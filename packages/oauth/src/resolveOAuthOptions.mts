@@ -60,6 +60,22 @@ export interface ResolvedOAuthOptions {
 	/** #481: `oauth.authorize.acrValues` — acr → the amr values a session must carry. Empty when unset. */
 	readonly acrValues: Readonly<Record<string, readonly string[]>>;
 	/**
+	 * #529: Client ID Metadata Documents, resolved to plain lists and numbers
+	 * whatever shape the config carried them in — an environment variable
+	 * hands a list over as one comma-separated string, and a hand-built
+	 * config may do the same.
+	 */
+	readonly clientIdMetadataDocuments: {
+		readonly enabled: boolean;
+		readonly allowedScopes: readonly string[];
+		readonly allowedAudiences: readonly string[];
+		readonly allowedHosts: readonly string[];
+		readonly deniedHosts: readonly string[];
+		readonly maxBytes: number | undefined;
+		readonly timeoutMs: number | undefined;
+		readonly cacheMaxAgeMs: number | undefined;
+	};
+	/**
 	 * #311: when true, a client that declares no `allowedGrantTypes` is denied
 	 * every grant instead of being unrestricted. Resolved here so both
 	 * enforcement points #268 added read one value decided at composition.
@@ -84,6 +100,38 @@ type OAuthConfigShape = {
 	grants?: Record<string, Record<string, unknown> | undefined>;
 	nonce?: { maxLength?: number };
 	resourceIndicator?: { enabled?: boolean };
+	clientIdMetadataDocuments?: {
+		enabled?: unknown;
+		allowedScopes?: unknown;
+		allowedAudiences?: unknown;
+		allowedHosts?: unknown;
+		deniedHosts?: unknown;
+		maxBytes?: unknown;
+		timeoutMs?: unknown;
+		cacheMaxAgeMs?: unknown;
+	};
+};
+
+/**
+ * A list from an array, a comma-separated string, or nothing (#529).
+ *
+ * Trimmed and emptied the same way whichever shape it arrived in: a HOCON
+ * array entry can carry surrounding space as surely as an environment
+ * override can, and a host policy that silently keeps `" .trusted.example"`
+ * refuses the URL the operator meant to allow.
+ */
+const listOf = (value: unknown): readonly string[] => {
+	const parts = Array.isArray(value)
+		? value.filter((v): v is string => typeof v === "string")
+		: typeof value === "string"
+			? value.split(",")
+			: [];
+	return parts.map((v) => v.trim()).filter((v) => v.length > 0);
+};
+
+const positiveIntOrUndefined = (value: unknown): number | undefined => {
+	const n = typeof value === "string" ? Number(value) : value;
+	return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : undefined;
 };
 
 /**
@@ -142,6 +190,16 @@ export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedO
 		nonceMaxLength: oauth?.nonce?.maxLength ?? 256,
 		resourceIndicatorEnabled: oauth?.resourceIndicator?.enabled === true,
 		acrValues: readAcrValues(oauth),
+		clientIdMetadataDocuments: {
+			enabled: oauth?.clientIdMetadataDocuments?.enabled === true,
+			allowedScopes: listOf(oauth?.clientIdMetadataDocuments?.allowedScopes),
+			allowedAudiences: listOf(oauth?.clientIdMetadataDocuments?.allowedAudiences),
+			allowedHosts: listOf(oauth?.clientIdMetadataDocuments?.allowedHosts),
+			deniedHosts: listOf(oauth?.clientIdMetadataDocuments?.deniedHosts),
+			maxBytes: positiveIntOrUndefined(oauth?.clientIdMetadataDocuments?.maxBytes),
+			timeoutMs: positiveIntOrUndefined(oauth?.clientIdMetadataDocuments?.timeoutMs),
+			cacheMaxAgeMs: positiveIntOrUndefined(oauth?.clientIdMetadataDocuments?.cacheMaxAgeMs),
+		},
 		requireGrantTypeAllowlist: oauth?.requireGrantTypeAllowlist === true,
 	};
 };

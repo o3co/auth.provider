@@ -14,6 +14,15 @@
  * limitations under the License.
  */
 
+// #529: Client ID Metadata Documents — a client whose client_id is the https
+// URL of its own registration (draft-ietf-oauth-client-id-metadata-document).
+export {
+	type ClientIdMetadataDocumentOptions,
+	type ClientIdMetadataDocumentResolver,
+	createClientIdMetadataDocumentResolver,
+	isClientIdMetadataDocumentUrl,
+	withClientIdMetadataDocuments,
+} from "./clients/clientIdMetadataDocument.mjs";
 export {
 	type BroadcastBackchannelLogoutOptions,
 	type BroadcastRP,

@@ -336,3 +336,32 @@ describe("acr_values_supported (#481)", () => {
 		);
 	});
 });
+
+describe("oauthModule — client_id_metadata_document_supported (#529)", () => {
+	const enabled = (): AppConfig => {
+		const base = configWithRevocation();
+		return {
+			...base,
+			oauth: { ...base.oauth, clientIdMetadataDocuments: { enabled: true } },
+		} as unknown as AppConfig;
+	};
+
+	it("advertises Client ID Metadata Documents only when the feature is on", () => {
+		// MCP 2026-07-28: a hosted client selects CIMD when the AS advertises
+		// this AND lists `none` in token_endpoint_auth_methods_supported.
+		const off = discoveryContribution({ consentStore: {} });
+		expect(off.metadata?.client_id_metadata_document_supported).toBeUndefined();
+
+		const on = discoveryContribution({ consentStore: {} }, enabled());
+		expect(on.metadata?.client_id_metadata_document_supported).toBe(true);
+		expect(on.metadata?.token_endpoint_auth_methods_supported).toContain("none");
+	});
+
+	it("says nothing without a consent store — a document client could not finish the flow (#529 review)", () => {
+		// Every document client is non-first-party, and `/authorize` refuses
+		// those without a consent store. Advertising CIMD there sends an MCP
+		// client down a flow this deployment cannot complete.
+		const on = discoveryContribution({}, enabled());
+		expect(on.metadata?.client_id_metadata_document_supported).toBeUndefined();
+	});
+});

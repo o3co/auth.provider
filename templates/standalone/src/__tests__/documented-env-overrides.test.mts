@@ -96,6 +96,14 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_NONCE_MAX_LENGTH: "256",
 	OAUTH_TOKEN_EXCHANGE_MAX_ACTOR_CHAIN_DEPTH: "3",
 	OAUTH_RESOURCE_INDICATOR_ENABLED: "true",
+	OAUTH_CIMD_ENABLED: "true",
+	OAUTH_CIMD_ALLOWED_SCOPES: "read, write",
+	OAUTH_CIMD_ALLOWED_AUDIENCES: "https://mcp.example",
+	OAUTH_CIMD_ALLOWED_HOSTS: "client.example, .trusted.example",
+	OAUTH_CIMD_DENIED_HOSTS: "evil.example",
+	OAUTH_CIMD_MAX_BYTES: "8192",
+	OAUTH_CIMD_TIMEOUT_MS: "3000",
+	OAUTH_CIMD_CACHE_MAX_AGE_MS: "60000",
 	OAUTH_TOKEN_BINDING_DISPATCH_POLICY: "intent-explicit",
 	OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
 
@@ -313,6 +321,17 @@ describe("#288: the shipped config boots with every documented override supplied
 		expect(config.session.maxAge).toBe(3600000);
 		expect(config.session.csrf?.ttlSeconds).toBe(7200);
 		expect(config.oauth.nonce?.maxLength).toBe(256);
+		// #529: the comma-separated lists become lists, trimmed; the numbers, numbers.
+		expect(config.oauth.clientIdMetadataDocuments).toEqual({
+			enabled: true,
+			allowedScopes: ["read", "write"],
+			allowedAudiences: ["https://mcp.example"],
+			allowedHosts: ["client.example", ".trusted.example"],
+			deniedHosts: ["evil.example"],
+			maxBytes: 8192,
+			timeoutMs: 3000,
+			cacheMaxAgeMs: 60000,
+		});
 		// #500: a comma-separated string becomes a list of origins, trimmed.
 		expect(config.cors?.allowedOrigins).toEqual([
 			"https://app.example.com",

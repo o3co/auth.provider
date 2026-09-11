@@ -59,6 +59,10 @@ import type { Request, RequestHandler, Response, Router } from "express";
 // sessions (see authorization.mts `sessionMutation.clear`).
 import type {} from "express-session";
 import { parseAccessTokenHeader } from "./accessTokenHeader.mjs";
+import {
+	type ClientIdMetadataDocumentOptions,
+	withClientIdMetadataDocuments,
+} from "./clients/clientIdMetadataDocument.mjs";
 import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
 import { resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
 import { createAuthorizeHandler } from "./routes/authorize.mjs";
@@ -93,7 +97,7 @@ export const createOAuthRouter = async (
 	{
 		registry,
 		config,
-		clientRepository,
+		clientRepository: registeredClients,
 		codeRepository,
 		keyStore,
 		rateLimiter,
@@ -109,6 +113,7 @@ export const createOAuthRouter = async (
 		federationTokenStore,
 		replaySeenSet,
 		consentStore,
+		clientIdMetadataDocuments: clientIdMetadataDocumentSeams = {},
 		getFederationProviders = () => undefined,
 		logger = consoleLogger,
 	}: {
@@ -150,6 +155,12 @@ export const createOAuthRouter = async (
 		 */
 		consentStore?: ConsentStore;
 		/**
+		 * #529: the seams of the Client ID Metadata Document fetch (`fetch`,
+		 * `lookup`, `now`), for tests. Everything else about the feature comes
+		 * from `oauth.clientIdMetadataDocuments` in the config.
+		 */
+		clientIdMetadataDocuments?: Pick<ClientIdMetadataDocumentOptions, "fetch" | "lookup" | "now">;
+		/**
 		 * Lazy getter for the federation providers Map. Evaluated at request time so
 		 * module init order does not affect resolution — pass `() => context.federationProviders`
 		 * from `module.mts`. Defaults to `() => undefined` when not provided.
@@ -183,6 +194,25 @@ export const createOAuthRouter = async (
 	}
 	// `checkCanonicalIssuer` returned null above, which only a string satisfies.
 	const canonicalIssuer = options.issuer as string;
+	// #529: Client ID Metadata Documents. Pre-registered clients answer first;
+	// a client_id that is an https URL is then resolved from the document it
+	// names, under the operator's ceilings. One repository for every
+	// endpoint below — /authorize, /token, /revoke — so a document client is
+	// the same client everywhere.
+	const cimd = options.clientIdMetadataDocuments;
+	const clientRepository: ClientRepository = cimd.enabled
+		? withClientIdMetadataDocuments(registeredClients, {
+				allowedScopes: cimd.allowedScopes,
+				allowedAudiences: cimd.allowedAudiences,
+				allowedHosts: cimd.allowedHosts,
+				deniedHosts: cimd.deniedHosts,
+				...(cimd.maxBytes === undefined ? {} : { maxBytes: cimd.maxBytes }),
+				...(cimd.timeoutMs === undefined ? {} : { timeoutMs: cimd.timeoutMs }),
+				...(cimd.cacheMaxAgeMs === undefined ? {} : { cacheMaxAgeMs: cimd.cacheMaxAgeMs }),
+				logger,
+				...clientIdMetadataDocumentSeams,
+			})
+		: registeredClients;
 	const legacyTypAcceptOpt = options.legacyTypAccept;
 	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
 	// because PKCE/S256 at `/oauth/authorize` is their authenticity gate.

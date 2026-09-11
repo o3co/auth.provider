@@ -221,6 +221,32 @@ The challenge is bound to the session that parked the request and reaches the pa
 
 Register what the page will show: `clientName` (RFC 7591 `client_name`) and `clientUri` (`client_uri`) on the client record. A native client with a loopback `redirect_uri` is the case the MCP authorization spec asks the page to warn about — `redirect_uri` is in the response for exactly that.
 
+## Client ID Metadata Documents (#529)
+
+A client may identify itself with the `https` URL of its own registration — a **Client ID Metadata Document** ([draft-ietf-oauth-client-id-metadata-document](https://datatracker.ietf.org/doc/draft-ietf-oauth-client-id-metadata-document/)), the registration model the MCP authorization spec (2026-07-28) makes the SHOULD for hosted clients now that Dynamic Client Registration is deprecated there. Off by default: `oauth.clientIdMetadataDocuments.enabled = true` (`OAUTH_CIMD_ENABLED`), and the discovery document then advertises `client_id_metadata_document_supported: true` beside the `none` it already lists in `token_endpoint_auth_methods_supported` — the two signals an MCP client selects on.
+
+`GET https://client.example/oauth/client-metadata.json` is the registration:
+
+```json
+{
+  "client_id": "https://client.example/oauth/client-metadata.json",
+  "client_name": "Acme Chat",
+  "client_uri": "https://client.example",
+  "redirect_uris": ["https://client.example/cb", "http://127.0.0.1/cb"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "scope": "read write"
+}
+```
+
+What the server does with it:
+
+- **A pre-registered client with the same `client_id` wins**; the document is not fetched.
+- **The URL must be a document URL**: `https`, a path, no fragment, credentials, dot segments or query string, a host name rather than an address and not loopback. Anything else is not a client. The operator may narrow hosts further (`allowedHosts`, exact or `.suffix`; `deniedHosts` wins).
+- **The name is resolved before the socket opens**, and every address must be public: one inside an RFC 6890 special-use range — the cloud metadata endpoint, a private network, this host — refuses the lookup. That is the SSRF guard the draft requires; a rebinding between check and connect is the residual it accepts too, and the host lists are the lever against it.
+- **The fetch** follows no redirect (a 3xx is an error), times out (`timeoutMs`), caps the body on `Content-Length` and on the stream (`maxBytes`, 5 KB by default), and takes only `200` with JSON. Errors and invalid documents are never cached; a valid one is cached per URL for its `Cache-Control: max-age`, bounded by `cacheMaxAgeMs`, and revalidated by `ETag` when it expires. Concurrent lookups share one fetch. Every refusal logs `cimd_document_rejected` / `cimd_document_fetch_failed` / `cimd_host_not_allowed` with the reason.
+- **The document** must carry `client_id` equal to the URL, a non-empty `redirect_uris` this server would accept at registration (exact match at `/authorize`, with the RFC 8252 §7.3 loopback-port carve-out), no `client_secret`, and no `token_endpoint_auth_method` but `none` — a shared-secret method is forbidden by the draft, and `private_key_jwt` is refused until this server authenticates clients that way (#484). `grant_types` must include `authorization_code`; `response_types` must admit `code`.
+- **The client it becomes is public and not first-party** (`tokenEndpointAuthMethod: none`, PKCE S256 required, `firstParty: false`), so it goes through the [consent step](#consent-for-third-party-clients-527) — wire a consent store — and the page shows the document's `client_name`, `client_uri` and the `redirect_uri`. Its scopes are the document's `scope` intersected with the operator's `allowedScopes`; its audiences are the operator's `allowedAudiences` — the resource servers this authorization server protects, which an MCP client names with `resource`. A document says who a client is, never what it may reach.
+
 ## Introspection: which tokens a caller may ask about
 
 `POST /oauth/introspect` authenticates its caller first (RFC 7662 §2.1 — public clients are refused), then answers only about tokens that caller is entitled to see. Two rules decide that, and both are stated here because both bit during live testing.
