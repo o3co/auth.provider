@@ -128,6 +128,8 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		).toBe(true);
 		expect(ClientEntrySchema.safeParse({ ...base, clientName: "" }).success).toBe(false);
 		expect(ClientEntrySchema.safeParse({ ...base, clientUri: "chat.example" }).success).toBe(false);
+	});
+
 	it("rejects empty-string entries in allowedAudiences (#521)", () => {
 		// `""` is a malformed audience, not a widening — nothing matches it —
 		// but `generateToken` would stamp `aud: ""` on every token minted for

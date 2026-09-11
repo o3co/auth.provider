@@ -1235,6 +1235,24 @@ describe("createRefreshTokenGrant", () => {
 			} else {
 				expect.fail("Expected an error result");
 			}
+
+			// Falsy but present: still malformed, not "no opinion".
+			for (const malformed of ["", null]) {
+				const falsy = createStubPolicy(
+					async () =>
+						({ outcome: "allow", grantedScope: malformed }) as unknown as Awaited<
+							ReturnType<GrantPolicyHook["evaluate"]>
+						>,
+				);
+				const out = await createRefreshTokenGrant({ ...mockDeps, grantPolicy: falsy }).handle({
+					body: { refresh_token: await makeRefreshToken({ scope: "read write" }) },
+					session: {},
+					issuer: "localhost",
+					metadata: {},
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
+				});
+				expect(out.result.status).toBe(500);
+			}
 		});
 
 		it("forwards ctx.ip and ctx.userAgent to grantPolicy.evaluate (CP-1)", async () => {
