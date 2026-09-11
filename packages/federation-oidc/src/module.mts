@@ -229,14 +229,18 @@ function readSection(name: string, slice: Slice): OidcProviderConfig {
  * every enabled section whose `type` is `oidc`, flat or nested (the shapes
  * `extractFederationSection` accepts), checked field by field so a typo is a
  * boot refusal naming `federations.<name>.<field>` rather than a provider
- * running with one fewer setting than the operator wrote down.
+ * running with one fewer setting than the operator wrote down. The map has
+ * no prototype, and every name is checked before it becomes a key: a
+ * section the config parser named `__proto__` is refused by name rather
+ * than assigned through the prototype setter.
  */
 export function readOidcFederationConfigs(
 	federations: Record<string, unknown> | undefined,
 ): Readonly<Record<string, OidcProviderConfig>> {
-	const out: Record<string, OidcProviderConfig> = {};
+	const out: Record<string, OidcProviderConfig> = Object.create(null);
 	if (!federations) return out;
 	for (const name of oidcFederationNames(federations)) {
+		checkFederationName(name);
 		const slice = extractFederationSection(federations, name);
 		if (!slice) continue;
 		out[name] = readSection(name, slice);

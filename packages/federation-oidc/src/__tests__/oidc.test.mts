@@ -78,6 +78,13 @@ describe("createOidcProvider (#524)", () => {
 			expect(`${url.origin}${url.pathname}`).toBe(`${ISSUER}/authorize`);
 		});
 
+		it("refuses an empty clientSecret at construction, not at the first token request", async () => {
+			const idp = await createFakeIdp({ issuer: ISSUER });
+			await expect(
+				createOidcProvider("idp-a", baseConfig(idp, { clientSecret: "" })),
+			).rejects.toThrow(/clientSecret must not be empty/);
+		});
+
 		it("is fatal when the document cannot be fetched", async () => {
 			const idp = await createFakeIdp({ issuer: ISSUER });
 			idp.discoveryStatus = 503;

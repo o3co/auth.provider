@@ -37,7 +37,11 @@ import {
 	redisRefreshTokenFamilyStoreModule,
 	redisSessionStoresModule,
 } from "@o3co/auth-provider-redis";
-import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import {
+	extractFederationSection,
+	sessionModule,
+	sessionStoreModuleFor,
+} from "@o3co/auth-provider-session";
 import {
 	auditSinkModule,
 	googleFederationConfigModule,
@@ -111,11 +115,18 @@ export interface BuildModulesOverrides {
  * #524: the generic OIDC federation follows the same rule, once per enabled
  * `federations.<name>` of type "oidc": `oidcFederationModule(name)` per
  * instance plus the one `oidcFederationConfigModule` that reads every
- * instance's config into the slot they share.
+ * instance's config into the slot they share. A section's `type` decides
+ * which implementation owns the name, so the two gates never both select
+ * the same section.
  */
 export function buildModules(config: AppConfig, overrides: BuildModulesOverrides = {}): Module[] {
+	// A section's `type` names the implementation: `federations.google` is the
+	// built-in Google federation only when its type is `google` (the default
+	// for that name). With `type = "oidc"` it is a generic OIDC instance named
+	// "google" (#524), and composing both would contribute the same
+	// federation and redirect-policy keys twice.
 	const googleEnabled =
-		(config.federations?.google as { enabled?: boolean } | undefined)?.enabled === true;
+		extractFederationSection(config.federations ?? {}, "google")?.type === "google";
 	const oidcFederations = oidcFederationNames(config.federations ?? {});
 
 	// Wave 5d (IH-14 + OR-M1 + OR-4) + OR-9: adapter-driven branching for
