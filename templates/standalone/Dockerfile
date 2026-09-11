@@ -1,4 +1,4 @@
-# The base image is pinned by digest, not just by tag: `node:24-alpine` is a
+# The base image is pinned by digest, not just by tag: `node:26-alpine` is a
 # moving pointer, so the same source produced a different image on every
 # rebuild (#289). The digest is the multi-arch index, so amd64 and arm64 both
 # resolve from it. Dependabot's `docker` ecosystem keeps the pair in step —

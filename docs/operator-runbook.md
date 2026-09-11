@@ -783,7 +783,7 @@ before you flip — and a relying party holding the secret can also mint.
 
 ### Rolling out
 
-- The image is `node:24-alpine`, digest-pinned, with `tini` and a `runtime`
+- The image is `node:26-alpine`, digest-pinned, with `tini` and a `runtime`
   stage that carries compiled JS and production dependencies only
   (`templates/standalone/Dockerfile`). `pnpm install --frozen-lockfile` means
   a committed `pnpm-lock.yaml` and `pnpm-workspace.yaml` are build inputs.
