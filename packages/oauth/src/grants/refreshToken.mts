@@ -562,12 +562,19 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// the instant its lifetime is measured from — is decided here,
 			// committed to the family store below, and signed only once that
 			// commit holds. A replay or a revoked family therefore returns having
-			// signed nothing, which is what it costs that matters under a
-			// KMS-backed signing key (#303): a billable remote call per lost race,
-			// for tokens that are never issued.
+			// signed nothing, which is what matters under a KMS-backed signing
+			// key (#303): a billable remote call per lost race, for tokens that
+			// are never issued.
 			const issuedAt = Math.floor(Date.now() / 1000);
 			const newRefreshJti = randomUUID();
-			const newRefreshExp = issuedAt + config.oauth.refreshToken.expiresIn;
+			const requestedRefreshExpiresIn = config.oauth.refreshToken.expiresIn;
+			const newRefreshExp = issuedAt + requestedRefreshExpiresIn;
+			// What the rotation actually committed, once it has: IH-13 sets a
+			// family's TTL once at creation and never extends it, so a rotation
+			// late in a family's life commits a shorter expiry than it was asked
+			// for. Signing past that would outlive the record that catches the
+			// token's replay.
+			let refreshExpiresIn = requestedRefreshExpiresIn;
 
 			if (deps.refreshTokenFamilyRotation) {
 				// SF-6 fail-fast above already returned for missing
@@ -607,10 +614,23 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				// behavior for unknown_family) is now an explicit
 				// policy decision under operator control (CC-2).
 				switch (rotateResult.outcome) {
-					case "rotated":
+					case "rotated": {
 						// Successful rotation — fall through to the
-						// success path below (token issuance).
+						// success path below (token issuance), at no more than the
+						// ceiling the store committed. The adapter reconstructs that
+						// epoch after its round-trip, so it drifts a few milliseconds
+						// forward; flooring to the second is the margin its contract
+						// asks for, and the `min` means a cap that is not a cap
+						// changes nothing.
+						const capped = rotateResult.cappedExpiresAtMs;
+						if (capped !== undefined) {
+							refreshExpiresIn = Math.max(
+								0,
+								Math.min(requestedRefreshExpiresIn, Math.floor(capped / 1000) - issuedAt),
+							);
+						}
 						break;
+					}
 					case "replayed": {
 						// PB-1: RFC 6819 §5.2.2 / OAuth 2.1 BCP §4.14.2
 						// require revoking the entire family on replay
@@ -765,7 +785,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			const newRefreshToken = await generateToken(
 				{ family_id: newFamilyId, ...(sid ? { sid } : {}) },
 				{
-					expiresIn: config.oauth.refreshToken.expiresIn,
+					expiresIn: refreshExpiresIn,
 					keyStore,
 					issuer,
 					audience: finalAudience,
