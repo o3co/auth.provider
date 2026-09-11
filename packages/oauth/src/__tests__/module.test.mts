@@ -40,6 +40,7 @@ import express from "express";
 import { exportPKCS8, exportSPKI, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { CLIENT_ASSERTION_ALGORITHMS } from "#/middleware/clientAssertion.mjs";
 import { oauthModule } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 
@@ -423,13 +424,28 @@ describe("oauthModule + jwksModule — discovery/JWKS path agreement", () => {
 			id_token_signing_alg_values_supported: ["HS256"],
 			scopes_supported: ["openid", "profile", "email", "groups"],
 			grant_types_supported: [],
-			token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"],
-			introspection_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"],
+			// #484: private_key_jwt on every client-authenticated endpoint, with
+			// the assertion algorithms it accepts (RFC 8414 §2).
+			token_endpoint_auth_methods_supported: [
+				"client_secret_basic",
+				"client_secret_post",
+				"private_key_jwt",
+				"none",
+			],
+			token_endpoint_auth_signing_alg_values_supported: CLIENT_ASSERTION_ALGORITHMS,
+			introspection_endpoint_auth_methods_supported: [
+				"client_secret_basic",
+				"client_secret_post",
+				"private_key_jwt",
+			],
+			introspection_endpoint_auth_signing_alg_values_supported: CLIENT_ASSERTION_ALGORITHMS,
 			revocation_endpoint_auth_methods_supported: [
 				"client_secret_basic",
 				"client_secret_post",
+				"private_key_jwt",
 				"none",
 			],
+			revocation_endpoint_auth_signing_alg_values_supported: CLIENT_ASSERTION_ALGORITHMS,
 			code_challenge_methods_supported: ["S256"],
 		});
 		await handle.dispose();

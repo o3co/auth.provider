@@ -437,6 +437,11 @@ export const standaloneRedisClientsModule: Module = defineModule({
 			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.sessionFederationIndexClient;
 		},
+		// #484: the replay seen-set behind private_key_jwt client assertions.
+		replaySeenSetClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.replaySeenSetClient;
+		},
 		rateLimiterClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
 			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.rateLimiterClient;

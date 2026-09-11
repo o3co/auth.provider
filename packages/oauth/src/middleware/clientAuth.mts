@@ -19,9 +19,11 @@ import {
 	consoleLogger,
 	type Logger,
 	type PublicClient,
+	type ReplaySeenSet,
 	type TokenEndpointAuthMethod,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler, Response } from "express";
+import { createClientAssertionVerifier, hasClientAssertion } from "./clientAssertion.mjs";
 
 // Module augmentation: expose `req.oauthClient` for consumers who compose this
 // middleware onto their own routes and need the authenticated client downstream.
@@ -40,7 +42,7 @@ declare global {
 	}
 }
 
-interface ClientAuthMiddlewareOptions {
+export interface ClientAuthMiddlewareOptions {
 	/**
 	 * Issuer URL used to populate the `realm` parameter of `WWW-Authenticate:
 	 * Basic` headers per RFC 7235 §2.2. Defaults to `"oauth"` when unset so the
@@ -64,6 +66,20 @@ interface ClientAuthMiddlewareOptions {
 	 * MUST leave this option at the default.
 	 */
 	allowPublicClients?: boolean;
+	/**
+	 * #484: the `jti` single-use record for `private_key_jwt` assertions.
+	 * Without it an assertion request is answered `server_error` — a jti
+	 * that cannot be recorded is one that could be replayed, so the path
+	 * fails closed rather than authenticating unchecked.
+	 */
+	replaySeenSet?: ReplaySeenSet;
+	/**
+	 * The absolute token endpoint URL, accepted as an assertion `aud`
+	 * alongside `issuer` (RFC 7523 §3). Defaults to `<issuer>/oauth/token`.
+	 */
+	tokenEndpoint?: string;
+	/** The fetch used for a client's `jwksUri`. A proxy, or a test seam. */
+	fetch?: typeof fetch;
 }
 
 // URI-safe characters per RFC 3986 (plus the few sub-delims commonly seen in
@@ -185,6 +201,16 @@ export function createClientAuthMiddleware(
 	// emission sites cannot drift.
 	const wwwAuth = `Basic realm="${resolveRealm(opts.issuer)}"`;
 	const allowPublicClients = opts.allowPublicClients === true;
+	// #484: `private_key_jwt`. The verifier owns the trust decision; this
+	// middleware only decides how to answer it and that no second method
+	// rides along on the same request.
+	const assertionVerifier = createClientAssertionVerifier({
+		issuer: opts.issuer,
+		tokenEndpoint: opts.tokenEndpoint ?? (opts.issuer ? `${opts.issuer}/oauth/token` : undefined),
+		replaySeenSet: opts.replaySeenSet,
+		logger,
+		fetch: opts.fetch,
+	});
 
 	function rejectBasic(res: Response, status: number, errorDescription?: string): void {
 		res.set("WWW-Authenticate", wwwAuth);
@@ -195,6 +221,11 @@ export function createClientAuthMiddleware(
 
 	function rejectPlain(res: Response, status: number, errorDescription?: string): void {
 		const body: { error: string; error_description?: string } = { error: "invalid_client" };
+		if (errorDescription !== undefined) body.error_description = errorDescription;
+		res.status(status).json(body);
+	}
+	function rejectAs(res: Response, status: number, error: string, errorDescription?: string): void {
+		const body: { error: string; error_description?: string } = { error };
 		if (errorDescription !== undefined) body.error_description = errorDescription;
 		res.status(status).json(body);
 	}
@@ -224,6 +255,32 @@ export function createClientAuthMiddleware(
 			typeof body?.client_secret === "string" && body.client_secret.length > 0
 				? body.client_secret
 				: undefined;
+
+		// #484: a client assertion is its own method. RFC 6749 §2.3 allows one
+		// client authentication method per request, so an assertion next to a
+		// Basic header or a body secret is refused before either is examined —
+		// the combination is the signature of one party pinning an identity in
+		// a place the other check does not look.
+		if (hasClientAssertion(body)) {
+			if (basic.kind !== "absent" || bodyClientSecret !== undefined) {
+				rejectPlain(
+					res,
+					401,
+					"Only one client authentication method per request (RFC 6749 §2.3): a client_assertion cannot be combined with Basic credentials or client_secret",
+				);
+				return;
+			}
+			const outcome = await assertionVerifier.verify(body, (id) => clientRepository.findById(id));
+			if (outcome.kind === "ok") {
+				req.oauthClient = outcome.client;
+				next();
+				return;
+			}
+			if (outcome.kind === "refused") {
+				rejectAs(res, outcome.status, outcome.error, outcome.description);
+				return;
+			}
+		}
 
 		// Codex M4: conflict detection. If both Basic and body identify a client,
 		// they MUST agree. Otherwise the request is ambiguous and an attacker

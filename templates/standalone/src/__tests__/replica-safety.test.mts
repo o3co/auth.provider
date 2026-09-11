@@ -159,6 +159,7 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	RATE_LIMITER_ADAPTER: "redis",
 	OAUTH_CODE_ADAPTER: "redis",
 	ACCESS_TOKEN_DENYLIST_ADAPTER: "redis",
+	REPLAY_SEEN_SET_ADAPTER: "redis",
 	FEDERATION_TOKEN_STORE_TYPE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: ENCRYPTION_KEY,
 };
@@ -244,6 +245,8 @@ describe('#455: the standalone\'s memory modules are refused under deployment.mo
 		// name; pinned so the name table's departure (#455) did not lose them.
 		["RATE_LIMITER_ADAPTER", "core-rate-limiter-memory"],
 		["ACCESS_TOKEN_DENYLIST_ADAPTER", "core-access-token-denylist-memory"],
+		// #484: the jti single-use record behind private_key_jwt client auth.
+		["REPLAY_SEEN_SET_ADAPTER", "core-replay-seen-set-memory"],
 	];
 
 	for (const [variable, module] of cases) {
@@ -266,6 +269,7 @@ describe('#455: the standalone\'s memory modules are refused under deployment.mo
 			SESSION_STORAGE_TYPE: "memory",
 			RATE_LIMITER_ADAPTER: "memory",
 			ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
+			REPLAY_SEEN_SET_ADAPTER: "memory",
 		});
 		await expect(boot(config)).rejects.toMatchObject({
 			reason: "replica-unsafe-adapter",

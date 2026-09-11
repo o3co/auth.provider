@@ -21,6 +21,7 @@ import {
 	type Module,
 	memoryAccessTokenDenylistModule,
 	memoryRateLimiterModule,
+	memoryReplaySeenSetModule,
 } from "@o3co/auth-provider-core";
 import { googleFederationModule } from "@o3co/auth-provider-federation-google";
 import { oidcFederationModule, oidcFederationNames } from "@o3co/auth-provider-federation-oidc";
@@ -35,6 +36,7 @@ import {
 	redisFederationTokenStoreModuleFor,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
+	redisReplaySeenSetModule,
 	redisSessionStoresModule,
 } from "@o3co/auth-provider-redis";
 import {
@@ -147,6 +149,8 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// endpoint would answer 200 while the token kept working. The switch here is
 	// only over WHICH denylist.
 	const accessTokenDenylistAdapter = config.accessTokenDenylist?.adapter ?? "memory";
+	// #484: the jti single-use record behind private_key_jwt client auth.
+	const replaySeenSetAdapter = config.replaySeenSet?.adapter ?? "memory";
 	// #456: adapter switch for the federation token store. `"memory"` by
 	// default, the template's local-dev shape; `"redis"` mounts
 	// `redisFederationTokenStoreModule` off the shared socket — what the README
@@ -191,6 +195,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		userSessionStoresAdapter === "redis" ||
 		codeRepositoryAdapter === "redis" ||
 		accessTokenDenylistAdapter === "redis" ||
+		replaySeenSetAdapter === "redis" ||
 		federationTokenStoreAdapter === "redis";
 
 	// The four user-session stores switch on `userSessionStores.adapter`; the
@@ -236,6 +241,9 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// #473: the Redis module is built for this composition root so its
 	// plaintext guard knows which environment selected the config; it reads
 	// `deployment.mode` off the config itself.
+	const replaySeenSetModules: Module[] =
+		replaySeenSetAdapter === "redis" ? [redisReplaySeenSetModule] : [memoryReplaySeenSetModule];
+
 	const federationTokenStoreModules: Module[] =
 		federationTokenStoreAdapter === "redis"
 			? [redisFederationTokenStoreModuleFor({ environment: overrides.environment })]
@@ -294,6 +302,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		// RFC 7009 access-token denylist: redis (shared revocations) or memory
 		// (single-instance dev). Always wired — see the switch above.
 		...accessTokenDenylistModules,
+		...replaySeenSetModules,
 		// RT family store: redis by default (closes OR-1); override path
 		// swaps to `[memoryRefreshTokenFamilyStoreModule]` for unit tests.
 		...refreshTokenFamilyModules,

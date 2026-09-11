@@ -136,6 +136,8 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	DEPLOYMENT_MODE: "multi",
 	USER_SESSION_STORES_ADAPTER: "redis",
 	ACCESS_TOKEN_DENYLIST_ADAPTER: "redis",
+	// #484: the replay seen-set behind private_key_jwt client authentication.
+	REPLAY_SEEN_SET_ADAPTER: "redis",
 	REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX: "atdeny:",
 	REDIS_SESSION_STORES_KEY_PREFIX: "ss:",
 	REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX: "rtfam:",

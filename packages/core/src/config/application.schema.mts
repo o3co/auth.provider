@@ -1339,6 +1339,17 @@ export const fullSectionsSchema = z.object({
 			adapter: z.enum(["memory", "redis"]).optional(),
 		})
 		.optional(),
+	// #484: backend for the replay seen-set — the `jti` single-use record
+	// behind `private_key_jwt` client authentication (and the WebAuthn
+	// challenge ceremony when that module is installed). Same replica
+	// reasoning as the denylist above: `core-replay-seen-set-memory` is in the
+	// guard's refused set, because a captured assertion would replay once per
+	// replica.
+	replaySeenSet: z
+		.object({
+			adapter: z.enum(["memory", "redis"]).optional(),
+		})
+		.optional(),
 	// #277: module-internal config for `redisAccessTokenDenylistModule`.
 	// Declared here for the same reason as `redisRefreshTokenFamilyStore` below:
 	// without a top-level entry, `AppConfigSchema.parse(...)` strips the key
