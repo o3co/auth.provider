@@ -45,10 +45,12 @@ export type DPoPReasonCode =
 /**
  * Thrown by `parseProof` and `verifyProof` for any DPoP validation failure.
  *
- * Wire-level `code` is hard-coded to `"invalid_dpop_proof"` (the only
- * RFC 9449 §7 token-endpoint code Phase 2 uses). The `reason` field carries
- * a granular sub-classification for audit emission — it must never reach
- * the wire.
+ * Wire-level `code` is `"invalid_dpop_proof"` (RFC 9449 §7) for every
+ * failure but the nonce ones, which are `"use_dpop_nonce"` (§8 / §9, #530):
+ * `nonce_required` and `nonce_invalid` are an instruction to retry with the
+ * nonce the answer carries in `responseHeaders`, not a verdict on the
+ * proof. The `reason` field carries a granular sub-classification for
+ * audit emission — it must never reach the wire.
  *
  * Per Wave 2 Phase 2 spec §5.6 + design principle §3.4.
  */
@@ -86,10 +88,11 @@ export class DPoPError extends Error {
 }
 
 /**
- * The wire-level OAuth error code emitted by Phase 2 DPoP failures.
- * Always `"invalid_dpop_proof"` per RFC 9449 §7 — the only token-endpoint
- * error code Phase 2 uses. The alias is exported per spec §5.1 so consumers
- * can name the wire-side surface explicitly when constructing wire-level
- * error envelopes.
+ * The wire-level OAuth error code emitted by DPoP failures:
+ * `"invalid_dpop_proof"` (RFC 9449 §7), or `"use_dpop_nonce"` (§8 / §9,
+ * #530) for a proof that lacks the server-provided nonce or carries a
+ * stale one. The alias is exported per spec §5.1 so consumers can name the
+ * wire-side surface explicitly when constructing wire-level error
+ * envelopes.
  */
 export type DPoPErrorCode = DPoPError["code"];

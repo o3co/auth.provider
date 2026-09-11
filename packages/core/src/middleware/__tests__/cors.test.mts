@@ -276,11 +276,31 @@ describe("corsMw — an exact-match allowlist on the browser-facing surface (#50
 			expect(failed.headers["access-control-allow-origin"]).toBe(ALLOWED);
 		});
 
-		it("exposes the two headers a caller cannot act without", async () => {
+		it("exposes the three headers a caller cannot act without", async () => {
 			const res = await request(buildApp([ALLOWED]))
 				.post("/oauth/token")
 				.set("Origin", ALLOWED);
-			expect(res.headers["access-control-expose-headers"]).toBe("WWW-Authenticate, Retry-After");
+			expect(res.headers["access-control-expose-headers"]).toBe(
+				"WWW-Authenticate, Retry-After, DPoP-Nonce",
+			);
+		});
+
+		it("lets a cross-origin DPoP client read the nonce a use_dpop_nonce refusal carries (#530)", async () => {
+			// RFC 9449 §8: the refusal is an instruction to retry with the nonce
+			// in `DPoP-Nonce`. The header is not CORS-safelisted, so unless it is
+			// exposed a browser client never sees it and the retry never happens.
+			const app = express();
+			const mw = corsMw({ allowedOrigins: [ALLOWED], routes: browserFacingCorsRoutes({}) });
+			if (mw !== null) app.use(mw);
+			app.post("/oauth/token", (_req, res2) => {
+				res2.setHeader("DPoP-Nonce", "nonce-1");
+				res2.status(400).json({ error: "use_dpop_nonce" });
+			});
+			const refused = await request(app).post("/oauth/token").set("Origin", ALLOWED);
+			expect(refused.status).toBe(400);
+			expect(refused.headers["dpop-nonce"]).toBe("nonce-1");
+			expect(refused.headers["access-control-allow-origin"]).toBe(ALLOWED);
+			expect(refused.headers["access-control-expose-headers"]).toContain("DPoP-Nonce");
 		});
 	});
 
