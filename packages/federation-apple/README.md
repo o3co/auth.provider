@@ -105,9 +105,12 @@ the cache untouched. The key is imported once per distinct key material: when
 `privateKey` reads differently from what the held key was imported from — a
 repaired mount, or a leaked `.p8` revoked and replaced — the key is
 re-imported and the cached secret dropped on the next request, without a
-restart (#498). That works through whatever you passed as `privateKey`: the
-option is read at every token exchange, not copied at construction, so a
-getter or a re-read file is enough.
+restart (#498). A signature still in progress under the old key is neither
+handed to a caller that arrives after the rotation nor kept once it
+completes. That works through whatever you passed as `privateKey`, to
+`createAppleProvider` as much as to `createAppleClientSecret`: the option is
+read at every token exchange, not copied at construction, so a getter or a
+re-read file is enough.
 
 If you already produce the secret elsewhere, pass `clientSecret` instead —
 either a string or a resolver (`() => string | Promise<string>`), the widened

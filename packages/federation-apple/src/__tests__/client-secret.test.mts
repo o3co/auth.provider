@@ -219,4 +219,34 @@ describe("createAppleClientSecret — caching and rotation", () => {
 		// Unchanged material keeps the cache, as before.
 		expect(await resolve()).toBe(second);
 	});
+
+	it("neither shares nor commits a signature still in flight under the old key once rotated (#498 review)", async () => {
+		// A caller that arrives after the rotation must not be handed the
+		// signature the previous key is still producing, and that signature
+		// must not land in the cache the new key owns when it completes.
+		const rotated = await makeTestSigningKey();
+		let privateKey = key.privateKeyPem;
+		const options: AppleClientSecretOptions = {
+			teamId: TEAM_ID,
+			clientId: CLIENT_ID,
+			keyId: KEY_ID,
+			get privateKey() {
+				return privateKey;
+			},
+		};
+		const resolve = createAppleClientSecret(options);
+		const inFlightUnderOldKey = resolve();
+		privateKey = rotated.privateKeyPem;
+		const askedAfterRotation = resolve();
+
+		await jwtVerify(await inFlightUnderOldKey, key.publicKey);
+		const second = await askedAfterRotation;
+		await jwtVerify(second, rotated.publicKey);
+
+		// The old signature, completed after the rotation, is not what later
+		// callers get.
+		const third = await resolve();
+		expect(third).toBe(second);
+		await jwtVerify(third, rotated.publicKey);
+	});
 });
