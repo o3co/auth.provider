@@ -61,9 +61,15 @@ export interface Client {
 	 * - Token Exchange (RFC 8693) `audience` parameter selection — when this
 	 *   list is empty or undefined, only the client's own `clientId` is
 	 *   accepted as an audience target.
-	 * - `client_credentials` grant default `aud` claim — selects the first
-	 *   entry (`allowedAudiences[0]`); when absent, falls back to the issuer
-	 *   (and ultimately omits `aud` when no issuer is configured).
+	 * - Every issuing grant's default `aud` — the first entry, with a
+	 *   `grantPolicy` narrowing within the list. What an absent list falls
+	 *   back to is the client id for a user-bound token (`authorization_code`,
+	 *   `session`, device, WebAuthn, jwt-bearer) and the issuer for a
+	 *   client-only one (`client_credentials`); the two families are spelled
+	 *   out on `AuthenticatedClient.allowedAudiences` in `../grants/types.mts`
+	 *   (#520).
+	 * - Introspection's audience pin — an authenticated caller may ask about
+	 *   tokens whose `aud` is in `allowedAudiences ∪ {clientId}`.
 	 */
 	readonly allowedAudiences?: readonly string[];
 	/**

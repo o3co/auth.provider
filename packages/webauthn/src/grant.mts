@@ -70,16 +70,27 @@
  *   hole #489 named was the other half — a request that DID prove its key still
  *   received an unbound access token.
  *
- * Audience derivation:
- *   - When ctx.authenticatedClient is present: allowedAudiences[0] ?? issuer ?? null
- *   - When no authenticated client: issuer ?? null
+ * Audience derivation (#520 — the rule the session, device, code and jwt-bearer
+ * grants share; the two fallback families are documented on
+ * `AuthenticatedClient.allowedAudiences`):
+ *   - With an authenticated client: allowedAudiences[0] ?? clientId. The token
+ *     is bound to an end user and meant for a resource, so the fallback is the
+ *     client, never the authorization server.
+ *   - Without one: the issuer. Nothing names a resource or a client, RFC 9068
+ *     §2.2 still requires `aud`, and the issuer is the one audience every
+ *     deployment has.
+ *   - A `grantPolicy` may narrow within `allowedAudiences`. With no client there
+ *     is no ceiling to narrow within, and a policy audience is refused.
  *   (WebAuthn grant does not require client authentication — the passkey IS the
  *    authentication event. Consumers may optionally wire clientAuthMw before this
  *    handler to bind tokens to a specific client application.)
  *
- * RFC 8707 Stage 1 (Wave 1 §5.3):
+ * RFC 8707 (Wave 1 §5.3):
  *   - resource forwarded to grantPolicy when resourceIndicator.enabled === true
- *   - Library-layer audience binding enforcement deferred to Stage 2 (issue #173)
+ *   - No audience is derived from `resource` here. #173 landed that for
+ *     client_credentials, refresh_token and /authorize and did not cover this
+ *     grant; a policy that wants to honour `resource` narrows within
+ *     `allowedAudiences`.
  *
  * extractResourceParam: duplicated from packages/oauth/src/grants/_resourceIndicator.mts
  * because the webauthn package does not depend on @o3co/auth-provider-oauth and that
@@ -374,30 +385,40 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				}
 
 				if (decision.grantedAudience && decision.grantedAudience.length > 0) {
-					// Fail-closed audience validation: when a client is present, policy may
-					// only narrow to audiences already in client.allowedAudiences. When no
-					// client is authenticated there is no allowedAudiences ceiling — skip.
+					// Fail-closed audience validation: policy may only narrow to
+					// audiences already in client.allowedAudiences.
 					//
-					// TRUST ASYMMETRY (Wave 1 post-merge audit M-4): in client-less mode,
-					// `grantPolicy` is the SOLE audience authority — policy can mint a token
-					// for ANY audience it returns, with no library-side ceiling. This is
-					// acceptable per spec §5.6 Stage 1 staging (Stage 2 will add library-layer
-					// audience-binding enforcement per RFC 8707 — issue #173). Operators wiring
-					// webauthn without client-auth MUST therefore trust `grantPolicy` end-to-end
-					// for audience authorization.
+					// #520: without an authenticated client there is no ceiling to
+					// narrow within, and the answer is the one the jwt-bearer grant
+					// gives, and every scope ceiling gives a scope with nothing to
+					// bound it: refused. This used to be the one path where a policy
+					// could put ANY audience on a token (the "trust asymmetry" of the
+					// Wave 1 audit, M-4), staged for a library-side ceiling that #173
+					// then delivered only for client_credentials, refresh_token and
+					// /authorize. Policy may narrow, never originate: a deployment
+					// that wants a resource `aud` on a passkey token registers a client
+					// with `allowedAudiences` and authenticates it.
 					const client = ctx.authenticatedClient;
-					if (client) {
-						const allowedAudSet = new Set(client.allowedAudiences ?? []);
-						const exceeded = decision.grantedAudience.filter((a) => !allowedAudSet.has(a));
-						if (exceeded.length > 0) {
-							return {
-								result: {
-									status: 400,
-									error: "invalid_request",
-									errorDescription: `policy returned audiences outside client allowedAudiences: ${exceeded.join(" ")}`,
-								},
-							};
-						}
+					if (!client) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_request",
+								errorDescription:
+									"policy returned an audience but no authenticated client supplies an allowedAudiences ceiling",
+							},
+						};
+					}
+					const allowedAudSet = new Set(client.allowedAudiences ?? []);
+					const exceeded = decision.grantedAudience.filter((a) => !allowedAudSet.has(a));
+					if (exceeded.length > 0) {
+						return {
+							result: {
+								status: 400,
+								error: "invalid_request",
+								errorDescription: `policy returned audiences outside client allowedAudiences: ${exceeded.join(" ")}`,
+							},
+						};
 					}
 					policyGrantedAudience = decision.grantedAudience[0];
 				}
@@ -407,12 +428,15 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 			// Step 8: Derive audience + issue tokens
 			// ------------------------------------------------------------------
 			const client = ctx.authenticatedClient;
-			// Audience derivation:
-			//   policy override > client.allowedAudiences[0] > issuer > null
-			// When no client is authenticated, skip client.allowedAudiences (no source).
+			// Audience derivation (#520): policy override > client.allowedAudiences[0]
+			// > client id — the rule every user-bound grant applies. This token is
+			// meant for a resource, so its fallback is the client, not the
+			// authorization server. Without a client nothing names a resource or a
+			// client and the issuer stands: RFC 9068 §2.2 requires `aud`, and the
+			// issuer is the one audience every deployment has.
 			const audience =
 				policyGrantedAudience ??
-				(client ? (client.allowedAudiences?.[0] ?? issuer ?? null) : (issuer ?? null));
+				(client ? (client.allowedAudiences?.[0] ?? client.clientId) : (issuer ?? null));
 
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 

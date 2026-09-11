@@ -502,6 +502,37 @@ describe("createWebAuthnGrant — success (Wave 1 first slice)", () => {
 		const payload = decodeJwtPayload(result.tokens.access_token);
 		expect(payload.aud).toBe("https://rs.example");
 	});
+
+	it("falls back to the client id, not the issuer, when the client configures no allowedAudiences (#520)", async () => {
+		// The token is bound to an end user and meant for a resource, so it
+		// belongs to the family the session, device, code and jwt-bearer grants
+		// mint for: `allowedAudiences[0] ?? clientId`. The issuer is the fallback
+		// of the OTHER family — tokens minted for the client itself — and of the
+		// client-less case above, where no registration names anything.
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.registerCredential(makeCredential());
+
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const handler = createWebAuthnGrant(makeBaseDeps(store));
+
+		const assertion = makeAssertionResponse();
+		const { result } = await handler.handle(
+			makeCtx(
+				{ assertion },
+				{
+					clientId: "my-app",
+					tokenEndpointAuthMethod: "none",
+					allowedGrantTypes: [WEBAUTHN_GRANT_TYPE],
+				},
+			),
+		);
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) throw new Error("expected tokens in result");
+		const payload = decodeJwtPayload(result.tokens.access_token);
+		expect(payload.aud).toBe("my-app");
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -867,6 +898,30 @@ describe("createWebAuthnGrant — grantPolicy (CP-18 fail-closed)", () => {
 		expect("error" in result && result.error).toBe("invalid_request");
 		expect("errorDescription" in result && result.errorDescription).toContain(
 			"https://rogue.example",
+		);
+	});
+
+	it("refuses a policy audience when no client is authenticated (#520)", async () => {
+		// Policy may only narrow, never originate. With no client there is no
+		// `allowedAudiences` ceiling to narrow within, so the answer is the one
+		// the jwt-bearer grant gives and `resolveScope` gives a scope with
+		// nothing to bound it: refused, not minted. This used to be the one
+		// path where a policy could put ANY audience on a token.
+		const { store, deps } = makeDepsWith(async () => ({
+			outcome: "allow",
+			grantedAudience: ["https://rs1.example"],
+		}));
+		await store.registerCredential(makeCredential());
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const handler = createWebAuthnGrant(deps);
+		const assertion = makeAssertionResponse();
+		const { result } = await handler.handle(makeCtx({ assertion, resource: "https://rs1" }, null));
+
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_request");
+		expect("errorDescription" in result && result.errorDescription).toMatch(
+			/no authenticated client/,
 		);
 	});
 });
