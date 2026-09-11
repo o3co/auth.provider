@@ -64,8 +64,9 @@ declare module "express-session" {
 			nonce?: string;
 			redirectTo?: string;
 			/** #482: the browser asked to link this federation's identity to the
-			 *  account it is already signed in as (`?link=1`), rather than to log in. */
-			link?: boolean;
+			 *  account of the session `sid` it held then (`?link=1`), rather than
+			 *  to log in. */
+			link?: { readonly sid: string };
 		};
 		/** UserSession ID — set after successful federation callback. */
 		sid?: string;
@@ -305,15 +306,24 @@ export const createRouter = (
 		identityToken: string,
 		resolved: Awaited<ReturnType<typeof userRepository.authenticateByToken>>,
 		redirectTo: string | undefined,
+		linkSid: string,
 		req: Request,
 		res: Response,
 		log: Logger,
 	): Promise<unknown> => {
-		const currentSid = req.session.sid;
-		if (req.session.isAuthenticated !== true || typeof currentSid !== "string") {
+		// The link belongs to the session that asked for it — the one the start
+		// leg recorded in the transaction — not to whichever session the browser
+		// holds now. A "query" federation's envelope lives in that session, so
+		// the two are one; a "form_post" callback is a cross-site POST that the
+		// application session cookie (SameSite=Lax) does not accompany, so
+		// `req.session` is a fresh one there and the recorded sid is the only
+		// binding. A request that does carry an authenticated session must be
+		// that same one: switching accounts in between links nothing.
+		const currentSid = linkSid;
+		if (req.session.isAuthenticated === true && req.session.sid !== currentSid) {
 			return res.status(401).json({
 				error: "login_required",
-				error_description: "Linking a federated identity requires an authenticated session",
+				error_description: "The link was started from a different session",
 			});
 		}
 		let current: Awaited<ReturnType<typeof userSessionStore.get>>;
@@ -398,7 +408,13 @@ export const createRouter = (
 			});
 		}
 
+		// Whether the session already carried this federation: a failed re-link
+		// must not take an existing attachment down with it.
+		let hadFederation = false;
 		try {
+			hadFederation = (await sessionFederationIndex.listFederations(currentSid)).includes(
+				provider.name,
+			);
 			await sessionFederationIndex.addFederation(currentSid, provider.name, current.expiresAt);
 			if (profile.accessToken) {
 				await federationTokenStore.attach(currentSid, provider.name, {
@@ -410,6 +426,24 @@ export const createRouter = (
 			}
 		} catch (err) {
 			log.warn({ err }, "federation link: attaching to the live session failed");
+			// Best-effort rollback, as the login path does. The transaction is
+			// consumed and the Store's link stands — the identity is the
+			// account's, and the next login through this federation lands on it —
+			// so what must not be left behind is a half-attached federation on the
+			// live session: the token record first, then the index entry. One the
+			// session already carried is left as it was.
+			if (!hadFederation) {
+				try {
+					await federationTokenStore.delete(currentSid, provider.name);
+				} catch {
+					// best-effort
+				}
+				try {
+					await sessionFederationIndex.removeFederation(currentSid, provider.name);
+				} catch {
+					// best-effort
+				}
+			}
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "Session store unavailable",
@@ -719,8 +753,18 @@ export const createRouter = (
 		}
 		// #482: an explicit link request completes here, or is refused here. It
 		// never falls through to the login path below: a link is not a login.
-		if (fed.link === true) {
-			return completeLink(provider, profile, identityToken, user, redirectTo, req, res, log);
+		if (fed.link !== undefined) {
+			return completeLink(
+				provider,
+				profile,
+				identityToken,
+				user,
+				redirectTo,
+				fed.link.sid,
+				req,
+				res,
+				log,
+			);
 		}
 
 		if (!user) {
@@ -1066,6 +1110,7 @@ export const createRouter = (
 			// with another provider never links by itself — and refused here, before
 			// the browser is sent anywhere, when it cannot succeed.
 			const wantsLink = req.query.link === "1" || req.query.link === "true";
+			let linkSid: string | undefined;
 			if (wantsLink) {
 				if (req.session.isAuthenticated !== true || typeof req.session.sid !== "string") {
 					return res.status(401).json({
@@ -1079,6 +1124,11 @@ export const createRouter = (
 						error_description: "The user repository does not support linking federated identities",
 					});
 				}
+				// The session the link is for. The callback binds to it — a form_post
+				// callback arrives without the application session cookie, and a
+				// browser that switched accounts in between must not link to the new
+				// one — so it is recorded in the transaction, not inferred later.
+				linkSid = req.session.sid;
 			}
 
 			const responseMode = resolveFederationResponseMode(provider);
@@ -1111,7 +1161,7 @@ export const createRouter = (
 				codeVerifier,
 				nonce,
 				redirectTo,
-				...(wantsLink ? { link: true } : {}),
+				...(linkSid === undefined ? {} : { link: { sid: linkSid } }),
 			};
 
 			// #494: a form_post callback arrives as a cross-site POST from the

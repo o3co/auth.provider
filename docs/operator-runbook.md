@@ -354,6 +354,10 @@ Store client has no `linkFederatedIdentityUrl`
 identity is already another account's (the Store is not consulted),
 `403 link_refused` / `409 identity_conflict` when the Store says so,
 `503 temporarily_unavailable` when the session store or the Store is down.
+The link is bound to the session that started it — recorded in the
+transaction — so a `form_post` federation (Apple) links the same way as a
+`query` one, and a callback presented by a different authenticated session
+is `401 login_required`.
 Successes and refusals are audited (`federation.identity.linked`,
 `federation.identity.link_refused`, `subject` = the account,
 `details.reason` on a refusal).

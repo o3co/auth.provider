@@ -395,7 +395,8 @@ describe("account linking across federations (#482)", () => {
 	};
 	/** The browser already holds an authenticated session for user-1. */
 	const seed = { sid: "s-1", isAuthenticated: true };
-	const linkEnvelope = { name: "test", state: "s1", codeVerifier: "v1", link: true };
+	/** The envelope the start leg wrote: the intent, bound to the session that asked. */
+	const linkEnvelope = { name: "test", state: "s1", codeVerifier: "v1", link: { sid: "s-1" } };
 	const alice = { id: "user-1", username: "alice" };
 
 	type LinkableRepo = UserRepository & {
@@ -457,7 +458,8 @@ describe("account linking across federations (#482)", () => {
 			const res = await agent.get("/oauth/federation/test?link=1");
 			expect(res.status).toBe(302);
 			const inspect = await agent.get("/_inspect");
-			expect(JSON.parse(inspect.text).federation.link).toBe(true);
+			// The intent is bound to the session that asked, not merely recorded.
+			expect(JSON.parse(inspect.text).federation.link).toEqual({ sid: "s-1" });
 		});
 
 		it("records no intent on an ordinary start", async () => {
@@ -514,6 +516,69 @@ describe("account linking across federations (#482)", () => {
 			expect(JSON.parse(inspect.text).sid).toBe("s-1");
 			expect(audit.events.map((e) => e.type)).toEqual(["federation.identity.linked"]);
 			expect(audit.events[0]).toMatchObject({ subject: "user-1", details: { provider: "test" } });
+		});
+
+		it("links to the session that started the flow: a browser now holding a different authenticated session is refused", async () => {
+			// Switching accounts between the start leg and the callback must not
+			// hand the identity to the new account.
+			const repo = linkableRepo({ current: null });
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: { sid: "s-2", isAuthenticated: true },
+				userRepository: repo,
+				userSessionStore: liveStore(),
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await callback(agent);
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("login_required");
+			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+		});
+
+		it("rolls the index and the tokens back, best-effort, when attaching to the live session fails", async () => {
+			// The transaction is consumed and the Store has linked; what must
+			// not be left behind is a half-attached federation on the session.
+			const repo = linkableRepo({ current: null });
+			const sfi = makeSessionFederationIndex();
+			const fts = makeFederationTokenStore();
+			fts.attach.mockRejectedValueOnce(new Error("token store down"));
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: liveStore(),
+				sessionFederationIndex: sfi,
+				federationTokenStore: fts,
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await callback(agent);
+			expect(res.status).toBe(503);
+			expect(sfi.removeFederation).toHaveBeenCalledWith("s-1", "test");
+			expect(fts.delete).toHaveBeenCalledWith("s-1", "test");
+		});
+
+		it("leaves a federation the session already carried in place when a re-link fails to attach", async () => {
+			const repo = linkableRepo({ current: null });
+			const sfi = makeSessionFederationIndex();
+			(sfi.listFederations as ReturnType<typeof vi.fn>).mockResolvedValue(["test"]);
+			const fts = makeFederationTokenStore();
+			fts.attach.mockRejectedValueOnce(new Error("token store down"));
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: liveStore(),
+				sessionFederationIndex: sfi,
+				federationTokenStore: fts,
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await callback(agent);
+			expect(res.status).toBe(503);
+			expect(sfi.removeFederation).not.toHaveBeenCalled();
+			expect(fts.delete).not.toHaveBeenCalled();
 		});
 
 		it("refuses without an authenticated session, and never asks the Store", async () => {

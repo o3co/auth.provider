@@ -82,8 +82,14 @@ export interface FederationTransactionEnvelope {
 	/** PB-4 nonce — absent for OAuth-only providers. */
 	readonly nonce?: string | undefined;
 	readonly redirectTo?: string | undefined;
-	/** #482: the start leg asked to link this identity to the signed-in account, not to log in. */
-	readonly link?: boolean | undefined;
+	/**
+	 * #482: the start leg asked to link this identity to the account of the
+	 * session `sid` — the one the browser held then — rather than to log in.
+	 * The callback binds to that session: a `form_post` callback arrives
+	 * without the application session cookie, so the record is what says
+	 * whose link this is.
+	 */
+	readonly link?: { readonly sid: string } | undefined;
 }
 
 /**
@@ -146,6 +152,11 @@ export const deriveFederationTransactionCookieName = (sessionCookieName: string)
 	return `__Secure-${base}${FEDERATION_TRANSACTION_COOKIE_SUFFIX}`;
 };
 
+const isLinkIntent = (value: unknown): value is { readonly sid: string } =>
+	typeof value === "object" &&
+	value !== null &&
+	typeof (value as { sid?: unknown }).sid === "string";
+
 /** Reject anything that is not the envelope this module wrote. */
 const readEnvelope = (record: unknown): FederationTransactionEnvelope | null => {
 	if (record == null || typeof record !== "object") return null;
@@ -164,7 +175,7 @@ const readEnvelope = (record: unknown): FederationTransactionEnvelope | null => 
 		codeVerifier,
 		...(typeof nonce === "string" ? { nonce } : {}),
 		...(typeof redirectTo === "string" ? { redirectTo } : {}),
-		...(link === true ? { link: true } : {}),
+		...(isLinkIntent(link) ? { link: { sid: link.sid } } : {}),
 	};
 };
 
