@@ -521,6 +521,32 @@ Every session carries `authTime`, and since #481 `amr` — RFC 8176 values namin
 
 Re-authentication is a *new* session: `POST /session/login` and the federation callback always create one with a fresh `authTime`, which is what `max_age` and `prompt=login` measure. A login page that bounces an already-authenticated browser straight back to `/authorize` is answered `login_required` there, not looped.
 
+### Account linking across federations (#482)
+
+A federated identity is `<provider>:<sub>` — the federation's name and the IdP's opaque, stable subject — and that string is what the callback hands to `UserRepository.authenticateByToken`. **The Store decides who that is.** The session package never links by e-mail: the same person signing in with Google on the web and with Apple on iOS is two identities, and whether they are one account is the Store's record, not an inference from an address an IdP asserted.
+
+An account gains a second identity through an explicit, authenticated action:
+
+1. The browser already holds a session (`isAuthenticated`, a live `UserSession`).
+2. It starts the federation with `?link=1`: `GET /session/oauth/federation/<name>?link=1`. Without an authenticated session that is `401 login_required`; when the Store's repository does not implement `linkFederatedIdentity`, `400 link_unsupported` — both before the browser is sent anywhere.
+3. On the callback, after `state`, PKCE and `nonce` are checked exactly as for a login, the identity is resolved:
+   - **nobody** → `userRepository.linkFederatedIdentity(currentUserId, { provider, sub, token, claims })`. `ok` links it; the Store's `refused` is `403 link_refused`, its `conflict` is `409 identity_conflict`.
+   - **another account** → `409 identity_conflict`; the Store is not asked. Linking never merges accounts.
+   - **this account** → nothing to link; the callback proceeds.
+4. The federation is attached to the **live** session — `sessionFederationIndex` and `federationTokenStore` under the current `sid` — and the browser is redirected as after a login. No new `UserSession` is minted and the express session is not regenerated: a link is not a login, and the session's claims envelope is unchanged (the next login through the new provider builds one the usual way).
+
+Without `link=1` nothing changes: an authenticated session that completes a federation whose identity the Store does not know is `401 unknown_user`, as before. **There is no implicit linking** — a session cookie plus a stray identity is the login-CSRF shape, and `link=1` on an authenticated session is what makes the action the user's.
+
+Two audit events: `federation.identity.linked` and `federation.identity.link_refused` (`details.reason`: `conflict` or `refused`), both with `subject` = the account.
+
+**What a Store must check before it links.** The seam receives `claims` as the provider mapped them — the IdP's assertions, nothing more:
+
+- **Never bind on an e-mail alone.** An address the IdP did not verify (`emailVerified !== true`, with the [#297 discipline](#emailverified-is-a-boolean-here-whatever-the-idp-sent): absent is not `false`, and a string is absent), a relay address (Apple's `@privaterelay.appleid.com`, surfaced as `isPrivateEmail`), or an IdP that lets a user change their address must never be matched against an existing account. The classic account takeover is exactly that match.
+- The link request is already authenticated — that is what `link=1` on a live session guarantees — so a matching address is not what authorises the link; the session is. A Store may still refuse: one identity per provider per account, a maximum re-authentication age, a verified address required on the new identity.
+- `sub` is opaque and stable per issuer. Store `<provider>:<sub>` verbatim; never derive an identity from `email`.
+
+`@o3co/auth-provider-foundation`'s `HttpUserRepository` implements the seam when `linkFederatedIdentityUrl` is configured (`CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` in the scaffold): it POSTs `{ userId, provider, sub, token, claims }` and reads a `2xx` `User` as linked, `401` / `403` as refused and `409` as conflict. The in-memory repository links in memory only — development, not persistence.
+
 ### `FederationResult<T>` (type)
 
 ```typescript

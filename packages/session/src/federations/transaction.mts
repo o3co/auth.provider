@@ -82,6 +82,8 @@ export interface FederationTransactionEnvelope {
 	/** PB-4 nonce — absent for OAuth-only providers. */
 	readonly nonce?: string | undefined;
 	readonly redirectTo?: string | undefined;
+	/** #482: the start leg asked to link this identity to the signed-in account, not to log in. */
+	readonly link?: boolean | undefined;
 }
 
 /**
@@ -149,7 +151,10 @@ const readEnvelope = (record: unknown): FederationTransactionEnvelope | null => 
 	if (record == null || typeof record !== "object") return null;
 	const envelope = (record as { federation?: unknown }).federation;
 	if (envelope == null || typeof envelope !== "object") return null;
-	const { name, state, codeVerifier, nonce, redirectTo } = envelope as Record<string, unknown>;
+	const { name, state, codeVerifier, nonce, redirectTo, link } = envelope as Record<
+		string,
+		unknown
+	>;
 	if (typeof name !== "string" || typeof state !== "string" || typeof codeVerifier !== "string") {
 		return null;
 	}
@@ -159,6 +164,7 @@ const readEnvelope = (record: unknown): FederationTransactionEnvelope | null => 
 		codeVerifier,
 		...(typeof nonce === "string" ? { nonce } : {}),
 		...(typeof redirectTo === "string" ? { redirectTo } : {}),
+		...(link === true ? { link: true } : {}),
 	};
 };
 

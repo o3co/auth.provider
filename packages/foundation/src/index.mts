@@ -59,6 +59,10 @@ export const registerBuiltinAdapters = (factories: {
 		return new HttpUserRepository({
 			authenticateUrl: config.authenticateUrl,
 			authenticateByTokenUrl: config.authenticateByTokenUrl,
+			// #482: optional. Present → the repository can link a federated identity.
+			...(typeof config.linkFederatedIdentityUrl === "string"
+				? { linkFederatedIdentityUrl: config.linkFederatedIdentityUrl }
+				: {}),
 			timeout: toNumber(config.timeout, DEFAULT_TIMEOUT_MS),
 			maxResponseBytes: toNumber(config.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES),
 		});

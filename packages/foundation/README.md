@@ -40,6 +40,7 @@ class HttpUserRepository implements UserRepository {
   constructor(options: {
     authenticateUrl: string;        // POST endpoint for username/password auth
     authenticateByTokenUrl: string; // POST endpoint for token-based auth
+    linkFederatedIdentityUrl?: string; // POST endpoint that links a federated identity (#482)
     timeout: number;                // request timeout in milliseconds
     maxResponseBytes?: number;      // response body cap, default 1 MiB
   });
@@ -49,6 +50,10 @@ class HttpUserRepository implements UserRepository {
 
   // POST authenticateByTokenUrl with body: { token }
   authenticateByToken(token: string): Promise<User | null>;
+
+  // POST linkFederatedIdentityUrl with body: { userId, provider, sub, token, claims }
+  // — present only when the URL is configured (#482)
+  linkFederatedIdentity?(userId: string, identity: FederatedIdentityLink): Promise<LinkFederatedIdentityResult>;
 }
 ```
 
@@ -57,13 +62,21 @@ class HttpUserRepository implements UserRepository {
 - Throws when the upstream returns 2xx with a body that is not a JSON `User`
   (`{ id: string, username: string, … }`) — an upstream failure, not a
   "user not found".
+- `linkFederatedIdentity` (#482): a `2xx` `User` is `{ ok: true, user }`;
+  `401` / `403` is `{ ok: false, reason: "refused" }`; `409` is
+  `{ ok: false, reason: "conflict" }`; anything else throws. The method is
+  absent when `linkFederatedIdentityUrl` is not configured, which is how the
+  federation routes know to refuse `?link=1` up front. What a Store checks
+  before answering `2xx` — never on an unverified or relay address, never by
+  e-mail alone — is in the
+  [session package README](../session/README.md#account-linking-across-federations-482).
 
 ### Constructor validation
 
 Every option is validated in the **constructor**, so a misconfigured deployment
 fails at boot rather than at the first login attempt.
 
-**Both URLs must use `https://`.** They carry plaintext user credentials — a
+**Every URL must use `https://`** (the link endpoint included). They carry plaintext user credentials — a
 password on `authenticateUrl`, a token on `authenticateByTokenUrl` — so an
 `http://` URL does not merely weaken the connection, it publishes the credential
 to every hop on the path.

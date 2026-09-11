@@ -154,4 +154,46 @@ describe("InMemoryUserRepository", () => {
 			expect(user).toBeNull();
 		});
 	});
+
+	describe("linkFederatedIdentity (#482)", () => {
+		const apple = { provider: "apple", sub: "a1", token: "apple:a1", claims: {} };
+		const repo = () =>
+			new InMemoryUserRepository(
+				new Map([
+					["alice", { password: "x", id: "u1" }],
+					["bob", { password: "y", id: "u2", token: "google:bob-sub" }],
+				]),
+			);
+
+		it("links a token to a user so authenticateByToken resolves it afterwards", async () => {
+			const r = repo();
+			expect(await r.authenticateByToken("apple:a1")).toBeNull();
+			const out = await r.linkFederatedIdentity("u1", apple);
+			expect(out).toMatchObject({ ok: true, user: { id: "u1", username: "alice" } });
+			expect((await r.authenticateByToken("apple:a1"))?.id).toBe("u1");
+		});
+
+		it("refuses an unknown user, and reports a conflict for a token another user holds", async () => {
+			const r = repo();
+			expect(await r.linkFederatedIdentity("nobody", apple)).toMatchObject({
+				ok: false,
+				reason: "refused",
+			});
+			expect(
+				await r.linkFederatedIdentity("u1", {
+					provider: "google",
+					sub: "bob-sub",
+					token: "google:bob-sub",
+					claims: {},
+				}),
+			).toMatchObject({ ok: false, reason: "conflict" });
+			// Linking the same identity to the same user twice is fine; to another user it is not.
+			await r.linkFederatedIdentity("u1", apple);
+			expect(await r.linkFederatedIdentity("u1", apple)).toMatchObject({ ok: true });
+			expect(await r.linkFederatedIdentity("u2", apple)).toMatchObject({
+				ok: false,
+				reason: "conflict",
+			});
+		});
+	});
 });

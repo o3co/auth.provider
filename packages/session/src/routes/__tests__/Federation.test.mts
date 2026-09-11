@@ -15,6 +15,8 @@
  */
 
 import type {
+	AuditEvent,
+	AuditSink,
 	FederationTokenStore,
 	SessionFederationIndex,
 	SubjectSessionIndex,
@@ -119,12 +121,13 @@ function makeSessionApp(store: SessionStore): express.Express {
 function plantFederation(
 	store: SessionStore,
 	federation: Record<string, unknown>,
+	extra: Record<string, unknown> = {},
 ): express.RequestHandler {
 	return (_req, res) => {
 		// Find or create an entry in the store keyed by the current session id.
 		// We create a new stable key and set a cookie so subsequent requests reuse it.
 		const id = "test-session";
-		store.set(id, { federation });
+		store.set(id, { ...extra, federation });
 		// Return the id so the caller can set the cookie
 		res.cookie("sid", id, { httpOnly: true });
 		res.json({ ok: true });
@@ -312,6 +315,8 @@ function buildCallbackApp({
 	subjectSessionIndex,
 	federationTokenStore,
 	saveInterceptor,
+	sessionSeed,
+	auditSink,
 }: {
 	providers: ReadonlyMap<string, FederationProvider>;
 	providerCallbackUrls?: ReadonlyMap<string, string>;
@@ -324,12 +329,15 @@ function buildCallbackApp({
 	federationTokenStore?: FederationTokenStore;
 	/** Optional middleware inserted AFTER session shim to intercept req.session.save. */
 	saveInterceptor?: express.RequestHandler;
+	/** #482: extra session fields planted next to `federation` — an authenticated `sid`. */
+	sessionSeed?: Record<string, unknown>;
+	auditSink?: AuditSink;
 }): { app: express.Express; store: SessionStore } {
 	const store: SessionStore = new Map();
 	const app = makeSessionApp(store);
 
 	// Plant endpoint — sets session.federation and returns the session cookie
-	app.get("/_plant", plantFederation(store, federation));
+	app.get("/_plant", plantFederation(store, federation, sessionSeed));
 
 	if (saveInterceptor) app.use(saveInterceptor);
 
@@ -348,6 +356,7 @@ function buildCallbackApp({
 			sessionFederationIndex: sessionFederationIndex ?? makeSessionFederationIndex(),
 			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
 			federationTokenStore: federationTokenStore ?? makeFederationTokenStore(),
+			...(auditSink ? { auditSink } : {}),
 		}),
 	);
 
@@ -373,6 +382,273 @@ async function plantAndGetAgent(app: express.Express): Promise<ReturnType<typeof
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+
+describe("account linking across federations (#482)", () => {
+	const providers = new Map([["test", makeFakeProvider()]]);
+	const LIVE = {
+		sid: "s-1",
+		sub: "user-1",
+		authTime: new Date(),
+		createdAt: new Date(),
+		expiresAt: new Date(Date.now() + 3_600_000),
+		claims: {},
+	};
+	/** The browser already holds an authenticated session for user-1. */
+	const seed = { sid: "s-1", isAuthenticated: true };
+	const linkEnvelope = { name: "test", state: "s1", codeVerifier: "v1", link: true };
+	const alice = { id: "user-1", username: "alice" };
+
+	type LinkableRepo = UserRepository & {
+		authenticateByToken: ReturnType<typeof vi.fn>;
+		linkFederatedIdentity: ReturnType<typeof vi.fn>;
+	};
+	/** A Store that can link. `current` is what the identity resolves to today. */
+	const linkableRepo = (
+		opts: { current?: { id: string; username: string } | null; outcome?: unknown } = {},
+	): LinkableRepo =>
+		({
+			authenticate: vi.fn(async () => null),
+			authenticateByToken: vi.fn(async () => opts.current ?? null),
+			linkFederatedIdentity: vi.fn(async () => opts.outcome ?? { ok: true, user: alice }),
+		}) as unknown as LinkableRepo;
+	const liveStore = () => ({ ...makeUserSessionStore(), get: vi.fn(async () => LIVE) });
+	const recorder = () => {
+		const events: AuditEvent[] = [];
+		const sink: AuditSink = {
+			kind: "test",
+			record: async (event) => {
+				events.push(event);
+			},
+		};
+		return { sink, events };
+	};
+	const callback = (agent: ReturnType<typeof request.agent>) =>
+		agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+
+	describe("the start leg", () => {
+		it("refuses link=1 without an authenticated session", async () => {
+			const app = buildStatelessApp({ providers, userRepository: linkableRepo() });
+			const res = await request(app).get("/oauth/federation/test?link=1");
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("login_required");
+		});
+
+		it("refuses link=1 when the user repository cannot link, before sending the browser anywhere", async () => {
+			const { app } = buildCallbackApp({
+				providers,
+				federation: {},
+				sessionSeed: seed,
+				userRepository: makeUserRepository(),
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await agent.get("/oauth/federation/test?link=1");
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("link_unsupported");
+		});
+
+		it("records the intent in the transaction when the session is authenticated and the Store can link", async () => {
+			const { app } = buildCallbackApp({
+				providers,
+				federation: {},
+				sessionSeed: seed,
+				userRepository: linkableRepo(),
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await agent.get("/oauth/federation/test?link=1");
+			expect(res.status).toBe(302);
+			const inspect = await agent.get("/_inspect");
+			expect(JSON.parse(inspect.text).federation.link).toBe(true);
+		});
+
+		it("records no intent on an ordinary start", async () => {
+			const { app } = buildCallbackApp({
+				providers,
+				federation: {},
+				sessionSeed: seed,
+				userRepository: linkableRepo(),
+			});
+			const agent = await plantAndGetAgent(app);
+			await agent.get("/oauth/federation/test");
+			const inspect = await agent.get("/_inspect");
+			expect(JSON.parse(inspect.text).federation.link).toBeUndefined();
+		});
+	});
+
+	describe("the callback", () => {
+		it("links an unknown identity to the signed-in account, attaches the federation to the live session, and mints no new one", async () => {
+			const repo = linkableRepo({ current: null });
+			const uss = liveStore();
+			const sfi = makeSessionFederationIndex();
+			const fts = makeFederationTokenStore();
+			const audit = recorder();
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: uss,
+				sessionFederationIndex: sfi,
+				federationTokenStore: fts,
+				auditSink: audit.sink,
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await callback(agent);
+			expect(res.status).toBe(302);
+
+			expect(repo.authenticateByToken).toHaveBeenCalledWith("test:external-42");
+			expect(repo.linkFederatedIdentity).toHaveBeenCalledWith("user-1", {
+				provider: "test",
+				sub: "external-42",
+				token: "test:external-42",
+				claims: expect.any(Object),
+			});
+			expect(sfi.addFederation).toHaveBeenCalledWith("s-1", "test", LIVE.expiresAt);
+			expect(fts.attach).toHaveBeenCalledWith(
+				"s-1",
+				"test",
+				expect.objectContaining({ accessToken: "at" }),
+			);
+			// A link is not a login: no new UserSession, the express session keeps its sid.
+			expect(uss.create).not.toHaveBeenCalled();
+			const inspect = await agent.get("/_inspect");
+			expect(JSON.parse(inspect.text).sid).toBe("s-1");
+			expect(audit.events.map((e) => e.type)).toEqual(["federation.identity.linked"]);
+			expect(audit.events[0]).toMatchObject({ subject: "user-1", details: { provider: "test" } });
+		});
+
+		it("refuses without an authenticated session, and never asks the Store", async () => {
+			const repo = linkableRepo({ current: null });
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				userRepository: repo,
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await callback(agent);
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("login_required");
+			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+		});
+
+		it("refuses when the session's UserSession is gone", async () => {
+			const repo = linkableRepo({ current: null });
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: makeUserSessionStore(), // get → null
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await callback(agent);
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("login_required");
+			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+		});
+
+		it("refuses an identity that already belongs to another account with 409, without asking the Store, and audits it", async () => {
+			const repo = linkableRepo({ current: { id: "user-2", username: "bob" } });
+			const audit = recorder();
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: liveStore(),
+				auditSink: audit.sink,
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await callback(agent);
+			expect(res.status).toBe(409);
+			expect(res.body.error).toBe("identity_conflict");
+			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+			expect(audit.events).toHaveLength(1);
+			expect(audit.events[0]).toMatchObject({
+				type: "federation.identity.link_refused",
+				subject: "user-1",
+				details: { provider: "test", reason: "conflict" },
+			});
+		});
+
+		it("is idempotent for an identity the account already holds", async () => {
+			const repo = linkableRepo({ current: alice });
+			const sfi = makeSessionFederationIndex();
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: liveStore(),
+				sessionFederationIndex: sfi,
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await callback(agent);
+			expect(res.status).toBe(302);
+			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+			expect(sfi.addFederation).toHaveBeenCalledWith("s-1", "test", LIVE.expiresAt);
+		});
+
+		it("relays the Store's refusal as 403 and its conflict as 409", async () => {
+			const refused = linkableRepo({
+				current: null,
+				outcome: { ok: false, reason: "refused", description: "address not verified" },
+			});
+			const a = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: refused,
+				userSessionStore: liveStore(),
+			});
+			const resA = await callback(await plantAndGetAgent(a.app));
+			expect(resA.status).toBe(403);
+			expect(resA.body).toEqual({
+				error: "link_refused",
+				error_description: "address not verified",
+			});
+
+			const conflict = linkableRepo({ current: null, outcome: { ok: false, reason: "conflict" } });
+			const b = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: conflict,
+				userSessionStore: liveStore(),
+			});
+			const resB = await callback(await plantAndGetAgent(b.app));
+			expect(resB.status).toBe(409);
+			expect(resB.body.error).toBe("identity_conflict");
+		});
+
+		it("answers 400 when the repository has no linking seam", async () => {
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: makeUserRepository(null),
+				userSessionStore: liveStore(),
+			});
+			const res = await callback(await plantAndGetAgent(app));
+			expect(res.status).toBe(400);
+			expect(res.body.error).toBe("link_unsupported");
+		});
+
+		it("never links implicitly: an authenticated session plus an unknown identity is still unknown_user", async () => {
+			const repo = linkableRepo({ current: null });
+			const { app } = buildCallbackApp({
+				providers,
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: liveStore(),
+			});
+			const res = await callback(await plantAndGetAgent(app));
+			expect(res.status).toBe(401);
+			expect(res.body.error).toBe("unknown_user");
+			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+		});
+	});
+});
 
 describe("Federation routes", () => {
 	// -----------------------------------------------------------------------

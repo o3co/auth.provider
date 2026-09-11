@@ -414,4 +414,73 @@ describe("HttpUserRepository", () => {
 			);
 		});
 	});
+
+	describe("linkFederatedIdentity (#482)", () => {
+		const LINK_URL = `${BASE_URL}/user/link`;
+		const linking = () =>
+			new HttpUserRepository({
+				authenticateUrl: `${BASE_URL}/user/authenticate`,
+				authenticateByTokenUrl: `${BASE_URL}/user/authenticate/token`,
+				linkFederatedIdentityUrl: LINK_URL,
+				timeout: 5000,
+			});
+		const identity = {
+			provider: "apple",
+			sub: "a1",
+			token: "apple:a1",
+			claims: { email: "a@example.com", emailVerified: true },
+		};
+		const answer = (status: number) =>
+			server.use(http.post(LINK_URL, () => new HttpResponse(null, { status })));
+
+		it("is absent unless linkFederatedIdentityUrl is configured", () => {
+			expect(repo.linkFederatedIdentity).toBeUndefined();
+			expect(typeof linking().linkFederatedIdentity).toBe("function");
+		});
+
+		it("POSTs the user id with the identity and returns the Store's user on 2xx", async () => {
+			let seen: unknown;
+			server.use(
+				http.post(LINK_URL, async ({ request }) => {
+					seen = await request.json();
+					return HttpResponse.json(mockUser);
+				}),
+			);
+			const out = await linking().linkFederatedIdentity?.("user-1", identity);
+			expect(out).toEqual({ ok: true, user: mockUser });
+			expect(seen).toEqual({ userId: "user-1", ...identity });
+		});
+
+		it("maps 403 and 401 to refused, 409 to conflict, and throws on anything else", async () => {
+			answer(403);
+			expect(await linking().linkFederatedIdentity?.("user-1", identity)).toEqual({
+				ok: false,
+				reason: "refused",
+			});
+			answer(401);
+			expect(await linking().linkFederatedIdentity?.("user-1", identity)).toMatchObject({
+				ok: false,
+				reason: "refused",
+			});
+			answer(409);
+			expect(await linking().linkFederatedIdentity?.("user-1", identity)).toEqual({
+				ok: false,
+				reason: "conflict",
+			});
+			answer(500);
+			await expect(linking().linkFederatedIdentity?.("user-1", identity)).rejects.toThrow(/500/);
+		});
+
+		it("holds the link URL to https (loopback http) like the other two", () => {
+			expect(
+				() =>
+					new HttpUserRepository({
+						authenticateUrl: "https://users.example.com/auth",
+						authenticateByTokenUrl: "https://users.example.com/token",
+						linkFederatedIdentityUrl: "http://10.0.0.5/link",
+						timeout: 5000,
+					}),
+			).toThrow(/linkFederatedIdentityUrl/);
+		});
+	});
 });
