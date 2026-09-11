@@ -274,6 +274,18 @@ export const ocspNoCheck = (): pkijs.Extension =>
 	});
 
 /**
+ * `id-pkix-ocsp-nocheck` carrying something other than the DER `NULL`
+ * RFC 6960 §4.2.2.2.1 specifies — what a forged or broken responder
+ * certificate looks like.
+ */
+export const malformedOcspNoCheck = (): pkijs.Extension =>
+	new pkijs.Extension({
+		extnID: OID.ocspNoCheck,
+		critical: false,
+		extnValue: new asn1js.Integer({ value: 1 }).toBER(false),
+	});
+
+/**
  * The TLS feature extension (RFC 7633). `features` are TLS extension type
  * numbers; `[5]` (`status_request`) is OCSP must-staple.
  */

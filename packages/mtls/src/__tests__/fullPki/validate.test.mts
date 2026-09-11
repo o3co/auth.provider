@@ -71,6 +71,8 @@ import {
 const NOW = new Date("2027-01-01T00:00:00Z");
 /** The intermediate issues the leaf, so the leaf's CRL is published by it. */
 const INT_CRL_URL = "http://crl.test/int.crl";
+/** A second distribution point on the responder certificate, for the partial-CRL case (#550). */
+const SECOND_CRL_URL = "http://crl.test/int-2.crl";
 /** The root issues the intermediate, so the intermediate's CRL comes from the root. */
 const ROOT_CRL_URL = "http://crl.test/root.crl";
 
@@ -2174,5 +2176,43 @@ describe("full-pki revocation — a delegated responder's own revocation (#468)"
 		);
 		expect(unchecked).toHaveLength(1);
 		expect(unchecked[0]?.[0]).toMatchObject({ responder: INT_OCSP_URL });
+	});
+});
+
+describe("full-pki revocation — a responder checked against a partial CRL (#550 review)", () => {
+	it("does not treat a responder as checked when one of its distribution points could not be used", async () => {
+		// The responder names two points; one answers, one is down. That is the
+		// partial answer `on-unavailable` judges on the normal path — it is not
+		// "the responder is clean", so its answer is discarded and the leaf is
+		// judged by its own CRL.
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const responder = await mintOcspResponder("OCSP Responder", 50, int, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				ocspSigningEku(),
+				crlDistributionPoints([INT_CRL_URL, SECOND_CRL_URL]),
+			],
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, signer: responder }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+			[SECOND_CRL_URL]: 503,
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [] }),
+		});
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+		// The leaf's own CRL does not list it, so the CRL admits it — but it is
+		// the CRL that decided, not the answer from an unchecked responder.
+		expect(result).toEqual({ ok: true });
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ reason: "responder_status_unavailable" }),
+			"mtls_revocation_ocsp_fallback",
+		);
 	});
 });
