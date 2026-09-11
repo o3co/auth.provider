@@ -129,6 +129,18 @@ describe("ClientEntrySchema — senderConstrained field (Wave 2 §4.8)", () => {
 		expect(ClientEntrySchema.safeParse({ ...base, clientName: "" }).success).toBe(false);
 		expect(ClientEntrySchema.safeParse({ ...base, clientUri: "chat.example" }).success).toBe(false);
 	});
+
+	it("rejects empty-string entries in allowedAudiences (#521)", () => {
+		// `""` is a malformed audience, not a widening — nothing matches it —
+		// but `generateToken` would stamp `aud: ""` on every token minted for
+		// this client (session, device, jwt-bearer). Refuse it at registration.
+		const result = ClientEntrySchema.safeParse({
+			tokenEndpointAuthMethod: "client_secret_basic",
+			clientSecret: "s",
+			allowedAudiences: ["https://api.example", ""],
+		});
+		expect(result.success).toBe(false);
+	});
 	it("#316/#330: accepts firstParty, the marking /authorize requires", () => {
 		// The `.strict()` schema had no `firstParty` key, so a YAML/static
 		// registration could not carry the marking /authorize demands: writing

@@ -164,7 +164,10 @@ export const ClientEntrySchema = z
 		// to ⊆ allowedScopes by the superRefine below: a default the allowlist
 		// would refuse is a misconfiguration, not a grant.
 		defaultScopes: z.array(z.string()).optional(),
-		allowedAudiences: z.array(z.string()).default([]),
+		// #521: `""` is a malformed audience, not a widening — nothing matches
+		// it — but `generateToken` would stamp `aud: ""` on every token minted
+		// for this client. Refuse it at registration.
+		allowedAudiences: z.array(z.string().min(1)).default([]),
 		// Wave 1 §3.4.1: per-client grant type allowlist. Absent means no restriction on
 		// existing grants (authorization_code, refresh_token). Grants that declare
 		// `requiresExplicitGrantAllowlist` (client_credentials, WebAuthn) are gated by

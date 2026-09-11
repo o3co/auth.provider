@@ -367,7 +367,12 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 						},
 					};
 				}
-				if (decision.grantedScope) {
+				// Presence, not truthiness: only `undefined` is "no opinion" (#521).
+				if (decision.grantedScope !== undefined) {
+					if (!Array.isArray(decision.grantedScope)) {
+						// #521: a non-array from a JS policy would throw in `.filter`.
+						return { result: policyOutOfBounds("policy returned a non-array grantedScope") };
+					}
 					// CP-15: RFC 6749 §6 says the issued scope MUST NOT exceed
 					// the scope of the original grant. Re-enforce after policy
 					// so a buggy/compromised policy cannot expand privileges

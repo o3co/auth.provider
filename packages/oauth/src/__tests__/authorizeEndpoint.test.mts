@@ -518,6 +518,51 @@ describe("/authorize — policy evaluation edges (C-2)", () => {
 		expect(evaluated.requestedScope).toBeUndefined();
 	});
 
+	it("refuses a policy that returns a non-array grantedScope or grantedAudience (#521)", async () => {
+		// A JavaScript policy can return a string where the type says array.
+		// `.filter` would throw on one, and an audience string persisted on the
+		// code is read back as its first character at /token.
+		const scopeString = await makeApp({
+			grantPolicy: {
+				kind: "test",
+				evaluate: async () =>
+					({ outcome: "allow", grantedScope: "read" }) as unknown as GrantPolicyDecision,
+			},
+		});
+		const scopeRes = await authorize(scopeString.app, baseQuery);
+		expect(redirectParams(scopeRes).get("error")).toBe("server_error");
+		expect(redirectParams(scopeRes).get("error_description")).toMatch(/non-array grantedScope/);
+
+		const audienceString = await makeApp({
+			grantPolicy: {
+				kind: "test",
+				evaluate: async () =>
+					({
+						outcome: "allow",
+						grantedAudience: "https://api.example.com",
+					}) as unknown as GrantPolicyDecision,
+			},
+		});
+		const audienceRes = await authorize(audienceString.app, baseQuery);
+		expect(redirectParams(audienceRes).get("error")).toBe("server_error");
+		expect(redirectParams(audienceRes).get("error_description")).toMatch(
+			/non-array grantedAudience/,
+		);
+
+		// Falsy is still present: `""` and `null` are a malformed decision, not
+		// the absence of one, and only `undefined` means the policy said nothing.
+		for (const malformed of ["", null]) {
+			const { app } = await makeApp({
+				grantPolicy: {
+					kind: "test",
+					evaluate: async () =>
+						({ outcome: "allow", grantedScope: malformed }) as unknown as GrantPolicyDecision,
+				},
+			});
+			expect(redirectParams(await authorize(app, baseQuery)).get("error")).toBe("server_error");
+		}
+	});
+
 	it('redirects a deny without errorDescription as "policy denied"', async () => {
 		const { app } = await makeApp({
 			grantPolicy: {

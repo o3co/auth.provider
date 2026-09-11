@@ -28,6 +28,7 @@
 import {
 	type AppConfig,
 	type AssertionVerifier,
+	type AuthenticatedClient,
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantPolicyDecision,
@@ -588,10 +589,16 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 	// `https://api.example` from `session` and for `mobile-app` from
 	// jwt-bearer, and a resource server pinning its own identifier accepted
 	// the first and rejected the second for the same user, client and scopes.
-	const client = (over: Record<string, unknown>) =>
-		({
-			authenticatedClient: { clientId: "mobile-app", allowedScopes: [], ...over },
-		}) as never;
+	// #521: typed, so drift between this fixture and `AuthenticatedClient`
+	// fails to compile instead of hiding behind `as never`.
+	const client = (over: Partial<AuthenticatedClient> = {}): Partial<GrantContext> => ({
+		authenticatedClient: {
+			clientId: "mobile-app",
+			tokenEndpointAuthMethod: "none",
+			allowedScopes: [],
+			...over,
+		},
+	});
 	const claimsOf = (result: { status: number } & Record<string, unknown>) =>
 		"tokens" in result
 			? decodeJwt((result.tokens as { access_token: string }).access_token)
@@ -680,6 +687,165 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 		);
 		expect(result.status).toBe(200);
 		expect(claimsOf(result).aud).toBe("https://api.example");
+	});
+
+	it("refuses an out-of-bounds entry in any position, not only the first (#521)", async () => {
+		// The ceiling check runs over the whole array before the flatten to
+		// `[0]`: a policy returning [allowed, rogue] is refused, not quietly
+		// minted for the allowed one.
+		const { result } = await build({
+			grantPolicy: allow({ grantedAudience: ["https://api.example", "https://evil.example"] }),
+		}).handle(ctx({}, client({ allowedAudiences: ["https://api.example"] })));
+		expect(result.status).toBe(500);
+		expect("error" in result && result.error).toBe("server_error");
+		expect("errorDescription" in result && result.errorDescription).toContain(
+			"https://evil.example",
+		);
+	});
+
+	it("flattens two in-bounds entries to the first (#521)", async () => {
+		const { result } = await build({
+			grantPolicy: allow({ grantedAudience: ["https://other.example", "https://api.example"] }),
+		}).handle(
+			ctx({}, client({ allowedAudiences: ["https://api.example", "https://other.example"] })),
+		);
+		expect(result.status).toBe(200);
+		expect(claimsOf(result).aud).toBe("https://other.example");
+	});
+
+	it("treats an empty grantedAudience as no decision without a client too (#521)", async () => {
+		// An empty array is "no decision" before the no-client refusal is
+		// reached; the boundary of that refusal is exactly a non-empty one.
+		const { result } = await build({ grantPolicy: allow({ grantedAudience: [] }) }).handle(
+			ctx({}, { authenticatedClient: null }),
+		);
+		expect(result.status).toBe(200);
+		expect(claimsOf(result).aud).toBe("https://auth.example");
+	});
+
+	it("logs jwt_bearer_policy_audience_refused for the operator who wired the policy (#521)", async () => {
+		// This file's convention (`jwt_bearer_email_not_verified`): a refusal
+		// an operator caused logs, so the operator who wired the gate can see
+		// why devices are being refused.
+		const warn = vi.fn();
+		const logger = { error: vi.fn(), warn, info: vi.fn(), debug: vi.fn() };
+		await build({
+			logger,
+			grantPolicy: allow({ grantedAudience: ["https://evil.example"] }),
+		}).handle(ctx({}, client({ allowedAudiences: ["https://api.example"] })));
+		await build({
+			logger,
+			grantPolicy: allow({ grantedAudience: ["https://api.example"] }),
+		}).handle(ctx({}, { authenticatedClient: null }));
+
+		expect(warn).toHaveBeenCalledTimes(2);
+		for (const call of warn.mock.calls) {
+			expect(call[1]).toBe("jwt_bearer_policy_audience_refused");
+			expect(call[0]).toMatchObject({ kind: "stub" });
+		}
+		expect(warn.mock.calls[0]?.[0]).toMatchObject({
+			reason: expect.stringContaining("https://evil.example"),
+		});
+		expect(warn.mock.calls[1]?.[0]).toMatchObject({
+			reason: expect.stringContaining("no authenticated client"),
+		});
+	});
+
+	describe("RFC 8707 resource (#522)", () => {
+		// Every sibling minting at /token derives and enforces the audience
+		// from `resource` under `oauth.resourceIndicator.enabled`; this grant
+		// imported neither helper and silently ignored the parameter, so an
+		// operator who enabled the flag found one grant exempt.
+		const flagOn = {
+			...config,
+			oauth: { ...config.oauth, resourceIndicator: { enabled: true } },
+		} as unknown as AppConfig;
+		const registered = (over: Partial<AuthenticatedClient> = {}) =>
+			client({ allowedAudiences: ["https://api.example", "https://other.example"], ...over });
+
+		it("derives the audience from an allowed resource when no policy narrows one", async () => {
+			const { result } = await build({ config: flagOn }).handle(
+				ctx({ resource: "https://other.example" }, registered()),
+			);
+			expect(result.status).toBe(200);
+			expect(claimsOf(result).aud).toBe("https://other.example");
+		});
+
+		it("accepts the client id as a resource — the same ceiling a policy audience is held to", async () => {
+			const { result } = await build({ config: flagOn }).handle(
+				ctx({ resource: "mobile-app" }, registered()),
+			);
+			expect(result.status).toBe(200);
+			expect(claimsOf(result).aud).toBe("mobile-app");
+		});
+
+		it("answers invalid_target for a resource outside allowedAudiences ∪ {clientId}", async () => {
+			const { result } = await build({ config: flagOn }).handle(
+				ctx({ resource: "https://evil.example" }, registered()),
+			);
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_target");
+			expect("errorDescription" in result && result.errorDescription).toContain(
+				"https://evil.example",
+			);
+		});
+
+		it("answers invalid_target for two distinct resources — one aud cannot represent both", async () => {
+			const { result } = await build({ config: flagOn }).handle(
+				ctx({ resource: ["https://api.example", "https://other.example"] }, registered()),
+			);
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_target");
+		});
+
+		it("honours a policy that narrows to the requested resource, refuses one that narrows elsewhere", async () => {
+			const narrowed = await build({
+				config: flagOn,
+				grantPolicy: allow({ grantedAudience: ["https://other.example"] }),
+			}).handle(ctx({ resource: "https://other.example" }, registered()));
+			expect(narrowed.result.status).toBe(200);
+
+			const elsewhere = await build({
+				config: flagOn,
+				grantPolicy: allow({ grantedAudience: ["https://api.example"] }),
+			}).handle(ctx({ resource: "https://other.example" }, registered()));
+			expect(elsewhere.result.status).toBe(400);
+			expect("error" in elsewhere.result && elsewhere.result.error).toBe("invalid_target");
+		});
+
+		it("forwards resource to the policy under the flag, and nothing without it", async () => {
+			const evaluate = vi.fn(async () => ({ outcome: "allow" }) as GrantPolicyDecision);
+			await build({ config: flagOn, grantPolicy: policyOf(evaluate) }).handle(
+				ctx({ resource: "https://other.example" }, registered()),
+			);
+			expect(evaluate.mock.calls[0]?.[0]).toMatchObject({ resource: ["https://other.example"] });
+
+			evaluate.mockClear();
+			await build({ grantPolicy: policyOf(evaluate) }).handle(
+				ctx({ resource: "https://other.example" }, registered()),
+			);
+			expect(evaluate.mock.calls[0]?.[0]?.resource).toBeUndefined();
+		});
+
+		it("flag off: resource is ignored and the default audience stands", async () => {
+			const { result } = await build({}).handle(
+				ctx({ resource: "https://evil.example" }, registered()),
+			);
+			expect(result.status).toBe(200);
+			expect(claimsOf(result).aud).toBe("https://api.example");
+		});
+
+		it("refuses a resource without an authenticated client — nothing bounds the derivation", async () => {
+			// No registration means no `allowedAudiences ∪ {clientId}` to derive
+			// within; the token would carry the issuer, which represents no
+			// resource, and RFC 8707 §2 calls that `invalid_target`. Naming a
+			// resource is not a registration.
+			const { result } = await build({ config: flagOn }).handle(
+				ctx({ resource: "https://api.example" }, { authenticatedClient: null }),
+			);
+			expect(result.status).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_target");
+		});
 	});
 });
 

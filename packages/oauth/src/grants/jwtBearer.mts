@@ -30,6 +30,11 @@ import {
 	isEmailVerified,
 } from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
+import {
+	deriveAudienceFromResources,
+	extractResourceParam,
+	unrepresentedResources,
+} from "./_resourceIndicator.mjs";
 
 /** RFC 7523 §2.1. */
 export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer";
@@ -88,7 +93,11 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  * an authenticated client there is no registration to name a resource or a
  * client, and `aud` is the issuer (#520): RFC 9068 §2.2 requires the claim,
  * and the issuer is the one audience every deployment has — the WebAuthn
- * grant mints the same in the same position.
+ * grant mints the same in the same position. Under
+ * `oauth.resourceIndicator.enabled` a `resource` parameter derives the
+ * audience within `allowedAudiences ∪ {clientId}` and a request the final
+ * `aud` cannot represent is `invalid_target`, as in every sibling grant
+ * (RFC 8707 §2, #522).
  *
  * ## Failure vocabulary
  *
@@ -107,7 +116,10 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  *   widened scope, a `grantedAudience` outside the client's
  *   `allowedAudiences`, or one returned when no authenticated client
  *   supplies that ceiling, is `500 server_error` (#520): the policy exceeded
- *   its authority, the caller did not.
+ *   its authority, the caller did not. Each logs
+ *   `jwt_bearer_policy_audience_refused` for the operator who wired it (#521).
+ * - A `resource` the issued `aud` cannot represent → `400 invalid_target`
+ *   (RFC 8707 §2), under `oauth.resourceIndicator.enabled` only (#522).
  */
 export const createJwtBearerGrant = (
 	deps: GrantDependencies & {
@@ -234,6 +246,14 @@ export const createJwtBearerGrant = (
 			const client = ctx.authenticatedClient;
 			const clientId = client?.clientId;
 
+			// RFC 8707 (#522): read under the flag alone, as `client_credentials`
+			// does — the enforcement below does not depend on a policy being
+			// wired. Flag off, the parameter is ignored (RFC 6749 §3.2).
+			const resourceIndicatorEnabled = config.oauth.resourceIndicator?.enabled === true;
+			const requestedResource = resourceIndicatorEnabled
+				? extractResourceParam(ctx.body as Record<string, unknown>)
+				: null;
+
 			// CP-18: the policy gate every other minting path applies, after
 			// the identity gates and the scope ceilings so it sees a resolved
 			// subject and an already-narrowed request. Consulted whenever it is
@@ -247,6 +267,8 @@ export const createJwtBearerGrant = (
 						clientId,
 						subject,
 						requestedScope: effectiveScopes.length > 0 ? [...effectiveScopes] : undefined,
+						// Forwarded as the siblings do, so a policy can narrow to it.
+						resource: requestedResource ?? undefined,
 					},
 					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: ctx.issuer ?? "" },
 					effectiveScopes,
@@ -265,7 +287,16 @@ export const createJwtBearerGrant = (
 					policy.decision,
 					client ? (client.allowedAudiences ?? []) : undefined,
 				);
-				if (!policyAudience.ok) return { result: policyAudience.result };
+				if (!policyAudience.ok) {
+					// #521: an operator-triggered refusal logs, as
+					// `jwt_bearer_email_not_verified` does, so the operator who
+					// wired the policy can see why devices are being refused.
+					deps.logger?.warn(
+						{ kind: assertionVerifier.kind, reason: policyAudience.result.errorDescription },
+						"jwt_bearer_policy_audience_refused",
+					);
+					return { result: policyAudience.result };
+				}
 				policyGrantedAudience = policyAudience.audience;
 			}
 
@@ -281,8 +312,38 @@ export const createJwtBearerGrant = (
 			// issuer (#520): RFC 9068 §2.2 requires the claim, a verifier that pins
 			// its audience refuses a token without one, and the issuer is what the
 			// WebAuthn grant mints in the same position.
+			//
+			// RFC 8707 §2 (#522): when a `resource` was requested and no policy
+			// narrowed an audience, derive `aud` from the request — bounded by
+			// `allowedAudiences ∪ {clientId}`, the ceiling a policy audience is
+			// held to — instead of minting the default and then rejecting it.
+			// Without a client the bound is empty, nothing derives, and the check
+			// below refuses: naming a resource is not a registration.
 			const audience =
-				policyGrantedAudience ?? client?.allowedAudiences?.[0] ?? clientId ?? ctx.issuer ?? null;
+				policyGrantedAudience ??
+				deriveAudienceFromResources(
+					requestedResource,
+					new Set([...(client?.allowedAudiences ?? []), ...(clientId ? [clientId] : [])]),
+				) ??
+				client?.allowedAudiences?.[0] ??
+				clientId ??
+				ctx.issuer ??
+				null;
+
+			// RFC 8707 §2 (#522): the token's audience MUST be the resource the
+			// caller asked for. Runs after the audience is final so it covers
+			// every derivation — policy, the request, the registration fallback
+			// and the issuer.
+			const unrepresented = unrepresentedResources(requestedResource, audience);
+			if (unrepresented.length > 0) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_target",
+						errorDescription: `requested_resources_not_in_audience: ${unrepresented.join(" ")}`,
+					},
+				};
+			}
 
 			const scopeClaim = effectiveScopes.length > 0 ? effectiveScopes.join(" ") : null;
 			const confirmation = ctx.tokenBinding?.confirmation;

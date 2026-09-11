@@ -1212,6 +1212,49 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
+		it("refuses a policy that returns a non-array grantedScope (#521)", async () => {
+			const token = await makeRefreshToken({ scope: "read write" });
+			const policy = createStubPolicy(
+				async () =>
+					({ outcome: "allow", grantedScope: "read" }) as unknown as Awaited<
+						ReturnType<GrantPolicyHook["evaluate"]>
+					>,
+			);
+			const handler = createRefreshTokenGrant({ ...mockDeps, grantPolicy: policy });
+			const { result } = await handler.handle({
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+			expect(result.status).toBe(500);
+			if ("error" in result) {
+				expect(result.error).toBe("server_error");
+				expect(result.errorDescription).toMatch(/non-array grantedScope/);
+			} else {
+				expect.fail("Expected an error result");
+			}
+
+			// Falsy but present: still malformed, not "no opinion".
+			for (const malformed of ["", null]) {
+				const falsy = createStubPolicy(
+					async () =>
+						({ outcome: "allow", grantedScope: malformed }) as unknown as Awaited<
+							ReturnType<GrantPolicyHook["evaluate"]>
+						>,
+				);
+				const out = await createRefreshTokenGrant({ ...mockDeps, grantPolicy: falsy }).handle({
+					body: { refresh_token: await makeRefreshToken({ scope: "read write" }) },
+					session: {},
+					issuer: "localhost",
+					metadata: {},
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
+				});
+				expect(out.result.status).toBe(500);
+			}
+		});
+
 		it("forwards ctx.ip and ctx.userAgent to grantPolicy.evaluate (CP-1)", async () => {
 			const token = await makeRefreshToken({ scope: "read write" });
 			let observedIp: string | undefined;

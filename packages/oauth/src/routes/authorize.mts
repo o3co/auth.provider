@@ -1046,7 +1046,15 @@ const applyGrantPolicy = async (
 			redirectError(ctx, decision.error, decision.errorDescription ?? "policy denied");
 			return null;
 		}
-		if (decision.grantedScope) {
+		// Presence, not truthiness: `""` and `null` are a policy saying
+		// something malformed, not a policy saying nothing, and only
+		// `undefined` is "no opinion" (#521).
+		if (decision.grantedScope !== undefined) {
+			if (!Array.isArray(decision.grantedScope)) {
+				// #521: a non-array from a JS policy would throw in `.filter`.
+				redirectError(ctx, "server_error", "policy returned a non-array grantedScope");
+				return null;
+			}
 			// CP-13: policy MUST NOT expand the client's scope ceiling.
 			// Enforce grantedScope ⊆ allowedFilteredScopes (the
 			// pre-policy-narrowed set) — a policy returning a scope
@@ -1067,7 +1075,15 @@ const applyGrantPolicy = async (
 			}
 			grantedScopes = decision.grantedScope;
 		}
-		if (decision.grantedAudience) grantedAudience = decision.grantedAudience;
+		if (decision.grantedAudience !== undefined) {
+			if (!Array.isArray(decision.grantedAudience)) {
+				// #521: persisted on the code and read back as `[0]` at /token —
+				// a string would become its first character.
+				redirectError(ctx, "server_error", "policy returned a non-array grantedAudience");
+				return null;
+			}
+			grantedAudience = decision.grantedAudience;
+		}
 	}
 	return { grantedScopes, grantedAudience };
 };
