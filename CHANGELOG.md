@@ -1178,7 +1178,7 @@ Zero behavior change for any v0.7.x consumer that does not opt into the cluster:
 - **Compound-`cnf` pre-matrix reject** — an RT carrying BOTH `cnf.jkt` AND `cnf.x5t#S256` is rejected with `invalid_grant` BEFORE either matrix runs. Stage 1 supports single-mechanism bindings only; the runtime check is the cross-layer defense for JWT-decoded payloads (Phase 1's narrow `Confirmation` union is the TypeScript-layer defense).
 - **Security fix in PKI chain validation** — `validateCertChain` now requires explicit cryptographic signature verification at every hop. The previous implementation used only `X509Certificate.checkIssued()` which performs DN / AKID / SKID / CA-bit matching but does NOT verify the signature (OpenSSL `X509_check_issued` documents this limitation). Pinned by a regression test with a committed attacker-leaf fixture (same DN as the legit root, different signing key).
 
-See [packages/mtls/CHANGELOG.md](packages/mtls/CHANGELOG.md) for full Phase 3 detail.
+See [packages/mtls/CHANGELOG.md as of v0.12.1](https://github.com/o3co/auth.provider/blob/v0.12.1/packages/mtls/CHANGELOG.md) for full Phase 3 detail (the package-level files were retired in #548).
 
 ### Changed (Wave 2 Cross-mechanism dispatch refactor)
 
