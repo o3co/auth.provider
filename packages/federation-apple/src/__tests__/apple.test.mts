@@ -22,6 +22,8 @@ const hoisted = vi.hoisted(() => ({
 	mockAuthorizationCodeGrant: vi.fn(),
 	mockRefreshTokenGrant: vi.fn(),
 	mockClientSecretPost: vi.fn((secret?: string) => ({ auth: "client_secret_post", secret })),
+	mockEnableNonRepudiationChecks: vi.fn(),
+	customFetchSym: Symbol("customFetch"),
 	skipStateCheckSym: Symbol("skipStateCheck"),
 	skipSubjectCheckSym: Symbol("skipSubjectCheck"),
 	configurations: [] as Array<{ serverMetadata: unknown; clientId: string; metadata: unknown }>,
@@ -42,6 +44,9 @@ vi.mock("openid-client", () => ({
 	authorizationCodeGrant: (...args: unknown[]) => hoisted.mockAuthorizationCodeGrant(...args),
 	refreshTokenGrant: (...args: unknown[]) => hoisted.mockRefreshTokenGrant(...args),
 	ClientSecretPost: (...args: [string?]) => hoisted.mockClientSecretPost(...args),
+	enableNonRepudiationChecks: (...args: unknown[]) =>
+		hoisted.mockEnableNonRepudiationChecks(...args),
+	customFetch: hoisted.customFetchSym,
 	skipStateCheck: hoisted.skipStateCheckSym,
 	skipSubjectCheck: hoisted.skipSubjectCheckSym,
 }));
@@ -758,5 +763,42 @@ describe("isPrivateRelayEmail", () => {
 		expect(isPrivateRelayEmail("a@notprivaterelay.appleid.com")).toBe(false);
 		expect(isPrivateRelayEmail("ada@example.com")).toBe(false);
 		expect(isPrivateRelayEmail("no-at-sign")).toBe(false);
+	});
+});
+
+describe("id_token signature verification is switched on (#542)", () => {
+	it("enables the non-repudiation checks on every configuration it builds — the authorization one and each per-call token one", async () => {
+		// The token configuration is rebuilt per call because the secret
+		// rotates, so switching the check on once at construction would cover
+		// the one configuration that never sees an id_token.
+		hoisted.mockEnableNonRepudiationChecks.mockClear();
+		hoisted.configurations.length = 0;
+		const p = createAppleProvider({
+			clientId: "com.example.service",
+			clientSecret: "static-secret",
+			callbackURL: "https://app.example.com/session/oauth/federation/apple/callback",
+		});
+		expect(hoisted.configurations).toHaveLength(1);
+		expect(hoisted.mockEnableNonRepudiationChecks).toHaveBeenCalledTimes(1);
+
+		mockRefreshTokenGrant.mockResolvedValueOnce({ access_token: "at-2", expires_in: 3600 });
+		await p.refreshToken("rt-1");
+		expect(hoisted.configurations).toHaveLength(2);
+		expect(hoisted.mockEnableNonRepudiationChecks).toHaveBeenCalledTimes(2);
+	});
+
+	it("routes the library's requests through the configured fetch", async () => {
+		hoisted.mockEnableNonRepudiationChecks.mockClear();
+		const fetchImpl = vi.fn();
+		createAppleProvider({
+			clientId: "com.example.service",
+			clientSecret: "static-secret",
+			callbackURL: "https://app.example.com/session/oauth/federation/apple/callback",
+			fetch: fetchImpl as unknown as typeof fetch,
+		});
+		const [configuration] = hoisted.mockEnableNonRepudiationChecks.mock.calls[0] as [
+			Record<symbol, unknown>,
+		];
+		expect(configuration[hoisted.customFetchSym]).toBe(fetchImpl);
 	});
 });

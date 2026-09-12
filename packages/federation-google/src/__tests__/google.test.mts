@@ -15,6 +15,8 @@ const hoisted = vi.hoisted(() => ({
 	mockAuthorizationCodeGrant: vi.fn(),
 	mockFetchUserInfo: vi.fn(),
 	mockRefreshTokenGrant: vi.fn(),
+	mockEnableNonRepudiationChecks: vi.fn(),
+	customFetchSym: Symbol("customFetch"),
 	skipStateCheckSym: Symbol("skipStateCheck"),
 	skipSubjectCheckSym: Symbol("skipSubjectCheck"),
 }));
@@ -39,6 +41,9 @@ vi.mock("openid-client", () => ({
 	authorizationCodeGrant: (...args: unknown[]) => hoisted.mockAuthorizationCodeGrant(...args),
 	fetchUserInfo: (...args: unknown[]) => hoisted.mockFetchUserInfo(...args),
 	refreshTokenGrant: (...args: unknown[]) => hoisted.mockRefreshTokenGrant(...args),
+	enableNonRepudiationChecks: (...args: unknown[]) =>
+		hoisted.mockEnableNonRepudiationChecks(...args),
+	customFetch: hoisted.customFetchSym,
 	skipStateCheck: hoisted.skipStateCheckSym,
 	skipSubjectCheck: hoisted.skipSubjectCheckSym,
 }));
@@ -421,5 +426,37 @@ describe("createGoogleProvider on openid-client", () => {
 				}),
 			).rejects.toThrow(/UserInfo sub mismatch/);
 		});
+	});
+});
+
+describe("id_token signature verification is switched on (#542)", () => {
+	const config = {
+		clientId: "client-id",
+		clientSecret: "client-secret",
+		callbackURL: "https://app.example.com/session/oauth/federation/google/callback",
+	};
+
+	it("enables openid-client's non-repudiation checks on the configuration it exchanges with", () => {
+		// openid-client 6 skips the id_token signature on the code flow unless
+		// told otherwise; `jwks_uri` in the metadata alone fetches nothing.
+		hoisted.mockEnableNonRepudiationChecks.mockClear();
+		createGoogleProvider(config);
+		expect(hoisted.mockEnableNonRepudiationChecks).toHaveBeenCalledTimes(1);
+		const [configuration] = hoisted.mockEnableNonRepudiationChecks.mock.calls[0] as [
+			{ serverMetadata: { jwks_uri: string } },
+		];
+		expect(configuration.serverMetadata.jwks_uri).toBe(
+			"https://www.googleapis.com/oauth2/v3/certs",
+		);
+	});
+
+	it("routes the library's requests — JWKS included — through the configured fetch", () => {
+		hoisted.mockEnableNonRepudiationChecks.mockClear();
+		const fetchImpl = vi.fn();
+		createGoogleProvider({ ...config, fetch: fetchImpl as unknown as typeof fetch });
+		const [configuration] = hoisted.mockEnableNonRepudiationChecks.mock.calls[0] as [
+			Record<symbol, unknown>,
+		];
+		expect(configuration[hoisted.customFetchSym]).toBe(fetchImpl);
 	});
 });
