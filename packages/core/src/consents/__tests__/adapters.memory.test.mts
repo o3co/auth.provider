@@ -52,7 +52,10 @@ describe("createMemoryConsentStore (#527)", () => {
 describe("memoryConsentStoreModule (#527)", () => {
 	it("provides the slot and declares why it forks per replica", () => {
 		expect(memoryConsentStoreModule.name).toBe("core-consent-store-memory");
-		expect(Object.keys(memoryConsentStoreModule.provides ?? {})).toEqual(["consentStore"]);
+		expect(Object.keys(memoryConsentStoreModule.provides ?? {}).sort()).toEqual([
+			"consentStore",
+			"pendingConsentStore",
+		]);
 		expect(replicaUnsafeReason(memoryConsentStoreModule)).toMatch(/fork/);
 	});
 });

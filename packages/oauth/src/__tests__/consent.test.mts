@@ -32,7 +32,10 @@ import {
 	type CodeRepository,
 	type ConsentStore,
 	createMemoryConsentStore,
+	createMemoryPendingConsentStore,
 	createSymmetricKeyStore,
+	type PendingConsentRecord,
+	type PendingConsentStore,
 	type PublicClient,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -40,7 +43,7 @@ import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { PENDING_CONSENT_TTL_MS, type PendingConsent } from "#/routes/consent.mjs";
+import { PENDING_CONSENT_TTL_MS } from "#/routes/consent.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
@@ -63,11 +66,18 @@ const makeConfig = (consentUrl?: string): AppConfig =>
 		},
 	}) as unknown as AppConfig;
 
-type Session = Record<string, unknown> & { pendingConsent?: PendingConsent };
+type Session = Record<string, unknown>;
 
 const makeApp = async (opts: {
 	client?: Record<string, unknown>;
 	consentStore?: ConsentStore;
+	/**
+	 * #552: where a parked request waits for its answer. Defaults to the
+	 * memory store; `null` wires none, for the composition check.
+	 */
+	pendingConsentStore?: PendingConsentStore | null;
+	/** #552: the express-session id the middleware reports, per request. */
+	sessionId?: () => string | undefined;
 	session?: Session;
 	consentUrl?: string;
 	auditSink?: AuditSink;
@@ -102,6 +112,7 @@ const makeApp = async (opts: {
 		consumeByCode: async () => null,
 		removeByCode: async () => {},
 	};
+	const pending = opts.pendingConsentStore ?? createMemoryPendingConsentStore();
 	const { router } = await createOAuthRouter(express, {
 		registry: new GrantRegistry(),
 		config: makeConfig(opts.consentUrl),
@@ -109,6 +120,7 @@ const makeApp = async (opts: {
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		...(opts.consentStore ? { consentStore: opts.consentStore } : {}),
+		...(opts.pendingConsentStore === null ? {} : { pendingConsentStore: pending }),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		logger: createMockLogger(),
@@ -119,10 +131,14 @@ const makeApp = async (opts: {
 	const app = express();
 	app.use((req, _res, next) => {
 		(req as unknown as { session: Session }).session = session;
+		// What express-session would report as this session's id (#552).
+		(req as unknown as { sessionID?: string }).sessionID = opts.sessionId
+			? opts.sessionId()
+			: "sess-1";
 		next();
 	});
 	app.use("/oauth", router);
-	return { app, session, createCode };
+	return { app, session, createCode, pending };
 };
 
 /** The registered third-party client, for a test that supplies its own registry. */
@@ -187,30 +203,34 @@ const collectingSink = (): { sink: AuditSink; events: AuditEvent[] } => {
 
 describe("/authorize for a client that is not first-party (#527)", () => {
 	it("refuses it when no consent store is wired — the #267 rule, unchanged", async () => {
-		const { app, session } = await makeApp({});
+		const { app, pending } = await makeApp({});
 		const params = atClient(await authorize(app));
 		expect(params.get("error")).toBe("unauthorized_client");
-		expect(session.pendingConsent).toBeUndefined();
+		expect(pending.size).toBe(0);
 	});
 
-	it("parks the request in the session and sends the browser to the consent page", async () => {
-		const { app, session, createCode } = await makeApp({
+	it("parks the request under a challenge of its own and sends the browser to the consent page", async () => {
+		const { app, pending, createCode } = await makeApp({
 			consentStore: createMemoryConsentStore(),
 		});
 		const challenge = atConsentPage(await authorize(app));
 
 		expect(createCode).not.toHaveBeenCalled();
-		expect(session.pendingConsent).toMatchObject({
+		const parked = await pending.get(challenge);
+		// Bound to the session that parked it and the subject it was asked
+		// of, so only they can answer (#552).
+		expect(parked).toMatchObject({
 			challenge,
+			sessionId: "sess-1",
+			sub: "user-1",
 			clientId: CLIENT_ID,
 			scopes: ["read"],
 			grantedScopes: [],
 			redirectUri: REDIRECT_URI,
 			state: "xyz",
 		});
-		expect(session.pendingConsent?.authorizeUrl).toMatch(
-			/^https:\/\/issuer\.example\/oauth\/authorize\?/,
-		);
+		expect(parked?.authorizeUrl).toMatch(/^https:\/\/issuer\.example\/oauth\/authorize\?/);
+		expect(parked?.expiresAt).toBe((parked?.createdAt ?? 0) + PENDING_CONSENT_TTL_MS);
 		// Unguessable, and different every time.
 		expect(challenge.length).toBeGreaterThanOrEqual(43);
 		const again = atConsentPage(await authorize(app));
@@ -230,19 +250,19 @@ describe("/authorize for a client that is not first-party (#527)", () => {
 	it("skips the page when a live record covers the request", async () => {
 		const store = createMemoryConsentStore();
 		await granted(store, ["read", "write"]);
-		const { app, session, createCode } = await makeApp({ consentStore: store });
+		const { app, pending, createCode } = await makeApp({ consentStore: store });
 		const params = atClient(await authorize(app));
 		expect(params.get("code")).toBe("code-x");
 		expect(createCode).toHaveBeenCalledTimes(1);
-		expect(session.pendingConsent).toBeUndefined();
+		expect(pending.size).toBe(0);
 	});
 
 	it("asks again for a superset of what was granted, telling the page what was", async () => {
 		const store = createMemoryConsentStore();
 		await granted(store, ["read"]);
-		const { app, session } = await makeApp({ consentStore: store });
-		atConsentPage(await authorize(app, { scope: "read write" }));
-		expect(session.pendingConsent).toMatchObject({
+		const { app, pending } = await makeApp({ consentStore: store });
+		const challenge = atConsentPage(await authorize(app, { scope: "read write" }));
+		expect(await pending.get(challenge)).toMatchObject({
 			scopes: ["read", "write"],
 			grantedScopes: ["read"],
 		});
@@ -256,11 +276,11 @@ describe("/authorize for a client that is not first-party (#527)", () => {
 	});
 
 	it("prompt=none without a covering record answers consent_required at the client", async () => {
-		const { app, session } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const { app, pending } = await makeApp({ consentStore: createMemoryConsentStore() });
 		const params = atClient(await authorize(app, { prompt: "none" }));
 		expect(params.get("error")).toBe("consent_required");
 		expect(params.get("state")).toBe("xyz");
-		expect(session.pendingConsent).toBeUndefined();
+		expect(pending.size).toBe(0);
 	});
 
 	it("never consults the store for a first-party client, and prompt=consent is a no-op there", async () => {
@@ -319,7 +339,7 @@ describe("GET /oauth/consent (#527)", () => {
 	});
 
 	it("refuses a missing, foreign or expired challenge, and an unauthenticated session", async () => {
-		const { app, session } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const { app, session, pending } = await makeApp({ consentStore: createMemoryConsentStore() });
 		const challenge = atConsentPage(await authorize(app));
 
 		expect((await request(app).get("/oauth/consent")).status).toBe(400);
@@ -327,12 +347,18 @@ describe("GET /oauth/consent (#527)", () => {
 			400,
 		);
 
-		const pending = session.pendingConsent as PendingConsent;
-		session.pendingConsent = { ...pending, createdAt: Date.now() - PENDING_CONSENT_TTL_MS - 1 };
-		const expired = await request(app).get("/oauth/consent").query({ challenge });
-		expect(expired.status).toBe(400);
-		expect(expired.body.error_description).toMatch(/expired/);
-		expect(session.pendingConsent).toBeUndefined();
+		// The parked request expires with its record: past the TTL the store
+		// no longer has it, and the page is told there is nothing to answer.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			vi.setSystemTime(Date.now() + PENDING_CONSENT_TTL_MS + 1);
+			const expired = await request(app).get("/oauth/consent").query({ challenge });
+			expect(expired.status).toBe(400);
+			expect(expired.body.error_description).toMatch(/no pending consent/);
+			expect(await pending.get(challenge)).toBeNull();
+		} finally {
+			vi.useRealTimers();
+		}
 
 		session.isAuthenticated = false;
 		expect((await request(app).get("/oauth/consent").query({ challenge })).status).toBe(401);
@@ -348,14 +374,14 @@ describe("POST /oauth/consent (#527)", () => {
 	it("accept records the consent, sends the browser back to the parked request, and the request then mints", async () => {
 		const store = createMemoryConsentStore();
 		const { sink, events } = collectingSink();
-		const { app, session, createCode } = await makeApp({ consentStore: store, auditSink: sink });
+		const { app, pending, createCode } = await makeApp({ consentStore: store, auditSink: sink });
 		const challenge = atConsentPage(await authorize(app));
-		const parked = session.pendingConsent as PendingConsent;
+		const parked = (await pending.get(challenge)) as PendingConsentRecord;
 
 		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "accept" });
 		expect(res.status).toBe(303);
 		expect(res.headers.location).toBe(parked.authorizeUrl);
-		expect(session.pendingConsent).toBeUndefined();
+		expect(pending.size).toBe(0);
 		expect(await store.find("user-1", CLIENT_ID)).toMatchObject({ scopes: ["read"] });
 		expect(events.map((e) => e.type)).toContain("consent.granted");
 		expect(events.find((e) => e.type === "consent.granted")).toMatchObject({
@@ -393,7 +419,7 @@ describe("POST /oauth/consent (#527)", () => {
 	it("deny sends the browser to the client with access_denied and the state, and records nothing", async () => {
 		const store = createMemoryConsentStore();
 		const { sink, events } = collectingSink();
-		const { app, session } = await makeApp({ consentStore: store, auditSink: sink });
+		const { app, pending } = await makeApp({ consentStore: store, auditSink: sink });
 		const challenge = atConsentPage(await authorize(app));
 
 		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "deny" });
@@ -402,14 +428,14 @@ describe("POST /oauth/consent (#527)", () => {
 		expect(location.origin + location.pathname).toBe(REDIRECT_URI);
 		expect(location.searchParams.get("error")).toBe("access_denied");
 		expect(location.searchParams.get("state")).toBe("xyz");
-		expect(session.pendingConsent).toBeUndefined();
+		expect(pending.size).toBe(0);
 		expect(await store.find("user-1", CLIENT_ID)).toBeNull();
 		expect(events.map((e) => e.type)).toContain("consent.denied");
 	});
 
 	it("refuses a foreign challenge, an unknown decision (keeping the parked request), and a replayed answer", async () => {
 		const store = createMemoryConsentStore();
-		const { app, session } = await makeApp({ consentStore: store });
+		const { app, pending } = await makeApp({ consentStore: store });
 		const challenge = atConsentPage(await authorize(app));
 
 		expect(
@@ -422,7 +448,7 @@ describe("POST /oauth/consent (#527)", () => {
 		expect(
 			(await request(app).post("/oauth/consent").send({ challenge, decision: "maybe" })).status,
 		).toBe(400);
-		expect(session.pendingConsent).toBeDefined();
+		expect(await pending.get(challenge)).not.toBeNull();
 
 		expect(
 			(await request(app).post("/oauth/consent").send({ challenge, decision: "accept" })).status,
@@ -452,9 +478,9 @@ describe("the parked request resumes as the request that was made (#527 review)"
 	it("drops prompt=consent from the URL it returns to, so an accepted request does not park again", async () => {
 		// Carried back, `prompt=consent` parks the request a second time, and a
 		// third: every forced-consent request would loop forever.
-		const { app, session } = await makeApp({ consentStore: createMemoryConsentStore() });
-		await authorize(app, { prompt: "consent" });
-		const parked = new URL(session.pendingConsent?.authorizeUrl as string);
+		const { app, pending } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const challenge = atConsentPage(await authorize(app, { prompt: "consent" }));
+		const parked = new URL((await pending.get(challenge))?.authorizeUrl as string);
 		expect(parked.searchParams.get("prompt")).toBeNull();
 		expect(parked.searchParams.get("client_id")).toBe(CLIENT_ID);
 	});
@@ -464,20 +490,20 @@ describe("the parked request resumes as the request that was made (#527 review)"
 		// here by `invalid_request`, because this composition wires no user
 		// session store — so nothing is parked and the one-shot `consent` is
 		// still to be spent on the way back.
-		const { app, session } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const { app, pending } = await makeApp({ consentStore: createMemoryConsentStore() });
 		const res = await authorize(app, { prompt: "login consent" });
 		expect(atClient(res).get("error")).toBe("invalid_request");
-		expect(session.pendingConsent).toBeUndefined();
+		expect(pending.size).toBe(0);
 	});
 
 	it("carries a POST's form parameters into the URL it returns to", async () => {
 		// `authorizeParams` reads a POST from the body, so `req.originalUrl` is
 		// bare `/oauth/authorize`: resumed from it, the request would name no
 		// client and no redirect_uri.
-		const { app, session } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const { app, pending } = await makeApp({ consentStore: createMemoryConsentStore() });
 		const res = await request(app).post("/oauth/authorize").type("form").send(baseQuery);
-		expect(res.status).toBe(302);
-		const parked = new URL(session.pendingConsent?.authorizeUrl as string);
+		const challenge = atConsentPage(res);
+		const parked = new URL((await pending.get(challenge))?.authorizeUrl as string);
 		expect(parked.pathname).toBe("/oauth/authorize");
 		expect(parked.searchParams.get("client_id")).toBe(CLIENT_ID);
 		expect(parked.searchParams.get("redirect_uri")).toBe(REDIRECT_URI);
@@ -597,7 +623,7 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 		const res = await request(harness.app).get("/oauth/consent").query({ challenge });
 		expect(res.status).toBe(400);
 		expect(res.body.error_description).toMatch(/no longer registered/);
-		expect(harness.session.pendingConsent).toBeUndefined();
+		expect(harness.pending.size).toBe(0);
 	});
 
 	it("refuses an answer from a session that names no subject", async () => {
@@ -644,14 +670,140 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 	it("carries a repeated resource parameter into the parked URL", async () => {
 		// RFC 8707 allows more than one `resource`; the single-valued guard does
 		// not cover it, so the parked URL has to keep both.
-		const { app, session } = await makeApp({ consentStore: createMemoryConsentStore() });
-		await request(app)
-			.get("/oauth/authorize")
-			.query({ ...baseQuery, resource: ["https://api.example/a", "https://api.example/b"] });
-		const parked = new URL(session.pendingConsent?.authorizeUrl as string);
+		const { app, pending } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const challenge = atConsentPage(
+			await request(app)
+				.get("/oauth/authorize")
+				.query({ ...baseQuery, resource: ["https://api.example/a", "https://api.example/b"] }),
+		);
+		const parked = new URL((await pending.get(challenge))?.authorizeUrl as string);
 		expect(parked.searchParams.getAll("resource")).toEqual([
 			"https://api.example/a",
 			"https://api.example/b",
 		]);
+	});
+});
+
+describe("one challenge, one answer (#552)", () => {
+	/** A user-session store whose reads wait until the test lets them through. */
+	const gatedSessionStore = () => {
+		let release: () => void = () => {};
+		let gate: Promise<void> = Promise.resolve();
+		const get = vi.fn(async (sid: string) => {
+			await gate;
+			return {
+				sid,
+				sub: "user-1",
+				authTime: new Date(),
+				createdAt: new Date(),
+				expiresAt: new Date(Date.now() + 3_600_000),
+				claims: {},
+			};
+		});
+		const store = {
+			kind: "memory",
+			create: vi.fn(async () => {}),
+			get,
+			delete: vi.fn(async () => {}),
+		} as unknown as UserSessionStore;
+		return {
+			store,
+			get,
+			hold: () => {
+				gate = new Promise<void>((resolve) => {
+					release = resolve;
+				});
+			},
+			release: () => release(),
+		};
+	};
+
+	it("applies exactly one of two answers in flight for the same challenge", async () => {
+		// Both answers name the same parked request, both pass every check, and
+		// both are waiting on the session store when it answers — the shape a
+		// duplicated tab or a double submit produces. The record used to be a
+		// field on the session snapshot each request had already read, so both
+		// went on to apply: an accept and a deny for one challenge, and the
+		// accept's grant stood although the user had denied. Now the answer
+		// consumes the record in one step, and the second finds nothing.
+		const consentStore = createMemoryConsentStore();
+		const { sink, events } = collectingSink();
+		const gated = gatedSessionStore();
+		const { app, pending } = await makeApp({
+			consentStore,
+			auditSink: sink,
+			session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } },
+			userSessionStore: gated.store,
+		});
+		const challenge = atConsentPage(await authorize(app));
+		const readsSoFar = gated.get.mock.calls.length;
+
+		gated.hold();
+		const accept = request(app)
+			.post("/oauth/consent")
+			.send({ challenge, decision: "accept" })
+			.then((res) => res);
+		const deny = request(app)
+			.post("/oauth/consent")
+			.send({ challenge, decision: "deny" })
+			.then((res) => res);
+		// Both requests are past the challenge check and parked on the store.
+		await vi.waitFor(() => expect(gated.get).toHaveBeenCalledTimes(readsSoFar + 2));
+		gated.release();
+		const [accepted, denied] = await Promise.all([accept, deny]);
+
+		expect([accepted.status, denied.status].sort()).toEqual([303, 400]);
+		expect(pending.size).toBe(0);
+		const decided = events.filter(
+			(e) => e.type === "consent.granted" || e.type === "consent.denied",
+		);
+		expect(decided).toHaveLength(1);
+		// Whichever answer was handed the record is the one on record.
+		const record = await consentStore.find("user-1", CLIENT_ID);
+		expect(record !== null).toBe(decided[0]?.type === "consent.granted");
+	});
+
+	it("refuses an answer from a session other than the one that parked the request", async () => {
+		// The challenge is unguessable, but it is not a bearer token: the record
+		// names the session it was issued to, and another session presenting it
+		// — a leaked redirect URL — is told there is nothing to answer.
+		let sessionId = "sess-1";
+		const { app, pending } = await makeApp({
+			consentStore: createMemoryConsentStore(),
+			sessionId: () => sessionId,
+		});
+		const challenge = atConsentPage(await authorize(app));
+		sessionId = "sess-2";
+		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "accept" });
+		expect(res.status).toBe(400);
+		expect(res.body.error_description).toMatch(/no pending consent/);
+		expect(await pending.get(challenge)).not.toBeNull();
+	});
+
+	it("lets the page read the request more than once; only the answer spends it", async () => {
+		const { app, pending } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const challenge = atConsentPage(await authorize(app));
+		expect((await request(app).get("/oauth/consent").query({ challenge })).status).toBe(200);
+		expect((await request(app).get("/oauth/consent").query({ challenge })).status).toBe(200);
+		expect(await pending.get(challenge)).not.toBeNull();
+		expect(
+			(await request(app).post("/oauth/consent").send({ challenge, decision: "deny" })).status,
+		).toBe(303);
+		expect(pending.size).toBe(0);
+	});
+
+	it("cannot park a request for a session that reports no id to bind the challenge to", async () => {
+		const { app, pending } = await makeApp({
+			consentStore: createMemoryConsentStore(),
+			sessionId: () => undefined,
+		});
+		expect(atClient(await authorize(app)).get("error")).toBe("access_denied");
+		expect(pending.size).toBe(0);
+	});
+
+	it("refuses a composition that wires the consent store without the store its challenges live in", async () => {
+		await expect(
+			makeApp({ consentStore: createMemoryConsentStore(), pendingConsentStore: null }),
+		).rejects.toThrow(/pendingConsentStore/);
 	});
 });

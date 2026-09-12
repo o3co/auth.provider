@@ -37,6 +37,7 @@ import {
 	JwtVerificationError,
 	type KeyStore,
 	type Logger,
+	type PendingConsentStore,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
 	type ReplaySeenSet,
@@ -113,6 +114,7 @@ export const createOAuthRouter = async (
 		federationTokenStore,
 		replaySeenSet,
 		consentStore,
+		pendingConsentStore,
 		clientIdMetadataDocuments: clientIdMetadataDocumentSeams = {},
 		getFederationProviders = () => undefined,
 		logger = consoleLogger,
@@ -154,6 +156,12 @@ export const createOAuthRouter = async (
 		 * and the consent endpoints are not mounted.
 		 */
 		consentStore?: ConsentStore;
+		/**
+		 * #552: where a request is parked while the consent page asks, consumed
+		 * by exactly one answer. Wired with `consentStore`: the bundled memory
+		 * module provides both, and this router refuses one without the other.
+		 */
+		pendingConsentStore?: PendingConsentStore;
 		/**
 		 * #529: the seams of the Client ID Metadata Document fetch (`fetch`,
 		 * `lookup`, `now`), for tests. Everything else about the feature comes
@@ -270,6 +278,7 @@ export const createOAuthRouter = async (
 		// in HOCON; a hand-built config without the key falls back the same way.
 		consentUrl: () => config.endpoints.consent?.url ?? "/consent",
 		consentStore,
+		pendingConsentStore,
 		oauth: options,
 		// R1b: `/authorize` re-checks that the express-session's `sid` still
 		// names a live `UserSession` before minting. Optional here for the same
@@ -975,10 +984,21 @@ export const createOAuthRouter = async (
 	// #527: the consent step's endpoints, mounted only when a store is wired.
 	// Without one there is nothing to record, and `/authorize` refuses the
 	// clients that would need it.
-	if (consentStore) {
+	//
+	// #552: the step parks every request in `pendingConsentStore`, so a
+	// composition with the one store and not the other is refused here,
+	// where the operator can read why, rather than at the first third-party
+	// `/authorize`. The bundled memory module provides both.
+	if (consentStore && !pendingConsentStore) {
+		throw new Error(
+			"createOAuthRouter: consentStore is wired but pendingConsentStore is not — the consent step parks each request under a challenge in that store and cannot run without it; wire both (the bundled memory consent module provides both) or neither",
+		);
+	}
+	if (consentStore && pendingConsentStore) {
 		router.use(
 			createConsentRouter(express, {
 				consentStore,
+				pendingConsentStore,
 				clientRepository,
 				auditSink,
 				logger,

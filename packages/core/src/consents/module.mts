@@ -15,12 +15,14 @@
  */
 
 import { defineModule } from "../modules/index.mjs";
-import { createMemoryConsentStore } from "./memory.mjs";
+import { createMemoryConsentStore, createMemoryPendingConsentStore } from "./memory.mjs";
 
 /**
  * Built-in module that provides the in-process memory {@link ConsentStore}
- * (#527). Dev and single-replica only — no persistence across restarts, and
- * refused by name under `deployment.mode = "multi"`.
+ * (#527) and, with it, the memory {@link PendingConsentStore} the consent
+ * step parks requests in (#552): one feature, one switch, so the two cannot
+ * be wired apart. Dev and single-replica only — no persistence across
+ * restarts, and refused by name under `deployment.mode = "multi"`.
  */
 export const memoryConsentStoreModule = defineModule({
 	name: "core-consent-store-memory",
@@ -28,9 +30,10 @@ export const memoryConsentStoreModule = defineModule({
 	replicaSafety: {
 		unsafe: true,
 		reason:
-			"consent records fork per replica — a consent granted on one replica is asked for again on every other, and one revoked there stays granted here",
+			"consent records fork per replica — a consent granted on one replica is asked for again on every other, one revoked there stays granted here, and a consent challenge parked on one replica is unknown to every other",
 	},
 	provides: {
 		consentStore: () => createMemoryConsentStore(),
+		pendingConsentStore: () => createMemoryPendingConsentStore(),
 	},
 });

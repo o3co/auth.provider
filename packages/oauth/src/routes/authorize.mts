@@ -27,6 +27,7 @@ import {
 	isGrantTypeAllowed,
 	type Logger,
 	matchesRegisteredRedirectUri,
+	type PendingConsentStore,
 	type PublicClient,
 	type UserSession,
 	type UserSessionStore,
@@ -43,7 +44,7 @@ import {
 	pkceMethodsForClient,
 } from "../grants/pkce.mjs";
 import type { ResolvedOAuthOptions } from "../resolveOAuthOptions.mjs";
-import { newConsentChallenge } from "./consent.mjs";
+import { newConsentChallenge, PENDING_CONSENT_TTL_MS } from "./consent.mjs";
 
 export interface AuthorizeHandlerOptions {
 	readonly clientRepository: ClientRepository;
@@ -74,6 +75,11 @@ export interface AuthorizeHandlerOptions {
 	 * not first-party is refused, exactly as before the slot existed.
 	 */
 	readonly consentStore?: ConsentStore;
+	/**
+	 * #552: where a request is parked while the consent page asks. Wired
+	 * with `consentStore` — the router refuses one without the other.
+	 */
+	readonly pendingConsentStore?: PendingConsentStore;
 	/** The `oauth.*` knobs, resolved once at router composition (#328). */
 	readonly oauth: ResolvedOAuthOptions;
 	/**
@@ -391,7 +397,8 @@ const checkConsent = async (
 ): Promise<boolean> => {
 	if (client.firstParty === true) return true;
 	const store = ctx.opts.consentStore;
-	if (store === undefined) {
+	const pendingStore = ctx.opts.pendingConsentStore;
+	if (store === undefined || pendingStore === undefined) {
 		await auditFailure(ctx, { reason: "client_not_first_party" });
 		redirectError(
 			ctx,
@@ -432,17 +439,43 @@ const checkConsent = async (
 	// the deployment's page. The challenge is what the page's answer carries
 	// back, and being session-bound and unreadable cross-site it is the
 	// synchronizer token that keeps a forged POST from answering for the user.
+	//
+	// #552: in a record of its own, not on the session. The session is a
+	// per-request snapshot, so a field on it cannot be consumed atomically
+	// across two answers in flight; the record names the session that parked
+	// it, which is what keeps the challenge session-bound.
+	const sessionId = (ctx.req as { sessionID?: unknown }).sessionID;
+	if (typeof sessionId !== "string" || sessionId.length === 0) {
+		await auditFailure(ctx, { reason: "consent_without_session_id" });
+		redirectError(ctx, "access_denied", "the session has no id to bind the consent request to");
+		return false;
+	}
 	const challenge = newConsentChallenge();
-	ctx.req.session.pendingConsent = {
-		challenge,
-		clientId: ctx.clientId,
-		scopes: [...scopes],
-		grantedScopes: record === null ? [] : [...record.scopes],
-		authorizeUrl: resumeUrl(ctx),
-		redirectUri: ctx.redirectUri,
-		...(ctx.state === undefined ? {} : { state: ctx.state }),
-		createdAt: Date.now(),
-	};
+	const createdAt = Date.now();
+	try {
+		await pendingStore.set({
+			challenge,
+			sessionId,
+			sub,
+			clientId: ctx.clientId,
+			scopes: [...scopes],
+			grantedScopes: record === null ? [] : [...record.scopes],
+			authorizeUrl: resumeUrl(ctx),
+			redirectUri: ctx.redirectUri,
+			...(ctx.state === undefined ? {} : { state: ctx.state }),
+			createdAt,
+			expiresAt: createdAt + PENDING_CONSENT_TTL_MS,
+		});
+	} catch (err) {
+		// The same rule as the consent-store read above: an outage is not a
+		// decision either way.
+		ctx.opts.logger.error(
+			{ err, clientId: ctx.clientId },
+			"authorize_pending_consent_store_unavailable",
+		);
+		redirectError(ctx, "temporarily_unavailable", "consent store unavailable");
+		return false;
+	}
 	// `endpoints.consent.url` may already carry a query string, like the
 	// login URL.
 	const consentUrl = ctx.opts.consentUrl();
