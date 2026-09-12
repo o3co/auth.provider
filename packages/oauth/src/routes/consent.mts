@@ -105,7 +105,15 @@ const jsonError = (res: Response, status: number, error: string, description: st
 		.set("Cache-Control", "no-store")
 		.json({ error, error_description: description });
 
-const NO_PENDING = "no pending consent for this challenge";
+/**
+ * One answer for every way a challenge can have nothing behind it — answered
+ * already, expired, never issued, or issued to another session — so the
+ * response does not say which, and still tells the page what to do. The
+ * store hides an expired record the same way it hides an unknown one, which
+ * is why expiry is named here rather than detected separately.
+ */
+const NO_PENDING =
+	"no pending consent for this challenge — it was answered, has expired, or was not issued to this session; start again";
 
 const sameToken = (a: string, b: string): boolean => {
 	const x = Buffer.from(a);
@@ -189,13 +197,48 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		}
 	};
 
-	/** Drop a parked request that can no longer be answered; a failure to drop is logged, not fatal. */
-	const discard = async (challenge: string): Promise<void> => {
+	/**
+	 * Drop a parked request that can no longer be answered. `false` when the
+	 * store refused: the record is then still there for an answer to spend,
+	 * so the caller fails closed rather than reporting the request gone.
+	 */
+	const discard = async (challenge: string): Promise<boolean> => {
 		try {
 			await pendingConsentStore.consume(challenge);
+			return true;
 		} catch (err) {
-			logger.warn({ err }, "pending_consent_discard_failed");
+			logger.error({ err }, "pending_consent_store_unavailable");
+			return false;
 		}
+	};
+
+	/**
+	 * The client the parked request names, looked up now. `null` after a
+	 * response has been sent: a registry outage is `503`, and a client removed
+	 * since the request was parked drops the request and answers `400` — or
+	 * `503` if it cannot be dropped, because a record left behind is one an
+	 * answer could still spend for a client that no longer exists.
+	 */
+	const clientFor = async (
+		res: Response,
+		pending: PendingConsentRecord,
+	): Promise<Awaited<ReturnType<ClientRepository["findById"]>>> => {
+		let client: Awaited<ReturnType<ClientRepository["findById"]>>;
+		try {
+			client = await clientRepository.findById(pending.clientId);
+		} catch (err) {
+			logger.error({ err, clientId: pending.clientId }, "consent_client_repository_unavailable");
+			jsonError(res, 503, "temporarily_unavailable", "client registry unavailable");
+			return null;
+		}
+		if (client === null) {
+			if (!(await discard(pending.challenge))) {
+				jsonError(res, 503, "temporarily_unavailable", "consent store unavailable");
+				return null;
+			}
+			jsonError(res, 400, "invalid_request", "the client is no longer registered");
+		}
+		return client;
 	};
 
 	const router = express.Router();
@@ -208,19 +251,10 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		if (!(await sessionIsLive(req))) {
 			return jsonError(res, 401, "login_required", "the session is no longer active");
 		}
-		let client: Awaited<ReturnType<ClientRepository["findById"]>>;
-		try {
-			client = await clientRepository.findById(pending.clientId);
-		} catch (err) {
-			logger.error({ err, clientId: pending.clientId }, "consent_client_repository_unavailable");
-			return jsonError(res, 503, "temporarily_unavailable", "client registry unavailable");
-		}
-		if (client === null) {
-			// Registered when the request was parked, gone now: nothing to ask
-			// about. The parked request is dropped with it.
-			await discard(pending.challenge);
-			return jsonError(res, 400, "invalid_request", "the client is no longer registered");
-		}
+		// Registered when the request was parked, gone now: nothing to ask
+		// about, and the parked request is dropped with it.
+		const client = await clientFor(res, pending);
+		if (client === null) return;
 		return res
 			.status(200)
 			.set("Cache-Control", "no-store")
@@ -263,6 +297,11 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		if (decision !== "accept" && decision !== "deny") {
 			return jsonError(res, 400, "invalid_request", 'decision must be "accept" or "deny"');
 		}
+		// The client has to exist when the answer is given, not only when the
+		// page was shown: a registration removed in between is a consent for
+		// nobody, and a grant recorded under its id would greet whoever is
+		// registered under that id next (#552 review).
+		if ((await clientFor(res, peeked)) === null) return;
 
 		// One answer per challenge, whichever way it went: the record is handed
 		// to exactly one of any number of answers in flight, and the others

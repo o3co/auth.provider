@@ -88,3 +88,19 @@ describe("createMemoryPendingConsentStore sweeps the records nobody came back fo
 		}
 	});
 });
+
+describe("memoryConsentStoreModule's providers (#552)", () => {
+	it("builds a live store from each thunk", async () => {
+		const provides = memoryConsentStoreModule.provides as unknown as Record<
+			string,
+			() => { kind: string }
+		>;
+		expect(provides.consentStore?.().kind).toBe("memory");
+		const pending = provides.pendingConsentStore?.() as ReturnType<
+			typeof createMemoryPendingConsentStore
+		>;
+		expect(pending.kind).toBe("memory");
+		await pending.set(record("ch-1"));
+		expect(pending.size).toBe(1);
+	});
+});
