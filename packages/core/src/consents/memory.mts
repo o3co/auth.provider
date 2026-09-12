@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import type { ConsentRecord, ConsentStore } from "./types.mjs";
+import type {
+	ConsentRecord,
+	ConsentStore,
+	PendingConsentRecord,
+	PendingConsentStore,
+} from "./types.mjs";
 
 /** In-process consent store, with the record count exposed for observability. */
 export interface MemoryConsentStore extends ConsentStore {
@@ -76,6 +81,84 @@ export function createMemoryConsentStore(): MemoryConsentStore {
 
 		async revoke(sub, clientId) {
 			return records.delete(key(sub, clientId));
+		},
+	};
+}
+
+/** In-process pending-consent store, with the record count exposed for observability. */
+export interface MemoryPendingConsentStore extends PendingConsentStore {
+	/** Records currently resident, expired-but-unswept included. */
+	readonly size: number;
+}
+
+/**
+ * Sweep expired records once the map has grown to this many, and then again
+ * each time it doubles: a page that is never answered leaves a record nobody
+ * touches, and touch-on-read alone would keep it forever.
+ */
+const PENDING_SWEEP_FLOOR = 1024;
+
+/**
+ * In-process Map-backed {@link PendingConsentStore} (#552).
+ *
+ * `consume` reads and deletes with no `await` between them, which in a
+ * single-threaded process is the atomic step the port asks for. Bounded by
+ * traffic rather than population — one record per parked request, gone when
+ * answered or expired — so an expired record is dropped when it is next
+ * touched, and the whole map is swept when it has grown past a floor and
+ * doubled since, which keeps abandoned pages from accumulating without a
+ * timer of our own.
+ *
+ * Single-replica only, for the same reason as the consent store it is
+ * provided with: a challenge parked on one replica is unknown to every other.
+ */
+export function createMemoryPendingConsentStore(): MemoryPendingConsentStore {
+	const records = new Map<string, PendingConsentRecord>();
+	let sweepAt = PENDING_SWEEP_FLOOR;
+
+	const live = (challenge: string): PendingConsentRecord | null => {
+		const record = records.get(challenge);
+		if (record === undefined) return null;
+		if (record.expiresAt <= Date.now()) {
+			records.delete(challenge);
+			return null;
+		}
+		return record;
+	};
+
+	const sweep = (): void => {
+		const now = Date.now();
+		for (const [challenge, record] of records) {
+			if (record.expiresAt <= now) records.delete(challenge);
+		}
+		sweepAt = Math.max(PENDING_SWEEP_FLOOR, records.size * 2);
+	};
+
+	return {
+		kind: "memory",
+
+		get size() {
+			return records.size;
+		},
+
+		async set(record) {
+			if (records.size >= sweepAt) sweep();
+			records.set(record.challenge, {
+				...record,
+				scopes: [...record.scopes],
+				grantedScopes: [...record.grantedScopes],
+			});
+		},
+
+		async get(challenge) {
+			return live(challenge);
+		},
+
+		async consume(challenge) {
+			// No await between the read and the delete: this is the one step.
+			const record = live(challenge);
+			if (record !== null) records.delete(challenge);
+			return record;
 		},
 	};
 }

@@ -26,6 +26,7 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	createMemoryConsentStore,
+	createMemoryPendingConsentStore,
 	createSymmetricKeyStore,
 } from "@o3co/auth-provider-core";
 import { GrantRegistry } from "@o3co/auth-provider-core/testing";
@@ -87,6 +88,7 @@ const makeApp = async (opts: { enabled: boolean; document?: unknown }) => {
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		consentStore: createMemoryConsentStore(),
+		pendingConsentStore: createMemoryPendingConsentStore(),
 		clientIdMetadataDocuments: { fetch: fetchImpl, lookup: async () => ["93.184.216.34"] },
 		logger: createMockLogger(),
 	});
@@ -94,6 +96,8 @@ const makeApp = async (opts: { enabled: boolean; document?: unknown }) => {
 	const app = express();
 	app.use((req, _res, next) => {
 		(req as unknown as { session: Record<string, unknown> }).session = session;
+		// #552: the consent step binds its challenge to the express-session id.
+		(req as unknown as { sessionID?: string }).sessionID = "sess-1";
 		next();
 	});
 	app.use("/oauth", router);

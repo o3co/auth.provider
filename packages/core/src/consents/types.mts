@@ -81,10 +81,76 @@ export function consentCovers(
 }
 
 // ---------------------------------------------------------------------------
-// ComponentMap slot (#527)
+// The parked request (#552)
+// ---------------------------------------------------------------------------
+
+/**
+ * An `/authorize` request parked while the user is asked for consent (#552).
+ *
+ * Addressed by its `challenge` — 32 random bytes, handed to the deployment's
+ * consent page through the redirect URL and nowhere else — and bound to the
+ * session that parked it and the subject it was asked of: the challenge
+ * presented from any other session answers nothing. `expiresAt` bounds how
+ * long the page has; a record past it is gone whichever way it is read.
+ */
+export interface PendingConsentRecord {
+	readonly challenge: string;
+	/** The express session that parked the request. Only it may answer. */
+	readonly sessionId: string;
+	/** The subject consent is asked of; the answer has to come from them. */
+	readonly sub: string;
+	readonly clientId: string;
+	/** The scopes the request asks for, after the client's allowlist. */
+	readonly scopes: readonly string[];
+	/** What the user already agreed to for this client, for the page's delta. */
+	readonly grantedScopes: readonly string[];
+	/** The `/authorize` request to return to once consent is recorded. */
+	readonly authorizeUrl: string;
+	/** The validated `redirect_uri`, where a denial goes. */
+	readonly redirectUri: string;
+	readonly state?: string;
+	/** Epoch milliseconds. */
+	readonly createdAt: number;
+	/** Epoch milliseconds. */
+	readonly expiresAt: number;
+}
+
+/**
+ * Where a parked request waits for its answer (#552).
+ *
+ * A record of its own, not a field on the session. express-session hands
+ * every request a snapshot and writes it back on save, so two answers in
+ * flight for one challenge both read the challenge, both pass, and both
+ * apply — an accept and a deny, in either order, with the accept's grant
+ * standing although the user denied. A record that `consume` returns and
+ * removes in one step is what makes the second answer find nothing. The
+ * federation callback keeps its ephemeral state the same way (#494).
+ *
+ * `consume` is the port's reason to exist and the one operation an adapter
+ * has to get right: read and remove atomically — `GETDEL` on Redis, never a
+ * `GET` followed by a `DEL`. `get` is the page's read of what is being
+ * asked, and must not spend the record.
+ *
+ * Wired together with `consentStore`: the bundled memory module provides
+ * both, and the consent step is mounted only when both are present. A
+ * store that cannot answer throws, and is surfaced as
+ * `temporarily_unavailable`, never as an answer either way.
+ */
+export interface PendingConsentStore {
+	readonly kind: string;
+	set(record: PendingConsentRecord): Promise<void>;
+	/** The record, or `null` when there is none or it has expired. Does not spend it. */
+	get(challenge: string): Promise<PendingConsentRecord | null>;
+	/** The record, removed in the same step — or `null` when there was nothing to remove. */
+	consume(challenge: string): Promise<PendingConsentRecord | null>;
+}
+
+// ---------------------------------------------------------------------------
+// ComponentMap slots (#527, #552)
 // ---------------------------------------------------------------------------
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly consentStore?: ConsentStore;
+		readonly pendingConsentStore?: PendingConsentStore;
 	}
 }

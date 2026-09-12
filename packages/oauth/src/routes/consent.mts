@@ -20,9 +20,9 @@
  * `/authorize` mints a code for a first-party client as soon as the session is
  * authenticated. For any other client the user has to be asked — and the
  * page that asks is the deployment's, like the login page (`endpoints.login.url`):
- * `/authorize` parks the request in the session under an unguessable
- * challenge, redirects to `endpoints.consent.url?challenge=…`, and this router
- * is what the page talks to:
+ * `/authorize` parks the request under an unguessable challenge, redirects to
+ * `endpoints.consent.url?challenge=…`, and this router is what the page talks
+ * to:
  *
  * - `GET /oauth/consent?challenge=…` says what is being asked: the client's
  *   registered name and URI, the scopes, what the user already agreed to
@@ -42,6 +42,20 @@
  * matching challenge was composed by same-origin code — the synchronizer-
  * token pattern, with the session as the synchronizer. A stale, foreign or
  * expired challenge is `400`, never a silent no-op.
+ *
+ * ## Why the parked request is a record of its own (#552)
+ *
+ * It used to be a field on the express session. express-session hands every
+ * request a snapshot and writes it back on save, so two answers in flight for
+ * one challenge — a duplicated tab, a double submit — both read the field,
+ * both passed, and both applied: an accept and a deny, in either order, with
+ * the accept's grant standing although the user denied. The record now lives
+ * in a `PendingConsentStore`, addressed by the challenge and naming the
+ * session and subject it was issued to, and the answer **consumes** it in one
+ * step. The page's `GET` reads without spending; the `POST` is handed the
+ * record exactly once, and the second answer is told there is nothing to
+ * answer. The federation callback keeps its ephemeral state the same way
+ * (#494).
  */
 
 import { randomBytes, timingSafeEqual } from "node:crypto";
@@ -51,35 +65,14 @@ import {
 	type ConsentStore,
 	emitAuditEvent,
 	type Logger,
+	type PendingConsentRecord,
+	type PendingConsentStore,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 
 /** How long a parked `/authorize` request waits for the consent page. */
 export const PENDING_CONSENT_TTL_MS = 10 * 60 * 1000;
-
-/** What `/authorize` parks in the session while the user is asked (#527). */
-export interface PendingConsent {
-	readonly challenge: string;
-	readonly clientId: string;
-	/** The scopes the request asks for, after the client's allowlist. */
-	readonly scopes: readonly string[];
-	/** What the user already agreed to for this client, for the page's delta. */
-	readonly grantedScopes: readonly string[];
-	/** The canonical `/authorize` URL to return to once consent is recorded. */
-	readonly authorizeUrl: string;
-	/** The validated `redirect_uri`, where a denial goes. */
-	readonly redirectUri: string;
-	readonly state?: string;
-	/** Epoch milliseconds. */
-	readonly createdAt: number;
-}
-
-declare module "express-session" {
-	interface SessionData {
-		pendingConsent?: PendingConsent;
-	}
-}
 
 export const newConsentChallenge = (): string => randomBytes(32).toString("base64url");
 
@@ -91,6 +84,8 @@ type ExpressLike = {
 
 export interface ConsentRouterOptions {
 	readonly consentStore: ConsentStore;
+	/** #552: where `/authorize` parked the request; the answer consumes it. */
+	readonly pendingConsentStore: PendingConsentStore;
 	readonly clientRepository: ClientRepository;
 	/**
 	 * #527 review: the durable session behind the cookie. `/authorize`
@@ -110,37 +105,18 @@ const jsonError = (res: Response, status: number, error: string, description: st
 		.set("Cache-Control", "no-store")
 		.json({ error, error_description: description });
 
-const sameChallenge = (a: string, b: string): boolean => {
+const NO_PENDING = "no pending consent for this challenge";
+
+const sameToken = (a: string, b: string): boolean => {
 	const x = Buffer.from(a);
 	const y = Buffer.from(b);
 	return x.length === y.length && timingSafeEqual(x, y);
 };
 
-/**
- * The parked request the presented challenge names, or `null` after a `400`
- * has been sent. One reader for both methods, so the page cannot learn
- * something on GET that the POST would then refuse.
- */
-const pendingFor = (req: Request, res: Response, challenge: unknown): PendingConsent | null => {
-	if (!req.session?.isAuthenticated) {
-		jsonError(res, 401, "login_required", "no authenticated session");
-		return null;
-	}
-	if (typeof challenge !== "string" || challenge.length === 0) {
-		jsonError(res, 400, "invalid_request", "challenge is required");
-		return null;
-	}
-	const pending = req.session.pendingConsent;
-	if (pending === undefined || !sameChallenge(pending.challenge, challenge)) {
-		jsonError(res, 400, "invalid_request", "no pending consent for this challenge");
-		return null;
-	}
-	if (pending.createdAt + PENDING_CONSENT_TTL_MS <= Date.now()) {
-		delete req.session.pendingConsent;
-		jsonError(res, 400, "invalid_request", "the consent request has expired; start again");
-		return null;
-	}
-	return pending;
+/** What express-session reports as this session's id, if anything. */
+const sessionIdOf = (req: Request): string | null => {
+	const id = (req as { sessionID?: unknown }).sessionID;
+	return typeof id === "string" && id.length > 0 ? id : null;
 };
 
 const subjectOf = (req: Request): string | null => {
@@ -149,7 +125,51 @@ const subjectOf = (req: Request): string | null => {
 };
 
 export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOptions): Router {
-	const { consentStore, clientRepository, auditSink, logger, userSessionStore } = opts;
+	const {
+		consentStore,
+		pendingConsentStore,
+		clientRepository,
+		auditSink,
+		logger,
+		userSessionStore,
+	} = opts;
+
+	/**
+	 * The parked request the presented challenge names, read without spending
+	 * it, or `null` after an error has been sent. One reader for both
+	 * methods, so the page cannot learn something on GET that the POST would
+	 * then refuse. A record issued to another session is "no pending consent"
+	 * — the challenge is not a bearer token, and the answer does not say
+	 * whether one exists elsewhere.
+	 */
+	const pendingFor = async (
+		req: Request,
+		res: Response,
+		challenge: unknown,
+	): Promise<PendingConsentRecord | null> => {
+		if (!req.session?.isAuthenticated) {
+			jsonError(res, 401, "login_required", "no authenticated session");
+			return null;
+		}
+		if (typeof challenge !== "string" || challenge.length === 0) {
+			jsonError(res, 400, "invalid_request", "challenge is required");
+			return null;
+		}
+		let pending: PendingConsentRecord | null;
+		try {
+			pending = await pendingConsentStore.get(challenge);
+		} catch (err) {
+			logger.error({ err }, "pending_consent_store_unavailable");
+			jsonError(res, 503, "temporarily_unavailable", "consent store unavailable");
+			return null;
+		}
+		const sessionId = sessionIdOf(req);
+		if (pending === null || sessionId === null || !sameToken(pending.sessionId, sessionId)) {
+			jsonError(res, 400, "invalid_request", NO_PENDING);
+			return null;
+		}
+		return pending;
+	};
 
 	/**
 	 * Whether the cookie's session is still the live one. The same read
@@ -168,12 +188,22 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 			return false;
 		}
 	};
+
+	/** Drop a parked request that can no longer be answered; a failure to drop is logged, not fatal. */
+	const discard = async (challenge: string): Promise<void> => {
+		try {
+			await pendingConsentStore.consume(challenge);
+		} catch (err) {
+			logger.warn({ err }, "pending_consent_discard_failed");
+		}
+	};
+
 	const router = express.Router();
 	router.use(express.json());
 	router.use(express.urlencoded({ extended: false }));
 
 	router.get("/consent", async (req, res) => {
-		const pending = pendingFor(req, res, req.query.challenge);
+		const pending = await pendingFor(req, res, req.query.challenge);
 		if (pending === null) return;
 		if (!(await sessionIsLive(req))) {
 			return jsonError(res, 401, "login_required", "the session is no longer active");
@@ -188,7 +218,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		if (client === null) {
 			// Registered when the request was parked, gone now: nothing to ask
 			// about. The parked request is dropped with it.
-			delete req.session.pendingConsent;
+			await discard(pending.challenge);
 			return jsonError(res, 400, "invalid_request", "the client is no longer registered");
 		}
 		return res
@@ -202,17 +232,17 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 				scopes: pending.scopes,
 				granted_scopes: pending.grantedScopes,
 				redirect_uri: pending.redirectUri,
-				expires_in: Math.max(
-					0,
-					Math.floor((pending.createdAt + PENDING_CONSENT_TTL_MS - Date.now()) / 1000),
-				),
+				expires_in: Math.max(0, Math.floor((pending.expiresAt - Date.now()) / 1000)),
 			});
 	});
 
 	router.post("/consent", async (req, res) => {
 		const body = (req.body ?? {}) as Record<string, unknown>;
-		const pending = pendingFor(req, res, body.challenge);
-		if (pending === null) return;
+		// Read first, so a malformed answer is refused with the request still
+		// parked; the record is spent only once the answer is one that can be
+		// applied.
+		const peeked = await pendingFor(req, res, body.challenge);
+		if (peeked === null) return;
 		if (!(await sessionIsLive(req))) {
 			return jsonError(res, 401, "login_required", "the session is no longer active");
 		}
@@ -225,12 +255,28 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 				"the session names no subject to record consent for",
 			);
 		}
+		if (sub !== peeked.sub) {
+			// The record was asked of someone else: not this session's to answer.
+			return jsonError(res, 400, "invalid_request", NO_PENDING);
+		}
 		const decision = body.decision;
 		if (decision !== "accept" && decision !== "deny") {
 			return jsonError(res, 400, "invalid_request", 'decision must be "accept" or "deny"');
 		}
-		// One answer per challenge, whichever way it went.
-		delete req.session.pendingConsent;
+
+		// One answer per challenge, whichever way it went: the record is handed
+		// to exactly one of any number of answers in flight, and the others
+		// find nothing (#552).
+		let pending: PendingConsentRecord | null;
+		try {
+			pending = await pendingConsentStore.consume(peeked.challenge);
+		} catch (err) {
+			logger.error({ err, clientId: peeked.clientId }, "pending_consent_store_unavailable");
+			return jsonError(res, 503, "temporarily_unavailable", "consent store unavailable");
+		}
+		if (pending === null) {
+			return jsonError(res, 400, "invalid_request", NO_PENDING);
+		}
 
 		if (decision === "deny") {
 			await emitAuditEvent(auditSink, {

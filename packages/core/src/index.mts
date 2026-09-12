@@ -707,9 +707,22 @@ export {
 	createConsentStoreFactory,
 	registerBuiltinConsentStores,
 } from "./consents/factory.mjs";
-export { createMemoryConsentStore, type MemoryConsentStore } from "./consents/memory.mjs";
+export {
+	createMemoryConsentStore,
+	createMemoryPendingConsentStore,
+	type MemoryConsentStore,
+	type MemoryPendingConsentStore,
+} from "./consents/memory.mjs";
 export { memoryConsentStoreModule } from "./consents/module.mjs";
-export { type ConsentRecord, type ConsentStore, consentCovers } from "./consents/types.mjs";
+// #552: the record an `/authorize` request is parked in while the consent
+// page asks, consumed by exactly one answer.
+export {
+	type ConsentRecord,
+	type ConsentStore,
+	consentCovers,
+	type PendingConsentRecord,
+	type PendingConsentStore,
+} from "./consents/types.mjs";
 
 // SF-3 + MIN-4 (v0.5.1): timing-safe primitives. Exported from the package
 // root because `packages/core/package.json#exports` does not register a

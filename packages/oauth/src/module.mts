@@ -125,6 +125,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 		| "sessionFederationIndex"
 		| "federationTokenStore"
 		| "consentStore"
+		| "pendingConsentStore"
 		| "federationProviders"
 		| "replaySeenSet"
 		| "logger"
@@ -151,6 +152,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 			"sessionFederationIndex", // Amendment 4 (§1.1.4)
 			"federationTokenStore", // Phase 9 Task 4 augmentation — federation-token routes
 			"consentStore", // #527 — the consent step for clients that are not first-party; such clients are refused without it
+			"pendingConsentStore", // #552 — where the consent step parks a request; the memory consent module provides it with consentStore, and the router refuses one without the other
 			"federationProviders", // synthetic — boot planner injects ReadonlyMap from federation contributions
 			"replaySeenSet", // #484 — jti single-use for private_key_jwt client assertions; server_error on that path when absent
 			"logger", // D-4 — structured logger; falls back to consoleLogger when absent
@@ -192,6 +194,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						federationTokenStore: deps.federationTokenStore,
 						replaySeenSet: deps.replaySeenSet,
 						consentStore: deps.consentStore,
+						pendingConsentStore: deps.pendingConsentStore,
 						logger: deps.logger ?? consoleLogger,
 						// Theme E structural fix: typed deps replace the v0.4.x lazy
 						// () => ctx.federationProviders closure. The closure here only
