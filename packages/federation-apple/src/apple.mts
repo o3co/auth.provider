@@ -180,6 +180,11 @@ export interface AppleProviderConfig {
 	/** Override Apple's JWKS URI. Default: `https://appleid.apple.com/auth/keys`.
 	 *  Test injection only — production deployments rely on the default. */
 	jwksUri?: string;
+	/**
+	 * The fetch every request to Apple goes through — JWKS and token. A proxy,
+	 * or a test seam. Default: the global `fetch`.
+	 */
+	fetch?: typeof fetch;
 }
 
 export type AppleProvider = FederationProvider &
@@ -286,10 +291,12 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 	// are stable, and Apple publishes no `userinfo_endpoint` and no
 	// `end_session_endpoint`, so neither appears here.
 	//
-	// `jwks_uri` is required for id_token signature verification; without it
-	// openid-client treats id_tokens as opaque (silent verification skip). The
-	// `id_token_signing_alg_values_supported` list pins RS256 — what Apple
-	// signs with — so the library refuses `none` / `HS256` confusion attacks.
+	// `jwks_uri` names where Apple publishes the keys the id_token is verified
+	// against, and `id_token_signing_alg_values_supported` pins RS256 — what
+	// Apple signs with — so the library refuses `none` / `HS256` confusion.
+	// Neither does anything on its own: openid-client 6 skips the id_token
+	// signature on the code flow unless `enableNonRepudiationChecks` is on,
+	// which `verifying` below applies to every configuration built here (#542).
 	const serverMetadata: oidc.ServerMetadata = {
 		issuer: APPLE_ISSUER,
 		authorization_endpoint: "https://appleid.apple.com/auth/authorize",
@@ -298,9 +305,27 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 		id_token_signing_alg_values_supported: ["RS256"],
 	};
 
+	/**
+	 * #542: every configuration this provider builds verifies the id_token's
+	 * signature against `jwks_uri`. openid-client 6 does not on the code flow
+	 * unless told to — it treats the token endpoint's TLS as proof enough — so
+	 * the RS256 pin above was inert and `jwks_uri` was never fetched. Apple
+	 * publishes no userinfo endpoint: the id_token is the only source of
+	 * identity, and its signature the only check between the token endpoint's
+	 * TLS and the account. Applied per configuration, because the token one is
+	 * rebuilt on every call.
+	 */
+	const verifying = (configuration: oidc.Configuration): oidc.Configuration => {
+		if (config.fetch) {
+			configuration[oidc.customFetch] = config.fetch as unknown as oidc.CustomFetch;
+		}
+		oidc.enableNonRepudiationChecks(configuration);
+		return configuration;
+	};
+
 	// Building an authorization URL needs no client authentication, so this
 	// configuration carries no secret and never triggers the ES256 signature.
-	const authorizationConfig = new oidc.Configuration(serverMetadata, config.clientId);
+	const authorizationConfig = verifying(new oidc.Configuration(serverMetadata, config.clientId));
 
 	/**
 	 * A configuration for one token-endpoint call, with the secret resolved now.
@@ -313,11 +338,13 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 	 */
 	const tokenConfiguration = async (): Promise<oidc.Configuration> => {
 		const secret = await resolveClientSecret(clientSecret);
-		return new oidc.Configuration(
-			serverMetadata,
-			config.clientId,
-			secret,
-			oidc.ClientSecretPost(secret),
+		return verifying(
+			new oidc.Configuration(
+				serverMetadata,
+				config.clientId,
+				secret,
+				oidc.ClientSecretPost(secret),
+			),
 		);
 	};
 

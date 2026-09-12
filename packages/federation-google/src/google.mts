@@ -64,6 +64,11 @@ export interface GoogleProviderConfig {
 	/** Override Google's JWKS URI. Default: `https://www.googleapis.com/oauth2/v3/certs`.
 	 *  Test injection only — production deployments rely on the default. */
 	jwksUri?: string;
+	/**
+	 * The fetch every request to Google goes through — JWKS, token, userinfo.
+	 * A proxy, or a test seam. Default: the global `fetch`.
+	 */
+	fetch?: typeof fetch;
 }
 
 export type GoogleProvider = FederationProvider &
@@ -79,10 +84,12 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 	// ServerMetadata constructed locally — no discovery call. Google's endpoints are stable.
 	// Local variable type (oidc.ServerMetadata) does not survive to the .d.mts.
 	//
-	// PB-4: `jwks_uri` is required for id_token RS256 signature verification; without it
-	// openid-client treats id_tokens as opaque (silent verification skip). The
-	// `id_token_signing_alg_values_supported` list pins `RS256` so the library refuses to
-	// honour `none` / `HS256` confusion attacks should the published JWKS be coerced.
+	// PB-4: `jwks_uri` names where Google publishes the keys the id_token is
+	// verified against, and `id_token_signing_alg_values_supported` pins `RS256`
+	// so the library refuses `none` / `HS256` confusion should the published
+	// JWKS be coerced. Neither does anything on its own: openid-client 6 treats
+	// an id_token from the token endpoint as delivered over TLS and skips its
+	// signature unless `enableNonRepudiationChecks` is on — see below (#542).
 	const serverMetadata: oidc.ServerMetadata = {
 		issuer: GOOGLE_ISSUER,
 		authorization_endpoint: "https://accounts.google.com/o/oauth2/v2/auth",
@@ -93,6 +100,13 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 	};
 
 	const oidcConfig = new oidc.Configuration(serverMetadata, config.clientId, config.clientSecret);
+	if (config.fetch) oidcConfig[oidc.customFetch] = config.fetch as unknown as oidc.CustomFetch;
+	// #542: verify the id_token's signature against `jwks_uri` — the key looked
+	// up by `kid`, the set cached and refetched when an unknown `kid` appears.
+	// Without this the RS256 pin above is inert, `jwks_uri` is never fetched,
+	// and a token signed by anyone is accepted on the strength of the token
+	// endpoint's TLS alone.
+	oidc.enableNonRepudiationChecks(oidcConfig);
 
 	return {
 		name: "google",
