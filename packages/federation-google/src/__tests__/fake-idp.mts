@@ -66,7 +66,7 @@ export interface FakeIdp {
 	 * check against the JWKS can catch.
 	 */
 	signWithUnpublishedKey: boolean;
-	/** Leave the id_token out of the token response. */
+	/** Leave the id_token out of the token responses — the code exchange's and the refresh's. */
 	omitIdToken: boolean;
 	/** Claims laid over the userinfo defaults. */
 	userinfoClaims: Record<string, unknown>;
@@ -138,7 +138,8 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		},
 	};
 
-	const mintIdToken = async (): Promise<string> => {
+	/** A refresh's id_token carries no nonce: there is no authorization request for it to echo. */
+	const mintIdToken = async (opts: { nonce: boolean } = { nonce: true }): Promise<string> => {
 		const now = Math.floor(Date.now() / 1000);
 		const claims: Record<string, unknown> = {
 			iss: issuer,
@@ -149,7 +150,7 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 			email: "alice@example.test",
 			email_verified: true,
 			name: "Alice Example",
-			...(idp.nonce === undefined ? {} : { nonce: idp.nonce }),
+			...(opts.nonce && idp.nonce !== undefined ? { nonce: idp.nonce } : {}),
 			...idp.idTokenClaims,
 		};
 		const key = idp.signWithUnpublishedKey
@@ -185,11 +186,14 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		if (where === endpoints.token && method === "POST") {
 			if (idp.tokenStatus !== 200) return json({ error: "invalid_client" }, idp.tokenStatus);
 			if (body?.get("grant_type") === "refresh_token") {
+				// Google and Apple both return a fresh id_token on refresh; the
+				// library verifies it like the login's when it is there.
 				return json({
 					access_token: "at-refreshed",
 					token_type: "Bearer",
 					expires_in: 1800,
 					refresh_token: "rt-2",
+					...(idp.omitIdToken ? {} : { id_token: await mintIdToken({ nonce: false }) }),
 				});
 			}
 			return json({

@@ -111,12 +111,22 @@ describe("Apple id_token signature verification (#542)", () => {
 		expect(idp.requestsTo(APPLE.jwksUri)).toHaveLength(2);
 	});
 
-	it("verifies the id_token a refresh returns as well", async () => {
+	it("accepts a refresh whose id_token is signed by a published key, through the seam", async () => {
 		const { idp, provider } = await build();
 		await exchange(provider);
 		const refreshed = await provider.refreshToken("rt-1");
 		expect(refreshed.accessToken).toBe("at-refreshed");
-		// Through the seam, on a configuration built for that call.
+		expect(refreshed.idToken).toBeDefined();
+		// On a configuration built for that call.
 		expect(idp.requestsTo(APPLE.tokenEndpoint)).toHaveLength(2);
+	});
+
+	it("refuses a refresh whose id_token is signed by a key Apple never published", async () => {
+		// Apple returns an id_token on refresh too, and the configuration built
+		// for that call has to verify it the way the login's was.
+		const { idp, provider } = await build();
+		await exchange(provider);
+		idp.signWithUnpublishedKey = true;
+		await expect(provider.refreshToken("rt-1")).rejects.toThrow();
 	});
 });

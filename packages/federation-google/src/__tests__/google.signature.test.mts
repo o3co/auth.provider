@@ -123,4 +123,20 @@ describe("Google id_token signature verification (#542)", () => {
 		await expect(exchange(provider)).rejects.toThrow();
 		expect(idp.requestsTo(GOOGLE.userinfoEndpoint)).toHaveLength(0);
 	});
+
+	it("accepts a refresh whose id_token is signed by a published key", async () => {
+		const { idp, provider } = await build();
+		await exchange(provider);
+		const refreshed = await provider.refreshToken("rt-1");
+		expect(refreshed.accessToken).toBe("at-refreshed");
+		expect(refreshed.idToken).toBeDefined();
+		expect(idp.requestsTo(GOOGLE.tokenEndpoint)).toHaveLength(2);
+	});
+
+	it("refuses a refresh whose id_token is signed by a key Google never published", async () => {
+		const { idp, provider } = await build();
+		await exchange(provider);
+		idp.signWithUnpublishedKey = true;
+		await expect(provider.refreshToken("rt-1")).rejects.toThrow();
+	});
 });
