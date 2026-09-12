@@ -11,8 +11,9 @@ updates:
   # deliberate call rather than a default: bcrypt — the one native dependency
   # — is a Node-API addon whose alpine prebuild loads on 26 without
   # compiling, and the whole suite was run on 26 before the bump landed.
-  # Nothing in CI builds this image, so that verification is a human step,
-  # not a green check.
+  # Since then CI's publish-readiness job builds the Dockerfile's `node-base`
+  # stage from the pinned digest and installs the dependency set on it, so a
+  # future major that breaks the image fails a check rather than an operator.
   - package-ecosystem: "docker"
     directory: "/templates/standalone"
     schedule:

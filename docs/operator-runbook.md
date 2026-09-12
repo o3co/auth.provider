@@ -788,9 +788,14 @@ before you flip — and a relying party holding the secret can also mint.
   (`templates/standalone/Dockerfile`). `pnpm install --frozen-lockfile` means
   a committed `pnpm-lock.yaml` and `pnpm-workspace.yaml` are build inputs.
 - CI builds the template against packed tarballs on Node 24 and runs every
-  package's suite; it does **not** build or run the Docker image
-  (`.github/workflows/ci.yml`). Your image build is the first place a
-  base-image or native-addon (`bcrypt`) problem shows up.
+  package's suite. It also builds the Dockerfile's `node-base` stage from the
+  pinned digest and, inside that image, installs the same tarball-wired
+  dependency set frozen, builds it, and loads `bcrypt` — so a broken digest, a
+  corepack pin that no longer installs, or a native addon without a musl
+  prebuild for the pinned Node fails there, not in your first `docker build`
+  (`.github/workflows/ci.yml`, publish-readiness). The `runtime` stage's
+  assembly is not run in CI; your image build is still the first place a
+  problem in that stage shows up.
 - A replica drains for `drainTimeoutMs` (default 10 s) on `SIGTERM` and exits
   non-zero if it ran out of time; keep that below the orchestrator's kill grace
   period (`templates/standalone/src/shutdown.mts`).

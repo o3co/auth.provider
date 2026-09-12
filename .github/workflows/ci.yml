@@ -504,6 +504,9 @@ jobs:
             }
             pkg.overrides = pkg.overrides || {};
             for (const [name, spec] of map) pkg.overrides[name] = spec;
+            // pnpm reads its own block, not npm's: the image step below installs
+            // with pnpm, and its transitive @o3co deps must land on the tarballs too.
+            pkg.pnpm = { ...(pkg.pnpm || {}), overrides: Object.fromEntries(map) };
             fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n');
           " /tmp/tarballs
           # Use npm rather than pnpm here: pnpm in workspace context would
@@ -521,3 +524,53 @@ jobs:
           npm run test
           popd >/dev/null
           echo "OK: templates/standalone builds and tests against packed tarballs"
+          # The image step below reuses this tarball-wired copy.
+          echo "SCRATCH=$SCRATCH" >> "$GITHUB_ENV"
+
+      - name: Build the scaffold's base image and install the dependency set on it
+        run: |
+          set -euo pipefail
+          # Until this step, nothing in CI touched the Dockerfile: the suite ran on
+          # the runner's Node, so a broken base-image digest, a corepack pin that no
+          # longer installs, or a native addon with no musl prebuild for the pinned
+          # Node (#360, and the objection recorded on #388 / #435) surfaced only in
+          # an operator's first `docker build`.
+          #
+          # The Dockerfile's own first stage, from the pinned digest: base image,
+          # tini, the corepack pin. Built as written — no CI-only Dockerfile.
+          docker build --target node-base -t scaffold-node-base templates/standalone
+          #
+          # Then what its `deps` and `builder` stages do, run inside that image
+          # against the tarball-wired scaffold copy the previous step made — the
+          # published packages cannot be used here, because a PR's versions are
+          # not published yet, and the deps stage copies only the three manifest
+          # files, so the tarballs cannot ride along in a build context. The
+          # lockfile is generated first, as `create-auth-provider` does at scaffold
+          # time, and installed frozen, as the deps stage does — the same flags,
+          # because inside the image the scaffold is alone, as it is in the deps
+          # stage. The workspace file carries bcrypt's build allowlist, as the
+          # scaffolder writes it (#360).
+          # Finally bcrypt — the one native dependency — is loaded and exercised on
+          # the image's Node and libc, which is the check no runner-side test can
+          # make. It is a dependency of core, not of the scaffold, and pnpm does
+          # not hoist, so it is resolved from where core resolves it.
+          rm -rf "$SCRATCH/standalone/node_modules" "$SCRATCH/standalone/dist"
+          printf 'onlyBuiltDependencies:\n  - bcrypt\n' > "$SCRATCH/standalone/pnpm-workspace.yaml"
+          cat > "$SCRATCH/standalone/bcrypt-probe.cjs" <<'EOF'
+          const { createRequire } = require("node:module");
+          const core = require("node:fs").realpathSync("node_modules/@o3co/auth-provider-core");
+          const bcrypt = createRequire(`${core}/package.json`)("bcrypt");
+          if (!bcrypt.compareSync("probe", bcrypt.hashSync("probe", 4))) process.exit(1);
+          console.log("bcrypt loads on", process.version, process.platform, process.arch);
+          EOF
+          docker run --rm \
+            -v "$SCRATCH/standalone":/work -v /tmp/tarballs:/tmp/tarballs -w /work \
+            -e COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+            scaffold-node-base sh -euc '
+              node --version
+              pnpm install --lockfile-only
+              pnpm install --frozen-lockfile
+              pnpm run build
+              node bcrypt-probe.cjs
+            '
+          echo "OK: the scaffold dependency set installs, builds and loads bcrypt on the pinned image"
