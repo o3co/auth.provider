@@ -985,13 +985,17 @@ export const createOAuthRouter = async (
 	// Without one there is nothing to record, and `/authorize` refuses the
 	// clients that would need it.
 	//
-	// #552: the step parks every request in `pendingConsentStore`, so a
-	// composition with the one store and not the other is refused here,
-	// where the operator can read why, rather than at the first third-party
-	// `/authorize`. The bundled memory module provides both.
-	if (consentStore && !pendingConsentStore) {
+	// #552: the step records consent in the one store and parks every request
+	// in the other, so a composition with one and not the other — in either
+	// direction — is refused here, where the operator can read why, rather
+	// than at the first third-party `/authorize`. The bundled memory module
+	// provides both.
+	if ((consentStore === undefined) !== (pendingConsentStore === undefined)) {
+		const [wired, missing] = consentStore
+			? ["consentStore", "pendingConsentStore"]
+			: ["pendingConsentStore", "consentStore"];
 		throw new Error(
-			"createOAuthRouter: consentStore is wired but pendingConsentStore is not — the consent step parks each request under a challenge in that store and cannot run without it; wire both (the bundled memory consent module provides both) or neither",
+			`createOAuthRouter: ${wired} is wired but ${missing} is not — the consent step records consent in consentStore and parks each request under a challenge in pendingConsentStore, and cannot run with one of them; wire both (the bundled memory consent module provides both) or neither`,
 		);
 	}
 	if (consentStore && pendingConsentStore) {

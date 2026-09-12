@@ -120,7 +120,10 @@ const makeApp = async (opts: {
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 		...(opts.consentStore ? { consentStore: opts.consentStore } : {}),
-		...(opts.pendingConsentStore === null ? {} : { pendingConsentStore: pending }),
+		...(opts.pendingConsentStore === null ||
+		(opts.consentStore === undefined && opts.pendingConsentStore === undefined)
+			? {}
+			: { pendingConsentStore: pending }),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
 		logger: createMockLogger(),
@@ -355,6 +358,7 @@ describe("GET /oauth/consent (#527)", () => {
 			const expired = await request(app).get("/oauth/consent").query({ challenge });
 			expect(expired.status).toBe(400);
 			expect(expired.body.error_description).toMatch(/no pending consent/);
+			expect(expired.body.error_description).toMatch(/expired/);
 			expect(await pending.get(challenge)).toBeNull();
 		} finally {
 			vi.useRealTimers();
@@ -801,9 +805,171 @@ describe("one challenge, one answer (#552)", () => {
 		expect(pending.size).toBe(0);
 	});
 
-	it("refuses a composition that wires the consent store without the store its challenges live in", async () => {
+	it("refuses a composition that wires the consent store without the store its challenges live in, and the reverse", async () => {
 		await expect(
 			makeApp({ consentStore: createMemoryConsentStore(), pendingConsentStore: null }),
-		).rejects.toThrow(/pendingConsentStore/);
+		).rejects.toThrow(/consentStore is wired but pendingConsentStore is not/);
+		// The other half alone mounts nothing and would refuse every third-party
+		// client at /authorize with no hint of why; the mismatch is the fault,
+		// whichever side is missing.
+		await expect(
+			makeApp({ pendingConsentStore: createMemoryPendingConsentStore() }),
+		).rejects.toThrow(/pendingConsentStore is wired but consentStore is not/);
+	});
+});
+
+describe("the parked request and its store, on the edges (#552 review)", () => {
+	/** A pending-consent store whose operations fail on demand. */
+	const flakyPending = () => {
+		const inner = createMemoryPendingConsentStore();
+		const down = { set: false, get: false, consume: false };
+		const store: PendingConsentStore = {
+			kind: "flaky",
+			set: async (record) => {
+				if (down.set) throw new Error("pending store down");
+				return inner.set(record);
+			},
+			get: async (challenge) => {
+				if (down.get) throw new Error("pending store down");
+				return inner.get(challenge);
+			},
+			consume: async (challenge) => {
+				if (down.consume) throw new Error("pending store down");
+				return inner.consume(challenge);
+			},
+		};
+		return { store, inner, down };
+	};
+
+	const parkedOn = async (extra: Parameters<typeof makeApp>[0] = {}) => {
+		const consentStore = createMemoryConsentStore();
+		const flaky = flakyPending();
+		const harness = await makeApp({ consentStore, pendingConsentStore: flaky.store, ...extra });
+		const challenge = atConsentPage(await authorize(harness.app));
+		return { ...harness, challenge, consentStore, ...flaky };
+	};
+
+	it("/authorize answers temporarily_unavailable when the request cannot be parked", async () => {
+		const flaky = flakyPending();
+		const { app, createCode } = await makeApp({
+			consentStore: createMemoryConsentStore(),
+			pendingConsentStore: flaky.store,
+		});
+		flaky.down.set = true;
+		expect(atClient(await authorize(app)).get("error")).toBe("temporarily_unavailable");
+		expect(createCode).not.toHaveBeenCalled();
+		expect(flaky.inner.size).toBe(0);
+	});
+
+	it("the page answers 503 when the store cannot say what is parked", async () => {
+		const { app, challenge, down } = await parkedOn();
+		down.get = true;
+		const res = await request(app).get("/oauth/consent").query({ challenge });
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
+	});
+
+	it("the answer is 503, and records nothing, when the record cannot be consumed", async () => {
+		const { app, challenge, down, inner, consentStore } = await parkedOn();
+		down.consume = true;
+		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "accept" });
+		expect(res.status).toBe(503);
+		expect(await consentStore.find("user-1", CLIENT_ID)).toBeNull();
+		// Still parked: the outage decided nothing.
+		expect(await inner.get(challenge)).not.toBeNull();
+	});
+
+	it("refuses an answer from the parking session on behalf of another subject", async () => {
+		const { app, challenge, session, inner, consentStore } = await parkedOn();
+		session.user = { id: "user-2" };
+		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "accept" });
+		expect(res.status).toBe(400);
+		expect(res.body.error_description).toMatch(/no pending consent/);
+		expect(await consentStore.find("user-2", CLIENT_ID)).toBeNull();
+		expect(await inner.get(challenge)).not.toBeNull();
+	});
+
+	it("an answer for a client removed since the page was shown drops the request and records nothing", async () => {
+		// The page may have been rendered while the client existed; the answer
+		// arrives after an operator removed it. A grant under that id would
+		// greet whoever registers under it next.
+		let registered = true;
+		const { app, challenge, inner, consentStore } = await parkedOn({
+			clientRepository: {
+				findById: async (id: string) =>
+					registered && id === CLIENT_ID ? THIRD_PARTY_CLIENT : null,
+				authenticate: async () => null,
+			},
+		});
+		registered = false;
+		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "accept" });
+		expect(res.status).toBe(400);
+		expect(res.body.error_description).toMatch(/no longer registered/);
+		expect(await consentStore.find("user-1", CLIENT_ID)).toBeNull();
+		expect(inner.size).toBe(0);
+	});
+
+	it("an answer is 503 when the registry cannot say whether the client still exists", async () => {
+		let fail = false;
+		const { app, challenge, inner } = await parkedOn({
+			clientRepository: {
+				findById: async (id: string) => {
+					if (fail) throw new Error("registry down");
+					return id === CLIENT_ID ? THIRD_PARTY_CLIENT : null;
+				},
+				authenticate: async () => null,
+			},
+		});
+		fail = true;
+		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "accept" });
+		expect(res.status).toBe(503);
+		expect(await inner.get(challenge)).not.toBeNull();
+	});
+
+	it("fails closed when a request for a removed client cannot be dropped", async () => {
+		// A 400 here would report the request gone while the record stayed for
+		// an answer to spend.
+		let registered = true;
+		const { app, challenge, down, inner } = await parkedOn({
+			clientRepository: {
+				findById: async (id: string) =>
+					registered && id === CLIENT_ID ? THIRD_PARTY_CLIENT : null,
+				authenticate: async () => null,
+			},
+		});
+		registered = false;
+		down.consume = true;
+		const res = await request(app).get("/oauth/consent").query({ challenge });
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
+		expect(await inner.get(challenge)).not.toBeNull();
+	});
+});
+
+describe("the challenge's bindings, on the edges (#552 review)", () => {
+	it("refuses an answer from a request that reports no session id, keeping the request parked", async () => {
+		let sessionId: string | undefined = "sess-1";
+		const { app, pending } = await makeApp({
+			consentStore: createMemoryConsentStore(),
+			sessionId: () => sessionId,
+		});
+		const challenge = atConsentPage(await authorize(app));
+		sessionId = undefined;
+		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "accept" });
+		expect(res.status).toBe(400);
+		expect(res.body.error_description).toMatch(/no pending consent/);
+		expect(await pending.get(challenge)).not.toBeNull();
+	});
+
+	it("parks a request that carries no state, and denies it without one", async () => {
+		const { app, pending } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const { state: _omitted, ...withoutState } = baseQuery;
+		const challenge = atConsentPage(await request(app).get("/oauth/authorize").query(withoutState));
+		expect((await pending.get(challenge))?.state).toBeUndefined();
+		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "deny" });
+		expect(res.status).toBe(303);
+		const location = new URL(res.headers.location as string);
+		expect(location.searchParams.get("error")).toBe("access_denied");
+		expect(location.searchParams.has("state")).toBe(false);
 	});
 });
