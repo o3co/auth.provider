@@ -525,6 +525,8 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			grantPolicy?: GrantPolicyHook;
 			captureCode?: (params: Parameters<CodeRepository["createCode"]>[0]) => void;
 			allowedScopes?: string[];
+			/** #520: the ceiling a policy-returned audience must stay within. */
+			allowedAudiences?: string[];
 		}) {
 			const app = express();
 			app.set("trust proxy", 1);
@@ -544,6 +546,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 					allowedRedirectUris: ["https://example.test/cb"],
 					firstParty: true,
 					allowedScopes: opts.allowedScopes ?? ["read", "write"],
+					...(opts.allowedAudiences ? { allowedAudiences: opts.allowedAudiences } : {}),
 				}),
 				authenticate: async () => null,
 			};
@@ -571,6 +574,9 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 		it("evaluates grantPolicy at /authorize and persists narrowed scope on Code", async () => {
 			let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({
+				// #520: the policy narrows within this; without it the audience
+				// below would be one the policy originated.
+				allowedAudiences: ["aud-1", "aud-2"],
 				captureCode: (p) => {
 					captured = p;
 				},
@@ -611,6 +617,76 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			expect(captured).toBeDefined();
 			expect(captured?.grantedScope).toEqual(["read"]);
 			expect(captured?.grantedAudience).toEqual(["aud-1"]);
+		});
+
+		it("refuses an audience outside the client's allowedAudiences with server_error", async () => {
+			// #520: policy may narrow, never originate. `/authorize` applied no
+			// ceiling at all, so a buggy or compromised policy could put any
+			// audience on the code — and `/token` re-bounds nothing.
+			const { app, clientRepo, codeRepo } = buildAuthorizeApp({
+				allowedAudiences: ["aud-1"],
+			});
+			const grantPolicy: GrantPolicyHook = {
+				kind: "over-ceiling",
+				async evaluate() {
+					return { outcome: "allow", grantedAudience: ["aud-elsewhere"] };
+				},
+			};
+			const { router } = await createOAuthRouter(express, {
+				registry: new GrantRegistry(),
+				config: mockConfig,
+				clientRepository: clientRepo,
+				codeRepository: codeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				grantPolicy,
+			});
+			app.use("/oauth", router);
+
+			const res = await request(app).get("/oauth/authorize").query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				code_challenge: PKCE_S256_CHALLENGE,
+				code_challenge_method: "S256",
+				scope: "read",
+			});
+
+			expect(res.status).toBe(302);
+			// The policy exceeded its authority, not the caller: `server_error`,
+			// the answer every other grant gives (`policyOutOfBounds`).
+			expect(res.headers.location).toContain("error=server_error");
+			expect(res.headers.location).toContain("aud-elsewhere");
+		});
+
+		it("refuses a policy-originated audience when the client supplies no ceiling", async () => {
+			const { app, clientRepo, codeRepo } = buildAuthorizeApp({});
+			const grantPolicy: GrantPolicyHook = {
+				kind: "no-ceiling",
+				async evaluate() {
+					return { outcome: "allow", grantedAudience: ["aud-1"] };
+				},
+			};
+			const { router } = await createOAuthRouter(express, {
+				registry: new GrantRegistry(),
+				config: mockConfig,
+				clientRepository: clientRepo,
+				codeRepository: codeRepo,
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
+				grantPolicy,
+			});
+			app.use("/oauth", router);
+
+			const res = await request(app).get("/oauth/authorize").query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				code_challenge: PKCE_S256_CHALLENGE,
+				code_challenge_method: "S256",
+				scope: "read",
+			});
+
+			expect(res.status).toBe(302);
+			expect(res.headers.location).toContain("error=server_error");
 		});
 
 		it("redirects with error when grantPolicy denies at /authorize", async () => {
