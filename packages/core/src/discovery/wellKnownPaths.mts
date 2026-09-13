@@ -43,12 +43,28 @@ export interface DiscoveryPaths {
  * never fall back. Both are served, with the same document.
  *
  * `/.well-known/openid-configuration` at the root is kept for a path-bearing
- * issuer as well: it is what this server served before #528, and what a
- * deployment behind a path-stripping proxy may still be reached at. The
- * RFC 8414 root form is not served for a path-bearing issuer — that URL
- * names a different issuer (`https://as.example`), and a document answering
- * there with another `issuer` would be one an RFC 8414 §3.3 client must
- * reject.
+ * issuer as well, and the asymmetry with RFC 8414 follows from how such an
+ * issuer is deployed (v0.13.0 audit). The document's endpoints are the issuer
+ * plus each route (`https://as.example/tenant-a/oauth/authorize`) while the
+ * routes are mounted at the router's root, so a path-bearing issuer works only
+ * behind a proxy that strips the issuer path, or with the router mounted at
+ * that path. In both, the OIDC URL a client builds —
+ * `/tenant-a/.well-known/openid-configuration` — reaches this router as the
+ * root path; dropping the root would break discovery for exactly the
+ * deployments that work, and it is what this server served before #528.
+ *
+ * The RFC 8414 URL a client builds, `/.well-known/oauth-authorization-server/tenant-a`,
+ * carries no issuer prefix. A stripping proxy passes it through unchanged, and
+ * the inserted path is what is served for it; a router mounted at `/tenant-a`
+ * never receives it at all, so that deployment serves RFC 8414 only if it also
+ * routes the path to the router at the root. The RFC 8414 *root* form is never
+ * the URL a client of this issuer builds, and answering there would be
+ * answering for `https://as.example` — which an RFC 8414 §3.3 client must
+ * reject — so it is not served.
+ *
+ * Where the host's root reaches this router with no stripping, the root OIDC
+ * path answers with a document for another issuer; for a path-bearing issuer
+ * that is also a deployment whose advertised endpoints do not resolve.
  *
  * An issuer that is not a URL, or has no path, gets the two root forms.
  */

@@ -339,6 +339,8 @@ describe("protectedResourceBindingMw — the nonce challenge (#530, RFC 9449 §9
 		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT } });
 		const err = Object.assign(new Error("no nonce"), {
 			code: "use_dpop_nonce",
+			retryInstruction:
+				"a server-provided nonce is required; retry with the value of the DPoP-Nonce header",
 			responseHeaders: { "DPoP-Nonce": "n1" },
 		});
 		const { next, res } = await run(
@@ -350,6 +352,33 @@ describe("protectedResourceBindingMw — the nonce challenge (#530, RFC 9449 §9
 		expect(res.body).toMatchObject({ error: "use_dpop_nonce" });
 		expect(res.headers["WWW-Authenticate"]).toBe('DPoP error="use_dpop_nonce"');
 		expect(res.headers["DPoP-Nonce"]).toBe("n1");
+	});
+
+	it("challenges with whatever code a retry instruction carries, and treats a bare code as a failed proof (v0.13.0 audit)", async () => {
+		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT } });
+		const retry = Object.assign(new Error("nonce"), {
+			code: "use_fresh_nonce",
+			retryInstruction: "retry with the value of the Fresh-Nonce header",
+		});
+		const asked = await run(
+			protectedResourceBindingMw({ mechanisms: [throwingMechanism("dpop", retry)] }),
+			`DPoP ${token}`,
+		);
+		expect(asked.res.statusCode).toBe(401);
+		expect(asked.res.headers["WWW-Authenticate"]).toBe('DPoP error="use_fresh_nonce"');
+		expect(asked.res.body).toMatchObject({
+			error: "use_fresh_nonce",
+			error_description: "retry with the value of the Fresh-Nonce header",
+		});
+
+		// The code alone is not an instruction: the mechanism did not say retry.
+		const bare = Object.assign(new Error("nonce"), { code: "use_dpop_nonce" });
+		const refused = await run(
+			protectedResourceBindingMw({ mechanisms: [throwingMechanism("dpop", bare)] }),
+			`DPoP ${token}`,
+		);
+		expect(refused.res.statusCode).toBe(401);
+		expect(refused.res.headers["WWW-Authenticate"]).not.toContain("use_dpop_nonce");
 	});
 
 	it("sets the headers a succeeding binding carries, then continues", async () => {

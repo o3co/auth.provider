@@ -68,6 +68,13 @@ export class DPoPError extends Error {
 	readonly detail?: Record<string, unknown>;
 	/** Headers the HTTP answer must carry — `DPoP-Nonce` for the nonce refusals (#530). */
 	readonly responseHeaders?: Readonly<Record<string, string>>;
+	/**
+	 * Core's `TokenBindingRefusal.retryInstruction`: set for the nonce
+	 * refusals, which are an instruction to retry rather than a verdict. The
+	 * token-binding middlewares answer with it, and a protected resource
+	 * challenges with this error's `code`, without knowing DPoP's codes.
+	 */
+	readonly retryInstruction?: string;
 
 	constructor(
 		reason: DPoPReasonCode,
@@ -78,10 +85,12 @@ export class DPoPError extends Error {
 		super(message);
 		this.name = "DPoPError";
 		this.reason = reason;
-		this.code =
-			reason === "nonce_required" || reason === "nonce_invalid"
-				? "use_dpop_nonce"
-				: "invalid_dpop_proof";
+		const nonceRefusal = reason === "nonce_required" || reason === "nonce_invalid";
+		this.code = nonceRefusal ? "use_dpop_nonce" : "invalid_dpop_proof";
+		if (nonceRefusal) {
+			this.retryInstruction =
+				"a server-provided nonce is required; retry with the value of the DPoP-Nonce header";
+		}
 		if (detail !== undefined) this.detail = detail;
 		if (responseHeaders !== undefined) this.responseHeaders = responseHeaders;
 	}
