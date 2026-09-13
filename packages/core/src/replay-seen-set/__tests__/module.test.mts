@@ -16,4 +16,20 @@ describe("memoryReplaySeenSetModule", () => {
 		const set = memoryReplaySeenSetModule.provides?.replaySeenSet?.({} as never);
 		expect((set as { kind: string }).kind).toBe("memory");
 	});
+
+	it("names what actually forks when it refuses a multi-replica boot", () => {
+		// The reason is quoted verbatim into the refused boot message, so it is
+		// what an operator reads. It said DPoP proof replay — but DPoP keeps its
+		// own `dpopReplayStore` and never touches this slot. The consumers are
+		// the WebAuthn challenge ceremony, the jwt-bearer registry verifier and
+		// `private_key_jwt` client assertions, and an operator with no DPoP
+		// module was told DPoP was why their boot failed.
+		const reason = memoryReplaySeenSetModule.replicaSafety?.unsafe
+			? memoryReplaySeenSetModule.replicaSafety.reason
+			: "";
+		expect(reason).not.toMatch(/DPoP/);
+		expect(reason).toMatch(/private_key_jwt/);
+		expect(reason).toMatch(/jwt-bearer/);
+		expect(reason).toMatch(/WebAuthn/);
+	});
 });

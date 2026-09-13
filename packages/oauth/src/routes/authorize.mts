@@ -655,15 +655,13 @@ export const authorizeParams = (req: Request): Record<string, unknown> =>
  * a first-party client it is a no-op, since the deployment operates that
  * client and there is nothing to consent to.
  *
- * Every other value is **refused**, not ignored, and each for its own reason:
+ * `login` is honoured since #481, through the re-authentication ask
+ * (`./reauthAsk.mts`), which is what keeps it from looping.
+ *
+ * Every other value is **refused**, not ignored:
  *
  * - `select_account` — there is no account picker. Ignoring it would hand
  *   back a token the RP believes was freshly account-picked.
- * - `login` — forcing re-authentication needs a way to know that it just
- *   happened, or the user returns from the login page with the same
- *   `prompt=login` and goes round again. That marker is `auth_time`, which
- *   arrives with `max_age`; until then a looping implementation would be worse
- *   than an honest refusal.
  *
  * `invalid_request` naming the value is the answer — OIDC Core defines no
  * "prompt value unsupported" code, and inventing one would put a non-standard

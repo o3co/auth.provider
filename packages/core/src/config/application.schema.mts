@@ -388,11 +388,11 @@ const refreshTokenSchema = withRemovedKeys(
 );
 
 /**
- * `oauth.authorize` holds no live keys anymore — it exists only to retire
- * `allowUnmarkedClients` loudly (#330), via `withRemovedKeys` (#366).
- * Optional because nothing requires the section; the empty-object case is
- * what `reference.conf` yields when the tombstone env substitution resolves
- * to nothing.
+ * `oauth.authorize` carries one live key, `acrValues` (#481), and retires
+ * `allowUnmarkedClients` loudly (#330) via `withRemovedKeys` (#366).
+ * Optional because nothing requires the section: `reference.conf` declares
+ * `acrValues {}`, and the tombstone env substitution resolves to nothing
+ * unless a stale variable is still exported.
  */
 const authorizeSchema = withRemovedKeys(
 	"oauth.authorize",
@@ -604,9 +604,9 @@ export const CoreConfigSchema = z.object({
 		// #267: `/authorize` refuses a client not marked `firstParty: true` —
 		// one with no `firstParty` field and one carrying an explicit `false`
 		// alike. The `allowUnmarkedClients` migration escape hatch that
-		// admitted unmarked registrations (#317) was removed in #330; the
-		// section survives only as the tombstone that rejects a config still
-		// setting the key (see `REMOVED_AUTHORIZE_FIELDS`).
+		// admitted unmarked registrations (#317) was removed in #330, and the
+		// section still carries the tombstone that rejects a config setting it
+		// (see `REMOVED_AUTHORIZE_FIELDS`) — beside `acrValues` (#481).
 		authorize: authorizeSchema,
 		// OR-9 (Wave 5d): adapter switch for the OAuth authorization-code
 		// repository. Multi-replica deployments MUST set this to `"redis"`;
@@ -1137,7 +1137,8 @@ export const fullSectionsSchema = z.object({
 		login: z.object({ url: z.string() }),
 		// #527: the deployment-owned consent page a client that is not
 		// first-party is routed through, same pattern as `login`. Optional here;
-		// `/oauth/consent` is the default, from HOCON.
+		// `/consent` is the default, from HOCON — the deployment's page, not the
+		// `/oauth/consent` JSON API that page calls.
 		consent: z.object({ url: z.string() }).optional(),
 		// IH-10: `client` / `authCallback` removed — no production consumer
 		// reads them. The pre-fix env-var-only HOCON lines silently leaked

@@ -16,10 +16,19 @@ Adapter freedom applies **within** authentication and token issuance. It is not
 a licence to grow the responsibility.
 
 `UserRepository` is the clearest case, and the shape of the rule. It is
-`authenticate` / `authenticateByToken` and nothing else. Creating users,
-changing passwords, flipping verification state, linking a device to a user,
-upgrading an anonymous identity to a registered one — all of that belongs to the
-Store, and the library only ever *reads the result*. Three call sites already say
+`authenticate` / `authenticateByToken`, plus one optional member,
+`linkFederatedIdentity` (#482). Creating users, changing passwords, flipping
+verification state, linking a device to a user, upgrading an anonymous identity
+to a registered one — all of that belongs to the Store, and for all of it the
+library only ever *reads the result*. The one exception is the link below.
+
+`linkFederatedIdentity` is the one call through which the library causes a
+write, and it passes the document's own test: the `?link=1` flow is one this
+library drives end to end, so the flow needs the seam. What still holds is the
+part that matters — the **Store decides**. The library relays the verified
+identity and the session it is bound to, and relays `refused` / `conflict` back
+unchanged; it never merges accounts, never links implicitly, and never links on
+an unverified or relay e-mail on its own authority. Three call sites already say
 so where the temptation is highest:
 
 - `grants/emailVerifiedGate.mts` — the Store "issues the token, delivers it, and
@@ -121,7 +130,7 @@ a composition root. Listed because a module may `require` them.
 | `sessionRPRegistry` | `SessionRPRegistry` | optional | `core/user-sessions/types.mts` | Which RPs a session has authenticated to, for back-channel logout. |
 | `subjectRevocation` | `SubjectRevocation` | optional | `core/user-sessions/types.mts` | Per-subject not-before watermark: what a credential change stamps so tokens minted before it stop verifying. Absence must be declared (#406). |
 | `subjectSessionIndex` | `SubjectSessionIndex` | optional | `core/user-sessions/types.mts` | Subject → live sessions, so a credential change can enumerate what to cascade over. Absence must be declared (#406). |
-| `userRepository` | `UserRepository` | required | `core/repositories/UserRepository.mts` | **The verify seam.** `authenticate` / `authenticateByToken` and nothing else — see the boundary section. |
+| `userRepository` | `UserRepository` | required | `core/repositories/UserRepository.mts` | **The verify seam.** `authenticate` / `authenticateByToken`, plus the optional `linkFederatedIdentity` a `?link=1` flow relays to the Store, which decides — see the boundary section. |
 | `userSessionStore` | `UserSessionStore` | optional | `core/user-sessions/types.mts` | The session records themselves, keyed by `sid`. |
 | `webauthnConfig` | `WebAuthnConfig` | optional | `webauthn/config.mts` | Config slice for the WebAuthn module. |
 | `webauthnCredentialStore` | `WebAuthnCredentialStore` | optional | `core/webauthn-credentials/types.mts` | Registered passkeys. |
