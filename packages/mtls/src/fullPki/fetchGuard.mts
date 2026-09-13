@@ -42,6 +42,12 @@
  *     `oauth.mtls.trusted-proxies` draws for forwarded certificate headers,
  *     and it is required rather than defaulted for the same reason.
  *
+ * The allowlist is also why this guard does not consult core's
+ * `isSpecialUseAddress` (RFC 6890), which is the control for a URL a stranger
+ * chose. Here the operator names every destination, and must be able to name
+ * a private one: an internal CA's distribution point and OCSP responder
+ * usually are. The two homes state each other; see `core/src/net/special-use.mts`.
+ *
  * On top of those: no redirects (a redirect is a second destination that
  * neither layer vetted), a byte cap read incrementally so a hostile responder
  * cannot exhaust memory before the check fires, a wall-clock timeout, and no

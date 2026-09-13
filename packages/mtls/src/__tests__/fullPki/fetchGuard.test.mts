@@ -60,6 +60,24 @@ describe("guarded fetch — destination", () => {
 		expect(fetchImpl).not.toHaveBeenCalled();
 	});
 
+	it("fetches from a private address the operator allowlisted — the allowlist, not RFC 6890, is this guard's control", async () => {
+		// A deliberate divergence from core's `isSpecialUseAddress` (v0.13.0
+		// audit): an internal CA publishes its CRLs and runs its OCSP responder
+		// inside the network, so refusing special-use addresses here would refuse
+		// the deployments mTLS is for. The destination is one the operator named,
+		// not one a stranger chose, which is the case the special-use list is for.
+		const fetchImpl = vi.fn(async () => okResponse(new Uint8Array([9])));
+		const get = createGuardedFetch({
+			...options,
+			allowedHosts: ["10.20.30.40", "pki.corp.internal"],
+			fetchImpl: fetchImpl as unknown as typeof fetch,
+		});
+
+		expect((await get("http://10.20.30.40/ca.crl")).ok).toBe(true);
+		expect((await get("http://pki.corp.internal/ca.crl")).ok).toBe(true);
+		expect(fetchImpl).toHaveBeenCalledTimes(2);
+	});
+
 	it("matches an allowlist entry's port when it names one", async () => {
 		const fetchImpl = vi.fn(async () => okResponse(new Uint8Array([1])));
 		const get = createGuardedFetch({
