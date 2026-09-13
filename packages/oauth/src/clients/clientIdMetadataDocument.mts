@@ -473,7 +473,17 @@ export function createClientIdMetadataDocumentResolver(
 		}
 		if (res.status !== 200) {
 			await res.body?.cancel().catch(() => undefined);
-			throw new DocumentRejected(`document fetch answered ${res.status}`);
+			// A verdict on the document, or a verdict on the day the client's
+			// server is having? A 4xx and a refused redirect say the
+			// registration is not there or not one we will follow — the client's
+			// own problem, and cached as a refusal. A 5xx or a 429 says their
+			// server could not answer, which is exactly what `staleIfErrorMs`
+			// exists to ride out; classifying it as a rejection would delete the
+			// warm registration this server already validated and refuse a
+			// working client for the length of someone else's outage.
+			const transient = res.status >= 500 || res.status === 429;
+			const message = `document fetch answered ${res.status}`;
+			throw transient ? new Error(message) : new DocumentRejected(message);
 		}
 		const contentType = res.headers.get("content-type") ?? "";
 		if (!/json/i.test(contentType)) {

@@ -215,13 +215,17 @@ describe("createClientIdMetadataDocumentResolver — the SSRF guard and the host
 
 describe("createClientIdMetadataDocumentResolver — the fetch (#529)", () => {
 	it("refuses a redirect, a non-200, and a non-JSON body", async () => {
+		// Each of these is the client's own registration being wrong or absent,
+		// so each is logged as a rejection — the log an operator reads to tell
+		// "this client is misconfigured" from "their server is having a bad
+		// day", which is the `cimd_document_fetch_failed` case below.
 		for (const [name, response] of [
 			[
 				"redirect",
 				() => new Response(null, { status: 302, headers: { location: "https://elsewhere" } }),
 			],
 			["404", () => json({}, {}, 404)],
-			["500", () => json({}, {}, 500)],
+			["403", () => json({}, {}, 403)],
 			[
 				"html",
 				() => new Response("<html/>", { status: 200, headers: { "content-type": "text/html" } }),
@@ -235,6 +239,21 @@ describe("createClientIdMetadataDocumentResolver — the fetch (#529)", () => {
 			const { resolve, warn } = resolver({}, [response]);
 			expect(await resolve(), name).toBeNull();
 			expect(warn, name).toHaveBeenCalledWith(expect.anything(), "cimd_document_rejected");
+		}
+	});
+
+	it("reports the client server's own failure as a fetch failure, not a rejection", async () => {
+		// A 5xx or a 429 is their availability, not their registration. The
+		// distinction decides whether a warm entry survives (#529 audit) — and
+		// it is the one an operator needs from the log.
+		for (const [name, response] of [
+			["500", () => json({}, {}, 500)],
+			["503", () => json({}, {}, 503)],
+			["429", () => json({}, {}, 429)],
+		] as const) {
+			const { resolve, warn } = resolver({}, [response]);
+			expect(await resolve(), name).toBeNull();
+			expect(warn, name).toHaveBeenCalledWith(expect.anything(), "cimd_document_fetch_failed");
 		}
 	});
 
@@ -541,6 +560,53 @@ describe("the cache tells the truth about an outage (#529 audit)", () => {
 		clock.now += 2_000; // the entry has expired, so this revalidates
 		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
 		expect(calls).toHaveLength(2);
+	});
+
+	it("rides out the client server's own 5xx on a warm cache", async () => {
+		// A 503 from the client's server is not a verdict on the client. It
+		// reached this code as `DocumentRejected` — every non-200 did — so the
+		// warm registration was deleted and the client refused, which is the
+		// case the stale window exists for.
+		const clock = { now: 1_000_000 };
+		const { fetch } = fakeFetch([
+			() => json(document(), { "cache-control": "max-age=1" }),
+			() => json({ error: "down" }, {}, 503),
+			() => json({ error: "slow down" }, {}, 429),
+		]);
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read", "write"],
+			allowedAudiences: ["https://mcp.example"],
+			fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		clock.now += 2_000;
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		clock.now += 2_000;
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+	});
+
+	it("treats a 404 as the client's own problem, not an outage", async () => {
+		// The other side of the same line: the registration is not there, so
+		// the warm entry goes and the refusal is remembered.
+		const clock = { now: 1_000_000 };
+		const { fetch } = fakeFetch([
+			() => json(document(), { "cache-control": "max-age=1" }),
+			() => json({ error: "gone" }, {}, 404),
+		]);
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read", "write"],
+			allowedAudiences: ["https://mcp.example"],
+			fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		clock.now += 2_000;
+		expect(await r.resolve(CLIENT_URL)).toBeNull();
 	});
 
 	it("still refuses a document that was rejected, cache or no cache", async () => {
