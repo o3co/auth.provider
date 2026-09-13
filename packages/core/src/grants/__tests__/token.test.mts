@@ -22,6 +22,32 @@ import { createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
 
 const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 
+describe("generateToken — a caller-supplied identity (v0.13.0 audit)", () => {
+	it("refuses an empty jti rather than signing a token with no identity", async () => {
+		// `jti` is supplied when a token's identity is reserved before it is
+		// signed (#449). An empty one would be signed as-is, and every replay
+		// check keyed on it would share one key.
+		await expect(generateToken({}, { keyStore, jti: "" })).rejects.toThrow(/jti/);
+	});
+
+	it("refuses an issuedAt that is not a whole number of epoch seconds", async () => {
+		for (const issuedAt of [Number.NaN, 1.5, -1, Number.POSITIVE_INFINITY]) {
+			await expect(generateToken({}, { keyStore, issuedAt }), String(issuedAt)).rejects.toThrow(
+				/issuedAt/,
+			);
+		}
+	});
+
+	it("signs exactly the jti and issuedAt it is given", async () => {
+		const token = await generateToken(
+			{},
+			{ keyStore, jti: "reserved-1", issuedAt: 1_700_000_000, expiresIn: 60 },
+		);
+		const claims = decodeJwt(token.token);
+		expect(claims).toMatchObject({ jti: "reserved-1", iat: 1_700_000_000, exp: 1_700_000_060 });
+	});
+});
+
 describe("generateToken", () => {
 	it("returns a Token with a valid JWT string", async () => {
 		const token = await generateToken(

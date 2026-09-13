@@ -1931,10 +1931,53 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 			).toString("utf-8"),
 		) as Record<string, unknown>;
 		// At or inside the committed ceiling — never past it. The adapter's
-		// reported value drifts forward by milliseconds, so the second it is
-		// floored to is the safe reading.
+		// reported value drifts forward by milliseconds, so a one-second margin
+		// comes off before flooring.
 		expect((claims.exp as number) * 1000).toBeLessThanOrEqual(cappedAt);
-		expect(claims.exp as number).toBe(Math.floor(cappedAt / 1000));
+		expect(claims.exp as number).toBe(Math.floor((cappedAt - 1_000) / 1000));
+	});
+
+	it("keeps a margin for the forward drift, which flooring alone does not (v0.13.0 audit)", async () => {
+		// The contract (`RefreshTokenFamilyRotationOutcome.cappedExpiresAtMs`)
+		// says the reported ceiling drifts FORWARD and asks for a subtracted
+		// margin. Flooring truncates: a true ceiling at …10.998 s reported as
+		// …11.002 s floored to 11 s, two milliseconds past the record.
+		const store = countingKeyStore();
+		const reported = (Math.floor(Date.now() / 1000) + 42) * 1000 + 2; // just past a second
+		const { result } = await run(
+			{
+				async register() {},
+				async rotate() {
+					return { outcome: "rotated" as const, cappedExpiresAtMs: reported };
+				},
+			},
+			store,
+		);
+		if (!("tokens" in result)) return expect.fail("expected tokens");
+		const exp = decodeJwt(result.tokens.refresh_token as string).exp as number;
+		// The true ceiling may be up to the drift earlier than reported.
+		expect(exp * 1000).toBeLessThanOrEqual(reported - 1_000);
+	});
+
+	it("refuses rather than issue a refresh token the family ceiling leaves no lifetime for (v0.13.0 audit)", async () => {
+		// `Math.max(0, …)` turned an exhausted family into `expiresIn: 0`: a
+		// 200 carrying a refresh token that was already expired, after the one
+		// presented had been spent. The family reached its lifetime; say so.
+		const store = countingKeyStore();
+		const { result } = await run(
+			{
+				async register() {},
+				async rotate() {
+					return { outcome: "rotated" as const, cappedExpiresAtMs: Date.now() + 400 };
+				},
+			},
+			store,
+		);
+		expect(result.status).toBe(400);
+		if (!("error" in result)) return expect.fail("expected an error");
+		expect(result.error).toBe("invalid_grant");
+		expect(result.errorDescription).toMatch(/lifetime/);
+		expect(store.signed).toHaveLength(0);
 	});
 
 	it("ignores a cap that is not shorter than what it asked for", async () => {
@@ -1959,6 +2002,54 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 		expect((claims.exp as number) - (claims.iat as number)).toBe(
 			mockConfig.oauth.refreshToken.expiresIn,
 		);
+	});
+
+	it("does not shorten a rotation the family did not cap (review)", async () => {
+		// The store reports the committed ceiling on every rotation; when the
+		// family is younger than the requested lifetime that is exactly the
+		// expiry asked for. The drift margin is for a cap that fired — applied
+		// here it took a second off every refresh token, and refused a
+		// one-second lifetime as exhausted.
+		const store = countingKeyStore();
+		const { result } = await run(
+			{
+				async register() {},
+				async rotate(_previousJti: string, _newJti: string, _family: string, expiresAt: number) {
+					return { outcome: "rotated" as const, cappedExpiresAtMs: expiresAt };
+				},
+			},
+			store,
+		);
+		if (!("tokens" in result)) return expect.fail("expected tokens");
+		const claims = decodeJwt(result.tokens.refresh_token as string);
+		expect((claims.exp as number) - (claims.iat as number)).toBe(
+			mockConfig.oauth.refreshToken.expiresIn,
+		);
+	});
+
+	it("refuses when the store took longer than the capped lifetime it left (review)", async () => {
+		// `issuedAt` is reserved before the rotation; a slow store can use up
+		// what the cap left, and the token would be signed already expired.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			const start = 1_800_000_000_000;
+			vi.setSystemTime(start);
+			const store = countingKeyStore();
+			const { result } = await run(
+				{
+					async register() {},
+					async rotate() {
+						vi.setSystemTime(start + 4_000); // the CAS round trip took four seconds
+						return { outcome: "rotated" as const, cappedExpiresAtMs: start + 3_500 };
+					},
+				},
+				store,
+			);
+			expect(result.status).toBe(400);
+			expect(store.signed).toHaveLength(0);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 
 	it("signs the jti and expiry it reserved, once the reservation holds", async () => {
