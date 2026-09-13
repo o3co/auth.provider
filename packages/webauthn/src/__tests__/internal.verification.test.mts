@@ -25,8 +25,8 @@
  * brittle and duplicates SimpleWebAuthn's own test surface.
  *
  * The helpers under test are *thin wrappers* whose value-add is:
- *   1. Typed error-reason mapping (origin/challenge/rp_id/counter error strings
- *      → typed reason union)
+ *   1. Typed error-reason mapping (algorithm/top-origin/origin/challenge/rp_id/
+ *      counter error strings → typed reason union)
  *   2. Material reshaping (drop SimpleWebAuthn-internal fields; expose only
  *      credentialId / publicKey / signCount / transports / backedUp)
  *   3. §2.4 sign-count corner case (stored=0 && new=0 → allow)
