@@ -38,6 +38,16 @@ import {
 	unrepresentedResources,
 } from "./_resourceIndicator.mjs";
 
+/**
+ * Taken off the family ceiling a rotation reports before the refresh token's
+ * `exp` is set from it. The reported `cappedExpiresAtMs` drifts forward by
+ * milliseconds (its contract, `RefreshTokenFamilyRotationOutcome`), so a
+ * token signed at the reported second could outlive the record that catches
+ * its replay. A second is generous for a drift of milliseconds, and costs a
+ * refresh token issued at the very end of its family one second of life.
+ */
+const CAPPED_EXPIRY_DRIFT_MARGIN_MS = 1_000;
+
 export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
 	const { config, keyStore, logger, subjectRevocation } = deps;
 
@@ -597,19 +607,35 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				switch (rotateResult.outcome) {
 					case "rotated": {
 						rotationCommitted = true;
-						// Successful rotation — fall through to the
-						// success path below (token issuance), at no more than the
-						// ceiling the store committed. The adapter reconstructs that
-						// epoch after its round-trip, so it drifts a few milliseconds
-						// forward; flooring to the second is the margin its contract
-						// asks for, and the `min` means a cap that is not a cap
-						// changes nothing.
+						// Successful rotation — fall through to the success path below
+						// (token issuance), at no more than the ceiling the store
+						// committed. The adapter reconstructs that epoch after its
+						// round-trip, so it drifts forward by milliseconds, and its
+						// contract asks for a subtracted margin: flooring alone only
+						// truncates, and can land past the true ceiling (v0.13.0
+						// audit). The `min` means a cap that is not a cap changes
+						// nothing.
 						const capped = rotateResult.cappedExpiresAtMs;
 						if (capped !== undefined) {
-							refreshExpiresIn = Math.max(
-								0,
-								Math.min(requestedRefreshExpiresIn, Math.floor(capped / 1000) - issuedAt),
+							refreshExpiresIn = Math.min(
+								requestedRefreshExpiresIn,
+								Math.floor((capped - CAPPED_EXPIRY_DRIFT_MARGIN_MS) / 1000) - issuedAt,
 							);
+							if (refreshExpiresIn <= 0) {
+								// The family reached its lifetime. Issuing `expiresIn: 0`
+								// was a 200 carrying an already-expired refresh token.
+								logger?.info(
+									{ familyId: newFamilyId, clientId: authenticatedClientId },
+									"refresh_token_family_lifetime_exhausted",
+								);
+								return {
+									result: {
+										status: 400,
+										error: "invalid_grant",
+										errorDescription: "refresh token family has reached its lifetime",
+									},
+								};
+							}
 						}
 						break;
 					}

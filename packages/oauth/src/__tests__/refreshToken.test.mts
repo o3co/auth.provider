@@ -1931,10 +1931,53 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 			).toString("utf-8"),
 		) as Record<string, unknown>;
 		// At or inside the committed ceiling — never past it. The adapter's
-		// reported value drifts forward by milliseconds, so the second it is
-		// floored to is the safe reading.
+		// reported value drifts forward by milliseconds, so a one-second margin
+		// comes off before flooring.
 		expect((claims.exp as number) * 1000).toBeLessThanOrEqual(cappedAt);
-		expect(claims.exp as number).toBe(Math.floor(cappedAt / 1000));
+		expect(claims.exp as number).toBe(Math.floor((cappedAt - 1_000) / 1000));
+	});
+
+	it("keeps a margin for the forward drift, which flooring alone does not (v0.13.0 audit)", async () => {
+		// The contract (`RefreshTokenFamilyRotationOutcome.cappedExpiresAtMs`)
+		// says the reported ceiling drifts FORWARD and asks for a subtracted
+		// margin. Flooring truncates: a true ceiling at …10.998 s reported as
+		// …11.002 s floored to 11 s, two milliseconds past the record.
+		const store = countingKeyStore();
+		const reported = (Math.floor(Date.now() / 1000) + 42) * 1000 + 2; // just past a second
+		const { result } = await run(
+			{
+				async register() {},
+				async rotate() {
+					return { outcome: "rotated" as const, cappedExpiresAtMs: reported };
+				},
+			},
+			store,
+		);
+		if (!("tokens" in result)) return expect.fail("expected tokens");
+		const exp = decodeJwt(result.tokens.refresh_token as string).exp as number;
+		// The true ceiling may be up to the drift earlier than reported.
+		expect(exp * 1000).toBeLessThanOrEqual(reported - 1_000);
+	});
+
+	it("refuses rather than issue a refresh token the family ceiling leaves no lifetime for (v0.13.0 audit)", async () => {
+		// `Math.max(0, …)` turned an exhausted family into `expiresIn: 0`: a
+		// 200 carrying a refresh token that was already expired, after the one
+		// presented had been spent. The family reached its lifetime; say so.
+		const store = countingKeyStore();
+		const { result } = await run(
+			{
+				async register() {},
+				async rotate() {
+					return { outcome: "rotated" as const, cappedExpiresAtMs: Date.now() + 400 };
+				},
+			},
+			store,
+		);
+		expect(result.status).toBe(400);
+		if (!("error" in result)) return expect.fail("expected an error");
+		expect(result.error).toBe("invalid_grant");
+		expect(result.errorDescription).toMatch(/lifetime/);
+		expect(store.signed).toHaveLength(0);
 	});
 
 	it("ignores a cap that is not shorter than what it asked for", async () => {

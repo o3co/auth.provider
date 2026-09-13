@@ -103,7 +103,7 @@ export interface GenerateTokenOptions {
 	 * family store first and signs only once the reservation holds, so a
 	 * lost race costs no signature.
 	 */
-	jti?: string;
+	readonly jti?: string;
 	/**
 	 * Epoch seconds for `iat`, and what `exp` is measured from. The clock
 	 * unless the caller supplies it — supplied alongside `jti` so the
@@ -128,6 +128,14 @@ export const generateToken = async (
 		issuedAt = undefined,
 	}: GenerateTokenOptions,
 ): Promise<Token> => {
+	// Both are reservations made before signing (#449). An empty `jti` would
+	// sign a token with no identity for every replay check keyed on it; an
+	// `issuedAt` that is not whole epoch seconds would sign `iat` / `exp` no
+	// verifier reads as intended.
+	if (jti.length === 0) throw new Error("generateToken: jti must not be empty");
+	if (issuedAt !== undefined && !(Number.isSafeInteger(issuedAt) && issuedAt >= 0)) {
+		throw new Error("generateToken: issuedAt must be a non-negative whole number of epoch seconds");
+	}
 	const now = issuedAt ?? Math.floor(Date.now() / 1000);
 	const claims: JWTPayload = {
 		...(data as Record<string, unknown>),
