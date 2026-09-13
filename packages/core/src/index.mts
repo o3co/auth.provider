@@ -248,6 +248,17 @@ export {
 export { DEFAULT_JWKS_CACHE_MAX_AGE, resolveJwksCacheMaxAge } from "./jwks/cache.mjs";
 export { jwksModule } from "./jwks/module.mjs";
 export { DEFAULT_JWKS_PATH, resolveJwksPath } from "./jwks/path.mjs";
+// A remote JSON Web Key Set, memoised per uri and tuning, with a fetch seam
+export {
+	createRemoteKeySetCache,
+	DEFAULT_REMOTE_JWKS_CACHE_MAX_AGE_MS,
+	DEFAULT_REMOTE_JWKS_COOLDOWN_MS,
+	DEFAULT_REMOTE_JWKS_TIMEOUT_MS,
+	type RemoteKeySet,
+	type RemoteKeySetCache,
+	type RemoteKeySetCacheOptions,
+	type RemoteKeySetTuning,
+} from "./jwks/remoteKeySet.mjs";
 // JWT verifier (SF-1) — central verifyJwt with alg/iss/aud/typ pinning
 export type {
 	JwtRevocationSources,

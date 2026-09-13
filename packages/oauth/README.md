@@ -575,7 +575,7 @@ const assertionVerifier = createRegistryAssertionVerifier({
 
 What an entry says, and what it means at `/oauth/token`:
 
-- **Keys** come from one public key (`type: "key"`), a static JWK set (`type: "jwks"`), or a JWKS endpoint (`type: "jwks_uri"`, `https` required outside loopback). A remote set is fetched on first use and cached; an unknown `kid` triggers a refetch, so a rotation at the issuer is picked up without a restart. An endpoint that is down is an outage: the grant answers `503`, not `invalid_grant`.
+- **Keys** come from one public key (`type: "key"`), a static JWK set (`type: "jwks"`), or a JWKS endpoint (`type: "jwks_uri"`, `https` required outside loopback). A remote set is fetched on first use and cached (10 minutes by default; `cacheMaxAgeMs`, `cooldownMs`, `timeoutMs` on the entry tune it); an unknown `kid` triggers a refetch, so a rotation at the issuer is picked up without a restart. The fetch is the verifier's `fetch` option when given — an egress proxy — as it is for a `private_key_jwt` client's `jwksUri`; both are core's `createRemoteKeySetCache`. An endpoint that is down is an outage: the grant answers `503`, not `invalid_grant`.
 - **An unregistered `iss` is refused before any signature work.** No key is fetched and no signature is checked for an issuer nobody registered; "signed by A, claiming to be B" fails on B's keys.
 - **`allowedClients`** restricts who may present the issuer's assertions; a list refuses an unauthenticated presenter. Absent, anyone may.
 - **`allowedScopes`** is intersected with the assertion's own `scope` claim (or stands alone when the assertion names none) and becomes the scope ceiling the request and the client registration are further bounded by.

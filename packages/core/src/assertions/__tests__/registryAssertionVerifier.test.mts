@@ -242,6 +242,33 @@ describe("createRegistryAssertionVerifier — a remote JWKS endpoint (#525)", ()
 		expect(await verifier.verify(await mint({ sub: "d" }, { kid: "k1" }))).toBeNull();
 	});
 
+	it("fetches through the fetch it is given — an egress proxy, as client assertions already allow (v0.13.0 audit)", async () => {
+		// `createClientAssertionVerifier` took a fetch for a client's `jwksUri`;
+		// this verifier did not, so a deployment behind an egress proxy could
+		// verify `private_key_jwt` but not a trusted issuer's assertions.
+		const fetchImpl = vi.fn(
+			async () =>
+				new Response(
+					JSON.stringify({
+						keys: [{ ...(await exportJWK(authorityA.publicKey)), kid: "k1", alg: "EdDSA" }],
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				),
+		);
+		const verifier = createRegistryAssertionVerifier({
+			registry: createMemoryAssertionIssuerRegistry([
+				entryA({ keys: { type: "jwks_uri", uri: "https://a.example/jwks.json" } }),
+			]),
+			audience: AS,
+			fetch: fetchImpl as unknown as typeof fetch,
+		});
+		expect(await verifier.verify(await mint({ sub: "d" }, { kid: "k1" }))).toMatchObject({
+			subjectHandle: "d",
+		});
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
+		expect(String(fetchImpl.mock.calls[0]?.[0])).toBe("https://a.example/jwks.json");
+	});
+
 	it("does not fetch for an issuer that is not registered", async () => {
 		const verifier = verifierOver([remoteEntry()]);
 		const before = jwks.fetches();
