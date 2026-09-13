@@ -28,6 +28,7 @@ import {
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
+import { checkRequestOrigin } from "../csrf.mjs";
 import { mergeFederatedClaims } from "../federations/claim-precedence.mjs";
 import { generateCodeVerifier } from "../federations/pkce.mjs";
 import type { FederationRedirectPolicy } from "../federations/redirect-policy.mjs";
@@ -113,6 +114,38 @@ const readSessionCookieName = (config: unknown): string => {
 	if (session == null || typeof session !== "object") return FALLBACK_SESSION_COOKIE_NAME;
 	const name = (session as { name?: unknown }).name;
 	return typeof name === "string" && name.length > 0 ? name : FALLBACK_SESSION_COOKIE_NAME;
+};
+
+/** Read `config.session.csrf.trustedOrigins` without assuming a full AppConfig. */
+const readCsrfTrustedOrigins = (config: unknown): readonly string[] => {
+	const csrf = (config as { session?: { csrf?: { trustedOrigins?: unknown } } } | null | undefined)
+		?.session?.csrf;
+	const list = csrf?.trustedOrigins;
+	return Array.isArray(list) ? list.filter((o): o is string => typeof o === "string") : [];
+};
+
+/**
+ * Whether a `?link=1` start carries positive evidence that the user asked for
+ * it on this deployment's own pages (v0.13.0 audit).
+ *
+ * Fetch Metadata answers first where the browser sends it: `same-origin` is a
+ * page of this origin, `none` a typed URL or a bookmark — no page sent the
+ * browser — and `cross-site` is refused. `same-site` is not enough on its own:
+ * it is the registrable domain, so a user-controlled sibling such as
+ * `blog.example.com` sends it too. That, an absent header (a browser predating
+ * Fetch Metadata still carries the SameSite=Lax cookie on a cross-site
+ * navigation) and a value this code does not know all fall to the origin the
+ * request names, held to the same rule as the session CSRF guard: this origin
+ * or one on `session.csrf.trustedOrigins`. A GET navigation sends no `Origin`,
+ * so that is the `Referer` — and a missing one is refused, because the
+ * navigating page chooses its own referrer policy.
+ */
+const isLinkStartTrusted = (req: Request, trustedOrigins: readonly string[]): boolean => {
+	const site = req.get("sec-fetch-site");
+	if (site === "same-origin" || site === "none") return true;
+	if (site === "cross-site") return false;
+	const verdict = checkRequestOrigin(req, trustedOrigins);
+	return verdict === "same-origin" || verdict === "trusted";
 };
 
 /**
@@ -202,6 +235,7 @@ export const createRouter = (
 	const transactionCookieName =
 		federationTransactionCookieName ??
 		deriveFederationTransactionCookieName(readSessionCookieName(config));
+	const linkTrustedOrigins = readCsrfTrustedOrigins(config);
 
 	/**
 	 * The federation transaction store, over the express-session store the
@@ -1117,18 +1151,21 @@ export const createRouter = (
 				// session cookie is SameSite=Lax, which a top-level cross-site
 				// navigation carries; paired with a login CSRF at the IdP, a forced
 				// `?link=1` would link the attacker's identity to the victim's
-				// account (v0.13.0 audit). Fetch Metadata says where the navigation
-				// came from. `cross-site` is refused; `same-site` is the deployment's
-				// own account page on a sibling host, `none` a typed URL or bookmark,
-				// and an absent header — an older browser, or a client that is not a
-				// browser — carries no ambient cross-site navigation to forge. An
-				// ordinary login start is not held to this: an RP on another domain
-				// starting a federated login is the normal shape.
-				if (req.get("sec-fetch-site") === "cross-site") {
+				// account (v0.13.0 audit). See `isLinkStartTrusted` for what counts
+				// as evidence. An ordinary login start is not held to this: an RP on
+				// another domain starting a federated login is the normal shape.
+				if (!isLinkStartTrusted(req, linkTrustedOrigins)) {
+					logger.warn(
+						{
+							provider: String(req.params.name),
+							secFetchSite: (req.get("sec-fetch-site") ?? "").slice(0, 32),
+						},
+						"federation_link_start_rejected",
+					);
 					return res.status(403).json({
-						error: "link_requires_same_site",
+						error: "link_requires_trusted_origin",
 						error_description:
-							"Linking a federated identity must be started from this site, not navigated to from another",
+							"Linking a federated identity must be started from this site or an origin on session.csrf.trustedOrigins",
 					});
 				}
 				if (req.session.isAuthenticated !== true || typeof req.session.sid !== "string") {

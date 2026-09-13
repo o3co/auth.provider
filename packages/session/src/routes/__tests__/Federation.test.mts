@@ -317,6 +317,7 @@ function buildCallbackApp({
 	saveInterceptor,
 	sessionSeed,
 	auditSink,
+	config,
 }: {
 	providers: ReadonlyMap<string, FederationProvider>;
 	providerCallbackUrls?: ReadonlyMap<string, string>;
@@ -332,6 +333,8 @@ function buildCallbackApp({
 	/** #482: extra session fields planted next to `federation` — an authenticated `sid`. */
 	sessionSeed?: Record<string, unknown>;
 	auditSink?: AuditSink;
+	/** A partial `AppConfig`; absent is `{}`, as most tests need none. */
+	config?: Record<string, unknown>;
 }): { app: express.Express; store: SessionStore } {
 	const store: SessionStore = new Map();
 	const app = makeSessionApp(store);
@@ -347,7 +350,7 @@ function buildCallbackApp({
 	);
 	app.use(
 		createRouter(express, {
-			config: {} as never,
+			config: (config ?? {}) as never,
 			federationProviders: providers,
 			federationRedirectPolicyResolver: federationRedirectPolicyResolver ?? defaultResolver,
 			providerCallbackUrls: providerCallbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
@@ -429,7 +432,9 @@ describe("account linking across federations (#482)", () => {
 	describe("the start leg", () => {
 		it("refuses link=1 without an authenticated session", async () => {
 			const app = buildStatelessApp({ providers, userRepository: linkableRepo() });
-			const res = await request(app).get("/oauth/federation/test?link=1");
+			const res = await request(app)
+				.get("/oauth/federation/test?link=1")
+				.set("Sec-Fetch-Site", "same-origin");
 			expect(res.status).toBe(401);
 			expect(res.body.error).toBe("login_required");
 		});
@@ -442,7 +447,9 @@ describe("account linking across federations (#482)", () => {
 				userRepository: makeUserRepository(),
 			});
 			const agent = await plantAndGetAgent(app);
-			const res = await agent.get("/oauth/federation/test?link=1");
+			const res = await agent
+				.get("/oauth/federation/test?link=1")
+				.set("Sec-Fetch-Site", "same-origin");
 			expect(res.status).toBe(400);
 			expect(res.body.error).toBe("link_unsupported");
 		});
@@ -455,69 +462,119 @@ describe("account linking across federations (#482)", () => {
 				userRepository: linkableRepo(),
 			});
 			const agent = await plantAndGetAgent(app);
-			const res = await agent.get("/oauth/federation/test?link=1");
+			const res = await agent
+				.get("/oauth/federation/test?link=1")
+				.set("Sec-Fetch-Site", "same-origin");
 			expect(res.status).toBe(302);
 			const inspect = await agent.get("/_inspect");
 			// The intent is bound to the session that asked, not merely recorded.
 			expect(JSON.parse(inspect.text).federation.link).toEqual({ sid: "s-1" });
 		});
 
-		it("refuses a link start a cross-site page navigated the browser to", async () => {
+		describe("a link start must come from this deployment's own pages (v0.13.0 audit)", () => {
 			// The start is a GET and the session cookie is SameSite=Lax, which a
 			// top-level cross-site navigation carries: any page could send a
 			// signed-in victim to `?link=1`. Paired with a login CSRF at the IdP —
 			// the victim's browser signed in there as the attacker — the callback
 			// would link the attacker's identity to the victim's account, and the
-			// attacker could then sign in as the victim through that IdP. The
-			// browser says where the navigation came from; a cross-site one is
-			// not the user asking to link.
-			const repo = linkableRepo();
-			const { app } = buildCallbackApp({
-				providers,
-				federation: {},
-				sessionSeed: seed,
-				userRepository: repo,
-			});
-			const agent = await plantAndGetAgent(app);
-			const res = await agent
-				.get("/oauth/federation/test?link=1")
-				.set("Sec-Fetch-Site", "cross-site");
-			expect(res.status).toBe(403);
-			expect(res.body.error).toBe("link_requires_same_site");
-			// Refused before any transaction exists or the browser is sent anywhere.
-			const inspect = await agent.get("/_inspect");
-			expect(JSON.parse(inspect.text).federation.link).toBeUndefined();
-		});
-
-		it.each([["same-origin"], ["same-site"], ["none"]])(
-			"accepts a link start whose navigation is %s",
-			async (site) => {
-				// `same-site` is the deployment's own account page on a sibling host;
-				// `none` is a typed URL or a bookmark.
-				const { app } = buildCallbackApp({
+			// attacker could then sign in as the victim through that IdP. So a
+			// link start needs positive evidence the user asked for it here.
+			const HOST = "auth.example.com";
+			const linkApp = (trustedOrigins?: string[]) =>
+				buildCallbackApp({
 					providers,
 					federation: {},
 					sessionSeed: seed,
 					userRepository: linkableRepo(),
-				});
+					...(trustedOrigins ? { config: { session: { csrf: { trustedOrigins } } } } : {}),
+				}).app;
+			const start = async (
+				app: express.Express,
+				headers: Record<string, string>,
+			): Promise<request.Response> => {
 				const agent = await plantAndGetAgent(app);
-				const res = await agent.get("/oauth/federation/test?link=1").set("Sec-Fetch-Site", site);
-				expect(res.status).toBe(302);
-			},
-		);
+				let req = agent.get("/oauth/federation/test?link=1").set("Host", HOST);
+				for (const [name, value] of Object.entries(headers)) req = req.set(name, value);
+				const res = await req;
+				if (res.status === 403) {
+					// Refused before any transaction exists or the browser is sent anywhere.
+					const inspect = await agent.get("/_inspect");
+					expect(JSON.parse(inspect.text).federation.link).toBeUndefined();
+				}
+				return res;
+			};
 
-		it("accepts a link start from a client that sends no fetch metadata", async () => {
-			// Absent is not evidence of an attack: a browser that predates the
-			// header, or a client that is not a browser, carries no ambient
-			// cross-site navigation to forge.
-			const { app } = buildCallbackApp({
-				providers,
-				federation: {},
-				sessionSeed: seed,
-				userRepository: linkableRepo(),
+			it("refuses a start navigated to by a cross-site page", async () => {
+				const res = await start(linkApp(), { "Sec-Fetch-Site": "cross-site" });
+				expect(res.status).toBe(403);
+				expect(res.body.error).toBe("link_requires_trusted_origin");
 			});
-			const agent = await plantAndGetAgent(app);
-			expect((await agent.get("/oauth/federation/test?link=1")).status).toBe(302);
+
+			it.each([["same-origin"], ["none"]])(
+				"accepts a start whose navigation is %s",
+				async (site) => {
+					// `none` is a typed URL or a bookmark: no page sent the browser.
+					expect((await start(linkApp(), { "Sec-Fetch-Site": site })).status).toBe(302);
+				},
+			);
+
+			it("refuses a same-site start from a sibling host this deployment does not trust", async () => {
+				// Fetch Metadata's `same-site` is the registrable domain, so a
+				// user-controlled `blog.example.com` navigates the victim here as
+				// `same-site` and the session cookie travels. A sibling is trusted
+				// only when `session.csrf.trustedOrigins` names it.
+				const res = await start(linkApp(), {
+					"Sec-Fetch-Site": "same-site",
+					Referer: "https://blog.example.com/post",
+				});
+				expect(res.status).toBe(403);
+				expect(res.body.error).toBe("link_requires_trusted_origin");
+			});
+
+			it("refuses a same-site start that names no origin at all", async () => {
+				// The navigating page chooses its own referrer policy, so a sibling
+				// sending none is the attacker's choice, not evidence of trust.
+				const res = await start(linkApp(["https://account.example.com"]), {
+					"Sec-Fetch-Site": "same-site",
+				});
+				expect(res.status).toBe(403);
+			});
+
+			it("accepts a same-site start from a sibling on session.csrf.trustedOrigins", async () => {
+				const res = await start(linkApp(["https://account.example.com"]), {
+					"Sec-Fetch-Site": "same-site",
+					Referer: "https://account.example.com/settings/identities",
+				});
+				expect(res.status).toBe(302);
+			});
+
+			it("refuses a start carrying no fetch metadata and no origin", async () => {
+				// A browser that predates Fetch Metadata still sends the SameSite=Lax
+				// cookie on a cross-site navigation, and an attacker's page can
+				// suppress the Referer. Absent evidence is not evidence of the user.
+				const res = await start(linkApp(), {});
+				expect(res.status).toBe(403);
+				expect(res.body.error).toBe("link_requires_trusted_origin");
+			});
+
+			it("refuses a start carrying no fetch metadata and a foreign Referer", async () => {
+				const res = await start(linkApp(), { Referer: "https://evil.example/" });
+				expect(res.status).toBe(403);
+			});
+
+			it("accepts a start carrying no fetch metadata from this deployment's own page", async () => {
+				// The older browser's link on the account page: its Referer names
+				// this origin, which a cross-site page cannot make it do.
+				const res = await start(linkApp(), { Referer: `http://${HOST}/account` });
+				expect(res.status).toBe(302);
+			});
+
+			it("accepts a start carrying no fetch metadata from a trusted origin", async () => {
+				const res = await start(linkApp(["https://account.example.com"]), {
+					Referer: "https://account.example.com/settings",
+				});
+				expect(res.status).toBe(302);
+			});
 		});
 
 		it("does not refuse an ordinary login start from another site", async () => {

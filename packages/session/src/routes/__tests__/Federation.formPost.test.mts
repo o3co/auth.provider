@@ -917,7 +917,8 @@ describe("POST callback — account linking through a form_post federation (#482
 
 		const start = await request(harness.app)
 			.get("/oauth/federation/apple?link=1")
-			.set("Cookie", "sid=browser");
+			.set("Cookie", "sid=browser")
+			.set("Sec-Fetch-Site", "same-origin");
 		expect(start.status).toBe(302);
 		const transactionId = readTransactionCookie(start);
 		expect(transactionId).toBeDefined();

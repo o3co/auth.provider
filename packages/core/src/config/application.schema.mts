@@ -1010,7 +1010,9 @@ export const fullSectionsSchema = z.object({
 			 * my responses" and "may this origin make me change state" are two
 			 * questions, and #272 was filed because one list was answering both.
 			 * Deployments whose login UI is served from a different origin than
-			 * the provider list those origins here — explicitly.
+			 * the provider list those origins here — explicitly. The same list
+			 * decides where an account-link start (`?link=1`) may be navigated
+			 * from.
 			 */
 			csrf: z
 				.object({
