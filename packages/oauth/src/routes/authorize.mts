@@ -16,6 +16,7 @@
 
 import {
 	type AuditSink,
+	boundPolicyAudience,
 	buildCanonicalRequestUrl,
 	type ClientRepository,
 	type CodeRepository,
@@ -819,13 +820,20 @@ const resolveAcr = (
 	if (requested.length === 0) return { value: undefined };
 	const table = ctx.opts.oauth.acrValues;
 	const held = new Set(session?.amr ?? []);
+	// `Object.hasOwn` rather than a bare read, and not only because
+	// `resolveOAuthOptions` now builds the table without a prototype:
+	// `ResolvedOAuthOptions` is exported, so a composition may hand in a
+	// plain object, and the value being looked up is one an unauthenticated
+	// caller writes.
+	const entryFor = (acr: string): readonly string[] | undefined =>
+		Object.hasOwn(table, acr) ? table[acr] : undefined;
 	for (const acr of requested) {
-		const required = table[acr];
+		const required = entryFor(acr);
 		if (required?.every((method) => held.has(method))) {
 			return { value: acr };
 		}
 	}
-	const unknown = requested.filter((acr) => table[acr] === undefined);
+	const unknown = requested.filter((acr) => entryFor(acr) === undefined);
 	redirectError(
 		ctx,
 		"unmet_authentication_requirements",
@@ -1024,13 +1032,25 @@ const applyGrantPolicy = async (
 		allowedFilteredScopes: readonly string[];
 		/** The client's full allowlist — the policy's `originalScope`. */
 		originalScope: readonly string[];
+		/**
+		 * #520: the audiences this grant may mint for — the client's
+		 * `allowedAudiences`, or an empty ceiling when it registers none.
+		 * Policy may narrow within it, never originate outside it.
+		 */
+		audienceCeiling: readonly string[];
 		authorizeResource: readonly string[] | null;
 	},
 ): Promise<{
 	grantedScopes: readonly string[];
 	grantedAudience: readonly string[] | undefined;
 } | null> => {
-	const { requestedScopes, allowedFilteredScopes, originalScope, authorizeResource } = inputs;
+	const {
+		requestedScopes,
+		allowedFilteredScopes,
+		originalScope,
+		audienceCeiling,
+		authorizeResource,
+	} = inputs;
 	let grantedScopes: readonly string[] = allowedFilteredScopes;
 	let grantedAudience: readonly string[] | undefined;
 	const sessionUser = ctx.req.session.user as Record<string, unknown> | undefined;
@@ -1109,12 +1129,26 @@ const applyGrantPolicy = async (
 			grantedScopes = decision.grantedScope;
 		}
 		if (decision.grantedAudience !== undefined) {
-			if (!Array.isArray(decision.grantedAudience)) {
-				// #521: persisted on the code and read back as `[0]` at /token —
-				// a string would become its first character.
-				redirectError(ctx, "server_error", "policy returned a non-array grantedAudience");
+			// #520: the same ceiling `client_credentials`, jwt-bearer and the
+			// WebAuthn grant apply, through the same home — a policy may narrow
+			// the grant's audience and may not originate one. `/authorize` used
+			// to check only the shape, and nothing re-bounds the value at
+			// `/token`: it is persisted on the code and read back there, so an
+			// audience a buggy or compromised policy invented would reach a
+			// resource server the client was never registered for. Refused as
+			// `server_error` (the redirect shape of `policyOutOfBounds`): the
+			// deployment's policy exceeded its authority, the caller did not.
+			const bounded = boundPolicyAudience(decision, audienceCeiling);
+			if (!bounded.ok) {
+				redirectError(
+					ctx,
+					bounded.result.error,
+					bounded.result.errorDescription ?? "policy exceeded its audience ceiling",
+				);
 				return null;
 			}
+			// The whole list is persisted, as before — every entry has now met
+			// the ceiling, and `/token` reads the first.
 			grantedAudience = decision.grantedAudience;
 		}
 	}
@@ -1138,7 +1172,8 @@ const resolveAudienceForPersist = (
 	// enforces against — already reflects the request. Deriving at
 	// `/authorize` rather than `/token` is what keeps the audience decided
 	// exactly once (C-2 / D-1). Bounded by the client's allowedAudiences
-	// plus its own id, the same ceiling a policy-returned audience meets.
+	// plus its own id; a policy-returned audience met the client's
+	// allowedAudiences in `applyGrantPolicy` before it got here (#520).
 	let effectiveGrantedAudience = grantedAudience;
 	if (ctx.opts.oauth.resourceIndicatorEnabled && authorizeResource && !effectiveGrantedAudience) {
 		const derived = deriveAudienceFromResources(
@@ -1417,6 +1452,9 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			requestedScopes: scopes.requestedScopes,
 			allowedFilteredScopes: scopes.allowedFilteredScopes,
 			originalScope: client.allowedScopes,
+			// #520: the same `?? []` the sibling grants pass — a client that
+			// registers no audiences gives the policy nothing to narrow within.
+			audienceCeiling: client.allowedAudiences ?? [],
 			authorizeResource,
 		});
 		if (!policy) return;

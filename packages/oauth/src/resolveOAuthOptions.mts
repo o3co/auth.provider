@@ -159,12 +159,23 @@ const positiveIntOrUndefined = (value: unknown): number | undefined => {
  * warning. Resolution runs once at composition, so an operator sees one
  * boot-time warning instead of one per `/authorize` request.
  */
-/** #481: the configured acr table, or `{}`. The schema already held the shape at boot. */
+/**
+ * #481: the configured acr table, or an empty one. The schema already held
+ * the shape at boot.
+ *
+ * Null-prototype, because an `acr_values` an unauthenticated caller chooses
+ * is used as a key into it: on a plain object `{}` every request asking for
+ * `constructor` reads `Object`, which is truthy and has no `.every`. The
+ * same reasoning — and the same class of defect — as the replica-safety
+ * table's move to a `Map` (`core/src/boot/replica-safety.mts`).
+ */
 const readAcrValues = (oauth: unknown): Readonly<Record<string, readonly string[]>> => {
 	const raw = (oauth as { authorize?: { acrValues?: unknown } } | undefined)?.authorize?.acrValues;
-	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return {};
-	const out: Record<string, readonly string[]> = {};
+	const out: Record<string, readonly string[]> = Object.create(null);
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return out;
 	for (const [acr, amr] of Object.entries(raw as Record<string, unknown>)) {
+		// `Object.entries` yields own keys only, so nothing from the source
+		// object's prototype is copied in either.
 		if (Array.isArray(amr) && amr.length > 0 && amr.every((v) => typeof v === "string")) {
 			out[acr] = [...(amr as string[])];
 		}
