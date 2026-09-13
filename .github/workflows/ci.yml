@@ -20,8 +20,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           # Full history needed by the "No cross-project references in PR commit
-          # messages" step below (it walks BASE..HEAD on the PR branch). Other
-          # steps don't depend on history depth.
+          # messages" and "Every commit in the PR installs" steps below (both
+          # walk BASE..HEAD on the PR branch). Other steps don't depend on
+          # history depth.
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
@@ -160,6 +161,16 @@ jobs:
             exit 1
           fi
           echo "OK: no cross-project references in PR commit messages"
+      - name: Every commit in the PR installs (package.json parses, no conflict markers)
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        # CI builds the head only; a rebase merge lands every commit. 2a2e2059
+        # shipped conflict markers in create-app/package.json behind a head
+        # that a later commit had repaired (v0.13.0 audit). Needs the full
+        # history fetched above.
+        run: .github/scripts/check-commit-integrity.sh "$BASE_SHA" "$HEAD_SHA"
       - name: Restrict ignoreExpiration use-site (Wave 1 spec §4.5 S9 security guardrail)
         run: |
           set -euo pipefail
