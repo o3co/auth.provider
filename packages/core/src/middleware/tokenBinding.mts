@@ -95,7 +95,9 @@ export interface TokenBindingRefusal {
 	 * repository ships — and the text is the answer's description. At the
 	 * token endpoint the answer is `400 <code>` either way. At a protected
 	 * resource an instruction is `401` with `WWW-Authenticate: <scheme>
-	 * error="<code>"`, where a verdict is `proof_invalid`.
+	 * error="<code>"` and that `code` as the body's `error`; a verdict is
+	 * `401 invalid_token` with `WWW-Authenticate: <scheme> error="invalid_token"`
+	 * (RFC 6750 §3.1 — the mechanism's own code is logged, never sent).
 	 *
 	 * The mechanism states it; the dispatchers never learn a mechanism's codes
 	 * (v0.13.0 audit), so a second mechanism with a retry of its own needs no

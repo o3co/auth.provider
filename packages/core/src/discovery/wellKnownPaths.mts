@@ -43,20 +43,28 @@ export interface DiscoveryPaths {
  * never fall back. Both are served, with the same document.
  *
  * `/.well-known/openid-configuration` at the root is kept for a path-bearing
- * issuer as well, and the asymmetry with RFC 8414 is deliberate rather than
- * an exemption (v0.13.0 audit). This server mounts its routes at the root, so
- * a path-bearing issuer is reached through a proxy that strips the issuer
- * path or an Express sub-mount — the only ways `authorization_endpoint` and
- * the rest resolve under it. Either way the OIDC form a client builds,
- * `/tenant-a/.well-known/openid-configuration`, arrives here as the root path,
- * so dropping the root would break discovery for exactly those deployments —
- * and it is what this server served before #528. The RFC 8414 form a client
- * builds, `/.well-known/oauth-authorization-server/tenant-a`, carries no issuer
- * prefix to strip and arrives unchanged, so its root form is never the path
- * such a client reached; served there, it would answer for a different issuer
- * (`https://as.example`), which an RFC 8414 §3.3 client must reject. A
- * deployment that exposes this server's root on the public host directly
- * should not route `/.well-known/openid-configuration` there.
+ * issuer as well, and the asymmetry with RFC 8414 follows from how such an
+ * issuer is deployed (v0.13.0 audit). The document's endpoints are the issuer
+ * plus each route (`https://as.example/tenant-a/oauth/authorize`) while the
+ * routes are mounted at the router's root, so a path-bearing issuer works only
+ * behind a proxy that strips the issuer path, or with the router mounted at
+ * that path. In both, the OIDC URL a client builds —
+ * `/tenant-a/.well-known/openid-configuration` — reaches this router as the
+ * root path; dropping the root would break discovery for exactly the
+ * deployments that work, and it is what this server served before #528.
+ *
+ * The RFC 8414 URL a client builds, `/.well-known/oauth-authorization-server/tenant-a`,
+ * carries no issuer prefix. A stripping proxy passes it through unchanged, and
+ * the inserted path is what is served for it; a router mounted at `/tenant-a`
+ * never receives it at all, so that deployment serves RFC 8414 only if it also
+ * routes the path to the router at the root. The RFC 8414 *root* form is never
+ * the URL a client of this issuer builds, and answering there would be
+ * answering for `https://as.example` — which an RFC 8414 §3.3 client must
+ * reject — so it is not served.
+ *
+ * Where the host's root reaches this router with no stripping, the root OIDC
+ * path answers with a document for another issuer; for a path-bearing issuer
+ * that is also a deployment whose advertised endpoints do not resolve.
  *
  * An issuer that is not a URL, or has no path, gets the two root forms.
  */
