@@ -49,7 +49,12 @@ const document = {
 	scope: "read write",
 };
 
-const makeApp = async (opts: { enabled: boolean; document?: unknown }) => {
+const makeApp = async (opts: {
+	enabled: boolean;
+	document?: unknown;
+	/** #529 audit: wire the consent step a document client needs. Default: yes. */
+	consent?: boolean;
+}) => {
 	const config = {
 		oauth: {
 			jwt: { issuer: "https://issuer.example" },
@@ -87,8 +92,12 @@ const makeApp = async (opts: { enabled: boolean; document?: unknown }) => {
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
-		consentStore: createMemoryConsentStore(),
-		pendingConsentStore: createMemoryPendingConsentStore(),
+		...(opts.consent === false
+			? {}
+			: {
+					consentStore: createMemoryConsentStore(),
+					pendingConsentStore: createMemoryPendingConsentStore(),
+				}),
 		clientIdMetadataDocuments: { fetch: fetchImpl, lookup: async () => ["93.184.216.34"] },
 		logger: createMockLogger(),
 	});
@@ -164,5 +173,33 @@ describe("/authorize with a Client ID Metadata Document client (#529)", () => {
 		const res = await authorize(app);
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("invalid_client");
+	});
+});
+
+describe("/authorize does not fetch a document it could never honour (#529 audit)", () => {
+	it("makes no outbound request when the feature is on but no consent store is wired", async () => {
+		// Every document client is by definition not first-party, so
+		// `/authorize` refuses it without a consent store — and the discovery
+		// document already declines to advertise the feature for that reason.
+		// The repository wrap did not follow: each request resolved a name and
+		// made a guarded outbound HTTPS fetch before the refusal, which is an
+		// amplification surface in a configuration where no request can ever
+		// succeed.
+		const { app, fetchImpl } = await makeApp({ enabled: true, consent: false });
+		const res = await authorize(app);
+		expect(fetchImpl).not.toHaveBeenCalled();
+		// Nothing resolved the id, so it is an unknown client — and an unknown
+		// client is refused at the endpoint, not redirected: `redirect_uri` has
+		// been validated against nothing. That is a firmer refusal than the
+		// `unauthorized_client` redirect the resolved-then-refused path gave,
+		// and it sends no attacker-authored URL to the browser.
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_client");
+	});
+
+	it("still fetches when the flow can finish", async () => {
+		const { app, fetchImpl } = await makeApp({ enabled: true });
+		await authorize(app);
+		expect(fetchImpl).toHaveBeenCalled();
 	});
 });

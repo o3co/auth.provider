@@ -57,8 +57,12 @@
  * must be a non-empty list of URIs this server would accept at registration
  * (`checkRedirectUri`); `token_endpoint_auth_method`, when present, must be
  * `none` — a shared-secret method is forbidden by the draft, and
- * `private_key_jwt` is refused until this server authenticates clients that
- * way (#484); `client_secret` must be absent; `grant_types` must include
+ * `private_key_jwt` is refused because the draft's client is one that proves
+ * nothing beyond holding its own URL: the keys would have to come from the
+ * same attacker-authored document that names them, so the method would
+ * authenticate the document rather than the client. This server does support
+ * `private_key_jwt` for registered clients (#484); `client_secret` must be
+ * absent; `grant_types` must include
  * `authorization_code` and only its RFC 7591 companions survive;
  * `response_types` must admit `code`. `scope` is intersected with the
  * operator's `allowedScopes` ceiling, and `allowedAudiences` — the resource
@@ -141,6 +145,16 @@ export function isClientIdMetadataDocumentUrl(clientId: string): boolean {
 	if (url.search !== "" || clientId.endsWith("?")) return false;
 	if (url.pathname.split("/").some((segment) => segment === "." || segment === "..")) return false;
 	if (isIP(url.hostname) !== 0 || url.hostname.startsWith("[")) return false;
+	// A trailing dot is the DNS root — `client.example.` and `client.example`
+	// resolve to one host, and TLS accepts the certificate issued for the
+	// undotted name — but it survives `new URL(...).href` unchanged, so the
+	// canonical-form check above passes it. The host policy compares strings:
+	// `allowedHosts` fails closed on the dotted spelling (it matches nothing)
+	// while `deniedHosts` failed open, so a denied host was reachable by
+	// adding one character. Refused here rather than normalised, because a
+	// client id is a string a document has to echo exactly, and there is no
+	// reason for one to carry the root label.
+	if (url.hostname.endsWith(".")) return false;
 	if (isLoopbackHostname(url.hostname)) return false;
 	return true;
 }
@@ -224,7 +238,7 @@ function toClient(
 	if (method !== undefined && method !== "none") {
 		throw new DocumentRejected(
 			method === "private_key_jwt"
-				? "private_key_jwt client authentication is not supported yet (#484)"
+				? "private_key_jwt is not allowed for a Client ID Metadata Document: its keys would come from the same document that names them"
 				: `token_endpoint_auth_method ${JSON.stringify(method)} is not allowed for a Client ID Metadata Document`,
 		);
 	}

@@ -961,3 +961,23 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 		});
 	});
 });
+
+describe("oauth routes — /oauth/revoke is rate limited too (#529 audit)", () => {
+	it("returns 429 rate_limited when rateLimiter denies /oauth/revoke", async () => {
+		// `/token`, `/introspect` and `/authorize` all sit behind the shared
+		// guard; `/revoke` did not, though it reaches the client repository on
+		// every attempt — and, with Client ID Metadata Documents on, the
+		// outbound document fetch that repository performs.
+		const app = await buildApp({
+			rateLimiter: createStubRateLimiter((key) =>
+				key.startsWith("revoke") ? { allowed: false, reason: "limit:revoke" } : { allowed: true },
+			),
+		});
+
+		const res = await request(app).post("/oauth/revoke").type("form").send({ token: "any" });
+
+		expect(res.status).toBe(429);
+		expect(res.body.error).toBe("rate_limited");
+		expect(res.body.error_description).toBe("limit:revoke");
+	});
+});
