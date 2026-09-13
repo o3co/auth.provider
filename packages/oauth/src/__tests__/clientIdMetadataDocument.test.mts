@@ -626,3 +626,69 @@ describe("the cache tells the truth about an outage (#529 audit)", () => {
 		expect(started).toHaveLength(6);
 	});
 });
+
+describe("the refusal memo and the stale window are bounded (#529 audit)", () => {
+	it("bounds the refusal memo the same way it bounds the documents", async () => {
+		// The keys here are the caller's too: an id that refuses is an id the
+		// caller invented, so remembering every one of them would hand the
+		// memory back to whoever was being throttled.
+		const clock = { now: 1_000_000 };
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read"],
+			allowedAudiences: [],
+			maxCacheEntries: 2,
+			fetch: (async () => json({ error: "nope" }, {}, 404)) as typeof fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+
+		for (let i = 0; i < 5; i += 1) {
+			expect(await r.resolve(`https://client.example/meta-${i}`)).toBeNull();
+		}
+		// The earliest refusals were evicted, so their ids are fetched again
+		// rather than answered from a memo that grew without limit.
+		const fetched: string[] = [];
+		const counting = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read"],
+			allowedAudiences: [],
+			maxCacheEntries: 2,
+			fetch: (async (input: string | URL | Request) => {
+				fetched.push(String(input));
+				return json({ error: "nope" }, {}, 404);
+			}) as typeof fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+		for (let i = 0; i < 3; i += 1) await counting.resolve(`https://client.example/m-${i}`);
+		await counting.resolve("https://client.example/m-0");
+		expect(fetched).toHaveLength(4);
+	});
+
+	it("stops serving a stale registration once its window has lapsed", async () => {
+		// The window is anchored to the last successful fetch, so it does not
+		// renew itself for the length of an outage: eventually the client is
+		// refused rather than served a registration nobody can revalidate.
+		const clock = { now: 1_000_000 };
+		let fail = false;
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read", "write"],
+			allowedAudiences: [],
+			cacheMaxAgeMs: 1_000,
+			staleIfErrorMs: 5_000,
+			negativeCacheMs: 0,
+			fetch: (async () => {
+				if (fail) throw new Error("connect ETIMEDOUT");
+				return json(document(), { "cache-control": "max-age=1" });
+			}) as typeof fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		fail = true;
+		clock.now += 2_000; // expired; revalidation fails, so the stale one is served
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		clock.now += 10_000; // past the deadline from the last success
+		expect(await r.resolve(CLIENT_URL)).toBeNull();
+	});
+});

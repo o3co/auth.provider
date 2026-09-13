@@ -416,21 +416,25 @@ export function createClientIdMetadataDocumentResolver(
 	 * first, as in the CRL and OCSP caches — the bound exists so the map
 	 * cannot grow without limit, not to maximise hits.
 	 */
-	/** A refusal, remembered briefly and bounded the same way documents are. */
-	const rememberRefusal = (clientId: string): void => {
-		if (refusals.size >= maxCacheEntries && !refusals.has(clientId)) {
-			const oldest = refusals.keys().next();
-			if (!oldest.done) refusals.delete(oldest.value);
-		}
-		refusals.set(clientId, now() + negativeCacheMs);
-	};
-
 	const remember = (clientId: string, entry: CacheEntry): void => {
 		if (cache.size >= maxCacheEntries && !cache.has(clientId)) {
 			const oldest = cache.keys().next();
 			if (!oldest.done) cache.delete(oldest.value);
 		}
 		cache.set(clientId, entry);
+	};
+
+	/**
+	 * A refusal, remembered briefly and bounded the same way documents are —
+	 * the keys are the caller's here too, so a caller inventing ids must not be
+	 * able to grow this map without limit either.
+	 */
+	const rememberRefusal = (clientId: string): void => {
+		if (refusals.size >= maxCacheEntries && !refusals.has(clientId)) {
+			const oldest = refusals.keys().next();
+			if (!oldest.done) refusals.delete(oldest.value);
+		}
+		refusals.set(clientId, now() + negativeCacheMs);
 	};
 	const inFlight = new Map<string, Promise<PublicClient | null>>();
 
