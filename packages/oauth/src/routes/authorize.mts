@@ -364,7 +364,7 @@ const subjectOf = (req: Request): string | null => {
  * written back into the query of the URL the browser returns to. And
  * `prompt=consent` is answered by this very round trip: carried back, it
  * would park the request again, forever. Every other prompt value is left
- * alone — `login` has its own one-shot marker (#481).
+ * alone — `login` has its own one-shot ask, recorded on the session (#481).
  */
 const resumeUrl = (ctx: AuthorizeContext): string => {
 	const url = new URL(buildCanonicalRequestUrl(ctx.issuerOrigin, ctx.req.originalUrl));
@@ -612,7 +612,6 @@ const SINGLE_VALUED_QUERY_PARAMS = [
 	// #481
 	"max_age",
 	"acr_values",
-	"reauth_after",
 ] as const;
 
 /**
@@ -729,19 +728,41 @@ const parseMaxAge = (ctx: AuthorizeContext): { readonly value: number | undefine
 };
 
 /**
- * #481 — the marker this endpoint puts on the authorize URL it sends the
- * browser back to when it asks for a re-authentication: the epoch second
- * of the ask. On the way back, a session authenticated at or after it is
+ * #481 — the epoch second at which this endpoint asked for a
+ * re-authentication, recorded on the session while the browser is at the
+ * login page. On the way back, a session authenticated at or after it is
  * the re-authentication that was asked for; one authenticated before it is
- * not, and gets `login_required` instead of a second round trip. Only
- * this server ever writes it, and it decides nothing an RP relies on —
- * `auth_time` in the id_token is what the RP verifies.
+ * not, and gets `login_required` instead of a second round trip.
+ *
+ * On the session rather than on the authorize URL, for two reasons the
+ * v0.13.0 release audit found. The URL is the caller's: a request carrying
+ * `max_age=60&reauth_after=0` satisfied `authTime >= 0` for any live
+ * session and skipped the round trip the parameter exists to force —
+ * turning an OP control OIDC Core §3.1.2.1 makes mandatory into an RP's
+ * optional `auth_time` check. And a deployment login page that rebuilt the
+ * authorize URL rather than returning `redirect_to` verbatim dropped the
+ * marker, so the request looped between `/authorize` and the login page
+ * forever — the failure v0.12.1 cited as its reason not to ship
+ * `prompt=login` at all.
+ *
+ * The session, not a store of its own: unlike the parked consent request
+ * (#552), this is not a decision two answers could race to apply — it is
+ * one browser's record of one ask, read once on the way back. It is spent
+ * when it is read, so an ask cannot satisfy a later request whose session
+ * has since gone stale.
  */
-const REAUTH_MARKER_PARAM = "reauth_after";
+declare module "express-session" {
+	interface SessionData {
+		reauthAskedAt?: number;
+	}
+}
 
-const readReauthMarker = (ctx: AuthorizeContext): number | undefined => {
-	const raw = ctx.params[REAUTH_MARKER_PARAM];
-	return typeof raw === "string" && /^[0-9]+$/.test(raw) ? Number(raw) : undefined;
+/** Read the outstanding ask and spend it; `undefined` when there is none. */
+const takeReauthAsk = (ctx: AuthorizeContext): number | undefined => {
+	const asked = ctx.req.session?.reauthAskedAt;
+	if (typeof asked !== "number" || !Number.isFinite(asked)) return undefined;
+	delete ctx.req.session.reauthAskedAt;
+	return asked;
 };
 
 type ReauthOutcome = "proceed" | "login" | "answered";
@@ -779,7 +800,7 @@ const evaluateReauthentication = (
 	}
 	const nowSeconds = Math.floor(Date.now() / 1000);
 	const authTimeSeconds = Math.floor(session.authTime.getTime() / 1000);
-	const marker = readReauthMarker(ctx);
+	const marker = takeReauthAsk(ctx);
 	if (marker !== undefined) {
 		if (authTimeSeconds >= marker) return "proceed";
 		redirectError(
@@ -1403,12 +1424,8 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// RFC 6749 §3.1: refuse a repeated single-valued parameter before any of
 		// it is interpreted — a repeat read as absence is a different request
 		// from the one the client sent. This runs ahead of the re-authentication
-		// evaluation as well as the client-policy gates: a repeated
-		// `reauth_after` read as "no marker" would send a stale session to the
-		// login page, whose redirect rebuilds the URL with one server-written
-		// marker, and the request would then succeed where it should have been
-		// refused. A malformed request never reaches the repository or the
-		// policy hook either.
+		// evaluation as well as the client-policy gates, so a malformed request
+		// never reaches the repository or the policy hook either.
 		if (!checkSingleValuedParams(ctx)) return;
 		// #481: is the authentication fresh enough for what the RP asked?
 		const maxAge = parseMaxAge(ctx);
@@ -1416,8 +1433,12 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		const reauth = evaluateReauthentication(ctx, prompt, maxAge.value, liveSession.session);
 		if (reauth === "answered") return;
 		if (reauth === "login") {
+			// The ask is the server's record, not a parameter on the URL the
+			// browser carries (#481, v0.13.0 audit) — so it cannot be forged,
+			// and it survives a login page that rebuilds the request rather than
+			// round-tripping `redirect_to` verbatim.
+			req.session.reauthAskedAt = Math.floor(Date.now() / 1000);
 			const back = new URL(buildCanonicalRequestUrl(issuerOrigin, req.originalUrl));
-			back.searchParams.set(REAUTH_MARKER_PARAM, String(Math.floor(Date.now() / 1000)));
 			const loginUrl = opts.loginUrl();
 			const joiner = loginUrl.includes("?") ? "&" : "?";
 			return res.redirect(`${loginUrl}${joiner}redirect_to=${encodeURIComponent(back.toString())}`);

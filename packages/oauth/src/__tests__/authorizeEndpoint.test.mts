@@ -135,15 +135,19 @@ const makeApp = async (opts: {
 	});
 
 	const app = express();
+	// One session object per app, and the same one for every request that app
+	// serves — the way express-session persists it across the login round trip
+	// (#481). Copied rather than shared, because the fixtures are module-level
+	// constants and `/authorize` now writes the re-authentication ask onto it.
+	const session: Record<string, unknown> = {
+		...(opts.session ?? { isAuthenticated: true, user: { id: "user-1" } }),
+	};
 	app.use((req, _res, next) => {
-		(req as unknown as { session: Record<string, unknown> }).session = opts.session ?? {
-			isAuthenticated: true,
-			user: { id: "user-1" },
-		};
+		(req as unknown as { session: Record<string, unknown> }).session = session;
 		next();
 	});
 	app.use("/oauth", router);
-	return { app, createCode };
+	return { app, createCode, session };
 };
 
 type Query = Record<string, string | string[]>;
@@ -1028,25 +1032,29 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(redirectParams(res).get("code")).toBe("code-x");
 		});
 
-		it("sends a session older than max_age back to the login page, round-tripping the request with a reauth_after marker", async () => {
-			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(5)) });
-			const res = await authorize(app, { ...baseQuery, max_age: "60" });
+		it("sends a session older than max_age back to the login page, recording the ask in the session", async () => {
+			const harness = await makeApp({ session, userSessionStore: storeWith(minutesAgo(5)) });
+			const res = await authorize(harness.app, { ...baseQuery, max_age: "60" });
 			const back = loginRedirectTo(res);
 			expect(back.searchParams.get("max_age")).toBe("60");
 			expect(back.searchParams.get("client_id")).toBe(CLIENT_ID);
 			expect(back.searchParams.get("state")).toBe("xyz");
-			const marker = Number(back.searchParams.get("reauth_after"));
+			// The ask is the server's record of what it asked for, so it is
+			// kept where the caller cannot write it — not on the URL.
+			expect(back.searchParams.has("reauth_after")).toBe(false);
+			const marker = harness.session.reauthAskedAt as number;
 			expect(marker).toBeGreaterThanOrEqual(nowSeconds() - 5);
 			expect(marker).toBeLessThanOrEqual(nowSeconds());
 		});
 
 		it("max_age=0 always re-authenticates", async () => {
-			const { app } = await makeApp({
+			const harness = await makeApp({
 				session,
 				userSessionStore: storeWith(new Date(Date.now() - 2_000)),
 			});
-			const res = await authorize(app, { ...baseQuery, max_age: "0" });
-			expect(loginRedirectTo(res).searchParams.get("reauth_after")).toBeTruthy();
+			const res = await authorize(harness.app, { ...baseQuery, max_age: "0" });
+			loginRedirectTo(res);
+			expect(harness.session.reauthAskedAt).toBeTypeOf("number");
 		});
 
 		it("refuses a max_age that is not a non-negative integer", async () => {
@@ -1063,71 +1071,109 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(redirectParams(res).get("error")).toBe("invalid_request");
 		});
 
-		it("refuses a repeated reauth_after before interpreting it, rather than sending a stale session to login with the marker collapsed", async () => {
-			// Read as "no marker", a repeat would earn a login redirect whose
-			// rebuilt URL carries one server-written marker, and the request
-			// would then succeed where it should have been refused.
-			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(10)) });
-			const res = await authorize(app, {
-				...baseQuery,
-				prompt: "login",
-				reauth_after: ["1", "2"],
-			});
-			expect(redirectParams(res).get("error")).toBe("invalid_request");
+		it("ignores a caller-supplied reauth_after entirely — the ask is the server's record", async () => {
+			// The marker used to be read straight from the request, so
+			// `max_age=60&reauth_after=0` satisfied `authTime >= 0` for any live
+			// session and skipped the login round trip the parameter exists to
+			// force. Whatever the caller writes now decides nothing.
+			const harness = await makeApp({ session, userSessionStore: storeWith(minutesAgo(10)) });
+			for (const forged of [
+				{ max_age: "60", reauth_after: "0" },
+				{ prompt: "login", reauth_after: "0" },
+				{ max_age: "60", reauth_after: String(nowSeconds() + 3600) },
+				{ max_age: "60", reauth_after: ["1", "2"] },
+			]) {
+				harness.session.reauthAskedAt = undefined;
+				const res = await authorize(harness.app, { ...baseQuery, ...forged });
+				// The login page, every time — never a code.
+				loginRedirectTo(res);
+			}
 		});
 	});
 
 	describe("prompt=login", () => {
-		it("re-authenticates even a fresh session, carrying prompt=login and the marker back", async () => {
-			const { app } = await makeApp({ session, userSessionStore: storeWith(new Date()) });
-			const res = await authorize(app, { ...baseQuery, prompt: "login" });
+		it("re-authenticates even a fresh session, carrying prompt=login back and recording the ask", async () => {
+			const harness = await makeApp({ session, userSessionStore: storeWith(new Date()) });
+			const res = await authorize(harness.app, { ...baseQuery, prompt: "login" });
 			const back = loginRedirectTo(res);
 			expect(back.searchParams.get("prompt")).toBe("login");
-			expect(back.searchParams.get("reauth_after")).toBeTruthy();
+			expect(back.searchParams.has("reauth_after")).toBe(false);
+			expect(harness.session.reauthAskedAt).toBeTypeOf("number");
 		});
 
-		it("is satisfied once the session was authenticated after the marker, and mints a code", async () => {
+		it("is satisfied once the session was authenticated after the ask, and mints a code", async () => {
 			const createCode = mintingCode();
 			const asked = nowSeconds() - 30;
-			const { app } = await makeApp({
-				session,
+			const harness = await makeApp({
+				session: { ...session, reauthAskedAt: asked },
 				userSessionStore: storeWith(new Date((asked + 10) * 1000)),
 				createCode,
 			});
-			const res = await authorize(app, {
-				...baseQuery,
-				prompt: "login",
-				reauth_after: String(asked),
-			});
+			const res = await authorize(harness.app, { ...baseQuery, prompt: "login" });
 			expect(redirectParams(res).get("code")).toBe("code-x");
+			// One-shot: spent on the way through, so it cannot satisfy a later
+			// request whose session has since gone stale.
+			expect(harness.session.reauthAskedAt).toBeUndefined();
 		});
 
 		it("answers login_required — no second round trip — when the user came back without re-authenticating", async () => {
 			const asked = nowSeconds() - 30;
-			const { app } = await makeApp({
-				session,
+			const harness = await makeApp({
+				session: { ...session, reauthAskedAt: asked },
 				userSessionStore: storeWith(new Date((asked - 600) * 1000)),
 			});
-			const res = await authorize(app, {
-				...baseQuery,
-				prompt: "login",
-				reauth_after: String(asked),
-			});
+			const res = await authorize(harness.app, { ...baseQuery, prompt: "login" });
 			const params = redirectParams(res);
 			expect(params.get("error")).toBe("login_required");
 			expect(params.get("state")).toBe("xyz");
+			expect(harness.session.reauthAskedAt).toBeUndefined();
 		});
 
-		it("the marker satisfies max_age=0 on the way back too", async () => {
+		it("the ask satisfies max_age=0 on the way back too", async () => {
 			const createCode = mintingCode();
 			const asked = nowSeconds() - 30;
-			const { app } = await makeApp({
-				session,
+			const harness = await makeApp({
+				session: { ...session, reauthAskedAt: asked },
 				userSessionStore: storeWith(new Date((asked + 5) * 1000)),
 				createCode,
 			});
-			const res = await authorize(app, { ...baseQuery, max_age: "0", reauth_after: String(asked) });
+			const res = await authorize(harness.app, { ...baseQuery, max_age: "0" });
 			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+
+		it("a spent ask does not satisfy the next request, whose session has gone stale", async () => {
+			// A marker left behind would let a later `max_age` request through
+			// on an authentication that predates it — the freshness check
+			// answering with a stale session's own age.
+			const asked = nowSeconds() - 30;
+			const harness = await makeApp({
+				session: { ...session, reauthAskedAt: asked },
+				userSessionStore: storeWith(new Date((asked + 5) * 1000)),
+				createCode: mintingCode(),
+			});
+			expect(
+				redirectParams(await authorize(harness.app, { ...baseQuery, max_age: "0" })).get("code"),
+			).toBe("code-x");
+			// Second request, same browser: the ask is spent, so this one is
+			// sent to the login page rather than satisfied by it.
+			loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "0" }));
+		});
+
+		it("terminates even when the login page rebuilds the authorize URL instead of round-tripping it", async () => {
+			// The marker travelled on the URL, so a deployment login page that
+			// reconstructed the request rather than returning `redirect_to`
+			// verbatim looped between `/authorize` and the login page forever.
+			// Held in the session, the ask survives whatever the page does to
+			// the URL.
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(10)),
+			});
+			loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+			// The page sends the browser back with a freshly built URL — no
+			// marker on it — and the user did not re-authenticate.
+			const back = await authorize(harness.app, { ...baseQuery, prompt: "login" });
+			expect(redirectParams(back).get("error")).toBe("login_required");
 		});
 
 		it("still refuses prompt=none combined with login", async () => {
