@@ -353,7 +353,7 @@ function toClient(
 			: claimedScopes.filter((s) => opts.allowedScopes.includes(s));
 	const name = typeof doc.client_name === "string" ? doc.client_name.trim().slice(0, 200) : "";
 
-	return {
+	const client: PublicClient = {
 		clientId,
 		tokenEndpointAuthMethod: "none",
 		allowedRedirectUris: [...redirectUris],
@@ -364,6 +364,27 @@ function toClient(
 		...(name.length > 0 ? { clientName: name } : {}),
 		...(typeof doc.client_uri === "string" ? { clientUri: doc.client_uri } : {}),
 	};
+	documentClients.add(client);
+	return client;
+}
+
+/**
+ * The clients this module built from a document. A `WeakSet` rather than a
+ * field on `PublicClient`: provenance is this server's fact, not something a
+ * repository — or a document — can claim by setting a property.
+ */
+const documentClients = new WeakSet<PublicClient>();
+
+/**
+ * Whether `client` was resolved from a Client ID Metadata Document, as opposed
+ * to a pre-registered client whose id merely looks like a URL
+ * (`withClientIdMetadataDocuments` answers those from the inner repository
+ * first). For a document client, the host its `client_id` names is the one
+ * fact about it this server verified; its `client_name` is the document
+ * author's claim.
+ */
+export function isClientIdMetadataDocumentClient(client: PublicClient | null | undefined): boolean {
+	return client != null && documentClients.has(client);
 }
 
 export interface ClientIdMetadataDocumentResolver {

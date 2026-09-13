@@ -43,6 +43,7 @@ import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { withClientIdMetadataDocuments } from "#/clients/clientIdMetadataDocument.mjs";
 import { PENDING_CONSENT_TTL_MS } from "#/routes/consent.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
@@ -196,14 +197,40 @@ describe("the page is told which host a URL-shaped client_id names (v0.13.0 audi
 	// it cannot forget to derive it.
 	const DOC_ID = "https://tools.example/oauth/client.json";
 
-	it("adds client_id_host for a client identified by its document URL", async () => {
+	it("adds client_id_host for a client resolved from its metadata document", async () => {
+		const inner: ClientRepository = { findById: async () => null, authenticate: async () => null };
+		const clientRepository = withClientIdMetadataDocuments(inner, {
+			allowedScopes: ["read", "write"],
+			allowedAudiences: [],
+			lookup: async () => ["93.184.216.34"],
+			fetch: (async () =>
+				new Response(
+					JSON.stringify({
+						client_id: DOC_ID,
+						client_name: "Google Drive",
+						redirect_uris: [REDIRECT_URI],
+						token_endpoint_auth_method: "none",
+					}),
+					{ status: 200, headers: { "content-type": "application/json" } },
+				)) as typeof fetch,
+		});
+		const { app } = await makeApp({ consentStore: createMemoryConsentStore(), clientRepository });
+		const challenge = atConsentPage(await authorize(app, { client_id: DOC_ID }));
+		const res = await request(app).get("/oauth/consent").query({ challenge });
+		expect(res.status).toBe(200);
+		expect(res.body).toMatchObject({ client_id: DOC_ID, client_id_host: "tools.example" });
+	});
+
+	it("omits it for a pre-registered client whose id merely looks like a URL (review)", async () => {
+		// The operator registered it; no document was fetched, so the host in
+		// the id is not a fact this server verified about the client.
 		const record = {
 			clientId: DOC_ID,
 			tokenEndpointAuthMethod: "none" as const,
 			allowedRedirectUris: [REDIRECT_URI],
 			allowedScopes: ["read", "write"],
 			defaultScopes: ["read"],
-			clientName: "Google Drive",
+			clientName: "Tools",
 			firstParty: false,
 		} as unknown as PublicClient;
 		const { app } = await makeApp({
@@ -216,7 +243,7 @@ describe("the page is told which host a URL-shaped client_id names (v0.13.0 audi
 		const challenge = atConsentPage(await authorize(app, { client_id: DOC_ID }));
 		const res = await request(app).get("/oauth/consent").query({ challenge });
 		expect(res.status).toBe(200);
-		expect(res.body).toMatchObject({ client_id: DOC_ID, client_id_host: "tools.example" });
+		expect(res.body).not.toHaveProperty("client_id_host");
 	});
 
 	it("omits it for a registered client id, which names no host", async () => {
