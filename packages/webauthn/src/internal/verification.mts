@@ -30,9 +30,14 @@
  * NOT exported from the package barrel — internal use only.
  *
  * Error-reason regex mapping (re-validated against SimpleWebAuthn v14.0.1
- * source; all four target strings are unchanged since v13.1.1. v14 adds
- * "Unexpected top origin of …" for cross-origin authentication, which the
- * `/origin/i` arm already covers and which is an origin mismatch):
+ * source; all four original target strings are unchanged since v13.1.1. v14
+ * adds two cross-origin messages — "Detected cross-origin authentication
+ * response from top origin of …" when no `expectedTopOrigin` was supplied,
+ * and "Unexpected cross-origin authentication response top origin of …" when
+ * one was and did not match. Both carry the word "origin", so both would land
+ * in the `/origin/i` arm and send an operator to the `webauthn.origin`
+ * allowlist, which cannot fix an embedding they never configured. They get an
+ * arm of their own, ahead of it — #554 audit):
  *   /top.?origin/i → "top_origin_mismatch" (before the arm below, which
  *                    would otherwise swallow it)
  *   /origin/i   → "origin_mismatch"

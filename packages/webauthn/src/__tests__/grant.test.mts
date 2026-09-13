@@ -61,6 +61,7 @@ vi.mock("../internal/verification.mjs", () => ({
 
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "../grant.mjs";
 import { verifyWebAuthnAssertion } from "../internal/verification.mjs";
+import { webauthnModule } from "../module.mjs";
 
 const mockVerifyAssertion = vi.mocked(verifyWebAuthnAssertion);
 
@@ -993,5 +994,56 @@ describe("createWebAuthnGrant — allowedGrantTypes strictness (Codex Round 2 P1
 
 		// Should succeed
 		expect(result.status).toBe(200);
+	});
+});
+
+describe("the configured top origins reach the verifier (#554 audit)", () => {
+	beforeEach(() => vi.clearAllMocks());
+
+	/** The grant as `webauthnModule` builds it, not as a test hand-assembles it. */
+	const throughTheModule = async (webauthnConfig: Record<string, unknown>) => {
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.registerCredential(makeCredential());
+		const factory = webauthnModule.contributes?.grants?.[WEBAUTHN_GRANT_TYPE] as (
+			deps: Record<string, unknown>,
+		) => ReturnType<typeof createWebAuthnGrant>;
+		return factory({
+			...makeBaseDeps(store),
+			grantPolicy: { kind: "allow", evaluate: async () => ({ outcome: "allow" as const }) },
+			webauthnConfig,
+		});
+	};
+
+	it("passes them through the module's own wiring, not just a hand-built deps bag", async () => {
+		// The module rebuilds `webauthnConfig` field by field, so a key it does
+		// not name is a key the grant never sees — an operator-facing knob that
+		// looks configured and does nothing. That is what happened here.
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const handler = await throughTheModule({
+			rpId: "test.example",
+			origin: ["https://test.example"],
+			topOrigin: ["https://embedder.example"],
+			userVerification: "preferred" as const,
+		});
+		await handler.handle(makeCtx({ assertion: makeAssertionResponse() }));
+
+		expect(mockVerifyAssertion).toHaveBeenCalledWith(
+			expect.objectContaining({ expectedTopOrigins: ["https://embedder.example"] }),
+		);
+	});
+
+	it("passes none when the deployment configured none", async () => {
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+		const handler = await throughTheModule({
+			rpId: "test.example",
+			origin: ["https://test.example"],
+			userVerification: "preferred" as const,
+		});
+		await handler.handle(makeCtx({ assertion: makeAssertionResponse() }));
+
+		expect(mockVerifyAssertion).toHaveBeenCalledWith(
+			expect.not.objectContaining({ expectedTopOrigins: expect.anything() }),
+		);
 	});
 });

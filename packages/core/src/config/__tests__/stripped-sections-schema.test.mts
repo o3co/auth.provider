@@ -215,6 +215,7 @@ describe("webauthn survives AppConfigSchema (#496)", () => {
 			rpId: "example.com",
 			rpName: "Example",
 			origin: ["https://example.com"],
+			topOrigin: ["https://embedder.example"],
 			challengeTtlMs: 60000,
 			attestationPreference: "direct",
 			userVerification: "required",
@@ -227,9 +228,10 @@ describe("webauthn survives AppConfigSchema (#496)", () => {
 	it("keeps the single-origin spelling an env substitution produces", () => {
 		const parsed = AppConfigSchema.parse({
 			...base,
-			webauthn: { origin: "https://example.com" },
+			webauthn: { origin: "https://example.com", topOrigin: "https://embedder.example" },
 		});
 		expect(parsed.webauthn?.origin).toBe("https://example.com");
+		expect(parsed.webauthn?.topOrigin).toBe("https://embedder.example");
 	});
 
 	it("refuses a user-verification requirement WebAuthn does not have", () => {
