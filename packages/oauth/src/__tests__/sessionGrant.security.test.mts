@@ -152,6 +152,24 @@ describe("session grant authentication and token binding", () => {
 		expect(decodeJwt(result.body.access_token).amr).toEqual(["hwk"]);
 	});
 
+	it("stamps no amr when the tracked session's is malformed", async () => {
+		// A federation login records the upstream IdP's `amr` as it arrived; an
+		// empty element is not an RFC 8176 value, and the refresh grant would
+		// not carry it either.
+		const store = createInMemoryUserSessionStore();
+		await store.create({
+			sid: SID,
+			sub: SUB,
+			authTime: new Date(),
+			expiresAt: new Date(Date.now() + 60_000),
+			claims: {},
+			amr: ["hwk", ""],
+		});
+		const result = await mint(await buildApp(store));
+		expect(result.status).toBe(200);
+		expect(decodeJwt(result.body.access_token)).not.toHaveProperty("amr");
+	});
+
 	it("stamps no amr when the tracked session recorded none", async () => {
 		const result = await mint(await buildApp(await liveStore()));
 		expect(decodeJwt(result.body.access_token)).not.toHaveProperty("amr");

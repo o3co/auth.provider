@@ -27,6 +27,8 @@ import {
 	matchConfirmation,
 	policyOutOfBounds,
 	verifyJwt,
+	wellFormedAcr,
+	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
 import {
@@ -162,14 +164,8 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// resource server gating on them must see the same answer after a
 			// refresh as before it. Only well-formed values: a claim copied forward
 			// is a claim vouched for again.
-			const carriedAmr =
-				Array.isArray(claims.amr) &&
-				claims.amr.length > 0 &&
-				claims.amr.every((v) => typeof v === "string" && v.length > 0)
-					? (claims.amr as string[])
-					: undefined;
-			const carriedAcr =
-				typeof claims.acr === "string" && claims.acr.length > 0 ? claims.acr : undefined;
+			const carriedAmr = wellFormedAmr(claims.amr);
+			const carriedAcr = wellFormedAcr(claims.acr);
 			const authenticationClaims = {
 				...(carriedAmr ? { amr: carriedAmr } : {}),
 				...(carriedAcr ? { acr: carriedAcr } : {}),

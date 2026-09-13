@@ -245,6 +245,15 @@ describe("createWebAuthnGrant — refresh_token allowlist gate (#480)", () => {
 		expect(typeof tokens.refresh_token).toBe("string");
 	});
 
+	it("stamps the passkey's amr on the refresh token, so the refresh grant carries it (#481 audit)", async () => {
+		// The access token carries `amr: ["hwk"]`; the refresh grant mirrors
+		// `amr` from the presented refresh token, so a refresh token without it
+		// would hand the first refreshed access token no `hwk`.
+		const tokens = await issue(await makeDeps(), makeCtx(makeClient()));
+		expect(decodePayload(tokens.access_token as string).amr).toEqual(["hwk"]);
+		expect(decodePayload(tokens.refresh_token as string).amr).toEqual(["hwk"]);
+	});
+
 	it("issues no refresh_token when allowedGrantTypes omits refresh_token", async () => {
 		const tokens = await issue(
 			await makeDeps(),

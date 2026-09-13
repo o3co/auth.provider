@@ -100,6 +100,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isDeviceVerificationRateLimitSpec\b/,
 	},
 	{
+		concept: "authentication claims a token may carry (#481)",
+		home: "packages/core/src/grants/authenticationClaims.mts",
+		definition: /(?:function|const)\s+(?:wellFormedAmr|wellFormedAcr)\b/,
+	},
+	{
 		concept: "fail-closed grant-policy evaluation and its bounds (#441, #520)",
 		home: "packages/core/src/grants/grantPolicy.mts",
 		definition:

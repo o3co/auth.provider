@@ -21,6 +21,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isEmailVerified,
+	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 
@@ -123,7 +124,7 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 						};
 					}
 					userId = tracked.sub;
-					if (Array.isArray(tracked.amr) && tracked.amr.length > 0) trackedAmr = tracked.amr;
+					trackedAmr = wellFormedAmr(tracked.amr);
 				} catch {
 					return {
 						result: {
