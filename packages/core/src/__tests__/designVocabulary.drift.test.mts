@@ -39,7 +39,7 @@
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
-import { join, relative, resolve } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
@@ -163,22 +163,46 @@ function walk(dir: string, out: string[]): void {
  * the home's fail-closed rules inline — which is how `refresh_token` carried a
  * full copy the definition-only guard above could not see (v0.13.0 audit).
  */
-const POLICY_EVALUATE_EXEMPTIONS: Readonly<Record<string, string>> = {
-	"packages/oauth/src/routes/authorize.mts":
-		"answers on the redirect (RFC 6749 §4.1.2.1), not as a token-endpoint error; bounds the audience through the home",
-	"packages/oauth-token-exchange/src/grant.mts":
-		"RFC 8693's contract: the ceiling is the subject token, a widening is `invalid_target`, and `access_denied` is 403",
+const POLICY_EVALUATE_EXEMPTIONS: Readonly<Record<string, { calls: number; reason: string }>> = {
+	"packages/oauth/src/routes/authorize.mts": {
+		calls: 1,
+		reason:
+			"answers on the redirect (RFC 6749 §4.1.2.1), not as a token-endpoint error; bounds the audience through the home",
+	},
+	"packages/oauth-token-exchange/src/grant.mts": {
+		calls: 1,
+		reason:
+			"RFC 8693's contract: the ceiling is the subject token, a widening is `invalid_target`, and `access_denied` is 403",
+	},
 };
+
+/** `grantPolicy.evaluate(` calls in `source`, comments removed so a mention is not a call. */
+const policyEvaluateCalls = (source: string): number =>
+	(
+		source
+			.replace(/\/\*[\s\S]*?\*\//g, "")
+			.replace(/(^|[^:])\/\/.*$/gm, "$1")
+			.match(/grantPolicy[\s\S]{0,40}?\.evaluate\s*\(/g) ?? []
+	).length;
 
 describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 	it("consults the grant policy through the home, or says why not", () => {
+		// An exemption is a count, not a whole file: a second inline call added
+		// to an exempt file is the drift this exists to catch.
 		const home = join(repoRoot, "packages/core/src/grants/grantPolicy.mts");
-		const offenders = listShippedSources()
-			.filter((file) => file !== home)
-			.filter((file) => /grantPolicy[\s\S]{0,40}\.evaluate\s*\(/.test(readFileSync(file, "utf8")))
-			.map((file) => relative(repoRoot, file))
-			.filter((file) => !(file in POLICY_EVALUATE_EXEMPTIONS));
-		expect(offenders, "call evaluateGrantPolicy from core/src/grants/grantPolicy.mts").toEqual([]);
+		const found = Object.fromEntries(
+			listShippedSources()
+				.filter((file) => file !== home)
+				.map((file) => [relative(repoRoot, file).split(sep).join("/"), file] as const)
+				.map(([rel, file]) => [rel, policyEvaluateCalls(readFileSync(file, "utf8"))] as const)
+				.filter(([, calls]) => calls > 0),
+		);
+		const expected = Object.fromEntries(
+			Object.entries(POLICY_EVALUATE_EXEMPTIONS).map(([rel, { calls }]) => [rel, calls]),
+		);
+		expect(found, "call evaluateGrantPolicy from core/src/grants/grantPolicy.mts").toEqual(
+			expected,
+		);
 	});
 
 	const sources = listShippedSources();
