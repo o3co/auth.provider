@@ -149,6 +149,22 @@ describe("the pending-consent store has a factory and a bound per session (#527 
 		expect(await store.get("ch-other")).not.toBeNull();
 	});
 
+	it("does not evict a live request while an expired one of the same session still counts", async () => {
+		// An expired record that is not the oldest used to stay in the session's
+		// index until it was read or swept, so it counted toward the bound and
+		// the eviction took the oldest live request instead.
+		const store = createMemoryPendingConsentStore();
+		await store.set({ ...record("live-oldest"), sessionId: "sess-c" });
+		await store.set({ ...record("dead", Date.now() - 1), sessionId: "sess-c" });
+		for (let i = 0; i < PENDING_CONSENT_PER_SESSION_LIMIT - 2; i += 1) {
+			await store.set({ ...record(`live-${i}`), sessionId: "sess-c" });
+		}
+		// The session is at the bound only if the dead one counts.
+		await store.set({ ...record("live-newest"), sessionId: "sess-c" });
+		expect(await store.get("live-oldest")).not.toBeNull();
+		expect(await store.get("live-newest")).not.toBeNull();
+	});
+
 	it("keeps the per-session index in step when a record is consumed, re-parked or expires", async () => {
 		// The bound counts the index, so an index that kept a consumed or expired
 		// challenge would evict live requests early, and one that counted a

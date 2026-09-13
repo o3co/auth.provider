@@ -975,6 +975,19 @@ describe("the challenge's bindings, on the edges (#552 review)", () => {
 });
 
 describe("the page and the answer refuse the same requests (#527 audit)", () => {
+	it("does not show the page to a session that names no subject", async () => {
+		// A session can keep `isAuthenticated` while its user is cleared; the
+		// POST already refused it, so the GET must not hand it the parked
+		// client, scopes and redirect_uri either.
+		const { app, session } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const challenge = atConsentPage(await authorize(app));
+		session.user = {};
+		const res = await request(app).get("/oauth/consent").query({ challenge });
+		expect(res.status).toBe(400);
+		expect(res.body.error_description).toMatch(/names no subject/);
+		expect(res.body).not.toHaveProperty("client_id");
+	});
+
 	it("does not show the page another subject's request, even from the parking session", async () => {
 		// `pendingFor`'s comment promised "one reader for both methods, so the
 		// page cannot learn something on GET that the POST would then refuse".

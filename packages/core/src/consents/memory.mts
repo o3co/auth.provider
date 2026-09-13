@@ -173,6 +173,15 @@ export function createMemoryPendingConsentStore(): MemoryPendingConsentStore {
 			// Re-parking a challenge already held replaces it, and must not count
 			// against the session twice.
 			drop(record.challenge);
+			// Expired entries leave this session's index before the bound is
+			// judged. Otherwise a stale record that is not the oldest counts toward
+			// the limit, and the eviction below takes a live request while the dead
+			// one stays — discarding an open consent page early.
+			const now = Date.now();
+			for (const challenge of [...(bySession.get(record.sessionId) ?? [])]) {
+				const held = records.get(challenge);
+				if (held !== undefined && held.expiresAt <= now) drop(challenge);
+			}
 			const mine = bySession.get(record.sessionId) ?? new Set<string>();
 			if (mine.size >= PENDING_CONSENT_PER_SESSION_LIMIT) {
 				const oldest = mine.values().next();
