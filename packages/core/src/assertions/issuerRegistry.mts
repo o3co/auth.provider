@@ -144,6 +144,9 @@ export interface AssertionIssuerRegistry {
  * The admin surface (#525): add, list, remove, and the one permitted edit.
  * Entries are otherwise immutable so that the history of what was trusted
  * is the history of adds and removes.
+ *
+ * An edit reaches the registry it is made on. For the memory registry that is
+ * one process: see {@link createMemoryAssertionIssuerRegistry}.
  */
 export interface MutableAssertionIssuerRegistry extends AssertionIssuerRegistry {
 	/** Refuses a duplicate `issuer` and a malformed entry. */
@@ -206,6 +209,15 @@ export function checkAssertionIssuerEntry(entry: AssertionIssuerEntry): void {
  * the admin surface, gone at restart. A deployment that registers issuers at
  * runtime and needs them to survive a restart implements
  * {@link AssertionIssuerRegistry} over its own store.
+ *
+ * **Replicas.** Entries supplied here are the same on every replica that runs
+ * the same composition, so a static registry is replica-safe. The admin
+ * surface is not: `add`, `remove` and `setExpiresAt` change this process only,
+ * and an issuer revoked on the replica that took the call stays trusted on
+ * every other until it restarts. `deployment.mode = "multi"` cannot refuse it —
+ * the registry sits inside the `assertionVerifier` a composition hands in, not
+ * on a module manifest the boot guard reads — so a multi-replica deployment
+ * changes the entry list by redeploying, or keeps it in a shared store.
  */
 export function createMemoryAssertionIssuerRegistry(
 	entries: readonly AssertionIssuerEntry[] = [],
