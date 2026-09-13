@@ -2010,6 +2010,29 @@ describe("a signing failure after the rotation commits (#449 audit)", () => {
 		expect(result.status).toBe(503);
 	});
 
+	it("does not call a rotation-less signer failure an orphan", async () => {
+		// No rotation is wired, so nothing was reserved and the presented token
+		// is still valid: this is the ordinary signer outage every other mint
+		// has, and it surfaces the way the runbook says they all do.
+		const error = vi.fn();
+		const handler = createRefreshTokenGrant({
+			...mockDeps,
+			keyStore: failingAfter(0),
+			logger: { error, warn: vi.fn(), info: vi.fn(), debug: vi.fn() } as never,
+			refreshTokenFamilyRotation: undefined,
+		});
+		await expect(
+			handler.handle({
+				body: { refresh_token: await presented() },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			} as GrantContext),
+		).rejects.toThrow(/KMS unavailable/);
+		expect(error).not.toHaveBeenCalledWith(expect.anything(), "refresh_token_rotation_orphaned");
+	});
+
 	it("logs the orphaned rotation, naming what an operator has to look for", async () => {
 		const error = vi.fn();
 		const logger = { error, warn: vi.fn(), info: vi.fn(), debug: vi.fn() };

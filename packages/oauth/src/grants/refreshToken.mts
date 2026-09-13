@@ -568,6 +568,13 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// token's replay.
 			let refreshExpiresIn = requestedRefreshExpiresIn;
 
+			// Whether the family store actually committed this rotation. Only then
+			// is the presented token spent and `newRefreshJti` reserved — the
+			// condition that makes a later signing failure an orphan rather than
+			// an ordinary signer outage. A composition with no rotation wired, and
+			// an unknown family under `accept`, both reach issuance having
+			// reserved nothing.
+			let rotationCommitted = false;
 			if (deps.refreshTokenFamilyRotation) {
 				// SF-6 fail-fast above already returned for missing
 				// jti/family_id when rotation is wired. The check below
@@ -607,6 +614,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				// policy decision under operator control (CC-2).
 				switch (rotateResult.outcome) {
 					case "rotated": {
+						rotationCommitted = true;
 						// Successful rotation — fall through to the
 						// success path below (token issuance), at no more than the
 						// ceiling the store committed. The adapter reconstructs that
@@ -809,6 +817,14 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 					},
 				);
 			} catch (err) {
+				if (!rotationCommitted) {
+					// Nothing was reserved — no rotation is wired, or the family was
+					// unknown and the policy accepted it — so this is the ordinary
+					// signer outage every other mint has, and it surfaces the way the
+					// runbook says they all do. Nothing to name and nothing to retry
+					// around: the presented token is still valid.
+					throw err;
+				}
 				logger?.error(
 					{ err, familyId: newFamilyId, previousJti, newRefreshJti },
 					"refresh_token_rotation_orphaned",
