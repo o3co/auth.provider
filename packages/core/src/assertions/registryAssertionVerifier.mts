@@ -57,12 +57,22 @@ export interface RegistryAssertionVerifierOptions {
 	/**
 	 * How an entry's claims are read — code, so it lives here rather than on
 	 * the entry a store holds. Called per verification with the entry found;
-	 * `undefined`, or an absent reader, keeps the default: `sub` (or
-	 * `<iss>#<sub>` for an ID-JAG) and a space-delimited `scope`.
+	 * `undefined`, or an absent reader, keeps the default: a non-empty `sub`
+	 * (or `<iss>#<sub>` / `<iss>#<tenant>#<sub>` for an ID-JAG) and a
+	 * space-delimited `scope`.
 	 *
-	 * With several issuers whose `sub` values may collide, namespace the handle
-	 * here — `(entry) => ({ readSubjectHandle: (c) => `${entry.issuer}#${c.sub}` })`
-	 * — since the Store receives the handle alone.
+	 * It runs for every entry, ID-JAG ones included. With several issuers
+	 * whose `sub` values may collide, namespace the handle for the entries that
+	 * need it and return `undefined` for the rest, and refuse a missing or empty
+	 * `sub` rather than namespacing it — the Store receives the handle alone:
+	 *
+	 * ```ts
+	 * readersFor: (entry) =>
+	 *   entry.profile === "id-jag"
+	 *     ? undefined // keeps <iss>#<tenant>#<sub>
+	 *     : { readSubjectHandle: (c) =>
+	 *         typeof c.sub === "string" && c.sub.length > 0 ? `${entry.issuer}#${c.sub}` : null },
+	 * ```
 	 */
 	readonly readersFor?: (entry: AssertionIssuerEntry) => AssertionClaimReaders | undefined;
 }

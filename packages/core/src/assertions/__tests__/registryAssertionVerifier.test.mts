@@ -406,13 +406,31 @@ describe("an entry is data a store can hold (v0.13.0 audit)", () => {
 			registry,
 			audience: AS,
 			readersFor: (entry) => ({
-				readSubjectHandle: (c) => (typeof c.sub === "string" ? `${entry.issuer}#${c.sub}` : null),
+				readSubjectHandle: (c) =>
+					typeof c.sub === "string" && c.sub.length > 0 ? `${entry.issuer}#${c.sub}` : null,
 			}),
 		});
 		expect(await verifier.verify(await mint({ sub: "d", scope: "read write" }))).toMatchObject({
 			subjectHandle: `${ISSUER_A}#d`,
 			scope: ["read"],
 		});
+	});
+
+	it("reads the scope through the verifier's reader, then bounds it by the entry", async () => {
+		const verifier = createRegistryAssertionVerifier({
+			registry: createMemoryAssertionIssuerRegistry([entryA({ allowedScopes: ["read", "write"] })]),
+			audience: AS,
+			readersFor: () => ({
+				readScope: (c) =>
+					Array.isArray(c.scp)
+						? c.scp.filter((s): s is string => typeof s === "string")
+						: undefined,
+			}),
+		});
+		expect(
+			(await verifier.verify(await mint({ sub: "d", scp: ["write", "admin"], scope: "read" })))
+				?.scope,
+		).toEqual(["write"]);
 	});
 
 	it("refuses an entry that still carries a reader, rather than ignoring it", () => {
@@ -555,6 +573,15 @@ describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => 
 			readersFor: () => ({ readSubjectHandle: (c) => `u:${String(c.sub)}` }),
 		});
 		expect((await custom.verify(await idJag(), asApp))?.subjectHandle).toBe("u:user-1");
+		// A reader that answers `undefined` for an ID-JAG entry keeps the
+		// tenant-aware default — what the documented example relies on.
+		const deferring = make([idJagEntry()], {
+			readersFor: (entry) =>
+				entry.profile === "id-jag" ? undefined : { readSubjectHandle: () => "not-used" },
+		});
+		expect((await deferring.verify(await idJag({ tenant: "acme" }), asApp))?.subjectHandle).toBe(
+			`${IDP}#acme#user-1`,
+		);
 	});
 
 	it("requires the oauth-id-jag+jwt typ", async () => {

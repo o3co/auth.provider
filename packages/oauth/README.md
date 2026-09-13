@@ -590,12 +590,19 @@ How claims are read is code, so it is the verifier's, not the entry's. With seve
 const assertionVerifier = createRegistryAssertionVerifier({
   registry,
   audience: "https://auth.example",
-  readersFor: (entry) => ({
-    readSubjectHandle: (claims) =>
-      typeof claims.sub === "string" ? `${entry.issuer}#${claims.sub}` : null,
-  }),
+  readersFor: (entry) =>
+    entry.profile === "id-jag"
+      ? undefined // keep the ID-JAG default, <iss>#<tenant>#<sub>
+      : {
+          readSubjectHandle: (claims) =>
+            typeof claims.sub === "string" && claims.sub.length > 0
+              ? `${entry.issuer}#${claims.sub}`
+              : null, // never namespace a missing or empty sub
+        },
 });
 ```
+
+`readersFor` runs for every entry, ID-JAG ones included, so return `undefined` where the default is the right answer.
 
 An entry that carries `readSubjectHandle` or `readScope` itself is refused when it is registered, rather than having the reader silently ignored.
 
