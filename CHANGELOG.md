@@ -267,8 +267,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   regardless. `acr_values` is now matched against `oauth.authorize.acrValues`,
   and a value the table does not carry — **every value, until the table is
   configured** — is `unmet_authentication_requirements` at the `redirect_uri`.
-  A malformed or repeated `max_age` is `invalid_request`, and a session older
-  than `max_age` is sent back to the login page. A composition that wires no
+  A malformed `max_age` is `invalid_request`, and so is a repeated `max_age` or
+  `acr_values` — they join `scope`, `state`, `code_challenge` and
+  `code_challenge_method`, whose repeats 0.12.1 already refused, and that guard
+  now runs before any of the request is interpreted. A session older than
+  `max_age` is sent back to the login page. A composition that wires no
   `userSessionStore` has no `auth_time` to measure and answers `invalid_request`
   to `max_age` and `prompt=login`. `prompt=login`, which was `invalid_request`,
   now forces the login round trip.
@@ -418,12 +421,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `"nonce_required"` and `"nonce_invalid"`. `BUILT_IN_AUDIT_EVENT_TYPES` gained
   `consent.granted`, `consent.denied`, `federation.identity.linked` and
   `federation.identity.link_refused`. An exhaustive `switch`, a `Record` keyed
-  on one of these unions, or a value typed as the old literal stops compiling:
-  add the new members. Code that turns a `DPoPError` into its own HTTP answer
-  must answer `use_dpop_nonce` as RFC 9449 §8/§9 do — `400` at a token
-  endpoint, `401` with `WWW-Authenticate: DPoP error="use_dpop_nonce"` at a
-  resource — and pass the error's `responseHeaders` (`DPoP-Nonce`) through.
-  Every other member added to an exported type in 0.13.0 is optional.
+  on one of these unions, or a value typed as the old literal stops compiling.
+
+  **Upgrade note.** Add the new members. Code that turns a `DPoPError` into its
+  own HTTP answer must answer `use_dpop_nonce` as RFC 9449 §8/§9 do — `400` at
+  a token endpoint, `401` with `WWW-Authenticate: DPoP error="use_dpop_nonce"`
+  at a resource — and pass the error's `responseHeaders` (`DPoP-Nonce`)
+  through. Every other member added to an exported type in 0.13.0 is optional.
 
 - **Adapter implementers: a `UserSessionStore` must round-trip `amr`, and a
   `CodeRepository` must round-trip `acr` (`@o3co/auth-provider-core`)**
