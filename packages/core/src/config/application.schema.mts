@@ -703,6 +703,10 @@ export const CoreConfigSchema = z.object({
 				maxBytes: z.coerce.number().int().positive().optional(),
 				timeoutMs: z.coerce.number().int().positive().optional(),
 				cacheMaxAgeMs: z.coerce.number().int().nonnegative().optional(),
+				maxCacheEntries: z.coerce.number().int().positive().optional(),
+				staleIfErrorMs: z.coerce.number().int().nonnegative().optional(),
+				negativeCacheMs: z.coerce.number().int().nonnegative().optional(),
+				maxConcurrentFetches: z.coerce.number().int().positive().optional(),
 			})
 			.optional(),
 		// #277: what `POST /oauth/revoke` promises for ACCESS tokens.

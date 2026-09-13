@@ -226,6 +226,12 @@ export const createOAuthRouter = async (
 					...(cimd.maxBytes === undefined ? {} : { maxBytes: cimd.maxBytes }),
 					...(cimd.timeoutMs === undefined ? {} : { timeoutMs: cimd.timeoutMs }),
 					...(cimd.cacheMaxAgeMs === undefined ? {} : { cacheMaxAgeMs: cimd.cacheMaxAgeMs }),
+					...(cimd.maxCacheEntries === undefined ? {} : { maxCacheEntries: cimd.maxCacheEntries }),
+					...(cimd.staleIfErrorMs === undefined ? {} : { staleIfErrorMs: cimd.staleIfErrorMs }),
+					...(cimd.negativeCacheMs === undefined ? {} : { negativeCacheMs: cimd.negativeCacheMs }),
+					...(cimd.maxConcurrentFetches === undefined
+						? {}
+						: { maxConcurrentFetches: cimd.maxConcurrentFetches }),
 					logger,
 					...clientIdMetadataDocumentSeams,
 				})
