@@ -1199,6 +1199,55 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(params.get("error_description")).toMatch(/urn:nope/);
 		});
 
+		it("refuses a prototype key as an acr instead of crashing on Object.prototype", async () => {
+			// `table[acr]` on a plain object resolves `constructor` to `Object`
+			// — truthy, and with no `.every` — so the request became an
+			// unhandled TypeError and a 500 from the error handler, on a route
+			// whose whole contract is that a post-validation error travels by
+			// redirect to the client. The same shape the replica-safety table
+			// was moved to a `Map` for.
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd"]),
+			});
+			for (const acr of ["constructor", "toString", "__proto__", "hasOwnProperty", "valueOf"]) {
+				const params = redirectParams(await authorize(app, { ...baseQuery, acr_values: acr }));
+				expect(params.get("error")).toBe("unmet_authentication_requirements");
+				expect(params.get("error_description")).toContain(acr);
+			}
+		});
+
+		it("refuses one with no acr table configured at all — `{}` still carries the prototype", async () => {
+			const { app } = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(1), ["pwd"]),
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "constructor" }),
+			);
+			expect(params.get("error")).toBe("unmet_authentication_requirements");
+		});
+
+		it("does not let a prototype key satisfy an acr the session has not met", async () => {
+			// The other half: `required?.every(...)` must not be reached at all,
+			// so no crafted value can be answered with a minted code.
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa"]),
+				createCode,
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "constructor urn:example:pwd" }),
+			);
+			// The real acr later in the list still decides; the prototype key is
+			// simply not an entry.
+			expect(params.get("code")).toBe("code-x");
+			expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ acr: "urn:example:pwd" }));
+		});
+
 		it("records no acr when none was requested", async () => {
 			const createCode = mintingCode();
 			const { app } = await makeApp({
