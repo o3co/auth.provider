@@ -1137,7 +1137,8 @@ export const fullSectionsSchema = z.object({
 		login: z.object({ url: z.string() }),
 		// #527: the deployment-owned consent page a client that is not
 		// first-party is routed through, same pattern as `login`. Optional here;
-		// `/oauth/consent` is the default, from HOCON.
+		// `/consent` is the default, from HOCON — the deployment's page, not the
+		// `/oauth/consent` JSON API that page calls.
 		consent: z.object({ url: z.string() }).optional(),
 		// IH-10: `client` / `authCallback` removed — no production consumer
 		// reads them. The pre-fix env-var-only HOCON lines silently leaked

@@ -286,7 +286,7 @@ refresh grant takes care to answer `503` for outages.
 | | `/oauth/federation/:name/logout` | `200 {"disconnected": true}` — local state is already cleared, the IdP session is orphaned (`packages/oauth/src/routes/logout.mts`) | audit `federation.logout.idp_unreachable` | — |
 | **The Store** (user directory) down or slow | `POST /session/login`; federation callback; jwt-bearer grant | `503 temporarily_unavailable` "User directory temporarily unavailable" (`Session.mts`, `Federation.mts`); `503` with `jwt_bearer_user_repository_unavailable` (`packages/oauth/src/grants/jwtBearer.mts`) | `local login authenticate failed` (warn) | `repositories.user.http.timeout` (default 5000 ms) and `maxResponseBytes` (default 1048576) — a timeout is a thrown error, not a `null` user (`packages/foundation/src/repositories/HttpUserRepository.mts`) |
 | **Client repository** lookup throws | client authentication on `/oauth/token`, `/oauth/introspect`, `/oauth/revoke`, device authorization | `401` — repository unavailability never admits a client (`packages/oauth/src/middleware/clientAuth.mts`) | `client lookup failed` / `client credential lookup failed` (warn) | the repository's own I/O |
-| **`grantPolicy` hook** throws | every grant; `/oauth/authorize` | `503 temporarily_unavailable` "policy evaluation unavailable" (`packages/oauth/src/grants/_grantPolicy.mts`); redirect `error=temporarily_unavailable` at `/authorize` | — | the hook's own |
+| **`grantPolicy` hook** throws | every grant; `/oauth/authorize` | `503 temporarily_unavailable` "policy evaluation unavailable" (`packages/core/src/grants/grantPolicy.mts`); redirect `error=temporarily_unavailable` at `/authorize` | — | the hook's own |
 | **Device code store** | device flow | only the in-memory adapter ships (`packages/device-grant/README.md` "Storage"); there is no Redis outage mode to describe, and `multi` refuses it | — | store bounded at 10 000 records (`packages/core/src/device-authorization/memory.mts`) |
 
 Two cross-cutting facts about these rows:
@@ -394,6 +394,7 @@ stream — its level is fixed at `info`.
 | audit `introspect.store_unavailable`, `logout.cascade_failed` | `oauth/src/routes.mts`, `oauth/src/routes/logout.mts` | introspection is answering `active: false` for outages; a logout left state behind |
 | `mtls_revocation_unavailable_rejected` (warn), sustained | `mtls/src/fullPki/validate.mts` | your CRL distribution point or OCSP responder is down and mTLS clients cannot get tokens |
 | `mtls_revocation_unavailable_allowed` (warn), **any**, if you chose `allow` | same | each line is a certificate that was not revocation-checked; a steady rate means the PKI is effectively unrevocable |
+| `mtls_ocsp_responder_unchecked` (warn, once per responder) | `mtls/src/fullPki/ocsp.mts` | a delegated OCSP responder carries no `id-pkix-ocsp-nocheck` and nothing can check its own revocation — under `mode = "ocsp"`, or under `"both"` when its certificate names no CRL. Its answers are trusted for the responder certificate's whole lifetime; ask the CA to add `nocheck` or name a CRL on it |
 | `jwt_bearer_assertion_verifier_unavailable`, `jwt_bearer_user_repository_unavailable` (error) | `oauth/src/grants/jwtBearer.mts` | the attestation service or the Store is down (`503` to devices) |
 | `jwt_bearer_policy_audience_refused` (warn) | `oauth/src/grants/jwtBearer.mts` | your `grantPolicy` returned an audience outside the client's `allowedAudiences`, or one with no authenticated client to supply that ceiling. Devices get `500 server_error`; the policy, not the device, is what to fix (#520, #521) |
 | `jwt_bearer_issuer_audience_mismatch` (warn) | `oauth/src/grants/jwtBearer.mts` | the presenting client's `allowedAudiences` and the assertion issuer's `allowedAudiences` (its trust-registry entry) admit no audience in common, so no token could name one both stand behind. Devices get `invalid_grant`; compare the two registrations (#525) |
@@ -445,8 +446,9 @@ after a deploy means a key or an encoding changed under live data — see
 ### The audit-event inventory
 
 `BUILT_IN_AUDIT_EVENT_TYPES` (`packages/core/src/audit/types.mts`) is pinned
-to the emission sites in both directions by a drift test, so this list is
-complete as of #482:
+to the emission sites in both directions by a drift test, so **that constant**
+is the complete list. This is a copy of it for reading; the test does not
+check this page, so when the two disagree, the constant is right:
 
 `authorize.granted`, `authorize.rejected`, `consent.denied`, `consent.granted`,
 `device.approved`, `device.denied`, `device.rate_limited`,
@@ -763,7 +765,7 @@ before you flip — and a relying party holding the secret can also mint.
    get ignored — it fails boot naming the key and the release that removed it
    (`withRemovedKeys`, `packages/core/src/config/removed-keys.mts`; the
    decision rule is [release-policy.md §Retiring a config key](release-policy.md#retiring-a-config-key-366)).
-   At `v0.11.0`:
+   The keys retired so far:
 
    | Key | Mechanism | What you see |
    | --- | --- | --- |

@@ -26,7 +26,7 @@ export const memoryReplaySeenSetModule = defineModule({
 	replicaSafety: {
 		unsafe: true,
 		reason:
-			"DPoP proof-replay detection forks per replica — a captured proof can be replayed once against each replica",
+			"single-use records fork per replica — a private_key_jwt client assertion, a jwt-bearer assertion or a WebAuthn challenge captured once can be replayed once against each replica",
 	},
 	provides: {
 		replaySeenSet: () => createMemoryReplaySeenSet(),
