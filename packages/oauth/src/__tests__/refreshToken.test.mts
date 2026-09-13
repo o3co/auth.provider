@@ -1937,3 +1937,90 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 		expect(store.signed).toHaveLength(2);
 	});
 });
+
+describe("a signing failure after the rotation commits (#449 audit)", () => {
+	const presented = async () =>
+		new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-1" })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+			.setIssuer("localhost")
+			.setAudience(DEFAULT_CLIENT_ID)
+			.setIssuedAt()
+			.setExpirationTime("24h")
+			.setJti("old-jti")
+			.sign(new TextEncoder().encode(SECRET));
+
+	/** A key store that signs `ok` times and then fails, as a KMS outage would. */
+	const failingAfter = (ok: number) => {
+		let signed = 0;
+		return {
+			...keyStore,
+			sign: async (args: Parameters<typeof keyStore.sign>[0]) => {
+				signed += 1;
+				if (signed > ok) throw new Error("KMS unavailable");
+				return keyStore.sign(args);
+			},
+		} as typeof keyStore;
+	};
+
+	const run = async (ok: number, logger?: unknown) => {
+		const rotated: string[] = [];
+		const handler = createRefreshTokenGrant({
+			...mockDeps,
+			keyStore: failingAfter(ok),
+			...(logger === undefined ? {} : { logger: logger as never }),
+			refreshTokenFamilyRotation: {
+				async register() {},
+				async rotate(previousJti: string) {
+					rotated.push(previousJti);
+					return { outcome: "rotated" as const };
+				},
+			},
+			refreshTokenFamilyRevocation: {
+				async revokeFamily() {},
+				async isFamilyRevoked() {
+					return false;
+				},
+			},
+		});
+		const out = await handler.handle({
+			body: { refresh_token: await presented() },
+			session: {},
+			issuer: "localhost",
+			metadata: {},
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		} as GrantContext);
+		return { ...out, rotated };
+	};
+
+	it("answers temporarily_unavailable rather than an unhandled error", async () => {
+		// Reserve-before-sign means the old jti is already consumed when the
+		// signer fails: the client gets nothing, and its retry with the old
+		// token reads as a replay, which revokes the whole family. An
+		// unhandled throw made that an express 500 with no log naming the
+		// family — the one case an operator most needs to find.
+		const { result } = await run(0);
+		expect(result.status).toBe(503);
+		expect("error" in result && result.error).toBe("temporarily_unavailable");
+	});
+
+	it("fails the same way when only the refresh token cannot be signed", async () => {
+		// The access token signs, the refresh token does not: the rotation is
+		// still committed, so this is the same orphan.
+		const { result } = await run(1);
+		expect(result.status).toBe(503);
+	});
+
+	it("logs the orphaned rotation, naming what an operator has to look for", async () => {
+		const error = vi.fn();
+		const logger = { error, warn: vi.fn(), info: vi.fn(), debug: vi.fn() };
+		await run(0, logger);
+		expect(error).toHaveBeenCalledWith(
+			expect.objectContaining({
+				familyId: expect.any(String),
+				previousJti: "old-jti",
+				newRefreshJti: expect.any(String),
+			}),
+			"refresh_token_rotation_orphaned",
+		);
+	});
+});

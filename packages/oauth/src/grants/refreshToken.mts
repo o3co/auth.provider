@@ -753,46 +753,74 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				}
 			}
 
-			const newAccessToken = await generateToken(
-				{ family_id: newFamilyId, ...(sid ? { sid } : {}) },
-				{
-					expiresIn: config.oauth.accessToken.expiresIn,
-					keyStore,
-					issuer,
-					audience: finalAudience,
-					subject: subjectStr ?? null,
-					// D-6: new token `azp` is the authenticated client. The legacy
-					// `tokenAzp` resolution (`claims.azp ?? tokenAud`) has been
-					// subsumed by the binding gate above (which proves the input
-					// token's azp/aud equalled `authenticatedClientId`), so
-					// reading from `ctx.authenticatedClient.clientId` is strictly
-					// equivalent and removes the body-spoofable surface.
-					authorizedParty: authenticatedClientId,
-					scope: scopeClaim,
-					tokenType: "at+jwt",
-					...(presentedConfirmation ? { confirmation: presentedConfirmation } : {}),
-				},
-			);
+			// #449 audit: from here the rotation is committed — the presented
+			// `jti` is spent and `newRefreshJti` is reserved — so a signer that
+			// fails now leaves the family with a token nobody holds. The client
+			// gets nothing, and its retry with the old token reads as a replay,
+			// which revokes the whole family and forces a re-authentication.
+			// That is the honest outcome of reserving before signing, and the
+			// price of the property it buys (#303: a KMS-backed key is not spent
+			// on a race that is already lost). What must not happen is an
+			// unhandled throw: an express 500 with no log naming the family is
+			// the one case an operator most needs to find. `503` says "retry"
+			// to a client whose retry will now fail — which is true of every
+			// answer here — and the log is what makes the orphan traceable.
+			let newAccessToken: Awaited<ReturnType<typeof generateToken>>;
+			let newRefreshToken: Awaited<ReturnType<typeof generateToken>>;
+			try {
+				newAccessToken = await generateToken(
+					{ family_id: newFamilyId, ...(sid ? { sid } : {}) },
+					{
+						expiresIn: config.oauth.accessToken.expiresIn,
+						keyStore,
+						issuer,
+						audience: finalAudience,
+						subject: subjectStr ?? null,
+						// D-6: new token `azp` is the authenticated client. The legacy
+						// `tokenAzp` resolution (`claims.azp ?? tokenAud`) has been
+						// subsumed by the binding gate above (which proves the input
+						// token's azp/aud equalled `authenticatedClientId`), so
+						// reading from `ctx.authenticatedClient.clientId` is strictly
+						// equivalent and removes the body-spoofable surface.
+						authorizedParty: authenticatedClientId,
+						scope: scopeClaim,
+						tokenType: "at+jwt",
+						...(presentedConfirmation ? { confirmation: presentedConfirmation } : {}),
+					},
+				);
 
-			const newRefreshToken = await generateToken(
-				{ family_id: newFamilyId, ...(sid ? { sid } : {}) },
-				{
-					expiresIn: refreshExpiresIn,
-					keyStore,
-					issuer,
-					audience: finalAudience,
-					subject: subjectStr ?? null,
-					// D-6: same rationale as above — `azp` is bound to the
-					// authenticated client at issuance.
-					authorizedParty: authenticatedClientId,
-					scope: scopeClaim,
-					tokenType: "rt+jwt",
-					// #449: the identity reserved with the family store above.
-					jti: newRefreshJti,
-					issuedAt,
-					...(bindNewRefreshToken ? { confirmation: presentedConfirmation } : {}),
-				},
-			);
+				newRefreshToken = await generateToken(
+					{ family_id: newFamilyId, ...(sid ? { sid } : {}) },
+					{
+						expiresIn: refreshExpiresIn,
+						keyStore,
+						issuer,
+						audience: finalAudience,
+						subject: subjectStr ?? null,
+						// D-6: same rationale as above — `azp` is bound to the
+						// authenticated client at issuance.
+						authorizedParty: authenticatedClientId,
+						scope: scopeClaim,
+						tokenType: "rt+jwt",
+						// #449: the identity reserved with the family store above.
+						jti: newRefreshJti,
+						issuedAt,
+						...(bindNewRefreshToken ? { confirmation: presentedConfirmation } : {}),
+					},
+				);
+			} catch (err) {
+				logger?.error(
+					{ err, familyId: newFamilyId, previousJti, newRefreshJti },
+					"refresh_token_rotation_orphaned",
+				);
+				return {
+					result: {
+						status: 503,
+						error: "temporarily_unavailable",
+						errorDescription: "token signing unavailable",
+					},
+				};
+			}
 
 			return {
 				result: {
