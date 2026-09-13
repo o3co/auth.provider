@@ -1295,6 +1295,60 @@ describe("createAuthorizationGrant", () => {
 				const at = decodeJwt(result.tokens.access_token as string) as Record<string, unknown>;
 				expect(at.amr).toEqual(["pwd", "mfa"]);
 				expect(at.acr).toBe("urn:example:mfa");
+				// The refresh token carries them too: `acr` lives on the code, which is
+				// spent here, so the refresh grant has nowhere else to read it from —
+				// and a resource server gating on `amr` must not see it vanish at the
+				// first refresh (v0.13.0 audit).
+				const rt = decodeJwt(result.tokens.refresh_token as string) as Record<string, unknown>;
+				expect(rt.amr).toEqual(["pwd", "mfa"]);
+				expect(rt.acr).toBe("urn:example:mfa");
+			});
+
+			it.each([
+				["an empty amr", []],
+				["an amr with an empty element", ["pwd", ""]],
+			])("stamps no amr on any token for a session recording %s", async (_label, amr) => {
+				// Every grant reads `amr` through one predicate, so the first refresh
+				// token cannot carry an `amr: []` the refresh grant then drops.
+				const userSessionStore = makeUserSessionStore({
+					sid: "sid-1",
+					sub: "u-1",
+					authTime: new Date("2026-04-21T00:00:00Z"),
+					claims: {},
+					amr: amr as string[],
+				});
+				const deps = {
+					...makeDepsWithIssuer(
+						vi.fn().mockResolvedValue({
+							code: "c1",
+							client_id: "client1",
+							redirect_uri: RP_URI,
+							code_challenge: S256_CHALLENGE,
+							code_challenge_method: "S256",
+							sid: "sid-1",
+							grantedScope: ["openid"],
+						}),
+					),
+					userSessionStore,
+					sessionFamilyIndex: makeSessionFamilyIndex(),
+					sessionRPRegistry: makeSessionRPRegistry(),
+				};
+				const { result } = await createAuthorizationGrant(deps).handle({
+					body: {
+						code: "c1",
+						client_id: "client1",
+						redirect_uri: RP_URI,
+						code_verifier: CODE_VERIFIER,
+					},
+					session: { code: "c1", code_client_id: "client1" },
+					issuer: "https://auth.example.com",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
+				});
+				if (!("tokens" in result)) throw new Error("expected tokens");
+				for (const token of ["id_token", "access_token", "refresh_token"] as const) {
+					expect(decodeJwt(result.tokens[token] as string), token).not.toHaveProperty("amr");
+				}
 			});
 
 			it("does NOT include id_token when issuer is absent (avoids OIDC-noncompliant iss:'')", async () => {

@@ -27,6 +27,8 @@ import {
 	matchConfirmation,
 	policyOutOfBounds,
 	verifyJwt,
+	wellFormedAcr,
+	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import type { JWTPayload } from "jose";
 import {
@@ -156,6 +158,18 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// upgrade window closes the `aud` fallback is dead code.
 			const tokenAud = Array.isArray(tokenPayload.aud) ? tokenPayload.aud[0] : tokenPayload.aud;
 			const claims = tokenPayload as Record<string, unknown>;
+			// #481 audit: how the user authenticated, carried from the presented
+			// token. A refresh does not repeat the authentication, so `amr` and `acr`
+			// are the original event's (as `auth_time` is, OIDC Core §12.2), and a
+			// resource server gating on them must see the same answer after a
+			// refresh as before it. Only well-formed values: a claim copied forward
+			// is a claim vouched for again.
+			const carriedAmr = wellFormedAmr(claims.amr);
+			const carriedAcr = wellFormedAcr(claims.acr);
+			const authenticationClaims = {
+				...(carriedAmr ? { amr: carriedAmr } : {}),
+				...(carriedAcr ? { acr: carriedAcr } : {}),
+			};
 			const tokenAzp =
 				typeof claims.azp === "string" && claims.azp.length > 0 ? claims.azp : tokenAud;
 			if (tokenAzp !== authenticatedClientId) {
@@ -777,7 +791,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			let newRefreshToken: Awaited<ReturnType<typeof generateToken>>;
 			try {
 				newAccessToken = await generateToken(
-					{ family_id: newFamilyId, ...(sid ? { sid } : {}) },
+					{ family_id: newFamilyId, ...(sid ? { sid } : {}), ...authenticationClaims },
 					{
 						expiresIn: config.oauth.accessToken.expiresIn,
 						keyStore,
@@ -798,7 +812,8 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				);
 
 				newRefreshToken = await generateToken(
-					{ family_id: newFamilyId, ...(sid ? { sid } : {}) },
+					// Onto the new refresh token too, or the second refresh drops them.
+					{ family_id: newFamilyId, ...(sid ? { sid } : {}), ...authenticationClaims },
 					{
 						expiresIn: refreshExpiresIn,
 						keyStore,

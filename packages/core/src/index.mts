@@ -164,6 +164,8 @@ export type {
 	SupportsLock,
 } from "./federation-tokens/types.mjs";
 export { supportsLock } from "./federation-tokens/types.mjs";
+// The authentication claims a token may carry (#481)
+export { wellFormedAcr, wellFormedAmr } from "./grants/authenticationClaims.mjs";
 export { filterClaimsByScope } from "./grants/claimFilter.mjs";
 export type { Confirmation } from "./grants/confirmation.mjs";
 // The ONE cnf/token-binding comparison matrix (#324) — consumed by the

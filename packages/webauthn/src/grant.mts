@@ -505,7 +505,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 
 				refreshToken = await generateToken(
-					{ family_id: familyId },
+					// #481 audit: the refresh grant mirrors `amr` from the refresh token
+					// it is handed, so the passkey's `hwk` has to be here too.
+					{ family_id: familyId, amr: ["hwk"] },
 					{
 						expiresIn: config.oauth.refreshToken.expiresIn,
 						keyStore,

@@ -6,6 +6,7 @@
 import { randomUUID } from "node:crypto";
 import type { JWTPayload, KeyStore } from "../keys/KeyStore.mjs";
 import type { UserSessionClaims } from "../user-sessions/types.mjs";
+import { wellFormedAcr, wellFormedAmr } from "./authenticationClaims.mjs";
 import { filterClaimsByScope } from "./claimFilter.mjs";
 import type { Token } from "./token.mjs";
 
@@ -55,6 +56,8 @@ export interface GenerateIdTokenOptions {
 export async function generateIdToken(opts: GenerateIdTokenOptions): Promise<Token> {
 	const now = Math.floor(Date.now() / 1000);
 	const expiresIn = opts.expiresIn ?? 3600;
+	const amr = wellFormedAmr(opts.amr);
+	const acr = wellFormedAcr(opts.acr);
 	const claims: JWTPayload = {
 		iss: opts.issuer,
 		sub: opts.sub,
@@ -66,8 +69,8 @@ export async function generateIdToken(opts: GenerateIdTokenOptions): Promise<Tok
 		sid: opts.sid,
 		...(opts.azp ? { azp: opts.azp } : {}),
 		...(opts.nonce ? { nonce: opts.nonce } : {}),
-		...(opts.amr && opts.amr.length > 0 ? { amr: [...opts.amr] } : {}),
-		...(opts.acr ? { acr: opts.acr } : {}),
+		...(amr ? { amr } : {}),
+		...(acr ? { acr } : {}),
 		...filterClaimsByScope(opts.userClaims, opts.scopes),
 	};
 	const token = await opts.keyStore.sign({ claims, header: { typ: "JWT" } });

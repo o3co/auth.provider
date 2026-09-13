@@ -28,6 +28,8 @@ import {
 	generateTokenResponse,
 	type Token,
 	type UserSession,
+	wellFormedAcr,
+	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
@@ -520,6 +522,12 @@ export const createAuthorizationGrant = (
 			const bindRefreshToken =
 				(bindingIsDpop || bindingIsMtls) && (isPublicClient || bindConfidentialClients);
 
+			// #481: how, and to which acr, the user authenticated — read once, in the
+			// shape every grant reads, and stamped on the id_token, the access token
+			// and the refresh token alike.
+			const amr = wellFormedAmr(userSession?.amr);
+			const acr = wellFormedAcr(codeData.acr);
+
 			// TODO-F-3: both access_token and refresh_token carry family_id and, when
 			// sid is present, the sid claim so introspect (Task 5) and refresh (Task 4)
 			// can propagate them without re-reading the session store on every request.
@@ -530,8 +538,8 @@ export const createAuthorizationGrant = (
 					...(sid ? { sid } : {}),
 					// #481: mirror the authentication method and context onto the access
 					// token, so a resource server (or auth.policy-verifier) can gate on them.
-					...(userSession?.amr ? { amr: userSession.amr } : {}),
-					...(codeData.acr ? { acr: codeData.acr } : {}),
+					...(amr ? { amr } : {}),
+					...(acr ? { acr } : {}),
 				},
 				{
 					expiresIn: config.oauth.accessToken.expiresIn,
@@ -547,7 +555,15 @@ export const createAuthorizationGrant = (
 				},
 			);
 			const refreshToken = await generateToken(
-				{ family_id: familyId, ...(sid ? { sid } : {}) },
+				{
+					family_id: familyId,
+					...(sid ? { sid } : {}),
+					// #481 audit: carried so the refresh grant can mirror them onto the
+					// access tokens it mints. `acr` lives on the code, which is spent
+					// here — there is nowhere else a refresh could read it from.
+					...(amr ? { amr } : {}),
+					...(acr ? { acr } : {}),
+				},
 				{
 					expiresIn: config.oauth.refreshToken.expiresIn,
 					keyStore,
@@ -750,8 +766,8 @@ export const createAuthorizationGrant = (
 					...(nonce ? { nonce } : {}),
 					sid,
 					// #481: how, and to which acr, the user authenticated.
-					...(userSession.amr ? { amr: userSession.amr } : {}),
-					...(codeData.acr ? { acr: codeData.acr } : {}),
+					...(amr ? { amr } : {}),
+					...(acr ? { acr } : {}),
 					scopes: grantedScopes,
 					userClaims: userSession.claims,
 					keyStore,
