@@ -79,8 +79,10 @@ Three things the guard cannot do:
   replica, which is safe. The admin surface is not: `add`, `remove` and
   `setExpiresAt` change this process's registry only, so an issuer revoked with
   `setExpiresAt` on the replica that took the call is still trusted by every
-  other replica until it restarts. Under `multi`, change the entry list by
-  redeploying, or implement `AssertionIssuerRegistry` over a shared store.
+  other replica. A restart does not converge them: it rebuilds the registry
+  from the composition's entries, which puts the revoked issuer back on that
+  replica too. Under `multi`, change the entry list and redeploy, or implement
+  `AssertionIssuerRegistry` over a shared store.
 
 In the standalone, `DEPLOYMENT_MODE=multi` therefore boots only once every
 store is on Redis: `USER_SESSION_STORES_ADAPTER=redis`,

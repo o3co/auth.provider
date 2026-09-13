@@ -214,7 +214,9 @@ export function checkAssertionIssuerEntry(entry: AssertionIssuerEntry): void {
  * the same composition, so a static registry is replica-safe. The admin
  * surface is not: `add`, `remove` and `setExpiresAt` change this process only,
  * and an issuer revoked on the replica that took the call stays trusted on
- * every other until it restarts. `deployment.mode = "multi"` cannot refuse it —
+ * every other. A restart does not converge them: it rebuilds the registry from
+ * the composition's entries, restoring the revoked issuer on that replica too.
+ * `deployment.mode = "multi"` cannot refuse it —
  * the registry sits inside the `assertionVerifier` a composition hands in, not
  * on a module manifest the boot guard reads — so a multi-replica deployment
  * changes the entry list by redeploying, or keeps it in a shared store.
