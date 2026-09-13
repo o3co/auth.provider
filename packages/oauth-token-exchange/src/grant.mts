@@ -32,6 +32,7 @@ import {
 	isGrantTypeAllowed,
 	matchConfirmation,
 	ownedConfirmation,
+	policyOutOfBounds,
 } from "@o3co/auth-provider-core";
 import { buildActClaim, countActorChainDepth, matchesMayAct, matchesMayActClient } from "./act.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
@@ -828,8 +829,20 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 					};
 				}
-				if (decision.grantedScope) grantedScope = decision.grantedScope;
-				if (decision.grantedAudience) grantedAudience = decision.grantedAudience;
+				// #521: presence, not truthiness, and an array — a JS policy returning
+				// a string would reach `.filter` below and throw out of the handler.
+				if (decision.grantedScope !== undefined) {
+					if (!Array.isArray(decision.grantedScope)) {
+						return { result: policyOutOfBounds("policy returned a non-array grantedScope") };
+					}
+					grantedScope = decision.grantedScope;
+				}
+				if (decision.grantedAudience !== undefined) {
+					if (!Array.isArray(decision.grantedAudience)) {
+						return { result: policyOutOfBounds("policy returned a non-array grantedAudience") };
+					}
+					grantedAudience = decision.grantedAudience;
+				}
 			}
 
 			// The policy hook may narrow, never widen — and "widen" is now past

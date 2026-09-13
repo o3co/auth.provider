@@ -17,6 +17,7 @@
 import { randomUUID } from "node:crypto";
 import {
 	boundPolicyAudience,
+	evaluateGrantPolicy,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -25,11 +26,11 @@ import {
 	generateTokenResponse,
 	isRevocationUnavailable,
 	matchConfirmation,
-	policyOutOfBounds,
 	verifyJwt,
 	wellFormedAcr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
+
 import type { JWTPayload } from "jose";
 import {
 	deriveAudienceFromResources,
@@ -342,68 +343,35 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				// the narrowed decision would have been. Failing open would
 				// effectively grant the pre-policy scope ceiling, which is
 				// exactly what policy exists to prevent.
-				const resource = requestedResource;
-				let decision: Awaited<ReturnType<typeof deps.grantPolicy.evaluate>>;
-				try {
-					decision = await deps.grantPolicy.evaluate(
-						{
-							grantType: "refresh_token",
-							// D-6: policy gate sees the authenticated client, not the
-							// raw body — same rationale as for token aud/azp.
-							clientId: authenticatedClientId,
-							subject: subjectStr,
-							requestedScope: requestedScope
-								? [...new Set(requestedScope.split(" ").filter(Boolean))]
-								: undefined,
-							originalScope: scopeStr ? scopeStr.split(" ") : undefined,
-							// RFC 8707: populated only when oauth.resourceIndicator.enabled
-							// is true; undefined otherwise (flag-off preserves pre-existing
-							// semantics and token-exchange's independent resource contract).
-							resource: resource ?? undefined,
-						},
-						{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
-					);
-				} catch {
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "policy evaluation unavailable",
-						},
-					};
-				}
-				if (decision.outcome === "deny") {
-					return {
-						result: {
-							status: 400,
-							error: decision.error,
-							errorDescription: decision.errorDescription,
-						},
-					};
-				}
-				// Presence, not truthiness: only `undefined` is "no opinion" (#521).
-				if (decision.grantedScope !== undefined) {
-					if (!Array.isArray(decision.grantedScope)) {
-						// #521: a non-array from a JS policy would throw in `.filter`.
-						return { result: policyOutOfBounds("policy returned a non-array grantedScope") };
-					}
-					// CP-15: RFC 6749 §6 says the issued scope MUST NOT exceed
-					// the scope of the original grant. Re-enforce after policy
-					// so a buggy/compromised policy cannot expand privileges
-					// beyond what the refresh token originally carried.
-					const originalSet = scopeStr ? scopeStr.split(" ") : [];
-					const exceeded = decision.grantedScope.filter((s) => !originalSet.includes(s));
-					if (exceeded.length > 0) {
-						// #520: the policy exceeded its authority; the caller did not.
-						return {
-							result: policyOutOfBounds(
-								`policy returned scopes exceeding original grant: ${exceeded.join(" ")}`,
-							),
-						};
-					}
-					// CP-15: empty array → null so response omits scope.
-					finalScope = decision.grantedScope.length > 0 ? decision.grantedScope.join(" ") : null;
-				}
+				const originalScopes = scopeStr ? scopeStr.split(" ") : [];
+				const outcome = await evaluateGrantPolicy(
+					deps.grantPolicy,
+					{
+						grantType: "refresh_token",
+						// D-6: policy gate sees the authenticated client, not the
+						// raw body — same rationale as for token aud/azp.
+						clientId: authenticatedClientId,
+						subject: subjectStr,
+						requestedScope: requestedScope
+							? [...new Set(requestedScope.split(" ").filter(Boolean))]
+							: undefined,
+						originalScope: scopeStr ? originalScopes : undefined,
+						// RFC 8707: populated only when oauth.resourceIndicator.enabled
+						// is true; undefined otherwise (flag-off preserves pre-existing
+						// semantics and token-exchange's independent resource contract).
+						resource: requestedResource ?? undefined,
+					},
+					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
+					grantedScope ? grantedScope.split(" ") : [],
+					// CP-15: RFC 6749 §6 says the issued scope MUST NOT exceed the
+					// scope of the original grant — the ceiling here, wider than the
+					// scope this refresh asked for, which a silent policy leaves.
+					{ scopes: originalScopes, name: "original grant" },
+				);
+				if (!outcome.ok) return { result: outcome.result };
+				const { decision } = outcome;
+				// CP-15: an empty grant → null so the response omits scope.
+				finalScope = outcome.scopes.length > 0 ? outcome.scopes.join(" ") : null;
 				// Fail-closed audience validation, bounded by this client's
 				// `allowedAudiences` (#520): a policy may narrow to one of them and
 				// nothing else. A decision that names none leaves `finalAudience`

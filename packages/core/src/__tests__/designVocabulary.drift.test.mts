@@ -157,7 +157,30 @@ function walk(dir: string, out: string[]): void {
 	}
 }
 
+/**
+ * Shipped sources allowed to call `grantPolicy.evaluate(` other than the home,
+ * each with why. A grant that consults the policy anywhere else re-implements
+ * the home's fail-closed rules inline — which is how `refresh_token` carried a
+ * full copy the definition-only guard above could not see (v0.13.0 audit).
+ */
+const POLICY_EVALUATE_EXEMPTIONS: Readonly<Record<string, string>> = {
+	"packages/oauth/src/routes/authorize.mts":
+		"answers on the redirect (RFC 6749 §4.1.2.1), not as a token-endpoint error; bounds the audience through the home",
+	"packages/oauth-token-exchange/src/grant.mts":
+		"RFC 8693's contract: the ceiling is the subject token, a widening is `invalid_target`, and `access_denied` is 403",
+};
+
 describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
+	it("consults the grant policy through the home, or says why not", () => {
+		const home = join(repoRoot, "packages/core/src/grants/grantPolicy.mts");
+		const offenders = listShippedSources()
+			.filter((file) => file !== home)
+			.filter((file) => /grantPolicy[\s\S]{0,40}\.evaluate\s*\(/.test(readFileSync(file, "utf8")))
+			.map((file) => relative(repoRoot, file))
+			.filter((file) => !(file in POLICY_EVALUATE_EXEMPTIONS));
+		expect(offenders, "call evaluateGrantPolicy from core/src/grants/grantPolicy.mts").toEqual([]);
+	});
+
 	const sources = listShippedSources();
 
 	it("walks a plausible workspace (sanity: the guard is not vacuous)", () => {

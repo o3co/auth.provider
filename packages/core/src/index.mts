@@ -189,6 +189,7 @@ export {
 	type GrantPolicyAllow,
 	type GrantPolicyOutcome,
 	type PolicyAudienceOutcome,
+	type PolicyScopeCeiling,
 	policyOutOfBounds,
 } from "./grants/grantPolicy.mjs";
 // id_token generation (OIDC Core §2)
