@@ -230,16 +230,18 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 			activatorModule,
 		];
 
-		await expect(
-			createApp({
-				modules: modulesWithoutConfig,
-				bootstrapComponents: minBoot,
-			}),
-		).rejects.toMatchObject({
-			name: "BootError",
+		const error = await createApp({
+			modules: modulesWithoutConfig,
+			bootstrapComponents: minBoot,
+		}).then(
+			() => undefined,
+			(e: unknown) => e,
+		);
+		expect(error).toBeInstanceOf(BootError);
+		expect(error).toMatchObject({
 			reason: "missing-required-component",
 			details: { missingKey: "webauthnConfig" },
-		} satisfies Partial<InstanceType<typeof BootError>>);
+		});
 	});
 
 	/**
@@ -334,7 +336,7 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 		const configWithRI = {
 			...coreConfig,
 			oauth: {
-				...(coreConfig as unknown as Record<string, unknown>).oauth,
+				...((coreConfig as unknown as Record<string, Record<string, unknown>>).oauth ?? {}),
 				jwt: {
 					...((coreConfig as unknown as Record<string, Record<string, unknown>>).oauth?.jwt ?? {}),
 					issuer: "https://example.com",

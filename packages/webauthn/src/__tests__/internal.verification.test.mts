@@ -142,6 +142,22 @@ describe("verifyWebAuthnAttestation (spec §2.5)", () => {
 		expect(result).toEqual({ ok: false, reason: "challenge_mismatch" });
 	});
 
+	it("names a credential whose algorithm is outside the pin, rather than answering unknown (v0.13.0 audit)", async () => {
+		// `WEBAUTHN_ALGORITHM_IDS` refuses e.g. ML-DSA-44 (-48). The library's
+		// message matched no arm, so the operator saw `{"error":"unknown"}` for a
+		// refusal this package chose on purpose.
+		mockVerifyRegistration.mockRejectedValueOnce(
+			new Error('Unexpected public key alg "-48", expected one of "-8,-7,-257"'),
+		);
+		const result = await verifyWebAuthnAttestation({
+			response: STUB_REGISTRATION_RESPONSE,
+			expectedChallenge: "some-challenge",
+			expectedRpId: "example.com",
+			expectedOrigins: ["https://example.com"],
+		});
+		expect(result).toEqual({ ok: false, reason: "algorithm_not_allowed" });
+	});
+
 	it("returns rp_id_mismatch when SimpleWebAuthn throws an RP ID hash error", async () => {
 		mockVerifyRegistration.mockRejectedValueOnce(new Error("Unexpected RP ID hash"));
 

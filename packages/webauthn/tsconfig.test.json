@@ -1,0 +1,11 @@
+{
+	"extends": "./tsconfig.json",
+	"compilerOptions": {
+		"noEmit": true
+	},
+	// The build config excludes `__tests__`, so the fixtures' type annotations
+	// were never checked (v0.13.0 audit): `BASE_CONFIG: WebAuthnConfig` compiled
+	// while missing required fields. `pnpm run typecheck` checks both.
+	"include": ["src/**/*.mts"],
+	"exclude": ["node_modules", "dist"]
+}

@@ -18,6 +18,7 @@
 // Wave 1 — Passkey-native primary-login first slice.
 export { type WebAuthnConfig, webauthnConfigSchema } from "./config.mjs";
 export { WEBAUTHN_GRANT_TYPE } from "./grant.mjs";
+export { WEBAUTHN_ALGORITHM_IDS } from "./internal/options.mjs";
 export { webauthnModule } from "./module.mjs";
 // WebAuthnSubject + Express Request augmentation — consumers importing this
 // package gain the augmentation automatically via declaration merging.

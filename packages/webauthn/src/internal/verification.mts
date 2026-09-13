@@ -116,6 +116,9 @@ export type AttestationVerificationResult =
 				| "challenge_mismatch"
 				| "attestation_invalid"
 				| "rp_id_mismatch"
+				// The credential's key uses an algorithm outside
+				// `WEBAUTHN_ALGORITHM_IDS` — a refusal this package chose, named as one.
+				| "algorithm_not_allowed"
 				| "unknown";
 	  };
 
@@ -165,6 +168,10 @@ export async function verifyWebAuthnAttestation(
 
 function mapRegistrationError(err: unknown): AttestationVerificationResult {
 	if (err instanceof Error) {
+		// `Unexpected public key alg "-48", expected one of "-8,-7,-257"` — checked
+		// first: it names no origin, challenge or RP ID, and used to land on
+		// `unknown` (v0.13.0 audit).
+		if (/public key alg/i.test(err.message)) return { ok: false, reason: "algorithm_not_allowed" };
 		if (/origin/i.test(err.message)) return { ok: false, reason: "origin_mismatch" };
 		if (/challenge/i.test(err.message)) return { ok: false, reason: "challenge_mismatch" };
 		if (/rp.?id/i.test(err.message)) return { ok: false, reason: "rp_id_mismatch" };

@@ -123,6 +123,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isSpecialUseAddress\b/,
 	},
 	{
+		concept: "WebAuthn algorithm pin (#516)",
+		home: "packages/webauthn/src/internal/options.mts",
+		definition: /(?:function|const)\s+WEBAUTHN_ALGORITHM_IDS\b|supportedAlgorithmIDs\s*:\s*\[\s*-/,
+	},
+	{
 		concept: "fail-closed grant-policy evaluation and its bounds (#441, #520)",
 		home: "packages/core/src/grants/grantPolicy.mts",
 		definition:
