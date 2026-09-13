@@ -96,7 +96,9 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 	});
 
 	it("contributes the literal capability metadata", () => {
-		const meta = discoveryContribution();
+		// #484: `private_key_jwt` travels with the replay store that makes it
+		// honourable, so the wired composition is what states the full set.
+		const meta = discoveryContribution({ replaySeenSet: {} });
 		expect(meta.metadata?.response_types_supported).toEqual(["code"]);
 		expect(meta.metadata?.subject_types_supported).toEqual(["public"]);
 		expect(meta.metadata?.scopes_supported).toEqual(["openid", "profile", "email", "groups"]);
@@ -209,7 +211,9 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 		// deliberately withheld. `POST /oauth/revoke` is mounted unconditionally
 		// by `createOAuthRouter`, so withholding it hid a working endpoint from
 		// exactly the clients that discover correctly.
-		const meta = discoveryContribution(allLogoutStores);
+		// #484: `private_key_jwt` is in the set because the store that records
+		// an assertion's `jti` is wired.
+		const meta = discoveryContribution({ ...allLogoutStores, replaySeenSet: {} });
 		expect(meta.endpoints?.revocation_endpoint).toBe("/oauth/revoke");
 		expect(meta.metadata?.revocation_endpoint_auth_methods_supported).toEqual([
 			"client_secret_basic",
@@ -285,7 +289,7 @@ describe("oauthModule — discoveryMetadata contribution", () => {
 		// `/oauth/introspect`. `none` is absent on purpose — RFC 7662 §2.1, and
 		// the route builds its client-auth middleware without
 		// `allowPublicClients`.
-		const meta = discoveryContribution(allLogoutStores);
+		const meta = discoveryContribution({ ...allLogoutStores, replaySeenSet: {} });
 		expect(meta.metadata?.introspection_endpoint_auth_methods_supported).toEqual([
 			"client_secret_basic",
 			"client_secret_post",
@@ -363,5 +367,63 @@ describe("oauthModule — client_id_metadata_document_supported (#529)", () => {
 		// client down a flow this deployment cannot complete.
 		const on = discoveryContribution({}, enabled());
 		expect(on.metadata?.client_id_metadata_document_supported).toBeUndefined();
+	});
+});
+
+describe("oauthModule — private_key_jwt is advertised only where it can be honoured (#484)", () => {
+	it("says nothing about private_key_jwt when no replay seen-set is wired", () => {
+		// A client assertion's `jti` is single-use, and the verifier answers
+		// `500 server_error` when it has nowhere to record one rather than
+		// authenticating it unchecked. Advertising the method anyway sends a
+		// client to three endpoints that will all refuse it — the same "on and
+		// completable" rule this file applies to CIMD, logout and revocation.
+		const off = discoveryContribution();
+		expect(off.metadata?.token_endpoint_auth_methods_supported).not.toContain("private_key_jwt");
+		expect(off.metadata?.token_endpoint_auth_signing_alg_values_supported).toBeUndefined();
+		expect(off.metadata?.introspection_endpoint_auth_methods_supported).not.toContain(
+			"private_key_jwt",
+		);
+		expect(off.metadata?.introspection_endpoint_auth_signing_alg_values_supported).toBeUndefined();
+	});
+
+	it("still advertises the methods that need no store", () => {
+		const off = discoveryContribution();
+		expect(off.metadata?.token_endpoint_auth_methods_supported).toEqual([
+			"client_secret_basic",
+			"client_secret_post",
+			"none",
+		]);
+		expect(off.metadata?.introspection_endpoint_auth_methods_supported).toEqual([
+			"client_secret_basic",
+			"client_secret_post",
+		]);
+	});
+
+	it("advertises it, with its algorithms, once a store is wired", () => {
+		const on = discoveryContribution({ replaySeenSet: {} });
+		expect(on.metadata?.token_endpoint_auth_methods_supported).toContain("private_key_jwt");
+		expect(on.metadata?.token_endpoint_auth_signing_alg_values_supported).toEqual(
+			expect.arrayContaining(["ES256", "RS256", "EdDSA"]),
+		);
+		expect(on.metadata?.introspection_endpoint_auth_methods_supported).toContain("private_key_jwt");
+		expect(on.metadata?.introspection_endpoint_auth_signing_alg_values_supported).toEqual(
+			expect.arrayContaining(["ES256", "RS256", "EdDSA"]),
+		);
+	});
+
+	it("gates the revocation entries on the store as well as on revocation being possible", () => {
+		const revoking = { refreshTokenFamilyRevocation: {} };
+		const withoutStore = discoveryContribution(revoking);
+		expect(withoutStore.metadata?.revocation_endpoint_auth_methods_supported).not.toContain(
+			"private_key_jwt",
+		);
+		expect(
+			withoutStore.metadata?.revocation_endpoint_auth_signing_alg_values_supported,
+		).toBeUndefined();
+
+		const withStore = discoveryContribution({ ...revoking, replaySeenSet: {} });
+		expect(withStore.metadata?.revocation_endpoint_auth_methods_supported).toContain(
+			"private_key_jwt",
+		);
 	});
 });

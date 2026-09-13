@@ -31,12 +31,14 @@ import {
 	createApp,
 	createMemoryDeviceCodeStore,
 	createMemoryRateLimiter,
+	createMemoryReplaySeenSet,
 	createSymmetricKeyStore,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
 import express from "express";
+import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 import { deviceGrantModule } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 
@@ -467,5 +469,131 @@ describe("deviceGrantModule — disabled surface", () => {
 		const handler = factory({ config: { oauth: { deviceAuthorization: { enabled: false } } } });
 		const { result } = await handler.handle({});
 		expect(result.error).toBe("unsupported_grant_type");
+	});
+});
+
+describe("deviceGrantModule — private_key_jwt on the mounted route (#484)", () => {
+	const ISSUER = "https://as.example.test";
+	const JWT_CLIENT = "assertion-app";
+	const JWT_BEARER_CLIENT_ASSERTION_TYPE = "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
+	let privateKey: CryptoKey;
+	let publicJwk: JWK;
+
+	beforeAll(async () => {
+		const pair = await generateKeyPair("ES256");
+		privateKey = pair.privateKey;
+		publicJwk = { ...(await exportJWK(pair.publicKey)), kid: "k1" };
+	});
+
+	const jwtRepository: ClientRepository = {
+		findById: async (id) =>
+			id === JWT_CLIENT
+				? ({
+						clientId: JWT_CLIENT,
+						tokenEndpointAuthMethod: "private_key_jwt",
+						allowedScopes: ["openid"],
+						defaultScopes: ["openid"],
+						allowedGrantTypes: [DEVICE_CODE_GRANT_TYPE],
+						jwks: { keys: [publicJwk] },
+					} as never)
+				: null,
+		authenticate: async () => null,
+	};
+
+	const assertion = async (): Promise<string> => {
+		const now = Math.floor(Date.now() / 1000);
+		return new SignJWT({
+			iss: JWT_CLIENT,
+			sub: JWT_CLIENT,
+			aud: `${ISSUER}/oauth/token`,
+			iat: now,
+			exp: now + 60,
+			jti: `jti-${Math.random().toString(36).slice(2)}`,
+		})
+			.setProtectedHeader({ alg: "ES256", kid: "k1" })
+			.sign(privateKey);
+	};
+
+	const mountWith = (deps: Record<string, unknown>) => {
+		const factory = deviceGrantModule.contributes?.routes?.[0] as (d: unknown) => {
+			mountPath: string;
+			handler: express.RequestHandler;
+		};
+		const route = factory(deps);
+		const app = express();
+		app.use(route.mountPath, route.handler);
+		return app;
+	};
+
+	const depsWith = (replaySeenSet?: unknown) => ({
+		config: {
+			oauth: {
+				jwt: { issuer: ISSUER },
+				accessToken: { expiresIn: 300 },
+				deviceAuthorization: {
+					enabled: true,
+					"verification-uri": "https://example.test/device",
+					"verification-uri-complete": false,
+					"code-lifetime-seconds": 600,
+					"polling-interval-seconds": 5,
+					rateLimit: { limit: 5, windowSeconds: 300 },
+				},
+			},
+			session: makeValidFullSections().session,
+			rateLimit: makeValidFullSections().rateLimit,
+		},
+		clientRepository: jwtRepository,
+		deviceCodeStore: createMemoryDeviceCodeStore(),
+		rateLimiter: createMemoryRateLimiter({
+			limits: { device_verification: { limit: 50, windowSeconds: 300 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+		}),
+		...(replaySeenSet === undefined ? {} : { replaySeenSet }),
+	});
+
+	it("authenticates a private_key_jwt client against the composition's replay store", async () => {
+		// The module builds the same client-auth middleware `/oauth/token`
+		// builds, but never handed it the replay store — so a client using the
+		// method the discovery document advertises got `500 server_error` here
+		// while it worked at every other endpoint.
+		const app = mountWith(depsWith(createMemoryReplaySeenSet()));
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.type("form")
+			.send({
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			});
+
+		expect(res.status).toBe(200);
+		expect(typeof res.body.device_code).toBe("string");
+	});
+
+	it("refuses a replayed assertion, because the store is the composition's", async () => {
+		const app = mountWith(depsWith(createMemoryReplaySeenSet()));
+		const jwt = await assertion();
+		const form = {
+			client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+			client_assertion: jwt,
+		};
+		expect(
+			(await request(app).post("/oauth/device_authorization").type("form").send(form)).status,
+		).toBe(200);
+		const replay = await request(app).post("/oauth/device_authorization").type("form").send(form);
+		expect(replay.status).toBe(401);
+		expect(replay.body.error).toBe("invalid_client");
+	});
+
+	it("answers server_error without a store rather than accepting an unchecked jti", async () => {
+		const app = mountWith(depsWith());
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.type("form")
+			.send({
+				client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+				client_assertion: await assertion(),
+			});
+		expect(res.status).toBe(500);
+		expect(res.body.error).toBe("server_error");
 	});
 });

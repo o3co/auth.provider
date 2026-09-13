@@ -341,7 +341,12 @@ export const deviceGrantModule = defineModule({
 	name: "device-grant",
 	configSchema: deviceGrantConfigSchema,
 	requires: ["config", "clientRepository", "keyStore"],
-	optional: ["deviceCodeStore", "rateLimiter", "logger", "auditSink"],
+	// #484: `replaySeenSet` is what records a client assertion's single-use
+	// `jti`. Optional here for the same reason it is optional on the OAuth
+	// router — a composition with no `private_key_jwt` client needs none —
+	// and a request using the method without one is `server_error`, never an
+	// assertion accepted unchecked.
+	optional: ["deviceCodeStore", "rateLimiter", "replaySeenSet", "logger", "auditSink"],
 	// #363: optional to wire, not optional to decide. A composition with no
 	// sink discards every device approval — a consent event — with no
 	// symptom, so it has to write `audit.sink.type = "none"` to say so.
@@ -416,6 +421,13 @@ export const deviceGrantModule = defineModule({
 					createClientAuthMiddleware(deps.clientRepository, {
 						issuer: deps.config.oauth.jwt.issuer,
 						allowPublicClients: true,
+						// #484: the composition's replay store, so a `private_key_jwt`
+						// client is authenticated here the way it is at every other
+						// endpoint. Without it the middleware has nowhere to record the
+						// assertion's `jti` and answers `server_error` — which is what
+						// this route did for every such client. The accepted `aud` is
+						// derived from `issuer` above, as it is at `/oauth/revoke`.
+						...(deps.replaySeenSet ? { replaySeenSet: deps.replaySeenSet } : {}),
 						...(deps.logger ? { logger: deps.logger } : {}),
 					}),
 				);

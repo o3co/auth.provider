@@ -120,6 +120,9 @@ importers:
       express:
         specifier: ^5.0.0
         version: 5.2.1
+      jose:
+        specifier: ^6.2.12
+        version: 6.2.12
       supertest:
         specifier: ^7.2.2
         version: 7.2.2
