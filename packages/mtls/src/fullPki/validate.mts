@@ -417,11 +417,20 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 		// #471: `unknown` is an answer, not an outage. RFC 6960 §2.2: the
 		// responder does not know the certificate — for a serial the CA never
 		// issued, that is the whole finding — and a CRL cannot list a
-		// never-issued serial, so consulting it would judge exactly that
-		// certificate by the one source that cannot see it. The fallback
-		// covers the transport-, freshness- and signature-shaped reasons only;
-		// an `unknown` stands, and `on-unavailable` decides what it means.
-		if (ocsp.reason === "unknown") return ocsp;
+		// never-issued serial, so it cannot exonerate one. A CRL's *silence*
+		// about this certificate therefore decides nothing, and the `unknown`
+		// stands for `on-unavailable` to judge.
+		//
+		// It can still say `revoked`, and that is worth asking for: a combined
+		// mode must not refuse fewer certificates than either of its parts.
+		// `crl` alone refuses a certificate its CRL lists; before this, `both`
+		// admitted the same certificate under `allow`, because the list that
+		// names it was never consulted.
+		if (ocsp.reason === "unknown") {
+			const listed = await byCrl(certificate, issuer, now);
+			if (listed.kind === "revoked") return listed;
+			return ocsp;
+		}
 		// A certificate that names no responder is a normal shape under
 		// "both" — a CA that publishes only CRLs for some of its
 		// certificates — not an outage. A responder that was asked and did

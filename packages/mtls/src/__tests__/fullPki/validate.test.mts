@@ -1781,12 +1781,14 @@ describe("full-pki revocation — mode = both (#431)", () => {
 		);
 	});
 
-	it("treats an OCSP unknown as final under both — the CRL is not consulted (#471)", async () => {
+	it("treats an OCSP unknown as final under both — a silent CRL does not answer it (#471)", async () => {
 		// RFC 6960 §2.2: `unknown` is the responder's answer — it does not know
 		// the certificate — and for a serial the CA never issued that is the
-		// whole finding. A CRL cannot list a never-issued serial, so falling
-		// back would judge exactly that certificate by the source that cannot
-		// see it: `both` would be weaker than `ocsp` for the case that matters.
+		// whole finding. A CRL cannot list a never-issued serial, so it cannot
+		// exonerate one: its silence must not become "good", or `both` would be
+		// weaker than `ocsp` for the case that matters. It is still asked,
+		// because it can say `revoked` (the case above), and a combined mode
+		// must not be weaker than `crl` either.
 		const { root, int, leaf } = await ocspAndCrlChain();
 		const { impl, calls } = stubFetch({
 			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, status: "unknown" }),
@@ -1803,14 +1805,20 @@ describe("full-pki revocation — mode = both (#431)", () => {
 
 		expect(result.ok).toBe(false);
 		if (!result.ok) expect(result.step).toBe("revocation status unavailable");
-		expect(calls).not.toContain(INT_CRL_URL);
+		// Consulted, and it decided nothing: the `unknown` still stands.
+		expect(calls).toContain(INT_CRL_URL);
 		expect(logger.warn).not.toHaveBeenCalledWith(
 			expect.anything(),
 			"mtls_revocation_ocsp_fallback",
 		);
 	});
 
-	it("under both with on-unavailable = allow, an OCSP unknown is admitted as unavailable, never CRL-checked (#471)", async () => {
+	it("under both, a CRL that lists the certificate refuses it even when OCSP answered unknown", async () => {
+		// #471 established that a CRL may not turn an `unknown` into "good": it
+		// cannot list a serial the CA never issued, so it cannot exonerate one.
+		// It can still say `revoked`, and a combined mode that refuses fewer
+		// certificates than either of its parts is not a combined mode —
+		// `crl` + `allow` refuses this certificate, so `both` + `allow` must.
 		const { root, int, leaf } = await ocspAndCrlChain();
 		const { impl, calls } = stubFetch({
 			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, status: "unknown" }),
@@ -1823,10 +1831,27 @@ describe("full-pki revocation — mode = both (#431)", () => {
 			fetchImpl: impl,
 		}).validate(leaf.x509, [int.x509], NOW);
 
-		// `allow` admits an unavailable status by policy; the CRL that would have
-		// refused this certificate did not decide, because it was never asked.
+		expect(result.ok).toBe(false);
+		expect(calls).toContain(INT_CRL_URL);
+	});
+
+	it("under both with on-unavailable = allow, an OCSP unknown the CRL does not list stays unavailable (#471)", async () => {
+		// The half #471 is about: the CRL is asked, says nothing about this
+		// certificate, and that silence does not become an answer. The status
+		// is still unavailable, and `allow` admits it by policy.
+		const { root, int, leaf } = await ocspAndCrlChain();
+		const { impl } = stubFetch({
+			[INT_OCSP_URL]: ocspAnswer({ issuer: int, subject: leaf, status: "unknown" }),
+			[ROOT_OCSP_URL]: ocspAnswer({ issuer: root, subject: int }),
+			[INT_CRL_URL]: await mintCrl({ issuer: int, revoked: [] }),
+		});
+
+		const result = await validator([root], {
+			revocation: fetchingPolicy("both", "allow"),
+			fetchImpl: impl,
+		}).validate(leaf.x509, [int.x509], NOW);
+
 		expect(result).toEqual({ ok: true });
-		expect(calls).not.toContain(INT_CRL_URL);
 	});
 
 	it.each(["reject", "allow"] as const)(
