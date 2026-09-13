@@ -207,20 +207,29 @@ export const createOAuthRouter = async (
 	// names, under the operator's ceilings. One repository for every
 	// endpoint below — /authorize, /token, /revoke — so a document client is
 	// the same client everywhere.
+	//
+	// Wired only where such a client could finish a flow: every document
+	// client is by definition not first-party, so `/authorize` refuses it
+	// without a consent store. The discovery document already withholds
+	// `client_id_metadata_document_supported` for that reason; the repository
+	// has to follow, or each request resolves a name and makes a guarded
+	// outbound HTTPS fetch before the refusal — an amplification surface in a
+	// configuration where no request can ever succeed.
 	const cimd = options.clientIdMetadataDocuments;
-	const clientRepository: ClientRepository = cimd.enabled
-		? withClientIdMetadataDocuments(registeredClients, {
-				allowedScopes: cimd.allowedScopes,
-				allowedAudiences: cimd.allowedAudiences,
-				allowedHosts: cimd.allowedHosts,
-				deniedHosts: cimd.deniedHosts,
-				...(cimd.maxBytes === undefined ? {} : { maxBytes: cimd.maxBytes }),
-				...(cimd.timeoutMs === undefined ? {} : { timeoutMs: cimd.timeoutMs }),
-				...(cimd.cacheMaxAgeMs === undefined ? {} : { cacheMaxAgeMs: cimd.cacheMaxAgeMs }),
-				logger,
-				...clientIdMetadataDocumentSeams,
-			})
-		: registeredClients;
+	const clientRepository: ClientRepository =
+		cimd.enabled && consentStore !== undefined
+			? withClientIdMetadataDocuments(registeredClients, {
+					allowedScopes: cimd.allowedScopes,
+					allowedAudiences: cimd.allowedAudiences,
+					allowedHosts: cimd.allowedHosts,
+					deniedHosts: cimd.deniedHosts,
+					...(cimd.maxBytes === undefined ? {} : { maxBytes: cimd.maxBytes }),
+					...(cimd.timeoutMs === undefined ? {} : { timeoutMs: cimd.timeoutMs }),
+					...(cimd.cacheMaxAgeMs === undefined ? {} : { cacheMaxAgeMs: cimd.cacheMaxAgeMs }),
+					logger,
+					...clientIdMetadataDocumentSeams,
+				})
+			: registeredClients;
 	const legacyTypAcceptOpt = options.legacyTypAccept;
 	// `/oauth/token` MUST accept public clients (`tokenEndpointAuthMethod: "none"`)
 	// because PKCE/S256 at `/oauth/authorize` is their authenticity gate.
@@ -966,6 +975,15 @@ export const createOAuthRouter = async (
 	// `createOAuthRouter` directly.
 	//
 	// Refresh-token revocation is independent of the mode and of the denylist.
+	//
+	// Throttled like `/token`, `/introspect` and `/authorize`, which it was
+	// not: RFC 7009 §2.1 lets a public client revoke its own tokens, so this
+	// is an unauthenticated entry point that reaches the client repository on
+	// every attempt — and with Client ID Metadata Documents on, that
+	// repository performs an outbound document fetch. Mounted as a
+	// path-scoped guard ahead of the router, because `createRevokeRouter`
+	// owns the `/revoke` path itself.
+	router.use("/revoke", rateLimitGuard("revoke"));
 	router.use(
 		createRevokeRouter(express, {
 			clientRepository,

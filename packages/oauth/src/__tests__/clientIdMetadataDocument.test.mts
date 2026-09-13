@@ -111,6 +111,12 @@ describe("isClientIdMetadataDocumentUrl (draft §3.1, #529)", () => {
 			"https://localhost/meta", // loopback name
 			"https://127.0.0.1/meta",
 			"https://CLIENT.example/Meta", // not canonical: the document's client_id could never equal it
+			// A trailing dot is the DNS root, and it survives canonicalisation:
+			// `new URL(...).href` returns it unchanged and TLS accepts the
+			// certificate issued for the undotted name. `deniedHosts` matches on
+			// neither spelling, so the operator's deny list read as a pass.
+			"https://client.example./meta",
+			"https://client.example.:8443/meta",
 			"not a url",
 			"",
 		]) {
@@ -462,5 +468,29 @@ describe("the document cache is bounded (#529 review)", () => {
 		expect(calls).toHaveLength(3);
 		expect(await r.resolve(urls[0] as string)).not.toBeNull();
 		expect(calls).toHaveLength(4);
+	});
+});
+
+describe("the host policy holds whichever way the name is spelled (#529 audit)", () => {
+	it("does not let a trailing dot walk past deniedHosts", async () => {
+		// `allowedHosts` fails closed on the dotted form — it matches nothing —
+		// but `deniedHosts` failed open: neither "client.example" nor
+		// ".client.example" matches "client.example.", so a denied host was
+		// reachable by adding one character the resolver, DNS and TLS all
+		// ignore.
+		const dotted = CLIENT_URL.replace("client.example", "client.example.");
+		const denied = resolver({ deniedHosts: ["client.example"] });
+		expect(await denied.resolve(dotted)).toBeNull();
+		// Refused before the socket opens, which is what "denied" has to mean:
+		// null alone was reached anyway, because the document's own `client_id`
+		// is the undotted spelling and could never equal what was asked for.
+		expect(denied.calls).toHaveLength(0);
+	});
+
+	it("refuses the dotted spelling even where the undotted one is allowed", async () => {
+		const dotted = CLIENT_URL.replace("client.example", "client.example.");
+		const allowed = resolver({ allowedHosts: ["client.example"] });
+		expect(await allowed.resolve(dotted)).toBeNull();
+		expect(allowed.calls).toHaveLength(0);
 	});
 });
