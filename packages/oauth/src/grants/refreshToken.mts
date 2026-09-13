@@ -609,33 +609,36 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 						rotationCommitted = true;
 						// Successful rotation — fall through to the success path below
 						// (token issuance), at no more than the ceiling the store
-						// committed. The adapter reconstructs that epoch after its
-						// round-trip, so it drifts forward by milliseconds, and its
+						// committed. The store reports that ceiling on every rotation;
+						// it caps only when it is earlier than the expiry asked for.
+						// When it did, the adapter reconstructs the epoch after its
+						// round-trip, so it drifts forward by milliseconds and its
 						// contract asks for a subtracted margin: flooring alone only
 						// truncates, and can land past the true ceiling (v0.13.0
-						// audit). The `min` means a cap that is not a cap changes
-						// nothing.
+						// audit). An uncapped rotation keeps the lifetime it asked for.
 						const capped = rotateResult.cappedExpiresAtMs;
-						if (capped !== undefined) {
+						if (capped !== undefined && capped < newRefreshExp * 1000) {
 							refreshExpiresIn = Math.min(
 								requestedRefreshExpiresIn,
 								Math.floor((capped - CAPPED_EXPIRY_DRIFT_MARGIN_MS) / 1000) - issuedAt,
 							);
-							if (refreshExpiresIn <= 0) {
-								// The family reached its lifetime. Issuing `expiresIn: 0`
-								// was a 200 carrying an already-expired refresh token.
-								logger?.info(
-									{ familyId: newFamilyId, clientId: authenticatedClientId },
-									"refresh_token_family_lifetime_exhausted",
-								);
-								return {
-									result: {
-										status: 400,
-										error: "invalid_grant",
-										errorDescription: "refresh token family has reached its lifetime",
-									},
-								};
-							}
+						}
+						// `issuedAt` was reserved before the store call, so measure what
+						// is left against the clock now: a cap at the end of the family's
+						// life, or a store slow enough to spend it, leaves a token that
+						// would be signed already expired.
+						if (issuedAt + refreshExpiresIn <= Math.floor(Date.now() / 1000)) {
+							logger?.info(
+								{ familyId: newFamilyId, clientId: authenticatedClientId },
+								"refresh_token_family_lifetime_exhausted",
+							);
+							return {
+								result: {
+									status: 400,
+									error: "invalid_grant",
+									errorDescription: "refresh token family has reached its lifetime",
+								},
+							};
 						}
 						break;
 					}

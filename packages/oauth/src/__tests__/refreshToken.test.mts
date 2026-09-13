@@ -2004,6 +2004,54 @@ describe("refresh rotation reserves before it signs (#449)", () => {
 		);
 	});
 
+	it("does not shorten a rotation the family did not cap (review)", async () => {
+		// The store reports the committed ceiling on every rotation; when the
+		// family is younger than the requested lifetime that is exactly the
+		// expiry asked for. The drift margin is for a cap that fired — applied
+		// here it took a second off every refresh token, and refused a
+		// one-second lifetime as exhausted.
+		const store = countingKeyStore();
+		const { result } = await run(
+			{
+				async register() {},
+				async rotate(_previousJti: string, _newJti: string, _family: string, expiresAt: number) {
+					return { outcome: "rotated" as const, cappedExpiresAtMs: expiresAt };
+				},
+			},
+			store,
+		);
+		if (!("tokens" in result)) return expect.fail("expected tokens");
+		const claims = decodeJwt(result.tokens.refresh_token as string);
+		expect((claims.exp as number) - (claims.iat as number)).toBe(
+			mockConfig.oauth.refreshToken.expiresIn,
+		);
+	});
+
+	it("refuses when the store took longer than the capped lifetime it left (review)", async () => {
+		// `issuedAt` is reserved before the rotation; a slow store can use up
+		// what the cap left, and the token would be signed already expired.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			const start = 1_800_000_000_000;
+			vi.setSystemTime(start);
+			const store = countingKeyStore();
+			const { result } = await run(
+				{
+					async register() {},
+					async rotate() {
+						vi.setSystemTime(start + 4_000); // the CAS round trip took four seconds
+						return { outcome: "rotated" as const, cappedExpiresAtMs: start + 3_500 };
+					},
+				},
+				store,
+			);
+			expect(result.status).toBe(400);
+			expect(store.signed).toHaveLength(0);
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("signs the jti and expiry it reserved, once the reservation holds", async () => {
 		const reserved: { jti?: string; expiresAt?: number } = {};
 		const store = countingKeyStore();
