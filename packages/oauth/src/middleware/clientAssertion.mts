@@ -16,14 +16,13 @@
 
 import {
 	consoleLogger,
+	createRemoteKeySetCache,
 	type Logger,
 	type PublicClient,
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
 import {
 	createLocalJWKSet,
-	createRemoteJWKSet,
-	customFetch,
 	decodeJwt,
 	errors,
 	type JSONWebKeySet,
@@ -122,10 +121,6 @@ export const hasClientAssertion = (body: Record<string, unknown> | undefined): b
 	body !== undefined &&
 	(body.client_assertion !== undefined || body.client_assertion_type !== undefined);
 
-const JWKS_TIMEOUT_MS = 5_000;
-const JWKS_COOLDOWN_MS = 30_000;
-const JWKS_CACHE_MAX_AGE_MS = 600_000;
-
 export function createClientAssertionVerifier(
 	options: ClientAssertionVerifierOptions,
 ): ClientAssertionVerifier {
@@ -135,27 +130,16 @@ export function createClientAssertionVerifier(
 	const audiences = [options.issuer, options.tokenEndpoint].filter(
 		(value): value is string => typeof value === "string" && value.length > 0,
 	);
-	// One remote key set per `jwksUri`: jose caches the document, refetches
-	// on an unknown `kid` (with a cooldown, so a flood of bad kids is not a
-	// flood of fetches) and refreshes it after `cacheMaxAge`.
-	const remoteKeySets = new Map<string, JWTVerifyGetKey>();
+	// One remote key set per `jwksUri`, shared across requests (core's
+	// `createRemoteKeySetCache`, which the trust-registry verifier uses too).
+	const remoteKeySets = createRemoteKeySetCache({ fetch: options.fetch });
 
 	const keySetFor = (client: PublicClient): JWTVerifyGetKey | undefined => {
 		if (client.jwks !== undefined) {
 			return createLocalJWKSet(client.jwks as unknown as JSONWebKeySet);
 		}
 		if (typeof client.jwksUri === "string" && client.jwksUri.length > 0) {
-			let set = remoteKeySets.get(client.jwksUri);
-			if (!set) {
-				set = createRemoteJWKSet(new URL(client.jwksUri), {
-					timeoutDuration: JWKS_TIMEOUT_MS,
-					cooldownDuration: JWKS_COOLDOWN_MS,
-					cacheMaxAge: JWKS_CACHE_MAX_AGE_MS,
-					...(options.fetch ? { [customFetch]: options.fetch } : {}),
-				});
-				remoteKeySets.set(client.jwksUri, set);
-			}
-			return set;
+			return remoteKeySets.keySetFor(client.jwksUri);
 		}
 		return undefined;
 	};

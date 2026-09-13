@@ -14,14 +14,8 @@
  * limitations under the License.
  */
 
-import {
-	createLocalJWKSet,
-	createRemoteJWKSet,
-	decodeJwt,
-	errors,
-	type JWTPayload,
-	jwtVerify,
-} from "jose";
+import { createLocalJWKSet, decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
+import { createRemoteKeySetCache } from "../jwks/remoteKeySet.mjs";
 import type { ReplaySeenSet } from "../replay-seen-set/types.mjs";
 import type { AssertionIssuerEntry, AssertionIssuerRegistry } from "./issuerRegistry.mjs";
 import type {
@@ -58,6 +52,8 @@ export interface RegistryAssertionVerifierOptions {
 	readonly replaySeenSet?: ReplaySeenSet;
 	/** Adapter kind, for logs and boot diagnostics. Default `"jwt-registry"`. */
 	readonly kind?: string;
+	/** The fetch a `jwks_uri` entry's key set uses. An egress proxy, or a test seam. */
+	readonly fetch?: typeof fetch;
 }
 
 const defaultReadSubjectHandle = (claims: JWTPayload): string | null =>
@@ -182,10 +178,12 @@ export function createRegistryAssertionVerifier(
 		throw new Error("createRegistryAssertionVerifier: issuerIdentifier must not be empty.");
 	}
 
-	// Remote key sets are cached by URI, not by entry: a registry backed by a
-	// store hands back a fresh entry object per lookup, and the cache is what
-	// makes a rotation cost one refetch rather than one per request.
-	const remoteSets = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+	// Remote key sets are cached by URI and tuning, not by entry: a registry
+	// backed by a store hands back a fresh entry object per lookup, and the
+	// cache is what makes a rotation cost one refetch rather than one per
+	// request. Two entries naming one URI with different tuning get two key
+	// sets — neither inherits the other's.
+	const remoteSets = createRemoteKeySetCache({ fetch: options.fetch });
 	const keyFor = (entry: AssertionIssuerEntry): unknown => {
 		const { keys } = entry;
 		switch (keys.type) {
@@ -193,17 +191,12 @@ export function createRegistryAssertionVerifier(
 				return keys.key;
 			case "jwks":
 				return createLocalJWKSet(keys.jwks);
-			case "jwks_uri": {
-				const cached = remoteSets.get(keys.uri);
-				if (cached) return cached;
-				const set = createRemoteJWKSet(new URL(keys.uri), {
-					cacheMaxAge: keys.cacheMaxAgeMs ?? 10 * 60 * 1000,
-					cooldownDuration: keys.cooldownMs ?? 30 * 1000,
-					timeoutDuration: keys.timeoutMs ?? 5 * 1000,
+			case "jwks_uri":
+				return remoteSets.keySetFor(keys.uri, {
+					cacheMaxAgeMs: keys.cacheMaxAgeMs,
+					cooldownMs: keys.cooldownMs,
+					timeoutMs: keys.timeoutMs,
 				});
-				remoteSets.set(keys.uri, set);
-				return set;
-			}
 		}
 	};
 

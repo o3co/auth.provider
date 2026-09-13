@@ -111,6 +111,13 @@ const VOCABULARY: readonly VocabularyRow[] = [
 			/(?:function|const)\s+(?:measureSecretEntropyBytes|assertSecretEntropy|describeWeakSecret|MIN_SECRET(?:_ENTROPY)?_BYTES)\b/,
 	},
 	{
+		// The call is the signature: a second `createRemoteJWKSet(` is a second
+		// memo with its own tuning and its own (or no) fetch seam.
+		concept: "remote JSON Web Key Set (#484, #525)",
+		home: "packages/core/src/jwks/remoteKeySet.mts",
+		definition: /(?:function|const)\s+createRemoteKeySetCache\b|\bcreateRemoteJWKSet\s*\(/,
+	},
+	{
 		concept: "fail-closed grant-policy evaluation and its bounds (#441, #520)",
 		home: "packages/core/src/grants/grantPolicy.mts",
 		definition:
