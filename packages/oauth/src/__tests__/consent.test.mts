@@ -973,3 +973,21 @@ describe("the challenge's bindings, on the edges (#552 review)", () => {
 		expect(location.searchParams.has("state")).toBe(false);
 	});
 });
+
+describe("the page and the answer refuse the same requests (#527 audit)", () => {
+	it("does not show the page another subject's request, even from the parking session", async () => {
+		// `pendingFor`'s comment promised "one reader for both methods, so the
+		// page cannot learn something on GET that the POST would then refuse".
+		// It checked the session id only; the POST also refused a different
+		// subject. Where an express session is reused across a logout and a
+		// login without regeneration, the GET handed one user another user's
+		// client, scopes and redirect_uri.
+		const { app, session } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const challenge = atConsentPage(await authorize(app));
+		session.user = { id: "user-2" };
+		const res = await request(app).get("/oauth/consent").query({ challenge });
+		expect(res.status).toBe(400);
+		expect(res.body.error_description).toMatch(/no pending consent/);
+		expect(res.body).not.toHaveProperty("client_id");
+	});
+});

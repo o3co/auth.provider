@@ -15,8 +15,8 @@
  */
 
 import { type AdapterFactory, createAdapterFactory } from "../adapters/AdapterFactory.mjs";
-import { createMemoryConsentStore } from "./memory.mjs";
-import type { ConsentStore } from "./types.mjs";
+import { createMemoryConsentStore, createMemoryPendingConsentStore } from "./memory.mjs";
+import type { ConsentStore, PendingConsentStore } from "./types.mjs";
 
 /** Domain-specific AdapterFactory alias for {@link ConsentStore} (#527). */
 export type ConsentStoreFactory = AdapterFactory<ConsentStore>;
@@ -36,4 +36,28 @@ export function createConsentStoreFactory(): ConsentStoreFactory {
  */
 export function registerBuiltinConsentStores(factory: ConsentStoreFactory): void {
 	factory.register("memory", () => createMemoryConsentStore());
+}
+
+/**
+ * Domain-specific AdapterFactory alias for {@link PendingConsentStore} (#552).
+ *
+ * The sibling of {@link ConsentStoreFactory}, and wired with it: the consent
+ * step needs both slots, and `createOAuthRouter` refuses a composition with one
+ * and not the other. A factory for only the first led a composition that
+ * followed the pattern straight into that refusal.
+ */
+export type PendingConsentStoreFactory = AdapterFactory<PendingConsentStore>;
+
+/** Create an empty PendingConsentStoreFactory. */
+export function createPendingConsentStoreFactory(): PendingConsentStoreFactory {
+	return createAdapterFactory<PendingConsentStore>("PendingConsentStore");
+}
+
+/**
+ * Register the in-tree built-in builders on a PendingConsentStoreFactory.
+ * Currently registers "memory". Throws AdapterFactoryError reason "duplicate"
+ * if any builtin name is already registered.
+ */
+export function registerBuiltinPendingConsentStores(factory: PendingConsentStoreFactory): void {
+	factory.register("memory", () => createMemoryPendingConsentStore());
 }

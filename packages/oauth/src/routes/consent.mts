@@ -176,6 +176,16 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 			jsonError(res, 400, "invalid_request", NO_PENDING);
 			return null;
 		}
+		// The subject too, here rather than only in the POST: a session reused
+		// across a logout and a login without regeneration would otherwise show
+		// one user another user's client, scopes and redirect_uri, and the page
+		// would learn on GET what the POST then refuses (#527 audit). A session
+		// that names no subject is left to the POST's own, more specific answer.
+		const sub = subjectOf(req);
+		if (sub !== null && sub !== pending.sub) {
+			jsonError(res, 400, "invalid_request", NO_PENDING);
+			return null;
+		}
 		return pending;
 	};
 

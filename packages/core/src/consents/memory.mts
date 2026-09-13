@@ -99,6 +99,17 @@ export interface MemoryPendingConsentStore extends PendingConsentStore {
 const PENDING_SWEEP_FLOOR = 1024;
 
 /**
+ * How many requests one session may have parked at once (#527 audit).
+ *
+ * Records are keyed by challenge and reclaimed only on expiry, so without a
+ * bound one authenticated session could park an unbounded number inside the
+ * ten-minute window. A browser has no use for more than a handful of consent
+ * pages open at once; past the bound the oldest of that session's requests
+ * goes, and every other session is untouched.
+ */
+export const PENDING_CONSENT_PER_SESSION_LIMIT = 16;
+
+/**
  * In-process Map-backed {@link PendingConsentStore} (#552).
  *
  * `consume` reads and deletes with no `await` between them, which in a
@@ -114,13 +125,29 @@ const PENDING_SWEEP_FLOOR = 1024;
  */
 export function createMemoryPendingConsentStore(): MemoryPendingConsentStore {
 	const records = new Map<string, PendingConsentRecord>();
+	/**
+	 * Each session's outstanding challenges, oldest first — a `Set` keeps
+	 * insertion order. An index rather than a scan, so the per-session bound
+	 * costs the same whatever the store holds.
+	 */
+	const bySession = new Map<string, Set<string>>();
 	let sweepAt = PENDING_SWEEP_FLOOR;
+
+	/** Remove a record and its index entry together; they must never disagree. */
+	const drop = (challenge: string): void => {
+		const record = records.get(challenge);
+		if (record === undefined) return;
+		records.delete(challenge);
+		const mine = bySession.get(record.sessionId);
+		mine?.delete(challenge);
+		if (mine?.size === 0) bySession.delete(record.sessionId);
+	};
 
 	const live = (challenge: string): PendingConsentRecord | null => {
 		const record = records.get(challenge);
 		if (record === undefined) return null;
 		if (record.expiresAt <= Date.now()) {
-			records.delete(challenge);
+			drop(challenge);
 			return null;
 		}
 		return record;
@@ -129,7 +156,7 @@ export function createMemoryPendingConsentStore(): MemoryPendingConsentStore {
 	const sweep = (): void => {
 		const now = Date.now();
 		for (const [challenge, record] of records) {
-			if (record.expiresAt <= now) records.delete(challenge);
+			if (record.expiresAt <= now) drop(challenge);
 		}
 		sweepAt = Math.max(PENDING_SWEEP_FLOOR, records.size * 2);
 	};
@@ -143,11 +170,21 @@ export function createMemoryPendingConsentStore(): MemoryPendingConsentStore {
 
 		async set(record) {
 			if (records.size >= sweepAt) sweep();
+			// Re-parking a challenge already held replaces it, and must not count
+			// against the session twice.
+			drop(record.challenge);
+			const mine = bySession.get(record.sessionId) ?? new Set<string>();
+			if (mine.size >= PENDING_CONSENT_PER_SESSION_LIMIT) {
+				const oldest = mine.values().next();
+				if (!oldest.done) drop(oldest.value);
+			}
 			records.set(record.challenge, {
 				...record,
 				scopes: [...record.scopes],
 				grantedScopes: [...record.grantedScopes],
 			});
+			mine.add(record.challenge);
+			bySession.set(record.sessionId, mine);
 		},
 
 		async get(challenge) {
@@ -157,7 +194,7 @@ export function createMemoryPendingConsentStore(): MemoryPendingConsentStore {
 		async consume(challenge) {
 			// No await between the read and the delete: this is the one step.
 			const record = live(challenge);
-			if (record !== null) records.delete(challenge);
+			if (record !== null) drop(challenge);
 			return record;
 		},
 	};

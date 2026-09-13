@@ -63,10 +63,26 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 			expect(await store.find("u-2", "app")).toBeNull();
 		});
 
-		it("replaces the record for the same pair on a later grant", async () => {
+		it("records a later grant as the union with what is already recorded, never a replacement", async () => {
+			// The port's contract (#527 review): two browsers consenting to
+			// different scopes at once must not lose the grant the user already
+			// answered for. The case this suite used to run — `[read]` then
+			// `[read, write]` — is a superset, which a replacing adapter passes
+			// too; so a later grant here is disjoint from the first, and
+			// replacing it is visible.
+			await store.grant({ sub: "u-1", clientId: "app", scopes: ["read", "write"], grantedAt: 1 });
+			await store.grant({ sub: "u-1", clientId: "app", scopes: ["admin"], grantedAt: 2 });
+			const record = await store.find("u-1", "app");
+			expect([...(record?.scopes ?? [])].sort()).toEqual(["admin", "read", "write"]);
+			// The later record's own fields are the ones kept.
+			expect(record?.grantedAt).toBe(2);
+		});
+
+		it("does not count a scope twice when a later grant repeats one", async () => {
 			await store.grant({ sub: "u-1", clientId: "app", scopes: ["read"], grantedAt: 1 });
 			await store.grant({ sub: "u-1", clientId: "app", scopes: ["read", "write"], grantedAt: 2 });
-			expect((await store.find("u-1", "app"))?.scopes).toEqual(["read", "write"]);
+			const scopes = (await store.find("u-1", "app"))?.scopes ?? [];
+			expect([...scopes].sort()).toEqual(["read", "write"]);
 		});
 
 		it("stops finding an expired record", async () => {
