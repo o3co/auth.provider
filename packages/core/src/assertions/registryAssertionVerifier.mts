@@ -54,6 +54,35 @@ export interface RegistryAssertionVerifierOptions {
 	readonly kind?: string;
 	/** The fetch a `jwks_uri` entry's key set uses. An egress proxy, or a test seam. */
 	readonly fetch?: typeof fetch;
+	/**
+	 * How an entry's claims are read — code, so it lives here rather than on
+	 * the entry a store holds. Called per verification with the entry found;
+	 * `undefined`, or an absent reader, keeps the default: a non-empty `sub`
+	 * (or `<iss>#<sub>` / `<iss>#<tenant>#<sub>` for an ID-JAG) and a
+	 * space-delimited `scope`.
+	 *
+	 * It runs for every entry, ID-JAG ones included. With several issuers
+	 * whose `sub` values may collide, namespace the handle for the entries that
+	 * need it and return `undefined` for the rest, and refuse a missing or empty
+	 * `sub` rather than namespacing it — the Store receives the handle alone:
+	 *
+	 * ```ts
+	 * readersFor: (entry) =>
+	 *   entry.profile === "id-jag"
+	 *     ? undefined // keeps <iss>#<tenant>#<sub>
+	 *     : { readSubjectHandle: (c) =>
+	 *         typeof c.sub === "string" && c.sub.length > 0 ? `${entry.issuer}#${c.sub}` : null },
+	 * ```
+	 */
+	readonly readersFor?: (entry: AssertionIssuerEntry) => AssertionClaimReaders | undefined;
+}
+
+/** How a verifier reads the subject handle and the scope ceiling from an issuer's claims. */
+export interface AssertionClaimReaders {
+	/** The handle the Store resolves; `null` refuses the assertion. */
+	readonly readSubjectHandle?: (claims: JWTPayload) => string | null;
+	/** The scope the assertion claims, before the entry's ceiling applies. */
+	readonly readScope?: (claims: JWTPayload) => readonly string[] | undefined;
 }
 
 const defaultReadSubjectHandle = (claims: JWTPayload): string | null =>
@@ -295,13 +324,14 @@ export function createRegistryAssertionVerifier(
 			) {
 				return null;
 			}
+			const readers = options.readersFor?.(entry);
 			const readHandle =
-				entry.readSubjectHandle ??
+				readers?.readSubjectHandle ??
 				(idJag ? idJagSubjectHandle(entry.issuer) : defaultReadSubjectHandle);
 			const subjectHandle = readHandle(claims);
 			if (subjectHandle === null || subjectHandle.length === 0) return null;
 
-			const claimed = (entry.readScope ?? defaultReadScope)(claims);
+			const claimed = (readers?.readScope ?? defaultReadScope)(claims);
 			const scope =
 				entry.allowedScopes === undefined
 					? claimed

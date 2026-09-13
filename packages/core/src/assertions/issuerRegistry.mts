@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { JSONWebKeySet, JWTPayload } from "jose";
+import type { JSONWebKeySet } from "jose";
 import type { KeyLike } from "../keys/KeyStore.mjs";
 import { isLoopbackHostname } from "../net/loopback.mjs";
 
@@ -51,7 +51,14 @@ export type AssertionIssuerKeySource =
  *
  * Every field beyond `issuer`, `keys` and `algorithms` is a ceiling: it can
  * only narrow what an assertion from this issuer may obtain, never widen the
- * request, the client registration or the policy. An entry is immutable
+ * request, the client registration or the policy.
+ *
+ * An entry is **data**, so a registry can keep it in a store: every field
+ * survives a JSON round trip, `expiresAt` revived as a `Date`. The one
+ * exception is `keys.type: "key"`, a live key object for the in-process shape
+ * `createJwtAssertionVerifier` builds — a store-backed registry holds `jwks`
+ * (a one-key set is fine) or `jwks_uri` instead. How claims are *read* is code,
+ * and code is the verifier's: `RegistryAssertionVerifierOptions.readersFor`. An entry is immutable
  * except for `expiresAt` — delete and re-add to change anything else, so the
  * audit trail of "what did we trust, and when" stays a list of adds and
  * removes.
@@ -90,7 +97,10 @@ export interface AssertionIssuerEntry {
 	 * unauthenticated presenter is refused.
 	 */
 	readonly allowedClients?: readonly string[];
-	/** After this instant the entry is refused. The only mutable field. */
+	/**
+	 * After this instant the entry is refused. The only mutable field. A
+	 * registry over a store hands it back as a `Date`.
+	 */
 	readonly expiresAt?: Date;
 	/**
 	 * Which assertion profile this issuer mints (#526).
@@ -108,11 +118,14 @@ export interface AssertionIssuerEntry {
 	readonly profile?: "rfc7523" | "id-jag";
 	/** Clock skew for `exp` / `nbf`, in seconds. Default 60. */
 	readonly clockToleranceSeconds?: number;
-	/** How the handle is read from the claims. Defaults to `sub`. */
-	readonly readSubjectHandle?: (claims: JWTPayload) => string | null;
-	/** How the scope ceiling is read from the claims. Defaults to `scope`, space-delimited. */
-	readonly readScope?: (claims: JWTPayload) => readonly string[] | undefined;
 }
+
+/**
+ * Entry fields that were code and are now the verifier's (`readersFor`). An
+ * entry still carrying one is refused rather than ignored: ignoring a handle
+ * reader would hand the Store a bare `sub` that two issuers can share.
+ */
+const READER_FIELDS = ["readSubjectHandle", "readScope"] as const;
 
 /**
  * The lookup the registry verifier performs before any signature work: is
@@ -148,6 +161,15 @@ export interface MutableAssertionIssuerRegistry extends AssertionIssuerRegistry 
  * of registering it.
  */
 export function checkAssertionIssuerEntry(entry: AssertionIssuerEntry): void {
+	for (const field of READER_FIELDS) {
+		if ((entry as unknown as Record<string, unknown>)[field] !== undefined) {
+			throw new Error(
+				`AssertionIssuerEntry(${entry.issuer}): ${field} is not an entry field — an entry is ` +
+					"data a store can hold, and a reader is code. Pass it through the verifier's " +
+					"readersFor(entry) instead.",
+			);
+		}
+	}
 	if (entry.issuer.length === 0) {
 		throw new Error(
 			"AssertionIssuerEntry: issuer is required — an assertion without a pinned " +
