@@ -20,6 +20,7 @@ export {
 	type ClientIdMetadataDocumentOptions,
 	type ClientIdMetadataDocumentResolver,
 	createClientIdMetadataDocumentResolver,
+	isClientIdMetadataDocumentClient,
 	isClientIdMetadataDocumentUrl,
 	withClientIdMetadataDocuments,
 } from "./clients/clientIdMetadataDocument.mjs";

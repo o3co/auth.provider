@@ -803,7 +803,9 @@ const evaluateReauthentication = async (
 			return "answered";
 		}
 		if (ask !== null) {
-			if (authTimeSeconds >= ask.askedAt) return "proceed";
+			// Strictly after the ask, to the millisecond: an authentication made
+			// before it — even earlier in the same second — is not the one it asked for.
+			if (session.authTime.getTime() > ask.askedAt) return "proceed";
 			redirectError(
 				ctx,
 				"login_required",
@@ -1455,7 +1457,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 			try {
 				// `evaluateReauthentication` refused already when there is no store.
 				askId = await (askStore as ReauthAskStore).ask({
-					askedAt: Math.floor(Date.now() / 1000),
+					askedAt: Date.now(),
 					request: askRequest,
 				});
 			} catch (err) {

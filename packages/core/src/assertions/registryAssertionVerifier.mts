@@ -27,6 +27,9 @@ import type {
 /** The `typ` an Identity Assertion JWT Authorization Grant MUST carry (ID-JAG §3). */
 export const ID_JAG_TYP = "oauth-id-jag+jwt";
 
+/** How long ago an ID-JAG may have been issued (`iat`), before clock tolerance. */
+const ID_JAG_MAX_AGE_SECONDS = 3600;
+
 export interface RegistryAssertionVerifierOptions {
 	readonly registry: AssertionIssuerRegistry;
 	/**
@@ -291,6 +294,11 @@ export function createRegistryAssertionVerifier(
 					// validated when present — except under ID-JAG, where iat,
 					// jti, sub and client_id are all required claims (§3).
 					requiredClaims: idJag ? ["exp", "iat", "jti", "sub", "client_id"] : ["exp"],
+					// An ID-JAG's `iat` is also bounded (v0.13.0 audit): its `jti` is
+					// remembered until `exp`, so an old assertion with a distant `exp`
+					// is a stale grant and a long-lived replay record at once. The
+					// same hour the `private_key_jwt` verifier allows.
+					...(idJag ? { maxTokenAge: ID_JAG_MAX_AGE_SECONDS } : {}),
 					...(idJag ? { typ: ID_JAG_TYP } : {}),
 				}));
 			} catch (err) {

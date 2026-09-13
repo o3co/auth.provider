@@ -1048,6 +1048,16 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			delete: vi.fn(async () => {}),
 		}) as unknown as UserSessionStore;
 	const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
+	/**
+	 * A re-authentication, which comes strictly after the ask: the ask is
+	 * compared to the millisecond, and a test that reads the clock in the same
+	 * millisecond as `/authorize` would be describing an authentication that
+	 * happened before the ask was made.
+	 */
+	const reauthenticatedNow = async (): Promise<Date> => {
+		await new Promise((resolve) => setTimeout(resolve, 2));
+		return new Date();
+	};
 	const mintingCode = () =>
 		vi.fn(async () => ({ code: "code-x", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }));
 	/** The login-page redirect, with the round-tripped authorize URL parsed. */
@@ -1150,7 +1160,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 				createCode,
 			});
 			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
-			authTime.at = new Date();
+			authTime.at = await reauthenticatedNow();
 			const res = await request(harness.app).get(back.pathname + back.search);
 			expect(redirectParams(res).get("code")).toBe("code-x");
 		});
@@ -1171,7 +1181,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
 			// What regeneration leaves behind: a brand-new session object.
 			harness.regenerate({ isAuthenticated: true, user: { id: "user-1" }, sid: "sid-1" });
-			authTime.at = new Date();
+			authTime.at = await reauthenticatedNow();
 			const res = await request(harness.app).get(back.pathname + back.search);
 			expect(redirectParams(res).get("code")).toBe("code-x");
 		});
@@ -1185,7 +1195,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 				createCode,
 			});
 			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
-			authTime.at = new Date();
+			authTime.at = await reauthenticatedNow();
 			const askId = back.searchParams.get("reauth_ask") as string;
 			const path = back.pathname + back.search;
 			expect(redirectParams(await request(harness.app).get(path)).get("code")).toBe("code-x");
@@ -1220,6 +1230,28 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(createCode).not.toHaveBeenCalled();
 		});
 
+		it("does not count an authentication earlier in the same second as the ask (v0.13.0 audit)", async () => {
+			// The ask and `auth_time` were both compared in whole seconds with
+			// `>=`, so a session authenticated at …:00.200 satisfied an ask made at
+			// …:00.800 — `prompt=login` honoured without re-authenticating, for a
+			// session created in the same wall-clock second.
+			vi.useFakeTimers({ toFake: ["Date"] });
+			try {
+				vi.setSystemTime(new Date("2026-09-13T12:00:00.800Z"));
+				const harness = await makeApp({
+					session,
+					userSessionStore: storeWith(new Date("2026-09-13T12:00:00.200Z")),
+				});
+				const back = loginRedirectTo(
+					await authorize(harness.app, { ...baseQuery, prompt: "login" }),
+				);
+				const res = await request(harness.app).get(back.pathname + back.search);
+				expect(redirectParams(res).get("error")).toBe("login_required");
+			} finally {
+				vi.useRealTimers();
+			}
+		});
+
 		it("answers login_required — no second round trip — when the user came back without re-authenticating", async () => {
 			const harness = await makeApp({ session, userSessionStore: storeWith(minutesAgo(10)) });
 			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
@@ -1240,7 +1272,7 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 				createCode,
 			});
 			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "0" }));
-			authTime.at = new Date();
+			authTime.at = await reauthenticatedNow();
 			const res = await request(harness.app).get(back.pathname + back.search);
 			expect(redirectParams(res).get("code")).toBe("code-x");
 		});
