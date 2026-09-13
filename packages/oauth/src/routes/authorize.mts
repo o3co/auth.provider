@@ -46,6 +46,7 @@ import {
 } from "../grants/pkce.mjs";
 import type { ResolvedOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { newConsentChallenge, PENDING_CONSENT_TTL_MS } from "./consent.mjs";
+import { REAUTH_ASK_PARAM, type ReauthAskStore, reauthAskStoreFor } from "./reauthAsk.mjs";
 
 export interface AuthorizeHandlerOptions {
 	readonly clientRepository: ClientRepository;
@@ -612,6 +613,7 @@ const SINGLE_VALUED_QUERY_PARAMS = [
 	// #481
 	"max_age",
 	"acr_values",
+	"reauth_ask",
 ] as const;
 
 /**
@@ -728,41 +730,18 @@ const parseMaxAge = (ctx: AuthorizeContext): { readonly value: number | undefine
 };
 
 /**
- * #481 — the epoch second at which this endpoint asked for a
- * re-authentication, recorded on the session while the browser is at the
- * login page. On the way back, a session authenticated at or after it is
- * the re-authentication that was asked for; one authenticated before it is
- * not, and gets `login_required` instead of a second round trip.
- *
- * On the session rather than on the authorize URL, for two reasons the
- * v0.13.0 release audit found. The URL is the caller's: a request carrying
- * `max_age=60&reauth_after=0` satisfied `authTime >= 0` for any live
- * session and skipped the round trip the parameter exists to force —
- * turning an OP control OIDC Core §3.1.2.1 makes mandatory into an RP's
- * optional `auth_time` check. And a deployment login page that rebuilt the
- * authorize URL rather than returning `redirect_to` verbatim dropped the
- * marker, so the request looped between `/authorize` and the login page
- * forever — the failure v0.12.1 cited as its reason not to ship
- * `prompt=login` at all.
- *
- * The session, not a store of its own: unlike the parked consent request
- * (#552), this is not a decision two answers could race to apply — it is
- * one browser's record of one ask, read once on the way back. It is spent
- * when it is read, so an ask cannot satisfy a later request whose session
- * has since gone stale.
+ * #481 — the re-authentication ask, and why it is neither a request
+ * parameter nor a session field: see `./reauthAsk.mts`, which holds the
+ * record and the reasoning.
  */
-declare module "express-session" {
-	interface SessionData {
-		reauthAskedAt?: number;
-	}
-}
-
-/** Read the outstanding ask and spend it; `undefined` when there is none. */
-const takeReauthAsk = (ctx: AuthorizeContext): number | undefined => {
-	const asked = ctx.req.session?.reauthAskedAt;
-	if (typeof asked !== "number" || !Number.isFinite(asked)) return undefined;
-	delete ctx.req.session.reauthAskedAt;
-	return asked;
+/**
+ * The authorize request an ask is minted for and returned to: the canonical
+ * URL without the ask parameter, so both sides agree by construction.
+ */
+const askRequestOf = (ctx: AuthorizeContext): string => {
+	const url = new URL(buildCanonicalRequestUrl(ctx.issuerOrigin, ctx.req.originalUrl));
+	url.searchParams.delete(REAUTH_ASK_PARAM);
+	return url.toString();
 };
 
 type ReauthOutcome = "proceed" | "login" | "answered";
@@ -780,12 +759,13 @@ type ReauthOutcome = "proceed" | "login" | "answered";
  * request), and one that was not is refused with `login_required` rather
  * than looped.
  */
-const evaluateReauthentication = (
+const evaluateReauthentication = async (
 	ctx: AuthorizeContext,
 	prompt: PromptDirective,
 	maxAge: number | undefined,
 	session: UserSession | null,
-): ReauthOutcome => {
+	askStore: ReauthAskStore | undefined,
+): Promise<ReauthOutcome> => {
 	if (!prompt.login && maxAge === undefined) return "proceed";
 	if (session === null) {
 		// No UserSessionStore in this composition: there is no `auth_time` to
@@ -798,17 +778,44 @@ const evaluateReauthentication = (
 		);
 		return "answered";
 	}
-	const nowSeconds = Math.floor(Date.now() / 1000);
-	const authTimeSeconds = Math.floor(session.authTime.getTime() / 1000);
-	const marker = takeReauthAsk(ctx);
-	if (marker !== undefined) {
-		if (authTimeSeconds >= marker) return "proceed";
+	if (askStore === undefined) {
+		// The ask is a record in the session store, and there is none to write
+		// it to. A composition error, not a per-request condition — and the
+		// alternative is asking for a re-authentication this endpoint could
+		// never recognise on the way back.
 		redirectError(
 			ctx,
-			"login_required",
-			"re-authentication was requested but the session was not re-established",
+			"invalid_request",
+			"max_age and prompt=login need a session store, which this deployment does not wire",
 		);
 		return "answered";
+	}
+	const nowSeconds = Math.floor(Date.now() / 1000);
+	const authTimeSeconds = Math.floor(session.authTime.getTime() / 1000);
+	const presented = ctx.params[REAUTH_ASK_PARAM];
+	if (typeof presented === "string" && presented.length > 0) {
+		let ask: Awaited<ReturnType<ReauthAskStore["consume"]>>;
+		try {
+			ask = await askStore.consume(presented, askRequestOf(ctx));
+		} catch (err) {
+			// The same rule the session-liveness read applies: an outage is not
+			// a decision either way.
+			ctx.opts.logger.error({ err }, "authorize_reauth_ask_store_unavailable");
+			redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+			return "answered";
+		}
+		if (ask !== null) {
+			if (authTimeSeconds >= ask.askedAt) return "proceed";
+			redirectError(
+				ctx,
+				"login_required",
+				"re-authentication was requested but the session was not re-established",
+			);
+			return "answered";
+		}
+		// An id that names no ask, names one for another request, or has
+		// expired, is simply not an ask: fall through and evaluate the
+		// request on its merits, which asks again rather than proceeding.
 	}
 	const stale = maxAge !== undefined && nowSeconds - authTimeSeconds > maxAge;
 	if (!prompt.login && !stale) return "proceed";
@@ -1430,15 +1437,36 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// #481: is the authentication fresh enough for what the RP asked?
 		const maxAge = parseMaxAge(ctx);
 		if (maxAge === null) return;
-		const reauth = evaluateReauthentication(ctx, prompt, maxAge.value, liveSession.session);
+		const askStore = reauthAskStoreFor(req);
+		const reauth = await evaluateReauthentication(
+			ctx,
+			prompt,
+			maxAge.value,
+			liveSession.session,
+			askStore,
+		);
 		if (reauth === "answered") return;
 		if (reauth === "login") {
-			// The ask is the server's record, not a parameter on the URL the
-			// browser carries (#481, v0.13.0 audit) — so it cannot be forged,
-			// and it survives a login page that rebuilds the request rather than
-			// round-tripping `redirect_to` verbatim.
-			req.session.reauthAskedAt = Math.floor(Date.now() / 1000);
-			const back = new URL(buildCanonicalRequestUrl(issuerOrigin, req.originalUrl));
+			// The ask is a record in the session store named by an opaque id on
+			// the URL the browser carries (#481, v0.13.0 audit): a caller cannot
+			// invent an id that exists, the record survives the session
+			// regeneration the login itself performs, and it is bound to this
+			// request so it cannot satisfy another's freshness requirement.
+			const askRequest = askRequestOf(ctx);
+			let askId: string;
+			try {
+				// `evaluateReauthentication` refused already when there is no store.
+				askId = await (askStore as ReauthAskStore).ask({
+					askedAt: Math.floor(Date.now() / 1000),
+					request: askRequest,
+				});
+			} catch (err) {
+				opts.logger.error({ err }, "authorize_reauth_ask_store_unavailable");
+				redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+				return;
+			}
+			const back = new URL(askRequest);
+			back.searchParams.set(REAUTH_ASK_PARAM, askId);
 			const loginUrl = opts.loginUrl();
 			const joiner = loginUrl.includes("?") ? "&" : "?";
 			return res.redirect(`${loginUrl}${joiner}redirect_to=${encodeURIComponent(back.toString())}`);
