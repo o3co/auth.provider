@@ -1214,6 +1214,10 @@ export const fullSectionsSchema = z.object({
 			// shape is decided; narrowing to an array here would fail the env
 			// spelling at the wrong layer, with the wrong message.
 			origin: z.union([z.string(), z.array(z.string())]).optional(),
+			// #554 audit: the origins this RP may be framed by. Same two spellings
+			// as `origin` and for the same reason — this object strips what it does
+			// not name, so a key missing here never reaches `webauthnConfigSchema`.
+			topOrigin: z.union([z.string(), z.array(z.string())]).optional(),
 			challengeTtlMs: z.coerce.number().int().positive().optional(),
 			attestationPreference: z.enum(["none", "indirect", "direct", "enterprise"]).optional(),
 			userVerification: z.enum(["required", "preferred", "discouraged"]).optional(),

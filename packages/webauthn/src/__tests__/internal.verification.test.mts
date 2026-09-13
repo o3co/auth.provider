@@ -691,3 +691,87 @@ describe("stored publicKey is copied before it reaches SimpleWebAuthn", () => {
 		expect(Array.from(stored.publicKey)).toEqual([1, 2, 3, 4]);
 	});
 });
+
+describe("cross-origin authentication is the deployment's decision (#554 audit)", () => {
+	const baseAssertionInput = () => ({
+		credential: makeStoredCredential(5),
+		response: STUB_AUTHENTICATION_RESPONSE,
+		expectedChallenge: "some-challenge",
+		expectedRpId: "example.com",
+		expectedOrigins: ["https://example.com"],
+	});
+
+	it("passes the configured top origins to the library", async () => {
+		// SimpleWebAuthn 14 refuses a cross-origin (iframe) authentication
+		// whose `topOrigin` the browser reports unless `expectedTopOrigin` is
+		// given. Nothing passed one, and `WebAuthnConfig` had no field for it,
+		// so Chromium iframe passkey authentication that worked on 13.3.3
+		// broke with no way for an operator to allow it.
+		mockVerifyAuthentication.mockResolvedValueOnce({
+			verified: true,
+			authenticationInfo: { newCounter: 1 },
+		} as never);
+
+		await verifyWebAuthnAssertion({
+			...baseAssertionInput(),
+			expectedTopOrigins: ["https://embedder.example"],
+		});
+
+		expect(mockVerifyAuthentication).toHaveBeenCalledWith(
+			expect.objectContaining({ expectedTopOrigin: ["https://embedder.example"] }),
+		);
+	});
+
+	it("passes none when the deployment configured none", async () => {
+		// Absent, the library keeps its own default — refusing a reported
+		// cross-origin response — which is the right default for a deployment
+		// that never meant to be framed.
+		mockVerifyAuthentication.mockResolvedValueOnce({
+			verified: true,
+			authenticationInfo: { newCounter: 1 },
+		} as never);
+
+		await verifyWebAuthnAssertion(baseAssertionInput());
+
+		expect(mockVerifyAuthentication).toHaveBeenCalledWith(
+			expect.not.objectContaining({ expectedTopOrigin: expect.anything() }),
+		);
+	});
+
+	it("reports a refused cross-origin response as its own reason, not an origin mismatch", async () => {
+		// The library's message carries the word "origin", so it landed in the
+		// `/origin/i` arm and answered `origin_mismatch` — sending the operator
+		// to their `webauthn.origin` allowlist, which cannot fix it.
+		mockVerifyAuthentication.mockRejectedValueOnce(
+			new Error(
+				'Detected cross-origin authentication response from top origin of "https://embedder.example", but a value for `expectedTopOrigin` was not specified when calling `verifyAuthenticationResponse()`',
+			),
+		);
+		expect(await verifyWebAuthnAssertion(baseAssertionInput())).toEqual({
+			ok: false,
+			reason: "top_origin_mismatch",
+		});
+
+		mockVerifyAuthentication.mockRejectedValueOnce(
+			new Error(
+				'Unexpected cross-origin authentication response top origin of "https://elsewhere.example", expected: https://embedder.example',
+			),
+		);
+		expect(
+			await verifyWebAuthnAssertion({
+				...baseAssertionInput(),
+				expectedTopOrigins: ["https://embedder.example"],
+			}),
+		).toEqual({ ok: false, reason: "top_origin_mismatch" });
+	});
+
+	it("still reports a plain origin mismatch as one", async () => {
+		mockVerifyAuthentication.mockRejectedValueOnce(
+			new Error('Unexpected authentication response origin "https://evil.example"'),
+		);
+		expect(await verifyWebAuthnAssertion(baseAssertionInput())).toEqual({
+			ok: false,
+			reason: "origin_mismatch",
+		});
+	});
+});

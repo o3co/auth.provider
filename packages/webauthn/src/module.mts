@@ -178,6 +178,13 @@ export const webauthnModule = defineModule<
 					webauthnConfig: {
 						rpId: deps.webauthnConfig.rpId,
 						origin: deps.webauthnConfig.origin,
+						// #554 audit: the frames this RP accepts being embedded in. This
+						// object is rebuilt field by field, so a key not named here is a
+						// key the grant never sees — the same shape as the dropped-slot
+						// note above.
+						...(deps.webauthnConfig.topOrigin === undefined
+							? {}
+							: { topOrigin: deps.webauthnConfig.topOrigin }),
 						// Forward userVerification so the grant enforces it via SimpleWebAuthn.
 						// Cross-refs: Codex Round 2 P1-1
 						userVerification: deps.webauthnConfig.userVerification,
