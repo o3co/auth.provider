@@ -43,12 +43,20 @@ export interface DiscoveryPaths {
  * never fall back. Both are served, with the same document.
  *
  * `/.well-known/openid-configuration` at the root is kept for a path-bearing
- * issuer as well: it is what this server served before #528, and what a
- * deployment behind a path-stripping proxy may still be reached at. The
- * RFC 8414 root form is not served for a path-bearing issuer — that URL
- * names a different issuer (`https://as.example`), and a document answering
- * there with another `issuer` would be one an RFC 8414 §3.3 client must
- * reject.
+ * issuer as well, and the asymmetry with RFC 8414 is deliberate rather than
+ * an exemption (v0.13.0 audit). This server mounts its routes at the root, so
+ * a path-bearing issuer is reached through a proxy that strips the issuer
+ * path or an Express sub-mount — the only ways `authorization_endpoint` and
+ * the rest resolve under it. Either way the OIDC form a client builds,
+ * `/tenant-a/.well-known/openid-configuration`, arrives here as the root path,
+ * so dropping the root would break discovery for exactly those deployments —
+ * and it is what this server served before #528. The RFC 8414 form a client
+ * builds, `/.well-known/oauth-authorization-server/tenant-a`, carries no issuer
+ * prefix to strip and arrives unchanged, so its root form is never the path
+ * such a client reached; served there, it would answer for a different issuer
+ * (`https://as.example`), which an RFC 8414 §3.3 client must reject. A
+ * deployment that exposes this server's root on the public host directly
+ * should not route `/.well-known/openid-configuration` there.
  *
  * An issuer that is not a URL, or has no path, gets the two root forms.
  */

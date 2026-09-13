@@ -51,7 +51,7 @@ import type { Logger } from "../logging/Logger.mjs";
 import type { TokenBindingMechanism } from "./tokenBinding.mjs";
 
 import "./express.mjs";
-import { applyResponseHeaders, hasErrorCode } from "./_responseHeaders.mjs"; // ensure ambient Express.Request augmentation is loaded
+import { applyResponseHeaders, oauthErrorCodeOf, retryInstructionOf } from "./_responseHeaders.mjs"; // ensure ambient Express.Request augmentation is loaded
 
 export interface ProtectedResourceBindingOptions {
 	/**
@@ -154,19 +154,15 @@ export const protectedResourceBindingMw = ({
 					{ mechanism: mechanism.kind, err },
 					"protected_resource_binding_proof_invalid",
 				);
-				if (hasErrorCode(err, "use_dpop_nonce")) {
-					// RFC 9449 §9 (#530): the resource server asks for a nonce with
-					// the error the challenge names, and hands the nonce over.
+				const retryInstruction = retryInstructionOf(err);
+				const code = oauthErrorCodeOf(err);
+				if (retryInstruction !== undefined && code !== undefined) {
+					// A retry instruction, not a verdict (`TokenBindingRefusal`) —
+					// RFC 9449 §9's nonce challenge (#530): the resource asks with the
+					// error the challenge names, and hands over what to retry with.
 					applyResponseHeaders(res, err);
-					res.setHeader("WWW-Authenticate", `${profile.challenge} error="use_dpop_nonce"`);
-					res
-						.status(401)
-						.json(
-							errorEnvelope(
-								"use_dpop_nonce",
-								"a server-provided nonce is required; retry with the value of the DPoP-Nonce header",
-							),
-						);
+					res.setHeader("WWW-Authenticate", `${profile.challenge} error="${code}"`);
+					res.status(401).json(errorEnvelope(code, retryInstruction));
 					return;
 				}
 				reject("proof_invalid", profile.challenge, "presented proof-of-possession is invalid");

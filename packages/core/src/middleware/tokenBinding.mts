@@ -17,7 +17,7 @@ import type { TokenBinding } from "../grants/tokenBinding.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 
 import "./express.mjs"; // ensure ambient Express.Request augmentation is loaded
-import { applyResponseHeaders } from "./_responseHeaders.mjs";
+import { applyResponseHeaders, oauthErrorCodeOf, retryInstructionOf } from "./_responseHeaders.mjs";
 
 /**
  * Extra request-scope facts a mechanism needs when the material is
@@ -74,9 +74,34 @@ export interface TokenBindingMechanism {
 	 * code is forwarded as the OAuth `error` field of the 400 response.
 	 * Errors without a snake_case `code` fall back to
 	 * `invalid_<kind>_proof` so infrastructure-layer codes (e.g. Node
-	 * `ECONNREFUSED`) do not leak through the public error envelope.
+	 * `ECONNREFUSED`) do not leak through the public error envelope. The
+	 * full shape a refusal may carry is {@link TokenBindingRefusal}.
 	 */
 	extract(req: Request, ctx?: TokenBindingExtractContext): Promise<TokenBinding | null>;
+}
+
+/**
+ * What a mechanism's `extract` may throw to refuse presented material — read
+ * by duck type, so any `Error` with these fields qualifies (#530).
+ */
+export interface TokenBindingRefusal {
+	/** The OAuth `error` for the answer; snake_case, or it falls back to `invalid_<kind>_proof`. */
+	readonly code: string;
+	/** Headers the answer carries, e.g. the `DPoP-Nonce` a client retries with. */
+	readonly responseHeaders?: Readonly<Record<string, string>>;
+	/**
+	 * Present when the refusal is an instruction to retry rather than a
+	 * verdict on the proof — RFC 9449's `use_dpop_nonce` is the one this
+	 * repository ships — and the text is the answer's description. At the
+	 * token endpoint the answer is `400 <code>` either way. At a protected
+	 * resource an instruction is `401` with `WWW-Authenticate: <scheme>
+	 * error="<code>"`, where a verdict is `proof_invalid`.
+	 *
+	 * The mechanism states it; the dispatchers never learn a mechanism's codes
+	 * (v0.13.0 audit), so a second mechanism with a retry of its own needs no
+	 * change here.
+	 */
+	readonly retryInstruction?: string;
 }
 
 /**
@@ -109,15 +134,6 @@ interface MechanismResult {
 	readonly mechanism: TokenBindingMechanism;
 	readonly binding: TokenBinding;
 }
-
-const OAUTH_ERROR_CODE_PATTERN = /^[a-z][a-z0-9_]*$/;
-
-const hasOAuthErrorCode = (err: unknown): err is { code: string } =>
-	typeof err === "object" &&
-	err !== null &&
-	"code" in err &&
-	typeof (err as { code: unknown }).code === "string" &&
-	OAUTH_ERROR_CODE_PATTERN.test((err as { code: string }).code);
 
 /**
  * Brand stamped on every handler {@link tokenBindingMw} returns, so boot can
@@ -160,20 +176,19 @@ export const tokenBindingMw = ({
 			try {
 				binding = await mechanism.extract(req);
 			} catch (err) {
-				const code = hasOAuthErrorCode(err) ? err.code : `invalid_${mechanism.kind}_proof`;
+				const code = oauthErrorCodeOf(err) ?? `invalid_${mechanism.kind}_proof`;
 				logger?.warn({ mechanism: mechanism.kind, code }, "token_binding_proof_invalid");
-				// #530: a refusal may carry headers the client needs to retry —
-				// `DPoP-Nonce` on `use_dpop_nonce` (RFC 9449 §8), which is an
-				// instruction rather than a verdict and says so.
+				// #530: a refusal may carry headers the client needs to retry, and
+				// say that it is an instruction rather than a verdict — in its own
+				// words (`TokenBindingRefusal`).
 				applyResponseHeaders(res, err);
 				res
 					.status(400)
 					.json(
 						errorEnvelope(
 							code,
-							code === "use_dpop_nonce"
-								? "a server-provided nonce is required; retry with the value of the DPoP-Nonce header"
-								: `${mechanism.kind} mechanism rejected the presented material`,
+							retryInstructionOf(err) ??
+								`${mechanism.kind} mechanism rejected the presented material`,
 						),
 					);
 				return;

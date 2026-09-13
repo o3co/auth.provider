@@ -8,6 +8,7 @@
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
 
+import { readFileSync } from "node:fs";
 import type { Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
 import type { TokenBinding } from "#/grants/tokenBinding.mjs";
@@ -298,10 +299,47 @@ describe("tokenBindingMw", () => {
 	});
 });
 
+describe("a retry instruction is the mechanism's to state, not core's to know (v0.13.0 audit)", () => {
+	// The dispatcher is deliberately vendor-neutral, and string-matched
+	// DPoP's `use_dpop_nonce` to decide the description (here) and the
+	// challenge (at a protected resource). A second mechanism with a retry of
+	// its own could not get either without editing core.
+	it("answers with the instruction a refusal carries, whatever its code", async () => {
+		const err = Object.assign(new Error("nonce"), {
+			code: "use_fresh_nonce",
+			retryInstruction: "retry with the value of the Fresh-Nonce header",
+			responseHeaders: { "Fresh-Nonce": "f1" },
+		});
+		const mw = tokenBindingMw({
+			mechanisms: [dpopMechanism(err)],
+			dispatchPolicy: "intent-explicit",
+		});
+		const res = fakeRes();
+		await mw(fakeReq(), res, vi.fn());
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(res.setHeader).toHaveBeenCalledWith("Fresh-Nonce", "f1");
+		expect(res.json).toHaveBeenCalledWith({
+			error: "use_fresh_nonce",
+			error_description: "retry with the value of the Fresh-Nonce header",
+		});
+	});
+
+	it("names no mechanism's error code in the dispatchers", () => {
+		for (const file of ["../tokenBinding.mts", "../protectedResourceBinding.mts"]) {
+			const source = readFileSync(new URL(file, import.meta.url), "utf8")
+				.replace(/\/\*[\s\S]*?\*\//g, "")
+				.replace(/(^|[^:])\/\/.*$/gm, "$1");
+			expect(source, file).not.toMatch(/["'`]use_dpop_nonce["'`]/);
+		}
+	});
+});
+
 describe("tokenBindingMw — response headers a mechanism asks for (#530)", () => {
 	it("sets the headers a refusal carries and answers use_dpop_nonce with its own description", async () => {
 		const err = Object.assign(new Error("no nonce"), {
 			code: "use_dpop_nonce",
+			retryInstruction:
+				"a server-provided nonce is required; retry with the value of the DPoP-Nonce header",
 			responseHeaders: { "DPoP-Nonce": "n1" },
 		});
 		const mw = tokenBindingMw({

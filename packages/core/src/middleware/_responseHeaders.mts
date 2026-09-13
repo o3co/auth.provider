@@ -40,6 +40,23 @@ export const applyResponseHeaders = (res: Response, source: unknown): void => {
 	}
 };
 
-/** Whether `err` carries the OAuth error `code`. */
-export const hasErrorCode = (err: unknown, code: string): boolean =>
-	typeof err === "object" && err !== null && (err as { code?: unknown }).code === code;
+/** An OAuth error code: snake_case, so an infrastructure code (`ECONNREFUSED`) never reaches the wire. */
+const OAUTH_ERROR_CODE_PATTERN = /^[a-z][a-z0-9_]*$/;
+
+/** The OAuth error `code` a thrown refusal carries, or `undefined`. */
+export const oauthErrorCodeOf = (err: unknown): string | undefined => {
+	const code =
+		typeof err === "object" && err !== null ? (err as { code?: unknown }).code : undefined;
+	return typeof code === "string" && OAUTH_ERROR_CODE_PATTERN.test(code) ? code : undefined;
+};
+
+/**
+ * The retry instruction a refusal states (`TokenBindingRefusal.retryInstruction`),
+ * or `undefined` for a verdict. Only a non-empty string beside an OAuth code
+ * counts: an instruction with no code to answer under is not one.
+ */
+export const retryInstructionOf = (err: unknown): string | undefined => {
+	if (oauthErrorCodeOf(err) === undefined) return undefined;
+	const instruction = (err as { retryInstruction?: unknown }).retryInstruction;
+	return typeof instruction === "string" && instruction.length > 0 ? instruction : undefined;
+};
