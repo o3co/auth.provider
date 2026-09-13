@@ -1295,6 +1295,13 @@ describe("createAuthorizationGrant", () => {
 				const at = decodeJwt(result.tokens.access_token as string) as Record<string, unknown>;
 				expect(at.amr).toEqual(["pwd", "mfa"]);
 				expect(at.acr).toBe("urn:example:mfa");
+				// The refresh token carries them too: `acr` lives on the code, which is
+				// spent here, so the refresh grant has nowhere else to read it from —
+				// and a resource server gating on `amr` must not see it vanish at the
+				// first refresh (v0.13.0 audit).
+				const rt = decodeJwt(result.tokens.refresh_token as string) as Record<string, unknown>;
+				expect(rt.amr).toEqual(["pwd", "mfa"]);
+				expect(rt.acr).toBe("urn:example:mfa");
 			});
 
 			it("does NOT include id_token when issuer is absent (avoids OIDC-noncompliant iss:'')", async () => {

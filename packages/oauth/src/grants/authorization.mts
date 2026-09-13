@@ -547,7 +547,15 @@ export const createAuthorizationGrant = (
 				},
 			);
 			const refreshToken = await generateToken(
-				{ family_id: familyId, ...(sid ? { sid } : {}) },
+				{
+					family_id: familyId,
+					...(sid ? { sid } : {}),
+					// #481 audit: carried so the refresh grant can mirror them onto the
+					// access tokens it mints. `acr` lives on the code, which is spent
+					// here — there is nowhere else a refresh could read it from.
+					...(userSession?.amr ? { amr: userSession.amr } : {}),
+					...(codeData.acr ? { acr: codeData.acr } : {}),
+				},
 				{
 					expiresIn: config.oauth.refreshToken.expiresIn,
 					keyStore,

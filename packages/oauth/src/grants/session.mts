@@ -90,6 +90,10 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 				typeof session.sid === "string" && session.sid.length > 0 ? session.sid : undefined;
 			const rawUserId = (session.user as Record<string, unknown> | undefined)?.id;
 			let userId = typeof rawUserId === "string" ? rawUserId : undefined;
+			// #481 audit: how the tracked session authenticated, mirrored onto the
+			// access token as the authorization_code grant does. Only a tracked
+			// session has one; the browser's own session is not a source for it.
+			let trackedAmr: readonly string[] | undefined;
 			if (deps.userSessionStore) {
 				if (!sid) {
 					return {
@@ -119,6 +123,7 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 						};
 					}
 					userId = tracked.sub;
+					if (Array.isArray(tracked.amr) && tracked.amr.length > 0) trackedAmr = tracked.amr;
 				} catch {
 					return {
 						result: {
@@ -220,7 +225,7 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 					tokens: generateTokenResponse(
 						{
 							accessToken: await generateToken(
-								{ ...(sid ? { sid } : {}) },
+								{ ...(sid ? { sid } : {}), ...(trackedAmr ? { amr: trackedAmr } : {}) },
 								{
 									keyStore,
 									expiresIn: config.oauth.accessToken.expiresIn,

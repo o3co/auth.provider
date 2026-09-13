@@ -23,7 +23,7 @@ import {
 	type RefreshTokenFamilyRotation,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { SignJWT } from "jose";
+import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
 
@@ -2045,5 +2045,86 @@ describe("a signing failure after the rotation commits (#449 audit)", () => {
 			}),
 			"refresh_token_rotation_orphaned",
 		);
+	});
+});
+
+describe("refresh carries how the user authenticated (#481 audit)", () => {
+	// `amr` and `acr` describe the authentication event, which a refresh does
+	// not repeat. The README promised the access token mirrors them "so
+	// auth.policy-verifier or a resource server can gate on them without an
+	// id_token" — but only the authorization_code grant stamped them, so a
+	// policy requiring `amr` to contain `mfa` passed on the first access token
+	// and failed on the first refresh.
+	const presentedWith = async (extra: Record<string, unknown>) =>
+		new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-1", ...extra })
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+			.setIssuer("localhost")
+			.setAudience(DEFAULT_CLIENT_ID)
+			.setIssuedAt()
+			.setExpirationTime("24h")
+			.setJti("old-jti")
+			.sign(new TextEncoder().encode(SECRET));
+
+	const refresh = async (refreshToken: string) => {
+		const handler = createRefreshTokenGrant({
+			...mockDeps,
+			refreshTokenFamilyRotation: {
+				async register() {},
+				async rotate() {
+					return { outcome: "rotated" as const };
+				},
+			},
+			refreshTokenFamilyRevocation: {
+				async revokeFamily() {},
+				async isFamilyRevoked() {
+					return false;
+				},
+			},
+		});
+		const { result } = await handler.handle({
+			body: { refresh_token: refreshToken },
+			session: {},
+			issuer: "localhost",
+			metadata: {},
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		} as GrantContext);
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+		return {
+			at: decodeJwt(result.tokens.access_token as string) as Record<string, unknown>,
+			rt: decodeJwt(result.tokens.refresh_token as string) as Record<string, unknown>,
+		};
+	};
+
+	it("carries amr and acr from the presented refresh token onto both new tokens", async () => {
+		const { at, rt } = await refresh(
+			await presentedWith({ amr: ["pwd", "mfa"], acr: "urn:example:mfa" }),
+		);
+		expect(at.amr).toEqual(["pwd", "mfa"]);
+		expect(at.acr).toBe("urn:example:mfa");
+		// Onto the new refresh token too, or the second refresh drops them.
+		expect(rt.amr).toEqual(["pwd", "mfa"]);
+		expect(rt.acr).toBe("urn:example:mfa");
+	});
+
+	it("carries nothing when the presented token has none", async () => {
+		const { at, rt } = await refresh(await presentedWith({}));
+		expect(at).not.toHaveProperty("amr");
+		expect(at).not.toHaveProperty("acr");
+		expect(rt).not.toHaveProperty("amr");
+	});
+
+	it("does not carry a malformed amr or acr forward", async () => {
+		// This server minted the presented token, so these shapes should never
+		// occur — but a claim copied forward is a claim vouched for again, and
+		// a resource server reads `amr` as a list of strings.
+		for (const bad of [
+			{ amr: "pwd", acr: 42 },
+			{ amr: ["pwd", 7], acr: "" },
+			{ amr: [], acr: null },
+		]) {
+			const { at } = await refresh(await presentedWith(bad));
+			expect(at, JSON.stringify(bad)).not.toHaveProperty("amr");
+			expect(at, JSON.stringify(bad)).not.toHaveProperty("acr");
+		}
 	});
 });
