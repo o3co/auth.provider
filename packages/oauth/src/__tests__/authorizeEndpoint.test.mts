@@ -80,6 +80,12 @@ const makeApp = async (opts: {
 	createCode?: ReturnType<typeof vi.fn>;
 	/** Session object the request carries; default authenticated user-1. */
 	session?: Record<string, unknown>;
+	/** #481: pass `false` to compose without an express-session store. */
+	sessionStore?: false;
+	/** #481: share one ask store between two apps. */
+	sessionStoreRecords?: Map<string, unknown>;
+	/** #481: make the ask store fail on one operation. */
+	sessionStoreFail?: "set" | "get";
 	/** Merged into `config.oauth`. */
 	oauth?: Record<string, unknown>;
 	/** `endpoints.login.url`; default `/login`. */
@@ -135,15 +141,49 @@ const makeApp = async (opts: {
 	});
 
 	const app = express();
+	// One session object per app, and the same one for every request that app
+	// serves. Copied rather than shared, because the fixtures are module-level
+	// constants and a test may mutate what it is handed.
+	const state: { session: Record<string, unknown> } = {
+		session: { ...(opts.session ?? { isAuthenticated: true, user: { id: "user-1" } }) },
+	};
+	// The express-session store the middleware would have mounted. #481's
+	// re-authentication ask is a record in it, under a prefix of its own.
+	const records = opts.sessionStoreRecords ?? new Map<string, unknown>();
+	const storeDown = new Error("session store unavailable");
+	const sessionStore = {
+		get: (sid: string, cb: (err: unknown, rec?: unknown) => void) =>
+			opts.sessionStoreFail === "get" ? cb(storeDown) : cb(null, records.get(sid)),
+		set: (sid: string, rec: unknown, cb?: (err?: unknown) => void) => {
+			if (opts.sessionStoreFail === "set") return cb?.(storeDown);
+			records.set(sid, rec);
+			cb?.();
+		},
+		destroy: (sid: string, cb?: (err?: unknown) => void) => {
+			records.delete(sid);
+			cb?.();
+		},
+	};
 	app.use((req, _res, next) => {
-		(req as unknown as { session: Record<string, unknown> }).session = opts.session ?? {
-			isAuthenticated: true,
-			user: { id: "user-1" },
-		};
+		(req as unknown as { session: Record<string, unknown> }).session = state.session;
+		if (opts.sessionStore !== false) {
+			(req as unknown as { sessionStore: unknown }).sessionStore = sessionStore;
+		}
 		next();
 	});
 	app.use("/oauth", router);
-	return { app, createCode };
+	return {
+		app,
+		createCode,
+		get session() {
+			return state.session;
+		},
+		/** Replace the session object wholesale, as `/session/login` does when it regenerates. */
+		regenerate(next: Record<string, unknown>) {
+			state.session = next;
+		},
+		records,
+	};
 };
 
 type Query = Record<string, string | string[]>;
@@ -985,12 +1025,15 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 describe("/authorize — step-up and re-authentication (#481)", () => {
 	const SID = "sid-1";
 	const session = { isAuthenticated: true, sid: SID, user: { id: "user-1" } };
-	const storeWith = (authTime: Date, amr?: readonly string[]): UserSessionStore =>
+	// A `Date`, or a thunk when a test needs the authentication to change
+	// between two requests — which is what a login round trip is (#481).
+	const storeWith = (at: Date | (() => Date), amr?: readonly string[]): UserSessionStore =>
 		({
 			kind: "memory",
 			create: vi.fn(async () => {}),
-			get: vi.fn(async (sid: string) =>
-				sid === SID
+			get: vi.fn(async (sid: string) => {
+				const authTime = typeof at === "function" ? at() : at;
+				return sid === SID
 					? {
 							sid: SID,
 							sub: "user-1",
@@ -1000,12 +1043,11 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 							claims: {},
 							...(amr ? { amr } : {}),
 						}
-					: null,
-			),
+					: null;
+			}),
 			delete: vi.fn(async () => {}),
 		}) as unknown as UserSessionStore;
 	const minutesAgo = (minutes: number): Date => new Date(Date.now() - minutes * 60_000);
-	const nowSeconds = (): number => Math.floor(Date.now() / 1000);
 	const mintingCode = () =>
 		vi.fn(async () => ({ code: "code-x", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }));
 	/** The login-page redirect, with the round-tripped authorize URL parsed. */
@@ -1028,25 +1070,29 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(redirectParams(res).get("code")).toBe("code-x");
 		});
 
-		it("sends a session older than max_age back to the login page, round-tripping the request with a reauth_after marker", async () => {
-			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(5)) });
-			const res = await authorize(app, { ...baseQuery, max_age: "60" });
+		it("sends a session older than max_age back to the login page, naming an ask it recorded", async () => {
+			const harness = await makeApp({ session, userSessionStore: storeWith(minutesAgo(5)) });
+			const res = await authorize(harness.app, { ...baseQuery, max_age: "60" });
 			const back = loginRedirectTo(res);
 			expect(back.searchParams.get("max_age")).toBe("60");
 			expect(back.searchParams.get("client_id")).toBe(CLIENT_ID);
 			expect(back.searchParams.get("state")).toBe("xyz");
-			const marker = Number(back.searchParams.get("reauth_after"));
-			expect(marker).toBeGreaterThanOrEqual(nowSeconds() - 5);
-			expect(marker).toBeLessThanOrEqual(nowSeconds());
+			// An opaque id naming a record in the session store — not a value the
+			// caller could have written, and not a field on the session, which
+			// the login itself regenerates away.
+			const askId = back.searchParams.get("reauth_ask") as string;
+			expect(askId.length).toBeGreaterThanOrEqual(43);
+			expect([...harness.records.keys()]).toEqual([`reauth:${askId}`]);
+			expect(harness.session).not.toHaveProperty("reauthAskedAt");
 		});
 
 		it("max_age=0 always re-authenticates", async () => {
-			const { app } = await makeApp({
+			const harness = await makeApp({
 				session,
 				userSessionStore: storeWith(new Date(Date.now() - 2_000)),
 			});
-			const res = await authorize(app, { ...baseQuery, max_age: "0" });
-			expect(loginRedirectTo(res).searchParams.get("reauth_after")).toBeTruthy();
+			const res = await authorize(harness.app, { ...baseQuery, max_age: "0" });
+			expect(loginRedirectTo(res).searchParams.get("reauth_ask")).toBeTruthy();
 		});
 
 		it("refuses a max_age that is not a non-negative integer", async () => {
@@ -1063,71 +1109,184 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			expect(redirectParams(res).get("error")).toBe("invalid_request");
 		});
 
-		it("refuses a repeated reauth_after before interpreting it, rather than sending a stale session to login with the marker collapsed", async () => {
-			// Read as "no marker", a repeat would earn a login redirect whose
-			// rebuilt URL carries one server-written marker, and the request
-			// would then succeed where it should have been refused.
-			const { app } = await makeApp({ session, userSessionStore: storeWith(minutesAgo(10)) });
-			const res = await authorize(app, {
-				...baseQuery,
-				prompt: "login",
-				reauth_after: ["1", "2"],
-			});
-			expect(redirectParams(res).get("error")).toBe("invalid_request");
+		it("ignores a marker the caller writes — the ask is a record only this server can name", async () => {
+			// `reauth_after` was read straight from the request, so
+			// `max_age=60&reauth_after=0` satisfied "authenticated at or after the
+			// ask" for any live session and skipped the round trip the parameter
+			// exists to force. Neither the old parameter nor an invented ask id
+			// decides anything now.
+			const harness = await makeApp({ session, userSessionStore: storeWith(minutesAgo(10)) });
+			for (const forged of [
+				{ max_age: "60", reauth_after: "0" },
+				{ prompt: "login", reauth_after: "0" },
+				{ max_age: "60", reauth_ask: "not-an-ask-this-server-minted" },
+				{ prompt: "login", reauth_ask: "a".repeat(43) },
+			]) {
+				const res = await authorize(harness.app, { ...baseQuery, ...forged });
+				// The login page, every time — never a code.
+				loginRedirectTo(res);
+			}
 		});
 	});
 
 	describe("prompt=login", () => {
-		it("re-authenticates even a fresh session, carrying prompt=login and the marker back", async () => {
-			const { app } = await makeApp({ session, userSessionStore: storeWith(new Date()) });
-			const res = await authorize(app, { ...baseQuery, prompt: "login" });
+		it("re-authenticates even a fresh session, carrying prompt=login back and naming an ask", async () => {
+			const harness = await makeApp({ session, userSessionStore: storeWith(new Date()) });
+			const res = await authorize(harness.app, { ...baseQuery, prompt: "login" });
 			const back = loginRedirectTo(res);
 			expect(back.searchParams.get("prompt")).toBe("login");
-			expect(back.searchParams.get("reauth_after")).toBeTruthy();
+			expect(back.searchParams.get("reauth_ask")).toBeTruthy();
+			expect(harness.session).not.toHaveProperty("reauthAskedAt");
 		});
 
-		it("is satisfied once the session was authenticated after the marker, and mints a code", async () => {
+		it("is satisfied once the session was authenticated after the ask, and mints a code", async () => {
+			// The real round trip: ask, authenticate, return to the URL the login
+			// page was handed.
 			const createCode = mintingCode();
-			const asked = nowSeconds() - 30;
-			const { app } = await makeApp({
+			const authTime = { at: minutesAgo(10) };
+			const harness = await makeApp({
 				session,
-				userSessionStore: storeWith(new Date((asked + 10) * 1000)),
+				userSessionStore: storeWith(() => authTime.at),
 				createCode,
 			});
-			const res = await authorize(app, {
-				...baseQuery,
-				prompt: "login",
-				reauth_after: String(asked),
-			});
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+			authTime.at = new Date();
+			const res = await request(harness.app).get(back.pathname + back.search);
 			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+
+		it("survives the session regeneration the login itself performs", async () => {
+			// `/session/login` regenerates the session (session fixation) and
+			// restores only `isAuthenticated`, `user`, `redirectTo` and `sid`. An
+			// ask held on the session would be destroyed by the very
+			// authentication that satisfies it, and `prompt=login` — whose
+			// staleness test is unconditional — would ask again forever.
+			const createCode = mintingCode();
+			const authTime = { at: minutesAgo(10) };
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(() => authTime.at),
+				createCode,
+			});
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+			// What regeneration leaves behind: a brand-new session object.
+			harness.regenerate({ isAuthenticated: true, user: { id: "user-1" }, sid: "sid-1" });
+			authTime.at = new Date();
+			const res = await request(harness.app).get(back.pathname + back.search);
+			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+
+		it("spends the ask, so replaying the returned URL asks again", async () => {
+			const createCode = mintingCode();
+			const authTime = { at: minutesAgo(10) };
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(() => authTime.at),
+				createCode,
+			});
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+			authTime.at = new Date();
+			const askId = back.searchParams.get("reauth_ask") as string;
+			const path = back.pathname + back.search;
+			expect(redirectParams(await request(harness.app).get(path)).get("code")).toBe("code-x");
+			expect(harness.records.has(`reauth:${askId}`)).toBe(false);
+			// Replayed: that record is gone, so this is a request with no ask, and
+			// it earns a fresh one rather than a second code.
+			const again = loginRedirectTo(await request(harness.app).get(path));
+			expect(again.searchParams.get("reauth_ask")).not.toBe(askId);
+		});
+
+		it("does not let an ask for one request satisfy another", async () => {
+			// An ask outstanding for request A must not answer B's freshness
+			// requirement: B's authentication may be far older than B asked for.
+			const createCode = mintingCode();
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(5)),
+				createCode,
+			});
+			const back = loginRedirectTo(
+				await authorize(harness.app, { ...baseQuery, prompt: "login", state: "request-a" }),
+			);
+			const askId = back.searchParams.get("reauth_ask") as string;
+			// B is a different request — another `state` is enough — carrying A's ask.
+			const res = await authorize(harness.app, {
+				...baseQuery,
+				max_age: "0",
+				state: "request-b",
+				reauth_ask: askId,
+			});
+			loginRedirectTo(res);
+			expect(createCode).not.toHaveBeenCalled();
 		});
 
 		it("answers login_required — no second round trip — when the user came back without re-authenticating", async () => {
-			const asked = nowSeconds() - 30;
-			const { app } = await makeApp({
-				session,
-				userSessionStore: storeWith(new Date((asked - 600) * 1000)),
-			});
-			const res = await authorize(app, {
-				...baseQuery,
-				prompt: "login",
-				reauth_after: String(asked),
-			});
+			const harness = await makeApp({ session, userSessionStore: storeWith(minutesAgo(10)) });
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, prompt: "login" }));
+			// Same stale authentication: the user never logged in.
+			const res = await request(harness.app).get(back.pathname + back.search);
 			const params = redirectParams(res);
 			expect(params.get("error")).toBe("login_required");
 			expect(params.get("state")).toBe("xyz");
+			expect(harness.records.size).toBe(0);
 		});
 
-		it("the marker satisfies max_age=0 on the way back too", async () => {
+		it("the ask satisfies max_age=0 on the way back too", async () => {
 			const createCode = mintingCode();
-			const asked = nowSeconds() - 30;
-			const { app } = await makeApp({
+			const authTime = { at: minutesAgo(10) };
+			const harness = await makeApp({
 				session,
-				userSessionStore: storeWith(new Date((asked + 5) * 1000)),
+				userSessionStore: storeWith(() => authTime.at),
 				createCode,
 			});
-			const res = await authorize(app, { ...baseQuery, max_age: "0", reauth_after: String(asked) });
+			const back = loginRedirectTo(await authorize(harness.app, { ...baseQuery, max_age: "0" }));
+			authTime.at = new Date();
+			const res = await request(harness.app).get(back.pathname + back.search);
 			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+
+		it("answers temporarily_unavailable when the ask cannot be recorded", async () => {
+			// An outage is not a decision either way — the same rule the
+			// session-liveness read applies. Asking for a re-authentication this
+			// endpoint could not recognise on the way back would loop instead.
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(10)),
+				sessionStoreFail: "set",
+			});
+			const params = redirectParams(await authorize(harness.app, { ...baseQuery, max_age: "60" }));
+			expect(params.get("error")).toBe("temporarily_unavailable");
+		});
+
+		it("answers temporarily_unavailable when the ask cannot be read back", async () => {
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(10)),
+				sessionStoreFail: "get",
+			});
+			const params = redirectParams(
+				await authorize(harness.app, { ...baseQuery, max_age: "60", reauth_ask: "a".repeat(43) }),
+			);
+			expect(params.get("error")).toBe("temporarily_unavailable");
+		});
+
+		it("refuses max_age and prompt=login when the composition wires no session store", async () => {
+			// There is nowhere to record an ask, and asking for a
+			// re-authentication this endpoint could never recognise on the way
+			// back is the loop the record exists to prevent.
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(10)),
+				sessionStore: false,
+			});
+			expect(
+				redirectParams(await authorize(harness.app, { ...baseQuery, max_age: "60" })).get("error"),
+			).toBe("invalid_request");
+			expect(
+				redirectParams(await authorize(harness.app, { ...baseQuery, prompt: "login" })).get(
+					"error",
+				),
+			).toBe("invalid_request");
 		});
 
 		it("still refuses prompt=none combined with login", async () => {
