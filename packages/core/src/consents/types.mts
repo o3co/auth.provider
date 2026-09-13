@@ -17,9 +17,10 @@
 /**
  * What an end-user has agreed a client may obtain on their behalf (#527).
  *
- * One record per (`sub`, `clientId`): a later grant replaces it, so the record
- * is always the current answer to "what has this user let this client have",
- * and revoking it is one delete.
+ * One record per (`sub`, `clientId`). A later grant adds to it — the union,
+ * never a replacement (see `ConsentStore.grant`) — so the record is always the
+ * whole answer to "what has this user let this client have", and revoking it
+ * is one delete.
  */
 export interface ConsentRecord {
 	readonly sub: string;
@@ -28,7 +29,12 @@ export interface ConsentRecord {
 	readonly scopes: readonly string[];
 	/** Epoch milliseconds. */
 	readonly grantedAt: number;
-	/** Epoch milliseconds; absent means until revoked. */
+	/**
+	 * Epoch milliseconds; absent means until revoked. `consentCovers` honours it.
+	 * Nothing in this library sets it — `POST /oauth/consent` records consent
+	 * until revoked — so it is for a deployment that writes records itself, or
+	 * an adapter that ages them out on its own policy.
+	 */
 	readonly expiresAt?: number;
 }
 

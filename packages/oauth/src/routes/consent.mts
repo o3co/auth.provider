@@ -154,7 +154,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		req: Request,
 		res: Response,
 		challenge: unknown,
-	): Promise<PendingConsentRecord | null> => {
+	): Promise<{ readonly record: PendingConsentRecord; readonly sub: string } | null> => {
 		if (!req.session?.isAuthenticated) {
 			jsonError(res, 401, "login_required", "no authenticated session");
 			return null;
@@ -176,7 +176,22 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 			jsonError(res, 400, "invalid_request", NO_PENDING);
 			return null;
 		}
-		return pending;
+		// The subject too, here rather than only in the POST (#527 audit). A
+		// session reused across a logout and a login without regeneration would
+		// otherwise show one user another user's client, scopes and
+		// redirect_uri; and a session that still claims authentication but names
+		// no user would be shown a request it can never answer. Both methods
+		// refuse both, from here, so the page learns nothing the answer refuses.
+		const sub = subjectOf(req);
+		if (sub === null) {
+			jsonError(res, 400, "invalid_request", "the session names no subject");
+			return null;
+		}
+		if (sub !== pending.sub) {
+			jsonError(res, 400, "invalid_request", NO_PENDING);
+			return null;
+		}
+		return { record: pending, sub };
 	};
 
 	/**
@@ -246,8 +261,9 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 	router.use(express.urlencoded({ extended: false }));
 
 	router.get("/consent", async (req, res) => {
-		const pending = await pendingFor(req, res, req.query.challenge);
-		if (pending === null) return;
+		const found = await pendingFor(req, res, req.query.challenge);
+		if (found === null) return;
+		const pending = found.record;
 		if (!(await sessionIsLive(req))) {
 			return jsonError(res, 401, "login_required", "the session is no longer active");
 		}
@@ -275,23 +291,11 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		// Read first, so a malformed answer is refused with the request still
 		// parked; the record is spent only once the answer is one that can be
 		// applied.
-		const peeked = await pendingFor(req, res, body.challenge);
-		if (peeked === null) return;
+		const found = await pendingFor(req, res, body.challenge);
+		if (found === null) return;
+		const { record: peeked, sub } = found;
 		if (!(await sessionIsLive(req))) {
 			return jsonError(res, 401, "login_required", "the session is no longer active");
-		}
-		const sub = subjectOf(req);
-		if (sub === null) {
-			return jsonError(
-				res,
-				400,
-				"invalid_request",
-				"the session names no subject to record consent for",
-			);
-		}
-		if (sub !== peeked.sub) {
-			// The record was asked of someone else: not this session's to answer.
-			return jsonError(res, 400, "invalid_request", NO_PENDING);
 		}
 		const decision = body.decision;
 		if (decision !== "accept" && decision !== "deny") {

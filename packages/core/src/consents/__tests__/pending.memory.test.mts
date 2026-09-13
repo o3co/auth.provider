@@ -15,7 +15,14 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { createMemoryPendingConsentStore } from "#/consents/memory.mjs";
+import {
+	createPendingConsentStoreFactory,
+	registerBuiltinPendingConsentStores,
+} from "#/consents/factory.mjs";
+import {
+	createMemoryPendingConsentStore,
+	PENDING_CONSENT_PER_SESSION_LIMIT,
+} from "#/consents/memory.mjs";
 import { memoryConsentStoreModule } from "#/consents/module.mjs";
 import type { PendingConsentRecord } from "#/consents/types.mjs";
 import { runPendingConsentStoreContract } from "./pending.contract.mjs";
@@ -76,7 +83,11 @@ describe("createMemoryPendingConsentStore sweeps the records nobody came back fo
 		// touch-on-read alone would keep it for the life of the process.
 		const store = createMemoryPendingConsentStore();
 		const expiresAt = Date.now() + 1_000;
-		for (let i = 0; i < 1024; i += 1) await store.set(record(`ch-${i}`, expiresAt));
+		// Across many sessions, as abandoned pages are: one session alone is held
+		// to its own bound long before the floor.
+		for (let i = 0; i < 1024; i += 1) {
+			await store.set({ ...record(`ch-${i}`, expiresAt), sessionId: `sess-${i}` });
+		}
 		expect(store.size).toBe(1024);
 		vi.useFakeTimers();
 		try {
@@ -102,5 +113,83 @@ describe("memoryConsentStoreModule's providers (#552)", () => {
 		expect(pending.kind).toBe("memory");
 		await pending.set(record("ch-1"));
 		expect(pending.size).toBe(1);
+	});
+});
+
+describe("the pending-consent store has a factory and a bound per session (#527 audit)", () => {
+	it("registers the memory builtin on a factory of its own", async () => {
+		// Every port with a factory has one; the consent store did and the
+		// pending store did not, so a composition following the factory
+		// pattern built one slot and not the other — which `createOAuthRouter`
+		// then refuses.
+		const factory = createPendingConsentStoreFactory();
+		registerBuiltinPendingConsentStores(factory);
+		const store = await factory.create({ type: "memory" });
+		expect(store.kind).toBe("memory");
+	});
+
+	it("keeps at most a bounded number of outstanding requests per session", async () => {
+		// Records are keyed by challenge and swept only on expiry, so one
+		// authenticated session could park an unbounded number inside the
+		// ten-minute window. A browser has no use for more than a handful at
+		// once; the oldest goes.
+		const store = createMemoryPendingConsentStore();
+		const ids: string[] = [];
+		for (let i = 0; i < PENDING_CONSENT_PER_SESSION_LIMIT + 4; i += 1) {
+			const id = `ch-${i}`;
+			ids.push(id);
+			await store.set({ ...record(id), sessionId: "sess-busy" });
+		}
+		expect(store.size).toBe(PENDING_CONSENT_PER_SESSION_LIMIT);
+		expect(await store.get(ids[0] as string)).toBeNull();
+		expect(await store.get(ids.at(-1) as string)).not.toBeNull();
+
+		// Another session's requests are untouched by the first one's bound.
+		await store.set({ ...record("ch-other"), sessionId: "sess-quiet" });
+		expect(await store.get("ch-other")).not.toBeNull();
+	});
+
+	it("does not evict a live request while an expired one of the same session still counts", async () => {
+		// An expired record that is not the oldest used to stay in the session's
+		// index until it was read or swept, so it counted toward the bound and
+		// the eviction took the oldest live request instead.
+		const store = createMemoryPendingConsentStore();
+		await store.set({ ...record("live-oldest"), sessionId: "sess-c" });
+		await store.set({ ...record("dead", Date.now() - 1), sessionId: "sess-c" });
+		for (let i = 0; i < PENDING_CONSENT_PER_SESSION_LIMIT - 2; i += 1) {
+			await store.set({ ...record(`live-${i}`), sessionId: "sess-c" });
+		}
+		// The session is at the bound only if the dead one counts.
+		await store.set({ ...record("live-newest"), sessionId: "sess-c" });
+		expect(await store.get("live-oldest")).not.toBeNull();
+		expect(await store.get("live-newest")).not.toBeNull();
+	});
+
+	it("keeps the per-session index in step when a record is consumed, re-parked or expires", async () => {
+		// The bound counts the index, so an index that kept a consumed or expired
+		// challenge would evict live requests early, and one that counted a
+		// re-parked challenge twice would do the same.
+		const store = createMemoryPendingConsentStore();
+		const fill = async (prefix: string) => {
+			for (let i = 0; i < PENDING_CONSENT_PER_SESSION_LIMIT; i += 1) {
+				await store.set({ ...record(`${prefix}-${i}`), sessionId: "sess-a" });
+			}
+		};
+		await fill("a");
+		// Spend one and re-park another under the same challenge: room for one more.
+		expect(await store.consume("a-0")).not.toBeNull();
+		await store.set({ ...record("a-1"), sessionId: "sess-a" });
+		await store.set({ ...record("a-new"), sessionId: "sess-a" });
+		expect(await store.get("a-2")).not.toBeNull();
+		expect(await store.get("a-new")).not.toBeNull();
+
+		// An expired record leaves the index when it is next touched.
+		const expiring = createMemoryPendingConsentStore();
+		await expiring.set({ ...record("old", Date.now() - 1), sessionId: "sess-b" });
+		expect(await expiring.get("old")).toBeNull();
+		for (let i = 0; i < PENDING_CONSENT_PER_SESSION_LIMIT; i += 1) {
+			await expiring.set({ ...record(`b-${i}`), sessionId: "sess-b" });
+		}
+		expect(await expiring.get("b-0")).not.toBeNull();
 	});
 });

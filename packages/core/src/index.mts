@@ -705,13 +705,17 @@ export { ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY } from "./access-token-denylist/ty
 export {
 	type ConsentStoreFactory,
 	createConsentStoreFactory,
+	createPendingConsentStoreFactory,
+	type PendingConsentStoreFactory,
 	registerBuiltinConsentStores,
+	registerBuiltinPendingConsentStores,
 } from "./consents/factory.mjs";
 export {
 	createMemoryConsentStore,
 	createMemoryPendingConsentStore,
 	type MemoryConsentStore,
 	type MemoryPendingConsentStore,
+	PENDING_CONSENT_PER_SESSION_LIMIT,
 } from "./consents/memory.mjs";
 export { memoryConsentStoreModule } from "./consents/module.mjs";
 // #552: the record an `/authorize` request is parked in while the consent
