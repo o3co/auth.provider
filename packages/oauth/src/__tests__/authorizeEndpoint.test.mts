@@ -84,6 +84,8 @@ const makeApp = async (opts: {
 	sessionStore?: false;
 	/** #481: share one ask store between two apps. */
 	sessionStoreRecords?: Map<string, unknown>;
+	/** #481: make the ask store fail on one operation. */
+	sessionStoreFail?: "set" | "get";
 	/** Merged into `config.oauth`. */
 	oauth?: Record<string, unknown>;
 	/** `endpoints.login.url`; default `/login`. */
@@ -148,9 +150,12 @@ const makeApp = async (opts: {
 	// The express-session store the middleware would have mounted. #481's
 	// re-authentication ask is a record in it, under a prefix of its own.
 	const records = opts.sessionStoreRecords ?? new Map<string, unknown>();
+	const storeDown = new Error("session store unavailable");
 	const sessionStore = {
-		get: (sid: string, cb: (err: unknown, rec?: unknown) => void) => cb(null, records.get(sid)),
+		get: (sid: string, cb: (err: unknown, rec?: unknown) => void) =>
+			opts.sessionStoreFail === "get" ? cb(storeDown) : cb(null, records.get(sid)),
 		set: (sid: string, rec: unknown, cb?: (err?: unknown) => void) => {
+			if (opts.sessionStoreFail === "set") return cb?.(storeDown);
 			records.set(sid, rec);
 			cb?.();
 		},
@@ -1238,6 +1243,31 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			authTime.at = new Date();
 			const res = await request(harness.app).get(back.pathname + back.search);
 			expect(redirectParams(res).get("code")).toBe("code-x");
+		});
+
+		it("answers temporarily_unavailable when the ask cannot be recorded", async () => {
+			// An outage is not a decision either way — the same rule the
+			// session-liveness read applies. Asking for a re-authentication this
+			// endpoint could not recognise on the way back would loop instead.
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(10)),
+				sessionStoreFail: "set",
+			});
+			const params = redirectParams(await authorize(harness.app, { ...baseQuery, max_age: "60" }));
+			expect(params.get("error")).toBe("temporarily_unavailable");
+		});
+
+		it("answers temporarily_unavailable when the ask cannot be read back", async () => {
+			const harness = await makeApp({
+				session,
+				userSessionStore: storeWith(minutesAgo(10)),
+				sessionStoreFail: "get",
+			});
+			const params = redirectParams(
+				await authorize(harness.app, { ...baseQuery, max_age: "60", reauth_ask: "a".repeat(43) }),
+			);
+			expect(params.get("error")).toBe("temporarily_unavailable");
 		});
 
 		it("refuses max_age and prompt=login when the composition wires no session store", async () => {
