@@ -74,6 +74,10 @@ export interface ResolvedOAuthOptions {
 		readonly maxBytes: number | undefined;
 		readonly timeoutMs: number | undefined;
 		readonly cacheMaxAgeMs: number | undefined;
+		readonly maxCacheEntries: number | undefined;
+		readonly staleIfErrorMs: number | undefined;
+		readonly negativeCacheMs: number | undefined;
+		readonly maxConcurrentFetches: number | undefined;
 	};
 	/**
 	 * #311: when true, a client that declares no `allowedGrantTypes` is denied
@@ -109,6 +113,10 @@ type OAuthConfigShape = {
 		maxBytes?: unknown;
 		timeoutMs?: unknown;
 		cacheMaxAgeMs?: unknown;
+		maxCacheEntries?: unknown;
+		staleIfErrorMs?: unknown;
+		negativeCacheMs?: unknown;
+		maxConcurrentFetches?: unknown;
 	};
 };
 
@@ -210,6 +218,12 @@ export const resolveOAuthOptions = (config: unknown, logger?: Logger): ResolvedO
 			maxBytes: positiveIntOrUndefined(oauth?.clientIdMetadataDocuments?.maxBytes),
 			timeoutMs: positiveIntOrUndefined(oauth?.clientIdMetadataDocuments?.timeoutMs),
 			cacheMaxAgeMs: positiveIntOrUndefined(oauth?.clientIdMetadataDocuments?.cacheMaxAgeMs),
+			maxCacheEntries: positiveIntOrUndefined(oauth?.clientIdMetadataDocuments?.maxCacheEntries),
+			staleIfErrorMs: positiveIntOrUndefined(oauth?.clientIdMetadataDocuments?.staleIfErrorMs),
+			negativeCacheMs: positiveIntOrUndefined(oauth?.clientIdMetadataDocuments?.negativeCacheMs),
+			maxConcurrentFetches: positiveIntOrUndefined(
+				oauth?.clientIdMetadataDocuments?.maxConcurrentFetches,
+			),
 		},
 		requireGrantTypeAllowlist: oauth?.requireGrantTypeAllowlist === true,
 	};

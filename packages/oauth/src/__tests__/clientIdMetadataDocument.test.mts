@@ -215,13 +215,17 @@ describe("createClientIdMetadataDocumentResolver — the SSRF guard and the host
 
 describe("createClientIdMetadataDocumentResolver — the fetch (#529)", () => {
 	it("refuses a redirect, a non-200, and a non-JSON body", async () => {
+		// Each of these is the client's own registration being wrong or absent,
+		// so each is logged as a rejection — the log an operator reads to tell
+		// "this client is misconfigured" from "their server is having a bad
+		// day", which is the `cimd_document_fetch_failed` case below.
 		for (const [name, response] of [
 			[
 				"redirect",
 				() => new Response(null, { status: 302, headers: { location: "https://elsewhere" } }),
 			],
 			["404", () => json({}, {}, 404)],
-			["500", () => json({}, {}, 500)],
+			["403", () => json({}, {}, 403)],
 			[
 				"html",
 				() => new Response("<html/>", { status: 200, headers: { "content-type": "text/html" } }),
@@ -235,6 +239,21 @@ describe("createClientIdMetadataDocumentResolver — the fetch (#529)", () => {
 			const { resolve, warn } = resolver({}, [response]);
 			expect(await resolve(), name).toBeNull();
 			expect(warn, name).toHaveBeenCalledWith(expect.anything(), "cimd_document_rejected");
+		}
+	});
+
+	it("reports the client server's own failure as a fetch failure, not a rejection", async () => {
+		// A 5xx or a 429 is their availability, not their registration. The
+		// distinction decides whether a warm entry survives (#529 audit) — and
+		// it is the one an operator needs from the log.
+		for (const [name, response] of [
+			["500", () => json({}, {}, 500)],
+			["503", () => json({}, {}, 503)],
+			["429", () => json({}, {}, 429)],
+		] as const) {
+			const { resolve, warn } = resolver({}, [response]);
+			expect(await resolve(), name).toBeNull();
+			expect(warn, name).toHaveBeenCalledWith(expect.anything(), "cimd_document_fetch_failed");
 		}
 	});
 
@@ -360,19 +379,37 @@ describe("createClientIdMetadataDocumentResolver — caching (#529)", () => {
 		expect(calls).toHaveLength(3);
 	});
 
-	it("never caches an error or an invalid document, and respects no-store", async () => {
-		const failing = resolver({}, [() => json({}, {}, 500), () => json(document())]);
+	it("never caches an error or an invalid document as a client, and respects no-store", async () => {
+		// A refusal is remembered as a refusal for a bounded window (#529
+		// audit) — never as a client, and never for long: the retry after the
+		// window is a real fetch, so a client that fixes its document is not
+		// locked out. What must not happen is re-fetching the refusal on every
+		// request, which is what made an unauthenticated caller's outbound cost
+		// unbounded.
+		const clock = { now: 1_000_000 };
+		const failing = resolver({ now: () => clock.now }, [
+			() => json({}, {}, 500),
+			() => json(document()),
+		]);
 		expect(await failing.resolve()).toBeNull();
+		expect(await failing.resolve()).toBeNull();
+		expect(failing.calls).toHaveLength(1);
+		clock.now += 120_000;
 		expect(await failing.resolve()).not.toBeNull();
 		expect(failing.calls).toHaveLength(2);
 
-		const invalid = resolver({}, [
+		const invalidClock = { now: 1_000_000 };
+		const invalid = resolver({ now: () => invalidClock.now }, [
 			() => json(document({ redirect_uris: [] })),
 			() => json(document()),
 		]);
 		expect(await invalid.resolve()).toBeNull();
+		expect(await invalid.resolve()).toBeNull();
+		invalidClock.now += 120_000;
 		expect(await invalid.resolve()).not.toBeNull();
 
+		// A success the client asked not to be stored is fetched again, and the
+		// success cleared any refusal that preceded it.
 		const noStore = resolver({}, [
 			() => json(document(), { "cache-control": "no-store" }),
 			() => json(document()),
@@ -492,5 +529,232 @@ describe("the host policy holds whichever way the name is spelled (#529 audit)",
 		const allowed = resolver({ allowedHosts: ["client.example"] });
 		expect(await allowed.resolve(dotted)).toBeNull();
 		expect(allowed.calls).toHaveLength(0);
+	});
+});
+
+describe("the cache tells the truth about an outage (#529 audit)", () => {
+	it("serves a cached registration through a failed revalidation rather than breaking the client", async () => {
+		// The catch deleted the entry and answered `null` for every error — a
+		// DNS blip, a 5xx, a timeout — which `/authorize` turns into
+		// `invalid_client`. That is the distinction this codebase draws
+		// everywhere else (#408): telling a caller their credential is bad when
+		// the truth is that a backend is unreachable. Defensible on a cold
+		// lookup; on a warm cache it is a working client broken by someone
+		// else's outage.
+		const clock = { now: 1_000_000 };
+		const { fetch, calls } = fakeFetch([
+			() => json(document(), { "cache-control": "max-age=1" }),
+			() => {
+				throw new Error("connect ETIMEDOUT");
+			},
+		]);
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read", "write"],
+			allowedAudiences: ["https://mcp.example"],
+			fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		clock.now += 2_000; // the entry has expired, so this revalidates
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		expect(calls).toHaveLength(2);
+	});
+
+	it("rides out the client server's own 5xx on a warm cache", async () => {
+		// A 503 from the client's server is not a verdict on the client. It
+		// reached this code as `DocumentRejected` — every non-200 did — so the
+		// warm registration was deleted and the client refused, which is the
+		// case the stale window exists for.
+		const clock = { now: 1_000_000 };
+		const { fetch } = fakeFetch([
+			() => json(document(), { "cache-control": "max-age=1" }),
+			() => json({ error: "down" }, {}, 503),
+			() => json({ error: "slow down" }, {}, 429),
+		]);
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read", "write"],
+			allowedAudiences: ["https://mcp.example"],
+			fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		clock.now += 2_000;
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		clock.now += 2_000;
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+	});
+
+	it("treats a 404 as the client's own problem, not an outage", async () => {
+		// The other side of the same line: the registration is not there, so
+		// the warm entry goes and the refusal is remembered.
+		const clock = { now: 1_000_000 };
+		const { fetch } = fakeFetch([
+			() => json(document(), { "cache-control": "max-age=1" }),
+			() => json({ error: "gone" }, {}, 404),
+		]);
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read", "write"],
+			allowedAudiences: ["https://mcp.example"],
+			fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		clock.now += 2_000;
+		expect(await r.resolve(CLIENT_URL)).toBeNull();
+	});
+
+	it("still refuses a document that was rejected, cache or no cache", async () => {
+		// A document the server will not honour is not an outage: the client
+		// stops being a client the moment its registration stops being valid.
+		const clock = { now: 1_000_000 };
+		const { fetch } = fakeFetch([
+			() => json(document(), { "cache-control": "max-age=1" }),
+			() => json({ ...document(), redirect_uris: [] }),
+		]);
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read"],
+			allowedAudiences: [],
+			fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		clock.now += 2_000;
+		expect(await r.resolve(CLIENT_URL)).toBeNull();
+		// And it is gone: the next lookup is not served the stale one either.
+		expect(await r.resolve(CLIENT_URL)).toBeNull();
+	});
+
+	it("does not re-fetch a refusal on every request", async () => {
+		// Failures were never cached, so N distinct URL-shaped client_ids cost
+		// N DNS resolutions and N TLS handshakes, every time — an attacker's
+		// tarpit pins a socket for the whole timeout, and a third party's 404
+		// is hammered from this server's address.
+		const clock = { now: 1_000_000 };
+		const { fetch, calls } = fakeFetch([
+			() => json({ error: "nope" }, {}, 404),
+			() => json({ error: "nope" }, {}, 404),
+		]);
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read"],
+			allowedAudiences: [],
+			fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+
+		expect(await r.resolve(CLIENT_URL)).toBeNull();
+		expect(await r.resolve(CLIENT_URL)).toBeNull();
+		expect(calls).toHaveLength(1);
+
+		// Bounded, not permanent: a client that fixes its document is not
+		// locked out for the life of the process.
+		clock.now += 120_000;
+		expect(await r.resolve(CLIENT_URL)).toBeNull();
+		expect(calls).toHaveLength(2);
+	});
+
+	it("bounds how many documents it fetches at once", async () => {
+		// Concurrency is per URL only, so distinct ids fan out without limit:
+		// N slow hosts hold N sockets for the whole timeout each.
+		const started: string[] = [];
+		let release: () => void = () => {};
+		const gate = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const slowFetch = (async (input: string | URL | Request) => {
+			started.push(String(input));
+			await gate;
+			return json(document({ client_id: String(input) }));
+		}) as typeof fetch;
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read"],
+			allowedAudiences: [],
+			maxConcurrentFetches: 2,
+			fetch: slowFetch,
+			lookup: publicLookup,
+		});
+
+		const ids = Array.from({ length: 6 }, (_, i) => `https://client.example/meta-${i}`);
+		const all = Promise.all(ids.map((id) => r.resolve(id)));
+		await vi.waitFor(() => expect(started.length).toBe(2));
+		// The other four are waiting for a slot, not for a socket.
+		expect(started).toHaveLength(2);
+		release();
+		await all;
+		expect(started).toHaveLength(6);
+	});
+});
+
+describe("the refusal memo and the stale window are bounded (#529 audit)", () => {
+	it("bounds the refusal memo the same way it bounds the documents", async () => {
+		// The keys here are the caller's too: an id that refuses is an id the
+		// caller invented, so remembering every one of them would hand the
+		// memory back to whoever was being throttled.
+		const clock = { now: 1_000_000 };
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read"],
+			allowedAudiences: [],
+			maxCacheEntries: 2,
+			fetch: (async () => json({ error: "nope" }, {}, 404)) as typeof fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+
+		for (let i = 0; i < 5; i += 1) {
+			expect(await r.resolve(`https://client.example/meta-${i}`)).toBeNull();
+		}
+		// The earliest refusals were evicted, so their ids are fetched again
+		// rather than answered from a memo that grew without limit.
+		const fetched: string[] = [];
+		const counting = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read"],
+			allowedAudiences: [],
+			maxCacheEntries: 2,
+			fetch: (async (input: string | URL | Request) => {
+				fetched.push(String(input));
+				return json({ error: "nope" }, {}, 404);
+			}) as typeof fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+		for (let i = 0; i < 3; i += 1) await counting.resolve(`https://client.example/m-${i}`);
+		await counting.resolve("https://client.example/m-0");
+		expect(fetched).toHaveLength(4);
+	});
+
+	it("stops serving a stale registration once its window has lapsed", async () => {
+		// The window is anchored to the last successful fetch, so it does not
+		// renew itself for the length of an outage: eventually the client is
+		// refused rather than served a registration nobody can revalidate.
+		const clock = { now: 1_000_000 };
+		let fail = false;
+		const r = createClientIdMetadataDocumentResolver({
+			allowedScopes: ["read", "write"],
+			allowedAudiences: [],
+			cacheMaxAgeMs: 1_000,
+			staleIfErrorMs: 5_000,
+			negativeCacheMs: 0,
+			fetch: (async () => {
+				if (fail) throw new Error("connect ETIMEDOUT");
+				return json(document(), { "cache-control": "max-age=1" });
+			}) as typeof fetch,
+			lookup: publicLookup,
+			now: () => clock.now,
+		});
+
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		fail = true;
+		clock.now += 2_000; // expired; revalidation fails, so the stale one is served
+		expect(await r.resolve(CLIENT_URL)).not.toBeNull();
+		clock.now += 10_000; // past the deadline from the last success
+		expect(await r.resolve(CLIENT_URL)).toBeNull();
 	});
 });

@@ -101,6 +101,22 @@ export interface ClientIdMetadataDocumentOptions {
 	readonly cacheMaxAgeMs?: number;
 	/** Bound on remembered documents. Default {@link DEFAULT_CIMD_MAX_CACHE_ENTRIES}. */
 	readonly maxCacheEntries?: number;
+	/**
+	 * How long a cached registration may still be served after a
+	 * revalidation that failed for a reason that is not the document's.
+	 * Default {@link DEFAULT_CIMD_STALE_IF_ERROR_MS}. Zero disables it.
+	 */
+	readonly staleIfErrorMs?: number;
+	/**
+	 * How long a refusal is remembered, so the same id is not fetched again
+	 * on every request. Default {@link DEFAULT_CIMD_NEGATIVE_CACHE_MS}.
+	 */
+	readonly negativeCacheMs?: number;
+	/**
+	 * How many documents may be in flight at once, across every client id.
+	 * Default {@link DEFAULT_CIMD_MAX_CONCURRENT_FETCHES}.
+	 */
+	readonly maxConcurrentFetches?: number;
 	readonly logger?: Logger;
 	/** Test seams. */
 	readonly fetch?: typeof fetch;
@@ -166,10 +182,52 @@ const hostMatches = (patterns: readonly string[] | undefined, hostname: string):
 		return p.startsWith(".") ? h === p.slice(1) || h.endsWith(p) : h === p;
 	});
 
+/**
+ * How long a cached registration outlives a revalidation this server could
+ * not complete — a DNS blip, a 5xx, a timeout.
+ *
+ * The distinction #408 draws, applied to the cache: refusing a client
+ * because someone else's server is down tells the caller their credential
+ * is bad when the truth is an outage. On a cold lookup there is nothing to
+ * serve and `null` is the only answer; on a warm one the registration this
+ * server already validated is a better answer than breaking a working
+ * client. A document the server **rejected** is not this: that client
+ * stopped being a client, and its entry goes immediately.
+ */
+export const DEFAULT_CIMD_STALE_IF_ERROR_MS = 5 * 60 * 1000;
+
+/**
+ * How long a refusal is remembered.
+ *
+ * Failures were never cached, so every distinct URL-shaped `client_id` cost
+ * a DNS resolution, a TLS handshake and a GET on **every** request: an
+ * unauthenticated caller could pin sockets against a tarpit of its own, or
+ * point this server's address at a third party and have it re-fetch a 404
+ * indefinitely. Short, because a client that fixes its document must not be
+ * locked out for the life of the process.
+ */
+export const DEFAULT_CIMD_NEGATIVE_CACHE_MS = 60 * 1000;
+
+/**
+ * How many documents may be fetched at once, across every client id.
+ *
+ * De-duplication was per URL, so distinct ids fanned out without limit and
+ * N slow hosts held N sockets for the whole timeout each. The cap makes the
+ * outbound cost of an unauthenticated request bounded rather than
+ * proportional to how many ids the caller can invent.
+ */
+export const DEFAULT_CIMD_MAX_CONCURRENT_FETCHES = 8;
+
 interface CacheEntry {
 	readonly client: PublicClient;
 	readonly etag: string | undefined;
 	readonly expiresAt: number;
+	/**
+	 * The instant past which this registration is not served at all, however
+	 * long the outage lasts — one stale window from when it was last
+	 * successfully fetched, not one per failed revalidation.
+	 */
+	readonly staleDeadline: number;
 }
 
 /**
@@ -327,6 +385,29 @@ export function createClientIdMetadataDocumentResolver(
 	const cacheMaxAgeMs = opts.cacheMaxAgeMs ?? DEFAULT_CIMD_CACHE_MAX_AGE_MS;
 	const logger = opts.logger;
 	const maxCacheEntries = opts.maxCacheEntries ?? DEFAULT_CIMD_MAX_CACHE_ENTRIES;
+	const staleIfErrorMs = opts.staleIfErrorMs ?? DEFAULT_CIMD_STALE_IF_ERROR_MS;
+	const negativeCacheMs = opts.negativeCacheMs ?? DEFAULT_CIMD_NEGATIVE_CACHE_MS;
+	const maxConcurrentFetches = opts.maxConcurrentFetches ?? DEFAULT_CIMD_MAX_CONCURRENT_FETCHES;
+	/**
+	 * Refusals, bounded the same way documents are. An entry here means
+	 * `not a client`, with an expiry.
+	 */
+	const refusals = new Map<string, number>();
+	/** Slots for an in-flight fetch; a waiter takes one when it is released. */
+	let inFlightFetches = 0;
+	const waiting: Array<() => void> = [];
+	const withSlot = async <T,>(job: () => Promise<T>): Promise<T> => {
+		if (inFlightFetches >= maxConcurrentFetches) {
+			await new Promise<void>((resolve) => waiting.push(resolve));
+		}
+		inFlightFetches += 1;
+		try {
+			return await job();
+		} finally {
+			inFlightFetches -= 1;
+			waiting.shift()?.();
+		}
+	};
 	const cache = new Map<string, CacheEntry>();
 	/**
 	 * Bounded, because an unauthenticated caller chooses the keys: every
@@ -341,6 +422,19 @@ export function createClientIdMetadataDocumentResolver(
 			if (!oldest.done) cache.delete(oldest.value);
 		}
 		cache.set(clientId, entry);
+	};
+
+	/**
+	 * A refusal, remembered briefly and bounded the same way documents are —
+	 * the keys are the caller's here too, so a caller inventing ids must not be
+	 * able to grow this map without limit either.
+	 */
+	const rememberRefusal = (clientId: string): void => {
+		if (refusals.size >= maxCacheEntries && !refusals.has(clientId)) {
+			const oldest = refusals.keys().next();
+			if (!oldest.done) refusals.delete(oldest.value);
+		}
+		refusals.set(clientId, now() + negativeCacheMs);
 	};
 	const inFlight = new Map<string, Promise<PublicClient | null>>();
 
@@ -379,7 +473,17 @@ export function createClientIdMetadataDocumentResolver(
 		}
 		if (res.status !== 200) {
 			await res.body?.cancel().catch(() => undefined);
-			throw new DocumentRejected(`document fetch answered ${res.status}`);
+			// A verdict on the document, or a verdict on the day the client's
+			// server is having? A 4xx and a refused redirect say the
+			// registration is not there or not one we will follow — the client's
+			// own problem, and cached as a refusal. A 5xx or a 429 says their
+			// server could not answer, which is exactly what `staleIfErrorMs`
+			// exists to ride out; classifying it as a rejection would delete the
+			// warm registration this server already validated and refuse a
+			// working client for the length of someone else's outage.
+			const transient = res.status >= 500 || res.status === 429;
+			const message = `document fetch answered ${res.status}`;
+			throw transient ? new Error(message) : new DocumentRejected(message);
 		}
 		const contentType = res.headers.get("content-type") ?? "";
 		if (!/json/i.test(contentType)) {
@@ -406,20 +510,46 @@ export function createClientIdMetadataDocumentResolver(
 	const resolveUncached = async (clientId: string): Promise<PublicClient | null> => {
 		const cached = cache.get(clientId);
 		try {
-			const { client, etag, cacheControl } = await fetchDocument(clientId, cached);
+			const { client, etag, cacheControl } = await withSlot(() => fetchDocument(clientId, cached));
 			const granted = maxAgeMsOf(cacheControl);
 			const ttl = Math.min(granted ?? cacheMaxAgeMs, cacheMaxAgeMs);
-			if (ttl > 0) remember(clientId, { client, etag, expiresAt: now() + ttl });
-			else cache.delete(clientId);
+			if (ttl > 0) {
+				remember(clientId, {
+					client,
+					etag,
+					expiresAt: now() + ttl,
+					staleDeadline: now() + ttl + staleIfErrorMs,
+				});
+			} else cache.delete(clientId);
+			refusals.delete(clientId);
 			return client;
 		} catch (err) {
-			// Never cached, and never a 5xx: a client whose document cannot be
-			// honoured is, to this server, a client that does not exist.
-			cache.delete(clientId);
+			const rejected = err instanceof DocumentRejected;
 			logger?.warn(
 				{ clientId, reason: err instanceof Error ? err.message : String(err) },
-				err instanceof DocumentRejected ? "cimd_document_rejected" : "cimd_document_fetch_failed",
+				rejected ? "cimd_document_rejected" : "cimd_document_fetch_failed",
 			);
+			if (rejected) {
+				// The document, not the network: this client stopped being a
+				// client, so what was remembered of it goes now.
+				cache.delete(clientId);
+			} else if (cached !== undefined && staleIfErrorMs > 0) {
+				// An outage is not a verdict on the client (#408). The
+				// registration this server already validated is served for a
+				// bounded window rather than breaking a working client because
+				// someone else's server is down. `expiresAt` moves, so the window
+				// does not renew itself indefinitely: the next revalidation is
+				// attempted when it lapses, and only a success resets the clock.
+				const staleUntil = Math.min(now() + staleIfErrorMs, cached.staleDeadline);
+				if (staleUntil > now()) {
+					remember(clientId, { ...cached, expiresAt: staleUntil });
+					return cached.client;
+				}
+				cache.delete(clientId);
+			} else {
+				cache.delete(clientId);
+			}
+			if (negativeCacheMs > 0) rememberRefusal(clientId);
 			return null;
 		}
 	};
@@ -433,6 +563,11 @@ export function createClientIdMetadataDocumentResolver(
 			}
 			const cached = cache.get(clientId);
 			if (cached !== undefined && cached.expiresAt > now()) return cached.client;
+			const refusedUntil = refusals.get(clientId);
+			if (refusedUntil !== undefined) {
+				if (refusedUntil > now()) return null;
+				refusals.delete(clientId);
+			}
 			const pending = inFlight.get(clientId);
 			if (pending !== undefined) return pending;
 			const job = resolveUncached(clientId).finally(() => inFlight.delete(clientId));

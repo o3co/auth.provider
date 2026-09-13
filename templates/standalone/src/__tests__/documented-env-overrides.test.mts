@@ -104,6 +104,10 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_CIMD_MAX_BYTES: "8192",
 	OAUTH_CIMD_TIMEOUT_MS: "3000",
 	OAUTH_CIMD_CACHE_MAX_AGE_MS: "60000",
+	OAUTH_CIMD_MAX_CACHE_ENTRIES: "128",
+	OAUTH_CIMD_STALE_IF_ERROR_MS: "120000",
+	OAUTH_CIMD_NEGATIVE_CACHE_MS: "30000",
+	OAUTH_CIMD_MAX_CONCURRENT_FETCHES: "4",
 	OAUTH_TOKEN_BINDING_DISPATCH_POLICY: "intent-explicit",
 	OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS: "true",
 
@@ -330,6 +334,10 @@ describe("#288: the shipped config boots with every documented override supplied
 			deniedHosts: ["evil.example"],
 			maxBytes: 8192,
 			timeoutMs: 3000,
+			maxCacheEntries: 128,
+			staleIfErrorMs: 120000,
+			negativeCacheMs: 30000,
+			maxConcurrentFetches: 4,
 			cacheMaxAgeMs: 60000,
 		});
 		// #500: a comma-separated string becomes a list of origins, trimmed.

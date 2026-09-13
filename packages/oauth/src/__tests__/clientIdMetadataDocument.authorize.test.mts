@@ -54,6 +54,8 @@ const makeApp = async (opts: {
 	document?: unknown;
 	/** #529 audit: wire the consent step a document client needs. Default: yes. */
 	consent?: boolean;
+	/** #529 audit: set the cache and fetch-budget knobs in config. */
+	knobs?: boolean;
 }) => {
 	const config = {
 		oauth: {
@@ -64,6 +66,17 @@ const makeApp = async (opts: {
 				enabled: opts.enabled,
 				allowedScopes: ["read"],
 				allowedAudiences: ["https://mcp.example"],
+				// #529 audit: the cache and fetch-budget knobs travel from config
+				// through `createOAuthRouter`. Opt-in, so the composition that
+				// sets none of them — every other case here — is exercised too.
+				...(opts.knobs
+					? {
+							maxCacheEntries: 32,
+							staleIfErrorMs: 120_000,
+							negativeCacheMs: 60_000,
+							maxConcurrentFetches: 2,
+						}
+					: {}),
 			},
 		},
 		rateLimit: { failMode: "open" as const },
@@ -201,5 +214,20 @@ describe("/authorize does not fetch a document it could never honour (#529 audit
 		const { app, fetchImpl } = await makeApp({ enabled: true });
 		await authorize(app);
 		expect(fetchImpl).toHaveBeenCalled();
+	});
+});
+
+describe("/authorize honours the document cache knobs the operator set (#529 audit)", () => {
+	it("does not re-fetch a document it already refused, within the window the operator set", async () => {
+		// `negativeCacheMs` is wired through `createOAuthRouter`, so a refused
+		// client_id costs one outbound fetch rather than one per request.
+		const { app, fetchImpl } = await makeApp({
+			enabled: true,
+			knobs: true,
+			document: { not: "a document" },
+		});
+		expect((await authorize(app)).status).toBe(400);
+		expect((await authorize(app)).status).toBe(400);
+		expect(fetchImpl).toHaveBeenCalledTimes(1);
 	});
 });

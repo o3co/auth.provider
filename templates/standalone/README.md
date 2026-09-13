@@ -176,6 +176,10 @@ fail fast rather than silently falling back to defaults.
 | `OAUTH_CIMD_MAX_BYTES` | `5120` | Byte cap on a document (the draft recommends 5 KB). |
 | `OAUTH_CIMD_TIMEOUT_MS` | `5000` | Fetch timeout. |
 | `OAUTH_CIMD_CACHE_MAX_AGE_MS` | `600000` | Upper bound on how long a valid document is served from cache; `Cache-Control: max-age` may shorten it. |
+| `OAUTH_CIMD_MAX_CACHE_ENTRIES` | `256` | How many documents are remembered at once. The keys are chosen by an unauthenticated caller, so the map is bounded. |
+| `OAUTH_CIMD_STALE_IF_ERROR_MS` | `300000` | How long a registration already validated is still served after a revalidation that failed for a reason that is not the document's (a DNS blip, a 5xx, a timeout) — an outage should not break a working client. A document that was *rejected* is dropped immediately. `0` disables it. |
+| `OAUTH_CIMD_NEGATIVE_CACHE_MS` | `60000` | How long a refusal is remembered, so the same `client_id` is not resolved and fetched again on every request. Short, so a client that fixes its document is not locked out. |
+| `OAUTH_CIMD_MAX_CONCURRENT_FETCHES` | `8` | How many documents may be in flight at once, across every `client_id`. Bounds what an unauthenticated caller can make this server dial. |
 | `OAUTH_JWT_KID` | `v0` | Key ID included in the JWT header |
 | `OAUTH_JWT_PRIVATE_KEY` | — | PEM-encoded private key (asymmetric algorithms) |
 | `OAUTH_JWT_PRIVATE_KEY_PATH` | — | Path to PEM private key file |
