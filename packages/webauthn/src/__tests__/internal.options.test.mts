@@ -45,6 +45,10 @@ const BASE_CONFIG: WebAuthnConfig = {
 	challengeTtlMs: 120_000,
 	attestationPreference: "none",
 	userVerification: "preferred",
+	allowCredentialsForKnownUser: false,
+	rateLimit: {
+		authenticationOptions: { limit: 30, windowSeconds: 60 },
+	},
 };
 
 function makeChallenge(): Uint8Array<ArrayBuffer> {
@@ -59,6 +63,7 @@ function makeCredential(overrides?: Partial<WebAuthnCredential>): WebAuthnCreden
 		transports: ["internal"],
 		backedUp: false,
 		userId: "user-1",
+		createdAt: new Date("2026-01-01T00:00:00Z"),
 		...overrides,
 	};
 }

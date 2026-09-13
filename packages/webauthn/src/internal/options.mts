@@ -34,7 +34,9 @@
  *      rather than the `Uint8Array<ArrayBufferLike>` default, i.e. it will not
  *      accept a view onto a SharedArrayBuffer.
  *
- * NOT exported from the package barrel — internal use only.
+ * NOT exported from the package barrel — internal use only, except
+ * `WEBAUTHN_ALGORITHM_IDS`, which the barrel re-exports as the statement of
+ * the algorithm pin.
  *
  * Cross-refs: Plan T26 / spec §2.4 / WebAuthn §5.4.3 / §2.3.2
  */
@@ -65,8 +67,13 @@ import type { WebAuthnConfig } from "../config.mjs";
  * registered it, so the set is a decision, not a default.
  *
  * Adopting ML-DSA-44 deliberately is #554.
+ *
+ * Frozen, and exported on the barrel: the library's default was a mutable
+ * array anything could push to, and the design vocabulary guards this as the
+ * one definition (a second literal `supportedAlgorithmIDs` fails CI). A
+ * registration outside the set is refused as `algorithm_not_allowed`.
  */
-export const WEBAUTHN_ALGORITHM_IDS: readonly number[] = [-8, -7, -257];
+export const WEBAUTHN_ALGORITHM_IDS: readonly number[] = Object.freeze([-8, -7, -257]);
 
 // ---------------------------------------------------------------------------
 // Registration

@@ -23,7 +23,14 @@
 		"src/__tests__/grant-context-readonly.test.mts",
 		"src/__tests__/repository-types-readonly.test.mts",
 		"src/__tests__/naming-aliases.test.mts",
-		"src/__tests__/contributes-map-substitution.test.mts"
+		"src/__tests__/contributes-map-substitution.test.mts",
+		// v0.13.0 audit: these three were in neither list (or only in vitest's),
+		// so their type contracts — `wiring.test.mts`'s `satisfies … as
+		// BootstrapMap` among them — were never compiled. Paired with
+		// vitest.config.mts's `typecheck.include`, as #343 requires.
+		"src/webauthn-credentials/__tests__/types.test.mts",
+		"src/challenges/__tests__/types.test.mts",
+		"src/challenges/__tests__/wiring.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }

@@ -37,6 +37,9 @@ export default defineConfig({
 				"src/__tests__/contributes-map-substitution.test.mts",
 				// Wave 1 §2.3.1 — WebAuthnCredential + WebAuthnCredentialStore type contract.
 				"src/webauthn-credentials/__tests__/types.test.mts",
+				// v0.13.0 audit: never typechecked before; paired with tsconfig.test.json.
+				"src/challenges/__tests__/types.test.mts",
+				"src/challenges/__tests__/wiring.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
 			// itself, where 4 was content to let an imported helper register

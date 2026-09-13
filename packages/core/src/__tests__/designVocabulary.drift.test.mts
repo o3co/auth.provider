@@ -56,6 +56,12 @@ interface VocabularyRow {
 	/** Repo-relative path of the one module allowed to define it. */
 	readonly home: string;
 	readonly definition: RegExp;
+	/**
+	 * How many times `definition` may match inside the home itself. Absent,
+	 * the home only has to match once; set, a second definition or literal
+	 * added beside the first — in the home — fails too.
+	 */
+	readonly homeMatches?: number;
 }
 
 const VOCABULARY: readonly VocabularyRow[] = [
@@ -121,6 +127,14 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		concept: "special-use address (#529)",
 		home: "packages/core/src/net/special-use.mts",
 		definition: /(?:function|const)\s+isSpecialUseAddress\b/,
+	},
+	{
+		concept: "WebAuthn algorithm pin (#516)",
+		home: "packages/webauthn/src/internal/options.mts",
+		definition: /(?:function|const)\s+WEBAUTHN_ALGORITHM_IDS\b|supportedAlgorithmIDs\s*:\s*\[\s*-/,
+		// The one `const`; a literal `supportedAlgorithmIDs: [-…]` beside it in
+		// the home is a second statement of the pin too.
+		homeMatches: 1,
 	},
 	{
 		concept: "fail-closed grant-policy evaluation and its bounds (#441, #520)",
@@ -223,10 +237,20 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 		"%s is defined only in its mapped home",
 		(_concept, row) => {
 			const home = join(repoRoot, row.home);
+			const homeSource = readFileSync(home, "utf8");
 			expect(
-				row.definition.test(readFileSync(home, "utf8")),
+				row.definition.test(homeSource),
 				`${row.home} must define the concept it is mapped as the home of`,
 			).toBe(true);
+			if (row.homeMatches !== undefined) {
+				const flags = row.definition.flags.includes("g")
+					? row.definition.flags
+					: `${row.definition.flags}g`;
+				expect(
+					homeSource.match(new RegExp(row.definition.source, flags))?.length ?? 0,
+					`${row.home} must state the concept exactly ${row.homeMatches} time(s)`,
+				).toBe(row.homeMatches);
+			}
 
 			const offenders = sources
 				.filter((file) => file !== home)
