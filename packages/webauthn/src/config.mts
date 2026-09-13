@@ -162,6 +162,67 @@ export const webauthnConfigSchema = z.object({
 		)
 		.min(1),
 	/**
+	 * Origins this RP may be **framed by** — the `topOrigin` a browser reports
+	 * for a cross-origin (iframe) ceremony (#554 audit).
+	 *
+	 * Optional, and absent is the safe default: SimpleWebAuthn 14 refuses an
+	 * authentication response whose `topOrigin` the browser reported unless it
+	 * is given an expected value, which is the right answer for a deployment
+	 * that never meant to be embedded. Set it to the embedding origins a
+	 * deployment does intend — the parent page's origin, not this RP's — and
+	 * cross-origin passkey authentication from those frames is accepted.
+	 *
+	 * Same shape rules as `origin`: a literal origin, https (or the http
+	 * loopback carve-out), no wildcard, no trailing slash. Not the Android app
+	 * form: `android:apk-key-hash:` is what Credential Manager sends *as* the
+	 * origin, and there is no browsing context above it to be a top origin.
+	 *
+	 * Safari does not send `topOrigin` as of the 14.0.1 vendoring, so the
+	 * library only enforces this where the browser reports one.
+	 */
+	topOrigin: z
+		.array(
+			z
+				.string()
+				.url()
+				.refine((u) => !u.includes("*"), {
+					message: "topOrigin must not contain wildcards — SimpleWebAuthn does exact-match only",
+				})
+				.refine(
+					(u) => {
+						let parsed: URL;
+						try {
+							parsed = new URL(u);
+						} catch {
+							return false;
+						}
+						if (parsed.username !== "" || parsed.password !== "") return false;
+						// The literal-origin form, which is what a browser reports as
+						// `topOrigin` and what SimpleWebAuthn exact-matches. Compared
+						// against the raw string rather than `parsed.href`, which
+						// normalises a trailing slash in and would accept the one
+						// spelling that never matches.
+						if (u !== parsed.origin) return false;
+						if (parsed.protocol === "https:") return true;
+						if (parsed.protocol === "http:") {
+							return (
+								parsed.hostname === "localhost" ||
+								parsed.hostname === "127.0.0.1" ||
+								parsed.hostname === "[::1]"
+							);
+						}
+						return false;
+					},
+					{
+						message:
+							"topOrigin must be a literal https:// origin, or http:// loopback " +
+							"(localhost / 127.0.0.1 / [::1]), with no userinfo, path, query or fragment",
+					},
+				),
+		)
+		.min(1)
+		.optional(),
+	/**
 	 * Challenge time-to-live in milliseconds.
 	 * Reference default (S11): 120_000 ms — mobile-network safe baseline.
 	 * Supplied via reference.conf per ADR 2026-04-30.

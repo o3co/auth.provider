@@ -216,3 +216,43 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 		});
 	});
 });
+
+describe("topOrigin — the origins this RP may be framed by (#554 audit)", () => {
+	const base = VALID;
+
+	it("is optional, and absent means this RP expects not to be framed", () => {
+		const parsed = webauthnConfigSchema.parse(base);
+		expect(parsed.topOrigin).toBeUndefined();
+	});
+
+	it("accepts https origins, and the loopback carve-out the origin list has", () => {
+		expect(
+			webauthnConfigSchema.parse({
+				...base,
+				topOrigin: ["https://embedder.example", "http://localhost:3000"],
+			}).topOrigin,
+		).toEqual(["https://embedder.example", "http://localhost:3000"]);
+	});
+
+	it("refuses what the origin list refuses — a wildcard, a trailing slash, a bare host", () => {
+		for (const bad of [
+			["https://*.example.com"],
+			["https://embedder.example/"],
+			["embedder.example"],
+			["http://embedder.example"],
+		]) {
+			expect(() => webauthnConfigSchema.parse({ ...base, topOrigin: bad }), String(bad)).toThrow();
+		}
+	});
+
+	it("refuses an Android app origin: a top origin is a browsing context", () => {
+		// `android:apk-key-hash:` is what Credential Manager sends *as* the
+		// origin; there is no frame above it, so it is not a top origin.
+		expect(() =>
+			webauthnConfigSchema.parse({
+				...base,
+				topOrigin: ["android:apk-key-hash:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"],
+			}),
+		).toThrow();
+	});
+});

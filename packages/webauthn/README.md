@@ -82,6 +82,29 @@ webauthn {
 }
 ```
 
+### Being framed: `topOrigin`
+
+`origin` is where the ceremony runs. `topOrigin` is the page it runs *inside*,
+when that is a different origin — a passkey prompt in an iframe. The browser
+reports it, and `@simplewebauthn/server` 14 refuses such a response unless the
+deployment named the embedding origins it accepts:
+
+```hocon
+webauthn {
+  topOrigin = ["https://partner.example"]
+}
+```
+
+Absent, a reported cross-origin authentication is refused, which is the right
+answer for a deployment that never meant to be embedded — and the refusal is
+`top_origin_mismatch`, not `origin_mismatch`, so it does not send an operator
+to the `origin` list above, which cannot fix it. Same shape rules as `origin`,
+minus the Android app form: a top origin is a browsing context, and Credential
+Manager's origin has no frame above it.
+
+Safari does not send `topOrigin` as of the version vendored here, so the check
+applies only where a browser reports one.
+
 **The Android entry.** Android's Credential Manager identifies the calling app
 by the base64url SHA-256 of its **signing certificate**, not by a host, and
 presents `android:apk-key-hash:<that hash>` as the ceremony origin. Derive it

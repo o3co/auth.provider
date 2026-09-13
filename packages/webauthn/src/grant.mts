@@ -153,6 +153,12 @@ export interface WebAuthnGrantDeps extends GrantDependencies {
 		readonly rpId: string;
 		readonly origin: readonly string[];
 		/**
+		 * #554 audit: origins this RP accepts being framed by, for a
+		 * cross-origin (iframe) ceremony. Absent, a browser-reported
+		 * cross-origin authentication is refused.
+		 */
+		readonly topOrigin?: readonly string[];
+		/**
 		 * WebAuthn UserVerificationRequirement (W3C §5.8.6).
 		 *
 		 * Threaded through to verifyWebAuthnAssertion so SimpleWebAuthn enforces
@@ -251,6 +257,12 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 				expectedChallenge: challengeValue,
 				expectedRpId: deps.webauthnConfig.rpId,
 				expectedOrigins: deps.webauthnConfig.origin,
+				// #554 audit: the frames this RP accepts being embedded in, when the
+				// deployment named any. Absent, a browser-reported cross-origin
+				// ceremony is refused.
+				...(deps.webauthnConfig.topOrigin === undefined
+					? {}
+					: { expectedTopOrigins: deps.webauthnConfig.topOrigin }),
 				// Thread configured UV through to SimpleWebAuthn (Codex Round 2 P1-1).
 				userVerification: deps.webauthnConfig.userVerification,
 			});

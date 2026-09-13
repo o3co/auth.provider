@@ -33,6 +33,8 @@
  * source; all four target strings are unchanged since v13.1.1. v14 adds
  * "Unexpected top origin of …" for cross-origin authentication, which the
  * `/origin/i` arm already covers and which is an origin mismatch):
+ *   /top.?origin/i → "top_origin_mismatch" (before the arm below, which
+ *                    would otherwise swallow it)
  *   /origin/i   → "origin_mismatch"
  *   /challenge/i → "challenge_mismatch"
  *   /rp.?id/i   → "rp_id_mismatch"  (matches "RP ID" from UnexpectedRPIDHash)
@@ -184,6 +186,14 @@ export interface AssertionVerificationInput {
 	 * Cross-refs: Codex Round 2 P1-1 / spec §2.5
 	 */
 	readonly userVerification?: "required" | "preferred" | "discouraged";
+	/**
+	 * Origins this RP may be framed by — the `topOrigin` a browser reports for
+	 * a cross-origin (iframe) ceremony (#554 audit). Absent, a reported
+	 * cross-origin response is refused, which is SimpleWebAuthn 14's own
+	 * default and the right one for a deployment that never meant to be
+	 * embedded.
+	 */
+	readonly expectedTopOrigins?: readonly string[];
 }
 
 export type AssertionVerificationResult =
@@ -192,6 +202,7 @@ export type AssertionVerificationResult =
 			readonly ok: false;
 			readonly reason:
 				| "origin_mismatch"
+				| "top_origin_mismatch"
 				| "challenge_mismatch"
 				| "rp_id_mismatch"
 				| "signature_invalid"
@@ -207,6 +218,13 @@ export async function verifyWebAuthnAssertion(
 			response: input.response,
 			expectedChallenge: input.expectedChallenge,
 			expectedOrigin: [...input.expectedOrigins], // S7: multi-origin support
+			// #554 audit: only when the deployment named some. Passing
+			// `undefined` and passing nothing are the same to the library, but
+			// the absence is the statement — this RP does not expect to be
+			// framed — so it is spelled as an absence here too.
+			...(input.expectedTopOrigins === undefined
+				? {}
+				: { expectedTopOrigin: [...input.expectedTopOrigins] }),
 			expectedRPID: input.expectedRpId,
 			credential: {
 				id: input.credential.credentialId,
@@ -274,6 +292,11 @@ export async function verifyWebAuthnAssertion(
 
 function mapAuthenticationError(err: unknown): AssertionVerificationResult {
 	if (err instanceof Error) {
+		// Before the plain-origin arm, which would otherwise swallow both of
+		// SimpleWebAuthn 14's cross-origin messages — they carry the word
+		// "origin" — and send an operator to the `webauthn.origin` allowlist,
+		// which cannot fix an embedding they have not configured (#554 audit).
+		if (/top.?origin/i.test(err.message)) return { ok: false, reason: "top_origin_mismatch" };
 		if (/origin/i.test(err.message)) return { ok: false, reason: "origin_mismatch" };
 		if (/challenge/i.test(err.message)) return { ok: false, reason: "challenge_mismatch" };
 		if (/rp.?id/i.test(err.message)) return { ok: false, reason: "rp_id_mismatch" };
