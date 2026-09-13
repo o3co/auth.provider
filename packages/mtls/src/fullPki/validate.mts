@@ -98,10 +98,13 @@
  * Under `"both"` the responder is asked first — one small request about one
  * certificate, against a CRL that may be large — and the CRL is consulted
  * only when OCSP could not answer: unreachable, unverifiable, stale, or
- * simply not named. An `unknown` is an answer, and final (#471): the CRL
- * cannot list a never-issued serial, so it is not asked about one. A
- * *revoked* from either source wins; a certificate is unavailable when both
- * sources are, or when the responder said `unknown`. The fallback is logged
+ * simply not named. An `unknown` is an answer, not an outage (#471), and it
+ * is the one shape where both sources are consulted: the CRL cannot list a
+ * never-issued serial, so it cannot clear one, but it can still refuse one.
+ * A CRL that lists the certificate therefore decides it; a CRL that does not
+ * has said nothing, and the `unknown` stands. A *revoked* from either source
+ * wins; a certificate is unavailable when both sources are, or when the
+ * responder said `unknown` and the CRL did not list it. The fallback is logged
  * when a responder was actually asked and failed, so an OCSP outage is
  * visible even while the CRL keeps revocation checking alive.
  */
@@ -141,7 +144,7 @@ export type OnRevocationUnavailable = "reject" | "allow";
 
 /**
  * Where revocation status comes from. `"both"` asks the responder first and
- * falls back to the CRL when OCSP could not answer (#431) — could not, not would not: an OCSP `unknown` is final (#471).
+ * falls back to the CRL when OCSP could not answer (#431) — could not, not would not. An OCSP `unknown` is an answer (#471): the CRL is asked but may only refuse, never clear.
  */
 export type RevocationSource = "crl" | "ocsp" | "both";
 
@@ -399,11 +402,13 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 
 	/**
 	 * The certificate's status from the configured source(s). Under `"both"`
-	 * the responder goes first and the CRL is consulted only when it could
-	 * not answer — could not, not would not: an OCSP `unknown` is final
-	 * (#471). A status either source determined is final, and the
-	 * certificate is unavailable only when both are, or when the responder
-	 * said `unknown`.
+	 * the responder goes first and the CRL is consulted when it could not
+	 * answer — could not, not would not. An OCSP `unknown` is an answer
+	 * (#471), and the CRL is asked about it too but may only refuse: it
+	 * cannot list a never-issued serial, so it cannot clear one. A status
+	 * either source determined is final, and the certificate is unavailable
+	 * only when both are, or when the responder said `unknown` and the CRL
+	 * did not list it.
 	 */
 	const decide = async (
 		certificate: pkijs.Certificate,
@@ -417,11 +422,20 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 		// #471: `unknown` is an answer, not an outage. RFC 6960 §2.2: the
 		// responder does not know the certificate — for a serial the CA never
 		// issued, that is the whole finding — and a CRL cannot list a
-		// never-issued serial, so consulting it would judge exactly that
-		// certificate by the one source that cannot see it. The fallback
-		// covers the transport-, freshness- and signature-shaped reasons only;
-		// an `unknown` stands, and `on-unavailable` decides what it means.
-		if (ocsp.reason === "unknown") return ocsp;
+		// never-issued serial, so it cannot exonerate one. A CRL's *silence*
+		// about this certificate therefore decides nothing, and the `unknown`
+		// stands for `on-unavailable` to judge.
+		//
+		// It can still say `revoked`, and that is worth asking for: a combined
+		// mode must not refuse fewer certificates than either of its parts.
+		// `crl` alone refuses a certificate its CRL lists; before this, `both`
+		// admitted the same certificate under `allow`, because the list that
+		// names it was never consulted.
+		if (ocsp.reason === "unknown") {
+			const listed = await byCrl(certificate, issuer, now);
+			if (listed.kind === "revoked") return listed;
+			return ocsp;
+		}
 		// A certificate that names no responder is a normal shape under
 		// "both" — a CA that publishes only CRLs for some of its
 		// certificates — not an outage. A responder that was asked and did
