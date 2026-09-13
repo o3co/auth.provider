@@ -28,6 +28,12 @@ import type { GrantError } from "./types.mjs";
  */
 export type GrantPolicyAllow = Extract<GrantPolicyDecision, { outcome: "allow" }>;
 
+/** The scopes a policy's `grantedScope` may reach, and what to call them in a refusal. */
+export interface PolicyScopeCeiling {
+	readonly scopes: readonly string[];
+	readonly name: string;
+}
+
 export type GrantPolicyOutcome =
 	| { readonly ok: true; readonly scopes: readonly string[]; readonly decision: GrantPolicyAllow }
 	| { readonly ok: false; readonly result: GrantError };
@@ -74,12 +80,18 @@ export function policyOutOfBounds(errorDescription: string): GrantError {
  *
  * `grantedAudience` is left on `decision` for the caller to hand to
  * {@link boundPolicyAudience} together with the ceiling its grant applies.
+ *
+ * `scopeCeiling` is for a grant whose ceiling is wider than its default:
+ * `refresh_token`, where a silent policy leaves the scope the refresh asked
+ * for and a `grantedScope` may reach anything in the original grant (RFC 6749
+ * §6). Omitted, the ceiling is `effectiveScopes` itself.
  */
 export async function evaluateGrantPolicy(
 	grantPolicy: GrantPolicyHook,
 	request: GrantPolicyRequest,
 	context: GrantPolicyContext,
 	effectiveScopes: readonly string[],
+	scopeCeiling: PolicyScopeCeiling = { scopes: effectiveScopes, name: "requested scope" },
 ): Promise<GrantPolicyOutcome> {
 	let decision: GrantPolicyDecision;
 	try {
@@ -113,13 +125,13 @@ export async function evaluateGrantPolicy(
 		// fail-closed, but ungraceful. Refuse it as what it is.
 		return { ok: false, result: policyOutOfBounds("policy returned a non-array grantedScope") };
 	}
-	const requestedSet = new Set(effectiveScopes);
-	const exceeded = decision.grantedScope.filter((s) => !requestedSet.has(s));
+	const ceilingSet = new Set(scopeCeiling.scopes);
+	const exceeded = decision.grantedScope.filter((s) => !ceilingSet.has(s));
 	if (exceeded.length > 0) {
 		return {
 			ok: false,
 			result: policyOutOfBounds(
-				`policy returned scopes exceeding requested scope: ${exceeded.join(" ")}`,
+				`policy returned scopes exceeding ${scopeCeiling.name}: ${exceeded.join(" ")}`,
 			),
 		};
 	}

@@ -132,6 +132,44 @@ describe("evaluateGrantPolicy", () => {
 		});
 	});
 
+	it("bounds the grant against a ceiling wider than the default when the grant has one (v0.13.0 audit)", async () => {
+		// `refresh_token`'s ceiling is the original grant (RFC 6749 §6), and its
+		// default the narrower scope the refresh asked for. The home took one
+		// list for both, so the refresh grant carried its own copy of this whole
+		// function — the copy the drift guard could not see.
+		const ceiling = { scopes: ["read", "write"], name: "original grant" };
+		const within = await evaluateGrantPolicy(
+			allow({ grantedScope: ["read", "write"] }),
+			request,
+			context,
+			["read"],
+			ceiling,
+		);
+		expect(within).toMatchObject({ ok: true, scopes: ["read", "write"] });
+
+		const beyond = await evaluateGrantPolicy(
+			allow({ grantedScope: ["read", "admin"] }),
+			request,
+			context,
+			["read"],
+			ceiling,
+		);
+		expect(beyond).toEqual({
+			ok: false,
+			result: {
+				status: 500,
+				error: "server_error",
+				errorDescription: "policy returned scopes exceeding original grant: admin",
+			},
+		});
+
+		// Silent, the default stands — not the ceiling.
+		expect(await evaluateGrantPolicy(allow(), request, context, ["read"], ceiling)).toMatchObject({
+			ok: true,
+			scopes: ["read"],
+		});
+	});
+
 	it("hands the allow decision back so the caller can bound its audience", async () => {
 		const outcome = await evaluateGrantPolicy(
 			allow({ grantedAudience: ["https://api.example"] }),

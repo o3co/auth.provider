@@ -669,6 +669,42 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 	});
 });
 
+describe("createTokenExchangeGrant — a malformed policy decision (#521, v0.13.0 audit)", () => {
+	// Every other grant refuses a non-array `grantedScope` / `grantedAudience`
+	// since #521. Token exchange read them on truthiness and then called
+	// `.filter`, so a JS policy returning a string threw a TypeError out of the
+	// handler: an unhandled 500 with no description, where the others answer
+	// `server_error` naming the policy's fault.
+	it.each([
+		["grantedScope", { grantedScope: "read" }],
+		["grantedAudience", { grantedAudience: "https://api.example.com" }],
+	])("answers server_error for a non-array %s instead of throwing", async (field, extra) => {
+		const malformed: GrantPolicyHook = {
+			kind: "malformed",
+			async evaluate() {
+				return { outcome: "allow", ...extra } as unknown as Awaited<
+					ReturnType<GrantPolicyHook["evaluate"]>
+				>;
+			},
+		};
+		const g = buildGrant({ grantPolicy: malformed });
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1", scope: "read" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 500,
+			error: "server_error",
+			errorDescription: expect.stringContaining(`non-array ${field}`),
+		});
+	});
+});
+
 describe("createTokenExchangeGrant — audience inheritance", () => {
 	it("rejects inherited subject.aud when not in client allowlist (cross-client confusion)", async () => {
 		// Subject token was issued with aud="a-api" (for Client A).

@@ -1212,6 +1212,58 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
+		it("lets a policy grant within the original grant beyond a narrowed refresh request (RFC 6749 §6 ceiling)", async () => {
+			// The ceiling is the original grant, not the request: this pins the
+			// `scopeCeiling` the refresh grant hands the home, so passing the
+			// request as the ceiling (or the grant as the default) fails here.
+			const token = await makeRefreshToken({ scope: "read write" });
+			const policy = createStubPolicy(async () => ({
+				outcome: "allow",
+				grantedScope: ["read", "write"],
+			}));
+			const handler = createRefreshTokenGrant({ ...mockDeps, grantPolicy: policy });
+			const { result } = await handler.handle({
+				body: { refresh_token: token, scope: "read" },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+			expect(result.tokens.scope).toBe("read write");
+
+			// And a silent policy leaves the narrowed request, not the grant.
+			const silent = createRefreshTokenGrant({
+				...mockDeps,
+				grantPolicy: createStubPolicy(async () => ({ outcome: "allow" })),
+			});
+			const narrowed = await silent.handle({
+				body: { refresh_token: await makeRefreshToken({ scope: "read write" }), scope: "read" },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+			if (!("tokens" in narrowed.result)) expect.fail("Expected tokens in result");
+			expect(narrowed.result.tokens.scope).toBe("read");
+		});
+
+		it("issues no scope when the refresh token carried none and the policy says nothing", async () => {
+			const handler = createRefreshTokenGrant({
+				...mockDeps,
+				grantPolicy: createStubPolicy(async () => ({ outcome: "allow" })),
+			});
+			const { result } = await handler.handle({
+				body: { refresh_token: await makeRefreshToken({ scope: undefined }) },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+			expect(result.tokens.scope ?? null).toBeNull();
+		});
+
 		it("refuses a policy that returns a non-array grantedScope (#521)", async () => {
 			const token = await makeRefreshToken({ scope: "read write" });
 			const policy = createStubPolicy(
