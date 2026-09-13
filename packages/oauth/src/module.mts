@@ -244,6 +244,7 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						| "federationTokenStore"
 						| "federationProviders"
 						| "consentStore"
+						| "replaySeenSet"
 						| "logger"
 					>,
 				) => {
@@ -306,6 +307,14 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 					// `/authorize` refuses it without a consent store (#527): saying
 					// otherwise would send a client down a flow this deployment cannot
 					// finish.
+					// #484: `private_key_jwt` is advertised only when it can be
+					// honoured. A client assertion's `jti` is single-use, and the
+					// verifier answers `500 server_error` when the composition wired
+					// no `replaySeenSet` rather than accepting an unchecked one — so
+					// without a store the method is advertised at three endpoints
+					// that all refuse it. The same "on **and** completable" rule the
+					// logout, revocation and CIMD gates apply below and above.
+					const clientAssertionSupported = deps.replaySeenSet !== undefined;
 					const cimdSupported =
 						(deps.config as { oauth?: { clientIdMetadataDocuments?: { enabled?: unknown } } }).oauth
 							?.clientIdMetadataDocuments?.enabled === true && deps.consentStore !== undefined;
@@ -368,16 +377,25 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							// `groups` is supported by filterClaimsByScope (non-standard but opt-in)
 							scopes_supported: ["openid", "profile", "email", "groups"],
 							grant_types_supported: grantTypesSupported,
-							// #484: `private_key_jwt` on every client-authenticated endpoint,
-							// and the assertion algorithms it accepts (RFC 8414 §2). Only
-							// asymmetric ones — a shared secret is what the method avoids.
+							// #484: `private_key_jwt` on every client-authenticated endpoint
+							// that can honour it, and the assertion algorithms it accepts
+							// (RFC 8414 §2). Only asymmetric ones — a shared secret is what
+							// the method avoids. The algorithm list travels with the method:
+							// advertising algorithms for a method that is not offered says
+							// nothing a client can act on.
 							token_endpoint_auth_methods_supported: [
 								"client_secret_basic",
 								"client_secret_post",
-								"private_key_jwt",
+								...(clientAssertionSupported ? ["private_key_jwt"] : []),
 								"none",
 							],
-							token_endpoint_auth_signing_alg_values_supported: [...CLIENT_ASSERTION_ALGORITHMS],
+							...(clientAssertionSupported
+								? {
+										token_endpoint_auth_signing_alg_values_supported: [
+											...CLIENT_ASSERTION_ALGORITHMS,
+										],
+									}
+								: {}),
 							// RFC 8414 §2: an omitted `*_endpoint_auth_methods_supported`
 							// means `["client_secret_basic"]`, which understates both
 							// endpoints. They differ from each other on purpose —
@@ -389,22 +407,30 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 							introspection_endpoint_auth_methods_supported: [
 								"client_secret_basic",
 								"client_secret_post",
-								"private_key_jwt",
+								...(clientAssertionSupported ? ["private_key_jwt"] : []),
 							],
-							introspection_endpoint_auth_signing_alg_values_supported: [
-								...CLIENT_ASSERTION_ALGORITHMS,
-							],
+							...(clientAssertionSupported
+								? {
+										introspection_endpoint_auth_signing_alg_values_supported: [
+											...CLIENT_ASSERTION_ALGORITHMS,
+										],
+									}
+								: {}),
 							...(revocationSupported
 								? {
 										revocation_endpoint_auth_methods_supported: [
 											"client_secret_basic",
 											"client_secret_post",
-											"private_key_jwt",
+											...(clientAssertionSupported ? ["private_key_jwt"] : []),
 											"none",
 										],
-										revocation_endpoint_auth_signing_alg_values_supported: [
-											...CLIENT_ASSERTION_ALGORITHMS,
-										],
+										...(clientAssertionSupported
+											? {
+													revocation_endpoint_auth_signing_alg_values_supported: [
+														...CLIENT_ASSERTION_ALGORITHMS,
+													],
+												}
+											: {}),
 									}
 								: {}),
 							// #273 + #283: S256 only, and since #273 that is simply true —
