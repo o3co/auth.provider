@@ -19,8 +19,8 @@ a licence to grow the responsibility.
 `authenticate` / `authenticateByToken`, plus one optional member,
 `linkFederatedIdentity` (#482). Creating users, changing passwords, flipping
 verification state, linking a device to a user, upgrading an anonymous identity
-to a registered one — all of that belongs to the Store, and the library only
-ever *reads the result*.
+to a registered one — all of that belongs to the Store, and for all of it the
+library only ever *reads the result*. The one exception is the link below.
 
 `linkFederatedIdentity` is the one call through which the library causes a
 write, and it passes the document's own test: the `?link=1` flow is one this

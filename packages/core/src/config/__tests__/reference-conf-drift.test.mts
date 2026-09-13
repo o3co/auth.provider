@@ -213,3 +213,46 @@ describe("every shipped reference.conf survives AppConfigSchema (#496)", () => {
 		expect(stripped).toEqual([]);
 	});
 });
+
+describe("core's reference.conf declares the operator keys a composition layering on it alone needs (#570)", () => {
+	// The drift diff above proves the schema keeps every path the file has; it
+	// cannot notice a path the file should have and does not. These two were
+	// missing: `linkFederatedIdentityUrl` lived only in the standalone template,
+	// so HOCON substituted its variable nowhere else and `?link=1` answered
+	// `link_unsupported`, and `acrValues` appeared in no reference.conf at all.
+
+	it("substitutes CLIENT_USER_LINK_FEDERATED_IDENTITY_URL and keeps it through AppConfigSchema", () => {
+		const raw = parseFile(REFERENCE_CONF_PATH, {
+			env: {
+				...REQUIRED_ENV,
+				CLIENT_USER_LINK_FEDERATED_IDENTITY_URL: "https://store.example/link",
+			},
+		});
+		const parsed = validate(raw, AppConfigSchema) as {
+			repositories?: { user?: { http?: { linkFederatedIdentityUrl?: unknown } } };
+		};
+		expect(parsed.repositories?.user?.http?.linkFederatedIdentityUrl).toBe(
+			"https://store.example/link",
+		);
+	});
+
+	it("leaves it absent when the variable is unset, so the link seam stays off", () => {
+		const parsed = validate(
+			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),
+			AppConfigSchema,
+		) as {
+			repositories?: { user?: { http?: Record<string, unknown> } };
+		};
+		expect(parsed.repositories?.user?.http).not.toHaveProperty("linkFederatedIdentityUrl");
+	});
+
+	it("declares oauth.authorize.acrValues, empty, so an unset table resolves to no acr values", () => {
+		const parsed = validate(
+			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),
+			AppConfigSchema,
+		) as {
+			oauth?: { authorize?: { acrValues?: unknown } };
+		};
+		expect(parsed.oauth?.authorize?.acrValues).toEqual({});
+	});
+});
