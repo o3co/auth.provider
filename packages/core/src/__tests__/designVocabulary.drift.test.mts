@@ -105,6 +105,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+(?:wellFormedAmr|wellFormedAcr)\b/,
 	},
 	{
+		concept: "secret entropy floor (#282)",
+		home: "packages/core/src/keys/secretEntropy.mts",
+		definition:
+			/(?:function|const)\s+(?:measureSecretEntropyBytes|assertSecretEntropy|describeWeakSecret|MIN_SECRET(?:_ENTROPY)?_BYTES)\b/,
+	},
+	{
 		concept: "fail-closed grant-policy evaluation and its bounds (#441, #520)",
 		home: "packages/core/src/grants/grantPolicy.mts",
 		definition:

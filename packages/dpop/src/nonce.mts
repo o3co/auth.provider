@@ -15,6 +15,7 @@
  */
 
 import { createHmac, timingSafeEqual } from "node:crypto";
+import { MIN_SECRET_ENTROPY_BYTES, measureSecretEntropyBytes } from "@o3co/auth-provider-core";
 
 /**
  * Server-provided DPoP nonces (RFC 9449 §8 / §9, #530).
@@ -51,7 +52,11 @@ export interface DPoPNonceIssuer {
 }
 
 export interface DPoPNonceIssuerOptions {
-	/** Shared by every replica. At least 32 bytes. */
+	/**
+	 * Shared by every replica. At least 32 bytes of key material: a string is
+	 * measured on its decoded length, as core's secret floor measures every
+	 * operator secret, so 32 hex characters are 16 bytes and refused.
+	 */
 	readonly secret: string | Uint8Array;
 	/** How often the nonce rotates; the acceptance window is twice this. Default 300 s. */
 	readonly ttlSeconds?: number;
@@ -60,15 +65,18 @@ export interface DPoPNonceIssuerOptions {
 }
 
 export const DEFAULT_DPOP_NONCE_TTL_SECONDS = 300;
-const MIN_SECRET_BYTES = 32;
 
 export function createDPoPNonceIssuer(options: DPoPNonceIssuerOptions): DPoPNonceIssuer {
 	const secret =
 		typeof options.secret === "string" ? new TextEncoder().encode(options.secret) : options.secret;
-	if (secret.byteLength < MIN_SECRET_BYTES) {
+	const keyMaterialBytes =
+		typeof options.secret === "string"
+			? measureSecretEntropyBytes(options.secret)
+			: options.secret.byteLength;
+	if (keyMaterialBytes < MIN_SECRET_ENTROPY_BYTES) {
 		throw new Error(
-			`createDPoPNonceIssuer: secret must be at least ${MIN_SECRET_BYTES} bytes — a nonce is only ` +
-				"as unforgeable as the key that signs it.",
+			`createDPoPNonceIssuer: secret must carry at least ${MIN_SECRET_ENTROPY_BYTES} bytes of key ` +
+				`material (it carries ${keyMaterialBytes}) — a nonce is only as unforgeable as the key that signs it.`,
 		);
 	}
 	const ttlSeconds = options.ttlSeconds ?? DEFAULT_DPOP_NONCE_TTL_SECONDS;

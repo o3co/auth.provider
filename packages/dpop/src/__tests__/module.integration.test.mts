@@ -464,6 +464,22 @@ describe("dpopModule — server-provided nonce from config (#530)", () => {
 		expect(() => buildMechanism(withNonce(undefined).config)).toThrow(/oauth\.dpop\.nonce\.secret/);
 	});
 
+	it("measures the secret on its decoded length, as every other operator secret is (v0.13.0 audit)", () => {
+		// `openssl rand -hex 16` is 32 characters and 16 bytes of randomness.
+		// The nonce issuer counted characters, so it passed a key with half the
+		// strength the floor exists to guarantee; `session.secret` and the HS256
+		// key have been measured on the decoded value since #282. The refusal
+		// names the key and the env var, as theirs do.
+		const hex16 = "0123456789abcdef0123456789abcdef";
+		expect(() => buildMechanism(withNonce(hex16).config)).toThrow(
+			/oauth\.dpop\.nonce\.secret must carry at least 32 bytes[\s\S]*OAUTH_DPOP_NONCE_SECRET/,
+		);
+		// `openssl rand -base64 32`, what reference.conf tells the operator to run.
+		expect(() =>
+			buildMechanism(withNonce("q83vEjRWeJq83vEjRWeJq83vEjRWeJq83vEjRWeJq80=").config),
+		).not.toThrow();
+	});
+
 	it("asks the token endpoint's caller for a nonce and admits the retry, keeping it current", async () => {
 		const received: { tokenBinding?: unknown } = {};
 		const observerModule = defineModule({

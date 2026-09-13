@@ -45,7 +45,7 @@
 
 // biome-ignore lint/correctness/noUnusedImports: ComponentMap is used in the `declare module` augmentation below
 import type { ComponentMap as _ComponentMap } from "@o3co/auth-provider-core";
-import { defineModule } from "@o3co/auth-provider-core";
+import { assertSecretEntropy, defineModule } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import { createMemoryDPoPReplayStore } from "./memory/replay-store.mjs";
 import { createDPoPNonceIssuer } from "./nonce.mjs";
@@ -112,7 +112,7 @@ export const dpopConfigSchema = z.object({
 				// default) asks for none; "as" asks at the token endpoint; "as+rs"
 				// also at protected resources. The nonce is an HMAC under `secret`,
 				// which every replica shares — required once `required` is not
-				// "never", and at least 32 bytes.
+				// "never", and at least 32 bytes of decoded key material (#282's floor).
 				nonce: z
 					.object({
 						required: z.enum(["never", "as", "as+rs"]).default("never"),
@@ -277,6 +277,13 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 								'material, or set nonce.required = "never".',
 						);
 					}
+					// The same floor, measured the same way, as every other operator
+					// secret (#282): on the decoded value, naming the key and the env
+					// var. The issuer checks too; this is the refusal an operator reads.
+					assertSecretEntropy(secret, {
+						configKey: "oauth.dpop.nonce.secret",
+						envVar: "OAUTH_DPOP_NONCE_SECRET",
+					});
 					nonce = {
 						required: nonceRequired,
 						issuer: createDPoPNonceIssuer({

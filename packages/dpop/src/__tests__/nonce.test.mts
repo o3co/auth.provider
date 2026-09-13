@@ -85,6 +85,19 @@ describe("createDPoPNonceIssuer (#530)", () => {
 
 	it("refuses to build on a short secret or a bad ttl", () => {
 		expect(() => createDPoPNonceIssuer({ secret: "short" })).toThrow(/at least 32 bytes/);
+		// Decoded length, not characters (v0.13.0 audit): 32 hex characters are
+		// 16 bytes, and a 32-character base64 body is 24.
+		expect(() => createDPoPNonceIssuer({ secret: "0123456789abcdef0123456789abcdef" })).toThrow(
+			/at least 32 bytes/,
+		);
+		expect(() => createDPoPNonceIssuer({ secret: "q83vEjRWeJq83vEjRWeJq83vEjRWeJq8" })).toThrow(
+			/at least 32 bytes/,
+		);
+		// Raw bytes are their own length.
+		expect(() => createDPoPNonceIssuer({ secret: new Uint8Array(31) })).toThrow(
+			/at least 32 bytes/,
+		);
+		expect(() => createDPoPNonceIssuer({ secret: new Uint8Array(32).fill(7) })).not.toThrow();
 		expect(() => createDPoPNonceIssuer({ secret: SECRET, ttlSeconds: 0 })).toThrow(/ttlSeconds/);
 		expect(() => createDPoPNonceIssuer({ secret: SECRET, ttlSeconds: 1.5 })).toThrow(/ttlSeconds/);
 	});
