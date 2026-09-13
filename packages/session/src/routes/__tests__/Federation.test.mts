@@ -462,6 +462,79 @@ describe("account linking across federations (#482)", () => {
 			expect(JSON.parse(inspect.text).federation.link).toEqual({ sid: "s-1" });
 		});
 
+		it("refuses a link start a cross-site page navigated the browser to", async () => {
+			// The start is a GET and the session cookie is SameSite=Lax, which a
+			// top-level cross-site navigation carries: any page could send a
+			// signed-in victim to `?link=1`. Paired with a login CSRF at the IdP —
+			// the victim's browser signed in there as the attacker — the callback
+			// would link the attacker's identity to the victim's account, and the
+			// attacker could then sign in as the victim through that IdP. The
+			// browser says where the navigation came from; a cross-site one is
+			// not the user asking to link.
+			const repo = linkableRepo();
+			const { app } = buildCallbackApp({
+				providers,
+				federation: {},
+				sessionSeed: seed,
+				userRepository: repo,
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await agent
+				.get("/oauth/federation/test?link=1")
+				.set("Sec-Fetch-Site", "cross-site");
+			expect(res.status).toBe(403);
+			expect(res.body.error).toBe("link_requires_same_site");
+			// Refused before any transaction exists or the browser is sent anywhere.
+			const inspect = await agent.get("/_inspect");
+			expect(JSON.parse(inspect.text).federation.link).toBeUndefined();
+		});
+
+		it.each([["same-origin"], ["same-site"], ["none"]])(
+			"accepts a link start whose navigation is %s",
+			async (site) => {
+				// `same-site` is the deployment's own account page on a sibling host;
+				// `none` is a typed URL or a bookmark.
+				const { app } = buildCallbackApp({
+					providers,
+					federation: {},
+					sessionSeed: seed,
+					userRepository: linkableRepo(),
+				});
+				const agent = await plantAndGetAgent(app);
+				const res = await agent.get("/oauth/federation/test?link=1").set("Sec-Fetch-Site", site);
+				expect(res.status).toBe(302);
+			},
+		);
+
+		it("accepts a link start from a client that sends no fetch metadata", async () => {
+			// Absent is not evidence of an attack: a browser that predates the
+			// header, or a client that is not a browser, carries no ambient
+			// cross-site navigation to forge.
+			const { app } = buildCallbackApp({
+				providers,
+				federation: {},
+				sessionSeed: seed,
+				userRepository: linkableRepo(),
+			});
+			const agent = await plantAndGetAgent(app);
+			expect((await agent.get("/oauth/federation/test?link=1")).status).toBe(302);
+		});
+
+		it("does not refuse an ordinary login start from another site", async () => {
+			// A relying party on another domain starting a federated login is the
+			// normal shape; only the link, which changes an existing account, is
+			// held to same-site.
+			const { app } = buildCallbackApp({
+				providers,
+				federation: {},
+				sessionSeed: seed,
+				userRepository: linkableRepo(),
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await agent.get("/oauth/federation/test").set("Sec-Fetch-Site", "cross-site");
+			expect(res.status).toBe(302);
+		});
+
 		it("records no intent on an ordinary start", async () => {
 			const { app } = buildCallbackApp({
 				providers,

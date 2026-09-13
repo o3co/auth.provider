@@ -1112,6 +1112,25 @@ export const createRouter = (
 			const wantsLink = req.query.link === "1" || req.query.link === "true";
 			let linkSid: string | undefined;
 			if (wantsLink) {
+				// A link changes an existing account, so it must be the user asking,
+				// not a page that navigated them here. The start is a GET and the
+				// session cookie is SameSite=Lax, which a top-level cross-site
+				// navigation carries; paired with a login CSRF at the IdP, a forced
+				// `?link=1` would link the attacker's identity to the victim's
+				// account (v0.13.0 audit). Fetch Metadata says where the navigation
+				// came from. `cross-site` is refused; `same-site` is the deployment's
+				// own account page on a sibling host, `none` a typed URL or bookmark,
+				// and an absent header — an older browser, or a client that is not a
+				// browser — carries no ambient cross-site navigation to forge. An
+				// ordinary login start is not held to this: an RP on another domain
+				// starting a federated login is the normal shape.
+				if (req.get("sec-fetch-site") === "cross-site") {
+					return res.status(403).json({
+						error: "link_requires_same_site",
+						error_description:
+							"Linking a federated identity must be started from this site, not navigated to from another",
+					});
+				}
 				if (req.session.isAuthenticated !== true || typeof req.session.sid !== "string") {
 					return res.status(401).json({
 						error: "login_required",
