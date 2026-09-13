@@ -22,9 +22,18 @@ import { BlockList, isIP } from "node:net";
  * benchmarking, multicast, reserved, unique-local, and the IPv4-mapped and
  * IPv4-compatible IPv6 forms of all of them.
  *
- * One list, so every "this URL must not point inside the network" decision
- * (#529's Client ID Metadata Document fetch, and whatever fetches a
- * caller-supplied URL next) refuses the same addresses.
+ * One list, so every fetch of a URL that **a stranger chose** refuses the
+ * same addresses: #529's Client ID Metadata Document fetch, where the
+ * `client_id` is the URL, and whatever fetches a caller-supplied URL next.
+ * The map row lives in `docs/design-vocabulary.md`; the drift guard fails a
+ * second definition.
+ *
+ * Not every outbound fetch is that decision. mtls revocation
+ * (`packages/mtls/src/fullPki/fetchGuard.mts`) fetches URLs a trusted CA
+ * wrote into a validated certificate, and only from hosts the operator put
+ * on `revocation.allowed-hosts` — a stricter control than a denylist, and one
+ * that must admit private addresses, because an internal CA publishes its CRLs
+ * and runs its OCSP responder inside the network. Each home states the other.
  */
 const SPECIAL_USE = new BlockList();
 for (const [net, prefix] of [

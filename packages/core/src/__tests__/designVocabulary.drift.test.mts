@@ -118,6 +118,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+createRemoteKeySetCache\b|\bcreateRemoteJWKSet\s*\(/,
 	},
 	{
+		concept: "special-use address (#529)",
+		home: "packages/core/src/net/special-use.mts",
+		definition: /(?:function|const)\s+isSpecialUseAddress\b/,
+	},
+	{
 		concept: "fail-closed grant-policy evaluation and its bounds (#441, #520)",
 		home: "packages/core/src/grants/grantPolicy.mts",
 		definition:
