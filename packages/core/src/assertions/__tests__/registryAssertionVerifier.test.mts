@@ -357,16 +357,76 @@ describe("createRegistryAssertionVerifier — the terms of an entry (#525)", () 
 		).toBeUndefined();
 	});
 
-	it("honours a custom handle reader per entry", async () => {
-		const verifier = verifierOver([
-			entryA({
-				readSubjectHandle: (c) =>
-					typeof c.device_id === "string" ? `device:${c.device_id}` : null,
-			}),
-		]);
+	it("honours a custom handle reader the verifier chooses per entry", async () => {
+		const verifier = createRegistryAssertionVerifier({
+			registry: createMemoryAssertionIssuerRegistry([entryA()]),
+			audience: AS,
+			readersFor: (entry) =>
+				entry.issuer === ISSUER_A
+					? {
+							readSubjectHandle: (c) =>
+								typeof c.device_id === "string" ? `device:${c.device_id}` : null,
+						}
+					: undefined,
+		});
 		expect((await verifier.verify(await mint({ device_id: "abc" })))?.subjectHandle).toBe(
 			"device:abc",
 		);
+	});
+});
+
+describe("an entry is data a store can hold (v0.13.0 audit)", () => {
+	// The README tells a deployment that registers issuers at runtime to
+	// implement the registry over its own store. The entry used to carry its
+	// claim readers as functions, which no store holds: a store-backed registry
+	// silently dropped them — and the namespaced handle the README recommends
+	// for several issuers with them.
+	it("keeps every term through a JSON round trip, with the readers on the verifier", async () => {
+		const stored = JSON.stringify([
+			entryA({
+				keys: {
+					type: "jwks",
+					jwks: { keys: [{ ...(await exportJWK(authorityA.publicKey)), alg: "EdDSA" }] },
+				},
+				allowedScopes: ["read"],
+				expiresAt: new Date(Date.now() + 60_000),
+			}),
+		]);
+		const registry: AssertionIssuerRegistry = {
+			kind: "json-store",
+			async findIssuer(issuer) {
+				const rows = JSON.parse(stored) as Array<AssertionIssuerEntry & { expiresAt?: string }>;
+				const row = rows.find((r) => r.issuer === issuer);
+				return row === undefined
+					? null
+					: { ...row, ...(row.expiresAt ? { expiresAt: new Date(row.expiresAt) } : {}) };
+			},
+		};
+		const verifier = createRegistryAssertionVerifier({
+			registry,
+			audience: AS,
+			readersFor: (entry) => ({
+				readSubjectHandle: (c) => (typeof c.sub === "string" ? `${entry.issuer}#${c.sub}` : null),
+			}),
+		});
+		expect(await verifier.verify(await mint({ sub: "d", scope: "read write" }))).toMatchObject({
+			subjectHandle: `${ISSUER_A}#d`,
+			scope: ["read"],
+		});
+	});
+
+	it("refuses an entry that still carries a reader, rather than ignoring it", () => {
+		// Ignoring it would drop a namespaced handle without a word — the Store
+		// would receive a bare `sub` two issuers can share.
+		for (const field of ["readSubjectHandle", "readScope"]) {
+			expect(
+				() =>
+					createMemoryAssertionIssuerRegistry([
+						{ ...entryA(), [field]: () => null } as unknown as AssertionIssuerEntry,
+					]),
+				field,
+			).toThrow(new RegExp(`${field}.*readersFor`));
+		}
 	});
 });
 
@@ -491,7 +551,9 @@ describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => 
 		expect((await make().verify(await idJag({ tenant: "acme" }), asApp))?.subjectHandle).toBe(
 			`${IDP}#acme#user-1`,
 		);
-		const custom = make([idJagEntry({ readSubjectHandle: (c) => `u:${String(c.sub)}` })]);
+		const custom = make([idJagEntry()], {
+			readersFor: () => ({ readSubjectHandle: (c) => `u:${String(c.sub)}` }),
+		});
 		expect((await custom.verify(await idJag(), asApp))?.subjectHandle).toBe("u:user-1");
 	});
 

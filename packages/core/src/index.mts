@@ -51,6 +51,7 @@ export type {
 } from "./assertions/jwtAssertionVerifier.mjs";
 export { createJwtAssertionVerifier } from "./assertions/jwtAssertionVerifier.mjs";
 export {
+	type AssertionClaimReaders,
 	createRegistryAssertionVerifier,
 	ID_JAG_TYP,
 	type RegistryAssertionVerifierOptions,

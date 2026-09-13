@@ -130,6 +130,10 @@ export function createJwtAssertionVerifier(
 		);
 	}
 
+	const readers = {
+		...(readSubjectHandle === undefined ? {} : { readSubjectHandle }),
+		...(readScope === undefined ? {} : { readScope }),
+	};
 	return createRegistryAssertionVerifier({
 		kind: "jwt",
 		audience,
@@ -139,9 +143,8 @@ export function createJwtAssertionVerifier(
 				keys: { type: "key", key },
 				algorithms,
 				...(clockToleranceSeconds === undefined ? {} : { clockToleranceSeconds }),
-				...(readSubjectHandle === undefined ? {} : { readSubjectHandle }),
-				...(readScope === undefined ? {} : { readScope }),
 			},
 		]),
+		readersFor: () => readers,
 	});
 }

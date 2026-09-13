@@ -54,6 +54,25 @@ export interface RegistryAssertionVerifierOptions {
 	readonly kind?: string;
 	/** The fetch a `jwks_uri` entry's key set uses. An egress proxy, or a test seam. */
 	readonly fetch?: typeof fetch;
+	/**
+	 * How an entry's claims are read — code, so it lives here rather than on
+	 * the entry a store holds. Called per verification with the entry found;
+	 * `undefined`, or an absent reader, keeps the default: `sub` (or
+	 * `<iss>#<sub>` for an ID-JAG) and a space-delimited `scope`.
+	 *
+	 * With several issuers whose `sub` values may collide, namespace the handle
+	 * here — `(entry) => ({ readSubjectHandle: (c) => `${entry.issuer}#${c.sub}` })`
+	 * — since the Store receives the handle alone.
+	 */
+	readonly readersFor?: (entry: AssertionIssuerEntry) => AssertionClaimReaders | undefined;
+}
+
+/** How a verifier reads the subject handle and the scope ceiling from an issuer's claims. */
+export interface AssertionClaimReaders {
+	/** The handle the Store resolves; `null` refuses the assertion. */
+	readonly readSubjectHandle?: (claims: JWTPayload) => string | null;
+	/** The scope the assertion claims, before the entry's ceiling applies. */
+	readonly readScope?: (claims: JWTPayload) => readonly string[] | undefined;
 }
 
 const defaultReadSubjectHandle = (claims: JWTPayload): string | null =>
@@ -295,13 +314,14 @@ export function createRegistryAssertionVerifier(
 			) {
 				return null;
 			}
+			const readers = options.readersFor?.(entry);
 			const readHandle =
-				entry.readSubjectHandle ??
+				readers?.readSubjectHandle ??
 				(idJag ? idJagSubjectHandle(entry.issuer) : defaultReadSubjectHandle);
 			const subjectHandle = readHandle(claims);
 			if (subjectHandle === null || subjectHandle.length === 0) return null;
 
-			const claimed = (entry.readScope ?? defaultReadScope)(claims);
+			const claimed = (readers?.readScope ?? defaultReadScope)(claims);
 			const scope =
 				entry.allowedScopes === undefined
 					? claimed

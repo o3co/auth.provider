@@ -582,9 +582,22 @@ What an entry says, and what it means at `/oauth/token`:
 - **`allowedAudiences`** bounds the issued `aud` whatever chose it — a `grantPolicy`, an RFC 8707 `resource`, the client registration (its `allowedAudiences` narrowed to the issuer's, its client id only if the issuer admits it). With no authenticated client it is also the source: the token names the issuer's first audience instead of this server. A client and an issuer that admit no audience in common is `invalid_grant` and logs `jwt_bearer_issuer_audience_mismatch`.
 - **`expiresAt`** is the one field that changes in place (`registry.setExpiresAt`); everything else is immutable — remove and re-add — so the history of what was trusted is the history of adds and removes. `add`, `list`, `remove` are the rest of the admin surface.
 
-`createJwtAssertionVerifier({ key, issuer, audience, algorithms })` — the static one-key shape — is a one-entry registry and keeps working unchanged. A deployment that registers issuers at runtime and needs them to survive a restart implements `AssertionIssuerRegistry` (`findIssuer`) over its own store.
+`createJwtAssertionVerifier({ key, issuer, audience, algorithms })` — the static one-key shape — is a one-entry registry and keeps working unchanged. A deployment that registers issuers at runtime and needs them to survive a restart implements `AssertionIssuerRegistry` (`findIssuer`) over its own store. **An entry is data** a store can hold: every field survives a JSON round trip (revive `expiresAt` as a `Date`), except `keys: { type: "key" }`, a live key object — a store-backed entry uses `jwks` (a one-key set is fine) or `jwks_uri`.
 
-With several issuers, namespace the handle per entry (`readSubjectHandle`) unless every issuer's `sub` values are known to be disjoint: the Store receives the handle alone.
+How claims are read is code, so it is the verifier's, not the entry's. With several issuers, namespace the handle unless every issuer's `sub` values are known to be disjoint — the Store receives the handle alone:
+
+```ts
+const assertionVerifier = createRegistryAssertionVerifier({
+  registry,
+  audience: "https://auth.example",
+  readersFor: (entry) => ({
+    readSubjectHandle: (claims) =>
+      typeof claims.sub === "string" ? `${entry.issuer}#${claims.sub}` : null,
+  }),
+});
+```
+
+An entry that carries `readSubjectHandle` or `readScope` itself is refused when it is registered, rather than having the reader silently ignored.
 
 ### The ID-JAG profile (#526)
 
