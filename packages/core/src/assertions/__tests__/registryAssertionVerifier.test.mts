@@ -584,6 +584,18 @@ describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => 
 		);
 	});
 
+	it("refuses an ID-JAG issued longer ago than the lifetime ceiling, however far its exp (v0.13.0 audit)", async () => {
+		// `iat` was required and never bounded; `exp` did all the work. The
+		// `private_key_jwt` verifier bounds both, and an ID-JAG's `jti` is
+		// remembered until `exp`, so an old assertion with a distant `exp` is
+		// both a stale grant and a long-lived replay record.
+		const now = Math.floor(Date.now() / 1000);
+		const stale = await idJag({ iat: now - 2 * 3600 }, { iat: false, exp: now + 300 });
+		expect(await make().verify(stale, asApp)).toBeNull();
+		const recent = await idJag({ iat: now - 60 }, { iat: false, exp: now + 300 });
+		expect(await make().verify(recent, asApp)).not.toBeNull();
+	});
+
 	it("requires the oauth-id-jag+jwt typ", async () => {
 		expect(await make().verify(await idJag({}, { typ: "JWT" }), asApp)).toBeNull();
 		expect(await make().verify(await idJag({}, { typ: null }), asApp)).toBeNull();

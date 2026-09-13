@@ -77,7 +77,12 @@ export const REAUTH_ASK_KEY_PREFIX = "reauth:";
 export const REAUTH_ASK_PARAM = "reauth_ask";
 
 export interface ReauthAskRecord {
-	/** Epoch seconds at which this endpoint asked for a re-authentication. */
+	/**
+	 * Epoch milliseconds at which this endpoint asked for a re-authentication.
+	 * Milliseconds, not seconds: an authentication must come strictly after the
+	 * ask, and in whole seconds a session created earlier in the same second
+	 * compared equal (v0.13.0 audit).
+	 */
 	readonly askedAt: number;
 	/**
 	 * The canonical authorize request the ask was minted for, without the ask
@@ -176,7 +181,7 @@ export const createReauthAskStore = (store: ReauthAskSessionStore): ReauthAskSto
 				store.destroy(key(id), (err?: unknown) => (err ? reject(err as Error) : resolve()));
 			});
 			if (record.request !== request) return null;
-			if (record.askedAt * 1000 + REAUTH_ASK_TTL_MS <= Date.now()) return null;
+			if (record.askedAt + REAUTH_ASK_TTL_MS <= Date.now()) return null;
 			return record;
 		},
 	};

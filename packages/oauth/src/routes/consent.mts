@@ -72,6 +72,22 @@ import {
 import type { Request, RequestHandler, Response, Router } from "express";
 
 /** How long a parked `/authorize` request waits for the consent page. */
+/**
+ * The host a URL-shaped `client_id` names — a Client ID Metadata Document
+ * (#529) — for the page to show prominently. Such a document is written by
+ * whoever controls that host, so its `client_name` and `client_uri` are that
+ * party's own claims; the host is the one fact about the client this server
+ * verified (v0.13.0 audit). A registered id names no host and gets none.
+ */
+const clientIdHost = (clientId: string): { client_id_host?: string } => {
+	if (!clientId.startsWith("https://")) return {};
+	try {
+		return { client_id_host: new URL(clientId).host };
+	} catch {
+		return {};
+	}
+};
+
 export const PENDING_CONSENT_TTL_MS = 10 * 60 * 1000;
 
 export const newConsentChallenge = (): string => randomBytes(32).toString("base64url");
@@ -277,6 +293,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 			.json({
 				challenge: pending.challenge,
 				client_id: pending.clientId,
+				...clientIdHost(pending.clientId),
 				...(client.clientName !== undefined ? { client_name: client.clientName } : {}),
 				...(client.clientUri !== undefined ? { client_uri: client.clientUri } : {}),
 				scopes: pending.scopes,

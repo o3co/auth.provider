@@ -188,6 +188,46 @@ const atConsentPage = (res: request.Response, consentPath = "/consent"): string 
 	return challenge as string;
 };
 
+describe("the page is told which host a URL-shaped client_id names (v0.13.0 audit)", () => {
+	// A Client ID Metadata Document is written by whoever controls its host,
+	// so its `client_name` and `client_uri` are that party's claims about
+	// itself — "Google Drive" costs nothing to type. The draft asks the AS to
+	// show the `client_id` host prominently; handing the page that host means
+	// it cannot forget to derive it.
+	const DOC_ID = "https://tools.example/oauth/client.json";
+
+	it("adds client_id_host for a client identified by its document URL", async () => {
+		const record = {
+			clientId: DOC_ID,
+			tokenEndpointAuthMethod: "none" as const,
+			allowedRedirectUris: [REDIRECT_URI],
+			allowedScopes: ["read", "write"],
+			defaultScopes: ["read"],
+			clientName: "Google Drive",
+			firstParty: false,
+		} as unknown as PublicClient;
+		const { app } = await makeApp({
+			consentStore: createMemoryConsentStore(),
+			clientRepository: {
+				findById: async (id) => (id === DOC_ID ? record : null),
+				authenticate: async () => null,
+			},
+		});
+		const challenge = atConsentPage(await authorize(app, { client_id: DOC_ID }));
+		const res = await request(app).get("/oauth/consent").query({ challenge });
+		expect(res.status).toBe(200);
+		expect(res.body).toMatchObject({ client_id: DOC_ID, client_id_host: "tools.example" });
+	});
+
+	it("omits it for a registered client id, which names no host", async () => {
+		const { app } = await makeApp({ consentStore: createMemoryConsentStore() });
+		const challenge = atConsentPage(await authorize(app));
+		const res = await request(app).get("/oauth/consent").query({ challenge });
+		expect(res.status).toBe(200);
+		expect(res.body).not.toHaveProperty("client_id_host");
+	});
+});
+
 const granted = async (store: ConsentStore, scopes: readonly string[]) =>
 	store.grant({ sub: "user-1", clientId: CLIENT_ID, scopes, grantedAt: Date.now() });
 

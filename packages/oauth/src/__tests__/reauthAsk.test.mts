@@ -55,7 +55,7 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 	it("records the ask under a prefix of its own, with the expiry the store reaps on", async () => {
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
-		const askedAt = Math.floor(Date.now() / 1000);
+		const askedAt = Date.now();
 		const id = await store.ask({ askedAt, request: REQUEST });
 
 		// 32 bytes of base64url: unguessable, so naming an ask that exists is
@@ -73,7 +73,7 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 	it("hands the record back once and removes it in the same step", async () => {
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
-		const askedAt = Math.floor(Date.now() / 1000);
+		const askedAt = Date.now();
 		const id = await store.ask({ askedAt, request: REQUEST });
 
 		expect(await store.consume(id, REQUEST)).toEqual({ askedAt, request: REQUEST });
@@ -91,7 +91,7 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 		// against a third request until one of them happens to match.
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
-		const id = await store.ask({ askedAt: Math.floor(Date.now() / 1000), request: REQUEST });
+		const id = await store.ask({ askedAt: Date.now(), request: REQUEST });
 
 		expect(await store.consume(id, `${REQUEST}&state=another`)).toBeNull();
 		expect(backing.records.size).toBe(0);
@@ -100,7 +100,7 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 	it("refuses one that has aged past its window", async () => {
 		const backing = memoryStore();
 		const store = createReauthAskStore(backing);
-		const askedAt = Math.floor((Date.now() - REAUTH_ASK_TTL_MS - 1000) / 1000);
+		const askedAt = Date.now() - REAUTH_ASK_TTL_MS - 1000;
 		const id = await store.ask({ askedAt, request: REQUEST });
 
 		expect(await store.consume(id, REQUEST)).toBeNull();
@@ -154,7 +154,7 @@ describe("createReauthAskStore — minting and spending an ask (#481)", () => {
 			...backing,
 			destroy: (_sid, cb) => cb?.(boom),
 		});
-		const id = await destroying.ask({ askedAt: Math.floor(Date.now() / 1000), request: REQUEST });
+		const id = await destroying.ask({ askedAt: Date.now(), request: REQUEST });
 		await expect(destroying.consume(id, REQUEST)).rejects.toThrow(/unavailable/);
 	});
 });
