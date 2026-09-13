@@ -52,9 +52,10 @@ Core's own in-memory modules declare it as follows
 | `core-webauthn-credential-store-memory` | registered passkeys — a passkey registered on one replica does not exist on the others |
 | `core-device-code-store-memory` | pending device authorizations — the human approves on one replica while the device polls another that has never heard of the code |
 | `core-federation-token-store-memory` | upstream federation tokens — stored on one replica, missing on the others |
+| `core-consent-store-memory` | consent records and parked consent requests — a consent granted on one replica is asked for again on every other, one revoked there stays granted here, and a consent challenge parked on one replica is unknown to every other |
 | `sessionStoreModule` (only with `session.storage.type = "memory"`, `SESSION_STORAGE_TYPE=memory`; #474) | the express-session store — a login served by one replica is unknown to the others, so a browser whose next request lands elsewhere is logged out, and every session is lost on restart |
 
-Two things the guard cannot do:
+Three things the guard cannot do:
 
 - **It cannot notice that you scaled without setting the mode.** A process
   whose state is all in its own memory has no shared medium through which to
@@ -71,6 +72,17 @@ Two things the guard cannot do:
   limiters when no shared `rateLimiter` is wired. With the mode **unset** those
   three warn instead (`login_rate_limiter_not_shared`,
   `webauthn_authentication_options_rate_limiter_not_shared`, [§4](#4-alerts)).
+- **It does not see state inside a component you build and hand in.** The
+  jwt-bearer trust registry is one: `createMemoryAssertionIssuerRegistry` lives
+  inside the `assertionVerifier` you pass as a bootstrap component, not in a
+  module. Entries supplied when the registry is built are identical on every
+  replica, which is safe. The admin surface is not: `add`, `remove` and
+  `setExpiresAt` change this process's registry only, so an issuer revoked with
+  `setExpiresAt` on the replica that took the call is still trusted by every
+  other replica. A restart does not converge them: it rebuilds the registry
+  from the composition's entries, which puts the revoked issuer back on that
+  replica too. Under `multi`, change the entry list and redeploy, or implement
+  `AssertionIssuerRegistry` over a shared store.
 
 In the standalone, `DEPLOYMENT_MODE=multi` therefore boots only once every
 store is on Redis: `USER_SESSION_STORES_ADAPTER=redis`,

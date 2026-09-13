@@ -204,6 +204,16 @@ describe("replica-safety declarations vs. the modules that exist (#304, #455)", 
 		expect(replicaUnsafeReason({ name: "constructor" })).toBeUndefined();
 	});
 
+	it("the operator runbook's table names every core module that declares", () => {
+		// `docs/operator-runbook.md` §1 is where an operator reads what `multi`
+		// refuses, and says the table lists core's declaring modules. It missed
+		// the consent store (#527) for a release (v0.13.0 audit); an operator
+		// reading it was told of nine, and the boot refused ten.
+		const runbook = readFileSync(join(repoRoot, "docs/operator-runbook.md"), "utf8");
+		const missing = REPLICA_UNSAFE_MODULES.filter((name) => !runbook.includes(`| \`${name}\``));
+		expect(missing).toEqual([]);
+	});
+
 	it("gives every unsafe module a reason, not just a name", () => {
 		// "use redis" is not by itself a reason. The guard's message quotes
 		// these, and an operator triaging a refused boot deserves the
