@@ -1,0 +1,1 @@
+{"version":3,"file":"authorization.d.mts","sourceRoot":"","sources":["../../src/grants/authorization.mts"],"names":[],"mappings":"AAiBA,OAAO,EACN,KAAK,gBAAgB,EACrB,KAAK,cAAc,EAEnB,KAAK,iBAAiB,EACtB,KAAK,YAAY,EAOjB,MAAM,0BAA0B,CAAC;AAGlC,eAAO,MAAM,wBAAwB,GACpC,MAAM,iBAAiB,GAAG;IAAE,cAAc,EAAE,cAAc,CAAC;IAAC,gBAAgB,EAAE,gBAAgB,CAAA;CAAE,KAC9F,YAyZF,CAAC"}

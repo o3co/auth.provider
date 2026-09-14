@@ -1,0 +1,21 @@
+# #407: without this file, the first `git add .` in a scaffolded project
+# commits the two things the README's own setup steps tell you to create right
+# here — the `.env` holding SESSION_SECRET, and the signing key pair.
+
+# Secrets and per-machine configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+config/clients.yaml
+config/*.local.conf
+
+# Build output and dependencies
+node_modules/
+dist/
+coverage/
+
+# Editor / OS noise
+.DS_Store
+*.log

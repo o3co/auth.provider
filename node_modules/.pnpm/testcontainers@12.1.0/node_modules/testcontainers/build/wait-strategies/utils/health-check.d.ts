@@ -1,0 +1,12 @@
+import { ContainerInspectInfo, HealthConfig, ImageInspectInfo } from "dockerode";
+import { HealthCheck, HealthCheckStatus } from "../../types";
+type HealthCheckConfig = HealthConfig | HealthCheck;
+type HealthCheckInspectInfo = ContainerInspectInfo | ImageInspectInfo;
+export declare const isHealthCheckDisabled: (healthCheck: HealthCheckConfig | undefined) => boolean;
+export declare const hasHealthCheck: (healthCheck: HealthCheckConfig | undefined) => boolean;
+export declare const getHealthCheckConfig: (inspectResult: HealthCheckInspectInfo) => HealthConfig | undefined;
+export declare const hasHealthCheckConfig: (inspectResult: HealthCheckInspectInfo) => boolean;
+export declare const hasDisabledHealthCheckConfig: (inspectResult: HealthCheckInspectInfo) => boolean;
+export declare const getHealthCheckStatusFromInspect: (inspectResult: ContainerInspectInfo) => HealthCheckStatus | undefined;
+export declare const hasHealthCheckStatus: (inspectResult: ContainerInspectInfo) => boolean;
+export {};

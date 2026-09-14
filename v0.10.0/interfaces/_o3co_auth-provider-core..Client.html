@@ -1,0 +1,262 @@
+<!DOCTYPE html><html class="default" lang="en" data-base="../"><head><meta charset="utf-8"/><meta http-equiv="x-ua-compatible" content="IE=edge"/><title>Client | auth.provider API</title><meta name="description" content="Documentation for auth.provider API"/><meta name="viewport" content="width=device-width, initial-scale=1"/><link rel="stylesheet" href="../assets/style.css"/><link rel="stylesheet" href="../assets/highlight.css"/><script defer src="../assets/main.js"></script><script async src="../assets/icons.js" id="tsd-icons-script"></script><script async src="../assets/search.js" id="tsd-search-script"></script><script async src="../assets/navigation.js" id="tsd-nav-script"></script><script async src="../assets/hierarchy.js" id="tsd-hierarchy-script"></script></head><body><script>document.documentElement.dataset.theme = localStorage.getItem("tsd-theme") || "os";document.body.style.display="none";setTimeout(() => window.app?app.showPage():document.body.style.removeProperty("display"),500)</script><header class="tsd-page-toolbar">
+<div class="tsd-toolbar-contents container"><a href="../index.html" class="title">auth.provider API</a>
+<div id="tsd-toolbar-links"></div><button id="tsd-search-trigger" class="tsd-widget" aria-label="Search"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-search"></use></svg></button><dialog id="tsd-search" aria-label="Search"><input role="combobox" id="tsd-search-input" aria-controls="tsd-search-results" aria-autocomplete="list" aria-expanded="true" autocapitalize="off" autocomplete="off" placeholder="Search the docs" maxLength="100"/>
+<ul role="listbox" id="tsd-search-results"></ul>
+<div id="tsd-search-status" aria-live="polite" aria-atomic="true">
+<div>Preparing search index...</div></div></dialog><a href="#" class="tsd-widget menu" id="tsd-toolbar-menu-trigger" data-toggle="menu" aria-label="Menu"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-menu"></use></svg></a></div></header>
+<div class="container container-main">
+<div class="col-content">
+<div class="tsd-page-title">
+<ul class="tsd-breadcrumb" aria-label="Breadcrumb">
+<li><a href="../modules/_o3co_auth-provider-core.html">@o3co/auth-provider-core</a></li>
+<li><a href="../modules/_o3co_auth-provider-core..html"></a></li>
+<li><a href="" aria-current="page">Client</a></li></ul>
+<h1>Interface Client</h1></div>
+<div class="tsd-signature"><span class="tsd-signature-keyword">interface</span> <span class="tsd-kind-interface">Client</span> <span class="tsd-signature-symbol">{</span><br/>    <a class="tsd-kind-property" href="#allowedaudiences">allowedAudiences</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#allowedazpforfederationtoken">allowedAzpForFederationToken</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#allowedgranttypes">allowedGrantTypes</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#allowedredirecturis">allowedRedirectUris</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#allowedscopes">allowedScopes</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#allowplainpkce">allowPlainPkce</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#backchannellogoutsessionrequired">backchannelLogoutSessionRequired</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#backchannellogouturi">backchannelLogoutUri</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#clientid">clientId</a><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#clientsecret">clientSecret</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#defaultscopes">defaultScopes</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#firstparty">firstParty</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#frontchannellogoutsessionrequired">frontchannelLogoutSessionRequired</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#frontchannellogouturi">frontchannelLogoutUri</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#postlogoutredirecturis">postLogoutRedirectUris</a><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#senderconstrained">senderConstrained</a><span class="tsd-signature-symbol">?:</span> <a href="_o3co_auth-provider-core..SenderConstraint.html" class="tsd-signature-type tsd-kind-interface">SenderConstraint</a><span class="tsd-signature-symbol">;</span><br/>    <a class="tsd-kind-property" href="#tokenendpointauthmethod">tokenEndpointAuthMethod</a><span class="tsd-signature-symbol">:</span> <a href="../types/_o3co_auth-provider-core..TokenEndpointAuthMethod.html" class="tsd-signature-type tsd-kind-type-alias">TokenEndpointAuthMethod</a><span class="tsd-signature-symbol">;</span><br/><span class="tsd-signature-symbol">}</span></div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L27">packages/core/src/repositories/types.mts:27</a></li></ul></aside>
+<section class="tsd-panel-group tsd-index-group">
+<section class="tsd-panel tsd-index-panel">
+<details class="tsd-index-content tsd-accordion" open><summary class="tsd-accordion-summary tsd-index-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h5 class="tsd-index-heading uppercase">Index</h5></summary>
+<div class="tsd-accordion-details">
+<section class="tsd-index-section">
+<h3 class="tsd-index-heading tsd-anchor-link" id="properties">Properties<a href="#properties" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-index-list"><a href="#allowedaudiences" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>allowed<wbr/>Audiences?</span></a>
+<a href="#allowedazpforfederationtoken" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>allowed<wbr/>Azp<wbr/>For<wbr/>Federation<wbr/>Token?</span></a>
+<a href="#allowedgranttypes" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>allowed<wbr/>Grant<wbr/>Types?</span></a>
+<a href="#allowedredirecturis" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>allowed<wbr/>Redirect<wbr/>Uris</span></a>
+<a href="#allowedscopes" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>allowed<wbr/>Scopes</span></a>
+<a href="#allowplainpkce" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>allow<wbr/>Plain<wbr/>Pkce?</span></a>
+<a href="#backchannellogoutsessionrequired" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>backchannel<wbr/>Logout<wbr/>Session<wbr/>Required?</span></a>
+<a href="#backchannellogouturi" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>backchannel<wbr/>Logout<wbr/>Uri?</span></a>
+<a href="#clientid" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>client<wbr/>Id</span></a>
+<a href="#clientsecret" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>client<wbr/>Secret?</span></a>
+<a href="#defaultscopes" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>default<wbr/>Scopes?</span></a>
+<a href="#firstparty" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>first<wbr/>Party?</span></a>
+<a href="#frontchannellogoutsessionrequired" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>frontchannel<wbr/>Logout<wbr/>Session<wbr/>Required?</span></a>
+<a href="#frontchannellogouturi" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>frontchannel<wbr/>Logout<wbr/>Uri?</span></a>
+<a href="#postlogoutredirecturis" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>post<wbr/>Logout<wbr/>Redirect<wbr/>Uris?</span></a>
+<a href="#senderconstrained" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>sender<wbr/>Constrained?</span></a>
+<a href="#tokenendpointauthmethod" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>token<wbr/>Endpoint<wbr/>Auth<wbr/>Method</span></a>
+</div></section></div></details></section></section>
+<details class="tsd-panel-group tsd-member-group tsd-accordion" open><summary class="tsd-accordion-summary" data-key="section-Properties"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h2 class="tsd-anchor-link" id="properties-1">Properties<a href="#properties-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h2></summary>
+<section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="allowedaudiences"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>allowed<wbr/>Audiences</span><a href="#allowedaudiences" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">allowedAudiences</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span></div>
+<div class="tsd-comment tsd-typography"><p>Audience URIs this client may receive tokens for.</p>
+<p>Consumers:</p>
+<ul>
+<li>Token Exchange (RFC 8693) <code>audience</code> parameter selection — when this
+list is empty or undefined, only the client's own <code>clientId</code> is
+accepted as an audience target.</li>
+<li><code>client_credentials</code> grant default <code>aud</code> claim — selects the first
+entry (<code>allowedAudiences[0]</code>); when absent, falls back to the issuer
+(and ultimately omits <code>aud</code> when no issuer is configured).</li>
+</ul>
+</div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L68">packages/core/src/repositories/types.mts:68</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="allowedazpforfederationtoken"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>allowed<wbr/>Azp<wbr/>For<wbr/>Federation<wbr/>Token</span><a href="#allowedazpforfederationtoken" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">allowedAzpForFederationToken</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span></div>
+<div class="tsd-comment tsd-typography"><p>When true, this client MAY call POST /oauth/federation/:name/token to
+retrieve the user's upstream federation access_token. Deny-by-default
+(deny-by-absence); must be explicitly opted in per client.</p>
+<p>Why default false: federation access_tokens grant access to the user's
+external resources (Google Calendar, GitHub API, etc.) — high blast
+radius. Opt-in prevents accidentally granting this power to a generic
+OAuth client registration that only needs auth.</p>
+</div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L117">packages/core/src/repositories/types.mts:117</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="allowedgranttypes"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>allowed<wbr/>Grant<wbr/>Types</span><a href="#allowedgranttypes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">allowedGrantTypes</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span></div>
+<div class="tsd-comment tsd-typography"><p>Grant types this client is explicitly permitted to use.</p>
+<p>Enforced <strong>centrally</strong> by <code>isGrantTypeAllowed</code> — once at <code>/oauth/token</code>
+grant dispatch, before the concrete handler runs, and at <code>/authorize</code>
+against <code>authorization_code</code> — so every current and future grant
+inherits the check rather than opting in (#268). The central rule:</p>
+<ul>
+<li><code>undefined</code> (absent) → <strong>no restriction</strong>. Absence means the
+registration declared no policy, not that it declared an empty one;
+denying here would revoke every grant from every registration written
+before this field existed.</li>
+<li><code>[]</code> (empty) → every grant is denied. An empty allowlist names no
+grant type, so none can match it.</li>
+<li>non-empty array → a grant is allowed iff its <code>grant_type</code> string
+appears in the list, compared exactly.</li>
+</ul>
+<p>A grant handler that declares <code>requiresExplicitGrantAllowlist</code> on its
+<code>GrantHandler</code> contract composes a <strong>stricter</strong> rule on top: dispatch
+denies by absence for that grant, so machine-to-machine access is
+never acquired by omission (#326). <code>client_credentials</code>
+(<code>grants/clientCredentials.mts</code>) and the WebAuthn grant
+(<code>@o3co/auth-provider-webauthn</code>) declare it. Both rules are enforced
+at dispatch — either can reject, and only the absent case
+distinguishes them; no handler carries its own copy of the check.</p>
+</div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L95">packages/core/src/repositories/types.mts:95</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="allowedredirecturis"><code class="tsd-tag">Readonly</code><span>allowed<wbr/>Redirect<wbr/>Uris</span><a href="#allowedredirecturis" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">allowedRedirectUris</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span></div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L45">packages/core/src/repositories/types.mts:45</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="allowedscopes"><code class="tsd-tag">Readonly</code><span>allowed<wbr/>Scopes</span><a href="#allowedscopes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">allowedScopes</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span></div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L46">packages/core/src/repositories/types.mts:46</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="allowplainpkce"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>allow<wbr/>Plain<wbr/>Pkce</span><a href="#allowplainpkce" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">allowPlainPkce</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span></div>
+<div class="tsd-comment tsd-typography"><p>Whether this client may use the RFC 7636 <code>plain</code> PKCE challenge method
+(#273).</p>
+<p>PKCE is mandatory for every authorization-code client and <code>S256</code> is the
+only method the authorization server accepts — there is no server-wide
+setting that admits <code>plain</code>, because a deployment-wide one would quietly
+cover every client at once. This flag is the ONLY way to reach it, and it
+is deliberately per client: admitting <code>plain</code> is a named exception for a
+named registration, visible in the client record itself.</p>
+<p><code>plain</code> stores the verifier as the challenge, so anything that can read
+the authorization request (browser history, a proxy log, a referrer)
+learns the verifier too and PKCE stops proving anything. Set this only
+for a legacy client that genuinely cannot compute SHA-256, and treat it
+as a migration deadline rather than a configuration.</p>
+<p>Absent and <code>false</code> are the same: S256 only. Like <code>firstParty</code>, the check
+is a strict <code>=== true</code>, so an uncoerced <code>&quot;true&quot;</code> from YAML or an
+environment variable does not widen the policy.</p>
+<p>Surfaces through <code>PublicClient</code> (via <code>Omit</code>) and <code>AuthenticatedClient</code>
+(via the <code>/token</code> route's projection) so <code>/authorize</code> and <code>/token</code> read
+the same value.</p>
+</div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L177">packages/core/src/repositories/types.mts:177</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="backchannellogoutsessionrequired"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>backchannel<wbr/>Logout<wbr/>Session<wbr/>Required</span><a href="#backchannellogoutsessionrequired" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">backchannelLogoutSessionRequired</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span></div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L101">packages/core/src/repositories/types.mts:101</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="backchannellogouturi"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>backchannel<wbr/>Logout<wbr/>Uri</span><a href="#backchannellogouturi" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">backchannelLogoutUri</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span></div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L98">packages/core/src/repositories/types.mts:98</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="clientid"><code class="tsd-tag">Readonly</code><span>client<wbr/>Id</span><a href="#clientid" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">clientId</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">string</span></div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L28">packages/core/src/repositories/types.mts:28</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="clientsecret"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>client<wbr/>Secret</span><a href="#clientsecret" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">clientSecret</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span></div>
+<div class="tsd-comment tsd-typography"><p>Required when <code>tokenEndpointAuthMethod</code> is <code>&quot;client_secret_basic&quot;</code> or
+<code>&quot;client_secret_post&quot;</code>. MUST be absent (<code>undefined</code>) when the method is
+<code>&quot;none&quot;</code>. The <code>ClientEntrySchema</code> superRefine enforces both directions.</p>
+</div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L44">packages/core/src/repositories/types.mts:44</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="defaultscopes"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>default<wbr/>Scopes</span><a href="#defaultscopes" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">defaultScopes</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span></div>
+<div class="tsd-comment tsd-typography"><p>What an omitted <code>scope</code> parameter grants (#396). Absent means the client
+has not declared a default: a scope-omitting request is then refused with
+<code>invalid_scope</code> whenever <code>allowedScopes</code> is non-empty — the old behavior
+granted the ENTIRE allowlist, making &quot;forgot to send scope&quot; the maximum
+grant (deny-by-absence, the #326/#363 shape). A client whose
+<code>allowedScopes</code> is empty is unaffected: there is nothing to over-grant,
+and scope-less deployments keep working.</p>
+</div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L56">packages/core/src/repositories/types.mts:56</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="firstparty"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>first<wbr/>Party</span><a href="#firstparty" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">firstParty</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span></div>
+<div class="tsd-comment tsd-typography"><p>Whether this client is first-party — i.e. operated by the same
+organisation as this authorization server, and trusted to receive the
+user's identity without the user being asked (#267).</p>
+<p><code>GET /authorize</code> mints an authorization code as soon as the session is
+authenticated, with no consent step. That is defensible in a pure
+first-party OP and only there: a forced top-level navigation from an
+attacker's page makes a logged-in victim's browser mint a code, bound to
+the victim's session, delivered to the named client's registered
+<code>redirect_uri</code>. Registering one semi-trusted client turns the endpoint
+into an account-linking vector.</p>
+<p>So the assumption is now enforced rather than assumed: <code>/authorize</code>
+refuses any client that is not <code>true</code> here — one with no <code>firstParty</code>
+field and one carrying an explicit <code>false</code> alike. There is no opt-out:
+the one-time <code>oauth.authorize.allowUnmarkedClients</code> migration flag that
+admitted unmarked registrations (#317) was removed in #330, and a config
+still setting it fails at boot with migration instructions.</p>
+<p>This does <strong>not</strong> make <code>/authorize</code> safe against forced navigation for a
+client that <em>is</em> first-party — that is the accepted model, and the
+user-interaction step which changes it is consent (#284). What the flag
+closes is the escalation: a client that should never have been trusted
+with a silent code cannot be registered into that position by accident.</p>
+</div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L151">packages/core/src/repositories/types.mts:151</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="frontchannellogoutsessionrequired"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>frontchannel<wbr/>Logout<wbr/>Session<wbr/>Required</span><a href="#frontchannellogoutsessionrequired" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">frontchannelLogoutSessionRequired</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">boolean</span></div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L105">packages/core/src/repositories/types.mts:105</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="frontchannellogouturi"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>frontchannel<wbr/>Logout<wbr/>Uri</span><a href="#frontchannellogouturi" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">frontchannelLogoutUri</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-type">string</span></div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L102">packages/core/src/repositories/types.mts:102</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="postlogoutredirecturis"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>post<wbr/>Logout<wbr/>Redirect<wbr/>Uris</span><a href="#postlogoutredirecturis" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">postLogoutRedirectUris</span><span class="tsd-signature-symbol">?:</span> <span class="tsd-signature-keyword">readonly</span> <span class="tsd-signature-type">string</span><span class="tsd-signature-symbol">[]</span></div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L97">packages/core/src/repositories/types.mts:97</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="senderconstrained"><code class="tsd-tag">Optional</code> <code class="tsd-tag">Readonly</code><span>sender<wbr/>Constrained</span><a href="#senderconstrained" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">senderConstrained</span><span class="tsd-signature-symbol">?:</span> <a href="_o3co_auth-provider-core..SenderConstraint.html" class="tsd-signature-type tsd-kind-interface">SenderConstraint</a></div>
+<div class="tsd-comment tsd-typography"><p>Sender-constraint requirement for this client. See Wave 2 Token-
+binding Cluster spec §4.8. Surfaces through <code>PublicClient</code> (via
+<code>Omit</code>) and <code>AuthenticatedClient</code> (via the <code>/token</code> route's
+projection).</p>
+</div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L124">packages/core/src/repositories/types.mts:124</a></li></ul></aside></section>
+<section class="tsd-panel tsd-member">
+<h3 class="tsd-anchor-link" id="tokenendpointauthmethod"><code class="tsd-tag">Readonly</code><span>token<wbr/>Endpoint<wbr/>Auth<wbr/>Method</span><a href="#tokenendpointauthmethod" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
+<div class="tsd-signature"><span class="tsd-kind-property">tokenEndpointAuthMethod</span><span class="tsd-signature-symbol">:</span> <a href="../types/_o3co_auth-provider-core..TokenEndpointAuthMethod.html" class="tsd-signature-type tsd-kind-type-alias">TokenEndpointAuthMethod</a></div>
+<div class="tsd-comment tsd-typography"><p>Token-endpoint authentication method. REQUIRED — the schema rejects
+client entries that omit it; deployments upgrading from v0.5.0 must add
+the field explicitly per the v0.5.1 migration guide.</p>
+<p>Public clients (<code>&quot;none&quot;</code>) MUST present PKCE/S256 at <code>/authorize</code>;
+confidential clients (<code>&quot;client_secret_basic&quot;</code> / <code>&quot;client_secret_post&quot;</code>)
+MUST present a <code>clientSecret</code> and use the matching transport at <code>/token</code>.</p>
+</div><aside class="tsd-sources">
+<ul>
+<li>Defined in <a href="https://github.com/o3co/auth.provider/blob/96a518a01f72d92ac6742b27f8ebc85411beb01a/packages/core/src/repositories/types.mts#L38">packages/core/src/repositories/types.mts:38</a></li></ul></aside></section></section></details></div>
+<div class="col-sidebar">
+<div class="page-menu">
+<div class="tsd-navigation settings">
+<details class="tsd-accordion"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>Settings</h3></summary>
+<div class="tsd-accordion-details">
+<div class="tsd-filter-visibility"><span class="settings-label">Member Visibility</span>
+<ul id="tsd-filter-options">
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-protected" name="protected"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Protected</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-inherited" name="inherited" checked/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>Inherited</span></label></li>
+<li class="tsd-filter-item"><label class="tsd-filter-input"><input type="checkbox" id="tsd-filter-external" name="external"/><svg width="32" height="32" viewBox="0 0 32 32" aria-hidden="true"><rect class="tsd-checkbox-background" width="30" height="30" x="1" y="1" rx="6" fill="none"></rect><path class="tsd-checkbox-checkmark" d="M8.35422 16.8214L13.2143 21.75L24.6458 10.25" stroke="none" stroke-width="3.5" stroke-linejoin="round" fill="none"></path></svg><span>External</span></label></li></ul></div>
+<div class="tsd-theme-toggle"><label class="settings-label" for="tsd-theme">Theme</label><select id="tsd-theme"><option value="os">OS</option><option value="light">Light</option><option value="dark">Dark</option></select></div></div></details></div>
+<details open class="tsd-accordion tsd-page-navigation"><summary class="tsd-accordion-summary"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>
+<h3>On This Page</h3></summary>
+<div class="tsd-accordion-details">
+<details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Properties"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Properties</summary>
+<div><a href="#allowedaudiences"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>allowed<wbr/>Audiences</span></a><a href="#allowedazpforfederationtoken"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>allowed<wbr/>Azp<wbr/>For<wbr/>Federation<wbr/>Token</span></a><a href="#allowedgranttypes"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>allowed<wbr/>Grant<wbr/>Types</span></a><a href="#allowedredirecturis"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>allowed<wbr/>Redirect<wbr/>Uris</span></a><a href="#allowedscopes"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>allowed<wbr/>Scopes</span></a><a href="#allowplainpkce"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>allow<wbr/>Plain<wbr/>Pkce</span></a><a href="#backchannellogoutsessionrequired"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>backchannel<wbr/>Logout<wbr/>Session<wbr/>Required</span></a><a href="#backchannellogouturi"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>backchannel<wbr/>Logout<wbr/>Uri</span></a><a href="#clientid"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>client<wbr/>Id</span></a><a href="#clientsecret"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>client<wbr/>Secret</span></a><a href="#defaultscopes"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>default<wbr/>Scopes</span></a><a href="#firstparty"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>first<wbr/>Party</span></a><a href="#frontchannellogoutsessionrequired"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>frontchannel<wbr/>Logout<wbr/>Session<wbr/>Required</span></a><a href="#frontchannellogouturi"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>frontchannel<wbr/>Logout<wbr/>Uri</span></a><a href="#postlogoutredirecturis"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>post<wbr/>Logout<wbr/>Redirect<wbr/>Uris</span></a><a href="#senderconstrained"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>sender<wbr/>Constrained</span></a><a href="#tokenendpointauthmethod"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>token<wbr/>Endpoint<wbr/>Auth<wbr/>Method</span></a></div></details></div></details></div>
+<div class="site-menu">
+<nav class="tsd-navigation"><a href="../modules.html">auth.provider API</a>
+<ul class="tsd-small-nested-navigation" id="tsd-nav-container">
+<li>Loading...</li></ul></nav></div></div></div><footer>
+<p class="tsd-generator">Generated using <a href="https://typedoc.org/" target="_blank">TypeDoc</a></p></footer>
+<div class="overlay"></div></body></html>

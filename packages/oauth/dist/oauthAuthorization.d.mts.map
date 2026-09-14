@@ -1,0 +1,1 @@
+{"version":3,"file":"oauthAuthorization.d.mts","sourceRoot":"","sources":["../src/oauthAuthorization.mts"],"names":[],"mappings":"AAeA,OAAO,KAAK,EAEX,gBAAgB,EAChB,cAAc,EACd,MAAM,EAEN,MAAM,0BAA0B,CAAC;AAIlC,eAAO,MAAM,wBAAwB,GAAI,QAAQ;IAChD,cAAc,EAAE,cAAc,CAAC;IAC/B,gBAAgB,EAAE,gBAAgB,CAAC;CACnC,KAAG,MA8BF,CAAC"}
