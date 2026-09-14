@@ -4,6 +4,613 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.13.0] - 2026-09-14
+
+### Added
+
+- **`@o3co/auth-provider-federation-oidc` — generic OpenID Connect federation**
+  ([#524](https://github.com/o3co/auth.provider/issues/524)). Every OpenID
+  Connect provider other than Google and Apple — Okta, Entra ID, Auth0,
+  Keycloak, a customer's own tenant — needed a package of its own. This one
+  takes any OIDC-compliant IdP from configuration: `oidcFederationModule(<name>)`
+  is a factory, one instance per issuer, and the scaffold wires every enabled
+  `federations.<name>` section with `type = "oidc"` (it ships one, disabled,
+  under `FEDERATIONS_OIDC_*`). Discovery runs at boot and a failure refuses
+  boot; `discovery = false` with hand-typed `endpoints` is the offline form. The
+  client authenticates with `client_secret_basic` (a rotating resolver is
+  accepted) or `private_key_jwt` from a PEM key — exactly one. The id_token is
+  verified against the issuer's JWKS (signature, `iss`, `aud`, `exp`, `iat`,
+  `nonce`, and `at_hash` when present) and UserInfo is bound to the id_token's
+  `sub`. There is no JIT provisioning: `<name>:<sub>` goes to the Store as every
+  federated identity does, and one the Store does not know is `401
+  unknown_user`. First release of this package.
+
+- **Server-provided DPoP nonces (`@o3co/auth-provider-dpop`,
+  `@o3co/auth-provider-core`)**
+  ([#530](https://github.com/o3co/auth.provider/issues/530),
+  [#574](https://github.com/o3co/auth.provider/pull/574),
+  [#584](https://github.com/o3co/auth.provider/pull/584)). The only freshness
+  control on a DPoP proof was `iat` skew, so a proof minted ahead of time stayed
+  usable for the whole window. `oauth.dpop.nonce.required = "as"` asks for a
+  nonce at the token endpoint and `"as+rs"` at protected resources too;
+  `"never"` is the default and changes nothing. The token endpoint answers `400
+  use_dpop_nonce` and a protected resource `401` with `WWW-Authenticate: DPoP
+  error="use_dpop_nonce"`, each carrying a `DPoP-Nonce` header, and every
+  accepted proof's answer carries the current nonce so a client learns of a
+  rotation before it needs to. The nonce is stateless — a time bucket and an
+  HMAC under `oauth.dpop.nonce.secret` (`OAUTH_DPOP_NONCE_SECRET`), rotating
+  every `ttl-seconds` (300) with the previous bucket still accepted — so nothing
+  is stored and a nonce one replica issues verifies on every other that shares
+  the secret. Boot refuses a `required` value with no secret, or with one under
+  32 bytes **measured decoded**, as `session.secret` is: a 32-character hex
+  string carries 16 bytes and is refused, `openssl rand -base64 32` passes. A
+  nonce refusal is decided before the replay store, so it does not spend the
+  proof's `jti`. `DPoP-Nonce` joins `Access-Control-Expose-Headers`, without
+  which a browser client could not read the nonce it is told to retry with. Not
+  advertised in discovery: RFC 9449 defines no metadata for it. For other
+  token-binding mechanisms, core exports `TokenBindingRefusal` (`code`,
+  `responseHeaders`, `retryInstruction`): a refusal carrying `retryInstruction`
+  is answered as an instruction under its own code rather than as a verdict,
+  which is how `DPoPError` now marks the nonce refusals. The type changes to
+  `DPoPError` are under Changed.
+
+- **`private_key_jwt` client authentication (`@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-core`, `@o3co/auth-provider-device-grant`)**
+  ([#484](https://github.com/o3co/auth.provider/issues/484),
+  [#563](https://github.com/o3co/auth.provider/pull/563)). Every confidential
+  client authenticated with a shared secret that had to reach every replica of
+  the client and be rotated everywhere at once. A client may now register
+  `tokenEndpointAuthMethod: "private_key_jwt"` with exactly one of `jwks`
+  (inline public keys — a key carrying private or symmetric material is refused
+  at registration) or `jwksUri` (`https`, or `http` on a loopback host), and
+  authenticate at `/oauth/token`, `/oauth/introspect`, `/oauth/revoke` and
+  `/oauth/device_authorization` with a JWT it signed: `iss` = `sub` =
+  `client_id`, `aud` the issuer or the token endpoint URL, `exp` required and at
+  most an hour out, `iat` bounded when present, asymmetric algorithms only, and
+  a `jti` spent once through the `replaySeenSet` slot. An assertion next to a
+  Basic header or a `client_secret` field — even an empty one — is refused. A
+  refused assertion is `401 invalid_client`, with the reason logged as
+  `client_assertion_refused`. A composition that wires no `replaySeenSet`
+  answers `500 server_error` on this path rather than accept an unchecked
+  `jti`, and its discovery document does not offer the method; with one wired,
+  `private_key_jwt` and the matching `*_endpoint_auth_signing_alg_values_supported`
+  lists are advertised for the token, introspection and revocation endpoints.
+  New `replaySeenSet.adapter` (`REPLAY_SEEN_SET_ADAPTER`; `"memory"` in core's
+  `reference.conf`, `"redis"` in the scaffold, and memory is refused under
+  `deployment.mode = "multi"`). `client_secret_jwt` is deliberately not shipped;
+  the oauth README says why.
+
+- **Step-up and re-authentication — `max_age`, `prompt=login`, `acr_values`,
+  and `amr` / `acr` on every token (`@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-session`, `@o3co/auth-provider-core`,
+  `@o3co/auth-provider-webauthn`, `@o3co/auth-provider-redis`)**
+  ([#481](https://github.com/o3co/auth.provider/issues/481),
+  [#564](https://github.com/o3co/auth.provider/pull/564),
+  [#573](https://github.com/o3co/auth.provider/pull/573),
+  [#583](https://github.com/o3co/auth.provider/pull/583)). A session recorded
+  when the user authenticated but not how. `UserSession.amr` (RFC 8176) is now
+  `["pwd"]` after `POST /session/login`, and the upstream IdP's values plus the
+  deployment-defined `fed` (exported as `FEDERATED_AMR`) after a federation
+  callback. The `authorization_code` grant stamps `amr` and the negotiated `acr`
+  on the id_token, the access token and the refresh token; the `refresh_token`
+  grant carries both forward onto the tokens it mints, since a refresh repeats
+  no authentication; the `session` grant mirrors the tracked session's `amr`;
+  and the WebAuthn grant stamps `amr: ["hwk"]` on its access and refresh tokens.
+  Every grant reads the claims through core's `wellFormedAmr` /
+  `wellFormedAcr`, so a malformed or empty value is left off every token rather
+  than some. At `/authorize`, `max_age` and `prompt=login` send the browser to
+  the login page with the request round-tripped and a `reauth_ask` id on the URL
+  it comes back to. The id names a single-use record in the express session
+  store, bound to that authorize request and expiring after ten minutes: a
+  caller cannot invent one, it survives the session regeneration
+  `/session/login` performs, and it cannot answer another request's freshness
+  requirement. On the way back only an authentication strictly later than the
+  ask, to the millisecond, proceeds; anything else is `login_required`, and
+  under `prompt=none` a stale session is `login_required` at once. `acr_values`
+  is answered from the new `oauth.authorize.acrValues` table — each acr mapped
+  to the `amr` values a session must carry, an acr that requires nothing
+  refused at boot — the first satisfied value becomes the code's and the
+  id_token's `acr`, and discovery advertises the table's keys as
+  `acr_values_supported`. The Redis session store and code repository
+  round-trip `amr` and `acr`. **What this changes for requests that work today
+  is under Changed.**
+
+- **Explicit account linking across federations
+  (`@o3co/auth-provider-session`, `@o3co/auth-provider-core`,
+  `@o3co/auth-provider-foundation`)**
+  ([#482](https://github.com/o3co/auth.provider/issues/482),
+  [#572](https://github.com/o3co/auth.provider/pull/572)). A signed-in user had
+  no way to add a second federated identity to their account. `GET
+  /session/oauth/federation/<name>?link=1` now starts one, through the new
+  optional `UserRepository.linkFederatedIdentity`: `InMemoryUserRepository`
+  implements it, and foundation's `HttpUserRepository` does when
+  `repositories.user.http.linkFederatedIdentityUrl`
+  (`CLIENT_USER_LINK_FEDERATED_IDENTITY_URL`, held to `https` like the other two
+  Store URLs) is set — declared in core's `reference.conf`, not only the
+  scaffold's. A GET start rides the `SameSite=Lax` session cookie on a
+  cross-site navigation, so it must carry evidence it came from this
+  deployment: `Sec-Fetch-Site: same-origin` or `none` is accepted, `cross-site`
+  is refused, and `same-site`, an absent or an unrecognised header need a
+  `Referer` naming this origin or one on `session.csrf.trustedOrigins`.
+  Otherwise the answer is `403 link_requires_trusted_origin` (logged as
+  `federation_link_start_rejected`) before anything is recorded; then `401
+  login_required` without a session and `400 link_unsupported` without the
+  seam. The link is bound to the session that started it, so a `form_post`
+  callback links the same way; an identity that is already another account's is
+  `409 identity_conflict` without asking the Store, the Store's own refusal is
+  `403 link_refused`, an outage `503`. The federation is attached to the live
+  session and no new `UserSession` is minted. Nothing links implicitly: signing
+  in with an identity the Store does not know is still `401 unknown_user`. New
+  audit events `federation.identity.linked` / `federation.identity.link_refused`.
+  The session README says what a Store must check before it links — never an
+  e-mail match alone. An account page on a sibling host belongs in
+  `session.csrf.trustedOrigins`.
+
+- **RFC 8414 metadata at `/.well-known/oauth-authorization-server`
+  (`@o3co/auth-provider-core`)**
+  ([#528](https://github.com/o3co/auth.provider/issues/528)). Discovery was
+  served only at the OIDC path, while some clients — the MCP authorization
+  spec's discovery among them — probe the RFC 8414 path first, and some never
+  fall back. The same document, through the same handler, is now served there
+  too: for a path-bearing issuer at `/.well-known/oauth-authorization-server/<path>`
+  (RFC 8414 §3 inserts) beside `/<path>/.well-known/openid-configuration` (OIDC
+  Discovery §4 appends). The root `/.well-known/openid-configuration` is still
+  served for a path-bearing issuer — behind a path-stripping proxy it is where
+  the appended URL arrives — and the root RFC 8414 form is not, because it names
+  a different issuer. Every discovery path is on the browser-facing CORS
+  allowlist.
+
+- **A consent step for clients that are not first-party
+  (`@o3co/auth-provider-oauth`, `@o3co/auth-provider-core`)**
+  ([#527](https://github.com/o3co/auth.provider/issues/527),
+  [#552](https://github.com/o3co/auth.provider/issues/552),
+  [#571](https://github.com/o3co/auth.provider/pull/571),
+  [#583](https://github.com/o3co/auth.provider/pull/583)). Serving a
+  third-party client meant marking it first-party, which minted codes with no
+  consent at all. Set `consentStore.adapter = "memory"` (`CONSENT_STORE_ADAPTER`;
+  the module fills both the `consentStore` and `pendingConsentStore` slots) and
+  point `endpoints.consent.url` (`ENDPOINTS_CONSENT_URL`, default `/consent`) at
+  a page the deployment builds, as it builds the login page. `/authorize` then
+  parks such a request under a 32-byte challenge bound to the session and
+  subject, and redirects to `<page>?challenge=<id>`. The page reads `GET
+  /oauth/consent?challenge=…` — `client_id`, `client_name`, `client_uri`, the
+  requested and already-granted scopes, `redirect_uri`, and `client_id_host` for
+  a Client ID Metadata Document client, which the page should show rather than
+  `client_name` alone — and posts `{challenge, decision: "accept" | "deny"}` to
+  `POST /oauth/consent`. An accept records the union of what was granted and
+  asked and resumes the request; a deny sends `access_denied` to the client's
+  `redirect_uri`. The parked request is a record of its own, consumed in one
+  step, so of two answers in flight exactly one applies; a challenge that is
+  answered, expired (ten minutes) or presented from another session or subject
+  is `400`, and the client is re-checked at the answer. `prompt=none` without a
+  covering record is `consent_required`. New optional client fields
+  `clientName` / `clientUri`, audit events `consent.granted` /
+  `consent.denied`, and the `ConsentStore` / `PendingConsentStore` ports with
+  factories and a memory adapter (at most 16 parked requests per session). The
+  memory adapter is refused under `deployment.mode = "multi"`, and no
+  shared-store adapter ships. `createOAuthRouter` refuses a composition that wires
+  one of the two slots without the other. **The default is `"none"`, and such
+  clients stay refused exactly as before.**
+
+- **A jwt-bearer trust registry, and the ID-JAG profile
+  (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`)**
+  ([#525](https://github.com/o3co/auth.provider/issues/525),
+  [#526](https://github.com/o3co/auth.provider/issues/526),
+  [#575](https://github.com/o3co/auth.provider/pull/575),
+  [#577](https://github.com/o3co/auth.provider/pull/577),
+  [#578](https://github.com/o3co/auth.provider/pull/578)). The jwt-bearer grant
+  could trust one issuer holding one static key. `createRegistryAssertionVerifier`
+  trusts several, each an `AssertionIssuerEntry` with its own keys — one public
+  key, a static JWK set, or a `jwks_uri` (`https` off loopback) fetched through
+  core's new `createRemoteKeySetCache` and refetched on an unknown `kid`, so a
+  rotation needs no restart; a `fetch` option serves an egress proxy — and its
+  own terms: `allowedSubjects`, `allowedScopes`, `allowedAudiences`,
+  `allowedClients`, `expiresAt`. An unregistered `iss` is refused before any key
+  is fetched, and a JWKS endpoint or registry backend that is down is `503`, not
+  `invalid_grant`. An issuer's `allowedAudiences` bounds the issued `aud`
+  whatever chose it; a client and an issuer that admit no audience in common is
+  `invalid_grant`, logged as `jwt_bearer_issuer_audience_mismatch`.
+  `AssertionVerifier.verify` takes an optional context (`clientId`) and its
+  result optional `issuer` / `audience` — a custom verifier that ignores both
+  keeps working — and `createJwtAssertionVerifier` keeps its options as a
+  one-entry registry. An entry with `profile: "id-jag"` accepts the Identity
+  Assertion JWT Authorization Grant (draft-ietf-oauth-identity-assertion-authz-grant):
+  `typ` `oauth-id-jag+jwt`, `aud` exactly the verifier's `issuerIdentifier`,
+  `client_id` naming the authenticated client, `iat` at most an hour old, a
+  `jti` accepted once per issuer through `replaySeenSet`, scope and resource
+  carried as claims, and a subject handle of `<iss>#<sub>`; no refresh token is
+  issued. An entry is data a store can hold: claim readers belong to the
+  verifier (`readersFor(entry)`), and an entry still carrying `readSubjectHandle`
+  or `readScope` is refused at registration. `createMemoryAssertionIssuerRegistry`'s
+  `add` / `remove` / `setExpiresAt` change one process only: entries supplied at
+  composition are replica-safe, runtime edits are not, and `deployment.mode =
+  "multi"` cannot detect them.
+
+- **Client ID Metadata Documents (`@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-core`)**
+  ([#529](https://github.com/o3co/auth.provider/issues/529),
+  [#565](https://github.com/o3co/auth.provider/pull/565),
+  [#566](https://github.com/o3co/auth.provider/pull/566)). Off by default
+  (`oauth.clientIdMetadataDocuments.enabled`, `OAUTH_CIMD_*`). A client whose
+  `client_id` is the `https` URL of its own registration — the path the MCP
+  2026-07-28 revision prefers to dynamic registration — is resolved by fetching
+  that document; a pre-registered client with the same id always wins. The
+  fetch is guarded: the name is resolved before the socket opens and every
+  address must lie outside the RFC 6890 special-use ranges (core's new
+  `isSpecialUseAddress`, which catches loopback, private and link-local
+  addresses and the cloud metadata endpoint in every IPv4-mapped spelling); no
+  redirect is followed; `timeoutMs` (5 s) and `maxBytes` (5 KB) bound it; only a
+  `200` JSON body is read; `allowedHosts` / `deniedHosts` narrow it; and a host
+  ending in the DNS root dot is not a client id at all. The document must name
+  itself, declare `authorization_code` and use `none` — `private_key_jwt` is
+  refused, since its keys would come from the very document that names them.
+  The client it becomes is public and not first-party, with the document's
+  scopes narrowed to `allowedScopes` and the operator's `allowedAudiences`, so it
+  goes through the consent step: the resolver is wired, and
+  `client_id_metadata_document_supported` advertised, only when a consent store
+  is wired too. A validated registration is cached (`cacheMaxAgeMs`,
+  `maxCacheEntries`) and served through a failed revalidation for
+  `staleIfErrorMs` (5 min, counted from the last success); a rejected document
+  is dropped at once, a refusal is remembered for `negativeCacheMs` (1 min), and
+  at most `maxConcurrentFetches` (8) fetches run at a time. Refusals are
+  `invalid_client`, logged as `cimd_document_rejected`,
+  `cimd_document_fetch_failed` or `cimd_host_not_allowed`. mTLS revocation
+  fetches deliberately keep `revocation.allowed-hosts` as their control, since
+  an internal CA publishes on private addresses.
+
+### Changed
+
+- **BREAKING: `/authorize` enforces `acr_values` and `max_age` instead of
+  ignoring them, and honours `prompt=login` (`@o3co/auth-provider-oauth`)**
+  ([#481](https://github.com/o3co/auth.provider/issues/481)). Up to 0.12.1
+  `/authorize` read neither `acr_values` nor `max_age` and minted a code
+  regardless. `acr_values` is now matched against `oauth.authorize.acrValues`,
+  and a value the table does not carry — **every value, until the table is
+  configured** — is `unmet_authentication_requirements` at the `redirect_uri`.
+  A malformed `max_age` is `invalid_request`, and so is a repeated `max_age` or
+  `acr_values` — they join `scope`, `state`, `code_challenge` and
+  `code_challenge_method`, whose repeats 0.12.1 already refused, and that guard
+  now runs before any of the request is interpreted. A session older than
+  `max_age` is sent back to the login page. A composition that wires no
+  `userSessionStore` has no `auth_time` to measure and answers `invalid_request`
+  to `max_age` and `prompt=login`. `prompt=login`, which was `invalid_request`,
+  now forces the login round trip.
+
+  **Upgrade note.** If any relying party sends `acr_values`, configure the
+  table before upgrading, e.g. `oauth.authorize.acrValues { "urn:example:pwd" =
+  ["pwd"] }`. A session established before the upgrade recorded no `amr` and
+  satisfies no acr that requires one until the user signs in again; a refresh
+  token minted before it carries neither claim, and neither do the tokens
+  refreshed from it. A deployment's login page must return `redirect_to`
+  verbatim — one that rebuilds the authorize URL drops `reauth_ask`, and the
+  user is asked to authenticate again. A relying party that sends `max_age` to
+  a deployment with no `userSessionStore` must stop, or the deployment must wire
+  one.
+
+- **`prompt=consent` is honoured instead of refused
+  (`@o3co/auth-provider-oauth`)**
+  ([#527](https://github.com/o3co/auth.provider/issues/527)). It was
+  `invalid_request`. For a client that is not first-party it forces the consent
+  page even when a recorded consent covers the request; for a first-party
+  client it is accepted and changes nothing, since the deployment operates that
+  client — so a relying party that sent it to a first-party client now receives
+  a code where it received an error. `select_account` is still refused.
+
+- **BREAKING: a `grantPolicy` decision past its ceiling is `500 server_error`,
+  and `/authorize` holds a policy's audience to the client's `allowedAudiences`
+  (`@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-webauthn`)**
+  ([#520](https://github.com/o3co/auth.provider/issues/520),
+  [#562](https://github.com/o3co/auth.provider/pull/562),
+  [#579](https://github.com/o3co/auth.provider/pull/579)). A policy that widened
+  the scope or named an audience outside `allowedAudiences` was answered `400
+  invalid_scope` / `invalid_request`, blaming the caller for the deployment's own
+  policy code. `client_credentials`, jwt-bearer, the WebAuthn grant,
+  `refresh_token` and `/authorize` now answer `server_error` — the code an
+  operator's alerting watches; a throwing policy stays `503` and a deny keeps
+  the policy's own `400`. Two paths had no ceiling at all: `/authorize` checked
+  only that a policy's `grantedAudience` was an array and persisted it on the
+  code, where `/token` read it back unbounded, and the WebAuthn grant with no
+  authenticated client minted whatever audience a policy named. `/authorize`
+  now bounds it by the client's `allowedAudiences`, and the client-less WebAuthn
+  grant refuses a policy audience, as jwt-bearer already did. The rule has one
+  home in core — `evaluateGrantPolicy` (with an optional `scopeCeiling`),
+  `boundPolicyAudience`, `policyOutOfBounds` — and token exchange keeps its RFC
+  8693 answers.
+
+  **Upgrade note.** A policy that returns `grantedAudience` at `/authorize` must
+  return only values in the client's `allowedAudiences`; a client with none
+  admits no policy audience. A WebAuthn deployment that relied on a policy
+  audience with no authenticated client must register a client with
+  `allowedAudiences` and authenticate it. Alerts and tests keyed on the old
+  `400` for a policy fault must move to the `500`.
+
+- **BREAKING: a WebAuthn-grant token for a client with no `allowedAudiences`
+  names the client id, and a client-less jwt-bearer token names the issuer
+  (`@o3co/auth-provider-webauthn`, `@o3co/auth-provider-oauth`)**
+  ([#520](https://github.com/o3co/auth.provider/issues/520)). User-bound tokens
+  take `allowedAudiences[0]` and fall back to the client id — what `session`,
+  the device grant, `authorization_code` and, since 0.12.1, jwt-bearer do. The
+  WebAuthn grant fell back to the issuer and now falls back to the client id.
+  With no authenticated client, jwt-bearer minted no `aud` at all, which RFC
+  9068 §2.2 does not allow and an audience-pinning verifier refuses; it now
+  mints the issuer (or the first audience the assertion issuer's registry entry
+  admits), as the WebAuthn grant already did in that position.
+
+  **Upgrade note.** A resource server that accepts WebAuthn-grant tokens for
+  such a client by pinning `aud` to the issuer must accept the client id
+  instead, or the client must be given `allowedAudiences`. Tokens minted before
+  the upgrade keep the old `aud` until they expire.
+
+- **BREAKING: the jwt-bearer grant honours RFC 8707 `resource`, and an empty
+  string in `allowedAudiences` fails boot (`@o3co/auth-provider-oauth`,
+  `@o3co/auth-provider-core`)**
+  ([#522](https://github.com/o3co/auth.provider/issues/522),
+  [#521](https://github.com/o3co/auth.provider/issues/521)). Under
+  `oauth.resourceIndicator.enabled` every other grant that mints at `/token`
+  derived `aud` from `resource`; jwt-bearer ignored the parameter. It now
+  derives the audience within `allowedAudiences` plus the client id, and answers
+  `400 invalid_target` when the issued `aud` cannot represent a requested
+  resource — which, for a caller with no authenticated client, is every
+  resource the assertion issuer's registry entry does not admit. A policy
+  audience the grant refuses is logged as `jwt_bearer_policy_audience_refused`.
+  Separately, a client registration carrying `""` in `allowedAudiences` is
+  refused at boot instead of stamping `aud: ""` on its tokens.
+
+  **Upgrade note.** With the resource-indicator flag on, a jwt-bearer caller
+  that sends `resource` must name an audience its registration admits. Remove
+  any empty-string entry from `allowedAudiences`.
+
+- **BREAKING: under `revocation.mode = "both"`, an OCSP `unknown` is final
+  unless the CRL lists the certificate (`@o3co/auth-provider-mtls`)**
+  ([#471](https://github.com/o3co/auth.provider/issues/471),
+  [#568](https://github.com/o3co/auth.provider/pull/568)). An `unknown` fell
+  back to the CRL as an outage does, and the CRL decided — so a clean CRL
+  cleared a certificate the CA's own responder did not know. RFC 6960 §2.2 makes
+  `unknown` an answer, and a CRL cannot list a serial the CA never issued, so it
+  cannot clear one. The CRL is still asked, and may only refuse: a certificate
+  it lists is refused; otherwise the status is unavailable with `reason:
+  "unknown"` and `on-unavailable` decides, as under `mode = "ocsp"`. No
+  `mtls_revocation_ocsp_fallback` line is logged for it.
+
+  **Upgrade note.** Only deployments that wrote `mode = "both"` are affected;
+  `revocation.mode` has no default. Under `on-unavailable = "reject"`, a
+  certificate whose responder answers `unknown` and whose CRL does not list it
+  is now refused (`invalid_certificate`, "revocation status unavailable") where
+  it was admitted. If your CA's responder does not know every certificate the CA
+  issued, fix the responder or use `mode = "crl"`. Under `"allow"` the outcome is
+  unchanged.
+
+- **BREAKING: `@simplewebauthn/server` 13.3.3 → 14.0.1 — passkey authentication
+  in a cross-origin iframe needs `webauthn.topOrigin`, and the algorithm set is
+  this package's (`@o3co/auth-provider-webauthn`)**
+  ([#516](https://github.com/o3co/auth.provider/pull/516),
+  [#555](https://github.com/o3co/auth.provider/pull/555),
+  [#569](https://github.com/o3co/auth.provider/pull/569),
+  [#581](https://github.com/o3co/auth.provider/pull/581)). 14 refuses an
+  authentication response whose browser-reported `topOrigin` it was not told to
+  expect, so Chromium iframe passkey authentication that worked on 13.3.3 fails.
+  The new optional `webauthn.topOrigin` (`WEBAUTHN_TOP_ORIGIN`) lists the
+  embedding origins a deployment accepts; absent keeps the refusal, which now
+  reads `top_origin_mismatch` rather than `origin_mismatch` — the latter sent
+  operators to `webauthn.origin`, which cannot fix it. 14 also prepends
+  ML-DSA-44 to its default algorithm list whenever the runtime supports it,
+  tying what registration offers to the Node build. `WEBAUTHN_ALGORITHM_IDS`
+  (EdDSA `-8`, ES256 `-7`, RS256 `-257`; frozen, now exported) is passed to both
+  registration options and registration verification, restoring the pre-14
+  offer. Verification under 13.3.3 accepted every algorithm the library knew, so
+  a registration whose key uses another algorithm is now refused, as
+  `algorithm_not_allowed` (it would have read `unknown`). Adopting ML-DSA-44 is
+  tracked in [#554](https://github.com/o3co/auth.provider/issues/554). The
+  13.3.2/13.3.3 cross-signed `x5c` regression is resolved upstream, and
+  `@peculiar/x509` moves to 2.x transitively.
+
+  **Upgrade note.** A deployment that runs passkey authentication inside a
+  cross-origin iframe must set `webauthn.topOrigin` to the parent page's
+  origin(s) before upgrading. Credentials already registered are unaffected.
+
+- **BREAKING (TypeScript): exported unions gained members
+  (`@o3co/auth-provider-core`, `@o3co/auth-provider-dpop`)**
+  ([#484](https://github.com/o3co/auth.provider/issues/484),
+  [#530](https://github.com/o3co/auth.provider/issues/530),
+  [#527](https://github.com/o3co/auth.provider/issues/527),
+  [#482](https://github.com/o3co/auth.provider/issues/482)).
+  `TokenEndpointAuthMethod` gained `"private_key_jwt"`. `DPoPError.code` was
+  the literal `"invalid_dpop_proof"` and is now `"invalid_dpop_proof" |
+  "use_dpop_nonce"`, and so is `DPoPErrorCode`; `DPoPReasonCode` gained
+  `"nonce_required"` and `"nonce_invalid"`. `BUILT_IN_AUDIT_EVENT_TYPES` gained
+  `consent.granted`, `consent.denied`, `federation.identity.linked` and
+  `federation.identity.link_refused`. An exhaustive `switch`, a `Record` keyed
+  on one of these unions, or a value typed as the old literal stops compiling.
+
+  **Upgrade note.** Add the new members. Code that turns a `DPoPError` into its
+  own HTTP answer must answer `use_dpop_nonce` as RFC 9449 §8/§9 do — `400` at
+  a token endpoint, `401` with `WWW-Authenticate: DPoP error="use_dpop_nonce"`
+  at a resource — and pass the error's `responseHeaders` (`DPoP-Nonce`)
+  through. Every other member added to an exported type in 0.13.0 is optional.
+
+- **Adapter implementers: a `UserSessionStore` must round-trip `amr`, and a
+  `CodeRepository` must round-trip `acr` (`@o3co/auth-provider-core`)**
+  ([#481](https://github.com/o3co/auth.provider/issues/481)). Both fields are
+  optional, so nothing fails to compile — but a store that drops them silently
+  strips `amr` / `acr` from issued tokens and fails every `acr_values` request
+  whose acr needs an `amr`. The in-repo `UserSessionStore` conformance suite now
+  checks the round trip, and the bundled memory and Redis adapters carry both.
+
+- **Refresh-token rotation is reserved before anything is signed
+  (`@o3co/auth-provider-oauth`, `@o3co/auth-provider-core`)**
+  ([#449](https://github.com/o3co/auth.provider/issues/449),
+  [#567](https://github.com/o3co/auth.provider/pull/567),
+  [#582](https://github.com/o3co/auth.provider/pull/582)). The grant signed both
+  new tokens and then committed the rotation, so a lost race — a replay, a
+  revoked family, an unknown family under `reject` — had already spent two
+  signatures, two billable calls under a KMS-backed signer. It now chooses the
+  new refresh token's `jti` and issue time, commits them to the family store,
+  and signs only once the commit holds (`GenerateTokenOptions` gains optional,
+  validated `jti` / `issuedAt`). Two consequences are visible. A signer that
+  fails after the commit answers `503 temporarily_unavailable` and logs
+  `refresh_token_rotation_orphaned` with `familyId`, `previousJti` and
+  `newRefreshJti`: the presented token is already spent, so the client's retry
+  with it reads as a replay and revokes the family, where up to 0.12.1 the old
+  token stayed usable. And a refresh token no longer outlives the family
+  record that catches its replay: its `exp` is capped at the family's committed
+  ceiling less a one-second margin, and a ceiling that leaves no lifetime is
+  `400 invalid_grant` ("refresh token family has reached its lifetime", logged
+  as `refresh_token_family_lifetime_exhausted`) before anything is signed.
+
+  **Upgrade note.** With a remote signer, alert on
+  `refresh_token_rotation_orphaned`: each one is a user who will have to sign in
+  again.
+
+- **`/oauth/revoke` is rate-limited like `/token`, `/introspect` and
+  `/authorize` (`@o3co/auth-provider-oauth`)**
+  ([#565](https://github.com/o3co/auth.provider/pull/565)). RFC 7009 lets a
+  public client call it, and it reaches the client repository on every attempt
+  — with Client ID Metadata Documents on, an outbound fetch — yet it was the one
+  public entry point outside the shared guard. It now runs through the wired
+  `rateLimiter` under the tag `revoke`, with `rateLimit.failMode` applying; a
+  throttled call is `429 rate_limited`. A composition with no `rateLimiter` is
+  unaffected.
+
+  **Upgrade note.** A client that revokes many tokens in a burst may now meet
+  `429`; give `revoke` its own limit if your limiter keys limits by tag.
+
+- **The scaffold's image moves to `node:26-alpine` (standalone template)**
+  ([#435](https://github.com/o3co/auth.provider/pull/435)). The Dockerfile's
+  pinned digest, the smoke test and the runbook name Node 26. bcrypt, the one
+  native dependency, loads from its alpine prebuild there without compiling, and
+  CI now builds the image's base stage and installs, builds and loads the
+  scaffold's dependency set inside it, so a broken digest or a missing musl
+  prebuild fails CI rather than a first `docker build`. `engines` stays
+  `>=22.0.0`. A project scaffolded from an earlier release keeps its own
+  Dockerfile.
+
+- **Runtime dependencies: `jose` 6.2.10 → 6.2.12 and `openid-client` 6.8.7 →
+  6.8.8.** Patch releases.
+
+### Removed
+
+- **The package-level `CHANGELOG.md` files in `core`, `dpop`, `mtls` and
+  `oauth`** ([#548](https://github.com/o3co/auth.provider/issues/548),
+  [#475](https://github.com/o3co/auth.provider/issues/475)). Each held only an
+  `## [Unreleased]` section that no release cut wrote, while this file listed
+  the same changes under the release that shipped them; none was in a published
+  tarball. This file is the one changelog, each entry naming its packages, and
+  `docs/release-policy.md` R2 now says what every cut already did: the section
+  is written at the cut from `git log <lastTag>..HEAD`. The one link into a
+  retired file is a `v0.12.1` permalink, and `packages/webauthn/package.json` no
+  longer lists a `CHANGELOG.md` the package never had.
+
+### Fixed
+
+- **`@o3co/auth-provider-federation-apple` kept signing with a rotated key,
+  relayed an unbounded user name, and checked one callback URL while sending
+  another** ([#498](https://github.com/o3co/auth.provider/issues/498)). The
+  imported `.p8` key was held from its first successful import, so a key rotated
+  under a running process kept signing — and the `client_secret` cached under it
+  kept being presented — until a restart. The imported key, the cached secret
+  and any signature in flight now belong to the PEM they came from, and a
+  changed `privateKey`, read on every exchange (through `createAppleProvider`
+  too), is re-imported and re-signed; a signature in flight during the rotation
+  cannot land in the new key's cache. `firstName` / `lastName` from Apple's
+  unsigned `user` body were unbounded while `name` is promotable; a part longer
+  than `APPLE_NAME_PART_MAX_LENGTH` (128, exported) is dropped whole. And the
+  boot guard validated `callbackURL` while the flow sent the route-derived
+  `redirect_uri`: `buildAuthorizationUrl` and `exchangeCode` now refuse a
+  `redirectUri` that is not the configured `callbackURL`.
+
+  **Upgrade note.** A composition in which the two differ now fails at the
+  first sign-in instead of sending the unchecked URL. The shipped bridge derives
+  both from `federations.<name>.callbackURL`, so it is unaffected.
+
+- **A grant policy that returned a non-array `grantedScope` or
+  `grantedAudience` crashed the handler or was misread
+  (`@o3co/auth-provider-oauth`, `@o3co/auth-provider-oauth-token-exchange`,
+  `@o3co/auth-provider-core`)**
+  ([#521](https://github.com/o3co/auth.provider/issues/521),
+  [#579](https://github.com/o3co/auth.provider/pull/579)). A JavaScript policy
+  returning `"read"` passed a truthiness check and then threw a `TypeError` out
+  of the handler — an unhandled `500` with no description — and `/authorize`
+  persisted a string `grantedAudience` that `/token` read back as its first
+  character. Every grant, token exchange included, now answers `500
+  server_error` naming the field; `""` and `null` are caught as well.
+
+- **A project scaffolded by `create-auth-provider` failed its own test suite
+  (standalone template)** ([#512](https://github.com/o3co/auth.provider/issues/512)).
+  6 of 179 tests failed under `pnpm test` and 19 under `make test`, for reasons
+  unrelated to the deployment. vitest externalises the `@o3co/auth-provider-*`
+  packages once they come from npm, so the suite's `vi.mock("ioredis")` never
+  reached the code opening sockets and every Redis boot test dialled
+  `redis.test` until it timed out; the template's `vitest.config.mts` now inlines
+  them. A guard asserted the project lived at `templates/standalone`, and the
+  Dockerfile's `test` stage — with `.dockerignore` — kept out the root-level
+  files the suite reads; the shipped `runtime` stage is unchanged. CI now runs
+  the suite in a copy wired to the packed tarballs. A project scaffolded earlier
+  can take the `server.deps.inline` line from the new template.
+
+- **The multi-replica boot refusal for `memoryReplaySeenSetModule` blamed DPoP
+  (`@o3co/auth-provider-core`)**
+  ([#570](https://github.com/o3co/auth.provider/pull/570)). DPoP has its own
+  replay store and never touches `replaySeenSet`, so an operator with no DPoP
+  module was told DPoP was why boot failed. The reason now names the slot's
+  consumers: `private_key_jwt` client assertions, jwt-bearer assertions and the
+  WebAuthn challenge. The operator runbook no longer cites a deleted file and
+  gains an alert row for `mtls_ocsp_responder_unchecked`, and
+  `docs/adapter-surface.md` names `linkFederatedIdentity` — a `UserRepository`
+  call through which the library causes a write — and states that the Store
+  still decides.
+
+- **Every commit a pull request brings must install (CI)**
+  ([#580](https://github.com/o3co/auth.provider/pull/580)). Commit `2a2e2059`
+  (the vitest 5 upgrade, [#553](https://github.com/o3co/auth.provider/pull/553))
+  left git conflict markers in `create-app/package.json`, which is invalid JSON
+  at that commit; the next commit, `0146e601`, removed them under a subject that
+  does not say so. No published file is affected, but `pnpm install` — and so
+  `git bisect` across the 0.13.0 range — stops at `2a2e2059`. CI now checks each
+  commit in a pull request for conflict markers and an unparseable
+  `package.json`, not only the head tree.
+
+### Security
+
+- **`federation-google` and `federation-apple` verify the id_token signature
+  (`@o3co/auth-provider-federation-google`,
+  `@o3co/auth-provider-federation-apple`)**
+  ([#542](https://github.com/o3co/auth.provider/issues/542)). Both configured a
+  `jwks_uri` and an RS256 pin in the belief that this verified the id_token's
+  signature. openid-client 6 does not verify it on the code flow unless
+  non-repudiation checks are switched on, so only `iss`, `aud`, `exp`, `iat` and
+  `nonce` were checked, the JWKS was never fetched, and an id_token signed by a
+  key the IdP never published was accepted. Exploiting that needed a position
+  inside the token endpoint's TLS; for Apple the id_token is the only source of
+  identity. Both providers now verify against the IdP's JWKS on the code
+  exchange and on refresh, and take a `fetch` option for a proxy.
+
+  **Upgrade note.** Allow outbound HTTPS to
+  `https://www.googleapis.com/oauth2/v3/certs` and
+  `https://appleid.apple.com/auth/keys` (or the `jwksUri` you configured) before
+  upgrading. Apple's key set is fetched once per sign-in.
+
+- **A delegated OCSP responder's own revocation status is checked
+  (`@o3co/auth-provider-mtls`)**
+  ([#468](https://github.com/o3co/auth.provider/issues/468)). A responder
+  certificate the CA issued with `id-kp-OCSPSigning` was believed for its whole
+  validity period, so a stolen responder key kept minting `good` for revoked
+  certificates — and under `mode = "both"` the CRL that would have said
+  otherwise was never asked. Under `both`, a responder whose certificate lacks
+  `id-pkix-ocsp-nocheck` is now checked against the CRL its own certificate
+  names: listed, its answer is discarded as `responder_revoked` and the
+  certificate's own CRL decides; that CRL unobtainable or only partly usable,
+  `responder_status_unavailable`, with the same fallback. A cached answer from
+  such a responder is re-checked on every cache hit. `nocheck` buys the
+  exemption only when its value is the DER `NULL` RFC 6960 §4.2.2.2.1 specifies.
+  A responder certificate that names neither, and any delegated responder under
+  `mode = "ocsp"`, where there is no independent source, is taken and logged
+  once per responder as `mtls_ocsp_responder_unchecked`.
+
+  **Upgrade note.** Under `both`, add the host of the responder certificate's
+  CRL to `revocation.allowed-hosts`; otherwise every answer from that responder
+  is discarded and each certificate falls back to its own CRL.
+
 ## [0.12.1] - 2026-09-09
 
 ### Fixed
