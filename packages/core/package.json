@@ -55,7 +55,7 @@
 		"bcrypt": "^6.0.0",
 		"jose": "^6.2.12",
 		"js-yaml": "^5.4.1",
-		"zod": "^4.5.4"
+		"zod": "^4.6.2"
 	},
 	"peerDependencies": {
 		"express": "^5.0.0"
