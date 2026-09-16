@@ -1,0 +1,120 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * #556 — the workspace setup file `vitest.supertest-loopback.mts` makes the
+ * server supertest starts listen on the address supertest dials.
+ *
+ * Unpatched, `request(app)` calls `app.listen(0)`, which binds the dual-stack
+ * wildcard `[::]:P`, and then dials `127.0.0.1:P`. On macOS the kernel will
+ * hand out a `P` that another process already holds as `127.0.0.1:P`, and a
+ * connection to `127.0.0.1:P` goes to that more specific socket, not to the
+ * test's server. When that process accepts and never answers (observed: an
+ * editor helper), the request hangs until the 20 s `testTimeout` — the four
+ * unrelated supertest timeouts of #556, each passing on the next run. Linux
+ * refuses the conflicting bind, which is why CI never showed one.
+ *
+ * This file lives in one package, but it exercises the shared setup: a
+ * package config that drops `WORKSPACE_TEST_SETUP` fails it.
+ */
+
+import http from "node:http";
+import net, { type AddressInfo } from "node:net";
+import express from "express";
+import request from "supertest";
+import { describe, expect, it } from "vitest";
+
+function helloApp() {
+	const app = express();
+	app.get("/hello", (_req, res) => {
+		res.status(200).send("hello");
+	});
+	return app;
+}
+
+/** Resolves with the address `server` binds, whoever calls `listen`. */
+function boundAddress(server: net.Server): Promise<AddressInfo> {
+	return new Promise((resolve) => {
+		server.once("listening", () => resolve(server.address() as AddressInfo));
+	});
+}
+
+describe("supertest's own server listens on the loopback address it dials (#556)", () => {
+	it("binds 127.0.0.1, not the dual-stack wildcard, for request(server)", async () => {
+		const server = http.createServer(helloApp());
+		const bound = boundAddress(server);
+
+		const res = await request(server).get("/hello");
+
+		expect(res.status).toBe(200);
+		expect(await bound).toMatchObject({ address: "127.0.0.1", family: "IPv4" });
+		expect(server.listening).toBe(false);
+	});
+
+	it("binds 127.0.0.1 for every request an agent sends", async () => {
+		const server = http.createServer(helloApp());
+		const agent = request.agent(server);
+
+		for (let i = 0; i < 2; i++) {
+			const bound = boundAddress(server);
+			const res = await agent.get("/hello");
+			expect(res.status).toBe(200);
+			expect(await bound).toMatchObject({ address: "127.0.0.1" });
+		}
+	});
+
+	it("leaves a server the test already started alone", async () => {
+		const server = http.createServer(helloApp());
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		try {
+			const res = await request(server).get("/hello");
+			expect(res.status).toBe(200);
+			// supertest does not own a server it did not start, so it stays up.
+			expect(server.listening).toBe(true);
+		} finally {
+			server.close();
+		}
+	});
+
+	it("fails the request, instead of hanging on another socket, when 127.0.0.1:P is taken", async () => {
+		// The collision the kernel produces by chance, produced on purpose: a
+		// socket that accepts and never answers holds 127.0.0.1:P, and the
+		// server supertest starts is steered onto P.
+		const held: net.Socket[] = [];
+		const squatter = net.createServer((socket) => {
+			held.push(socket);
+		});
+		await new Promise<void>((resolve) => squatter.listen(0, "127.0.0.1", resolve));
+		const { port } = squatter.address() as AddressInfo;
+
+		const server = http.createServer(helloApp());
+		const listen = server.listen.bind(server) as (...args: unknown[]) => net.Server;
+		(server as { listen: (...args: unknown[]) => net.Server }).listen = (_port, ...rest) =>
+			listen(port, ...rest);
+
+		try {
+			// Unpatched on macOS this request reaches the squatter and never
+			// settles; on Linux the unpatched `app.address().port` throws. Either
+			// way, what the suite needs is a prompt, named failure.
+			await expect(request(server).get("/hello")).rejects.toMatchObject({
+				code: "EADDRINUSE",
+			});
+		} finally {
+			for (const socket of held) socket.destroy();
+			squatter.close();
+		}
+	}, 5_000);
+});
