@@ -113,6 +113,7 @@ Other multi-replica considerations covered by the default modules:
 - The user-session stores switch on `userSessionStores.adapter = "redis"` (`USER_SESSION_STORES_ADAPTER`), which wires `redisSessionStoresModule` off the shared ioredis connection — the one `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` configures.
 - The authorization-code repository switches on `oauth.code.adapter` (`OAUTH_CODE_ADAPTER`); the template ships `"redis"`, on that same connection. The older `repositories.code.type = "redis"` (`CLIENT_CODE_TYPE`) switch is still honoured with a deprecation warning at boot. `CLIENT_CODE_ENDPOINT_URI` (`repositories.code.redis.endpointUri`) is still bound by `config/application.conf` but nothing reads it: the Redis code repository has run on the shared connection since the `{ endpointUri }` builder shape was retired, so there is one Redis URL for every adapter and that variable is legacy.
 - The replay seen-set — the `jti` single-use record behind `private_key_jwt` client authentication (#484) — switches on `replaySeenSet.adapter` (`REPLAY_SEEN_SET_ADAPTER`); the template ships `"redis"` on the shared connection, and `memory` is refused under `DEPLOYMENT_MODE=multi` because a captured client assertion would replay once per replica.
+- The consent step for clients that are not first-party (#527) switches on `consentStore.adapter` (`CONSENT_STORE_ADAPTER`). It is off (`none`) by default; `memory` is refused under `DEPLOYMENT_MODE=multi`, because a consent granted on one replica would be asked for again on every other and a consent page's parked request would be unknown to the replica that receives the answer. `redis` (#561) keeps both on the shared connection. See [Consent Store](#consent-store).
 - The federation token store defaults to memory. Set `FEDERATION_TOKEN_STORE_TYPE=redis` (`federationTokenStore.type = "redis"`) and supply `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` — 32 bytes, base64-encoded (`openssl rand -base64 32`); the store encrypts the upstream refresh tokens it holds. It shares the ioredis socket configured by `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`. See [Federation Token Store](#federation-token-store).
 
 ## Usage
@@ -422,13 +423,25 @@ needs a key.
 | Variable | Default | Description |
 |---|---|---|
 | `FEDERATION_TOKEN_STORE_TYPE` | `memory` | Federation token store backend: `memory` or `redis` |
-| `CONSENT_STORE_ADAPTER` | `none` | Consent store for clients that are not first-party (#527): `none` (such clients are refused) or `memory` (single replica) |
 | `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` | — | AES-256-GCM key for records at rest: 32 bytes, base64-encoded (`openssl rand -base64 32`). **Required** with `redis` unless the mode below is `allow-plaintext` |
 | `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused when the config was selected by a production/staging environment (`CONFIG_ENV` or `NODE_ENV`) and under `DEPLOYMENT_MODE=multi` in any environment, unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` is also set — development only |
 
 `ttl` (seconds; keep it above the upstream refresh-token lifetime) and the #291
 `scanFallback` migration flag live under `redisFederationTokenStore` in a
 config layer rather than behind an environment variable.
+
+### Consent Store
+
+Where an end-user's consent to a client that is not first-party is recorded,
+together with the `/authorize` request parked while the consent page asks
+(#527, #552). One switch wires both. `none` by default: such clients are
+refused and only first-party clients are served. `memory` forks per replica and
+is refused under `DEPLOYMENT_MODE=multi`; `redis` (#561) shares both over the
+socket configured by `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `CONSENT_STORE_ADAPTER` | `none` | Consent store for clients that are not first-party (#527): `none` (such clients are refused), `memory` (single replica) or `redis` (shared, #561) |
 
 ### Redis Namespacing
 
@@ -441,9 +454,10 @@ auth.provider instances cannot collide in the same database:
 | `REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX` | `rtfam:` | Prefix for refresh-token family records. |
 | `CLIENT_CODE_KEY_PREFIX` | `oauth:code:` | Prefix for OAuth authorization codes. |
 | `REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX` | `ft:` | Prefix for federation token records, their per-session index and their lock keys. |
+| `REDIS_CONSENT_STORE_KEY_PREFIX` | `consent:` | Prefix for consent records and for parked consent requests with their per-session index (`CONSENT_STORE_ADAPTER=redis`, #561). |
 
 Use values that include the deployment name, for example `tenant-a:ss:`,
-`tenant-a:rtfam:`, `tenant-a:code:`, and `tenant-a:ft:`.
+`tenant-a:rtfam:`, `tenant-a:code:`, `tenant-a:ft:`, and `tenant-a:consent:`.
 
 ### Endpoints
 

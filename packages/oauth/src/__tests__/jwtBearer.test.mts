@@ -25,19 +25,25 @@
  * lifecycle stays with the Store.
  */
 
+import { generateKeyPairSync } from "node:crypto";
 import {
 	type AppConfig,
 	type AssertionVerifier,
 	type AuthenticatedClient,
+	createJwtAssertionVerifier,
+	createMemoryAssertionIssuerRegistry,
+	createMemoryReplaySeenSet,
+	createRegistryAssertionVerifier,
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantPolicyDecision,
 	type GrantPolicyHook,
+	type GrantResult,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
-import { decodeJwt } from "jose";
-import { describe, expect, it, vi } from "vitest";
+import { decodeJwt, SignJWT } from "jose";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createJwtBearerGrant, JWT_BEARER_GRANT_TYPE } from "#/grants/jwtBearer.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
 
@@ -983,6 +989,222 @@ describe("jwt-bearer grant — aud names the client's configured resource audien
 			expect(result.status).toBe(200);
 			expect(claimsOf(result).aud).toBe("https://api.example");
 		});
+	});
+});
+
+/*
+ * auth.proxy#90 — the issued token never outlives the assertion.
+ *
+ * The grant stamped `exp` from `oauth.accessToken.expiresIn` with no reference
+ * to the assertion at all, so a two-minute ID-JAG bought an hour-long access
+ * token: the assertion's expiry, the one bound its issuing authority set,
+ * stopped bounding anything the moment it was exchanged. Token exchange holds
+ * the subject token to the same rule (its README, security note 16).
+ */
+describe("jwt-bearer grant — the token never outlives the assertion (auth.proxy#90)", () => {
+	/** A whole epoch second, so the arithmetic below reads exactly. */
+	const NOW = 1_800_000_000;
+	const at = (seconds: number) => vi.setSystemTime(new Date(seconds * 1000));
+	beforeEach(() => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		at(NOW);
+	});
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	const tokensOf = (result: GrantResult) => {
+		if (!("tokens" in result)) return expect.fail(`expected tokens, got ${JSON.stringify(result)}`);
+		return {
+			expiresIn: result.tokens.expires_in,
+			claims: decodeJwt(result.tokens.access_token),
+		};
+	};
+	const unverified = async () =>
+		(await build({ verifier: verifierFor(null) }).handle(ctx())).result;
+
+	it("caps expires_in and exp at the assertion's remaining lifetime when it expires first", async () => {
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "device:abc", expiresAt: NOW + 120 }),
+		}).handle(ctx());
+		const { expiresIn, claims } = tokensOf(result);
+		expect(expiresIn).toBe(120);
+		expect(claims.exp).toBe(NOW + 120);
+		// The response states the lifetime the token was minted with.
+		expect((claims.exp as number) - (claims.iat as number)).toBe(expiresIn);
+	});
+
+	it("leaves the configured lifetime standing when the assertion outlives it", async () => {
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "device:abc", expiresAt: NOW + 3600 }),
+		}).handle(ctx());
+		const { expiresIn, claims } = tokensOf(result);
+		expect(expiresIn).toBe(300);
+		expect(claims.exp).toBe(NOW + 300);
+	});
+
+	it("leaves the configured lifetime standing when the verifier reports no expiry", async () => {
+		// Omitting `expiresAt` asserts a credential with no expiry: there is no
+		// lifetime for the cap to descend from.
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "device:abc" }),
+		}).handle(ctx());
+		expect(tokensOf(result).expiresIn).toBe(300);
+	});
+
+	it("rounds the remaining lifetime down, mid-second", async () => {
+		at(NOW + 0.4);
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "device:abc", expiresAt: NOW + 120 }),
+		}).handle(ctx());
+		const { expiresIn, claims } = tokensOf(result);
+		expect(expiresIn).toBe(119);
+		expect(claims.exp as number).toBeLessThanOrEqual(NOW + 120);
+	});
+
+	it("refuses an assertion already past its exp — one a verifier admitted inside its clock tolerance", async () => {
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "device:abc", expiresAt: NOW - 5 }),
+		}).handle(ctx());
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_grant");
+		// The verifier folds expiry into its uniform refusal; so does the grant.
+		expect(result).toEqual(await unverified());
+	});
+
+	it("refuses an assertion expiring within the current second rather than minting a token dead on arrival", async () => {
+		for (const expiresAt of [NOW, NOW + 0.5]) {
+			at(NOW);
+			const { result } = await build({
+				verifier: verifierFor({ subjectHandle: "device:abc", expiresAt }),
+			}).handle(ctx());
+			expect(result).toEqual(await unverified());
+		}
+		at(NOW + 0.4);
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "device:abc", expiresAt: NOW + 1 }),
+		}).handle(ctx());
+		expect(result).toEqual(await unverified());
+	});
+
+	it("takes the remaining lifetime at minting, not at verification", async () => {
+		// A Store slow enough to outlast the assertion: it verified with thirty
+		// seconds left and has none by the time a token would be signed.
+		const { result } = await build({
+			verifier: verifierFor({ subjectHandle: "device:abc", expiresAt: NOW + 30 }),
+			userRepository: {
+				authenticate: async () => null,
+				authenticateByToken: async () => {
+					at(NOW + 31);
+					return { id: "u-1" };
+				},
+			} as never,
+		}).handle(ctx());
+		expect(result.status).toBe(400);
+		expect("error" in result && result.error).toBe("invalid_grant");
+	});
+
+	it("refuses an expiresAt that is not a finite number — neither an expiry nor no expiry", async () => {
+		// A custom verifier is typed, not checked. Arithmetic would coerce a
+		// numeric string into an expiry and read Infinity as none; every one of
+		// these is a verifier bug, and a bug here must not mint a token.
+		const malformed = [
+			String(NOW + 120),
+			"later",
+			null,
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			Number.NEGATIVE_INFINITY,
+		] as unknown as number[];
+		for (const expiresAt of malformed) {
+			const info = vi.fn();
+			const { result } = await build({
+				logger: { error: vi.fn(), warn: vi.fn(), info, debug: vi.fn() },
+				verifier: verifierFor({ subjectHandle: "device:abc", expiresAt }),
+			}).handle(ctx());
+			expect(result, `expiresAt: ${String(expiresAt)}`).toEqual(await unverified());
+			expect(info).toHaveBeenCalledWith(expect.anything(), "jwt_bearer_assertion_expired");
+		}
+	});
+
+	it("logs the expiry refusal for the operator — a skewed issuer clock shows up here", async () => {
+		const info = vi.fn();
+		await build({
+			logger: { error: vi.fn(), warn: vi.fn(), info, debug: vi.fn() },
+			verifier: verifierFor({
+				subjectHandle: "device:abc",
+				issuer: "https://devices.example",
+				expiresAt: NOW - 5,
+			}),
+		}).handle(ctx());
+		expect(info).toHaveBeenCalledWith(
+			expect.objectContaining({ kind: "stub", issuer: "https://devices.example" }),
+			"jwt_bearer_assertion_expired",
+		);
+	});
+
+	it("caps a token minted from a real RFC 7523 assertion at its exp", async () => {
+		const authority = generateKeyPairSync("ed25519");
+		const verifier = createJwtAssertionVerifier({
+			key: authority.publicKey,
+			issuer: "https://devices.example",
+			audience: "https://auth.example",
+			algorithms: ["EdDSA"],
+		});
+		const assertion = await new SignJWT({ sub: "device:abc" })
+			.setProtectedHeader({ alg: "EdDSA" })
+			.setIssuer("https://devices.example")
+			.setAudience("https://auth.example")
+			.setExpirationTime(NOW + 45)
+			.sign(authority.privateKey);
+		const { result } = await build({ verifier }).handle(ctx({ assertion }));
+		expect(tokensOf(result).expiresIn).toBe(45);
+	});
+
+	it("caps a token minted from a real ID-JAG at its exp — short-lived by design", async () => {
+		const idp = generateKeyPairSync("ed25519");
+		const verifier = createRegistryAssertionVerifier({
+			registry: createMemoryAssertionIssuerRegistry([
+				{
+					issuer: "https://idp.example",
+					keys: { type: "key", key: idp.publicKey },
+					algorithms: ["EdDSA"],
+					profile: "id-jag",
+					allowedAudiences: ["https://api.example"],
+				},
+			]),
+			audience: "https://auth.example",
+			issuerIdentifier: "https://auth.example",
+			replaySeenSet: createMemoryReplaySeenSet(),
+		});
+		const assertion = await new SignJWT({
+			client_id: "mcp-client",
+			jti: "jti-1",
+			resource: "https://api.example",
+		})
+			.setProtectedHeader({ alg: "EdDSA", typ: "oauth-id-jag+jwt" })
+			.setIssuer("https://idp.example")
+			.setSubject("user-1")
+			.setAudience("https://auth.example")
+			.setIssuedAt(NOW - 30)
+			.setExpirationTime(NOW + 90)
+			.sign(idp.privateKey);
+		const { result } = await build({ verifier }).handle(
+			ctx(
+				{ assertion },
+				{
+					authenticatedClient: {
+						clientId: "mcp-client",
+						tokenEndpointAuthMethod: "client_secret_basic",
+						allowedScopes: [],
+						allowedAudiences: ["https://api.example"],
+					},
+				},
+			),
+		);
+		const { expiresIn, claims } = tokensOf(result);
+		expect(expiresIn).toBe(90);
+		expect(claims.exp).toBe(NOW + 90);
 	});
 });
 

@@ -53,6 +53,30 @@ export interface AssertionVerificationResult {
 	 * nothing about audiences and the other parties stay in charge.
 	 */
 	readonly audience?: readonly string[];
+	/**
+	 * When the verified assertion expires, in epoch seconds — its `exp`
+	 * (auth.proxy#90).
+	 *
+	 * A ceiling on the issued token's lifetime: the jwt-bearer grant mints
+	 * `min(oauth.accessToken.defaultExpiresIn, expiresAt − now)`, so a token never
+	 * outlives the assertion it was exchanged for, and refuses an assertion
+	 * with no whole second left (`invalid_grant`). Report the claim as it is:
+	 * one inside a verifier's clock tolerance is already past, and clamping
+	 * it forward would mint a token the issuing authority never backed.
+	 *
+	 * Optional so a verifier written before it existed keeps compiling, but
+	 * omitting it is a statement, not a default: a verifier that returns no
+	 * `expiresAt` is asserting a credential with **no expiry**, and the
+	 * configured lifetime stands uncapped. A verifier whose credential expires
+	 * — a signed JWT, a platform attestation with a validity window — reports
+	 * it. The bundled registry verifier always does, from the `exp` it
+	 * requires.
+	 *
+	 * Present, it must be a finite number. Anything else — a numeric string,
+	 * `null`, `NaN`, `Infinity` — is refused as `invalid_grant`: a malformed
+	 * expiry is neither an expiry nor its absence.
+	 */
+	readonly expiresAt?: number;
 }
 
 /**

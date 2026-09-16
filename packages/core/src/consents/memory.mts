@@ -14,12 +14,19 @@
  * limitations under the License.
  */
 
-import type {
-	ConsentRecord,
-	ConsentStore,
-	PendingConsentRecord,
-	PendingConsentStore,
+import {
+	type ConsentRecord,
+	type ConsentStore,
+	PENDING_CONSENT_PER_SESSION_LIMIT,
+	type PendingConsentRecord,
+	type PendingConsentStore,
 } from "./types.mjs";
+
+/**
+ * Re-exported from where it was first declared: the bound is the port's
+ * since a shared adapter holds it too (#561), not this adapter's.
+ */
+export { PENDING_CONSENT_PER_SESSION_LIMIT };
 
 /** In-process consent store, with the record count exposed for observability. */
 export interface MemoryConsentStore extends ConsentStore {
@@ -97,17 +104,6 @@ export interface MemoryPendingConsentStore extends PendingConsentStore {
  * touches, and touch-on-read alone would keep it forever.
  */
 const PENDING_SWEEP_FLOOR = 1024;
-
-/**
- * How many requests one session may have parked at once (#527 audit).
- *
- * Records are keyed by challenge and reclaimed only on expiry, so without a
- * bound one authenticated session could park an unbounded number inside the
- * ten-minute window. A browser has no use for more than a handful of consent
- * pages open at once; past the bound the oldest of that session's requests
- * goes, and every other session is untouched.
- */
-export const PENDING_CONSENT_PER_SESSION_LIMIT = 16;
 
 /**
  * In-process Map-backed {@link PendingConsentStore} (#552).

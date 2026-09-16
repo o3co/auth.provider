@@ -486,6 +486,7 @@ describe("standalone smoke test", () => {
 				userSessionStores: { adapter: "redis" as const },
 				rateLimiter: { adapter: "redis" as const },
 				accessTokenDenylist: { adapter: "redis" as const },
+				consentStore: { adapter: "redis" as const },
 				oauth: { ...config.oauth, code: { adapter: "redis" as const } },
 			};
 			// No `refreshTokenFamilyModules` override: the default is the Redis

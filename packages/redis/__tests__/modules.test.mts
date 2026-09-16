@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
 	redisChallengeStoreModule,
+	redisConsentStoreModule,
 	redisDeviceCodeStoreModule,
 	redisReplaySeenSetModule,
 } from "../src/index.mjs";
@@ -65,5 +66,26 @@ describe("redisDeviceCodeStoreModule (#433)", () => {
 			redisDeviceCodeStore?: { keyPrefix?: string };
 		};
 		expect(parsed?.redisDeviceCodeStore?.keyPrefix).toBe("devauth:");
+	});
+});
+
+describe("redisConsentStoreModule (#561)", () => {
+	it("has the canonical module name 'redis-consent-store'", () => {
+		expect(redisConsentStoreModule.name).toBe("redis-consent-store");
+	});
+
+	it("requires both consent client slots and 'config'", () => {
+		const reqs = redisConsentStoreModule.requires ?? [];
+		expect(new Set(reqs)).toEqual(
+			new Set(["consentStoreClient", "pendingConsentStoreClient", "config"]),
+		);
+	});
+
+	it("declares a Zod configSchema with module-namespaced 'redisConsentStore' top-level key only", () => {
+		expect(redisConsentStoreModule.configSchema).toBeDefined();
+		const parsed = redisConsentStoreModule.configSchema?.parse({}) as {
+			redisConsentStore?: { keyPrefix?: string };
+		};
+		expect(parsed?.redisConsentStore?.keyPrefix).toBe("consent:");
 	});
 });

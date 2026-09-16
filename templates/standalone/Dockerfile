@@ -103,7 +103,7 @@ CMD ["node", "dist/app.mjs"]
 #############################################
 FROM builder AS test
 
-COPY --chown=node:node vitest.config.mts ./
+COPY --chown=node:node vitest.config.mts vitest.supertest-loopback.mts ./
 COPY --chown=node:node tests/ ./tests/
 # #512: the suite reads these from the project root (scaffold-assets,
 # documented-env-overrides, smoke). The builder stage brings only what the

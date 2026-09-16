@@ -210,9 +210,10 @@ describe("createJwtAssertionVerifier — construction (#301)", () => {
 		// The static-key configuration every existing deployment has keeps
 		// working; what it verifies now also says which issuer it was, and it
 		// accepts the presenting client without caring who that is.
-		const result = await verifier().verify(await mint({ sub: "device:abc" }), {
+		const exp = Math.floor(Date.now() / 1000) + 300;
+		const result = await verifier().verify(await mint({ sub: "device:abc" }, { expSec: exp }), {
 			clientId: "any-client",
 		});
-		expect(result).toEqual({ subjectHandle: "device:abc", issuer: ISSUER });
+		expect(result).toEqual({ subjectHandle: "device:abc", issuer: ISSUER, expiresAt: exp });
 	});
 });

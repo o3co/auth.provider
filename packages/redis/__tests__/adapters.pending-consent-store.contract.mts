@@ -14,12 +14,22 @@
  * limitations under the License.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+/**
+ * Conformance suite for `PendingConsentStore` (#552) — the copy
+ * `@o3co/auth-provider-redis` runs against its adapter (#561).
+ *
+ * Duplicated from `packages/core/src/consents/__tests__/pending.contract.mts`,
+ * differing only in how it imports the port: a contract file cannot be
+ * imported across a package boundary (see `docs/adapter-surface.md`, "Proving
+ * an implementation"). Keep the two in step.
+ */
+
 import {
 	PENDING_CONSENT_PER_SESSION_LIMIT,
 	type PendingConsentRecord,
 	type PendingConsentStore,
-} from "#/consents/types.mjs";
+} from "@o3co/auth-provider-core";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 export interface PendingConsentStoreContractFactory {
 	create(): Promise<PendingConsentStore>;

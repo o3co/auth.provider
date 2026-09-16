@@ -37,6 +37,18 @@ function buildApp(probes: Parameters<ReturnType<typeof createMetrics>["route"]>[
 	return app;
 }
 
+/**
+ * Starts `app` on 127.0.0.1, the address the raw-socket tests dial. A hostless
+ * `listen(0)` binds `[::]`, and on macOS the port it gets can be one another
+ * process holds on 127.0.0.1 — the request then reaches that process and can
+ * hang until the test times out (#556).
+ */
+function listenOnLoopback(app: express.Express): Promise<ReturnType<express.Express["listen"]>> {
+	return new Promise((resolve) => {
+		const server = app.listen(0, "127.0.0.1", () => resolve(server));
+	});
+}
+
 describe("GET /metrics", () => {
 	it("serves the Prometheus text exposition format", async () => {
 		const res = await request(buildApp()).get("/metrics");
@@ -95,7 +107,7 @@ describe("GET /metrics", () => {
 		// route label, reachable without any access to /metrics. Sent over a real
 		// socket because supertest cannot express a non-standard method.
 		const app = buildApp();
-		const server = app.listen(0);
+		const server = await listenOnLoopback(app);
 		const port = (server.address() as { port: number }).port;
 		try {
 			for (const method of ["FOO", "M000001", "PURGE"]) {
@@ -135,7 +147,7 @@ describe("GET /metrics", () => {
 			void res;
 		});
 
-		const server = app.listen(0);
+		const server = await listenOnLoopback(app);
 		const port = (server.address() as { port: number }).port;
 		try {
 			const controller = new AbortController();

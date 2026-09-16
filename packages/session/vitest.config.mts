@@ -1,5 +1,5 @@
 import { defineConfig } from "vitest/config";
-import { WORKSPACE_TEST_TIMEOUTS } from "../../vitest.shared.mts";
+import { WORKSPACE_TEST_SETUP, WORKSPACE_TEST_TIMEOUTS } from "../../vitest.shared.mts";
 
 export default defineConfig({
 	test: {
@@ -8,6 +8,8 @@ export default defineConfig({
 		// carried the ad-hoc 20s override; the policy now lives workspace-wide
 		// in vitest.shared.mts, rationale included.
 		...WORKSPACE_TEST_TIMEOUTS,
+		// #556: supertest's server binds the loopback address it dials — see vitest.shared.mts.
+		...WORKSPACE_TEST_SETUP,
 		typecheck: {
 			enabled: true,
 			// Scoped to A5 redirect-policy / contributes-map / slim type-only tests.

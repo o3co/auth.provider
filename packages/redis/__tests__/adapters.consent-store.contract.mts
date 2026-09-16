@@ -14,8 +14,18 @@
  * limitations under the License.
  */
 
+/**
+ * Conformance suite for `ConsentStore` (#527) — the copy
+ * `@o3co/auth-provider-redis` runs against its adapter (#561).
+ *
+ * Duplicated from `packages/core/src/consents/__tests__/adapters.contract.mts`,
+ * differing only in how it imports the port type: a contract file cannot be
+ * imported across a package boundary (see `docs/adapter-surface.md`, "Proving
+ * an implementation"). Keep the two in step.
+ */
+
+import type { ConsentStore } from "@o3co/auth-provider-core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ConsentStore } from "#/consents/types.mjs";
 
 export interface ConsentStoreContractFactory {
 	create(): Promise<ConsentStore>;

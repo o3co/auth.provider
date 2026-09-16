@@ -122,6 +122,22 @@ export interface PendingConsentRecord {
 }
 
 /**
+ * How many requests one session may have parked at once (#527 audit).
+ *
+ * Records are keyed by challenge and reclaimed only on expiry, so without a
+ * bound one authenticated session could park an unbounded number inside the
+ * ten-minute window. A browser has no use for more than a handful of consent
+ * pages open at once; past the bound the oldest of that session's requests —
+ * the one parked first — goes, and every other session is untouched. A
+ * request of the session that has already expired leaves the count before
+ * the bound is judged, so it never costs a live one its place.
+ *
+ * Part of the port rather than of one adapter (#561): an adapter over a
+ * shared store holds the same bound, and the contract suite checks it.
+ */
+export const PENDING_CONSENT_PER_SESSION_LIMIT = 16;
+
+/**
  * Where a parked request waits for its answer (#552).
  *
  * A record of its own, not a field on the session. express-session hands
@@ -144,6 +160,10 @@ export interface PendingConsentRecord {
  */
 export interface PendingConsentStore {
 	readonly kind: string;
+	/**
+	 * Parks `record` under its challenge, replacing one already parked there,
+	 * and holds its session to {@link PENDING_CONSENT_PER_SESSION_LIMIT}.
+	 */
 	set(record: PendingConsentRecord): Promise<void>;
 	/** The record, or `null` when there is none or it has expired. Does not spend it. */
 	get(challenge: string): Promise<PendingConsentRecord | null>;

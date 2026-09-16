@@ -92,7 +92,10 @@ store is on Redis: `USER_SESSION_STORES_ADAPTER=redis`,
 `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` (a base64 string that decodes to
 exactly 32 bytes — the AES-256 key, e.g. `openssl rand -base64 32`; the builder
 refuses any other length; `templates/standalone/src/buildModules.mts`,
-`packages/core/config/reference.conf`).
+`packages/core/config/reference.conf`). The consent step for clients that are
+not first-party is off by default (`CONSENT_STORE_ADAPTER=none`); to serve such
+clients under `multi`, set `CONSENT_STORE_ADAPTER=redis` — `memory` is refused
+there (#561; `packages/redis/src/consent-store.mts`).
 A deployment that ran `multi` with the default in-memory federation-token store
 before #455/#456 is refused at boot once they land — set the last pair before
 upgrading. `federationTokenStore.type` and `redisFederationTokenStore.*` are
@@ -300,6 +303,7 @@ refresh grant takes care to answer `503` for outages.
 | **The Store** (user directory) down or slow | `POST /session/login`; federation callback; jwt-bearer grant | `503 temporarily_unavailable` "User directory temporarily unavailable" (`Session.mts`, `Federation.mts`); `503` with `jwt_bearer_user_repository_unavailable` (`packages/oauth/src/grants/jwtBearer.mts`) | `local login authenticate failed` (warn) | `repositories.user.http.timeout` (default 5000 ms) and `maxResponseBytes` (default 1048576) — a timeout is a thrown error, not a `null` user (`packages/foundation/src/repositories/HttpUserRepository.mts`) |
 | **Client repository** lookup throws | client authentication on `/oauth/token`, `/oauth/introspect`, `/oauth/revoke`, device authorization | `401` — repository unavailability never admits a client (`packages/oauth/src/middleware/clientAuth.mts`) | `client lookup failed` / `client credential lookup failed` (warn) | the repository's own I/O |
 | **`grantPolicy` hook** throws | every grant; `/oauth/authorize` | `503 temporarily_unavailable` "policy evaluation unavailable" (`packages/core/src/grants/grantPolicy.mts`); redirect `error=temporarily_unavailable` at `/authorize` | — | the hook's own |
+| Shared Redis down — **consent step** (`CONSENT_STORE_ADAPTER=redis`) | `GET/POST /oauth/authorize` for a client that is not first-party; `GET/POST /oauth/consent` | `/authorize` redirects with `error=temporarily_unavailable` "consent store unavailable" — never a code, never a refusal the user could act on (`packages/oauth/src/routes/authorize.mts`); `/oauth/consent` answers `503 temporarily_unavailable` "consent store unavailable" (`packages/oauth/src/routes/consent.mts`) | `authorize_consent_store_unavailable`, `authorize_pending_consent_store_unavailable`, `pending_consent_store_unavailable`, `consent_store_unavailable` (error) | `commandTimeout` |
 | **Device code store** | device flow | only the in-memory adapter ships (`packages/device-grant/README.md` "Storage"); there is no Redis outage mode to describe, and `multi` refuses it | — | store bounded at 10 000 records (`packages/core/src/device-authorization/memory.mts`) |
 
 Two cross-cutting facts about these rows:
@@ -424,6 +428,7 @@ stream — its level is fixed at `info`.
 | --- | --- | --- |
 | audit `device.rate_limited`; log `device_verification_rate_limited` (warn) | `device-grant/src/verificationEndpoint.mts` | an **account** (the key is the authenticated subject) is guessing device codes |
 | `jwt_verify_rejected` (warn) by `reason` | `core/src/jwt/verify.mts` | `kid_unknown` = a fabricated key id; `kid_expired` = a token signed with a key whose overlap window closed (see [§6](#6-key-rotation)); `revoked` = a revocation finding, or a fail-closed refusal when the watermark cannot be compared: a denylist hit, a token predating the subject's watermark, or a token with no `iat` while a watermark is in force (#376); `revocation_unavailable` = the denylist or the watermark store was unreachable — an outage, not a finding (#408 / #459); `signature` / `alg` / `iss` / `aud` / `typ` = malformed or foreign tokens |
+| `jwt_bearer_assertion_expired` (info) | `oauth/src/grants/jwtBearer.mts` | a jwt-bearer assertion verified but had no whole second of lifetime left when its token would have been minted — past its `exp` inside the issuer entry's `clockToleranceSeconds` (default 60), or run out while the Store answered. Devices get `invalid_grant`. The issued access token **never outlives the assertion**: `expires_in` is `min(oauth.accessToken.defaultExpiresIn, exp − now)`, so a short-lived assertion gives a short-lived token — an ID-JAG's `iat` is at most an hour old and it often lives minutes — and, with no refresh token issued, the client re-exchanges a fresh assertion. A steady rate from one `issuer` is that issuer's clock running behind this server's, or clients presenting assertions at the last moment (auth.proxy#90) |
 | `csrf_origin_rejected`, `csrf_token_rejected` (warn) | `session/src/csrf.mts` | cross-site POSTs to login/logout/device verification, or a UI on an origin you forgot to list in `session.csrf.trustedOrigins` |
 | `mtls_untrusted_proxy_rejected` (warn) | `mtls/src/extractor.mts` | a forwarded certificate header from a peer not in `trusted-proxies` — a missing allowlist entry or a forgery attempt |
 | `mtls_chain_validation_failed`, `mtls_full_pki_validation_failed` (warn) | `mtls/src/extractor.mts` | certificate refused; `step` says why (`certificate revoked`, `no path to trust anchor`, …) |
@@ -490,7 +495,7 @@ None of the device events carries the user code or the device code
 
 | Connection | Configured by | Serves | Probe name |
 | --- | --- | --- | --- |
-| the shared **ioredis** socket, one per replica | `refreshTokenFamilyStore.redis.url` / `.password` (`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`, `…_PASSWORD`) | every `makeIoredisClients` purpose: refresh-token families, the six user-session stores, rate limiter, authorization codes, access-token denylist, federation tokens when Redis-backed (`templates/standalone/src/modules.mts`, `packages/redis/src/ioredis.mts`) | `redis` |
+| the shared **ioredis** socket, one per replica | `refreshTokenFamilyStore.redis.url` / `.password` (`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`, `…_PASSWORD`) | every `makeIoredisClients` purpose: refresh-token families, the six user-session stores, rate limiter, authorization codes, access-token denylist, federation tokens and the consent stores when Redis-backed (`templates/standalone/src/modules.mts`, `packages/redis/src/ioredis.mts`) | `redis` |
 | a **node-redis** client via connect-redis | `session.storage.redis.url` / `.password` (`SESSION_STORAGE_REDIS_URL`, `…_PASSWORD`) | the express-session cookie store only; its key layout and TTL are connect-redis's own — this repo passes it nothing but the client (`packages/session/src/store/factory.mts`) | `session-store` |
 
 Plus one short-lived **duplicate** of the shared socket per refresh rotation:
@@ -515,8 +520,8 @@ claim the code makes is for `sAddWithTtl`, a single-key `MULTI`.
 Prefixes are the shipped defaults; every one is overridable so two deployments
 can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 `REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX`, `CLIENT_CODE_KEY_PREFIX`,
-`REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX`, `REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX`;
-`packages/core/config/reference.conf`).
+`REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX`, `REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX`,
+`REDIS_CONSENT_STORE_KEY_PREFIX`; `packages/core/config/reference.conf`).
 
 | Key | Type / value | TTL comes from | Source |
 | --- | --- | --- | --- |
@@ -534,6 +539,9 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `ft:lock:<sid>:<federation>` | string, advisory lock token | the lock's own | `packages/redis/src/internal/lock.mts` |
 | `chal:…`, `replay:…` | strings `"1"` | the challenge / replay window, `SET … PX … NX` | `packages/redis/src/challenges.mts`, `replay-seen-set.mts` |
 | `dpop:replay:<jkt>:<jti>` | string `"1"` | the proof's `ttlSeconds` | `packages/redis/src/dpop-replay-store.mts` |
+| `consent:rec:<len>:<sub>\|<len>:<clientId>` | hash `{scopes (JSON array), grantedAt, expiresAt?}` | **none** for a consent recorded until revoked — which is what `POST /oauth/consent` writes; for a record carrying `expiresAt`, that expiry plus 5 minutes' slack (`CONSENT_EXPIRY_SLACK_MS`). Expiry is judged by `expiresAt` on the reading replica's clock; the TTL only reclaims records nobody reads again | `packages/redis/src/consent-store.mts`, `ioredis.mts` (`LUA_CONSENT_GRANT`) |
+| `consent:{pending}:ch:<challenge>` | hash `{record (JSON), sessionId, expiresAt}` | the parked request's `expiresAt` (10 minutes, `PENDING_CONSENT_TTL_MS`) plus the same slack; consumed with its index entry in one script | `packages/redis/src/consent-store.mts`, `ioredis.mts` (`LUA_PENDING_CONSENT_*`) |
+| `consent:{pending}:sess:<sessionId>` | sorted set of challenges, score = the order they were parked | raised to its longest-lived member's; at most `PENDING_CONSENT_PER_SESSION_LIMIT` (16) members, the first-parked evicted past it. `{pending}` is a Cluster hash tag: every parked request shares one slot | same |
 
 ### Sizing
 
@@ -560,6 +568,10 @@ lifetime) per family:
   small and wrong.
 - **Federation tokens** — one encrypted envelope per (session, federation)
   for 24 h plus one index set per session, only when federation is enabled.
+- **Consent** — one small hash per (subject, client that is not first-party)
+  the user has consented to, until revoked; one parked request per consent
+  page shown, for at most 15 minutes (10 plus the slack), 16 per session at
+  most. Only with `CONSENT_STORE_ADAPTER=redis`.
 
 The device-code store is not Redis: the memory adapter caps itself at 10 000
 records "at a few hundred bytes each"

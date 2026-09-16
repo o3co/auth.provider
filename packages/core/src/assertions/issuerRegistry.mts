@@ -116,7 +116,13 @@ export interface AssertionIssuerEntry {
 	 *   verifier.
 	 */
 	readonly profile?: "rfc7523" | "id-jag";
-	/** Clock skew for `exp` / `nbf`, in seconds. Default 60. */
+	/**
+	 * Clock skew for `exp` / `nbf`, in seconds. Default 60.
+	 *
+	 * An assertion admitted past its `exp` inside this tolerance still
+	 * verifies, but has no lifetime left for a token to inherit: the
+	 * jwt-bearer grant refuses it (auth.proxy#90).
+	 */
 	readonly clockToleranceSeconds?: number;
 }
 

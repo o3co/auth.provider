@@ -349,37 +349,49 @@ describe("main (argv parsing and directory derivation)", () => {
 	let argvBackup: string[];
 
 	beforeEach(() => {
+		// Both backups are taken before anything is changed, so the afterEach
+		// below can always put the process back the way it found it.
 		cwdBackup = process.cwd();
+		argvBackup = process.argv;
 		workdir = mkdtempSync(join(tmpdir(), "create-auth-provider-main-"));
 		process.chdir(workdir);
-		argvBackup = process.argv;
 	});
 
 	afterEach(() => {
-		process.chdir(cwdBackup);
 		process.argv = argvBackup;
+		process.chdir(cwdBackup);
 		rmSync(workdir, { recursive: true, force: true });
 	});
 
-	const runMain = (args: string[]): { exitCode: number | null; stderr: string } => {
+	const runMain = (args: string[]): { exitCode: number; stderr: string } => {
 		process.argv = ["node", "cli", ...args];
 		const exitSpy = vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
 			throw new Error(`__exit__:${code ?? 0}`);
 		}) as never);
 		const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		const logSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-		let exitCode: number | null = 0;
 		try {
-			main();
-		} catch (e) {
-			const m = /__exit__:(\d+)/.exec((e as Error).message);
-			exitCode = m ? Number(m[1]) : null;
+			let exitCode = 0;
+			try {
+				main();
+			} catch (e) {
+				// Only the `process.exit` stand-in above is an outcome. Anything else
+				// `main()` throws is a failure of the scaffold itself and must reach
+				// the test report under its own name: #556 saw it folded into
+				// `exitCode: null`, which surfaced as "expected null to be +0" and
+				// hid the ENOENT that explained it.
+				const m = e instanceof Error ? /^__exit__:(\d+)$/.exec(e.message) : null;
+				if (!m) throw e;
+				exitCode = Number(m[1]);
+			}
+			return { exitCode, stderr: errSpy.mock.calls.map((c) => c.join(" ")).join("\n") };
+		} finally {
+			// Restored on every path, the rethrow included, so one failing case
+			// cannot leave `process.exit` or the console stubbed for the next.
+			exitSpy.mockRestore();
+			errSpy.mockRestore();
+			logSpy.mockRestore();
 		}
-		const stderr = errSpy.mock.calls.map((c) => c.join(" ")).join("\n");
-		exitSpy.mockRestore();
-		errSpy.mockRestore();
-		logSpy.mockRestore();
-		return { exitCode, stderr };
 	};
 
 	// Positive: unscoped, no --dir

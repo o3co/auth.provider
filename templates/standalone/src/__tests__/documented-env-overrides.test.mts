@@ -159,7 +159,9 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	ACCESS_TOKEN_DENYLIST_ADAPTER: "redis",
 	// #484: the replay seen-set behind private_key_jwt client authentication.
 	REPLAY_SEEN_SET_ADAPTER: "redis",
-	CONSENT_STORE_ADAPTER: "none",
+	// #561: the consent stores' shared backend and its namespace.
+	CONSENT_STORE_ADAPTER: "redis",
+	REDIS_CONSENT_STORE_KEY_PREFIX: "tenant-a:consent:",
 	REDIS_ACCESS_TOKEN_DENYLIST_KEY_PREFIX: "atdeny:",
 	REDIS_SESSION_STORES_KEY_PREFIX: "ss:",
 	REFRESH_TOKEN_FAMILY_STORE_KEY_PREFIX: "rtfam:",
@@ -339,6 +341,8 @@ describe("#288: the shipped config boots with every documented override supplied
 		expect(config.session.maxAge).toBe(3600000);
 		expect(config.session.csrf?.ttlSeconds).toBe(7200);
 		expect(config.oauth.nonce?.maxLength).toBe(256);
+		expect(config.consentStore?.adapter).toBe("redis");
+		expect(config.redisConsentStore?.keyPrefix).toBe("tenant-a:consent:");
 		// #529: the comma-separated lists become lists, trimmed; the numbers, numbers.
 		expect(config.oauth.clientIdMetadataDocuments).toEqual({
 			enabled: true,

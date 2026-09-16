@@ -324,6 +324,29 @@ describe("#512 — the shipped suite is green outside this repository", () => {
 			).toBe(false);
 		}
 	});
+
+	it("ships every setup file vitest.config.mts loads, into the `test` image as well (#556)", async () => {
+		// vitest refuses to start when a `setupFiles` entry is missing, so a setup
+		// file the image never copied fails the whole of `make test`, not one test.
+		const configPath = fileURLToPath(new URL("../../vitest.config.mts", import.meta.url));
+		const { default: config } = (await import(configPath)) as {
+			default: { test?: { setupFiles?: string | readonly string[] } };
+		};
+		const setupFiles = [config.test?.setupFiles ?? []].flat();
+		expect(setupFiles, "the #556 supertest loopback guard is not wired in").not.toHaveLength(0);
+
+		const copied = copiedIntoStage(read("/Dockerfile"), "test");
+		const dockerignore = read("/.dockerignore");
+		for (const entry of setupFiles) {
+			const file = entry.replace(/^\.\//, "");
+			expect(existsSync(`${standaloneDir}${file}`), `${file} does not exist`).toBe(true);
+			expect(copied.has(file), `${file} is not copied into the test image`).toBe(true);
+			expect(
+				dockerignoreExcludes(dockerignore, file),
+				`${file} is excluded from the build context`,
+			).toBe(false);
+		}
+	});
 });
 
 /**

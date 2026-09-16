@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import { fileURLToPath } from "node:url";
+
 /**
  * The workspace-wide test deadline policy (#357) — one floor, one reason.
  *
@@ -42,3 +44,30 @@ export const WORKSPACE_TEST_TIMEOUTS = {
 	testTimeout: 20_000,
 	hookTimeout: 20_000,
 } as const;
+
+/**
+ * Setup files every package's vitest run loads (#556).
+ *
+ * `templates/standalone/vitest.supertest-loopback.mts` binds the server
+ * supertest starts to `127.0.0.1`, the address supertest dials. Unpatched,
+ * macOS can hand that server a port another process holds on `127.0.0.1`, and
+ * the request hangs on the other process until the test timeout.
+ *
+ * The file lives in the template because the template must carry it: it is
+ * copied verbatim into scaffolded projects, cannot import anything from this
+ * workspace, and wires the file into its own `vitest.config.mts`. The packages
+ * load that same file rather than a copy of it, so the workspace and every
+ * scaffold run one implementation. It finds supertest from the package that
+ * owns the running test file and does nothing where that package does not
+ * declare supertest, so it is wired into every package: one that adds supertest
+ * later is covered without anyone remembering to. A package config that sets
+ * its own `setupFiles` must keep these in the list.
+ *
+ * The path is absolute because vitest resolves `setupFiles` against each
+ * package's root.
+ */
+export const WORKSPACE_TEST_SETUP: { readonly setupFiles: string[] } = {
+	setupFiles: [
+		fileURLToPath(new URL("./templates/standalone/vitest.supertest-loopback.mts", import.meta.url)),
+	],
+};
