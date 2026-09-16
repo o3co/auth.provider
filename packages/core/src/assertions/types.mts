@@ -71,6 +71,10 @@ export interface AssertionVerificationResult {
 	 * — a signed JWT, a platform attestation with a validity window — reports
 	 * it. The bundled registry verifier always does, from the `exp` it
 	 * requires.
+	 *
+	 * Present, it must be a finite number. Anything else — a numeric string,
+	 * `null`, `NaN`, `Infinity` — is refused as `invalid_grant`: a malformed
+	 * expiry is neither an expiry nor its absence.
 	 */
 	readonly expiresAt?: number;
 }
