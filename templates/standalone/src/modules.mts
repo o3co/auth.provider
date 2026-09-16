@@ -361,11 +361,12 @@ export const storesModule: Module = defineModule({
 
 /**
  * Shared ioredis clients module — opens ONE long-lived ioredis connection
- * per replica, wraps it via `makeIoredisClients()` (returns 13 typed
+ * per replica, wraps it via `makeIoredisClients()` (returns 16 typed
  * per-purpose clients), and exposes the slots consumed by the standalone's
  * Redis-backed adapters (refresh-token-family + 4 user-session stores +
  * subject-level revocation index + watermark + rate limiter + code
- * repository + access-token denylist).
+ * repository + access-token denylist + replay seen-set + federation token
+ * store + device-code store + the consent stores).
  *
  * Per F4 PR1 (D-2 v2) + Wave 5d unification: the previous design opened a
  * separate ioredis socket per Redis-backed module (3+ sockets per replica).
@@ -503,6 +504,23 @@ export const standaloneRedisClientsModule: Module = defineModule({
 		deviceCodeStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
 			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.deviceCodeStoreClient;
+		},
+		// #561: the consent stores' clients, off the same shared socket.
+		// `redisConsentStoreModule` requires both — it provides the consent
+		// records and the parked requests together — and `buildModules` selects
+		// it under `consentStore.adapter = "redis"`.
+		consentStoreClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.consentStoreClient;
+		},
+		pendingConsentStoreClient: async ({
+			config,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.pendingConsentStoreClient;
 		},
 		// #456: the federation-token-store client, off the same shared socket.
 		// `redisFederationTokenStoreModule` requires it, and nothing provided

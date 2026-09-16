@@ -60,6 +60,7 @@ import {
 	defineModule,
 	InMemoryClientRepository,
 	InMemoryUserRepository,
+	memoryRefreshTokenFamilyStoreModule,
 	registerBuiltinKeyStores,
 	replicaUnsafeReason,
 } from "@o3co/auth-provider-core";
@@ -162,6 +163,9 @@ const ALL_REDIS_ENV: Readonly<Record<string, string>> = {
 	REPLAY_SEEN_SET_ADAPTER: "redis",
 	FEDERATION_TOKEN_STORE_TYPE: "redis",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: ENCRYPTION_KEY,
+	// #561: the consent step for clients that are not first-party, on the
+	// shared store — the one switch value `multi` accepts besides `none`.
+	CONSENT_STORE_ADAPTER: "redis",
 };
 
 function resolveConfig(env: Record<string, string>): AppConfig {
@@ -394,6 +398,60 @@ describe('#456: federationTokenStore.type = "redis" in the standalone', () => {
 		expect(names).not.toContain("redis-federation-token-store");
 		handleRef = await boot(config);
 		expect(handleRef.components.federationTokenStore?.kind).toBe("memory");
+	});
+});
+
+describe('#561: consentStore.adapter = "redis" in the standalone', () => {
+	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
+
+	afterEach(async () => {
+		await handleRef?.dispose();
+		handleRef = undefined;
+	});
+
+	it("selects the Redis consent module, providing both slots, and not the memory one", () => {
+		const modules = modulesFor(resolveConfig(ALL_REDIS_ENV));
+		const names = modules.map((m) => m.name);
+		expect(names).toContain("redis-consent-store");
+		expect(names).not.toContain("core-consent-store-memory");
+		// Exactly one provider for each slot: the consent step refuses a
+		// composition with one and not the other, and two would collide.
+		for (const slot of ["consentStore", "pendingConsentStore"]) {
+			const providers = modules.filter((m) => Object.keys(m.provides ?? {}).includes(slot));
+			expect(
+				providers.map((m) => m.name),
+				slot,
+			).toEqual(["redis-consent-store"]);
+		}
+	});
+
+	it("pulls the shared clients module in for the consent stores alone", () => {
+		// Every other store on memory, single replica: the consent module still
+		// needs its two client slots, which only the shared clients module
+		// provides — the #439 shape otherwise.
+		const config = resolveConfig({
+			...ALL_REDIS_ENV,
+			DEPLOYMENT_MODE: "single",
+			USER_SESSION_STORES_ADAPTER: "memory",
+			OAUTH_CODE_ADAPTER: "memory",
+			RATE_LIMITER_ADAPTER: "memory",
+			ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
+			REPLAY_SEEN_SET_ADAPTER: "memory",
+			FEDERATION_TOKEN_STORE_TYPE: "memory",
+		});
+		const names = buildModules(config, {
+			keyStoreModule: testKeyStoreModule,
+			repositoriesModule: testRepositoriesModule,
+			refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+		}).map((m) => m.name);
+		expect(names).toContain("redis-consent-store");
+		expect(names).toContain("standalone:redis-clients");
+	});
+
+	it("boots under DEPLOYMENT_MODE=multi with both slots resolved to the Redis adapters", async () => {
+		handleRef = await boot(resolveConfig(ALL_REDIS_ENV));
+		expect(handleRef.components.consentStore?.kind).toBe("redis");
+		expect(handleRef.components.pendingConsentStore?.kind).toBe("redis");
 	});
 });
 
