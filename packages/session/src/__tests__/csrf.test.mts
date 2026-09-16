@@ -454,7 +454,11 @@ describe("csrf — guard acceptance rule", () => {
 
 	it("accepts a same-origin browser request that carries no token", async () => {
 		const { app } = buildApp();
-		const server = app.listen(0);
+		// #556: bound to the loopback address the request dials — a hostless
+		// listen can share its port with another process's 127.0.0.1 socket.
+		const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
+			const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+		});
 		try {
 			const address = server.address();
 			const port = typeof address === "object" && address !== null ? address.port : 0;

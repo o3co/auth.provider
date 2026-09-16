@@ -3,11 +3,13 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { defineConfig } from "vitest/config";
-import { WORKSPACE_TEST_TIMEOUTS } from "../../vitest.shared.mts";
+import { WORKSPACE_TEST_SETUP, WORKSPACE_TEST_TIMEOUTS } from "../../vitest.shared.mts";
 
 export default defineConfig({
 	test: {
 		...WORKSPACE_TEST_TIMEOUTS,
+		// #556: supertest's server binds the loopback address it dials — see vitest.shared.mts.
+		...WORKSPACE_TEST_SETUP,
 		// Raises the #357 workspace floor (never lowers it): testcontainers
 		// boot + Redis warm-up takes time on first run.
 		testTimeout: 30_000,
