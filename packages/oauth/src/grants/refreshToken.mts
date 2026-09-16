@@ -26,6 +26,7 @@ import {
 	generateTokenResponse,
 	isRevocationUnavailable,
 	matchConfirmation,
+	resolveAccessTokenLifetime,
 	verifyJwt,
 	wellFormedAcr,
 	wellFormedAmr,
@@ -551,6 +552,10 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 			// are never issued.
 			const issuedAt = Math.floor(Date.now() / 1000);
 			const newRefreshJti = randomUUID();
+			// Resolved before the reservation, not beside the signature: a
+			// configuration the resolver refuses must fail before the family
+			// store has spent the presented token, not after.
+			const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
 			const requestedRefreshExpiresIn = config.oauth.refreshToken.expiresIn;
 			const newRefreshExp = issuedAt + requestedRefreshExpiresIn;
 			// What the rotation actually committed, once it has: IH-13 sets a
@@ -790,7 +795,7 @@ export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler =
 				newAccessToken = await generateToken(
 					{ family_id: newFamilyId, ...(sid ? { sid } : {}), ...authenticationClaims },
 					{
-						expiresIn: config.oauth.accessToken.expiresIn,
+						expiresIn: accessTokenExpiresIn,
 						keyStore,
 						issuer,
 						audience: finalAudience,

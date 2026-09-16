@@ -79,12 +79,17 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | `3600` | アクセストークンの有効期間（秒）。正の整数、上限は 1 年（`31536000`）。 |
+| `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` | `3600` | リクエストが有効期間を指定しないときに全グラントが発行するアクセストークンの有効期間（秒）。正の整数、上限は 1 年（`31536000`）。 |
+| `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN` | デフォルトと同じ | token exchange リクエストの `expires_in` パラメータで得られる上限。超えるリクエストはこの値に切り詰められる。未設定ならデフォルトと同じで、設定しない限り延長されない。デフォルトがこれを超えると両キーを名指しして起動失敗。オフラインで検証するリソースサーバーに対し、交換で発行されたトークンが失効後も通用し得る期間の上限でもある。 |
+| `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | — | `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` の**非推奨（deprecated）**エイリアス（config キーでは `oauth.accessToken.expiresIn` が `oauth.accessToken.defaultExpiresIn` のエイリアス）。新しい変数が未設定の間だけ読まれる。値は新しい変数へ移すこと。 |
 | `OAUTH_REFRESH_TOKEN_EXPIRES_IN` | `86400` | リフレッシュトークンの有効期間（秒）。正の整数、上限は 1 年（`31536000`）。 |
 
 これらを空文字で export すると fallback ではなく起動失敗になる: HOCON は `FOO=` を
 `""` に解決し、それが `0` に coerce され、有効期間 0 は「発行時点で期限切れ」の
 トークンを作るため。
+
+`expires_in` リクエストパラメータを読むのは token exchange（RFC 8693）だけで、
+他のグラントはそれを無視してデフォルトを発行する。
 
 ### グラントタイプ
 

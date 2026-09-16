@@ -121,6 +121,26 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		expect(payload.scope).toBe("read:foo");
 	});
 
+	it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+		const handler = createClientCredentialsGrant({
+			...baseDeps,
+			config: {
+				oauth: {
+					jwt: { issuer: "https://test.example" },
+					accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
+				},
+			} as unknown as GrantDependencies["config"],
+		});
+		const { result } = await handler.handle(
+			makeCtx(makeClient(), { grant_type: "client_credentials", expires_in: "7200" }),
+		);
+
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${result.status}`);
+		expect(result.tokens.expires_in).toBe(600);
+		const payload = decodeJwt(result.tokens.access_token);
+		expect((payload.exp as number) - (payload.iat as number)).toBe(600);
+	});
+
 	// #396: an omitted scope draws on the client's DECLARED default — never on
 	// the whole allowlist, which made "forgot to send scope" the maximum grant.
 	it("grants defaultScopes when scope is omitted and the client declares them", async () => {

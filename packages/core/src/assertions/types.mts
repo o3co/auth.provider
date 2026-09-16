@@ -58,7 +58,7 @@ export interface AssertionVerificationResult {
 	 * (auth.proxy#90).
 	 *
 	 * A ceiling on the issued token's lifetime: the jwt-bearer grant mints
-	 * `min(oauth.accessToken.expiresIn, expiresAt − now)`, so a token never
+	 * `min(oauth.accessToken.defaultExpiresIn, expiresAt − now)`, so a token never
 	 * outlives the assertion it was exchanged for, and refuses an assertion
 	 * with no whole second left (`invalid_grant`). Report the claim as it is:
 	 * one inside a verifier's clock tolerance is already past, and clamping

@@ -104,6 +104,9 @@ export function makeValidCoreConfig() {
 					},
 				},
 			},
+			// The shape `reference.conf` loads to when no lifetime is overridden:
+			// the shipped literal sits on the deprecated `expiresIn`, and
+			// `resolveAccessTokenLifetime` reads it as a 3600 s default and max.
 			accessToken: { expiresIn: 3600 },
 			refreshToken: {
 				expiresIn: 86400,

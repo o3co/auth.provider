@@ -227,6 +227,40 @@ describe("createAuthorizationGrant", () => {
 			expect(sessionMutation?.clear).not.toContain("granted_scopes");
 		});
 
+		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+			// A configuration that carries only the new keys: read through
+			// `resolveAccessTokenLifetime`, not the deprecated `expiresIn`, which
+			// is absent here. Only token exchange honours `expires_in`.
+			const deps = {
+				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "test-sid-1", ...validCode })),
+				config: {
+					oauth: {
+						...mockConfig.oauth,
+						accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
+					},
+				} as unknown as GrantDependencies["config"],
+			};
+			const handler = createAuthorizationGrant(deps);
+			const { result } = await handler.handle({
+				body: {
+					code: "abc",
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_verifier: CODE_VERIFIER,
+					expires_in: "7200",
+				},
+				session: { code: "abc", code_client_id: "client1", user: { id: "u1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+
+			if (!("tokens" in result)) throw new Error(`expected tokens, got ${result.status}`);
+			expect(result.tokens.expires_in).toBe(600);
+			const decoded = decodeJwt(result.tokens.access_token);
+			expect((decoded.exp as number) - (decoded.iat as number)).toBe(600);
+		});
+
 		it("registers initial rt+jwt via refreshTokenFamilyRotation.register (CP-2)", async () => {
 			const registerSpy = vi.fn(async () => {});
 			const refreshTokenFamilyRotation: RefreshTokenFamilyRotation = {

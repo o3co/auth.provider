@@ -104,6 +104,15 @@ export interface BuildModulesOverrides {
 }
 
 /**
+ * The access-token lifetime core's `reference.conf` ships on the deprecated
+ * `oauth.accessToken.expiresIn`. Not a default — nothing mints with it — only
+ * what an unmodified deployment carries there, so the deprecation line can tell
+ * an operator's override from the shipped value. Pinned against the real file
+ * by `access-token-lifetime-alias.test.mts`.
+ */
+const SHIPPED_ACCESS_TOKEN_EXPIRES_IN = 3600;
+
+/**
  * Compose the standalone v0.5.0 module list from `config`. Splitting this
  * out of `app.mts` keeps the composition root testable: a smoke test can
  * verify that disabling a federation removes its module pair from the
@@ -184,6 +193,26 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		codeRepositoryAdapter = "redis";
 	} else {
 		codeRepositoryAdapter = "memory";
+	}
+
+	// The access-token lifetime's deprecated alias: `oauth.accessToken.expiresIn`
+	// (OAUTH_ACCESS_TOKEN_EXPIRES_IN) is still read as the default while
+	// `defaultExpiresIn` is unset — `resolveAccessTokenLifetime` does that, and
+	// this only says so. Core's `reference.conf` keeps the shipped lifetime on
+	// the deprecated key, so "the alias supplied the default" is every
+	// deployment that set nothing; an override of it is the one case with
+	// something to move, the reading `legacyCodeType === "redis"` gives above.
+	// See CHANGELOG for the removal version.
+	const accessToken = config.oauth.accessToken;
+	if (
+		accessToken.defaultExpiresIn === undefined &&
+		accessToken.expiresIn !== SHIPPED_ACCESS_TOKEN_EXPIRES_IN
+	) {
+		console.warn(
+			"[buildModules] `oauth.accessToken.expiresIn` (OAUTH_ACCESS_TOKEN_EXPIRES_IN) is " +
+				"deprecated; use `oauth.accessToken.defaultExpiresIn` " +
+				"(OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN) instead — see CHANGELOG for the removal version.",
+		);
 	}
 
 	const refreshTokenFamilyModules: readonly Module[] = overrides.refreshTokenFamilyModules ?? [

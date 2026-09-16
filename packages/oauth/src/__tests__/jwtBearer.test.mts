@@ -114,6 +114,22 @@ describe("jwt-bearer grant — the happy path (#301)", () => {
 		expect(decodeJwt(result.tokens.access_token as string).sub).toBe("user-42");
 	});
 
+	it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+		const { result } = await build({
+			config: {
+				oauth: {
+					jwt: { issuer: "https://auth.example" },
+					accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
+				},
+			} as unknown as AppConfig,
+		}).handle(ctx({ expires_in: "7200" }));
+
+		if (!("tokens" in result)) expect.fail("expected tokens");
+		expect(result.tokens.expires_in).toBe(600);
+		const payload = decodeJwt(result.tokens.access_token as string);
+		expect((payload.exp as number) - (payload.iat as number)).toBe(600);
+	});
+
 	it("hands the Store exactly the handle the verifier returned", async () => {
 		const authenticateByToken = vi.fn(async () => ({ id: "u-1" }));
 		await build({
@@ -1086,6 +1102,30 @@ describe("jwt-bearer grant — the token never outlives the assertion (auth.prox
 		}).handle(ctx());
 		expect(result.status).toBe(400);
 		expect("error" in result && result.error).toBe("invalid_grant");
+	});
+
+	it("mints no exp past the assertion's when the clock moves between the cap and the mint", async () => {
+		// A clock that ticks a whole second on every read: any two reads land in
+		// different seconds. Capping against one read and stamping `exp` from
+		// another mints `exp = later second + (assertion exp − earlier second)`,
+		// past the assertion. Measuring both from one issuance instant cannot.
+		let clockMs = NOW * 1000;
+		const spy = vi.spyOn(Date, "now").mockImplementation(() => {
+			const now = clockMs;
+			clockMs += 1000;
+			return now;
+		});
+		try {
+			const expiresAt = NOW + 60;
+			const { result } = await build({
+				verifier: verifierFor({ subjectHandle: "device:abc", expiresAt }),
+			}).handle(ctx());
+			const { expiresIn, claims } = tokensOf(result);
+			expect(claims.exp as number).toBeLessThanOrEqual(expiresAt);
+			expect((claims.exp as number) - (claims.iat as number)).toBe(expiresIn);
+		} finally {
+			spy.mockRestore();
+		}
 	});
 
 	it("refuses an expiresAt that is not a finite number — neither an expiry nor no expiry", async () => {

@@ -36,7 +36,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
 import express from "express";
-import { exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
+import { decodeJwt, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
 import { beforeAll, describe, expect, it } from "vitest";
 import { deviceGrantModule } from "#/module.mjs";
@@ -469,6 +469,61 @@ describe("deviceGrantModule — disabled surface", () => {
 		const handler = factory({ config: { oauth: { deviceAuthorization: { enabled: false } } } });
 		const { result } = await handler.handle({});
 		expect(result.error).toBe("unsupported_grant_type");
+	});
+});
+
+describe("deviceGrantModule — the access-token lifetime", () => {
+	it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+		// The module hands the grant its lifetime at composition. Only the new
+		// keys are configured, so reading the deprecated `expiresIn` would hand
+		// it `undefined` and mint a token with no `exp` claim at all.
+		const factory = deviceGrantModule.contributes?.grants?.[DEVICE_CODE_GRANT_TYPE] as (
+			deps: unknown,
+		) => {
+			handle(ctx: unknown): Promise<{ result: { tokens?: Record<string, unknown> } }>;
+		};
+		const approvedStore = {
+			...createMemoryDeviceCodeStore(),
+			poll: async () => ({
+				status: "approved" as const,
+				authorization: {
+					userCode: "BCDF-GHJK",
+					clientId: CONFIDENTIAL_ID,
+					expiresAtMs: Date.now() + 600_000,
+					intervalSeconds: 5,
+					status: "approved" as const,
+					subject: "user-1",
+					grantedScope: ["openid"],
+				},
+			}),
+		};
+		const base = makeValidCoreConfig();
+		const handler = factory({
+			config: {
+				oauth: {
+					...base.oauth,
+					accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
+					deviceAuthorization: {
+						enabled: true,
+						"verification-uri": "https://example.test/device",
+					},
+				},
+			},
+			deviceCodeStore: approvedStore,
+			keyStore: createSymmetricKeyStore("device-lifetime-secret.at-least-32-bytes"),
+		});
+
+		const { result } = await handler.handle({
+			body: { device_code: "device-code-1", expires_in: "7200" },
+			session: {},
+			metadata: {},
+			issuer: "https://as.example.test",
+			authenticatedClient: confidentialClient,
+		});
+
+		expect(result.tokens?.expires_in).toBe(600);
+		const payload = decodeJwt(result.tokens?.access_token as string);
+		expect((payload.exp as number) - (payload.iat as number)).toBe(600);
 	});
 });
 

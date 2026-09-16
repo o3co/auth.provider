@@ -21,6 +21,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isEmailVerified,
+	resolveAccessTokenLifetime,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
@@ -200,7 +201,7 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 			// logout at any point and keeps accepting the token until it expires.
 			// That is inherent to a self-contained token, not a gap these checks
 			// left open — the lever for such a deployment is a short
-			// `accessToken.expiresIn`, not a longer one.
+			// `accessToken.defaultExpiresIn`, not a longer one.
 			//
 			// No `family_id` is stamped alongside it: this grant issues no refresh
 			// token, so a family id would name a family nothing ever opens or
@@ -229,7 +230,7 @@ export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
 								{ ...(sid ? { sid } : {}), ...(trackedAmr ? { amr: trackedAmr } : {}) },
 								{
 									keyStore,
-									expiresIn: config.oauth.accessToken.expiresIn,
+									expiresIn: resolveAccessTokenLifetime(config).defaultExpiresIn,
 									issuer,
 									audience,
 									subject: userId ?? null,

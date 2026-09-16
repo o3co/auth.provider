@@ -17,7 +17,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type AppConfig, AppConfigSchema } from "@o3co/auth-provider-core";
+import {
+	type AppConfig,
+	AppConfigSchema,
+	resolveAccessTokenLifetime,
+} from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { describe, expect, it } from "vitest";
@@ -83,6 +87,10 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_LEGACY_TYP_ACCEPT: "true",
 
 	// --- oauth tokens / policy ----------------------------------------
+	OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "900",
+	OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN: "7200",
+	// Deprecated alias of the default. Exported alongside the new variable on
+	// purpose, with a different value: the new variable must win.
 	OAUTH_ACCESS_TOKEN_EXPIRES_IN: "3600",
 	OAUTH_REFRESH_TOKEN_EXPIRES_IN: "86400",
 	OAUTH_REFRESH_TOKEN_UNKNOWN_FAMILY_POLICY: "reject",
@@ -322,7 +330,13 @@ describe("#288: the shipped config boots with every documented override supplied
 		expect(config.http.port).toBe(3000);
 		expect(config.http.readinessTimeoutMs).toBe(1500);
 		expect(config.http.trustProxy).toEqual(["10.0.0.0/8", "loopback"]);
-		expect(config.oauth.accessToken.expiresIn).toBe(3600);
+		// The new default wins over the deprecated variable, and the parsed
+		// config mirrors it onto the old key for readers that predate the split.
+		expect(resolveAccessTokenLifetime(config)).toEqual({
+			defaultExpiresIn: 900,
+			maxExpiresIn: 7200,
+		});
+		expect(config.oauth.accessToken.expiresIn).toBe(900);
 		expect(config.oauth.refreshToken.expiresIn).toBe(86400);
 		expect(config.session.maxAge).toBe(3600000);
 		expect(config.session.csrf?.ttlSeconds).toBe(7200);
@@ -511,6 +525,26 @@ describe("#288: the shipped config boots with every documented override supplied
 				}),
 			).toThrow(/allowUnmarkedClients/);
 		});
+
+		it("refuses an access-token default above the max, naming both keys", () => {
+			expect(() =>
+				buildResolvedConfig({
+					...DOCUMENTED_ENV,
+					OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN: "7200",
+					OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN: "3600",
+				}),
+			).toThrow(/defaultExpiresIn.*maxExpiresIn/s);
+		});
+
+		for (const name of [
+			"OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN",
+			"OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN",
+			"OAUTH_ACCESS_TOKEN_EXPIRES_IN",
+		]) {
+			it(`refuses an empty ${name} rather than minting already-expired tokens`, () => {
+				expect(() => buildResolvedConfig({ ...DOCUMENTED_ENV, [name]: "" })).toThrow();
+			});
+		}
 
 		it("still refuses an empty SESSION_CSRF_TTL_SECONDS (#272)", () => {
 			// Pinned alongside the boolean cases because it is the same trap

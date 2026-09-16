@@ -108,7 +108,11 @@ oauth {
       }
     }
   }
-  accessToken  { expiresIn = 3600 }   # 秒、正の整数、上限 1 年
+  # 秒、正の整数、上限 1 年。`defaultExpiresIn` は全グラントが発行する有効期間、
+  # `maxExpiresIn`（未設定ならデフォルトと同じ）は token exchange リクエストの
+  # `expires_in` で得られる上限。`expiresIn` は `defaultExpiresIn` の非推奨
+  # （deprecated）エイリアスで、`defaultExpiresIn` 未設定の間だけ読まれる。
+  accessToken  { defaultExpiresIn = 3600, maxExpiresIn = 3600 }
   refreshToken { expiresIn = 86400 }  # 秒、正の整数、上限 1 年
 }
 ```

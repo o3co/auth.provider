@@ -134,6 +134,31 @@ describe("createSessionGrant", () => {
 			expect("tokens" in result).toBe(true);
 		});
 
+		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+			const handler = createSessionGrant(
+				makeDeps({
+					config: {
+						oauth: {
+							...mockConfig.oauth,
+							accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
+						},
+					} as unknown as GrantDependencies["config"],
+				}),
+			);
+			const { result } = await handler.handle({
+				body: { expires_in: "7200" },
+				session: { isAuthenticated: true, user: { id: "user1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
+			});
+
+			if (!("tokens" in result)) throw new Error(`expected tokens, got ${result.status}`);
+			expect(result.tokens.expires_in).toBe(600);
+			const decoded = decodeJwt(result.tokens.access_token);
+			expect((decoded.exp as number) - (decoded.iat as number)).toBe(600);
+		});
+
 		it("binds audience and azp to the authenticated client", async () => {
 			const handler = createSessionGrant(makeDeps());
 			const ctx: GrantContext = {

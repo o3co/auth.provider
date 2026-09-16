@@ -28,6 +28,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isEmailVerified,
+	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import {
@@ -106,7 +107,7 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  * ## How long the token lives
  *
  * Never longer than the assertion (auth.proxy#90): `expires_in` is
- * `min(oauth.accessToken.expiresIn, expiresAt − now)`, from the verifier's
+ * `min(oauth.accessToken.defaultExpiresIn, expiresAt − now)`, from the verifier's
  * `expiresAt` — the assertion's `exp` — rounded down, taken at minting. A
  * short-lived assertion yields a short-lived token, and no refresh token is
  * issued, so a client re-exchanges a fresh assertion. A verifier that reports
@@ -423,7 +424,13 @@ export const createJwtBearerGrant = (
 			// token, so the expiry the issuing authority set stopped bounding
 			// anything once exchanged. Taken here, at minting, rather than at
 			// verification: the Store and the policy run in between.
-			let expiresIn = config.oauth.accessToken.expiresIn;
+			let expiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
+			// One issuance instant for both the cap and the token. Read twice,
+			// a second boundary between the reads would stamp `exp` a second
+			// past the assertion's; `iat` is this instant's whole second, so
+			// `iat + floor(expiresAt − now)` can never exceed `expiresAt`.
+			const nowSeconds = Date.now() / 1000;
+			const issuedAt = Math.floor(nowSeconds);
 			const { expiresAt } = verified;
 			if (expiresAt !== undefined) {
 				// Present means a finite number. The port is typed, not checked:
@@ -432,7 +439,7 @@ export const createJwtBearerGrant = (
 				// below — a malformed expiry is neither an expiry nor its absence.
 				const remaining =
 					typeof expiresAt === "number" && Number.isFinite(expiresAt)
-						? Math.floor(expiresAt - Date.now() / 1000)
+						? Math.floor(expiresAt - nowSeconds)
 						: Number.NaN;
 				// `<= 0` is the assertion already past `exp` — admitted inside a
 				// verifier's clock tolerance, or run out while the Store answered
@@ -469,6 +476,7 @@ export const createJwtBearerGrant = (
 				{ ...(clientId ? { client_id: clientId } : {}) },
 				{
 					expiresIn,
+					issuedAt,
 					keyStore,
 					issuer: ctx.issuer,
 					audience,

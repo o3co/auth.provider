@@ -300,6 +300,30 @@ describe("createWebAuthnGrant — unbound requests are unchanged (#489)", () => 
 		expect(tokens.expires_in).toBe(ACCESS_TOKEN_TTL);
 	});
 
+	it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+		// Only the new keys: a grant still reading the deprecated `expiresIn`
+		// would mint an access token with no `exp` claim at all.
+		const deps = await makeDeps();
+		const tokens = await issue(
+			{
+				...deps,
+				config: {
+					oauth: {
+						...deps.config.oauth,
+						accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
+					},
+				} as unknown as GrantDependencies["config"],
+			},
+			makeCtx(makeClient({ allowedGrantTypes: [WEBAUTHN_GRANT_TYPE] }), {
+				body: { expires_in: "7200" },
+			}),
+		);
+
+		expect(tokens.expires_in).toBe(600);
+		const payload = decodePayload(tokens.access_token);
+		expect((payload.exp as number) - (payload.iat as number)).toBe(600);
+	});
+
 	it("emits no cnf on either token when a refresh token is issued unbound", async () => {
 		const tokens = await issue(await makeDeps(), makeCtx(makeClient()));
 

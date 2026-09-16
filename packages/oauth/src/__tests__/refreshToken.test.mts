@@ -252,6 +252,32 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
+		it("mints the configured default lifetime and ignores an expires_in request parameter", async () => {
+			// Only the new keys are configured, so a grant still reading the
+			// deprecated `expiresIn` would mint a token with no `exp` at all.
+			const handler = createRefreshTokenGrant({
+				...mockDeps,
+				config: {
+					oauth: {
+						...mockConfig.oauth,
+						accessToken: { defaultExpiresIn: 600, maxExpiresIn: 7200 },
+					},
+				} as unknown as GrantDependencies["config"],
+			});
+			const { result } = await handler.handle({
+				body: { refresh_token: await makeRefreshToken(), expires_in: "7200" },
+				session: {},
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+
+			if (!("tokens" in result)) throw new Error(`expected tokens, got ${result.status}`);
+			expect(result.tokens.expires_in).toBe(600);
+			const decoded = decodeJwt(result.tokens.access_token);
+			expect((decoded.exp as number) - (decoded.iat as number)).toBe(600);
+		});
+
 		it("returns 200 when client_id matches token audience", async () => {
 			const token = await new SignJWT({ sub: "u1" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })

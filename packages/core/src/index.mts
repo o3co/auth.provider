@@ -131,6 +131,9 @@ export {
 } from "./boot/index.mjs";
 // Configuration
 export {
+	type AccessTokenConfig,
+	type AccessTokenLifetime,
+	type AccessTokenLifetimeSource,
 	type AccessTokenRevocationMode,
 	type AppConfig,
 	AppConfigSchema,
@@ -139,6 +142,7 @@ export {
 	composeConfigSchema,
 	fullSectionsSchema,
 	readAccessTokenRevocationMode,
+	resolveAccessTokenLifetime,
 } from "./config/application.schema.mjs";
 // OIDC discovery aggregation — modules contribute `discoveryMetadata`
 // (OidcDiscoveryContributionFactory above) and core synthesizes the
