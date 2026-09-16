@@ -521,6 +521,10 @@ describe("token exchange — a request may ask for its lifetime with expires_in"
 		);
 	});
 
+	it("reads an expires_in sent without a value as omitted, minting the default (RFC 6749 §3.2)", async () => {
+		expect(mintedLifetime((await exchange("")).result)).toBe(600);
+	});
+
 	it("reads digits with leading zeros as the number they spell", async () => {
 		expect(mintedLifetime((await exchange("0120")).result)).toBe(120);
 	});
@@ -540,7 +544,6 @@ describe("token exchange — a request may ask for its lifetime with expires_in"
 		["a repeated parameter", ["600", "900"]],
 		["a single-element array", ["600"]],
 		["a JSON number rather than a form string", 600],
-		["an empty string", ""],
 		["zero", "0"],
 		["all zeros", "000"],
 		["a leading plus sign", "+600"],

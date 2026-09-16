@@ -132,8 +132,9 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			}
 			// The lifetime the client asks for, in seconds. RFC 8693 defines no
 			// such parameter and RFC 6749 §3.2 has a server ignore one it does
-			// not know, so this is additive: a client that never sends it gets
-			// the configured default, exactly as before. It is refused, not
+			// not know, so this is additive: a client that never sends it — or
+			// sends it without a value (§3.2) — gets the configured default,
+			// exactly as before. It is refused, not
 			// ignored, when present and malformed, for the reason `client_id`
 			// above is — a value the caller sent and this grant silently
 			// reinterpreted would answer a different request than the one made.
@@ -1112,23 +1113,20 @@ const MAX_REQUESTED_EXPIRES_IN_DIGITS = 10;
 const REQUESTED_EXPIRES_IN_SHAPE = new RegExp(`^[0-9]{1,${MAX_REQUESTED_EXPIRES_IN_DIGITS}}$`);
 
 /**
- * Reads the `expires_in` form parameter: `undefined` when absent, the number of
- * seconds when it is one string of ASCII decimal digits denoting a positive
- * integer, and `MALFORMED` otherwise.
+ * Reads the `expires_in` form parameter: `undefined` when absent or sent
+ * without a value, the number of seconds when it is one string of ASCII decimal
+ * digits denoting a positive integer, and `MALFORMED` otherwise.
  *
  * Deliberately narrower than `Number(value)`, which accepts whitespace, a sign,
- * a decimal point, an exponent, hexadecimal and the empty string (as `0`).
+ * a decimal point, an exponent, hexadecimal, and reads the empty string as `0`.
  * A repeated parameter arrives as an array and is refused rather than having
  * one of its values picked: the grant cannot tell which one the client meant.
- * Absent and `null` mean the same thing, as they do for `client_id`.
- *
- * An empty value is refused too, which is stricter than RFC 6749 §3.2's
- * reading of a parameter sent without a value as omitted. A client that sends
- * `expires_in=` meant to ask for something and lost the value on the way;
- * minting the default would hide that bug rather than report it.
+ * Absent, `null` and `""` all mean omitted: RFC 6749 §3.2 has a parameter sent
+ * without a value treated as if it were not sent, which is also how this grant
+ * reads `scope=""`.
  */
 function parseRequestedExpiresIn(value: unknown): number | undefined | typeof MALFORMED {
-	if (value === undefined || value === null) return undefined;
+	if (value === undefined || value === null || value === "") return undefined;
 	if (typeof value !== "string" || !REQUESTED_EXPIRES_IN_SHAPE.test(value)) return MALFORMED;
 	const seconds = Number(value);
 	return seconds > 0 ? seconds : MALFORMED;

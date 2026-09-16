@@ -60,10 +60,10 @@ clients:
 
 A token-exchange request may carry an optional `expires_in` form parameter: the lifetime, in seconds, the client wants the issued token to have. RFC 8693 defines no such parameter and RFC 6749 §3.2 has a server ignore a parameter it does not recognise, so sending it is safe against any authorization server.
 
-- **Absent:** the token gets `oauth.accessToken.defaultExpiresIn`.
+- **Absent, or sent without a value** (`expires_in=`, RFC 6749 §3.2): the token gets `oauth.accessToken.defaultExpiresIn`.
 - **Present:** honoured up to `oauth.accessToken.maxExpiresIn` — a larger request is **clamped** to the max, not refused — and always capped at the subject token's remaining lifetime (Security note 16). The response's `expires_in` is the lifetime actually minted; read it rather than assuming the request was granted in full.
 - **`maxExpiresIn` unset means the default.** Until the operator raises it (`OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`), a request can shorten a token but not lengthen it. Security note 19 is what raising it costs.
-- **Malformed is refused** with `400 invalid_request` naming `expires_in`: sent more than once, empty, zero, longer than 10 digits, or anything but ASCII decimal digits — no sign, decimal point, exponent or whitespace.
+- **Malformed is refused** with `400 invalid_request` naming `expires_in`: sent more than once, zero, longer than 10 digits, or anything but ASCII decimal digits — no sign, decimal point, exponent or whitespace.
 - **Only this grant reads it.** Every other grant ignores the parameter and mints the default.
 
 ## External JWT subject_token
