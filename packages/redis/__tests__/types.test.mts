@@ -9,9 +9,11 @@ import { describe, expectTypeOf, it } from "vitest";
 // between `index.mts` re-exports and `clients.mts` definitions fails here.
 import type {
 	ChallengeStoreClient,
+	ConsentStoreClient,
 	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
+	PendingConsentStoreClient,
 	RateLimiterClient,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
@@ -109,6 +111,15 @@ describe("makeIoredisClients return shape", () => {
 			IoredisClientsReturn["deviceCodeStoreClient"]
 		>().toMatchTypeOf<DeviceCodeStoreClient>();
 	});
+
+	// #561: the consent stores' clients are semantic too — the union and the
+	// one-step consume live behind the interface, not in the caller.
+	it("consentStoreClient and pendingConsentStoreClient satisfy their interfaces", () => {
+		expectTypeOf<IoredisClientsReturn["consentStoreClient"]>().toMatchTypeOf<ConsentStoreClient>();
+		expectTypeOf<
+			IoredisClientsReturn["pendingConsentStoreClient"]
+		>().toMatchTypeOf<PendingConsentStoreClient>();
+	});
 });
 
 describe("ComponentMap declaration-merge — per-purpose client slots", () => {
@@ -169,6 +180,15 @@ describe("ComponentMap declaration-merge — per-purpose client slots", () => {
 	it("deviceCodeStoreClient slot is optional and of DeviceCodeStoreClient type (#433)", () => {
 		expectTypeOf<ComponentMap["deviceCodeStoreClient"]>().toEqualTypeOf<
 			DeviceCodeStoreClient | undefined
+		>();
+	});
+
+	it("the consent client slots are optional and of their client types (#561)", () => {
+		expectTypeOf<ComponentMap["consentStoreClient"]>().toEqualTypeOf<
+			ConsentStoreClient | undefined
+		>();
+		expectTypeOf<ComponentMap["pendingConsentStoreClient"]>().toEqualTypeOf<
+			PendingConsentStoreClient | undefined
 		>();
 	});
 });

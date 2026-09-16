@@ -101,8 +101,8 @@ a composition root. Listed because a module may `require` them.
 | Slot | Type | Wiring | Declared in | Purpose |
 | --- | --- | --- | --- | --- |
 | `accessTokenDenylist` | `AccessTokenDenylist` | optional | `core/access-token-denylist/types.mts` | RFC 7009 access-token revocation by `jti`. Absence must be declared (#375). |
-| `consentStore` | `ConsentStore` | optional | `core/consents/types.mts` | What an end-user agreed a client that is not first-party may obtain, read by `/authorize` and written by `POST /oauth/consent`. Absent, such clients are refused as before #527 — nothing to declare. |
-| `pendingConsentStore` | `PendingConsentStore` | optional | `core/consents/types.mts` | The `/authorize` request parked under a challenge while the consent page asks; `consume` hands it to exactly one answer, so two answers in flight apply one (#552). Wired with `consentStore` — the bundled memory module provides both, and the OAuth router refuses a composition with one and not the other. |
+| `consentStore` | `ConsentStore` | optional | `core/consents/types.mts` | What an end-user agreed a client that is not first-party may obtain, read by `/authorize` and written by `POST /oauth/consent`. Absent, such clients are refused as before #527 — nothing to declare. Bundled adapters: memory (single replica) and Redis (`redisConsentStoreModule`, #561). |
+| `pendingConsentStore` | `PendingConsentStore` | optional | `core/consents/types.mts` | The `/authorize` request parked under a challenge while the consent page asks; `consume` hands it to exactly one answer, so two answers in flight apply one (#552). Wired with `consentStore` — the bundled memory and Redis modules each provide both, and the OAuth router refuses a composition with one and not the other. Holds each session to `PENDING_CONSENT_PER_SESSION_LIMIT` parked requests. |
 | `appleFederationConfig` | `AppleProviderConfig` | optional | `federation-apple/apple.mts` | Config slice for the bundled Sign in with Apple federation module. Carries either a `clientSecret` (string or resolver) or the `.p8` key material the module signs one from — Apple's secret is an ES256 JWT that expires. |
 | `assertionVerifier` | `AssertionVerifier` | optional | `core/assertions/types.mts` | Proves possession of a presented assertion (device JWT, platform attestation) and returns the opaque handle the Store resolves. Required once the RFC 7523 jwt-bearer grant is enabled — there is no default, because the only possible one accepts things (#301). `createRegistryAssertionVerifier` over an `AssertionIssuerRegistry` is the bundled one for several issuers, each with its own keys and terms; `createJwtAssertionVerifier` is its one-entry form (#525). |
 | `auditSink` | `AuditSink` | optional | `core/audit/types.mts` | Where security events go. Optional to wire, **not optional to decide** — an unfilled slot must be declared absent (#363). |
@@ -142,8 +142,10 @@ a composition root. Listed because a module may `require` them.
 | `accessTokenDenylistClient` | `AccessTokenDenylistClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `challengeStoreClient` | `ChallengeStoreClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `codeRepositoryClient` | `CodeRepositoryClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
+| `consentStoreClient` | `ConsentStoreClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. Semantic operations (`find` / `grant` / `revoke`), because `grant` is the port's union and a read-then-write loses a concurrent grant (#561). |
 | `deviceCodeStoreClient` | `DeviceCodeStoreClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. Semantic operations (`create` / `findPending` / `decide` / `poll` / `remove`) rather than commands, because each must be indivisible (#433). |
 | `federationTokenStoreClient` | `FederationTokenStoreClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
+| `pendingConsentStoreClient` | `PendingConsentStoreClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. Semantic operations (`set` / `get` / `consume`): `consume` reads and removes a parked request with its per-session index entry in one step (#561). |
 | `rateLimiterClient` | `RateLimiterClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `refreshTokenFamilyClient` | `RefreshTokenFamilyClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
 | `replaySeenSetClient` | `ReplaySeenSetClient` | optional | `redis/clients.mts` | Vendor-facing half — what `@o3co/auth-provider-redis` needs from a driver, not what a module consumes. |
@@ -202,7 +204,9 @@ out-of-tree adapter can import and run:
 | `SubjectRevocation` | `packages/core/src/user-sessions/__tests__/subjectRevocation.contract.mts` |
 | `AccessTokenDenylist` | `packages/core/src/access-token-denylist/__tests__/adapters.contract.mts` |
 | `ChallengeStore` | `packages/core/src/challenges/__tests__/adapters.contract.mts` |
+| `ConsentStore` | `packages/core/src/consents/__tests__/adapters.contract.mts` |
 | `DeviceCodeStore` | `packages/core/src/device-authorization/__tests__/adapters.contract.mts` |
+| `PendingConsentStore` | `packages/core/src/consents/__tests__/pending.contract.mts` |
 | `ReplaySeenSet` | `packages/core/src/replay-seen-set/__tests__/adapters.contract.mts` |
 | `RefreshTokenFamilyStore` | `packages/core/src/refresh-token-family/__tests__/adapters.contract.mts` |
 | `WebAuthnCredentialStore` | `packages/core/src/webauthn-credentials/__tests__/adapters.contract.mts` |

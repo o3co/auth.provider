@@ -17,12 +17,18 @@ import { describe, expect, it } from "vitest";
 import { redisChallengeStoreBuilder } from "../src/challenges.mjs";
 import type {
 	ChallengeStoreClient,
+	ConsentStoreClient,
 	DeviceCodeStoreClient,
+	PendingConsentStoreClient,
 	ReplaySeenSetClient,
 	SessionRPRegistryClient,
 	SessionSidSortedSetClient,
 	UserSessionStoreClient,
 } from "../src/clients.mjs";
+import {
+	redisConsentStoreBuilder,
+	redisPendingConsentStoreBuilder,
+} from "../src/consent-store.mjs";
 import { redisDeviceCodeStoreBuilder } from "../src/device-code-store.mjs";
 import { redisReplaySeenSetBuilder } from "../src/replay-seen-set.mjs";
 import { redisSessionFamilyIndexBuilder } from "../src/sessionFamilyIndex.mjs";
@@ -206,5 +212,45 @@ describe("#433: redisDeviceCodeStoreBuilder — client guard", () => {
 		);
 		expect(store).toBeDefined();
 		expect(store.kind).toBe("redis");
+	});
+});
+
+// #561: the Redis consent store builders. Same boot-time guard — a missing
+// `client` is named at boot, not at the first `/authorize` for a client that
+// is not first-party.
+
+const noopConsentStoreClient: ConsentStoreClient = {
+	find: async () => null,
+	grant: async () => {},
+	revoke: async () => false,
+};
+
+const noopPendingConsentStoreClient: PendingConsentStoreClient = {
+	set: async () => {},
+	get: async () => null,
+	consume: async () => null,
+};
+
+describe("#561: redisConsentStoreBuilder / redisPendingConsentStoreBuilder — client guard", () => {
+	it("throws when 'client' option is missing (config = {})", () => {
+		expect(() => redisConsentStoreBuilder({} as never, { lifecycle: undefined } as never)).toThrow(
+			"redisConsentStoreBuilder: 'client' option is required",
+		);
+		expect(() =>
+			redisPendingConsentStoreBuilder({} as never, { lifecycle: undefined } as never),
+		).toThrow("redisPendingConsentStoreBuilder: 'client' option is required");
+	});
+
+	it("succeeds when 'client' is present", async () => {
+		const consent = await redisConsentStoreBuilder(
+			{ client: noopConsentStoreClient } as never,
+			{ lifecycle: undefined } as never,
+		);
+		const pending = await redisPendingConsentStoreBuilder(
+			{ client: noopPendingConsentStoreClient } as never,
+			{ lifecycle: undefined } as never,
+		);
+		expect(consent.kind).toBe("redis");
+		expect(pending.kind).toBe("redis");
 	});
 });

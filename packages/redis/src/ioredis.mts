@@ -9,10 +9,13 @@ import type {
 	AccessTokenDenylistClient,
 	ChallengeStoreClient,
 	CodeRepositoryClient,
+	ConsentRecordFields,
+	ConsentStoreClient,
 	DeviceCodeRecordFields,
 	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
+	PendingConsentStoreClient,
 	RateLimiterClient,
 	RateLimitIncrement,
 	RefreshTokenFamilyClient,
@@ -383,6 +386,204 @@ if not userCode then return 0 end
 return redis.call('DEL', KEYS[1], ARGV[1] .. userCode)
 `.trim();
 
+// --- Consent scripts (#561) -------------------------------------------------
+//
+// Four scripts — one per operation that must be indivisible, the pending
+// store's read and consume sharing one — for the reason the device scripts
+// above give. Expiry is judged by the record's own `expiresAt`
+// against the caller's clock, passed in `ARGV`, and never by a key's TTL:
+// the TTL a write sets is a safety net for records nobody reads again, the
+// same split `LUA_DEVICE_CODE_POLL` makes between the TTL and `expiresAtMs`.
+// A record inside its TTL whose timestamp has passed on the caller's clock is
+// gone, and is reclaimed by whoever finds it.
+//
+// Expiries are set with a relative `PEXPIRE` rather than `PEXPIREAT` the
+// caller's deadline. An absolute deadline is read on the server's clock, so
+// the skew between the writing replica and Redis would move the safety net
+// by exactly that much — before the logical expiry when Redis runs ahead. A
+// lifetime measured from the write is independent of that skew; the adapter
+// adds slack for the one it cannot remove, between the writer and a later
+// reader (see `CONSENT_EXPIRY_SLACK_MS`).
+
+/**
+ * `ConsentStoreClient.find` — the record, unless it has expired.
+ *
+ * `KEYS[1]` = record key; `ARGV[1]` = now in epoch ms. Returns
+ * `{scopes, grantedAt, expiresAt|nil}`, or nil for absent or expired.
+ *
+ * The reclaim is in the script because a `DEL` sent after the read could
+ * remove a grant another browser wrote in between. An `expiresAt` that does
+ * not parse reads as expired: the fail-closed direction for a consent.
+ */
+const LUA_CONSENT_FIND = `
+local r = redis.call('HMGET', KEYS[1], 'scopes', 'grantedAt', 'expiresAt')
+if not r[1] or not r[2] then return false end
+if r[3] then
+  local expiresAt = tonumber(r[3])
+  if not expiresAt or expiresAt <= tonumber(ARGV[1]) then
+    redis.call('DEL', KEYS[1])
+    return false
+  end
+end
+return r
+`.trim();
+
+/**
+ * `ConsentStoreClient.grant` — the union with what is recorded, as one write.
+ *
+ * `KEYS[1]` = record key; `ARGV[1]` = now in epoch ms, `ARGV[2]` = grantedAt,
+ * `ARGV[3]` = the granted scopes as a JSON array, `ARGV[4]` = expiresAt or
+ * empty for until revoked, `ARGV[5]` = the TTL in ms (read only with an
+ * expiry).
+ *
+ * The recorded scopes join the union only while the recorded consent is live
+ * on the caller's clock: a lapsed consent is not something the user still
+ * agrees to. They keep their order and the new ones follow, as the memory
+ * adapter's `Set` does. A recorded list that does not decode contributes
+ * nothing rather than failing the grant. An empty union is written as `[]`
+ * literally, because `cjson.encode({})` is `{}`.
+ *
+ * Without an expiry the record is until revoked, so the stale `expiresAt`
+ * field goes and so does the key's TTL — `PERSIST`, explicitly: an earlier
+ * expiring grant's TTL left in place would delete this consent when it fired,
+ * on no request at all. With one whose TTL is not positive the new record is
+ * dead on arrival, and the key is removed, as the memory adapter's record
+ * would read.
+ */
+const LUA_CONSENT_GRANT = `
+local now = tonumber(ARGV[1])
+local merged, seen = {}, {}
+local function add(list)
+  for _, scope in ipairs(list) do
+    if type(scope) == 'string' and not seen[scope] then
+      seen[scope] = true
+      merged[#merged + 1] = scope
+    end
+  end
+end
+local held = redis.call('HMGET', KEYS[1], 'scopes', 'expiresAt')
+if held[1] then
+  local live = true
+  if held[2] then
+    local expiresAt = tonumber(held[2])
+    live = expiresAt ~= nil and expiresAt > now
+  end
+  if live then
+    local ok, list = pcall(cjson.decode, held[1])
+    if ok and type(list) == 'table' then add(list) end
+  end
+end
+add(cjson.decode(ARGV[3]))
+local encoded = '[]'
+if #merged > 0 then encoded = cjson.encode(merged) end
+if ARGV[4] == '' then
+  redis.call('HSET', KEYS[1], 'scopes', encoded, 'grantedAt', ARGV[2])
+  redis.call('HDEL', KEYS[1], 'expiresAt')
+  redis.call('PERSIST', KEYS[1])
+  return 1
+end
+local ttl = tonumber(ARGV[5])
+if not ttl or ttl <= 0 then
+  redis.call('DEL', KEYS[1])
+  return 0
+end
+redis.call('HSET', KEYS[1], 'scopes', encoded, 'grantedAt', ARGV[2], 'expiresAt', ARGV[4])
+redis.call('PEXPIRE', KEYS[1], ttl)
+return 1
+`.trim();
+
+/**
+ * `PendingConsentStoreClient.set` — park a request and hold its session to
+ * the bound, in one script.
+ *
+ * `KEYS[1]` = record key, `KEYS[2]` = the session's index; `ARGV[1]` = now in
+ * epoch ms, `ARGV[2]` = challenge, `ARGV[3]` = sessionId, `ARGV[4]` =
+ * expiresAt, `ARGV[5]` = the record's TTL in ms, `ARGV[6]` = the serialised
+ * request, `ARGV[7]` = the per-session bound, `ARGV[8]` = record key prefix,
+ * `ARGV[9]` = session index key prefix.
+ *
+ * In the memory adapter's order: a request already parked under the
+ * challenge leaves its own session's index (possibly another session's,
+ * reached through the record); this session's expired requests — and index
+ * entries whose record is already gone — leave before the bound is judged, so
+ * a dead request never costs a live one its place; then the first-parked go
+ * until there is room.
+ *
+ * The index is a sorted set scored by the order requests were parked in —
+ * one past the highest score it holds — not by `createdAt`. That is the
+ * memory adapter's insertion order exactly, and it is a total order no
+ * replica's clock takes part in: `createdAt` is written by whichever replica
+ * served the request, and two within a millisecond would tie and fall back to
+ * comparing challenges, which are random.
+ *
+ * The index is kept alive at least as long as its longest-lived request —
+ * its TTL is only ever raised — so it cannot vanish under a record it still
+ * has to bound.
+ */
+const LUA_PENDING_CONSENT_SET = `
+local now = tonumber(ARGV[1])
+local challenge = ARGV[2]
+local recordPrefix = ARGV[8]
+local previous = redis.call('HGET', KEYS[1], 'sessionId')
+if previous then
+  redis.call('ZREM', ARGV[9] .. previous, challenge)
+end
+redis.call('DEL', KEYS[1])
+for _, member in ipairs(redis.call('ZRANGE', KEYS[2], 0, -1)) do
+  local expiresAt = tonumber(redis.call('HGET', recordPrefix .. member, 'expiresAt'))
+  if not expiresAt or expiresAt <= now then
+    redis.call('DEL', recordPrefix .. member)
+    redis.call('ZREM', KEYS[2], member)
+  end
+end
+local ttl = tonumber(ARGV[5])
+if not ttl or ttl <= 0 then return 0 end
+local limit = tonumber(ARGV[7])
+while redis.call('ZCARD', KEYS[2]) >= limit do
+  local oldest = redis.call('ZRANGE', KEYS[2], 0, 0)[1]
+  if not oldest then break end
+  redis.call('DEL', recordPrefix .. oldest)
+  redis.call('ZREM', KEYS[2], oldest)
+end
+local last = redis.call('ZRANGE', KEYS[2], -1, -1, 'WITHSCORES')
+local order = 1
+if last[2] then order = tonumber(last[2]) + 1 end
+redis.call('HSET', KEYS[1], 'record', ARGV[6], 'sessionId', ARGV[3], 'expiresAt', ARGV[4])
+redis.call('PEXPIRE', KEYS[1], ttl)
+redis.call('ZADD', KEYS[2], order, challenge)
+if redis.call('PTTL', KEYS[2]) < ttl then
+  redis.call('PEXPIRE', KEYS[2], ttl)
+end
+return 1
+`.trim();
+
+/**
+ * `PendingConsentStoreClient.get` and `.consume` — the read, and the read
+ * that spends.
+ *
+ * `KEYS[1]` = record key; `ARGV[1]` = now in epoch ms, `ARGV[2]` = challenge,
+ * `ARGV[3]` = session index key prefix, `ARGV[4]` = `spend` | `peek`.
+ * Returns the serialised request, or nil for absent or expired.
+ *
+ * `spend` is the port's one step: the record, its removal and its index
+ * entry's removal in one script, so of two answers in flight exactly one is
+ * handed the request. `GETDEL` alone would be atomic for the record but
+ * leave the index entry to a second command — a consumed request still
+ * counting toward the bound until it did. `peek` never spends a live request;
+ * an expired one is reclaimed by either.
+ */
+const LUA_PENDING_CONSENT_TAKE = `
+local r = redis.call('HMGET', KEYS[1], 'record', 'sessionId', 'expiresAt')
+if not r[1] then return false end
+local expiresAt = tonumber(r[3])
+local live = expiresAt ~= nil and expiresAt > tonumber(ARGV[1])
+if live and ARGV[4] ~= 'spend' then return r[1] end
+redis.call('DEL', KEYS[1])
+if r[2] then redis.call('ZREM', ARGV[3] .. r[2], ARGV[2]) end
+if live then return r[1] end
+return false
+`.trim();
+
 /**
  * A script, its digest, and its cache-residency flag — the EVALSHA-first call
  * path the three scripts above take by hand, packaged once for the five
@@ -411,6 +612,10 @@ const DEVICE_CODE_FIND_PENDING = defineScript(LUA_DEVICE_CODE_FIND_PENDING);
 const DEVICE_CODE_DECIDE = defineScript(LUA_DEVICE_CODE_DECIDE);
 const DEVICE_CODE_POLL = defineScript(LUA_DEVICE_CODE_POLL);
 const DEVICE_CODE_REMOVE = defineScript(LUA_DEVICE_CODE_REMOVE);
+const CONSENT_FIND = defineScript(LUA_CONSENT_FIND);
+const CONSENT_GRANT = defineScript(LUA_CONSENT_GRANT);
+const PENDING_CONSENT_SET = defineScript(LUA_PENDING_CONSENT_SET);
+const PENDING_CONSENT_TAKE = defineScript(LUA_PENDING_CONSENT_TAKE);
 
 /**
  * Run `script` EVALSHA-first, falling back to EVAL — which implicitly loads
@@ -496,7 +701,7 @@ function assertPipelineSucceeded(reply: unknown[] | null, operation: string): un
 }
 
 /**
- * Wrap a single ioredis connection into the 14 typed client wrappers
+ * Wrap a single ioredis connection into the 16 typed client wrappers
  * needed by `@o3co/auth-provider-redis` adapters. Production consumers
  * use this factory in their composition root and spread the result into
  * `bootstrapComponents`.
@@ -505,7 +710,7 @@ function assertPipelineSucceeded(reply: unknown[] | null, operation: string): un
  * in — this factory opens nothing of its own (the sole exception is
  * `refreshTokenFamilyClient.duplicate()`, which is per rotation, not per
  * purpose). Connection-level ioredis options are therefore shared by all
- * fourteen purposes, so a composition root that needs different failure timing
+ * sixteen purposes, so a composition root that needs different failure timing
  * for one of them — `enableOfflineQueue: false` on the rate limiter, say —
  * has to build that purpose off a second connection deliberately (#286).
  *
@@ -562,6 +767,8 @@ export function makeIoredisClients(
 	rateLimiterClient: RateLimiterClient;
 	codeRepositoryClient: CodeRepositoryClient;
 	deviceCodeStoreClient: DeviceCodeStoreClient;
+	consentStoreClient: ConsentStoreClient;
+	pendingConsentStoreClient: PendingConsentStoreClient;
 } {
 	const logger = options.logger ?? consoleLogger;
 
@@ -1005,6 +1212,83 @@ export function makeIoredisClients(
 		},
 	};
 
+	// #561: the consent store and the parked-request store, each operation that
+	// must be indivisible one Lua script (see the `LUA_CONSENT_*` and
+	// `LUA_PENDING_CONSENT_*` docblocks). A consent record is one key; a parked
+	// request and its session's index share the `{pending}` hash tag, so the
+	// keys a script derives from the other are in the slot it was routed to.
+	const consentStoreClient: ConsentStoreClient = {
+		async find(key, nowMs) {
+			const reply = (await runScript(io, CONSENT_FIND, [key], [String(nowMs)])) as
+				| [string, string, string | null]
+				| null;
+			if (!Array.isArray(reply)) return null;
+			const [scopes, grantedAt, expiresAt] = reply;
+			const fields: ConsentRecordFields = {
+				scopes,
+				grantedAt,
+				...(expiresAt === null || expiresAt === undefined ? {} : { expiresAt }),
+			};
+			return fields;
+		},
+		async grant(key, input) {
+			await runScript(
+				io,
+				CONSENT_GRANT,
+				[key],
+				[
+					String(input.nowMs),
+					String(input.grantedAt),
+					JSON.stringify(input.scopes),
+					input.expiry === undefined ? "" : String(input.expiry.expiresAt),
+					input.expiry === undefined ? "" : String(Math.ceil(input.expiry.ttlMs)),
+				],
+			);
+		},
+		async revoke(key) {
+			return (await io.del(key)) > 0;
+		},
+	};
+
+	const pendingConsentStoreClient: PendingConsentStoreClient = {
+		async set(keys, input) {
+			await runScript(
+				io,
+				PENDING_CONSENT_SET,
+				[keys.recordKeyPrefix + input.challenge, keys.sessionKeyPrefix + input.sessionId],
+				[
+					String(input.nowMs),
+					input.challenge,
+					input.sessionId,
+					String(input.expiresAt),
+					String(Math.ceil(input.ttlMs)),
+					input.record,
+					String(input.perSessionLimit),
+					keys.recordKeyPrefix,
+					keys.sessionKeyPrefix,
+				],
+			);
+		},
+		async get(keys, challenge, nowMs) {
+			const reply = await runScript(
+				io,
+				PENDING_CONSENT_TAKE,
+				[keys.recordKeyPrefix + challenge],
+				[String(nowMs), challenge, keys.sessionKeyPrefix, "peek"],
+			);
+			return typeof reply === "string" ? reply : null;
+		},
+		async consume(keys, challenge, nowMs) {
+			const reply = await runScript(
+				io,
+				PENDING_CONSENT_TAKE,
+				[keys.recordKeyPrefix + challenge],
+				[String(nowMs), challenge, keys.sessionKeyPrefix, "spend"],
+			);
+			return typeof reply === "string" ? reply : null;
+		},
+	};
+
 	return {
 		challengeStoreClient,
 		accessTokenDenylistClient,
@@ -1020,5 +1304,7 @@ export function makeIoredisClients(
 		rateLimiterClient,
 		codeRepositoryClient,
 		deviceCodeStoreClient,
+		consentStoreClient,
+		pendingConsentStoreClient,
 	};
 }

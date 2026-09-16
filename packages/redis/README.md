@@ -25,7 +25,7 @@ Redis-backed adapters and `defineModule` manifests for `@o3co/auth-provider-core
   custom `FederationTokenStoreClient` whose `compareAndDelete` uses an
   alternative atomic primitive (e.g., a Cluster-safe transaction).
 
-This package ships fourteen adapters covering every redis-backed component
+This package ships sixteen adapters covering every redis-backed component
 that `@o3co/auth-provider-core` exposes as a typed slot:
 
 - `ChallengeStore` (challenges)
@@ -51,6 +51,12 @@ that `@o3co/auth-provider-core` exposes as a typed slot:
   heard of the code — so core refuses it under `deployment.mode = "multi"`;
   this adapter is what lets the grant run scaled (#433). See "Device
   authorizations share one slot" below before choosing it.
+- `ConsentStore` / `PendingConsentStore` (consent-store) — the consent step
+  for clients that are not first-party: what a user agreed a client may
+  obtain, and the `/authorize` request parked while the consent page asks.
+  Core's in-process pair forks per replica and is refused under
+  `deployment.mode = "multi"`; `redisConsentStoreModule` provides both slots
+  (#561). See "Consent records and parked requests" below.
 
 ## Backing-client contract
 
@@ -110,7 +116,7 @@ individually instead of spreading.
 and opens none of its own (the exception is
 `refreshTokenFamilyClient.duplicate()`, one per refresh rotation).
 Connection-level ioredis options are
-therefore shared by all fourteen purposes, and the ones governing how a partition
+therefore shared by all sixteen purposes, and the ones governing how a partition
 *ends* are the ones worth setting deliberately:
 
 - **`commandTimeout`** is the only option that bounds a command which never
@@ -159,6 +165,7 @@ Each redis adapter ships in two flavours:
 | `redisRateLimiterModule` | `rateLimiterClient` | `rateLimiter` | `redisRateLimiter` | `redisRateLimiterBuilder` |
 | `redisCodeRepositoryModule` | `codeRepositoryClient` | `codeRepository` | `redisCodeRepository` | `redisCodeRepositoryBuilder` |
 | `redisDeviceCodeStoreModule` | `deviceCodeStoreClient` | `deviceCodeStore` | `redisDeviceCodeStore` | `redisDeviceCodeStoreBuilder` |
+| `redisConsentStoreModule` | `consentStoreClient`, `pendingConsentStoreClient` | `consentStore`, `pendingConsentStore` | `redisConsentStore` | `redisConsentStoreBuilder`, `redisPendingConsentStoreBuilder` |
 
 Every module also requires `config`. The `*Client` column is the slot
 `makeIoredisClients` fills; a composition that wires a Redis-branch module
@@ -251,6 +258,45 @@ that is the case a `HGETALL`-then-`DEL` implementation fails. Both keys
 carry the authorization's `expiresAtMs` as their TTL so Redis reclaims them,
 but `poll` still answers `expired` from the timestamp: a record inside its
 TTL whose deadline has passed on the caller's clock expires, and is dropped.
+
+## Consent records and parked requests
+
+`redisConsentStoreModule` (#561) provides both slots the consent step needs —
+one switch, as core's memory module is, because `createOAuthRouter` refuses a
+composition with one and not the other. Its keys:
+
+| Key | Type | Holds |
+| --- | --- | --- |
+| `${keyPrefix}rec:${len}:${sub}\|${len}:${clientId}` | hash | a consent record — `scopes` (JSON array), `grantedAt`, `expiresAt` when it has one |
+| `${keyPrefix}{pending}:ch:${challenge}` | hash | a parked `/authorize` request, its `sessionId` and `expiresAt` |
+| `${keyPrefix}{pending}:sess:${sessionId}` | sorted set | that session's challenges, scored by the order they were parked |
+
+`keyPrefix` is `redisConsentStore.keyPrefix` (default `consent:`). A consent
+record is one key, and every script over it touches that key alone, so consent
+records spread across a Cluster like any other key; the pair is length-prefixed,
+as the challenge and replay stores encode theirs, so no subject or client id can
+spell another pair's key. A parked request and its session's index share the
+constant **`{pending}` hash tag**: `consume` arrives with the challenge alone and
+takes the request out of the index in the same script, so the two keys must be in
+one slot — and every parked request therefore lands on the same slot, the trade
+the device-code store makes and for the same reason (a human-paced ceremony,
+bounded per session and gone in minutes).
+
+Each operation that must be indivisible is one Lua script: `grant` computes the
+union with what is recorded (only while that record is live), `consume` reads the
+request and removes it with its index entry, and parking a request holds its
+session to `PENDING_CONSENT_PER_SESSION_LIMIT`, dropping that session's expired
+requests before evicting the first-parked. The conformance suites for both ports
+run against a real Redis in this package's tests, racing cases included.
+
+Expiry is judged by the record's own `expiresAt` against the caller's clock, never
+by a key's TTL. The TTL a write sets — relative, `PEXPIRE`, so the skew between
+the writing replica and Redis cannot move it — runs `CONSENT_EXPIRY_SLACK_MS`
+(five minutes, the JWT verifier's default clock-skew allowance) past that expiry,
+so it only reclaims records nobody reads again: a replica whose clock runs
+behind the writer's by less than that still finds a record it holds to be live. A consent recorded until
+revoked — what `POST /oauth/consent` writes — has no TTL at all, including when
+an earlier grant for the pair had one.
 
 ## Internal helpers
 

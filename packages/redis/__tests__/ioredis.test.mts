@@ -396,9 +396,25 @@ describe("makeIoredisClients — one connection in, one connection used", () => 
 			{ codeKeyPrefix: "devauth:{devauth}:code:", userKeyPrefix: "devauth:{devauth}:user:" },
 			"dc",
 		);
+		await c.consentStoreClient.revoke("consent:rec:1:u|1:c");
+		await c.pendingConsentStoreClient.get(
+			{ recordKeyPrefix: "consent:{pending}:ch:", sessionKeyPrefix: "consent:{pending}:sess:" },
+			"ch",
+			1_000,
+		);
 
 		const fake = io as unknown as Record<string, ReturnType<typeof vi.fn>>;
-		for (const method of ["pttl", "exists", "get", "hset", "zrange", "zrem", "getdel", "eval"]) {
+		for (const method of [
+			"pttl",
+			"exists",
+			"get",
+			"hset",
+			"zrange",
+			"zrem",
+			"getdel",
+			"eval",
+			"del",
+		]) {
 			expect(
 				fake[method],
 				`${method} went somewhere other than the passed-in connection`,
@@ -518,5 +534,83 @@ describe("makeIoredisClients rateLimiterClient (#458)", () => {
 		const c = makeIoredisClients(io);
 
 		await expect(c.rateLimiterClient.incrementWithTtl("token:ip:1.2.3.4", 60)).resolves.toBe(3);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// #561 — the consent stores' scripts go through the same shared runner. What
+// is pinned here is what a fake can see: which keys each script declares to
+// Cluster, and that the caller's clock — not the server's — is what it is
+// handed. Atomicity and the scripts' behaviour are pinned against a real
+// Redis in `consent-store.test.mts`.
+// ---------------------------------------------------------------------------
+
+describe("makeIoredisClients consent clients — keys declared and the caller's clock (#561)", () => {
+	const pendingKeys = {
+		recordKeyPrefix: "consent:{pending}:ch:",
+		sessionKeyPrefix: "consent:{pending}:sess:",
+	};
+
+	const lastScriptCall = (io: Redis): unknown[] => {
+		const fake = io as unknown as Record<string, ReturnType<typeof vi.fn>>;
+		return [...(fake.eval?.mock.calls ?? []), ...(fake.evalsha?.mock.calls ?? [])].at(
+			-1,
+		) as unknown[];
+	};
+
+	it("declares the record key and the session's index when parking a request", async () => {
+		const io = makeFakeIoredis({
+			evalsha: vi.fn().mockResolvedValue(1),
+			eval: vi.fn().mockResolvedValue(1),
+		});
+		const { pendingConsentStoreClient } = makeIoredisClients(io);
+		await pendingConsentStoreClient.set(pendingKeys, {
+			challenge: "ch",
+			sessionId: "sess",
+			expiresAt: 601_000,
+			nowMs: 1_000,
+			ttlMs: 900_000,
+			record: "{}",
+			perSessionLimit: 16,
+		});
+		const call = lastScriptCall(io);
+		expect(call.slice(1, 5)).toEqual([
+			2,
+			"consent:{pending}:ch:ch",
+			"consent:{pending}:sess:sess",
+			"1000",
+		]);
+	});
+
+	it("declares only the record key on consume, reaching the index through the shared tag", async () => {
+		const io = makeFakeIoredis({
+			evalsha: vi.fn().mockResolvedValue(null),
+			eval: vi.fn().mockResolvedValue(null),
+		});
+		const { pendingConsentStoreClient } = makeIoredisClients(io);
+		expect(await pendingConsentStoreClient.consume(pendingKeys, "ch", 2_000)).toBeNull();
+		expect(lastScriptCall(io).slice(1, 4)).toEqual([1, "consent:{pending}:ch:ch", "2000"]);
+	});
+
+	it("hands the grant script the caller's clock and no expiry for a consent until revoked", async () => {
+		const io = makeFakeIoredis({
+			evalsha: vi.fn().mockResolvedValue(1),
+			eval: vi.fn().mockResolvedValue(1),
+		});
+		const { consentStoreClient } = makeIoredisClients(io);
+		await consentStoreClient.grant("consent:rec:1:u|1:c", {
+			nowMs: 3_000,
+			scopes: ["read"],
+			grantedAt: 3_000,
+		});
+		expect(lastScriptCall(io).slice(1)).toEqual([
+			1,
+			"consent:rec:1:u|1:c",
+			"3000",
+			"3000",
+			'["read"]',
+			"",
+			"",
+		]);
 	});
 });
