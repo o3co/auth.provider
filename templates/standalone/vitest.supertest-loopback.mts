@@ -137,6 +137,17 @@ function supertestFor(testPath: string): TestPrototype | undefined {
  */
 const binding = new WeakMap<Server, Promise<unknown>>();
 
+/**
+ * A throw from the test's own callback, raised where it cannot propagate to
+ * the test: reported as an uncaught exception, which fails the run by name,
+ * instead of an unhandled rejection of a promise nobody holds.
+ */
+function rethrowOutsideThisChain(err: unknown): void {
+	process.nextTick(() => {
+		throw err;
+	});
+}
+
 function patch(proto: TestPrototype): void {
 	if (proto[PATCHED]) return;
 	const originalServerAddress = proto.serverAddress;
@@ -174,14 +185,36 @@ function patch(proto: TestPrototype): void {
 		this[PENDING] = undefined;
 
 		const { server, protocol, path, ready } = pending;
-		ready.then(
-			() => {
+		let called = false;
+		const callback = (err: unknown, res?: unknown) => {
+			called = true;
+			fn?.(err, res);
+		};
+		// Unpatched, whatever `end` throws while building the request (a header
+		// value Node refuses, a body that will not serialize) reaches the caller
+		// at once — and `then` runs `end` inside a promise executor, so the
+		// awaited request rejects with it. Deferred, there is no caller left: the
+		// throw, like a failed bind, is handed to the request's callback, which
+		// is what rejects that promise. Nothing here may reject: a rejection of
+		// this chain is one nobody awaits.
+		const fail = (err: unknown) => {
+			if (called) return rethrowOutsideThisChain(err);
+			// The request never went out, so supertest will not close the server
+			// this request started.
+			if (this._server?.listening) this._server.close();
+			try {
+				callback(err);
+			} catch (thrown) {
+				rethrowOutsideThisChain(thrown);
+			}
+		};
+		ready
+			.then(() => {
 				const { port } = server.address() as { port: number };
 				this.url = `${protocol}://${LOOPBACK}:${port}${path}`;
-				originalEnd.call(this, fn);
-			},
-			(err: unknown) => fn?.(err),
-		);
+				originalEnd.call(this, callback);
+			})
+			.catch(fail);
 		return this;
 	};
 

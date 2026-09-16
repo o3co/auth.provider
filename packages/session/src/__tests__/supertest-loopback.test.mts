@@ -77,6 +77,34 @@ describe("supertest's own server listens on the loopback address it dials (#556)
 		}
 	});
 
+	it("rejects promptly with the request's own error when the request cannot be built", async () => {
+		// Node refuses this header value (ERR_INVALID_CHAR) while supertest builds
+		// the request. With the loopback bind that happens after the bind settles,
+		// outside the promise the test awaits; the throw must still reject that
+		// promise, as it does unpatched, and not become an unhandled rejection
+		// that leaves the request hanging until the test timeout.
+		const server = http.createServer(helloApp());
+
+		await expect(request(server).get("/hello").set("x-test", "bad\nvalue")).rejects.toMatchObject({
+			code: "ERR_INVALID_CHAR",
+		});
+		// The request never went out, so nothing would close the server it started.
+		expect(server.listening).toBe(false);
+	}, 5_000);
+
+	it("hands the same error to an .end() callback", async () => {
+		const server = http.createServer(helloApp());
+
+		const err = await new Promise<unknown>((resolve) => {
+			request(server)
+				.get("/hello")
+				.set("x-test", "bad\nvalue")
+				.end((error) => resolve(error));
+		});
+
+		expect(err).toMatchObject({ code: "ERR_INVALID_CHAR" });
+	}, 5_000);
+
 	it("serves requests an agent sends together over its one server", async () => {
 		// `request.agent(app)` wraps the app in a single server. Unpatched, the
 		// first request's synchronous listen is visible to the second; the
