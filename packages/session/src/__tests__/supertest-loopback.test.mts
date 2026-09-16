@@ -76,6 +76,18 @@ describe("supertest's own server listens on the loopback address it dials (#556)
 		}
 	});
 
+	it("serves requests an agent sends together over its one server", async () => {
+		// `request.agent(app)` wraps the app in a single server. Unpatched, the
+		// first request's synchronous listen is visible to the second; the
+		// loopback listen is not yet bound when the second request is built, and
+		// must not be started twice.
+		const agent = request.agent(helloApp());
+
+		const responses = await Promise.all([agent.get("/hello"), agent.get("/hello")]);
+
+		expect(responses.map((res) => res.status)).toEqual([200, 200]);
+	});
+
 	it("leaves a server the test already started alone", async () => {
 		const server = http.createServer(helloApp());
 		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));

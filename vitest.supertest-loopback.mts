@@ -43,6 +43,7 @@
  * A server the test started itself is never touched.
  */
 
+import { once } from "node:events";
 import { createRequire } from "node:module";
 import type { Server } from "node:net";
 import { join } from "node:path";
@@ -52,7 +53,21 @@ const LOOPBACK = "127.0.0.1";
 const PATCHED = Symbol.for("o3co.auth.provider.supertest-loopback");
 const PENDING = Symbol("o3co.auth.provider.supertest-loopback.pending");
 
-type Pending = { readonly server: Server; readonly protocol: string; readonly path: string };
+/**
+ * The bind in progress per server. A second request on a server whose bind has
+ * not finished (an agent's requests sent together share one server) waits on
+ * the same bind instead of calling `listen` twice — and, like unpatched
+ * supertest when it finds a server already listening, does not own it.
+ */
+const binding = new WeakMap<Server, Promise<unknown>>();
+
+type Pending = {
+	readonly server: Server;
+	readonly protocol: string;
+	readonly path: string;
+	/** Settles on `listening`, rejects on a listen `error`. */
+	readonly ready: Promise<unknown>;
+};
 
 type TestInstance = {
 	url: string;
@@ -96,10 +111,23 @@ if (resolvesSupertest()) {
 			if (app.address()) return originalServerAddress.call(this, app, path);
 
 			const protocol = app instanceof TlsServer ? "https" : "http";
-			// supertest closes `_server` after the response, as it does for the
-			// server it would have started itself.
-			this._server = app.listen(0, LOOPBACK);
-			this[PENDING] = { server: app, protocol, path };
+			let ready = binding.get(app);
+			if (!ready) {
+				// supertest closes `_server` after the response, as it does for the
+				// server it would have started itself.
+				this._server = app.listen(0, LOOPBACK);
+				// Subscribed now, not in `end`: a listen error emitted before the
+				// test sends the request must still reach it, not crash the worker as
+				// an unhandled 'error' event.
+				const bound = once(app, "listening");
+				binding.set(app, bound);
+				bound.then(
+					() => binding.delete(app),
+					() => binding.delete(app),
+				);
+				ready = bound;
+			}
+			this[PENDING] = { server: app, protocol, path, ready };
 			// No port yet; `end` fills it in before anything is sent.
 			return `${protocol}://${LOOPBACK}${path}`;
 		};
@@ -109,26 +137,15 @@ if (resolvesSupertest()) {
 			if (!pending) return originalEnd.call(this, fn);
 			this[PENDING] = undefined;
 
-			const { server, protocol, path } = pending;
-			const send = () => {
-				const { port } = server.address() as { port: number };
-				this.url = `${protocol}://${LOOPBACK}:${port}${path}`;
-				originalEnd.call(this, fn);
-			};
-			if (server.listening) {
-				send();
-				return this;
-			}
-			const onError = (err: Error) => {
-				server.off("listening", onListening);
-				fn?.(err);
-			};
-			const onListening = () => {
-				server.off("error", onError);
-				send();
-			};
-			server.once("error", onError);
-			server.once("listening", onListening);
+			const { server, protocol, path, ready } = pending;
+			ready.then(
+				() => {
+					const { port } = server.address() as { port: number };
+					this.url = `${protocol}://${LOOPBACK}:${port}${path}`;
+					originalEnd.call(this, fn);
+				},
+				(err: unknown) => fn?.(err),
+			);
 			return this;
 		};
 
