@@ -163,7 +163,9 @@ const isRefusal = (err: unknown): boolean =>
  * 4. `sub` must be one the entry admits (`allowedSubjects`), and the handle
  *    reader must find a handle.
  * 5. The result carries the entry's ceilings: the scope claim intersected
- *    with `allowedScopes`, and `allowedAudiences` as the audience ceiling.
+ *    with `allowedScopes`, and `allowedAudiences` as the audience ceiling —
+ *    and the assertion's own, `exp` as `expiresAt`, which caps the issued
+ *    token's lifetime (auth.proxy#90).
  *
  * ## The ID-JAG profile (#526)
  *
@@ -368,6 +370,10 @@ export function createRegistryAssertionVerifier(
 				issuer: entry.issuer,
 				...(scope === undefined ? {} : { scope }),
 				...(audienceCeiling === undefined ? {} : { audience: audienceCeiling }),
+				// Required and type-checked by jose above for both profiles. As
+				// the claim says — one inside the clock tolerance is already past,
+				// and the grant, not this verifier, refuses it (auth.proxy#90).
+				expiresAt: claims.exp as number,
 			};
 		},
 	};

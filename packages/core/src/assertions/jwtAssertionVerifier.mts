@@ -58,7 +58,11 @@ export interface JwtAssertionVerifierOptions {
 	 * signed with an unintended algorithm gets through.
 	 */
 	readonly algorithms: readonly string[];
-	/** Clock skew for `exp` / `nbf`, in seconds. Default 60. */
+	/**
+	 * Clock skew for `exp` / `nbf`, in seconds. Default 60. An assertion past
+	 * its `exp` inside the tolerance verifies, but the jwt-bearer grant
+	 * refuses it: no lifetime is left for a token to inherit (auth.proxy#90).
+	 */
 	readonly clockToleranceSeconds?: number;
 	/** Defaults to reading `sub`. */
 	readonly readSubjectHandle?: SubjectHandleReader;
@@ -93,7 +97,8 @@ export interface JwtAssertionVerifierOptions {
  *   assertion that omits it would otherwise be accepted for ever. There is
  *   no lifetime ceiling beyond `exp` itself (no `maxTokenAge`): the RFC gives
  *   the issuing authority that decision, and this verifier has no knob for
- *   second-guessing it.
+ *   second-guessing it. The `exp` is reported as `expiresAt`, and the
+ *   jwt-bearer grant caps the token it mints there (auth.proxy#90).
  * - **Replay within `exp` is not detected here.** RFC 7523 §3 item 7 lets
  *   an AS track `jti` to refuse a second presentation; this verifier does
  *   not, and neither does the grant that consumes it. An assertion is
