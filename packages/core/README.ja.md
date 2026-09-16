@@ -31,7 +31,9 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 | `http.port` | HTTP リッスンポート |
 | `http.trustProxy` | Express の `trust proxy` 設定: `false` / アドレスリスト（IP、CIDR レンジ、名前付きレンジ `loopback` / `linklocal` / `uniquelocal`）/ ホップ数 / `true`。エントリは boot 時に検証される。`true` はプロセスに到達できる誰からの forwarded アドレスも信じるため、プロキシを明示することを推奨 |
 | `oauth.jwt` | JWT 署名設定 — issuer、signingKey（provider + プロバイダーごとのサブセクション） |
-| `oauth.accessToken.expiresIn` | アクセストークンの有効期間 |
+| `oauth.accessToken.defaultExpiresIn` | リクエストが有効期間を指定しないときに全グラントが発行するアクセストークンの有効期間（秒）。指定できるのは token exchange（`expires_in` パラメータ）だけで、他のグラントはそのパラメータを無視する。有効期間は `resolveAccessTokenLifetime(config)` で読む |
+| `oauth.accessToken.maxExpiresIn` | token exchange の `expires_in` で得られる上限。超えるリクエストはこの値に切り詰められる。未設定ならデフォルトと同じで、明示的に設定しない限り延長されない。デフォルトがこれを超えると両キーを名指しして起動失敗 |
+| `oauth.accessToken.expiresIn` | `defaultExpiresIn` の**非推奨（deprecated）**エイリアス。`defaultExpiresIn` 未設定の間だけ読まれる（`reference.conf` は出荷時の `3600` をこのキーに置いている）。分割前に書かれた読み手のため、パース後の config はこの名前にも解決済みのデフォルトを持つ |
 | `oauth.refreshToken.expiresIn` | リフレッシュトークンの有効期間 |
 | `oauth.grants` | グラントタイプごとの設定（`session`、`authorization`、`refresh_token`、カスタムキー） |
 | `session` | Express セッション設定 — secret、maxAge、secure、sameSite、domain、storage、csrf |

@@ -37,7 +37,9 @@ Top-level fields (the sections every deployment carries; module-owned sections a
 | `http.port` | HTTP listen port |
 | `http.trustProxy` | Express `trust proxy`: `false`, an address list (IPs, CIDR ranges, or the named ranges `loopback` / `linklocal` / `uniquelocal`), a hop count, or `true`. Entries are validated at boot. Prefer naming the proxy over `true`, which believes a forwarded client address from anyone who can reach the process |
 | `oauth.jwt` | JWT signing config — issuer, signingKey (provider + per-provider sub-section) |
-| `oauth.accessToken.expiresIn` | Access token lifetime |
+| `oauth.accessToken.defaultExpiresIn` | Access token lifetime, in seconds, that every grant mints when the request asks for none. Only token exchange lets a request ask (its `expires_in` parameter); every other grant ignores that parameter. Read the lifetime with `resolveAccessTokenLifetime(config)` |
+| `oauth.accessToken.maxExpiresIn` | The most a token-exchange `expires_in` can obtain; a larger request is clamped to it. Unset means the default, so nothing is extended unless you opt in. A default above it fails boot naming both keys |
+| `oauth.accessToken.expiresIn` | **Deprecated** alias of `defaultExpiresIn`, read only while that key is unset (`reference.conf` keeps the shipped `3600` here). The parsed config still carries the resolved default under this name for readers written before the split |
 | `oauth.refreshToken.expiresIn` | Refresh token lifetime |
 | `oauth.grants` | Per-grant-type config (`session`, `authorization`, `refresh_token`, and custom keys) |
 | `session` | Express session — secret, maxAge, secure, sameSite, domain, storage, csrf |

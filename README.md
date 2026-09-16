@@ -116,7 +116,11 @@ oauth {
       }
     }
   }
-  accessToken  { expiresIn = 3600 }   # seconds, positive, <= 1 year
+  # Seconds, positive, <= 1 year. `defaultExpiresIn` is what every grant
+  # mints; `maxExpiresIn` (unset = the default) is the most a token-exchange
+  # request's `expires_in` can obtain. `expiresIn` is a deprecated alias of
+  # `defaultExpiresIn`, still read while that key is unset.
+  accessToken  { defaultExpiresIn = 3600, maxExpiresIn = 3600 }
   refreshToken { expiresIn = 86400 }  # seconds, positive, <= 1 year
 }
 ```

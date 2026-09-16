@@ -358,6 +358,205 @@ const jwtSchema = z.preprocess((raw, ctx) => {
 	return raw;
 }, jwtSchemaBase);
 
+/**
+ * `oauth.accessToken` once the schema has parsed it.
+ *
+ * Read the lifetime through {@link resolveAccessTokenLifetime}, not through
+ * these fields: `defaultExpiresIn` and `maxExpiresIn` are present only when
+ * configured, and the rules that fill them in live in the resolver.
+ */
+export interface AccessTokenConfig {
+	/**
+	 * The lifetime, in seconds, every grant mints when the request does not ask
+	 * for one — and every grant but token exchange never lets it ask. Absent
+	 * when unset, in which case the deprecated `expiresIn` supplies it.
+	 */
+	defaultExpiresIn?: number;
+	/**
+	 * The most a token-exchange request's `expires_in` can obtain; a larger
+	 * request is clamped to it. Absent when unset, which means the default: no
+	 * request extends past it unless the operator opts in.
+	 */
+	maxExpiresIn?: number;
+	/**
+	 * The resolved default lifetime, in seconds — mirrored here for readers
+	 * written before `defaultExpiresIn` existed, so they keep minting what every
+	 * other grant mints.
+	 *
+	 * @deprecated since the release that added `defaultExpiresIn` and
+	 * `maxExpiresIn`: as a configuration key this is an alias of
+	 * `defaultExpiresIn`, and readers should call `resolveAccessTokenLifetime`.
+	 * See CHANGELOG.
+	 */
+	expiresIn: number;
+}
+
+/** What {@link resolveAccessTokenLifetime} answers. */
+export interface AccessTokenLifetime {
+	/** Seconds minted when the request asks for no particular lifetime. */
+	readonly defaultExpiresIn: number;
+	/** Seconds no request can exceed. Never below `defaultExpiresIn`. */
+	readonly maxExpiresIn: number;
+}
+
+/**
+ * Anything carrying an `oauth.accessToken` section: a loaded `AppConfig`, or
+ * a configuration built by hand that never met the schema. Values are
+ * `unknown` because the resolver validates them rather than trusting a type.
+ */
+export interface AccessTokenLifetimeSource {
+	readonly oauth: {
+		readonly accessToken?: {
+			readonly defaultExpiresIn?: unknown;
+			readonly maxExpiresIn?: unknown;
+			readonly expiresIn?: unknown;
+		};
+	};
+}
+
+const ACCESS_TOKEN_LIFETIME_KEYS = ["defaultExpiresIn", "maxExpiresIn", "expiresIn"] as const;
+
+type AccessTokenLifetimeKey = (typeof ACCESS_TOKEN_LIFETIME_KEYS)[number];
+
+const isLifetimeSeconds = (value: unknown): value is number =>
+	typeof value === "number" &&
+	Number.isInteger(value) &&
+	value > 0 &&
+	value <= MAX_DURATION_SECONDS;
+
+type AccessTokenLifetimeCheck =
+	| { readonly ok: true; readonly lifetime: AccessTokenLifetime }
+	| { readonly ok: false; readonly key: AccessTokenLifetimeKey; readonly message: string };
+
+/**
+ * The rules, in one place, for the schema's refinement and the resolver alike.
+ *
+ * `defaultExpiresIn` wins over the deprecated `expiresIn` whenever it is set —
+ * the OR-9 precedent (`oauth.code.adapter` over `repositories.code.type`). It
+ * cannot be the other way round, and a disagreement cannot fail boot, because
+ * `reference.conf` keeps the shipped literal on `expiresIn`: a configuration
+ * that adopts the new key always carries both, and the two differ whenever the
+ * operator chose anything but the shipped value.
+ */
+function checkAccessTokenLifetime(
+	accessToken: AccessTokenLifetimeSource["oauth"]["accessToken"],
+): AccessTokenLifetimeCheck {
+	for (const key of ACCESS_TOKEN_LIFETIME_KEYS) {
+		const value = accessToken?.[key];
+		if (value !== undefined && !isLifetimeSeconds(value)) {
+			return {
+				ok: false,
+				key,
+				message: `oauth.accessToken.${key} must be a whole number of seconds from 1 to ${MAX_DURATION_SECONDS} (got ${typeof value === "string" ? JSON.stringify(value) : String(value)})`,
+			};
+		}
+	}
+	const configuredDefault = accessToken?.defaultExpiresIn as number | undefined;
+	const aliasDefault = accessToken?.expiresIn as number | undefined;
+	const defaultExpiresIn = configuredDefault ?? aliasDefault;
+	if (defaultExpiresIn === undefined) {
+		return {
+			ok: false,
+			key: "defaultExpiresIn",
+			message:
+				"oauth.accessToken.defaultExpiresIn is required (OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN); the deprecated oauth.accessToken.expiresIn is still read in its place",
+		};
+	}
+	const maxExpiresIn = (accessToken?.maxExpiresIn as number | undefined) ?? defaultExpiresIn;
+	if (defaultExpiresIn > maxExpiresIn) {
+		const source =
+			configuredDefault === undefined
+				? ", read from the deprecated oauth.accessToken.expiresIn"
+				: "";
+		return {
+			ok: false,
+			key: "maxExpiresIn",
+			message: `oauth.accessToken.defaultExpiresIn (${defaultExpiresIn}${source}) must not exceed oauth.accessToken.maxExpiresIn (${maxExpiresIn}): lower the default or raise the max`,
+		};
+	}
+	return { ok: true, lifetime: { defaultExpiresIn, maxExpiresIn } };
+}
+
+/**
+ * The access-token lifetime a deployment configured: the DEFAULT minted when a
+ * request asks for nothing, and the MAX no request may exceed.
+ *
+ * Every grant reads the lifetime through this function — there is no other
+ * correct reader:
+ *
+ * - `defaultExpiresIn` when set, otherwise the deprecated `expiresIn`;
+ * - `maxExpiresIn` when set, otherwise the default, so nothing is extended
+ *   past the default unless the operator opts in;
+ * - a default above the max, a missing default, or a value that is not a
+ *   whole number of seconds within the one-year ceiling throws, naming the key.
+ *
+ * The schema enforces the same rules at boot, so a loaded configuration never
+ * throws here. The checks are repeated for configurations built by hand, which
+ * reach a grant without meeting the schema; before this function the grants
+ * handed such a value straight to `exp` arithmetic.
+ *
+ * Why the alias is resolved here rather than in HOCON: `parseFile` resolves
+ * substitutions per file before the layers merge, so a
+ * `${oauth.accessToken.expiresIn}` in `reference.conf` would never see an
+ * application layer's override of it.
+ */
+export function resolveAccessTokenLifetime(config: AccessTokenLifetimeSource): AccessTokenLifetime {
+	const check = checkAccessTokenLifetime(config.oauth?.accessToken);
+	if (!check.ok) throw new Error(check.message);
+	return check.lifetime;
+}
+
+/**
+ * A lifetime in whole seconds: positive and bounded (#282), so the
+ * exported-but-empty variable that `z.coerce.number()` reads as `0` fails boot.
+ */
+const lifetimeSecondsSchema = z.coerce.number().int().positive().max(MAX_DURATION_SECONDS);
+
+/**
+ * `oauth.accessToken`. Every key is optional in the input so either spelling of
+ * the default can stand alone; the refinement requires one of them and fails
+ * boot on a default above the max. The output mirrors the resolved default onto
+ * `expiresIn`, which is what keeps readers of the old key — outside this
+ * repository included — minting the lifetime every grant here mints. The
+ * mirror is idempotent, which matters: `createApp` parses the loaded
+ * configuration a second time.
+ */
+const accessTokenSchema = z
+	.object({
+		defaultExpiresIn: lifetimeSecondsSchema.optional(),
+		maxExpiresIn: lifetimeSecondsSchema.optional(),
+		/**
+		 * @deprecated since the release that added `defaultExpiresIn` and
+		 * `maxExpiresIn` — an alias of `defaultExpiresIn`, still read when that
+		 * key is unset. See CHANGELOG.
+		 */
+		expiresIn: lifetimeSecondsSchema.optional(),
+	})
+	.superRefine((value, ctx) => {
+		// A value that failed its own leaf check is already reported by name;
+		// a cross-field complaint built on it would only be noise.
+		if (
+			ACCESS_TOKEN_LIFETIME_KEYS.some(
+				(key) => value[key] !== undefined && !isLifetimeSeconds(value[key]),
+			)
+		) {
+			return;
+		}
+		const check = checkAccessTokenLifetime(value);
+		if (!check.ok) {
+			ctx.addIssue({ code: z.ZodIssueCode.custom, message: check.message, path: [check.key] });
+		}
+	})
+	.transform(
+		({ defaultExpiresIn, maxExpiresIn, expiresIn }): AccessTokenConfig => ({
+			...(defaultExpiresIn !== undefined ? { defaultExpiresIn } : {}),
+			...(maxExpiresIn !== undefined ? { maxExpiresIn } : {}),
+			// The refinement above guarantees one of the two; the transform does
+			// not run on a value that failed it.
+			expiresIn: (defaultExpiresIn ?? expiresIn) as number,
+		}),
+	);
+
 const refreshTokenSchemaBase = z.object({
 	// #282: positive and bounded. See MAX_DURATION_SECONDS.
 	expiresIn: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
@@ -559,10 +758,10 @@ export const CoreConfigSchema = z.object({
 	}),
 	oauth: z.object({
 		jwt: jwtSchema,
-		accessToken: z.object({
-			// #282: positive and bounded. See MAX_DURATION_SECONDS.
-			expiresIn: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
-		}),
+		// The access-token lifetime: `defaultExpiresIn`, `maxExpiresIn`, and the
+		// deprecated `expiresIn` alias. See `accessTokenSchema` and
+		// `resolveAccessTokenLifetime`.
+		accessToken: accessTokenSchema,
 		refreshToken: refreshTokenSchema,
 		grants: z.object({}).passthrough(),
 		// IH-6 (v0.5.3): when acting as an OIDC OP, `/authorize` rejects
