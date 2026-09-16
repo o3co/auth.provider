@@ -69,6 +69,12 @@ describe("published-package install context (e2e)", () => {
 		expect(existsSync(join(targetDir, "package.json"))).toBe(true);
 		expect(existsSync(join(targetDir, "src", "app.mts"))).toBe(true);
 		expect(existsSync(join(targetDir, "config", "application.conf"))).toBe(true);
+		// #556: the scaffold's vitest.config.mts loads this setup file, and vitest
+		// refuses to start without it — so the tarball has to carry it.
+		expect(existsSync(join(targetDir, "vitest.supertest-loopback.mts"))).toBe(true);
+		expect(readFileSync(join(targetDir, "vitest.config.mts"), "utf-8")).toContain(
+			'setupFiles: ["./vitest.supertest-loopback.mts"]',
+		);
 
 		// #407: the scaffold must arrive with a .gitignore, or the first
 		// `git add .` commits the `.env` and the signing key the README's own

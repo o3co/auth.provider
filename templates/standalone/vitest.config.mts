@@ -20,5 +20,11 @@ export default defineConfig({
 		// monorepo the same packages are symlinks to source and are inlined
 		// anyway; this makes the two layouts behave the same.
 		server: { deps: { inline: [/@o3co\/auth-provider-/] } },
+		// #556: the server `request(app)` starts listens on 127.0.0.1, the
+		// address supertest dials. Unpatched, macOS can give it a port another
+		// process holds on 127.0.0.1, and the request hangs on that process until
+		// the test timeout. Rationale and mechanics in the file itself. The
+		// Dockerfile `test` stage copies it; scaffold-assets.test.mts checks that.
+		setupFiles: ["./vitest.supertest-loopback.mts"],
 	},
 });

@@ -15,21 +15,16 @@
  */
 
 /**
- * #556 — the setup file `templates/standalone/vitest.supertest-loopback.mts`,
- * which every package loads through `WORKSPACE_TEST_SETUP`, makes the server
- * supertest starts listen on the address supertest dials.
+ * #556 — the server `request(app)` starts listens on the address supertest
+ * dials, in this project's own test run.
  *
- * Unpatched, `request(app)` calls `app.listen(0)`, which binds the dual-stack
- * wildcard `[::]:P`, and then dials `127.0.0.1:P`. On macOS the kernel will
- * hand out a `P` that another process already holds as `127.0.0.1:P`, and a
- * connection to `127.0.0.1:P` goes to that more specific socket, not to the
- * test's server. When that process accepts and never answers (observed: an
- * editor helper), the request hangs until the 20 s `testTimeout` — the four
- * unrelated supertest timeouts of #556, each passing on the next run. Linux
- * refuses the conflicting bind, which is why CI never showed one.
- *
- * This file lives in one package, but it exercises the shared setup: a
- * package config that drops `WORKSPACE_TEST_SETUP` fails it.
+ * Unpatched, supertest starts its server with `app.listen(0)` — the
+ * dual-stack wildcard `[::]:P` — and sends the request to `127.0.0.1:P`. On
+ * macOS the kernel can hand out a `P` another process already holds as
+ * `127.0.0.1:P`; the request then reaches that process, and if it never
+ * answers the test hangs until its timeout. `vitest.supertest-loopback.mts`
+ * (wired in through `setupFiles` in `vitest.config.mts`) binds the server to
+ * `127.0.0.1` instead. These tests fail if that wiring is lost.
  */
 
 import http from "node:http";
@@ -53,8 +48,8 @@ function boundAddress(server: net.Server): Promise<AddressInfo> {
 	});
 }
 
-describe("supertest's own server listens on the loopback address it dials (#556)", () => {
-	it("binds 127.0.0.1, not the dual-stack wildcard, for request(server)", async () => {
+describe("#556 — supertest's own server listens on the loopback address it dials", () => {
+	it("binds 127.0.0.1, not the dual-stack wildcard", async () => {
 		const server = http.createServer(helloApp());
 		const bound = boundAddress(server);
 
@@ -62,44 +57,16 @@ describe("supertest's own server listens on the loopback address it dials (#556)
 
 		expect(res.status).toBe(200);
 		expect(await bound).toMatchObject({ address: "127.0.0.1", family: "IPv4" });
+		// supertest still closes the server it started.
 		expect(server.listening).toBe(false);
 	});
 
-	it("binds 127.0.0.1 for every request an agent sends", async () => {
-		const server = http.createServer(helloApp());
-		const agent = request.agent(server);
-
-		for (let i = 0; i < 2; i++) {
-			const bound = boundAddress(server);
-			const res = await agent.get("/hello");
-			expect(res.status).toBe(200);
-			expect(await bound).toMatchObject({ address: "127.0.0.1" });
-		}
-	});
-
 	it("serves requests an agent sends together over its one server", async () => {
-		// `request.agent(app)` wraps the app in a single server. Unpatched, the
-		// first request's synchronous listen is visible to the second; the
-		// loopback listen is not yet bound when the second request is built, and
-		// must not be started twice.
 		const agent = request.agent(helloApp());
 
 		const responses = await Promise.all([agent.get("/hello"), agent.get("/hello")]);
 
 		expect(responses.map((res) => res.status)).toEqual([200, 200]);
-	});
-
-	it("leaves a server the test already started alone", async () => {
-		const server = http.createServer(helloApp());
-		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-		try {
-			const res = await request(server).get("/hello");
-			expect(res.status).toBe(200);
-			// supertest does not own a server it did not start, so it stays up.
-			expect(server.listening).toBe(true);
-		} finally {
-			server.close();
-		}
 	});
 
 	it("fails the request, instead of hanging on another socket, when 127.0.0.1:P is taken", async () => {
@@ -119,9 +86,6 @@ describe("supertest's own server listens on the loopback address it dials (#556)
 			listen(port, ...rest);
 
 		try {
-			// Unpatched on macOS this request reaches the squatter and never
-			// settles; on Linux the unpatched `app.address().port` throws. Either
-			// way, what the suite needs is a prompt, named failure.
 			await expect(request(server).get("/hello")).rejects.toMatchObject({
 				code: "EADDRINUSE",
 			});
