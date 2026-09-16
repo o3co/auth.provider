@@ -34,7 +34,7 @@
  *                                  listByUserId, updateSignCount).
  *   - `challengeStore`         — raw challenge persistence (issue, consume).
  *   - `challengeCeremony`      — 3-outcome replay protection (consume).
- *   - `config`                 — AppConfig; grant reads oauth.accessToken.expiresIn
+ *   - `config`                 — AppConfig; grant reads the oauth.accessToken lifetime
  *                                and oauth.resourceIndicator.enabled.
  *   - `keyStore`               — JWT signing; consumed by generateToken inside
  *                                the grant handler.

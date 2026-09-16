@@ -64,14 +64,14 @@ export const oauthSessionModule = (params: { config: AppConfig }): Module => {
 	}
 	// Intentionally no `configSchema`: this module reads only slices already
 	// declared in `CoreConfigSchema` (`oauth.grants.session.enabled`,
-	// `oauth.accessToken.expiresIn`). Adding a symmetric configSchema would
+	// `oauth.accessToken`). Adding a symmetric configSchema would
 	// be theatre — `composeConfigSchema` already validates these fields via
 	// the core schema. Declare a configSchema here only if a future change
 	// adds a read of a `config.<full-section>` key that lives in
 	// `fullSectionsSchema` (e.g. `config.session`, `config.endpoints`).
 	return defineModule({
 		name: "oauth-session",
-		// `config` is required because createSessionGrant uses config.oauth.accessToken.expiresIn
+		// `config` is required because createSessionGrant reads the access-token lifetime from it
 		// when building the token response for authenticated sessions.
 		requires: ["config", "keyStore"],
 		optional: ["userSessionStore"],

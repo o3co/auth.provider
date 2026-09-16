@@ -83,6 +83,7 @@ import {
 	isDeviceVerificationRateLimitSpec,
 	type RateLimitFailMode,
 	type RateLimitSpec,
+	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import {
@@ -378,7 +379,7 @@ export const deviceGrantModule = defineModule({
 				return createDeviceCodeGrant({
 					store: deps.deviceCodeStore,
 					keyStore: deps.keyStore,
-					accessTokenExpiresIn: deps.config.oauth.accessToken.expiresIn,
+					accessTokenExpiresIn: resolveAccessTokenLifetime(deps.config).defaultExpiresIn,
 					logger: deps.logger,
 				});
 			},

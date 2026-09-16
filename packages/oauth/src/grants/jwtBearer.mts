@@ -28,6 +28,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isEmailVerified,
+	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import {
@@ -407,7 +408,7 @@ export const createJwtBearerGrant = (
 			const accessToken = await generateToken(
 				{ ...(clientId ? { client_id: clientId } : {}) },
 				{
-					expiresIn: config.oauth.accessToken.expiresIn,
+					expiresIn: resolveAccessTokenLifetime(config).defaultExpiresIn,
 					keyStore,
 					issuer: ctx.issuer,
 					audience,

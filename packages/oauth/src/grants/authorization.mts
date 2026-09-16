@@ -26,6 +26,7 @@ import {
 	generateIdToken,
 	generateToken,
 	generateTokenResponse,
+	resolveAccessTokenLifetime,
 	type Token,
 	type UserSession,
 	wellFormedAcr,
@@ -542,7 +543,7 @@ export const createAuthorizationGrant = (
 					...(acr ? { acr } : {}),
 				},
 				{
-					expiresIn: config.oauth.accessToken.expiresIn,
+					expiresIn: resolveAccessTokenLifetime(config).defaultExpiresIn,
 					keyStore,
 					issuer,
 					audience,

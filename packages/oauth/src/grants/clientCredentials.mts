@@ -24,6 +24,7 @@ import {
 	type GrantHandlerResult,
 	generateToken,
 	generateTokenResponse,
+	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import {
 	deriveAudienceFromResources,
@@ -192,7 +193,7 @@ export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHand
 					client_id: client.clientId,
 				},
 				{
-					expiresIn: config.oauth.accessToken.expiresIn,
+					expiresIn: resolveAccessTokenLifetime(config).defaultExpiresIn,
 					keyStore,
 					issuer,
 					audience,

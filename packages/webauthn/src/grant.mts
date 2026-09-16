@@ -112,6 +112,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isGrantTypeAllowed,
+	resolveAccessTokenLifetime,
 	type Token,
 	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
@@ -471,7 +472,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					amr: ["hwk"],
 				},
 				{
-					expiresIn: config.oauth.accessToken.expiresIn,
+					expiresIn: resolveAccessTokenLifetime(config).defaultExpiresIn,
 					keyStore,
 					issuer,
 					audience,
