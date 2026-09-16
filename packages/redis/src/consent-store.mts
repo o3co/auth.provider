@@ -66,6 +66,12 @@
  * request, through the session's index: expired requests leave first, then
  * the first-parked go until there is room — the memory adapter's rule, which
  * the shared contract suite checks for both.
+ *
+ * ### Corrupt records
+ *
+ * A stored value that is not the shape the port declares reads as absent, never
+ * as a throw or a half-typed record — see "Reading what Redis hands back"
+ * below for why absence, not an outage.
  */
 
 import {
@@ -116,43 +122,112 @@ const safetyNetTtlMs = (expiresAt: number, nowMs: number): number =>
  */
 const PENDING_CONSENT_HASH_TAG = "{pending}";
 
-const parseScopes = (json: string): readonly string[] => {
-	// The script only ever writes a JSON array of strings; anything else is
-	// external mutation and reads as no scope, which covers only an empty
-	// request — the fail-closed direction for a consent.
-	try {
-		const parsed: unknown = JSON.parse(json);
-		return Array.isArray(parsed) ? parsed.filter((s): s is string => typeof s === "string") : [];
-	} catch {
-		return [];
-	}
+// ---------------------------------------------------------------------------
+// Reading what Redis hands back
+//
+// Nothing this package writes fails these checks. A value edited by hand,
+// restored from a mismatched backup or written by another version can, and a
+// record that is not the shape the port promises must not leave this file:
+// the consent route binds a parked request to the session with
+// `Buffer.from(pending.sessionId)`, which throws on anything but a string, and
+// looks a request up by one challenge before consuming by the challenge the
+// record names.
+//
+// A corrupt record reads as **absent** — `null` — and never throws. The port
+// reserves a throw for a store that could not answer, which surfaces as
+// `temporarily_unavailable`; a store that answered with garbage did answer,
+// and "there is no consent" / "there is no pending request" is the answer
+// that fails closed: the user is asked again, or told the page has expired.
+// Turning corruption into an outage would instead make one bad key a
+// permanent 503 for that user and client.
+//
+// The checks live here rather than in the Lua scripts so there is one
+// definition of the shape, applied to whatever `ConsentStoreClient` or
+// `PendingConsentStoreClient` a deployment wires, and so a JSON document is
+// judged by `JSON.parse` rather than by `cjson`, which cannot tell `[]` from
+// `{}`. The returned record is rebuilt field by field: nothing the store held
+// beyond the port's fields reaches the caller.
+// ---------------------------------------------------------------------------
+
+const isString = (value: unknown): value is string => typeof value === "string";
+
+const isStringArray = (value: unknown): value is string[] =>
+	Array.isArray(value) && value.every(isString);
+
+const isFiniteNumber = (value: unknown): value is number =>
+	typeof value === "number" && Number.isFinite(value);
+
+/** A stored decimal: `Number("")` is 0, so emptiness is refused before conversion. */
+const storedNumber = (value: string): number | null => {
+	if (value.trim() === "") return null;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : null;
 };
 
 const toConsentRecord = (
 	sub: string,
 	clientId: string,
 	fields: ConsentRecordFields,
-): ConsentRecord => ({
-	sub,
-	clientId,
-	scopes: parseScopes(fields.scopes),
-	grantedAt: Number(fields.grantedAt),
-	...(fields.expiresAt === undefined ? {} : { expiresAt: Number(fields.expiresAt) }),
-});
-
-const toPendingRecord = (json: string | null): PendingConsentRecord | null => {
-	if (json === null) return null;
-	// Written by `set` from `JSON.stringify` of the record; a value that does
-	// not parse to an object is external mutation, and a challenge with nothing
-	// behind it answers nothing.
+): ConsentRecord | null => {
+	if (!isString(fields.scopes) || !isString(fields.grantedAt)) return null;
+	let scopes: unknown;
 	try {
-		const parsed: unknown = JSON.parse(json);
-		return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
-			? (parsed as PendingConsentRecord)
-			: null;
+		scopes = JSON.parse(fields.scopes);
 	} catch {
 		return null;
 	}
+	if (!isStringArray(scopes)) return null;
+	const grantedAt = storedNumber(fields.grantedAt);
+	if (grantedAt === null) return null;
+	if (fields.expiresAt === undefined) return { sub, clientId, scopes, grantedAt };
+	const expiresAt = isString(fields.expiresAt) ? storedNumber(fields.expiresAt) : null;
+	if (expiresAt === null) return null;
+	return { sub, clientId, scopes, grantedAt, expiresAt };
+};
+
+/**
+ * The parked request `json` holds, if it is one — every field the port
+ * declares, of its declared type — and it was parked under `challenge`.
+ */
+const toPendingRecord = (json: string, challenge: string): PendingConsentRecord | null => {
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(json);
+	} catch {
+		return null;
+	}
+	if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+	const r = parsed as Record<string, unknown>;
+	// Bound to the key it was read from: a record naming another challenge
+	// would have the route consume a request other than the one it showed.
+	if (r.challenge !== challenge) return null;
+	if (
+		!isString(r.sessionId) ||
+		!isString(r.sub) ||
+		!isString(r.clientId) ||
+		!isStringArray(r.scopes) ||
+		!isStringArray(r.grantedScopes) ||
+		!isString(r.authorizeUrl) ||
+		!isString(r.redirectUri) ||
+		!isFiniteNumber(r.createdAt) ||
+		!isFiniteNumber(r.expiresAt) ||
+		(r.state !== undefined && !isString(r.state))
+	) {
+		return null;
+	}
+	return {
+		challenge,
+		sessionId: r.sessionId,
+		sub: r.sub,
+		clientId: r.clientId,
+		scopes: r.scopes,
+		grantedScopes: r.grantedScopes,
+		authorizeUrl: r.authorizeUrl,
+		redirectUri: r.redirectUri,
+		...(r.state === undefined ? {} : { state: r.state }),
+		createdAt: r.createdAt,
+		expiresAt: r.expiresAt,
+	};
 };
 
 /** Options for {@link createRedisConsentStore}. */
@@ -171,6 +246,9 @@ export function createRedisConsentStore(opts: RedisConsentStoreOptions): Consent
 		kind: "redis",
 
 		async find(sub, clientId) {
+			// A corrupt record reads as no consent and is left in place: the grant
+			// script gives it no weight either, so the user's next answer replaces
+			// it whole. A record with a TTL still ages out on it.
 			const fields = await client.find(key(sub, clientId), Date.now());
 			return fields === null ? null : toConsentRecord(sub, clientId, fields);
 		},
@@ -233,11 +311,28 @@ export function createRedisPendingConsentStore(
 		},
 
 		async get(challenge) {
-			return toPendingRecord(await client.get(keys, challenge, Date.now()));
+			const json = await client.get(keys, challenge, Date.now());
+			if (json === null) return null;
+			const record = toPendingRecord(json, challenge);
+			if (record === null) {
+				// Reclaimed as a second, compare-and-delete step rather than inside
+				// the read script: the shape is judged here, once, for any client
+				// (see "Reading what Redis hands back"), and the comparison keeps a
+				// request re-parked in between from being taken with it. The answer
+				// does not depend on the reclaim — the record is corrupt whether or
+				// not it goes — so a failure to reclaim leaves it to its TTL and
+				// still answers `null` rather than turning corruption into an
+				// outage.
+				await client.discard(keys, challenge, json).catch(() => false);
+			}
+			return record;
 		},
 
 		async consume(challenge) {
-			return toPendingRecord(await client.consume(keys, challenge, Date.now()));
+			// The consume script has already removed the record and its index
+			// entry, corrupt or not, so there is nothing left to reclaim.
+			const json = await client.consume(keys, challenge, Date.now());
+			return json === null ? null : toPendingRecord(json, challenge);
 		},
 	};
 }

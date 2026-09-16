@@ -229,6 +229,7 @@ const noopPendingConsentStoreClient: PendingConsentStoreClient = {
 	set: async () => {},
 	get: async () => null,
 	consume: async () => null,
+	discard: async () => false,
 };
 
 describe("#561: redisConsentStoreBuilder / redisPendingConsentStoreBuilder — client guard", () => {

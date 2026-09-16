@@ -388,7 +388,7 @@ return redis.call('DEL', KEYS[1], ARGV[1] .. userCode)
 
 // --- Consent scripts (#561) -------------------------------------------------
 //
-// Four scripts — one per operation that must be indivisible, the pending
+// Five scripts — one per operation that must be indivisible, the pending
 // store's read and consume sharing one — for the reason the device scripts
 // above give. Expiry is judged by the record's own `expiresAt`
 // against the caller's clock, passed in `ARGV`, and never by a key's TTL:
@@ -439,8 +439,11 @@ return r
  * The recorded scopes join the union only while the recorded consent is live
  * on the caller's clock: a lapsed consent is not something the user still
  * agrees to. They keep their order and the new ones follow, as the memory
- * adapter's `Set` does. A recorded list that does not decode contributes
- * nothing rather than failing the grant. An empty union is written as `[]`
+ * adapter's `Set` does. A recorded consent that is not well-formed — `scopes`
+ * not a JSON array of strings, `grantedAt` not a number — contributes nothing
+ * rather than failing the grant or lending it the strings it does hold: the
+ * adapter's `find` reports such a record absent, so the user was asked again,
+ * and their answer is the whole record. An empty union is written as `[]`
  * literally, because `cjson.encode({})` is `{}`.
  *
  * Without an expiry the record is until revoked, so the stale `expiresAt`
@@ -461,17 +464,26 @@ local function add(list)
     end
   end
 end
-local held = redis.call('HMGET', KEYS[1], 'scopes', 'expiresAt')
-if held[1] then
+local function string_array(json)
+  local ok, list = pcall(cjson.decode, json)
+  if not ok or type(list) ~= 'table' then return nil end
+  local count = 0
+  for _ in pairs(list) do count = count + 1 end
+  if count ~= #list then return nil end
+  for _, scope in ipairs(list) do
+    if type(scope) ~= 'string' then return nil end
+  end
+  return list
+end
+local held = redis.call('HMGET', KEYS[1], 'scopes', 'grantedAt', 'expiresAt')
+if held[1] and held[2] and tonumber(held[2]) then
   local live = true
-  if held[2] then
-    local expiresAt = tonumber(held[2])
+  if held[3] then
+    local expiresAt = tonumber(held[3])
     live = expiresAt ~= nil and expiresAt > now
   end
-  if live then
-    local ok, list = pcall(cjson.decode, held[1])
-    if ok and type(list) == 'table' then add(list) end
-  end
+  local list = live and string_array(held[1])
+  if list then add(list) end
 end
 add(cjson.decode(ARGV[3]))
 local encoded = '[]'
@@ -585,6 +597,30 @@ return false
 `.trim();
 
 /**
+ * `PendingConsentStoreClient.discard` — reclaim a request the adapter read and
+ * found corrupt, only if it is still the value that was read.
+ *
+ * `KEYS[1]` = record key; `ARGV[1]` = the serialised request as read,
+ * `ARGV[2]` = challenge, `ARGV[3]` = session index key prefix. Returns 1 when
+ * the record and its index entry were removed, 0 when the stored value is no
+ * longer that one (or is gone).
+ *
+ * A compare-and-delete rather than a plain delete because it runs after the
+ * read, as a second command: a valid request re-parked under the challenge in
+ * between must not be taken with the corrupt one it replaced. The index is
+ * reached through the record's own `sessionId` field, which the park script
+ * writes beside the serialisation — the JSON's copy is exactly what may be
+ * corrupt.
+ */
+const LUA_PENDING_CONSENT_DISCARD = `
+local r = redis.call('HMGET', KEYS[1], 'record', 'sessionId')
+if r[1] ~= ARGV[1] then return 0 end
+redis.call('DEL', KEYS[1])
+if r[2] then redis.call('ZREM', ARGV[3] .. r[2], ARGV[2]) end
+return 1
+`.trim();
+
+/**
  * A script, its digest, and its cache-residency flag — the EVALSHA-first call
  * path the three scripts above take by hand, packaged once for the five
  * device-authorization scripts (#433) so a sixth inline copy of the NOSCRIPT
@@ -616,6 +652,7 @@ const CONSENT_FIND = defineScript(LUA_CONSENT_FIND);
 const CONSENT_GRANT = defineScript(LUA_CONSENT_GRANT);
 const PENDING_CONSENT_SET = defineScript(LUA_PENDING_CONSENT_SET);
 const PENDING_CONSENT_TAKE = defineScript(LUA_PENDING_CONSENT_TAKE);
+const PENDING_CONSENT_DISCARD = defineScript(LUA_PENDING_CONSENT_DISCARD);
 
 /**
  * Run `script` EVALSHA-first, falling back to EVAL — which implicitly loads
@@ -1286,6 +1323,15 @@ export function makeIoredisClients(
 				[String(nowMs), challenge, keys.sessionKeyPrefix, "spend"],
 			);
 			return typeof reply === "string" ? reply : null;
+		},
+		async discard(keys, challenge, record) {
+			const reply = await runScript(
+				io,
+				PENDING_CONSENT_DISCARD,
+				[keys.recordKeyPrefix + challenge],
+				[record, challenge, keys.sessionKeyPrefix],
+			);
+			return reply === 1;
 		},
 	};
 

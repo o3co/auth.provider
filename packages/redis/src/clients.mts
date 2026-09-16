@@ -811,14 +811,16 @@ export interface ConsentStoreClient {
 	 * The record at `key`, or `null` when there is none or its `expiresAt` is
 	 * at or before `nowMs`. An expired record is removed on the way, in the same
 	 * step as the read — a separate `DEL` could remove a grant written in
-	 * between.
+	 * between. The fields are returned as stored; judging their shape is the
+	 * adapter's.
 	 */
 	find(key: string, nowMs: number): Promise<ConsentRecordFields | null>;
 	/**
 	 * Atomically replace the record at `key` with one whose scopes are the
 	 * union of `input.scopes` and those of the record already there — only if
-	 * that record is still live at `input.nowMs`; an expired one contributes
-	 * nothing. `grantedAt` and the expiry are the new record's, and so is the
+	 * that record is still live at `input.nowMs` and well-formed (`scopes` a
+	 * JSON array of strings, `grantedAt` a number); an expired or corrupt one
+	 * contributes nothing, as `find` reports it absent. `grantedAt` and the expiry are the new record's, and so is the
 	 * key's TTL: set from `expiry.ttlMs`, or removed when there is no expiry.
 	 */
 	grant(key: string, input: GrantConsentInput): Promise<void>;
@@ -899,6 +901,16 @@ export interface PendingConsentStoreClient {
 	 * removed too, and answers `null`.
 	 */
 	consume(keys: PendingConsentKeyspace, challenge: string, nowMs: number): Promise<string | null>;
+	/**
+	 * Remove the request parked under `challenge`, with its index entry — but
+	 * only while the stored serialisation is still exactly `record`, compared
+	 * and removed atomically. Resolves whether it was removed.
+	 *
+	 * The adapter's reclaim for a record `get` read and found corrupt. The
+	 * comparison is what makes it safe to issue after the read: a valid request
+	 * re-parked under the challenge in between is a different value, and stays.
+	 */
+	discard(keys: PendingConsentKeyspace, challenge: string, record: string): Promise<boolean>;
 }
 
 // ---------------------------------------------------------------------------

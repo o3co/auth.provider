@@ -289,6 +289,14 @@ session to `PENDING_CONSENT_PER_SESSION_LIMIT`, dropping that session's expired
 requests before evicting the first-parked. The conformance suites for both ports
 run against a real Redis in this package's tests, racing cases included.
 
+A stored value that is not the shape the port declares — a missing or non-string
+field, a parked request naming a challenge other than its key's, JSON that does
+not parse — reads as **absent**, never as a throw: corruption is not an outage,
+and "no consent" / "no pending request" is the answer that fails closed. A corrupt
+parked request is reclaimed with its index entry (by the consume script, or after
+a read by a compare-and-delete); a corrupt consent record is given no weight by
+the next grant, which replaces it.
+
 Expiry is judged by the record's own `expiresAt` against the caller's clock, never
 by a key's TTL. The TTL a write sets — relative, `PEXPIRE`, so the skew between
 the writing replica and Redis cannot move it — runs `CONSENT_EXPIRY_SLACK_MS`

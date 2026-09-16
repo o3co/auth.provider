@@ -275,3 +275,132 @@ describe("createRedisPendingConsentStore — what is Redis-specific (#561)", () 
 		expect(await store.consume("ch-1")).toEqual(record);
 	});
 });
+
+describe("corrupt records read as absent, never as a throw or a half-typed record (#561 review)", () => {
+	// Nothing this package writes is corrupt; a value edited by hand, restored
+	// from a mismatched backup or written by another version is. A record that
+	// is not the shape the port promises must not reach the consent route —
+	// whose session binding calls `Buffer.from(pending.sessionId)` and would
+	// throw — nor answer for a challenge other than the one looked up.
+	const pendingCorruptions: ReadonlyArray<
+		readonly [name: string, corrupt: (valid: Record<string, unknown>) => string]
+	> = [
+		["invalid JSON", () => "{not json"],
+		["JSON that is not an object", (valid) => JSON.stringify([valid])],
+		["a missing sessionId", ({ sessionId: _, ...rest }) => JSON.stringify(rest)],
+		["a non-string sessionId", (valid) => JSON.stringify({ ...valid, sessionId: 42 })],
+		["non-string scopes", (valid) => JSON.stringify({ ...valid, scopes: ["read", 5] })],
+		[
+			"grantedScopes that are not an array",
+			(valid) => JSON.stringify({ ...valid, grantedScopes: "read" }),
+		],
+		["a non-string state", (valid) => JSON.stringify({ ...valid, state: { x: 1 } })],
+		["a createdAt that is not a number", (valid) => JSON.stringify({ ...valid, createdAt: "now" })],
+		["an expiresAt that is not a number", (valid) => JSON.stringify({ ...valid, expiresAt: null })],
+		[
+			"a challenge other than its key's",
+			(valid) => JSON.stringify({ ...valid, challenge: "ch-2" }),
+		],
+	];
+
+	/** Parks a valid request, then overwrites the stored JSON the way corruption would. */
+	const parkCorrupt = async (
+		prefix: string,
+		corrupt: (valid: Record<string, unknown>) => string,
+	) => {
+		const store = pendingStoreAt(prefix);
+		const valid = parked();
+		await store.set(valid);
+		await raw.hset(
+			`${prefix}{pending}:ch:ch-1`,
+			"record",
+			corrupt(valid as unknown as Record<string, unknown>),
+		);
+		return store;
+	};
+
+	for (const [name, corrupt] of pendingCorruptions) {
+		it(`get answers null for a parked request with ${name}, and reclaims it with its index entry`, async () => {
+			const prefix = freshPrefix();
+			const store = await parkCorrupt(prefix, corrupt);
+			await expect(store.get("ch-1")).resolves.toBeNull();
+			expect(await raw.exists(`${prefix}{pending}:ch:ch-1`)).toBe(0);
+			expect(await raw.zscore(`${prefix}{pending}:sess:sess-1`, "ch-1")).toBeNull();
+		});
+
+		it(`consume answers null for a parked request with ${name}, and reclaims it with its index entry`, async () => {
+			const prefix = freshPrefix();
+			const store = await parkCorrupt(prefix, corrupt);
+			await expect(store.consume("ch-1")).resolves.toBeNull();
+			expect(await raw.exists(`${prefix}{pending}:ch:ch-1`)).toBe(0);
+			expect(await raw.zscore(`${prefix}{pending}:sess:sess-1`, "ch-1")).toBeNull();
+		});
+	}
+
+	it("does not let a record carrying another challenge answer for, or spend, that challenge's request", async () => {
+		const prefix = freshPrefix();
+		const store = pendingStoreAt(prefix);
+		const second = parked({ challenge: "ch-2", clientId: "other" });
+		await store.set(parked());
+		await store.set(second);
+		await raw.hset(`${prefix}{pending}:ch:ch-1`, "record", JSON.stringify(second));
+		expect(await store.consume("ch-1")).toBeNull();
+		expect(await store.get("ch-2")).toEqual(second);
+	});
+
+	it("reclaims a corrupt record only while it is still the one that was read", async () => {
+		// The reclaim is a compare-and-delete: a request re-parked under the
+		// challenge between the read and the reclaim is a valid record, and must
+		// not be taken with the corrupt one it replaced.
+		const prefix = freshPrefix();
+		const client = makeIoredisClients(raw).pendingConsentStoreClient;
+		const keys = {
+			recordKeyPrefix: `${prefix}{pending}:ch:`,
+			sessionKeyPrefix: `${prefix}{pending}:sess:`,
+		};
+		const store = pendingStoreAt(prefix);
+		await store.set(parked());
+		expect(await client.discard(keys, "ch-1", "{not what is stored")).toBe(false);
+		expect(await store.get("ch-1")).not.toBeNull();
+		const stored = (await raw.hget(`${prefix}{pending}:ch:ch-1`, "record")) as string;
+		expect(await client.discard(keys, "ch-1", stored)).toBe(true);
+		expect(await raw.exists(`${prefix}{pending}:ch:ch-1`)).toBe(0);
+		expect(await raw.exists(`${prefix}{pending}:sess:sess-1`)).toBe(0);
+	});
+
+	const consentCorruptions: ReadonlyArray<readonly [name: string, fields: Record<string, string>]> =
+		[
+			["scopes that are not JSON", { scopes: "read write" }],
+			["scopes that are not an array", { scopes: '{"0":"read"}' }],
+			["non-string scopes", { scopes: '["read",5]' }],
+			["a grantedAt that is not a number", { grantedAt: "yesterday" }],
+			["an empty grantedAt", { grantedAt: "" }],
+		];
+
+	for (const [name, fields] of consentCorruptions) {
+		it(`find answers null for a consent record with ${name}`, async () => {
+			const prefix = freshPrefix();
+			const store = consentStoreAt(prefix);
+			await store.grant({ sub: "u-1", clientId: "app", scopes: ["read"], grantedAt: 1 });
+			await raw.hset(`${prefix}rec:3:u-1|3:app`, fields);
+			await expect(store.find("u-1", "app")).resolves.toBeNull();
+		});
+	}
+
+	it("lets nothing of a corrupt consent record into the next grant's union", async () => {
+		// What `find` reports absent must not contribute scopes either: the user
+		// is asked again, and what they answer is the whole record.
+		const prefix = freshPrefix();
+		const store = consentStoreAt(prefix);
+		await store.grant({ sub: "u-1", clientId: "app", scopes: ["read"], grantedAt: 1 });
+		await raw.hset(`${prefix}rec:3:u-1|3:app`, { scopes: '["admin",5]' });
+		expect(await store.find("u-1", "app")).toBeNull();
+		await store.grant({ sub: "u-1", clientId: "app", scopes: ["write"], grantedAt: 2 });
+		expect(await store.find("u-1", "app")).toEqual({
+			sub: "u-1",
+			clientId: "app",
+			scopes: ["write"],
+			grantedAt: 2,
+		});
+	});
+});
