@@ -15,7 +15,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { PendingConsentRecord, PendingConsentStore } from "#/consents/types.mjs";
+import {
+	PENDING_CONSENT_PER_SESSION_LIMIT,
+	type PendingConsentRecord,
+	type PendingConsentStore,
+} from "#/consents/types.mjs";
 
 export interface PendingConsentStoreContractFactory {
 	create(): Promise<PendingConsentStore>;
@@ -112,6 +116,73 @@ export function runPendingConsentStoreContract(
 			await store.set(record({ scopes }));
 			scopes.push("admin");
 			expect((await store.get("ch-1"))?.scopes).toEqual(["read"]);
+		});
+
+		it("hands the record to exactly one of two answers racing for one challenge", async () => {
+			// The sequential case above, under concurrency: an adapter whose
+			// one step is a round trip — a `GET` then a `DEL` — passes that one
+			// and fails this one against a real server.
+			await store.set(record());
+			const answers = await Promise.all([store.consume("ch-1"), store.consume("ch-1")]);
+			expect(answers.filter((answer) => answer !== null)).toHaveLength(1);
+		});
+
+		// The per-session bound (#527 audit), held by every adapter since a
+		// shared one exists (#561): records are keyed by challenge and reclaimed
+		// only on expiry, so without it one authenticated session could park an
+		// unbounded number inside the ten-minute window. "Oldest" is the order
+		// the requests were parked in — every record below carries the same
+		// `createdAt`, as requests parked within one millisecond do.
+
+		it("keeps at most the per-session bound parked, the first parked going first, and no other session's", async () => {
+			const parked = Array.from(
+				{ length: PENDING_CONSENT_PER_SESSION_LIMIT + 2 },
+				(_, i) => `busy-${i}`,
+			);
+			for (const challenge of parked) {
+				await store.set(record({ challenge, sessionId: "sess-busy" }));
+			}
+			expect(await store.get("busy-0")).toBeNull();
+			expect(await store.get("busy-1")).toBeNull();
+			for (const challenge of parked.slice(2)) {
+				expect(await store.get(challenge), challenge).not.toBeNull();
+			}
+
+			await store.set(record({ challenge: "quiet", sessionId: "sess-quiet" }));
+			expect(await store.get("quiet")).not.toBeNull();
+			expect(await store.get("busy-2")).not.toBeNull();
+		});
+
+		it("does not evict a live request while one of the same session that has expired still counts", async () => {
+			// An expired record that is not the oldest must leave the count
+			// before the bound is judged; otherwise the eviction takes a live
+			// request — an open consent page — while the dead one stays.
+			await store.set(record({ challenge: "live-oldest", sessionId: "sess-c" }));
+			await store.set(
+				record({ challenge: "dead", sessionId: "sess-c", expiresAt: Date.now() + 1_000 }),
+			);
+			for (let i = 0; i < PENDING_CONSENT_PER_SESSION_LIMIT - 2; i += 1) {
+				await store.set(record({ challenge: `live-${i}`, sessionId: "sess-c" }));
+			}
+			vi.setSystemTime(new Date(Date.now() + 1_000));
+			// The session is at the bound only if the dead one still counts.
+			await store.set(record({ challenge: "live-newest", sessionId: "sess-c" }));
+			expect(await store.get("live-oldest")).not.toBeNull();
+			expect(await store.get("live-newest")).not.toBeNull();
+		});
+
+		it("frees a place when a request is consumed, and counts a re-parked challenge once", async () => {
+			for (let i = 0; i < PENDING_CONSENT_PER_SESSION_LIMIT; i += 1) {
+				await store.set(record({ challenge: `a-${i}`, sessionId: "sess-a" }));
+			}
+			expect(await store.consume("a-0")).not.toBeNull();
+			await store.set(record({ challenge: "a-1", sessionId: "sess-a" }));
+			// One place is free only if the consumed request left the count and
+			// the re-parked one is counted once.
+			await store.set(record({ challenge: "a-new", sessionId: "sess-a" }));
+			expect(await store.get("a-1")).not.toBeNull();
+			expect(await store.get("a-2")).not.toBeNull();
+			expect(await store.get("a-new")).not.toBeNull();
 		});
 	});
 }

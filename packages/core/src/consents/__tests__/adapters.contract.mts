@@ -85,7 +85,24 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 			expect([...scopes].sort()).toEqual(["read", "write"]);
 		});
 
-		it("stops finding an expired record", async () => {
+		it("stops finding an expired record, and finds it intact until then", async () => {
+			const expiresAt = Date.now() + 1_000;
+			const record = {
+				sub: "u-1",
+				clientId: "app",
+				scopes: ["read"],
+				grantedAt: Date.now(),
+				expiresAt,
+			};
+			await store.grant(record);
+			expect(await store.find("u-1", "app")).toEqual(record);
+			vi.setSystemTime(new Date(expiresAt + 1));
+			expect(await store.find("u-1", "app")).toBeNull();
+		});
+
+		it("does not carry the scopes of an expired record into a later grant", async () => {
+			// The union is with what the user has agreed to and still stands; a
+			// consent that has lapsed is not one of those.
 			const expiresAt = Date.now() + 1_000;
 			await store.grant({
 				sub: "u-1",
@@ -94,9 +111,41 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 				grantedAt: Date.now(),
 				expiresAt,
 			});
-			expect(await store.find("u-1", "app")).not.toBeNull();
 			vi.setSystemTime(new Date(expiresAt + 1));
-			expect(await store.find("u-1", "app")).toBeNull();
+			await store.grant({ sub: "u-1", clientId: "app", scopes: ["write"], grantedAt: Date.now() });
+			expect((await store.find("u-1", "app"))?.scopes).toEqual(["write"]);
+		});
+
+		it("records a later grant without an expiry until revoked, whatever the earlier one's was", async () => {
+			// `expiresAt` is the new record's. A store that kept the earlier
+			// expiry — a key TTL left in place, say — would silently end a
+			// consent the user gave until revoked.
+			const expiresAt = Date.now() + 1_000;
+			await store.grant({
+				sub: "u-1",
+				clientId: "app",
+				scopes: ["read"],
+				grantedAt: Date.now(),
+				expiresAt,
+			});
+			await store.grant({ sub: "u-1", clientId: "app", scopes: ["write"], grantedAt: Date.now() });
+			vi.setSystemTime(new Date(expiresAt + 1));
+			const record = await store.find("u-1", "app");
+			expect(record).not.toBeNull();
+			expect(record?.expiresAt).toBeUndefined();
+			expect([...(record?.scopes ?? [])].sort()).toEqual(["read", "write"]);
+		});
+
+		it("keeps both of two grants racing with different scopes", async () => {
+			// The union under concurrency: an adapter whose union is a
+			// read-modify-write across round trips passes the sequential case and
+			// loses one of these against a real server.
+			await Promise.all([
+				store.grant({ sub: "u-1", clientId: "app", scopes: ["read"], grantedAt: Date.now() }),
+				store.grant({ sub: "u-1", clientId: "app", scopes: ["write"], grantedAt: Date.now() }),
+			]);
+			const scopes = (await store.find("u-1", "app"))?.scopes ?? [];
+			expect([...scopes].sort()).toEqual(["read", "write"]);
 		});
 
 		it("revokes, and says whether there was anything to revoke", async () => {

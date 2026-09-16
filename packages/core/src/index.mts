@@ -731,7 +731,6 @@ export {
 	createMemoryPendingConsentStore,
 	type MemoryConsentStore,
 	type MemoryPendingConsentStore,
-	PENDING_CONSENT_PER_SESSION_LIMIT,
 } from "./consents/memory.mjs";
 export { memoryConsentStoreModule } from "./consents/module.mjs";
 // #552: the record an `/authorize` request is parked in while the consent
@@ -740,6 +739,7 @@ export {
 	type ConsentRecord,
 	type ConsentStore,
 	consentCovers,
+	PENDING_CONSENT_PER_SESSION_LIMIT,
 	type PendingConsentRecord,
 	type PendingConsentStore,
 } from "./consents/types.mjs";
