@@ -4,6 +4,217 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.14.0] - 2026-09-17
+
+### Added
+
+- **The access-token lifetime is a default and a max:
+  `oauth.accessToken.defaultExpiresIn` and `maxExpiresIn`
+  (`@o3co/auth-provider-core`)**
+  ([#591](https://github.com/o3co/auth.provider/pull/591)). The lifetime was one
+  value, `oauth.accessToken.expiresIn`, read by every grant.
+  `defaultExpiresIn` (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`) is what every
+  grant mints when the request asks for no particular lifetime, and
+  `maxExpiresIn` (`OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`) is the most a request can
+  obtain — only token exchange lets a request ask (below). An unset max is the
+  default, so no token gets longer unless the operator raises it. Both are whole
+  seconds from 1 to one year; a variable exported as an empty string fails boot,
+  as for the other lifetimes; and a default above the max fails boot with a
+  message naming both keys, which also says when the default was read from the
+  deprecated `expiresIn` (under Changed). `resolveAccessTokenLifetime(config)`
+  answers `{ defaultExpiresIn, maxExpiresIn }` and is now the one reader: the
+  authorization_code, refresh_token, session, client_credentials, jwt-bearer,
+  WebAuthn, device and token-exchange grants all call it, and it holds a
+  configuration built by hand to the same rules. It is exported with the types
+  `AccessTokenConfig`, `AccessTokenLifetime` and `AccessTokenLifetimeSource`.
+
+- **A token exchange may ask for its lifetime with `expires_in`
+  (`@o3co/auth-provider-oauth-token-exchange`)**
+  ([#591](https://github.com/o3co/auth.provider/pull/591)). RFC 8693 defines no
+  lifetime parameter, and RFC 6749 §3.2 has a server ignore a parameter it does
+  not recognise, so a client can send the optional `expires_in` form parameter
+  (seconds) to any authorization server. The issued lifetime is `min(expires_in
+  ?? defaultExpiresIn, maxExpiresIn, subject_token exp − now)`: a request above
+  the max is clamped to it, not refused, and the subject token's remaining
+  lifetime still caps it. The response's `expires_in` is the lifetime actually
+  minted. A parameter sent without a value (`expires_in=`) is read as omitted,
+  per RFC 6749 §3.2, and mints the default; leading zeros are accepted. A
+  malformed value — sent more than once, zero, signed, with a decimal point, an
+  exponent, whitespace or non-ASCII digits, or longer than 10 digits — is `400
+  invalid_request` ("expires_in must be sent once, as a positive whole number of
+  seconds in ASCII digits"). Every other grant ignores the parameter and mints
+  the default. The max is a security bound: it is the longest a resource server
+  that validates an exchanged token offline, by signature and `exp` alone, can
+  keep accepting it after its family is revoked (security note 19 in the
+  package README). Unset, it equals the default, so that window does not change
+  until an operator raises it.
+
+- **Redis consent stores — the consent step for clients that are not
+  first-party runs on more than one replica (`@o3co/auth-provider-redis`,
+  `@o3co/auth-provider-core`, standalone template)**
+  ([#561](https://github.com/o3co/auth.provider/issues/561),
+  [#589](https://github.com/o3co/auth.provider/pull/589)). The only provider of
+  `consentStore` and `pendingConsentStore` was core's memory module, which
+  `deployment.mode = "multi"` refuses, so a scaled deployment could serve
+  first-party clients only. `redisConsentStoreModule` provides both slots off
+  the shared ioredis socket and declares no replica restriction, and
+  `consentStore.adapter = "redis"` (`CONSENT_STORE_ADAPTER`) selects it in the
+  standalone template. The default stays `none`, and `memory` is still refused
+  under `multi`. Keys live under `redisConsentStore.keyPrefix`
+  (`REDIS_CONSENT_STORE_KEY_PREFIX`, default `consent:`). A consent record is a
+  hash under `consent:rec:…` with no TTL when it is granted until revoked —
+  which is what `POST /oauth/consent` writes. A parked request and its
+  session's index live under `consent:{pending}:…` for at most ten minutes plus
+  five minutes' slack (`CONSENT_EXPIRY_SLACK_MS`), 16 requests per session.
+  Expiry is judged by each record's own `expiresAt` on the reading replica's
+  clock, never by a key's TTL. Each operation that must be indivisible — the
+  scope union on grant, a consume together with its index entry, the
+  per-session bound on park — is one Lua script, and a corrupt stored value
+  reads as absent rather than throwing. `{pending}` is a Cluster hash tag, so
+  every parked request shares one slot. With the adapter selected, a Redis
+  outage makes `/authorize` for a client that is not first-party redirect with
+  `error=temporarily_unavailable` ("consent store unavailable") and
+  `/oauth/consent` answer `503`. Also exported: `createRedisConsentStore`,
+  `createRedisPendingConsentStore`, `redisConsentStoreBuilder`,
+  `redisPendingConsentStoreBuilder`, `CONSENT_EXPIRY_SLACK_MS` and the
+  `ConsentStoreClient` / `PendingConsentStoreClient` types; `makeIoredisClients`
+  returns the two new clients.
+
+### Changed
+
+- **Deprecated: `oauth.accessToken.expiresIn` (`OAUTH_ACCESS_TOKEN_EXPIRES_IN`)
+  is an alias of `defaultExpiresIn` (`@o3co/auth-provider-core`, standalone
+  template)** ([#591](https://github.com/o3co/auth.provider/pull/591)). It still
+  works: `defaultExpiresIn` wins whenever it is set, and otherwise `expiresIn` is
+  read as the default. Setting both to different values does not fail boot —
+  the new key wins. `reference.conf` keeps the shipped `3600` on the old key and
+  puts no literal on the new one, so an existing override of the old key, in an
+  application layer or the environment, keeps deciding the default. The parsed
+  configuration still carries the resolved default under `expiresIn`, which
+  stays a required `number` in `AccessTokenConfig`, so code that reads
+  `config.oauth.accessToken.expiresIn` directly keeps minting what the grants
+  mint. The standalone composition prints `` [buildModules]
+  `oauth.accessToken.expiresIn` (OAUTH_ACCESS_TOKEN_EXPIRES_IN) is deprecated ``
+  once at boot, and only when `defaultExpiresIn` is unset and the old key holds
+  something other than `3600`.
+
+  **Upgrade note.** Nothing has to change to upgrade. To move off the alias,
+  set `oauth.accessToken.defaultExpiresIn`
+  (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`) to the value the old key carries and
+  remove the old key; code outside this repository should read
+  `resolveAccessTokenLifetime(config).defaultExpiresIn`. A max set below the
+  default on its own — `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN` under the shipped
+  `3600`, say — fails boot until the default is lowered too.
+
+- **Every grant holds a configuration built by hand to the lifetime rules
+  (`@o3co/auth-provider-oauth`, `@o3co/auth-provider-oauth-token-exchange`,
+  `@o3co/auth-provider-webauthn`, `@o3co/auth-provider-device-grant`)**
+  ([#591](https://github.com/o3co/auth.provider/pull/591)). A loaded
+  configuration is unaffected: the schema already required a valid lifetime. A
+  configuration built by hand never meets the schema, and the grants read
+  `config.oauth.accessToken.expiresIn` as they found it. Without that value,
+  every grant but token exchange passed `undefined` to `generateToken`, which
+  then mints a token with **no `exp`**, and token exchange fell back silently to
+  300 seconds. The grants now read the lifetime through
+  `resolveAccessTokenLifetime`: a configuration carrying only the new keys mints
+  `defaultExpiresIn`, and one with neither `defaultExpiresIn` nor `expiresIn`,
+  or with a value that is not a whole number of seconds up to one year, throws
+  naming the key — the device grant when its handler is built, the others when
+  the grant runs (the refresh grant before it reserves the rotation).
+
+  **Upgrade note.** A composition that builds its configuration without
+  `AppConfigSchema` must carry `oauth.accessToken.defaultExpiresIn` (or the
+  deprecated `expiresIn`).
+
+- **Adapter implementers: a `PendingConsentStore` holds each session to
+  `PENDING_CONSENT_PER_SESSION_LIMIT`, and an `AssertionVerifier` whose
+  credential expires reports `expiresAt` (`@o3co/auth-provider-core`)**
+  ([#561](https://github.com/o3co/auth.provider/issues/561),
+  [#588](https://github.com/o3co/auth.provider/pull/588)). The bound of 16
+  parked requests per session was the memory adapter's; it is now declared on
+  the port (the root export is unchanged, and the memory module re-exports it),
+  and `set` must hold it: a session's expired requests leave the count first,
+  then its first-parked request is evicted. The `PendingConsentStore` contract
+  suite now checks the bound and a consume race, and the `ConsentStore` suite a
+  grant race, that a lapsed record contributes no scopes to a grant, and that a
+  grant with no expiry after an expiring one is kept until revoked.
+  `AssertionVerificationResult` gains an optional `expiresAt`, in epoch seconds:
+  the assertion's `exp`, reported as it is even when it lies inside the clock
+  tolerance. It is optional so an existing verifier still compiles, but
+  omitting it asserts a credential with no expiry, which leaves the jwt-bearer
+  grant's configured lifetime uncapped (under Security); present, it must be a
+  finite number. `createRegistryAssertionVerifier`, for both profiles, and
+  `createJwtAssertionVerifier` report it.
+
+  **Upgrade note.** Run both consent contract suites against a custom consent
+  adapter. A custom `AssertionVerifier` over a credential that expires should
+  return `expiresAt`.
+
+- **Runtime dependency: `zod` 4.5.4 → 4.6.2**
+  ([#587](https://github.com/o3co/auth.provider/pull/587)). A minor release; the
+  packages that depend on it now declare `^4.6.2`.
+
+### Fixed
+
+- **A token-exchange token could outlive its subject token by a second
+  (`@o3co/auth-provider-oauth-token-exchange`)**
+  ([#591](https://github.com/o3co/auth.provider/pull/591)). The grant computed
+  the subject token's remaining lifetime from one clock read, and
+  `generateToken` read the clock again to stamp `iat` and `exp`. When a second
+  boundary fell between the two reads, the issued `exp` landed a second past the
+  subject's, breaking the package's security note 16: the issued token never
+  outlives the subject token. The grant now takes one issuance instant, caps
+  against it, and mints with it as `issuedAt`. The jwt-bearer cap new in 0.14.0
+  (under Security) is measured from one instant in the same way.
+
+- **A scaffolded project's supertest tests could hang until the 20 s timeout
+  on macOS (standalone template)**
+  ([#556](https://github.com/o3co/auth.provider/issues/556),
+  [#590](https://github.com/o3co/auth.provider/pull/590)). `request(app)` starts
+  its server on the dual-stack wildcard address and dials `127.0.0.1`. macOS can
+  hand that server a port another process already holds on `127.0.0.1`, and the
+  request then reaches the other process and hangs; Linux refuses the bind,
+  which is why CI never showed it. The template now ships
+  `vitest.supertest-loopback.mts` — loaded through `setupFiles` in its
+  `vitest.config.mts` and copied by the Dockerfile's `test` stage — which makes
+  the server supertest starts listen on `127.0.0.1`, and throws rather than
+  doing nothing if supertest's internals stop matching. `metrics.test.mts` binds
+  its hand-started servers to `127.0.0.1` as well. Test code only: nothing a
+  deployment runs changes. A project scaffolded earlier can copy the file and
+  the `setupFiles` line.
+
+### Security
+
+- **BREAKING: a jwt-bearer access token never outlives the assertion it was
+  exchanged for (`@o3co/auth-provider-oauth`, `@o3co/auth-provider-core`)**
+  ([auth.proxy#90](https://github.com/o3co/auth.proxy/issues/90),
+  [#588](https://github.com/o3co/auth.provider/pull/588),
+  [#591](https://github.com/o3co/auth.provider/pull/591)). Every jwt-bearer
+  token was minted with the configured lifetime whatever the assertion's `exp`,
+  so a two-minute ID-JAG bought an hour-long access token, and the expiry the
+  issuer set stopped bounding anything once the assertion was exchanged. For
+  both profiles, RFC 7523 and ID-JAG, the lifetime is now `min(defaultExpiresIn,
+  expiresAt − now)`, from the verifier's `expiresAt` (the assertion's `exp`),
+  rounded down and measured when the token is minted; `expires_in` in the
+  response is that lifetime. Token exchange already held its subject token to
+  the same rule. An assertion with no whole second left is refused with `400
+  invalid_grant` ("assertion did not verify", the answer every other refusal in
+  the grant gives) and logged as `jwt_bearer_assertion_expired` (info, `{ kind,
+  issuer }`). That covers an assertion past its `exp` that verified only inside
+  `clockToleranceSeconds` (default 60), which used to get a full-lifetime token;
+  one expiring within the current second; and one that ran out while the Store
+  answered. A custom verifier's `expiresAt` that is present but not a finite
+  number is refused the same way, never read as an expiry or as none. A
+  verifier that reports no `expiresAt` leaves the configured lifetime standing.
+
+  **Upgrade note.** Clients of the jwt-bearer grant must read `expires_in`
+  rather than assume the configured lifetime: a short-lived assertion now
+  yields a short-lived token, no refresh token is issued, and an ID-JAG's `jti`
+  is accepted once, so the client exchanges a fresh assertion when the token
+  expires. A caller that presents assertions at or past their `exp` now gets
+  `invalid_grant`; a steady rate of `jwt_bearer_assertion_expired` from one
+  issuer means that issuer's clock is behind this server's.
+
 ## [0.13.0] - 2026-09-14
 
 ### Added

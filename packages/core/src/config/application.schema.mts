@@ -383,8 +383,7 @@ export interface AccessTokenConfig {
 	 * written before `defaultExpiresIn` existed, so they keep minting what every
 	 * other grant mints.
 	 *
-	 * @deprecated since the release that added `defaultExpiresIn` and
-	 * `maxExpiresIn`: as a configuration key this is an alias of
+	 * @deprecated since v0.14.0: as a configuration key this is an alias of
 	 * `defaultExpiresIn`, and readers should call `resolveAccessTokenLifetime`.
 	 * See CHANGELOG.
 	 */
@@ -526,9 +525,8 @@ const accessTokenSchema = z
 		defaultExpiresIn: lifetimeSecondsSchema.optional(),
 		maxExpiresIn: lifetimeSecondsSchema.optional(),
 		/**
-		 * @deprecated since the release that added `defaultExpiresIn` and
-		 * `maxExpiresIn` — an alias of `defaultExpiresIn`, still read when that
-		 * key is unset. See CHANGELOG.
+		 * @deprecated since v0.14.0 — an alias of `defaultExpiresIn`, still read
+		 * when that key is unset. See CHANGELOG.
 		 */
 		expiresIn: lifetimeSecondsSchema.optional(),
 	})
