@@ -1088,12 +1088,26 @@ describe("jwt-bearer grant — the token never outlives the assertion (auth.prox
 		expect("error" in result && result.error).toBe("invalid_grant");
 	});
 
-	it("refuses an expiresAt that is not a number rather than reading it as no expiry", async () => {
-		for (const expiresAt of [Number.NaN, "later" as unknown as number]) {
+	it("refuses an expiresAt that is not a finite number — neither an expiry nor no expiry", async () => {
+		// A custom verifier is typed, not checked. Arithmetic would coerce a
+		// numeric string into an expiry and read Infinity as none; every one of
+		// these is a verifier bug, and a bug here must not mint a token.
+		const malformed = [
+			String(NOW + 120),
+			"later",
+			null,
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			Number.NEGATIVE_INFINITY,
+		] as unknown as number[];
+		for (const expiresAt of malformed) {
+			const info = vi.fn();
 			const { result } = await build({
+				logger: { error: vi.fn(), warn: vi.fn(), info, debug: vi.fn() },
 				verifier: verifierFor({ subjectHandle: "device:abc", expiresAt }),
 			}).handle(ctx());
-			expect(result).toEqual(await unverified());
+			expect(result, `expiresAt: ${String(expiresAt)}`).toEqual(await unverified());
+			expect(info).toHaveBeenCalledWith(expect.anything(), "jwt_bearer_assertion_expired");
 		}
 	});
 

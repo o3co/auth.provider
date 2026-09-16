@@ -424,13 +424,21 @@ export const createJwtBearerGrant = (
 			// anything once exchanged. Taken here, at minting, rather than at
 			// verification: the Store and the policy run in between.
 			let expiresIn = config.oauth.accessToken.expiresIn;
-			if (verified.expiresAt !== undefined) {
-				const remaining = Math.floor(verified.expiresAt - Date.now() / 1000);
+			const { expiresAt } = verified;
+			if (expiresAt !== undefined) {
+				// Present means a finite number. The port is typed, not checked:
+				// arithmetic would coerce a custom verifier's numeric string into
+				// an expiry and read Infinity as none, so anything else is refused
+				// below — a malformed expiry is neither an expiry nor its absence.
+				const remaining =
+					typeof expiresAt === "number" && Number.isFinite(expiresAt)
+						? Math.floor(expiresAt - Date.now() / 1000)
+						: Number.NaN;
 				// `<= 0` is the assertion already past `exp` — admitted inside a
 				// verifier's clock tolerance, or run out while the Store answered
 				// — and the one expiring within this second; either would mint a
-				// token dead on arrival. Written `!(> 0)` so a verifier returning
-				// a non-number (NaN) is refused, not read as no expiry.
+				// token dead on arrival. Written `!(> 0)` so the malformed case
+				// (NaN) takes the same branch.
 				//
 				// The uniform description, not token exchange's "has expired":
 				// the bundled verifier already folds expiry into its `null`, so a
