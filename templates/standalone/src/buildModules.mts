@@ -34,6 +34,7 @@ import {
 import {
 	redisAccessTokenDenylistModule,
 	redisCodeRepositoryModule,
+	redisConsentStoreModule,
 	redisFederationTokenStoreModuleFor,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
@@ -156,6 +157,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// first-party. `"none"` (the default) wires nothing — such clients are
 	// refused, as before — so a first-party-only deployment pays nothing and
 	// a multi-replica one is not handed a memory store it cannot run.
+	// `"redis"` (#561) is the store such a deployment selects.
 	const consentStoreAdapter = config.consentStore?.adapter ?? "none";
 	// #456: adapter switch for the federation token store. `"memory"` by
 	// default, the template's local-dev shape; `"redis"` mounts
@@ -202,6 +204,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		codeRepositoryAdapter === "redis" ||
 		accessTokenDenylistAdapter === "redis" ||
 		replaySeenSetAdapter === "redis" ||
+		consentStoreAdapter === "redis" ||
 		federationTokenStoreAdapter === "redis";
 
 	// The four user-session stores switch on `userSessionStores.adapter`; the
@@ -237,10 +240,17 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 			? [redisAccessTokenDenylistModule]
 			: [memoryAccessTokenDenylistModule];
 
-	// #527: opt-in, memory only for now. The module declares itself
-	// replica-unsafe, so `deployment.mode = "multi"` refuses it by name.
+	// #527: opt-in. Each module provides both slots the consent step needs —
+	// the consent records and the requests parked while the page asks — so the
+	// two cannot be wired apart. The memory one declares itself replica-unsafe
+	// and `deployment.mode = "multi"` refuses it by name; the Redis one (#561)
+	// shares both over the ioredis socket.
 	const consentStoreModules: Module[] =
-		consentStoreAdapter === "memory" ? [memoryConsentStoreModule] : [];
+		consentStoreAdapter === "redis"
+			? [redisConsentStoreModule]
+			: consentStoreAdapter === "memory"
+				? [memoryConsentStoreModule]
+				: [];
 
 	// #455 / #456: mutually-exclusive federation-token-store pair, the same
 	// shape as the session stores. One module per adapter, so the memory one
@@ -314,8 +324,8 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		// (single-instance dev). Always wired — see the switch above.
 		...accessTokenDenylistModules,
 		...replaySeenSetModules,
-		// Consent records for clients that are not first-party: memory, or
-		// nothing (#527).
+		// Consent records for clients that are not first-party: redis
+		// (multi-replica, #561), memory (single-instance), or nothing (#527).
 		...consentStoreModules,
 		// RT family store: redis by default (closes OR-1); override path
 		// swaps to `[memoryRefreshTokenFamilyStoreModule]` for unit tests.

@@ -37,6 +37,8 @@ export type {
 	AccessTokenDenylistClient,
 	ChallengeStoreClient,
 	CodeRepositoryClient,
+	ConsentRecordFields,
+	ConsentStoreClient,
 	CreateDeviceCodeRecordInput,
 	DeviceCodeDecisionInput,
 	DeviceCodeDecisionReply,
@@ -46,6 +48,10 @@ export type {
 	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
+	GrantConsentInput,
+	ParkPendingConsentInput,
+	PendingConsentKeyspace,
+	PendingConsentStoreClient,
 	RateLimiterClient,
 	RateLimitIncrement,
 	RefreshTokenFamilyClient,
@@ -78,6 +84,22 @@ export {
 	redisCodeRepositoryBuilder,
 	redisCodeRepositoryModule,
 } from "./code-repository.mjs";
+// ---------------------------------------------------------------------------
+// ConsentStore + PendingConsentStore (#561). The Redis half of the consent
+// step for clients that are not first-party: core's memory module is refused
+// under `deployment.mode = "multi"`, so this is what lets such clients be
+// served by a scaled deployment. One module provides both slots.
+// ---------------------------------------------------------------------------
+export {
+	CONSENT_EXPIRY_SLACK_MS,
+	createRedisConsentStore,
+	createRedisPendingConsentStore,
+	type RedisConsentStoreOptions,
+	type RedisPendingConsentStoreOptions,
+	redisConsentStoreBuilder,
+	redisConsentStoreModule,
+	redisPendingConsentStoreBuilder,
+} from "./consent-store.mjs";
 // ---------------------------------------------------------------------------
 // DeviceCodeStore (#433). The Redis half of the RFC 8628 device grant's
 // storage: the memory adapter in core is refused under `deployment.mode =

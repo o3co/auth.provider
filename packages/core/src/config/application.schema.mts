@@ -1414,10 +1414,21 @@ export const fullSectionsSchema = z.object({
 	// #527: where consent to a client that is not first-party is recorded.
 	// `"none"` (the HOCON default) wires nothing, and such clients are refused
 	// as before; `"memory"` forks per replica and is refused by name under
-	// `deployment.mode = "multi"`.
+	// `deployment.mode = "multi"`; `"redis"` (#561) shares the consent records
+	// and the parked requests, and is what a multi-replica deployment selects.
 	consentStore: z
 		.object({
-			adapter: z.enum(["none", "memory"]).optional(),
+			adapter: z.enum(["none", "memory", "redis"]).optional(),
+		})
+		.optional(),
+	// #561: module-internal config for `redisConsentStoreModule`. Presence-only,
+	// for the reason every `redis*` section here is: without a top-level entry
+	// `AppConfigSchema.parse(...)` strips the key before the module's own
+	// `configSchema` sees it. The default lives in `reference.conf` and in the
+	// module.
+	redisConsentStore: z
+		.object({
+			keyPrefix: z.string().optional(),
 		})
 		.optional(),
 	// #277: module-internal config for `redisAccessTokenDenylistModule`.
