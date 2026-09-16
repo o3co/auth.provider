@@ -119,9 +119,12 @@ const startJwksServer = async (): Promise<JwksServer> => {
 };
 
 describe("createRegistryAssertionVerifier — issuers and their keys (#525)", () => {
-	it("accepts an assertion from a registered issuer and says which issuer it was", async () => {
-		const result = await verifierOver([entryA()]).verify(await mint({ sub: "device:1" }));
-		expect(result).toEqual({ subjectHandle: "device:1", issuer: ISSUER_A });
+	it("accepts an assertion from a registered issuer and says which issuer it was, and until when", async () => {
+		const exp = Math.floor(Date.now() / 1000) + 300;
+		const result = await verifierOver([entryA()]).verify(
+			await mint({ sub: "device:1" }, { expSec: exp }),
+		);
+		expect(result).toEqual({ subjectHandle: "device:1", issuer: ISSUER_A, expiresAt: exp });
 	});
 
 	it("keeps two issuers' keys apart", async () => {
@@ -487,6 +490,26 @@ describe("createRegistryAssertionVerifier — what every entry refuses (#525)", 
 		expect(await verifierOver([entryA()]).verify(await mint({ sub: "" }))).toBeNull();
 	});
 
+	it("reports the verified exp as expiresAt, in epoch seconds", async () => {
+		// The jwt-bearer grant caps the token it mints at the assertion's
+		// remaining lifetime (auth.proxy#90), and the verifier is the only
+		// party that has read `exp` off a verified signature.
+		const exp = Math.floor(Date.now() / 1000) + 120;
+		const result = await verifierOver([entryA()]).verify(await mint({ sub: "d" }, { expSec: exp }));
+		expect(result?.expiresAt).toBe(exp);
+	});
+
+	it("reports an exp inside the clock tolerance as it is — already past, not clamped", async () => {
+		// jose admits an assertion up to `clockToleranceSeconds` past its
+		// `exp`. The verifier does not pretend it has time left; what a
+		// lifetime that has run out means is the grant's call, and the grant
+		// refuses it.
+		const exp = Math.floor(Date.now() / 1000) - 10;
+		const result = await verifierOver([entryA()]).verify(await mint({ sub: "d" }, { expSec: exp }));
+		expect(result).not.toBeNull();
+		expect(result?.expiresAt).toBe(exp);
+	});
+
 	it("requires an audience to build, and reports its kind", () => {
 		expect(() => verifierOver([entryA()], [])).toThrow(/audience is required/);
 		expect(() => verifierOver([entryA()], "")).toThrow(/audience is required/);
@@ -555,14 +578,24 @@ describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => 
 		});
 	const asApp = { clientId: "app" };
 
-	it("accepts a conformant ID-JAG and hands back the issuer, a namespaced handle, and the claims' ceilings", async () => {
-		const result = await make().verify(await idJag({ scope: "read admin" }), asApp);
+	it("accepts a conformant ID-JAG and hands back the issuer, a namespaced handle, the claims' ceilings and its expiry", async () => {
+		const exp = Math.floor(Date.now() / 1000) + 300;
+		const result = await make().verify(await idJag({ scope: "read admin" }, { exp }), asApp);
 		expect(result).toEqual({
 			subjectHandle: `${IDP}#user-1`,
 			issuer: IDP,
 			scope: ["read"],
 			audience: ["https://api.example"],
+			expiresAt: exp,
 		});
+	});
+
+	it("reports the verified exp as expiresAt — the grant caps the token at it", async () => {
+		// An ID-JAG is short-lived by construction (iat at most an hour old,
+		// often minutes in practice); the token minted from it must not
+		// outlive it (auth.proxy#90).
+		const exp = Math.floor(Date.now() / 1000) + 90;
+		expect((await make().verify(await idJag({}, { exp }), asApp))?.expiresAt).toBe(exp);
 	});
 
 	it("namespaces the handle by tenant too, and honours a custom reader instead", async () => {
@@ -737,7 +770,12 @@ describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => 
 
 	it("leaves RFC 7523 entries alone: no typ, no jti, the audience list, the plain sub handle", async () => {
 		const verifier = make([entryA()]);
-		const plain = await mint({ sub: "device:1" }, { aud: `${AS}/oauth/token` });
-		expect(await verifier.verify(plain)).toEqual({ subjectHandle: "device:1", issuer: ISSUER_A });
+		const exp = Math.floor(Date.now() / 1000) + 300;
+		const plain = await mint({ sub: "device:1" }, { aud: `${AS}/oauth/token`, expSec: exp });
+		expect(await verifier.verify(plain)).toEqual({
+			subjectHandle: "device:1",
+			issuer: ISSUER_A,
+			expiresAt: exp,
+		});
 	});
 });

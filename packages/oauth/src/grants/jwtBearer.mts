@@ -103,6 +103,16 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  * client, supplies the audience itself. A client and an issuer that admit
  * no audience in common is `invalid_grant`.
  *
+ * ## How long the token lives
+ *
+ * Never longer than the assertion (auth.proxy#90): `expires_in` is
+ * `min(oauth.accessToken.expiresIn, expiresAt − now)`, from the verifier's
+ * `expiresAt` — the assertion's `exp` — rounded down, taken at minting. A
+ * short-lived assertion yields a short-lived token, and no refresh token is
+ * issued, so a client re-exchanges a fresh assertion. A verifier that reports
+ * no `expiresAt` asserts a credential with no expiry, and the configured
+ * lifetime stands.
+ *
  * ## Failure vocabulary
  *
  * - Missing/blank `assertion` → `invalid_request` (RFC 6749 §5.2: a missing
@@ -110,7 +120,10 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  * - Verifier returns `null`, the Store does not resolve the handle, or the
  *   resolved user fails `oauth.requireEmailVerified` (#297) → `invalid_grant`,
  *   identically. Distinguishing them would let a caller probe for live device
- *   identifiers, or for which of them are linked to a real account.
+ *   identifiers, or for which of them are linked to a real account. An
+ *   assertion with no whole second of lifetime left at minting — past `exp`
+ *   inside a verifier's clock tolerance, or run out while the Store answered —
+ *   is the same `invalid_grant`, logged as `jwt_bearer_assertion_expired`.
  * - Verifier or Store **throws** → `503 temporarily_unavailable`. An
  *   attestation service or a Store being unreachable is an outage, not a bad
  *   credential, and answering `invalid_grant` would send an operator to
@@ -404,10 +417,50 @@ export const createJwtBearerGrant = (
 			const confirmation = ctx.tokenBinding?.confirmation;
 			const tokenType = ctx.tokenBinding?.kind === "dpop" ? "DPoP" : "Bearer";
 
+			// auth.proxy#90: the token never outlives the assertion — the rule
+			// token exchange holds a subject token to (RFC 8693 §2.2.1). A flat
+			// configured lifetime let a two-minute ID-JAG buy an hour-long
+			// token, so the expiry the issuing authority set stopped bounding
+			// anything once exchanged. Taken here, at minting, rather than at
+			// verification: the Store and the policy run in between.
+			let expiresIn = config.oauth.accessToken.expiresIn;
+			if (verified.expiresAt !== undefined) {
+				const remaining = Math.floor(verified.expiresAt - Date.now() / 1000);
+				// `<= 0` is the assertion already past `exp` — admitted inside a
+				// verifier's clock tolerance, or run out while the Store answered
+				// — and the one expiring within this second; either would mint a
+				// token dead on arrival. Written `!(> 0)` so a verifier returning
+				// a non-number (NaN) is refused, not read as no expiry.
+				//
+				// The uniform description, not token exchange's "has expired":
+				// the bundled verifier already folds expiry into its `null`, so a
+				// distinct answer would fire only for an assertion that got this
+				// far — past the Store and the email gate — and tell its holder
+				// the handle resolves to a real account, the probe every refusal
+				// above is worded to deny. The log line is for the operator.
+				if (!(remaining > 0)) {
+					deps.logger?.info(
+						{ kind: assertionVerifier.kind, issuer: verified.issuer },
+						"jwt_bearer_assertion_expired",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_grant",
+							errorDescription: "assertion did not verify",
+						},
+					};
+				}
+				expiresIn = Math.min(expiresIn, remaining);
+			}
+			// No `expiresAt` leaves the configured lifetime standing: the
+			// verifier is asserting a credential with no expiry, not declining
+			// to say (see `AssertionVerificationResult.expiresAt`).
+
 			const accessToken = await generateToken(
 				{ ...(clientId ? { client_id: clientId } : {}) },
 				{
-					expiresIn: config.oauth.accessToken.expiresIn,
+					expiresIn,
 					keyStore,
 					issuer: ctx.issuer,
 					audience,
