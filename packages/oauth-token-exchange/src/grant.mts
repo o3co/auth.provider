@@ -33,6 +33,7 @@ import {
 	matchConfirmation,
 	ownedConfirmation,
 	policyOutOfBounds,
+	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { buildActClaim, countActorChainDepth, matchesMayAct, matchesMayActClient } from "./act.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
@@ -126,6 +127,26 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						status: 400,
 						error: "invalid_request",
 						errorDescription: "client_secret must be a single string value",
+					},
+				};
+			}
+			// The lifetime the client asks for, in seconds. RFC 8693 defines no
+			// such parameter and RFC 6749 §3.2 has a server ignore one it does
+			// not know, so this is additive: a client that never sends it gets
+			// the configured default, exactly as before. It is refused, not
+			// ignored, when present and malformed, for the reason `client_id`
+			// above is — a value the caller sent and this grant silently
+			// reinterpreted would answer a different request than the one made.
+			// Honoured below as `min(requested ?? default, max, subject
+			// remaining)`.
+			const requestedExpiresIn = parseRequestedExpiresIn(body.expires_in);
+			if (requestedExpiresIn === MALFORMED) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription:
+							"expires_in must be sent once, as a positive whole number of seconds in ASCII digits",
 					},
 				};
 			}
@@ -970,6 +991,21 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			});
 			const scopeClaim = grantedScope && grantedScope.length > 0 ? grantedScope.join(" ") : null;
 
+			// The issued lifetime, narrowed in three steps.
+			//
+			// 1. What the client asked for with `expires_in`, or the configured
+			//    `oauth.accessToken.defaultExpiresIn` when it asked for nothing.
+			// 2. Clamped to `oauth.accessToken.maxExpiresIn`. Clamped, not
+			//    refused: the request is for "at most this long", and a shorter
+			//    token answers it — the same reading step 3 gives the subject's
+			//    expiry. An unset max equals the default, so no request extends
+			//    past the default unless the operator opted in. The max is also
+			//    the longest a resource server validating this token offline
+			//    can keep accepting it after its family is revoked.
+			// 3. Capped at the subject token's remaining lifetime, below.
+			const { defaultExpiresIn, maxExpiresIn } = resolveAccessTokenLifetime(deps.config);
+			let expiresIn = Math.min(requestedExpiresIn ?? defaultExpiresIn, maxExpiresIn);
+
 			// RFC 8693 §2.2.1: the issued token's lifetime SHOULD NOT exceed the
 			// subject token's. A fresh `exp` was stamped from config with no
 			// reference to the subject at all, so every exchange reset the
@@ -984,7 +1020,6 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// before this point, which makes this the fail-closed backstop for
 			// consumer-contributed validators rather than the common path.
 			const subjectExpiry = subjectValidated.claims.exp;
-			let expiresIn = getExpiresIn(deps);
 			if (typeof subjectExpiry === "number" && Number.isFinite(subjectExpiry)) {
 				const remaining = Math.floor(subjectExpiry - Date.now() / 1000);
 				// `<= 0` is both the already-expired token and the one expiring
@@ -1003,8 +1038,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 				expiresIn = Math.min(expiresIn, remaining);
 			}
-			// A subject token carrying no `exp` leaves the configured lifetime
-			// standing. That is not absence read permissively: `exp` is a
+			// A subject token carrying no `exp` leaves the lifetime from steps 1
+			// and 2 standing. That is not absence read permissively: `exp` is a
 			// property of the presented credential, not a policy this
 			// deployment declined to write, and a validator that returns a
 			// token without one is asserting a credential with no expiry for
@@ -1055,18 +1090,40 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 	};
 }
 
-function getExpiresIn(deps: TokenExchangeDependencies): number {
-	// The CONFIGURED lifetime only — the caller caps it at the subject token's
-	// remaining lifetime (RFC 8693 §2.2.1) before minting, so this value is a
-	// ceiling rather than the lifetime the issued token gets.
-	//
-	// Reads the global OAuth accessToken.expiresIn. The per-grant
-	// oauth.grants.token_exchange.accessToken.expiresIn path is unreachable
-	// because core's GrantRegistry.addModule keys module config by grant-type
-	// URN, not by friendly name. Consumers who want a different expiresIn
-	// for Token Exchange should wrap createTokenExchangeGrant() instead.
-	const top = (deps.config.oauth.accessToken as { expiresIn?: number } | undefined)?.expiresIn;
-	return typeof top === "number" && top > 0 ? top : 300;
+/** What {@link parseRequestedExpiresIn} answers for a present, unusable value. */
+const MALFORMED = Symbol("malformed");
+
+/**
+ * The longest `expires_in` digit string read as a lifetime. Ten digits is over
+ * three centuries — far past the one-year ceiling any `maxExpiresIn` can carry,
+ * so every value it admits that is too large is clamped rather than refused —
+ * and well inside the range `Number` represents exactly.
+ */
+const MAX_REQUESTED_EXPIRES_IN_DIGITS = 10;
+
+const REQUESTED_EXPIRES_IN_SHAPE = new RegExp(`^[0-9]{1,${MAX_REQUESTED_EXPIRES_IN_DIGITS}}$`);
+
+/**
+ * Reads the `expires_in` form parameter: `undefined` when absent, the number of
+ * seconds when it is one string of ASCII decimal digits denoting a positive
+ * integer, and `MALFORMED` otherwise.
+ *
+ * Deliberately narrower than `Number(value)`, which accepts whitespace, a sign,
+ * a decimal point, an exponent, hexadecimal and the empty string (as `0`).
+ * A repeated parameter arrives as an array and is refused rather than having
+ * one of its values picked: the grant cannot tell which one the client meant.
+ * Absent and `null` mean the same thing, as they do for `client_id`.
+ *
+ * An empty value is refused too, which is stricter than RFC 6749 §3.2's
+ * reading of a parameter sent without a value as omitted. A client that sends
+ * `expires_in=` meant to ask for something and lost the value on the way;
+ * minting the default would hide that bug rather than report it.
+ */
+function parseRequestedExpiresIn(value: unknown): number | undefined | typeof MALFORMED {
+	if (value === undefined || value === null) return undefined;
+	if (typeof value !== "string" || !REQUESTED_EXPIRES_IN_SHAPE.test(value)) return MALFORMED;
+	const seconds = Number(value);
+	return seconds > 0 ? seconds : MALFORMED;
 }
 
 function getMaxActorChainDepth(deps: TokenExchangeDependencies): number {
