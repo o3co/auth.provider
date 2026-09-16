@@ -166,6 +166,7 @@ config-parse time unless noted.
 | `oauth.deviceAuthorization.verification-uri` | required once `oauth.deviceAuthorization.enabled = true`; the device displays it verbatim | `packages/device-grant/src/module.mts` |
 | `oauth.mtls.full-pki.revocation.mode` / `.on-unavailable` / `.allowed-hosts` | all three required under `mode = "full-pki"` with `revocation.mode` ∈ `"crl"`, `"ocsp"`, `"both"` (`allowed-hosts` covers CRL distribution points and OCSP responders alike); there is no default for what an outage means | `packages/mtls/src/module.mts`, `packages/mtls/src/reference.conf` |
 | `http.readinessTimeoutMs`, `session.csrf.ttlSeconds`, token lifetimes, `session.maxAge` | positive integers. An **exported-but-empty** variable is `""`, which coerces to `0` and is refused — the failure it prevents is a zero lifetime or a probe that always times out | `application.schema.mts` |
+| `oauth.accessToken.defaultExpiresIn` / `maxExpiresIn` (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` / `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`) | the default must not exceed the max; the message names both keys. An unset max is the default, and an unset default is the deprecated `oauth.accessToken.expiresIn` (shipped `3600`) — so a max below `3600` set on its own fails until the default is lowered too | `application.schema.mts` (`resolveAccessTokenLifetime`) |
 
 ### Boot refusals you will meet
 
@@ -345,7 +346,10 @@ all come from it is fully served by `/session/logout`.
 
 Neither endpoint reaches a resource server that validates the JWT offline —
 signature and `exp`, no introspection call. Such a consumer cannot observe a
-logout at all, and the only lever is a short `oauth.accessToken.expiresIn`.
+logout at all, and the only lever is a short access-token lifetime:
+`oauth.accessToken.defaultExpiresIn`, and `oauth.accessToken.maxExpiresIn` for a
+token a token-exchange request asked to live longer (unset, the max is the
+default).
 
 The asymmetry is structural: `cascadeLogout` lives in
 `@o3co/auth-provider-oauth` and `@o3co/auth-provider-session` cannot import it.
@@ -440,6 +444,7 @@ stream — its level is fixed at `info`.
 | `federationTokenStore: in-memory adapter is for dev/test only …` (warn) | `core/src/federation-tokens/factory.mts` | the standalone builds this store in memory unless `federationTokenStore.type = "redis"` (`FEDERATION_TOKEN_STORE_TYPE=redis`) is set (#456) |
 | `[federation-tokens] CRITICAL: running with mode="allow-plaintext" …` (console) | `redis/src/federation-tokens.mts` | `FEDERATION_TOKENS_ALLOW_INSECURE=1` is set where plaintext is refused — a production/staging environment or `deployment.mode = "multi"` (#473) |
 | `` [buildModules] `repositories.code.type = "redis"` is deprecated `` (console) | `templates/standalone/src/buildModules.mts` | move to `oauth.code.adapter = "redis"` (`OAUTH_CODE_ADAPTER`) |
+| `` [buildModules] `oauth.accessToken.expiresIn` (OAUTH_ACCESS_TOKEN_EXPIRES_IN) is deprecated `` (console) | `templates/standalone/src/buildModules.mts` | the deprecated key decides the access-token default; move the value to `oauth.accessToken.defaultExpiresIn` (`OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN`) |
 
 ### Data corruption — a stored record could not be read
 
@@ -547,7 +552,8 @@ lifetime) per family:
 - **Authorization codes** — one record per `/authorize` for ≤ 600 s; consumed
   codes are deleted on redemption.
 - **Denylist** — one tiny key per revoked access token for its remaining
-  lifetime (≤ `oauth.accessToken.expiresIn`, default 3 600 s). A deployment
+  lifetime (≤ `oauth.accessToken.maxExpiresIn`, which defaults to
+  `defaultExpiresIn`, 3 600 s). A deployment
   that never calls `/oauth/revoke` holds none.
 - **Rate limits** — one counter per (prefix, client IP) per window. Behind a
   misconfigured `HTTP_TRUST_PROXY` every client shares one key, which is
@@ -673,7 +679,9 @@ expired**, plus the time a verifier may serve a cached set. With the shipped
 defaults:
 
 - longest-lived token: the refresh token, `oauth.refreshToken.expiresIn`
-  = 86 400 s (access tokens are `oauth.accessToken.expiresIn` = 3 600 s; id
+  = 86 400 s (access tokens live at most `oauth.accessToken.maxExpiresIn`,
+  which defaults to `defaultExpiresIn` = 3 600 s — raise the max past the
+  refresh token's lifetime and the access token becomes the longest-lived; id
   tokens default to 3 600 s, `packages/core/src/grants/idToken.mts`);
 - provider-side cache: `jwksCacheMaxAge` = 300 s;
 - verifier-side cache: e.g. `jwksCacheMaxAgeMs` = 600 s.
@@ -787,6 +795,7 @@ before you flip — and a relying party holding the secret can also mint.
    | flat `oauth.jwt.algorithm` / `kid` / `secret` / key fields | moved | `oauth.jwt has legacy flat fields (…). Migrate to nested shape: oauth.jwt.signingKey.local.<field>` |
    | `oauth.grants.authorization_code.pkce.*` (and `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) | warn and ignore | one `pkce_config_ignored_s256_is_mandatory` line; S256 is mandatory regardless (`packages/oauth/src/grants/pkce.mts`) |
    | `repositories.code.type = "redis"` | deprecated alias of `oauth.code.adapter` | a `[buildModules] … is deprecated` console line at boot |
+   | `oauth.accessToken.expiresIn` (and `OAUTH_ACCESS_TOKEN_EXPIRES_IN`) | deprecated alias of `oauth.accessToken.defaultExpiresIn`, read only while that key is unset — set both and the new key wins | the standalone prints a `[buildModules] … is deprecated` console line at boot when the old key carries anything but the shipped `3600`; `resolveAccessTokenLifetime` is the reader for every composition |
 
 3. Note the migration windows that are **still open** at `v0.11.0`, each of
    which you should be able to close after the upgrade rather than leave on:
