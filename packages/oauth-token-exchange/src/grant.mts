@@ -1019,9 +1019,16 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// the subject validator already rejects an expired self-issued token
 			// before this point, which makes this the fail-closed backstop for
 			// consumer-contributed validators rather than the common path.
+			//
+			// The issuance instant is decided once, here, and both the cap and
+			// the minted `iat` / `exp` are measured from it. Reading the clock
+			// again inside `generateToken` let the two land in different
+			// seconds, and `exp = mint second + (subject exp − cap second)`
+			// then passed the subject's `exp` by the seconds in between.
+			const issuedAt = Math.floor(Date.now() / 1000);
 			const subjectExpiry = subjectValidated.claims.exp;
 			if (typeof subjectExpiry === "number" && Number.isFinite(subjectExpiry)) {
-				const remaining = Math.floor(subjectExpiry - Date.now() / 1000);
+				const remaining = Math.floor(subjectExpiry - issuedAt);
 				// `<= 0` is both the already-expired token and the one expiring
 				// inside this second. Capping either mints a token with a zero
 				// or negative lifetime — dead on arrival, and indistinguishable
@@ -1053,6 +1060,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}),
 				{
 					expiresIn,
+					issuedAt,
 					keyStore: deps.keyStore,
 					issuer: ctx.issuer,
 					audience: audienceForToken,

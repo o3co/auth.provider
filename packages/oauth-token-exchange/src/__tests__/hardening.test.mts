@@ -39,7 +39,7 @@ import type {
 	TokenBinding,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
@@ -397,6 +397,45 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 			}),
 		);
 		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+	});
+
+	describe("when the clock moves between the cap and the mint", () => {
+		afterEach(() => {
+			vi.restoreAllMocks();
+		});
+
+		it("still mints no exp past the subject token's", async () => {
+			// A clock that ticks a whole second on every read: any two reads land
+			// in different seconds. Capping against one read and stamping `exp`
+			// from another then mints `exp = later second + (subject exp −
+			// earlier second)` — past the subject. Deciding the issuance instant
+			// once, and measuring both the cap and `exp` from it, cannot.
+			const start = 1_800_000_000;
+			let clockMs = start * 1000;
+			vi.spyOn(Date, "now").mockImplementation(() => {
+				const now = clockMs;
+				clockMs += 1000;
+				return now;
+			});
+			const subjectExp = start + 60;
+			const g = buildGrant({
+				stub: { sub: "user-1", scope: "read", claims: { sub: "user-1", exp: subjectExp } },
+			});
+			const { result } = await g.handle(
+				ctx({
+					client_id: "client-a",
+					client_secret: "s",
+					subject_token: "opaque",
+					subject_token_type: STUB_TOKEN_TYPE,
+				}),
+			);
+
+			expect(result.status).toBe(200);
+			if (result.status !== 200) return;
+			const claims = decodeJwt(result.tokens.access_token);
+			expect(claims.exp as number).toBeLessThanOrEqual(subjectExp);
+			expect((claims.exp as number) - (claims.iat as number)).toBe(result.tokens.expires_in);
+		});
 	});
 
 	it("leaves the configured lifetime alone when the subject token carries no exp", async () => {
