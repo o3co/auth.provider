@@ -1104,6 +1104,30 @@ describe("jwt-bearer grant — the token never outlives the assertion (auth.prox
 		expect("error" in result && result.error).toBe("invalid_grant");
 	});
 
+	it("mints no exp past the assertion's when the clock moves between the cap and the mint", async () => {
+		// A clock that ticks a whole second on every read: any two reads land in
+		// different seconds. Capping against one read and stamping `exp` from
+		// another mints `exp = later second + (assertion exp − earlier second)`,
+		// past the assertion. Measuring both from one issuance instant cannot.
+		let clockMs = NOW * 1000;
+		const spy = vi.spyOn(Date, "now").mockImplementation(() => {
+			const now = clockMs;
+			clockMs += 1000;
+			return now;
+		});
+		try {
+			const expiresAt = NOW + 60;
+			const { result } = await build({
+				verifier: verifierFor({ subjectHandle: "device:abc", expiresAt }),
+			}).handle(ctx());
+			const { expiresIn, claims } = tokensOf(result);
+			expect(claims.exp as number).toBeLessThanOrEqual(expiresAt);
+			expect((claims.exp as number) - (claims.iat as number)).toBe(expiresIn);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
 	it("refuses an expiresAt that is not a finite number — neither an expiry nor no expiry", async () => {
 		// A custom verifier is typed, not checked. Arithmetic would coerce a
 		// numeric string into an expiry and read Infinity as none; every one of
