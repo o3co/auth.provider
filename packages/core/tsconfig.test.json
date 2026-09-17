@@ -30,7 +30,11 @@
 		// vitest.config.mts's `typecheck.include`, as #343 requires.
 		"src/webauthn-credentials/__tests__/types.test.mts",
 		"src/challenges/__tests__/types.test.mts",
-		"src/challenges/__tests__/wiring.test.mts"
+		"src/challenges/__tests__/wiring.test.mts",
+		// #593: paired with vitest.config.mts, as #343 requires. The
+		// `@ts-expect-error` directives in this file are the regression test for
+		// the FederationGrant union.
+		"src/federation-grants/**/*.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }

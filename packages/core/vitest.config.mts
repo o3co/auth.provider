@@ -42,6 +42,10 @@ export default defineConfig({
 				// v0.13.0 audit: never typechecked before; paired with tsconfig.test.json.
 				"src/challenges/__tests__/types.test.mts",
 				"src/challenges/__tests__/wiring.test.mts",
+				// #593: the `@ts-expect-error` directives here are the regression
+				// test for the FederationGrant union — a revoked or pending grant
+				// with only some of the authorization fields must not compile.
+				"src/federation-grants/__tests__/types.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
 			// itself, where 4 was content to let an imported helper register

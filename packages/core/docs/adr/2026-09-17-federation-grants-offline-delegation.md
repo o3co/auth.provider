@@ -61,7 +61,7 @@ RFC 7662. RFC 8693 and RFC 9396 are left room for, not used (D9).
 ### D1 — A grant is a first-class record with its own lifecycle
 
 ```ts
-type RevokedBy = "client" | "subject" | "operator" | "logout_policy" | "backstop";
+type FederationGrantRevokedBy = "client" | "subject" | "operator" | "logout_policy" | "backstop";
 
 interface FederationGrantBase {
 	readonly id: string; // opaque, 256 bits, base64url; a reference, not a credential
@@ -72,20 +72,10 @@ interface FederationGrantBase {
 	readonly version: number; // bumped by every status or credential change (D2)
 }
 
-type FederationGrant =
-	| (FederationGrantBase & { readonly status: "pending" })
-	| (FederationGrantBase & AuthorizedFields & {
-			readonly status: "active" | "reauthorization_required";
-	  })
-	| (FederationGrantBase & AuthorizedFields & Revoked) // revoked after authorization
-	| (FederationGrantBase & Revoked); // revoked while `pending`: no authorized fields
-
-interface Revoked {
-	readonly status: "revoked";
-	readonly revocation: { readonly by: RevokedBy; readonly at: Date };
-}
-
-interface AuthorizedFields {
+// What an activation writes, and only an activation replaces. These decide who
+// may obtain what, until when, and every one of them is inside the sealed
+// credential's authenticated envelope (D16).
+interface FederationGrantAuthorization {
 	readonly identityRevision: string; // D4
 	readonly authorizationRevision: string; // D4
 	readonly upstream: { readonly issuer: string; readonly subject: string };
@@ -94,9 +84,38 @@ interface AuthorizedFields {
 	readonly consent: { readonly at: Date; readonly sid: string; readonly scopes: readonly string[] };
 	readonly authorizedAt: Date;
 	readonly expiresAt: Date; // set at consent; never moved by a refresh
-	readonly lastUsedAt?: Date;
 }
+
+// What changes while a grant is in use, outside any activation and outside the
+// envelope: neither decides what the grant allows.
+interface FederationGrantUsage {
+	readonly lastUsedAt?: Date;
+	readonly ineligible?: { reason; at: Date; judgedAgainst: number }; // D5
+}
+
+interface FederationGrantRevocation {
+	readonly status: "revoked";
+	readonly revocation: { readonly by: FederationGrantRevokedBy; readonly at: Date };
+}
+
+type FederationGrant =
+	| (FederationGrantBase & NeverAuthorized & { readonly status: "pending" })
+	| (FederationGrantBase & FederationGrantAuthorization & FederationGrantUsage & {
+			readonly status: "active" | "reauthorization_required";
+	  })
+	// revoked after authorization: keeps every authorization field
+	| (FederationGrantBase & FederationGrantAuthorization & FederationGrantUsage &
+			FederationGrantRevocation)
+	// revoked while `pending`: never had any, and the type forbids them
+	| (FederationGrantBase & NeverAuthorized & FederationGrantRevocation);
 ```
+
+Every exported name says `FederationGrant`: the core barrel already exports
+`GrantContext`, `GrantResult` and `GrantPolicy*` for OAuth grant types, which
+these are not. `NeverAuthorized` types every authorization and usage field as
+`never`, so that a record with `consent` and no `expiresAt` does not compile,
+and the narrowing to "has an authorization" cannot promise fields that are not
+there.
 
 A grant names exactly one client in the first cut. The issue allows
 "client(s)"; one is enough for every case we have, and it keeps isolation
@@ -524,6 +543,15 @@ evaluates, in order:
    `consent.scopes` — checked here so that a request that can never succeed
    does not cost an upstream call.
 
+When more than one of steps 2 to 4 would refuse, what is *reported* goes from
+what cannot be undone to what can, so that a client is never sent to a remedy
+that cannot work: a stored revocation, then the backstop (before expiry, so
+that a revocation which never reached the record is not reported as a mere
+expiry), then expiry, then a changed upstream identity, then what a
+reauthorization mends, then an upstream that stopped issuing eligible tokens.
+The ineligibility marker (D5) is reported for as long as it stands; its retry
+interval only limits how often this route calls the upstream again.
+
 Then it takes the stored upstream access token if its remaining life exceeds
 `max(min_ttl, refreshBuffer)`, and refreshes otherwise (D12). Before any
 token is disclosed, cached or fresh, these are checked again: steps 2 and 3,
@@ -555,8 +583,11 @@ type FederationGrantTokenResult =
 	| { ok: true; accessToken: string; tokenType: string; expiresIn: number;
 	    scopes: readonly string[]; // what this token carries
 	    refreshed: boolean }
-	| { ok: false; code: FederationGrantDenial; reason?: string; retryAfterSeconds?: number };
+	| ({ ok: false } & FederationGrantDenial);
 ```
+
+`FederationGrantDenial` is a union of objects, one per row below, so that a
+reason cannot be attached to a code that has none.
 
 | `code` | reasons | HTTP | what the application does |
 | --- | --- | --- | --- |
@@ -967,8 +998,10 @@ to the current value would hide a scope or `boundary` change and skip the
 renewed consent; swapping `upstream` would weaken the account check at the
 next reauthorization. So the additional authenticated data is a canonical
 encoding of the key name together with `id`, `subject`, `clientId`,
-`connection` and every authorized field except `lastUsedAt`, recomputed from
-the HASH when the credential is opened. Those fields change only at
+`connection` and every field of `FederationGrantAuthorization` (D1),
+recomputed from the HASH when the credential is opened. The usage fields,
+`lastUsedAt` and the ineligibility marker, are outside it: they change while
+the grant is in use, and neither decides what the grant allows. Those fields change only at
 activation, which seals a new credential under the new fields and writes both
 in one script; a refresh re-seals under unchanged fields, which the `version`
 guard guarantees. A tampered field fails authentication and reads as

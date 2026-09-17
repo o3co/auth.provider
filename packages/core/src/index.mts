@@ -748,6 +748,60 @@ export {
 	type PendingConsentStore,
 } from "./consents/types.mjs";
 
+// #593: federation grants — a consented, bounded grant under which the
+// provider holds an upstream refresh credential for a confidential client.
+// These are the domain rules only: no store, no route, nothing is wired yet.
+// See docs/adr/2026-09-17-federation-grants-offline-delegation.md.
+//
+// Every name says FederationGrant. This barrel already exports GrantContext,
+// GrantResult and GrantPolicy* for OAuth grant types, which these are not.
+// The typed result of a retrieval and the sealed credential stay internal
+// until the store port and the retrieval exist to give them a consumer.
+export {
+	coveredByRevocationBoundary,
+	type EffectiveFederationGrantStatusContext,
+	effectiveFederationGrantStatus,
+} from "./federation-grants/effective-status.mjs";
+export {
+	type FederationGrantIntentScopes,
+	federationGrantIneligibilityRetry,
+	federationGrantIneligibilityStands,
+	judgeUpstreamAccessToken,
+	resolveFederationGrantIntentScopes,
+	type UpstreamTokenJudgement,
+} from "./federation-grants/eligibility.mjs";
+export {
+	FEDERATION_GRANT_LIFETIME_CEILING_MS,
+	federationGrantEffectiveExpiry,
+	federationGrantExpiresAt,
+	federationGrantExpiryState,
+	resolveFederationGrantLifetimeMs,
+	withinFederationGrantLifetimeCeiling,
+} from "./federation-grants/lifetime.mjs";
+export {
+	federationGrantAuthorizationRevision,
+	federationGrantIdentityRevision,
+} from "./federation-grants/revision.mjs";
+export {
+	type AuthorizedFederationGrant,
+	type EffectiveFederationGrantStatus,
+	type FederationGrant,
+	type FederationGrantAuthorization,
+	type FederationGrantBase,
+	type FederationGrantConnection,
+	type FederationGrantConsent,
+	type FederationGrantExpiredReason,
+	type FederationGrantIneligibilityMarker,
+	type FederationGrantIneligibilityReason,
+	type FederationGrantReauthorizationReason,
+	type FederationGrantRevocation,
+	type FederationGrantRevokedBy,
+	type FederationGrantUsage,
+	hasFederationGrantAuthorization,
+	type PendingFederationGrant,
+	type RevokedFederationGrant,
+} from "./federation-grants/types.mjs";
+
 // SF-3 + MIN-4 (v0.5.1): timing-safe primitives. Exported from the package
 // root because `packages/core/package.json#exports` does not register a
 // `./security/*` subpath — Codex Delta 1 confirmed the subpath approach
