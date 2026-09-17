@@ -323,7 +323,9 @@ Reauthorization is the same call on an existing grant:
 `POST /oauth/federation-grants/:grantId/reauthorize`. It judges the
 *effective* status (D1): it is accepted from `active` and
 `reauthorization_required`, and refused for a grant that is `pending`,
-expired, or reads as `connection_identity_changed`.
+expired, or reads as `connection_identity_changed`. It evaluates the
+revocation backstop first (D13): a grant that a subject-wide revocation should
+have ended is revoked there, not renewed.
 
 A grant has at most one live intent. Lodging another supersedes the older one,
 whose callback is then refused as stale. Live first-time intents are bounded
@@ -370,7 +372,9 @@ order:
 
 1. the transaction exists, names this connection, and its `state` matches; it
    is consumed before the code is exchanged;
-2. the intent is still the grant's current intent and has not expired;
+2. the intent is still the grant's current intent and has not expired; on a
+   reauthorization, the existing grant still passes the revocation backstop
+   (D13);
 3. the `UserSession` the flow started under is re-read from the store and is
    still live, the browser still presents it, its `sub` is the intent's `sub`,
    and it authenticated after the subject's sessions boundary;
@@ -446,7 +450,11 @@ headless: it ships no UI, and the login and consent pages are the
 deployment's. A deployment whose clients are all first-party may have no
 consent page today, and enabling federation grants obliges it to provide one.
 The obligation is small — one `GET` to learn what to show, one `POST` to
-answer — and the feature refuses to boot without `federationGrants.consent.url`.
+answer. `federationGrants.consent.url` has no default, unlike
+`endpoints.consent.url`, which falls back to `/consent`, and the feature
+refuses to boot without it. That is stricter than consent is today, on
+purpose. It cannot prove that a page exists; it makes enabling the feature a
+recorded statement that one does.
 The upstream's own consent screen cannot stand in: it does not name the
 client, the expiry, or the fact that this outlives logout.
 
@@ -634,9 +642,10 @@ There are three entry points, and ordinary logout is not one of them.
   A second library function, `listFederationGrantsForSubject(deps, subject)`,
   is what lets a Store offer users a "connected applications" page; without it
   the user has no direct way to withdraw a grant.
-- **Per subject.** `revokeAllForSubject` ends the subject's grants by
-  default, and a Store may keep them for a routine credential change (below).
-  It gains an optional `federationGrantStore`. A throw from it is a `failures`
+- **Per subject.** A subject-wide revocation ends the subject's grants. A
+  Store may keep them across a routine credential change, through the service
+  described below and nowhere else. The free function `revokeAllForSubject`
+  gains an optional `federationGrantStore`. A throw from it is a `failures`
   entry with `capability: "federationGrantStore"`, the grant stays enumerable
   for a retry, and `complete` accounts for it.
 - **At logout, by policy.** See D14.
@@ -673,26 +682,55 @@ interface SupportsSessionsOnlyRevocation {
 }
 ```
 
-It is a capability, detected by method presence like the others. Both built-in
-adapters implement it; Redis writes the grants key first, then the sessions
-key. An adapter without it has one watermark, so every stamp ends the grants:
-it fails closed.
+The two boundaries are two fields of **one record**, advanced by one atomic,
+monotonic write. Two separate writes would open a window between them: with
+the grants boundary written and the sessions boundary still to come, a session
+that should already be dead could consent, and that consent would be dated
+after the grants boundary and escape the backstop for good. The Redis script
+is atomic for one key only, so it stays one key, `ss:rev:<subject>`, now
+holding both fields; a value written before this change, a lone number, reads
+as both boundaries.
 
-`revokeAllForSubject` gains `federationGrants?: "revoke" | "keep"`, default
-`"revoke"`.
+It is a capability, detected by method presence like the others, and both
+built-in adapters implement it. With federation grants enabled it is
+**required**: boot refuses a `SubjectRevocation` adapter without it. Method
+absence could only change which watermark is read. It could not enforce
+retention, and a custom adapter that accepts whatever expiry its caller picks
+would let a short direct stamp lapse under a long-lived grant. So the
+capability's contract includes the retention floor below, applied inside
+`revokeBefore` by the adapter and checked by the adapter contract suite, which
+makes a direct stamp as safe as the helper's. A deployment that does not use
+grants is unaffected, whatever its adapter.
 
-- **`"revoke"`** stamps both boundaries first, then cascades the sessions,
-  then lists the subject's grants, `pending` ones included, and revokes each.
-- **`"keep"`** stamps the sessions boundary only and leaves the grants alone.
-  It is honoured only when the operator allows it
-  (`federationGrants.allowKeepOnSubjectRevocation`, default `false`, handed to
-  the helper as a policy resolved from config) and the adapter has the
-  capability. Otherwise the helper revokes, and says so in its result. It
-  never keeps silently, and it never falls back silently.
+The free function `revokeAllForSubject` always revokes: it stamps both
+boundaries first, then cascades the sessions, then lists the subject's grants,
+`pending` ones included, and revokes each. It has no way to keep anything.
+
+Keeping is offered only by a **subject revocation service**, a component that
+a module factory builds from the validated configuration and the wired
+dependencies: the stores, the session cascade, the grant store, the retention
+rules. A boolean that the Store itself hands to a helper would be a convention
+among trusted callers, not a control, so the operator's allowance
+(`federationGrants.allowKeepOnSubjectRevocation`, default `false`) is read
+where the Store cannot supply it. The service also always has the grant store,
+so the Store that forgets to pass it no longer exists. Its call takes
+`federationGrants?: "revoke" | "keep"`, default `"revoke"`:
+
+- **`"revoke"`** is the free function's behaviour.
+- **`"keep"`**, when the operator allows it, advances the sessions boundary
+  only and preserves the subject's *established* grants. It does not preserve
+  anything in flight: every `pending` grant is revoked, and every outstanding
+  intent and connect transaction of the subject is invalidated, so that a
+  callback which passed its session check before the stamp cannot finish a
+  grant or a renewal after it. When the operator does not allow it the service
+  revokes, and says so in its result. It never keeps silently, and it never
+  falls back silently.
 - With `"keep"`, an optional `revokeGrantsConsentedSince: Date` still revokes
   the grants consented at or after that instant — the window in which a
-  session thief would have been creating them. It is a heuristic. It runs on
-  the primary path only, and a failure is reported like any other.
+  session thief would have been creating them. It is a heuristic. The grants
+  boundary can say "before", not "since", so this runs on the primary path
+  only; a failure is reported like any other and leaves nothing worse off than
+  not asking.
 
 `"keep"` is a decision per call and not a deployment-wide setting, because the
 provider cannot tell a routine change from a recovery: `revokeAllForSubject`
@@ -702,13 +740,15 @@ The reason the default is `"revoke"` is also the reason to be careful with
 `"keep"`. A grant is consented through a session, and session-bound consent
 proves possession of the session, not the intent of its owner. Whoever held a
 stolen session could, with a cooperating or controlled client, have created or
-renewed a grant, and `"keep"` lets it survive the password change. With only
-first-party clients that risk is small. With third-party clients it is not.
-So the documentation says when `"keep"` is sound — a change the signed-in user
-made after proving the current credential — and when it is not: a reset, a
-forced change, a suspected compromise, a disablement. It tells the Store to
-show the user which applications keep their access, which
-`listFederationGrantsForSubject` is there for. And it tells applications what
+renewed a grant, and `"keep"` lets an established one survive the password
+change. Proving the current credential justifies calling the change routine.
+It does not prove that the grants already there are benign, and clients being
+first-party is no proof either. So the documentation says when `"keep"` is
+sound — a change the signed-in user made after proving the current credential
+— and when it is not: a reset, a forced change, a suspected compromise, a
+disablement. It tells the Store to show the user which applications keep
+their access, which `listFederationGrantsForSubject` is there for, and to use
+`revokeGrantsConsentedSince` when it has any reason to doubt the recent past. And it tells applications what
 to do on `grant_revoked` with reason `subject` or `backstop`: stop the work,
 tell the user why, and offer a fresh authorization. Not a retry and not
 `/reauthorize`: revocation is terminal (D2), so that is a new grant with a new
@@ -724,8 +764,7 @@ back to press it.
 
 **The backstop.** `"revoke"` stamps the boundaries first, as the helper does
 now. D10 step 3 and the status route compare the grants boundary with the
-grant's `consent.at` (an adapter without the capability has one watermark, and
-that is the one compared). Not with a token's `iat`: a token minted from a
+grant's `consent.at`. Not with a token's `iat`: a token minted from a
 surviving grant is always fresh. And not with `authorizedAt`: consent precedes
 the callback by up to ten minutes, and a callback landing just after the
 boundary must not hide a consent given before it. The comparison is inclusive
@@ -733,6 +772,13 @@ and adds `subjectRevocationSkewMs` — the 1 s allowance `verify.mts` applies to
 the watermark, which becomes an exported constant — and not the 5-minute
 `clockSkewMs`, which would refuse the re-login a revocation sends the user to.
 A hit revokes that grant durably, with `by: "backstop"`.
+
+Reauthorization must not launder a revocation that was stamped but never
+reached the grant. A new consent replaces `consent.at`, and with it the only
+evidence the backstop has. So the backstop is evaluated on the existing grant
+when a reauthorization intent is lodged, and again in the callback before the
+authorized fields are replaced (D6, D7). A hit revokes the grant and ends the
+flow.
 
 D7's session test uses the *sessions* boundary with the same comparison, so it
 holds after a `"keep"` as well, and a login within that second cannot connect
@@ -754,10 +800,16 @@ rounding to seconds, both far inside the margin, and its `expiresAt` is at
 most `consent.at` plus one year. So it cannot outlive the boundary, whatever
 the operator does to the configuration, and whether or not the Store passed
 the grant store. Both adapters already refuse to shorten an in-force
-watermark, so a later sessions-only stamp, which needs no floor, cannot undo
-it, and a `"keep"` never moves the grants boundary back: a grant that an
-earlier revocation should have ended stays ended. The cost is one small key
-per revoked subject for a year, in every deployment.
+watermark, so a later sessions-only stamp cannot undo it, and a `"keep"` never
+moves the grants boundary back: a grant that an earlier revocation should have
+ended stays ended. The cost is one small key per revoked subject for a year.
+
+A sessions-only stamp needs no one-year floor, but it is not free of one. D7
+relies on the sessions boundary to refuse a session that a cascade missed, so
+the boundary has to outlast that session, and today's rule sizes it to refresh
+tokens alone. `resolveSubjectRevocationHorizonMs(config)` is the longer of the
+refresh-token lifetime and the user-session lifetime, plus the comparison's
+allowances, and the service applies it as the floor of a sessions-only stamp.
 
 Two things make that true by construction and not by convention:
 
@@ -1063,8 +1115,19 @@ The two boundaries of D13 add:
 - a `"keep"` followed by a `"revoke"`: the grants are dead;
 - a `"revoke"` whose grant write fails part-way, followed by a `"keep"`: the
   grant the first call should have ended stays unusable;
-- `"keep"` without the operator's allowance, and `"keep"` on an adapter
-  without the capability: the grants are revoked, and the result says why;
+- `"keep"` without the operator's allowance: the grants are revoked, and the
+  result says why. The free function offers no `"keep"` at all;
+- a `"revoke"` that stamps but misses a grant's write, then a fresh login and
+  `/reauthorize` on that grant, with no `/token` or `/status` call in between:
+  the grant is revoked, not renewed;
+- a callback that passed its session check before a `"keep"`: it cannot
+  activate after it, and `pending` grants are gone;
+- once a revocation of either kind is stamped, a session that predates it
+  cannot consent, and that still holds when the refresh-token lifetime has
+  passed but the session's has not;
+- federation grants refuse to boot on a `SubjectRevocation` adapter without
+  the capability, and the adapter contract suite refuses a `revokeBefore`
+  that accepts an expiry below the floor;
 - `"keep"` with `revokeGrantsConsentedSince`: grants consented since then are
   revoked, older ones are kept;
 - a caller that stamps `revokeBefore` directly ends the grants.
@@ -1103,8 +1166,8 @@ route test is written first and watched failing.
 Slices 1–3 change no behaviour. Nothing can create a grant until slice 6, and
 revocation exists from slice 5, so no release cut between slices ships an
 offline credential without an off switch. Slice 5 also carries the second
-boundary of D13: the capability on `SubjectRevocation`, both adapters, and the
-`"keep"` option with its policy.
+boundary of D13: the capability on `SubjectRevocation` and its contract suite,
+both adapters, and the subject revocation service with its `"keep"` option.
 
 Later, outside the first release: the **logout policy** (D14).
 
@@ -1128,8 +1191,10 @@ unsupported (D5). An IdP that accumulates consent needs one connection and one
 app registration per scope set (D19). Every revoked subject leaves a watermark
 key for a year. By default every password change that calls
 `revokeAllForSubject` ends that user's delegations; a Store may keep them for
-a routine change, and the soundness of that rests on the Store telling a
-routine change from a recovery (D13). A deployment that enables federation
+a routine change through the revocation service, and the soundness of that
+rests on the Store telling a routine change from a recovery (D13). A custom
+`SubjectRevocation` adapter has to implement the two-boundary capability
+before its deployment can enable federation grants (D13). A deployment that enables federation
 grants has to provide a consent page, even if it has none today (D8).
 
 **Neutral.** Upstream refresh tokens also die from disuse — Google after six
