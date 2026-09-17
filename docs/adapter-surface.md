@@ -115,6 +115,7 @@ a composition root. Listed because a module may `require` them.
 | `federationProviders` | `ReadonlyMap<string, FederationProvider>` | optional | `core/modules/manifest/synthetic-keys.mts` | Upstream IdP protocol adapters, contributed per federation module. |
 | `federationRedirectPolicies` | `{ readonly [name: string]: FederationRedire…` | optional | `session/federations/contributes.mts` | Per-federation `redirect_to` allowlist factories. Paired with the provider at boot; an unpaired one refuses. |
 | `federationTokenStore` | `FederationTokenStore` | optional | `core/federation-tokens/types.mts` | Upstream tokens held on behalf of a session. Encrypted at rest by the bundled adapter. |
+| `federationGrantStore` | `FederationGrantStore` | optional | `core/federation-grants/store.mts` | Federation grants (#593): one user's consent that one client may obtain upstream access tokens through one connection, which outlives the session — the records, the upstream credentials kept beside each (sealed at rest by an adapter that persists them; the bundled one holds them in memory, unsealed), and the lock a refresh holds. Every transition is a guarded write inside the store. Every operation on a record takes the time from its caller, and what a caller is told is judged on that time alone; what an adapter reclaims is judged on its own clock. Its consumer is the federation grant routes of #593. Bundled adapter: memory (single replica). |
 | `githubFederationConfig` | `GithubProviderConfig` | optional | `federation-github/github.mts` | Config slice for the bundled GitHub federation module. |
 | `googleFederationConfig` | `GoogleProviderConfig` | optional | `federation-google/google.mts` | Config slice for the bundled Google federation module. |
 | `grantPolicy` | `GrantPolicyHook` | optional | `core/policy/types.mts` | Deployment-supplied hook consulted at grant dispatch, for policy this library does not model. |
@@ -206,6 +207,7 @@ out-of-tree adapter can import and run:
 | `ChallengeStore` | `packages/core/src/challenges/__tests__/adapters.contract.mts` |
 | `ConsentStore` | `packages/core/src/consents/__tests__/adapters.contract.mts` |
 | `DeviceCodeStore` | `packages/core/src/device-authorization/__tests__/adapters.contract.mts` |
+| `FederationGrantStore` | `packages/core/src/federation-grants/__tests__/store.contract.mts` |
 | `PendingConsentStore` | `packages/core/src/consents/__tests__/pending.contract.mts` |
 | `ReplaySeenSet` | `packages/core/src/replay-seen-set/__tests__/adapters.contract.mts` |
 | `RefreshTokenFamilyStore` | `packages/core/src/refresh-token-family/__tests__/adapters.contract.mts` |
