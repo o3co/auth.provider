@@ -1,0 +1,68 @@
+import type { z } from "zod";
+import type { CoreConfig } from "../config/application.schema.mjs";
+import type { KeyStore } from "../keys/KeyStore.mjs";
+import type { PathResolver } from "../modules/types.mjs";
+import type { GrantPolicyHookBase } from "../policy/types.mjs";
+import type { RefreshTokenStoreBase } from "../refresh/types.mjs";
+import type { UserSessionStoreBase } from "../user-sessions/types.mjs";
+export interface SessionData {
+    user?: Record<string, unknown>;
+    client?: Record<string, unknown>;
+    code?: string;
+    code_client_id?: string;
+    code_redirect_uri?: string;
+    granted_scopes?: string[];
+    isAuthenticated?: boolean;
+}
+export interface GrantContext {
+    body: Record<string, unknown>;
+    session: SessionData;
+    issuer?: string;
+    metadata: Record<string, unknown>;
+    ip?: string;
+    userAgent?: string;
+}
+export interface GrantSuccess {
+    status: number;
+    tokens: import("./token.mjs").TokenResponse;
+}
+export interface GrantError {
+    status: number;
+    error: string;
+    errorDescription?: string;
+}
+export type GrantResult = GrantSuccess | GrantError;
+export interface SessionMutation {
+    clear?: string[];
+    set?: Record<string, unknown>;
+}
+export interface GrantHandlerResult {
+    result: GrantResult;
+    sessionMutation?: SessionMutation;
+}
+export interface GrantHandler {
+    handle(ctx: GrantContext): Promise<GrantHandlerResult>;
+    cleanup?(): void;
+}
+export interface GrantDependencies {
+    config: CoreConfig & Record<string, unknown>;
+    keyStore: KeyStore;
+    pathResolver?: PathResolver;
+    refreshTokenStore?: RefreshTokenStoreBase;
+    grantPolicy?: GrantPolicyHookBase;
+    userSessionStore?: UserSessionStoreBase;
+}
+/**
+ * Factory function type for creating grant handlers.
+ * Used by OSS consumers to implement custom grant types.
+ */
+export type GrantFactory = (deps: GrantDependencies) => GrantHandler;
+/**
+ * A module that bundles one or more grant factories together.
+ * Used with GrantRegistry.addModule() for plugin-style registration.
+ */
+export interface GrantModule {
+    grants: Record<string, GrantFactory>;
+    configSchema?: z.ZodType;
+}
+//# sourceMappingURL=types.d.mts.map
