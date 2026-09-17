@@ -128,6 +128,23 @@ describe("createGithubProvider on openid-client", () => {
 		expect(checks.expectedState).toBe(skipStateCheckSym);
 	});
 
+	it("#597: hands the library the code alone — GitHub's iss is not yet compared, because the library is configured with the profile label and not GitHub's issuer (#598)", async () => {
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-at" });
+		mockFetchUserInfo.mockResolvedValueOnce({ id: 1, login: "alice" });
+		mockFetchProtectedResource.mockResolvedValueOnce({ json: async () => [] });
+		const p = createGithubProvider(baseConfig);
+		// The route hands every adapter the rest of the callback as
+		// `callbackParams`; this provider's signature does not take it.
+		await p.exchangeCode({
+			code: "gh-code",
+			codeVerifier: "v",
+			redirectUri: baseConfig.callbackURL,
+			callbackParams: { iss: "https://github.com/login/oauth" },
+		} as Parameters<typeof p.exchangeCode>[0]);
+		const url = mockAuthorizationCodeGrant.mock.calls.at(-1)?.[1] as URL;
+		expect([...url.searchParams.keys()]).toEqual(["code"]);
+	});
+
 	it("exchangeCode coerces numeric GitHub id to string sub (C-1 regression guard)", async () => {
 		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-tok" });
 		// Real GitHub shape: id is a number, no sub field at all.

@@ -38,6 +38,9 @@ export {
 	DEFAULT_CSRF_TTL_SECONDS,
 	MAX_CSRF_TTL_SECONDS,
 } from "./csrf.mjs";
+// #597 — the URL a provider hands its OAuth library for the code exchange:
+// the code, the RFC 9207 `iss` when the callback carried one, nothing else.
+export { callbackUrlForExchange } from "./federations/callback-url.mjs";
 // #279 — federated claims never outrank local ones; see claim-precedence.mts.
 export type { FederatedClaimsNamespace } from "./federations/claim-precedence.mjs";
 export {

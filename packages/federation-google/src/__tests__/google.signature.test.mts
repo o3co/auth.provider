@@ -57,6 +57,8 @@ const exchange = (provider: GoogleProvider) =>
 		codeVerifier: VERIFIER,
 		redirectUri: CALLBACK,
 		nonce: "nonce-1",
+		// #597: Google always returns `iss`, and the provider now requires it.
+		callbackParams: { iss: GOOGLE.issuer },
 	});
 
 describe("Google id_token signature verification (#542)", () => {

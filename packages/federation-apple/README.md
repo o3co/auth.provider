@@ -137,6 +137,12 @@ parameters. It POSTs an `application/x-www-form-urlencoded` body to the
 callback, because the first-authorization `user` field does not fit a redirect
 URL.
 
+An RFC 9207 `iss` in that body is compared with `https://appleid.apple.com`
+before the code is spent, and another issuer's is refused
+([#597](https://github.com/o3co/auth.provider/issues/597)). None is required:
+Apple's discovery document does not advertise
+`authorization_response_iss_parameter_supported`.
+
 The provider declares `responseMode: "form_post"`, and the session router does
 the rest: it appends `response_mode=form_post` to the authorization request,
 mounts `POST /session/oauth/federation/apple/callback` with the same state /

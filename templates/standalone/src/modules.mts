@@ -704,6 +704,33 @@ function optionalString(
 }
 
 /**
+ * An optional boolean from the `federations.google` slice. HOCON gives a
+ * boolean; an environment override (`${?VAR}`) gives the string, in the
+ * spellings core's `coerceBooleanFromEnv` accepts: "true" / "false" / "1" /
+ * "0", trimmed and in any case. One deliberate difference: that coercion reads
+ * an empty value as false, and this refuses it. HOCON substitutes an
+ * exported-but-empty variable as "", and for a security switch that must not
+ * quietly turn the check off. Anything else is refused too — a typo that
+ * silently reads as either value is worse than a boot failure.
+ */
+function optionalBoolean(
+	slice: Record<string, unknown>,
+	field: string,
+): Record<string, boolean> | Record<string, never> {
+	const value = slice[field];
+	if (value === undefined || value === null) return {};
+	if (typeof value === "boolean") return { [field]: value };
+	if (typeof value === "string") {
+		const normalized = value.trim().toLowerCase();
+		if (normalized === "true" || normalized === "1") return { [field]: true };
+		if (normalized === "false" || normalized === "0") return { [field]: false };
+	}
+	throw new Error(
+		`federations.google.${field} must be one of true, false, "true", "false", "1" or "0" when present`,
+	);
+}
+
+/**
  * Google federation config bridge — supplies the typed `googleFederationConfig`
  * ComponentMap slot from the `config.federations.google` slice.
  *
@@ -769,6 +796,8 @@ export const googleFederationConfigModule: Module = defineModule({
 				...optionalString(slice, "sessionDomain"),
 				...optionalString(slice, "authCallbackUrl"),
 				...optionalString(slice, "clientUrl"),
+				// #597: absent means the provider's default, which is to require it.
+				...optionalBoolean(slice, "requireAuthorizationResponseIss"),
 			};
 		},
 	},
