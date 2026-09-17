@@ -756,7 +756,8 @@ export const createRouter = (
 				// identity an IdP delivers beside the token response — Apple's
 				// first-authorization `user` body. Unsigned and relayed through the
 				// user agent: `mapClaims` decides what to make of it and claim
-				// precedence decides where the result may land.
+				// precedence decides where the result may land. #595: the RFC 9207
+				// `iss` response parameter reaches the OIDC adapter this way too.
 				callbackParams: adapterCallbackParams,
 			});
 		} catch (err) {

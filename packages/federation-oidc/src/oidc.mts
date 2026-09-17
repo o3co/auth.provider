@@ -339,6 +339,16 @@ export async function createOidcProvider(
 			const nonce = requireNonce(params.nonce);
 			const callbackUrl = new URL(params.redirectUri);
 			callbackUrl.searchParams.set("code", params.code);
+			// #595: RFC 9207. The library compares `iss` with the configured issuer,
+			// and requires one from an issuer that advertises
+			// `authorization_response_iss_parameter_supported` — so dropping it both
+			// skips the mix-up check and fails every login against such an issuer.
+			// Only `iss` is taken from the bag: the bag is unsigned and relayed
+			// through the user agent, and an `error`, `response`, `id_token` or
+			// `token` on this URL would change how the library reads the response.
+			// `state` never reaches an adapter, and `skipStateCheck` ignores it.
+			const iss = params.callbackParams?.iss;
+			if (iss !== undefined) callbackUrl.searchParams.set("iss", iss);
 
 			const tokens = await oidc.authorizationCodeGrant(configuration, callbackUrl, {
 				pkceCodeVerifier: params.codeVerifier,

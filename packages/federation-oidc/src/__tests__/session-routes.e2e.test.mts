@@ -199,6 +199,39 @@ describe("OIDC federation through the session routes (#524)", () => {
 		expect(repo.authenticateByToken).toHaveBeenLastCalledWith("idp-a:sub-b-1");
 	});
 
+	it("#595: the callback's iss reaches the adapter — the right issuer logs in, another issuer's is refused", async () => {
+		const idpA = await createFakeIdp({ issuer: ISSUER_A, clientId: "client-a", sub: "sub-a-1" });
+		const idpB = await createFakeIdp({ issuer: ISSUER_B, clientId: "client-b", sub: "sub-b-1" });
+		// Discovery runs at boot, so the flag goes on the document first.
+		idpA.metadata.authorization_response_iss_parameter_supported = true;
+		const { handle, app, repo } = await boot(idpA, idpB, async (token) =>
+			token === "idp-a:sub-a-1" ? { id: "user-a", username: "alice" } : null,
+		);
+		handleRef = handle;
+
+		const agent = request.agent(app);
+		const { state } = await startLogin(agent, "idp-a", idpA);
+		const cb = await agent.get(
+			`/session/oauth/federation/idp-a/callback?code=code-1&state=${state}&iss=${encodeURIComponent(ISSUER_A)}`,
+		);
+		expect(cb.status).toBe(302);
+		expect(repo.authenticateByToken).toHaveBeenCalledWith("idp-a:sub-a-1");
+
+		// A mix-up: idp-a's response delivered to idp-b's callback. idp-b does not
+		// advertise the parameter, so only the comparison can refuse this one — a
+		// dropped `iss` would let the exchange go ahead.
+		const other = request.agent(app);
+		const second = await startLogin(other, "idp-b", idpB);
+		const mixedUp = await other.get(
+			`/session/oauth/federation/idp-b/callback?code=code-2&state=${second.state}&iss=${encodeURIComponent(ISSUER_A)}`,
+		);
+		expect(mixedUp.status).toBe(502);
+		expect(mixedUp.body).toMatchObject({ error: "exchange_failed" });
+		// Refused before the code was spent, and before the Store was asked.
+		expect(idpB.requestsTo("/token")).toHaveLength(0);
+		expect(repo.authenticateByToken).toHaveBeenCalledTimes(1);
+	});
+
 	it("a callback whose id_token fails validation never reaches the Store", async () => {
 		const idpA = await createFakeIdp({ issuer: ISSUER_A, clientId: "client-a" });
 		const idpB = await createFakeIdp({ issuer: ISSUER_B, clientId: "client-b" });
