@@ -75,8 +75,11 @@ interface FederationGrantBase {
 type FederationGrant =
 	| (FederationGrantBase & { readonly status: "pending" })
 	| (FederationGrantBase & AuthorizedFields & {
-			readonly status: "active" | "reauthorization_required" | "revoked";
-			readonly revocation?: { readonly by: RevokedBy; readonly at: Date };
+			readonly status: "active" | "reauthorization_required";
+	  })
+	| (FederationGrantBase & Partial<AuthorizedFields> & {
+			readonly status: "revoked"; // revoked while `pending`: no authorized fields
+			readonly revocation: { readonly by: RevokedBy; readonly at: Date };
 	  });
 
 interface AuthorizedFields {
@@ -111,17 +114,26 @@ not enough: the store enforces it at the write.
 
 | event | precondition, evaluated in the store | effect |
 | --- | --- | --- |
-| lodge first intent | — | create `pending`; key lives as long as the intent |
-| activate (callback succeeds) | status is `pending`, `active` or `reauthorization_required`; not expired; the intent is the grant's current intent | `active`; set the authorized fields; write credentials; `version++` |
-| replace credentials (refresh) | status is `active`; `version` equals the one read | write credentials; `version++` |
+| lodge first intent | — | create `pending`, naming this intent as current; key lives as long as the intent |
+| lodge reauthorization intent | the record exists; status is `active` or `reauthorization_required`; `now < expiresAt` | name this intent as current, superseding any other |
+| activate (callback succeeds) | status is `pending`, `active` or `reauthorization_required`; `now < expiresAt` unless `pending`; the intent is the grant's current intent; `expiresAt − consent.at` is within the lifetime ceiling (D13) | `active`; set the authorized fields; write credentials; `version++` |
+| replace credentials (refresh) | status is `active`; `version` equals the one read; `now < expiresAt` | write credentials; `version++` |
 | require reauthorization | status is `active`; `version` equals the one read | `reauthorization_required`; delete credentials; `version++` |
-| revoke | status is not `revoked` | `revoked`; record `revocation`; delete credentials; `version++` — one atomic operation that always wins |
+| revoke | the record exists; status is not `revoked` | `revoked`; record `revocation`; delete credentials; `version++` — one atomic operation that always wins |
+| touch | the record exists; status is `active` | set `lastUsedAt` only |
 | first intent lapses unused | — | the `pending` grant is deleted with it |
 
-`revoked` and expired are terminal: new consent means a new grant. The grant
-ID stays the same across reauthorization from `active` (a renewal) and from
-`reauthorization_required`, as the Australian CDR does with
-`cdr_arrangement_id`.
+Every row is one script that checks the record exists. A bare field write on a
+key that has expired or been tombstoned would re-create a partial record with
+no TTL.
+
+`revoked`, and expiry by the stored `expiresAt`, are terminal: new consent
+means a new grant. One expiry is not terminal, and D11 says so: a grant that
+reads as expired only because the operator lowered `maxExpiresIn` (D3) is
+usable again if the maximum is raised, always within the bound the user
+consented to. The grant ID stays the same across reauthorization from `active`
+(a renewal) and from `reauthorization_required`, as the Australian CDR does
+with `cdr_arrangement_id`.
 
 A writer whose precondition fails does not use what it fetched. It
 re-evaluates D10 from the top: if the winner was another refresh it returns
@@ -129,13 +141,13 @@ the stored token, and if the winner was a revocation it answers
 `grant_revoked`. It never returns a token it obtained for a grant it could not
 write.
 
-`lastUsedAt` is a best-effort field write that does not bump `version` and
-cannot fail a call.
+`touch` is best-effort: it does not bump `version` and cannot fail a call.
 
-Two races are part of the contract suite both adapters run: a callback that
-passed its checks and activates after a revocation (it must fail), and a
-refresh in flight while the grant is revoked (it must not re-create the
-credential record, and must not return the token).
+Three races are part of the contract suite both adapters run: a callback that
+passed its checks and activates after a revocation (it must fail); a refresh in
+flight while the grant is revoked (it must not re-create the credential record,
+and must not return the token); and a refresh that starts before `expiresAt`
+and finishes after it (the write must fail, and no token is returned).
 
 ### D3 — Expiry is absolute, required, and bounded by the operator
 
@@ -227,11 +239,21 @@ cannot cost every user a reconnect:
 - A refresh response may omit `refresh_token` (RFC 6749 §6); the stored one is
   kept, as the session-bound route already does.
 - A rotated refresh token is **always** persisted, even when the access token
-  that came with it fails condition 2. Discarding the response would discard
-  the only valid credential.
-- When condition 2 fails, only the access token is withheld. The call answers
+  that came with it is ineligible. Discarding the response would discard the
+  only valid credential.
+- An access token is ineligible when it fails condition 2, or when the scopes
+  the refresh response reports are not within `consent.scopes`. The second
+  case is real: an IdP that accumulates consent returns, on refresh, every
+  scope the user has since granted to the same upstream client, and the
+  generic OIDC adapter sends no `scope` on refresh to narrow it.
+- An ineligible access token is withheld **and never written**: the credential
+  record keeps the refresh credential only. The call answers
   `upstream_token_ineligible`, the grant is untouched, and an operator who set
   `maxAccessTokenLifetime` too low fixes it without any user acting.
+
+The same predicate guards every disclosure, not only a fresh one (D10). So
+lowering `maxAccessTokenLifetime` takes effect on the next call, not when the
+cached token happens to run out.
 
 Not in the first cut: an adapter capability for upstream revocation (RFC 7009
 or provider-specific) could admit connections with unbounded token lifetimes
@@ -247,9 +269,11 @@ POST /oauth/federation-grants          (client-authenticated)
 
 - `redirect_uri` must be one of the client's `federationGrantRedirectUris`.
 - `state` is required; the client binds it to its own user session.
-- `scope`, when sent, must be a subset of the connection's `scopes`. The
-  validated subset is bound to the intent and is what consent shows and what
-  is requested upstream. Absent, it is the connection's full set.
+- `scope`, when sent, must be a subset of the connection's `scopes` that keeps
+  `openid` (the adapter requires an `id_token`) and keeps `offline_access`
+  where the connection lists it. The validated subset is bound to the intent
+  and is what consent shows and what is requested upstream. Absent, it is the
+  connection's full set.
 - `upstream_sub`, when the client already knows which upstream account it
   expects, is checked at the callback.
 - `connect_uri` is `/session/federation-grants/connect?request=<handle>`. The
@@ -261,8 +285,10 @@ connection, and pending request" as the issue requires. A browser-initiated
 start could name any `client_id`; this one cannot.
 
 Reauthorization is the same call on an existing grant:
-`POST /oauth/federation-grants/:grantId/reauthorize`. It is accepted from
-`active` and `reauthorization_required`, not from `pending`.
+`POST /oauth/federation-grants/:grantId/reauthorize`. It judges the
+*effective* status (D1): it is accepted from `active` and
+`reauthorization_required`, and refused for a grant that is `pending`,
+expired, or reads as `connection_identity_changed`.
 
 A grant has at most one live intent. Lodging another supersedes the older one,
 whose callback is then refused as stale. Live first-time intents are bounded
@@ -285,6 +311,10 @@ and that is its CSRF defence, as it is for `/authorize`.
   `endpoints.login.url?redirect_to=<this request>`, as `/authorize` does.
 - With a session whose `sub` is not the intent's `sub`, it answers 403 and
   redirects nowhere.
+- With a session that authenticated at or before the subject's revocation
+  watermark, it answers 403 too, and so do the consent answer and the
+  callback. A session that a subject-wide revocation has not yet reached, or
+  failed to reach, cannot mint a consent dated after the watermark.
 - Neither of those, nor an unknown handle, nor a prefetch, spends the handle.
   The handle is consumed, atomically, when the consent is answered. An
   approval creates the upstream transaction and redirects upstream with
@@ -311,12 +341,22 @@ order:
 5. account binding. On reauthorization the upstream `(issuer, subject)` must
    equal the one on the grant. With `upstream_sub` in the intent it must equal
    that. If the upstream identity is linked to a *different* local subject the
-   flow is refused; one linked to nobody is accepted and recorded;
+   flow is refused; one linked to nobody is accepted and recorded. That last
+   test needs a read-only lookup the Store port lacks: `authenticateByToken`
+   carries login semantics, and a Store may stamp a last login or provision a
+   user on first sight. So `UserRepository` gains an optional, side-effect-free
+   `findSubjectByFederatedIdentity?`. A deployment either provides it or
+   declares its absence, in which case this one test is skipped and the other
+   two still hold;
 6. eligibility (D5);
 7. scope containment. The scopes the upstream reports must be within
    `consent.scopes`. A response that omits `scope` means "as requested"
    (RFC 6749 §5.1). An upstream that grants more than the user was shown is
-   refused, because an upstream token cannot be narrowed after the fact;
+   refused, because an upstream token cannot be narrowed after the fact. The
+   comparison is exact, on the names the connection configures. An adapter
+   whose IdP answers in another vocabulary — Google's `userinfo.*` URLs for
+   `email` and `profile`, Entra's resource-qualified names — normalizes them
+   before it reports, or its connections fail closed;
 8. the guarded activation in D2.
 
 `form_post` federations are not eligible: the session cookie is absent on
@@ -386,8 +426,10 @@ mismatch, so a known grant ID tells a stranger nothing, on any of the four.
 The status response carries `grant_id`, the effective `status` with its
 reason, `sub`, `client_id`, `connection`, `upstream`, `scope`, `resource`,
 `created_at`, `authorized_at`, `expires_at` and `last_used_at`. It evaluates
-the revocation backstop (D13) like a retrieval does, so it never reports
-`active` for a grant that cannot be used.
+everything a retrieval does short of contacting the upstream — the revocation
+backstop (D13), the revisions, and whether the credential authenticates under
+the current key ring, without the tokens leaving the store — so it never
+reports `active` for a grant that cannot be used.
 
 The routes ship in a new package, `@o3co/auth-provider-federation-grants`,
 which contributes them the way `device-grant` does and answers 404 when
@@ -414,14 +456,18 @@ evaluates, in order:
 1. the grant exists, its `clientId` is the authenticated client, and `sub`
    equals its subject;
 2. status is `active`, and `now < effectiveExpiry`;
-3. the subject's revocation watermark does not cover `consent.at` (D13);
+3. the subject's revocation watermark does not cover `consent.at` (D13). A
+   watermark that cannot be read answers 503, as `verifyJwt` fails closed;
 4. the connection is in the client's `allowedFederationGrantConnections`; an
    asserted `connection` names it; both revisions match (D4);
-5. asserted `scope` is within the grant's scopes; asserted `resource` equals
-   the grant's.
+5. asserted `resource` equals the grant's.
 
-Then it returns the stored upstream access token if its remaining life
-exceeds `max(min_ttl, refreshBuffer)`, and refreshes otherwise (D12).
+Then it takes the stored upstream access token if its remaining life exceeds
+`max(min_ttl, refreshBuffer)`, and refreshes otherwise (D12). Before any
+token is disclosed, cached or fresh, three things are checked again: step 2,
+because a refresh may have straddled the expiry; the eligibility predicate of
+D5 against the *current* `maxAccessTokenLifetime`; and an asserted `scope`
+against the scopes that token carries, not against what the grant once got.
 
 `min_ttl` may not exceed the connection's `maxAccessTokenLifetime`; a larger
 value is `invalid_request`. A call refreshes at most once. If the fresh token
@@ -437,7 +483,8 @@ and never as enforcement (D15).
 ```ts
 type FederationGrantTokenResult =
 	| { ok: true; accessToken: string; tokenType: string; expiresIn: number;
-	    scopes: readonly string[]; refreshed: boolean }
+	    scopes: readonly string[]; // what this token carries
+	    refreshed: boolean }
 	| { ok: false; code: FederationGrantDenial; reason?: string; retryAfterSeconds?: number };
 ```
 
@@ -445,13 +492,13 @@ type FederationGrantTokenResult =
 | --- | --- | --- | --- |
 | `grant_not_found` | — | 404 | treat as no delegation; never fall back |
 | `authorization_pending` | — | 400 | the user has not finished connecting |
-| `grant_expired` | — | 410 | terminal; ask for a new grant |
+| `grant_expired` | `consented_lifetime`, `operator_maximum` | 410 | ask for a new grant; only `operator_maximum` can lift by itself |
 | `grant_revoked` | `client`, `subject`, `operator`, `logout_policy`, `backstop` | 410 | terminal; ask for a new grant, if at all |
 | `connection_identity_changed` | — | 410 | terminal while it lasts; ask for a new grant |
 | `reauthorization_required` | `upstream_invalid_grant`, `connection_changed`, `credential_unreadable` | 410 | call `/reauthorize`, send the user, retry later |
 | `access_denied` | `connection_not_permitted` | 403 | configuration; do not retry |
 | `invalid_request`, `invalid_scope`, `invalid_target` | — | 400 | the request is malformed or exceeds the grant |
-| `upstream_token_ineligible` | `no_finite_lifetime`, `lifetime_over_maximum` | 502 | operator; the grant is untouched |
+| `upstream_token_ineligible` | `no_finite_lifetime`, `lifetime_over_maximum`, `scope_exceeded` | 502 | operator; the grant is untouched |
 | `upstream_rejected` | the upstream's error code | 502 | operator, e.g. an expired upstream client secret; the grant is untouched |
 | `rate_limited` | `provider`, `upstream` | 429 | retry after `Retry-After` |
 | `temporarily_unavailable` | `upstream`, `storage`, `lock_timeout`, `key_unavailable` | 503 | retry; the grant is untouched |
@@ -464,19 +511,27 @@ subject's grant or an application-wide credential.
 ### D12 — Refresh is coordinated per grant, and fails safe
 
 The session-bound lock cannot be reused as it is: it is typed to
-`(sid, federationName)`, its TTL is a fixed 5 s with no renewal, and the write
-after it is an unconditional `SET`. With a rotating upstream, a lock that
+`(sid, federationName)`, its TTL is a 5 s default the route never overrides,
+with no renewal, and the write after it is an unconditional `SET`. With a rotating upstream, a lock that
 expires mid-refresh lets two replicas present the same refresh token, which a
 reuse-detecting IdP answers by revoking the family.
 
 - The lock is keyed by grant ID and added beside `internal/lock.mts`, not
   refactored into it. Its TTL is configurable
   (`federationGrants.refreshLockTtlMs`, default 30 s).
-- No federation adapter sets a timeout, and `refreshToken()` takes no signal.
-  So the caller bounds the wait (`federationGrants.upstreamTimeoutMs`, default
-  10 s), and boot refuses a lock TTL that does not exceed it. A timed-out call
-  has an unknown outcome: it answers `temporarily_unavailable` / `upstream`,
-  and the stored refresh credential is not assumed to be still good.
+- A slow upstream must not cost users their grants. No federation adapter
+  sets a timeout and `refreshToken()` takes no signal, while `openid-client`
+  applies its own 30 s default underneath. Giving up at 10 s and dropping the
+  late response would, against a rotating IdP, turn every refresh during a
+  latency incident into `invalid_grant` on the retry. So:
+  - the delegated refresh (D17) takes a `signal`, and the caller aborts at
+    `federationGrants.upstreamTimeoutMs` (default 10 s);
+  - the lock is released only when the upstream call has settled, never while
+    it may still rotate the credential;
+  - a result that does arrive is always offered to the guarded write, even
+    after the caller has answered `temporarily_unavailable` / `upstream`;
+  - boot refuses a lock TTL that does not exceed the adapter's real request
+    timeout plus the persist-retry budget.
 - After acquiring the lock the record is re-read; another replica may have
   refreshed already.
 - The write is the guarded "replace credentials" of D2, in one Lua script.
@@ -525,7 +580,8 @@ now. D10 step 3 and the status route compare it with the grant's `consent.at`.
 Not with a token's `iat`: a token minted from a surviving grant is always
 fresh. And not with `authorizedAt`: consent precedes the callback by up to ten
 minutes, and a callback landing just after the watermark must not hide a
-consent given before it. A hit revokes that grant durably, with
+consent given before it. The comparison is inclusive and uses the same skew
+allowance as `verify.mts`. A hit revokes that grant durably, with
 `by: "backstop"`.
 
 The watermark's retention cannot be computed from the configured maximum: a
@@ -537,20 +593,34 @@ neither on configuration nor on what the caller passes:
 expiresAt = at + max(watermarkTtlMs, SUBJECT_REVOCATION_MIN_RETENTION_MS)
 ```
 
-`SUBJECT_REVOCATION_MIN_RETENTION_MS` is a constant equal to the schema's
-ceiling on `federationGrants.maxExpiresIn`, one year. `revokeAllForSubject`
+`SUBJECT_REVOCATION_MIN_RETENTION_MS` is one year, and `revokeAllForSubject`
 applies it unconditionally. Any grant this watermark should stop was consented
-at or before `at`, and its `expiresAt` was clamped at consent to at most
-`consent.at` plus that ceiling, so it cannot outlive the watermark — whatever
-the operator does to the configuration, and whether or not the Store passed
-the grant store. Both adapters already refuse to shorten an in-force
-watermark. The cost is one small key per revoked subject for a year, in every
-deployment.
+at or before `at`, and its `expiresAt` is at most `consent.at` plus one year,
+so it cannot outlive the watermark — whatever the operator does to the
+configuration, and whether or not the Store passed the grant store. Both
+adapters already refuse to shorten an in-force watermark. The cost is one
+small key per revoked subject for a year, in every deployment.
+
+Two things make that true by construction and not by convention:
+
+- **The ceiling is a core constant, enforced at the write.** The config schema
+  caps `federationGrants.maxExpiresIn` at one year, but a hand-built config
+  bypasses a schema, as #448 showed. So `FEDERATION_GRANT_LIFETIME_CEILING_MS`
+  lives in core, `activate` refuses a lifetime beyond it (D2),
+  `SUBJECT_REVOCATION_MIN_RETENTION_MS` is defined from it, and a test pins
+  the two together.
+- **The watermark must exist.** `subjectRevocation` is an optional slot, and a
+  deployment may declare it unsupported. With federation grants enabled that
+  is refused at boot, as `device-grant` refuses to start without a rate
+  limiter.
 
 So the per-subject pass is what makes revocation prompt and deletes the
-credentials at once, and the backstop is what makes it certain. A Store that
-upgrades without touching its `revokeAllForSubject` call site is safe, not
-silently exempt. The primary path alone fails when a store write fails
+credentials at once, and the backstop is what holds when that pass does not
+run or does not finish. A Store that upgrades without touching its
+`revokeAllForSubject` call site is safe, not silently exempt. One window
+remains and D7 closes it: a consent given through a session that the
+revocation has not reached would be dated after the watermark, so such a
+session cannot consent at all. The primary path alone fails when a store write fails
 part-way. The watermark alone would make revocation depend on a TTL, which
 today is sized to refresh tokens. Hence both.
 
@@ -602,19 +672,22 @@ clamp in D10 as a security control.
 
 The port follows `ConsentStore` (#589), not `FederationTokenStore`: a shared
 contract suite that both adapters run, the caller's clock for expiry, and a
-key TTL that is only a safety net. Its shape, not its final signatures:
+key TTL that is only a safety net. The listing and the key layout below
+illustrate the contract; slices 1 and 3 settle the signatures and the names.
 
 ```ts
 interface FederationGrantStore {
 	readonly kind: string;
 	lodge(intent: FederationGrantIntent): Promise<LodgeResult>; // creates or supersedes; enforces the bound
 	readIntent(handle: string): Promise<FederationGrantIntent | null>;
+	readIntentByChallenge(challenge: string): Promise<FederationGrantIntent | null>; // the consent page's lookup (D8)
 	consumeIntent(handle: string): Promise<FederationGrantIntent | null>; // atomic, single-use
 	putTransaction(tx: ConnectTransaction): Promise<void>;
 	consumeTransaction(state: string): Promise<ConnectTransaction | null>; // atomic, single-use
 	find(grantId: string): Promise<FederationGrant | null>;
 	listBySubject(subject: string): Promise<readonly FederationGrant[]>;
 	openCredentials(grant: FederationGrant): Promise<OpenResult>; // "unreadable" and "key_unavailable" are results, not throws
+	verifyCredentials(grant: FederationGrant): Promise<"ok" | "unreadable" | "key_unavailable">; // for the status route; returns no token
 	activate(grantId: string, intentHandle: string, fields: AuthorizedFields, credentials: UpstreamCredentials): Promise<TransitionResult>;
 	replaceCredentials(grantId: string, expectedVersion: number, credentials: UpstreamCredentials): Promise<TransitionResult>;
 	requireReauthorization(grantId: string, expectedVersion: number): Promise<TransitionResult>;
@@ -626,14 +699,19 @@ interface FederationGrantStore {
 Redis layout, default prefix `fg:`. Keys that one script touches share a
 Cluster hash tag, as the consent store's do:
 
-- `fg:{<id>}:grant` — a HASH of non-secret fields, `status` and `version`. The
-  status route reads this without decrypting anything.
+- `fg:{<id>}:grant` — a HASH of non-secret fields, `status`, `version` and the
+  current intent's handle.
 - `fg:{<id>}:cred` — one AES-256-GCM ciphertext of the upstream tokens,
   reusing `internal/crypto.mts`.
 - `fg:{<id>}:lock`.
 - `fg:sub:<subject>` — a ZSET index scored by `expiresAt`, written before the
   record; a dangling entry is tolerated and pruned.
-- `fg:intent:<handle>` and `fg:tx:<state>`, each with its own TTL.
+- `fg:{intents}:<handle>`, `fg:{intents}:tx:<state>` and the per
+  `(client, subject)` counter, each with its own TTL. They share one constant
+  tag, as the consent store's parked requests do, so the bound is enforced
+  atomically among intents. Nothing needs atomicity across the two tags:
+  supersession is enforced at activation, by the grant's current-intent
+  pointer (D2).
 
 Key TTLs come from the stored `expiresAt`, never from `effectiveExpiry`, which
 depends on configuration (D3). The grant HASH keeps a tombstone retention
@@ -646,11 +724,17 @@ session-bound store binds a ciphertext to its key name, because there the key
 name *is* the binding (#293). Here the binding is a set of fields in a
 plaintext HASH, and someone able to write to Redis — or a mismatched restore —
 could re-point `clientId`, extend `expiresAt`, or move `consent.at` past the
-watermark without touching the ciphertext. So the additional authenticated
-data is a canonical encoding of the key name together with `id`, `subject`,
-`clientId`, `connection`, `identityRevision`, `consent.at` and `expiresAt`,
-recomputed from the HASH when the credential is opened. A tampered field fails
-authentication and reads as `credential_unreadable`.
+watermark without touching the ciphertext. Rewriting `authorizationRevision`
+to the current value would hide a scope or `boundary` change and skip the
+renewed consent; swapping `upstream` would weaken the account check at the
+next reauthorization. So the additional authenticated data is a canonical
+encoding of the key name together with `id`, `subject`, `clientId`,
+`connection` and every authorized field except `lastUsedAt`, recomputed from
+the HASH when the credential is opened. Those fields change only at
+activation, which re-seals the credential in the same script. A tampered field
+fails authentication and reads as `credential_unreadable`. `status`, `version`
+and `revocation` are left out on purpose: every transition away from `active`
+deletes the credential, so rewriting them gains nothing.
 
 Two behaviours differ from the session-bound store on purpose, because a
 mistake here revokes every user's delegation at once:
@@ -667,7 +751,7 @@ mistake here revokes every user's delegation at once:
 The `allow-plaintext` production guard applies unchanged. The in-memory
 adapter declares `replicaSafety: unsafe`.
 
-### D17 — The federation adapter surface gains one capability
+### D17 — The federation adapter surface gains one capability, in two methods
 
 Every adapter fixes its authorization parameters today, so `offline_access`
 with `prompt=consent` — what OIDC Core §11 requires — cannot be sent at all.
@@ -686,12 +770,23 @@ interface SupportsDelegatedAuthorization {
 		readonly resource?: string; // sent as the RFC 8707 `resource` parameter
 		readonly authorizationParams?: Readonly<Record<string, string>>;
 	}): URL;
+	refreshDelegatedToken(params: {
+		readonly refreshToken: string;
+		readonly resource?: string; // an upstream that needs it at authorization needs it here too
+		readonly signal?: AbortSignal; // D12
+	}): Promise<RefreshedTokens>;
 }
 ```
 
+The existing `refreshToken(refreshToken)` takes nothing else. An upstream that
+requires a resource indicator would authorize and then fail its first refresh,
+or answer with a default-audience token that D10 would still file under the
+configured resource.
+
 `FederationProfile` and `RefreshedTokens` also gain the token response's
 `scope` and `token_type`. The generic OIDC adapter's `snapshot` drops both
-today, so the scope actually granted is unobservable, and D7 check 7 needs it.
+today, so the scope actually granted is unobservable, and both D7 check 7 and
+the refresh rule in D5 need it.
 Both additions are optional, so existing adapters and the login flow are
 unaffected. A connection whose federation lacks the capability is refused at
 boot. The first cut implements it for the generic OIDC adapter.
@@ -712,7 +807,7 @@ correlation ID. The provider has no request ID today; these routes accept
 and echo it. No event, response or log line carries a refresh token or any
 other long-lived secret.
 
-### D19 — Entra: on-behalf-of is not implemented, and scopes need their own registration
+### D19 — Entra: on-behalf-of is not implemented, and consent accumulates
 
 An OBO assertion must be an access token issued for the middle-tier API that
 makes the request. A token auth.provider issued, or a login through another
@@ -721,9 +816,14 @@ supported path: an authorization-code connect flow against Entra as an OIDC
 federation with `offline_access`. OBO can follow if there is demand.
 
 Entra returns every scope the user has ever consented to for a resource and
-client, not only the ones just asked for. Under D7 check 7 a narrower intent
-is then refused. The documentation says so and gives the remedy, which is also
-the isolation the issue asks for: a dedicated app registration per connection.
+upstream client, not only the ones just asked for, and it does so on refresh
+as well. Two grants with different scope subsets on one connection therefore
+broaden each other: the narrower one's next refresh comes back carrying the
+wider one's scopes. D5 withholds that token, so the design fails closed, but
+the narrower grant is then unusable. The documentation gives the rule for any
+IdP that accumulates consent: one connection per scope set, each on its own
+app registration, and no intent subsets on it. A dedicated registration alone
+is not enough.
 
 ## Acceptance criteria
 
@@ -733,10 +833,10 @@ the isolation the issue asks for: a dedicated app registration per connection.
 | 2 | not renewable without refresh credentials | D5 | callback with no `refresh_token`: no credential is stored, the grant never leaves `pending`, the redirect says `refresh_token_absent` |
 | 3 | wrong client / subject / connection / environment / resource / scopes denied, grant ID known | D4, D9, D10 | one case per dimension, on all four grant-addressed routes; "not yours" responses are byte-identical; `boundary` change reads as `connection_changed` |
 | 4 | expired or revoked upstream credentials → reauthorization, no fallback | D11, D12 | structured upstream `invalid_grant`; assert no other grant or credential is read |
-| 5 | transient failures distinguishable and non-destructive | D5, D11, D12 | injected 5xx, 429, timeout, storage throw, `invalid_client`, over-long token lifetime; record unchanged in each |
-| 6 | concurrent refresh, lock expiry, restart, persistence failure | D2, D12 | two replicas on one testcontainer; lock TTL forced to expire; guarded-write loser; injected persist failure; refresh response without `refresh_token` |
-| 7 | duplicate, stale, wrong-account callbacks cannot replace or broaden | D6, D7 | replayed callback; superseded intent; expired intent; different upstream `sub`; upstream grants more scopes than consented |
-| 8 | session-expiry / logout / subject-revocation behaviour; session-bound endpoint preserved | D13, D14 | both logout endpoints, policy off and on; existing `federationToken` suite untouched and green |
+| 5 | transient failures distinguishable and non-destructive | D5, D11, D12 | injected 5xx, 429, storage throw, `invalid_client`, over-long token lifetime, unreadable watermark; record unchanged in each. A rotating upstream that answers after the caller's timeout: the late credential is persisted and the next call succeeds |
+| 6 | concurrent refresh, lock expiry, restart, persistence failure | D2, D12 | two replicas on one testcontainer; lock TTL forced to expire; guarded-write loser; injected persist failure; refresh response without `refresh_token`; refresh straddling `expiresAt` |
+| 7 | duplicate, stale, wrong-account callbacks cannot replace or broaden | D5, D6, D7 | replayed callback; superseded intent; expired intent; different upstream `sub`; upstream grants more scopes than consented. Broadening through refresh: G1 consented for one scope, G2 later for two on the same connection, G1's refresh returns both — G1's client gets `upstream_token_ineligible`, never the token |
+| 8 | session-expiry / logout / subject-revocation behaviour; session-bound endpoint preserved | D13, D14 | slice 5: both logout endpoints leave grants alone, subject revocation ends them, existing `federationToken` suite untouched and green. Slice 8: the same with the policy on |
 | 9 | no refresh token or long-lived secret in responses, audit or logs | D18 | a sentinel secret is grepped for in every response body, audit event and captured log line |
 | 10 | provider-specific `offline_access` documentation | D19 | documentation review |
 
@@ -750,9 +850,11 @@ The two review conditions add:
 - a grant that expires before its issued access token: retrieval stops, and
   the documented residual window is that token's remaining life; an upstream
   token with no finite expiry: refused at authorization, nothing but the
-  lapsing `pending` grant stored, nothing disclosed (D5, D15).
+  lapsing `pending` grant stored, nothing disclosed; `maxAccessTokenLifetime`
+  lowered while a longer-lived token is cached: that token is not disclosed
+  (D5, D10, D15).
 
-And D2 adds the two races, in the contract suite both adapters run.
+And D2 adds its three races, in the contract suite both adapters run.
 
 Time is controlled (`now` is injected everywhere it is read) and failures are
 injected deterministically.
@@ -771,8 +873,9 @@ route test is written first and watched failing.
 4. **package: token and status routes** (D9–D12), exercised on grants seeded
    straight into the store; the `Client` fields, audit events, configuration.
 5. **revocation** (D13): the revoke route, the two library functions, the
-   `revokeAllForSubject` extension, the retention floor, and the condition
-   tests.
+   `revokeAllForSubject` extension, the retention floor and lifetime ceiling,
+   the boot refusal without `subjectRevocation`, the condition tests, and the
+   tests that default logout leaves grants alone.
 6. **acquisition** (D6–D8): the intent routes, consent, the connect flow.
 7. **standalone template, documentation, CHANGELOG.** Includes the operator
    runbook rows the replica-safety drift test requires, `adapter-surface.md`,
@@ -795,10 +898,13 @@ no configuration slip costs every user a reconnect.
 
 **Bad.** It is a large surface: a package, a port, two adapters, five client
 routes, the connect flow and a consent page contract, and two new `Client`
-fields. A rotating upstream combined with a storage outage or a timeout during
-a refresh costs the user a reconnect (D12). Connections on federations that
-issue non-expiring tokens are unsupported (D5). Entra needs an app
-registration per connection (D19). Every revoked subject leaves a watermark
+fields. It asks two things of integrators: `subjectRevocation` becomes
+mandatory once grants are enabled (D13), and the account check is at full
+strength only with a new optional `UserRepository` lookup (D7). A rotating
+upstream combined with a storage outage during a refresh costs the user a
+reconnect (D12). Connections on federations that issue non-expiring tokens are
+unsupported (D5). An IdP that accumulates consent needs one connection and one
+app registration per scope set (D19). Every revoked subject leaves a watermark
 key for a year (D13).
 
 **Neutral.** Upstream refresh tokens also die from disuse — Google after six
