@@ -288,6 +288,54 @@ describe("effectiveFederationGrantStatus (#593, D1)", () => {
 		});
 	});
 
+	describe("a connection that is no longer configured", () => {
+		// The operator removed `federationGrants.connections.<name>`. Nothing can
+		// be compared with a connection that is not there, and nothing about the
+		// grant has changed: putting the entry back restores it.
+		const removed = { ...context, connection: undefined };
+
+		it("is reported as such: not as a changed identity, which removing an entry does not establish", () => {
+			expect(effectiveFederationGrantStatus(active, removed)).toEqual({
+				status: "connection_not_configured",
+			});
+			expect(effectiveFederationGrantStatus(needsUser, removed)).toEqual({
+				status: "connection_not_configured",
+			});
+		});
+
+		it("gives way to every terminal fact: a configuration remedy must not be offered for a grant that is over", () => {
+			const revoked: FederationGrant = {
+				...active,
+				status: "revoked",
+				revocation: { by: "client", at: at(DAY) },
+			};
+			expect(effectiveFederationGrantStatus(revoked, removed)).toEqual({
+				status: "revoked",
+				reason: "client",
+			});
+			expect(
+				effectiveFederationGrantStatus(active, { ...removed, grantsBoundary: at(1_000) }),
+			).toEqual({ status: "revoked", reason: "backstop" });
+			expect(effectiveFederationGrantStatus(active, { ...removed, now: at(30 * DAY) })).toEqual({
+				status: "expired",
+				reason: "consented_lifetime",
+			});
+		});
+
+		it("does not concern a pending grant, which is compared with nothing yet", () => {
+			const pending: FederationGrant = {
+				id: "g-0",
+				status: "pending",
+				subject: "u-1",
+				clientId: "agent",
+				connection: "okta-calendar",
+				createdAt: CONSENT,
+				version: 1,
+			};
+			expect(effectiveFederationGrantStatus(pending, removed)).toEqual({ status: "pending" });
+		});
+	});
+
 	describe("order — what cannot be undone is reported first", () => {
 		const everything: EffectiveFederationGrantStatusContext = {
 			...context,

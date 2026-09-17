@@ -176,7 +176,13 @@ export interface FederationGrantConnection {
 export type FederationGrantIneligibilityReason =
 	| "no_finite_lifetime"
 	| "lifetime_over_maximum"
-	| "scope_exceeded";
+	| "scope_exceeded"
+	/**
+	 * The adapter reported a refresh without a usable access token, or with a
+	 * field of the wrong type. The refresh token it came with is kept all the
+	 * same, and the marker keeps a broken adapter from rotating on every request.
+	 */
+	| "malformed_token_response";
 
 /**
  * Non-secret, and outside the authenticated envelope. Without it a grant whose
@@ -207,6 +213,8 @@ export type EffectiveFederationGrantStatus =
 	| { readonly status: "active" }
 	| { readonly status: "expired"; readonly reason: FederationGrantExpiredReason }
 	| { readonly status: "revoked"; readonly reason: FederationGrantRevokedBy }
+	/** The operator removed the connection's entry. Putting it back restores the grant. */
+	| { readonly status: "connection_not_configured" }
 	| { readonly status: "connection_identity_changed" }
 	| {
 			readonly status: "reauthorization_required";
@@ -237,15 +245,19 @@ export interface FederationGrantCredentials {
 }
 
 // ---------------------------------------------------------------------------
-// Not exported from the package root yet. Nothing produces or consumes these
-// until `retrieveFederationGrantToken` exists, and the ADR leaves their final
-// shape to that slice (D11).
+// The typed result of `retrieveFederationGrantToken` (D11).
 // ---------------------------------------------------------------------------
 
-export type TemporarilyUnavailableReason =
+export type FederationGrantUnavailableReason =
 	| "upstream"
 	| "storage"
 	| "lock_timeout"
+	/**
+	 * This call's refresh was overtaken — its guarded write lost, or what it
+	 * wrote was replaced before the last look — and what is stored now is
+	 * nothing to answer with.
+	 */
+	| "concurrent_update"
 	| "key_unavailable";
 
 /**
@@ -264,7 +276,12 @@ export type FederationGrantDenial =
 			readonly reason: FederationGrantReauthorizationReason;
 	  }
 	| { readonly code: "access_denied"; readonly reason: "connection_not_permitted" }
-	| { readonly code: "invalid_request" | "invalid_scope" | "invalid_target" }
+	| {
+			readonly code: "invalid_request";
+			/** Which assertion failed: both answer 400, and an `error_description` wants to say which. */
+			readonly reason: "connection_mismatch" | "min_ttl_out_of_range";
+	  }
+	| { readonly code: "invalid_scope" | "invalid_target" }
 	| {
 			readonly code: "upstream_token_ineligible";
 			readonly reason: FederationGrantIneligibilityReason;
@@ -278,7 +295,7 @@ export type FederationGrantDenial =
 	  }
 	| {
 			readonly code: "temporarily_unavailable";
-			readonly reason: TemporarilyUnavailableReason;
+			readonly reason: FederationGrantUnavailableReason;
 			readonly retryAfterSeconds?: number;
 	  };
 
@@ -291,6 +308,12 @@ export type FederationGrantTokenResult =
 			readonly expiresIn: number;
 			/** What this token carries. */
 			readonly scopes: readonly string[];
+			/**
+			 * Whether this is a token the call itself fetched from the upstream. It
+			 * is `false` for a cached token, for somebody else's refresh, and for
+			 * the token the grant had when this call's refresh brought nothing
+			 * usable (D5).
+			 */
 			readonly refreshed: boolean;
 	  }
 	| ({ readonly ok: false } & FederationGrantDenial);

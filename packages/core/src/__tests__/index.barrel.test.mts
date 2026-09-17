@@ -69,6 +69,30 @@ describe("core barrel — #593 federation grant domain rules", () => {
 		expect(core.memoryFederationGrantStoreModule.name).toBe("core-federation-grant-store-memory");
 	});
 
+	it("re-exports the retrieval the package maps to HTTP, and the timing rule it checks at boot", () => {
+		expect(typeof core.retrieveFederationGrantToken).toBe("function");
+		expect(() =>
+			core.assertFederationGrantRetrievalLimits({
+				maxExpiresInMs: 7_776_000_000,
+				revocationSkewMs: 1_000,
+				refreshBufferMs: 30_000,
+				ineligibleRetryAfterMs: 300_000,
+				upstreamTimeoutMs: 10_000,
+				upstreamHardTimeoutMs: 25_000,
+				refreshLockTtlMs: 28_000,
+				lockWaitMs: 5_000,
+				persistRetryBudgetMs: 3_000,
+			}),
+		).toThrow(RangeError);
+	});
+
+	it("re-exports the refresh-error classifier both token routes share", () => {
+		expect(core.classifyFederationRefreshError(new Error("boom"))).toEqual({
+			reason: "unknown",
+			structured: false,
+		});
+	});
+
 	it("says FederationGrant in every name: this barrel already exports GrantContext and GrantResult for OAuth grant types", () => {
 		const generic = [
 			"effectiveExpiry",

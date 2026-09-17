@@ -98,9 +98,11 @@ export function judgeUpstreamAccessToken(token: {
 }
 
 /**
- * Whether a marker still says the grant cannot yield a token. This is what the
- * status route reports (D5, D9): it never calls a grant `active` that cannot
- * be used.
+ * Whether a marker still says the grant's last refresh brought no token that
+ * could be disclosed. This is what the status route reports (D5, D9): it never
+ * calls a grant `active` that cannot be refreshed into a usable token. The
+ * converse does not hold: `/token` goes on answering the token the grant had,
+ * while that one lasts, under a marker that stands.
  *
  * Three things clear a marker: an eligible refresh, a reauthorization, and a
  * change to the maximum it was judged against — the operator fixing the

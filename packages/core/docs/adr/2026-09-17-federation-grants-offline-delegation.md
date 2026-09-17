@@ -123,7 +123,9 @@ trivially true.
 
 The stored `status` has four values. What a caller is told is an *effective*
 status, computed on every read: an `active` grant past its expiry reads as
-expired; one whose connection's identity changed reads as
+expired; one whose connection the operator removed reads as
+`connection_not_configured`, which removing an entry establishes and a changed
+identity it does not; one whose connection's identity changed reads as
 `connection_identity_changed`; one whose connection otherwise changed, or
 whose credential cannot be opened, reads as `reauthorization_required`; and
 one whose upstream stopped issuing eligible tokens reads as
@@ -347,10 +349,19 @@ cannot cost every user a reconnect:
   case is real: an IdP that accumulates consent returns, on refresh, every
   scope the user has since granted to the same upstream client, and the
   generic OIDC adapter sends no `scope` on refresh to narrow it.
-- An ineligible access token is withheld **and never written**: the credential
-  record keeps the refresh credential only. The call answers
-  `upstream_token_ineligible`, the grant is untouched, and an operator who set
-  `maxAccessTokenLifetime` too low fixes it without any user acting.
+- An ineligible access token is withheld **and never written**. The call
+  answers `upstream_token_ineligible` — unless the token the grant had still
+  serves the request, as below — the grant is untouched, and an operator who
+  set `maxAccessTokenLifetime` too low fixes it without any user acting.
+- The stored access token is kept beside the rotated refresh token when it is
+  one that could still be disclosed: eligible under the current maximum,
+  alive, and dated believably (D10). What is kept is what the look under the
+  lock found, never what the look before the wait found: that one may have
+  been replaced meanwhile. A refresh that brought nothing usable must not cost the grant the
+  token that worked — a refresh asked for on behalf of one unusual request
+  would otherwise starve every ordinary one until the upstream recovers.
+  Nothing is lowered by that: the kept token is judged again at every
+  disclosure, as any cached token is.
 
 The same predicate guards every disclosure, not only a fresh one (D10). It
 judges the lifetime a token was *issued* with, not what remains of it, so a
@@ -358,8 +369,16 @@ cached token does not become disclosable merely by ageing below a lowered
 maximum. Lowering `maxAccessTokenLifetime` therefore takes effect on the next
 call. The sealed credential records, beside the refresh token, the access
 token (which may be absent), when it was obtained, its issued lifetime, and
-its own `scope` and `token_type`. A refresh response that omits `scope` means
-the grant's `scopes` (RFC 6749 §6).
+its own `scope` and `token_type`. A refresh response that omits `scope` — or
+sends an empty one, which is not a scope — means the grant's `scopes`
+(RFC 6749 §6).
+
+A refresh whose answer is not one an adapter should report — no usable access
+token, or a field of the wrong type — is ineligible too, as
+`malformed_token_response`. The refresh token it came with is kept all the
+same, since the rule above does not depend on the rest of the answer being
+sound, and the marker below keeps a broken adapter from rotating on every
+request.
 
 An ineligible refresh also leaves a non-secret marker on the record:
 `{ reason, at, judgedAgainst }`. Without it a starved grant would take the
@@ -367,11 +386,18 @@ lock, call the upstream and rotate the refresh token on every `/token` call —
 each rotation another chance to lose the credential (D12), and a drain on the
 upstream client's rate limit that other grants share. With it:
 
-- `/token` answers `upstream_token_ineligible` from the marker, with
-  `retryAfterSeconds`, until `federationGrants.ineligibleRetryAfter` (default
-  300 s) has passed;
+- `/token` does not ask the upstream until
+  `federationGrants.ineligibleRetryAfter` (default 300 s) has passed. Until
+  then it answers the stored token while that is good — the marker limits how
+  often the upstream is asked, and is no reason to withhold a token that
+  works — and `upstream_token_ineligible` from the marker, with
+  `retryAfterSeconds`, once it is not;
 - the status route reports it, so a grant that cannot yield a token never
-  reads as `active`;
+  reads as `active`. The converse does not hold, and is not meant to: while a
+  kept token lasts, `/token` answers 200 under a status of
+  `upstream_token_ineligible`. The status says whether the grant can be
+  *refreshed*, which is what an operator has to act on; a client does not
+  gate `/token` on it;
 - it is cleared by an eligible refresh, by reauthorization, and when the
   connection's `maxAccessTokenLifetime` no longer equals `judgedAgainst`.
 
@@ -413,7 +439,8 @@ Reauthorization is the same call on an existing grant:
 `POST /oauth/federation-grants/:grantId/reauthorize`. It judges the
 *effective* status (D1): it is accepted from `active` and
 `reauthorization_required`, and refused for a grant that is `pending`,
-expired, or reads as `connection_identity_changed`. It evaluates the
+expired, reads as `connection_identity_changed`, or whose connection is no
+longer configured. It evaluates the
 revocation backstop first (D13): a grant that a subject-wide revocation should
 have ended is revoked there, not renewed.
 
@@ -620,17 +647,101 @@ that cannot work: a stored revocation, then the backstop (before expiry, so
 that a revocation which never reached the record is not reported as a mere
 expiry), then expiry, then a changed upstream identity, then what a
 reauthorization mends, then an upstream that stopped issuing eligible tokens.
-The ineligibility marker (D5) is reported for as long as it stands; its retry
-interval only limits how often this route calls the upstream again.
+The ineligibility marker (D5) only limits how often this route calls the
+upstream — so for this route, and not for the status route, it is not where
+the evaluation ends. It goes on to step 5, and to the stored token: one that
+is good is answered under the marker, and the marker is what is reported
+where a refresh would have been needed and its retry interval has not passed.
+Once it has, the evaluation goes on to a refresh, or no starved grant would
+ever recover. One marker does end it: under a `maxAccessTokenLifetime` that
+no token can satisfy nothing is disclosed, and nothing of step 5 can be
+judged, since `min_ttl` is held against that maximum.
 
-Then it takes the stored upstream access token if its remaining life exceeds
-`max(min_ttl, refreshBuffer)`, and refreshes otherwise (D12). Before any
+Two kinds of refusal are neither terminal facts nor remedies the client has,
+and their place in that order is fixed too:
+
+- *Configuration* — a connection the client may not use, or one the operator
+  removed — comes after a revocation, the backstop and an expiry, and before
+  everything else, a changed identity included: a client that may not use the
+  connection cannot act on "ask for a new grant" either. A client must not be sent to its operator about a grant
+  that is over, so a revoked grant on a removed connection answers 410, and
+  never 403.
+- *Outages* come where they cannot mask anything. "Not yours", a stored
+  revocation and a pending grant are answered from the record alone, before
+  the subject's boundary is consulted, so that a boundary that cannot be read
+  turns none of them into a 503. A key that is missing from the ring is not a
+  status (D1, D16), and it is answered 503 exactly where the evaluation would
+  otherwise say `credential_unreadable` — the first point at which the
+  credential matters. Everything reported ahead of that is decided without a
+  credential, so a missing key masks neither the backstop nor an expiry, and
+  the backstop is still made durable under it. The boundary is read
+  first and the record last, so that the record — the thing a revocation
+  changes — is the freshest thing evaluated, and `now` is sampled after both.
+
+Then it takes the stored upstream access token, or refreshes it (D12) as set
+out below. Before any
 token is disclosed, cached or fresh, these are checked again: steps 2 and 3,
 because a refresh may have straddled the expiry, or a subject-wide revocation
 may have stamped its watermark meanwhile without reaching this grant; the
 eligibility predicate of D5 against the *current* `maxAccessTokenLifetime`;
 and an asserted `scope` against the scopes that token carries, not against
 what the grant once got.
+
+"Checked again" means the record is read again. A successful guarded write
+proves that the grant was `active` at that instant, and a per-grant
+revocation can land while the boundary is being read after it; a token that
+has not been disclosed yet is not D15's residual access. So after its own
+write the call takes one more look — the boundary, then the record, then the
+clock — and discloses what is *stored*, never the token it holds in a
+variable. That look never refreshes: a call refreshes at most once. The same
+look is all a call gets after a lock timeout or a lost write, with one
+difference. After its own write it answers what is stored as it is, as below;
+after losing, what is stored is somebody else's or the token that had run
+down, it is judged as on the first look, and what would have been a refresh
+is answered as the outage that brought the call there. A fresh token that is
+good and lacks an asserted scope answers `invalid_scope`, after its rotated
+refresh token was kept: missing what was asked for is not exceeding the
+consent.
+
+**When a stored token is refreshed.** A token is refreshed once it is half
+spent and either has run down to `federationGrants.refreshBuffer`, or the
+caller wants more than it has: more life (`min_ttl`), or a scope it does not
+carry. Before it is half spent it is answered as it is — below `min_ttl` with
+its true lifetime, short of an asserted scope as `invalid_scope`. Until then a
+refresh has little more life to give, and an upstream that has just left a
+scope out is not going to change its mind, while every refresh rotates the
+refresh token at an IdP that rotates. Without the bound a client asking an
+hour of tokens that are issued for an hour, or a scope the upstream never
+puts in a token, or anything at all of tokens issued with less life than the
+buffer, would get a rotation on every request: the harm D5's marker exists to
+prevent, on a path the marker does not cover, because such a token is
+eligible. A naive `min_ttl` is enough to get there; no malice is needed. It
+is one rule and no setting: a refresh buffer of zero is a setting an operator
+may choose, and must not be a way round it.
+
+What the rule bounds is what a *client* can cause while the upstream answers:
+two rotations in a token's lifetime — or, under a standing marker beside a
+kept token, one per `ineligibleRetryAfter`. It does not bound an upstream
+that *fails*: a failed refresh is not remembered yet, so every request that
+needs one asks again (build order, slice 1d). And `min_ttl` is a request, never a guarantee:
+one above half the lifetime the upstream issues cannot be met for most of a
+token's life, and `expires_in` is what tells the caller what it got.
+
+A token that is already dead is never answered, however it was come by. One
+that is dated far ahead of `now` is not believed: read as it stands it would
+be unspent, and alive, for as long as its date is ahead. "Far" is further
+than the refresh buffer absorbs — or than `revocationSkew`, where the buffer
+is set to less. Believing a date that is a little ahead costs that the token
+is refreshed so much later; not believing it costs a second rotation on the
+heels of the first, whenever the replica that refreshed is the one whose
+clock is ahead. What believing it can cost is a token answered after the
+upstream has let it die, by as much as its date was ahead: where a token
+lives less than twice that, and under a marker, where a token is answered
+with however little it has. That is a 401 for the worker and nothing
+disclosed, and clocks that far apart are the fault to fix. No token is given more life than
+it was issued with, whatever its date says. Where the marker of D5 forbids
+asking the upstream, a stored token that is good is answered with the life it
+has, however little.
 
 This evaluation and the refresh of D12 are one function in core,
 `retrieveFederationGrantToken`, written against a structural refresh
@@ -668,13 +779,15 @@ reason cannot be attached to a code that has none.
 | `grant_revoked` | `client`, `subject`, `operator`, `logout_policy`, `backstop` | 410 | terminal. Stop the work and tell the user; offer a fresh authorization, which is a new grant. Never retry, never `/reauthorize` |
 | `connection_identity_changed` | — | 410 | terminal while it lasts; ask for a new grant |
 | `reauthorization_required` | `upstream_invalid_grant`, `connection_changed`, `credential_unreadable` | 410 | call `/reauthorize`, send the user, retry later |
-| `access_denied` | `connection_not_permitted` | 403 | configuration; do not retry |
-| `invalid_request`, `invalid_scope`, `invalid_target` | — | 400 | the request is malformed or exceeds the grant |
+| `access_denied` | `connection_not_permitted` | 403 | configuration: the client may not use the connection, the operator removed it, or its federation cannot refresh for a grant. Do not retry. Reported after a revocation, the backstop and an expiry, and before a changed identity (D10) |
+| `invalid_request` | `connection_mismatch`, `min_ttl_out_of_range` | 400 | the request is malformed; the reason is for an `error_description` |
+| `invalid_scope`, `invalid_target` | — | 400 | the request exceeds the grant — or, for `invalid_scope`, the stored token does not carry what was asked for and it is too early to ask the upstream again (D10): a refresh may bring the scope once the token is half spent |
 | `upstream_token_ineligible` | `no_finite_lifetime`, `lifetime_over_maximum` | 502 | operator; the grant is untouched; honour `retryAfterSeconds` |
+| `upstream_token_ineligible` | `malformed_token_response` | 502 | operator: the federation adapter reported an answer without a usable access token, or with a field of the wrong type. The grant is untouched; honour `retryAfterSeconds` |
 | `upstream_token_ineligible` | `scope_exceeded` | 502 | no operator action un-accumulates consent: `/reauthorize` for the wider set, or a new grant on a connection of its own (D19) |
-| `upstream_rejected` | the upstream's error code | 502 | operator, e.g. an expired upstream client secret; the grant is untouched |
+| `upstream_rejected` | the upstream's error code, or `unknown` | 502 | operator, e.g. an expired upstream client secret; the grant is untouched. The code is repeated only when it is one of the RFC 6749, RFC 6750, RFC 8707 and OpenID Connect codes this provider knows, and is `unknown` otherwise — an allow-list, because any pattern that fits `invalid_client` fits an opaque token as well, and an upstream that echoes what it was sent must not get a refresh token repeated through this field |
 | `rate_limited` | `provider`, `upstream` | 429 | retry after `Retry-After` |
-| `temporarily_unavailable` | `upstream`, `storage`, `lock_timeout`, `key_unavailable` | 503 | retry; the grant is untouched |
+| `temporarily_unavailable` | `upstream`, `storage`, `lock_timeout`, `concurrent_update`, `key_unavailable` | 503 | retry; the grant is untouched. `concurrent_update`: this call's refresh was overtaken — its guarded write lost, or what it wrote was replaced before the last look — and what is stored now is nothing to answer with |
 
 410 follows the session-bound endpoint's `re_authentication_required`. Only an
 upstream `invalid_grant` and a revocation change a grant. No other outcome
@@ -707,21 +820,96 @@ reuse-detecting IdP answers by revoking the family.
     write from landing after a revocation or the expiry;
   - `federationGrants.upstreamHardTimeoutMs` (default 25 s) is where the
     delegated refresh's `signal` (D17) does abort. Past it the outcome is
-    unknown and is treated like the persist failure below;
+    unknown. It is audited like the persist failure below, and the caller —
+    answered at the soft deadline already — is told `upstream`, which is
+    where the failure was;
   - the lock has no renewal, so "until the call settles" is only true if
-    settling always comes first. Boot requires
-    `upstreamHardTimeoutMs + persistRetryBudgetMs < refreshLockTtlMs`
-    (defaults 25 s + 3 s < 30 s). All three are this provider's
-    configuration; nothing depends on an adapter's internals.
+    settling always comes first. `assertFederationGrantRetrievalLimits`, which
+    the package calls at boot (slice 4), requires
+    `upstreamHardTimeoutMs + persistRetryBudgetMs + 1 s <= refreshLockTtlMs`
+    (defaults 25 s + 3 s + 1 s <= 30 s). The second is a margin: the lease is
+    counted from when the acquisition was acknowledged, which is after the
+    store started the lock's TTL, and timers fire late, so a configuration
+    that fits by a millisecond does not fit. All three are this provider's
+    configuration; nothing depends on an adapter's internals. It validates
+    every other limit of the retrieval too — NaN compares as fine everywhere,
+    and a NaN retry interval switches the marker's limit off.
 - After acquiring the lock the record is re-read; another replica may have
   refreshed already.
+- The lease has one clock, started when the lock is acquired. Every deadline
+  counts from there and not from the upstream call: what a call spends under
+  the lock before it asks the upstream — the re-read above — is spent of the
+  same lease, and an inequality between configured durations bounds nothing
+  if each of them starts when it likes.
+- The upstream is not asked at all once that re-read has used up the soft
+  deadline — or more: the whole lease, when a read hung through a store
+  failover. A rotation started then is one nobody waits for, run toward a
+  deadline it no longer has the time to meet, perhaps under a lock that has
+  already run out while another replica presents the same refresh token. The
+  call answers `temporarily_unavailable` / `storage` — the upstream was never
+  asked, and what was slow is the look under the lock — tells the logger so,
+  and lets go of the lock.
+- A call waits `federationGrants.lockWaitMs` (default 5 s) for another
+  replica's refresh, then looks once more and answers. The store is told how
+  long to wait and is not trusted to keep to it: three seconds past that the
+  call answers `storage`, and a lock that arrives afterwards, for nobody, is
+  let go of. Nothing relates `lockWaitMs` to the lock's TTL: after an outcome
+  that is unknown (below) the lock is left to run out, and until it has, every
+  call that needs a refresh answers `lock_timeout` after waiting this long.
+- One worker owns the upstream call and the guarded write. Its tail — letting
+  go of the lock, and then telling the audit sink, in that order — and, when
+  the caller stopped waiting at the soft deadline, the worker itself, are
+  handed to a `background` seam that whoever composes the retrieval must
+  supply, so that a shutdown can drain them and a test can await them. One
+  thing is detached any other way: letting go of a lock that arrives after
+  the wait for it was given up, which may never arrive, while what is handed
+  over has to settle. Nothing is audited while the lock is held, and no
+  answer waits for the sink, for the release, or for the record of a use: a
+  sink that hangs must hold no lock, and a lock that is slow to let go of must
+  not turn a refresh that was persisted into an outage. What is handed over
+  waits for a sink, a `touch` or a release for three seconds and no longer,
+  so that nothing handed over can fail to settle: a registry would hold it for
+  ever, and a shutdown would never finish draining.
+- At the hard deadline the worker aborts and stops accepting a result,
+  whether or not the abort ever settles. A write that hangs is not waited for
+  past the persist budget; if it lands later it is still guarded by the
+  version.
+- While something of a call's is still *in flight* the lock is left to run
+  out instead of being let go of: an upstream request that was aborted, a
+  write still going at the end of its budget, and a worker that failed in a
+  way nobody foresaw once the upstream may have been asked. Whoever acquired
+  the lock next would present the stored refresh token, the old one, beside
+  an operation that is about to replace it, and an IdP that detects reuse
+  answers that by revoking the family, the new token included. The price is
+  that other callers wait out what is left of the lock, while the store or
+  the upstream is failing anyway.
+- An upstream failure that *arrived* is not that, whatever it was — a refusal,
+  a 5xx, a connection that failed, an answer that could not be parsed, an
+  error nobody can read — and the lock is let go of. Nothing of the call's is
+  in flight any more. If the IdP rotated before its answer was lost, the old
+  refresh token is presented again whenever the next refresh comes, and
+  waiting out the lock changes nothing about that; an IdP that keeps a grace
+  window for exactly this takes a prompt retry and not a late one; and one
+  transient 503 would otherwise cost every caller of the grant the lock's
+  whole TTL. How *often* a failing upstream is asked is a matter of rate, and
+  of slice 1d.
+- Wherever a cause is turned into a typed answer it is handed to a `report`
+  seam, for a logger that redacts: a 503 says that something failed, and an
+  operator needs to know what. Nothing handed there reaches a response.
+- A write that throws may have landed with only its acknowledgement lost. The
+  retry is then refused on the version that write bumped. It is not forced
+  through. One look, still under the lock and spent of the same persist
+  budget — the lock is sized for one — tells whose write it was: the call's
+  own when what is stored is what it tried to store. Then it is a refresh like
+  any other — audited as `.refreshed`, answered as `refreshed` — and otherwise
+  it is a write that lost.
 - The write is the guarded "replace credentials" of D2, in one Lua script.
 - `classifyFederationRefreshError`, today a private function of the
   session-bound route, moves to core and both routes import it. For a grant,
   only a *structured* `invalid_grant` or `invalid_token` requires
   reauthorization and deletes credentials. The classifier's substring fallback
   never does; it maps to `upstream_rejected`. 429 and 5xx/network failures
-  change nothing.
+  change nothing in the record.
 - If the upstream refresh succeeds but the replacement cannot be persisted
   after bounded retries inside the lock, the call answers
   `temporarily_unavailable` / `storage`, the new credentials are dropped, and
@@ -881,7 +1069,11 @@ boundary must not hide a consent given before it. The comparison is inclusive
 and adds `subjectRevocationSkewMs` — the 1 s allowance `verify.mts` applies to
 the watermark, which becomes an exported constant — and not the 5-minute
 `clockSkewMs`, which would refuse the re-login a revocation sends the user to.
-A hit revokes that grant durably, with `by: "backstop"`.
+A hit revokes that grant durably, with `by: "backstop"`. When that write
+cannot be made the call answers 503 and not 410: the watermark would make the
+denial sound, and a revocation outage is one of the things this section says
+must surface. A write that changes nothing — somebody else revoked the grant
+meanwhile — leaves the answer as it is.
 
 Reauthorization must not launder a revocation that was stamped but never
 reached the grant. A new consent replaces `consent.at`, and with it the only
@@ -1199,8 +1391,24 @@ signal, so the generic adapter passes this one through `customFetch`.
 `scope` and `token_type`. The generic OIDC adapter's `snapshot` drops both
 today, so the scope actually granted is unobservable, and both D7 check 7 and
 the refresh rule in D5 need it.
-Both additions are optional, so existing adapters and the login flow are
-unaffected. A connection whose federation lacks the capability is refused at
+
+They gain the raw `expires_in` too, as `expiresIn`, beside the `expiresAt`
+they have. D5 judges the lifetime a token was *issued* with, and that cannot
+be recovered from an absolute expiry: one step of the clock between the
+adapter and the judgement turns 3600 into 3601, and starves every grant on a
+connection whose maximum is 3600. The two together also say when the token
+was obtained on the adapter's reading of the clock (`expiresAt − expiresIn`),
+which is what the stored record keeps; pairing `expiresIn` with a later
+reading taken in core would lengthen the token's life. Core holds that
+instant inside the window of its call, so that a wild `expiresAt` cannot date
+a token in the future. A response with one of the two and not the other has
+no finite lifetime as far as D5 is concerned.
+All of these additions are optional, so existing adapters and the login flow
+are unaffected; the retrieval reads an answer field by field and trusts none
+of it (D5). Core's structural type for that answer is all-optional for the
+same reason. `RefreshedTokens` as it stands today is still not assignable to
+it — `Omit` over a type with an index signature erases the named fields — and
+becomes so once slice 2 declares the additions on it. A connection whose federation lacks the capability is refused at
 boot. The first cut implements it for the generic OIDC adapter.
 
 ### D18 — Audit, with a correlation ID
@@ -1211,15 +1419,25 @@ New event types, each added to `BUILT_IN_AUDIT_EVENT_TYPES`:
 `.reauthorization_required`, `.refresh_failed`, `.refresh_persist_failed`,
 `.revoked`. `.refreshed` is emitted whenever credentials are replaced,
 including by a result that arrived after its caller was answered (D12), which
-no `.token.success` would record.
+no `.token.success` would record. `.refresh_failed` is emitted whenever the
+upstream was asked and nothing came of it — a refusal, a guarded write or a
+mark that lost (`write_lost`, `mark_lost`), a mark that could not be written
+(`mark_not_written`), a worker that failed unforeseen (`internal_error`) —
+since the upstream may have rotated the refresh token all the same, and that
+must leave a trail. `.refresh_persist_failed` names which of the three it was:
+`storage`, `write_in_flight`, or `hard_timeout`.
 
 Every event carries the grant ID, the caller in `clientId`, the owner and the
 upstream subject, the connection, the resource, the scopes, the outcome and a
 correlation ID. The provider has no request ID today; these routes accept
 `x-request-id` when it is 1–128 characters of `A-Z a-z 0-9 - _ . : + / = #`
 (the shape auth.policy-verifier 0.11.0 settled on), generate one otherwise,
-and echo it. No event, response or log line carries a refresh token or any
-other long-lived secret.
+and echo it. No event or response carries a refresh token or any other
+long-lived secret, and no log line this provider writes does. One seam is
+outside that: the retrieval's `report` hands a cause to the composer's logger
+as it was thrown, and an upstream's error may carry what the upstream echoed.
+The package logs its name and its classification, never the error whole
+(slice 4).
 
 ### D19 — Entra: on-behalf-of is not implemented, and consent accumulates
 
@@ -1314,6 +1532,19 @@ route test is written first and watched failing.
    ceiling, the transition rules, the two revisions, eligibility,
    `retrieveFederationGrantToken` with its typed result, the in-memory adapter
    and the contract suite, races and lock included.
+   - **1d: a failed refresh is remembered.** Today a failure changes nothing
+     in the record, so every request that needs a refresh asks the upstream
+     again — N polls during an IdP incident are N upstream calls, the lock
+     serializes them and does not deduplicate them; that includes a refresh
+     whose answer could not be persisted, where the rotation is lost for
+     certain — and a call whose refresh
+     failed answers the failure even where the stored token would still have
+     served it, which a refresh that brought nothing usable does not (D5).
+     Both want one thing: a non-secret stamp of the last failed attempt on
+     the record, written through the port as the marker is, under which the
+     upstream is not asked and a stored token that is good is answered as it
+     is. It changes the store port, so it is its own slice, and it lands
+     before slice 4: until a route exists nothing can reach the retrieval.
 2. **federation adapter capability** (D17), generic OIDC first.
 3. **redis adapter** (D16), with the duplicated contract suite on a
    testcontainer, the guarded-write scripts and the grant-keyed lock.
