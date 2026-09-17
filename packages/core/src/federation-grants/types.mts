@@ -99,7 +99,13 @@ export interface FederationGrantRevocation {
 	readonly revocation: { readonly by: FederationGrantRevokedBy; readonly at: Date };
 }
 
-/** No authorization field and no usage field may be present, not even as `undefined`-typed junk. */
+/**
+ * No authorization field and no usage field may carry a value. That is as far
+ * as the type goes: without `exactOptionalPropertyTypes`, which this
+ * repository does not enable, `consent?: never` still admits an explicit
+ * `consent: undefined`. `hasFederationGrantAuthorization` therefore tests the
+ * value and not the key.
+ */
 type NeverAuthorized = {
 	readonly [K in keyof (FederationGrantAuthorization & FederationGrantUsage)]?: never;
 };

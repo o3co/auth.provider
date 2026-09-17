@@ -257,7 +257,12 @@ At authorization, the upstream token response must carry
    `maxAccessTokenLifetime`.
 
 "Finite" alone would admit a 30-day access token; the maximum is what turns
-residual access (D15) into a number the operator chose. A token with
+residual access (D15) into a number the operator chose. The maximum is
+therefore a positive, finite number of seconds itself. Under anything else —
+absent from a hand-built config, NaN, zero, or Infinity, which every finite
+lifetime is within — no token is eligible, a marker already left stands, and
+the grant reads as `upstream_token_ineligible` / `lifetime_over_maximum`
+without the upstream being asked. A token with
 `expiresAt: null` fails by definition. At authorization a failure stores
 nothing but the `pending` grant, which then lapses. GitHub OAuth Apps' classic
 tokens fail twice: no expiry and no refresh token. The session-bound endpoint
@@ -1001,9 +1006,9 @@ encoding of the key name together with `id`, `subject`, `clientId`,
 `connection` and every field of `FederationGrantAuthorization` (D1),
 recomputed from the HASH when the credential is opened. The usage fields,
 `lastUsedAt` and the ineligibility marker, are outside it: they change while
-the grant is in use, and neither decides what the grant allows. Those fields change only at
-activation, which seals a new credential under the new fields and writes both
-in one script; a refresh re-seals under unchanged fields, which the `version`
+the grant is in use, and neither decides what the grant allows. The
+authorization fields change only at activation, which seals a new credential
+under the new fields and writes both in one script; a refresh re-seals under unchanged fields, which the `version`
 guard guarantees. A tampered field fails authentication and reads as
 `credential_unreadable`. `status`, `version`
 and `revocation` are left out on purpose: every transition away from `active`

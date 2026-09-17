@@ -18,6 +18,7 @@ import { describe, expect, it } from "vitest";
 import {
 	federationGrantIneligibilityRetry,
 	federationGrantIneligibilityStands,
+	isUsableMaxUpstreamAccessTokenLifetime,
 	judgeUpstreamAccessToken,
 	resolveFederationGrantIntentScopes,
 	scopesWithin,
@@ -63,7 +64,15 @@ describe("upstream token eligibility (#593, D5)", () => {
 		it("refuses every token when the maximum is not a usable number", () => {
 			// A hand-built config that omits the key hands `undefined` through a
 			// cast, and `lifetime > undefined` is false: a 30-day token would pass.
-			for (const bad of [Number.NaN, undefined as unknown as number, 0, -1]) {
+			// Infinity is no maximum either: every finite lifetime is within it,
+			// and residual access would be a number nobody chose (D15).
+			for (const bad of [
+				Number.NaN,
+				undefined as unknown as number,
+				0,
+				-1,
+				Number.POSITIVE_INFINITY,
+			]) {
 				expect(judge({ issuedLifetime: 2_592_000, scopes: CONSENTED }, bad)).toEqual({
 					eligible: false,
 					reason: "lifetime_over_maximum",
@@ -96,6 +105,23 @@ describe("upstream token eligibility (#593, D5)", () => {
 				eligible: false,
 				reason: "no_finite_lifetime",
 			});
+		});
+	});
+
+	describe("isUsableMaxUpstreamAccessTokenLifetime", () => {
+		it("is a positive finite number of seconds, and nothing else", () => {
+			expect(isUsableMaxUpstreamAccessTokenLifetime(1)).toBe(true);
+			expect(isUsableMaxUpstreamAccessTokenLifetime(3600)).toBe(true);
+			for (const bad of [
+				Number.NaN,
+				undefined as unknown as number,
+				"3600" as unknown as number,
+				0,
+				-1,
+				Number.POSITIVE_INFINITY,
+			]) {
+				expect(isUsableMaxUpstreamAccessTokenLifetime(bad)).toBe(false);
+			}
 		});
 	});
 
@@ -134,6 +160,26 @@ describe("upstream token eligibility (#593, D5)", () => {
 
 			it("is false when there is no marker", () => {
 				expect(federationGrantIneligibilityStands(undefined, 1800)).toBe(false);
+			});
+
+			it("stands while the current maximum is one no token can satisfy: nothing has been fixed", () => {
+				// A maximum that differs from `judgedAgainst` voids the marker because
+				// the operator may have fixed the setting. An unusable one fixes
+				// nothing — every token is refused under it — and `NaN === NaN` is
+				// false, so a marker judged against NaN would never stand, and the
+				// grant would refresh on every call again.
+				for (const bad of [
+					Number.NaN,
+					undefined as unknown as number,
+					0,
+					-1,
+					Number.POSITIVE_INFINITY,
+				]) {
+					expect(federationGrantIneligibilityStands(marker, bad)).toBe(true);
+					expect(federationGrantIneligibilityStands({ ...marker, judgedAgainst: bad }, bad)).toBe(
+						true,
+					);
+				}
 			});
 		});
 

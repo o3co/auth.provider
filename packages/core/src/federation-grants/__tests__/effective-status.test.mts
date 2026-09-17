@@ -246,6 +246,48 @@ describe("effectiveFederationGrantStatus (#593, D1)", () => {
 		});
 	});
 
+	describe("a maximum no token can satisfy", () => {
+		// A hand-built config bypasses the schema (#448). Under such a maximum
+		// `judgeUpstreamAccessToken` refuses every token, so the grant cannot
+		// yield one, and D9 says such a grant never reads as `active`.
+		const unusable = [Number.NaN, undefined as unknown as number, 0, -1, Number.POSITIVE_INFINITY];
+		const under = (maxAccessTokenLifetime: number) => ({
+			...context,
+			connection: { ...connection, maxAccessTokenLifetime },
+		});
+
+		it("reads as ineligible before any refresh has found that out", () => {
+			for (const bad of unusable) {
+				expect(effectiveFederationGrantStatus(active, under(bad))).toEqual({
+					status: "upstream_token_ineligible",
+					reason: "lifetime_over_maximum",
+				});
+			}
+		});
+
+		it("names the maximum, whatever an older marker was left for: that is what /token answers", () => {
+			const starved: AuthorizedFederationGrant = {
+				...active,
+				ineligible: { reason: "scope_exceeded", at: at(DAY - 60_000), judgedAgainst: 3600 },
+			};
+			for (const bad of unusable) {
+				expect(effectiveFederationGrantStatus(starved, under(bad))).toEqual({
+					status: "upstream_token_ineligible",
+					reason: "lifetime_over_maximum",
+				});
+			}
+		});
+
+		it("still gives way to everything above it in the order", () => {
+			expect(
+				effectiveFederationGrantStatus(active, {
+					...under(Number.NaN),
+					credentials: "unreadable",
+				}),
+			).toEqual({ status: "reauthorization_required", reason: "credential_unreadable" });
+		});
+	});
+
 	describe("order — what cannot be undone is reported first", () => {
 		const everything: EffectiveFederationGrantStatusContext = {
 			...context,

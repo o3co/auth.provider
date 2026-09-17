@@ -766,6 +766,7 @@ export {
 	type FederationGrantIntentScopes,
 	federationGrantIneligibilityRetry,
 	federationGrantIneligibilityStands,
+	isUsableMaxUpstreamAccessTokenLifetime,
 	judgeUpstreamAccessToken,
 	resolveFederationGrantIntentScopes,
 	type UpstreamTokenJudgement,

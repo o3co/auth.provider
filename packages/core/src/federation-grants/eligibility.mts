@@ -30,6 +30,20 @@ export function scopesWithin(scopes: readonly string[], within: readonly string[
 	return scopes.every((scope) => allowed.has(scope));
 }
 
+/**
+ * Whether a connection's `maxAccessTokenLifetime` is a maximum at all: a
+ * positive, finite number of seconds. A schema guarantees that, and a
+ * hand-built config bypasses a schema (#448).
+ *
+ * Infinity is not one. Every finite lifetime is within it, so residual access
+ * (D15) would be a number nobody chose; admitting unbounded tokens is an
+ * opt-in the ADR leaves for later (D5). Under a maximum that is not usable no
+ * token is eligible, and the three rules below all say so.
+ */
+export function isUsableMaxUpstreamAccessTokenLifetime(maxAccessTokenLifetime: number): boolean {
+	return Number.isFinite(maxAccessTokenLifetime) && maxAccessTokenLifetime > 0;
+}
+
 export type UpstreamTokenJudgement =
 	| { readonly eligible: true }
 	| { readonly eligible: false; readonly reason: FederationGrantIneligibilityReason };
@@ -53,10 +67,11 @@ export type UpstreamTokenJudgement =
  *   since granted to the same upstream client, and an upstream token cannot be
  *   narrowed after the fact.
  *
- * The maximum is tested as "is the lifetime within it?" and negated. A
- * hand-built config that omits the key hands `undefined` through a cast, every
- * comparison with `undefined` or NaN is false, and "is it over?" would answer
- * no for a 30-day token.
+ * A maximum that is not usable refuses every token. It is tested by name, and
+ * not left to the comparison: a hand-built config that omits the key hands
+ * `undefined` through a cast, every comparison with `undefined` or NaN is
+ * false, and "is it over?" would answer no for a 30-day token — while
+ * Infinity compares well and admits all of them.
  */
 export function judgeUpstreamAccessToken(token: {
 	/** Seconds, as issued; `null` when the upstream named no finite lifetime. */
@@ -70,7 +85,10 @@ export function judgeUpstreamAccessToken(token: {
 	if (lifetime === null || !Number.isFinite(lifetime) || lifetime <= 0) {
 		return { eligible: false, reason: "no_finite_lifetime" };
 	}
-	if (!(lifetime <= token.maxAccessTokenLifetime)) {
+	if (
+		!isUsableMaxUpstreamAccessTokenLifetime(token.maxAccessTokenLifetime) ||
+		!(lifetime <= token.maxAccessTokenLifetime)
+	) {
 		return { eligible: false, reason: "lifetime_over_maximum" };
 	}
 	if (!scopesWithin(token.scopes, token.consentedScopes)) {
@@ -89,13 +107,20 @@ export function judgeUpstreamAccessToken(token: {
  * setting must not have to wait. Time is not one of them. The retry interval
  * below limits how often `/token` tries again; it says nothing about whether
  * the next try will succeed.
+ *
+ * A change to a maximum that is not usable is no fix: every token is refused
+ * under it, so the marker stands. Comparing alone would void it — and a marker
+ * judged against NaN would never stand at all, `NaN === NaN` being false,
+ * which puts back the refresh on every call the marker exists to prevent.
  */
 export function federationGrantIneligibilityStands(
 	marker: FederationGrantIneligibilityMarker | undefined,
 	/** Seconds; the connection's current value. */
 	maxAccessTokenLifetime: number,
 ): boolean {
-	return marker !== undefined && marker.judgedAgainst === maxAccessTokenLifetime;
+	if (marker === undefined) return false;
+	if (!isUsableMaxUpstreamAccessTokenLifetime(maxAccessTokenLifetime)) return true;
+	return marker.judgedAgainst === maxAccessTokenLifetime;
 }
 
 /**
