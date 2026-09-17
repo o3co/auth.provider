@@ -16,6 +16,7 @@
 
 import { defineModule } from "@o3co/auth-provider-core";
 import {
+	callbackUrlForExchange,
 	codeChallenge,
 	createFederationRedirectPolicy,
 	type EndSessionRequest,
@@ -65,6 +66,17 @@ export interface GoogleProviderConfig {
 	 *  Test injection only — production deployments rely on the default. */
 	jwksUri?: string;
 	/**
+	 * Whether a callback without the RFC 9207 `iss` parameter is refused.
+	 * Default `true`: Google's discovery document advertises
+	 * `authorization_response_iss_parameter_supported`, and its OpenID Connect
+	 * reference says the parameter "is always returned". This metadata is
+	 * hand-built and not discovered, so if Google ever stopped sending it no
+	 * deployment could log in until a release shipped — `false` is the
+	 * operator's way out meanwhile. It permits absence only: an `iss` that is
+	 * sent and is not Google's is refused either way (#597).
+	 */
+	requireAuthorizationResponseIss?: boolean;
+	/**
 	 * The fetch every request to Google goes through — JWKS, token, userinfo.
 	 * A proxy, or a test seam. Default: the global `fetch`.
 	 */
@@ -79,6 +91,18 @@ export type GoogleProvider = FederationProvider &
 export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvider {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
 		throw new Error(`Google federation "google" requires clientId, clientSecret, and callbackURL`);
+	}
+	// #597: the library reads this as a truthy flag, and an environment override
+	// arrives as the string "false" — which is truthy. A bridge that forwards it
+	// uncoerced would leave the requirement on during the very incident the
+	// switch exists for, so anything that is not a boolean is refused here.
+	if (
+		config.requireAuthorizationResponseIss !== undefined &&
+		typeof config.requireAuthorizationResponseIss !== "boolean"
+	) {
+		throw new Error(
+			'Google federation "google": requireAuthorizationResponseIss must be a boolean — coerce an environment string before passing it',
+		);
 	}
 
 	// ServerMetadata constructed locally — no discovery call. Google's endpoints are stable.
@@ -97,6 +121,10 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 		userinfo_endpoint: "https://www.googleapis.com/oauth2/v3/userinfo",
 		jwks_uri: config.jwksUri ?? GOOGLE_JWKS_URI,
 		id_token_signing_alg_values_supported: ["RS256"],
+		// #597: mirrors what Google's own discovery document says. With it the
+		// library refuses a callback that carries no `iss`; without it, only one
+		// that carries a wrong `iss`.
+		authorization_response_iss_parameter_supported: config.requireAuthorizationResponseIss ?? true,
 	};
 
 	const oidcConfig = new oidc.Configuration(serverMetadata, config.clientId, config.clientSecret);
@@ -142,6 +170,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			readonly codeVerifier: string;
 			readonly redirectUri: string;
 			readonly nonce?: string;
+			readonly callbackParams?: Readonly<Record<string, string>>;
 		}): Promise<FederationProfile> {
 			// PB-4: same fail-closed guard as buildAuthorizationUrl. Pre-PB-4 sessions written
 			// to the store before the upgrade have no `nonce` field; rather than silently
@@ -155,8 +184,13 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 
 			// openid-client's authorizationCodeGrant expects the full callback URL.
 			// We synthesize it from redirectUri + code since the route receives them separately.
-			const callbackUrl = new URL(params.redirectUri);
-			callbackUrl.searchParams.set("code", params.code);
+			// #597: and from the callback's RFC 9207 `iss`, which Google sends, so
+			// that the library compares it with GOOGLE_ISSUER.
+			const callbackUrl = callbackUrlForExchange({
+				redirectUri: params.redirectUri,
+				code: params.code,
+				callbackParams: params.callbackParams,
+			});
 
 			// PB-4: passing `expectedNonce` activates openid-client's nonce check (OIDC §3.1.3.7)
 			// and *also* asserts an id_token is present in the response.

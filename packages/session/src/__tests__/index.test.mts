@@ -47,6 +47,11 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 			"function",
 		);
 		expect(typeof (mod as { codeChallenge?: unknown }).codeChallenge).toBe("function");
+		// #597: what a provider hands its OAuth library for the code exchange.
+		// A third-party adapter that rebuilds the URL by hand reproduces #595.
+		expect(typeof (mod as { callbackUrlForExchange?: unknown }).callbackUrlForExchange).toBe(
+			"function",
+		);
 	});
 
 	it("does NOT export the standalone validateRedirect helper (#278)", async () => {

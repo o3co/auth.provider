@@ -103,6 +103,16 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			readonly redirectUri: string;
 		}): Promise<FederationProfile> {
 			// Synthesize the callback URL from redirectUri + code.
+			//
+			// #597: unlike the OIDC, Google and Apple providers this one does NOT
+			// forward the callback's RFC 9207 `iss` to the library — yet. GitHub's
+			// published metadata (/.well-known/oauth-authorization-server/login/oauth)
+			// names its issuer "https://github.com/login/oauth" and advertises the
+			// parameter. GITHUB_ISSUER, "https://github.com", is this provider's
+			// label for the profile, and it is also what the library is configured
+			// with. Forwarding `iss` today would compare the two and refuse every
+			// GitHub login. Doing it properly — the library's issuer set to
+			// GitHub's own, the profile label kept — is #598.
 			const callbackUrl = new URL(params.redirectUri);
 			callbackUrl.searchParams.set("code", params.code);
 

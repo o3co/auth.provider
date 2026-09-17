@@ -16,6 +16,7 @@
 
 import { defineModule, isLoopbackHostname } from "@o3co/auth-provider-core";
 import {
+	callbackUrlForExchange,
 	codeChallenge,
 	createFederationRedirectPolicy,
 	type EndSessionRequest,
@@ -396,9 +397,14 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 			// Apple POSTs the parameters rather than putting them in a redirect, so
 			// there is no such URL to hand it — it is synthesized from the
 			// registered return URL plus the code, exactly as the Google adapter
-			// does for a query-mode callback.
-			const callbackUrl = new URL(requireConfiguredCallback(params.redirectUri));
-			callbackUrl.searchParams.set("code", params.code);
+			// does for a query-mode callback. #597: an RFC 9207 `iss` in the posted
+			// body goes with it, so that one Apple does send is compared with
+			// APPLE_ISSUER.
+			const callbackUrl = callbackUrlForExchange({
+				redirectUri: requireConfiguredCallback(params.redirectUri),
+				code: params.code,
+				callbackParams: params.callbackParams,
+			});
 
 			// `expectedNonce` activates openid-client's nonce check (OIDC §3.1.3.7)
 			// and also asserts an id_token is present in the response.

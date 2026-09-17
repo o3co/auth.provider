@@ -188,6 +188,7 @@ Implement this interface to add a custom OAuth 2.0 / OIDC federation provider. O
 - `exchangeCode` — exchanges an authorization code for a normalized `FederationProfile`. Must include `issuer` and `sub`; all other fields are optional.
 - `responseMode` — how the IdP delivers the authorization response. Optional, and absence means `"query"`, so every provider written before #479 is unaffected. See below.
 - `callbackParams` — the rest of the callback's parameters (query string or form body), string values only, **excluding `code` and `state`**. Those two are the framework's to bind and are already accounted for — `code` has its own field, `state` is what the route compared against the session — so they are not repeated in a generic bag where an adapter could read the unvalidated copy. What remains is present so an IdP that returns identity data *beside* the token response can be adapted: Sign in with Apple sends the end user's name once, in a `user` JSON field on the first authorization, and never in the id_token. **The values are relayed through the user agent and are not signed** — the `state` check binds them to the session and binds nothing else, so treat anything read here as self-asserted and let `mapClaims` + claim precedence decide where it may land.
+  Protocol response parameters travel here too, and one of them matters to every adapter: the RFC 9207 **`iss`**. An adapter built on an OAuth library hands it the authorization response as a URL, and has to rebuild that URL because the route passes `code` and the rest separately. Use **`callbackUrlForExchange({ redirectUri, code, callbackParams })`** for that: it sets `code`, forwards `iss` when the callback carried one, and forwards nothing else from the bag (an `error`, `response`, `id_token` or `token` on that URL would change how the library reads the response). Rebuilding the URL from `code` alone drops `iss`: the mix-up check then never runs, and every login fails against an issuer that advertises `authorization_response_iss_parameter_supported` (#595). Configure the library with the issuer the IdP actually publishes, or the comparison refuses every login.
 
 > **Note (A5 split, v0.5.0):** redirect URL handling — `validateRedirect` /
 > `resolveCallbackRedirect` — was moved off `FederationProvider` and onto a
@@ -753,8 +754,11 @@ function buildMicrosoftProvider(cfg: { clientId: string; callbackURL: string }):
       url.searchParams.set("scope", "openid profile email");
       return url;
     },
-    async exchangeCode({ code, codeVerifier, redirectUri }) {
-      // POST to token endpoint + optional userinfo; normalize to FederationProfile
+    async exchangeCode({ code, codeVerifier, redirectUri, callbackParams }) {
+      // With an OAuth library: hand it callbackUrlForExchange({ redirectUri, code, callbackParams }),
+      // so the RFC 9207 `iss` reaches its issuer check. By hand: compare
+      // callbackParams?.iss with the issuer yourself before spending the code.
+      // Then POST to the token endpoint + optional userinfo; normalize to FederationProfile.
       return { issuer: "https://login.microsoftonline.com/common/v2.0", sub: "...", expiresAt: null };
     },
   };

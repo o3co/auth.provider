@@ -160,9 +160,11 @@ export interface FederationProvider {
 		 * sends the end user's name exactly once, in a `user` JSON field on the
 		 * first authorization, and never in the id_token.
 		 *
-		 * Protocol response parameters travel here as well. An OIDC adapter
-		 * forwards `iss` (RFC 9207) from this bag to its issuer check (#595), so
-		 * narrowing the bag to identity data would silently switch that check off.
+		 * Protocol response parameters travel here as well. An adapter forwards
+		 * `iss` (RFC 9207) from this bag to its library's issuer check — through
+		 * `callbackUrlForExchange`, so that the rule lives in one place (#595,
+		 * #597) — and narrowing the bag to identity data would silently switch
+		 * that check off.
 		 *
 		 * **These values are relayed through the user agent and are not signed.**
 		 * The `state` check binds them to this session, which is all it binds:

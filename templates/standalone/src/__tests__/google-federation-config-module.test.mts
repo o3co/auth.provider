@@ -112,3 +112,60 @@ describe("googleFederationConfigModule — redirect-policy plumbing (#278)", () 
 		expect(out.redirectAllowlist).toEqual(["https://app.example.com/dashboard"]);
 	});
 });
+
+describe("googleFederationConfigModule — requireAuthorizationResponseIss (#597)", () => {
+	it("is absent by default, so the provider's own default (required) applies", () => {
+		expect("requireAuthorizationResponseIss" in buildConfig(credentials)).toBe(false);
+	});
+
+	it("forwards the operator's escape hatch", () => {
+		expect(
+			buildConfig({ ...credentials, requireAuthorizationResponseIss: false })
+				.requireAuthorizationResponseIss,
+		).toBe(false);
+		expect(
+			buildConfig({ ...credentials, requireAuthorizationResponseIss: true })
+				.requireAuthorizationResponseIss,
+		).toBe(true);
+	});
+
+	it("reads the strings an environment override produces", () => {
+		expect(
+			buildConfig({ ...credentials, requireAuthorizationResponseIss: "false" })
+				.requireAuthorizationResponseIss,
+		).toBe(false);
+		expect(
+			buildConfig({ ...credentials, requireAuthorizationResponseIss: "true" })
+				.requireAuthorizationResponseIss,
+		).toBe(true);
+	});
+
+	it("reads the spellings every other env-overridable boolean accepts", () => {
+		for (const [raw, expected] of [
+			["False", false],
+			[" false ", false],
+			["0", false],
+			["TRUE", true],
+			["1", true],
+		] as const) {
+			expect(
+				buildConfig({ ...credentials, requireAuthorizationResponseIss: raw })
+					.requireAuthorizationResponseIss,
+			).toBe(expected);
+		}
+	});
+
+	it("refuses an empty value, which elsewhere reads as false: exported-but-empty must not switch this check off", () => {
+		expect(() => buildConfig({ ...credentials, requireAuthorizationResponseIss: "" })).toThrow(
+			/federations\.google\.requireAuthorizationResponseIss/,
+		);
+	});
+
+	it("refuses anything else: a typo must not silently switch the check off, or leave it on", () => {
+		for (const bad of ["no", "off", 0, 1, []]) {
+			expect(() => buildConfig({ ...credentials, requireAuthorizationResponseIss: bad })).toThrow(
+				/federations\.google\.requireAuthorizationResponseIss/,
+			);
+		}
+	});
+});
