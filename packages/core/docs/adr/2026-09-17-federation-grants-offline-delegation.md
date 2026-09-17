@@ -546,7 +546,7 @@ type FederationGrantTokenResult =
 | `grant_not_found` | — | 404 | treat as no delegation; never fall back |
 | `authorization_pending` | — | 400 | the user has not finished connecting |
 | `grant_expired` | `consented_lifetime`, `operator_maximum` | 410 | ask for a new grant; only `operator_maximum` can lift by itself |
-| `grant_revoked` | `client`, `subject`, `operator`, `logout_policy`, `backstop` | 410 | terminal; ask for a new grant, if at all |
+| `grant_revoked` | `client`, `subject`, `operator`, `logout_policy`, `backstop` | 410 | terminal. Stop the work and tell the user; offer a fresh authorization, which is a new grant. Never retry, never `/reauthorize` |
 | `connection_identity_changed` | — | 410 | terminal while it lasts; ask for a new grant |
 | `reauthorization_required` | `upstream_invalid_grant`, `connection_changed`, `credential_unreadable` | 410 | call `/reauthorize`, send the user, retry later |
 | `access_denied` | `connection_not_permitted` | 403 | configuration; do not retry |
@@ -676,20 +676,73 @@ Two things make that true by construction and not by convention:
   lives in core (D3), `activate` refuses a lifetime beyond it (D2),
   `SUBJECT_REVOCATION_MIN_RETENTION_MS` is defined from it, and a test pins
   the relation.
-- **The watermark must exist.** `subjectRevocation` is an optional slot, and a
-  deployment may declare it unsupported. With federation grants enabled that
-  is refused at boot, as `device-grant` refuses to start without a rate
-  limiter.
+- **The watermark must exist, and must last as long as the grants do.**
+  `subjectRevocation` is an optional slot, and a deployment may declare it
+  unsupported. With federation grants enabled that is refused at boot, as
+  `device-grant` refuses to start without a rate limiter. So is a durable
+  grant store beside the in-memory `subjectRevocation`, whose watermark is a
+  process-local map: a restart would drop the watermark and keep the grants.
+
+What remains is the stamp itself. It is a store write, and it can fail. The
+helper then records a `failures` entry, reports `complete: false`, and still
+runs the per-subject pass. A Store has to check `complete` and retry, as it
+already must for sessions and tokens. The guarantee below holds from the
+moment a stamp succeeds.
 
 So the per-subject pass is what makes revocation prompt and deletes the
 credentials at once, and the backstop is what holds when that pass does not
 run or does not finish. A Store that upgrades without touching its
-`revokeAllForSubject` call site is safe, not silently exempt. One window
+`revokeAllForSubject` call site is covered by the backstop, not silently
+exempt. One window
 remains and D7 closes it: a consent given through a session that the
 revocation has not reached would be dated after the watermark, so such a
 session cannot consent at all. The primary path alone fails when a store write fails
 part-way. The watermark alone would make revocation depend on a TTL, which
 today is sized to refresh tokens. Hence both.
+
+**A subject-wide revocation always takes the grants with it.** There is no
+opt-out, and the cost is real, so the documentation has to say it loudly.
+`revokeAllForSubject` exists for one moment above all: a Store calls it
+"immediately after writing a new password" (#296), because "a successful reset
+that leaves old sessions and refresh families alive is not a reset". A
+federation grant is consented through a session that the old credential
+authenticated. Session-bound consent proves possession of the session, not the
+intent of its owner: whoever held a stolen session could, with a cooperating
+or controlled client, have created or renewed a grant. Keeping grants would
+leave that route to fresh upstream tokens open after the recovery that was
+meant to close everything.
+
+The alternatives were weighed and an independent review reached the same
+verdict:
+
+- *Let the caller keep the grants.* Skipping the per-subject pass does not
+  keep anything, because D10 still compares `consent.at` with the one
+  watermark. Keeping them needs separate revocation state: a second watermark
+  in the port, both adapters, the retention rule and the failure contract. As
+  an optional dependency it would lose the protection a forgetful Store gets
+  today.
+- *Decide by reason* (routine rotation, suspected compromise, disablement).
+  That adds the same second state, and the risk of filing a compromise under
+  routine.
+- The codebase does revoke selectively elsewhere — one `jti` without its
+  family, `/session/logout` without family revocation — but never as a
+  subject-wide reset.
+- Global Token Revocation, OpenID Provider Commands' Invalidate and Entra's
+  `revokeSignInSessions` are all comprehensive, offline access included.
+  RFC 9700 §4.14.2 only permits revocation on a password change, and Google
+  limits it to some scopes. That argues against revoking on *every* password
+  change by policy, not against an operation that is explicitly global.
+
+What the documentation owes integrators in return:
+
+- the operator guide says, where it tells a Store to call
+  `revokeAllForSubject` after a password change, that this now ends the
+  subject's delegations too, so a policy of frequent forced rotation has a
+  price that agents and paused jobs pay;
+- the application guide says what to do on `grant_revoked` with reason
+  `subject` or `backstop`: stop the work, tell the user why, and offer a fresh
+  authorization. Not a retry, and not `/reauthorize`: revocation is terminal
+  (D2), so this is a new grant with a new ID.
 
 `RevokeAllForSubjectCapability` and the failure `operation` union gain
 members, so a caller that switches exhaustively on them needs a new case. That
@@ -713,9 +766,11 @@ and the documentation says so:
   `cascadeLogout`, which has no `sub`, would repeat it per `sid` under
   `revokeAllForSubject`, and whose `step` union callers switch on
   exhaustively.
-- `/session/logout` is best-effort and logged by contract; it never answers
-  5xx. A deployment that needs the guarantee sends logout through
-  `/oauth/logout`.
+- `/session/logout` cleans up its records best-effort: a failure there is
+  logged and never propagated, by contract. Its only 5xx is a failed session
+  destroy, which comes after the records are gone. So it has no way to report
+  a failed grant revocation as something to retry. A deployment that needs the
+  guarantee sends logout through `/oauth/logout`.
 
 Subject disablement and consent withdrawal are the Store's events: it calls
 `revokeAllForSubject` or `revokeFederationGrant`. The provider cannot receive
@@ -967,8 +1022,9 @@ route test is written first and watched failing.
    straight into the store; the `Client` fields, audit events, configuration.
 5. **revocation** (D13): the revoke route, the two library functions, the
    `revokeAllForSubject` extension, the retention floor and lifetime ceiling,
-   the boot refusal without `subjectRevocation`, the condition tests, and the
-   tests that default logout leaves grants alone.
+   the boot refusals (no `subjectRevocation`, or an in-memory one beside a
+   durable grant store), the condition tests, and the tests that default
+   logout leaves grants alone.
 6. **acquisition** (D6–D8): the intent routes, consent, the connect flow, and
    the optional `UserRepository` lookup.
 7. **standalone template, documentation, CHANGELOG.** Includes the operator
@@ -999,7 +1055,8 @@ upstream combined with a storage outage during a refresh, or one slower than
 the hard deadline, costs the user a reconnect (D12). Connections on federations that issue non-expiring tokens are
 unsupported (D5). An IdP that accumulates consent needs one connection and one
 app registration per scope set (D19). Every revoked subject leaves a watermark
-key for a year (D13).
+key for a year, and every password reset that calls `revokeAllForSubject` ends
+that user's delegations (D13).
 
 **Neutral.** Upstream refresh tokens also die from disuse — Google after six
 months unused, Entra on a 90-day rolling window — and the provider runs no
@@ -1011,13 +1068,12 @@ does not hard-code one and does not promise indefinite unattended execution.
 ## Open for review
 
 1. Whether D14's logout policy ships in the first release or the next.
-   Recommended: the next. It is off by default, it is the last slice, and its
-   guarantee differs between the two logout endpoints.
-2. Whether a subject-wide revocation should always take grants with it (D13).
-   Recommended: yes, as Global Token Revocation and OpenID Provider Commands
-   both specify. The cost is real: a deployment that calls
-   `revokeAllForSubject` on every password change ends its users' delegations
-   on every password change. Keeping grants would need a second watermark.
+   Recommended: the next. It is additive and off by default, so deferring it
+   breaks nothing and shipping it later breaks nothing. The reason to wait is
+   risk: it edits both logout paths that #276 hardened, its guarantee differs
+   between them, and the per-grant and per-subject revocations already give
+   the first release its safety valve. Until it ships, a deployment that wants
+   logout to end delegations calls `revokeAllForSubject` from its Store.
 
 ## References
 
