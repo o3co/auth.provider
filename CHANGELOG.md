@@ -93,9 +93,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   configuration still carries the resolved default under `expiresIn`, which
   stays a required `number` in `AccessTokenConfig`, so code that reads
   `config.oauth.accessToken.expiresIn` directly keeps minting what the grants
-  mint. The standalone composition prints `` [buildModules]
-  `oauth.accessToken.expiresIn` (OAUTH_ACCESS_TOKEN_EXPIRES_IN) is deprecated ``
-  once at boot, and only when `defaultExpiresIn` is unset and the old key holds
+  mint. The standalone composition logs a one-time `[buildModules]` warning at
+  boot that `oauth.accessToken.expiresIn` (`OAUTH_ACCESS_TOKEN_EXPIRES_IN`) is
+  deprecated, and only when `defaultExpiresIn` is unset and the old key holds
   something other than `3600`.
 
   **Upgrade note.** Nothing has to change to upgrade. To move off the alias,
