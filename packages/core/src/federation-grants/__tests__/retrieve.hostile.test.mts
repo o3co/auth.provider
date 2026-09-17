@@ -234,6 +234,34 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			});
 		}
 
+		it("reads an answer whose fields throw when they are read: malformed, the rotated refresh token kept, and the lock let go of", async () => {
+			await h.seed();
+			setNow(GONE);
+			h.refresh.mockResolvedValue({
+				refreshToken: `${SECRET}-rotated`,
+				get accessToken(): string {
+					throw new Error("a getter that throws");
+				},
+			} as FederationGrantRefreshedToken);
+			expect(await retrieve()).toMatchObject({
+				code: "upstream_token_ineligible",
+				reason: "malformed_token_response",
+			});
+			expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-rotated` });
+			await Promise.all(h.background);
+			expect(await lockIsFree(h)).toBe(true);
+
+			// Even the refresh token's: then the stored one is what is kept.
+			setNow(new Date(now().getTime() + limits.ineligibleRetryAfterMs));
+			h.refresh.mockResolvedValue({
+				get refreshToken(): string {
+					throw new Error("a getter that throws");
+				},
+			} as FederationGrantRefreshedToken);
+			expect(await retrieve()).toMatchObject({ reason: "malformed_token_response" });
+			expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-rotated` });
+		});
+
 		it("treats an answer that is not an object at all as malformed, and lets go of the lock", async () => {
 			await h.seed();
 			setNow(GONE);
@@ -700,6 +728,37 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				expect(told).not.toContain("federation.grant.refreshed success");
 			},
 		);
+
+		it("is a loss when somebody else stored the very same credentials: the marker beside them is theirs", async () => {
+			// An IdP that does not rotate, and an adapter that answers nonsense: two
+			// replicas would store the same refresh token and no access token. What
+			// this call tried to store includes its marker, and that one is dated.
+			const grant = await h.seed();
+			setNow(GONE);
+			h.refresh.mockResolvedValue({ refreshToken: SECRET } as FederationGrantRefreshedToken);
+			const real = h.store.replaceCredentials.bind(h.store);
+			vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async () => {
+				await real({
+					grantId: "g-1",
+					expectedVersion: grant.version,
+					credentials: { refreshToken: SECRET },
+					ineligible: {
+						reason: "malformed_token_response",
+						at: new Date(now().getTime() - 1_000),
+						judgedAgainst: 3600,
+					},
+					now: now(),
+				});
+				throw new Error("blip");
+			});
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(500);
+			await answer;
+			await Promise.all(h.background);
+			const told = h.events.map((event) => `${event.type} ${event.outcome}`);
+			expect(told).toContain("federation.grant.refresh_failed write_lost");
+			expect(told.filter((entry) => entry.startsWith("federation.grant.refreshed "))).toEqual([]);
+		});
 
 		it("is looked for with what is left of the persist budget, and not with a budget of its own", async () => {
 			// The lock is sized for the hard deadline plus ONE persist budget (D12).

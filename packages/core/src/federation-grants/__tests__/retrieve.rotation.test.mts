@@ -479,6 +479,31 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 		});
 	});
 
+	describe("a lock that arrives after the wait for it was given up", () => {
+		it("is let go of within bounds, and a release that fails is reported like any other", async () => {
+			await h.seed();
+			setNow(at(HOUR - 15_000));
+			vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async () => {
+				await new Promise((resolve) => setTimeout(resolve, 20_000));
+				return {
+					acquired: true,
+					release: async () => {
+						throw new Error("the store lost the connection");
+					},
+				};
+			});
+			const reported: string[] = [];
+			h.deps.report = (failure) => reported.push(failure.during);
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(limits.lockWaitMs + 3_000);
+			expect(await answer).toMatchObject({ code: "temporarily_unavailable", reason: "storage" });
+			await vi.advanceTimersByTimeAsync(20_000);
+			await Promise.all(h.background);
+			expect(reported).toEqual(["lock", "release"]);
+			expect(vi.getTimerCount()).toBe(0);
+		});
+	});
+
 	describe("a write that throws", () => {
 		it("is tried again after a pause, not in a loop that spends the budget at once", async () => {
 			await h.seed();

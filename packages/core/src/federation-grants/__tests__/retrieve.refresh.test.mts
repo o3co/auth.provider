@@ -495,6 +495,104 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			expect((await stored())?.refreshToken).toBe(`${SECRET}-renewed`);
 		});
 
+		it("a reauthorization lands after this call's write and before its last look: what it stored is answered, and not as this call's refresh", async () => {
+			// A reauthorization does not take the refresh lock. `refreshed` says
+			// that the token answered is the one this call fetched, and here it is
+			// not.
+			await h.seed();
+			setNow(DUE);
+			await h.store.nameIntent({
+				grantId: "g-1",
+				intent: { handle: "h-re", expiresAt: new Date(DUE.getTime() + 10 * MIN) },
+				now: DUE,
+			});
+			h.refresh.mockResolvedValue(refreshed("fetched", DUE));
+			const write = h.store.replaceCredentials.bind(h.store);
+			vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async (input) => {
+				const written = await write(input);
+				const moment = now();
+				await h.store.activate({
+					grantId: "g-1",
+					intentHandle: "h-re",
+					authorization: {
+						identityRevision: federationGrantIdentityRevision(connection),
+						authorizationRevision: federationGrantAuthorizationRevision(connection),
+						upstream: { issuer: connection.upstreamIssuer, subject: "00u-alice" },
+						scopes: [...SCOPES],
+						consent: { at: moment, sid: "sid-2", scopes: [...SCOPES] },
+						authorizedAt: moment,
+						expiresAt: new Date(moment.getTime() + 30 * DAY),
+					},
+					credentials: {
+						refreshToken: `${SECRET}-renewed`,
+						accessToken: {
+							value: "at-renewed",
+							tokenType: "Bearer",
+							obtainedAt: moment,
+							issuedLifetime: 3600,
+							scopes: [...SCOPES],
+						},
+					},
+					now: moment,
+				});
+				return written;
+			});
+			expect(await retrieve()).toMatchObject({
+				ok: true,
+				accessToken: "at-renewed",
+				refreshed: false,
+			});
+		});
+
+		it("what replaced this call's write is judged as somebody else's: one that would be refreshed is not answered as this call's own, and the reason says what happened", async () => {
+			await h.seed();
+			setNow(DUE);
+			await h.store.nameIntent({
+				grantId: "g-1",
+				intent: { handle: "h-re", expiresAt: new Date(DUE.getTime() + 10 * MIN) },
+				now: DUE,
+			});
+			h.refresh.mockResolvedValue(refreshed("fetched", DUE));
+			const write = h.store.replaceCredentials.bind(h.store);
+			vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async (input) => {
+				const written = await write(input);
+				const moment = now();
+				await h.store.activate({
+					grantId: "g-1",
+					intentHandle: "h-re",
+					authorization: {
+						identityRevision: federationGrantIdentityRevision(connection),
+						authorizationRevision: federationGrantAuthorizationRevision(connection),
+						upstream: { issuer: connection.upstreamIssuer, subject: "00u-alice" },
+						scopes: [...SCOPES],
+						consent: { at: moment, sid: "sid-2", scopes: [...SCOPES] },
+						authorizedAt: moment,
+						expiresAt: new Date(moment.getTime() + 30 * DAY),
+					},
+					credentials: {
+						refreshToken: `${SECRET}-renewed`,
+						accessToken: {
+							value: "at-renewed",
+							tokenType: "Bearer",
+							// Fifty minutes old already: ten are left, and twenty are asked.
+							obtainedAt: new Date(moment.getTime() - 50 * MIN),
+							issuedLifetime: 3600,
+							scopes: [...SCOPES],
+						},
+					},
+					now: moment,
+				});
+				return written;
+			});
+			// A call refreshes once. What it wrote was replaced before its last look
+			// (D11): that is what it says, and not that the upstream failed it.
+			expect(await retrieve({ minTtlSeconds: 1200 })).toStrictEqual({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "concurrent_update",
+			});
+		});
+
 		it("the refresh starts before the grant's expiry and finishes after it", async () => {
 			await h.seed({ expiresAt: at(HOUR) });
 			setNow(DUE);

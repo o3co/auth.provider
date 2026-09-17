@@ -695,8 +695,10 @@ write the call takes one more look — the boundary, then the record, then the
 clock — and discloses what is *stored*, never the token it holds in a
 variable. That look never refreshes: a call refreshes at most once. The same
 look is all a call gets after a lock timeout or a lost write, with one
-difference. After its own write it answers what is stored as it is, as below;
-after losing, what is stored is somebody else's or the token that had run
+difference. After its own write it answers what is stored as it is, as below
+— when what is stored is still the token it wrote: a reauthorization does not
+take the refresh lock, and what it stored meanwhile is answered as somebody
+else's, and not as `refreshed`. After losing, what is stored is somebody else's or the token that had run
 down, it is judged as on the first look, and what would have been a refresh
 is answered as the outage that brought the call there. A fresh token that is
 good and lacks an asserted scope answers `invalid_scope`, after its rotated
@@ -861,9 +863,10 @@ reuse-detecting IdP answers by revoking the family.
   the caller stopped waiting at the soft deadline, the worker itself, are
   handed to a `background` seam that whoever composes the retrieval must
   supply, so that a shutdown can drain them and a test can await them. One
-  thing is detached any other way: letting go of a lock that arrives after
-  the wait for it was given up, which may never arrive, while what is handed
-  over has to settle. Nothing is audited while the lock is held, and no
+  thing is detached any other way: the wait for a lock that was given up on,
+  which may never arrive, while what is handed over has to settle. Letting go
+  of that lock, once it has arrived, is handed over like any other release:
+  bounded, and reported when it fails. Nothing is audited while the lock is held, and no
   answer waits for the sink, for the release, or for the record of a use: a
   sink that hangs must hold no lock, and a lock that is slow to let go of must
   not turn a refresh that was persisted into an outage. What is handed over
@@ -900,7 +903,9 @@ reuse-detecting IdP answers by revoking the family.
   retry is then refused on the version that write bumped. It is not forced
   through. One look, still under the lock and spent of the same persist
   budget — the lock is sized for one — tells whose write it was: the call's
-  own when what is stored is what it tried to store. Then it is a refresh like
+  own when what is stored is what it tried to store, the marker beside the
+  credentials included — two replicas can come to store the very same
+  credentials, and the marker is dated. Then it is a refresh like
   any other — audited as `.refreshed`, answered as `refreshed` — and otherwise
   it is a write that lost.
 - The write is the guarded "replace credentials" of D2, in one Lua script.
