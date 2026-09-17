@@ -158,6 +158,13 @@ export {
 	registerBuiltinFederationTokenStores,
 } from "./federation-tokens/factory.mjs";
 export { memoryFederationTokenStoreModule } from "./federation-tokens/module.mjs";
+// SF-13's classifier, moved from the session-bound token route so that the
+// federation grant retrieval (#593, D12) shares it.
+export {
+	classifyFederationRefreshError,
+	type FederationRefreshErrorClassification,
+	type FederationRefreshErrorReason,
+} from "./federation-tokens/refresh-error.mjs";
 // FederationTokenStore — TODO-F-1. Backing client interface
 // (FederationTokenStoreClient) lives in @o3co/auth-provider-redis (S3).
 export type {
@@ -755,9 +762,9 @@ export {
 //
 // Every name says FederationGrant. This barrel already exports GrantContext,
 // GrantResult and GrantPolicy* for OAuth grant types, which these are not.
-// The typed result of a retrieval stays internal until the retrieval exists to
-// give it a consumer. The store port, its memory adapter and the credential
-// the port carries are exported: a Redis adapter implements against them.
+// The store port, its memory adapter and the credential the port carries are
+// exported: a Redis adapter implements against them. So are the retrieval and
+// its typed result, which the routes package maps to HTTP and nothing else.
 export {
 	coveredByRevocationBoundary,
 	type EffectiveFederationGrantStatusContext,
@@ -793,6 +800,18 @@ export {
 } from "./federation-grants/memory.mjs";
 export { memoryFederationGrantStoreModule } from "./federation-grants/module.mjs";
 export {
+	assertFederationGrantRetrievalLimits,
+	FEDERATION_GRANT_REFRESH_LOCK_MARGIN_MS,
+	type FederationGrantAuditEvent,
+	type FederationGrantRefreshedToken,
+	type FederationGrantRefresher,
+	type FederationGrantRetrievalFailure,
+	type FederationGrantRetrievalLimits,
+	type RetrieveFederationGrantTokenDeps,
+	type RetrieveFederationGrantTokenRequest,
+	retrieveFederationGrantToken,
+} from "./federation-grants/retrieve.mjs";
+export {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "./federation-grants/revision.mjs";
@@ -814,12 +833,15 @@ export {
 	type FederationGrantConnection,
 	type FederationGrantConsent,
 	type FederationGrantCredentials,
+	type FederationGrantDenial,
 	type FederationGrantExpiredReason,
 	type FederationGrantIneligibilityMarker,
 	type FederationGrantIneligibilityReason,
 	type FederationGrantReauthorizationReason,
 	type FederationGrantRevocation,
 	type FederationGrantRevokedBy,
+	type FederationGrantTokenResult,
+	type FederationGrantUnavailableReason,
 	type FederationGrantUsage,
 	hasFederationGrantAuthorization,
 	type PendingFederationGrant,

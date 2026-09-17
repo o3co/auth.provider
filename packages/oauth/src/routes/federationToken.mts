@@ -27,7 +27,12 @@ import type {
 	SubjectRevocation,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { emitAuditEvent, supportsLock, verifyJwt } from "@o3co/auth-provider-core";
+import {
+	classifyFederationRefreshError,
+	emitAuditEvent,
+	supportsLock,
+	verifyJwt,
+} from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
 
@@ -36,69 +41,6 @@ type ExpressLike = {
 	json: () => RequestHandler;
 	urlencoded: (opts: { extended: boolean }) => RequestHandler;
 };
-
-/**
- * SF-13 — classification of upstream federation refresh errors.
- *
- * `invalid_grant`: IdP rejected the refresh_token (revoked, expired, mismatched). Triggers
- *   cleanup + 410 re-authentication.
- * `rate_limited`: IdP returned 429. Map to 429 so callers can implement Retry-After.
- * `network`: upstream 5xx, connection refused / timed out / DNS failure. Map to 503.
- * `unknown`: anything else — generic 500, audited with reason for SIEM grouping.
- *
- * Preference order: structured properties (`.error`, `.status`, `.code`) over message-string
- * matching. The string fallback is defense-in-depth for legacy or non-openid-client errors.
- */
-type FederationRefreshErrorReason = "invalid_grant" | "rate_limited" | "network" | "unknown";
-
-/**
- * Node/undici fetch failures bubble up as `TypeError("fetch failed")` with the underlying
- * network error code on `.cause.code` (one level deep). openid-client v6 rethrows these
- * as-is. Walk the cause chain so `ECONNREFUSED` / `ENOTFOUND` / `ETIMEDOUT` reach the
- * `network` classification regardless of whether the code lands on the top-level error
- * or its `cause`.
- */
-const NETWORK_CODES = new Set(["ECONNREFUSED", "ENOTFOUND", "ETIMEDOUT", "EAI_AGAIN"] as const);
-
-function extractNetworkCode(error: unknown): string | undefined {
-	let cur: unknown = error;
-	for (let depth = 0; depth < 4 && cur !== null && typeof cur === "object"; depth++) {
-		const code = (cur as { code?: unknown }).code;
-		if (typeof code === "string" && NETWORK_CODES.has(code as never)) {
-			return code;
-		}
-		cur = (cur as { cause?: unknown }).cause;
-	}
-	return undefined;
-}
-
-function classifyFederationRefreshError(error: unknown): FederationRefreshErrorReason {
-	if (error !== null && typeof error === "object") {
-		const e = error as { error?: unknown; status?: unknown };
-		// openid-client v6 surfaces token-endpoint errors with `.error` populated from the
-		// IdP response body (RFC 6749 §5.2 error codes). `invalid_grant` is the canonical
-		// "refresh token rejected"; `invalid_token` is RFC 6750 §3.1 — both require re-auth.
-		if (e.error === "invalid_grant" || e.error === "invalid_token") return "invalid_grant";
-		// Rate-limit indicators per RFC 6749 token-endpoint behavior + RFC 6585 §4. RFC 6585
-		// defines `too_many_requests` as an HTTP status name — some IdPs (Google, Microsoft)
-		// echo it back as the error code in `.error`.
-		if (e.error === "too_many_requests" || e.status === 429) return "rate_limited";
-		// Generic upstream 5xx — IdP outage. Surfaced via openid-client `.status` even when
-		// the message is opaque ("service down").
-		if (typeof e.status === "number" && e.status >= 500 && e.status < 600) return "network";
-		// Node network-layer failures: ECONNREFUSED / ENOTFOUND / ETIMEDOUT may be on the
-		// top-level error (legacy adapters) or wrapped as `.cause` of a TypeError thrown by
-		// undici/fetch (openid-client v6's transport).
-		if (extractNetworkCode(error) !== undefined) return "network";
-	}
-	// Defense-in-depth string fallback for non-openid-client errors (legacy stubs, mocks,
-	// custom adapters). Less precise than structured inspection, kept so v0.5.0 callers
-	// that throw plain `Error("invalid_grant: ...")` still reach the cleanup path.
-	const msg = error instanceof Error ? error.message : String(error);
-	if (msg.includes("invalid_grant")) return "invalid_grant";
-	if (msg.includes("temporarily_unavailable") || /5\d\d/.test(msg)) return "network";
-	return "unknown";
-}
 
 /**
  * Structural narrowing of `FederationProviderHandle` for the refresh capability.
@@ -582,7 +524,10 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				// `.error`, `.status`, `.code`), with message-string fallback for legacy /
 				// non-openid-client errors. The fragile `msg.includes(...)` / `/5\d\d/.test(msg)`
 				// path is now confined to the helper as last-resort.
-				const reason = classifyFederationRefreshError(error);
+				// SF-13's classifier lives in core now, shared with the federation grant
+				// retrieval (#593). This route acts on the reason alone, the message
+				// fallback included, exactly as before.
+				const { reason } = classifyFederationRefreshError(error);
 				logger.warn(
 					`POST /oauth/federation/${name}/token: refreshToken failed (reason: ${reason}):`,
 					error,

@@ -71,8 +71,12 @@ export function coveredByRevocationBoundary(
 
 export interface EffectiveFederationGrantStatusContext {
 	readonly now: Date;
-	/** The connection as it is configured now. */
-	readonly connection: FederationGrantConnection;
+	/**
+	 * The connection as it is configured now; `undefined` when the operator has
+	 * removed it. That is reported as `connection_not_configured`, after every
+	 * terminal fact and before anything that needs a connection to compare with.
+	 */
+	readonly connection: FederationGrantConnection | undefined;
 	/** `federationGrants.maxExpiresIn` as it is configured now, in milliseconds. */
 	readonly maxExpiresInMs: number;
 	/** The subject's grants boundary; `null` when none is in force. */
@@ -103,6 +107,10 @@ export interface EffectiveFederationGrantStatusContext {
  *    `pending` grant: it has no consent to date, and D7 already demands a
  *    session that authenticated after the boundary;
  * 3. expiry, the terminal bound first (`federationGrantExpiryState`);
+ * 3a. a connection that is no longer configured. Putting the entry back
+ *    restores the grant, so it comes after what cannot be undone — a
+ *    configuration remedy must not be offered for a grant that is over — and
+ *    it is not a changed identity, which removing an entry does not establish;
  * 4. a changed upstream identity, which no reauthorization can mend — before
  *    the stored `invalid_grant`, because `/reauthorize` refuses such a grant;
  * 5. what a reauthorization does mend: a stored `invalid_grant`, a changed
@@ -117,9 +125,11 @@ export interface EffectiveFederationGrantStatusContext {
  * This is the order D10's steps are reported in, which is not the order the
  * ADR lists them: it puts the backstop before expiry.
  *
- * A key that is missing from the ring is not a status. It is an outage, and
- * the caller answers 503 before it gets here. So is a boundary that cannot be
- * compared: `coveredByRevocationBoundary` throws.
+ * A key that is missing from the ring is not a status. It is an outage: the
+ * caller passes `"unreadable"` for it and answers 503 where this would say
+ * `credential_unreadable` — and only there, so that the outage masks nothing
+ * that is reported ahead of it, none of which needs a credential. So is a
+ * boundary that cannot be compared: `coveredByRevocationBoundary` throws.
  */
 export function effectiveFederationGrantStatus(
 	grant: FederationGrant,
@@ -137,20 +147,23 @@ export function effectiveFederationGrantStatus(
 	const expiry = federationGrantExpiryState(grant, context.now, context.maxExpiresInMs);
 	if (expiry !== "live") return { status: "expired", reason: expiry };
 
-	if (grant.identityRevision !== federationGrantIdentityRevision(context.connection)) {
+	const connection = context.connection;
+	if (connection === undefined) return { status: "connection_not_configured" };
+
+	if (grant.identityRevision !== federationGrantIdentityRevision(connection)) {
 		return { status: "connection_identity_changed" };
 	}
 	if (grant.status === "reauthorization_required") {
 		return { status: "reauthorization_required", reason: "upstream_invalid_grant" };
 	}
-	if (grant.authorizationRevision !== federationGrantAuthorizationRevision(context.connection)) {
+	if (grant.authorizationRevision !== federationGrantAuthorizationRevision(connection)) {
 		return { status: "reauthorization_required", reason: "connection_changed" };
 	}
 	if (context.credentials === "unreadable") {
 		return { status: "reauthorization_required", reason: "credential_unreadable" };
 	}
 
-	const maximum = context.connection.maxAccessTokenLifetime;
+	const maximum = connection.maxAccessTokenLifetime;
 	if (!isUsableMaxUpstreamAccessTokenLifetime(maximum)) {
 		return { status: "upstream_token_ineligible", reason: "lifetime_over_maximum" };
 	}
