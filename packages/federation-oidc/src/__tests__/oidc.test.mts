@@ -272,6 +272,121 @@ describe("createOidcProvider (#524)", () => {
 		});
 	});
 
+	describe("authorization response issuer (RFC 9207, #595)", () => {
+		// Discovery runs at construction, so the flag has to be on the document
+		// before the provider is built.
+		async function buildAdvertising(advertised: boolean) {
+			const idp = await createFakeIdp({ issuer: ISSUER });
+			if (advertised) idp.metadata.authorization_response_iss_parameter_supported = true;
+			idp.nonce = "nonce-1";
+			const provider = await createOidcProvider("idp-a", baseConfig(idp));
+			return { idp, provider };
+		}
+
+		// openid-client reports every response failure as "invalid response
+		// encountered" and carries the reason on `cause`. The code is the stable
+		// anchor; the wording is what tells "missing" from "unexpected", which
+		// share it, so a library rewording fails here loudly.
+		const refusedBecause = (reason: RegExp) => ({
+			code: "OAUTH_INVALID_RESPONSE",
+			cause: { message: expect.stringMatching(reason) },
+		});
+
+		const exchangeWith = (
+			provider: Awaited<ReturnType<typeof createOidcProvider>>,
+			callbackParams: Readonly<Record<string, string>>,
+		) =>
+			provider.exchangeCode({
+				code: "code-1",
+				codeVerifier: VERIFIER,
+				redirectUri: CALLBACK,
+				nonce: "nonce-1",
+				callbackParams,
+			});
+
+		it("an issuer that advertises the parameter: the callback's iss reaches the check and login succeeds", async () => {
+			const { idp, provider } = await buildAdvertising(true);
+			const profile = await exchangeWith(provider, { iss: ISSUER });
+			expect(profile).toMatchObject({ issuer: ISSUER, sub: idp.sub });
+		});
+
+		it("refuses another issuer's iss before any token request", async () => {
+			const { idp, provider } = await buildAdvertising(true);
+			await expect(exchangeWith(provider, { iss: "https://impostor.test" })).rejects.toMatchObject(
+				refusedBecause(/unexpected "iss"/),
+			);
+			expect(idp.lastTokenRequest()).toBeUndefined();
+		});
+
+		it("refuses a callback with no iss when the issuer advertises the parameter", async () => {
+			const { idp, provider } = await buildAdvertising(true);
+			await expect(exchangeWith(provider, {})).rejects.toMatchObject(
+				refusedBecause(/"iss" \(issuer\) missing/),
+			);
+			expect(idp.lastTokenRequest()).toBeUndefined();
+		});
+
+		it("an issuer that does not advertise it: a callback with no iss still succeeds", async () => {
+			const { idp, provider } = await buildAdvertising(false);
+			const profile = await exchangeWith(provider, {});
+			expect(profile).toMatchObject({ issuer: ISSUER, sub: idp.sub });
+		});
+
+		it("an issuer that does not advertise it but sends one anyway: a wrong iss is still refused", async () => {
+			const { idp, provider } = await buildAdvertising(false);
+			await expect(exchangeWith(provider, { iss: "https://impostor.test" })).rejects.toMatchObject(
+				refusedBecause(/unexpected "iss"/),
+			);
+			expect(idp.lastTokenRequest()).toBeUndefined();
+		});
+
+		it("forwards iss and nothing else from the callback bag", async () => {
+			const { idp, provider } = await buildAdvertising(true);
+			// Each of these on the rebuilt URL makes the library refuse: `error`
+			// reads as an authorization error, the other three as a response type
+			// this flow never asked for.
+			const profile = await exchangeWith(provider, {
+				iss: ISSUER,
+				error: "access_denied",
+				response: "jarm.response.jwt",
+				id_token: "hybrid.id.token",
+				token: "implicit-access-token",
+			});
+			expect(profile).toMatchObject({ issuer: ISSUER, sub: idp.sub });
+		});
+
+		it("treats an empty iss as absent: refused when the issuer advertises the parameter", async () => {
+			const { idp, provider } = await buildAdvertising(true);
+			await expect(exchangeWith(provider, { iss: "" })).rejects.toMatchObject(
+				refusedBecause(/"iss" \(issuer\) missing/),
+			);
+			expect(idp.lastTokenRequest()).toBeUndefined();
+		});
+
+		it("discovery = false: no metadata can require iss, but one that is sent is still compared", async () => {
+			const idp = await createFakeIdp({ issuer: ISSUER });
+			idp.nonce = "nonce-1";
+			const provider = await createOidcProvider(
+				"idp-a",
+				baseConfig(idp, {
+					discovery: false,
+					endpoints: {
+						authorizationEndpoint: `${ISSUER}/authorize`,
+						tokenEndpoint: `${ISSUER}/token`,
+						jwksUri: `${ISSUER}/jwks`,
+						userinfoEndpoint: `${ISSUER}/userinfo`,
+					},
+				}),
+			);
+			await expect(exchangeWith(provider, { iss: "https://impostor.test" })).rejects.toMatchObject(
+				refusedBecause(/unexpected "iss"/),
+			);
+			expect(idp.lastTokenRequest()).toBeUndefined();
+			const profile = await exchangeWith(provider, {});
+			expect(profile).toMatchObject({ issuer: ISSUER, sub: idp.sub });
+		});
+	});
+
 	describe("ID token conformance", () => {
 		it("accepts a conforming token and maps the profile", async () => {
 			const { idp, provider } = await build();

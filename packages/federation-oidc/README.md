@@ -126,7 +126,12 @@ that cannot be parsed.
    nonce (OIDC Core §3.1.3.7).
 2. **Code exchange** — at `token_endpoint`, authenticated with the configured
    method, `redirect_uri` echoing the callback and `code_verifier` closing the
-   PKCE loop.
+   PKCE loop. Before it, the callback's `iss` parameter (RFC 9207) is compared
+   with the configured issuer, as an exact string: a different one is refused
+   without spending the code. An issuer whose discovered metadata advertises
+   `authorization_response_iss_parameter_supported` — Keycloak's does by
+   default — must also send one. With `discovery = false` there is no metadata
+   to advertise it, so `iss` is compared when present and never required.
 3. **ID token validation** — signature against the issuer's JWKS (fetched by
    `kid`, cached, refetched when an unknown `kid` appears — but not within a
    minute of the last fetch, so an IdP that rotates keys must publish the new
