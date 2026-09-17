@@ -396,22 +396,28 @@ function handOver(
 // ---------------------------------------------------------------------------
 
 /**
- * Which look this is. Every look judges the grant the same way; they differ in
- * what becomes of a stored token that would be refreshed.
+ * What a look is told about the call it is made for. Every look judges the
+ * grant the same way; they differ in what becomes of a stored token that would
+ * be refreshed.
  *
  * - The first look, and the same look again once the lock is held, when
  *   another replica may have refreshed already: it sends the call to the
  *   refresh.
- * - `"own"` — the last look before a token this call refreshed is disclosed.
- *   What is stored is answered with its true lifetime, whatever was asked of
- *   it: a call refreshes at most once, and the caller decides (D10).
+ * - `fetched` — the last look before a token this call refreshed is
+ *   disclosed, told the access token the call wrote. When that is what is
+ *   stored it is answered with its true lifetime, whatever was asked of it: a
+ *   call refreshes at most once, and the caller decides (D10). When something
+ *   else is stored by then — a reauthorization does not take the refresh
+ *   lock — it is somebody else's, and judged as such.
  * - The only look after a lock timeout or a lost write is a first look again:
  *   what is stored is somebody else's, or the token that had run down. A token
  *   that is not half spent is answered as it is, somebody else's included, and
  *   what would have been a refresh is answered by `refresh` below as the
  *   outage that brought the call there. `refresh` runs once per call.
  */
-type Look = "any" | "own";
+interface Look {
+	readonly fetched?: string;
+}
 
 type StoredAccessToken = NonNullable<FederationGrantCredentials["accessToken"]>;
 
@@ -438,6 +444,8 @@ type Evaluation =
 			 * refresh that brings nothing usable keeps it (D5).
 			 */
 			readonly keep?: StoredAccessToken;
+			/** The access token that is stored, whether or not it could be disclosed. */
+			readonly stored?: string;
 	  };
 
 const unavailable = (reason: FederationGrantUnavailableReason): FederationGrantDenial => ({
@@ -453,7 +461,7 @@ const NOT_PERMITTED: FederationGrantDenial = {
 async function evaluate(
 	deps: RetrieveFederationGrantTokenDeps,
 	request: RetrieveFederationGrantTokenRequest,
-	look: Look,
+	look: Look = {},
 ): Promise<Evaluation> {
 	// The boundary first and the record last, so that the record — the thing a
 	// revocation changes — is the freshest thing evaluated. A boundary that
@@ -676,7 +684,8 @@ async function evaluate(
 			const halfSpent = age >= lifetimeMs / 2;
 			const ranDown = remainingMs <= deps.limits.refreshBufferMs;
 			const wantsMore = !carries || remainingMs <= minTtlSeconds * 1000;
-			const refreshIt = look !== "own" && halfSpent && (ranDown || wantsMore);
+			const own = look.fetched !== undefined && token.value === look.fetched;
+			const refreshIt = !own && halfSpent && (ranDown || wantsMore);
 			if (carries && (!refreshIt || notAsked !== undefined)) {
 				const grantEndsAt = federationGrantEffectiveExpiry(grant, deps.limits.maxExpiresInMs);
 				return {
@@ -704,6 +713,7 @@ async function evaluate(
 		connection,
 		refreshToken: credentials.refreshToken,
 		...(keep !== undefined ? { keep } : {}),
+		...(token !== undefined ? { stored: token.value } : {}),
 	};
 }
 
@@ -815,9 +825,9 @@ type PendingAudit = readonly [type: FederationGrantAuditEvent["type"], outcome: 
  * held. It never rejects.
  */
 type RefreshOutcome =
-	/** `brought`: whether an access token came with it. Without one, what is stored is what the grant had. */
+	/** `fetched`: the access token that came with it. Without one, what is stored is what the grant had. */
 	(
-		| { readonly kind: "written"; readonly brought: boolean }
+		| { readonly kind: "written"; readonly fetched?: string }
 		/** A guarded write lost. Never the fetched token: the last look answers with what is there. */
 		| { readonly kind: "lost" }
 		| { readonly kind: "denied"; readonly denial: FederationGrantDenial }
@@ -864,16 +874,26 @@ function readResponse(
 	grant: AuthorizedFederationGrant,
 	storedRefreshToken: string,
 ): ReadResponse {
-	const fields = (typeof response === "object" && response !== null ? response : {}) as Record<
-		string,
-		unknown
-	>;
-	const refreshToken =
-		typeof fields.refreshToken === "string" && fields.refreshToken !== ""
-			? fields.refreshToken
-			: storedRefreshToken;
-
-	const { accessToken, tokenType = "Bearer", expiresIn = null, expiresAt = null, scope } = fields;
+	// Anything at all may have been answered: `null` throws when it is read, a
+	// field may be a getter, and a getter may throw. The refresh token is read
+	// on its own, so that another read that throws does not cost it.
+	const fields = response as Record<string, unknown>;
+	let refreshToken = storedRefreshToken;
+	try {
+		if (typeof fields.refreshToken === "string" && fields.refreshToken !== "") {
+			refreshToken = fields.refreshToken;
+		}
+	} catch {
+		// Kept as it is stored.
+	}
+	let rest: Record<string, unknown>;
+	try {
+		const { accessToken, tokenType, expiresIn, expiresAt, scope } = fields;
+		rest = { accessToken, tokenType, expiresIn, expiresAt, scope };
+	} catch {
+		return { refreshToken };
+	}
+	const { accessToken, tokenType = "Bearer", expiresIn = null, expiresAt = null, scope } = rest;
 	if (typeof accessToken !== "string" || accessToken === "") return { refreshToken };
 	if (typeof tokenType !== "string" || tokenType === "") return { refreshToken };
 	if (expiresIn !== null && typeof expiresIn !== "number") return { refreshToken };
@@ -896,14 +916,19 @@ function readResponse(
 }
 
 /**
- * Whether the record holds the credentials this call tried to store. Waited
- * for no longer than `budgetMs`: the lock is sized for ONE persist budget
- * after the hard deadline, and this look is spent of the same one.
+ * Whether the record holds what this call tried to store: the credentials,
+ * and the marker beside them. Two replicas can come to store the very same
+ * credentials — an IdP that does not rotate, an answer that brought no access
+ * token — and the marker, which is dated, is what tells theirs from this
+ * call's. Waited for no longer than `budgetMs`: the lock is sized for ONE
+ * persist budget after the hard deadline, and this look is spent of the same
+ * one.
  */
 async function isStored(
 	deps: RetrieveFederationGrantTokenDeps,
 	grant: AuthorizedFederationGrant,
 	credentials: FederationGrantCredentials,
+	ineligible: FederationGrantIneligibilityMarker | null,
 	budgetMs: number,
 ): Promise<boolean> {
 	const read = await within(
@@ -911,11 +936,13 @@ async function isStored(
 		budgetMs,
 	);
 	if (read === "elapsed" || !read.ok || read.value === null) return false;
-	const held = read.value.credentials;
+	const { grant: current, credentials: held } = read.value;
+	const marker = hasFederationGrantAuthorization(current) ? current.ineligible : undefined;
 	return (
 		held.state === "ok" &&
 		held.value.refreshToken === credentials.refreshToken &&
-		held.value.accessToken?.value === credentials.accessToken?.value
+		held.value.accessToken?.value === credentials.accessToken?.value &&
+		marker?.at.getTime() === ineligible?.at.getTime()
 	);
 }
 
@@ -1096,7 +1123,7 @@ async function refreshUnderLock(
 	// Bounded twice: by the clock, and by a count, for a clock that does not move.
 	const persistDeadline = receivedAt + limits.persistRetryBudgetMs;
 	const attempts = Math.max(1, Math.ceil(limits.persistRetryBudgetMs / PERSIST_RETRY_DELAY_MS));
-	const brought = ineligible === null;
+	const fetched = ineligible === null ? credentials.accessToken?.value : undefined;
 	const refreshedAudit: PendingAudit = [
 		"federation.grant.refreshed",
 		ineligible === null ? "success" : `upstream_token_ineligible/${ineligible.reason}`,
@@ -1140,12 +1167,20 @@ async function refreshUnderLock(
 				// One look, still under the lock, tells the two apart: it is this
 				// call's write exactly when what is stored is what it tried to store.
 				const left = persistDeadline - deps.now().getTime();
-				if (threwBefore && (await isStored(deps, grant, credentials, left))) {
-					return { kind: "written", brought, audits: [refreshedAudit] };
+				if (threwBefore && (await isStored(deps, grant, credentials, ineligible, left))) {
+					return {
+						kind: "written",
+						...(fetched !== undefined ? { fetched } : {}),
+						audits: [refreshedAudit],
+					};
 				}
 				return { kind: "lost", audits: [["federation.grant.refresh_failed", "write_lost"]] };
 			}
-			return { kind: "written", brought, audits: [refreshedAudit] };
+			return {
+				kind: "written",
+				...(fetched !== undefined ? { fetched } : {}),
+				audits: [refreshedAudit],
+			};
 		}
 		threwBefore = true;
 		failed("write", result.error);
@@ -1158,6 +1193,21 @@ async function refreshUnderLock(
 		denial: unavailable("storage"),
 		audits: [["federation.grant.refresh_persist_failed", "storage"]],
 	};
+}
+
+/** Lets go of a lock, waiting so long and no longer, and tells the logger when it could not. Never rejects. */
+async function letGo(
+	deps: RetrieveFederationGrantTokenDeps,
+	request: RetrieveFederationGrantTokenRequest,
+	lock: { release(): Promise<void> },
+): Promise<void> {
+	const released = await within(
+		settle(() => lock.release()),
+		SIDE_EFFECT_WAIT_MS,
+	);
+	// The lock has a TTL: one that could not be let go of runs out.
+	if (released === "elapsed") report(deps, request, "release", NOT_ANSWERED);
+	else if (!released.ok) report(deps, request, "release", released.error);
 }
 
 async function refresh(
@@ -1175,12 +1225,12 @@ async function refresh(
 	if (asked === "elapsed" || !asked.ok) {
 		if (asked === "elapsed") {
 			// A lock that arrives for nobody is let go of, not left to run out
-			// against every replica that needs it. Not handed to `background`: it
-			// may never arrive, and what is handed over has to settle.
+			// against every replica that needs it. The WAIT for it is not handed to
+			// `background` — it may never arrive, and what is handed over has to
+			// settle — but letting go of it, once it has, is.
 			void asking.then((late) => {
 				if (!late.ok || !late.value.acquired) return;
-				const arrived = late.value;
-				void settle(() => arrived.release());
+				handOver(deps, request, letGo(deps, request, late.value));
 			});
 		}
 		report(deps, request, "lock", asked === "elapsed" ? NOT_ANSWERED : asked.error);
@@ -1190,22 +1240,14 @@ async function refresh(
 	const lock = asked.value;
 	if (!lock.acquired) {
 		// Whoever held it may have refreshed. One look, which never refreshes.
-		const stored = await evaluate(deps, request, "any");
+		const stored = await evaluate(deps, request);
 		return conclude(deps, request, stored, false, unavailable("lock_timeout"));
 	}
 
 	// One owner of the release, whichever way this ends. Never waited for by the
 	// caller: a lock that is slow to let go of must not turn a refresh that was
 	// persisted into an outage.
-	const release = async (): Promise<void> => {
-		const released = await within(
-			settle(() => lock.release()),
-			SIDE_EFFECT_WAIT_MS,
-		);
-		// The lock has a TTL: one that could not be let go of runs out.
-		if (released === "elapsed") report(deps, request, "release", NOT_ANSWERED);
-		else if (!released.ok) report(deps, request, "release", released.error);
-	};
+	const release = (): Promise<void> => letGo(deps, request, lock);
 
 	let held: Extract<Evaluation, { kind: "refresh" }>;
 	let refresher: FederationGrantRefresher;
@@ -1216,7 +1258,7 @@ async function refresh(
 		// what this call spends under the lock before it asks the upstream is
 		// spent of the same lease (D12).
 		leaseStartedAt = deps.now().getTime();
-		const again = await evaluate(deps, request, "any");
+		const again = await evaluate(deps, request);
 		if (again.kind !== "refresh") {
 			// Another replica refreshed already, or the grant ended meanwhile.
 			handOver(deps, request, release());
@@ -1313,18 +1355,23 @@ async function refresh(
 	// Written or lost, the last look is the same: the record as it is NOW, the
 	// boundary as it is now, and the token that is stored — never the one this
 	// call fetched and holds in a variable.
-	// `refreshed` says that what is answered is what this call fetched: a write
-	// that brought no access token kept the one the grant had (D5).
-	const own = first.kind === "written" && first.brought;
-	const stored = await evaluate(deps, request, own ? "own" : "any");
+	const fetched = first.kind === "written" ? first.fetched : undefined;
+	const stored = await evaluate(deps, request, fetched !== undefined ? { fetched } : {});
+	const overtaken =
+		first.kind === "lost" ||
+		(fetched !== undefined && stored.kind === "refresh" && stored.stored !== fetched);
 	return conclude(
 		deps,
 		request,
 		stored,
-		own,
-		// A write that landed was overtaken by nothing: if its token cannot be
-		// answered, the upstream's token is what failed the call.
-		unavailable(first.kind === "written" ? "upstream" : "concurrent_update"),
+		// `refreshed` says that what is answered is what this call fetched. It is
+		// not when the write brought no access token and kept the one the grant
+		// had (D5), nor when something else was stored before this look.
+		fetched !== undefined && stored.kind === "token" && stored.token.value === fetched,
+		// A write that landed and is still what is stored was overtaken by
+		// nothing: if its token cannot be answered, the upstream's token is what
+		// failed the call. Lost, or replaced before this look, it was overtaken.
+		unavailable(overtaken ? "concurrent_update" : "upstream"),
 	);
 }
 
@@ -1343,7 +1390,7 @@ export async function retrieveFederationGrantToken(
 	deps: RetrieveFederationGrantTokenDeps,
 	request: RetrieveFederationGrantTokenRequest,
 ): Promise<FederationGrantTokenResult> {
-	const first = await evaluate(deps, request, "any");
+	const first = await evaluate(deps, request);
 	if (first.kind !== "refresh") {
 		return conclude(deps, request, first, false, unavailable("upstream"));
 	}
