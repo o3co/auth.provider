@@ -57,6 +57,18 @@ describe("core barrel — #593 federation grant domain rules", () => {
 		}
 	});
 
+	it("re-exports the store: the port's companions, the memory adapter, its factory and its module", () => {
+		for (const name of [
+			"createMemoryFederationGrantStore",
+			"createFederationGrantStoreFactory",
+			"registerBuiltinFederationGrantStores",
+		] as const) {
+			expect(typeof (core as Record<string, unknown>)[name], name).toBe("function");
+		}
+		expect(core.DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS).toBe(2_592_000_000);
+		expect(core.memoryFederationGrantStoreModule.name).toBe("core-federation-grant-store-memory");
+	});
+
 	it("says FederationGrant in every name: this barrel already exports GrantContext and GrantResult for OAuth grant types", () => {
 		const generic = [
 			"effectiveExpiry",
@@ -66,6 +78,8 @@ describe("core barrel — #593 federation grant domain rules", () => {
 			"resolveIntentScopes",
 			"effectiveGrantStatus",
 			"scopesWithin",
+			"createMemoryGrantStore",
+			"memoryGrantStoreModule",
 		];
 		for (const name of generic) {
 			expect((core as Record<string, unknown>)[name], name).toBeUndefined();

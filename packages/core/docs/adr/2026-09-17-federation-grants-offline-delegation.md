@@ -139,13 +139,14 @@ not enough: the store enforces it at the write.
 
 | event | precondition, evaluated in the store | effect |
 | --- | --- | --- |
-| lodge first intent | — | create `pending`, naming this intent as current; key lives as long as the intent |
-| lodge reauthorization intent | the record exists; status is `active` or `reauthorization_required`; `now < expiresAt` | name this intent as current, superseding any other |
-| activate (callback succeeds) | status is `pending`, `active` or `reauthorization_required`; `now < expiresAt` unless `pending`; the intent is the grant's current intent; `expiresAt − consent.at` is within the lifetime ceiling (D3) | `active`; set the authorized fields; write credentials; `version++` |
-| replace credentials (refresh) | status is `active`; `version` equals the one read; `now < expiresAt` | write credentials; `version++` |
+| lodge first intent | no record is there under the ID, whether or not this caller's clock can see it; the intent has not already lapsed | create `pending`, naming this intent as current; key lives as long as the intent |
+| lodge reauthorization intent | the record exists; status is `active` or `reauthorization_required`; `now < expiresAt`; the intent has not already lapsed | name this intent as current, superseding any other; `version` is *not* bumped |
+| activate (callback succeeds) | status is `pending`, `active` or `reauthorization_required`; `now` is before the *stored* `expiresAt` unless `pending`; the intent is the grant's current intent and has not lapsed; the *new* `expiresAt` is after `now`, and `expiresAt − consent.at` is within the lifetime ceiling (D3); `consent.at` and `authorizedAt` are not after `now` (D13); unless `pending`, the upstream account and the identity revision are the stored ones (D4, D7) | `active`; replace the authorized fields as a whole; write credentials; clear the ineligibility marker (D5); retire the intent; `version++` |
+| replace credentials (refresh) | status is `active`; `version` equals the one read; `now < expiresAt` | replace credentials as a whole; set or clear the ineligibility marker (D5); `version++`; the current intent is left alone |
 | require reauthorization | status is `active`; `version` equals the one read | `reauthorization_required`; delete credentials; `version++` |
-| revoke | the record exists; status is not `revoked` | `revoked`; record `revocation`; delete credentials; `version++` — one atomic operation that always wins |
-| touch | the record exists; status is `active` | set `lastUsedAt` only |
+| revoke | the record exists; status is not `revoked` | `revoked`; record `revocation`; delete credentials; retire the intent; `version++` — one atomic operation that always wins |
+| retire intent | status is `active` or `reauthorization_required`; there is a current intent, and it is the named one when one is named | retire the intent; `version` is *not* bumped |
+| touch | the record exists; status is `active` | set `lastUsedAt` only, and never back |
 | first intent lapses unused | — | the `pending` grant is deleted with it |
 
 Every row is one script that checks the record exists. A bare field write on a
@@ -168,11 +169,76 @@ write.
 
 `touch` is best-effort: it does not bump `version` and cannot fail a call.
 
+The details of the table are there for a reason each.
+
+- Naming a reauthorization intent does not bump `version`. A refresh in flight
+  holds the version it read, and a reauthorization the user may never finish
+  must not make it drop the rotated refresh token it is about to store.
+- An activation retires the intent, so the same handle cannot activate twice,
+  and it refuses an intent that lapsed while the code was being exchanged. The
+  connect callback also asks whether the intent is current *before* the
+  exchange (D7), which the activation at the end cannot stand in for; the port
+  has an operation for that, and the handle is never part of the record a
+  client is shown.
+- The renewal guard reads the stored `expiresAt` and the ceiling reads the new
+  one. With one expiry for both, a new consent could resurrect a grant whose
+  consented lifetime had ended. The guard holds for every grant that is not
+  `pending` — one that needs the user has a consented lifetime too — and the
+  port's "is this intent current?" applies it as well, so that the callback
+  does not exchange a code for a grant it can no longer activate, and leave a
+  refresh token at the upstream that nothing will use.
+- The mirror image of the first point holds too: a refresh, an upstream
+  `invalid_grant` and a `touch` leave the current intent alone. A refresh in
+  the background must not cost the user the reauthorization they are in the
+  middle of.
+- An intent can be retired without ending the grant. D13's `"keep"` ends every
+  renewal in flight while preserving established grants, and by the time a
+  callback has passed its checks the pointer on the grant is the only thing
+  left to end. A reauthorization consent that the user declines retires the
+  intent it was asked about, and no newer one. A *first* consent that is
+  declined retires nothing and revokes nothing: declining spends the intent
+  record before any callback can exist, so nothing can reach the activation,
+  and the `pending` grant is left to lapse — a tombstone per decline would
+  report as revoked a grant that never was.
+- A renewal never re-points a grant. The callback checks that the upstream
+  account is the grant's (D7), and an identity change is terminal (D4); the
+  activation refuses both again, so that one slip in the callback cannot hand
+  a grant ID, and the client that holds it, to another upstream account.
+- A refused activation leaves an existing grant exactly as it was (D7):
+  everything it carries is checked before anything is written. Beside a
+  `pending` grant a half-written credential would be invisible; beside an
+  active one it would have replaced the user's working refresh token.
+
 Three races are part of the contract suite both adapters run: a callback that
 passed its checks and activates after a revocation (it must fail); a refresh in
 flight while the grant is revoked (it must not re-create the credential record,
 and must not return the token); and a refresh that starts before `expiresAt`
-and finishes after it (the write must fail, and no token is returned).
+and finishes after it (the write must fail, and no token is returned). "Must
+not return the token" is the retrieval's to keep (D10), and is tested there.
+
+Run one after the other, those races prove that the guards exist. They do not
+prove that a guard and its write are one step: an adapter that checks and
+writes in two round trips passes them. So the suite also runs the conflicting
+writes at once: a revocation against an activation, a renewal, a refresh, an
+upstream `invalid_grant` and the naming of an intent; two refreshes on one
+version, two callbacks on one intent, two lodgings of one ID, two revocations;
+and the writes to the intent pointer against each other and against the
+activation they would end or supersede. Those last ones matter because naming
+and retiring an intent do not bump `version`: an activation that checks the
+handle and then writes behind a compare-and-set on `version` passes everything
+else, and loses to both. Each pair is started in both orders, because whichever is started first gets
+its check in first, and the interleaving that matters — the write checks, the
+revocation lands, the write applies — exists only when the write is. The
+suite asserts what may be left behind: a revoked grant, exactly one winner,
+and never a credential beside a revoked grant.
+
+That last assertion cannot be made through the port. There a grant that is not
+`active` reads as having no credential whether the secret was deleted or is
+only hidden behind a status check, and a revocation that forgot the delete
+would pass with a live refresh token at rest. So the suite requires each
+adapter to supply a probe from outside the port — for Redis, whether the
+credential key exists — and asks it after the transitions away from `active`,
+a revocation past the expiry included, and after refused writes.
 
 ### D3 — Expiry is absolute, required, and bounded by the operator
 
@@ -353,7 +419,7 @@ have ended is revoked there, not renewed.
 
 A grant has at most one live intent. Lodging another supersedes the older one,
 whose callback is then refused as stale. Live first-time intents are bounded
-per `(client, subject)` by a constant on the port, as
+per `(client, subject)` by a constant on the intent port (D16), as
 `PENDING_CONSENT_PER_SESSION_LIMIT` bounds parked consents.
 
 A login never creates a grant, and a connect never creates a login link.
@@ -385,7 +451,7 @@ and that is its CSRF defence, as it is for `/authorize`.
   `state`, `nonce`, PKCE, the intent's scopes, the connection's `resource` and
   its `authorizationParams`. A refusal ends the intent.
 
-The transaction is a single-use record in the grant store, consumed
+The transaction is a single-use record in the intent store (D16), consumed
 atomically, with a 10-minute TTL. It is not the one-slot
 `req.session.federation` envelope, which a second start overwrites, and not
 `fedtx:`, which lives in the express-session store and is read and then
@@ -459,7 +525,7 @@ It reuses that mechanism and nothing else:
   contributed by the new package, and its own page URL,
   `federationGrants.consent.url`. A deployment may serve both kinds of consent
   from one page;
-- its own record, held with the intent in the grant store. Not
+- its own record, held with the intent in the intent store (D16). Not
   `PendingConsentRecord`, which is shaped for `/authorize`. Not `ConsentStore`:
   a record there would later suppress `/authorize` consent for local scopes,
   confusing two different things the user agreed to.
@@ -761,6 +827,14 @@ so the Store that forgets to pass it no longer exists. Its call takes
   grant or a renewal after it. When the operator does not allow it the service
   revokes, and says so in its result. It never keeps silently, and it never
   falls back silently.
+  One window stays open, as wide as two replicas' clocks disagree. A `pending`
+  grant within that much of its intent's lapse is already gone for a pass
+  whose clock is ahead — it is not listed, and revoking it changes nothing —
+  while a callback on a correct clock may still activate it. Under `"revoke"`
+  the backstop closes this, since the consent predates the boundary. Under
+  `"keep"` nothing does. It needs a callback that passed its session check
+  before the stamp, an intent in its last second, and a skewed clock, and it
+  is recorded here and not engineered around.
 - With `"keep"`, an optional `revokeGrantsConsentedSince: Date` still revokes
   the grants consented at or after that instant — the window in which a
   session thief would have been creating them. It is a heuristic. The grants
@@ -936,47 +1010,99 @@ clamp in D10 as a security control.
 ### D16 — Storage: bound, sealed, and never self-deleting
 
 The port follows `ConsentStore` (#589), not `FederationTokenStore`: a shared
-contract suite that both adapters run, the caller's clock for expiry, and a
-key TTL that is only a safety net. The listing and the key layout below
-illustrate the contract; slices 1 and 3 settle the signatures and the names.
+contract suite that both adapters run, and a key TTL that is only a safety
+net. Unlike `ConsentStore` it takes the time from its caller. Slice 1 settled
+the grant half; the key layout below illustrates the contract, and slice 3
+settles its names.
 
 ```ts
 interface FederationGrantStore {
 	readonly kind: string;
-	lodge(intent: FederationGrantIntent): Promise<LodgeResult>; // creates or supersedes; enforces the bound
-	readIntent(handle: string): Promise<FederationGrantIntent | null>;
-	readIntentByChallenge(challenge: string): Promise<FederationGrantIntent | null>; // the consent page's lookup (D8)
-	consumeIntent(handle: string): Promise<FederationGrantIntent | null>; // atomic, single-use
-	putTransaction(tx: ConnectTransaction): Promise<void>;
-	consumeTransaction(state: string): Promise<ConnectTransaction | null>; // atomic, single-use
-	find(grantId: string): Promise<FederationGrant | null>;
-	listBySubject(subject: string): Promise<readonly FederationGrant[]>;
-	openCredentials(grant: FederationGrant): Promise<OpenResult>; // "unreadable" and "key_unavailable" are results, not throws
-	verifyCredentials(grant: FederationGrant): Promise<"ok" | "unreadable" | "key_unavailable">; // for the status route; returns no token
-	activate(grantId: string, intentHandle: string, fields: AuthorizedFields, credentials: UpstreamCredentials): Promise<TransitionResult>;
-	replaceCredentials(grantId: string, expectedVersion: number, credentials: UpstreamCredentials): Promise<TransitionResult>;
-	requireReauthorization(grantId: string, expectedVersion: number): Promise<TransitionResult>;
-	revoke(grantId: string, by: RevokedBy, at: Date): Promise<boolean>; // whether it changed anything
+	createPending(input: { id; subject; clientId; connection; intent: { handle; expiresAt }; now }): Promise<FederationGrantWrite>;
+	nameIntent(input: { grantId; intent: { handle; expiresAt }; now }): Promise<FederationGrantWrite>; // a reauthorization's; supersedes
+	isCurrentIntent(grantId: string, handle: string, now: Date): Promise<boolean>; // D7, before the code exchange; spends nothing
+	retireIntent(input: { grantId; handle?; now }): Promise<FederationGrantWrite>; // ends a renewal in flight, not the grant
+	find(grantId: string, now: Date): Promise<FederationGrant | null>;
+	listBySubject(subject: string, now: Date): Promise<readonly FederationGrant[]>;
+	inspect(grantId: string, now: Date): Promise<{ grant; credentials: "ok" | "absent" | "unreadable" | "key_unavailable" } | null>; // for the status route; returns no token
+	open(grantId: string, now: Date): Promise<{ grant; credentials: { state: "ok"; value } | { state: "absent" | "unreadable" | "key_unavailable" } } | null>;
+	activate(input: { grantId; intentHandle; authorization: FederationGrantAuthorization; credentials; now }): Promise<FederationGrantWrite>;
+	replaceCredentials(input: { grantId; expectedVersion; credentials; ineligible: Marker | null; now }): Promise<FederationGrantWrite>;
+	requireReauthorization(input: { grantId; expectedVersion; now }): Promise<FederationGrantWrite>;
+	revoke(grantId: string, by: FederationGrantRevokedBy, at: Date): Promise<FederationGrantWrite>; // `ok`: whether it changed anything
 	touch(grantId: string, at: Date): Promise<void>;
-	acquireRefreshLock(grantId: string, opts: { ttlMs: number; waitForMs: number }): Promise<LockResult>;
+	acquireRefreshLock(grantId: string, options: { ttlMs: number; waitForMs: number }): Promise<FederationGrantLockResult>;
 }
+
+type FederationGrantWrite = { ok: true; grant: FederationGrant } | { ok: false };
 ```
 
-Every guarded write takes `now` from its caller, sampled at the write and not
-at the start of the request; the race across `expiresAt` depends on that. The
-lock is part of the port, so the in-memory adapter and the contract suite
-cover it too.
+- **The intents are a second port.** The intent records — redirect URI, scopes,
+  consent challenge — the connect transactions and the bound on live intents
+  arrive with acquisition (slice 6), as `FederationGrantIntentStore`. The
+  layout below already keeps them under another hash tag and needs no
+  atomicity between the two, so a single `lodge` could never be one step in
+  Redis; it would be two writes whose order each adapter chose for itself.
+  Core orders them once. What a grant record knows of an intent is a pointer:
+  its handle, and when it lapses.
+- **A credential is read with its record, as one snapshot.** `open` and
+  `inspect` take the grant ID and return the record they read beside the
+  credential's state, and the caller evaluates *that* record. Handing the
+  adapter a record read earlier would let a concurrent activation make a good
+  credential read as unreadable, since the binding below is recomputed from
+  the record; opening by ID and returning the credential alone would hand
+  back credentials for an authorization the caller never evaluated.
+- **A failed write carries no reason.** The record may change again before the
+  caller looks, so D2 has it re-read and re-evaluate whatever the reason was;
+  and a reason on the port would oblige two adapters to agree on which one
+  wins when several preconditions fail at once.
+- **Every operation on a record takes the time from its caller**, sampled at
+  the write and not at the start of the request; the race across `expiresAt`
+  depends on that. So do the reads: a `pending` grant whose intent has lapsed
+  reads as absent, and a credential is never returned from the stored
+  `expiresAt` on, whatever TTL its key still has. A time that is not a date is
+  refused and not compared — every comparison with NaN is false, and the
+  record would read as lapsed.
+- **Two clocks, kept apart.** What a caller is told is judged on the time it
+  passes. What an adapter reclaims is judged on the adapter's own clock, as a
+  key TTL is. A `now` that is wrong for one call is then told the wrong thing
+  once, and costs nothing: no operation, read or write, deletes anything
+  because of the time its caller passed — "the key has lapsed, so delete it
+  while we are here" is what this forbids. An ID is taken for as long as a
+  record is there under it, not for as long as the caller can see it. The
+  in-memory adapter follows the same rule, so that the two agree on it.
+- **An activation's dates are bounded against the write.** `consent.at` and
+  `authorizedAt` may not be after `now`, with no allowance. The backstop of
+  D13 compares the consent with a boundary, and a boundary stamped from the
+  activation on must always cover it. That comparison has its own allowance
+  for two replicas' clocks (`subjectRevocationSkewMs`); any added here would
+  come on top of it, and a consent dated thirty seconds ahead would slip past
+  a revocation stamped ten seconds after the activation — for good, since
+  neither instant ever changes. A consent precedes its callback by two
+  redirects and a code exchange, so replicas that disagree by more than that
+  refuse the activation, and the user connects again.
+- **The handle is opaque to the store**, which compares it and does nothing
+  else with it. Core may hand over a digest in place of the value the browser
+  carries; slice 6 decides.
+- **The lock is part of the port**, so the in-memory adapter and the contract
+  suite cover it too.
+- **Records are handed out and taken in as copies.**
 
 Redis layout, default prefix `fg:`. Keys that one script touches share a
 Cluster hash tag, as the consent store's do:
 
-- `fg:{<id>}:grant` — a HASH of non-secret fields, `status`, `version` and the
-  current intent's handle.
+- `fg:{<id>}:grant` — a HASH of non-secret fields, `status`, `version`, and the
+  current intent's handle with its expiry.
 - `fg:{<id>}:cred` — one AES-256-GCM ciphertext of the upstream tokens,
   reusing `internal/crypto.mts`.
 - `fg:{<id>}:lock`.
-- `fg:sub:<subject>` — a ZSET index scored by `expiresAt`, or by the intent's
-  expiry while the grant is `pending`, written before the record; a dangling
+- `fg:sub:<subject>` — a ZSET index scored by the instant the record stops
+  answering, which is what the record's own key TTL is set to: the intent's
+  expiry while the grant is `pending`, the stored `expiresAt` plus the
+  tombstone retention once it is authorized, the revocation plus the retention
+  for one revoked while `pending`. Scored by `expiresAt` alone, a listing
+  would drop the tombstones that `find` still answers for, and the contract
+  suite holds the two to the same set. Written before the record; a dangling
   entry is tolerated and pruned.
 - `fg:{intents}:<handle>`, `fg:{intents}:tx:<state>` and the per
   `(client, subject)` counter, each with its own TTL. They share one constant
@@ -988,8 +1114,11 @@ Cluster hash tag, as the consent store's do:
 Key TTLs come from the stored `expiresAt`, never from `effectiveExpiry`, which
 depends on configuration (D3). The grant HASH keeps a tombstone retention
 beyond that (`federationGrants.tombstoneRetention`, default 30 days), so a
-revoked or expired grant still answers the status route. The credential key
-gets no such retention. A `pending` grant lives as long as its intent. The
+revoked or expired grant still answers the status route. A revocation moves
+no horizon: an authorized grant is retained from its expiry whenever it was
+revoked. The credential key gets no such retention. A `pending` grant lives as
+long as its intent, with no retention; one revoked while `pending` has no
+expiry, and is retained from its revocation. The
 refresh buffer is 30 s, as on the session-bound route, and the persist-retry
 budget is 3 s.
 
@@ -1170,7 +1299,8 @@ The two boundaries of D13 add:
   revoked, older ones are kept;
 - a caller that stamps `revokeBefore` directly ends the grants.
 
-And D2 adds its three races, in the contract suite both adapters run.
+And D2 adds its three races, and the conflicting writes run at once, in the
+contract suite both adapters run.
 
 Time is controlled (`now` is injected everywhere it is read) and failures are
 injected deterministically.
@@ -1194,12 +1324,15 @@ route test is written first and watched failing.
    the boot refusals (no `subjectRevocation`, or an in-memory one beside a
    durable grant store), the condition tests, and the tests that default
    logout leaves grants alone.
-6. **acquisition** (D6–D8): the intent routes, consent, the connect flow, and
-   the optional `UserRepository` lookup.
-7. **standalone template, documentation, CHANGELOG.** Includes the operator
-   runbook rows the replica-safety drift test requires, `adapter-surface.md`,
-   the key-ring retention rule, and the provider-specific `offline_access`
-   guide.
+6. **acquisition** (D6–D8): the intent routes, consent, the connect flow, the
+   optional `UserRepository` lookup, and the second port of D16 —
+   `FederationGrantIntentStore`, both adapters, and the core function that
+   orders an intent's two writes.
+7. **standalone template, documentation, CHANGELOG.** Includes the key-ring
+   retention rule and the provider-specific `offline_access` guide. The
+   operator runbook rows and the `adapter-surface.md` rows are not left for
+   this slice: the drift tests require them of whichever slice adds a module
+   or a slot.
 
 Slices 1–3 change no behaviour. Nothing can create a grant until slice 6, and
 revocation exists from slice 5, so no release cut between slices ships an
@@ -1254,7 +1387,13 @@ release:
   a standard settles (D9);
 - a Shared Signals receiver that maps upstream security events to per-subject
   revocation (D14);
-- Entra on-behalf-of (D19).
+- Entra on-behalf-of (D19);
+- revoking everything one client holds. A leaked client secret is answered by
+  rotating it, which leaves the legitimate client its grants, and a disabled
+  client cannot authenticate to use them. The store lists by subject and not
+  by client, so adding this later means an index with a backfill; and a
+  store-level ceiling on how long a first intent may live, which today is a
+  constant of core's (D6) with no configuration to bypass.
 
 ## References
 

@@ -755,8 +755,9 @@ export {
 //
 // Every name says FederationGrant. This barrel already exports GrantContext,
 // GrantResult and GrantPolicy* for OAuth grant types, which these are not.
-// The typed result of a retrieval and the sealed credential stay internal
-// until the store port and the retrieval exist to give them a consumer.
+// The typed result of a retrieval stays internal until the retrieval exists to
+// give it a consumer. The store port, its memory adapter and the credential
+// the port carries are exported: a Redis adapter implements against them.
 export {
 	coveredByRevocationBoundary,
 	type EffectiveFederationGrantStatusContext,
@@ -772,6 +773,11 @@ export {
 	type UpstreamTokenJudgement,
 } from "./federation-grants/eligibility.mjs";
 export {
+	createFederationGrantStoreFactory,
+	type FederationGrantStoreFactory,
+	registerBuiltinFederationGrantStores,
+} from "./federation-grants/factory.mjs";
+export {
 	FEDERATION_GRANT_LIFETIME_CEILING_MS,
 	federationGrantEffectiveExpiry,
 	federationGrantExpiresAt,
@@ -780,9 +786,25 @@ export {
 	withinFederationGrantLifetimeCeiling,
 } from "./federation-grants/lifetime.mjs";
 export {
+	createMemoryFederationGrantStore,
+	DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS,
+	type MemoryFederationGrantStore,
+	type MemoryFederationGrantStoreOptions,
+} from "./federation-grants/memory.mjs";
+export { memoryFederationGrantStoreModule } from "./federation-grants/module.mjs";
+export {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "./federation-grants/revision.mjs";
+export type {
+	FederationGrantCredentialState,
+	FederationGrantInspection,
+	FederationGrantIntentPointer,
+	FederationGrantLockResult,
+	FederationGrantOpened,
+	FederationGrantStore,
+	FederationGrantWrite,
+} from "./federation-grants/store.mjs";
 export {
 	type AuthorizedFederationGrant,
 	type EffectiveFederationGrantStatus,
@@ -791,6 +813,7 @@ export {
 	type FederationGrantBase,
 	type FederationGrantConnection,
 	type FederationGrantConsent,
+	type FederationGrantCredentials,
 	type FederationGrantExpiredReason,
 	type FederationGrantIneligibilityMarker,
 	type FederationGrantIneligibilityReason,

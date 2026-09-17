@@ -217,19 +217,13 @@ export type EffectiveFederationGrantStatus =
 			readonly reason: FederationGrantIneligibilityReason;
 	  };
 
-// ---------------------------------------------------------------------------
-// Not exported from the package root yet. Nothing produces or consumes these
-// until the store port and `retrieveFederationGrantToken` exist, and the ADR
-// leaves their final shape to those slices (D16).
-// ---------------------------------------------------------------------------
-
 /**
  * What the sealed credential record holds (D5, D16). The access token may be
  * absent: an ineligible one is withheld and never written. Its expiry is not
  * stored: it is `obtainedAt` plus `issuedLifetime`, and a second copy would be
  * a second thing that could disagree with what the eligibility rule judged.
  */
-export interface UpstreamCredentials {
+export interface FederationGrantCredentials {
 	readonly refreshToken: string;
 	readonly accessToken?: {
 		readonly value: string;
@@ -241,6 +235,12 @@ export interface UpstreamCredentials {
 		readonly scopes: readonly string[];
 	};
 }
+
+// ---------------------------------------------------------------------------
+// Not exported from the package root yet. Nothing produces or consumes these
+// until `retrieveFederationGrantToken` exists, and the ADR leaves their final
+// shape to that slice (D11).
+// ---------------------------------------------------------------------------
 
 export type TemporarilyUnavailableReason =
 	| "upstream"
