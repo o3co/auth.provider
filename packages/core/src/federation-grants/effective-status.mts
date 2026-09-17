@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
-import { federationGrantIneligibilityStands } from "./eligibility.mjs";
+import {
+	federationGrantIneligibilityStands,
+	isUsableMaxUpstreamAccessTokenLifetime,
+} from "./eligibility.mjs";
 import { federationGrantExpiryState } from "./lifetime.mjs";
 import {
 	federationGrantAuthorizationRevision,
@@ -104,8 +107,11 @@ export interface EffectiveFederationGrantStatusContext {
  *    the stored `invalid_grant`, because `/reauthorize` refuses such a grant;
  * 5. what a reauthorization does mend: a stored `invalid_grant`, a changed
  *    connection, a credential that does not open;
- * 6. an upstream that stopped issuing eligible tokens, for as long as the
- *    marker stands. After what a reauthorization mends, since a
+ * 6. a grant that cannot yield a token: a `maxAccessTokenLifetime` no token
+ *    can satisfy — known without asking the upstream, and named as the reason
+ *    whatever an older marker says, because that is what `/token` answers —
+ *    and then an upstream that stopped issuing eligible tokens, for as long as
+ *    the marker stands. After what a reauthorization mends, since a
  *    reauthorization clears the marker as well.
  *
  * This is the order D10's steps are reported in, which is not the order the
@@ -144,9 +150,13 @@ export function effectiveFederationGrantStatus(
 		return { status: "reauthorization_required", reason: "credential_unreadable" };
 	}
 
+	const maximum = context.connection.maxAccessTokenLifetime;
+	if (!isUsableMaxUpstreamAccessTokenLifetime(maximum)) {
+		return { status: "upstream_token_ineligible", reason: "lifetime_over_maximum" };
+	}
 	if (
 		grant.ineligible !== undefined &&
-		federationGrantIneligibilityStands(grant.ineligible, context.connection.maxAccessTokenLifetime)
+		federationGrantIneligibilityStands(grant.ineligible, maximum)
 	) {
 		return { status: "upstream_token_ineligible", reason: grant.ineligible.reason };
 	}

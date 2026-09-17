@@ -45,6 +45,7 @@ describe("core barrel — #593 federation grant domain rules", () => {
 			"federationGrantIdentityRevision",
 			"federationGrantAuthorizationRevision",
 			"judgeUpstreamAccessToken",
+			"isUsableMaxUpstreamAccessTokenLifetime",
 			"federationGrantIneligibilityStands",
 			"federationGrantIneligibilityRetry",
 			"resolveFederationGrantIntentScopes",

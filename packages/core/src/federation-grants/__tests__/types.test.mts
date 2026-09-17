@@ -87,13 +87,16 @@ describe("FederationGrant — the shapes the union admits (#593, D1)", () => {
 	});
 
 	it("does not take an explicitly undefined consent for an authorization", () => {
-		// `"consent" in grant` is true for this record; the narrowing must not be.
-		const junk = {
+		// The limit of the type, pinned: without `exactOptionalPropertyTypes`,
+		// which this repository does not enable, `consent?: never` still admits
+		// `consent: undefined` — so this compiles, with no cast. `"consent" in
+		// grant` is true for such a record; the narrowing must not be.
+		const junk: FederationGrant = {
 			...base,
 			status: "revoked",
 			revocation: { by: "client", at },
 			consent: undefined,
 		};
-		expect(hasFederationGrantAuthorization(junk as FederationGrant)).toBe(false);
+		expect(hasFederationGrantAuthorization(junk)).toBe(false);
 	});
 });
