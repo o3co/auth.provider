@@ -843,7 +843,7 @@ const LUA_FG_TOUCH = `${LUA_FG_PRELUDE}
 local at = tonumber(ARGV[1])
 if at == nil then return 0 end
 local g = fg_visible(KEYS[1], at)
-if g == nil or g['status'] ~= 'active' then return 0 end
+if g == nil then return 0 end
 local last = fg_num(g['lastUsedAt'])
 if last ~= nil and not (last < at) then return 0 end
 redis.call('HSET', KEYS[1], 'lastUsedAt', ARGV[1])

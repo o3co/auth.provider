@@ -242,6 +242,56 @@ describe("the intent pointer (#593, D16)", () => {
 	});
 });
 
+describe("the intent pointer of an authorized grant (#593, D2)", () => {
+	it("is retired only by the handle it holds: a consent refused for a superseded intent does not end the newer one", async () => {
+		await activeWithCredential();
+		await client.nameIntent(grantKey("g-1"), {
+			nowMs: at(DAY),
+			handle: JSON.stringify("h-re"),
+			intentExpiresAtMs: at(DAY + 10 * MIN),
+		});
+		expect(
+			await client.retireIntent(grantKey("g-1"), {
+				nowMs: at(DAY + MIN),
+				handle: JSON.stringify("h-superseded"),
+			}),
+		).toBeNull();
+		expect((await client.snapshot(grantKey("g-1"), credKey("g-1")))?.fields.intentHandle).toBe(
+			JSON.stringify("h-re"),
+		);
+		// Without a handle, whichever is current — a subject-wide revocation ends
+		// every renewal in flight (D13).
+		const retired = await client.retireIntent(grantKey("g-1"), { nowMs: at(DAY + MIN) });
+		expect(retired?.intentHandle).toBeUndefined();
+	});
+
+	it("cannot be activated once it has lapsed, even with the right handle", async () => {
+		await activeWithCredential();
+		await client.nameIntent(grantKey("g-1"), {
+			nowMs: at(DAY),
+			handle: JSON.stringify("h-re"),
+			intentExpiresAtMs: at(DAY + 10 * MIN),
+		});
+		expect(
+			await client.activate(grantKey("g-1"), credKey("g-1"), {
+				nowMs: at(DAY + 11 * MIN),
+				handle: JSON.stringify("h-re"),
+				authorization: authorization("renewed"),
+				expiresAtMs: at(60 * DAY),
+				identityRevision: "identity-1",
+				upstreamIssuer: "https://dev-1.okta.test",
+				upstreamSubject: "00u-alice",
+				credential: "v2.sealed-2",
+			}),
+		).toBeNull();
+		// A code exchanged for an intent that has lapsed leaves a refresh token
+		// at the upstream that nothing will use; the record is untouched.
+		const snapshot = await client.snapshot(grantKey("g-1"), credKey("g-1"));
+		expect(snapshot?.fields.version).toBe("2");
+		expect(snapshot?.credential).toBe("v2.sealed-1");
+	});
+});
+
 describe("touch (#593, D16)", () => {
 	it("moves the last use forward and never back", async () => {
 		await active();
@@ -650,6 +700,17 @@ describe("noteRefreshFailure (#593, D12)", () => {
 		expect((await client.snapshot(grantKey("g-1"), credKey("g-1")))?.fields.failureAt).toBe(
 			String(at(DAY)),
 		);
+	});
+
+	it("measures the row from the failure, and not from the clock of whoever reported it", async () => {
+		// A stamp that took ten minutes to arrive is still one failure after the
+		// last: the row is the distance between the two FAILURES. Measured from
+		// the caller's clock instead, a slow report would start the count again
+		// and the backoff a run of failures earns would never be reached (D12).
+		await activeWithCredential();
+		await stamp({ atMs: at(DAY) });
+		const late = await stamp({ atMs: at(DAY + 1_000), nowMs: at(DAY + 600_000) });
+		expect(late?.failureCount).toBe("2");
 	});
 
 	it("replaces the whole stamp: what the new one does not carry is gone", async () => {

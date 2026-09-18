@@ -186,6 +186,8 @@ interface Decoded {
 	/** The instant the record answers nothing from, on the caller's clock. */
 	readonly horizonMs: number;
 	readonly base: BaseFields;
+	/** The retention this record carries: what its own horizon is derived from. */
+	readonly retentionMs: number;
 	readonly authorization?: FederationGrantAuthorization;
 	/** The authorization text as stored, for the credential's authenticated data. */
 	readonly authorizationText?: string;
@@ -202,11 +204,22 @@ interface Decoded {
  * the keyspace could extend one. Doing that can make a key linger; it cannot
  * make a credential be disclosed past the expiry the upstream consented to.
  */
-function decode(fields: FederationGrantHashFields, retentionMs: number): Decoded | undefined {
+function decode(
+	fields: FederationGrantHashFields,
+	configuredRetentionMs: number,
+	/** The ID the record was looked up by. One that says it is another grant is not this grant's. */
+	grantId?: string,
+): Decoded | undefined {
 	if (fields.format !== "1") return undefined;
 	const base = parseBase(fields.base);
 	const version = numberFrom(fields.version);
 	if (base === undefined || version === undefined) return undefined;
+	if (grantId !== undefined && base.id !== grantId) return undefined;
+	// The retention the record carries, and not the one configured now: a key's
+	// TTL and an index score are written once, so the scripts go on using the
+	// persisted value, and a horizon read from a changed setting would hide a
+	// tombstone whose keys are still there (Codex).
+	const retentionMs = numberFrom(fields.retentionMs) ?? configuredRetentionMs;
 	const status = fields.status;
 	const revokedAt = dateFrom(fields.revokedAt);
 	const revokedBy = fields.revokedBy;
@@ -236,7 +249,14 @@ function decode(fields: FederationGrantHashFields, retentionMs: number): Decoded
 			version,
 			...(status === "pending" ? { status: "pending" as const } : revocation),
 		} as FederationGrant;
-		return { grant: pending, horizonMs, base, guardsAgree: true, ...(intent ? { intent } : {}) };
+		return {
+			grant: pending,
+			horizonMs,
+			base,
+			retentionMs,
+			guardsAgree: true,
+			...(intent ? { intent } : {}),
+		};
 	}
 
 	const authorization = parseCanonicalAuthorization(fields.authorization);
@@ -276,6 +296,7 @@ function decode(fields: FederationGrantHashFields, retentionMs: number): Decoded
 		grant,
 		horizonMs: authorization.expiresAt.getTime() + retentionMs,
 		base,
+		retentionMs,
 		authorization,
 		authorizationText: fields.authorization,
 		guardsAgree:
@@ -319,7 +340,12 @@ export function createRedisFederationGrantStore(
 		);
 	}
 	validateEncryptionMode("federation-grants", options.encryption.mode, options.guard ?? {});
-	const ring = options.encryption.mode === "required" ? options.encryption.keys : [];
+	// Copied, so a buffer the caller mutates after construction cannot change
+	// what this store opens — the ring is held for the store's whole life.
+	const ring: readonly FederationGrantKey[] =
+		options.encryption.mode === "required"
+			? options.encryption.keys.map((entry) => ({ id: entry.id, key: Buffer.from(entry.key) }))
+			: [];
 	if (options.encryption.mode === "required") {
 		if (ring.length === 0) {
 			throw new Error('federation grant store: mode "required" needs at least one encryption key');
@@ -338,9 +364,13 @@ export function createRedisFederationGrantStore(
 
 	const lock = createFederationGrantLock({ client, lockKey });
 
-	const aadFor = (decoded: Decoded, authorizationText: string): Buffer =>
+	const aadFor = (decoded: Decoded, authorizationText: string, grantId: string): Buffer =>
 		credentialAad({
-			credentialKey: credKey(decoded.base.id),
+			// The key this credential was READ from, never one rebuilt from what
+			// the record says its ID is: a HASH copied together with its
+			// ciphertext into another grant's keys would otherwise authenticate
+			// under the name it carries (Codex).
+			credentialKey: credKey(grantId),
 			id: decoded.base.id,
 			subject: decoded.base.subject,
 			clientId: decoded.base.clientId,
@@ -374,6 +404,7 @@ export function createRedisFederationGrantStore(
 		decoded: Decoded,
 		credential: string | null,
 		nowMs: number,
+		grantId: string,
 	):
 		| { state: "ok"; value: FederationGrantCredentials }
 		| { state: "absent" | "unreadable" | "key_unavailable" } => {
@@ -398,7 +429,7 @@ export function createRedisFederationGrantStore(
 				"utf8",
 			);
 		} else {
-			const opened = openSealedCredential(credential, ring, aadFor(decoded, text));
+			const opened = openSealedCredential(credential, ring, aadFor(decoded, text, grantId));
 			if (opened.state !== "ok") return { state: opened.state };
 			payload = opened.value;
 		}
@@ -417,19 +448,25 @@ export function createRedisFederationGrantStore(
 	): Promise<{ decoded: Decoded; credential: string | null } | null> => {
 		const snapshot = await client.snapshot(grantKey(grantId), credKey(grantId));
 		if (snapshot === null) return null;
-		const decoded = visible(decode(snapshot.fields, retentionMs), nowMs);
+		const decoded = visible(decode(snapshot.fields, retentionMs, grantId), nowMs);
 		return decoded === undefined ? null : { decoded, credential: snapshot.credential };
 	};
 
-	const written = (fields: FederationGrantHashFields | null): FederationGrantWrite => {
+	const written = (
+		fields: FederationGrantHashFields | null,
+		grantId: string,
+	): FederationGrantWrite => {
 		if (fields === null) return { ok: false };
-		const decoded = decode(fields, retentionMs);
+		const decoded = decode(fields, retentionMs, grantId);
 		return decoded === undefined ? { ok: false } : { ok: true, grant: decoded.grant };
 	};
 
 	/** The horizon a record will have once it is written, which is what its index member is reserved at. */
-	const horizonOf = (status: "pending" | "authorized" | "revoked", ms: number): number =>
-		status === "pending" ? ms : ms + retentionMs;
+	const horizonOf = (
+		status: "pending" | "authorized" | "revoked",
+		ms: number,
+		recordRetentionMs = retentionMs,
+	): number => (status === "pending" ? ms : ms + recordRetentionMs);
 
 	return {
 		kind: "redis",
@@ -463,6 +500,7 @@ export function createRedisFederationGrantStore(
 					intentExpiresAtMs,
 					retentionMs,
 				}),
+				input.id,
 			);
 		},
 
@@ -475,6 +513,7 @@ export function createRedisFederationGrantStore(
 					handle: input.intent.handle,
 					intentExpiresAtMs: input.intent.expiresAt.getTime(),
 				}),
+				input.grantId,
 			);
 		},
 
@@ -505,6 +544,7 @@ export function createRedisFederationGrantStore(
 					nowMs: instant(input.now, "now"),
 					...(input.handle !== undefined ? { handle: input.handle } : {}),
 				}),
+				input.grantId,
 			);
 		},
 
@@ -532,7 +572,7 @@ export function createRedisFederationGrantStore(
 						}
 						if (typeof id !== "string") return null;
 						const snapshot = await client.snapshot(grantKey(id), credKey(id));
-						return snapshot === null ? null : (decode(snapshot.fields, retentionMs) ?? null);
+						return snapshot === null ? null : (decode(snapshot.fields, retentionMs, id) ?? null);
 					}),
 				);
 				for (const decoded of read) {
@@ -552,7 +592,7 @@ export function createRedisFederationGrantStore(
 			const nowMs = instant(now, "now");
 			const found = await read(grantId, nowMs);
 			if (found === null) return null;
-			const opened = openCredential(found.decoded, found.credential, nowMs);
+			const opened = openCredential(found.decoded, found.credential, nowMs, grantId);
 			return { grant: found.decoded.grant, credentials: opened.state };
 		},
 
@@ -560,7 +600,7 @@ export function createRedisFederationGrantStore(
 			const nowMs = instant(now, "now");
 			const found = await read(grantId, nowMs);
 			if (found === null) return null;
-			const opened = openCredential(found.decoded, found.credential, nowMs);
+			const opened = openCredential(found.decoded, found.credential, nowMs, grantId);
 			return {
 				grant: found.decoded.grant,
 				credentials:
@@ -597,7 +637,7 @@ export function createRedisFederationGrantStore(
 			// every state again.
 			const snapshot = await client.snapshot(grantKey(input.grantId), credKey(input.grantId));
 			if (snapshot === null) return { ok: false };
-			const current = decode(snapshot.fields, retentionMs);
+			const current = decode(snapshot.fields, retentionMs, input.grantId);
 			if (current === undefined) return { ok: false };
 			const text = canonicalAuthorization(authorization);
 			const credential = seal(input.credentials, {
@@ -610,7 +650,7 @@ export function createRedisFederationGrantStore(
 			await client.reserve(
 				indexKey(current.base.subject),
 				member(current.base.id),
-				horizonOf("authorized", authorization.expiresAt.getTime()),
+				horizonOf("authorized", authorization.expiresAt.getTime(), current.retentionMs),
 				allowanceMs,
 			);
 			return written(
@@ -624,6 +664,7 @@ export function createRedisFederationGrantStore(
 					upstreamSubject: authorization.upstream.subject,
 					credential,
 				}),
+				input.grantId,
 			);
 		},
 
@@ -634,10 +675,16 @@ export function createRedisFederationGrantStore(
 			if (input.ineligible !== null && !isDate(input.ineligible.at)) return { ok: false };
 			const snapshot = await client.snapshot(grantKey(input.grantId), credKey(input.grantId));
 			if (snapshot === null) return { ok: false };
-			const current = decode(snapshot.fields, retentionMs);
+			const current = decode(snapshot.fields, retentionMs, input.grantId);
 			if (current === undefined || current.authorizationText === undefined) return { ok: false };
-			// Sealed under the authorization it already has, unchanged — which the
-			// version guard in the script is what makes true.
+			// The authorization this seals under must be the one the credential it
+			// replaces was sealed under. Otherwise a rewritten authorization —
+			// the expiry extended, the version left alone — would be turned by
+			// this write into one the store had signed for, and tampering that
+			// was being reported as unreadable would become authentic (Codex).
+			if (openCredential(current, snapshot.credential, nowMs, input.grantId).state !== "ok") {
+				return { ok: false };
+			}
 			const credential = seal(input.credentials, {
 				id: current.base.id,
 				subject: current.base.subject,
@@ -652,6 +699,7 @@ export function createRedisFederationGrantStore(
 					credential,
 					ineligible: input.ineligible === null ? null : encodeMarker(input.ineligible),
 				}),
+				input.grantId,
 			);
 		},
 
@@ -661,6 +709,7 @@ export function createRedisFederationGrantStore(
 					nowMs: instant(input.now, "now"),
 					expectedVersion: input.expectedVersion,
 				}),
+				input.grantId,
 			);
 		},
 
@@ -671,17 +720,20 @@ export function createRedisFederationGrantStore(
 			// reserved at the new one before the record says so.
 			const snapshot = await client.snapshot(grantKey(grantId), credKey(grantId));
 			if (snapshot === null) return { ok: false };
-			const current = decode(snapshot.fields, retentionMs);
+			const current = decode(snapshot.fields, retentionMs, grantId);
 			if (current === undefined) return { ok: false };
 			if (current.grant.status === "pending") {
 				await client.reserve(
 					indexKey(current.base.subject),
 					member(current.base.id),
-					horizonOf("revoked", atMs),
+					horizonOf("revoked", atMs, current.retentionMs),
 					allowanceMs,
 				);
 			}
-			return written(await client.revoke(grantKey(grantId), credKey(grantId), { atMs, by }));
+			return written(
+				await client.revoke(grantKey(grantId), credKey(grantId), { atMs, by }),
+				grantId,
+			);
 		},
 
 		async noteRefreshFailure(input) {
@@ -701,6 +753,7 @@ export function createRedisFederationGrantStore(
 						? { upstreamCode: input.failure.upstreamCode }
 						: {}),
 				}),
+				input.grantId,
 			);
 		},
 

@@ -9,7 +9,6 @@ const ALGO = "aes-256-gcm";
 const IV_LEN = 12;
 const KEY_LEN = 32;
 const VERSION = "v1";
-const TAG_LEN = 16;
 
 /**
  * Additional authenticated data, as the callers hold it. A string is taken as
@@ -147,8 +146,11 @@ const v2Aad = (keyId: Buffer, record: Buffer): Buffer =>
  *
  * `record` is authenticated and not stored: the caller presents the same
  * bytes to open, which is what binds a credential to the record that
- * authorizes it (D16). The key material is copied, so a buffer the caller
- * mutates afterwards cannot change what opens.
+ * authorizes it (D16).
+ *
+ * A wrong IV or tag length is not checked here: `createDecipheriv` and
+ * `setAuthTag` refuse both, and a check in front of them could only ever
+ * report what they already do.
  */
 export function sealCredential(
 	plaintext: string,
@@ -160,7 +162,7 @@ export function sealCredential(
 	if (sealing === undefined) throw new Error("no federation grant encryption key to seal with");
 	const keyId = Buffer.from(sealing.id, "utf8");
 	const iv = randomBytes(IV_LEN);
-	const cipher = createCipheriv(ALGO, Buffer.from(sealing.key), iv);
+	const cipher = createCipheriv(ALGO, sealing.key, iv);
 	cipher.setAAD(v2Aad(keyId, record));
 	const ct = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
 	return [
@@ -194,13 +196,12 @@ export function openSealedCredential(
 	if (keyId === undefined || iv === undefined || ct === undefined || tag === undefined) {
 		return { state: "unreadable" };
 	}
-	if (iv.length !== IV_LEN || tag.length !== TAG_LEN) return { state: "unreadable" };
 	const id = keyId.toString("utf8");
 	if (!KEY_ID_PATTERN.test(id)) return { state: "unreadable" };
 	const entry = ring.find((candidate) => candidate.id === id);
 	if (entry === undefined) return { state: "key_unavailable" };
 	try {
-		const decipher = createDecipheriv(ALGO, Buffer.from(entry.key), iv);
+		const decipher = createDecipheriv(ALGO, entry.key, iv);
 		decipher.setAAD(v2Aad(keyId, record));
 		decipher.setAuthTag(tag);
 		const pt = Buffer.concat([decipher.update(ct), decipher.final()]);

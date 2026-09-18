@@ -71,11 +71,17 @@ const lock = (client: { tryLock: unknown; unlock: unknown }) =>
 	});
 
 describe("the refresh lock over a connection (#593, D12)", () => {
-	it("takes it on the first attempt and says it waited nothing", async () => {
+	it("takes it on the first attempt and says it waited all but nothing", async () => {
+		// Not exactly zero, and not asserted to be: what is reported is what
+		// elapsed before the attempt was SENT, which on a loaded process is the
+		// millisecond or two this call itself took. That is honest — it is time
+		// the lease had not started for — and the rule that it excludes the
+		// ANSWER's travel is what the next case pins.
 		const { client, attempts } = stub([true]);
 		const taken = await lock(client).acquire("g-1", { ttlMs: 30_000, waitForMs: 5_000 });
 		expect(taken.acquired).toBe(true);
-		expect(taken.acquired && taken.waitedMs).toBe(0);
+		expect(taken.acquired && taken.waitedMs).toBeGreaterThanOrEqual(0);
+		expect(taken.acquired && taken.waitedMs).toBeLessThan(50);
 		expect(attempts).toHaveLength(1);
 		expect(attempts[0]?.ttlMs).toBe(30_000);
 	});
@@ -93,6 +99,25 @@ describe("the refresh lock over a connection (#593, D12)", () => {
 		// attempt's own 40 ms.
 		expect(result.waitedMs).toBeGreaterThanOrEqual(40);
 		expect(result.waitedMs).toBeLessThan(80);
+	});
+
+	it("rounds the wait DOWN to a whole millisecond: a lower bound is never overstated", async () => {
+		// One millisecond, and it is the direction that matters: `waitedMs` dates
+		// the lease at `askedAt + waitedMs`, so rounding up says the lease began
+		// later than it did — and core would let a refresh run past the end of an
+		// exclusion that had already lapsed.
+		const { client } = stub([false, true]);
+		const readings = [0, 10.7, 10.7, 10.7, 10.7];
+		let next = 0;
+		const held = createFederationGrantLock({
+			client: client as Parameters<typeof createFederationGrantLock>[0]["client"],
+			lockKey: () => "fg:{g-1}:lock",
+			pollIntervalMs: 0,
+			now: () => readings[Math.min(next++, readings.length - 1)] as number,
+		});
+		const result = await held.acquire("g-1", { ttlMs: 30_000, waitForMs: 5_000 });
+		expect(result.acquired).toBe(true);
+		expect(result.acquired && result.waitedMs).toBe(10);
 	});
 
 	it("hands over a lock it took, however late the answer came back", async () => {

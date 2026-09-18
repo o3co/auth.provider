@@ -30,6 +30,16 @@ export interface FederationGrantLockOptions {
 	readonly lockKey: (grantId: string) => string;
 	/** How long to leave between attempts. Default 25 ms. */
 	readonly pollIntervalMs?: number;
+	/**
+	 * The monotonic clock, in milliseconds. Default `performance.now`.
+	 *
+	 * A seam, and only for tests: what `waitedMs` rounds to, and which side of
+	 * the deadline an attempt falls on, are differences of one millisecond that
+	 * no test can produce on a real clock reliably — and the direction of the
+	 * rounding is the difference between a lease that is understated and one
+	 * that is overstated.
+	 */
+	readonly now?: () => number;
 }
 
 const DEFAULT_POLL_INTERVAL_MS = 25;
@@ -75,6 +85,7 @@ export function createFederationGrantLock(options: FederationGrantLockOptions): 
 } {
 	const { client, lockKey } = options;
 	const pollIntervalMs = options.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+	const now = options.now ?? (() => performance.now());
 
 	return {
 		async acquire(grantId, { ttlMs, waitForMs }) {
@@ -90,14 +101,14 @@ export function createFederationGrantLock(options: FederationGrantLockOptions): 
 			const key = lockKey(grantId);
 			// Rounded up: a fractional millisecond would be a TTL of nothing.
 			const ttl = Math.ceil(ttlMs);
-			const startedAt = performance.now();
+			const startedAt = now();
 			const deadline = startedAt + waitForMs;
 			for (;;) {
 				const token = randomBytes(TOKEN_BYTES).toString("base64url");
 				// Rounded DOWN to a whole millisecond, as the reference adapter's
 				// clock difference already is. Down, because this is a lower bound:
 				// rounding up would date the lease later than it began.
-				const waitedMs = Math.floor(performance.now() - startedAt);
+				const waitedMs = Math.floor(now() - startedAt);
 				if (await client.tryLock(key, token, ttl)) {
 					let releasing: Promise<void> | undefined;
 					return {
@@ -114,13 +125,14 @@ export function createFederationGrantLock(options: FederationGrantLockOptions): 
 						},
 					};
 				}
-				// The deadline is looked at BEFORE every further attempt, and the
-				// wait never runs past it: a lock released between the deadline and
-				// the next attempt is not taken, since the caller has given up.
-				const remaining = deadline - performance.now();
-				if (remaining <= 0) return { acquired: false, reason: "timeout" };
-				await sleep(Math.min(pollIntervalMs, remaining));
-				if (performance.now() >= deadline) return { acquired: false, reason: "timeout" };
+				// The deadline is looked at before every further attempt is SENT: a
+				// lock released between the deadline and the next attempt is not
+				// taken, since the caller has given up by then. One check, after
+				// the wait — a second one in front of it could only refuse what
+				// this one refuses a turn of the event loop later.
+				const remaining = deadline - now();
+				await sleep(Math.max(0, Math.min(pollIntervalMs, remaining)));
+				if (now() >= deadline) return { acquired: false, reason: "timeout" };
 			}
 		},
 	};

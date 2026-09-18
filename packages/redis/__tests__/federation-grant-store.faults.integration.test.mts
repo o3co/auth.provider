@@ -247,6 +247,50 @@ describe("a field someone edited (#593, D16)", () => {
 	});
 });
 
+describe("what the port may disclose (#593, D1, D16)", () => {
+	it("hands out nothing for a grant that is not active, even with a credential still resident", async () => {
+		// Every transition away from `active` deletes the credential, so this
+		// cannot arise from the store. The status is checked all the same: a
+		// transition that one day forgot the delete must still disclose nothing.
+		const held = await activated();
+		const sealed = (await redis.get(key("g-1", "cred"))) as string;
+		await held.requireReauthorization({ grantId: "g-1", expectedVersion: 2, now: at(DAY) });
+		await redis.set(key("g-1", "cred"), sealed);
+		const opened = await held.open("g-1", at(DAY));
+		expect(opened?.grant.status).toBe("reauthorization_required");
+		expect(opened?.credentials.state).toBe("absent");
+		expect((await held.inspect("g-1", at(DAY)))?.credentials).toBe("absent");
+	});
+
+	it("says a credential that is there and empty does not open, rather than that there is none", async () => {
+		// An empty value is not something this store writes. Reporting it as
+		// absent would read as "this grant never had one"; it has one, and it
+		// does not open.
+		const held = await activated();
+		await redis.set(key("g-1", "cred"), "");
+		expect((await held.open("g-1", at(DAY)))?.credentials.state).toBe("unreadable");
+	});
+
+	it("answers from the authenticated text even where the arithmetic field says otherwise", async () => {
+		// `expiresAtMs` is a copy the scripts compare. Rewritten to the past, it
+		// must not make the record read as expired: what the upstream consented
+		// to is in the authenticated text, and that is what a caller is told.
+		const held = await activated();
+		// Far enough back that even with the retention added it is long past: a
+		// horizon read from this field would put the record out of reach.
+		await redis.hset(key("g-1", "grant"), "expiresAtMs", String(at(-60 * DAY).getTime()));
+		const found = await held.find("g-1", at(DAY));
+		expect(found?.status).toBe("active");
+		expect(
+			hasFederationGrantAuthorization(found as never) &&
+				(found as { expiresAt: Date }).expiresAt.getTime(),
+		).toBe(at(30 * DAY).getTime());
+		expect((await held.listBySubject("u-1", at(DAY))).map((grant) => grant.id)).toStrictEqual([
+			"g-1",
+		]);
+	});
+});
+
 describe("a credential from somewhere else (#593, D16)", () => {
 	it("does not open under another grant, another subject's record, or another prefix", async () => {
 		const first = await activated("g-1");
@@ -254,6 +298,54 @@ describe("a credential from somewhere else (#593, D16)", () => {
 		const sealed = (await redis.get(key("g-2", "cred"))) as string;
 		await redis.set(key("g-1", "cred"), sealed);
 		expect((await first.open("g-1", at(DAY)))?.credentials.state).toBe("unreadable");
+	});
+
+	it("does not answer a record found under another grant's key, ciphertext and all (Codex on #593)", async () => {
+		// The whole record copied, not just the secret: the authenticated data
+		// names the credential's key, so a copied ciphertext alone fails. Copied
+		// TOGETHER with the HASH that names it, it would authenticate if the key
+		// in the authenticated data were rebuilt from the record's own `base.id`
+		// rather than from the key actually read — and `open("g-target")` would
+		// hand back another grant's record and credential as `ok`, while core
+		// took its refresh lock on the ID it asked for.
+		const held = await activated("g-source");
+		const fields = await redis.hgetall(key("g-source", "grant"));
+		const sealed = (await redis.get(key("g-source", "cred"))) as string;
+		await redis.hset(key("g-target", "grant"), fields);
+		await redis.set(key("g-target", "cred"), sealed);
+		expect(await held.open("g-target", at(DAY))).toBeNull();
+		expect(await held.find("g-target", at(DAY))).toBeNull();
+		expect(await held.inspect("g-target", at(DAY))).toBeNull();
+		// And the grant it was copied from is untouched.
+		expect((await held.open("g-source", at(DAY)))?.credentials.state).toBe("ok");
+	});
+
+	it("does not re-seal a credential under an authorization it cannot authenticate the old one against (Codex on #593)", async () => {
+		// A refresh seals the new credential under the authorization it read. If
+		// that text was rewritten in the keyspace — the expiry extended, the
+		// version left alone — the old ciphertext no longer authenticates under
+		// it, and re-sealing would turn tampering that was detected into an
+		// authorization this store had signed for.
+		const held = await activated("g-1");
+		const forged = JSON.parse(
+			(await redis.hget(key("g-1", "grant"), "authorization")) as string,
+		) as unknown[];
+		forged[10] = String(at(365 * DAY).getTime());
+		await redis.hset(key("g-1", "grant"), {
+			authorization: JSON.stringify(forged),
+			expiresAtMs: String(at(365 * DAY).getTime()),
+		});
+		const sealed = await redis.get(key("g-1", "cred"));
+		expect(
+			await held.replaceCredentials({
+				grantId: "g-1",
+				expectedVersion: 2,
+				credentials: credentials("2"),
+				ineligible: null,
+				now: at(DAY),
+			}),
+		).toStrictEqual({ ok: false });
+		expect(await redis.get(key("g-1", "cred"))).toBe(sealed);
 	});
 
 	it("does not open for a store whose key ring no longer holds the key that sealed it, and opens again when it does", async () => {
@@ -351,6 +443,26 @@ describe("the subject index against what `find` answers (#593, D16)", () => {
 	});
 });
 
+describe("a retention that was changed under existing grants (#593, D16, Codex)", () => {
+	it("keeps answering for a tombstone from the retention its record was created with", async () => {
+		// A key's TTL and an index score are written once, so the scripts go on
+		// using the retention the record carries. Decoding it under the new
+		// setting instead would hide a tombstone whose keys are still there.
+		await activated("g-1");
+		const reopened = createRedisFederationGrantStore({
+			client: makeIoredisFederationGrantStoreClient(redis),
+			keyPrefix: prefix,
+			encryption: { mode: "required", keys: [KEY_A] },
+			tombstoneRetentionMs: 0,
+		});
+		const past = at(31 * DAY);
+		expect((await reopened.find("g-1", past))?.status).toBe("active");
+		expect((await reopened.listBySubject("u-1", past)).map((grant) => grant.id)).toStrictEqual([
+			"g-1",
+		]);
+	});
+});
+
 describe("two clocks (#593, D16)", () => {
 	it("tells a caller whose clock is far ahead nothing, and reclaims nothing on its behalf", async () => {
 		const held = await activated("g-1");
@@ -365,6 +477,40 @@ describe("two clocks (#593, D16)", () => {
 			at(30 * DAY).getTime(),
 		);
 		expect((await held.find("g-1", at(DAY)))?.status).toBe("active");
+		// And the index was not pruned on its behalf either: a listing prunes on
+		// the adapter's own clock, so a caller in the far future cannot take the
+		// members every other caller still needs.
+		expect((await held.listBySubject("u-1", at(DAY))).map((grant) => grant.id)).toStrictEqual([
+			"g-1",
+		]);
+	});
+});
+
+describe("the ring after construction (#593, D16)", () => {
+	it("is not changed by the buffer the caller handed over", async () => {
+		const mutable = Buffer.alloc(32, 7);
+		const held = createRedisFederationGrantStore({
+			client: makeIoredisFederationGrantStoreClient(redis),
+			keyPrefix: prefix,
+			encryption: { mode: "required", keys: [{ id: "k-m", key: mutable }] },
+		});
+		await held.createPending({
+			id: "g-1",
+			subject: "u-1",
+			clientId: "agent",
+			connection: "okta-calendar",
+			intent: { handle: "h-g-1", expiresAt: at(10 * MIN) },
+			now: T0,
+		});
+		await held.activate({
+			grantId: "g-1",
+			intentHandle: "h-g-1",
+			authorization: authorization(),
+			credentials: credentials(),
+			now: at(2 * MIN),
+		});
+		mutable.fill(8);
+		expect((await held.open("g-1", at(DAY)))?.credentials.state).toBe("ok");
 	});
 });
 

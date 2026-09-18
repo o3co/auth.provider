@@ -1469,6 +1469,26 @@ were written by this store. The envelope binds a credential to the
 authorization it was sealed under — it does not make the keyspace
 append-only.
 
+Two rules make the binding hold where the envelope alone would not, and an
+adapter that skips either is broken in a way its tests will not show:
+
+- **A record is answered only under the ID it says it is.** A HASH copied
+  together with its ciphertext into another grant's keys authenticates
+  perfectly well — everything the authenticated data names travelled with it.
+  So a record read under one key that names another grant is not that grant's
+  record and is answered as absent, and the authenticated data is computed
+  from the key the credential was *read from* rather than one rebuilt from
+  what the record says. Without this, `open(other)` hands back one grant's
+  record and credential while the caller locks the ID it asked for, and
+  refresh exclusion is gone.
+- **A credential is re-sealed only under an authorization the credential it
+  replaces authenticates against.** A refresh seals the new credential under
+  the authorization it read. If that text was rewritten in the keyspace — the
+  expiry extended, the `version` left alone — re-sealing would turn tampering
+  that was being reported as unreadable into an authorization this store had
+  signed for. So the existing credential is opened first, and a refresh whose
+  record no longer authenticates is refused.
+
 The fields the scripts compare — the authorization's `expiresAt`, the
 identity revision and the upstream account — are repeated outside the
 authenticated text, because a script cannot read the sealed text without
