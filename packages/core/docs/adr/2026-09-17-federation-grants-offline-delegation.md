@@ -830,19 +830,29 @@ reuse-detecting IdP answers by revoking the family.
     the package calls at boot (slice 4), requires
     `upstreamHardTimeoutMs + persistRetryBudgetMs + 1 s <= refreshLockTtlMs`
     (defaults 25 s + 3 s + 1 s <= 30 s). The second is a margin: the lease is
-    counted from when the acquisition was acknowledged, which is after the
-    store started the lock's TTL, and timers fire late, so a configuration
-    that fits by a millisecond does not fit. All three are this provider's
+    counted from a lower bound on when the store started the TTL, and timers
+    fire late, so a configuration that fits by a millisecond does not fit. All
+    three are this provider's
     configuration; nothing depends on an adapter's internals. It validates
     every other limit of the retrieval too — NaN compares as fine everywhere,
     and a NaN retry interval switches the marker's limit off.
 - After acquiring the lock the record is re-read; another replica may have
   refreshed already.
-- The lease has one clock, started when the lock is acquired. Every deadline
+- The lease has one clock, started when the store TOOK the lock: when the
+  lock was asked for, plus how long the store says it waited before it took
+  it (`waitedMs` in the lock's reply — a duration, so that it means the same
+  on the caller's clock as on the store's). Not when the acquisition was
+  acknowledged: an acknowledgement that took a second would overstate what
+  is left of the lock by that second, and a slow enough one lets a second
+  holder in while the first still refreshes — two refreshes presenting one
+  refresh token, which is what the lock exists to prevent. Every deadline
   counts from there and not from the upstream call: what a call spends under
   the lock before it asks the upstream — the re-read above — is spent of the
   same lease, and an inequality between configured durations bounds nothing
-  if each of them starts when it likes.
+  if each of them starts when it likes. A store whose reply does not say how
+  long it waited, or says it waited longer than the whole round trip, is not
+  one to run a refresh on: the lock is let go of and the caller is told
+  `storage`.
 - The upstream is not asked at all once that re-read has used up the soft
   deadline — or more: the whole lease, when a read hung through a store
   failover. A rotation started then is one nobody waits for, run toward a

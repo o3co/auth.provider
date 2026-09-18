@@ -487,6 +487,7 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				await new Promise((resolve) => setTimeout(resolve, 20_000));
 				return {
 					acquired: true,
+					waitedMs: 0,
 					release: async () => {
 						throw new Error("the store lost the connection");
 					},

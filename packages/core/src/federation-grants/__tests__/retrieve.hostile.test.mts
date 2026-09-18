@@ -107,6 +107,92 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			expect(await lockIsFree(h)).toBe(true);
 		});
 
+		it("counts the lease from when the store STARTED the TTL, not from when it acknowledged the lock: an acknowledgement that came late has spent the lease already", async () => {
+			// The store took the lock seven seconds before its answer arrived, and
+			// the look under the lock takes four more: eleven of the lease are gone,
+			// and the caller's ten with them. Counted from the acknowledgement, only
+			// four would be, and the upstream would be asked.
+			await h.seed();
+			setNow(DUE);
+			const real = h.store.acquireRefreshLock.bind(h.store);
+			vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async (id, options) => {
+				const lock = await real(id, options);
+				await new Promise((resolve) => setTimeout(resolve, 7_000));
+				return lock;
+			});
+			slowLookUnderLock(4_000);
+			h.refresh.mockResolvedValue(refreshed("rotated", DUE));
+			const reported: string[] = [];
+			h.deps.report = (failure) => reported.push(failure.during);
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(11_000);
+			expect(await answer).toStrictEqual({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "storage",
+			});
+			expect(reported).toEqual(["refresh"]);
+			expect(h.refresh).not.toHaveBeenCalled();
+			await Promise.all(h.background);
+			expect(await lockIsFree(h)).toBe(true);
+		});
+
+		it("aborts the upstream at the hard deadline counted from the lease's start", async () => {
+			await h.seed();
+			setNow(DUE);
+			const real = h.store.acquireRefreshLock.bind(h.store);
+			vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async (id, options) => {
+				const lock = await real(id, options);
+				await new Promise((resolve) => setTimeout(resolve, 5_000));
+				return lock;
+			});
+			let aborted = false;
+			h.refresh.mockImplementation(
+				({ signal }) =>
+					new Promise((_, reject) => {
+						signal?.addEventListener("abort", () => {
+							aborted = true;
+							reject(new Error("aborted"));
+						});
+					}),
+			);
+			const answer = retrieve();
+			// Five seconds until the lock is acknowledged, then the caller's wait:
+			// ten seconds of the lease, five of which were gone.
+			await vi.advanceTimersByTimeAsync(10_000);
+			expect(await answer).toMatchObject({ code: "temporarily_unavailable", reason: "upstream" });
+			// The hard deadline: twenty-five of the lease, twenty from here.
+			await vi.advanceTimersByTimeAsync(14_999);
+			expect(aborted).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(aborted).toBe(true);
+			await Promise.all(h.background);
+		});
+
+		it("refuses a lease it cannot date — a wait that is not a number, negative, or longer than the whole round trip — and lets go of the lock: a refresh does not run on a lease of unknown length", async () => {
+			await h.seed();
+			setNow(DUE);
+			h.refresh.mockResolvedValue(refreshed("rotated", DUE));
+			for (const waitedMs of [Number.NaN, "0" as unknown as number, -1, 1]) {
+				const real = h.store.acquireRefreshLock.bind(h.store);
+				vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async (id, options) => {
+					const lock = await real(id, options);
+					return lock.acquired ? { ...lock, waitedMs } : lock;
+				});
+				const reported: string[] = [];
+				h.deps.report = (failure) => reported.push(failure.during);
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				expect(reported).toEqual(["lock"]);
+				await Promise.all(h.background);
+				expect(await lockIsFree(h)).toBe(true);
+			}
+			expect(h.refresh).not.toHaveBeenCalled();
+		});
+
 		it("does not ask it after the lock itself has run out, when another replica may be asking", async () => {
 			await h.seed();
 			setNow(DUE);
@@ -452,7 +538,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				const lock = await real(id, options);
 				if (!lock.acquired) return lock;
 				return {
-					acquired: true,
+					...lock,
 					release: async () => {
 						await new Promise((resolve) => setTimeout(resolve, 20_000));
 						await lock.release();
@@ -512,7 +598,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			const real = h.store.acquireRefreshLock.bind(h.store);
 			vi.spyOn(h.store, "acquireRefreshLock").mockImplementation(async (id, options) => {
 				const lock = await real(id, options);
-				return lock.acquired ? { acquired: true, release: () => new Promise(() => {}) } : lock;
+				return lock.acquired ? { ...lock, release: () => new Promise(() => {}) } : lock;
 			});
 			const reported: Array<{ during: string }> = [];
 			h.deps.report = (failure) => reported.push(failure);
@@ -576,6 +662,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				});
 				return {
 					acquired: true,
+					waitedMs: 0,
 					release: () => new Promise((resolve) => setTimeout(resolve, 20_000)),
 				};
 			});

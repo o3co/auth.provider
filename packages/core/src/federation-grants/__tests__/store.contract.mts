@@ -2025,6 +2025,33 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				if (second.acquired) await second.release();
 			});
 
+			it("tells the holder how long it waited before it TOOK the lock: a duration, so that the holder can date the lease on its own clock", async () => {
+				// The holder counts every deadline from when it asked plus this (D12).
+				// Counting from the acknowledgement instead overstates what is left of
+				// the TTL by however long the acknowledgement took, and a slow one
+				// lets a second holder in while the first still refreshes.
+				const lock = await store.acquireRefreshLock("g-1", HELD);
+				if (!lock.acquired) throw new Error("fixture: the acquire failed");
+				expect(lock.waitedMs).toBeGreaterThanOrEqual(0);
+				expect(lock.waitedMs).toBeLessThan(50);
+				await lock.release();
+			});
+
+			it("counts the wait for a lock that was held: not less than the time until it was released", async () => {
+				const first = await store.acquireRefreshLock("g-1", HELD);
+				if (!first.acquired) throw new Error("fixture: the first acquire failed");
+				const asked = Date.now();
+				const waiting = store.acquireRefreshLock("g-1", { ttlMs: 120_000, waitForMs: 15_000 });
+				await sleep(150);
+				const released = Date.now();
+				await first.release();
+				const second = await waiting;
+				if (!second.acquired) throw new Error("fixture: the waiter did not get the lock");
+				expect(second.waitedMs).toBeGreaterThanOrEqual(released - asked - 50);
+				expect(second.waitedMs).toBeLessThanOrEqual(Date.now() - asked);
+				await second.release();
+			});
+
 			it("keeps grants apart", async () => {
 				const first = await store.acquireRefreshLock("g-1", HELD);
 				const other = await store.acquireRefreshLock("g-2", HELD);

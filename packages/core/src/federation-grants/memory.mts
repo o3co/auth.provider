@@ -259,12 +259,16 @@ export function createMemoryFederationGrantStore(
 		return { ok: true, grant: structuredClone(grant) };
 	};
 
-	const tryLock = (grantId: string, ttlMs: number): symbol | null => {
+	const tryLock = (
+		grantId: string,
+		ttlMs: number,
+	): { readonly token: symbol; readonly startedAt: number } | null => {
 		const held = locks.get(grantId);
-		if (held !== undefined && held.expiresAt > Date.now()) return null;
+		const startedAt = Date.now();
+		if (held !== undefined && held.expiresAt > startedAt) return null;
 		const token = Symbol("federation-grant-refresh-lock");
-		locks.set(grantId, { expiresAt: Date.now() + ttlMs, token });
-		return token;
+		locks.set(grantId, { expiresAt: startedAt + ttlMs, token });
+		return { token, startedAt };
 	};
 
 	return {
@@ -513,9 +517,10 @@ export function createMemoryFederationGrantStore(
 			if (!Number.isFinite(waitForMs) || waitForMs < 0) {
 				throw new RangeError("acquireRefreshLock: waitForMs must be a non-negative finite number");
 			}
-			const deadline = Date.now() + waitForMs;
-			let token = tryLock(grantId, ttlMs);
-			while (token === null) {
+			const askedAt = Date.now();
+			const deadline = askedAt + waitForMs;
+			let taken = tryLock(grantId, ttlMs);
+			while (taken === null) {
 				// The deadline is looked at BEFORE every further try, and the wait
 				// never runs past it: a lock released between the deadline and the
 				// next poll is not taken, since the caller has given up by then.
@@ -525,11 +530,12 @@ export function createMemoryFederationGrantStore(
 					setTimeout(resolve, Math.min(LOCK_POLL_INTERVAL_MS, remaining)),
 				);
 				if (Date.now() >= deadline) return { acquired: false, reason: "timeout" };
-				token = tryLock(grantId, ttlMs);
+				taken = tryLock(grantId, ttlMs);
 			}
-			const held = token;
+			const held = taken.token;
 			return {
 				acquired: true,
+				waitedMs: taken.startedAt - askedAt,
 				release: async () => {
 					// Only while it is still this holder's: past the TTL another
 					// caller may hold the lock, and that one is not ours to free.

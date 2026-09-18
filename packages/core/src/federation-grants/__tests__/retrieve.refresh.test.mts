@@ -1049,8 +1049,10 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			let readings = 0;
 			h.deps.now = () => {
 				readings += 1;
-				// The seventh reading is the worker's first.
-				if (readings === 7) throw new Error("clock bug");
+				// The eighth reading is the worker's first: two for each of the two
+				// looks, one before the lock is asked for, one when it is acknowledged,
+				// and one when the upstream is about to be asked.
+				if (readings === 8) throw new Error("clock bug");
 				return now();
 			};
 			expect(await retrieve()).toStrictEqual({
@@ -1076,7 +1078,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			vi.spyOn(h.store, "acquireRefreshLock").mockImplementation(async (id, options) => {
 				const lock = await real(id, options);
 				return lock.acquired
-					? { acquired: true, release: () => Promise.reject(new Error("redis down")) }
+					? { ...lock, release: () => Promise.reject(new Error("redis down")) }
 					: lock;
 			});
 			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1" });

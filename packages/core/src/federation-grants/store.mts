@@ -316,7 +316,21 @@ export interface FederationGrantOpened {
 }
 
 export type FederationGrantLockResult =
-	| { readonly acquired: true; readonly release: () => Promise<void> }
+	| {
+			readonly acquired: true;
+			/**
+			 * How long the store waited for the lock before it TOOK it, in
+			 * milliseconds: `0` for one taken at once. A duration, not an instant,
+			 * so that it means the same on the caller's clock as on the store's.
+			 * The holder counts every deadline from when it asked plus this (D12),
+			 * never from when the acquisition was acknowledged — an acknowledgement
+			 * that took a second would otherwise overstate what is left of the lock
+			 * by that second, and a slow enough one lets a second holder in while
+			 * the first still refreshes.
+			 */
+			readonly waitedMs: number;
+			readonly release: () => Promise<void>;
+	  }
 	| { readonly acquired: false; readonly reason: "timeout" };
 
 // ---------------------------------------------------------------------------

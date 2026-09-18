@@ -136,9 +136,10 @@ export interface FederationGrantRetrievalLimits {
 
 /**
  * What a refresh that keeps to its deadlines must still leave of its lock. The
- * lease is counted from when the acquisition was ACKNOWLEDGED, which is after
- * the store started the lock's TTL; and timers fire late. Without a margin, a
- * configuration that fits by a millisecond does not fit.
+ * lease is counted from when the lock was asked for plus what the store says
+ * it waited — a lower bound on when the TTL began, since the store took the
+ * lock some time after the caller asked — and timers fire late. Without a
+ * margin, a configuration that fits by a millisecond does not fit.
  */
 export const FEDERATION_GRANT_REFRESH_LOCK_MARGIN_MS = 1_000;
 
@@ -1214,6 +1215,7 @@ async function refresh(
 	deps: RetrieveFederationGrantTokenDeps,
 	request: RetrieveFederationGrantTokenRequest,
 ): Promise<FederationGrantTokenResult> {
+	const askedAt = deps.now().getTime();
 	const asking = settle(() =>
 		deps.store.acquireRefreshLock(request.grantId, {
 			ttlMs: deps.limits.refreshLockTtlMs,
@@ -1249,15 +1251,33 @@ async function refresh(
 	// persisted into an outage.
 	const release = (): Promise<void> => letGo(deps, request, lock);
 
+	// The lease has one clock. It starts when the store TOOK the lock — when it
+	// was asked for, plus what the store waited — which is before the store
+	// answered. Every deadline counts from there: what this call spends under
+	// the lock before it asks the upstream is spent of the same lease (D12), and
+	// so is however long the acknowledgement took. A store that cannot say how
+	// long it waited, or says it waited longer than the whole round trip, is not
+	// one to run a refresh on: the lock is let go of, and the caller is told the
+	// store failed.
+	const acknowledgedAt = deps.now().getTime();
+	const waitedMs: unknown = lock.waitedMs;
+	if (typeof waitedMs !== "number" || !(waitedMs >= 0) || !(askedAt + waitedMs <= acknowledgedAt)) {
+		handOver(deps, request, release());
+		report(
+			deps,
+			request,
+			"lock",
+			new Error("the store did not say how long it waited for the lock"),
+		);
+		const denial = unavailable("storage");
+		return conclude(deps, request, { kind: "deny", denial }, false, denial);
+	}
+	const leaseStartedAt = askedAt + waitedMs;
+
 	let held: Extract<Evaluation, { kind: "refresh" }>;
 	let refresher: FederationGrantRefresher;
-	let leaseStartedAt: number;
 	let startedAt: number;
 	try {
-		// The lease has one clock, started here. Every deadline counts from it:
-		// what this call spends under the lock before it asks the upstream is
-		// spent of the same lease (D12).
-		leaseStartedAt = deps.now().getTime();
 		const again = await evaluate(deps, request);
 		if (again.kind !== "refresh") {
 			// Another replica refreshed already, or the grant ended meanwhile.
