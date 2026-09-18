@@ -46,6 +46,8 @@ import {
 
 /** Fifteen seconds before the seeded token runs out: inside the refresh buffer. */
 const DUE = at(HOUR - 15_000);
+/** The seeded token has just run out: nothing that is stored serves a request any more. */
+const GONE = at(HOUR);
 
 interface Deferred<T> {
 	readonly promise: Promise<T>;
@@ -288,9 +290,6 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			["scopes beyond the consent", { scope: "openid files.readwrite" }, "scope_exceeded"],
 		];
 
-		/** The stored token has just run out: nothing is left that a refresh could keep. */
-		const GONE = at(HOUR);
-
 		for (const [what, over, reason] of cases) {
 			it(`${what}: the rotated refresh token is kept, the access token is never written, and a marker is left`, async () => {
 				await h.seed();
@@ -357,7 +356,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 
 		it("answers 503 when the mark cannot be written, and what is there when it lost to another write", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			const rejected = Object.assign(new Error("x"), { error: "invalid_grant" });
 			h.refresh.mockRejectedValue(rejected);
 			const mark = vi
@@ -392,7 +391,8 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			[
 				"an error code this provider knows",
 				Object.assign(new Error("x"), { error: "invalid_client", status: 401 }),
-				{ code: "upstream_rejected", reason: "invalid_client" },
+				// A refusal is remembered at once (D12): the wait is what the stamp says.
+				{ code: "upstream_rejected", reason: "invalid_client", retryAfterSeconds: 300 },
 			],
 			// An upstream that echoes what it was sent, in the one field that gets
 			// echoed on: not a code, so not repeated.
@@ -407,12 +407,13 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 					status: 429,
 					response: new Response(null, { status: 429, headers: { "retry-after": "17" } }),
 				}),
-				{ code: "rate_limited", reason: "upstream", retryAfterSeconds: 17 },
+				// The advice is honoured for the backoff at least: thirty seconds.
+				{ code: "rate_limited", reason: "upstream", retryAfterSeconds: 30 },
 			],
 			[
 				"a rate limit without",
 				Object.assign(new Error("x"), { status: 429 }),
-				{ code: "rate_limited", reason: "upstream" },
+				{ code: "rate_limited", reason: "upstream", retryAfterSeconds: 30 },
 			],
 			[
 				"an outage",
@@ -425,10 +426,10 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			"changes nothing in the record for anything else — %s",
 			async (_, error, denial) => {
 				const grant = await h.seed();
-				setNow(DUE);
+				setNow(GONE);
 				h.refresh.mockRejectedValueOnce(error);
 				expect(await retrieve()).toStrictEqual({ ok: false, ...denial });
-				expect(await h.store.open("g-1", DUE)).toMatchObject({
+				expect(await h.store.open("g-1", GONE)).toMatchObject({
 					grant: { status: "active", version: grant.version },
 					credentials: { state: "ok", value: { refreshToken: SECRET } },
 				});
@@ -544,7 +545,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			});
 		});
 
-		it("what replaced this call's write is judged as somebody else's: one that would be refreshed is not answered as this call's own, and the reason says what happened", async () => {
+		it("what replaced this call's write is judged as somebody else's: one that does not serve the request is not answered, and the reason says what happened", async () => {
 			await h.seed();
 			setNow(DUE);
 			await h.store.nameIntent({
@@ -574,10 +575,11 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 						accessToken: {
 							value: "at-renewed",
 							tokenType: "Bearer",
-							// Fifty minutes old already: ten are left, and twenty are asked.
+							// Half spent already, and narrower than what this request
+							// asserts: one the look would refresh.
 							obtainedAt: new Date(moment.getTime() - 50 * MIN),
 							issuedLifetime: 3600,
-							scopes: [...SCOPES],
+							scopes: ["openid"],
 						},
 					},
 					now: moment,
@@ -586,7 +588,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			});
 			// A call refreshes once. What it wrote was replaced before its last look
 			// (D11): that is what it says, and not that the upstream failed it.
-			expect(await retrieve({ minTtlSeconds: 1200 })).toStrictEqual({
+			expect(await retrieve({ scope: ["calendar.read"] })).toStrictEqual({
 				ok: false,
 				code: "temporarily_unavailable",
 				reason: "concurrent_update",
@@ -628,7 +630,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 
 		it("answers concurrent_update when what won left nothing to answer with", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			h.refresh.mockResolvedValue(refreshed("fetched", DUE));
 			// The guarded write is refused, and nothing else has changed: the stored
 			// token is still the one that had run down.
@@ -664,7 +666,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 
 		it("answers lock_timeout when the holder is still at it, and asks the upstream nothing", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			pendingUpstream();
 			const first = retrieve();
 			await vi.advanceTimersByTimeAsync(50);
@@ -717,7 +719,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 
 		it("answers 503 when the lock cannot be asked for", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			vi.spyOn(h.store, "acquireRefreshLock").mockRejectedValue(new Error("redis down"));
 			expect(await retrieve()).toStrictEqual({
 				ok: false,
@@ -731,7 +733,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 	describe("a slow upstream must not cost users their grants (D12)", () => {
 		it("answers the caller at the soft deadline, and persists the late result all the same", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			const call = pendingUpstream();
 			const answer = retrieve();
 			await vi.advanceTimersByTimeAsync(limits.upstreamTimeoutMs);
@@ -792,9 +794,9 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			expect((await stored())?.refreshToken).toBe(SECRET);
 		});
 
-		it("counts every deadline from the moment the lock was acquired: what the call spends under the lock is spent of the same lease", async () => {
+		it("counts every deadline from the moment the store took the lock: what the call spends under the lock is spent of the same lease", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			// The look under the lock is slow: four seconds for the boundary.
 			let reads = 0;
 			h.deps.grantsBoundary = async () => {
@@ -819,7 +821,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 	describe("a replacement that cannot be persisted (D12)", () => {
 		it("is retried inside the lock, within a budget, and then answered as a storage outage", async () => {
 			const grant = await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			h.refresh.mockResolvedValue(refreshed("1", DUE));
 			const write = vi
 				.spyOn(h.store, "replaceCredentials")
@@ -872,7 +874,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 
 		it("does not wait for a write that hangs past the budget", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			h.refresh.mockResolvedValue(refreshed("1", DUE));
 			vi.spyOn(h.store, "replaceCredentials").mockReturnValue(new Promise(() => {}));
 
@@ -1042,15 +1044,17 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 
 		it("answers 503, says so to the logger, and leaves the lock to run out when the worker itself fails: the upstream may have been asked", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			h.refresh.mockResolvedValue(refreshed("1", DUE));
 			const reported: Array<{ during: string }> = [];
 			h.deps.report = (failure) => reported.push(failure);
 			let readings = 0;
 			h.deps.now = () => {
 				readings += 1;
-				// The seventh reading is the worker's first.
-				if (readings === 7) throw new Error("clock bug");
+				// The eighth reading is the worker's first: two for each of the two
+				// looks, one before the lock is asked for, one when it is acknowledged,
+				// and one when the upstream is about to be asked.
+				if (readings === 8) throw new Error("clock bug");
 				return now();
 			};
 			expect(await retrieve()).toStrictEqual({
@@ -1076,7 +1080,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			vi.spyOn(h.store, "acquireRefreshLock").mockImplementation(async (id, options) => {
 				const lock = await real(id, options);
 				return lock.acquired
-					? { acquired: true, release: () => Promise.reject(new Error("redis down")) }
+					? { ...lock, release: () => Promise.reject(new Error("redis down")) }
 					: lock;
 			});
 			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1" });
@@ -1086,7 +1090,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 
 		it("tells the logger what an upstream refusal was, and an audit sink's failure, and puts neither in the answer", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			const refusal = Object.assign(new Error(`echoed ${SECRET}`), { status: 503 });
 			h.refresh.mockRejectedValue(refusal);
 			const reported: Array<{ during: string; error: unknown }> = [];

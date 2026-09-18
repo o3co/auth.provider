@@ -18,6 +18,7 @@ import { classifyFederationRefreshError } from "../federation-tokens/refresh-err
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
 import {
 	federationGrantIneligibilityRetry,
+	federationGrantRefreshFailureStands,
 	isUsableMaxUpstreamAccessTokenLifetime,
 	judgeUpstreamAccessToken,
 	scopesWithin,
@@ -31,6 +32,7 @@ import {
 	type FederationGrantCredentials,
 	type FederationGrantDenial,
 	type FederationGrantIneligibilityMarker,
+	type FederationGrantRefreshFailureInput,
 	type FederationGrantTokenResult,
 	type FederationGrantUnavailableReason,
 	hasFederationGrantAuthorization,
@@ -119,6 +121,13 @@ export interface FederationGrantRetrievalLimits {
 	 */
 	readonly refreshBufferMs: number;
 	readonly ineligibleRetryAfterMs: number;
+	/**
+	 * How long the upstream is not asked again after it failed twice in a row
+	 * (30 s), and the least a rate limit is honoured for (D12). The first
+	 * failure of a row is retried promptly. `ineligibleRetryAfterMs` is the
+	 * ceiling, and what a refusal with a code this provider knows waits.
+	 */
+	readonly refreshFailureBackoffMs: number;
 	/** The SOFT deadline: how long a caller waits for the upstream (D12). */
 	readonly upstreamTimeoutMs: number;
 	/** The HARD deadline: where the upstream request is aborted. */
@@ -136,9 +145,10 @@ export interface FederationGrantRetrievalLimits {
 
 /**
  * What a refresh that keeps to its deadlines must still leave of its lock. The
- * lease is counted from when the acquisition was ACKNOWLEDGED, which is after
- * the store started the lock's TTL; and timers fire late. Without a margin, a
- * configuration that fits by a millisecond does not fit.
+ * lease is counted from when the lock was asked for plus what the store says
+ * it waited — a lower bound on when the TTL began, since the store took the
+ * lock some time after the caller asked — and timers fire late. Without a
+ * margin, a configuration that fits by a millisecond does not fit.
  */
 export const FEDERATION_GRANT_REFRESH_LOCK_MARGIN_MS = 1_000;
 
@@ -231,6 +241,8 @@ const MAX_TIMER_MS = 2_147_483_647;
  *   a lock is given are positive, and fit a timer. NaN compares as fine
  *   everywhere: under a NaN refresh buffer no token is refreshed before it
  *   has died, and a NaN retry interval switches the marker's limit off.
+ * - `refreshFailureBackoffMs <= ineligibleRetryAfterMs`: the marker's interval
+ *   is the ceiling on how long a failing upstream is not asked (D12).
  * - `upstreamTimeoutMs <= upstreamHardTimeoutMs`: the soft deadline only
  *   answers the caller, and the hard one is where the request is aborted.
  * - `upstreamHardTimeoutMs + persistRetryBudgetMs + margin <= refreshLockTtlMs`
@@ -251,7 +263,12 @@ export function assertFederationGrantRetrievalLimits(limits: FederationGrantRetr
 		"ineligibleRetryAfterMs",
 		"maxExpiresInMs",
 	] as const;
-	const allowances = ["revocationSkewMs", "refreshBufferMs", "lockWaitMs"] as const;
+	const allowances = [
+		"revocationSkewMs",
+		"refreshBufferMs",
+		"lockWaitMs",
+		"refreshFailureBackoffMs",
+	] as const;
 	for (const name of timed) {
 		const value = limits[name];
 		if (!Number.isFinite(value) || value <= 0) {
@@ -278,6 +295,11 @@ export function assertFederationGrantRetrievalLimits(limits: FederationGrantRetr
 	// The store is given `SIDE_EFFECT_WAIT_MS` over the lock wait (`refresh`).
 	if (limits.lockWaitMs + SIDE_EFFECT_WAIT_MS > MAX_TIMER_MS) {
 		throw new RangeError("federationGrants: lockWaitMs does not fit a timer");
+	}
+	if (!(limits.refreshFailureBackoffMs <= limits.ineligibleRetryAfterMs)) {
+		throw new RangeError(
+			"federationGrants: refreshFailureBackoffMs must not exceed ineligibleRetryAfterMs — the marker's interval is the ceiling on how long a failing upstream is not asked",
+		);
 	}
 	if (!(limits.upstreamTimeoutMs <= limits.upstreamHardTimeoutMs)) {
 		throw new RangeError(
@@ -403,19 +425,23 @@ function handOver(
  * - The first look, and the same look again once the lock is held, when
  *   another replica may have refreshed already: it sends the call to the
  *   refresh.
- * - `fetched` — the last look before a token this call refreshed is
- *   disclosed, told the access token the call wrote. When that is what is
- *   stored it is answered with its true lifetime, whatever was asked of it: a
- *   call refreshes at most once, and the caller decides (D10). When something
- *   else is stored by then — a reauthorization does not take the refresh
- *   lock — it is somebody else's, and judged as such.
- * - The only look after a lock timeout or a lost write is a first look again:
- *   what is stored is somebody else's, or the token that had run down. A token
- *   that is not half spent is answered as it is, somebody else's included, and
- *   what would have been a refresh is answered by `refresh` below as the
- *   outage that brought the call there. `refresh` runs once per call.
+ * - `attempted` — the last look, after the call went for a refresh, whatever
+ *   came of that: it wrote, it lost, the upstream failed, the lock was not to
+ *   be had, the lease was spent. A stored token that is good and carries what
+ *   was asked is answered with the life it has (D10): a refresh is an attempt
+ *   to improve on it, never a condition for it, and `refresh` runs once per
+ *   call. What would have been a refresh is answered by `refresh` as what the
+ *   attempt came to, and the look's own verdicts, an expiry or a revocation
+ *   that landed meanwhile, come before that.
+ * - `fetched` — with `attempted`, the access token the call wrote. When that
+ *   is what is stored it is the call's own: never refreshed again, and one
+ *   that lacks the asserted scope answers `invalid_scope`, since the upstream
+ *   was asked and that is what it gave. Something else stored by then — a
+ *   reauthorization does not take the refresh lock — is somebody else's.
  */
 interface Look {
+	readonly attempted?: true;
+	/** With `attempted`: the access token this call wrote. */
 	readonly fetched?: string;
 }
 
@@ -452,6 +478,34 @@ const unavailable = (reason: FederationGrantUnavailableReason): FederationGrantD
 	code: "temporarily_unavailable",
 	reason,
 });
+
+/** How far ahead of `now` a stored date is believed: what the refresh buffer absorbs, or replicas' clocks may differ by. */
+const dateAllowanceMs = (limits: FederationGrantRetrievalLimits): number =>
+	Math.max(limits.refreshBufferMs, limits.revocationSkewMs);
+
+/** RFC 6749 §4.1.2.1's names for an outage: not refusals, whatever status they came with. */
+const UPSTREAM_OUTAGE_CODES: ReadonlySet<string> = new Set([
+	"server_error",
+	"temporarily_unavailable",
+]);
+
+/**
+ * What `count` the store will give a failure at `at`: one more than a stamp no
+ * older than `rowMs`, else one — and `undefined` for one dated before the
+ * stamp on the record, which the store refuses (D2): a caller must not be
+ * told a wait the record will not carry.
+ */
+const rowCount = (
+	grant: AuthorizedFederationGrant,
+	at: Date,
+	rowMs: number,
+): number | undefined => {
+	const previous = grant.refreshFailure;
+	if (previous === undefined) return 1;
+	const sinceMs = at.getTime() - previous.at.getTime();
+	if (sinceMs < 0) return undefined;
+	return sinceMs <= rowMs ? previous.count + 1 : 1;
+};
 
 const NOT_PERMITTED: FederationGrantDenial = {
 	code: "access_denied",
@@ -585,6 +639,7 @@ async function evaluate(
 		const retry = federationGrantIneligibilityRetry(grant.ineligible, {
 			now,
 			retryAfterMs: deps.limits.ineligibleRetryAfterMs,
+			allowanceMs: dateAllowanceMs(deps.limits),
 		});
 		const denial: FederationGrantDenial = {
 			code: "upstream_token_ineligible",
@@ -601,6 +656,28 @@ async function evaluate(
 		const unhandled: never = status;
 		void unhandled;
 		return { kind: "deny", denial: unavailable("storage"), grant };
+	}
+	// The stamp of a failed refresh (D12): while it stands the upstream is not
+	// asked either. The marker's denial comes first: an ineligible answer is the
+	// more specific fault.
+	const failure = federationGrantRefreshFailureStands(grant.refreshFailure, {
+		now,
+		allowanceMs: dateAllowanceMs(deps.limits),
+		backoffMs: deps.limits.refreshFailureBackoffMs,
+		ceilingMs: deps.limits.ineligibleRetryAfterMs,
+	});
+	if (notAsked === undefined && failure.stands) {
+		const { retryAfterSeconds } = failure;
+		notAsked =
+			failure.kind === "rate_limited"
+				? { code: "rate_limited", reason: "upstream", retryAfterSeconds }
+				: failure.kind === "rejected"
+					? {
+							code: "upstream_rejected",
+							reason: grant.refreshFailure?.upstreamCode ?? "unknown",
+							retryAfterSeconds,
+						}
+					: { code: "temporarily_unavailable", reason: "upstream", retryAfterSeconds };
 	}
 
 	// What the request asserts is checked here, so that a request that can
@@ -663,7 +740,7 @@ async function evaluate(
 		// rotation on the heels of the first, whenever the replica that refreshed
 		// is the one that is ahead. And no token has more life left than it was
 		// issued with, whatever its date says.
-		const believed = age >= -Math.max(deps.limits.refreshBufferMs, deps.limits.revocationSkewMs);
+		const believed = age >= -dateAllowanceMs(deps.limits);
 		const tokenEndsAt = Math.min(token.obtainedAt.getTime(), now.getTime()) + lifetimeMs;
 		const remainingMs = tokenEndsAt - now.getTime();
 		if (eligible && believed && remainingMs > 0) {
@@ -684,9 +761,12 @@ async function evaluate(
 			const halfSpent = age >= lifetimeMs / 2;
 			const ranDown = remainingMs <= deps.limits.refreshBufferMs;
 			const wantsMore = !carries || remainingMs <= minTtlSeconds * 1000;
+			// The call's own token, at the last look: what the upstream just gave is
+			// not refreshed again, and one that lacks the asserted scope answers
+			// `invalid_scope`, half spent or not — the upstream was asked.
 			const own = look.fetched !== undefined && token.value === look.fetched;
 			const refreshIt = !own && halfSpent && (ranDown || wantsMore);
-			if (carries && (!refreshIt || notAsked !== undefined)) {
+			if (carries && (!refreshIt || notAsked !== undefined || look.attempted === true)) {
 				const grantEndsAt = federationGrantEffectiveExpiry(grant, deps.limits.maxExpiresInMs);
 				return {
 					kind: "token",
@@ -1033,23 +1113,64 @@ async function refreshUnderLock(
 				audits: [["federation.grant.reauthorization_required", "upstream_invalid_grant"]],
 			};
 		}
-		// None of the rest changes the record.
+		// None of the rest changes the credentials. The failure is stamped on the
+		// record (D12), so that the next request does not ask a failing upstream
+		// again at once — a refusal, and an outage from the second time on.
 		let denial: FederationGrantDenial;
+		let failure: FederationGrantRefreshFailureInput;
+		const at = deps.now();
 		if (classified.reason === "rate_limited") {
-			denial = {
-				code: "rate_limited",
-				reason: "upstream",
-				...(classified.retryAfterSeconds !== undefined
-					? { retryAfterSeconds: classified.retryAfterSeconds }
-					: {}),
+			const advice = classified.retryAfterSeconds;
+			denial = { code: "rate_limited", reason: "upstream" };
+			failure = {
+				at,
+				kind: "rate_limited",
+				...(advice !== undefined ? { retryAfterSeconds: advice } : {}),
 			};
 		} else if (classified.reason === "network") {
 			denial = unavailable("upstream");
-		} else {
+			failure = { at, kind: "unavailable" };
+		} else if (
+			classified.upstreamCode !== undefined &&
+			!UPSTREAM_OUTAGE_CODES.has(classified.upstreamCode)
+		) {
 			// The upstream's error code when it is one this provider knows, and
-			// never its message: this goes into a response.
+			// never its message: this goes into a response. The IdP answered and
+			// said no: nothing was processed, and a refusal is remembered at once.
+			denial = { code: "upstream_rejected", reason: classified.upstreamCode };
+			failure = { at, kind: "rejected", upstreamCode: classified.upstreamCode };
+		} else {
+			// An error nobody can read, or an outage the IdP named in its body
+			// (RFC 6749 §4.1.2.1) with some status other than a 5xx: it may have
+			// been processed, and its answer lost, so it is retried promptly like
+			// an outage.
 			denial = { code: "upstream_rejected", reason: classified.upstreamCode ?? "unknown" };
+			failure = { at, kind: "unavailable" };
 		}
+		// What the failing caller is told is what the stamp will tell the next
+		// one, computed the same way — and told even when the stamp does not land.
+		const count = rowCount(grant, failure.at, limits.ineligibleRetryAfterMs);
+		const wouldStand =
+			count === undefined
+				? { stands: false as const }
+				: federationGrantRefreshFailureStands(
+						{ ...failure, count },
+						{
+							now: at,
+							allowanceMs: dateAllowanceMs(limits),
+							backoffMs: limits.refreshFailureBackoffMs,
+							ceilingMs: limits.ineligibleRetryAfterMs,
+						},
+					);
+		if (
+			wouldStand.stands &&
+			(denial.code === "rate_limited" ||
+				denial.code === "upstream_rejected" ||
+				denial.code === "temporarily_unavailable")
+		) {
+			denial = { ...denial, retryAfterSeconds: wouldStand.retryAfterSeconds };
+		}
+		await stamp(deps, request, grant, failure, limits.persistRetryBudgetMs);
 		// The lock is let go of, whatever the failure was. A failure that ARRIVED
 		// leaves nothing of this call's in flight, which is what keeping the lock
 		// is for. If the IdP rotated before its answer was lost, the old refresh
@@ -1187,12 +1308,49 @@ async function refreshUnderLock(
 		await after(Math.min(PERSIST_RETRY_DELAY_MS, remaining)).elapsed;
 	}
 	// The new credentials are dropped. The stored refresh credential is not
-	// assumed to be still good: the next refresh decides (D12).
+	// assumed to be still good: the next refresh decides (D12). The failure is
+	// stamped all the same, best effort, with what is left of the persist
+	// budget — the store is what failed, and one more write to it may fail too
+	// — and not a millisecond past it: the lock is sized for the budget, and a
+	// stamp written past the lease could land under the next holder.
+	const left = persistDeadline - deps.now().getTime();
+	if (left > 0) await stamp(deps, request, grant, { at: deps.now(), kind: "unavailable" }, left);
 	return {
 		kind: "denied",
 		denial: unavailable("storage"),
 		audits: [["federation.grant.refresh_persist_failed", "storage"]],
 	};
+}
+
+/**
+ * Stamps a failed refresh on the record (D12): one attempt, bounded, under the
+ * lock, so that every waiter finds it. It never changes the answer — the last
+ * look answers a stored token that serves with or without it — and a store
+ * that will not take it is told to the logger.
+ */
+async function stamp(
+	deps: RetrieveFederationGrantTokenDeps,
+	request: RetrieveFederationGrantTokenRequest,
+	grant: AuthorizedFederationGrant,
+	failure: FederationGrantRefreshFailureInput,
+	budgetMs: number,
+): Promise<void> {
+	const noted = await within(
+		settle(() =>
+			deps.store.noteRefreshFailure({
+				grantId: grant.id,
+				expectedVersion: grant.version,
+				failure,
+				rowMs: deps.limits.ineligibleRetryAfterMs,
+				now: deps.now(),
+			}),
+		),
+		budgetMs,
+	);
+	if (noted === "elapsed") report(deps, request, "mark", NOT_ANSWERED);
+	else if (!noted.ok) report(deps, request, "mark", noted.error);
+	// Refused on the version, the stamp says nothing about the credentials the
+	// grant has now: nothing to report.
 }
 
 /** Lets go of a lock, waiting so long and no longer, and tells the logger when it could not. Never rejects. */
@@ -1210,10 +1368,46 @@ async function letGo(
 	else if (!released.ok) report(deps, request, "release", released.error);
 }
 
+/**
+ * The last look of a call that went for a refresh: what is stored NOW, judged
+ * with `attempted`. A token that serves the request is answered; otherwise the
+ * look's own verdict when it has one, and `fallback` — what the attempt came
+ * to — when the look would have refreshed. With `fetched`, the token this call
+ * wrote: answered as `refreshed` only while that is what is stored, and
+ * overtaken — `concurrent_update`, whatever `fallback` says — when something
+ * else is.
+ */
+async function lastLook(
+	deps: RetrieveFederationGrantTokenDeps,
+	request: RetrieveFederationGrantTokenRequest,
+	fallback: FederationGrantDenial,
+	wrote: { readonly fetched?: string } = {},
+): Promise<FederationGrantTokenResult> {
+	const { fetched } = wrote;
+	const stored = await evaluate(deps, request, {
+		attempted: true,
+		...(fetched !== undefined ? { fetched } : {}),
+	});
+	// A write that was replaced before this look was overtaken, whatever the
+	// caller says the attempt came to.
+	const replaced = fetched !== undefined && stored.kind === "refresh" && stored.stored !== fetched;
+	return conclude(
+		deps,
+		request,
+		stored,
+		// `refreshed` says that what is answered is what this call fetched. It is
+		// not when the write brought no access token and kept the one the grant
+		// had (D5), nor when something else was stored before this look.
+		fetched !== undefined && stored.kind === "token" && stored.token.value === fetched,
+		replaced ? unavailable("concurrent_update") : fallback,
+	);
+}
+
 async function refresh(
 	deps: RetrieveFederationGrantTokenDeps,
 	request: RetrieveFederationGrantTokenRequest,
 ): Promise<FederationGrantTokenResult> {
+	const askedAt = deps.now().getTime();
 	const asking = settle(() =>
 		deps.store.acquireRefreshLock(request.grantId, {
 			ttlMs: deps.limits.refreshLockTtlMs,
@@ -1234,14 +1428,12 @@ async function refresh(
 			});
 		}
 		report(deps, request, "lock", asked === "elapsed" ? NOT_ANSWERED : asked.error);
-		const denial = unavailable("storage");
-		return conclude(deps, request, { kind: "deny", denial }, false, denial);
+		return lastLook(deps, request, unavailable("storage"));
 	}
 	const lock = asked.value;
 	if (!lock.acquired) {
 		// Whoever held it may have refreshed. One look, which never refreshes.
-		const stored = await evaluate(deps, request);
-		return conclude(deps, request, stored, false, unavailable("lock_timeout"));
+		return lastLook(deps, request, unavailable("lock_timeout"));
 	}
 
 	// One owner of the release, whichever way this ends. Never waited for by the
@@ -1254,10 +1446,31 @@ async function refresh(
 	let leaseStartedAt: number;
 	let startedAt: number;
 	try {
-		// The lease has one clock, started here. Every deadline counts from it:
-		// what this call spends under the lock before it asks the upstream is
-		// spent of the same lease (D12).
-		leaseStartedAt = deps.now().getTime();
+		// The lease has one clock. It starts when the store TOOK the lock — when it
+		// was asked for, plus what the store waited — which is before the store
+		// answered. Every deadline counts from there: what this call spends under
+		// the lock before it asks the upstream is spent of the same lease (D12), and
+		// so is however long the acknowledgement took. A store that cannot say how
+		// long it waited, or says it waited longer than the whole round trip, is not
+		// one to run a refresh on: the lock is let go of, and the caller is told the
+		// store failed.
+		const acknowledgedAt = deps.now().getTime();
+		const waitedMs: unknown = lock.waitedMs;
+		if (
+			typeof waitedMs !== "number" ||
+			!(waitedMs >= 0) ||
+			!(askedAt + waitedMs <= acknowledgedAt + FEDERATION_GRANT_REFRESH_LOCK_MARGIN_MS)
+		) {
+			handOver(deps, request, release());
+			report(
+				deps,
+				request,
+				"lock",
+				new Error("the store did not say how long it waited for the lock"),
+			);
+			return lastLook(deps, request, unavailable("storage"));
+		}
+		leaseStartedAt = askedAt + waitedMs;
 		const again = await evaluate(deps, request);
 		if (again.kind !== "refresh") {
 			// Another replica refreshed already, or the grant ended meanwhile.
@@ -1291,8 +1504,7 @@ async function refresh(
 				"refresh",
 				new Error("the look under the refresh lock used up the lease; the upstream was not asked"),
 			);
-			const denial = unavailable("storage");
-			return conclude(deps, request, { kind: "deny", denial, grant: again.grant }, false, denial);
+			return lastLook(deps, request, unavailable("storage"));
 		}
 		held = again;
 		refresher = found;
@@ -1339,39 +1551,21 @@ async function refresh(
 	if (first === "elapsed") {
 		// A slow upstream must not cost users their grants: the request goes on,
 		// holding the lock, and its result is persisted whenever it arrives. Only
-		// the caller is answered now.
-		const denial = unavailable("upstream");
-		return conclude(deps, request, { kind: "deny", denial, grant: held.grant }, false, denial);
+		// the caller is answered now — with what is stored, when that serves it.
+		return lastLook(deps, request, unavailable("upstream"));
 	}
-	if (first.kind === "denied") {
-		return conclude(
-			deps,
-			request,
-			{ kind: "deny", denial: first.denial, grant: held.grant },
-			false,
-			first.denial,
-		);
-	}
+	if (first.kind === "denied") return lastLook(deps, request, first.denial);
 	// Written or lost, the last look is the same: the record as it is NOW, the
 	// boundary as it is now, and the token that is stored — never the one this
 	// call fetched and holds in a variable.
-	const fetched = first.kind === "written" ? first.fetched : undefined;
-	const stored = await evaluate(deps, request, fetched !== undefined ? { fetched } : {});
-	const overtaken =
-		first.kind === "lost" ||
-		(fetched !== undefined && stored.kind === "refresh" && stored.stored !== fetched);
-	return conclude(
+	// A write that landed and is still what is stored was overtaken by nothing:
+	// if its token cannot be answered, the upstream's token is what failed the
+	// call. Lost, it was overtaken.
+	return lastLook(
 		deps,
 		request,
-		stored,
-		// `refreshed` says that what is answered is what this call fetched. It is
-		// not when the write brought no access token and kept the one the grant
-		// had (D5), nor when something else was stored before this look.
-		fetched !== undefined && stored.kind === "token" && stored.token.value === fetched,
-		// A write that landed and is still what is stored was overtaken by
-		// nothing: if its token cannot be answered, the upstream's token is what
-		// failed the call. Lost, or replaced before this look, it was overtaken.
-		unavailable(overtaken ? "concurrent_update" : "upstream"),
+		unavailable(first.kind === "written" ? "upstream" : "concurrent_update"),
+		first.kind === "written" ? first : {},
 	);
 }
 

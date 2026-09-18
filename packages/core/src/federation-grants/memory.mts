@@ -259,12 +259,16 @@ export function createMemoryFederationGrantStore(
 		return { ok: true, grant: structuredClone(grant) };
 	};
 
-	const tryLock = (grantId: string, ttlMs: number): symbol | null => {
+	const tryLock = (
+		grantId: string,
+		ttlMs: number,
+	): { readonly token: symbol; readonly startedAt: number } | null => {
 		const held = locks.get(grantId);
-		if (held !== undefined && held.expiresAt > Date.now()) return null;
+		const startedAt = Date.now();
+		if (held !== undefined && held.expiresAt > startedAt) return null;
 		const token = Symbol("federation-grant-refresh-lock");
-		locks.set(grantId, { expiresAt: Date.now() + ttlMs, token });
-		return token;
+		locks.set(grantId, { expiresAt: startedAt + ttlMs, token });
+		return { token, startedAt };
 	};
 
 	return {
@@ -451,7 +455,7 @@ export function createMemoryFederationGrantStore(
 			if (!credentialDatesAreDates(input.credentials)) return failed();
 			if (input.ineligible !== null && !isDate(input.ineligible.at)) return failed();
 
-			const { ineligible: _cleared, ...kept } = grant;
+			const { ineligible: _cleared, refreshFailure: _forgotten, ...kept } = grant;
 			const next: AuthorizedFederationGrant = {
 				...kept,
 				version: grant.version + 1,
@@ -468,8 +472,9 @@ export function createMemoryFederationGrantStore(
 			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
 
 			entry.credentials = null;
+			const { refreshFailure: _forgotten, ...kept } = grant;
 			return written(entry, {
-				...grant,
+				...kept,
 				status: "reauthorization_required",
 				version: grant.version + 1,
 			});
@@ -485,12 +490,44 @@ export function createMemoryFederationGrantStore(
 
 			entry.intent = null;
 			entry.credentials = null;
+			const { refreshFailure: _forgotten, ...kept } = grant;
 			return written(entry, {
-				...grant,
+				...kept,
 				status: "revoked",
 				version: grant.version + 1,
 				revocation: { by, at: new Date(atMs) },
 			});
+		},
+
+		async noteRefreshFailure(input) {
+			const nowMs = instant(input.now, "now");
+			const entry = visible(input.grantId, nowMs);
+			if (entry === undefined) return failed();
+			const grant = entry.grant;
+			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
+			if (!(nowMs < grant.expiresAt.getTime())) return failed();
+			if (!isDate(input.failure.at)) return failed();
+			const { retryAfterSeconds, upstreamCode } = input.failure;
+			const atMs = input.failure.at.getTime();
+			const previous = grant.refreshFailure;
+			// Never back: a stamp that outlived its caller's budget arrives after a
+			// newer one, and must not replace it.
+			if (previous !== undefined && atMs < previous.at.getTime()) return failed();
+			// A row: the stamp it replaces is no further back than `rowMs`.
+			const inRow = previous !== undefined && atMs - previous.at.getTime() <= input.rowMs;
+			// In place, in one step: a stamp read, counted and written in three
+			// would lose to a touch, and a count to a second stamp.
+			const next: AuthorizedFederationGrant = {
+				...grant,
+				refreshFailure: {
+					at: new Date(atMs),
+					kind: input.failure.kind,
+					count: inRow ? previous.count + 1 : 1,
+					...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+					...(upstreamCode !== undefined ? { upstreamCode } : {}),
+				},
+			};
+			return written(entry, next);
 		},
 
 		async touch(grantId, at) {
@@ -513,9 +550,10 @@ export function createMemoryFederationGrantStore(
 			if (!Number.isFinite(waitForMs) || waitForMs < 0) {
 				throw new RangeError("acquireRefreshLock: waitForMs must be a non-negative finite number");
 			}
-			const deadline = Date.now() + waitForMs;
-			let token = tryLock(grantId, ttlMs);
-			while (token === null) {
+			const askedAt = Date.now();
+			const deadline = askedAt + waitForMs;
+			let taken = tryLock(grantId, ttlMs);
+			while (taken === null) {
 				// The deadline is looked at BEFORE every further try, and the wait
 				// never runs past it: a lock released between the deadline and the
 				// next poll is not taken, since the caller has given up by then.
@@ -525,11 +563,12 @@ export function createMemoryFederationGrantStore(
 					setTimeout(resolve, Math.min(LOCK_POLL_INTERVAL_MS, remaining)),
 				);
 				if (Date.now() >= deadline) return { acquired: false, reason: "timeout" };
-				token = tryLock(grantId, ttlMs);
+				taken = tryLock(grantId, ttlMs);
 			}
-			const held = token;
+			const held = taken.token;
 			return {
 				acquired: true,
+				waitedMs: taken.startedAt - askedAt,
 				release: async () => {
 					// Only while it is still this holder's: past the TTL another
 					// caller may hold the lock, and that one is not ours to free.

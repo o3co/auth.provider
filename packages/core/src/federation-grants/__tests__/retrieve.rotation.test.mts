@@ -411,14 +411,8 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				{ name: "OperationProcessingError" },
 				"upstream_rejected",
 			],
-			[
-				"an error code this provider knows",
-				{ error: "invalid_client", status: 401 },
-				"upstream_rejected",
-			],
-			["a rate limit", { status: 429 }, "rate_limited"],
 		])(
-			"leaves nothing in flight — %s: the lock is let go of, and the next poll asks again at once",
+			"leaves nothing in flight — %s: the lock is let go of, and the next poll asks again at once (a refusal is remembered instead, D12)",
 			async (_, carried, code) => {
 				// If the IdP rotated before its answer was lost, the old refresh token
 				// is presented again whenever the next refresh comes: waiting out the
@@ -426,7 +420,7 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				// exactly this takes a prompt retry, not a late one. Keeping the lock
 				// is for what is still in flight (D12).
 				await h.seed();
-				setNow(at(HOUR - 15_000));
+				setNow(at(HOUR));
 				h.refresh.mockRejectedValueOnce(
 					Object.assign(new Error("fetch failed"), { cause: carried, ...carried }),
 				);
@@ -446,7 +440,7 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 	describe("a store that does not answer when asked for the lock", () => {
 		it("is waited for as long as the lock may be waited for and a little more, and a lock that arrives after that is let go of", async () => {
 			await h.seed();
-			setNow(at(HOUR - 15_000));
+			setNow(at(HOUR));
 			h.refresh.mockResolvedValue(refreshed("1", now()));
 			const acquire = h.store.acquireRefreshLock.bind(h.store);
 			vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async (id, options) => {
@@ -482,11 +476,12 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 	describe("a lock that arrives after the wait for it was given up", () => {
 		it("is let go of within bounds, and a release that fails is reported like any other", async () => {
 			await h.seed();
-			setNow(at(HOUR - 15_000));
+			setNow(at(HOUR));
 			vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async () => {
 				await new Promise((resolve) => setTimeout(resolve, 20_000));
 				return {
 					acquired: true,
+					waitedMs: 0,
 					release: async () => {
 						throw new Error("the store lost the connection");
 					},
@@ -507,7 +502,7 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 	describe("a write that throws", () => {
 		it("is tried again after a pause, not in a loop that spends the budget at once", async () => {
 			await h.seed();
-			setNow(at(HOUR - 15_000));
+			setNow(at(HOUR));
 			h.refresh.mockResolvedValue(refreshed("1", now()));
 			const write = vi
 				.spyOn(h.store, "replaceCredentials")

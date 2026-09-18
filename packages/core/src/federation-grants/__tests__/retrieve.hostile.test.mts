@@ -85,7 +85,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			// 13 left — and with a slower look, none, or none of the lock either, and
 			// two replicas would present one refresh token.
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			slowLookUnderLock(12_000);
 			h.refresh.mockResolvedValue(refreshed("rotated", DUE));
 
@@ -105,6 +105,134 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			expect((await stored())?.refreshToken).toBe(SECRET);
 			await Promise.all(h.background);
 			expect(await lockIsFree(h)).toBe(true);
+		});
+
+		it("counts the lease from when the store STARTED the TTL, not from when it acknowledged the lock: an acknowledgement that came late has spent the lease already", async () => {
+			// The store took the lock seven seconds before its answer arrived, and
+			// the look under the lock takes four more: eleven of the lease are gone,
+			// and the caller's ten with them. Counted from the acknowledgement, only
+			// four would be, and the upstream would be asked.
+			await h.seed();
+			setNow(GONE);
+			const real = h.store.acquireRefreshLock.bind(h.store);
+			vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async (id, options) => {
+				const lock = await real(id, options);
+				await new Promise((resolve) => setTimeout(resolve, 7_000));
+				return lock;
+			});
+			slowLookUnderLock(4_000);
+			h.refresh.mockResolvedValue(refreshed("rotated", DUE));
+			const reported: string[] = [];
+			h.deps.report = (failure) => reported.push(failure.during);
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(11_000);
+			expect(await answer).toStrictEqual({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "storage",
+			});
+			expect(reported).toEqual(["refresh"]);
+			expect(h.refresh).not.toHaveBeenCalled();
+			await Promise.all(h.background);
+			expect(await lockIsFree(h)).toBe(true);
+		});
+
+		it("aborts the upstream at the hard deadline counted from the lease's start", async () => {
+			await h.seed();
+			setNow(GONE);
+			const real = h.store.acquireRefreshLock.bind(h.store);
+			vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async (id, options) => {
+				const lock = await real(id, options);
+				await new Promise((resolve) => setTimeout(resolve, 5_000));
+				return lock;
+			});
+			let aborted = false;
+			h.refresh.mockImplementation(
+				({ signal }) =>
+					new Promise((_, reject) => {
+						signal?.addEventListener("abort", () => {
+							aborted = true;
+							reject(new Error("aborted"));
+						});
+					}),
+			);
+			const answer = retrieve();
+			// Five seconds until the lock is acknowledged, then the caller's wait:
+			// ten seconds of the lease, five of which were gone.
+			await vi.advanceTimersByTimeAsync(10_000);
+			expect(await answer).toMatchObject({ code: "temporarily_unavailable", reason: "upstream" });
+			// The hard deadline: twenty-five of the lease, twenty from here.
+			await vi.advanceTimersByTimeAsync(14_999);
+			expect(aborted).toBe(false);
+			await vi.advanceTimersByTimeAsync(1);
+			expect(aborted).toBe(true);
+			await Promise.all(h.background);
+		});
+
+		it("counts the lease from when the lock was TAKEN, not from when it was asked for: what a waiter waited is not the waiter's lease", async () => {
+			// Another replica holds the lock for four seconds; this call waits, takes
+			// it, and its upstream takes eight. Counted from when it asked, the soft
+			// deadline would fall at ten seconds, two before the answer.
+			await h.seed();
+			setNow(GONE);
+			const theirs = await h.store.acquireRefreshLock("g-1", { ttlMs: 60_000, waitForMs: 0 });
+			if (!theirs.acquired) throw new Error("fixture: the lock was not free");
+			h.refresh.mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						setTimeout(() => resolve(refreshed("1", now())), 8_000);
+					}),
+			);
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(4_000);
+			await theirs.release();
+			await vi.advanceTimersByTimeAsync(8_500);
+			expect(await answer).toMatchObject({ ok: true, accessToken: "at-1", refreshed: true });
+		});
+
+		it("allows the round trip the lock's margin, for a clock read in whole seconds", async () => {
+			await h.seed();
+			setNow(GONE);
+			const fine = h.deps.now;
+			h.deps.now = () => new Date(Math.floor(fine().getTime() / 1000) * 1000);
+			const theirs = await h.store.acquireRefreshLock("g-1", { ttlMs: 60_000, waitForMs: 0 });
+			if (!theirs.acquired) throw new Error("fixture: the lock was not free");
+			h.refresh.mockResolvedValue(refreshed("1", now()));
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(40);
+			await theirs.release();
+			await vi.advanceTimersByTimeAsync(500);
+			expect(await answer).toMatchObject({ ok: true, accessToken: "at-1" });
+		});
+
+		it("refuses a lease it cannot date — a wait that is not a number, negative, or longer than the whole round trip — and lets go of the lock: a refresh does not run on a lease of unknown length", async () => {
+			await h.seed();
+			setNow(GONE);
+			h.refresh.mockResolvedValue(refreshed("rotated", DUE));
+			for (const waitedMs of [
+				Number.NaN,
+				"0" as unknown as number,
+				true as unknown as number,
+				-1,
+				1_001,
+			]) {
+				const real = h.store.acquireRefreshLock.bind(h.store);
+				vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async (id, options) => {
+					const lock = await real(id, options);
+					return lock.acquired ? { ...lock, waitedMs } : lock;
+				});
+				const reported: string[] = [];
+				h.deps.report = (failure) => reported.push(failure.during);
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				expect(reported).toEqual(["lock"]);
+				await Promise.all(h.background);
+				expect(await lockIsFree(h)).toBe(true);
+			}
+			expect(h.refresh).not.toHaveBeenCalled();
 		});
 
 		it("does not ask it after the lock itself has run out, when another replica may be asking", async () => {
@@ -173,16 +301,21 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			await h.seed();
 			setNow(DUE);
 			h.refresh.mockResolvedValue(refreshed("1", DUE));
-			let calls = 0;
-			h.deps.now = () => {
-				calls += 1;
-				// Past the first look and the lock: the reading that starts the lease.
-				if (calls === 3) throw new Error("clock bug");
-				return now();
-			};
-			await expect(retrieve()).rejects.toThrow("clock bug");
-			h.deps.now = () => now();
-			expect(await lockIsFree(h)).toBe(true);
+			// Two readings for the first look, one before the lock is asked for, and
+			// the fourth acknowledges it: the first reading made with the lock held.
+			// The seventh is the one before the upstream is asked. (The fifth is
+			// made inside a settled read, and is answered as a store failure.)
+			for (const failing of [4, 7]) {
+				let calls = 0;
+				h.deps.now = () => {
+					calls += 1;
+					if (calls === failing) throw new Error("clock bug");
+					return now();
+				};
+				await expect(retrieve()).rejects.toThrow("clock bug");
+				h.deps.now = () => now();
+				expect(await lockIsFree(h), `reading ${failing}`).toBe(true);
+			}
 		});
 
 		it("still answers, and still lets go of the lock, when the late work cannot be handed over", async () => {
@@ -452,7 +585,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				const lock = await real(id, options);
 				if (!lock.acquired) return lock;
 				return {
-					acquired: true,
+					...lock,
 					release: async () => {
 						await new Promise((resolve) => setTimeout(resolve, 20_000));
 						await lock.release();
@@ -468,7 +601,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 
 		it("not an endless loop, when the clock it is given does not move", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			h.refresh.mockResolvedValue(refreshed("1", DUE));
 			const write = vi
 				.spyOn(h.store, "replaceCredentials")
@@ -486,7 +619,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 	describe("what is reported, and what is waited for", () => {
 		it("answers a failure the classifier cannot even read like any other that arrived: a typed answer, and the lock let go of", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			// `String()` of this throws, and so does the classifier.
 			h.refresh.mockRejectedValue(Object.create(null));
 			expect(await retrieve()).toStrictEqual({
@@ -512,7 +645,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			const real = h.store.acquireRefreshLock.bind(h.store);
 			vi.spyOn(h.store, "acquireRefreshLock").mockImplementation(async (id, options) => {
 				const lock = await real(id, options);
-				return lock.acquired ? { acquired: true, release: () => new Promise(() => {}) } : lock;
+				return lock.acquired ? { ...lock, release: () => new Promise(() => {}) } : lock;
 			});
 			const reported: Array<{ during: string }> = [];
 			h.deps.report = (failure) => reported.push(failure);
@@ -536,7 +669,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 
 		it("does not wait for a mark that hangs, under the lock", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			h.refresh.mockRejectedValue(Object.assign(new Error("x"), { error: "invalid_grant" }));
 			vi.spyOn(h.store, "requireReauthorization").mockReturnValue(new Promise(() => {}));
 			const answer = retrieve();
@@ -576,6 +709,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				});
 				return {
 					acquired: true,
+					waitedMs: 0,
 					release: () => new Promise((resolve) => setTimeout(resolve, 20_000)),
 				};
 			});
@@ -845,7 +979,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 
 	it("never repeats a secret the upstream echoes as its error code: only codes this provider knows are repeated (D18)", async () => {
 		await h.seed();
-		setNow(DUE);
+		setNow(GONE);
 		// Exactly the shape of an opaque token, and of an error code.
 		h.refresh.mockRejectedValue(Object.assign(new Error("x"), { error: SECRET, status: 400 }));
 		const result = await retrieve();

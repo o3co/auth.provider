@@ -92,6 +92,39 @@ export interface FederationGrantUsage {
 	readonly lastUsedAt?: Date;
 	/** Left by a refresh whose token could not be disclosed (D5). */
 	readonly ineligible?: FederationGrantIneligibilityMarker;
+	/** Left by a refresh that failed (D12). Cleared by whatever replaces or ends the credentials. */
+	readonly refreshFailure?: FederationGrantRefreshFailure;
+}
+
+/**
+ * How a refresh failed, as far as a later look needs to know: what to answer
+ * meanwhile, and how long to wait before the upstream is asked again.
+ *
+ * - `unavailable` — an outage, a connection that failed, an answer nobody
+ *   could read: the request may have been processed, and its answer lost.
+ * - `rate_limited` — a 429: the request was not processed.
+ * - `rejected` — an error code this provider knows, other than the ones that
+ *   end the credentials: a configuration fault, until an operator acts.
+ */
+export type FederationGrantRefreshFailureKind = "unavailable" | "rate_limited" | "rejected";
+
+/** What a refresh reports of its failure. The store counts. */
+export interface FederationGrantRefreshFailureInput {
+	readonly at: Date;
+	readonly kind: FederationGrantRefreshFailureKind;
+	/** The upstream's `Retry-After`, in seconds, as the classifier bounded it. */
+	readonly retryAfterSeconds?: number;
+	/** For `rejected`: the error code, one this provider knows (D18). */
+	readonly upstreamCode?: string;
+}
+
+/**
+ * Non-secret, and outside the authenticated envelope (D16). Without it every
+ * request that needs a refresh would ask a failing upstream again (D12).
+ */
+export interface FederationGrantRefreshFailure extends FederationGrantRefreshFailureInput {
+	/** Failures in a row, counted by the store: `1` for the first. */
+	readonly count: number;
 }
 
 export interface FederationGrantRevocation {
@@ -287,7 +320,12 @@ export type FederationGrantDenial =
 			readonly reason: FederationGrantIneligibilityReason;
 			readonly retryAfterSeconds?: number;
 	  }
-	| { readonly code: "upstream_rejected"; readonly reason: string }
+	| {
+			readonly code: "upstream_rejected";
+			readonly reason: string;
+			/** Present when answered from the stamp of a failed refresh (D12). */
+			readonly retryAfterSeconds?: number;
+	  }
 	| {
 			readonly code: "rate_limited";
 			readonly reason: "provider" | "upstream";

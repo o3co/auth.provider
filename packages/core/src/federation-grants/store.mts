@@ -19,6 +19,7 @@ import type {
 	FederationGrantAuthorization,
 	FederationGrantCredentials,
 	FederationGrantIneligibilityMarker,
+	FederationGrantRefreshFailureInput,
 	FederationGrantRevokedBy,
 } from "./types.mjs";
 
@@ -249,6 +250,34 @@ export interface FederationGrantStore {
 	revoke(grantId: string, by: FederationGrantRevokedBy, at: Date): Promise<FederationGrantWrite>;
 
 	/**
+	 * A refresh failed (D12). The grant must be `active`, its `version` the one
+	 * the caller read — a failure of a refresh token the grant no longer has
+	 * says nothing about the one it has now — and `now` before `expiresAt`. A
+	 * date that is not one refuses the write.
+	 *
+	 * Effect: `refreshFailure` set, with `count` one more than the stamp it
+	 * replaces when that one is no older than `rowMs` before `failure.at`, and
+	 * `1` otherwise: failures further apart than that are not a row, and a
+	 * day-old stamp must not cost today's failure its place as the first. A
+	 * stamp dated before the one it would replace is refused: a write that
+	 * outlived its caller's budget must not land over a newer failure. It
+	 * does not bump `version` — it must not cost anybody a guarded write, and
+	 * nothing reads it as a state of the grant — and it touches nothing else.
+	 * It is cleared by whatever replaces or ends the credentials:
+	 * `replaceCredentials`, `activate`, `requireReauthorization`, `revoke`. An
+	 * adapter writes it atomically: a read, a count and a write in three steps
+	 * would lose a stamp to a `touch`, and a count to a second stamp.
+	 */
+	noteRefreshFailure(input: {
+		readonly grantId: string;
+		readonly expectedVersion: number;
+		readonly failure: FederationGrantRefreshFailureInput;
+		/** How far apart two failures may be and still count as a row. */
+		readonly rowMs: number;
+		readonly now: Date;
+	}): Promise<FederationGrantWrite>;
+
+	/**
 	 * Sets `lastUsedAt` on an `active` grant, and never moves it back: two
 	 * retrievals may report out of order. It does not bump `version`, and does
 	 * nothing for any other grant, nor for an `at` that is not a date.
@@ -316,7 +345,21 @@ export interface FederationGrantOpened {
 }
 
 export type FederationGrantLockResult =
-	| { readonly acquired: true; readonly release: () => Promise<void> }
+	| {
+			readonly acquired: true;
+			/**
+			 * How long the store waited for the lock before it TOOK it, in
+			 * milliseconds: `0` for one taken at once. A duration, not an instant,
+			 * so that it means the same on the caller's clock as on the store's.
+			 * The holder counts every deadline from when it asked plus this (D12),
+			 * never from when the acquisition was acknowledged — an acknowledgement
+			 * that took a second would otherwise overstate what is left of the lock
+			 * by that second, and a slow enough one lets a second holder in while
+			 * the first still refreshes.
+			 */
+			readonly waitedMs: number;
+			readonly release: () => Promise<void>;
+	  }
 	| { readonly acquired: false; readonly reason: "timeout" };
 
 // ---------------------------------------------------------------------------
