@@ -139,6 +139,9 @@ export {
 	AppConfigSchema,
 	type CoreConfig,
 	CoreConfigSchema,
+	// #593: the four spellings an environment variable may say a boolean in,
+	// for the packages outside core that read a section this file declares.
+	coerceBooleanFromEnv,
 	composeConfigSchema,
 	fullSectionsSchema,
 	readAccessTokenRevocationMode,

@@ -131,8 +131,14 @@ const MAX_DURATION_MS = 31_536_000_000;
  * takes `yes` / `no` / `on` / `off`: those used to work by accident on the
  * leaves the bridge could reach, and now fail at boot naming the four
  * spellings that are real.
+ *
+ * Exported since #593: the federation-grants routes ship in a package of their
+ * own and read `federationGrants.enabled`, which `reference.conf` lets
+ * `FEDERATION_GRANTS_ENABLED` reach. A second copy of these spellings out
+ * there is a second vocabulary to drift from this one, and the feature it
+ * would drift on is one whose default is off.
  */
-const coerceBooleanFromEnv = z.preprocess(
+export const coerceBooleanFromEnv = z.preprocess(
 	(val) => {
 		if (typeof val === "boolean") return val;
 		if (typeof val === "string") {

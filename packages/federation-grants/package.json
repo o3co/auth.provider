@@ -1,0 +1,63 @@
+{
+	"name": "@o3co/auth-provider-federation-grants",
+	"description": "Federation grants — offline delegation of upstream tokens to backends, over HTTP",
+	"version": "0.0.0",
+	"license": "Apache-2.0",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"type": "module",
+	"exports": {
+		".": {
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.mts"
+		}
+	},
+	"files": [
+		"dist",
+		"README.md",
+		"LICENSE"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/o3co/auth.provider.git",
+		"directory": "packages/federation-grants"
+	},
+	"imports": {
+		"#/*": {
+			"development": "./src/*",
+			"default": "./dist/*"
+		}
+	},
+	"scripts": {
+		"prebuild": "rimraf dist",
+		"build": "tsc",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
+	},
+	"dependencies": {
+		"zod": "^4.6.2"
+	},
+	"peerDependencies": {
+		"@o3co/auth-provider-core": "workspace:^",
+		"@o3co/auth-provider-oauth": "workspace:^",
+		"@o3co/auth-provider-session": "workspace:^",
+		"express": "^5.0.0"
+	},
+	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
+		"@o3co/auth-provider-oauth": "workspace:*",
+		"@o3co/auth-provider-session": "workspace:*",
+		"@types/express": "^5.0.6",
+		"@types/supertest": "^7.2.1",
+		"@vitest/coverage-v8": "^5.0.0",
+		"express": "^5.0.0",
+		"supertest": "^7.2.2",
+		"typescript": "^6.0.3",
+		"vitest": "^5.0.0"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}
