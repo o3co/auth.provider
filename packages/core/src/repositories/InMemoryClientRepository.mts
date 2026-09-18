@@ -211,6 +211,16 @@ export const ClientEntrySchema = z
 		frontchannelLogoutSessionRequired: z.boolean().optional().default(true),
 		// NEW (TODO-F-6): Federation-token access opt-in. Default false — deny-by-default.
 		allowedAzpForFederationToken: z.boolean().optional().default(false),
+		// #593, D9: which federation grant connections this client may spend a
+		// grant on, and where a connect flow may return to. Absent means none of
+		// either; a name is compared exactly against configuration, so nothing
+		// here is trimmed, folded or sorted. Duplicates are refused rather than
+		// deduplicated: a registration that lists one twice is a mistake worth
+		// reporting at boot, not a set to tidy.
+		allowedFederationGrantConnections: z
+			.array(z.string().regex(/^[A-Za-z0-9_-]+$/, "must be a connection name"))
+			.optional(),
+		federationGrantRedirectUris: z.array(z.string().min(1)).optional(),
 		// #316: /authorize admits only `firstParty: true` clients, and #330 removed
 		// the migration flag that used to admit unmarked ones. This schema is
 		// `.strict()`, so without the key a YAML/static registration could neither
@@ -275,6 +285,38 @@ export const ClientEntrySchema = z
 					'clientSecret is required when tokenEndpointAuthMethod is "client_secret_basic" or "client_secret_post"',
 				path: ["clientSecret"],
 			});
+		}
+		// A grant is a confidential client's to hold: the credential it spends
+		// belongs to a user, and a public client cannot keep one.
+		for (const field of [
+			"allowedFederationGrantConnections",
+			"federationGrantRedirectUris",
+		] as const) {
+			const value = data[field];
+			if (data.tokenEndpointAuthMethod === "none" && value !== undefined && value.length > 0) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: `${field} must not be set for a public client (tokenEndpointAuthMethod "none")`,
+					path: [field],
+				});
+			}
+			if (value !== undefined && new Set(value).size !== value.length) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: `${field} must not repeat a value`,
+					path: [field],
+				});
+			}
+		}
+		for (const uri of data.federationGrantRedirectUris ?? []) {
+			const rejection = checkRedirectUri(uri);
+			if (rejection !== null) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message: `federationGrantRedirectUris: ${rejection.reason}`,
+					path: ["federationGrantRedirectUris"],
+				});
+			}
 		}
 		if (data.tokenEndpointAuthMethod === "none" && data.clientSecret !== undefined) {
 			ctx.addIssue({
@@ -363,6 +405,12 @@ export class InMemoryClientRepository implements ClientRepository {
 			}),
 			frontchannelLogoutSessionRequired: entry.frontchannelLogoutSessionRequired,
 			allowedAzpForFederationToken: entry.allowedAzpForFederationToken,
+			...(entry.allowedFederationGrantConnections !== undefined && {
+				allowedFederationGrantConnections: entry.allowedFederationGrantConnections,
+			}),
+			...(entry.federationGrantRedirectUris !== undefined && {
+				federationGrantRedirectUris: entry.federationGrantRedirectUris,
+			}),
 			...(entry.jwks !== undefined && { jwks: entry.jwks }),
 			...(entry.jwksUri !== undefined && { jwksUri: entry.jwksUri }),
 			...(entry.senderConstrained !== undefined && {
@@ -429,6 +477,12 @@ export class InMemoryClientRepository implements ClientRepository {
 			}),
 			frontchannelLogoutSessionRequired: entry.frontchannelLogoutSessionRequired,
 			allowedAzpForFederationToken: entry.allowedAzpForFederationToken,
+			...(entry.allowedFederationGrantConnections !== undefined && {
+				allowedFederationGrantConnections: entry.allowedFederationGrantConnections,
+			}),
+			...(entry.federationGrantRedirectUris !== undefined && {
+				federationGrantRedirectUris: entry.federationGrantRedirectUris,
+			}),
 			...(entry.jwks !== undefined && { jwks: entry.jwks }),
 			...(entry.jwksUri !== undefined && { jwksUri: entry.jwksUri }),
 			...(entry.senderConstrained !== undefined && {

@@ -1137,6 +1137,70 @@ const federationEntrySchema = z
 	.passthrough();
 
 export const fullSectionsSchema = z.object({
+	// #593, D9/D16: the federation-grants section. Declared here for the
+	// reason `deviceAuthorization` above is — this object strips keys it
+	// does not know and the standalone validates against it before any
+	// module's own `configSchema` runs — and for one of its own: the
+	// bundled Redis grant store reads the same block, and it is installed
+	// whether or not the routes are. An undeclared block would take an
+	// operator's encryption keys and lifetime bound with it, silently.
+	//
+	// Presence and shape only, as elsewhere here. The bounds live where the
+	// values are used (`assertFederationGrantRetrievalLimits`, the store's
+	// constructor) and the defaults in `config/reference.conf`. Numbers ride
+	// `z.coerce` and booleans `coerceBooleanFromEnv` for the #288 reason: a
+	// `${?VAR}` arrives as a string.
+	federationGrants: z
+		.object({
+			enabled: coerceBooleanFromEnv.optional(),
+			// Seconds. A grant's own lifetime (D3): what a new one gets, and
+			// the most an operator permits — the code's one-year ceiling still
+			// applies above it.
+			defaultExpiresIn: z.coerce.number().int().positive().optional(),
+			maxExpiresIn: z.coerce.number().int().positive().optional(),
+			// Seconds. The retrieval's timings (D10, D12).
+			refreshBuffer: z.coerce.number().int().nonnegative().optional(),
+			ineligibleRetryAfter: z.coerce.number().int().positive().optional(),
+			refreshFailureBackoff: z.coerce.number().int().nonnegative().optional(),
+			// Milliseconds, as the limits they become are.
+			upstreamTimeoutMs: z.coerce.number().int().positive().optional(),
+			upstreamHardTimeoutMs: z.coerce.number().int().positive().optional(),
+			refreshLockTtlMs: z.coerce.number().int().positive().optional(),
+			lockWaitMs: z.coerce.number().int().nonnegative().optional(),
+			persistRetryBudgetMs: z.coerce.number().int().positive().optional(),
+			// Seconds. How long a record answers past the end of what it was
+			// authorized for (D16). Zero is a deployment that keeps no
+			// tombstones.
+			tombstoneRetention: z.coerce.number().int().nonnegative().optional(),
+			// The credential envelope's key ring (D16). The first key seals;
+			// every listed key opens, so one stays in the ring for as long as
+			// a paused grant may live.
+			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
+			encryptionKeys: z
+				.array(z.object({ id: z.string().min(1), key: z.string().min(1) }))
+				.optional(),
+			// What a grant may be for (D6). An empty map is valid: removing the
+			// last connection must remain an operable change.
+			connections: z
+				.record(
+					z.string().min(1),
+					z.object({
+						federation: z.string().min(1),
+						scopes: z.array(z.string().min(1)).min(1),
+						resource: z.string().min(1).optional(),
+						// No default for either: a guessed access-token maximum
+						// invents a residual-access policy (D15), and a guessed
+						// boundary silently shares one (D13).
+						boundary: z.string().min(1),
+						maxAccessTokenLifetime: z.coerce.number().positive(),
+						allowScopeSubsets: coerceBooleanFromEnv.optional(),
+						authorizationParams: z.record(z.string(), z.string()).optional(),
+						callbackURL: z.string().min(1).optional(),
+					}),
+				)
+				.optional(),
+		})
+		.optional(),
 	session: z
 		.object({
 			// #282: the session secret signs the cookie that IS the

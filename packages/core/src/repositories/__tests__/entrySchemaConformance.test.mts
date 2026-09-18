@@ -86,6 +86,10 @@ const FULLY_POPULATED_CLIENT = {
 	clientName: "Example App",
 	clientUri: "https://app.example.com",
 	allowedAzpForFederationToken: true,
+	// #593, D9: what a client may spend a federation grant on, and where a
+	// connect flow may return to for it.
+	allowedFederationGrantConnections: ["graph"],
+	federationGrantRedirectUris: ["https://app.example.com/grants/cb"],
 	senderConstrained: { required: true, methods: ["dpop"] },
 	firstParty: true,
 	allowPlainPkce: false,

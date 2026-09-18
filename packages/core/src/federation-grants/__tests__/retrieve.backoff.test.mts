@@ -284,6 +284,42 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 		});
 	});
 
+	describe("what a stored stamp may say about the upstream", () => {
+		it("repeats only a code this provider knows, whatever a stored stamp carries (#593, D11)", async () => {
+			await h.seed();
+			// The stamp stands and the stored token is gone, so every answer below
+			// comes from the stamp without the upstream being asked at all — which
+			// is the path that reads a stored code back.
+			setNow(GONE);
+			// The stamp is data in the store, and the classifier's allow-list was
+			// applied when it was written — not when it is read back. A stamp
+			// seeded by a fixture, or written by another version, or edited in the
+			// keyspace, therefore reaches the reason field unchecked, and D11
+			// promises the opposite: "the code is repeated only when it is one of
+			// the codes this provider knows". Anything else is `unknown`.
+			for (const [carried, reported] of [
+				["invalid_client", "invalid_client"],
+				["rt-0f3c-the-refresh-token-itself", "unknown"],
+				["", "unknown"],
+				["Bearer eyJhbGciOi", "unknown"],
+			] as const) {
+				const grant = await h.store.find("g-1", now());
+				await h.store.noteRefreshFailure({
+					grantId: "g-1",
+					expectedVersion: (grant as { version: number }).version,
+					failure: { at: now(), kind: "rejected", upstreamCode: carried },
+					rowMs: 0,
+					now: now(),
+				});
+				expect(await retrieve(), carried).toMatchObject({
+					code: "upstream_rejected",
+					reason: reported,
+				});
+				expect(h.refresh, carried).not.toHaveBeenCalled();
+			}
+		});
+	});
+
 	describe("what else the stamp does, and does not do", () => {
 		it("gives way to the marker: an ineligible answer is the more specific fault", async () => {
 			await h.seed();

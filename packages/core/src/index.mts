@@ -164,6 +164,7 @@ export {
 	classifyFederationRefreshError,
 	type FederationRefreshErrorClassification,
 	type FederationRefreshErrorReason,
+	isKnownFederationRefreshErrorCode,
 } from "./federation-tokens/refresh-error.mjs";
 // FederationTokenStore — TODO-F-1. Backing client interface
 // (FederationTokenStoreClient) lives in @o3co/auth-provider-redis (S3).
