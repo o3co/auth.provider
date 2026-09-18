@@ -174,6 +174,14 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REDIS_FEDERATION_TOKEN_STORE_KEY_PREFIX: "ft:",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE: "required",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
+	// #593: federation grants — a user's standing consent that a client may
+	// obtain upstream tokens without them. The three overrides `reference.conf`
+	// declares; the template does not mount the routes yet, so what is
+	// exercised here is that the shipped config still parses with them set,
+	// which is the half that breaks silently.
+	FEDERATION_GRANTS_ENABLED: "true",
+	FEDERATION_GRANTS_ENCRYPTION_MODE: "required",
+	REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX: "fg:",
 
 	// --- federation ---------------------------------------------------
 	FEDERATIONS_GOOGLE_ENABLED: "true",
@@ -323,6 +331,10 @@ describe("#288: the shipped config boots with every documented override supplied
 		expect(config.oauth.resourceIndicator?.enabled).toBe(true);
 		expect(config.federations.google?.enabled).toBe(true);
 		expect(config.federations.oidc?.enabled).toBe(true);
+		// #593: the newest one, and the one where a leftover string would be
+		// read as "on" by a truthiness check and as "off" by `=== true` — a
+		// feature whose whole default is off.
+		expect(config.federationGrants?.enabled).toBe(true);
 	});
 
 	it("turns every non-boolean override into its declared type", () => {
