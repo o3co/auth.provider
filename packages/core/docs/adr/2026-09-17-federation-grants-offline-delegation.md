@@ -713,8 +713,6 @@ else's. A fresh token that is good and lacks an asserted scope answers
 `invalid_scope`, after its rotated refresh token was kept: missing what was
 asked for is not exceeding the consent.
 
-consent.
-
 **When a stored token is refreshed.** A token is refreshed once it is half
 spent and either has run down to `federationGrants.refreshBuffer`, or the
 caller wants more than it has: more life (`min_ttl`), or a scope it does not
@@ -1290,6 +1288,7 @@ interface FederationGrantStore {
 	open(grantId: string, now: Date): Promise<{ grant; credentials: { state: "ok"; value } | { state: "absent" | "unreadable" | "key_unavailable" } } | null>;
 	activate(input: { grantId; intentHandle; authorization: FederationGrantAuthorization; credentials; now }): Promise<FederationGrantWrite>;
 	replaceCredentials(input: { grantId; expectedVersion; credentials; ineligible: Marker | null; now }): Promise<FederationGrantWrite>;
+	noteRefreshFailure(input: { grantId; expectedVersion; failure: { at; kind; retryAfterSeconds?; upstreamCode? }; rowMs; now }): Promise<FederationGrantWrite>; // D12; no version bump; never dated back
 	requireReauthorization(input: { grantId; expectedVersion; now }): Promise<FederationGrantWrite>;
 	revoke(grantId: string, by: FederationGrantRevokedBy, at: Date): Promise<FederationGrantWrite>; // `ok`: whether it changed anything
 	touch(grantId: string, at: Date): Promise<void>;
@@ -1297,6 +1296,9 @@ interface FederationGrantStore {
 }
 
 type FederationGrantWrite = { ok: true; grant: FederationGrant } | { ok: false };
+type FederationGrantLockResult =
+	| { acquired: true; waitedMs: number; release(): Promise<void> } // `waitedMs`: how long the store waited before it TOOK the lock (D12)
+	| { acquired: false; reason: "timeout" };
 ```
 
 - **The intents are a second port.** The intent records — redirect URI, scopes,

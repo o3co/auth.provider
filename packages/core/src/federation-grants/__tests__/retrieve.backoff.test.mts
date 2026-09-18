@@ -436,6 +436,29 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 			});
 		});
 
+		it("tells the failing caller no wait its stamp will not record: a stamp dated before the one on the record is refused, and not counted", async () => {
+			// Another replica, ten seconds ahead within the allowance, stamped a
+			// first outage. This replica's outage is dated before it: the store
+			// refuses it, the record keeps count 1, and this caller must not be
+			// told the backoff a count of 2 would carry.
+			const grant = await h.seed();
+			setNow(GONE);
+			await h.store.noteRefreshFailure({
+				grantId: "g-1",
+				expectedVersion: grant.version,
+				failure: { at: new Date(now().getTime() + 10_000), kind: "unavailable" },
+				rowMs: limits.ineligibleRetryAfterMs,
+				now: now(),
+			});
+			h.refresh.mockRejectedValue(outage());
+			expect(await retrieve()).toStrictEqual({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "upstream",
+			});
+			expect(await stamp()).toMatchObject({ count: 1 });
+		});
+
 		it("does not wait for a stamp that hangs past the persist budget, and tells the logger", async () => {
 			await h.seed();
 			setNow(GONE);

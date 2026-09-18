@@ -489,12 +489,22 @@ const UPSTREAM_OUTAGE_CODES: ReadonlySet<string> = new Set([
 	"temporarily_unavailable",
 ]);
 
-/** What `count` the store will give a failure at `at`: one more than a stamp no older than `rowMs`, else one. */
-const rowCount = (grant: AuthorizedFederationGrant, at: Date, rowMs: number): number => {
+/**
+ * What `count` the store will give a failure at `at`: one more than a stamp no
+ * older than `rowMs`, else one — and `undefined` for one dated before the
+ * stamp on the record, which the store refuses (D2): a caller must not be
+ * told a wait the record will not carry.
+ */
+const rowCount = (
+	grant: AuthorizedFederationGrant,
+	at: Date,
+	rowMs: number,
+): number | undefined => {
 	const previous = grant.refreshFailure;
-	return previous !== undefined && at.getTime() - previous.at.getTime() <= rowMs
-		? previous.count + 1
-		: 1;
+	if (previous === undefined) return 1;
+	const sinceMs = at.getTime() - previous.at.getTime();
+	if (sinceMs < 0) return undefined;
+	return sinceMs <= rowMs ? previous.count + 1 : 1;
 };
 
 const NOT_PERMITTED: FederationGrantDenial = {
@@ -1139,15 +1149,19 @@ async function refreshUnderLock(
 		}
 		// What the failing caller is told is what the stamp will tell the next
 		// one, computed the same way — and told even when the stamp does not land.
-		const wouldStand = federationGrantRefreshFailureStands(
-			{ ...failure, count: rowCount(grant, failure.at, limits.ineligibleRetryAfterMs) },
-			{
-				now: at,
-				allowanceMs: dateAllowanceMs(limits),
-				backoffMs: limits.refreshFailureBackoffMs,
-				ceilingMs: limits.ineligibleRetryAfterMs,
-			},
-		);
+		const count = rowCount(grant, failure.at, limits.ineligibleRetryAfterMs);
+		const wouldStand =
+			count === undefined
+				? { stands: false as const }
+				: federationGrantRefreshFailureStands(
+						{ ...failure, count },
+						{
+							now: at,
+							allowanceMs: dateAllowanceMs(limits),
+							backoffMs: limits.refreshFailureBackoffMs,
+							ceilingMs: limits.ineligibleRetryAfterMs,
+						},
+					);
 		if (
 			wouldStand.stands &&
 			(denial.code === "rate_limited" ||
