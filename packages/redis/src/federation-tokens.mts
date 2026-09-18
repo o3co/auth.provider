@@ -61,101 +61,17 @@ import {
 import { z } from "zod";
 import type { FederationTokenStoreClient } from "./clients.mjs";
 import { decryptTokenField, encryptTokenField } from "./internal/crypto.mjs";
+import {
+	type EncryptionGuardContext,
+	validateEncryptionMode,
+} from "./internal/encryption-mode.mjs";
+
 import { createRedisLock } from "./internal/lock.mjs";
 import { createRedisSidSet } from "./internal/redisSidSet.mjs";
 
 export type EncryptionConfig = { mode: "required"; key: Buffer } | { mode: "allow-plaintext" };
 
-/**
- * Environment names treated as production for the purpose of OR-12's hard
- * guard on `allow-plaintext` encryption mode. Federation tokens carry
- * long-lived IdP refresh tokens; storing them unencrypted in production is a
- * security risk.
- */
-const PRODUCTION_ENVS = new Set(["production", "staging"]);
-
-/**
- * What the plaintext guard reads, beside the mode itself (#473).
- *
- * `environment` is the name the deployment selected its configuration by —
- * the standalone's `CONFIG_ENV || NODE_ENV`. Until #473 the guard read
- * `NODE_ENV` alone, so `CONFIG_ENV=production NODE_ENV=test` ran
- * production.conf under the development guard. The explicit name is a signal
- * *added* to `NODE_ENV`, not a replacement for it: a process that says
- * production anywhere is production.
- *
- * `deploymentMode` is `deployment.mode` from the config. `"multi"` refuses
- * plaintext in every environment — a deployment that has declared more than
- * one replica is never a development box, whatever its environment is named.
- */
-export interface EncryptionGuardContext {
-	readonly environment?: string;
-	readonly deploymentMode?: string;
-}
-
-/**
- * OR-12 / #473 — refuse to construct a federation-token store with
- * `mode = "allow-plaintext"` where plaintext is not acceptable, unless the
- * operator explicitly sets `FEDERATION_TOKENS_ALLOW_INSECURE=1`. Logs a
- * CRITICAL line when the escape hatch is active. Everywhere else it emits a
- * soft `console.warn` but does not throw.
- *
- * Plaintext is refused when any of these holds:
- *   - the explicit `environment` is `production` or `staging`;
- *   - `NODE_ENV` is `production` or `staging` (always consulted; the sole
- *     signal when no environment is passed);
- *   - `deploymentMode` is `"multi"`.
- *
- * Runs at factory time before the DI container is fully wired, so direct
- * `console.*` is the appropriate emission channel (no Logger available yet).
- */
-function validateEncryptionMode(
-	mode: "required" | "allow-plaintext",
-	{ environment, deploymentMode }: EncryptionGuardContext,
-): void {
-	if (mode === "required") return;
-	const allowInsecure = process.env.FEDERATION_TOKENS_ALLOW_INSECURE === "1";
-
-	// Both names are checked, and the one that matched is the one reported:
-	// an operator whose CONFIG_ENV says production should not be told about
-	// NODE_ENV, and vice versa.
-	const productionEnvironment = [environment, process.env.NODE_ENV].find(
-		(name): name is string => name !== undefined && PRODUCTION_ENVS.has(name),
-	);
-	const reasons: string[] = [];
-	if (productionEnvironment !== undefined) {
-		reasons.push(`the environment is "${productionEnvironment}"`);
-	}
-	if (deploymentMode === "multi") {
-		reasons.push(
-			'deployment.mode is "multi" (a multi-replica deployment is never a development box)',
-		);
-	}
-
-	if (reasons.length > 0) {
-		const because = reasons.join(" and ");
-		if (allowInsecure) {
-			// Factory-time emission, no Logger available yet.
-			console.error(
-				`[federation-tokens] CRITICAL: running with mode="${mode}" although ${because}, ` +
-					"because FEDERATION_TOKENS_ALLOW_INSECURE=1. Federation tokens (IdP refresh tokens) " +
-					"are stored UNENCRYPTED. This is a security risk. Do NOT use in normal production.",
-			);
-			return;
-		}
-		throw new Error(
-			`[federation-tokens] mode "${mode}" is refused because ${because}. ` +
-				'Set mode to "required" and provide a 32-byte encryption key, OR set ' +
-				"FEDERATION_TOKENS_ALLOW_INSECURE=1 to override (NOT recommended for production).",
-		);
-	}
-
-	// Dev/test: warn but do not throw. Factory-time emission, no Logger available yet.
-	console.warn(
-		`[federation-tokens] WARNING: mode="${mode}" stores federation tokens (IdP refresh tokens) ` +
-			"unencrypted. Use only in development/test environments.",
-	);
-}
+export type { EncryptionGuardContext };
 
 export interface RedisFederationTokenStoreOptions {
 	client: FederationTokenStoreClient;
@@ -317,7 +233,7 @@ export function createRedisFederationTokenStore(
 	// `redisFederationTokenStoreBuilder` does its own pre-construction
 	// validation; this guard closes the gap when consumers call this lower-
 	// level factory directly (the OR-12 spec's M2 calibration delta).
-	validateEncryptionMode(opts.encryption.mode, {
+	validateEncryptionMode("federation-tokens", opts.encryption.mode, {
 		environment: opts.environment,
 		deploymentMode: opts.deploymentMode,
 	});
@@ -617,7 +533,7 @@ export const redisFederationTokenStoreBuilder: AdapterBuilder<FederationTokenSto
 	// OR-12: hard production guard (throws on plaintext in production unless
 	// FEDERATION_TOKENS_ALLOW_INSECURE=1). Validate before constructing the
 	// EncryptionConfig so the failure surfaces before any key parsing.
-	validateEncryptionMode(mode, guard);
+	validateEncryptionMode("federation-tokens", mode, guard);
 	let encryption: EncryptionConfig;
 	if (mode === "required") {
 		const rawKey = cfg.encryption?.key;

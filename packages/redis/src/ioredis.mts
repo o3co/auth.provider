@@ -14,6 +14,8 @@ import type {
 	DeviceCodeRecordFields,
 	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
+	FederationGrantHashFields,
+	FederationGrantStoreClient,
 	FederationTokenStoreClient,
 	PendingConsentStoreClient,
 	RateLimiterClient,
@@ -653,6 +655,487 @@ const CONSENT_GRANT = defineScript(LUA_CONSENT_GRANT);
 const PENDING_CONSENT_SET = defineScript(LUA_PENDING_CONSENT_SET);
 const PENDING_CONSENT_TAKE = defineScript(LUA_PENDING_CONSENT_TAKE);
 const PENDING_CONSENT_DISCARD = defineScript(LUA_PENDING_CONSENT_DISCARD);
+
+// --- Federation grant scripts (#593) ---------------------------------------
+//
+// One script per write, and every guard inside it. What the layout makes
+// possible, and what it does not: a grant's HASH, its credential and its lock
+// share a hash tag, so one script may touch all three; the subject's index is
+// its own key, in its own slot, and no script touches it together with a
+// record. That is the price of letting a deployment's grants spread across a
+// Cluster rather than pile onto the one node a shared tag would name — and it
+// is why the index is reserved before the record is written, at the horizon
+// the record will have, and pruned by that horizon alone (D16).
+//
+// Every script validates before it mutates. Lua's isolation is not a
+// transaction: an error halfway through leaves what it already wrote.
+
+/**
+ * Shared prelude. Concatenated into each script's source, so each still has
+ * its own SHA-1 and its own cache entry.
+ *
+ * `horizon` is the instant the record stops answering, and it is the one
+ * arithmetic every guard and every key deadline agrees on: a `pending` grant
+ * lapses with its intent and keeps no retention; anything ever authorized runs
+ * from the stored expiry plus the retention it was created with; one revoked
+ * before it was ever authorized has no expiry, so it runs from the revocation.
+ * A revocation moves no horizon.
+ */
+const LUA_FG_PRELUDE = `
+local function fg_num(v)
+  if v == false or v == nil then return nil end
+  return tonumber(v)
+end
+local function fg_fields(flat)
+  local t = {}
+  for i = 1, #flat, 2 do t[flat[i]] = flat[i + 1] end
+  return t
+end
+local function fg_horizon(g)
+  local retention = fg_num(g['retentionMs'])
+  if retention == nil then return nil end
+  if g['status'] == 'pending' then return fg_num(g['intentExpiresAt']) end
+  local expiresAt = fg_num(g['expiresAtMs'])
+  if expiresAt ~= nil then return expiresAt + retention end
+  local revokedAt = fg_num(g['revokedAt'])
+  if revokedAt ~= nil then return revokedAt + retention end
+  return nil
+end
+-- The record as this caller may see it: resident, and not past its horizon.
+-- A caller whose clock is wrong is told the wrong thing once; it never costs
+-- anyone else the record, so nothing here deletes or expires anything.
+local function fg_visible(key, now)
+  local flat = redis.call('HGETALL', key)
+  if #flat == 0 then return nil end
+  local g = fg_fields(flat)
+  local h = fg_horizon(g)
+  if h == nil then return nil end
+  if not (now < h) then return nil end
+  return g
+end
+local function fg_renewable(g, now)
+  if g['status'] ~= 'active' and g['status'] ~= 'reauthorization_required' then return false end
+  return true
+end
+-- Compared byte by byte with no early exit: the handle is a capability the
+-- browser carries, and the reference adapter compares it in constant time.
+local function fg_same(a, b)
+  if a == nil or b == nil then return false end
+  if #a ~= #b then return false end
+  local diff = 0
+  for i = 1, #a do
+    diff = bit.bor(diff, bit.bxor(string.byte(a, i), string.byte(b, i)))
+  end
+  return diff == 0
+end
+`;
+
+/**
+ * Creates a `pending` grant. `KEYS[1]` = the record, `KEYS[2]` = its
+ * credential; `ARGV` = the caller's clock, the base fields, the intent's
+ * handle and expiry, the retention.
+ *
+ * The existence check is on the key, not on the horizon: an ID is taken for
+ * as long as a record is there under it, and a caller whose clock is ahead
+ * must not lodge over a record everyone else can still see.
+ *
+ * A credential already at `KEYS[2]` goes with it. It could never authenticate
+ * under the new authorization — the record it was sealed for is gone — but a
+ * secret at rest that nothing can use is still a secret at rest, and a
+ * mismatched restore or a reused ID can leave one. The record's fields are
+ * read for the reply *before* the deadline is applied, so that a reply is
+ * never built from a key the same script expired.
+ */
+const LUA_FG_CREATE = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local intentAt = tonumber(ARGV[4])
+local retention = tonumber(ARGV[5])
+if now == nil or intentAt == nil or retention == nil then return {0} end
+if not (now < intentAt) then return {0} end
+if redis.call('EXISTS', KEYS[1]) == 1 then return {0} end
+redis.call('HSET', KEYS[1],
+  'format', '1',
+  'base', ARGV[2],
+  'status', 'pending',
+  'version', '1',
+  'retentionMs', ARGV[5],
+  'intentHandle', ARGV[3],
+  'intentExpiresAt', ARGV[4])
+redis.call('DEL', KEYS[2])
+local fields = redis.call('HGETALL', KEYS[1])
+redis.call('PEXPIREAT', KEYS[1], math.ceil(intentAt))
+return {1, fields}
+`;
+
+/**
+ * The record and its credential, in one step. `KEYS[1]` = the record,
+ * `KEYS[2]` = its credential.
+ *
+ * One step because the two are read together or not at all: between a
+ * `HGETALL` and a `GET` an activation can replace both, and the caller would
+ * evaluate one authorization against the other's credential. A reply of two
+ * elements says there is no credential; three says there is one, which an
+ * empty string also is.
+ *
+ * No visibility guard: what the caller may see is judged where the record is
+ * decoded, against the authenticated text rather than the arithmetic field.
+ */
+const LUA_FG_SNAPSHOT = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return {0} end
+local fields = redis.call('HGETALL', KEYS[1])
+local credential = redis.call('GET', KEYS[2])
+if credential == false then return {1, fields} end
+return {1, fields, credential}
+`;
+
+/**
+ * Names a reauthorization's intent as current. `KEYS[1]` = the record;
+ * `ARGV` = the caller's clock, the handle, the intent's expiry.
+ *
+ * Refuses a `pending` grant — a first-time intent makes a new grant and never
+ * takes over another one's — and a grant past its stored expiry, so that a
+ * new consent cannot resurrect a lifetime that has ended. Moves no deadline
+ * and bumps no version: a refresh in flight must not lose its write to a
+ * renewal the user may never finish.
+ */
+const LUA_FG_NAME_INTENT = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local intentAt = tonumber(ARGV[3])
+if now == nil or intentAt == nil then return {0} end
+if not (now < intentAt) then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil then return {0} end
+if not fg_renewable(g, now) then return {0} end
+local expiresAt = fg_num(g['expiresAtMs'])
+if expiresAt == nil or not (now < expiresAt) then return {0} end
+redis.call('HSET', KEYS[1], 'intentHandle', ARGV[2], 'intentExpiresAt', ARGV[3])
+return {1, redis.call('HGETALL', KEYS[1])}
+`;
+
+/**
+ * Retires the current intent. `KEYS[1]` = the record; `ARGV` = the caller's
+ * clock, whether a handle was given, the handle.
+ *
+ * With a handle, only if that is the one there: a consent refused for a
+ * superseded intent must not end the newer one. Without, whichever is
+ * current. A `pending` grant is refused, whose first intent is its life.
+ */
+const LUA_FG_RETIRE_INTENT = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+if now == nil then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil then return {0} end
+if g['intentHandle'] == nil then return {0} end
+if not fg_renewable(g, now) then return {0} end
+if ARGV[2] == '1' and not fg_same(g['intentHandle'], ARGV[3]) then return {0} end
+redis.call('HDEL', KEYS[1], 'intentHandle', 'intentExpiresAt')
+return {1, redis.call('HGETALL', KEYS[1])}
+`;
+
+/**
+ * Records a use. `KEYS[1]` = the record; `ARGV[1]` = the instant.
+ *
+ * Forward only, and on an `active` record only. A use never brings back a
+ * record that has lapsed, and never creates one: an ID whose record is gone
+ * is free, and a touch that wrote a field would take it.
+ */
+const LUA_FG_TOUCH = `${LUA_FG_PRELUDE}
+local at = tonumber(ARGV[1])
+if at == nil then return 0 end
+local g = fg_visible(KEYS[1], at)
+if g == nil or g['status'] ~= 'active' then return 0 end
+local last = fg_num(g['lastUsedAt'])
+if last ~= nil and not (last < at) then return 0 end
+redis.call('HSET', KEYS[1], 'lastUsedAt', ARGV[1])
+return 1
+`;
+
+/**
+ * Reserves a grant in its subject's index. `KEYS[1]` = the index; `ARGV` =
+ * the member, its horizon, the allowance.
+ *
+ * The score moves forward only, and `ZADD GT` would do it in one command —
+ * it is written out here so that the comparison and the index's own deadline
+ * are one step, and so that the reply says what the horizon became. The
+ * deadline is the last horizon the index holds plus the allowance, so the
+ * index outlives every record it points at even when its node's clock differs
+ * from theirs.
+ */
+const LUA_FG_RESERVE = `
+local horizon = tonumber(ARGV[2])
+local allowance = tonumber(ARGV[3])
+if horizon == nil or allowance == nil then return 0 end
+local current = redis.call('ZSCORE', KEYS[1], ARGV[1])
+if current == false or tonumber(current) < horizon then
+  redis.call('ZADD', KEYS[1], ARGV[2], ARGV[1])
+end
+local last = redis.call('ZRANGE', KEYS[1], -1, -1, 'WITHSCORES')
+if #last == 2 then
+  redis.call('PEXPIREAT', KEYS[1], math.ceil(tonumber(last[2]) + allowance))
+end
+return 1
+`;
+
+/**
+ * Drops members whose horizon is past by the allowance. `KEYS[1]` = the
+ * index; `ARGV` = the adapter's clock, the allowance.
+ *
+ * By horizon and never by whether the record is there: the two are different
+ * keys, so a member reserved for a record still being written would be
+ * dropped by that rule and nothing would put it back. The allowance is what
+ * keeps the prune later than any answer a replica whose clock differs could
+ * still give from the record itself.
+ */
+const LUA_FG_PRUNE = `
+local clock = tonumber(ARGV[1])
+local allowance = tonumber(ARGV[2])
+if clock == nil or allowance == nil then return 0 end
+return redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. string.format('%.0f', clock - allowance))
+`;
+
+/**
+ * Takes a grant from its current intent to `active`. `KEYS[1]` = the record,
+ * `KEYS[2]` = its credential; `ARGV` = the caller's clock, the handle, the
+ * authorization text, its expiry, the three guard fields, the sealed
+ * credential.
+ *
+ * The current intent is compared here and not by version, because naming and
+ * retiring an intent bump none: a caller that read a pointer and activated on
+ * it would otherwise activate a renewal the user had already superseded, or
+ * one a subject-wide revocation had retired. That is the mistake this script
+ * exists to make impossible.
+ *
+ * The stored expiry is checked unless the grant is `pending` — a new consent
+ * must not resurrect a lifetime that has ended — and the identity revision
+ * and upstream account must be the ones recorded, so that a renewal never
+ * re-points a grant at another account (D4, D7).
+ *
+ * The authorization is replaced as a whole, so the marker and the stamp of a
+ * failed refresh go with the one they were about. A use recorded before it
+ * stays: it says nothing about what the grant allows.
+ */
+const LUA_FG_ACTIVATE = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local expiresAt = tonumber(ARGV[4])
+if now == nil or expiresAt == nil then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil then return {0} end
+if g['status'] == 'revoked' then return {0} end
+if g['status'] ~= 'pending' then
+  local stored = fg_num(g['expiresAtMs'])
+  if stored == nil or not (now < stored) then return {0} end
+end
+if not fg_same(g['intentHandle'], ARGV[2]) then return {0} end
+local intentAt = fg_num(g['intentExpiresAt'])
+if intentAt == nil or not (now < intentAt) then return {0} end
+if g['authorization'] ~= nil then
+  if g['identityRevision'] ~= ARGV[5] then return {0} end
+  if g['upstreamIssuer'] ~= ARGV[6] then return {0} end
+  if g['upstreamSubject'] ~= ARGV[7] then return {0} end
+end
+local version = fg_num(g['version'])
+if version == nil then return {0} end
+redis.call('HDEL', KEYS[1],
+  'intentHandle', 'intentExpiresAt', 'ineligible',
+  'failureAt', 'failureKind', 'failureCount',
+  'failureRetryAfterSeconds', 'failureUpstreamCode')
+redis.call('HSET', KEYS[1],
+  'status', 'active',
+  'version', string.format('%.0f', version + 1),
+  'authorization', ARGV[3],
+  'expiresAtMs', ARGV[4],
+  'identityRevision', ARGV[5],
+  'upstreamIssuer', ARGV[6],
+  'upstreamSubject', ARGV[7])
+redis.call('SET', KEYS[2], ARGV[8])
+local fields = redis.call('HGETALL', KEYS[1])
+local retention = fg_num(g['retentionMs']) or 0
+redis.call('PEXPIREAT', KEYS[1], math.ceil(expiresAt + retention))
+redis.call('PEXPIREAT', KEYS[2], math.ceil(expiresAt))
+return {1, fields}
+`;
+
+/**
+ * Replaces the credential of an `active` grant. `KEYS[1]` = the record,
+ * `KEYS[2]` = its credential; `ARGV` = the caller's clock, the expected
+ * version, the sealed credential, whether a marker was given, the marker.
+ *
+ * The marker is replaced as a whole, including being removed: a refresh that
+ * found the token eligible says so by handing over none. The stamp of a
+ * failed refresh is forgotten, because this refresh succeeded. Neither
+ * horizon moves — the credential's deadline is set to the same expiry it
+ * already had, so a rotation does not extend what the user consented to.
+ */
+const LUA_FG_REPLACE = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local expected = tonumber(ARGV[2])
+if now == nil or expected == nil then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil or g['status'] ~= 'active' then return {0} end
+local version = fg_num(g['version'])
+if version == nil or version ~= expected then return {0} end
+local expiresAt = fg_num(g['expiresAtMs'])
+if expiresAt == nil or not (now < expiresAt) then return {0} end
+redis.call('HDEL', KEYS[1],
+  'ineligible', 'failureAt', 'failureKind', 'failureCount',
+  'failureRetryAfterSeconds', 'failureUpstreamCode')
+redis.call('HSET', KEYS[1], 'version', string.format('%.0f', version + 1))
+if ARGV[4] == '1' then
+  redis.call('HSET', KEYS[1], 'ineligible', ARGV[5])
+end
+redis.call('SET', KEYS[2], ARGV[3])
+local fields = redis.call('HGETALL', KEYS[1])
+redis.call('PEXPIREAT', KEYS[2], math.ceil(expiresAt))
+return {1, fields}
+`;
+
+/**
+ * Asks for the user again. `KEYS[1]` = the record, `KEYS[2]` = its
+ * credential; `ARGV` = the caller's clock, the expected version.
+ *
+ * The one transition with no expiry guard: an upstream that says the
+ * credential is dead is believed whenever it says it, and a record whose
+ * expiry passed while the answer was in flight must still lose its
+ * credential. The marker stays — it describes the tokens this authorization
+ * yields, which is exactly what the user is being asked about — and the
+ * horizon does not move, because what was consented to has not changed.
+ */
+const LUA_FG_REQUIRE_REAUTH = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local expected = tonumber(ARGV[2])
+if now == nil or expected == nil then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil or g['status'] ~= 'active' then return {0} end
+local version = fg_num(g['version'])
+if version == nil or version ~= expected then return {0} end
+redis.call('HDEL', KEYS[1],
+  'failureAt', 'failureKind', 'failureCount',
+  'failureRetryAfterSeconds', 'failureUpstreamCode')
+redis.call('HSET', KEYS[1],
+  'status', 'reauthorization_required',
+  'version', string.format('%.0f', version + 1))
+redis.call('DEL', KEYS[2])
+return {1, redis.call('HGETALL', KEYS[1])}
+`;
+
+/**
+ * Ends the grant. `KEYS[1]` = the record, `KEYS[2]` = its credential; `ARGV`
+ * = the instant, who revoked it.
+ *
+ * No version guard: a revocation does not lose to a refresh in flight, and
+ * whichever runs second is still correct — a revocation after a refresh takes
+ * the credential the refresh wrote, and a refresh after a revocation is
+ * refused by the status.
+ *
+ * What the grant was authorized for stays, so the status route can say what
+ * ended. A revocation moves no horizon — an authorized grant is retained from
+ * its expiry whenever it was revoked — except for one that was never
+ * authorized, which has no expiry to be retained from and runs from here.
+ */
+const LUA_FG_REVOKE = `${LUA_FG_PRELUDE}
+local at = tonumber(ARGV[1])
+if at == nil then return {0} end
+local flat = redis.call('HGETALL', KEYS[1])
+if #flat == 0 then return {0} end
+local g = fg_fields(flat)
+if g['status'] == 'revoked' then return {0} end
+-- The one write that does not go through the visibility check, because it is
+-- the one that must always win. A horizon that CAN be computed is still
+-- honoured: a tombstone is not revoked again. One that cannot — a record
+-- whose retention someone deleted — is not a reason to leave a credential at
+-- rest with no way to end it, which is exactly the state an operator reaches
+-- for this in (the reviewer, then Copilot).
+local horizon = fg_horizon(g)
+if horizon ~= nil and not (at < horizon) then return {0} end
+local version = fg_num(g['version'])
+local wasPending = g['status'] == 'pending'
+redis.call('HDEL', KEYS[1],
+  'intentHandle', 'intentExpiresAt',
+  'failureAt', 'failureKind', 'failureCount',
+  'failureRetryAfterSeconds', 'failureUpstreamCode')
+redis.call('HSET', KEYS[1],
+  'status', 'revoked',
+  'revokedBy', ARGV[2],
+  'revokedAt', ARGV[1])
+-- A version that is not a number is left as it is: it cannot be bumped, and
+-- refusing over it would be refusing the revocation. The caller is told the
+-- write could not be represented, and the credential is gone all the same.
+if version ~= nil then
+  redis.call('HSET', KEYS[1], 'version', string.format('%.0f', version + 1))
+end
+redis.call('DEL', KEYS[2])
+local fields = redis.call('HGETALL', KEYS[1])
+if wasPending then
+  local retention = fg_num(g['retentionMs'])
+  if retention ~= nil then
+    redis.call('PEXPIREAT', KEYS[1], math.ceil(at + retention))
+  end
+end
+return {1, fields}
+`;
+
+/**
+ * Stamps a failed refresh. `KEYS[1]` = the record; `ARGV` = the caller's
+ * clock, the expected version, when the failure happened, its kind, the row,
+ * and the two optional fields with a flag each.
+ *
+ * The version is compared although none is written: a failure that outlived
+ * its own refresh must not install a backoff over a credential written since
+ * (D12). The row is measured from the stamp it replaces and against the
+ * failure's own instant, not the caller's clock — a stamp that took a second
+ * to arrive is still one failure after the last. An equal instant counts
+ * onward; an earlier one is refused, so a stamp that arrives out of order
+ * never replaces a newer one.
+ *
+ * Only the stamp's fields are touched, so a use or a pointer written
+ * meanwhile survives — which is the reason this is a script and not a
+ * read, a count and a write.
+ */
+const LUA_FG_NOTE_FAILURE = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local expected = tonumber(ARGV[2])
+local failedAt = tonumber(ARGV[3])
+local row = tonumber(ARGV[5])
+if now == nil or expected == nil or failedAt == nil then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil or g['status'] ~= 'active' then return {0} end
+local version = fg_num(g['version'])
+if version == nil or version ~= expected then return {0} end
+local expiresAt = fg_num(g['expiresAtMs'])
+if expiresAt == nil or not (now < expiresAt) then return {0} end
+local previous = fg_num(g['failureAt'])
+local count = 1
+if previous ~= nil then
+  if failedAt < previous then return {0} end
+  local since = failedAt - previous
+  if row ~= nil and since <= row then
+    count = (fg_num(g['failureCount']) or 0) + 1
+  end
+end
+redis.call('HDEL', KEYS[1], 'failureRetryAfterSeconds', 'failureUpstreamCode')
+redis.call('HSET', KEYS[1],
+  'failureAt', ARGV[3],
+  'failureKind', ARGV[4],
+  'failureCount', string.format('%.0f', count))
+if ARGV[6] == '1' then redis.call('HSET', KEYS[1], 'failureRetryAfterSeconds', ARGV[7]) end
+if ARGV[8] == '1' then redis.call('HSET', KEYS[1], 'failureUpstreamCode', ARGV[9]) end
+return {1, redis.call('HGETALL', KEYS[1])}
+`;
+
+const FG_CREATE = defineScript(LUA_FG_CREATE);
+const FG_SNAPSHOT = defineScript(LUA_FG_SNAPSHOT);
+const FG_NAME_INTENT = defineScript(LUA_FG_NAME_INTENT);
+const FG_RETIRE_INTENT = defineScript(LUA_FG_RETIRE_INTENT);
+const FG_TOUCH = defineScript(LUA_FG_TOUCH);
+const FG_RESERVE = defineScript(LUA_FG_RESERVE);
+const FG_PRUNE = defineScript(LUA_FG_PRUNE);
+/** The same source the session lock uses: a delete that only frees the value it was given. */
+const FG_UNLOCK = defineScript(LUA_COMPARE_AND_DELETE);
+const FG_ACTIVATE = defineScript(LUA_FG_ACTIVATE);
+const FG_REPLACE = defineScript(LUA_FG_REPLACE);
+const FG_REQUIRE_REAUTH = defineScript(LUA_FG_REQUIRE_REAUTH);
+const FG_REVOKE = defineScript(LUA_FG_REVOKE);
+const FG_NOTE_FAILURE = defineScript(LUA_FG_NOTE_FAILURE);
 
 /**
  * Run `script` EVALSHA-first, falling back to EVAL — which implicitly loads
@@ -1352,5 +1835,219 @@ export function makeIoredisClients(
 		deviceCodeStoreClient,
 		consentStoreClient,
 		pendingConsentStoreClient,
+	};
+}
+
+/**
+ * The commands a federation grant store needs from its connection (#593).
+ *
+ * Narrower than `Redis` on purpose: everything a write does happens inside a
+ * script, and a listing's reads are routed one key at a time, so a Cluster
+ * client satisfies this too — without widening the WATCH-based adapters in
+ * {@link makeIoredisClients}, which a Cluster cannot serve.
+ */
+export interface FederationGrantRedisCommands {
+	evalsha(sha: string, numkeys: number, ...args: (string | number)[]): Promise<unknown>;
+	eval(script: string, numkeys: number, ...args: (string | number)[]): Promise<unknown>;
+	zrange(key: string, start: number, stop: number): Promise<string[]>;
+	set(
+		key: string,
+		value: string,
+		expiryMode: "PX",
+		ttlMs: number,
+		condition: "NX",
+	): Promise<"OK" | null>;
+}
+
+/** A number as a Redis argument: never in exponent form, whatever its magnitude. */
+const fgNumber = (value: number): string =>
+	Number.isFinite(value) ? value.toFixed(0) : String(value);
+
+/** `HGETALL`'s flat `[field, value, …]` reply as the record's fields. */
+const fgFields = (flat: unknown): FederationGrantHashFields => {
+	const pairs = Array.isArray(flat) ? (flat as string[]) : [];
+	const fields: Record<string, string> = {};
+	for (let i = 0; i + 1 < pairs.length; i += 2) {
+		fields[pairs[i] as string] = pairs[i + 1] as string;
+	}
+	return fields as unknown as FederationGrantHashFields;
+};
+
+/**
+ * A write's reply: `[1, fields]` when it happened, `[0]` when it was refused.
+ * Absence and a failed precondition are the same answer on purpose — the
+ * record may change again before the caller looks, so the port re-reads (D2).
+ */
+const fgWritten = (reply: unknown): FederationGrantHashFields | null => {
+	if (!Array.isArray(reply) || reply[0] !== 1) return null;
+	return fgFields(reply[1]);
+};
+
+/**
+ * The federation grant store's connection (#593, D16), separate from
+ * {@link makeIoredisClients} so that a Cluster deployment can have one.
+ */
+export function makeIoredisFederationGrantStoreClient(
+	io: FederationGrantRedisCommands,
+): FederationGrantStoreClient {
+	const connection = io as unknown as Redis;
+	return {
+		async createPending(grantKey, credKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_CREATE,
+					[grantKey, credKey],
+					[
+						fgNumber(input.nowMs),
+						input.base,
+						input.handle,
+						fgNumber(input.intentExpiresAtMs),
+						fgNumber(input.retentionMs),
+					],
+				),
+			);
+		},
+
+		async snapshot(grantKey, credKey) {
+			const reply = await runScript(connection, FG_SNAPSHOT, [grantKey, credKey], []);
+			if (!Array.isArray(reply) || reply[0] !== 1) return null;
+			return {
+				fields: fgFields(reply[1]),
+				credential: typeof reply[2] === "string" ? reply[2] : null,
+			};
+		},
+
+		async nameIntent(grantKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_NAME_INTENT,
+					[grantKey],
+					[fgNumber(input.nowMs), input.handle, fgNumber(input.intentExpiresAtMs)],
+				),
+			);
+		},
+
+		async retireIntent(grantKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_RETIRE_INTENT,
+					[grantKey],
+					[fgNumber(input.nowMs), input.handle === undefined ? "0" : "1", input.handle ?? ""],
+				),
+			);
+		},
+
+		async activate(grantKey, credKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_ACTIVATE,
+					[grantKey, credKey],
+					[
+						fgNumber(input.nowMs),
+						input.handle,
+						input.authorization,
+						fgNumber(input.expiresAtMs),
+						input.identityRevision,
+						input.upstreamIssuer,
+						input.upstreamSubject,
+						input.credential,
+					],
+				),
+			);
+		},
+
+		async replaceCredentials(grantKey, credKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_REPLACE,
+					[grantKey, credKey],
+					[
+						fgNumber(input.nowMs),
+						fgNumber(input.expectedVersion),
+						input.credential,
+						input.ineligible === null ? "0" : "1",
+						input.ineligible ?? "",
+					],
+				),
+			);
+		},
+
+		async requireReauthorization(grantKey, credKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_REQUIRE_REAUTH,
+					[grantKey, credKey],
+					[fgNumber(input.nowMs), fgNumber(input.expectedVersion)],
+				),
+			);
+		},
+
+		async revoke(grantKey, credKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_REVOKE,
+					[grantKey, credKey],
+					[fgNumber(input.atMs), input.by],
+				),
+			);
+		},
+
+		async noteRefreshFailure(grantKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_NOTE_FAILURE,
+					[grantKey],
+					[
+						fgNumber(input.nowMs),
+						fgNumber(input.expectedVersion),
+						fgNumber(input.atMs),
+						input.kind,
+						fgNumber(input.rowMs),
+						input.retryAfterSeconds === undefined ? "0" : "1",
+						input.retryAfterSeconds === undefined ? "" : String(input.retryAfterSeconds),
+						input.upstreamCode === undefined ? "0" : "1",
+						input.upstreamCode ?? "",
+					],
+				),
+			);
+		},
+
+		async touch(grantKey, atMs) {
+			await runScript(connection, FG_TOUCH, [grantKey], [fgNumber(atMs)]);
+		},
+
+		async reserve(indexKey, member, horizonMs, allowanceMs) {
+			await runScript(
+				connection,
+				FG_RESERVE,
+				[indexKey],
+				[member, fgNumber(horizonMs), fgNumber(allowanceMs)],
+			);
+		},
+
+		async tryLock(lockKey, token, ttlMs) {
+			const reply = await io.set(lockKey, token, "PX", ttlMs, "NX");
+			return reply === "OK";
+		},
+
+		async unlock(lockKey, token) {
+			await runScript(connection, FG_UNLOCK, [lockKey], [token]);
+		},
+
+		async members(indexKey) {
+			return await io.zrange(indexKey, 0, -1);
+		},
+
+		async prune(indexKey, clockMs, allowanceMs) {
+			await runScript(connection, FG_PRUNE, [indexKey], [fgNumber(clockMs), fgNumber(allowanceMs)]);
+		},
 	};
 }

@@ -14,17 +14,35 @@
  * limitations under the License.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { FEDERATION_GRANT_LIFETIME_CEILING_MS } from "#/federation-grants/lifetime.mjs";
-import type { FederationGrantStore, FederationGrantWrite } from "#/federation-grants/store.mjs";
+/**
+ * Conformance suite for `FederationGrantStore` (#593, D16) — the copy
+ * `@o3co/auth-provider-redis` runs against its adapter.
+ *
+ * Duplicated from
+ * `packages/core/src/federation-grants/__tests__/store.contract.mts`,
+ * differing only in how it imports the port and the types: a contract file
+ * cannot be imported across a package boundary (see `docs/adapter-surface.md`,
+ * "Proving an implementation").
+ *
+ * The two are held in step MECHANICALLY, by
+ * `__tests__/federation-grant-contract-parity.test.mts`: a suite this long
+ * would otherwise drift the week after it landed, and a copy that has drifted
+ * is worse than none — it reads as the same contract while asserting
+ * something else. Nothing but the import block may differ.
+ */
+
 import {
 	type AuthorizedFederationGrant,
+	FEDERATION_GRANT_LIFETIME_CEILING_MS,
 	type FederationGrantAuthorization,
 	type FederationGrantCredentials,
 	type FederationGrantIneligibilityMarker,
 	type FederationGrantRefreshFailureInput,
+	type FederationGrantStore,
+	type FederationGrantWrite,
 	hasFederationGrantAuthorization,
-} from "#/federation-grants/types.mjs";
+} from "@o3co/auth-provider-core";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 export interface FederationGrantStoreContractFactory<
 	S extends FederationGrantStore = FederationGrantStore,

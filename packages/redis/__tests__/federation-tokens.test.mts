@@ -152,6 +152,26 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		).toThrow(/encryption key/i);
 	});
 
+	it("names itself when it refuses plaintext: the guard is shared, the message is not", () => {
+		// The guard moved to `internal/encryption-mode.mts` and the federation
+		// grant store (#593) uses it too, with its own label. An operator reading
+		// a boot failure has to be told which store refused, and nothing here
+		// said so before (the reviewer).
+		const previous = process.env.NODE_ENV;
+		process.env.NODE_ENV = "production";
+		try {
+			expect(() =>
+				createRedisFederationTokenStore({
+					client: redis,
+					encryption: { mode: "allow-plaintext" },
+				}),
+			).toThrow(/\[federation-tokens\] mode "allow-plaintext" is refused/);
+		} finally {
+			if (previous === undefined) delete process.env.NODE_ENV;
+			else process.env.NODE_ENV = previous;
+		}
+	});
+
 	it("rejects ttl: 0 at construction", () => {
 		expect(() =>
 			createRedisFederationTokenStore({

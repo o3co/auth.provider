@@ -41,6 +41,11 @@ that `@o3co/auth-provider-core` exposes as a typed slot:
 - `SubjectSessionIndex` / `SubjectRevocation` (subject-level revocation,
   #321) — bundled with the four above in `redisSessionStoresModule`
 - `FederationTokenStore` (federation tokens)
+- `FederationGrantStore` (federation grants, #593) — offline delegation of an
+  upstream's tokens to a backend or an agent, with no session behind the call.
+  `createRedisFederationGrantStore` takes its own connection through
+  `makeIoredisFederationGrantStoreClient`, and no module factory yet: the
+  routes and the configuration arrive with the package's slice.
 - `RateLimiter` (rate-limiter)
 - `CodeRepository` (relocated from `@o3co/auth-provider-foundation` in
   v0.5.0; `redisCodeRepositoryBuilder` for AdapterFactory wiring)
@@ -191,6 +196,41 @@ handful of named keys rather than a search:
 | `${keyPrefix}${sid}:${federationName}` | string | one federation token envelope |
 | `${keyPrefix}idx:${sid}` | **set** | the federation names attached to `${sid}` |
 | `${keyPrefix}lock:${sid}:${federationName}` | string | the advisory lock |
+
+### Federation grants (#593)
+
+Its own keyspace, and its own connection, because what it holds outlives every
+session: default prefix `fg:`.
+
+| Key | Type | Holds |
+| --- | --- | --- |
+| `fg:{<id>}:grant` | **hash** | the non-secret record: status, version, the authorization as one canonical text, the current intent |
+| `fg:{<id>}:cred` | string | one sealed credential (`v2.<key id>.<iv>.<ciphertext>.<tag>`) |
+| `fg:{<id>}:lock` | string | the lock one refresh holds |
+| `fg:sub:<subject>` | **zset** | that subject's grants, scored by the instant each stops answering |
+
+`<id>` and `<subject>` are base64url of their JSON, so a brace cannot walk
+into the hash tag and two values differing only in a lone surrogate cannot
+share a key. A grant's three keys share a tag and are written by one script; a
+subject's index is a key of its own and is never touched by a script that
+touches a record — which is what lets a deployment's grants spread across a
+Cluster rather than pile onto the one node a namespace-wide tag would name. So
+a member is reserved before its record is written, at the horizon the record
+will have, its score only moves forward, and it is pruned by that horizon and
+never by whether the record is there.
+
+Every write is one guarded script, and a refused one says only that it was
+refused: the record may change again before the caller looks, so the port
+re-reads. Nothing deletes a record because of the time its caller passed —
+what a caller is told is judged on the time it passes, and what Redis reclaims
+is judged by Redis.
+
+The credential is sealed under a key **ring**: the first key seals, every
+configured key opens, and the envelope names the one that sealed it, so a key
+can be introduced without re-sealing grants that are paused. A key that is not
+in the ring reads as `key_unavailable` — a configuration problem an operator
+undoes by putting it back — and is told apart from a credential that will
+never open again. Nothing is ever deleted on a read.
 
 The index (`idx:`) is what lets `removeBySid` name the keys it must delete
 instead of hunting for them, at a cost of O(that session's federations). Before

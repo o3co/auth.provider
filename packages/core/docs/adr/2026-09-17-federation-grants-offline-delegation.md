@@ -91,6 +91,7 @@ interface FederationGrantAuthorization {
 interface FederationGrantUsage {
 	readonly lastUsedAt?: Date;
 	readonly ineligible?: { reason; at: Date; judgedAgainst: number }; // D5
+	readonly refreshFailure?: { at: Date; kind; count: number; retryAfterSeconds?; upstreamCode? }; // D12
 }
 
 interface FederationGrantRevocation {
@@ -942,7 +943,9 @@ reuse-detecting IdP answers by revoking the family.
   only a *structured* `invalid_grant` or `invalid_token` requires
   reauthorization and deletes credentials. The classifier's substring fallback
   never does; it maps to `upstream_rejected`. 429 and 5xx/network failures
-  change nothing in the record.
+  touch neither the authorization, the status nor the credentials — they do
+  write the stamp of the failed refresh, which is a usage field (D1) and
+  bumps no version.
 - If the upstream refresh succeeds but the replacement cannot be persisted
   after bounded retries inside the lock, the call answers
   `temporarily_unavailable` / `storage`, the new credentials are dropped, and
@@ -1306,7 +1309,7 @@ interface FederationGrantStore {
 
 type FederationGrantWrite = { ok: true; grant: FederationGrant } | { ok: false };
 type FederationGrantLockResult =
-	| { acquired: true; waitedMs: number; release(): Promise<void> } // `waitedMs`: how long the store waited before it TOOK the lock (D12)
+	| { acquired: true; waitedMs: number; release(): Promise<void> } // `waitedMs`: a LOWER BOUND on how long the store waited before it took the lock (D12)
 	| { acquired: false; reason: "timeout" };
 ```
 
@@ -1358,7 +1361,17 @@ type FederationGrantLockResult =
   else with it. Core may hand over a digest in place of the value the browser
   carries; slice 6 decides.
 - **The lock is part of the port**, so the in-memory adapter and the contract
-  suite cover it too.
+  suite cover it too. Over a connection, `waitedMs` is the elapsed time
+  recorded immediately before the attempt that succeeded was *sent*: a
+  conservative lower bound, since including the acknowledgement's own travel
+  would date the lease later than it began, and core measures that part
+  itself. "Never acquires after the deadline" is then what an adapter can
+  observe: no attempt is sent after it. A request sent before it may still be
+  executed by the server after it, and an acquisition whose answer arrives
+  late is handed over rather than thrown away — core refuses to start upstream
+  work once the budget measured from `askedAt + waitedMs` is spent, and an
+  adapter answering `timeout` for a lock it held would report contention that
+  never happened.
 - **Records are handed out and taken in as copies.**
 
 Redis layout, default prefix `fg:`. Keys that one script touches share a
@@ -1375,14 +1388,46 @@ Cluster hash tag, as the consent store's do:
   tombstone retention once it is authorized, the revocation plus the retention
   for one revoked while `pending`. Scored by `expiresAt` alone, a listing
   would drop the tombstones that `find` still answers for, and the contract
-  suite holds the two to the same set. Written before the record; a dangling
-  entry is tolerated and pruned.
+  suite holds the two to the same set.
+
+  Slice 3 settles what that layout leaves open. Both the grant ID and the
+  subject go into a key as base64url of their JSON, so a brace cannot walk
+  into a hash tag and two values differing only in a lone surrogate cannot
+  collide; a `keyPrefix` containing a brace is refused at construction. A
+  member is **reserved before the record is written**, at the horizon the
+  record will have, and its score **only ever moves forward** — two writers
+  lodging one ID both reserve, the one whose record is created is not
+  necessarily the one that reserved last, and a reservation that lost would
+  otherwise pull the horizon back under the record that won. A reservation is
+  never withdrawn for the same reason.
+
+  **Pruning is by horizon and never by absence.** The index is a key of its
+  own, in its own slot, so "the record is not there, drop the member" would
+  drop a member reserved for a record still being written, and nothing would
+  put it back. A member is dropped once its horizon is past by an allowance
+  (`listingAllowanceMs`, default 5 min) on the adapter's own clock, and the
+  index key's own deadline is the last horizon it holds plus that allowance,
+  so the index outlives every record it points at. The consequence, which a
+  single-node deployment never sees: with the index and a record on different
+  nodes, a record may be missing from `listBySubject` up to the allowance
+  before its horizon while `find` still answers for it. That is the price of
+  keeping a deployment's grants spread across a Cluster instead of colocating
+  the whole namespace in one slot, which is what an index atomic with its
+  records would need — and a store for per-user offline delegation is exactly
+  the thing that grows. A listing is not a transactionally consistent
+  snapshot, and the port does not promise one.
 - `fg:{intents}:<handle>`, `fg:{intents}:tx:<state>` and the per
   `(client, subject)` counter, each with its own TTL. They share one constant
   tag, as the consent store's parked requests do, so the bound is enforced
   atomically among intents. Nothing needs atomicity across the two tags:
   supersession is enforced at activation, by the grant's current-intent
   pointer (D2).
+
+The retention a grant was created with is kept **with the record**, and its
+horizon derived from that: a key's TTL and an index score are written once, so
+a store reopened under a different setting would otherwise disagree with the
+arithmetic it had already written. A change to the setting therefore applies
+to grants created after it.
 
 Key TTLs come from the stored `expiresAt`, never from `effectiveExpiry`, which
 depends on configuration (D3). The grant HASH keeps a tombstone retention
@@ -1415,7 +1460,76 @@ under the new fields and writes both in one script; a refresh re-seals under unc
 guard guarantees. A tampered field fails authentication and reads as
 `credential_unreadable`. `status`, `version`
 and `revocation` are left out on purpose: every transition away from `active`
-deletes the credential, so rewriting them gains nothing.
+deletes the credential, so rewriting *them alone* cannot reconstruct one.
+
+What this does not defend against, and no field list would: restoring an old
+HASH and its matching credential together, or replaying an earlier credential
+under an authorization that has not changed. Both authenticate, because both
+were written by this store. The envelope binds a credential to the
+authorization it was sealed under — it does not make the keyspace
+append-only.
+
+Two rules make the binding hold where the envelope alone would not, and an
+adapter that skips either is broken in a way its tests will not show:
+
+- **A record is answered only under the ID it says it is.** A HASH copied
+  together with its ciphertext into another grant's keys authenticates
+  perfectly well — everything the authenticated data names travelled with it.
+  So a record read under one key that names another grant is not that grant's
+  record and is answered as absent, and the authenticated data is computed
+  from the key the credential was *read from* rather than one rebuilt from
+  what the record says. Without this, `open(other)` hands back one grant's
+  record and credential while the caller locks the ID it asked for, and
+  refresh exclusion is gone.
+- **A write that has the record in hand refuses one whose copies disagree.**
+  The scripts compare the copies, so one rewritten in the keyspace lets a
+  write through that was refused before it: one `HSET` of the expiry renews a
+  grant whose consented lifetime had ended, and one of the upstream account
+  re-points it at another. Activation, the refresh and naming a renewal's
+  intent therefore read the record first and refuse unless the copies still
+  agree with the authenticated text — which is also what keeps `activate` and
+  `isCurrentIntent` (D7) answering the same thing. Retiring a pointer, a use
+  and a failure stamp are left to the copies: none of them decides what the
+  grant allows, and a round trip on every use is not worth a pointer's
+  removal. A rewrite of the text *and* its copies together is the restore case
+  above, and is not detected.
+- **The retention is part of the record, and a record without it answers
+  nothing.** It is in neither the envelope nor the comparison, and every
+  script derives the horizon from it: read through a configured fallback
+  instead, a record whose retention had gone would keep disclosing its
+  credential while every write — a revocation included — was refused for
+  ever. A grant that cannot be ended is the one thing this store may never
+  produce.
+- **A revocation reaches the store even for a record nothing can read.** It
+  has no version to match and always wins, so it is the one write that does
+  not go through the visibility check: a horizon that *can* be computed is
+  still honoured, since a tombstone is not revoked again, but one that cannot
+  — a record whose retention someone deleted — is not a reason to leave a
+  credential at rest with no way to end it. A `version` that is not a number
+  is left as it is rather than refused over, and the caller is told the write
+  could not be represented; the credential is gone all the same. The read in
+  front of the write is for the subject its index is named after and nothing
+  else. A record the adapter cannot decode answers nothing to `find` either,
+  so a member left at an earlier horizon hides nothing a caller could have
+  read.
+- **A credential is re-sealed only under an authorization the credential it
+  replaces authenticates against.** A refresh seals the new credential under
+  the authorization it read. If that text was rewritten in the keyspace — the
+  expiry extended, the `version` left alone — re-sealing would turn tampering
+  that was being reported as unreadable into an authorization this store had
+  signed for. So the existing credential is opened first, and a refresh whose
+  record no longer authenticates is refused.
+
+The fields the scripts compare — the authorization's `expiresAt`, the
+identity revision and the upstream account — are repeated outside the
+authenticated text, because a script cannot read the sealed text without
+decoding it and decoding it is what must never happen. They gate writes and
+decide nothing a caller is told: every answer is judged on the authenticated
+text, so one of them rewritten in the keyspace can make a key linger, and
+cannot make a credential be disclosed past the expiry the upstream consented
+to. A copy that no longer agrees with the text it came from means the
+keyspace was written by something else, and the credential reads as
+`credential_unreadable`.
 
 Two behaviours differ from the session-bound store on purpose, because a
 mistake here revokes every user's delegation at once:
@@ -1429,11 +1543,22 @@ mistake here revokes every user's delegation at once:
   Paused grants are not re-sealed, so the runbook says an old key stays in the
   ring for the one-year ceiling.
 - **No self-heal delete.** A record that cannot be read is never deleted on
-  read. `credential_unreadable` is computed, not persisted (D1): wrong key
-  material under a known key ID must not durably flip every grant.
+  read, and neither is its credential or its index membership.
+  `credential_unreadable` is computed, not persisted (D1): wrong key material
+  under a known key ID must not durably flip every grant. A resident record
+  whose HASH no longer parses is answered as absent and kept, and its member
+  is not pruned — it is physically there, and pruning is by horizon anyway.
 
-The `allow-plaintext` production guard applies unchanged. The in-memory
-adapter declares `replicaSafety: unsafe`.
+The `allow-plaintext` production guard applies unchanged, which means what it
+means for the session-bound store: plaintext is refused where the environment
+is `production` or `staging` or the deployment declares more than one replica,
+*unless* `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which permits it with a
+CRITICAL line. One escape hatch and not two — it is about IdP refresh tokens
+at rest without encryption, which is what either store would be doing — and
+the message names which store refused. Under `allow-plaintext` a credential
+carries no authorization authentication at all, and its spelling is its own,
+so neither reader takes the other's. The in-memory adapter declares
+`replicaSafety: unsafe`.
 
 ### D17 — The federation adapter surface gains one capability, in two methods
 
@@ -1699,8 +1824,11 @@ route test is written first and watched failing.
    snapshot, D5's bearer-only rule, and the generic adapter's implementation
    with the reserved parameters, the salvaged refresh token and the per-call
    signal.
-3. **redis adapter** (D16), with the duplicated contract suite on a
-   testcontainer, the guarded-write scripts and the grant-keyed lock.
+3. **redis adapter** (D16). Done: the `v2` envelope and its key ring, the
+   three canonical encodings, the guarded-write scripts, the grant-keyed lock,
+   the adapter, and the contract suite duplicated onto a testcontainer with a
+   parity test that allows nothing but its import block to differ from core's
+   copy.
 4. **package: token and status routes** (D9–D12), exercised on grants seeded
    straight into the store; the `Client` fields, audit events, configuration.
 5. **revocation** (D13): the revoke route, the two library functions, the

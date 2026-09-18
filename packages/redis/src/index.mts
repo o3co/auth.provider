@@ -35,11 +35,13 @@ export {
 // ---------------------------------------------------------------------------
 export type {
 	AccessTokenDenylistClient,
+	ActivateFederationGrantInput,
 	ChallengeStoreClient,
 	CodeRepositoryClient,
 	ConsentRecordFields,
 	ConsentStoreClient,
 	CreateDeviceCodeRecordInput,
+	CreatePendingFederationGrantInput,
 	DeviceCodeDecisionInput,
 	DeviceCodeDecisionReply,
 	DeviceCodeKeyspace,
@@ -47,8 +49,13 @@ export type {
 	DeviceCodeRecordFields,
 	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
+	FederationGrantHashFields,
+	FederationGrantSnapshot,
+	FederationGrantStoreClient,
 	FederationTokenStoreClient,
 	GrantConsentInput,
+	NameFederationGrantIntentInput,
+	NoteFederationGrantRefreshFailureInput,
 	ParkPendingConsentInput,
 	PendingConsentKeyspace,
 	PendingConsentStoreClient,
@@ -56,7 +63,11 @@ export type {
 	RateLimitIncrement,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
+	ReplaceFederationGrantCredentialsInput,
 	ReplaySeenSetClient,
+	RequireFederationGrantReauthorizationInput,
+	RetireFederationGrantIntentInput,
+	RevokeFederationGrantInput,
 	SessionRPRegistryClient,
 	SessionRPRegistryMultiClient,
 	SessionSidSortedSetClient,
@@ -126,6 +137,16 @@ export {
 // Adapter relocated from core; module pattern added for declarative wiring
 // parity with other v0.5.0 redis adapters.
 // ---------------------------------------------------------------------------
+// Federation grants (#593, D16): the offline-delegation store. No module
+// factory here — slice 4 wires the routes and the configuration.
+// ---------------------------------------------------------------------------
+export {
+	createRedisFederationGrantStore,
+	DEFAULT_FEDERATION_GRANT_LISTING_ALLOWANCE_MS,
+	type FederationGrantEncryption,
+	type FederationGrantKey,
+	type RedisFederationGrantStoreOptions,
+} from "./federation-grant-store.mjs";
 export {
 	createRedisFederationTokenStore,
 	type EncryptionConfig,
