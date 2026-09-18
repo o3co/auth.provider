@@ -47,10 +47,10 @@ No description, deliberately. A body naming the feature would tell an unauthenti
 
 What it is **not** is byte-identical to a deployment that never installed the package: there, nothing matches the path at all and the host's own fallback answers — Express's HTML 404 in a bare composition. Review measured the difference and it is the headers and the content type, not the body. So the property this actually has is the one worth having: the refusal names no feature, and nothing behind it runs. A deployment that wants the two indistinguishable gives its host a JSON 404 of its own.
 
-## The two routes
+## The three routes
 
-Both are `POST`, both are authenticated as a confidential client
-(`client_secret_basic`, `client_secret_post` or `private_key_jwt`), and both
+All three are `POST`, all are authenticated as a confidential client
+(`client_secret_basic`, `client_secret_post` or `private_key_jwt`), and all
 take the grant id as an opaque path segment.
 
 ### `POST /oauth/federation-grants/:grantId/token`
@@ -72,8 +72,22 @@ object in it.
 Everything else is `{"error": "<code>"}` with an `"error_description"`
 alongside it wherever the failure has a reason to give — `grant_not_found`,
 `invalid_scope`, `invalid_target` and `authorization_pending` have none, and
-carry the code alone. Both fields are **identifiers, not prose**: a client may
-switch on them. The status
+carry the code alone. Both fields are **identifiers, not prose**, for every
+answer **this package** owns: a client may switch on them, and the wording may
+be improved without breaking one. What these routes inherit — client
+authentication's `401`s and the shared rate limiter's `503` — still carries
+that middleware's own wording, and it is the same wording every other
+throttled, client-authenticated route in this provider gives; rewriting it
+here would make one failure read two ways depending on which route met it.
+
+The body identifiers are `invalid_body`, `sub_required`, `invalid_sub`,
+`duplicate_sub`, `unexpected_parameter`, and — on `/token`, which is the only
+route that takes them — `invalid_connection`, `invalid_resource`,
+`invalid_scope`, `invalid_min_ttl` and `duplicate_min_ttl`. A parameter this
+route does not take is never named back to the caller: it is their string, and
+`error_description` goes into logs.
+
+The status
 says what kind of problem it is: `400` the caller's, `403` the client's
 registration, `404` no such grant of theirs, `410` the user must be asked
 again, `429` slow down, `502` the upstream, `503` come back. `Retry-After` is

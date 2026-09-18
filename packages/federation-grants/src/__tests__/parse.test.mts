@@ -126,8 +126,27 @@ describe("parseFederationGrantTokenRequest", () => {
 		// A caller that sent `scopes` meaning `scope`, or `subject` meaning
 		// `sub`, has asked for something this route did not do — answering as
 		// if the field had not been there is how that goes unnoticed.
-		expect(rejected({ sub: "u", scopes: "openid" })).toMatch(/scopes/);
-		expect(rejected({ sub: "u", audience: "x" })).toMatch(/audience/);
+		expect(rejected({ sub: "u", scopes: "openid" })).toBe("unexpected_parameter");
+		expect(rejected({ sub: "u", audience: "x" })).toBe("unexpected_parameter");
+	});
+
+	it("answers with an identifier and never with the caller's own field name", () => {
+		// Two reasons it does not name the field. It is caller-supplied, and
+		// `error_description` ends up in logs and dashboards; and the point of
+		// an identifier is that something can branch on it, which a sentence
+		// containing an arbitrary string cannot be.
+		expect(rejected({ sub: "u", "</script>": "x" })).toBe("unexpected_parameter");
+		expect(rejected({})).toBe("sub_required");
+		expect(rejected({ sub: ["a", "b"] })).toBe("duplicate_sub");
+		expect(rejected({ sub: 42 })).toBe("invalid_sub");
+		expect(rejected("sub=u")).toBe("invalid_body");
+		for (const description of [
+			rejected({ sub: "u", connection: "" }),
+			rejected({ sub: "u", scope: " " }),
+			rejected({ sub: "u", min_ttl: "60s" }),
+		]) {
+			expect(description).toMatch(/^[a-z][a-z_]*$/);
+		}
 	});
 
 	it("permits the client authentication fields alongside its own", () => {
