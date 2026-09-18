@@ -1202,6 +1202,12 @@ export const fullSectionsSchema = z.object({
 			// authorized for (D16). Zero is a deployment that keeps no
 			// tombstones.
 			tombstoneRetention: durationFromEnv(z.number().int().nonnegative()).optional(),
+			// Whether a subject-wide revocation may be ASKED to leave this
+			// subject's established grants standing (D13). An allowance and not
+			// an instruction: the caller still has to ask, what it asked for and
+			// what happened are both reported, and boot refuses the pairing with
+			// an adapter that cannot stamp the two boundaries separately.
+			allowKeepOnSubjectRevocation: coerceBooleanFromEnv.optional(),
 			// The credential envelope's key ring (D16). The first key seals;
 			// every listed key opens, so one stays in the ring for as long as
 			// a paused grant may live.

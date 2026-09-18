@@ -183,3 +183,35 @@ export function resolveFederationGrantRetrievalLimits(
 	assertFederationGrantRetrievalLimits(limits);
 	return limits;
 }
+
+/**
+ * `federationGrants.allowKeepOnSubjectRevocation`, from the configuration an
+ * operator wrote (D13).
+ *
+ * Read on its own rather than through {@link FEDERATION_GRANT_SETTING_DEFAULTS}
+ * and `setting`: those carry a unit and a maximum, and every one of their
+ * checks is about a duration. A boolean in that object would be a value whose
+ * key ends in neither `Ms` nor a number, taking the wrong branch of each of
+ * them.
+ *
+ * Refuses rather than repairs, for the reason the durations do — but the stake
+ * here is the opposite direction: a value nobody can read must not become
+ * `true`. `"false"`, `"0"` and an empty string are what HOCON substitutes an
+ * unset `${?VAR}` chain as, and they mean what they say; anything else is
+ * named.
+ */
+export function resolveFederationGrantKeepPolicy(config: unknown): boolean {
+	const written = (config as { federationGrants?: { allowKeepOnSubjectRevocation?: unknown } })
+		?.federationGrants?.allowKeepOnSubjectRevocation;
+	if (written === undefined) return false;
+	if (typeof written === "boolean") return written;
+	if (typeof written === "string") {
+		const normalized = written.trim().toLowerCase();
+		if (normalized === "true" || normalized === "1") return true;
+		if (normalized === "false" || normalized === "0" || normalized === "") return false;
+	}
+	throw new RangeError(
+		'federationGrants.allowKeepOnSubjectRevocation must be one of "true", "false", "1" or "0" ' +
+			`(an empty value reads as false), and was ${JSON.stringify(written)}`,
+	);
+}

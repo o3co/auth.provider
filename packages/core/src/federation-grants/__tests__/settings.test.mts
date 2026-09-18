@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
 	FEDERATION_GRANT_SETTING_DEFAULTS,
+	resolveFederationGrantKeepPolicy,
 	resolveFederationGrantRetrievalLimits,
 } from "#/federation-grants/settings.mjs";
 
@@ -61,6 +62,41 @@ describe("FEDERATION_GRANT_SETTING_DEFAULTS", () => {
 				(FEDERATION_GRANT_SETTING_DEFAULTS as Record<string, number>)[key],
 				`reference.conf federationGrants.${key}`,
 			).toBe(value);
+		}
+	});
+});
+
+describe("resolveFederationGrantKeepPolicy", () => {
+	const resolve = (written: unknown) =>
+		resolveFederationGrantKeepPolicy({
+			federationGrants: { allowKeepOnSubjectRevocation: written },
+		});
+
+	it("is off when an operator wrote nothing", () => {
+		// Including the deployments that predate the key: what a subject-wide
+		// revocation did before this existed is what it keeps doing.
+		expect(resolveFederationGrantKeepPolicy({})).toBe(false);
+		expect(resolveFederationGrantKeepPolicy(undefined)).toBe(false);
+		expect(resolve(undefined)).toBe(false);
+	});
+
+	it("reads the spellings HOCON substitutes an environment variable as", () => {
+		for (const written of [true, "true", "TRUE", " 1 "]) {
+			expect(resolve(written), JSON.stringify(written)).toBe(true);
+		}
+		// An empty value is an unset `${?VAR}` chain, and it reads as false.
+		for (const written of [false, "false", "0", ""]) {
+			expect(resolve(written), JSON.stringify(written)).toBe(false);
+		}
+	});
+
+	it("refuses a value it would have to guess at, rather than reading it as on", () => {
+		// The direction matters: an allowance nobody can read must not become
+		// one an operator never gave.
+		for (const written of ["yes", "on", 1, null, [], {}]) {
+			expect(() => resolve(written), JSON.stringify(written)).toThrow(
+				/allowKeepOnSubjectRevocation/,
+			);
 		}
 	});
 });

@@ -231,7 +231,8 @@ describe("revokeAllForSubject with a grant store", () => {
 
 		const first = (await h.store.inspect("g-1", now()))?.grant;
 		const second = (await h.store.inspect("g-2", now()))?.grant;
-		const instant = (grant: unknown) => (grant as { revocation: { at: Date } }).revocation.at.getTime();
+		const instant = (grant: unknown) =>
+			(grant as { revocation: { at: Date } }).revocation.at.getTime();
 		expect(instant(first)).not.toBe(instant(second));
 	});
 

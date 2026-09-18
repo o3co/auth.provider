@@ -22,6 +22,7 @@ import {
 import type { FederationGrantStore } from "../federation-grants/store.mjs";
 import type { FederationGrant } from "../federation-grants/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { cascadeSubjectSessions, type SubjectSessionCascade } from "./cascadeSubjectSessions.mjs";
 import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
 
 /**
@@ -59,7 +60,15 @@ export type RevokeAllForSubjectCapability =
  */
 export interface RevokeAllForSubjectFailure {
 	readonly capability: RevokeAllForSubjectCapability;
-	readonly operation: "revokeBefore" | "listSids" | "removeSid" | "listBySubject" | "revoke";
+	readonly operation:
+		| "revokeBefore"
+		| "listSids"
+		| "removeSid"
+		| "listBySubject"
+		| "revoke"
+		/** The subject revocation service's two: a sessions-only stamp, and a renewal it could not end. */
+		| "revokeSessionsBefore"
+		| "retireIntent";
 	/** The session the failing call concerned, for the per-session operations. */
 	readonly sid?: string;
 	/** The grant the failing call concerned, for the per-grant operations. */
@@ -217,56 +226,17 @@ export async function revokeAllForSubject(
 	}
 
 	// Step 2 — cascade every session the subject holds.
-	const sessionsRevoked: string[] = [];
-	const sessionsFailed: string[] = [];
+	let sessions: SubjectSessionCascade = { revoked: [], failed: [], failures: [] };
 	if (opts.subjectSessionIndex === undefined) {
 		unavailable.push("subjectSessionIndex");
 	} else {
-		const index = opts.subjectSessionIndex;
-		let sids: readonly string[] = [];
-		try {
-			sids = await index.listSids(opts.subject);
-		} catch (error) {
-			// Nothing to enumerate means nothing to cascade, but the watermark
-			// above may already be in force — which is why this is a reported
-			// partial result rather than a thrown one.
-			failures.push({ capability: "subjectSessionIndex", operation: "listSids", error });
-			opts.logger?.error({ err: error, subject: opts.subject }, "revoke_all_list_sids_failed");
-		}
-		for (const sid of sids) {
-			// Sequential, not concurrent: each cascade is itself a multi-store
-			// sequence whose ordering matters, and a credential change is rare
-			// enough that fanning out to save milliseconds is not worth the
-			// extra load it would put on the same stores mid-incident.
-			let ok: boolean;
-			try {
-				ok = (await opts.cascadeSession(sid)).ok;
-			} catch (err) {
-				opts.logger?.error({ err, subject: opts.subject, sid }, "revoke_all_cascade_failed");
-				ok = false;
-			}
-			if (!ok) {
-				// Left in the index deliberately: the entry is what a retry
-				// enumerates. Removing it would strand a live session.
-				sessionsFailed.push(sid);
-				continue;
-			}
-			sessionsRevoked.push(sid);
-			try {
-				await index.removeSid(opts.subject, sid);
-			} catch (error) {
-				// Bookkeeping only, and deliberately not fatal to the loop: the
-				// session's cascade already succeeded, so it stays counted as
-				// revoked. A stale entry costs the next call one redundant
-				// cascade, which is idempotent — whereas aborting here would
-				// leave the subject's remaining sessions live.
-				failures.push({ capability: "subjectSessionIndex", operation: "removeSid", sid, error });
-				opts.logger?.error(
-					{ err: error, subject: opts.subject, sid },
-					"revoke_all_remove_sid_failed",
-				);
-			}
-		}
+		sessions = await cascadeSubjectSessions({
+			subject: opts.subject,
+			index: opts.subjectSessionIndex,
+			cascadeSession: opts.cascadeSession,
+			logger: opts.logger,
+		});
+		failures.push(...sessions.failures);
 	}
 
 	// Step 3 — end every federation grant the subject has. Last, because it is
@@ -330,11 +300,12 @@ export async function revokeAllForSubject(
 	// alongside the failure that produced it, which `failures` already carries.
 	// `sessionsFailed` is a term because a cascade that answers `{ ok: false }`
 	// reports no failure at all.
-	const complete = unavailable.length === 0 && failures.length === 0 && sessionsFailed.length === 0;
+	const complete =
+		unavailable.length === 0 && failures.length === 0 && sessions.failed.length === 0;
 
 	return {
-		sessionsRevoked,
-		sessionsFailed,
+		sessionsRevoked: sessions.revoked,
+		sessionsFailed: sessions.failed,
 		tokensRevoked,
 		grantsRequested: grantStore !== undefined,
 		grantsRevoked,

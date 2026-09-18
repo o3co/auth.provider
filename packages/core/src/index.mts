@@ -600,6 +600,14 @@ export {
 	type RevokeAllForSubjectResult,
 	revokeAllForSubject,
 } from "./user-sessions/revokeAllForSubject.mjs";
+export {
+	createSubjectRevocationService,
+	type FederationGrantDisposition,
+	type SubjectRevocationReport,
+	type SubjectRevocationRequest,
+	type SubjectRevocationService,
+	type SubjectRevocationServiceDeps,
+} from "./user-sessions/subjectRevocationService.mjs";
 // ---------------------------------------------------------------------------
 // A4 user-sessions (post v0.5.0 redesign): 4-way decomposition.
 // Per spec §5.1-§5.7, §7.1, §8.1.
@@ -832,6 +840,7 @@ export {
 // the limits the retrieval takes. In core because the block is core's.
 export {
 	FEDERATION_GRANT_SETTING_DEFAULTS,
+	resolveFederationGrantKeepPolicy,
 	resolveFederationGrantRetrievalLimits,
 } from "./federation-grants/settings.mjs";
 export type {

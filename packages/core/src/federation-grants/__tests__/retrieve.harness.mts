@@ -140,6 +140,8 @@ export interface Harness {
 		credentials?: FederationGrantCredentials;
 		expiresAt?: Date;
 		id?: string;
+		/** When the user agreed, for a test that turns on which grants were consented when. */
+		consentAt?: Date;
 	}): Promise<AuthorizedFederationGrant>;
 }
 
@@ -201,7 +203,7 @@ export function harness(): Harness {
 					upstream: { issuer: connection.upstreamIssuer, subject: "00u-alice" },
 					...(configured.resource !== undefined ? { resource: configured.resource } : {}),
 					scopes: [...SCOPES],
-					consent: { at: seededAt, sid: "sid-1", scopes: [...CONSENTED] },
+					consent: { at: over.consentAt ?? seededAt, sid: "sid-1", scopes: [...CONSENTED] },
 					authorizedAt: seededAt,
 					expiresAt: over.expiresAt ?? new Date(seededAt.getTime() + 30 * DAY),
 				},
