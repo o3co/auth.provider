@@ -30,7 +30,7 @@ import { resolveFederationGrantRetrievalLimits } from "@o3co/auth-provider-core"
 import type { Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
 import { createFederationGrantBackground } from "#/background.mjs";
-import { createTokenDenialAudit } from "#/denialAudit.mjs";
+import { createRouteDenialAudit } from "#/denialAudit.mjs";
 import { parserErrors } from "#/routes.mjs";
 import { createFederationGrantStatusHandler } from "#/statusRoute.mjs";
 import { createFederationGrantTokenHandler } from "#/tokenRoute.mjs";
@@ -232,7 +232,7 @@ describe("the hook that audits what middleware refused", () => {
 		const events: unknown[] = [];
 		const background = createFederationGrantBackground();
 		const { res, finish } = watchable();
-		createTokenDenialAudit({
+		createRouteDenialAudit({
 			sink: {
 				kind: "test",
 				record: async (event) => {

@@ -119,6 +119,57 @@ lock, never `touch`. It is also **not** a health check for `/token` — `active`
 does not promise a token, and an ineligible status can sit beside a perfectly
 usable cached one.
 
+### `POST /oauth/federation-grants/:grantId/revoke`
+
+```json
+{ "sub": "local-subject" }
+```
+
+The owning client ends its own grant: the user disconnected the integration on
+its side, the workspace was deleted, the agent is being decommissioned. A
+success is **`204` with no body** — a withdrawal has no result to report — and
+a second call answers `204` as well, because the record is retained as a
+tombstone for `/status` and a client retrying after a timeout must not be told
+its second attempt failed.
+
+**Ownership is the whole check.** The grant is this client's and this
+subject's, or it answers the same `404` as an unknown id. After that nothing
+else is consulted: not the connection allowlist, not the current connection
+configuration, not the revision, not eligibility, not expiry, not the subject's
+boundary. Every one of those decides whether a credential may be *disclosed*,
+and none of them is a reason to refuse a withdrawal — a grant whose connection
+was removed, whose encryption key is out of the ring, or which expired last
+week and is still retained, is exactly the grant an operator most needs to be
+able to end.
+
+It does not stamp either subject boundary, touch the subject's other grants,
+cascade sessions, or call the upstream. Ending a grant here is a local fact
+about one record; revoking the upstream's own refresh token is that upstream's
+API and a different failure domain, and waiting on it would mean a user cannot
+disconnect while somebody else's service is down.
+
+| Exit | HTTP | `error` | `error_description` |
+|---|---:|---|---|
+| Ended, or already over | 204 | — | — |
+| Body is not an object | 400 | `invalid_request` | `invalid_body` |
+| `sub` missing or empty | 400 | `invalid_request` | `sub_required` |
+| `sub` repeated / not a string | 400 | `invalid_request` | `duplicate_sub` / `invalid_sub` |
+| Any other body parameter | 400 | `invalid_request` | `unexpected_parameter` |
+| Unknown id, another client's, another subject's | 404 | `grant_not_found` | — |
+| The record could not be read or written | 503 | `temporarily_unavailable` | `storage` |
+| Admitted as the process began shutting down | 503 | `service_unavailable` | `shutting_down` |
+| Unexpected fault, or no authenticated client on the request | 500 | `server_error` | `unexpected_error` |
+
+Client authentication, the throttle and the body-size and content-type guards
+are the same ones `/token` inherits, and answer the same way here.
+
+A withdrawal that changed something emits one `federation.grant.revoked` with
+`outcome: "client"`, built from the record the write returned. A refused one
+emits `federation.grant.revoke.denied` — its own type, not a
+`.token.denied`: a credential that was not handed out and a credential that is
+still live are opposite facts, and a dashboard counting one must not count the
+other.
+
 ## Install these modules before `oauthModule`
 
 These routes live under `/oauth`, and `oauthModule` mounts its own router there

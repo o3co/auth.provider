@@ -46,7 +46,7 @@ export interface FederationGrantAuditBridgeOptions {
 	readonly ip?: string;
 	readonly userAgent?: string;
 	/** Which route the event came from: status writes a backstop revocation too. */
-	readonly operation: "token" | "status";
+	readonly operation: "token" | "status" | "revoke";
 	/** Sampled when the event is handed over, not when the request arrived. */
 	readonly now: () => Date;
 }
@@ -94,6 +94,13 @@ export function createFederationGrantAuditBridge(
 }
 
 export interface RouteDeniedEventInput {
+	/**
+	 * Defaults to the token route's. A refused withdrawal is its own type: a
+	 * dashboard counting denied disclosures would otherwise count them
+	 * together, and they mean opposite things — one is a credential not handed
+	 * out, the other a credential still live that somebody tried to end.
+	 */
+	readonly type?: "federation.grant.token.denied" | "federation.grant.revoke.denied";
 	readonly correlationId: string;
 	readonly grantId: string;
 	/** A fixed identifier: `invalid_request`, `invalid_client`, `rate_limited/provider`, … */
@@ -117,7 +124,7 @@ export interface RouteDeniedEventInput {
  */
 export function routeDeniedEvent(input: RouteDeniedEventInput): FederationGrantAuditEvent {
 	return {
-		type: "federation.grant.token.denied",
+		type: input.type ?? "federation.grant.token.denied",
 		correlationId: input.correlationId,
 		grantId: input.grantId,
 		clientId: input.clientId ?? "",

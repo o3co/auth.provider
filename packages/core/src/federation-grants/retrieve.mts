@@ -91,7 +91,16 @@ export interface FederationGrantAuditEvent {
 		| "federation.grant.refresh_failed"
 		| "federation.grant.refresh_persist_failed"
 		| "federation.grant.reauthorization_required"
-		| "federation.grant.revoked";
+		| "federation.grant.revoked"
+		/**
+		 * A withdrawal that did not happen (D18). Its own type rather than a
+		 * `.token.denied` with a different outcome: a dashboard counting
+		 * denied disclosures would otherwise count refused withdrawals with
+		 * them, and the two mean opposite things — one is a credential not
+		 * handed out, the other is a credential still live that somebody tried
+		 * to end.
+		 */
+		| "federation.grant.revoke.denied";
 	readonly correlationId: string;
 	readonly grantId: string;
 	/** The caller. */

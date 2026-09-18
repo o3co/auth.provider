@@ -120,6 +120,17 @@ function federationGrantEmissions(source: string): readonly string[] {
 	)) {
 		if (call[1]) found.push(call[1]);
 	}
+	// `routeDeniedEvent({ type: "federation.grant.x", … })` — the routes
+	// package's own builder for a refusal the handler never reached. Its
+	// result is always handed to the sink, so a literal in one of its calls is
+	// an emission. `({` and not `(` on purpose: it matches the CALLS and not
+	// the declaration, whose parameter list is `(input: …)` and whose body
+	// carries the default type — a declaration is not an emission.
+	for (const call of source.matchAll(/\brouteDeniedEvent\(\{/g)) {
+		const windowText = source.slice(call.index, (call.index ?? 0) + 600);
+		const literal = /type:\s*"(federation\.grant\.[\w.]+)"/.exec(windowText);
+		if (literal?.[1]) found.push(literal[1]);
+	}
 	// A `PendingAudit` tuple: `["federation.grant.x", "<outcome>"]`, whether it
 	// sits inside an `audits: [[…]]` list or is bound to a name first. Matched
 	// as "the first element of an array literal", which is what a tuple is and
