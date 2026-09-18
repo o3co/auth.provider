@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+import type { FederationGrantAuditEvent } from "../federation-grants/retrieve.mjs";
+import {
+	listFederationGrantsForSubject,
+	revokeFederationGrant,
+} from "../federation-grants/revoke.mjs";
+import type { FederationGrantStore } from "../federation-grants/store.mjs";
+import type { FederationGrant } from "../federation-grants/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
 
@@ -29,11 +36,18 @@ import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
 export type CascadeSession = (sid: string) => Promise<{ readonly ok: boolean }>;
 
 /**
- * The two optional slots this helper consumes. Named rather than free strings
- * so a caller can branch on them, and so the set is greppable when #321 adds
- * the Redis adapters that fill them.
+ * The optional slots this helper consumes. Named rather than free strings so a
+ * caller can branch on them, and so the set is greppable when #321 adds the
+ * Redis adapters that fill them.
+ *
+ * `federationGrantStore` appears here for the failures it can report, not for
+ * the gap it can leave: unlike the other two, leaving it out is a decision
+ * rather than an omission, so it is never listed in `unavailable`.
  */
-export type RevokeAllForSubjectCapability = "subjectSessionIndex" | "subjectRevocation";
+export type RevokeAllForSubjectCapability =
+	| "subjectSessionIndex"
+	| "subjectRevocation"
+	| "federationGrantStore";
 
 /**
  * One store call that was attempted and threw.
@@ -45,9 +59,11 @@ export type RevokeAllForSubjectCapability = "subjectSessionIndex" | "subjectRevo
  */
 export interface RevokeAllForSubjectFailure {
 	readonly capability: RevokeAllForSubjectCapability;
-	readonly operation: "revokeBefore" | "listSids" | "removeSid";
+	readonly operation: "revokeBefore" | "listSids" | "removeSid" | "listBySubject" | "revoke";
 	/** The session the failing call concerned, for the per-session operations. */
 	readonly sid?: string;
+	/** The grant the failing call concerned, for the per-grant operations. */
+	readonly grantId?: string;
 	readonly error: unknown;
 }
 
@@ -64,6 +80,21 @@ export interface RevokeAllForSubjectOptions {
 	readonly cascadeSession: CascadeSession;
 	readonly subjectSessionIndex?: SubjectSessionIndex;
 	readonly subjectRevocation?: SubjectRevocation;
+	/**
+	 * Supplying it asks for the subject's federation grants to be ended too
+	 * (#593). **Omitting it is not a missing capability** — see
+	 * {@link RevokeAllForSubjectResult.grantsRequested}.
+	 */
+	readonly federationGrantStore?: FederationGrantStore;
+	/**
+	 * Told about each grant this call ended, on the same terms as every other
+	 * revocation: one event per write that changed something, built from the
+	 * record rather than from what was asked for, and a sink that throws
+	 * changes nothing.
+	 */
+	readonly federationGrantAudit?: (event: FederationGrantAuditEvent) => void | Promise<void>;
+	/** Carried into the grant audit events when the caller has one. */
+	readonly correlationId?: string;
 	readonly logger?: Logger;
 	/** Injectable for tests; defaults to `Date.now`. */
 	readonly now?: () => number;
@@ -76,6 +107,21 @@ export interface RevokeAllForSubjectResult {
 	readonly sessionsFailed: readonly string[];
 	/** Whether the access-token watermark was written. */
 	readonly tokensRevoked: boolean;
+	/**
+	 * Whether a grant store was supplied, and the grant pass therefore ran.
+	 *
+	 * `false` is reported rather than counted as a gap: every call written
+	 * before #593 omits the store, and a deployment that has no grants at all
+	 * is not incomplete for not revoking any. A caller that expects grants to
+	 * be ended checks this field; what covers the omission meanwhile is the
+	 * boundary the watermark just wrote, which the adapters apply to grants as
+	 * well as to sessions.
+	 */
+	readonly grantsRequested: boolean;
+	/** Grant ids this call ended. A grant that was already over is not one. */
+	readonly grantsRevoked: readonly string[];
+	/** Grant ids whose write threw — still live, safe to retry. */
+	readonly grantsFailed: readonly string[];
 	/**
 	 * Capabilities that were not wired, and therefore not exercised.
 	 *
@@ -130,6 +176,12 @@ export interface RevokeAllForSubjectResult {
  * — retry these sids, alert on that outage — with nothing at all. Every store
  * call is therefore reported rather than propagated, and `complete` is the one
  * field a caller has to check.
+ *
+ * The subject's federation grants are ended last, and only when a store is
+ * supplied (#593). That pass comes after the sessions rather than before them
+ * for the same reason the watermark comes first: the two older passes are what
+ * every caller already depends on, and a grant store having a bad day must not
+ * cost them. An outage in any pass still leaves the other two done.
  *
  * Does **not** fix #276 — the local logout route still does not run the
  * cascade for its own session. This builds on `cascadeLogout`, which is
@@ -217,11 +269,78 @@ export async function revokeAllForSubject(
 		}
 	}
 
+	// Step 3 — end every federation grant the subject has. Last, because it is
+	// the pass a caller can opt out of: the two above are what this function
+	// has always promised, and an outage here must not cost them.
+	const grantsRevoked: string[] = [];
+	const grantsFailed: string[] = [];
+	const grantStore = opts.federationGrantStore;
+	if (grantStore !== undefined) {
+		const deps = {
+			store: grantStore,
+			now: () => new Date(now()),
+			audit: opts.federationGrantAudit,
+			correlationId: opts.correlationId,
+		};
+		let grants: readonly FederationGrant[] = [];
+		try {
+			// Pending and retained terminal records included, on purpose. A
+			// pending one is an authorization the subject is in the middle of
+			// giving, and leaving it to complete after its owner revoked
+			// everything is exactly the hole this pass exists to close.
+			grants = await listFederationGrantsForSubject(deps, opts.subject);
+		} catch (error) {
+			// Not the same as "this subject has no grants", which is why it is
+			// reported: a listing outage that read as an empty subject would
+			// return a clean, complete result having revoked nothing.
+			failures.push({ capability: "federationGrantStore", operation: "listBySubject", error });
+			opts.logger?.error({ err: error, subject: opts.subject }, "revoke_all_list_grants_failed");
+		}
+		for (const grant of grants) {
+			try {
+				const written = await revokeFederationGrant(deps, grant.id, "subject");
+				// A write that changed nothing means the grant was already over
+				// — somebody else revoked it, or it expired — so it is neither
+				// revoked here nor a failure. Only a throw is an outage.
+				if (written.ok) grantsRevoked.push(grant.id);
+			} catch (error) {
+				// The loop continues. The remaining grants are independent
+				// records, and stopping at the first outage would leave the
+				// ones after it live for no reason.
+				grantsFailed.push(grant.id);
+				failures.push({
+					capability: "federationGrantStore",
+					operation: "revoke",
+					grantId: grant.id,
+					error,
+				});
+				opts.logger?.error(
+					{ err: error, subject: opts.subject, grantId: grant.id },
+					"revoke_all_revoke_grant_failed",
+				);
+			}
+		}
+	}
+
 	if (unavailable.length > 0) {
 		opts.logger?.error({ subject: opts.subject, unavailable }, "revoke_all_for_subject_incomplete");
 	}
 
+	// `grantsFailed` is not a term of its own: every entry in it was pushed
+	// alongside the failure that produced it, which `failures` already carries.
+	// `sessionsFailed` is a term because a cascade that answers `{ ok: false }`
+	// reports no failure at all.
 	const complete = unavailable.length === 0 && failures.length === 0 && sessionsFailed.length === 0;
 
-	return { sessionsRevoked, sessionsFailed, tokensRevoked, unavailable, failures, complete };
+	return {
+		sessionsRevoked,
+		sessionsFailed,
+		tokensRevoked,
+		grantsRequested: grantStore !== undefined,
+		grantsRevoked,
+		grantsFailed,
+		unavailable,
+		failures,
+		complete,
+	};
 }
