@@ -53,7 +53,7 @@ import {
 	revokeAllForSubject,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
-import { subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
+import { cascadeLogout, subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -272,6 +272,30 @@ describe("a subject-wide revocation, from the service to the disclosure", () => 
 		// And the disclosure wrote the revocation down rather than recomputing
 		// it for ever: the record is over from here on for every reader.
 		expect((await federationGrantStore.find("g-1", new Date()))?.status).toBe("revoked");
+		await handle.dispose();
+	});
+
+	it("is not what an ordinary logout does", async () => {
+		// A logout ends a session. A grant outlives the session it was agreed
+		// through — that is the whole of what a federation grant is — so the
+		// four-store cascade both logout endpoints run must leave it, and its
+		// credential, exactly as they were. The composition here has the grant
+		// store in it, so a cascade that grew a path to it would fail this.
+		const { handle, app, federationGrantStore } = await boot(true);
+
+		const result = await cascadeLogout({
+			sid: "sid",
+			...(CASCADE_STORES as unknown as Parameters<typeof cascadeLogout>[0]),
+		});
+		expect(result.outcome).toBe("done");
+
+		const grant = await federationGrantStore.find("g-1", new Date());
+		expect(grant?.status).toBe("active");
+		expect((await federationGrantStore.open("g-1", new Date()))?.credentials.state).toBe("ok");
+		// And the grant is still spendable, which is the fact a backend cares about.
+		const response = await disclose(app);
+		expect(response.status).toBe(200);
+		expect(response.body.access_token).toBe("upstream-access-token");
 		await handle.dispose();
 	});
 

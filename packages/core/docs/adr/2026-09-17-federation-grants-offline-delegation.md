@@ -250,7 +250,14 @@ a revocation past the expiry included, and after refused writes.
 the rules `oauth.accessToken` got in 0.14.0. Above them sits a one-year
 ceiling, `FEDERATION_GRANT_LIFETIME_CEILING_MS`, which is a core constant and
 not only a schema rule: a hand-built config bypasses a schema, as #448 showed.
-The module refuses at boot a maximum above it, and a requested `expires_in` is
+The module refuses at boot a maximum above it — **amended in slice 5**: the
+config leaf itself carries no cap, and the refusal is
+`resolveFederationGrantRetrievalLimits`, which reads the block at boot and
+throws for a maximum above the ceiling. The claim elsewhere in this ADR that
+"the config schema caps `federationGrants.maxExpiresIn` at one year" describes
+the effect and not the mechanism; the mechanism is a core constant applied
+where the configuration is resolved, which is what makes it hold for a
+hand-built config too. A requested `expires_in` is
 clamped to `min(maxExpiresIn, ceiling)` when the intent is lodged — not
 rejected, and not left for `activate` to refuse after the user has already
 consented upstream. The response reports the value that applied. `expiresAt` is `consent.at` plus
@@ -454,6 +461,10 @@ expired, reads as `connection_identity_changed`, or whose connection is no
 longer configured. It evaluates the
 revocation backstop first (D13): a grant that a subject-wide revocation should
 have ended is revoked there, not renewed.
+**Amended in slice 5:** the boundary this reads and the comparison it uses now
+exist and are tested, but this route does not — so the obligation is slice
+6's, and what it must read is the **grants** boundary
+(`grantsRevokedBefore`), not the sessions one.
 
 A grant has at most one live intent. Lodging another supersedes the older one,
 whose callback is then refused as stale. Live first-time intents are bounded
@@ -502,7 +513,9 @@ order:
    is consumed before the code is exchanged;
 2. the intent is still the grant's current intent and has not expired; on a
    reauthorization, the existing grant still passes the revocation backstop
-   (D13);
+   (D13) — **amended in slice 5**: that is the grants boundary, and the check
+   is slice 6's to write. A `"keep"` that retired this grant's pointer is
+   exactly what makes "still the grant's current intent" load-bearing here;
 3. the `UserSession` the flow started under is re-read from the store and is
    still live, the browser still presents it, its `sub` is the intent's `sub`,
    and it authenticated after the subject's sessions boundary;
@@ -537,7 +550,9 @@ their callback, so check 3 cannot run.
 
 **Outcomes.** A failure of check 1 has no trustworthy redirect target and
 answers a plain 400 from the provider. Every later failure leaves an existing
-grant exactly as it was and redirects to the intent's `redirect_uri` with
+grant exactly as it was — **amended in slice 5**: except a backstop hit, which
+deliberately revokes it, and is the one failure here meant to change the
+record — and redirects to the intent's `redirect_uri` with
 `grant_id`, `state` and one of: `access_denied` (the user or the upstream
 declined), `reauthentication_required`, `account_mismatch`,
 `identity_conflict`, `refresh_token_absent`, `upstream_token_ineligible`,
@@ -610,6 +625,33 @@ Every grant-addressed route requires `sub` and answers the same 404
 `grant_not_found` for an unknown ID, another client's grant and a subject
 mismatch, so a known grant ID tells a stranger nothing, on any of the four.
 
+**Amended in slice 5** with the revoke route's contract, which was left open
+here. It answers **204 with no body** for a withdrawal, for a write that
+changed nothing because somebody else got there first, and for a grant that is
+already revoked — the record is retained as a tombstone for `/status`, so a
+client retrying after a timeout must not be told its second attempt failed. It
+writes nothing on that second call.
+
+Ownership is the whole check. Nothing else is consulted: not the client's
+connection allowlist, not the current connection configuration, not the
+revisions, not eligibility, not expiry, not the subject's boundary. Each of
+those decides whether a credential may be *disclosed*, and none of them is a
+reason to refuse a withdrawal — a grant whose connection an operator removed,
+whose key is out of the ring, or which expired last week and is still
+retained, is exactly the grant that most needs to be endable. It reads with
+`find` rather than `open` or `inspect`, revokes with `by: "client"`, and never
+stamps a boundary, touches the subject's other grants, cascades sessions or
+calls the upstream.
+
+Its refusals are `invalid_request` with a fixed identifier (`invalid_body`,
+`sub_required`, `invalid_sub`, `duplicate_sub`, `unexpected_parameter`),
+`grant_not_found`, `temporarily_unavailable/storage` for a read or write that
+threw, `service_unavailable/shutting_down`, and
+`server_error/unexpected_error`. Those identifiers are promised for what this
+package answers; what it inherits — client authentication's 401s, the shared
+limiter's 503 — keeps that middleware's own wording, the same on every route
+that uses it.
+
 The status response carries `grant_id`, the effective `status` with its
 reason, `sub`, `client_id`, `connection`, `upstream`, `scope`, `resource`,
 `created_at`, `authorized_at`, `expires_at` and `last_used_at`. It evaluates
@@ -661,6 +703,14 @@ The wire contract, which this section also left open:
 - Status calls `inspect` and nothing else: never `open`, never a refresh, never
   the refresh lock, never `touch`. A dashboard must not rotate a credential,
   and a look is not a use.
+  **Amended in slice 5**, because "nothing else" was already untrue of the
+  slice-4 code and reads as a stronger promise than the one meant. Status also
+  reads the subject's grants boundary, and a grant the boundary covers is
+  revoked **durably** there, with `by: "backstop"` — a revocation that existed
+  only as a computation would be recomputed by every later reader and
+  disappear the day the boundary was lost. What the sentence is about is the
+  credential: status does not open it, refresh it, lock it or record a use of
+  it.
 
 The routes ship in a new package, `@o3co/auth-provider-federation-grants`,
 which contributes them the way `device-grant` does and answers 404 when
@@ -1119,6 +1169,13 @@ There are three entry points, and ordinary logout is not one of them.
   gains an optional `federationGrantStore`. A throw from it is a `failures`
   entry with `capability: "federationGrantStore"`, the grant stays enumerable
   for a retry, and `complete` accounts for it.
+  **Amended in slice 5:** omitting the store is **not** a missing capability
+  and never appears in `unavailable`. Every call written before #593 omits it,
+  and a deployment with no grants is not incomplete for revoking none — what
+  the omission means is "no grant pass was asked for", reported as
+  `grantsRequested: false`, with the boundary as the backstop meanwhile. The
+  result also gains `grantsRevoked` and `grantsFailed`; `tokensRevoked` keeps
+  its old meaning, which is that the stamp succeeded.
 - **At logout, by policy.** See D14.
 
 Revocation is the atomic, always-winning write of D2. Deleting the refresh
@@ -1162,6 +1219,20 @@ is atomic for one key only, so it stays one key, `ss:rev:<subject>`, now
 holding both fields; a value written before this change, a lone number, reads
 as both boundaries.
 
+**Amended in slice 5.** The record also stays a lone number while the two
+boundaries are equal, and becomes the delimited `v1:<sessions>:<grants>` only
+when they differ — which is to say, only once a deployment has actually kept a
+subject's grants. A deployment that never enables `"keep"` therefore keeps
+writing exactly what it wrote before, and can be rolled back to a version that
+has never heard of the second boundary.
+
+The rollback is one-way in time. Once divergent records exist, mixed-version
+writers are **not safe**: an old writer replaces a divergent record with a
+scalar taken from its own view, which can move the sessions boundary backward
+and un-revoke sessions while the grants boundary advances or stands. Nothing
+in either encoding prevents that, so old writers are drained before
+sessions-only stamps are allowed, not afterwards.
+
 It is a capability, detected by method presence like the others, and both
 built-in adapters implement it. With federation grants enabled it is
 **required**: boot refuses a `SubjectRevocation` adapter without it. Method
@@ -1170,8 +1241,31 @@ retention, and a custom adapter that accepts whatever expiry its caller picks
 would let a short direct stamp lapse under a long-lived grant. So the
 capability's contract includes the retention floor below, applied inside
 `revokeBefore` by the adapter and checked by the adapter contract suite, which
-makes a direct stamp as safe as the helper's. A deployment that does not use
-grants is unaffected, whatever its adapter.
+makes a direct stamp as safe as the helper's.
+
+**Amended in slice 5**, where the capability was built and three of these
+sentences turned out to be looser than the code. The guard is
+`supportsSessionsOnlyRevocation`: both `revokeSessionsBefore` and
+`grantsRevokedBefore` present and callable, checked once at boot and never per
+request. The two fields take **independent maxima** — `revokeBefore` advances
+each past its own previous value, and `revokeSessionsBefore` advances the
+sessions field and leaves the grants field exactly as it was, `null` included,
+because copying the sessions instant into it would revoke the grants being
+kept. Both live in one record with one expiry, which is the later of what
+either field needs. A stored value that is neither a date nor absent is an
+outage at the read and answers 503; it is never read as "nothing was revoked".
+
+And method presence proves a **surface**, not a property: it cannot show that
+an adapter persists anything or honours the retention floor. That is why the
+durability pairing below is refused on `kind` rather than on the capability,
+and why a custom adapter's persistence remains its own contract's claim and
+its own tests'.
+
+The last sentence was wrong as written: a deployment that does not use grants
+**is** affected, deliberately. `revokeBefore` applies the one-year floor
+unconditionally, so every deployment's revocation keys now live a year rather
+than the caller's TTL. That is one small key per revoked subject, and it is
+what makes a direct stamp safe for a grant the caller knew nothing about.
 
 The free function `revokeAllForSubject` always revokes: it stamps both
 boundaries first, then cascades the sessions, then lists the subject's grants,
@@ -1180,7 +1274,26 @@ boundaries first, then cascades the sessions, then lists the subject's grants,
 Keeping is offered only by a **subject revocation service**, a component that
 a module factory builds from the validated configuration and the wired
 dependencies: the stores, the session cascade, the grant store, the retention
-rules. A boolean that the Store itself hands to a helper would be a convention
+rules.
+
+**Amended in slice 5** with where each half lives and what the call answers.
+The orchestration is core's (`createSubjectRevocationService`); the module
+that builds it ships in `@o3co/auth-provider-oauth`, because one session's
+teardown is `cascadeLogout` and core cannot import it without inverting the
+package dependency. It fills an optional `subjectRevocationService` slot and
+is installed explicitly — folding it into `oauthModule` would require the
+whole session cascade of every deployment that serves `/oauth/token`. The slot
+is `eager`, because its consumer is the Store reading `handle.components` and
+not another module; without that the planner would build nothing.
+
+The cascade closure adapts the real result: `cascadeLogout` answers
+`{ outcome: "done" }` or `{ outcome: "failed", step, errors }`, and the helper
+takes the one bit its loop branches on. A refused `"keep"` answers
+`{ requested: "keep", applied: "revoke", reason: "keep_not_allowed" }`, and
+`complete: true` then means **the applied action** completed — every grant was
+revoked. A Store reading only `complete` after asking to keep will believe the
+opposite of what happened, which is why all three fields are reported and why
+the operator documentation says this in the same words. A boolean that the Store itself hands to a helper would be a convention
 among trusted callers, not a control, so the operator's allowance
 (`federationGrants.allowKeepOnSubjectRevocation`, default `false`) is read
 where the Store cannot supply it. The service also always has the grant store,
@@ -1204,6 +1317,20 @@ so the Store that forgets to pass it no longer exists. Its call takes
   `"keep"` nothing does. It needs a callback that passed its session check
   before the stamp, an intent in its last second, and a skewed clock, and it
   is recorded here and not engineered around.
+  **Amended in slice 5.** The sentence about invalidating every outstanding
+  intent claims more than the code does. Retiring the current intent prevents
+  an activation *after the retirement wins*; it does not make the retirement
+  atomic with the earlier stamp. Between the sessions-only stamp and the grant
+  pass — matching clocks or not — a callback can activate a renewal that was
+  already in flight, and the pass then finds a grant whose current intent is
+  the newly activated one and retires that instead. What is guaranteed is
+  per-grant and after the fact: every grant the pass reached has no renewal
+  outstanding when the pass returns. The stronger claim needs acquisition-side
+  coordination, and is recorded as a slice-6 obligation rather than implied
+  here. Slice 5 also retires without a handle and through the port's existing
+  unconditional form; the intent store and the connect transactions of D16 do
+  not exist yet, so "every outstanding intent and connect transaction" is, for
+  now, the grant's own pointer.
 - With `"keep"`, an optional `revokeGrantsConsentedSince: Date` still revokes
   the grants consented at or after that instant — the window in which a
   session thief would have been creating them. It is a heuristic. The grants
@@ -1250,6 +1377,12 @@ boundary must not hide a consent given before it. The comparison is inclusive
 and adds `subjectRevocationSkewMs` — the 1 s allowance `verify.mts` applies to
 the watermark, which becomes an exported constant — and not the 5-minute
 `clockSkewMs`, which would refuse the re-login a revocation sends the user to.
+**Amended in slice 5:** sharing the constant makes the two allowances the same
+number, not the same comparison. `verifyJwt` compares a JWT's `iat`, truncated
+to whole seconds, against the sessions boundary; the grants comparison uses
+`consent.at` in milliseconds. A grant and a token stamped in the same second
+are judged at different resolutions, deliberately, and the shared constant
+only guarantees that neither comparison is more forgiving than the other.
 A hit revokes that grant durably, with `by: "backstop"`. When that write
 cannot be made the call answers 503 and not 410: the watermark would make the
 denial sound, and a revocation outage is one of the things this section says
@@ -1294,6 +1427,23 @@ tokens alone. `resolveSubjectRevocationHorizonMs(config)` is the longer of the
 refresh-token lifetime and the user-session lifetime, plus the comparison's
 allowances, and the service applies it as the floor of a sessions-only stamp.
 
+**Amended in slice 5** on three counts. It reads **three** lifetimes, not two:
+the access token belongs there as well, because nothing in the configuration
+says an access token must be shorter than a refresh token, and `verifyJwt`
+consults the watermark for both. Each is extended by the tolerance with which
+it is actually accepted rather than by its nominal expiry — `verifyJwt` passes
+`clockTolerance`, so a token is acceptable for that long past `exp`, and a
+boundary sized to the nominal expiry leaves exactly that window with nothing
+behind it. The adapter then writes an absolute instant, `at + max(ttl,
+floor)`, so the floor lands on the expiry and not on the caller's TTL.
+
+What it cannot know is what was issued *before* an operator lowered these
+settings: the horizon shortens immediately while the artifacts issued under
+the old one are still live, so a deployment that lowers a lifetime keeps the
+previous horizon until they have expired. The grants boundary has no such
+hole, because its floor comes from a ceiling the code enforces rather than
+from configuration.
+
 Two things make that true by construction and not by convention:
 
 - **The ceiling is a core constant, enforced at the write.** The config schema
@@ -1308,6 +1458,16 @@ Two things make that true by construction and not by convention:
   `device-grant` refuses to start without a rate limiter. So is a durable
   grant store beside the in-memory `subjectRevocation`, whose watermark is a
   process-local map: a restart would drop the boundary and keep the grants.
+  **Amended in slice 5** with who asks, and how. The three rules — no adapter,
+  an adapter without the capability, and the durability pairing — live once in
+  core (`requireFederationGrantSubjectRevocation`) and are applied by both
+  modules that need them: the routes module while contributing its route, and
+  the service module in its provider factory. A second copy would be the one
+  that accepts an adapter the other refuses. The durability rule is
+  `grantStore.kind !== "memory" && subjectRevocation.kind === "memory"`, which
+  catches the built-in pairing and conservatively treats every custom store as
+  durable — `kind` is all the port exposes, and it cannot prove a custom
+  adapter's persistence either way.
 
 What remains is the stamp itself. It is a store write, and it can fail. The
 helper then records a `failures` entry, reports `complete: false`, and still
@@ -1329,6 +1489,12 @@ TTL, which today is sized to refresh tokens. Hence both.
 members, so a caller that switches exhaustively on them needs a new case. That
 is accepted here, because an unreported grant failure is worse. D14 declines
 the same trade for `cascadeLogout`.
+
+**Amended in slice 5** with the members themselves: the capability union gains
+`"federationGrantStore"`, and `operation` gains `"listBySubject"` and
+`"revoke"` from the free function, plus `"revokeSessionsBefore"` and
+`"retireIntent"` from the service. A per-grant failure carries `grantId`
+beside the existing `sid`.
 
 ### D14 — Grants survive logout; a logout policy is designed, and deferred
 
@@ -1804,6 +1970,24 @@ since the upstream may have rotated the refresh token all the same, and that
 must leave a trail. `.refresh_persist_failed` names which of the three it was:
 `storage`, `write_in_flight`, or `hard_timeout`.
 
+**Amended in slice 5** with a twelfth type and the rule for the eleventh.
+`.revoke.denied` is emitted for a withdrawal that did not happen, including
+the middleware exits the handler never reaches. It is not a `.token.denied`
+with a different outcome: a dashboard counting denied disclosures would
+otherwise count refused withdrawals with them, and the two are opposite facts
+— one is a credential that was not handed out, the other a credential still
+live that somebody tried to end.
+
+`.revoked` is emitted **once per write that changed something**, by whoever
+made that write: the revoke route (`outcome: "client"`), the status route's
+durable backstop (`"backstop"`), core's `revokeFederationGrant` for a Store's
+own call (`"operator"` or `"subject"`), and the subject-wide pass
+(`"subject"`). A write that changed nothing — the grant was already over —
+emits nothing, so a retry leaves one event and not two. Every one of them is
+built from the record the write returned rather than from what the caller
+claimed, and a sink that throws changes nothing: the grant is revoked, and
+reporting otherwise would send an operator to undo something that was right.
+
 Every event carries the grant ID, the outcome and a correlation ID. The
 caller, the owner, the upstream subject, the connection, the resource and the
 scopes are carried **where they have been established** — amended in slice 4,
@@ -1959,6 +2143,16 @@ route test is written first and watched failing.
    the boot refusals (no `subjectRevocation`, or an in-memory one beside a
    durable grant store), the condition tests, and the tests that default
    logout leaves grants alone.
+   Done, with the amendments marked through D3, D6, D7, D9, D13 and D18. The
+   lifetime ceiling was already slice 1's; what this slice added is the
+   retention floor derived from it and the horizon for a sessions-only stamp.
+   What it did **not** deliver, and is not implied by "every outstanding
+   intent and connect transaction is invalidated", is acquisition-side
+   coordination: the intent store of D16 does not exist yet, so `"keep"`
+   retires the grant's own pointer and nothing else, and the backstop checks
+   D6 and D7 describe belong to the routes slice 6 adds. The primitives those
+   checks need — the grants boundary, the comparison, the durable backstop
+   write — are here and tested.
 6. **acquisition** (D6–D8): the intent routes, consent, the connect flow, the
    optional `UserRepository` lookup, and the second port of D16 —
    `FederationGrantIntentStore`, both adapters, and the core function that
