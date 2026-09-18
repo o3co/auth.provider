@@ -102,6 +102,20 @@ describe("subjectRevocationServiceModule", () => {
 		);
 	});
 
+	it("is built even though nothing in the graph asks for it", () => {
+		// The consumer is the Store, which reads it off `handle.components`
+		// after `createApp` returns — and the boot planner builds a component
+		// when a module needs it. Without `eager` the module would install,
+		// refuse nothing, and provide a component nobody ever built.
+		expect(
+			(
+				subjectRevocationServiceModule.lifecycle as
+					| { subjectRevocationService?: { eager?: boolean } }
+					| undefined
+			)?.subjectRevocationService?.eager,
+		).toBe(true);
+	});
+
 	describe("the cascade closure", () => {
 		it("tears a session down through cascadeLogout and counts it revoked", async () => {
 			const index = createInMemorySubjectSessionIndex();

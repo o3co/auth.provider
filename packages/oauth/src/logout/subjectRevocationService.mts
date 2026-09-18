@@ -120,6 +120,20 @@ export const subjectRevocationServiceModule = defineModule({
 		"subjectRevocation",
 	] as const,
 	optional: ["federationGrantStore", "auditSink", "logger"] as const,
+	/**
+	 * Eager, because its consumer is not a module.
+	 *
+	 * The boot planner builds a component when something in the graph needs
+	 * it, and nothing here does: the caller is the Store, which reads
+	 * `handle.components.subjectRevocationService` after `createApp` returns.
+	 * Without this the module installs, refuses nothing, and provides a
+	 * component that is never built — a deployment would find out when the
+	 * first password change had nothing to call.
+	 *
+	 * It also puts the refusals below at boot for every deployment that
+	 * installs this module, which is where a composition error belongs.
+	 */
+	lifecycle: { subjectRevocationService: { eager: true } },
 	provides: {
 		subjectRevocationService: (deps: AnyDeps) => {
 			const enabled = grantsEnabled(deps);
