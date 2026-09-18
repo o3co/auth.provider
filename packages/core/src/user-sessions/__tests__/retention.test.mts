@@ -67,6 +67,32 @@ describe("resolveSubjectRevocationHorizonMs", () => {
 		expect(horizon).toBeGreaterThan(86_400_000);
 	});
 
+	it("sizes the access token from the maximum a request may obtain, not the default", () => {
+		// Found by review. `expiresIn` is what a grant mints when the request
+		// asks for nothing; token exchange may ask for more, up to
+		// `maxExpiresIn`. A horizon computed from the default expires while
+		// those longer tokens are still valid — and a token that outlives the
+		// boundary that revoked it works again.
+		const horizon = resolveSubjectRevocationHorizonMs({
+			oauth: {
+				refreshToken: { expiresIn: 60 },
+				accessToken: { defaultExpiresIn: 60, maxExpiresIn: 86_400 },
+			},
+			session: { maxAge: 60_000 },
+		});
+		expect(horizon).toBeGreaterThan(86_400_000);
+	});
+
+	it("reads the deprecated alias where that is all a deployment has", () => {
+		// `expiresIn` alone means both the default and the maximum.
+		const horizon = resolveSubjectRevocationHorizonMs({
+			oauth: { refreshToken: { expiresIn: 60 }, accessToken: { expiresIn: 7_200 } },
+			session: { maxAge: 60_000 },
+		});
+		expect(horizon).toBeGreaterThan(7_200_000);
+		expect(horizon).toBeLessThan(7_200_000 + 600_000);
+	});
+
 	it("adds the tolerance with which those things are actually accepted", () => {
 		// `verifyJwt` passes `clockTolerance`, so a token is accepted for five
 		// minutes past its `exp`. A watermark sized to the nominal expiry leaves

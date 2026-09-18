@@ -82,6 +82,9 @@ export function createRedisSubjectRevocation(
 		);
 	}
 
+	/** What a `Date` can hold: ±100 000 000 days from the epoch (ECMA-262). */
+	const MAX_DATE_MS = 8_640_000_000_000_000;
+
 	/** Every comparison with NaN is false, so a NaN boundary covers nothing while looking like one. */
 	const instant = (value: Date, name: string): number => {
 		const ms = value?.getTime?.();
@@ -102,7 +105,7 @@ export function createRedisSubjectRevocation(
 	 */
 	const decode = (raw: string): { sessionsMs: number; grantsMs: number | null } => {
 		if (/^-?\d+$/.test(raw)) {
-			const both = Number(raw);
+			const both = boundary(raw);
 			return { sessionsMs: both, grantsMs: both };
 		}
 		const parsed = /^v1:(-?\d+):(-?\d+|-)$/.exec(raw);
@@ -112,9 +115,30 @@ export function createRedisSubjectRevocation(
 			);
 		}
 		return {
-			sessionsMs: Number(parsed[1]),
-			grantsMs: parsed[2] === "-" ? null : Number(parsed[2]),
+			sessionsMs: boundary(parsed[1] as string),
+			grantsMs: parsed[2] === "-" ? null : boundary(parsed[2] as string),
 		};
+	};
+
+	/**
+	 * Digits are not yet a date.
+	 *
+	 * Found by review: `Number("9".repeat(400))` is `Infinity`, which is all
+	 * digits and passes every shape check above. `new Date(Infinity)` is an
+	 * Invalid Date, every comparison against it is false, and a boundary that
+	 * compares false against everything reads as "this subject has revoked
+	 * nothing" — revocation silently off for that subject, which is the exact
+	 * failure this adapter refuses everywhere else. So the value has to be a
+	 * date a `Date` can hold, and anything else is an outage.
+	 */
+	const boundary = (digits: string): number => {
+		const ms = Number(digits);
+		if (!Number.isSafeInteger(ms) || Math.abs(ms) > MAX_DATE_MS) {
+			throw new Error(
+				`SubjectRevocation: the record for a subject is not a watermark (key prefix "${prefix}")`,
+			);
+		}
+		return ms;
 	};
 
 	const read = async (subject: string) => {

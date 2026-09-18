@@ -32,6 +32,10 @@
  * resolved, not fixed.
  */
 
+import {
+	type AccessTokenLifetimeSource,
+	resolveAccessTokenLifetime,
+} from "../config/application.schema.mjs";
 import { FEDERATION_GRANT_LIFETIME_CEILING_MS } from "../federation-grants/lifetime.mjs";
 import { DEFAULT_CLOCK_SKEW_MS, DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
 
@@ -89,21 +93,23 @@ const lifetime = (value: unknown, path: string, unit: "s" | "ms"): number => {
  */
 export function resolveSubjectRevocationHorizonMs(config: unknown): number {
 	const root = config as
-		| {
-				oauth?: { refreshToken?: { expiresIn?: unknown }; accessToken?: { expiresIn?: unknown } };
-				session?: { maxAge?: unknown };
-		  }
+		| { oauth?: { refreshToken?: { expiresIn?: unknown } }; session?: { maxAge?: unknown } }
 		| undefined;
 	const refreshMs = lifetime(
 		root?.oauth?.refreshToken?.expiresIn,
 		"oauth.refreshToken.expiresIn",
 		"s",
 	);
-	const accessMs = lifetime(
-		root?.oauth?.accessToken?.expiresIn,
-		"oauth.accessToken.expiresIn",
-		"s",
-	);
+	// The MAXIMUM, not the default. `oauth.accessToken.expiresIn` is what a
+	// grant mints when the request asks for nothing; token exchange may ask
+	// for more, up to `maxExpiresIn`. Sizing the horizon from the default
+	// leaves exactly those longer tokens outliving the boundary that revoked
+	// them — 60-second defaults beside a one-day maximum would retain the
+	// boundary for six minutes. `resolveAccessTokenLifetime` is the one
+	// correct reader of that pair, alias and all, and it refuses a value that
+	// is not a lifetime rather than letting this compute from one.
+	const accessMs =
+		resolveAccessTokenLifetime(config as AccessTokenLifetimeSource).maxExpiresIn * 1000;
 	const sessionMs = lifetime(root?.session?.maxAge, "session.maxAge", "ms");
 	const longest = Math.max(
 		sessionMs,

@@ -191,7 +191,23 @@ describe("SubjectRevocation — the two boundaries on one key (#593, D13)", () =
 	it("refuses a value it cannot read rather than answering that nothing was revoked", async () => {
 		const prefix = "t593e:7:";
 		const adapter = store(prefix);
-		for (const corrupt of ["not-a-watermark", "v1:abc:1", "v2:1:2", "v1:1"]) {
+		for (const corrupt of [
+			"not-a-watermark",
+			"v1:abc:1",
+			"v2:1:2",
+			"v1:1",
+			// Found by review: all digits, and `Number` reads it as Infinity.
+			// `new Date(Infinity)` is an Invalid Date, every comparison against
+			// it is false, and a boundary that compares false against
+			// everything reads as "nothing was revoked for this subject" —
+			// revocation silently off, which is the failure this refusal
+			// exists for.
+			"9".repeat(400),
+			`v1:${"9".repeat(400)}:1`,
+			`v1:1:${"9".repeat(400)}`,
+			// One millisecond past what a Date can hold.
+			"8640000000000001",
+		]) {
 			await raw.set(`${prefix}u`, corrupt, "PX", 600_000);
 			await expect(adapter.revokedBefore("u"), corrupt).rejects.toThrow();
 			await expect(adapter.grantsRevokedBefore("u"), corrupt).rejects.toThrow();
