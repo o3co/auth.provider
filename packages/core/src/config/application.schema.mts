@@ -1135,6 +1135,30 @@ export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[])
 	return schema;
 }
 
+/**
+ * A duration an operator wrote, read strictly (#593).
+ *
+ * `z.coerce.number()` is the house default for a value HOCON may substitute as
+ * a string, and for most sections it is right. It is wrong for this block, and
+ * Copilot named why: `Number()` reads `null` and `[]` as `0`, `true` as `1` and
+ * `"1e3"` as `1000`, so a malformed duration was NORMALISED here and the
+ * package's own strict reader — which refuses exactly those — never saw the
+ * value an operator wrote. `tombstoneRetention: null` silently disabled
+ * tombstones; `refreshBuffer: null` handed out tokens with milliseconds left.
+ *
+ * So: a number, or the plain decimal string an environment variable arrives
+ * as. Anything that would have to be converted to be understood was not
+ * written as a duration, and fails boot naming the key.
+ */
+const durationFromEnv = (bounds: z.ZodNumber) =>
+	z.preprocess((value) => {
+		if (typeof value === "number") return value;
+		if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+		// Handed through unchanged, and refused by `bounds` with a message that
+		// names what is acceptable.
+		return value;
+	}, bounds);
+
 const federationEntrySchema = z
 	.object({
 		enabled: coerceBooleanFromEnv,
@@ -1162,22 +1186,22 @@ export const fullSectionsSchema = z.object({
 			// Seconds. A grant's own lifetime (D3): what a new one gets, and
 			// the most an operator permits — the code's one-year ceiling still
 			// applies above it.
-			defaultExpiresIn: z.coerce.number().int().positive().optional(),
-			maxExpiresIn: z.coerce.number().int().positive().optional(),
+			defaultExpiresIn: durationFromEnv(z.number().int().positive()).optional(),
+			maxExpiresIn: durationFromEnv(z.number().int().positive()).optional(),
 			// Seconds. The retrieval's timings (D10, D12).
-			refreshBuffer: z.coerce.number().int().nonnegative().optional(),
-			ineligibleRetryAfter: z.coerce.number().int().positive().optional(),
-			refreshFailureBackoff: z.coerce.number().int().nonnegative().optional(),
+			refreshBuffer: durationFromEnv(z.number().int().nonnegative()).optional(),
+			ineligibleRetryAfter: durationFromEnv(z.number().int().positive()).optional(),
+			refreshFailureBackoff: durationFromEnv(z.number().int().nonnegative()).optional(),
 			// Milliseconds, as the limits they become are.
-			upstreamTimeoutMs: z.coerce.number().int().positive().optional(),
-			upstreamHardTimeoutMs: z.coerce.number().int().positive().optional(),
-			refreshLockTtlMs: z.coerce.number().int().positive().optional(),
-			lockWaitMs: z.coerce.number().int().nonnegative().optional(),
-			persistRetryBudgetMs: z.coerce.number().int().positive().optional(),
+			upstreamTimeoutMs: durationFromEnv(z.number().int().positive()).optional(),
+			upstreamHardTimeoutMs: durationFromEnv(z.number().int().positive()).optional(),
+			refreshLockTtlMs: durationFromEnv(z.number().int().positive()).optional(),
+			lockWaitMs: durationFromEnv(z.number().int().nonnegative()).optional(),
+			persistRetryBudgetMs: durationFromEnv(z.number().int().positive()).optional(),
 			// Seconds. How long a record answers past the end of what it was
 			// authorized for (D16). Zero is a deployment that keeps no
 			// tombstones.
-			tombstoneRetention: z.coerce.number().int().nonnegative().optional(),
+			tombstoneRetention: durationFromEnv(z.number().int().nonnegative()).optional(),
 			// The credential envelope's key ring (D16). The first key seals;
 			// every listed key opens, so one stays in the ring for as long as
 			// a paused grant may live.
@@ -1198,7 +1222,7 @@ export const fullSectionsSchema = z.object({
 						// invents a residual-access policy (D15), and a guessed
 						// boundary silently shares one (D13).
 						boundary: z.string().min(1),
-						maxAccessTokenLifetime: z.coerce.number().positive(),
+						maxAccessTokenLifetime: durationFromEnv(z.number().int().positive()),
 						allowScopeSubsets: coerceBooleanFromEnv.optional(),
 						authorizationParams: z.record(z.string(), z.string()).optional(),
 						callbackURL: z.string().min(1).optional(),

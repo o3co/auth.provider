@@ -97,13 +97,25 @@ describe("the federationGrants section (#593)", () => {
 		).toBe(false);
 	});
 
-	it("takes the numbers as strings too, and refuses one that is not a number", () => {
+	it("takes a decimal string, and refuses everything that is not one", () => {
+		// HOCON substitutes `${?VAR}` as a string, always, so a plain decimal
+		// is what an operator wrote.
 		expect(parse({ maxExpiresIn: "2592000" })?.maxExpiresIn).toBe(2592000);
-		// Exponent form is the number it denotes, as it is for every other
-		// coerced number in this schema.
-		expect(parse({ maxExpiresIn: "1e3" })?.maxExpiresIn).toBe(1000);
-		for (const value of ["thirty", "", -1, 0, 1.5]) {
+		expect(parse({ maxExpiresIn: " 2592000 " })?.maxExpiresIn).toBe(2592000);
+
+		// And nothing else. This block used `z.coerce.number()` first, the way
+		// the sections around it still do, and Copilot named what that costs
+		// HERE: `Number()` reads `null` and `[]` as `0`, `true` as `1` and
+		// `"1e3"` as `1000`, so a malformed duration was NORMALISED at the
+		// schema and the strict reader downstream — which refuses exactly these
+		// — never saw what an operator actually wrote. `tombstoneRetention:
+		// null` disabled tombstones silently; `refreshBuffer: null` handed out
+		// tokens with milliseconds left on them.
+		for (const value of ["thirty", "", "1e3", "0x10", -1, 0, 1.5, null, true, false, [], [45]]) {
 			expect(() => parse({ maxExpiresIn: value }), JSON.stringify(value)).toThrow();
+		}
+		for (const value of [null, true, [], "1e3"]) {
+			expect(() => parse({ tombstoneRetention: value }), JSON.stringify(value)).toThrow();
 		}
 	});
 

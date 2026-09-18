@@ -15,6 +15,7 @@
  */
 
 import { z } from "zod";
+import { fullSectionsSchema } from "../config/application.schema.mjs";
 import { defineModule } from "../modules/index.mjs";
 import { createMemoryFederationGrantStore } from "./memory.mjs";
 
@@ -38,10 +39,13 @@ export const memoryFederationGrantStoreModule = defineModule({
 	// key is optional and the adapter's own default applies without it, so this
 	// module needs no configuration to be installed.
 	requires: ["config"] as const,
+	// Projected from core's own declaration rather than restated: a narrower
+	// copy here read `tombstoneRetention: null` as zero — Copilot's finding —
+	// and silently gave a deployment no tombstones at all, which is the one
+	// setting where "no tombstones" and "thirty days" look identical until
+	// somebody asks why a revoked grant cannot be looked up.
 	configSchema: z.object({
-		federationGrants: z
-			.object({ tombstoneRetention: z.coerce.number().int().nonnegative().optional() })
-			.default({}),
+		federationGrants: fullSectionsSchema.shape.federationGrants,
 	}),
 	provides: {
 		federationGrantStore: (deps) => {

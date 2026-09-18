@@ -114,6 +114,52 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 		).toThrow();
 	});
 
+	it("refuses a key that has to be tidied up before it can be read", () => {
+		// Copilot's finding. `Buffer.from(…, "base64")` ignores embedded
+		// whitespace, and the canonicality check stripped it before comparing —
+		// so a key pasted out of a file, or wrapped by a secret manager, was
+		// accepted as canonical. A value an operator has to trim is not the
+		// value they checked.
+		for (const key of [`${KEY}\n`, ` ${KEY}`, `${KEY.slice(0, 20)}\n${KEY.slice(20)}`]) {
+			expect(() =>
+				build({ encryptionMode: "required", encryptionKeys: [{ id: "k", key }] }),
+			).toThrow(/canonical base64 of 32 bytes/);
+		}
+	});
+
+	it("refuses a key that is not 32 bytes, at boot rather than per grant", () => {
+		// The comment always said "of 32 bytes"; the length was left to the
+		// crypto layer, which finds out once a user has already consented.
+		for (const bytes of [16, 31, 33, 64]) {
+			expect(
+				() =>
+					build({
+						encryptionMode: "required",
+						encryptionKeys: [{ id: "k", key: Buffer.alloc(bytes, 1).toString("base64") }],
+					}),
+				String(bytes),
+			).toThrow(/32 bytes/);
+		}
+	});
+
+	it("refuses a retention that is not a duration, rather than reading it as none", () => {
+		// Copilot's finding, and the one where the two readings look the same
+		// from outside: `null` coerced to `0` is "keep no tombstones", which is
+		// indistinguishable from thirty days of them until somebody asks why a
+		// revoked grant cannot be looked up.
+		for (const tombstoneRetention of [null, true, [], "1e3", "0x10"]) {
+			expect(
+				() =>
+					build({
+						encryptionMode: "required",
+						encryptionKeys: [{ id: "k", key: KEY }],
+						tombstoneRetention,
+					}),
+				JSON.stringify(tombstoneRetention),
+			).toThrow();
+		}
+	});
+
 	it("refuses two keys under one id, and keeps the order the ring was written in", () => {
 		expect(() =>
 			build({

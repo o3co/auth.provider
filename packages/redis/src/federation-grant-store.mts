@@ -818,10 +818,27 @@ export function createRedisFederationGrantStore(
  * Durations are whole seconds in the policy block, as every duration an
  * operator writes there is, and milliseconds where the adapter takes them.
  */
+/**
+ * A duration an operator wrote, read strictly.
+ *
+ * Copilot's finding, and the same one core's own block had: `z.coerce.number()`
+ * reads `null` and `[]` as `0`, `true` as `1` and `"1e3"` as `1000` — so
+ * `tombstoneRetention: null` silently became "keep no tombstones", which is
+ * indistinguishable from thirty days of them until somebody asks why a revoked
+ * grant cannot be looked up. This module resolves the store independently of
+ * core's strict reader, so it needs the rule itself.
+ */
+const durationFromEnv = (bounds: z.ZodNumber) =>
+	z.preprocess((value) => {
+		if (typeof value === "number") return value;
+		if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+		return value;
+	}, bounds);
+
 const moduleConfigSchema = z.object({
 	federationGrants: z
 		.object({
-			tombstoneRetention: z.coerce.number().int().nonnegative().optional(),
+			tombstoneRetention: durationFromEnv(z.number().int().nonnegative()).optional(),
 			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
 			encryptionKeys: z
 				.array(z.object({ id: z.string().min(1), key: z.string().min(1) }))
@@ -831,7 +848,7 @@ const moduleConfigSchema = z.object({
 	redisFederationGrantStore: z
 		.object({
 			keyPrefix: z.string().default("fg:"),
-			listingAllowanceMs: z.coerce.number().int().nonnegative().optional(),
+			listingAllowanceMs: durationFromEnv(z.number().int().nonnegative()).optional(),
 		})
 		.default({ keyPrefix: "fg:" }),
 	deployment: z.object({ mode: z.string().optional() }).optional(),
@@ -844,13 +861,31 @@ export interface RedisFederationGrantStoreModuleOptions {
 }
 
 /** Canonical base64 of exactly 32 bytes, or a refusal that names the key. */
+const KEY_BYTES = 32;
+
+/**
+ * Canonical base64 of exactly 32 bytes — which is what the comment always
+ * said, and now what the code checks.
+ *
+ * Copilot found both halves of the gap: `Buffer.from(…, "base64")` ignores
+ * embedded whitespace, and the comparison stripped it before comparing, so
+ * `"<key>\n"` — a key pasted out of a file, or wrapped by a secret manager —
+ * was accepted as canonical; and the length was left to the crypto layer, so a
+ * key of the wrong size failed per grant rather than at boot, after a user had
+ * already consented.
+ */
 const keyMaterial = (id: string, encoded: string): Buffer => {
-	const bytes = Buffer.from(encoded, "base64");
-	if (bytes.toString("base64") !== encoded.replace(/\s+/g, "")) {
+	const refuse = (): never => {
 		throw new Error(
-			`federation grant store: encryption key "${id}" must be canonical base64 of 32 bytes`,
+			`federation grant store: encryption key "${id}" must be canonical base64 of ${KEY_BYTES} bytes`,
 		);
-	}
+	};
+	// No whitespace anywhere, not even at the ends: a value that has to be
+	// tidied up to be read is not the value an operator checked.
+	if (/\s/.test(encoded)) refuse();
+	const bytes = Buffer.from(encoded, "base64");
+	if (bytes.toString("base64") !== encoded) refuse();
+	if (bytes.length !== KEY_BYTES) refuse();
 	return bytes;
 };
 
