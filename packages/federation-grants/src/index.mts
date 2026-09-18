@@ -54,6 +54,10 @@ export {
 	type FederationGrantRouterOptions,
 } from "./routes.mjs";
 export {
+	createFederationGrantStatusHandler,
+	type FederationGrantStatusHandlerOptions,
+} from "./statusRoute.mjs";
+export {
 	createFederationGrantTokenHandler,
 	type FederationGrantTokenHandlerOptions,
 } from "./tokenRoute.mjs";

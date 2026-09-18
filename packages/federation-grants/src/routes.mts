@@ -48,6 +48,7 @@ import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express, { type ErrorRequestHandler, type RequestHandler, type Router } from "express";
 import { createSanitizedLogger } from "./report.mjs";
 import { createRequestIdMiddleware } from "./requestId.mjs";
+import { createFederationGrantStatusHandler } from "./statusRoute.mjs";
 import {
 	createFederationGrantTokenHandler,
 	type FederationGrantTokenHandlerOptions,
@@ -189,6 +190,7 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 		}),
 	);
 	router.post("/:grantId/token", createFederationGrantTokenHandler(options));
+	router.post("/:grantId/status", createFederationGrantStatusHandler(options));
 	router.use(notFound);
 	router.use(parserErrors);
 	return router;

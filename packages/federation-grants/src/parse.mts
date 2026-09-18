@@ -154,3 +154,36 @@ export function parseFederationGrantTokenRequest(body: unknown): ParsedFederatio
 		},
 	};
 }
+
+/** `sub`, plus the fields client authentication reads out of the same body. */
+const STATUS_KNOWN = new Set([
+	"sub",
+	"client_id",
+	"client_secret",
+	"client_assertion",
+	"client_assertion_type",
+]);
+
+/**
+ * The status route's body: `{"sub": "..."}` and nothing else.
+ *
+ * The token route's assertions are **refused** here rather than ignored. A
+ * caller that sent `min_ttl` to `/status` asked a question this route does not
+ * answer, and a 200 describing the grant would read as though it had — status
+ * says what the grant IS, not what a token would be.
+ */
+export function parseFederationGrantStatusRequest(
+	body: unknown,
+): ParsedFederationGrantTokenRequest {
+	if (typeof body !== "object" || body === null || Array.isArray(body)) {
+		return refuse("the request body must be a JSON object or a form body");
+	}
+	for (const field of Object.keys(body as Record<string, unknown>)) {
+		if (STATUS_KNOWN.has(field)) continue;
+		if (KNOWN.has(field)) {
+			return refuse(`${field} is a parameter of the token route, not of this one`);
+		}
+		return refuse(`${field} is not a parameter of this request`);
+	}
+	return parseFederationGrantTokenRequest(body);
+}

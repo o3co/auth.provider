@@ -30,8 +30,10 @@ import type {
 	Client,
 	ClientRepository,
 	FederationGrantConnection,
+	FederationGrantCredentialState,
 	FederationGrantCredentials,
 	FederationGrantRefresher,
+	FederationGrantStore,
 	Logger,
 	RateLimiter,
 } from "@o3co/auth-provider-core";
@@ -94,6 +96,14 @@ export interface Harness {
 		connections: Map<string, FederationGrantConnection>;
 		boundary: Date | null | Error;
 		allowedConnections: readonly string[] | undefined;
+		/** Read live, so a test can lower the maximum between two requests (D3). */
+		maxExpiresInMs: number;
+		/**
+		 * What `inspect` reports about the credential. The memory store keeps
+		 * credentials unsealed, so `unreadable` and `key_unavailable` are states
+		 * it can never produce — and they are exactly the ones worth testing.
+		 */
+		credentials: FederationGrantCredentialState;
 		client: Client;
 		now: Date;
 	};
@@ -131,6 +141,8 @@ export function harness(options: HarnessOptions = {}): Harness {
 		// fixture dated at a fixed instant in the past is swept before the test
 		// can use it, which is how this line was found.
 		now: new Date(Date.now() + 3 * DAY),
+		maxExpiresInMs: 30 * DAY,
+		credentials: "ok",
 	};
 
 	const clientRepository: ClientRepository = {
@@ -174,18 +186,43 @@ export function harness(options: HarnessOptions = {}): Harness {
 					},
 				};
 
+	// `inspect` goes through the world, so a test can say what the credential
+	// state is without a store that can seal anything.
+	// A proxy rather than a spread: a spread copies the method references once,
+	// so a test that spies on the store afterwards would be spying on an object
+	// the router no longer calls.
+	const inspecting = new Proxy(store, {
+		get(target, property, receiver) {
+			if (property === "inspect") {
+				return async (grantId: string, at: Date) => {
+					const real = await target.inspect(grantId, at);
+					return real === null ? null : { ...real, credentials: world.credentials };
+				};
+			}
+			const value = Reflect.get(target, property, receiver);
+			return typeof value === "function" ? value.bind(target) : value;
+		},
+	}) as FederationGrantStore;
+
+	const limits = resolveFederationGrantRetrievalLimits({ federationGrants: {} });
+
 	const app = express();
 	app.use(
 		FEDERATION_GRANTS_MOUNT_PATH,
 		createFederationGrantRouter({
-			store,
+			store: inspecting,
 			connections: world.connections,
 			refresher: () => ({ refreshDelegatedToken: refresh }),
 			grantsBoundary: async () => {
 				if (world.boundary instanceof Error) throw world.boundary;
 				return world.boundary;
 			},
-			limits: resolveFederationGrantRetrievalLimits({ federationGrants: {} }),
+			limits: {
+				...limits,
+				get maxExpiresInMs() {
+					return world.maxExpiresInMs;
+				},
+			},
 			background,
 			now: () => world.now,
 			clientRepository,
