@@ -112,10 +112,16 @@ const isDate = (value: unknown): value is Date =>
 const segment = (value: string): string =>
 	Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
 
+/**
+ * A stored integer, or nothing. Safe integers only: `version` is compared and
+ * incremented as a number, and past 2^53 the increment is the same double — a
+ * refresh would match the version it had just written, and two of them would
+ * both believe they had rotated the token (the reviewer).
+ */
 const numberFrom = (value: string | undefined): number | undefined => {
 	if (value === undefined || !/^-?\d+$/.test(value)) return undefined;
 	const parsed = Number(value);
-	return Number.isFinite(parsed) ? parsed : undefined;
+	return Number.isSafeInteger(parsed) ? parsed : undefined;
 };
 
 const dateFrom = (value: string | undefined): Date | undefined => {
@@ -206,7 +212,6 @@ interface Decoded {
  */
 function decode(
 	fields: FederationGrantHashFields,
-	configuredRetentionMs: number,
 	/** The ID the record was looked up by. One that says it is another grant is not this grant's. */
 	grantId?: string,
 ): Decoded | undefined {
@@ -219,7 +224,15 @@ function decode(
 	// TTL and an index score are written once, so the scripts go on using the
 	// persisted value, and a horizon read from a changed setting would hide a
 	// tombstone whose keys are still there (Codex).
-	const retentionMs = numberFrom(fields.retentionMs) ?? configuredRetentionMs;
+	//
+	// A record without it answers NOTHING, rather than falling back to the
+	// setting: the field is in neither the envelope nor the guard comparison,
+	// and every script derives the horizon from it — so a record whose
+	// retention had gone would go on disclosing its credential while every
+	// write, a revocation included, was refused for ever. A grant that cannot
+	// be ended is the one thing this store may never produce (the reviewer).
+	const retentionMs = numberFrom(fields.retentionMs);
+	if (retentionMs === undefined) return undefined;
 	const status = fields.status;
 	const revokedAt = dateFrom(fields.revokedAt);
 	const revokedBy = fields.revokedBy;
@@ -448,7 +461,7 @@ export function createRedisFederationGrantStore(
 	): Promise<{ decoded: Decoded; credential: string | null } | null> => {
 		const snapshot = await client.snapshot(grantKey(grantId), credKey(grantId));
 		if (snapshot === null) return null;
-		const decoded = visible(decode(snapshot.fields, retentionMs, grantId), nowMs);
+		const decoded = visible(decode(snapshot.fields, grantId), nowMs);
 		return decoded === undefined ? null : { decoded, credential: snapshot.credential };
 	};
 
@@ -457,7 +470,7 @@ export function createRedisFederationGrantStore(
 		grantId: string,
 	): FederationGrantWrite => {
 		if (fields === null) return { ok: false };
-		const decoded = decode(fields, retentionMs, grantId);
+		const decoded = decode(fields, grantId);
 		return decoded === undefined ? { ok: false } : { ok: true, grant: decoded.grant };
 	};
 
@@ -507,6 +520,14 @@ export function createRedisFederationGrantStore(
 		async nameIntent(input) {
 			const nowMs = instant(input.now, "now");
 			if (!isDate(input.intent.expiresAt)) return { ok: false };
+			// A round trip this write would not otherwise need, for the reason
+			// `activate` takes one: naming an intent is where a renewal starts,
+			// and the script decides it from the copies. The pointer is worth
+			// nothing on its own, but an activation follows it.
+			const before = await client.snapshot(grantKey(input.grantId), credKey(input.grantId));
+			if (before === null) return { ok: false };
+			const current = decode(before.fields, input.grantId);
+			if (current === undefined || !current.guardsAgree) return { ok: false };
 			return written(
 				await client.nameIntent(grantKey(input.grantId), {
 					nowMs,
@@ -572,7 +593,7 @@ export function createRedisFederationGrantStore(
 						}
 						if (typeof id !== "string") return null;
 						const snapshot = await client.snapshot(grantKey(id), credKey(id));
-						return snapshot === null ? null : (decode(snapshot.fields, retentionMs, id) ?? null);
+						return snapshot === null ? null : (decode(snapshot.fields, id) ?? null);
 					}),
 				);
 				for (const decoded of read) {
@@ -637,8 +658,15 @@ export function createRedisFederationGrantStore(
 			// every state again.
 			const snapshot = await client.snapshot(grantKey(input.grantId), credKey(input.grantId));
 			if (snapshot === null) return { ok: false };
-			const current = decode(snapshot.fields, retentionMs, input.grantId);
+			const current = decode(snapshot.fields, input.grantId);
 			if (current === undefined) return { ok: false };
+			// The scripts compare the copies, so a copy rewritten in the keyspace
+			// would let a write through that was refused before it: one `HSET` of
+			// the expiry renews a grant whose consented lifetime had ended, and
+			// one of the upstream account re-points it (the reviewer). Where a
+			// write has a snapshot in hand, the copies must still agree with the
+			// text the credential was sealed under.
+			if (!current.guardsAgree) return { ok: false };
 			const text = canonicalAuthorization(authorization);
 			const credential = seal(input.credentials, {
 				id: current.base.id,
@@ -675,8 +703,9 @@ export function createRedisFederationGrantStore(
 			if (input.ineligible !== null && !isDate(input.ineligible.at)) return { ok: false };
 			const snapshot = await client.snapshot(grantKey(input.grantId), credKey(input.grantId));
 			if (snapshot === null) return { ok: false };
-			const current = decode(snapshot.fields, retentionMs, input.grantId);
+			const current = decode(snapshot.fields, input.grantId);
 			if (current === undefined || current.authorizationText === undefined) return { ok: false };
+			if (!current.guardsAgree) return { ok: false };
 			// The authorization this seals under must be the one the credential it
 			// replaces was sealed under. Otherwise a rewritten authorization —
 			// the expiry extended, the version left alone — would be turned by
@@ -718,11 +747,14 @@ export function createRedisFederationGrantStore(
 			// A grant revoked before it was ever authorized is retained from the
 			// revocation, so its horizon moves forward and its member must be
 			// reserved at the new one before the record says so.
+			// Read for the subject the index is named after, and for nothing
+			// else: this write has no version to match and the port has it
+			// always win, so a record this adapter cannot decode is still
+			// revoked — that is exactly the state an operator needs to end, and
+			// its credential is still at rest beside it (the reviewer).
 			const snapshot = await client.snapshot(grantKey(grantId), credKey(grantId));
-			if (snapshot === null) return { ok: false };
-			const current = decode(snapshot.fields, retentionMs, grantId);
-			if (current === undefined) return { ok: false };
-			if (current.grant.status === "pending") {
+			const current = snapshot === null ? undefined : decode(snapshot.fields, grantId);
+			if (current !== undefined && current.grant.status === "pending") {
 				await client.reserve(
 					indexKey(current.base.subject),
 					member(current.base.id),

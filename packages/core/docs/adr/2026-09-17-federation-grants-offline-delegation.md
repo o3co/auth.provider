@@ -1481,6 +1481,30 @@ adapter that skips either is broken in a way its tests will not show:
   what the record says. Without this, `open(other)` hands back one grant's
   record and credential while the caller locks the ID it asked for, and
   refresh exclusion is gone.
+- **A write that has the record in hand refuses one whose copies disagree.**
+  The scripts compare the copies, so one rewritten in the keyspace lets a
+  write through that was refused before it: one `HSET` of the expiry renews a
+  grant whose consented lifetime had ended, and one of the upstream account
+  re-points it at another. Activation, the refresh and naming a renewal's
+  intent therefore read the record first and refuse unless the copies still
+  agree with the authenticated text — which is also what keeps `activate` and
+  `isCurrentIntent` (D7) answering the same thing. Retiring a pointer, a use
+  and a failure stamp are left to the copies: none of them decides what the
+  grant allows, and a round trip on every use is not worth a pointer's
+  removal. A rewrite of the text *and* its copies together is the restore case
+  above, and is not detected.
+- **The retention is part of the record, and a record without it answers
+  nothing.** It is in neither the envelope nor the comparison, and every
+  script derives the horizon from it: read through a configured fallback
+  instead, a record whose retention had gone would keep disclosing its
+  credential while every write — a revocation included — was refused for
+  ever. A grant that cannot be ended is the one thing this store may never
+  produce.
+- **A revocation reaches the store even for a record the adapter cannot
+  read.** It has no version to match and always wins, so the read in front of
+  it is for the subject its index is named after and nothing else: a record
+  whose fields no longer decode is exactly the state an operator needs to
+  end, with its credential still at rest beside it.
 - **A credential is re-sealed only under an authorization the credential it
   replaces authenticates against.** A refresh seals the new credential under
   the authorization it read. If that text was rewritten in the keyspace — the

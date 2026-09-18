@@ -27,6 +27,7 @@ import type { FederationGrantAuthorization } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import type { FederationGrantHashFields, FederationGrantStoreClient } from "../src/clients.mjs";
 import { createRedisFederationGrantStore } from "../src/federation-grant-store.mjs";
+import { makeIoredisFederationGrantStoreClient } from "../src/ioredis.mjs";
 
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -120,6 +121,41 @@ const storeOver = (client: FederationGrantStoreClient) =>
 		keyPrefix: "fg:",
 		encryption: { mode: "required", keys: [{ id: "k-1", key: Buffer.alloc(32, 1) }] },
 	});
+
+describe("how many commands a read is (#593, D16)", () => {
+	it("reads the record and its credential as ONE command", async () => {
+		// The property a race cannot prove: between a `HGETALL` and a `GET`, an
+		// activation can replace both, and the caller would evaluate one
+		// authorization against the other's credential. A client batches the two
+		// closely enough that the window almost never opens, so the test is at
+		// the seam — what went over the wire — and not at the outcome (the
+		// reviewer found the race version of this test proving nothing, over
+		// 2,400 concurrent attempts).
+		const sent: string[] = [];
+		const connection = {
+			async evalsha(_sha: string, numkeys: number, ...args: (string | number)[]) {
+				sent.push(`evalsha ${numkeys} ${args.slice(0, numkeys).join(" ")}`);
+				return [0];
+			},
+			async eval(_script: string, numkeys: number, ...args: (string | number)[]) {
+				sent.push(`eval ${numkeys} ${args.slice(0, numkeys).join(" ")}`);
+				return [0];
+			},
+			async zrange() {
+				sent.push("zrange");
+				return [];
+			},
+			async set() {
+				sent.push("set");
+				return "OK" as const;
+			},
+		};
+		const client = makeIoredisFederationGrantStoreClient(connection);
+		await client.snapshot("fg:{a}:grant", "fg:{a}:cred");
+		expect(sent).toHaveLength(1);
+		expect(sent[0]).toMatch(/^eval(sha)? 2 fg:\{a\}:grant fg:\{a\}:cred$/);
+	});
+});
 
 describe("the order a write goes out in (#593, D16)", () => {
 	it("reserves the index member, and waits for it, before the record is created", async () => {

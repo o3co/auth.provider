@@ -27,7 +27,7 @@
 // So the only difference allowed is the import block, and this test is what
 // says so. When the core suite changes, copy it again and re-run.
 
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -45,6 +45,14 @@ const body = (path: string): string => {
 	const from = text.indexOf("export interface FederationGrantStoreContractFactory");
 	expect(from, `${path}: the suite's first export`).toBeGreaterThan(0);
 	return text.slice(from);
+};
+
+/** What is above that line, which comparing the bodies leaves out. */
+const prologue = (path: string): string[] => {
+	const text = readFileSync(path, "utf8");
+	return text
+		.slice(0, text.indexOf("export interface FederationGrantStoreContractFactory"))
+		.split("\n");
 };
 
 describe("the FederationGrantStore contract suite, in both copies", () => {
@@ -70,5 +78,49 @@ describe("the FederationGrantStore contract suite, in both copies", () => {
 		// `#/` is core's own path alias; it does not resolve from this package,
 		// and a copy that still used it would fail to load rather than drift.
 		expect(copy.slice(0, copy.indexOf("export interface"))).not.toContain('"#/');
+	});
+
+	it("has nothing but comments and imports above that line, in either copy", () => {
+		// Comparing the bodies leaves the prologue out, and the reviewer showed
+		// what fits there: `import { it as rawIt } from "vitest"; const it =
+		// rawIt.skip;` leaves the parity test green and skips all 123 cases. A
+		// shadowed `expect`, a rebound `describe` or a stale constant do the
+		// same. So the prologue may declare nothing at all.
+		for (const path of [CORE, COPY]) {
+			let inComment = false;
+			let inImport = false;
+			for (const [index, line] of prologue(path).entries()) {
+				const text = line.trim();
+				if (text.length === 0) continue;
+				if (inComment) {
+					if (text.includes("*/")) inComment = false;
+					continue;
+				}
+				if (text.startsWith("/*")) {
+					if (!text.includes("*/")) inComment = true;
+					continue;
+				}
+				if (text.startsWith("//")) continue;
+				if (inImport) {
+					if (text.startsWith("}")) inImport = false;
+					continue;
+				}
+				if (text.startsWith("import ")) {
+					if (text.endsWith("{")) inImport = true;
+					continue;
+				}
+				expect.fail(`${path}:${index + 1} is neither a comment nor an import: ${text}`);
+			}
+		}
+	});
+
+	it("is run by something: a copy nothing calls cannot fail", () => {
+		const here = dirname(new URL(import.meta.url).pathname);
+		const callers = readdirSync(here).filter(
+			(name) =>
+				name.endsWith(".test.mts") &&
+				readFileSync(join(here, name), "utf8").includes("runFederationGrantStoreContract("),
+		);
+		expect(callers).toContain("federation-grant-store.integration.test.mts");
 	});
 });

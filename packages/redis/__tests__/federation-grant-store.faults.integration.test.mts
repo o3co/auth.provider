@@ -155,6 +155,16 @@ const activated = async (
 	return held;
 };
 
+/** Names a renewal's intent on an authorized grant, and insists it took. */
+const client_nameIntentOk = async (held: FederationGrantStore): Promise<void> => {
+	const written = await held.nameIntent({
+		grantId: "g-1",
+		intent: { handle: "h-re", expiresAt: at(DAY + 10 * MIN) },
+		now: at(DAY),
+	});
+	expect(written.ok).toBe(true);
+};
+
 describe("a field someone edited (#593, D16)", () => {
 	it("refuses the credential when any field the authorization is bound to is changed, and takes nothing away", async () => {
 		const held = await activated();
@@ -288,6 +298,159 @@ describe("what the port may disclose (#593, D1, D16)", () => {
 		expect((await held.listBySubject("u-1", at(DAY))).map((grant) => grant.id)).toStrictEqual([
 			"g-1",
 		]);
+	});
+});
+
+describe("a field the envelope does not cover (#593, D16, the reviewer)", () => {
+	it("answers nothing for a record whose retention is gone, rather than a grant nothing can end", async () => {
+		// `retentionMs` is in neither the envelope nor the guard comparison, and
+		// every script derives the horizon from it. Read through the configured
+		// value instead, the record would go on disclosing its credential while
+		// every write — a revocation included — was refused for ever. A grant
+		// that cannot be ended is the one thing this store may never produce, so
+		// a record without it answers nothing at all.
+		const held = await activated();
+		await redis.hdel(key("g-1", "grant"), "retentionMs");
+		expect(await held.find("g-1", at(DAY))).toBeNull();
+		expect(await held.open("g-1", at(DAY))).toBeNull();
+		expect(await held.inspect("g-1", at(DAY))).toBeNull();
+		expect(await held.listBySubject("u-1", at(DAY))).toStrictEqual([]);
+	});
+
+	it("still ends a grant whose record it cannot read: a revocation does not need to understand it", async () => {
+		// `revoke` is the one write with no version to match, and the port has it
+		// always win. Deciding from a record decoded a round trip earlier would
+		// leave an operator unable to end a grant precisely when something has
+		// gone wrong with it — with its credential still at rest.
+		const held = await activated();
+		await redis.hset(key("g-1", "grant"), "base", "not json");
+		expect(await held.revoke("g-1", "operator", at(DAY))).toStrictEqual({ ok: false });
+		expect(await redis.hget(key("g-1", "grant"), "status")).toBe("revoked");
+		expect(await redis.exists(key("g-1", "cred"))).toBe(0);
+	});
+
+	it("refuses every write that would decide from a copy the envelope does not authenticate", async () => {
+		// One `HSET` of the arithmetic copy, and a grant whose consented lifetime
+		// ended an hour ago is renewable again: the scripts compare the copies,
+		// so a write refused before the tamper succeeds after it. The credential
+		// does read `unreadable` — but a fresh consent would then seal a new one
+		// and leave a clean `active` grant with no trace of the edit.
+		const held = await activated();
+		const afterExpiry = at(31 * DAY);
+		await redis.hset(key("g-1", "grant"), "expiresAtMs", String(at(365 * DAY).getTime()));
+		expect(
+			await held.nameIntent({
+				grantId: "g-1",
+				intent: { handle: "h-re", expiresAt: at(31 * DAY + 10 * MIN) },
+				now: afterExpiry,
+			}),
+		).toStrictEqual({ ok: false });
+		expect(
+			await held.replaceCredentials({
+				grantId: "g-1",
+				expectedVersion: 2,
+				credentials: credentials("2"),
+				ineligible: null,
+				now: afterExpiry,
+			}),
+		).toStrictEqual({ ok: false });
+		expect(
+			await held.activate({
+				grantId: "g-1",
+				intentHandle: "h-re",
+				authorization: authorization({
+					consent: { at: afterExpiry, sid: "sid-2", scopes: [...SCOPES] },
+					authorizedAt: afterExpiry,
+					expiresAt: at(60 * DAY),
+				}),
+				credentials: credentials("2"),
+				now: afterExpiry,
+			}),
+		).toStrictEqual({ ok: false });
+	});
+
+	it("refuses a renewal whose upstream account was re-pointed in the keyspace", async () => {
+		const held = await activated();
+		await client_nameIntentOk(held);
+		await redis.hset(key("g-1", "grant"), "upstreamSubject", "00u-bob");
+		expect(
+			await held.activate({
+				grantId: "g-1",
+				intentHandle: "h-re",
+				authorization: authorization({
+					upstream: { issuer: "https://dev-1.okta.test", subject: "00u-bob" },
+					consent: { at: at(DAY), sid: "sid-2", scopes: [...SCOPES] },
+					authorizedAt: at(DAY),
+				}),
+				credentials: credentials("bob"),
+				now: at(DAY + MIN),
+			}),
+		).toStrictEqual({ ok: false });
+	});
+
+	it("says the same thing about an activation as the question that precedes it", async () => {
+		// `isCurrentIntent` is what the connect callback asks before it exchanges
+		// the code (D7), and it reads the authenticated text. An `activate` that
+		// answered differently would let a code be exchanged for a grant the
+		// question had already refused.
+		const held = await activated();
+		await client_nameIntentOk(held);
+		await redis.hset(key("g-1", "grant"), "expiresAtMs", String(at(365 * DAY).getTime()));
+		const afterExpiry = at(31 * DAY);
+		expect(await held.isCurrentIntent("g-1", "h-re", afterExpiry)).toBe(false);
+		expect(
+			await held.activate({
+				grantId: "g-1",
+				intentHandle: "h-re",
+				authorization: authorization({
+					consent: { at: afterExpiry, sid: "sid-2", scopes: [...SCOPES] },
+					authorizedAt: afterExpiry,
+					expiresAt: at(60 * DAY),
+				}),
+				credentials: credentials("2"),
+				now: afterExpiry,
+			}),
+		).toStrictEqual({ ok: false });
+	});
+
+	it("refuses an activation on a revoked record, whatever pointer it still carries", async () => {
+		const held = await activated();
+		await client_nameIntentOk(held);
+		await redis.hset(key("g-1", "grant"), {
+			status: "revoked",
+			revokedBy: "operator",
+			revokedAt: String(at(DAY).getTime()),
+		});
+		expect(
+			await held.activate({
+				grantId: "g-1",
+				intentHandle: "h-re",
+				authorization: authorization({
+					consent: { at: at(DAY), sid: "sid-2", scopes: [...SCOPES] },
+					authorizedAt: at(DAY),
+				}),
+				credentials: credentials("2"),
+				now: at(DAY + MIN),
+			}),
+		).toStrictEqual({ ok: false });
+	});
+
+	it("keeps an optimistic guard that a version outside the safe integers would have lost", async () => {
+		// `version` is compared as a number. Past 2^53 the increment is the same
+		// double, so every refresh would match the version it just wrote and two
+		// of them would both believe they had rotated the token.
+		const held = await activated();
+		await redis.hset(key("g-1", "grant"), "version", "10000000000000000000000");
+		expect(await held.find("g-1", at(DAY))).toBeNull();
+		expect(
+			await held.replaceCredentials({
+				grantId: "g-1",
+				expectedVersion: 1e22,
+				credentials: credentials("2"),
+				ineligible: null,
+				now: at(DAY),
+			}),
+		).toStrictEqual({ ok: false });
 	});
 });
 

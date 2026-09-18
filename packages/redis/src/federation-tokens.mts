@@ -66,19 +66,12 @@ import {
 	validateEncryptionMode,
 } from "./internal/encryption-mode.mjs";
 
-export type { EncryptionGuardContext };
-
 import { createRedisLock } from "./internal/lock.mjs";
 import { createRedisSidSet } from "./internal/redisSidSet.mjs";
 
 export type EncryptionConfig = { mode: "required"; key: Buffer } | { mode: "allow-plaintext" };
 
-/**
- * Environment names treated as production for the purpose of OR-12's hard
- * guard on `allow-plaintext` encryption mode. Federation tokens carry
- * long-lived IdP refresh tokens; storing them unencrypted in production is a
- * security risk.
- */
+export type { EncryptionGuardContext };
 
 export interface RedisFederationTokenStoreOptions {
 	client: FederationTokenStoreClient;
