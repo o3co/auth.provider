@@ -451,10 +451,10 @@ export async function createOidcProvider(
 				oidc.refreshTokenGrant(configuration, params.refreshToken, body),
 			);
 		} catch (error) {
-			// The IdP said no: the classifier reads the error as thrown. Anything
-			// else the library refused — an answer it could not parse — may still
-			// carry a rotated refresh token, and that one is never lost (D5).
-			if (error instanceof oidc.ResponseBodyError) throw error;
+			// An answer the library could not parse may still carry a rotated
+			// refresh token, and that one is never lost (D5). Only a 200 is ever
+			// captured: the IdP's own refusal is a 4xx, has nothing to salvage
+			// from whatever its body says, and is rethrown for the classifier.
 			const rotated = optionalString(call.captured?.refresh_token);
 			if (rotated === undefined) throw error;
 			return { refreshToken: rotated };

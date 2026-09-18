@@ -54,6 +54,17 @@ describe("upstream token eligibility (#593, D5)", () => {
 					reason: "token_type_unsupported",
 				});
 			}
+			// A record nobody typed: whatever is not a string is not a bearer token.
+			for (const tokenType of [42, undefined, null, { toString: () => "bearer" }]) {
+				expect(
+					judge({
+						issuedLifetime: 3600,
+						scopes: ["openid"],
+						tokenType: tokenType as unknown as string,
+					}),
+					String(tokenType),
+				).toEqual({ eligible: false, reason: "token_type_unsupported" });
+			}
 		});
 
 		it("accepts a finite lifetime within the maximum, carrying consented scopes", () => {

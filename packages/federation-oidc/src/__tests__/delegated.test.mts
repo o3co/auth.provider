@@ -220,12 +220,18 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			expect(tokens).toStrictEqual({ refreshToken: "rt-rotated" });
 		});
 
-		it("rethrows what the IdP refused with, for the classifier", async () => {
+		it("rethrows what the IdP refused with, for the classifier — even when the refusal's body carries a refresh_token", async () => {
 			const { idp, provider } = await build();
 			idp.tokenStatus = 400;
 			await expect(provider.refreshDelegatedToken({ refreshToken: "rt-1" })).rejects.toMatchObject({
 				error: "invalid_client",
 				status: 400,
+			});
+			// Nothing is salvaged from a refusal: a 4xx is the IdP saying no, and a
+			// token in its body is not one it issued.
+			idp.refusal = { error: "invalid_grant", refresh_token: "rt-planted" };
+			await expect(provider.refreshDelegatedToken({ refreshToken: "rt-1" })).rejects.toMatchObject({
+				error: "invalid_grant",
 			});
 		});
 

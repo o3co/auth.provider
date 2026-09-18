@@ -75,6 +75,8 @@ export interface FakeIdp {
 	refreshAnswer: Record<string, unknown>;
 	/** Mint an id_token into the refresh answer (an IdP that re-issues one on refresh). */
 	refreshWithIdToken: boolean;
+	/** The body of a token endpoint refusal (when `tokenStatus` is not 200). */
+	refusal: Record<string, unknown>;
 	/** Replace the signing key; the JWKS then holds only the new one. */
 	rotateKey(): Promise<string>;
 	currentKid(): string;
@@ -146,6 +148,7 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		accessToken: "at-1",
 		refreshAnswer: {},
 		refreshWithIdToken: false,
+		refusal: { error: "invalid_client" },
 		fetch: undefined as unknown as typeof fetch,
 		rotateKey: newKey,
 		currentKid: () => signer.kid,
@@ -202,7 +205,7 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		if (path === "/.well-known/openid-configuration") return json(metadata, idp.discoveryStatus);
 		if (path === "/jwks") return json(jwks);
 		if (path === "/token" && method === "POST") {
-			if (idp.tokenStatus !== 200) return json({ error: "invalid_client" }, idp.tokenStatus);
+			if (idp.tokenStatus !== 200) return json(idp.refusal, idp.tokenStatus);
 			if (body?.get("grant_type") === "refresh_token") {
 				const answer: Record<string, unknown> = {
 					access_token: "at-refreshed",
