@@ -820,6 +820,14 @@ export {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "./federation-grants/revision.mjs";
+// #593, D13: what a Store calls instead of an admin route this provider does
+// not mount — ending one grant, and listing a subject's for a connected-
+// applications page.
+export {
+	type FederationGrantAdministrationDeps,
+	listFederationGrantsForSubject,
+	revokeFederationGrant,
+} from "./federation-grants/revoke.mjs";
 // #593 slice 4: the `federationGrants.*` block an operator writes, turned into
 // the limits the retrieval takes. In core because the block is core's.
 export {
