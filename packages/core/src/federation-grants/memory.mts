@@ -508,14 +508,18 @@ export function createMemoryFederationGrantStore(
 			if (!(nowMs < grant.expiresAt.getTime())) return failed();
 			if (!isDate(input.failure.at)) return failed();
 			const { retryAfterSeconds, upstreamCode } = input.failure;
+			const atMs = input.failure.at.getTime();
+			const previous = grant.refreshFailure;
+			// A row: the stamp it replaces is no further back than `rowMs`.
+			const inRow = previous !== undefined && atMs - previous.at.getTime() <= input.rowMs;
 			// In place, in one step: a stamp read, counted and written in three
 			// would lose to a touch, and a count to a second stamp.
 			const next: AuthorizedFederationGrant = {
 				...grant,
 				refreshFailure: {
-					at: new Date(input.failure.at.getTime()),
+					at: new Date(atMs),
 					kind: input.failure.kind,
-					count: (grant.refreshFailure?.count ?? 0) + 1,
+					count: inRow ? previous.count + 1 : 1,
 					...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
 					...(upstreamCode !== undefined ? { upstreamCode } : {}),
 				},

@@ -169,11 +169,53 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			await Promise.all(h.background);
 		});
 
+		it("counts the lease from when the lock was TAKEN, not from when it was asked for: what a waiter waited is not the waiter's lease", async () => {
+			// Another replica holds the lock for four seconds; this call waits, takes
+			// it, and its upstream takes eight. Counted from when it asked, the soft
+			// deadline would fall at ten seconds, two before the answer.
+			await h.seed();
+			setNow(GONE);
+			const theirs = await h.store.acquireRefreshLock("g-1", { ttlMs: 60_000, waitForMs: 0 });
+			if (!theirs.acquired) throw new Error("fixture: the lock was not free");
+			h.refresh.mockImplementation(
+				() =>
+					new Promise((resolve) => {
+						setTimeout(() => resolve(refreshed("1", now())), 8_000);
+					}),
+			);
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(4_000);
+			await theirs.release();
+			await vi.advanceTimersByTimeAsync(8_500);
+			expect(await answer).toMatchObject({ ok: true, accessToken: "at-1", refreshed: true });
+		});
+
+		it("allows the round trip the lock's margin, for a clock read in whole seconds", async () => {
+			await h.seed();
+			setNow(GONE);
+			const fine = h.deps.now;
+			h.deps.now = () => new Date(Math.floor(fine().getTime() / 1000) * 1000);
+			const theirs = await h.store.acquireRefreshLock("g-1", { ttlMs: 60_000, waitForMs: 0 });
+			if (!theirs.acquired) throw new Error("fixture: the lock was not free");
+			h.refresh.mockResolvedValue(refreshed("1", now()));
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(40);
+			await theirs.release();
+			await vi.advanceTimersByTimeAsync(500);
+			expect(await answer).toMatchObject({ ok: true, accessToken: "at-1" });
+		});
+
 		it("refuses a lease it cannot date — a wait that is not a number, negative, or longer than the whole round trip — and lets go of the lock: a refresh does not run on a lease of unknown length", async () => {
 			await h.seed();
 			setNow(GONE);
 			h.refresh.mockResolvedValue(refreshed("rotated", DUE));
-			for (const waitedMs of [Number.NaN, "0" as unknown as number, -1, 1]) {
+			for (const waitedMs of [
+				Number.NaN,
+				"0" as unknown as number,
+				true as unknown as number,
+				-1,
+				1_001,
+			]) {
 				const real = h.store.acquireRefreshLock.bind(h.store);
 				vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async (id, options) => {
 					const lock = await real(id, options);

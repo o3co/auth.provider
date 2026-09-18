@@ -145,7 +145,7 @@ not enough: the store enforces it at the write.
 | lodge reauthorization intent | the record exists; status is `active` or `reauthorization_required`; `now < expiresAt`; the intent has not already lapsed | name this intent as current, superseding any other; `version` is *not* bumped |
 | activate (callback succeeds) | status is `pending`, `active` or `reauthorization_required`; `now` is before the *stored* `expiresAt` unless `pending`; the intent is the grant's current intent and has not lapsed; the *new* `expiresAt` is after `now`, and `expiresAt − consent.at` is within the lifetime ceiling (D3); `consent.at` and `authorizedAt` are not after `now` (D13); unless `pending`, the upstream account and the identity revision are the stored ones (D4, D7) | `active`; replace the authorized fields as a whole; write credentials; clear the ineligibility marker (D5) and the stamp of a failed refresh (D12); retire the intent; `version++` |
 | replace credentials (refresh) | status is `active`; `version` equals the one read; `now < expiresAt` | replace credentials as a whole; set or clear the ineligibility marker (D5); clear the stamp of a failed refresh (D12); `version++`; the current intent is left alone |
-| note refresh failure | status is `active`; `version` equals the one read; `now < expiresAt` | set the stamp of a failed refresh (D12), its `count` one more than the stamp it replaces, or `1`; `version` is *not* bumped; nothing else changes |
+| note refresh failure | status is `active`; `version` equals the one read; `now < expiresAt` | set the stamp of a failed refresh (D12), its `count` one more than the stamp it replaces when that one is no older than the row window, and `1` otherwise; `version` is *not* bumped; nothing else changes |
 | require reauthorization | status is `active`; `version` equals the one read | `reauthorization_required`; delete credentials; clear the stamp; `version++` |
 | revoke | the record exists; status is not `revoked` | `revoked`; record `revocation`; delete credentials; clear the stamp; retire the intent; `version++` — one atomic operation that always wins |
 | retire intent | status is `active` or `reauthorization_required`; there is a current intent, and it is the named one when one is named | retire the intent; `version` is *not* bumped |
@@ -851,7 +851,8 @@ reuse-detecting IdP answers by revoking the family.
 - The lease has one clock, started when the store TOOK the lock: when the
   lock was asked for, plus how long the store says it waited before it took
   it (`waitedMs` in the lock's reply — a duration, so that it means the same
-  on the caller's clock as on the store's). Not when the acquisition was
+  on the caller's clock as on the store's; a `now` read in whole seconds is
+  allowed the lock's margin over the round trip). Not when the acquisition was
   acknowledged: an acknowledgement that took a second would overstate what
   is left of the lock by that second, and a slow enough one lets a second
   holder in while the first still refreshes — two refreshes presenting one
@@ -947,7 +948,9 @@ reuse-detecting IdP answers by revoking the family.
   written under the lock by one guarded script that bumps no version and
   touches nothing else, and cleared by whatever replaces or ends the
   credentials (D2). A refresh whose answer could not be persisted leaves one
-  too, best effort: the store is what failed. While the stamp stands the
+  too, best effort, with what is left of the persist budget and not a
+  millisecond past it: the store is what failed, and a stamp written past
+  the lease could land under the next holder. While the stamp stands the
   upstream is not asked: a stored token that serves the request is answered
   as it is (D10), and otherwise the failure is, with what is left of the
   wait as `retryAfterSeconds` — `temporarily_unavailable` / `upstream`,
@@ -955,8 +958,9 @@ reuse-detecting IdP answers by revoking the family.
   upstream gave. The marker of D5 comes first where both stand. Without the
   stamp every request that needs a refresh asks a failing upstream again, and
   N polls during an incident are N upstream calls: the lock serializes them,
-  it does not deduplicate them. With it, every waiter that acquires the lock
-  after the holder failed finds the stamp and asks nothing.
+  it does not deduplicate them. With it, a waiter that acquires the lock after
+  the holder failed finds the stamp, and asks nothing unless the stamp is the
+  first of a row and the prompt retry below is its to make.
   - What the stamp waits depends on what failed. An *outage* — a 5xx, a
     connection that failed, an answer nobody could read — is retried promptly
     ONCE: the request may have been processed and its answer lost, and an IdP
@@ -968,9 +972,16 @@ reuse-detecting IdP answers by revoking the family.
     processed, and there is nothing to recover promptly; the failing caller
     is told the same capped wait as the next. A *refusal* with a code this
     provider knows is remembered for `ineligibleRetryAfter`: a configuration
-    fault is the marker's class of problem, and gets the marker's interval.
-    The count is what tells the first outage from the second; a refresh that
-    wrote forgets it, so the next row starts over.
+    fault is the marker's class of problem, and gets the marker's interval —
+    except `server_error` and `temporarily_unavailable`, which RFC 6749
+    §4.1.2.1 names for an outage, and which are one whatever status they came
+    with. The count is what tells the first outage from the second; a refresh
+    that wrote forgets it, and so does time: failures further apart than
+    `ineligibleRetryAfter` are not a row, so a day-old stamp does not cost
+    today's outage its prompt retry. The failing caller is told the wait the
+    stamp will tell the next one, computed the same way, whether or not the
+    stamp lands. `refreshFailureBackoff` may not exceed `ineligibleRetryAfter`,
+    and the ceiling bounds what the stamp does, not only what is told.
   - The stamp is outside the authenticated envelope, as the marker is: one
     dated further ahead than the refresh buffer absorbs is not believed — as
     a marker is not — and never re-read "from now", which would let it stand

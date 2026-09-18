@@ -206,16 +206,18 @@ export function federationGrantRefreshFailureStands(
 			waitMs = failure.count > 1 ? context.backoffMs : 0;
 			break;
 		case "rate_limited":
-			waitMs = Math.min(
-				context.ceilingMs,
-				Math.max(context.backoffMs, (failure.retryAfterSeconds ?? 0) * 1000),
-			);
+			waitMs = Math.max(context.backoffMs, (failure.retryAfterSeconds ?? 0) * 1000);
 			break;
 		case "rejected":
 			waitMs = context.ceilingMs;
 			break;
 	}
-	const remainingMs = at + waitMs - now;
+	// No wait is no wait, whatever the date says: a replica that runs ahead
+	// within the allowance must not turn the prompt retry into a short one.
+	if (!(waitMs > 0)) return { stands: false };
+	// The ceiling bounds what the stamp does, and not only what the client is
+	// told: a backoff set above it is held to it here as well.
+	const remainingMs = at + Math.min(waitMs, context.ceilingMs) - now;
 	if (!(remainingMs > 0)) return { stands: false };
 	return {
 		stands: true,

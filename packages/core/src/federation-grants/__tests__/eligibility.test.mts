@@ -257,6 +257,19 @@ describe("upstream token eligibility (#593, D5)", () => {
 		it("does not stand for the first outage: the next poll is the prompt retry an IdP's grace window takes", () => {
 			expect(standing(stamp(), at)).toEqual({ stands: false });
 			expect(standing(stamp(), later(1))).toEqual({ stands: false });
+			// Nor when the replica that stamped it runs ahead, within the allowance:
+			// no wait is no wait, whatever the date says.
+			expect(standing(stamp({ at: later(20_000) }), at)).toEqual({ stands: false });
+		});
+
+		it("never stands longer than the ceiling, whatever the backoff is set to", () => {
+			const wide = { allowanceMs: 30_000, backoffMs: 600_000, ceilingMs: 300_000 };
+			expect(
+				federationGrantRefreshFailureStands(stamp({ count: 2 }), { now: later(299_999), ...wide }),
+			).toMatchObject({ stands: true, retryAfterSeconds: 1 });
+			expect(
+				federationGrantRefreshFailureStands(stamp({ count: 2 }), { now: later(300_000), ...wide }),
+			).toEqual({ stands: false });
 		});
 
 		it("stands for the backoff from the second outage in a row", () => {

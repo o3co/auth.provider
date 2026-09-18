@@ -29,6 +29,7 @@ import {
 	now,
 	refreshed,
 	request,
+	SECRET,
 	setNow,
 	T0,
 } from "./retrieve.harness.mjs";
@@ -134,6 +135,20 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 				refreshed: false,
 			});
 			expect(h.refresh).toHaveBeenCalledTimes(2);
+		});
+
+		it("is the first of its row again once the last one is older than the ceiling: a day-old stamp does not cost today's outage its prompt retry", async () => {
+			await h.seed();
+			setNow(GONE);
+			h.refresh.mockRejectedValue(outage());
+			await retrieve();
+			expect(await stamp()).toMatchObject({ count: 1 });
+			setNow(new Date(now().getTime() + limits.ineligibleRetryAfterMs + 1));
+			await retrieve();
+			expect(await stamp()).toMatchObject({ count: 1 });
+			// And retried promptly, as the first of a row is.
+			await retrieve();
+			expect(h.refresh).toHaveBeenCalledTimes(3);
 		});
 
 		it("is forgotten by a refresh that wrote: the count starts over", async () => {
@@ -247,6 +262,19 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 			expect(h.refresh).toHaveBeenCalledTimes(2);
 		});
 
+		it.each(["server_error", "temporarily_unavailable"])(
+			"is not what the outage codes of RFC 6749 are — %s is an outage whatever status it came with, and is retried promptly",
+			async (code) => {
+				await h.seed();
+				setNow(GONE);
+				h.refresh.mockRejectedValue(Object.assign(new Error("x"), { error: code, status: 400 }));
+				expect(await retrieve()).toMatchObject({ code: "upstream_rejected", reason: code });
+				expect(await stamp()).toMatchObject({ kind: "unavailable", count: 1 });
+				await retrieve();
+				expect(h.refresh).toHaveBeenCalledTimes(2);
+			},
+		);
+
 		it("is not what an error nobody can read is: that one may have been processed, and is retried promptly like an outage", async () => {
 			await h.seed();
 			setNow(GONE);
@@ -273,15 +301,137 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 			expect(await stamp()).toBeUndefined();
 		});
 
-		it("is written after a refresh whose answer could not be persisted, best effort", async () => {
+		it("is written after a refresh whose answer could not be persisted, with what is left of the persist budget: never past the lease", async () => {
+			// The write is refused at once, thirty times: the budget's count runs out
+			// with time to spare, and the stamp gets what is left.
 			await h.seed();
 			setNow(GONE);
 			h.refresh.mockResolvedValue(refreshed("1", now()));
 			vi.spyOn(h.store, "replaceCredentials").mockRejectedValue(new Error("redis down"));
+			const frozen = now();
+			h.deps.now = () => frozen;
 			const answer = retrieve();
 			await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs + 100);
 			expect(await answer).toMatchObject({ code: "temporarily_unavailable", reason: "storage" });
 			expect(await stamp()).toMatchObject({ kind: "unavailable", count: 1 });
+		});
+
+		it("is not written after a persist failure that spent the whole budget: a stamp past the lease could land under the next holder", async () => {
+			await h.seed();
+			setNow(GONE);
+			h.refresh.mockResolvedValue(refreshed("1", now()));
+			vi.spyOn(h.store, "replaceCredentials").mockImplementation(
+				() => new Promise((_, reject) => setTimeout(() => reject(new Error("redis down")), 200)),
+			);
+			const noted = vi.spyOn(h.store, "noteRefreshFailure");
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs + 500);
+			expect(await answer).toMatchObject({ code: "temporarily_unavailable", reason: "storage" });
+			expect(noted).not.toHaveBeenCalled();
+		});
+
+		it("gives way to the marker where both stand: the marker is the more specific fault", async () => {
+			const grant = await h.seed();
+			setNow(GONE);
+			const marked = await h.store.replaceCredentials({
+				grantId: "g-1",
+				expectedVersion: grant.version,
+				credentials: { refreshToken: SECRET },
+				ineligible: { reason: "scope_exceeded", at: now(), judgedAgainst: 3600 },
+				now: now(),
+			});
+			if (!marked.ok) throw new Error("fixture: the marker was not written");
+			await h.store.noteRefreshFailure({
+				grantId: "g-1",
+				expectedVersion: marked.grant.version,
+				failure: { at: now(), kind: "rejected", upstreamCode: "invalid_client" },
+				rowMs: limits.ineligibleRetryAfterMs,
+				now: now(),
+			});
+			expect(await retrieve()).toMatchObject({
+				code: "upstream_token_ineligible",
+				reason: "scope_exceeded",
+			});
+			expect(h.refresh).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			["a stamp", "refreshFailure"],
+			["a marker", "ineligible"],
+		] as const)(
+			"does not believe %s dated a day ahead: it would stand until its date caught up",
+			async (_, field) => {
+				const grant = await h.seed();
+				setNow(GONE);
+				const ahead = new Date(now().getTime() + 24 * HOUR);
+				if (field === "ineligible") {
+					await h.store.replaceCredentials({
+						grantId: "g-1",
+						expectedVersion: grant.version,
+						credentials: { refreshToken: SECRET },
+						ineligible: { reason: "scope_exceeded", at: ahead, judgedAgainst: 3600 },
+						now: now(),
+					});
+				} else {
+					await h.store.noteRefreshFailure({
+						grantId: "g-1",
+						expectedVersion: grant.version,
+						failure: { at: ahead, kind: "rejected", upstreamCode: "invalid_client" },
+						rowMs: limits.ineligibleRetryAfterMs,
+						now: now(),
+					});
+				}
+				h.refresh.mockResolvedValue(refreshed("1", now()));
+				expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1" });
+			},
+		);
+
+		it.each([
+			["an outage", outage(), { code: "temporarily_unavailable", reason: "upstream" }],
+			[
+				"a rate limit with advice beyond the ceiling",
+				Object.assign(new Error("x"), {
+					status: 429,
+					response: new Response(null, { status: 429, headers: { "retry-after": "3600" } }),
+				}),
+				{ code: "rate_limited", reason: "upstream", retryAfterSeconds: 300 },
+			],
+			[
+				"a rate limit with advice below the backoff",
+				Object.assign(new Error("x"), {
+					status: 429,
+					response: new Response(null, { status: 429, headers: { "retry-after": "17" } }),
+				}),
+				// The same arithmetic as the stamp's: never less than the backoff.
+				{ code: "rate_limited", reason: "upstream", retryAfterSeconds: 30 },
+			],
+			[
+				"a refusal with a code this provider knows",
+				Object.assign(new Error("x"), { error: "invalid_client", status: 401 }),
+				{ code: "upstream_rejected", reason: "invalid_client", retryAfterSeconds: 300 },
+			],
+		])(
+			"answers the failure itself when the stamp could not be written, with the wait the stamp would have said — %s",
+			async (_, error, denial) => {
+				await h.seed();
+				setNow(GONE);
+				h.refresh.mockRejectedValue(error);
+				vi.spyOn(h.store, "noteRefreshFailure").mockRejectedValue(new Error("redis down"));
+				expect(await retrieve()).toStrictEqual({ ok: false, ...denial });
+			},
+		);
+
+		it("does not wait for a stamp that hangs past the persist budget, and tells the logger", async () => {
+			await h.seed();
+			setNow(GONE);
+			h.refresh.mockRejectedValue(outage());
+			vi.spyOn(h.store, "noteRefreshFailure").mockReturnValue(new Promise(() => {}));
+			const reported: string[] = [];
+			h.deps.report = (failure) => reported.push(failure.during);
+			const answer = retrieve();
+			await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs + 50);
+			expect(await answer).toMatchObject({ code: "temporarily_unavailable", reason: "upstream" });
+			expect(reported).toEqual(["upstream", "mark"]);
 		});
 
 		it("changes no answer when it cannot be written, and tells the logger", async () => {
@@ -340,6 +490,21 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 	});
 
 	describe("the limit", () => {
+		it("must not exceed the ceiling: the backoff is never longer than the marker's interval", () => {
+			expect(() =>
+				assertFederationGrantRetrievalLimits({
+					...limits,
+					refreshFailureBackoffMs: limits.ineligibleRetryAfterMs + 1,
+				}),
+			).toThrow(RangeError);
+			expect(() =>
+				assertFederationGrantRetrievalLimits({
+					...limits,
+					refreshFailureBackoffMs: limits.ineligibleRetryAfterMs,
+				}),
+			).not.toThrow();
+		});
+
 		it("must be a non-negative finite number", () => {
 			for (const bad of [Number.NaN, -1, Number.POSITIVE_INFINITY, "30000" as unknown as number]) {
 				expect(() =>

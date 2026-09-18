@@ -256,17 +256,22 @@ export interface FederationGrantStore {
 	 * date that is not one refuses the write.
 	 *
 	 * Effect: `refreshFailure` set, with `count` one more than the stamp it
-	 * replaces, or `1`. It does not bump `version` — it must not cost anybody a
-	 * guarded write, and nothing reads it as a state of the grant — and it
-	 * touches nothing else. It is cleared by whatever replaces or ends the
-	 * credentials: `replaceCredentials`, `activate`, `requireReauthorization`,
-	 * `revoke`. An adapter writes it atomically: a read, a count and a write in
-	 * three steps would lose a stamp to a `touch`, and a count to a second stamp.
+	 * replaces when that one is no older than `rowMs` before `failure.at`, and
+	 * `1` otherwise: failures further apart than that are not a row, and a
+	 * day-old stamp must not cost today's failure its place as the first. It
+	 * does not bump `version` — it must not cost anybody a guarded write, and
+	 * nothing reads it as a state of the grant — and it touches nothing else.
+	 * It is cleared by whatever replaces or ends the credentials:
+	 * `replaceCredentials`, `activate`, `requireReauthorization`, `revoke`. An
+	 * adapter writes it atomically: a read, a count and a write in three steps
+	 * would lose a stamp to a `touch`, and a count to a second stamp.
 	 */
 	noteRefreshFailure(input: {
 		readonly grantId: string;
 		readonly expectedVersion: number;
 		readonly failure: FederationGrantRefreshFailureInput;
+		/** How far apart two failures may be and still count as a row. */
+		readonly rowMs: number;
 		readonly now: Date;
 	}): Promise<FederationGrantWrite>;
 

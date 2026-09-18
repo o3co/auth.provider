@@ -1295,12 +1295,19 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				kind: "unavailable" as const,
 				...over,
 			});
+			const ROW_MS = 300_000;
 			const note = (
 				expectedVersion: number,
 				over: Partial<FederationGrantRefreshFailureInput> = {},
 				now = at(DAY),
 			) =>
-				store.noteRefreshFailure({ grantId: "g-1", expectedVersion, failure: failure(over), now });
+				store.noteRefreshFailure({
+					grantId: "g-1",
+					expectedVersion,
+					failure: failure(over),
+					rowMs: ROW_MS,
+					now,
+				});
 
 			it("stamps an active grant with the failure, counted from one, and bumps nothing", async () => {
 				const grant = await activated();
@@ -1344,6 +1351,22 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				);
 			});
 
+			it("starts a new row when the stamp it replaces is older than the row window: a failure a day later is the first of its row again", async () => {
+				const grant = await activated();
+				await note(grant.version);
+				await note(grant.version, { at: at(DAY + MIN) }, at(DAY + MIN));
+				expect((await store.find("g-1", at(DAY + MIN)))?.refreshFailure).toHaveProperty("count", 2);
+				// Exactly the window later: still the row. One more: a new one.
+				await note(grant.version, { at: at(DAY + MIN + ROW_MS) }, at(DAY + MIN + ROW_MS));
+				expect((await store.find("g-1", at(2 * DAY)))?.refreshFailure).toHaveProperty("count", 3);
+				await note(
+					grant.version,
+					{ at: at(DAY + MIN + 2 * ROW_MS + 1) },
+					at(DAY + MIN + 2 * ROW_MS + 1),
+				);
+				expect((await store.find("g-1", at(2 * DAY)))?.refreshFailure).toHaveProperty("count", 1);
+			});
+
 			it("refuses everything a refresh's own write would refuse, and changes nothing then", async () => {
 				const grant = await activated();
 				const before = await store.find("g-1", at(DAY));
@@ -1360,17 +1383,15 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				await needingUser("g-needs-user");
 				await activated("g-revoked");
 				await store.revoke("g-revoked", "client", at(DAY));
-				for (const [id, version] of [
-					["g-pending", 0],
-					["g-needs-user", 2],
-					["g-revoked", 2],
-					["g-unknown", 1],
-				] as const) {
+				for (const id of ["g-pending", "g-needs-user", "g-revoked", "g-unknown"]) {
+					// With the version the record has, so that it is the status that refuses.
+					const version = (await store.find(id, at(5 * MIN)))?.version ?? 1;
 					expect(
 						await store.noteRefreshFailure({
 							grantId: id,
 							expectedVersion: version,
 							failure: failure({ at: at(5 * MIN) }),
+							rowMs: 300_000,
 							now: at(5 * MIN),
 						}),
 						id,
@@ -1419,6 +1440,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					grantId: "g-2",
 					expectedVersion: other.version,
 					failure: failure(),
+					rowMs: 300_000,
 					now: at(DAY),
 				});
 				await store.revoke("g-2", "client", at(DAY + MIN));
@@ -1432,6 +1454,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					grantId: "g-1",
 					expectedVersion: grant.version,
 					failure: { at: at1, kind: "unavailable" },
+					rowMs: 300_000,
 					now: at(DAY),
 				});
 				at1.setTime(0);
@@ -2046,6 +2069,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					grantId: "g-1",
 					expectedVersion: grant.version,
 					failure: { at: at1, kind: "unavailable" },
+					rowMs: 300_000,
 					now: at1,
 				});
 

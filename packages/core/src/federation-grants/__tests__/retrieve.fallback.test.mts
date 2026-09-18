@@ -154,6 +154,31 @@ describe("retrieveFederationGrantToken — what a failed refresh leaves the call
 		});
 	});
 
+	describe("the token the call fetched itself", () => {
+		it("answers invalid_scope when it lacks the asserted scope, even when the last look finds it half spent: the upstream was asked, and that is what it gave", async () => {
+			// Four-second tokens, and a last look whose boundary read takes three:
+			// the call's own token is half spent by the time it is judged.
+			await h.seed();
+			setNow(at(HOUR - 15_000));
+			h.refresh.mockImplementation(async () =>
+				refreshed("1", now(), {
+					expiresIn: 4,
+					expiresAt: new Date(now().getTime() + 4_000),
+					scope: "openid calendar.read",
+				}),
+			);
+			let reads = 0;
+			h.deps.grantsBoundary = async () => {
+				reads += 1;
+				if (reads === 3) await new Promise((resolve) => setTimeout(resolve, 3_000));
+				return null;
+			};
+			const answer = retrieve({ scope: ["calendar.write"] });
+			await vi.advanceTimersByTimeAsync(3_100);
+			expect(await answer).toStrictEqual({ ok: false, code: "invalid_scope" });
+		});
+	});
+
 	describe("the look's own verdict comes before the attempt's", () => {
 		it("reports an expiry that landed during the upstream call, even when the upstream answered invalid_grant and the record was marked", async () => {
 			// `requireReauthorization` marks an expired record on purpose (D1); the
