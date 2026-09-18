@@ -1,6 +1,6 @@
 {
 	"name": "@o3co/auth-provider-federation-grants",
-	"description": "Federation grants — offline delegation of upstream tokens to backends, over HTTP",
+	"description": "Federation grants \u2014 offline delegation of upstream tokens to backends, over HTTP",
 	"version": "0.0.0",
 	"license": "Apache-2.0",
 	"engines": {
@@ -48,12 +48,15 @@
 	"devDependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"@o3co/auth-provider-oauth": "workspace:*",
+		"@o3co/auth-provider-redis": "workspace:*",
 		"@o3co/auth-provider-session": "workspace:*",
 		"@types/express": "^5.0.6",
 		"@types/supertest": "^7.2.1",
 		"@vitest/coverage-v8": "^5.0.0",
 		"express": "^5.0.0",
+		"ioredis": "^6.0.0",
 		"supertest": "^7.2.2",
+		"testcontainers": "^12.1.0",
 		"typescript": "^6.0.3",
 		"vitest": "^5.0.0"
 	},

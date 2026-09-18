@@ -280,7 +280,7 @@ federationGrants.connections.<name> {
   federation = "<key under federations>"
   scopes = ["openid", "offline_access", "..."] # the ceiling an intent may ask within
   resource = "https://api.example"              # optional, RFC 8707
-  authorizationParams { prompt = "consent" }    # allowlisted keys only
+  authorizationParams { prompt = "consent" }    # anything but the reserved names
   callbackURL = "https://.../session/federation-grants/callback/<name>"
   maxAccessTokenLifetime = 3600                 # seconds, see D5
   allowScopeSubsets = true                      # false: every intent gets the full set (D19)
@@ -614,10 +614,53 @@ The status response carries `grant_id`, the effective `status` with its
 reason, `sub`, `client_id`, `connection`, `upstream`, `scope`, `resource`,
 `created_at`, `authorized_at`, `expires_at` and `last_used_at`. It evaluates
 everything a retrieval does short of contacting the upstream — the revocation
-backstop (D13), the revisions, and whether the credential authenticates under
-the current key ring, without the tokens leaving the store — and the marker
-of D5, so it never reports `active` for a grant that cannot be used. A key
-that is not in the ring answers 503 here as it does on `/token`.
+backstop (D13), the revisions, whether the credential authenticates under the
+current key ring without the tokens leaving the store, and the marker of D5.
+
+**Amended in slice 4.** This section said status "never reports `active` for a
+grant that cannot be used", and that is a promise it cannot keep.
+`effectiveFederationGrantStatus` inspects the grant's lifecycle and whether the
+stored credential authenticates; it does not look at an access token's
+remaining lifetime or its scopes, because `inspect` does not open the
+credential. So status may report `active` for a grant whose next `/token` call
+fails at the upstream, and may report `upstream_token_ineligible` for a grant
+that still has a perfectly usable cached token. **Status is not a health check
+for `/token`.** It describes a grant's lifecycle; `/token` answers an issuance
+request.
+
+The wire contract, which this section also left open:
+
+- **200 for every effective status**, `expired` and `revoked` included: a
+  successful inspection of a grant that has ended is a successful inspection,
+  and the token route's 410 here would make a dashboard read as a failure.
+- Dates are UTC ISO strings to the millisecond.
+- `scope` is the authorization's scopes — what the user consented the client to
+  — never the scopes of a cached token, which differ the moment an upstream
+  answers a refresh with fewer.
+- `expires_at` is **effective** expiry: `min(stored expiresAt, consent.at +
+  current maxExpiresIn)`. Lowering `maxExpiresIn` therefore moves the reported
+  expiry earlier for grants that already exist, including into the past. That
+  is intended under D3 — the stored `expiresAt` never changes, and raising the
+  maximum moves the reported expiry back again, never beyond it — and it will
+  be read as a bug the first time somebody lowers the maximum, which is why it
+  is written here.
+- Fields a record does not have are **omitted**, not reported empty: a pending
+  grant, and one revoked before it was ever authorized, has no upstream
+  account, no scopes, no authorization date and no expiry.
+- Nothing discloses a consent session id, an intent handle, a revision, a
+  version, a failure stamp or any credential.
+- Terminal statuses are reported **before** the client's connection allowlist
+  is consulted, so a client whose registration changed can still be told that
+  the grant it used to spend is over. Every other status requires the
+  allowlist, and a connection an operator removed is reported as
+  `connection_not_configured` — a configuration remedy, not a changed identity.
+- A key that is not in the ring answers 503 here as it does on `/token`, but
+  **only** where the status would otherwise have read
+  `reauthorization_required` / `credential_unreadable`. Anywhere else it would
+  tell an operator to restore a key for a grant that has simply expired.
+- Status calls `inspect` and nothing else: never `open`, never a refresh, never
+  the refresh lock, never `touch`. A dashboard must not rotate a credential,
+  and a look is not a use.
 
 The routes ship in a new package, `@o3co/auth-provider-federation-grants`,
 which contributes them the way `device-grant` does and answers 404 when
@@ -690,8 +733,16 @@ and their place in that order is fixed too:
   changes — is the freshest thing evaluated, and `now` is sampled after both.
 
 Then it takes the stored upstream access token, or refreshes it (D12) as set
-out below. Before any
-token is disclosed, cached or fresh, these are checked again: steps 2 and 3,
+out below.
+
+**Amended in slice 4.** What follows said that everything below is checked
+again "before any token is disclosed, cached or fresh". That is the *refresh*
+path. A call that finds a usable stored token performs one evaluation —
+boundary, record, clock — and concludes on it; there is no second look, and the
+route adds none. The re-evaluation described here is the last look a refresh
+ends in (D10, slice 1d), which exists because a refresh may have straddled the
+expiry or a revocation. On the
+refresh path, these are checked again: steps 2 and 3,
 because a refresh may have straddled the expiry, or a subject-wide revocation
 may have stamped its watermark meanwhile without reaching this grant; the
 eligibility predicate of D5 against the *current* `maxAccessTokenLifetime`;
@@ -805,7 +856,7 @@ reason cannot be attached to a code that has none.
 | `upstream_token_ineligible` | `no_finite_lifetime`, `lifetime_over_maximum`, `token_type_unsupported` | 502 | operator; the grant is untouched; honour `retryAfterSeconds`. `token_type_unsupported`: the upstream issues sender-constrained tokens for this client, which a bearer route cannot present |
 | `upstream_token_ineligible` | `malformed_token_response` | 502 | operator: the federation adapter reported an answer without a usable access token, or with a field of the wrong type. The grant is untouched; honour `retryAfterSeconds` |
 | `upstream_token_ineligible` | `scope_exceeded` | 502 | no operator action un-accumulates consent: `/reauthorize` for the wider set, or a new grant on a connection of its own (D19) |
-| `upstream_rejected` | the upstream's error code, or `unknown` | 502 | operator, e.g. an expired upstream client secret; the grant is untouched. Answered from the stamp of a failed refresh (D12) it carries `retryAfterSeconds`, and is answered only where nothing stored serves the request (D10). The code is repeated only when it is one of the RFC 6749, RFC 6750, RFC 8707 and OpenID Connect codes this provider knows, and is `unknown` otherwise — an allow-list, because any pattern that fits `invalid_client` fits an opaque token as well, and an upstream that echoes what it was sent must not get a refresh token repeated through this field |
+| `upstream_rejected` | the upstream's error code, or `unknown` (see the amendments below) | 502 | operator, e.g. an expired upstream client secret; the grant is untouched. Answered from the stamp of a failed refresh (D12) it carries `retryAfterSeconds`, and is answered only where nothing stored serves the request (D10). The code is repeated only when it is one of the RFC 6749, RFC 6750, RFC 8707 and OpenID Connect codes this provider knows, and is `unknown` otherwise — an allow-list, because any pattern that fits `invalid_client` fits an opaque token as well, and an upstream that echoes what it was sent must not get a refresh token repeated through this field |
 | `rate_limited` | `provider`, `upstream` | 429 | retry after `Retry-After`. `upstream` is answered only where nothing stored serves the request (D10) |
 | `temporarily_unavailable` | `upstream`, `storage`, `lock_timeout`, `concurrent_update`, `key_unavailable` | 503 | retry; the grant is untouched. Each of these is answered only where nothing stored serves the request (D10). `concurrent_update`: this call's refresh was overtaken — its guarded write lost, or what it wrote was replaced before the last look — and what is stored now is nothing to answer with |
 
@@ -813,6 +864,33 @@ reason cannot be attached to a code that has none.
 upstream `invalid_grant` and a revocation change a grant. No other outcome
 changes its status or deletes anything, and no code path substitutes another
 subject's grant or an application-wide credential.
+
+**Three amendments from slice 4.**
+
+*"The grant is untouched" is narrower than it reads.* A failed refresh writes
+`refreshFailure` (D12), and a refresh whose token is ineligible replaces the
+credential, persists a rotated refresh token and updates the marker and the
+version. What is untouched is the **authorization**: the consent, its scopes,
+the expiry, the revisions, the upstream account and the stored status. Nothing
+a user would have to be asked about again changes on any of these answers.
+
+*"Answered only where nothing stored serves the request" holds for a refresh
+that could look.* It is exactly right when the last look can evaluate what is
+stored. It cannot promise cached fallback through a dependency that could not
+be read at all: an unreadable boundary, a store that failed, or a key that is
+not in the ring prevents establishing that anything stored serves the request,
+and those answer 503 without a fallback. The promise is about a refresh that
+failed, not about a provider that cannot see its own state.
+
+*`upstream_rejected.reason` needs an output boundary, not only an input one.*
+The allow-list is applied by the classifier when a failure is stamped — but the
+reason is also built by reading a **stored** `refreshFailure.upstreamCode` back,
+and a stamp seeded by a fixture, written by a version before the list, or
+edited in the keyspace would otherwise reach a caller unchecked. Slice 4 asks
+the predicate again where the reason is constructed, in core rather than at any
+one consumer: the promise is about the result union, so sanitizing at the HTTP
+boundary alone would leave the hole for slice 5's revoke route and for anything
+reading the union directly.
 
 ### D12 — Refresh is coordinated per grant, and fails safe
 
@@ -832,7 +910,11 @@ reuse-detecting IdP answers by revoking the family.
   latency incident into `invalid_grant` on the retry. So:
   - `federationGrants.upstreamTimeoutMs` (default 10 s) is a *soft*
     deadline. It bounds only how long the worker's call waits before it is
-    answered `temporarily_unavailable` / `upstream`. The upstream request is
+    answered. **Amended in slice 4:** what it is answered with is the last
+    look, not necessarily an outage — a stored token that still serves the
+    request is disclosed, and a lifecycle verdict that has become true
+    meanwhile is reported; `temporarily_unavailable` / `upstream` is the
+    fallback when neither applies. The upstream request is
     not aborted: aborting a token request does not undo a rotation at the IdP,
     it only guarantees the new credential is never received;
   - the request goes on, holding the lock, and its result is offered to the
@@ -891,11 +973,30 @@ reuse-detecting IdP answers by revoking the family.
   go of the lock, and then telling the audit sink, in that order — and, when
   the caller stopped waiting at the soft deadline, the worker itself, are
   handed to a `background` seam that whoever composes the retrieval must
-  supply, so that a shutdown can drain them and a test can await them. One
+  supply, so that a shutdown can drain them and a test can await them.
+  **Slice 4 says what "a shutdown can drain them" requires of the composer:**
+  a per-application registry, held as a *component* whose cleanup drains and
+  whose dependency edges point at the grant store, the subject-revocation
+  store and the audit sink — `AppHandle.dispose()` runs component cleanups
+  before `lifecycleRegistrar` callbacks, so a drain registered with the
+  registrar would run after an adapter had already closed the client the
+  pending write needs. The drain refuses new operations, then waits for every
+  admitted request and registered promise, rechecking as finishing work
+  registers more. It bounds nothing itself: core bounds its own waits, an
+  adapter whose read can hang needs its own I/O timeout, and the host's
+  cleanup allowance is what stops a pathological tail — **45 seconds or more**
+  for a deployment mounting these routes, against the standalone's default of
+  ten, which is shorter than the hard timeout plus the persist budget. One
   thing is detached any other way: the wait for a lock that was given up on,
   which may never arrive, while what is handed over has to settle. Letting go
   of that lock, once it has arrived, is handed over like any other release:
-  bounded, and reported when it fails. Nothing is audited while the lock is held, and no
+  bounded, and reported when it fails. **Amended in slice 4:** this said
+  "nothing is audited while the lock is held", which is too absolute — a
+  refresh worker's outcome audit follows its release *attempt* and may run
+  while a retained lease runs out, an answer's audit can run while a late
+  worker still holds the lock, and a backstop audit originates during
+  evaluation. The invariant is the one that matters: **audit never blocks
+  refresh progress and never extends a release wait.** No
   answer waits for the sink, for the release, or for the record of a use: a
   sink that hangs must hold no lock, and a lock that is slow to let go of must
   not turn a refresh that was persisted into an outage. What is handed over
@@ -1703,9 +1804,17 @@ since the upstream may have rotated the refresh token all the same, and that
 must leave a trail. `.refresh_persist_failed` names which of the three it was:
 `storage`, `write_in_flight`, or `hard_timeout`.
 
-Every event carries the grant ID, the caller in `clientId`, the owner and the
-upstream subject, the connection, the resource, the scopes, the outcome and a
-correlation ID. The provider has no request ID today; these routes accept
+Every event carries the grant ID, the outcome and a correlation ID. The
+caller, the owner, the upstream subject, the connection, the resource and the
+scopes are carried **where they have been established** — amended in slice 4,
+because they cannot always be. A denial before client authentication has no
+verified caller, and promoting a Basic username or an assertion's `iss` into
+`clientId` would put an unauthenticated claim in the field an operator reads as
+"this client did it". An unknown grant, or one belonging to somebody else, has
+no connection, upstream or scopes to report, and reading them would answer the
+question the identical 404 exists to refuse. A grant that was never authorized
+has none to read. The asserted `sub` and an established owner are the same
+field and different facts; the outcome says which. The provider has no request ID today; these routes accept
 `x-request-id` when it is 1–128 characters of `A-Z a-z 0-9 - _ . : + / = #`
 (the shape auth.policy-verifier 0.11.0 settled on), generate one otherwise,
 and echo it. No event or response carries a refresh token or any other
@@ -1831,6 +1940,20 @@ route test is written first and watched failing.
    copy.
 4. **package: token and status routes** (D9–D12), exercised on grants seeded
    straight into the store; the `Client` fields, audit events, configuration.
+   Done: `@o3co/auth-provider-federation-grants` with both routes and the 404
+   a disabled deployment answers; the shutdown drain as a component, for the
+   reason now written into D12; `x-request-id`; the `federationGrants` block
+   resolved in core and the connections in the package; the eight boot
+   refusals this slice can make; the seven audit types, the runbook rows and
+   the adapter-surface row. Eleven corrections to this ADR's prose, each
+   marked where it stands — D9 overstated what status knows and left its wire
+   contract open, D10's re-evaluation is the refresh path's and not the cached
+   one's, D11's "untouched" and its fallback promise were both broader than
+   the code, D11's upstream-code allow-list needed an output boundary as well
+   as an input one, D12's soft deadline can end in a better answer than an
+   outage and its audit rule was too absolute, D12 said nothing about who
+   drains the tail, D18 cannot promise every field on every event, and D4 said
+   "allowlisted keys" where slice 2 implements a reserved-name exclusion.
 5. **revocation** (D13): the revoke route, the two library functions, the
    `revokeAllForSubject` extension, the retention floor and lifetime ceiling,
    the boot refusals (no `subjectRevocation`, or an in-memory one beside a

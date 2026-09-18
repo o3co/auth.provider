@@ -164,6 +164,58 @@ describe("the background component's place in a shutdown", () => {
 		expect(order).toEqual(["late write persisted", "store closed"]);
 	});
 
+	it("waits for a bounded audit tail before the sink it writes through closes", async () => {
+		// The store is not the only dependency the drain is ordered against.
+		// Core hands its audit promises to the same registry, and the event it
+		// most often has outstanding is the one describing a refresh that
+		// landed after the response — exactly the event a sink closed early
+		// would lose.
+		const order: string[] = [];
+		const sinkModule = defineModule({
+			name: "test-audit-sink",
+			provides: {
+				auditSink: () => ({ kind: "test", record: async () => undefined }),
+			},
+			lifecycle: {
+				auditSink: {
+					cleanup: () => {
+						order.push("sink closed");
+					},
+				},
+			},
+		});
+		const handle = await createApp({
+			modules: [
+				sinkModule,
+				storeModuleWriting(order),
+				federationGrantBackgroundModule,
+				federationGrantsModule,
+			],
+			bootstrapComponents: bootstrap(),
+		});
+
+		let told!: () => void;
+		const audited = new Promise<void>((resolve) => {
+			told = () => resolve();
+		});
+		handle.components.federationGrantBackground?.register(
+			audited.then(() => {
+				order.push("audit tail told");
+			}),
+		);
+
+		const disposed = handle.dispose();
+		await tick();
+		expect(order).toEqual([]);
+
+		told();
+		await disposed;
+		// The store and the sink both close after, in whichever order the
+		// planner built them; what matters is that neither closed first.
+		expect(order[0]).toBe("audit tail told");
+		expect(order.slice(1).sort()).toEqual(["sink closed", "store closed"]);
+	});
+
 	it("is idempotent, and disposing twice does not wait again", async () => {
 		const order: string[] = [];
 		const handle = await createApp({
