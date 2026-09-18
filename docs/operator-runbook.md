@@ -422,6 +422,62 @@ A failed audit, touch or lock release does not change an answer that has
 already been decided; it is reported through `federation_grant.failure` and
 nothing waits for it.
 
+### Ending a grant (#593, D13)
+
+Three ways, and they end different amounts of what a user has.
+
+| You want to | Call | What ends |
+| --- | --- | --- |
+| let a client disconnect its own integration | `POST /oauth/federation-grants/:grantId/revoke` | That one grant. 204, and 204 again on a retry. Ownership is the only check: a grant whose connection you removed, whose key is out of the ring, or which expired last week can still be ended. |
+| end one grant, or show a user their connected applications | `revokeFederationGrant(deps, grantId, by)` / `listFederationGrantsForSubject(deps, subject)` | That one grant, on the Store's authority. There is no admin route: authenticating the person and checking the grant is theirs belongs to the Store, which has both. |
+| end everything one subject holds | the `subjectRevocationService` component | Sessions, tokens and grants. This is what a credential change calls. |
+
+The service takes `federationGrants: "revoke" | "keep"`, default `"revoke"`.
+`"keep"` — end the sessions and the tokens, leave the established grants —
+is an **operator allowance**, `federationGrants.allowKeepOnSubjectRevocation`,
+default `false`, and not something a caller may switch on. Turning it on needs
+a `subjectRevocation` adapter carrying both boundaries; boot refuses the
+pairing rather than revoking silently.
+
+Read `requested`, `applied` and `reason` together. **`complete: true` means
+the applied action completed, not that the requested one was honoured**: a
+Store that asked for `"keep"`, was refused by policy, and reads only
+`complete` will believe the subject's grants survived when every one of them
+was revoked.
+
+When `"keep"` is sound: a change the signed-in user made after proving their
+current credential. When it is not: a reset, a forced change, a suspected
+compromise, a disablement — those are `"revoke"`. In between, pass
+`revokeGrantsConsentedSince` with the instant you suspect, and everything
+consented at or after it is ended anyway.
+
+Two things `"keep"` does not keep, on purpose: a `pending` grant, which is a
+consent the user had not finished giving, and any reauthorization in flight,
+whose pointer is retired so it cannot widen the grant afterwards. One window
+stays open as wide as two replicas' clocks disagree, and it is recorded in
+D13.
+
+If a subject-wide revocation reports `complete: false`, **retry it**, and
+which failure you are looking at decides how much the retry matters:
+
+- **`"revoke"`** — the grants boundary was stamped before anything was
+  enumerated, so it is the backstop meanwhile: a grant consented before it is
+  refused at `/token` and revoked durably there, even if the pass that should
+  have ended it never ran. The retry tidies up; it is not what makes the
+  revocation hold.
+- **`"keep"`** — there is **no grants boundary behind it**, by design: the
+  whole point of the mode is not to advance one. So a grant in `grantsFailed`
+  — one that `revokeGrantsConsentedSince` selected, whose write threw — is
+  **still usable** until the retry succeeds. Nothing else will end it. Treat
+  that `complete: false` as an open incident rather than as bookkeeping, and
+  if you cannot retry promptly, run a plain `"revoke"` instead: it stamps the
+  boundary and covers every grant at once.
+
+`grantsFailed` and `grantsRetireFailed` want different retries. The first is a
+revocation that did not happen; the second is a grant your policy **kept**
+whose in-flight reauthorization could not be ended — revoking it on retry
+would destroy exactly what the policy chose to keep.
+
 **A grant needs a federation that is enabled**, and enabling a federation
 brings the session-federation stores with it. A deployment that wants offline
 delegation and nothing else still wires those.
@@ -516,7 +572,8 @@ check this page, so when the two disagree, the constant is right:
 `device.approved`, `device.denied`, `device.rate_limited`,
 `federation.grant.reauthorization_required`,
 `federation.grant.refresh_failed`, `federation.grant.refresh_persist_failed`,
-`federation.grant.refreshed`, `federation.grant.revoked`,
+`federation.grant.refreshed`, `federation.grant.revoke.denied`,
+`federation.grant.revoked`,
 `federation.grant.token.denied`, `federation.grant.token.success`,
 `federation.identity.link_refused`, `federation.identity.linked`,
 `federation.logout.idp_unreachable`,

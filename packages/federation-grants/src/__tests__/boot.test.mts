@@ -27,6 +27,7 @@ import type { BootstrapMap, ClientRepository, FederationProvider } from "@o3co/a
 import {
 	BootError,
 	createApp,
+	createInMemorySubjectRevocation,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
 	defineModule,
@@ -59,6 +60,25 @@ const storeModule = defineModule({
 	name: "test-federation-grant-store",
 	provides: { federationGrantStore: () => createMemoryFederationGrantStore() },
 });
+
+/**
+ * A store that says it keeps grants somewhere they survive a restart. The port
+ * exposes `kind` and nothing else about persistence, so that is what the
+ * durability pairing is judged on.
+ */
+const durableStoreModule = defineModule({
+	name: "test-durable-federation-grant-store",
+	provides: {
+		federationGrantStore: () => ({ ...createMemoryFederationGrantStore(), kind: "redis" }),
+	} as never,
+});
+
+/** The single-boundary surface #296 shipped, with no grants boundary on it. */
+const olderRevocation = {
+	kind: "redis",
+	revokeBefore: async () => undefined,
+	revokedBefore: async () => null,
+};
 
 /** An adapter with BOTH delegated methods: the capability slice 2 defined. */
 const delegated = {
@@ -97,6 +117,10 @@ interface Setup {
 	readonly connections?: Record<string, unknown>;
 	readonly grants?: Record<string, unknown>;
 	readonly withStore?: boolean;
+	/** `"memory"` is the bundled pair; `"durable"` says grants outlive the process. */
+	readonly store?: "memory" | "durable";
+	/** What ends a grant a user withdrew on a replica that never saw the withdrawal. */
+	readonly revocation?: "memory" | "older" | "absent";
 	readonly withLimiter?: boolean;
 	readonly withAudit?: boolean;
 	readonly failMode?: unknown;
@@ -112,7 +136,9 @@ const boot = (setup: Setup) => {
 	const modules = [
 		...(setup.federationFirst === false ? [] : federation),
 		...federationGrantsModules,
-		...(setup.withStore === false ? [] : [storeModule]),
+		...(setup.withStore === false
+			? []
+			: [setup.store === "durable" ? durableStoreModule : storeModule]),
 		...(setup.federationFirst === false ? federation : []),
 	];
 	return createApp({
@@ -138,6 +164,15 @@ const boot = (setup: Setup) => {
 			// guard is not this feature's. Present but empty: what is under test
 			// here is the grant refusals, and nothing in this file logs anyone in.
 			...SESSION_FEDERATION_STORES,
+			// The boundary a grant is compared against on every disclosure
+			// (D13). Bundled here because every composition that enables the
+			// feature needs one, which is the point of the refusals below.
+			...(setup.revocation === "absent"
+				? {}
+				: {
+						subjectRevocation:
+							setup.revocation === "older" ? olderRevocation : createInMemorySubjectRevocation(),
+					}),
 			...(setup.withLimiter === false
 				? {}
 				: {
@@ -168,6 +203,24 @@ describe("enabling the feature", () => {
 
 	it("refuses to boot with nowhere to keep grants", async () => {
 		await expect(boot({ withStore: false })).rejects.toThrow(/federationGrantStore/);
+	});
+
+	it("refuses to boot with nothing that can end a grant", async () => {
+		// The backstop, not a nicety: a grant outlives the session it was
+		// agreed through, so the boundary is what reaches one on a replica that
+		// never saw the withdrawal. Slice 4 answered 503 per request; a
+		// composition error belongs here.
+		await expect(boot({ revocation: "absent" })).rejects.toThrow(/subjectRevocation component/);
+	});
+
+	it("refuses an adapter that carries only the boundary #296 shipped", async () => {
+		await expect(boot({ revocation: "older" })).rejects.toThrow(/grantsRevokedBefore/);
+	});
+
+	it("refuses grants that outlive the process beside a boundary that does not", async () => {
+		// A restart — or simply the replica that never held it — would disclose
+		// a credential for a grant that was revoked.
+		await expect(boot({ store: "durable" })).rejects.toThrow(/outlive the process/);
 	});
 
 	it("refuses to boot with no throttle in front of an opaque grant id", async () => {

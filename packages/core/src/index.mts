@@ -600,6 +600,14 @@ export {
 	type RevokeAllForSubjectResult,
 	revokeAllForSubject,
 } from "./user-sessions/revokeAllForSubject.mjs";
+export {
+	createSubjectRevocationService,
+	type FederationGrantDisposition,
+	type SubjectRevocationReport,
+	type SubjectRevocationRequest,
+	type SubjectRevocationService,
+	type SubjectRevocationServiceDeps,
+} from "./user-sessions/subjectRevocationService.mjs";
 // ---------------------------------------------------------------------------
 // A4 user-sessions (post v0.5.0 redesign): 4-way decomposition.
 // Per spec §5.1-§5.7, §7.1, §8.1.
@@ -820,10 +828,23 @@ export {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "./federation-grants/revision.mjs";
+// #593 slice 5: the wiring a grants deployment must have before a grant may
+// outlive a session (D13). Shared so the routes module and the subject
+// revocation service module cannot hold an adapter to different rules.
+export { requireFederationGrantSubjectRevocation } from "./federation-grants/revocationWiring.mjs";
+// #593, D13: what a Store calls instead of an admin route this provider does
+// not mount — ending one grant, and listing a subject's for a connected-
+// applications page.
+export {
+	type FederationGrantAdministrationDeps,
+	listFederationGrantsForSubject,
+	revokeFederationGrant,
+} from "./federation-grants/revoke.mjs";
 // #593 slice 4: the `federationGrants.*` block an operator writes, turned into
 // the limits the retrieval takes. In core because the block is core's.
 export {
 	FEDERATION_GRANT_SETTING_DEFAULTS,
+	resolveFederationGrantKeepPolicy,
 	resolveFederationGrantRetrievalLimits,
 } from "./federation-grants/settings.mjs";
 export type {
@@ -861,12 +882,26 @@ export {
 	type PendingFederationGrant,
 	type RevokedFederationGrant,
 } from "./federation-grants/types.mjs";
-
+// #593, D13: the two boundaries of a subject revocation, and how long each has
+// to be kept. The skew leaves `jwt/verify.mts` because the grants comparison
+// has to use the same allowance the watermark comparison already does.
+export {
+	DEFAULT_CLOCK_SKEW_MS,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+} from "./jwt/verify.mjs";
 // SF-3 + MIN-4 (v0.5.1): timing-safe primitives. Exported from the package
 // root because `packages/core/package.json#exports` does not register a
 // `./security/*` subpath — Codex Delta 1 confirmed the subpath approach
 // would fail at runtime under Node's exports gating.
 export { constantTimeStringEqual } from "./security/timingSafe.mjs";
+export {
+	resolveSubjectRevocationHorizonMs,
+	SUBJECT_REVOCATION_MIN_RETENTION_MS,
+} from "./user-sessions/retention.mjs";
+export {
+	type SupportsSessionsOnlyRevocation,
+	supportsSessionsOnlyRevocation,
+} from "./user-sessions/types.mjs";
 
 // ===========================================================================
 // Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628, #298)

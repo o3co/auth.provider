@@ -355,6 +355,11 @@ describe("the status route — the body it accepts", () => {
 			const response = await ask(h, GRANT_ID, body);
 			expect(response.status, JSON.stringify(body)).toBe(400);
 			expect(response.body.error).toBe("invalid_request");
+			// One identifier for every parameter this route does not take,
+			// including the token route's own: a caller that sent `min_ttl`
+			// and one that sent `minttl` both asked for something that did not
+			// happen, and the difference is not something to branch on.
+			expect(response.body.error_description).toBe("unexpected_parameter");
 		}
 	});
 

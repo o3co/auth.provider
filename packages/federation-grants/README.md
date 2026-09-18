@@ -22,6 +22,14 @@ const app = await createApp({
 
 The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a logout and a subject-wide revocation reach grants through the same port. `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`.
 
+Enabling the feature also requires a `subjectRevocation` component that carries the **grants boundary** — `revokeSessionsBefore` and `grantsRevokedBefore` beside the pair #296 shipped (D13). A grant outlives the session it was agreed through, so that boundary is what reaches one on a replica that never saw the withdrawal, and every disclosure is compared against it. Three compositions are refused at boot rather than per request:
+
+| Composition | Why it is refused |
+|---|---|
+| no `subjectRevocation` | Nothing would end a grant the user withdrew. Declaring the capability absent (`oauth.revocation.subject = "unsupported"`) is **not** an escape: sessions end when their cookie does, and a grant ends when nothing does. |
+| an adapter with only `revokeBefore` / `revokedBefore` | There is no second boundary to compare a grant against, and a subject-wide revocation could not be asked to keep one. |
+| a non-`memory` grant store beside a `memory` `subjectRevocation` | The grants outlive the process and the boundary does not, so a restart — or the replica that never held it — discloses a credential for a grant that was revoked. A custom store of any other `kind` is treated as durable: `kind` is all the port exposes, and refusing a pairing that would lose the boundary is the conservative direction. |
+
 ## A disabled deployment is indistinguishable from an uninstalled one
 
 `federationGrants.enabled` defaults to `false`, and while it is false both paths answer:
@@ -39,10 +47,10 @@ No description, deliberately. A body naming the feature would tell an unauthenti
 
 What it is **not** is byte-identical to a deployment that never installed the package: there, nothing matches the path at all and the host's own fallback answers — Express's HTML 404 in a bare composition. Review measured the difference and it is the headers and the content type, not the body. So the property this actually has is the one worth having: the refusal names no feature, and nothing behind it runs. A deployment that wants the two indistinguishable gives its host a JSON 404 of its own.
 
-## The two routes
+## The three routes
 
-Both are `POST`, both are authenticated as a confidential client
-(`client_secret_basic`, `client_secret_post` or `private_key_jwt`), and both
+All three are `POST`, all are authenticated as a confidential client
+(`client_secret_basic`, `client_secret_post` or `private_key_jwt`), and all
 take the grant id as an opaque path segment.
 
 ### `POST /oauth/federation-grants/:grantId/token`
@@ -64,8 +72,22 @@ object in it.
 Everything else is `{"error": "<code>"}` with an `"error_description"`
 alongside it wherever the failure has a reason to give — `grant_not_found`,
 `invalid_scope`, `invalid_target` and `authorization_pending` have none, and
-carry the code alone. Both fields are **identifiers, not prose**: a client may
-switch on them. The status
+carry the code alone. Both fields are **identifiers, not prose**, for every
+answer **this package** owns: a client may switch on them, and the wording may
+be improved without breaking one. What these routes inherit — client
+authentication's `401`s and the shared rate limiter's `503` — still carries
+that middleware's own wording, and it is the same wording every other
+throttled, client-authenticated route in this provider gives; rewriting it
+here would make one failure read two ways depending on which route met it.
+
+The body identifiers are `invalid_body`, `sub_required`, `invalid_sub`,
+`duplicate_sub`, `unexpected_parameter`, and — on `/token`, which is the only
+route that takes them — `invalid_connection`, `invalid_resource`,
+`invalid_scope`, `invalid_min_ttl` and `duplicate_min_ttl`. A parameter this
+route does not take is never named back to the caller: it is their string, and
+`error_description` goes into logs.
+
+The status
 says what kind of problem it is: `400` the caller's, `403` the client's
 registration, `404` no such grant of theirs, `410` the user must be asked
 again, `429` slow down, `502` the upstream, `503` come back. `Retry-After` is
@@ -96,6 +118,57 @@ Status calls `inspect` and nothing else: never a refresh, never the refresh
 lock, never `touch`. It is also **not** a health check for `/token` — `active`
 does not promise a token, and an ineligible status can sit beside a perfectly
 usable cached one.
+
+### `POST /oauth/federation-grants/:grantId/revoke`
+
+```json
+{ "sub": "local-subject" }
+```
+
+The owning client ends its own grant: the user disconnected the integration on
+its side, the workspace was deleted, the agent is being decommissioned. A
+success is **`204` with no body** — a withdrawal has no result to report — and
+a second call answers `204` as well, because the record is retained as a
+tombstone for `/status` and a client retrying after a timeout must not be told
+its second attempt failed.
+
+**Ownership is the whole check.** The grant is this client's and this
+subject's, or it answers the same `404` as an unknown id. After that nothing
+else is consulted: not the connection allowlist, not the current connection
+configuration, not the revision, not eligibility, not expiry, not the subject's
+boundary. Every one of those decides whether a credential may be *disclosed*,
+and none of them is a reason to refuse a withdrawal — a grant whose connection
+was removed, whose encryption key is out of the ring, or which expired last
+week and is still retained, is exactly the grant an operator most needs to be
+able to end.
+
+It does not stamp either subject boundary, touch the subject's other grants,
+cascade sessions, or call the upstream. Ending a grant here is a local fact
+about one record; revoking the upstream's own refresh token is that upstream's
+API and a different failure domain, and waiting on it would mean a user cannot
+disconnect while somebody else's service is down.
+
+| Exit | HTTP | `error` | `error_description` |
+|---|---:|---|---|
+| Ended, or already over | 204 | — | — |
+| Body is not an object | 400 | `invalid_request` | `invalid_body` |
+| `sub` missing or empty | 400 | `invalid_request` | `sub_required` |
+| `sub` repeated / not a string | 400 | `invalid_request` | `duplicate_sub` / `invalid_sub` |
+| Any other body parameter | 400 | `invalid_request` | `unexpected_parameter` |
+| Unknown id, another client's, another subject's | 404 | `grant_not_found` | — |
+| The record could not be read or written | 503 | `temporarily_unavailable` | `storage` |
+| Admitted as the process began shutting down | 503 | `service_unavailable` | `shutting_down` |
+| Unexpected fault, or no authenticated client on the request | 500 | `server_error` | `unexpected_error` |
+
+Client authentication, the throttle and the body-size and content-type guards
+are the same ones `/token` inherits, and answer the same way here.
+
+A withdrawal that changed something emits one `federation.grant.revoked` with
+`outcome: "client"`, built from the record the write returned. A refused one
+emits `federation.grant.revoke.denied` — its own type, not a
+`.token.denied`: a credential that was not handed out and a credential that is
+still live are opposite facts, and a dashboard counting one must not count the
+other.
 
 ## Install these modules before `oauthModule`
 

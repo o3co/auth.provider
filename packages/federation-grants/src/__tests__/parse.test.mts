@@ -31,7 +31,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { parseFederationGrantTokenRequest } from "#/parse.mjs";
+import {
+	parseFederationGrantRevokeRequest,
+	parseFederationGrantStatusRequest,
+	parseFederationGrantTokenRequest,
+} from "#/parse.mjs";
 
 const ok = (body: unknown) => {
 	const parsed = parseFederationGrantTokenRequest(body);
@@ -113,8 +117,10 @@ describe("parseFederationGrantTokenRequest", () => {
 		// A form body with `sub` twice arrives as an array. Neither value is
 		// the one the caller meant, and choosing is how a proxy and a server
 		// come to disagree about who is being asked for.
-		expect(rejected({ sub: ["a", "b"] })).toMatch(/sub/);
-		expect(rejected({ sub: "u", connection: ["a", "b"] })).toMatch(/connection/);
+		expect(rejected({ sub: ["a", "b"] })).toBe("duplicate_sub");
+		expect(rejected({ sub: "u", connection: ["a", "b"] })).toBe("duplicate_connection");
+		expect(rejected({ sub: "u", scope: ["openid", "profile"] })).toBe("duplicate_scope");
+		expect(rejected({ sub: "u", scope: 42 })).toBe("invalid_scope");
 	});
 
 	it("refuses a nested object where a value belongs", () => {
@@ -126,8 +132,27 @@ describe("parseFederationGrantTokenRequest", () => {
 		// A caller that sent `scopes` meaning `scope`, or `subject` meaning
 		// `sub`, has asked for something this route did not do — answering as
 		// if the field had not been there is how that goes unnoticed.
-		expect(rejected({ sub: "u", scopes: "openid" })).toMatch(/scopes/);
-		expect(rejected({ sub: "u", audience: "x" })).toMatch(/audience/);
+		expect(rejected({ sub: "u", scopes: "openid" })).toBe("unexpected_parameter");
+		expect(rejected({ sub: "u", audience: "x" })).toBe("unexpected_parameter");
+	});
+
+	it("answers with an identifier and never with the caller's own field name", () => {
+		// Two reasons it does not name the field. It is caller-supplied, and
+		// `error_description` ends up in logs and dashboards; and the point of
+		// an identifier is that something can branch on it, which a sentence
+		// containing an arbitrary string cannot be.
+		expect(rejected({ sub: "u", "</script>": "x" })).toBe("unexpected_parameter");
+		expect(rejected({})).toBe("sub_required");
+		expect(rejected({ sub: ["a", "b"] })).toBe("duplicate_sub");
+		expect(rejected({ sub: 42 })).toBe("invalid_sub");
+		expect(rejected("sub=u")).toBe("invalid_body");
+		for (const description of [
+			rejected({ sub: "u", connection: "" }),
+			rejected({ sub: "u", scope: " " }),
+			rejected({ sub: "u", min_ttl: "60s" }),
+		]) {
+			expect(description).toMatch(/^[a-z][a-z_]*$/);
+		}
 	});
 
 	it("permits the client authentication fields alongside its own", () => {
@@ -149,4 +174,47 @@ describe("parseFederationGrantTokenRequest", () => {
 			expect(rejected(body), JSON.stringify(body)).toBeTruthy();
 		}
 	});
+});
+
+describe("the routes that take a subject and nothing else", () => {
+	// `/status` and `/revoke` share one parser: `sub`, the fields client
+	// authentication reads out of the same body, and a refusal for everything
+	// else — including the token route's own conditions, which neither route
+	// honours and so must not appear to.
+	for (const [name, parse] of [
+		["status", parseFederationGrantStatusRequest],
+		["revoke", parseFederationGrantRevokeRequest],
+	] as const) {
+		it(`${name} takes the subject`, () => {
+			const parsed = parse({ sub: "u", client_id: "worker", client_secret: "s" });
+			expect(parsed.ok && parsed.value.subject).toBe("u");
+		});
+
+		it(`${name} refuses a body that is not an object`, () => {
+			for (const body of [undefined, null, "sub=u", 42, []]) {
+				const parsed = parse(body);
+				expect(parsed.ok, JSON.stringify(body)).toBe(false);
+				expect(!parsed.ok && parsed.description).toBe("invalid_body");
+			}
+		});
+
+		it(`${name} refuses the token route's conditions with one identifier`, () => {
+			for (const body of [
+				{ sub: "u", min_ttl: 60 },
+				{ sub: "u", scope: "openid" },
+				{ sub: "u", connection: "graph" },
+				{ sub: "u", resource: "https://graph.example" },
+				{ sub: "u", whatever: "x" },
+			]) {
+				const parsed = parse(body);
+				expect(!parsed.ok && parsed.description, JSON.stringify(body)).toBe("unexpected_parameter");
+			}
+		});
+
+		it(`${name} still requires the subject`, () => {
+			expect(!parse({}).ok && (parse({}) as { description: string }).description).toBe(
+				"sub_required",
+			);
+		});
+	}
 });

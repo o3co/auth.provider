@@ -175,12 +175,13 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_MODE: "required",
 	REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY: "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
 	// #593: federation grants — a user's standing consent that a client may
-	// obtain upstream tokens without them. The three overrides `reference.conf`
+	// obtain upstream tokens without them. The overrides `reference.conf`
 	// declares; the template does not mount the routes yet, so what is
 	// exercised here is that the shipped config still parses with them set,
 	// which is the half that breaks silently.
 	FEDERATION_GRANTS_ENABLED: "true",
 	FEDERATION_GRANTS_ENCRYPTION_MODE: "required",
+	FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION: "false",
 	REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX: "fg:",
 
 	// --- federation ---------------------------------------------------

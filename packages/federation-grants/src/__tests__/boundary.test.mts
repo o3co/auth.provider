@@ -23,14 +23,18 @@
  * subject-revocation capability has no watermark — and the whole question here
  * is what it should do about that.
  *
- * It answers 503. The tempting alternative is `null`, which the port uses for
- * "nothing was revoked for this subject" — but that is a statement, and an
- * absent capability is not in a position to make it. Reading the two as the
- * same switches core's backstop off silently, on exactly the deployments that
- * never noticed they needed one.
+ * Slice 5 answers it at boot: a deployment with no capability, or with one
+ * that carries only the boundary #296 shipped, does not start. `boot.test.mts`
+ * holds those refusals. What is left here is what boot cannot establish — what
+ * a backend will say about a subject when it is asked — and which of the two
+ * boundaries the answer is read from.
  *
- * Slice 5 turns this into a boot refusal, where it belongs. Until then it is a
- * per-request failure that an operator can see.
+ * That last part is the whole of D13 from a disclosure's point of view. The
+ * grants boundary and the sessions boundary move independently: a subject-wide
+ * revocation asked to keep this subject's grants advances the sessions one
+ * alone. Reading that one here would end the grants an operator's policy just
+ * chose to keep, and the feature would look implemented while doing the
+ * opposite.
  */
 
 import type {
@@ -111,7 +115,13 @@ const SESSION_FEDERATION_STORES = {
 	refreshTokenFamilyRevocation: {},
 };
 
-const boot = async (withRevocation: boolean | "malformed", spent = false) => {
+/**
+ * What the adapter answers for the subject's boundaries: `null` from both, a
+ * grants boundary in the past, or an answer that is neither a date nor null.
+ */
+type Boundaries = { grants?: Date | null | "malformed" | "invalid"; sessions?: Date | null };
+
+const boot = async (boundaries: Boundaries = {}, spent = false) => {
 	const full = makeValidFullSections();
 	const handle = await createApp({
 		modules: [federationModule, ...federationGrantsModules, storeModule],
@@ -148,14 +158,18 @@ const boot = async (withRevocation: boolean | "malformed", spent = false) => {
 				defaultLimit: { limit: 100, windowSeconds: 60 },
 			}),
 			...SESSION_FEDERATION_STORES,
-			...(withRevocation === false
-				? {}
-				: {
-						subjectRevocation: {
-							revokedBefore: async () =>
-								withRevocation === "malformed" ? (undefined as unknown as null) : null,
-						},
-					}),
+			subjectRevocation: {
+				kind: "memory",
+				revokeBefore: async () => undefined,
+				revokeSessionsBefore: async () => undefined,
+				revokedBefore: async () => boundaries.sessions ?? null,
+				grantsRevokedBefore: async () =>
+					boundaries.grants === "malformed"
+						? (undefined as unknown as null)
+						: boundaries.grants === "invalid"
+							? new Date("not a date")
+							: (boundaries.grants ?? null),
+			},
 		} as unknown as BootstrapMap,
 	});
 	const store = handle.components.federationGrantStore as MemoryFederationGrantStore;
@@ -208,28 +222,13 @@ const boot = async (withRevocation: boolean | "malformed", spent = false) => {
 };
 
 describe("the grants boundary the module wires", () => {
-	it("answers 503 storage where the deployment has no subject revocation", async () => {
-		const { handle, app } = await boot(false);
-		const response = await request(app)
-			.post("/oauth/federation-grants/g-1/token")
-			.set("Authorization", basic())
-			.send({ sub: SUBJECT });
-
-		expect(response.status).toBe(503);
-		expect(response.body).toEqual({
-			error: "temporarily_unavailable",
-			error_description: "storage",
-		});
-		await handle.dispose();
-	});
-
 	it("refuses an answer that is neither a date nor null, on both routes", async () => {
 		// Found by review. `null` is a statement — nothing was revoked for this
 		// subject — and an adapter that answers `undefined` has made none. The
 		// two routes read it through the same bridge, so they cannot disagree:
 		// before this, `/status` reported `active` while `/token` on the same
 		// input failed closed.
-		const { handle, app } = await boot("malformed");
+		const { handle, app } = await boot({ grants: "malformed" });
 
 		const described = await request(app)
 			.post("/oauth/federation-grants/g-1/status")
@@ -251,12 +250,28 @@ describe("the grants boundary the module wires", () => {
 		await handle.dispose();
 	});
 
+	it("refuses a date that cannot be compared, which is not the same as no revocation", async () => {
+		// `new Date("nope")` is an instance of Date, so a check that stops at
+		// the type lets it through — and every comparison against NaN is
+		// false, which reads as "this subject has revoked nothing".
+		const { handle, app } = await boot({ grants: "invalid" });
+
+		const response = await request(app)
+			.post("/oauth/federation-grants/g-1/token")
+			.set("Authorization", basic())
+			.send({ sub: SUBJECT });
+
+		expect(response.status).toBe(503);
+		expect(response.body.error).toBe("temporarily_unavailable");
+		await handle.dispose();
+	});
+
 	it("reaches the federation adapter through the capability the module resolved", async () => {
 		// The refresher the module builds is only exercised by a grant that
 		// actually needs a refresh; everything else in this file is answered
 		// from the stored token.
 		refreshed.mockClear();
-		const { handle, app } = await boot(true, true);
+		const { handle, app } = await boot({}, true);
 
 		const response = await request(app)
 			.post("/oauth/federation-grants/g-1/token")
@@ -269,8 +284,38 @@ describe("the grants boundary the module wires", () => {
 		await handle.dispose();
 	});
 
-	it("discloses the token once a watermark can actually be read", async () => {
-		const { handle, app } = await boot(true);
+	it("discloses the token where neither boundary has been stamped", async () => {
+		const { handle, app } = await boot();
+		const response = await request(app)
+			.post("/oauth/federation-grants/g-1/token")
+			.set("Authorization", basic())
+			.send({ sub: SUBJECT });
+
+		expect(response.status).toBe(200);
+		expect(response.body.access_token).toBe("upstream-access-token");
+		await handle.dispose();
+	});
+
+	it("ends a grant the subject's grants boundary covers", async () => {
+		const { handle, app } = await boot({ grants: new Date(Date.now() + 60_000) });
+		const response = await request(app)
+			.post("/oauth/federation-grants/g-1/token")
+			.set("Authorization", basic())
+			.send({ sub: SUBJECT });
+
+		// 410 and not 403: the backstop does not merely refuse the disclosure,
+		// it writes the revocation the boundary implies (D13), so the grant is
+		// over from then on for everyone.
+		expect(response.status).toBe(410);
+		expect(response.body.error).toBe("grant_revoked");
+		await handle.dispose();
+	});
+
+	it("keeps a grant the sessions boundary alone covers", async () => {
+		// The subject's sessions and tokens ended; the operator's policy let
+		// their grants stand. Reading `revokedBefore` here would revoke them
+		// anyway, and nothing in the response would say so.
+		const { handle, app } = await boot({ sessions: new Date(Date.now() + 60_000) });
 		const response = await request(app)
 			.post("/oauth/federation-grants/g-1/token")
 			.set("Authorization", basic())

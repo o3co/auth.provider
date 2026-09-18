@@ -46,9 +46,10 @@ import {
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express, { type ErrorRequestHandler, type RequestHandler, type Router } from "express";
-import { createTokenDenialAudit } from "./denialAudit.mjs";
+import { createRouteDenialAudit } from "./denialAudit.mjs";
 import { createSanitizedAuditSink, createSanitizedLogger } from "./report.mjs";
 import { createRequestIdMiddleware } from "./requestId.mjs";
+import { createFederationGrantRevokeHandler } from "./revokeRoute.mjs";
 import { createFederationGrantStatusHandler } from "./statusRoute.mjs";
 import {
 	createFederationGrantTokenHandler,
@@ -194,15 +195,17 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 	// for is a response those two write themselves: the handler is not the only
 	// thing that can refuse a token request, and until this existed it was the
 	// only thing auditing one.
-	router.use(
-		"/:grantId/token",
-		createTokenDenialAudit({
-			...(options.auditSink === undefined ? {} : { sink: options.auditSink }),
-			operation: "token",
-			now: options.now ?? (() => new Date()),
-			background: options.background,
-		}),
-	);
+	for (const operation of ["token", "revoke"] as const) {
+		router.use(
+			`/:grantId/${operation}`,
+			createRouteDenialAudit({
+				...(options.auditSink === undefined ? {} : { sink: options.auditSink }),
+				operation,
+				now: options.now ?? (() => new Date()),
+				background: options.background,
+			}),
+		);
+	}
 	// Ahead of client authentication, as the token endpoint orders it: repeated
 	// unauthenticated hits are bounded before they reach a repository lookup.
 	// `deniedDescription` keeps this route's throttle speaking the same
@@ -238,6 +241,7 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 	);
 	router.post("/:grantId/token", createFederationGrantTokenHandler(options));
 	router.post("/:grantId/status", createFederationGrantStatusHandler(options));
+	router.post("/:grantId/revoke", createFederationGrantRevokeHandler(options));
 	router.use(notFound);
 	router.use(parserErrors);
 	return router;

@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import type { AdapterBuilder, SubjectRevocation } from "@o3co/auth-provider-core";
+import {
+	type AdapterBuilder,
+	SUBJECT_REVOCATION_MIN_RETENTION_MS,
+	type SubjectRevocation,
+	type SupportsSessionsOnlyRevocation,
+} from "@o3co/auth-provider-core";
 import type { SubjectRevocationClient } from "./clients.mjs";
 
 /**
@@ -32,7 +37,7 @@ import type { SubjectRevocationClient } from "./clients.mjs";
  * replicas interleaving between the `GET` and the `SET`.
  *
  * So the comparison happens on the server, in one command
- * (`setWatermarkMonotonic`), and the same guard covers the entry's own expiry:
+ * (`setRevocationBoundaries`), and the same guard covers the entry's own expiry:
  * shortening an in-force watermark would retire the line while tokens it must
  * refuse are still presentable.
  *
@@ -41,12 +46,18 @@ import type { SubjectRevocationClient } from "./clients.mjs";
  * watermark timed out starts from its own value, matching the in-process
  * adapter.
  *
- * ## TTL sizing is the caller's contract, not this adapter's
+ * ## TTL sizing is the caller's contract, and the grants floor is this adapter's
  *
  * `expiresAt` must reach as far as the longest-lived credential the watermark
- * has to refuse — the refresh token, not the access token, wherever the
- * composition forwards `subjectRevocation` to the refresh grant. See
- * `SubjectRevocation` in core for why. This adapter stores what it is given.
+ * has to refuse; `resolveSubjectRevocationHorizonMs` in core is what sizes it.
+ * This adapter stores what it is given — **except** that a write which
+ * advances the grants boundary raises the stored expiry to
+ * `SUBJECT_REVOCATION_MIN_RETENTION_MS` past that boundary (#593, D13). That
+ * floor is not the caller's to shorten: what it has to outlive is a grant
+ * lifetime the code bounds absolutely, and a Store that upgrades without
+ * touching its call site would otherwise leave a boundary lapsing under a
+ * grant consented for a year. A sessions-only stamp manufactures no such
+ * floor.
  */
 export interface RedisSubjectRevocationOptions {
 	readonly client: SubjectRevocationClient;
@@ -56,31 +67,122 @@ export interface RedisSubjectRevocationOptions {
 
 export function createRedisSubjectRevocation(
 	deps: RedisSubjectRevocationOptions,
-): SubjectRevocation {
+): SubjectRevocation & SupportsSessionsOnlyRevocation {
 	const prefix = deps.keyPrefix ?? "ss:rev:";
 	const key = (subject: string): string => `${prefix}${subject}`;
+
+	// #593, D13: a driver built before the second boundary existed cannot
+	// express a sessions-only stamp, and one that quietly ignored the mode
+	// would answer every such stamp by revoking the subject's grants — the one
+	// operation the caller asked not to perform. So it fails here, at
+	// construction, rather than at the first password change.
+	if (
+		typeof (deps.client as { setRevocationBoundaries?: unknown }).setRevocationBoundaries !==
+		"function"
+	) {
+		throw new Error(
+			"createRedisSubjectRevocation: this driver has no `setRevocationBoundaries`. " +
+				"It predates the two revocation boundaries of #593 (D13) and can only advance " +
+				"one, so a sessions-only stamp made through it would revoke the subject's " +
+				"federation grants. Upgrade the driver rather than the adapter.",
+		);
+	}
+
+	/** What a `Date` can hold: ±100 000 000 days from the epoch (ECMA-262). */
+	const MAX_DATE_MS = 8_640_000_000_000_000;
+
+	/** Every comparison with NaN is false, so a NaN boundary covers nothing while looking like one. */
+	const instant = (value: Date, name: string): number => {
+		const ms = value?.getTime?.();
+		if (typeof ms !== "number" || Number.isNaN(ms)) {
+			throw new RangeError(`SubjectRevocation: ${name} must be a date`);
+		}
+		return ms;
+	};
+
+	/**
+	 * The stored value, in the two forms the script writes — and the one an
+	 * older release wrote, a bare decimal, which means both boundaries.
+	 *
+	 * Anything else is refused rather than read as `null`. Answering "nothing
+	 * was revoked" for a value this adapter does not understand would silently
+	 * disable revocation for that subject; `verifyJwt` already fails closed on
+	 * a throw from this store.
+	 */
+	const decode = (raw: string): { sessionsMs: number; grantsMs: number | null } => {
+		if (/^-?\d+$/.test(raw)) {
+			const both = boundary(raw);
+			return { sessionsMs: both, grantsMs: both };
+		}
+		const parsed = /^v1:(-?\d+):(-?\d+|-)$/.exec(raw);
+		if (parsed === null) {
+			throw new Error(
+				`SubjectRevocation: the record for a subject is not a watermark (key prefix "${prefix}")`,
+			);
+		}
+		return {
+			sessionsMs: boundary(parsed[1] as string),
+			grantsMs: parsed[2] === "-" ? null : boundary(parsed[2] as string),
+		};
+	};
+
+	/**
+	 * Digits are not yet a date.
+	 *
+	 * Found by review: `Number("9".repeat(400))` is `Infinity`, which is all
+	 * digits and passes every shape check above. `new Date(Infinity)` is an
+	 * Invalid Date, every comparison against it is false, and a boundary that
+	 * compares false against everything reads as "this subject has revoked
+	 * nothing" — revocation silently off for that subject, which is the exact
+	 * failure this adapter refuses everywhere else. So the value has to be a
+	 * date a `Date` can hold, and anything else is an outage.
+	 */
+	const boundary = (digits: string): number => {
+		const ms = Number(digits);
+		if (!Number.isSafeInteger(ms) || Math.abs(ms) > MAX_DATE_MS) {
+			throw new Error(
+				`SubjectRevocation: the record for a subject is not a watermark (key prefix "${prefix}")`,
+			);
+		}
+		return ms;
+	};
+
+	const read = async (subject: string) => {
+		const raw = await deps.client.get(key(subject));
+		return raw === null ? null : decode(raw);
+	};
 
 	return {
 		kind: "redis",
 
 		async revokeBefore(subject, before, expiresAt) {
-			await deps.client.setWatermarkMonotonic(key(subject), before.getTime(), expiresAt.getTime());
+			await deps.client.setRevocationBoundaries(
+				key(subject),
+				"all",
+				instant(before, "before"),
+				instant(expiresAt, "expiresAt"),
+				SUBJECT_REVOCATION_MIN_RETENTION_MS,
+			);
+		},
+
+		async revokeSessionsBefore(subject, before, expiresAt) {
+			await deps.client.setRevocationBoundaries(
+				key(subject),
+				"sessions",
+				instant(before, "before"),
+				instant(expiresAt, "expiresAt"),
+				SUBJECT_REVOCATION_MIN_RETENTION_MS,
+			);
 		},
 
 		async revokedBefore(subject) {
-			const raw = await deps.client.get(key(subject));
-			if (raw === null) return null;
-			const ms = Number(raw);
-			// A value this adapter did not write, or one corrupted in the store, is
-			// not a watermark. Answering `null` would silently disable revocation
-			// for the subject, so it is refused loudly instead — the caller
-			// (`verifyJwt`) already fails closed on a throw from this store.
-			if (!Number.isFinite(ms)) {
-				throw new Error(
-					`SubjectRevocation: watermark for a subject is not a number (key prefix "${prefix}")`,
-				);
-			}
-			return new Date(ms);
+			const record = await read(subject);
+			return record === null ? null : new Date(record.sessionsMs);
+		},
+
+		async grantsRevokedBefore(subject) {
+			const record = await read(subject);
+			return record?.grantsMs == null ? null : new Date(record.grantsMs);
 		},
 	};
 }

@@ -27,7 +27,10 @@ import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSubjectRevocation } from "../src/subjectRevocation.mjs";
-import { runSubjectRevocationContract } from "./subjectRevocation.contract.mjs";
+import {
+	runSessionsOnlyRevocationContract,
+	runSubjectRevocationContract,
+} from "./subjectRevocation.contract.mjs";
 
 let container: StartedTestContainer;
 let raw: Redis;
@@ -55,6 +58,20 @@ runSubjectRevocationContract(
 		return createRedisSubjectRevocation({
 			client: subjectRevocationClient,
 			keyPrefix: `t321r:${suiteCounter}:`,
+		});
+	},
+	{ waitPastExpiry: sleep },
+);
+
+// #593, D13: the bundled adapter claims the capability, so it owes its
+// contract — on a real Redis, where the expiry cases run on the server's clock
+// rather than a fake timer's.
+runSessionsOnlyRevocationContract(
+	async () => {
+		suiteCounter += 1;
+		return createRedisSubjectRevocation({
+			client: makeIoredisClients(raw).subjectRevocationClient,
+			keyPrefix: `t593c:${suiteCounter}:`,
 		});
 	},
 	{ waitPastExpiry: sleep },
@@ -106,5 +123,132 @@ describe("SubjectRevocation — Redis-specific behaviour (#321)", () => {
 		const afterShort = await raw.pttl("t321r:ttl:u4");
 		expect(afterShort).toBeGreaterThan(5_000);
 		expect(Math.abs(afterShort - afterLong)).toBeLessThan(2_000);
+	});
+});
+
+describe("SubjectRevocation — the two boundaries on one key (#593, D13)", () => {
+	const store = (prefix: string) =>
+		createRedisSubjectRevocation({
+			client: makeIoredisClients(raw).subjectRevocationClient,
+			keyPrefix: prefix,
+		});
+
+	it("writes a bare decimal while the boundaries are equal, so a rollback is safe", async () => {
+		// The whole compatibility argument in one assertion. A previous release
+		// reads this form and only this form, and `revokeBefore` — every caller
+		// written before #593, and the whole "revoke" path — only ever writes
+		// it. A deployment that never makes a sessions-only stamp can roll back.
+		const prefix = "t593e:1:";
+		const before = new Date();
+		await store(prefix).revokeBefore("u", before, new Date(Date.now() + 600_000));
+		expect(await raw.get(`${prefix}u`)).toBe(String(before.getTime()));
+	});
+
+	it("uses the richer form only once the boundaries actually differ", async () => {
+		const prefix = "t593e:2:";
+		await store(prefix).revokeSessionsBefore("u", new Date(1_000), new Date(Date.now() + 600_000));
+		expect(await raw.get(`${prefix}u`)).toBe("v1:1000:-");
+		await store(prefix).revokeBefore("u", new Date(500), new Date(Date.now() + 600_000));
+		expect(await raw.get(`${prefix}u`)).toBe("v1:1000:500");
+	});
+
+	it("reads a value an older release wrote as both boundaries", async () => {
+		// Not as "sessions only": a lone number was written by a release where
+		// one watermark ended everything, and reading it as sessions-only would
+		// resurrect grants an earlier revocation had ended.
+		const prefix = "t593e:3:";
+		await raw.set(`${prefix}u`, "1000", "PX", 600_000);
+		const adapter = store(prefix);
+		expect((await adapter.revokedBefore("u"))?.getTime()).toBe(1_000);
+		expect((await adapter.grantsRevokedBefore("u"))?.getTime()).toBe(1_000);
+	});
+
+	it("keeps both boundaries on the one key, so there is no half-written state", async () => {
+		const prefix = "t593e:4:";
+		await store(prefix).revokeSessionsBefore("u", new Date(9_000), new Date(Date.now() + 600_000));
+		expect(await raw.keys(`${prefix}*`)).toEqual([`${prefix}u`]);
+	});
+
+	it("leaves a key with no expiry without one", async () => {
+		// An operator who pinned a boundary for ever meant it. Turning infinite
+		// retention into a year would be this adapter deciding otherwise.
+		const prefix = "t593e:5:";
+		await raw.set(`${prefix}u`, "1000");
+		await store(prefix).revokeSessionsBefore("u", new Date(2_000), new Date(Date.now() + 1_000));
+		expect(await raw.pttl(`${prefix}u`)).toBe(-1);
+		expect((await store(prefix).revokedBefore("u"))?.getTime()).toBe(2_000);
+	});
+
+	it("keeps a full revocation for a year, whatever expiry the caller asked for", async () => {
+		const prefix = "t593e:6:";
+		const before = new Date();
+		await store(prefix).revokeBefore("u", before, new Date(Date.now() + 1_000));
+		const ttl = await raw.pttl(`${prefix}u`);
+		// A year and a minute from the boundary, less whatever the round trip took.
+		expect(ttl).toBeGreaterThan(31_000_000_000);
+	});
+
+	it("refuses a value it cannot read rather than answering that nothing was revoked", async () => {
+		const prefix = "t593e:7:";
+		const adapter = store(prefix);
+		for (const corrupt of [
+			"not-a-watermark",
+			"v1:abc:1",
+			"v2:1:2",
+			"v1:1",
+			// Found by review: all digits, and `Number` reads it as Infinity.
+			// `new Date(Infinity)` is an Invalid Date, every comparison against
+			// it is false, and a boundary that compares false against
+			// everything reads as "nothing was revoked for this subject" —
+			// revocation silently off, which is the failure this refusal
+			// exists for.
+			"9".repeat(400),
+			`v1:${"9".repeat(400)}:1`,
+			`v1:1:${"9".repeat(400)}`,
+			// One millisecond past what a Date can hold.
+			"8640000000000001",
+		]) {
+			await raw.set(`${prefix}u`, corrupt, "PX", 600_000);
+			await expect(adapter.revokedBefore("u"), corrupt).rejects.toThrow();
+			await expect(adapter.grantsRevokedBefore("u"), corrupt).rejects.toThrow();
+		}
+	});
+
+	it("refuses to write over a record it cannot read", async () => {
+		// The script fails the whole call rather than starting a fresh record:
+		// a value nobody can decode may be a newer release's, and overwriting
+		// it would lose a boundary that is in force.
+		const prefix = "t593e:8:";
+		for (const corrupt of [
+			"v9:1:2",
+			// Shaped like a watermark, and not an instant: the read path
+			// refuses it, so the write path must not carry it forward into a
+			// record nothing can read.
+			"8640000000000001",
+			"9".repeat(400),
+			`v1:1:${"9".repeat(400)}`,
+		]) {
+			await raw.set(`${prefix}u`, corrupt, "PX", 600_000);
+			await expect(
+				store(prefix).revokeBefore("u", new Date(), new Date(Date.now() + 600_000)),
+				corrupt,
+			).rejects.toThrow();
+			await expect(
+				store(prefix).revokeSessionsBefore("u", new Date(), new Date(Date.now() + 600_000)),
+				corrupt,
+			).rejects.toThrow();
+			expect(await raw.get(`${prefix}u`), corrupt).toBe(corrupt);
+		}
+	});
+
+	it("refuses a driver that cannot express a sessions-only stamp", async () => {
+		// A driver that kept the old single-boundary primitive would answer
+		// every sessions-only stamp by revoking the subject's grants.
+		expect(() =>
+			createRedisSubjectRevocation({
+				client: { get: async () => null } as never,
+				keyPrefix: "t593e:9:",
+			}),
+		).toThrow(/setRevocationBoundaries/);
 	});
 });

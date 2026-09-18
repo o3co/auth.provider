@@ -49,7 +49,7 @@ import { requestIdOf } from "./requestId.mjs";
 /** Set by the handler, so its own denial is not counted twice. */
 const HANDLED = Symbol.for("o3co.federationGrants.handlerReached");
 
-/** Called by the token handler: from here on, the denial is the handler's to emit. */
+/** Called by a handler: from here on, the denial is the handler's to emit. */
 export function markHandlerReached(res: Response): void {
 	(res as unknown as Record<symbol, boolean>)[HANDLED] = true;
 }
@@ -83,7 +83,19 @@ export interface DenialAuditOptions extends FederationGrantAuditBridgeOptions {
 	readonly background: FederationGrantBackground;
 }
 
-export function createTokenDenialAudit(options: DenialAuditOptions): RequestHandler {
+/**
+ * The hook, for one route.
+ *
+ * `operation` decides which event a refusal becomes: the token route's
+ * denials and the revoke route's are counted separately, because a credential
+ * that was not handed out and a credential that is still live are opposite
+ * facts.
+ */
+export function createRouteDenialAudit(options: DenialAuditOptions): RequestHandler {
+	const type =
+		options.operation === "revoke"
+			? ("federation.grant.revoke.denied" as const)
+			: ("federation.grant.token.denied" as const);
 	return (req, res, next) => {
 		const correlationId = requestIdOf(res);
 		const matched = req.params.grantId;
@@ -107,6 +119,7 @@ export function createTokenDenialAudit(options: DenialAuditOptions): RequestHand
 			options.background.register(
 				audit(
 					routeDeniedEvent({
+						type,
 						correlationId,
 						grantId,
 						outcome: outcomeOf(res.statusCode, written),

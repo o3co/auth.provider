@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-import type { SubjectRevocation } from "@o3co/auth-provider-core";
+import {
+	type SubjectRevocation,
+	type SupportsSessionsOnlyRevocation,
+	supportsSessionsOnlyRevocation,
+} from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 
 export type SubjectRevocationFactoryForContract = () => Promise<SubjectRevocation>;
@@ -91,6 +95,125 @@ export function runSubjectRevocationContract(
 
 		it("reports an adapter kind", async () => {
 			expect((await factory()).kind).toBeTruthy();
+		});
+	});
+}
+
+/**
+ * What an adapter owes once it claims {@link SupportsSessionsOnlyRevocation}
+ * (#593, D13).
+ *
+ * The capability exists because a password change and "revoke everything" are
+ * different events. What makes it safe is that the narrower one can only ever
+ * do less: `revokeSessionsBefore` may move the sessions line forward and must
+ * leave the grants line exactly where it was, including absent. An adapter
+ * that derived one from the other — or that took a single maximum across both
+ * — would either revoke the grants a caller asked to keep, or rescue grants an
+ * earlier revocation had ended. Both are silent.
+ */
+export function runSessionsOnlyRevocationContract(
+	factory: SubjectRevocationFactoryForContract,
+	options: { readonly waitPastExpiry?: (ms: number) => Promise<void> } = {},
+): void {
+	const capable = async (): Promise<SubjectRevocation & SupportsSessionsOnlyRevocation> => {
+		const store = await factory();
+		if (!supportsSessionsOnlyRevocation(store)) {
+			throw new Error("this adapter does not claim SupportsSessionsOnlyRevocation");
+		}
+		return store;
+	};
+
+	describe("SupportsSessionsOnlyRevocation contract", () => {
+		it("answers null for each boundary independently", async () => {
+			const store = await capable();
+			expect(await store.revokedBefore("c-u0")).toBeNull();
+			expect(await store.grantsRevokedBefore("c-u0")).toBeNull();
+		});
+
+		it("advances both boundaries when the existing method is called", async () => {
+			// The compatibility argument in one test: an unchanged call site
+			// still ends the subject's grants.
+			const store = await capable();
+			await store.revokeBefore("c-u1", new Date(1_000_000), LONG());
+			expect((await store.revokedBefore("c-u1"))?.getTime()).toBe(1_000_000);
+			expect((await store.grantsRevokedBefore("c-u1"))?.getTime()).toBe(1_000_000);
+		});
+
+		it("advances only the sessions boundary when asked to", async () => {
+			const store = await capable();
+			await store.revokeSessionsBefore("c-u2", new Date(1_000_000), LONG());
+			expect((await store.revokedBefore("c-u2"))?.getTime()).toBe(1_000_000);
+			expect(await store.grantsRevokedBefore("c-u2")).toBeNull();
+		});
+
+		it("keeps each boundary's own maximum, in either order", async () => {
+			// Two replicas, two clocks: a sessions-only stamp at the later
+			// instant followed by a delayed full revocation at the earlier one.
+			// Deriving the grants boundary from the resulting sessions boundary
+			// would revoke grants consented in between.
+			const store = await capable();
+			await store.revokeSessionsBefore("c-u3", new Date(2_000_000), LONG());
+			await store.revokeBefore("c-u3", new Date(1_000_000), LONG());
+			expect((await store.revokedBefore("c-u3"))?.getTime()).toBe(2_000_000);
+			expect((await store.grantsRevokedBefore("c-u3"))?.getTime()).toBe(1_000_000);
+		});
+
+		it("never lets a sessions-only stamp rescue an ended grant", async () => {
+			const store = await capable();
+			await store.revokeBefore("c-u4", new Date(1_000_000), LONG());
+			await store.revokeSessionsBefore("c-u4", new Date(9_000_000), LONG());
+			expect((await store.grantsRevokedBefore("c-u4"))?.getTime()).toBe(1_000_000);
+		});
+
+		it("hands back dates a caller cannot use to edit the record", async () => {
+			const store = await capable();
+			await store.revokeBefore("c-u5", new Date(1_000_000), LONG());
+			(await store.revokedBefore("c-u5"))?.setTime(7);
+			(await store.grantsRevokedBefore("c-u5"))?.setTime(7);
+			expect((await store.revokedBefore("c-u5"))?.getTime()).toBe(1_000_000);
+			expect((await store.grantsRevokedBefore("c-u5"))?.getTime()).toBe(1_000_000);
+		});
+
+		it("refuses an instant that is not one, and changes nothing doing it", async () => {
+			// Every comparison with NaN is false, so a NaN boundary is one that
+			// covers nothing while looking like a boundary.
+			const store = await capable();
+			await store.revokeBefore("c-u6", new Date(1_000_000), LONG());
+			await expect(
+				store.revokeSessionsBefore("c-u6", new Date(Number.NaN), LONG()),
+			).rejects.toThrow();
+			await expect(
+				store.revokeBefore("c-u6", new Date(2_000_000), new Date(Number.NaN)),
+			).rejects.toThrow();
+			expect((await store.revokedBefore("c-u6"))?.getTime()).toBe(1_000_000);
+		});
+
+		it("keeps a full revocation past the expiry its caller asked for", async () => {
+			// The floor is the adapter's, not the helper's: a direct stamp with
+			// a short TTL must be as safe as one made through the service, or a
+			// grant consented for a year outlives the boundary that ended it.
+			//
+			// The boundary is `now`, as a real caller's is, because the floor is
+			// anchored to the boundary rather than to a clock reading: what it
+			// has to outlive is every grant consented BEFORE that instant, and a
+			// boundary dated 1970 plus a year covers grants that do not exist.
+			const wait = options.waitPastExpiry;
+			if (wait === undefined) return;
+			const store = await capable();
+			const before = new Date();
+			await store.revokeBefore("c-u7", before, new Date(Date.now() + 1_000));
+			await wait(1_500);
+			expect((await store.revokedBefore("c-u7"))?.getTime()).toBe(before.getTime());
+			expect((await store.grantsRevokedBefore("c-u7"))?.getTime()).toBe(before.getTime());
+		});
+
+		it("still lets a sessions-only stamp lapse on the expiry it was given", async () => {
+			const wait = options.waitPastExpiry;
+			if (wait === undefined) return;
+			const store = await capable();
+			await store.revokeSessionsBefore("c-u8", new Date(1_000_000), new Date(Date.now() + 1_000));
+			await wait(1_500);
+			expect(await store.revokedBefore("c-u8")).toBeNull();
 		});
 	});
 }

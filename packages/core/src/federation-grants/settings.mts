@@ -34,6 +34,7 @@
  *     turns a typo into a deployment nobody chose.
  */
 
+import { DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
 import { FEDERATION_GRANT_LIFETIME_CEILING_MS } from "./lifetime.mjs";
 import {
 	assertFederationGrantRetrievalLimits,
@@ -84,9 +85,12 @@ export const FEDERATION_GRANT_SETTING_DEFAULTS = {
  * Deliberately not configurable per feature: it is compared against the same
  * subject watermark `verifyJwt` reads, and a second allowance for one
  * comparison is a second number slice 5's retention proof would have to cover.
- * The value is `jwt/verify.mts`'s `DEFAULT_SUBJECT_REVOCATION_SKEW_MS`.
+ * Slice 5 made it an exported constant rather than a copy of one, so the two
+ * comparisons cannot drift — what still differs is their units, and that is
+ * deliberate: a grant's consent is compared in milliseconds and a JWT's claims
+ * in truncated seconds.
  */
-const FEDERATION_GRANT_REVOCATION_SKEW_MS = 1_000;
+const FEDERATION_GRANT_REVOCATION_SKEW_MS = DEFAULT_SUBJECT_REVOCATION_SKEW_MS;
 
 type Settings = Partial<Record<keyof typeof FEDERATION_GRANT_SETTING_DEFAULTS, unknown>>;
 
@@ -178,4 +182,36 @@ export function resolveFederationGrantRetrievalLimits(
 	};
 	assertFederationGrantRetrievalLimits(limits);
 	return limits;
+}
+
+/**
+ * `federationGrants.allowKeepOnSubjectRevocation`, from the configuration an
+ * operator wrote (D13).
+ *
+ * Read on its own rather than through {@link FEDERATION_GRANT_SETTING_DEFAULTS}
+ * and `setting`: those carry a unit and a maximum, and every one of their
+ * checks is about a duration. A boolean in that object would be a value whose
+ * key ends in neither `Ms` nor a number, taking the wrong branch of each of
+ * them.
+ *
+ * Refuses rather than repairs, for the reason the durations do — but the stake
+ * here is the opposite direction: a value nobody can read must not become
+ * `true`. `"false"`, `"0"` and an empty string are what HOCON substitutes an
+ * unset `${?VAR}` chain as, and they mean what they say; anything else is
+ * named.
+ */
+export function resolveFederationGrantKeepPolicy(config: unknown): boolean {
+	const written = (config as { federationGrants?: { allowKeepOnSubjectRevocation?: unknown } })
+		?.federationGrants?.allowKeepOnSubjectRevocation;
+	if (written === undefined) return false;
+	if (typeof written === "boolean") return written;
+	if (typeof written === "string") {
+		const normalized = written.trim().toLowerCase();
+		if (normalized === "true" || normalized === "1") return true;
+		if (normalized === "false" || normalized === "0" || normalized === "") return false;
+	}
+	throw new RangeError(
+		'federationGrants.allowKeepOnSubjectRevocation must be one of "true", "false", "1" or "0" ' +
+			`(an empty value reads as false), and was ${JSON.stringify(written)}`,
+	);
 }

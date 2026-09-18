@@ -41,7 +41,20 @@ export interface FederationGrantTokenRequestBody {
 
 export type ParsedFederationGrantTokenRequest =
 	| { readonly ok: true; readonly value: FederationGrantTokenRequestBody }
-	/** `description` is the stable identifier the 400 carries, never prose. */
+	/**
+	 * A stable identifier, and never prose (D9).
+	 *
+	 * It used to be a sentence — `"sub is required"` — which reads well and is
+	 * useless: a caller that wants to branch on it has to match on English,
+	 * and the day the wording improves every one of those callers breaks. The
+	 * identifiers are `snake_case`, are part of the contract, and are what the
+	 * exit tables in the README and the ADR list.
+	 *
+	 * The promise covers what **this package** answers. What it inherits —
+	 * client authentication's 401s, the shared limiter's 503 — still carries
+	 * that middleware's own wording, and rewriting it per route would make the
+	 * same failure read differently on `/token` and on `/revoke`.
+	 */
 	| { readonly ok: false; readonly description: string };
 
 /**
@@ -82,18 +95,20 @@ type Read =
 
 const single = (value: unknown, field: string): Read => {
 	if (value === undefined) return { ok: true, value: undefined };
-	if (Array.isArray(value)) return { ok: false, description: `${field} was given more than once` };
-	if (typeof value !== "string") return { ok: false, description: `${field} must be a string` };
+	if (Array.isArray(value)) return { ok: false, description: `duplicate_${field}` };
+	if (typeof value !== "string") return { ok: false, description: `invalid_${field}` };
 	return { ok: true, value };
 };
 
 export function parseFederationGrantTokenRequest(body: unknown): ParsedFederationGrantTokenRequest {
 	if (typeof body !== "object" || body === null || Array.isArray(body)) {
-		return refuse("the request body must be a JSON object or a form body");
+		return refuse("invalid_body");
 	}
 	const fields = body as Record<string, unknown>;
 	for (const field of Object.keys(fields)) {
-		if (!KNOWN.has(field)) return refuse(`${field} is not a parameter of this request`);
+		// The field is deliberately not named: it is caller-supplied, and what
+		// goes into `error_description` goes into logs and dashboards.
+		if (!KNOWN.has(field)) return refuse("unexpected_parameter");
 	}
 
 	const subRead = single(fields.sub, "sub");
@@ -102,17 +117,17 @@ export function parseFederationGrantTokenRequest(body: unknown): ParsedFederatio
 	// and trimming or case-folding here would authorise a subject the store
 	// never recorded.
 	const sub = subRead.value;
-	if (sub === undefined || sub === "") return refuse("sub is required");
+	if (sub === undefined || sub === "") return refuse("sub_required");
 
 	const connectionRead = single(fields.connection, "connection");
 	if (!connectionRead.ok) return refuse(connectionRead.description);
 	const connection = connectionRead.value;
-	if (connection === "") return refuse("connection must not be empty");
+	if (connection === "") return refuse("invalid_connection");
 
 	const resourceRead = single(fields.resource, "resource");
 	if (!resourceRead.ok) return refuse(resourceRead.description);
 	const resource = resourceRead.value;
-	if (resource === "") return refuse("resource must not be empty");
+	if (resource === "") return refuse("invalid_resource");
 
 	const scopeRead = single(fields.scope, "scope");
 	if (!scopeRead.ok) return refuse(scopeRead.description);
@@ -122,23 +137,23 @@ export function parseFederationGrantTokenRequest(body: unknown): ParsedFederatio
 		// RFC 6749 §3.3: space-delimited. Split without sorting, widening or
 		// supplying defaults — the set is exactly what the caller asked for.
 		const tokens = scopeText.split(" ").filter((token) => token !== "");
-		if (tokens.length === 0) return refuse("scope must name at least one scope");
+		if (tokens.length === 0) return refuse("invalid_scope");
 		scope = tokens;
 	}
 
 	let minTtlSeconds: number | undefined;
 	const rawMinTtl = fields.min_ttl;
 	if (rawMinTtl !== undefined) {
-		if (Array.isArray(rawMinTtl)) return refuse("min_ttl was given more than once");
+		if (Array.isArray(rawMinTtl)) return refuse("duplicate_min_ttl");
 		if (typeof rawMinTtl === "object" && rawMinTtl !== null) {
-			return refuse("min_ttl must be a number");
+			return refuse("invalid_min_ttl");
 		}
 		// A JSON number, or the decimal a form body carries it as. `Number("")`
 		// is 0 and `Number("60s")` is NaN, and both are refusals rather than
 		// values core would have to have an opinion about.
 		const parsed = typeof rawMinTtl === "number" ? rawMinTtl : Number(String(rawMinTtl).trim());
 		if (rawMinTtl === "" || !Number.isFinite(parsed)) {
-			return refuse("min_ttl must be a number of seconds");
+			return refuse("invalid_min_ttl");
 		}
 		minTtlSeconds = parsed;
 	}
@@ -175,15 +190,45 @@ const STATUS_KNOWN = new Set([
 export function parseFederationGrantStatusRequest(
 	body: unknown,
 ): ParsedFederationGrantTokenRequest {
+	return parseWithout(body, STATUS_KNOWN);
+}
+
+/** `sub`, plus the fields client authentication reads out of the same body. */
+const REVOKE_KNOWN = STATUS_KNOWN;
+
+/**
+ * The revoke route's body: `{"sub": "..."}`, and the same refusal for anything
+ * else.
+ *
+ * `scope`, `resource`, `connection` and `min_ttl` are conditions on a *token*.
+ * A withdrawal has no conditions — the grant either belongs to this caller and
+ * this subject or it does not — and accepting a field that reads like a
+ * condition would suggest one was honoured.
+ */
+export function parseFederationGrantRevokeRequest(
+	body: unknown,
+): ParsedFederationGrantTokenRequest {
+	return parseWithout(body, REVOKE_KNOWN);
+}
+
+/**
+ * `sub` and the authentication fields, with every other parameter refused —
+ * including the token route's own.
+ *
+ * One identifier for all of them, and deliberately: a caller that sent
+ * `min_ttl` here and a caller that sent `minttl` both asked for something that
+ * did not happen, and the difference between the two is not something to
+ * branch on.
+ */
+function parseWithout(
+	body: unknown,
+	known: ReadonlySet<string>,
+): ParsedFederationGrantTokenRequest {
 	if (typeof body !== "object" || body === null || Array.isArray(body)) {
-		return refuse("the request body must be a JSON object or a form body");
+		return refuse("invalid_body");
 	}
 	for (const field of Object.keys(body as Record<string, unknown>)) {
-		if (STATUS_KNOWN.has(field)) continue;
-		if (KNOWN.has(field)) {
-			return refuse(`${field} is a parameter of the token route, not of this one`);
-		}
-		return refuse(`${field} is not a parameter of this request`);
+		if (!known.has(field)) return refuse("unexpected_parameter");
 	}
 	return parseFederationGrantTokenRequest(body);
 }

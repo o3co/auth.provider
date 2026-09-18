@@ -386,16 +386,38 @@ export interface SubjectSessionIndexMultiClient {
 export interface SubjectRevocationClient {
 	get(key: string): Promise<string | null>;
 	/**
-	 * Atomically store `max(existing, beforeMs)` at `key` with expiry
-	 * `max(existing, expiresAtMs)`, creating the key when absent.
+	 * Atomically advance one or both of a subject's revocation boundaries on
+	 * one key, monotonically, and retain the record for as long as either needs
+	 * (#593, D13).
+	 *
+	 * Replaces `setWatermarkMonotonic`, which could express only one boundary.
+	 * It is a deliberate break rather than an addition: a driver that kept the
+	 * old method and silently ignored a `mode` argument would answer every
+	 * sessions-only stamp by revoking the subject's grants, which is precisely
+	 * the operation the caller asked not to perform.
+	 *
+	 * - `mode: "all"` advances both boundaries to `max(existing, beforeMs)`,
+	 *   each taken independently. This is `revokeBefore`, and it is what every
+	 *   caller written before #593 means.
+	 * - `mode: "sessions"` advances the sessions boundary alone and leaves the
+	 *   grants boundary exactly as it was, including absent.
+	 *
+	 * The retained expiry is the largest of the key's current expiry, the
+	 * caller's `expiresAtMs`, and — when a grants boundary is in force — that
+	 * boundary plus `grantRetentionMs`. A key with no expiry keeps none.
 	 *
 	 * An **expired** key is absent, so the guard does not resurrect a lapsed
-	 * watermark's larger value — a fresh reset after the previous watermark
-	 * timed out starts from the new value.
+	 * record's larger values.
 	 *
-	 * Resolves with the watermark in force after the write.
+	 * Resolves with the stored value, exactly as written.
 	 */
-	setWatermarkMonotonic(key: string, beforeMs: number, expiresAtMs: number): Promise<number>;
+	setRevocationBoundaries(
+		key: string,
+		mode: "all" | "sessions",
+		beforeMs: number,
+		expiresAtMs: number,
+		grantRetentionMs: number,
+	): Promise<string>;
 }
 
 // --- FederationTokenStoreClient --------------------------------------------

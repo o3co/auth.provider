@@ -14,7 +14,15 @@
  * limitations under the License.
  */
 
+import type { FederationGrantAuditEvent } from "../federation-grants/retrieve.mjs";
+import {
+	listFederationGrantsForSubject,
+	revokeFederationGrant,
+} from "../federation-grants/revoke.mjs";
+import type { FederationGrantStore } from "../federation-grants/store.mjs";
+import type { FederationGrant } from "../federation-grants/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { cascadeSubjectSessions, type SubjectSessionCascade } from "./cascadeSubjectSessions.mjs";
 import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
 
 /**
@@ -29,11 +37,18 @@ import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
 export type CascadeSession = (sid: string) => Promise<{ readonly ok: boolean }>;
 
 /**
- * The two optional slots this helper consumes. Named rather than free strings
- * so a caller can branch on them, and so the set is greppable when #321 adds
- * the Redis adapters that fill them.
+ * The optional slots this helper consumes. Named rather than free strings so a
+ * caller can branch on them, and so the set is greppable when #321 adds the
+ * Redis adapters that fill them.
+ *
+ * `federationGrantStore` appears here for the failures it can report, not for
+ * the gap it can leave: unlike the other two, leaving it out is a decision
+ * rather than an omission, so it is never listed in `unavailable`.
  */
-export type RevokeAllForSubjectCapability = "subjectSessionIndex" | "subjectRevocation";
+export type RevokeAllForSubjectCapability =
+	| "subjectSessionIndex"
+	| "subjectRevocation"
+	| "federationGrantStore";
 
 /**
  * One store call that was attempted and threw.
@@ -45,25 +60,51 @@ export type RevokeAllForSubjectCapability = "subjectSessionIndex" | "subjectRevo
  */
 export interface RevokeAllForSubjectFailure {
 	readonly capability: RevokeAllForSubjectCapability;
-	readonly operation: "revokeBefore" | "listSids" | "removeSid";
+	readonly operation:
+		| "revokeBefore"
+		| "listSids"
+		| "removeSid"
+		| "listBySubject"
+		| "revoke"
+		/** The subject revocation service's two: a sessions-only stamp, and a renewal it could not end. */
+		| "revokeSessionsBefore"
+		| "retireIntent";
 	/** The session the failing call concerned, for the per-session operations. */
 	readonly sid?: string;
+	/** The grant the failing call concerned, for the per-grant operations. */
+	readonly grantId?: string;
 	readonly error: unknown;
 }
 
 export interface RevokeAllForSubjectOptions {
 	readonly subject: string;
 	/**
-	 * How long the watermark must outlive. Size it to the longest-lived
-	 * **refresh token**, not the access token: the refresh grant consults the
-	 * watermark as the backstop for a family revocation that did not complete,
-	 * so a watermark that expires first takes the backstop with it. See the TTL
+	 * How long the watermark must outlive. Size it with
+	 * `resolveSubjectRevocationHorizonMs`, which reads the session, the
+	 * refresh token and the access-token **maximum** — a watermark that
+	 * expires before any of them takes the backstop with it, and nothing in
+	 * the configuration says which of the three is longest. See the TTL
 	 * contract on {@link SubjectRevocation}.
 	 */
 	readonly watermarkTtlMs: number;
 	readonly cascadeSession: CascadeSession;
 	readonly subjectSessionIndex?: SubjectSessionIndex;
 	readonly subjectRevocation?: SubjectRevocation;
+	/**
+	 * Supplying it asks for the subject's federation grants to be ended too
+	 * (#593). **Omitting it is not a missing capability** — see
+	 * {@link RevokeAllForSubjectResult.grantsRequested}.
+	 */
+	readonly federationGrantStore?: FederationGrantStore;
+	/**
+	 * Told about each grant this call ended, on the same terms as every other
+	 * revocation: one event per write that changed something, built from the
+	 * record rather than from what was asked for, and a sink that throws
+	 * changes nothing.
+	 */
+	readonly federationGrantAudit?: (event: FederationGrantAuditEvent) => void | Promise<void>;
+	/** Carried into the grant audit events when the caller has one. */
+	readonly correlationId?: string;
 	readonly logger?: Logger;
 	/** Injectable for tests; defaults to `Date.now`. */
 	readonly now?: () => number;
@@ -76,6 +117,21 @@ export interface RevokeAllForSubjectResult {
 	readonly sessionsFailed: readonly string[];
 	/** Whether the access-token watermark was written. */
 	readonly tokensRevoked: boolean;
+	/**
+	 * Whether a grant store was supplied, and the grant pass therefore ran.
+	 *
+	 * `false` is reported rather than counted as a gap: every call written
+	 * before #593 omits the store, and a deployment that has no grants at all
+	 * is not incomplete for not revoking any. A caller that expects grants to
+	 * be ended checks this field; what covers the omission meanwhile is the
+	 * boundary the watermark just wrote, which the adapters apply to grants as
+	 * well as to sessions.
+	 */
+	readonly grantsRequested: boolean;
+	/** Grant ids this call ended. A grant that was already over is not one. */
+	readonly grantsRevoked: readonly string[];
+	/** Grant ids whose write threw — still live, safe to retry. */
+	readonly grantsFailed: readonly string[];
 	/**
 	 * Capabilities that were not wired, and therefore not exercised.
 	 *
@@ -131,6 +187,12 @@ export interface RevokeAllForSubjectResult {
  * call is therefore reported rather than propagated, and `complete` is the one
  * field a caller has to check.
  *
+ * The subject's federation grants are ended last, and only when a store is
+ * supplied (#593). That pass comes after the sessions rather than before them
+ * for the same reason the watermark comes first: the two older passes are what
+ * every caller already depends on, and a grant store having a bad day must not
+ * cost them. An outage in any pass still leaves the other two done.
+ *
  * Does **not** fix #276 — the local logout route still does not run the
  * cascade for its own session. This builds on `cascadeLogout`, which is
  * complete; the gap there is that one caller does not invoke it.
@@ -165,53 +227,67 @@ export async function revokeAllForSubject(
 	}
 
 	// Step 2 — cascade every session the subject holds.
-	const sessionsRevoked: string[] = [];
-	const sessionsFailed: string[] = [];
+	let sessions: SubjectSessionCascade = { revoked: [], failed: [], failures: [] };
 	if (opts.subjectSessionIndex === undefined) {
 		unavailable.push("subjectSessionIndex");
 	} else {
-		const index = opts.subjectSessionIndex;
-		let sids: readonly string[] = [];
+		sessions = await cascadeSubjectSessions({
+			subject: opts.subject,
+			index: opts.subjectSessionIndex,
+			cascadeSession: opts.cascadeSession,
+			logger: opts.logger,
+		});
+		failures.push(...sessions.failures);
+	}
+
+	// Step 3 — end every federation grant the subject has. Last, because it is
+	// the pass a caller can opt out of: the two above are what this function
+	// has always promised, and an outage here must not cost them.
+	const grantsRevoked: string[] = [];
+	const grantsFailed: string[] = [];
+	const grantStore = opts.federationGrantStore;
+	if (grantStore !== undefined) {
+		const deps = {
+			store: grantStore,
+			now: () => new Date(now()),
+			audit: opts.federationGrantAudit,
+			correlationId: opts.correlationId,
+		};
+		let grants: readonly FederationGrant[] = [];
 		try {
-			sids = await index.listSids(opts.subject);
+			// Pending and retained terminal records included, on purpose. A
+			// pending one is an authorization the subject is in the middle of
+			// giving, and leaving it to complete after its owner revoked
+			// everything is exactly the hole this pass exists to close.
+			grants = await listFederationGrantsForSubject(deps, opts.subject);
 		} catch (error) {
-			// Nothing to enumerate means nothing to cascade, but the watermark
-			// above may already be in force — which is why this is a reported
-			// partial result rather than a thrown one.
-			failures.push({ capability: "subjectSessionIndex", operation: "listSids", error });
-			opts.logger?.error({ err: error, subject: opts.subject }, "revoke_all_list_sids_failed");
+			// Not the same as "this subject has no grants", which is why it is
+			// reported: a listing outage that read as an empty subject would
+			// return a clean, complete result having revoked nothing.
+			failures.push({ capability: "federationGrantStore", operation: "listBySubject", error });
+			opts.logger?.error({ err: error, subject: opts.subject }, "revoke_all_list_grants_failed");
 		}
-		for (const sid of sids) {
-			// Sequential, not concurrent: each cascade is itself a multi-store
-			// sequence whose ordering matters, and a credential change is rare
-			// enough that fanning out to save milliseconds is not worth the
-			// extra load it would put on the same stores mid-incident.
-			let ok: boolean;
+		for (const grant of grants) {
 			try {
-				ok = (await opts.cascadeSession(sid)).ok;
-			} catch (err) {
-				opts.logger?.error({ err, subject: opts.subject, sid }, "revoke_all_cascade_failed");
-				ok = false;
-			}
-			if (!ok) {
-				// Left in the index deliberately: the entry is what a retry
-				// enumerates. Removing it would strand a live session.
-				sessionsFailed.push(sid);
-				continue;
-			}
-			sessionsRevoked.push(sid);
-			try {
-				await index.removeSid(opts.subject, sid);
+				const written = await revokeFederationGrant(deps, grant.id, "subject");
+				// A write that changed nothing means the grant was already over
+				// — somebody else revoked it, or it expired — so it is neither
+				// revoked here nor a failure. Only a throw is an outage.
+				if (written.ok) grantsRevoked.push(grant.id);
 			} catch (error) {
-				// Bookkeeping only, and deliberately not fatal to the loop: the
-				// session's cascade already succeeded, so it stays counted as
-				// revoked. A stale entry costs the next call one redundant
-				// cascade, which is idempotent — whereas aborting here would
-				// leave the subject's remaining sessions live.
-				failures.push({ capability: "subjectSessionIndex", operation: "removeSid", sid, error });
+				// The loop continues. The remaining grants are independent
+				// records, and stopping at the first outage would leave the
+				// ones after it live for no reason.
+				grantsFailed.push(grant.id);
+				failures.push({
+					capability: "federationGrantStore",
+					operation: "revoke",
+					grantId: grant.id,
+					error,
+				});
 				opts.logger?.error(
-					{ err: error, subject: opts.subject, sid },
-					"revoke_all_remove_sid_failed",
+					{ err: error, subject: opts.subject, grantId: grant.id },
+					"revoke_all_revoke_grant_failed",
 				);
 			}
 		}
@@ -221,7 +297,22 @@ export async function revokeAllForSubject(
 		opts.logger?.error({ subject: opts.subject, unavailable }, "revoke_all_for_subject_incomplete");
 	}
 
-	const complete = unavailable.length === 0 && failures.length === 0 && sessionsFailed.length === 0;
+	// `grantsFailed` is not a term of its own: every entry in it was pushed
+	// alongside the failure that produced it, which `failures` already carries.
+	// `sessionsFailed` is a term because a cascade that answers `{ ok: false }`
+	// reports no failure at all.
+	const complete =
+		unavailable.length === 0 && failures.length === 0 && sessions.failed.length === 0;
 
-	return { sessionsRevoked, sessionsFailed, tokensRevoked, unavailable, failures, complete };
+	return {
+		sessionsRevoked: sessions.revoked,
+		sessionsFailed: sessions.failed,
+		tokensRevoked,
+		grantsRequested: grantStore !== undefined,
+		grantsRevoked,
+		grantsFailed,
+		unavailable,
+		failures,
+		complete,
+	};
 }
