@@ -42,9 +42,10 @@ import { revokeFederationGrant } from "../federation-grants/revoke.mjs";
 import type { FederationGrantStore } from "../federation-grants/store.mjs";
 import { hasFederationGrantAuthorization } from "../federation-grants/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
-import { cascadeSubjectSessions } from "./cascadeSubjectSessions.mjs";
+import { cascadeSubjectSessions, type SubjectSessionCascade } from "./cascadeSubjectSessions.mjs";
 import {
 	type CascadeSession,
+	type RevokeAllForSubjectCapability,
 	type RevokeAllForSubjectFailure,
 	type RevokeAllForSubjectResult,
 	revokeAllForSubject,
@@ -52,6 +53,7 @@ import {
 import {
 	type SubjectRevocation,
 	type SubjectSessionIndex,
+	type SupportsSessionsOnlyRevocation,
 	supportsSessionsOnlyRevocation,
 } from "./types.mjs";
 
@@ -122,8 +124,18 @@ export interface SubjectRevocationService {
 }
 
 export interface SubjectRevocationServiceDeps {
-	readonly subjectSessionIndex: SubjectSessionIndex;
-	readonly subjectRevocation: SubjectRevocation;
+	/**
+	 * Optional for the reason the free function's are: #406 lets a deployment
+	 * declare either capability absent, and a service that could not be
+	 * *installed* in such a deployment would be a harder demand than the
+	 * operation it wraps. An absence is reported exactly as
+	 * `revokeAllForSubject` reports it — in `unavailable`, with
+	 * `complete: false` — rather than refused here. What IS refused is a
+	 * missing boundary while federation grants are enabled, which the module
+	 * checks: a grant ends when nothing else does.
+	 */
+	readonly subjectSessionIndex?: SubjectSessionIndex;
+	readonly subjectRevocation?: SubjectRevocation;
 	readonly cascadeSession: CascadeSession;
 	/**
 	 * How long a boundary must outlive, from
@@ -161,9 +173,9 @@ export function createSubjectRevocationService(
 		);
 	}
 	const revocation = deps.subjectRevocation;
-	if (deps.allowKeep && !supportsSessionsOnlyRevocation(revocation)) {
+	if (deps.allowKeep && (revocation === undefined || !supportsSessionsOnlyRevocation(revocation))) {
 		throw new TypeError(
-			`federationGrants.allowKeepOnSubjectRevocation is on, but the subjectRevocation adapter (kind "${revocation.kind}") ` +
+			`federationGrants.allowKeepOnSubjectRevocation is on, but the subjectRevocation adapter (kind "${revocation?.kind ?? "absent"}") ` +
 				"cannot stamp a sessions-only boundary: keeping a subject's federation grants needs revokeSessionsBefore and " +
 				"grantsRevokedBefore. Without them every keep would silently revoke, which reads like the policy working.",
 		);
@@ -203,7 +215,18 @@ export function createSubjectRevocationService(
 				});
 				return { ...result, grantsRetired: [], grantsRetireFailed: [], federationGrants };
 			}
-			return { ...(await keep(deps, revocation, now, request.subject, since)), federationGrants };
+			// Narrowed by the construction refusal above: `allowKeep` is what
+			// admits this path, and it is refused without a capable adapter.
+			return {
+				...(await keep(
+					deps,
+					revocation as SubjectRevocation & SupportsSessionsOnlyRevocation,
+					now,
+					request.subject,
+					since,
+				)),
+				federationGrants,
+			};
 		},
 	};
 }
@@ -221,19 +244,21 @@ export function createSubjectRevocationService(
  */
 async function keep(
 	deps: SubjectRevocationServiceDeps,
-	revocation: SubjectRevocation,
+	revocation: SubjectRevocation & SupportsSessionsOnlyRevocation,
 	now: () => number,
 	subject: string,
 	since: Date | undefined,
 ): Promise<Omit<SubjectRevocationReport, "federationGrants">> {
 	const failures: RevokeAllForSubjectFailure[] = [];
+	const unavailable: RevokeAllForSubjectCapability[] = [];
 	const at = now();
 	let tokensRevoked = false;
 	try {
-		// Narrowed at construction, where the refusal is.
-		await (
-			revocation as SubjectRevocation & { revokeSessionsBefore: SubjectRevocation["revokeBefore"] }
-		).revokeSessionsBefore(subject, new Date(at), new Date(at + deps.watermarkTtlMs));
+		await revocation.revokeSessionsBefore(
+			subject,
+			new Date(at),
+			new Date(at + deps.watermarkTtlMs),
+		);
 		tokensRevoked = true;
 	} catch (error) {
 		failures.push({
@@ -244,13 +269,18 @@ async function keep(
 		deps.logger?.error({ err: error, subject }, "revoke_all_watermark_failed");
 	}
 
-	const sessions = await cascadeSubjectSessions({
-		subject,
-		index: deps.subjectSessionIndex,
-		cascadeSession: deps.cascadeSession,
-		logger: deps.logger,
-	});
-	failures.push(...sessions.failures);
+	let sessions: SubjectSessionCascade = { revoked: [], failed: [], failures: [] };
+	if (deps.subjectSessionIndex === undefined) {
+		unavailable.push("subjectSessionIndex");
+	} else {
+		sessions = await cascadeSubjectSessions({
+			subject,
+			index: deps.subjectSessionIndex,
+			cascadeSession: deps.cascadeSession,
+			logger: deps.logger,
+		});
+		failures.push(...sessions.failures);
+	}
 
 	const grantsRevoked: string[] = [];
 	const grantsFailed: string[] = [];
@@ -325,9 +355,9 @@ async function keep(
 		grantsFailed,
 		grantsRetired,
 		grantsRetireFailed,
-		unavailable: [],
+		unavailable,
 		failures,
-		complete: failures.length === 0 && sessions.failed.length === 0,
+		complete: unavailable.length === 0 && failures.length === 0 && sessions.failed.length === 0,
 	};
 }
 

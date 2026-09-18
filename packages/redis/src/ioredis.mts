@@ -139,6 +139,13 @@ const LUA_COMPARE_AND_DELETE_SHA = createHash("sha1").update(LUA_COMPARE_AND_DEL
  */
 const LUA_SET_REVOCATION_BOUNDARIES = `
 local mode = ARGV[1]
+-- What a Date can hold (ECMA-262). A stored value outside it is not a
+-- boundary: the read path refuses it, and carrying it forward here would
+-- write a record only this script can produce and nothing can read.
+local MAX_DATE = 8640000000000000
+local function readable(n)
+  return n ~= nil and n == n and n >= -MAX_DATE and n <= MAX_DATE
+end
 local before = tonumber(ARGV[2])
 local expiresAt = tonumber(ARGV[3])
 local retention = tonumber(ARGV[4])
@@ -165,6 +172,12 @@ if current then
       end
       sessions = tonumber(s)
     end
+  end
+  -- The shape matched; the numbers still have to be instants. tonumber of
+  -- four hundred digits is infinity, which passes every pattern above and
+  -- would be written back as "inf".
+  if (not readable(sessions)) or (grants ~= nil and not readable(grants)) then
+    return redis.error_reply("subject revocation: unreadable record")
   end
 end
 

@@ -91,14 +91,61 @@ describe("subjectRevocationServiceModule", () => {
 				"sessionFederationIndex",
 				"refreshTokenFamilyRevocation",
 				"federationTokenStore",
-				"subjectSessionIndex",
-				"subjectRevocation",
 			]),
 		);
-		// Not required: a deployment with the feature off has no grant store,
-		// and this module is the one a session deployment installs.
+	});
+
+	it("does not require the two slots #406 lets a deployment declare absent", () => {
+		// A module that REQUIRED them could not be installed at all in a
+		// deployment that declared the capability absent — a harder demand
+		// than the operation it wraps, which reports the absence instead.
 		expect(subjectRevocationServiceModule.optional).toEqual(
-			expect.arrayContaining(["federationGrantStore"]),
+			expect.arrayContaining([
+				"subjectSessionIndex",
+				"subjectRevocation",
+				// Nor the grant store: the feature may be off.
+				"federationGrantStore",
+			]),
+		);
+		expect(subjectRevocationServiceModule.requires).not.toContain("subjectRevocation");
+		expect(subjectRevocationServiceModule.requires).not.toContain("subjectSessionIndex");
+	});
+
+	it("reports an absent boundary rather than refusing to be built", async () => {
+		// #296's behaviour, unchanged: the call answers, says what it could not
+		// do, and `complete` is false. A deployment that declared the
+		// capability absent already lives with exactly this.
+		const { subjectRevocation: _absent, ...withoutBoundary } = {
+			config: config(),
+			...cascadeStores(),
+			subjectSessionIndex: createInMemorySubjectSessionIndex(),
+			subjectRevocation: createInMemorySubjectRevocation(),
+		};
+		const provides = subjectRevocationServiceModule.provides as unknown as {
+			subjectRevocationService: (deps: unknown) => SubjectRevocationService;
+		};
+		const service = provides.subjectRevocationService(withoutBoundary);
+
+		const result = await service.revokeAllForSubject({ subject: "u-1" });
+
+		expect(result.unavailable).toEqual(["subjectRevocation"]);
+		expect(result.complete).toBe(false);
+		expect(result.tokensRevoked).toBe(false);
+	});
+
+	it("refuses a deployment with grants on and no boundary at all", () => {
+		const { subjectRevocation: _absent, ...withoutBoundary } = {
+			config: enabled(),
+			...cascadeStores(),
+			subjectSessionIndex: createInMemorySubjectSessionIndex(),
+			subjectRevocation: createInMemorySubjectRevocation(),
+			federationGrantStore: createMemoryFederationGrantStore(),
+		};
+		const provides = subjectRevocationServiceModule.provides as unknown as {
+			subjectRevocationService: (deps: unknown) => SubjectRevocationService;
+		};
+		expect(() => provides.subjectRevocationService(withoutBoundary)).toThrow(
+			/requires a subjectRevocation component/,
 		);
 	});
 
@@ -231,6 +278,63 @@ describe("subjectRevocationServiceModule", () => {
 		});
 	});
 
+	it("finishes while a sink that never answers is still thinking", async () => {
+		// The caller is a Store in the middle of a credential change it cannot
+		// undo. A sink that hangs would hang that, having already revoked the
+		// grants — so the event is dispatched and the revocation reports what
+		// it did.
+		const store = createMemoryFederationGrantStore();
+		const now = new Date();
+		await store.createPending({
+			id: "g-1",
+			subject: "u-1",
+			clientId: "agent",
+			connection: "okta-calendar",
+			intent: { handle: "h", expiresAt: new Date(now.getTime() + HOUR) },
+			now,
+		});
+		const service = build({
+			config: enabled(),
+			federationGrantStore: store,
+			auditSink: { record: () => new Promise<void>(() => undefined) },
+		});
+
+		const result = await service.revokeAllForSubject({ subject: "u-1" });
+
+		expect(result.grantsRevoked).toEqual(["g-1"]);
+		expect(result.complete).toBe(true);
+	});
+
+	it("logs a sink that refuses the event, and revokes anyway", async () => {
+		const store = createMemoryFederationGrantStore();
+		const now = new Date();
+		await store.createPending({
+			id: "g-1",
+			subject: "u-1",
+			clientId: "agent",
+			connection: "okta-calendar",
+			intent: { handle: "h", expiresAt: new Date(now.getTime() + HOUR) },
+			now,
+		});
+		const logged: string[] = [];
+		const service = build({
+			config: enabled(),
+			federationGrantStore: store,
+			auditSink: {
+				record: () => {
+					throw new Error("the sink is down");
+				},
+			},
+			logger: { error: (_fields: unknown, message: string) => logged.push(message) },
+		});
+
+		const result = await service.revokeAllForSubject({ subject: "u-1" });
+		await Promise.resolve();
+
+		expect(result.grantsRevoked).toEqual(["g-1"]);
+		expect(logged).toContain("federation_grant_audit_failed");
+	});
+
 	it("sizes the boundary from the lifetimes this deployment is configured with", async () => {
 		// The service takes the number and cannot derive it: a boundary that
 		// expires before the credentials it covers is not a backstop, and what
@@ -272,6 +376,8 @@ describe("subjectRevocationServiceModule", () => {
 
 		await service.revokeAllForSubject({ subject: "u-1" });
 
+		// The sink is told, and it was not waited for: a `record` that never
+		// settles must not hang a credential change that has already happened.
 		expect(record).toHaveBeenCalledWith(
 			expect.objectContaining({
 				type: "federation.grant.revoked",

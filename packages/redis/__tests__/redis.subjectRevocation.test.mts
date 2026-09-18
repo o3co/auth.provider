@@ -219,11 +219,26 @@ describe("SubjectRevocation — the two boundaries on one key (#593, D13)", () =
 		// a value nobody can decode may be a newer release's, and overwriting
 		// it would lose a boundary that is in force.
 		const prefix = "t593e:8:";
-		await raw.set(`${prefix}u`, "v9:1:2", "PX", 600_000);
-		await expect(
-			store(prefix).revokeBefore("u", new Date(), new Date(Date.now() + 600_000)),
-		).rejects.toThrow();
-		expect(await raw.get(`${prefix}u`)).toBe("v9:1:2");
+		for (const corrupt of [
+			"v9:1:2",
+			// Shaped like a watermark, and not an instant: the read path
+			// refuses it, so the write path must not carry it forward into a
+			// record nothing can read.
+			"8640000000000001",
+			"9".repeat(400),
+			`v1:1:${"9".repeat(400)}`,
+		]) {
+			await raw.set(`${prefix}u`, corrupt, "PX", 600_000);
+			await expect(
+				store(prefix).revokeBefore("u", new Date(), new Date(Date.now() + 600_000)),
+				corrupt,
+			).rejects.toThrow();
+			await expect(
+				store(prefix).revokeSessionsBefore("u", new Date(), new Date(Date.now() + 600_000)),
+				corrupt,
+			).rejects.toThrow();
+			expect(await raw.get(`${prefix}u`), corrupt).toBe(corrupt);
+		}
 	});
 
 	it("refuses a driver that cannot express a sessions-only stamp", async () => {

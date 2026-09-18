@@ -36,6 +36,7 @@ import {
 	defineModule,
 	type FederationGrantAuditEvent,
 	fullSectionsSchema,
+	type Logger,
 	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantKeepPolicy,
 	resolveSubjectRevocationHorizonMs,
@@ -68,9 +69,21 @@ const grantsEnabled = (deps: AnyDeps): boolean =>
  * a Store makes after writing a credential, and there is no request behind it
  * to attribute. Inventing one would put the provider's own address in the
  * field an operator reads as "where it came from".
+ *
+ * **Dispatched and not awaited**, which is the opposite of what the route
+ * bridge does, for the opposite reason. There, core bounds its own audit
+ * waits and hands the promise to a registry a shutdown drains, so returning
+ * it is how a failing sink becomes visible. Here the caller is a Store in the
+ * middle of a credential change it cannot undo, and nothing bounds anything:
+ * a sink that never settles would hang that call for ever, having already
+ * revoked the grants. So the event goes out, a failure is logged, and the
+ * revocation reports what it did.
  */
-const auditor = (sink: AuditSink): ((event: FederationGrantAuditEvent) => Promise<void>) => {
-	return async (event) => {
+const auditor = (
+	sink: AuditSink,
+	logger: Logger | undefined,
+): ((event: FederationGrantAuditEvent) => void) => {
+	return (event) => {
 		const mapped: AuditEvent = {
 			timestamp: new Date(),
 			type: event.type,
@@ -84,12 +97,17 @@ const auditor = (sink: AuditSink): ((event: FederationGrantAuditEvent) => Promis
 				operation: "subject-revocation",
 			},
 		};
-		// Awaited rather than detached: the caller is a Store waiting on this
-		// call, not a request that will be gone before the sink settles. A sink
-		// that throws still changes nothing — `revokeFederationGrant` swallows
-		// it, because the grant is already revoked and reporting otherwise
-		// would send an operator to undo something that was right.
-		await sink.record(mapped);
+		// `Promise.resolve().then` and not a bare call: a sink that throws
+		// synchronously must fail the same way as one that rejects, and
+		// neither may reach the caller.
+		void Promise.resolve()
+			.then(() => sink.record(mapped))
+			.catch((err: unknown) => {
+				logger?.error(
+					{ err, grantId: event.grantId, correlationId: event.correlationId },
+					"federation_grant_audit_failed",
+				);
+			});
 	};
 };
 
@@ -115,11 +133,23 @@ export const subjectRevocationServiceModule = defineModule({
 		"sessionFederationIndex",
 		"refreshTokenFamilyRevocation",
 		"federationTokenStore",
-		// What turns "this subject" into sessions, and what outlives them.
+	] as const,
+	/**
+	 * What turns "this subject" into sessions, and what outlives them — both
+	 * `optional`, and not because the service can do without them. #406 lets a
+	 * deployment declare either capability absent, and a module that REQUIRED
+	 * them could not be installed there at all; absence is reported instead,
+	 * in `unavailable`, exactly as `revokeAllForSubject` has always reported
+	 * it. What is refused is the pairing that matters: no boundary while
+	 * federation grants are enabled, below.
+	 */
+	optional: [
 		"subjectSessionIndex",
 		"subjectRevocation",
+		"federationGrantStore",
+		"auditSink",
+		"logger",
 	] as const,
-	optional: ["federationGrantStore", "auditSink", "logger"] as const,
 	/**
 	 * Eager, because its consumer is not a module.
 	 *
@@ -186,7 +216,9 @@ export const subjectRevocationServiceModule = defineModule({
 				// letting it through would make the service refuse an adapter
 				// that a grantless deployment has every right to use.
 				allowKeep: enabled && resolveFederationGrantKeepPolicy(deps.config),
-				...(deps.auditSink === undefined ? {} : { federationGrantAudit: auditor(deps.auditSink) }),
+				...(deps.auditSink === undefined
+					? {}
+					: { federationGrantAudit: auditor(deps.auditSink, deps.logger) }),
 				...(deps.logger === undefined ? {} : { logger: deps.logger }),
 			});
 		},

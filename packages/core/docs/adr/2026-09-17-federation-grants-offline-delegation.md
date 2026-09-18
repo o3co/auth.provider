@@ -1284,7 +1284,12 @@ package dependency. It fills an optional `subjectRevocationService` slot and
 is installed explicitly — folding it into `oauthModule` would require the
 whole session cascade of every deployment that serves `/oauth/token`. The slot
 is `eager`, because its consumer is the Store reading `handle.components` and
-not another module; without that the planner would build nothing.
+not another module; without that the planner would build nothing. The two
+subject-level slots stay **optional** on that module: #406 lets a deployment
+declare either capability absent, and requiring them would make this service
+impossible to install where the operation it wraps still works. An absence is
+reported in `unavailable` exactly as `revokeAllForSubject` reports it. What is
+refused is the pairing that matters — no boundary while grants are enabled.
 
 The cascade closure adapts the real result: `cascadeLogout` answers
 `{ outcome: "done" }` or `{ outcome: "failed", step, errors }`, and the helper

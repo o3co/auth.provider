@@ -78,6 +78,31 @@ describe("createSubjectRevocationService", () => {
 			).not.toThrow();
 		});
 
+		it("is built for a deployment that declared the boundary absent, and reports it", () => {
+			// #406 lets a deployment declare either subject-level capability
+			// absent. Refusing to construct would be a harder demand than the
+			// operation this wraps makes, and the answer is the one
+			// `revokeAllForSubject` has always given: say what was not done.
+			const { subjectRevocation: _absent, ...withoutBoundary } = deps();
+			const service = createSubjectRevocationService(
+				withoutBoundary as Parameters<typeof createSubjectRevocationService>[0],
+			);
+			return expect(service.revokeAllForSubject({ subject: "u-1" })).resolves.toMatchObject({
+				unavailable: ["subjectRevocation"],
+				tokensRevoked: false,
+				complete: false,
+			});
+		});
+
+		it("still refuses to allow keeping with no boundary at all", () => {
+			const { subjectRevocation: _absent, ...withoutBoundary } = deps({ allowKeep: true });
+			expect(() =>
+				createSubjectRevocationService(
+					withoutBoundary as Parameters<typeof createSubjectRevocationService>[0],
+				),
+			).toThrow(/revokeSessionsBefore|sessions-only/i);
+		});
+
 		it("refuses a watermark that would expire immediately", () => {
 			expect(() => createSubjectRevocationService(deps({ watermarkTtlMs: 0 }))).toThrow(
 				/ttl|retention/i,
@@ -189,6 +214,26 @@ describe("createSubjectRevocationService", () => {
 			// And the grants were still dealt with: a boundary that could not be
 			// written does not make the renewal in flight less worth ending.
 			expect(result.grantsRequested).toBe(true);
+		});
+
+		it("reports a session index the deployment declared absent", async () => {
+			// The keep path answers the same way the revoke path does: what it
+			// could not do is named, and `complete` is false.
+			const { subjectSessionIndex: _absent, ...withoutIndex } = keeping();
+			const service = createSubjectRevocationService(
+				withoutIndex as Parameters<typeof createSubjectRevocationService>[0],
+			);
+
+			const result = await service.revokeAllForSubject({
+				subject: "u-1",
+				federationGrants: "keep",
+			});
+
+			expect(result.unavailable).toEqual(["subjectSessionIndex"]);
+			expect(result.complete).toBe(false);
+			// And the boundary was still stamped: one missing capability does
+			// not cost the others.
+			expect(result.tokensRevoked).toBe(true);
 		});
 
 		it("cascades the sessions all the same", async () => {
