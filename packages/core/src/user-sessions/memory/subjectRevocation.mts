@@ -81,9 +81,18 @@ export function createInMemorySubjectRevocation(): SubjectRevocation &
 		// The floor is about GRANTS, and it is anchored to the boundary rather
 		// than to a freshly sampled clock: what it has to outlive is every
 		// grant consented before that instant, and the ceiling `activate`
-		// enforces bounds those absolutely (D3). A caller cannot shorten it,
-		// and a deployment that has never revoked a grant is not made to keep a
-		// year of keys because somebody changed a password.
+		// enforces bounds those absolutely (D3). A caller cannot shorten it.
+		//
+		// It follows — and review found this comment claiming the opposite —
+		// that a password change DOES cost a year of retention, in every
+		// deployment: `revokeBefore` is what a credential change calls, and it
+		// advances the grants boundary whether or not this deployment has a
+		// single grant. That is deliberate (D13): the alternative is a
+		// boundary that lapses under a grant the caller knew nothing about.
+		// What a sessions-only stamp costs is still the caller's expiry alone.
+		// This adapter reclaims on a read of the same subject, so a
+		// long-running process holds one entry per revoked subject for the
+		// year rather than sweeping.
 		const grantFloor =
 			grants === null ? Number.NEGATIVE_INFINITY : grants + SUBJECT_REVOCATION_MIN_RETENTION_MS;
 		entries.set(subject, {

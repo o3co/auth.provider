@@ -128,32 +128,43 @@ describe("the two boundaries", () => {
 });
 
 describe("the retention floor the adapter applies", () => {
+	// Each of these asks for an expiry that has ALREADY passed, so the record
+	// is readable afterwards only if something raised it. Review found the
+	// earlier form of these tests — a short expiry, read back at once —
+	// passing with the floor deleted, which is a test certifying nothing.
 	it("outlives every grant a full revocation covers, however short the caller's expiry", async () => {
 		// A caller that passes a one-minute expiry — or a Store on an old
 		// version whose TTL is sized to refresh tokens — must not leave a
 		// boundary that lapses under a grant consented for a year.
 		const store = capable();
 		const before = Date.now();
-		await store.revokeBefore("u", at(before), at(before + 60_000));
-		// The record is still readable well past the caller's expiry, which is
-		// the observable form of "the floor was applied".
+		await store.revokeBefore("u", at(before), at(before - 1));
 		expect((await store.revokedBefore("u"))?.getTime()).toBe(before);
+		expect((await store.grantsRevokedBefore("u"))?.getTime()).toBe(before);
 	});
 
 	it("keeps a longer expiry the caller or an earlier write asked for", async () => {
 		const store = capable();
 		const before = Date.now();
 		await store.revokeBefore("u", at(before), at(before + SUBJECT_REVOCATION_MIN_RETENTION_MS * 2));
-		await store.revokeSessionsBefore("u", at(before + 1), at(before + 60_000));
+		await store.revokeSessionsBefore("u", at(before + 1), at(before - 1));
 		expect((await store.revokedBefore("u"))?.getTime()).toBe(before + 1);
 	});
 
 	it("does not manufacture a grants boundary, or its year, for a sessions-only stamp", async () => {
 		// The floor is about grants. A deployment that has never revoked a
 		// grant should not be made to keep a year of keys because somebody
-		// changed a password.
+		// changed a password — so this record lapses when its caller said it
+		// would, and the assertion is that it is gone rather than kept.
 		const store = capable();
-		await store.revokeSessionsBefore("u", at(Date.now()), at(Date.now() + 60_000));
+		const before = Date.now();
+		await store.revokeSessionsBefore("u", at(before), at(before - 1));
+		expect(await store.revokedBefore("u")).toBeNull();
+		expect(await store.grantsRevokedBefore("u")).toBeNull();
+
+		// And a live one has no grants boundary either.
+		await store.revokeSessionsBefore("u", at(before), at(before + 600_000));
+		expect((await store.revokedBefore("u"))?.getTime()).toBe(before);
 		expect(await store.grantsRevokedBefore("u")).toBeNull();
 	});
 

@@ -243,9 +243,13 @@ describe("subjectRevocationServiceModule", () => {
 		await service.revokeAllForSubject({ subject: "u-1" });
 
 		const [, before, expiresAt] = stamp.mock.calls[0] as [string, Date, Date];
-		expect(expiresAt.getTime() - before.getTime()).toBe(
-			resolveSubjectRevocationHorizonMs(deployment),
-		);
+		const ttl = expiresAt.getTime() - before.getTime();
+		// Two assertions, because the first one alone compares the module with
+		// the function it calls and would pass whatever that function said.
+		// The second is the property itself: the boundary outlasts the
+		// longest-lived thing this deployment is configured to accept.
+		expect(ttl).toBe(resolveSubjectRevocationHorizonMs(deployment));
+		expect(ttl).toBeGreaterThan(40 * 24 * HOUR);
 	});
 
 	it("tells the deployment's sink what a revocation ended", async () => {

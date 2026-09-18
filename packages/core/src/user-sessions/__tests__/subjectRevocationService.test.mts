@@ -319,7 +319,11 @@ describe("createSubjectRevocationService", () => {
 			// Reporting a completed revocation while a renewal somebody else
 			// started is still current would be the wrong half of the truth.
 			expect(result.complete).toBe(false);
-			expect(result.grantsFailed).toEqual(["g-1"]);
+			// NOT `grantsFailed`, which means "the revocation write threw, still
+			// live, safe to retry". A Store retrying these two as one list would
+			// revoke the grants its operator's policy had just chosen to keep.
+			expect(result.grantsRetireFailed).toEqual(["g-1"]);
+			expect(result.grantsFailed).toEqual([]);
 			expect(result.failures).toContainEqual(
 				expect.objectContaining({ operation: "retireIntent", grantId: "g-1" }),
 			);

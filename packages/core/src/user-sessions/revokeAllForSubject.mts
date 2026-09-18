@@ -79,10 +79,11 @@ export interface RevokeAllForSubjectFailure {
 export interface RevokeAllForSubjectOptions {
 	readonly subject: string;
 	/**
-	 * How long the watermark must outlive. Size it to the longest-lived
-	 * **refresh token**, not the access token: the refresh grant consults the
-	 * watermark as the backstop for a family revocation that did not complete,
-	 * so a watermark that expires first takes the backstop with it. See the TTL
+	 * How long the watermark must outlive. Size it with
+	 * `resolveSubjectRevocationHorizonMs`, which reads the session, the
+	 * refresh token and the access-token **maximum** — a watermark that
+	 * expires before any of them takes the backstop with it, and nothing in
+	 * the configuration says which of the three is longest. See the TTL
 	 * contract on {@link SubjectRevocation}.
 	 */
 	readonly watermarkTtlMs: number;

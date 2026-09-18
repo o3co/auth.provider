@@ -85,12 +85,30 @@ export interface SubjectRevocationReport extends RevokeAllForSubjectResult {
 	 */
 	readonly grantsRetired: readonly string[];
 	/**
+	 * Grants that were **kept**, and whose renewal could not be ended.
+	 *
+	 * Separate from `grantsFailed`, and the separation is the point: that
+	 * field means "the revocation write threw — still live, safe to retry",
+	 * and a Store that read these two as one would retry by revoking grants
+	 * the operator's policy had just chosen to keep. Retrying one of these
+	 * means asking for the retirement again, not for a revocation.
+	 */
+	readonly grantsRetireFailed: readonly string[];
+	/**
 	 * What was asked for, what was done, and — when they differ — why.
 	 *
 	 * `complete: true` means the **applied** action completed. It does not mean
 	 * the requested one was honoured: a Store that asked to keep, was refused
 	 * by policy, and reads only `complete` will believe the subject's grants
 	 * survived when every one of them was revoked. Read all three fields.
+	 *
+	 * And `complete: false` is worse under `"keep"` than under `"revoke"`. A
+	 * full revocation stamps the grants boundary before it enumerates
+	 * anything, so a grant its pass could not reach is refused at `/token` and
+	 * revoked durably there; the retry only tidies up. `"keep"` advances no
+	 * grants boundary — that is the mode — so a grant in `grantsFailed`,
+	 * selected by `revokeGrantsConsentedSince` and left unwritten by an
+	 * outage, stays usable until the retry succeeds. Nothing else will end it.
 	 */
 	readonly federationGrants: {
 		readonly requested: FederationGrantDisposition;
@@ -183,7 +201,7 @@ export function createSubjectRevocationService(
 					logger: deps.logger,
 					now,
 				});
-				return { ...result, grantsRetired: [], federationGrants };
+				return { ...result, grantsRetired: [], grantsRetireFailed: [], federationGrants };
 			}
 			return { ...(await keep(deps, revocation, now, request.subject, since)), federationGrants };
 		},
@@ -237,6 +255,7 @@ async function keep(
 	const grantsRevoked: string[] = [];
 	const grantsFailed: string[] = [];
 	const grantsRetired: string[] = [];
+	const grantsRetireFailed: string[] = [];
 	const store = deps.federationGrantStore;
 	if (store !== undefined) {
 		const grantDeps = {
@@ -279,8 +298,10 @@ async function keep(
 			} catch (error) {
 				// Counted against `complete`, both of them: reporting a
 				// completed revocation while a renewal somebody else started is
-				// still current would be the wrong half of the truth.
-				grantsFailed.push(grant.id);
+				// still current would be the wrong half of the truth. Which
+				// list they land in decides what a retry should DO — revoke
+				// again, or retire again — so they are not one list.
+				(end ? grantsFailed : grantsRetireFailed).push(grant.id);
 				failures.push({
 					capability: "federationGrantStore",
 					operation: end ? "revoke" : "retireIntent",
@@ -303,6 +324,7 @@ async function keep(
 		grantsRevoked,
 		grantsFailed,
 		grantsRetired,
+		grantsRetireFailed,
 		unavailable: [],
 		failures,
 		complete: failures.length === 0 && sessions.failed.length === 0,

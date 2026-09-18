@@ -37,7 +37,7 @@ import type { SubjectRevocationClient } from "./clients.mjs";
  * replicas interleaving between the `GET` and the `SET`.
  *
  * So the comparison happens on the server, in one command
- * (`setWatermarkMonotonic`), and the same guard covers the entry's own expiry:
+ * (`setRevocationBoundaries`), and the same guard covers the entry's own expiry:
  * shortening an in-force watermark would retire the line while tokens it must
  * refuse are still presentable.
  *
@@ -46,12 +46,18 @@ import type { SubjectRevocationClient } from "./clients.mjs";
  * watermark timed out starts from its own value, matching the in-process
  * adapter.
  *
- * ## TTL sizing is the caller's contract, not this adapter's
+ * ## TTL sizing is the caller's contract, and the grants floor is this adapter's
  *
  * `expiresAt` must reach as far as the longest-lived credential the watermark
- * has to refuse — the refresh token, not the access token, wherever the
- * composition forwards `subjectRevocation` to the refresh grant. See
- * `SubjectRevocation` in core for why. This adapter stores what it is given.
+ * has to refuse; `resolveSubjectRevocationHorizonMs` in core is what sizes it.
+ * This adapter stores what it is given — **except** that a write which
+ * advances the grants boundary raises the stored expiry to
+ * `SUBJECT_REVOCATION_MIN_RETENTION_MS` past that boundary (#593, D13). That
+ * floor is not the caller's to shorten: what it has to outlive is a grant
+ * lifetime the code bounds absolutely, and a Store that upgrades without
+ * touching its call site would otherwise leave a boundary lapsing under a
+ * grant consented for a year. A sessions-only stamp manufactures no such
+ * floor.
  */
 export interface RedisSubjectRevocationOptions {
 	readonly client: SubjectRevocationClient;

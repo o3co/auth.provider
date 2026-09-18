@@ -203,7 +203,7 @@ const LUA_SET_REVOCATION_BOUNDARIES_SHA = createHash("sha1")
 	.update(LUA_SET_REVOCATION_BOUNDARIES)
 	.digest("hex");
 
-/** Script-cache residency flag for {@link LUA_SET_WATERMARK_MONOTONIC}. */
+/** Script-cache residency flag for {@link LUA_SET_REVOCATION_BOUNDARIES}. */
 let watermarkScriptCached = false;
 
 /**

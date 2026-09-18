@@ -457,10 +457,26 @@ whose pointer is retired so it cannot widen the grant afterwards. One window
 stays open as wide as two replicas' clocks disagree, and it is recorded in
 D13.
 
-If a subject-wide revocation reports `complete: false`, retry it. The grants
-boundary is the backstop meanwhile: a grant consented before it is refused at
-`/token` and revoked durably there, even if the pass that should have ended it
-never ran.
+If a subject-wide revocation reports `complete: false`, **retry it**, and
+which failure you are looking at decides how much the retry matters:
+
+- **`"revoke"`** — the grants boundary was stamped before anything was
+  enumerated, so it is the backstop meanwhile: a grant consented before it is
+  refused at `/token` and revoked durably there, even if the pass that should
+  have ended it never ran. The retry tidies up; it is not what makes the
+  revocation hold.
+- **`"keep"`** — there is **no grants boundary behind it**, by design: the
+  whole point of the mode is not to advance one. So a grant in `grantsFailed`
+  — one that `revokeGrantsConsentedSince` selected, whose write threw — is
+  **still usable** until the retry succeeds. Nothing else will end it. Treat
+  that `complete: false` as an open incident rather than as bookkeeping, and
+  if you cannot retry promptly, run a plain `"revoke"` instead: it stamps the
+  boundary and covers every grant at once.
+
+`grantsFailed` and `grantsRetireFailed` want different retries. The first is a
+revocation that did not happen; the second is a grant your policy **kept**
+whose in-flight reauthorization could not be ended — revoking it on retry
+would destroy exactly what the policy chose to keep.
 
 **A grant needs a federation that is enabled**, and enabling a federation
 brings the session-federation stores with it. A deployment that wants offline
