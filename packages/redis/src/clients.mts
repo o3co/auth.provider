@@ -948,6 +948,10 @@ export interface FederationGrantHashFields {
 	readonly authorization?: string;
 	/** The authorization's `expiresAt`, in epoch milliseconds. Absent before authorization. */
 	readonly expiresAtMs?: string;
+	/** Guard fields, repeated outside the authenticated text so a script can compare them. */
+	readonly identityRevision?: string;
+	readonly upstreamIssuer?: string;
+	readonly upstreamSubject?: string;
 	/** The current intent's opaque handle, JSON-encoded, and when it lapses. Absent when there is none. */
 	readonly intentHandle?: string;
 	readonly intentExpiresAt?: string;
