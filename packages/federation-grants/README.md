@@ -22,6 +22,14 @@ const app = await createApp({
 
 The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a logout and a subject-wide revocation reach grants through the same port. `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`.
 
+Enabling the feature also requires a `subjectRevocation` component that carries the **grants boundary** — `revokeSessionsBefore` and `grantsRevokedBefore` beside the pair #296 shipped (D13). A grant outlives the session it was agreed through, so that boundary is what reaches one on a replica that never saw the withdrawal, and every disclosure is compared against it. Three compositions are refused at boot rather than per request:
+
+| Composition | Why it is refused |
+|---|---|
+| no `subjectRevocation` | Nothing would end a grant the user withdrew. Declaring the capability absent (`oauth.revocation.subject = "unsupported"`) is **not** an escape: sessions end when their cookie does, and a grant ends when nothing does. |
+| an adapter with only `revokeBefore` / `revokedBefore` | There is no second boundary to compare a grant against, and a subject-wide revocation could not be asked to keep one. |
+| a non-`memory` grant store beside a `memory` `subjectRevocation` | The grants outlive the process and the boundary does not, so a restart — or the replica that never held it — discloses a credential for a grant that was revoked. A custom store of any other `kind` is treated as durable: `kind` is all the port exposes, and refusing a pairing that would lose the boundary is the conservative direction. |
+
 ## A disabled deployment is indistinguishable from an uninstalled one
 
 `federationGrants.enabled` defaults to `false`, and while it is false both paths answer:

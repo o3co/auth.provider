@@ -57,7 +57,9 @@ import {
 	type FederationGrantRefresher,
 	fullSectionsSchema,
 	type RateLimitFailMode,
+	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantRetrievalLimits,
+	type SupportsSessionsOnlyRevocation,
 } from "@o3co/auth-provider-core";
 import { supportsDelegatedAuthorization } from "@o3co/auth-provider-session";
 import { z } from "zod";
@@ -225,34 +227,23 @@ const refresherFor =
 	};
 
 /**
- * The subject's grants boundary (D13), as far as this slice goes.
+ * The subject's grants boundary (#593, D13).
  *
- * `subjectRevocation.revokedBefore` is the watermark every other subject-wide
- * revocation already reads. Where a deployment has none, this **throws** —
- * which core turns into 503/storage for an authorized grant — rather than
- * answering `null`. `null` is a statement: "nothing was revoked for this
- * subject". An absent capability does not know that, and treating the two as
- * the same silently switches core's backstop off.
+ * `grantsRevokedBefore`, and deliberately not `revokedBefore`: the two move
+ * independently now. A subject-wide revocation that was asked to keep this
+ * subject's grants advances the sessions boundary alone, and reading that one
+ * here would revoke the grants an operator's policy just chose to keep — the
+ * feature would look implemented and do the opposite.
  *
- * Slice 5 replaces this bridge with the grants boundary of D13 proper, and
- * moves a missing or insufficient capability to a boot refusal — at which
- * point a deployment finds out at boot rather than per request.
+ * The adapter is the one the boot refusal above returned, so this no longer
+ * has an absent-capability branch: a deployment without the capability does
+ * not get here. What stays is the answer's own validation, because boot cannot
+ * establish what a backend will say about a subject that does not exist yet.
  */
-const boundaryFor = (deps: AnyDeps): ((subject: string) => Promise<Date | null>) => {
-	const revocation = deps.subjectRevocation as
-		| { revokedBefore(subject: string): Promise<Date | null> }
-		| undefined;
-	if (revocation === undefined) {
-		return async () => {
-			throw new Error(
-				"federationGrantsModule: no subjectRevocation component, so the subject's grants " +
-					"boundary cannot be read. Wire one — a grant outlives the session, and the " +
-					"backstop that covers a subject-wide revocation is what makes that safe (D13).",
-			);
-		};
-	}
-	return async (subject) => {
-		const watermark = await revocation.revokedBefore(subject);
+const boundaryFor =
+	(revocation: SupportsSessionsOnlyRevocation): ((subject: string) => Promise<Date | null>) =>
+	async (subject) => {
+		const watermark = await revocation.grantsRevokedBefore(subject);
 		// The port says `Date | null`, and a `null` is a STATEMENT: nothing was
 		// revoked for this subject. An adapter that answers `undefined` — or
 		// anything else — has made no statement at all, and reading it as one
@@ -264,11 +255,10 @@ const boundaryFor = (deps: AnyDeps): ((subject: string) => Promise<Date | null>)
 		if (watermark instanceof Date && !Number.isNaN(watermark.getTime())) return watermark;
 		throw new Error(
 			"federationGrantsModule: the subjectRevocation adapter answered something that is " +
-				"neither a date nor null for the subject's watermark. Fails closed: an answer " +
-				"that cannot be compared is not the same as no revocation (D13).",
+				"neither a date nor null for the subject's grants boundary. Fails closed: an " +
+				"answer that cannot be compared is not the same as no revocation (D13).",
 		);
 	};
-};
 
 export const federationGrantBackgroundModule = defineModule({
 	name: "federation-grant-background",
@@ -330,6 +320,17 @@ export const federationGrantsModule = defineModule({
 				// an operator is told about: a deployment with no store has not
 				// half-configured the feature, it has not configured it.
 				const store = requireStore(deps);
+				// Second, because it is the same question asked of the other
+				// half: a grant that can be read from somewhere and ended
+				// nowhere is worse than one that cannot be read at all. Slice 4
+				// answered this per request, with a bridge that threw; a
+				// composition error belongs at boot, where a deployment finds
+				// out before it has told a user it was set up.
+				const revocation = requireFederationGrantSubjectRevocation({
+					module: "federationGrantsModule",
+					subjectRevocation: deps.subjectRevocation,
+					federationGrantStore: store,
+				});
 				const rateLimiter = requireLimiter(deps);
 				const failMode = requireFailMode(deps);
 				const limits = resolveFederationGrantRetrievalLimits(deps.config);
@@ -343,7 +344,7 @@ export const federationGrantsModule = defineModule({
 						store,
 						connections,
 						refresher: refresherFor(deps),
-						grantsBoundary: boundaryFor(deps),
+						grantsBoundary: boundaryFor(revocation),
 						limits,
 						background: deps.federationGrantBackground,
 						clientRepository: deps.clientRepository,
