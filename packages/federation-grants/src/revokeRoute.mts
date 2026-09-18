@@ -50,11 +50,12 @@
  * user cannot disconnect while somebody else's service is down.
  */
 
-import type {
-	AuditSink,
-	FederationGrant,
-	FederationGrantStore,
-	Logger,
+import {
+	type AuditSink,
+	type FederationGrant,
+	type FederationGrantStore,
+	federationGrantAuditMetadata,
+	type Logger,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler } from "express";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
@@ -212,9 +213,12 @@ export function createFederationGrantRevokeHandler(
 						grantId,
 						clientId: client.clientId,
 						// From the record the write returned, never from what the
-						// caller claimed.
+						// caller claimed — including what access it was: the
+						// upstream account, the resource and the scopes that
+						// have just been taken away (D18). The record may be a
+						// tombstone by the time anybody reads this.
 						subject: written.grant.subject,
-						connection: written.grant.connection,
+						...federationGrantAuditMetadata(written.grant),
 						outcome: "client",
 					}).catch(() => undefined),
 				);

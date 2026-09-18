@@ -382,7 +382,11 @@ describe("subjectRevocationServiceModule", () => {
 			expect.objectContaining({
 				type: "federation.grant.revoked",
 				subject: "u-1",
-				details: expect.objectContaining({ grantId: "g-1", operation: "subject-revocation" }),
+				details: expect.objectContaining({
+					grantId: "g-1",
+					operation: "subject-revocation",
+					connection: "okta-calendar",
+				}),
 			}),
 		);
 	});

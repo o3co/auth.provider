@@ -119,6 +119,7 @@ const CASCADE_STORES = {
 const boot = async (allowKeep: boolean) => {
 	const full = makeValidFullSections();
 	const components = shared();
+	const events: { type: string; details?: Record<string, unknown> }[] = [];
 	const handle = await createApp({
 		modules: [federationModule, ...federationGrantsModules, subjectRevocationServiceModule],
 		bootstrapComponents: {
@@ -157,6 +158,11 @@ const boot = async (allowKeep: boolean) => {
 			}),
 			...CASCADE_STORES,
 			...components,
+			auditSink: {
+				record: (event: { type: string; details?: Record<string, unknown> }) => {
+					events.push(event);
+				},
+			},
 		} as unknown as BootstrapMap,
 	});
 
@@ -199,7 +205,7 @@ const boot = async (allowKeep: boolean) => {
 	const app = express();
 	app.use(handle.router);
 	const service = handle.components.subjectRevocationService as SubjectRevocationService;
-	return { handle, app, service, ...components };
+	return { handle, app, service, events, ...components };
 };
 
 const disclose = (app: express.Express) =>
@@ -224,6 +230,28 @@ describe("a subject-wide revocation, from the service to the disclosure", () => 
 		// And the subject's sessions and tokens did end: keeping the grants is
 		// not keeping the session they were agreed through.
 		expect(await subjectRevocation.revokedBefore(SUBJECT)).not.toBeNull();
+		await handle.dispose();
+	});
+
+	it("says what access it ended, all the way to the deployment's sink", async () => {
+		// Three packages have to agree for this line to appear: core builds
+		// the event from the record the write returned, the oauth module maps
+		// it onto the deployment's sink, and the grant was activated through
+		// the routes package's own store. An operator reading it sees which
+		// upstream account and which scopes were taken away, from a record
+		// that is a tombstone by then.
+		const { handle, service, events } = await boot(false);
+
+		await service.revokeAllForSubject({ subject: SUBJECT });
+
+		const revoked = events.find((event) => event.type === "federation.grant.revoked");
+		expect(revoked?.details).toMatchObject({
+			grantId: "g-1",
+			operation: "subject-revocation",
+			connection: connection.name,
+			upstream: { issuer: connection.upstreamIssuer, subject: "upstream-subject" },
+			scopes: [...connection.scopes],
+		});
 		await handle.dispose();
 	});
 

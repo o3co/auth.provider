@@ -44,7 +44,11 @@
 
 import type { FederationGrantAuditEvent } from "./retrieve.mjs";
 import type { FederationGrantStore, FederationGrantWrite } from "./store.mjs";
-import type { FederationGrant, FederationGrantRevokedBy } from "./types.mjs";
+import {
+	type FederationGrant,
+	type FederationGrantRevokedBy,
+	hasFederationGrantAuthorization,
+} from "./types.mjs";
 
 export interface FederationGrantAdministrationDeps {
 	readonly store: FederationGrantStore;
@@ -100,6 +104,36 @@ export async function listFederationGrantsForSubject(
 	return deps.store.listBySubject(subject, deps.now());
 }
 
+/**
+ * What an event can say about the grant it ended (D18).
+ *
+ * D18 carries the caller, the owner, the upstream subject, the connection, the
+ * resource and the scopes **where they have been established** — and for a
+ * revocation they are, because the record the write returned is the
+ * establishment. Leaving them out made the revocation events the only ones in
+ * the family that did not say *what access ended*: an operator reading
+ * `federation.grant.revoked` got a grant id and a connection name, and had to
+ * go and look up the upstream account and the scopes that had just been taken
+ * away — at exactly the moment the record may be a tombstone.
+ *
+ * A grant revoked while `pending` has none of it, and that absence is the
+ * honest answer rather than a blank: nothing was ever authorized.
+ *
+ * Copies, so that a sink which holds its argument cannot be handed a reference
+ * into a record the caller is still working with.
+ */
+export function federationGrantAuditMetadata(
+	grant: FederationGrant,
+): Pick<FederationGrantAuditEvent, "connection" | "upstream" | "resource" | "scopes"> {
+	if (!hasFederationGrantAuthorization(grant)) return { connection: grant.connection };
+	return {
+		connection: grant.connection,
+		upstream: { ...grant.upstream },
+		...(grant.resource === undefined ? {} : { resource: grant.resource }),
+		scopes: [...grant.scopes],
+	};
+}
+
 /** Built from the record that was ended, never from what the caller claimed. */
 async function tell(
 	deps: FederationGrantAdministrationDeps,
@@ -115,7 +149,7 @@ async function tell(
 			grantId: grant.id,
 			clientId: grant.clientId,
 			subject: grant.subject,
-			connection: grant.connection,
+			...federationGrantAuditMetadata(grant),
 			outcome: by,
 		});
 	} catch {

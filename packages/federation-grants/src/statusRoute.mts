@@ -44,6 +44,7 @@ import {
 	type FederationGrantConnection,
 	type FederationGrantRetrievalLimits,
 	type FederationGrantStore,
+	federationGrantAuditMetadata,
 	type Logger,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler } from "express";
@@ -241,7 +242,7 @@ export function createFederationGrantStatusHandler(
 							grantId,
 							clientId: client.clientId,
 							subject: grant.subject,
-							connection: grant.connection,
+							...federationGrantAuditMetadata(grant),
 							outcome: "backstop",
 						}),
 					);

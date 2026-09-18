@@ -92,7 +92,13 @@ const auditor = (
 			details: {
 				correlationId: event.correlationId,
 				grantId: event.grantId,
+				// What access ended, where core established it (D18). Copies,
+				// so a sink that holds its argument cannot be handed a
+				// reference into what core is still working with.
 				...(event.connection === undefined ? {} : { connection: event.connection }),
+				...(event.upstream === undefined ? {} : { upstream: { ...event.upstream } }),
+				...(event.resource === undefined ? {} : { resource: event.resource }),
+				...(event.scopes === undefined ? {} : { scopes: [...event.scopes] }),
 				outcome: event.outcome,
 				operation: "subject-revocation",
 			},

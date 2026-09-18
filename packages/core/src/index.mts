@@ -837,6 +837,7 @@ export { requireFederationGrantSubjectRevocation } from "./federation-grants/rev
 // applications page.
 export {
 	type FederationGrantAdministrationDeps,
+	federationGrantAuditMetadata,
 	listFederationGrantsForSubject,
 	revokeFederationGrant,
 } from "./federation-grants/revoke.mjs";
