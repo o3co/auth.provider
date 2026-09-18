@@ -694,15 +694,24 @@ has not been disclosed yet is not D15's residual access. So after its own
 write the call takes one more look — the boundary, then the record, then the
 clock — and discloses what is *stored*, never the token it holds in a
 variable. That look never refreshes: a call refreshes at most once. The same
-look is all a call gets after a lock timeout or a lost write, with one
-difference. After its own write it answers what is stored as it is, as below
-— when what is stored is still the token it wrote: a reauthorization does not
+look ends every call that went for a refresh, whatever the attempt came to —
+it wrote, it lost, the upstream failed or refused, the caller stopped waiting
+at the soft deadline, the lock was not to be had, the lease was spent — and
+it answers a stored token that is good and carries what was asked with the
+life it has. A refresh is an attempt to improve on the stored token, never a
+condition for answering one that is good: an outage improves nothing, and it
+must take nothing away. Only where nothing stored serves the request is what
+the attempt came to answered — `temporarily_unavailable`, `rate_limited`,
+`upstream_rejected`, `lock_timeout` — and the look's own verdicts come before
+that: an expiry or a revocation that landed during the upstream call is what
+is reported, even when the upstream answered `invalid_grant` and the record
+was marked meanwhile. After its own write the token it wrote is answered as
+`refreshed` while that is still what is stored; a reauthorization does not
 take the refresh lock, and what it stored meanwhile is answered as somebody
-else's, and not as `refreshed`. After losing, what is stored is somebody else's or the token that had run
-down, it is judged as on the first look, and what would have been a refresh
-is answered as the outage that brought the call there. A fresh token that is
-good and lacks an asserted scope answers `invalid_scope`, after its rotated
-refresh token was kept: missing what was asked for is not exceeding the
+else's. A fresh token that is good and lacks an asserted scope answers
+`invalid_scope`, after its rotated refresh token was kept: missing what was
+asked for is not exceeding the consent.
+
 consent.
 
 **When a stored token is refreshed.** A token is refreshed once it is half
@@ -788,8 +797,8 @@ reason cannot be attached to a code that has none.
 | `upstream_token_ineligible` | `malformed_token_response` | 502 | operator: the federation adapter reported an answer without a usable access token, or with a field of the wrong type. The grant is untouched; honour `retryAfterSeconds` |
 | `upstream_token_ineligible` | `scope_exceeded` | 502 | no operator action un-accumulates consent: `/reauthorize` for the wider set, or a new grant on a connection of its own (D19) |
 | `upstream_rejected` | the upstream's error code, or `unknown` | 502 | operator, e.g. an expired upstream client secret; the grant is untouched. The code is repeated only when it is one of the RFC 6749, RFC 6750, RFC 8707 and OpenID Connect codes this provider knows, and is `unknown` otherwise — an allow-list, because any pattern that fits `invalid_client` fits an opaque token as well, and an upstream that echoes what it was sent must not get a refresh token repeated through this field |
-| `rate_limited` | `provider`, `upstream` | 429 | retry after `Retry-After` |
-| `temporarily_unavailable` | `upstream`, `storage`, `lock_timeout`, `concurrent_update`, `key_unavailable` | 503 | retry; the grant is untouched. `concurrent_update`: this call's refresh was overtaken — its guarded write lost, or what it wrote was replaced before the last look — and what is stored now is nothing to answer with |
+| `rate_limited` | `provider`, `upstream` | 429 | retry after `Retry-After`. `upstream` is answered only where nothing stored serves the request (D10) |
+| `temporarily_unavailable` | `upstream`, `storage`, `lock_timeout`, `concurrent_update`, `key_unavailable` | 503 | retry; the grant is untouched. Each of these is answered only where nothing stored serves the request (D10). `concurrent_update`: this call's refresh was overtaken — its guarded write lost, or what it wrote was replaced before the last look — and what is stored now is nothing to answer with |
 
 410 follows the session-bound endpoint's `re_authentication_required`. Only an
 upstream `invalid_grant` and a revocation change a grant. No other outcome

@@ -85,7 +85,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			// 13 left — and with a slower look, none, or none of the lock either, and
 			// two replicas would present one refresh token.
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			slowLookUnderLock(12_000);
 			h.refresh.mockResolvedValue(refreshed("rotated", DUE));
 
@@ -113,7 +113,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			// and the caller's ten with them. Counted from the acknowledgement, only
 			// four would be, and the upstream would be asked.
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			const real = h.store.acquireRefreshLock.bind(h.store);
 			vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async (id, options) => {
 				const lock = await real(id, options);
@@ -139,7 +139,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 
 		it("aborts the upstream at the hard deadline counted from the lease's start", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			const real = h.store.acquireRefreshLock.bind(h.store);
 			vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async (id, options) => {
 				const lock = await real(id, options);
@@ -171,7 +171,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 
 		it("refuses a lease it cannot date — a wait that is not a number, negative, or longer than the whole round trip — and lets go of the lock: a refresh does not run on a lease of unknown length", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			h.refresh.mockResolvedValue(refreshed("rotated", DUE));
 			for (const waitedMs of [Number.NaN, "0" as unknown as number, -1, 1]) {
 				const real = h.store.acquireRefreshLock.bind(h.store);
@@ -554,7 +554,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 
 		it("not an endless loop, when the clock it is given does not move", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			h.refresh.mockResolvedValue(refreshed("1", DUE));
 			const write = vi
 				.spyOn(h.store, "replaceCredentials")
@@ -572,7 +572,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 	describe("what is reported, and what is waited for", () => {
 		it("answers a failure the classifier cannot even read like any other that arrived: a typed answer, and the lock let go of", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			// `String()` of this throws, and so does the classifier.
 			h.refresh.mockRejectedValue(Object.create(null));
 			expect(await retrieve()).toStrictEqual({
@@ -622,7 +622,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 
 		it("does not wait for a mark that hangs, under the lock", async () => {
 			await h.seed();
-			setNow(DUE);
+			setNow(GONE);
 			h.refresh.mockRejectedValue(Object.assign(new Error("x"), { error: "invalid_grant" }));
 			vi.spyOn(h.store, "requireReauthorization").mockReturnValue(new Promise(() => {}));
 			const answer = retrieve();
@@ -932,7 +932,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 
 	it("never repeats a secret the upstream echoes as its error code: only codes this provider knows are repeated (D18)", async () => {
 		await h.seed();
-		setNow(DUE);
+		setNow(GONE);
 		// Exactly the shape of an opaque token, and of an error code.
 		h.refresh.mockRejectedValue(Object.assign(new Error("x"), { error: SECRET, status: 400 }));
 		const result = await retrieve();

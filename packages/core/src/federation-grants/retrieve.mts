@@ -404,19 +404,21 @@ function handOver(
  * - The first look, and the same look again once the lock is held, when
  *   another replica may have refreshed already: it sends the call to the
  *   refresh.
- * - `fetched` — the last look before a token this call refreshed is
- *   disclosed, told the access token the call wrote. When that is what is
- *   stored it is answered with its true lifetime, whatever was asked of it: a
- *   call refreshes at most once, and the caller decides (D10). When something
- *   else is stored by then — a reauthorization does not take the refresh
- *   lock — it is somebody else's, and judged as such.
- * - The only look after a lock timeout or a lost write is a first look again:
- *   what is stored is somebody else's, or the token that had run down. A token
- *   that is not half spent is answered as it is, somebody else's included, and
- *   what would have been a refresh is answered by `refresh` below as the
- *   outage that brought the call there. `refresh` runs once per call.
+ * - `attempted` — the last look, after the call went for a refresh, whatever
+ *   came of that: it wrote, it lost, the upstream failed, the lock was not to
+ *   be had, the lease was spent. A stored token that is good and carries what
+ *   was asked is answered with the life it has (D10): a refresh is an attempt
+ *   to improve on it, never a condition for it, and `refresh` runs once per
+ *   call. What would have been a refresh is answered by `refresh` as what the
+ *   attempt came to — and the look's own verdicts, an expiry or a revocation
+ *   that landed meanwhile, come before that.
+ * - `fetched` — with `attempted`, the access token the call wrote. When that
+ *   is what is stored it is this call's own; when something else is stored by
+ *   then — a reauthorization does not take the refresh lock — it is somebody
+ *   else's, and judged as such.
  */
 interface Look {
+	readonly attempted?: true;
 	readonly fetched?: string;
 }
 
@@ -687,7 +689,7 @@ async function evaluate(
 			const wantsMore = !carries || remainingMs <= minTtlSeconds * 1000;
 			const own = look.fetched !== undefined && token.value === look.fetched;
 			const refreshIt = !own && halfSpent && (ranDown || wantsMore);
-			if (carries && (!refreshIt || notAsked !== undefined)) {
+			if (carries && (!refreshIt || notAsked !== undefined || look.attempted === true)) {
 				const grantEndsAt = federationGrantEffectiveExpiry(grant, deps.limits.maxExpiresInMs);
 				return {
 					kind: "token",
@@ -1211,6 +1213,41 @@ async function letGo(
 	else if (!released.ok) report(deps, request, "release", released.error);
 }
 
+/**
+ * The last look of a call that went for a refresh: what is stored NOW, judged
+ * with `attempted`. A token that serves the request is answered; otherwise the
+ * look's own verdict when it has one, and `fallback` — what the attempt came
+ * to — when the look would have refreshed. With `fetched`, the token this call
+ * wrote: answered as `refreshed` only while that is what is stored, and
+ * overtaken — `concurrent_update`, whatever `fallback` says — when something
+ * else is.
+ */
+async function lastLook(
+	deps: RetrieveFederationGrantTokenDeps,
+	request: RetrieveFederationGrantTokenRequest,
+	fallback: FederationGrantDenial,
+	wrote: { readonly fetched?: string } = {},
+): Promise<FederationGrantTokenResult> {
+	const { fetched } = wrote;
+	const stored = await evaluate(deps, request, {
+		attempted: true,
+		...(fetched !== undefined ? { fetched } : {}),
+	});
+	// A write that was replaced before this look was overtaken, whatever the
+	// caller says the attempt came to.
+	const replaced = fetched !== undefined && stored.kind === "refresh" && stored.stored !== fetched;
+	return conclude(
+		deps,
+		request,
+		stored,
+		// `refreshed` says that what is answered is what this call fetched. It is
+		// not when the write brought no access token and kept the one the grant
+		// had (D5), nor when something else was stored before this look.
+		fetched !== undefined && stored.kind === "token" && stored.token.value === fetched,
+		replaced ? unavailable("concurrent_update") : fallback,
+	);
+}
+
 async function refresh(
 	deps: RetrieveFederationGrantTokenDeps,
 	request: RetrieveFederationGrantTokenRequest,
@@ -1236,14 +1273,12 @@ async function refresh(
 			});
 		}
 		report(deps, request, "lock", asked === "elapsed" ? NOT_ANSWERED : asked.error);
-		const denial = unavailable("storage");
-		return conclude(deps, request, { kind: "deny", denial }, false, denial);
+		return lastLook(deps, request, unavailable("storage"));
 	}
 	const lock = asked.value;
 	if (!lock.acquired) {
 		// Whoever held it may have refreshed. One look, which never refreshes.
-		const stored = await evaluate(deps, request);
-		return conclude(deps, request, stored, false, unavailable("lock_timeout"));
+		return lastLook(deps, request, unavailable("lock_timeout"));
 	}
 
 	// One owner of the release, whichever way this ends. Never waited for by the
@@ -1269,8 +1304,7 @@ async function refresh(
 			"lock",
 			new Error("the store did not say how long it waited for the lock"),
 		);
-		const denial = unavailable("storage");
-		return conclude(deps, request, { kind: "deny", denial }, false, denial);
+		return lastLook(deps, request, unavailable("storage"));
 	}
 	const leaseStartedAt = askedAt + waitedMs;
 
@@ -1311,8 +1345,7 @@ async function refresh(
 				"refresh",
 				new Error("the look under the refresh lock used up the lease; the upstream was not asked"),
 			);
-			const denial = unavailable("storage");
-			return conclude(deps, request, { kind: "deny", denial, grant: again.grant }, false, denial);
+			return lastLook(deps, request, unavailable("storage"));
 		}
 		held = again;
 		refresher = found;
@@ -1359,39 +1392,21 @@ async function refresh(
 	if (first === "elapsed") {
 		// A slow upstream must not cost users their grants: the request goes on,
 		// holding the lock, and its result is persisted whenever it arrives. Only
-		// the caller is answered now.
-		const denial = unavailable("upstream");
-		return conclude(deps, request, { kind: "deny", denial, grant: held.grant }, false, denial);
+		// the caller is answered now — with what is stored, when that serves it.
+		return lastLook(deps, request, unavailable("upstream"));
 	}
-	if (first.kind === "denied") {
-		return conclude(
-			deps,
-			request,
-			{ kind: "deny", denial: first.denial, grant: held.grant },
-			false,
-			first.denial,
-		);
-	}
+	if (first.kind === "denied") return lastLook(deps, request, first.denial);
 	// Written or lost, the last look is the same: the record as it is NOW, the
 	// boundary as it is now, and the token that is stored — never the one this
 	// call fetched and holds in a variable.
-	const fetched = first.kind === "written" ? first.fetched : undefined;
-	const stored = await evaluate(deps, request, fetched !== undefined ? { fetched } : {});
-	const overtaken =
-		first.kind === "lost" ||
-		(fetched !== undefined && stored.kind === "refresh" && stored.stored !== fetched);
-	return conclude(
+	// A write that landed and is still what is stored was overtaken by nothing:
+	// if its token cannot be answered, the upstream's token is what failed the
+	// call. Lost, it was overtaken.
+	return lastLook(
 		deps,
 		request,
-		stored,
-		// `refreshed` says that what is answered is what this call fetched. It is
-		// not when the write brought no access token and kept the one the grant
-		// had (D5), nor when something else was stored before this look.
-		fetched !== undefined && stored.kind === "token" && stored.token.value === fetched,
-		// A write that landed and is still what is stored was overtaken by
-		// nothing: if its token cannot be answered, the upstream's token is what
-		// failed the call. Lost, or replaced before this look, it was overtaken.
-		unavailable(overtaken ? "concurrent_update" : "upstream"),
+		unavailable(first.kind === "written" ? "upstream" : "concurrent_update"),
+		first.kind === "written" ? first : {},
 	);
 }
 

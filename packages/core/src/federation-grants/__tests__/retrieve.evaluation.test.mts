@@ -507,8 +507,10 @@ describe("retrieveFederationGrantToken — what is evaluated before any token (#
 			h.refresh.mockRejectedValue(Object.assign(new Error("down"), { status: 503 }));
 			setNow(at(60 * MIN - 30_001));
 			expect((await retrieve()).ok).toBe(true);
+			expect(h.refresh).not.toHaveBeenCalled();
 			setNow(at(60 * MIN - 30_000));
-			expect((await retrieve()).ok).toBe(false);
+			// The refresh fails, and the token that ran down is answered as it is.
+			expect((await retrieve()).ok).toBe(true);
 			expect(h.refresh).toHaveBeenCalledTimes(1);
 		});
 	});

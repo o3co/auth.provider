@@ -426,7 +426,7 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				// exactly this takes a prompt retry, not a late one. Keeping the lock
 				// is for what is still in flight (D12).
 				await h.seed();
-				setNow(at(HOUR - 15_000));
+				setNow(at(HOUR));
 				h.refresh.mockRejectedValueOnce(
 					Object.assign(new Error("fetch failed"), { cause: carried, ...carried }),
 				);
@@ -446,7 +446,7 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 	describe("a store that does not answer when asked for the lock", () => {
 		it("is waited for as long as the lock may be waited for and a little more, and a lock that arrives after that is let go of", async () => {
 			await h.seed();
-			setNow(at(HOUR - 15_000));
+			setNow(at(HOUR));
 			h.refresh.mockResolvedValue(refreshed("1", now()));
 			const acquire = h.store.acquireRefreshLock.bind(h.store);
 			vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async (id, options) => {
@@ -482,7 +482,7 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 	describe("a lock that arrives after the wait for it was given up", () => {
 		it("is let go of within bounds, and a release that fails is reported like any other", async () => {
 			await h.seed();
-			setNow(at(HOUR - 15_000));
+			setNow(at(HOUR));
 			vi.spyOn(h.store, "acquireRefreshLock").mockImplementationOnce(async () => {
 				await new Promise((resolve) => setTimeout(resolve, 20_000));
 				return {
@@ -508,7 +508,7 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 	describe("a write that throws", () => {
 		it("is tried again after a pause, not in a loop that spends the budget at once", async () => {
 			await h.seed();
-			setNow(at(HOUR - 15_000));
+			setNow(at(HOUR));
 			h.refresh.mockResolvedValue(refreshed("1", now()));
 			const write = vi
 				.spyOn(h.store, "replaceCredentials")
