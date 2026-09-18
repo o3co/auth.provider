@@ -828,6 +828,10 @@ export {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "./federation-grants/revision.mjs";
+// #593 slice 5: the wiring a grants deployment must have before a grant may
+// outlive a session (D13). Shared so the routes module and the subject
+// revocation service module cannot hold an adapter to different rules.
+export { requireFederationGrantSubjectRevocation } from "./federation-grants/revocationWiring.mjs";
 // #593, D13: what a Store calls instead of an admin route this provider does
 // not mount — ending one grant, and listing a subject's for a connected-
 // applications page.

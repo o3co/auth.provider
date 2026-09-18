@@ -39,6 +39,9 @@ export {
 	type RenderFrontchannelLogoutHtmlOptions,
 	renderFrontchannelLogoutHtml,
 } from "./logout/renderFrontchannel.mjs";
+// #593 slice 5 (D13): the subject revocation service, installed explicitly —
+// it needs the whole session cascade, which `oauthModule` does not.
+export { subjectRevocationServiceModule } from "./logout/subjectRevocationService.mjs";
 // #484: private_key_jwt client authentication (RFC 7523 §2.2).
 export type {
 	ClientAssertionOutcome,

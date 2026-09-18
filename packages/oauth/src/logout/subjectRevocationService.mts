@@ -1,0 +1,180 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/**
+ * The module that builds core's subject revocation service (#593, D13).
+ *
+ * It lives here, and not in core, for the reason `cascadeSession` is a
+ * parameter at all: tearing one session down is `cascadeLogout`, a carefully
+ * ordered four-store sequence this package owns, and core cannot import it
+ * without inverting the package dependency. The orchestration is core's; the
+ * wiring is the only part that has to be here.
+ *
+ * **Installed explicitly.** It is not folded into `oauthModule`, whose routes
+ * work perfectly well in a deployment with no session stores at all. Requiring
+ * the whole cascade from the module that serves `/oauth/token` would break
+ * those deployments to give this one a component it never asked for.
+ */
+
+import {
+	type AuditEvent,
+	type AuditSink,
+	createSubjectRevocationService,
+	defineModule,
+	type FederationGrantAuditEvent,
+	fullSectionsSchema,
+	requireFederationGrantSubjectRevocation,
+	resolveFederationGrantKeepPolicy,
+	resolveSubjectRevocationHorizonMs,
+} from "@o3co/auth-provider-core";
+import { z } from "zod";
+import { cascadeLogout } from "./cascadeLogout.mjs";
+
+const NAME = "subjectRevocationServiceModule";
+
+/**
+ * Core strips the keys no installed module declares, and the two this reads —
+ * whether grants exist at all, and whether keeping one is allowed — both live
+ * in that block. Taking core's shape rather than restating it keeps the
+ * `${?VAR}` coercions in one place (#288).
+ */
+const configSchema = z.object({
+	federationGrants: fullSectionsSchema.shape.federationGrants,
+});
+
+// biome-ignore lint/suspicious/noExplicitAny: planner-inferred deps shape — the manifest reads only slots it declares in `requires` / `optional`
+type AnyDeps = any;
+
+const grantsEnabled = (deps: AnyDeps): boolean =>
+	(deps.config as { federationGrants?: { enabled?: boolean } }).federationGrants?.enabled === true;
+
+/**
+ * What ended a grant, told to the deployment's sink.
+ *
+ * No `ip` and no `userAgent`, unlike the route bridge: this is a library call
+ * a Store makes after writing a credential, and there is no request behind it
+ * to attribute. Inventing one would put the provider's own address in the
+ * field an operator reads as "where it came from".
+ */
+const auditor = (sink: AuditSink): ((event: FederationGrantAuditEvent) => Promise<void>) => {
+	return async (event) => {
+		const mapped: AuditEvent = {
+			timestamp: new Date(),
+			type: event.type,
+			subject: event.subject,
+			clientId: event.clientId,
+			details: {
+				correlationId: event.correlationId,
+				grantId: event.grantId,
+				...(event.connection === undefined ? {} : { connection: event.connection }),
+				outcome: event.outcome,
+				operation: "subject-revocation",
+			},
+		};
+		// Awaited rather than detached: the caller is a Store waiting on this
+		// call, not a request that will be gone before the sink settles. A sink
+		// that throws still changes nothing — `revokeFederationGrant` swallows
+		// it, because the grant is already revoked and reporting otherwise
+		// would send an operator to undo something that was right.
+		await sink.record(mapped);
+	};
+};
+
+/**
+ * Wires every store the service needs, and refuses the compositions that would
+ * make it lie.
+ *
+ * The refusals are here rather than at request time because each is structural
+ * — what a component *is* — and a subject revocation is the wrong moment to
+ * discover that the grants it should have ended had nowhere to be read from.
+ * They apply only when grants are enabled: a deployment with the feature off
+ * gets exactly the service #296 would have had.
+ */
+export const subjectRevocationServiceModule = defineModule({
+	name: "subject-revocation-service",
+	configSchema,
+	requires: [
+		"config",
+		// The four-store cascade, plus the two stores `cascadeLogout` fans out to.
+		"userSessionStore",
+		"sessionRPRegistry",
+		"sessionFamilyIndex",
+		"sessionFederationIndex",
+		"refreshTokenFamilyRevocation",
+		"federationTokenStore",
+		// What turns "this subject" into sessions, and what outlives them.
+		"subjectSessionIndex",
+		"subjectRevocation",
+	] as const,
+	optional: ["federationGrantStore", "auditSink", "logger"] as const,
+	provides: {
+		subjectRevocationService: (deps: AnyDeps) => {
+			const enabled = grantsEnabled(deps);
+			const store = deps.federationGrantStore;
+			if (enabled && store === undefined) {
+				throw new Error(
+					`${NAME}: federationGrants.enabled = true requires a federationGrantStore ` +
+						"component. Without it a subject-wide revocation would end the sessions and " +
+						"the tokens, report itself complete, and leave every offline credential the " +
+						"subject had standing (D13).",
+				);
+			}
+			const subjectRevocation = enabled
+				? requireFederationGrantSubjectRevocation({
+						module: NAME,
+						subjectRevocation: deps.subjectRevocation,
+						federationGrantStore: store,
+					})
+				: deps.subjectRevocation;
+
+			return createSubjectRevocationService({
+				subjectSessionIndex: deps.subjectSessionIndex,
+				subjectRevocation,
+				cascadeSession: async (sid: string) => ({
+					// `cascadeLogout` answers with its own union, and its `step`
+					// is what makes a failure retryable. What this needs is the
+					// one bit the helper's loop branches on; the detail is
+					// already in the log the cascade wrote.
+					ok:
+						(
+							await cascadeLogout({
+								sid,
+								refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
+								federationTokenStore: deps.federationTokenStore,
+								userSessionStore: deps.userSessionStore,
+								sessionRPRegistry: deps.sessionRPRegistry,
+								sessionFamilyIndex: deps.sessionFamilyIndex,
+								sessionFederationIndex: deps.sessionFederationIndex,
+								...(deps.logger === undefined ? {} : { logger: deps.logger }),
+							})
+						).outcome === "done",
+				}),
+				// The boundary must outlive the longest-lived thing it covers,
+				// which is configuration this module can read and the service
+				// cannot.
+				watermarkTtlMs: resolveSubjectRevocationHorizonMs(deps.config),
+				...(enabled && store !== undefined ? { federationGrantStore: store } : {}),
+				// Gated on the feature: an allowance to keep grants in a
+				// deployment that has none is an allowance over nothing, and
+				// letting it through would make the service refuse an adapter
+				// that a grantless deployment has every right to use.
+				allowKeep: enabled && resolveFederationGrantKeepPolicy(deps.config),
+				...(deps.auditSink === undefined ? {} : { federationGrantAudit: auditor(deps.auditSink) }),
+				...(deps.logger === undefined ? {} : { logger: deps.logger }),
+			});
+		},
+	} as never,
+});
