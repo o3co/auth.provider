@@ -17,7 +17,37 @@
 import { z } from "zod";
 import { fullSectionsSchema } from "../config/application.schema.mjs";
 import { defineModule } from "../modules/index.mjs";
+import { createMemoryFederationGrantIntentStore } from "./intentMemory.mjs";
 import { createMemoryFederationGrantStore } from "./memory.mjs";
+
+/**
+ * Built-in module that provides the in-process
+ * {@link FederationGrantIntentStore} (#593, D16, slice 6) — acquisition's
+ * records: the intent a backend lodged, the consent challenge a browser
+ * answers, and the connect transaction a callback consumes.
+ *
+ * Dev and single-replica only, and refused by name under
+ * `deployment.mode = "multi"`. Unlike the in-memory grant store beside a
+ * durable one, this pairing is permitted for a single replica: a restart loses
+ * flows in progress, and no established grant or revocation with it.
+ *
+ * It needs no configuration. The one deadline of an acquisition is the flow
+ * budget, which core sets when it lodges the intent, and the bound on live
+ * first-time intents is a constant on the port — neither is an operator's to
+ * tune, so this module reads nothing.
+ */
+export const memoryFederationGrantIntentStoreModule = defineModule({
+	name: "core-federation-grant-intent-store-memory",
+	// #455: what forks per replica, quoted into a refused multi-replica boot.
+	replicaSafety: {
+		unsafe: true,
+		reason:
+			"federation grant acquisition forks per replica — an intent lodged on one replica is unknown to every other, so the consent page and the upstream callback answer as if the flow had expired whenever they land elsewhere, and the bound on live intents is counted per replica instead of per (client, subject)",
+	},
+	provides: {
+		federationGrantIntentStore: () => createMemoryFederationGrantIntentStore(),
+	},
+});
 
 /**
  * Built-in module that provides the in-process memory
