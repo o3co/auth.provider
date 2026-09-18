@@ -921,6 +921,142 @@ export interface PendingConsentStoreClient {
 // `bootstrapComponents` get the slot types automatically.
 // ---------------------------------------------------------------------------
 
+// --- FederationGrantStoreClient (#593) -------------------------------------
+
+/**
+ * A federation grant as it lives in Redis: one HASH per grant, every field a
+ * string, beside one STRING holding the sealed credential (#593, D16). The
+ * field names are part of the contract, because the scripts read them by name.
+ *
+ * Two fields are arithmetic rather than record: `retentionMs` is the
+ * tombstone retention as it was when the grant was created, and `expiresAtMs`
+ * repeats the authorization's expiry outside the authenticated text. They
+ * decide what Redis reclaims and what a write may touch — never what a caller
+ * is told. Every answer is judged on the authenticated text, so a `expiresAtMs`
+ * someone rewrote in the keyspace can make a key linger; it cannot make a
+ * credential be disclosed past the expiry the upstream consented to.
+ */
+export interface FederationGrantHashFields {
+	/** The layout's own version, so a later one can be told apart rather than misread. */
+	readonly format: string;
+	/** JSON `[id, subject, clientId, connection, createdAtMs]`. */
+	readonly base: string;
+	readonly status: string;
+	readonly version: string;
+	readonly retentionMs: string;
+	/** The canonical authorization text, byte for byte as it was sealed under. Absent before authorization. */
+	readonly authorization?: string;
+	/** The authorization's `expiresAt`, in epoch milliseconds. Absent before authorization. */
+	readonly expiresAtMs?: string;
+	/** The current intent's opaque handle, JSON-encoded, and when it lapses. Absent when there is none. */
+	readonly intentHandle?: string;
+	readonly intentExpiresAt?: string;
+	readonly lastUsedAt?: string;
+	/** JSON `[reason, atMs, judgedAgainst]`. */
+	readonly ineligible?: string;
+	readonly failureAt?: string;
+	readonly failureKind?: string;
+	readonly failureCount?: string;
+	readonly failureRetryAfterSeconds?: string;
+	readonly failureUpstreamCode?: string;
+	readonly revokedBy?: string;
+	readonly revokedAt?: string;
+}
+
+export interface CreatePendingFederationGrantInput {
+	/** The caller's clock, in epoch milliseconds. */
+	readonly nowMs: number;
+	/** {@link FederationGrantHashFields.base}, already encoded. */
+	readonly base: string;
+	/** The intent's handle, JSON-encoded. */
+	readonly handle: string;
+	readonly intentExpiresAtMs: number;
+	readonly retentionMs: number;
+}
+
+export interface NameFederationGrantIntentInput {
+	readonly nowMs: number;
+	readonly handle: string;
+	readonly intentExpiresAtMs: number;
+}
+
+export interface RetireFederationGrantIntentInput {
+	readonly nowMs: number;
+	/** When given, the pointer is removed only if this is the handle it holds. */
+	readonly handle?: string;
+}
+
+/** What one read returns: the record and its credential as they were at one instant. */
+export interface FederationGrantSnapshot {
+	readonly fields: FederationGrantHashFields;
+	/** `null` when the key is not there. An empty string is a credential, and not that. */
+	readonly credential: string | null;
+}
+
+/**
+ * The indivisible steps the Redis federation grant store is built from
+ * (#593, D16). Every method here is one round trip, and every write is one
+ * script: a guard evaluated in the client and a write sent after it would let
+ * a concurrent activation, refresh or revocation land in between.
+ *
+ * A refused write says `null` and nothing else. The record may change again
+ * before the caller looks, so the port has it re-read and re-evaluated (D2),
+ * and a reason here would oblige two adapters to agree on which precondition
+ * wins when several fail at once.
+ *
+ * Keys are passed in whole rather than built here: the store owns the layout,
+ * and a script that discovered key names inside Lua would not be safe to run
+ * on a Cluster.
+ */
+export interface FederationGrantStoreClient {
+	/**
+	 * Creates the `pending` record at `grantKey`, at version 1, with its
+	 * intent, and takes any credential at `credKey` with it. Refuses when a
+	 * record is already there — however far ahead the caller's clock is — and
+	 * when the intent's expiry is not after `nowMs`.
+	 */
+	createPending(
+		grantKey: string,
+		credKey: string,
+		input: CreatePendingFederationGrantInput,
+	): Promise<FederationGrantHashFields | null>;
+	/** The record and its credential, read together. `null` when there is no record. */
+	snapshot(grantKey: string, credKey: string): Promise<FederationGrantSnapshot | null>;
+	/** Replaces the intent pointer of an `active` or `reauthorization_required` record, and nothing else. */
+	nameIntent(
+		grantKey: string,
+		input: NameFederationGrantIntentInput,
+	): Promise<FederationGrantHashFields | null>;
+	/** Removes the intent pointer of an `active` or `reauthorization_required` record, and nothing else. */
+	retireIntent(
+		grantKey: string,
+		input: RetireFederationGrantIntentInput,
+	): Promise<FederationGrantHashFields | null>;
+	/** Moves `lastUsedAt` forward, and never back. Writes nothing when there is no record. */
+	touch(grantKey: string, atMs: number): Promise<void>;
+	/**
+	 * Reserves `member` in the subject's index at `horizonMs` — the instant the
+	 * record stops answering — and pushes the index's own deadline to the last
+	 * horizon it holds plus `allowanceMs`.
+	 *
+	 * The score only ever moves forward. Two writers lodging one ID both
+	 * reserve, and the one whose record is created is not the one that reserved
+	 * last: a reservation that lost must not pull the horizon back under the
+	 * record that won. A reservation is never withdrawn, for the same reason.
+	 */
+	reserve(indexKey: string, member: string, horizonMs: number, allowanceMs: number): Promise<void>;
+	/** Everything the index holds, nearest horizon first. */
+	members(indexKey: string): Promise<readonly string[]>;
+	/**
+	 * Drops members whose horizon passed more than `allowanceMs` before
+	 * `clockMs` — the adapter's own clock, as a key TTL is, and never a
+	 * caller's. Never by whether the record is there: the index and the record
+	 * are different keys, so a member reserved for a record still being written
+	 * would be dropped by that rule, and nothing would ever put it back.
+	 */
+	prune(indexKey: string, clockMs: number, allowanceMs: number): Promise<void>;
+}
+
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
 		readonly challengeStoreClient?: ChallengeStoreClient;
@@ -939,5 +1075,6 @@ declare module "@o3co/auth-provider-core" {
 		readonly deviceCodeStoreClient?: DeviceCodeStoreClient;
 		readonly consentStoreClient?: ConsentStoreClient;
 		readonly pendingConsentStoreClient?: PendingConsentStoreClient;
+		readonly federationGrantStoreClient?: FederationGrantStoreClient;
 	}
 }
