@@ -345,11 +345,20 @@ cannot cost every user a reconnect:
 - A rotated refresh token is **always** persisted, even when the access token
   that came with it is ineligible. Discarding the response would discard the
   only valid credential.
-- An access token is ineligible when it fails condition 2, or when the scopes
-  the refresh response reports are not within `consent.scopes`. The second
-  case is real: an IdP that accumulates consent returns, on refresh, every
-  scope the user has since granted to the same upstream client, and the
-  generic OIDC adapter sends no `scope` on refresh to narrow it.
+- An access token is ineligible when it fails condition 2, when the scopes
+  the refresh response reports are not within `consent.scopes`, or when it is
+  not a bearer token (`token_type_unsupported`). The second case is real: an
+  IdP that accumulates consent returns, on refresh, every scope the user has
+  since granted to the same upstream client; the delegated refresh sends the
+  grant's scopes to narrow it (D17), and an IdP that ignores that is what the
+  predicate is for. The third: a sender-constrained token — DPoP, or any
+  other — is bound to a key the client that receives it does not hold, and
+  disclosing it as a bearer token would hand out something that cannot be
+  used; `token_type` is compared without regard to case, since oauth4webapi
+  lower-cases what it was sent. Through the generic OIDC adapter only `dpop`
+  reaches this rule — oauth4webapi refuses any other token type before the
+  adapter sees the body, and the adapter answers `{ refreshToken }` — but a
+  cached token, and another adapter, are judged by it all the same.
 - An ineligible access token is withheld **and never written**. The call
   answers `upstream_token_ineligible` — unless the token the grant had still
   serves the request, as below — the grant is untouched, and an operator who
@@ -792,7 +801,7 @@ reason cannot be attached to a code that has none.
 | `access_denied` | `connection_not_permitted` | 403 | configuration: the client may not use the connection, the operator removed it, or its federation cannot refresh for a grant. Do not retry. Reported after a revocation, the backstop and an expiry, and before a changed identity (D10) |
 | `invalid_request` | `connection_mismatch`, `min_ttl_out_of_range` | 400 | the request is malformed; the reason is for an `error_description` |
 | `invalid_scope`, `invalid_target` | — | 400 | the request exceeds the grant — or, for `invalid_scope`, the stored token does not carry what was asked for and it is too early to ask the upstream again (D10): a refresh may bring the scope once the token is half spent |
-| `upstream_token_ineligible` | `no_finite_lifetime`, `lifetime_over_maximum` | 502 | operator; the grant is untouched; honour `retryAfterSeconds` |
+| `upstream_token_ineligible` | `no_finite_lifetime`, `lifetime_over_maximum`, `token_type_unsupported` | 502 | operator; the grant is untouched; honour `retryAfterSeconds`. `token_type_unsupported`: the upstream issues sender-constrained tokens for this client, which a bearer route cannot present |
 | `upstream_token_ineligible` | `malformed_token_response` | 502 | operator: the federation adapter reported an answer without a usable access token, or with a field of the wrong type. The grant is untouched; honour `retryAfterSeconds` |
 | `upstream_token_ineligible` | `scope_exceeded` | 502 | no operator action un-accumulates consent: `/reauthorize` for the wider set, or a new grant on a connection of its own (D19) |
 | `upstream_rejected` | the upstream's error code, or `unknown` | 502 | operator, e.g. an expired upstream client secret; the grant is untouched. Answered from the stamp of a failed refresh (D12) it carries `retryAfterSeconds`, and is answered only where nothing stored serves the request (D10). The code is repeated only when it is one of the RFC 6749, RFC 6750, RFC 8707 and OpenID Connect codes this provider knows, and is `unknown` otherwise — an allow-list, because any pattern that fits `invalid_client` fits an opaque token as well, and an upstream that echoes what it was sent must not get a refresh token repeated through this field |
@@ -1474,7 +1483,14 @@ per-call fetch — the endpoint compared as a URL, however the metadata spells
 it — and, when the library throws, answers `{ refreshToken }` from what it
 read. Only a 200 is ever captured: an error the IdP answered with is a 4xx,
 has nothing to salvage from whatever its body says, and is thrown as the
-library throws it, for the classifier. The captured body is also where the
+library throws it, for the classifier. The rule is wider than "could not
+parse": a valid answer whose id_token the library then failed to verify —
+its JWKS unreachable, or the caller's abort landing during that fetch — is
+answered as `{ refreshToken }` too, since the credential it carries is the
+one to keep, and core treats it as after a malformed answer, marker and
+interval included. That is a transient reported as a broken adapter for one
+interval, bounded by the JWKS cache; rethrowing instead would keep the old
+refresh token in the store after the IdP had rotated it. The captured body is also where the
 lifetime is judged: the library coerces `expires_in` with `parseFloat`, so
 `[3600, 7200]` would read as 3600, and a value that is neither a number nor
 a string of digits withholds the access token and keeps the refresh token.

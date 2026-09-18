@@ -167,7 +167,8 @@ never reaches the Store.
   runs the `refresh_token` grant with the grant's scopes and resource under
   the caller's `AbortSignal`, answers the raw `expires_in`, `scope` and
   `token_type`, and keeps a rotated refresh token out of an answer the library
-  refuses to parse.
+  did not accept — one it could not parse, or one whose id_token it could not
+  verify.
 - `SupportsLogout` — present only when the issuer publishes an
   `end_session_endpoint` (or `endpoints.endSessionEndpoint` names one):
   RP-initiated logout with `id_token_hint`, `post_logout_redirect_uri` and

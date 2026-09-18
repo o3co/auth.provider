@@ -447,11 +447,16 @@ export async function createOidcProvider(
 			);
 		}
 		const extra = params.authorizationParams ?? {};
-		for (const key of Object.keys(extra)) {
+		for (const [key, value] of Object.entries(extra)) {
 			if (RESERVED_AUTHORIZATION_PARAMS.has(key)) {
 				throw new Error(
 					`${label}: authorizationParams may not set "${key}" — this provider owns it (#593, D17)`,
 				);
+			}
+			// A value that is not a string would be sent spelled out ("undefined"),
+			// and an undefined prompt would defeat the consent default below.
+			if (typeof value !== "string") {
+				throw new Error(`${label}: authorizationParams "${key}" must be a string`);
 			}
 		}
 		return oidc.buildAuthorizationUrl(configuration, {

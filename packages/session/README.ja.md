@@ -342,7 +342,7 @@ function supportsDelegatedAuthorization(
 
 - scope は intent のもので、provider のログイン scope ではない。`nonce` は必須。`resource` は認可時も refresh 時も RFC 8707 のパラメータとして送る。
 - `authorizationParams` で provider が所有するパラメータ（`client_id`、`response_type`、`redirect_uri`、`state`、`code_challenge`、`code_challenge_method`、`nonce`、`scope`、`resource`、`request`、`request_uri`、`response_mode`）を指定すると throw する。openid-client は `client_id` と `response_type` を未指定のときにしか設定しないので、複製されたパラメータは別の registration へ consent を送ってしまう。`offline_access` を求めるときは `prompt=consent` を付ける（OIDC Core §11）。operator 自身の `prompt` が優先される。
-- ライブラリが解釈を拒んだ応答にも rotate 済みの refresh token が含まれ得る。adapter は throw せず `{ refreshToken }` を返し、唯一の有効な credential を失わない。IdP が返したエラーは、ライブラリが投げるまま投げる。
+- ライブラリが受け入れなかった応答（解釈できなかったもの、JWKS に届かず id_token を検証できなかったもの）にも rotate 済みの refresh token が含まれ得る。adapter は throw せず `{ refreshToken }` を返し、唯一の有効な credential を失わない。core はこれを malformed な応答の後として扱う。IdP が返したエラーは、ライブラリが投げるまま投げる。
 - `expiresIn` は送られてきた `expires_in` そのもの（数値か、数字だけの文字列）。それ以外なら access token を出さず refresh token だけ返す。`expiresAt` は応答が届いた時刻を起点にし、ライブラリの検証時間を含めない。`tokenType` はライブラリが報告するまま。
 
 ```ts

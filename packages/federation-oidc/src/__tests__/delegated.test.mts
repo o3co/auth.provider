@@ -110,6 +110,19 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			}
 		});
 
+		it('refuses an operator parameter whose value is not a string: a configuration fault, not a parameter named "undefined"', async () => {
+			const { provider } = await build();
+			for (const value of [undefined, 42, null, ["consent"]]) {
+				expect(
+					() =>
+						authorize(provider, {
+							authorizationParams: { prompt: value } as unknown as Record<string, string>,
+						}),
+					String(value),
+				).toThrow(/prompt/);
+			}
+		});
+
 		it("refuses scopes without openid, an empty list, and no nonce: configuration faults, not answers", async () => {
 			const { provider } = await build();
 			expect(() => authorize(provider, { scopes: ["offline_access"] })).toThrow(/openid/);
@@ -209,6 +222,17 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 					(cause instanceof Error && /gave up/.test(cause.message))
 				);
 			});
+		});
+
+		it("salvages nothing that is not a refresh token: a malformed answer whose refresh_token is empty or not a string is thrown", async () => {
+			const { idp, provider } = await build();
+			for (const refreshToken of ["", 123, null]) {
+				idp.refreshAnswer = { scope: ["openid"], refresh_token: refreshToken };
+				await expect(
+					provider.refreshDelegatedToken({ refreshToken: "rt-1" }),
+					String(refreshToken),
+				).rejects.toThrow();
+			}
 		});
 
 		it("keeps the rotated refresh token out of an answer the library refuses to parse: what D5 persists is never lost to a parser", async () => {
