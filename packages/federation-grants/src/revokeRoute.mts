@@ -56,7 +56,7 @@ import type {
 	FederationGrantStore,
 	Logger,
 } from "@o3co/auth-provider-core";
-import type { RequestHandler, Response } from "express";
+import type { RequestHandler } from "express";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
 import { markHandlerReached } from "./denialAudit.mjs";
@@ -111,7 +111,7 @@ export function createFederationGrantRevokeHandler(
 			outcome: string,
 			subject?: string,
 		): void => {
-			respond(res, status, body);
+			res.status(status).json(body);
 			options.background.register(
 				audit(
 					routeDeniedEvent({
@@ -231,10 +231,4 @@ export function createFederationGrantRevokeHandler(
 			release();
 		}
 	};
-}
-
-/** Writes the refusal, unless something already answered. */
-function respond(res: Response, status: number, body: Record<string, string>): void {
-	if (res.headersSent) return;
-	res.status(status).json(body);
 }

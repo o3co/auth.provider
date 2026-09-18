@@ -309,7 +309,13 @@ describe("createSubjectRevocationService", () => {
 			const h = harness();
 			await h.seed();
 			vi.spyOn(h.store, "retireIntent").mockRejectedValue(new Error("store is down"));
-			const service = createSubjectRevocationService(keeping({ federationGrantStore: h.store }));
+			const logged: string[] = [];
+			const service = createSubjectRevocationService(
+				keeping({
+					federationGrantStore: h.store,
+					logger: { error: (_fields: unknown, message: string) => logged.push(message) },
+				}),
+			);
 
 			const result = await service.revokeAllForSubject({
 				subject: "u-1",
@@ -327,6 +333,93 @@ describe("createSubjectRevocationService", () => {
 			expect(result.failures).toContainEqual(
 				expect.objectContaining({ operation: "retireIntent", grantId: "g-1" }),
 			);
+			expect(logged).toContain("revoke_all_retire_intent_failed");
+		});
+
+		it("leaves a grant the operator dated still live when its write threw, and says so", async () => {
+			// The incident the runbook is about. There is no grants boundary
+			// behind a keep, so this grant is usable until somebody retries —
+			// unlike the same failure under a full revocation, where the
+			// boundary refuses it at `/token` meanwhile.
+			const h = harness();
+			const since = new Date(now().getTime() - 10 * MIN);
+			await h.seed({ id: "g-bad", consentAt: since });
+			vi.spyOn(h.store, "revoke").mockRejectedValue(new Error("store is down"));
+			const logged: string[] = [];
+			const service = createSubjectRevocationService(
+				keeping({
+					federationGrantStore: h.store,
+					logger: { error: (_fields: unknown, message: string) => logged.push(message) },
+				}),
+			);
+
+			const result = await service.revokeAllForSubject({
+				subject: "u-1",
+				federationGrants: "keep",
+				revokeGrantsConsentedSince: since,
+			});
+
+			expect(result.complete).toBe(false);
+			expect(result.grantsFailed).toEqual(["g-bad"]);
+			expect(result.grantsRetireFailed).toEqual([]);
+			expect(result.failures).toContainEqual(
+				expect.objectContaining({ operation: "revoke", grantId: "g-bad" }),
+			);
+			expect((await h.store.find("g-bad", now()))?.status).toBe("active");
+			// A failed revocation and a failed retirement are different lines,
+			// because they send an operator to different places.
+			expect(logged).toContain("revoke_all_revoke_grant_failed");
+		});
+
+		it("reports a listing outage rather than calling it a subject with no grants", async () => {
+			const h = harness();
+			await h.seed();
+			vi.spyOn(h.store, "listBySubject").mockRejectedValue(new Error("store is down"));
+			const service = createSubjectRevocationService(keeping({ federationGrantStore: h.store }));
+
+			const result = await service.revokeAllForSubject({
+				subject: "u-1",
+				federationGrants: "keep",
+			});
+
+			expect(result.complete).toBe(false);
+			expect(result.failures).toContainEqual(
+				expect.objectContaining({ capability: "federationGrantStore", operation: "listBySubject" }),
+			);
+			// The sessions still ended: one pass failing does not cost another.
+			expect(result.tokensRevoked).toBe(true);
+		});
+
+		it("does not count a dated grant somebody else had already ended", async () => {
+			const h = harness();
+			const since = new Date(now().getTime() - 10 * MIN);
+			await h.seed({ id: "g-race", consentAt: since });
+			vi.spyOn(h.store, "revoke").mockResolvedValue({ ok: false });
+			const service = createSubjectRevocationService(keeping({ federationGrantStore: h.store }));
+
+			const result = await service.revokeAllForSubject({
+				subject: "u-1",
+				federationGrants: "keep",
+				revokeGrantsConsentedSince: since,
+			});
+
+			expect(result.complete).toBe(true);
+			expect(result.grantsRevoked).toEqual([]);
+			expect(result.grantsFailed).toEqual([]);
+		});
+
+		it("runs on the real clock when no clock is injected", async () => {
+			const revocation = createInMemorySubjectRevocation();
+			const { now: _injected, ...withoutClock } = keeping({ subjectRevocation: revocation });
+			const service = createSubjectRevocationService(
+				withoutClock as Parameters<typeof createSubjectRevocationService>[0],
+			);
+
+			await service.revokeAllForSubject({ subject: "u-1", federationGrants: "keep" });
+
+			const stamped = await revocation.revokedBefore("u-1");
+			expect(stamped).not.toBeNull();
+			expect(Math.abs((stamped as Date).getTime() - Date.now())).toBeLessThan(5_000);
 		});
 
 		it("does not count a grant that had no renewal to end", async () => {

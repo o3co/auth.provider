@@ -29,8 +29,12 @@
  * not both this client's and this subject's.
  */
 
+import { createMemoryFederationGrantStore } from "@o3co/auth-provider-core";
+import type { Request, Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
+import { createFederationGrantBackground } from "#/background.mjs";
+import { createFederationGrantRevokeHandler } from "#/revokeRoute.mjs";
 import {
 	basic,
 	CLIENT_ID,
@@ -283,7 +287,12 @@ describe("the revoke route — the trail it leaves", () => {
 		const h = harness({ withSink: true });
 		await h.seed();
 
-		await ask(h);
+		// With a `User-Agent`, which the event carries where the request had one.
+		await request(h.app)
+			.post(path())
+			.set("Authorization", basic())
+			.set("User-Agent", "worker/1.0")
+			.send({ sub: SUBJECT });
 		await h.background.drain();
 
 		const revoked = h.events.filter((event) => event.type === "federation.grant.revoked");
@@ -304,6 +313,26 @@ describe("the revoke route — the trail it leaves", () => {
 		await h.background.drain();
 
 		expect(h.events.filter((event) => event.type === "federation.grant.revoked")).toHaveLength(1);
+	});
+
+	it("is not undone by a sink that throws", async () => {
+		// The grant is revoked. A sink that failed is an operator's problem
+		// with their sink, and turning it into a failed withdrawal would send
+		// them to undo something that was right.
+		const h = harness({ withSink: true });
+		await h.seed();
+		const sink = h.events as unknown as { push: (event: unknown) => number };
+		vi.spyOn(sink, "push").mockImplementation(() => {
+			throw new Error("the sink is down");
+		});
+
+		expect((await ask(h)).status).toBe(204);
+		// The same holds for a refusal's own event: the 404 is the answer
+		// whether or not anybody could be told about it.
+		expect((await ask(h, "g-nothing")).status).toBe(404);
+		// And the drain does not reject on the promises nobody is holding.
+		await expect(h.background.drain()).resolves.toBeUndefined();
+		expect(await statusOf(h)).toBe("revoked");
 	});
 
 	it("counts a refused withdrawal as its own kind of event", async () => {
@@ -353,5 +382,113 @@ describe("the revoke route — the trail it leaves", () => {
 		// The subject on the event is the one the caller ASSERTED. Reporting
 		// the record's would tell the caller whose grant they just guessed at.
 		expect(denied).toMatchObject({ subject: SUBJECT });
+	});
+});
+
+/**
+ * The handler on its own, for the exits the router cannot produce.
+ *
+ * Two of them are only reachable by mounting the chain wrongly or by a
+ * response that will not write, and both answer 500 — the status that means
+ * "this provider is broken", as distinct from the 503 that means "come back".
+ * The third is simply what the handler does with nothing injected.
+ */
+describe("the revoke route — what only a broken composition reaches", () => {
+	const fakeRes = () => {
+		const sent: { status?: number; body?: unknown; ended?: boolean } = {};
+		const res = {
+			getHeader: () => undefined,
+			status(code: number) {
+				sent.status = code;
+				return this;
+			},
+			json(body: unknown) {
+				sent.body = body;
+				return this;
+			},
+			end() {
+				sent.ended = true;
+				return this;
+			},
+		};
+		return { res: res as unknown as Response, sent };
+	};
+
+	/** No `oauthClient`, no `ip`, no `user-agent`: a request nothing has enriched. */
+	const bareReq = (over: Record<string, unknown> = {}) =>
+		({
+			params: { grantId: GRANT_ID },
+			body: { sub: SUBJECT },
+			get: () => undefined,
+			...over,
+		}) as unknown as Request;
+
+	/** No clock, no logger, no sink — every optional seam left out. */
+	const bare = (store = createMemoryFederationGrantStore()) =>
+		createFederationGrantRevokeHandler({ store, background: createFederationGrantBackground() });
+
+	it("answers 500 when the chain was mounted without client authentication", async () => {
+		// The middleware that establishes the client answers on its own when it
+		// fails, so an authenticated-client-less request here is a composition
+		// error and not a caller's mistake.
+		const store = createMemoryFederationGrantStore();
+		const find = vi.spyOn(store, "find");
+		const { res, sent } = fakeRes();
+
+		await bare(store)(bareReq(), res, () => undefined);
+
+		expect(sent.status).toBe(500);
+		expect(sent.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		// And it looked nothing up: there is nobody to look it up for.
+		expect(find).not.toHaveBeenCalled();
+	});
+
+	it("answers 500 when the response itself will not write", async () => {
+		const store = createMemoryFederationGrantStore();
+		const now = new Date();
+		await store.createPending({
+			id: GRANT_ID,
+			subject: SUBJECT,
+			clientId: CLIENT_ID,
+			connection: connection.name,
+			intent: { handle: "h", expiresAt: new Date(now.getTime() + 600_000) },
+			now,
+		});
+		const { res, sent } = fakeRes();
+		vi.spyOn(res, "end").mockImplementation(() => {
+			throw new Error("the socket is gone");
+		});
+
+		await bare(store)(bareReq({ oauthClient: { clientId: CLIENT_ID } }), res, () => undefined);
+
+		// The grant was ended all the same — the write happened before the
+		// answer could not be written.
+		expect((await store.find(GRANT_ID, new Date()))?.status).toBe("revoked");
+		expect(sent.status).toBe(500);
+	});
+
+	it("runs on the real clock, and tells nobody, when nothing is injected", async () => {
+		const { res, sent } = fakeRes();
+
+		await bare()(bareReq({ oauthClient: { clientId: CLIENT_ID } }), res, () => undefined);
+
+		// No grant, so the same 404 every ownership failure answers.
+		expect(sent.status).toBe(404);
+		expect(sent.body).toEqual({ error: "grant_not_found" });
+	});
+
+	it("answers the same 404 when it is mounted on a path that names no grant", async () => {
+		// Express always hands a matched parameter over as a string, so this is
+		// only reachable by mounting the handler somewhere it does not belong —
+		// and the answer is the one that tells such a caller nothing.
+		const { res, sent } = fakeRes();
+
+		await bare()(
+			bareReq({ params: {}, oauthClient: { clientId: CLIENT_ID } }),
+			res,
+			() => undefined,
+		);
+
+		expect(sent.status).toBe(404);
 	});
 });
