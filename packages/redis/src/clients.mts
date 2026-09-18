@@ -1154,6 +1154,10 @@ export interface FederationGrantStoreClient {
 	reserve(indexKey: string, member: string, horizonMs: number, allowanceMs: number): Promise<void>;
 	/** Everything the index holds, nearest horizon first. */
 	members(indexKey: string): Promise<readonly string[]>;
+	/** `SET key token NX PX ttl`: whether this caller now holds the lock. */
+	tryLock(lockKey: string, token: string, ttlMs: number): Promise<boolean>;
+	/** Deletes the lock only while its value is still `token`: past the TTL it is somebody else's. */
+	unlock(lockKey: string, token: string): Promise<void>;
 	/**
 	 * Drops members whose horizon passed more than `allowanceMs` before
 	 * `clockMs` — the adapter's own clock, as a key TTL is, and never a

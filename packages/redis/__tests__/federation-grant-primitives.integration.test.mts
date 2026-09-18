@@ -680,3 +680,31 @@ describe("noteRefreshFailure (#593, D12)", () => {
 		expect(await stamp({ nowMs: at(30 * DAY), atMs: at(30 * DAY) })).toBeNull();
 	});
 });
+
+describe("the lock over a real connection (#593, D12)", () => {
+	const lockKey = (id: string): string => `${prefix}{${id}}:lock`;
+
+	it("is held by one caller at a time, and its TTL is the one asked for", async () => {
+		expect(await client.tryLock(lockKey("g-1"), "token-a", 30_000)).toBe(true);
+		expect(await client.tryLock(lockKey("g-1"), "token-b", 30_000)).toBe(false);
+		const ttl = await redis.pttl(lockKey("g-1"));
+		expect(ttl).toBeGreaterThan(29_000);
+		expect(ttl).toBeLessThanOrEqual(30_000);
+	});
+
+	it("is freed only by the token that holds it: past the TTL the lock is somebody else's", async () => {
+		await client.tryLock(lockKey("g-1"), "token-a", 30_000);
+		await client.unlock(lockKey("g-1"), "token-b");
+		expect(await redis.get(lockKey("g-1"))).toBe("token-a");
+		await client.unlock(lockKey("g-1"), "token-a");
+		expect(await redis.exists(lockKey("g-1"))).toBe(0);
+		// And freeing one that is already gone is not an error.
+		await client.unlock(lockKey("g-1"), "token-a");
+	});
+
+	it("is a key of its own, and taking it changes no record", async () => {
+		await pending();
+		await client.tryLock(lockKey("g-1"), "token-a", 30_000);
+		expect((await client.snapshot(grantKey("g-1"), credKey("g-1")))?.fields.version).toBe("1");
+	});
+});

@@ -1113,6 +1113,8 @@ const FG_RETIRE_INTENT = defineScript(LUA_FG_RETIRE_INTENT);
 const FG_TOUCH = defineScript(LUA_FG_TOUCH);
 const FG_RESERVE = defineScript(LUA_FG_RESERVE);
 const FG_PRUNE = defineScript(LUA_FG_PRUNE);
+/** The same source the session lock uses: a delete that only frees the value it was given. */
+const FG_UNLOCK = defineScript(LUA_COMPARE_AND_DELETE);
 const FG_ACTIVATE = defineScript(LUA_FG_ACTIVATE);
 const FG_REPLACE = defineScript(LUA_FG_REPLACE);
 const FG_REQUIRE_REAUTH = defineScript(LUA_FG_REQUIRE_REAUTH);
@@ -1832,6 +1834,13 @@ export interface FederationGrantRedisCommands {
 	evalsha(sha: string, numkeys: number, ...args: (string | number)[]): Promise<unknown>;
 	eval(script: string, numkeys: number, ...args: (string | number)[]): Promise<unknown>;
 	zrange(key: string, start: number, stop: number): Promise<string[]>;
+	set(
+		key: string,
+		value: string,
+		expiryMode: "PX",
+		ttlMs: number,
+		condition: "NX",
+	): Promise<"OK" | null>;
 }
 
 /** A number as a Redis argument: never in exponent form, whatever its magnitude. */
@@ -2006,6 +2015,15 @@ export function makeIoredisFederationGrantStoreClient(
 				[indexKey],
 				[member, fgNumber(horizonMs), fgNumber(allowanceMs)],
 			);
+		},
+
+		async tryLock(lockKey, token, ttlMs) {
+			const reply = await io.set(lockKey, token, "PX", ttlMs, "NX");
+			return reply === "OK";
+		},
+
+		async unlock(lockKey, token) {
+			await runScript(connection, FG_UNLOCK, [lockKey], [token]);
 		},
 
 		async members(indexKey) {
