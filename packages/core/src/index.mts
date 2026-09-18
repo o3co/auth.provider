@@ -766,7 +766,10 @@ export {
 	type PendingConsentRecord,
 	type PendingConsentStore,
 } from "./consents/types.mjs";
-
+// #593 (D18): what an audit event says about the grant it concerns. Its own
+// module because the retrieval, the revocation library call and the routes all
+// need the same answer and cannot import each other.
+export { federationGrantAuditMetadata } from "./federation-grants/auditMetadata.mjs";
 // #593: federation grants — a consented, bounded grant under which the
 // provider holds an upstream refresh credential for a confidential client.
 // These are the domain rules only: no store, no route, nothing is wired yet.
@@ -837,7 +840,6 @@ export { requireFederationGrantSubjectRevocation } from "./federation-grants/rev
 // applications page.
 export {
 	type FederationGrantAdministrationDeps,
-	federationGrantAuditMetadata,
 	listFederationGrantsForSubject,
 	revokeFederationGrant,
 } from "./federation-grants/revoke.mjs";
