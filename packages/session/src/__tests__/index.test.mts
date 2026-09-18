@@ -17,6 +17,13 @@
 import { describe, expect, it } from "vitest";
 
 describe("package public surface (@o3co/auth-provider-session)", () => {
+	it("exports supportsDelegatedAuthorization as a runtime helper (#593, D17)", async () => {
+		const mod = await import("#/index.mjs");
+		expect(
+			typeof (mod as { supportsDelegatedAuthorization?: unknown }).supportsDelegatedAuthorization,
+		).toBe("function");
+	});
+
 	it("exports supportsLogout as a runtime helper", async () => {
 		const mod = await import("#/index.mjs");
 		expect(typeof (mod as { supportsLogout?: unknown }).supportsLogout).toBe("function");

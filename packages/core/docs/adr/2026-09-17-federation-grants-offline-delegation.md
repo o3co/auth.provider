@@ -1450,9 +1450,53 @@ interface SupportsDelegatedAuthorization {
 		readonly scopes?: readonly string[]; // the grant's; RFC 6749 §6 allows asking for no more
 		readonly resource?: string; // an upstream that needs it at authorization needs it here too
 		readonly signal?: AbortSignal; // D12
-	}): Promise<RefreshedTokens>;
+	}): Promise<DelegatedTokens>;
+}
+
+interface DelegatedTokens {
+	// every field optional: `{ refreshToken }` alone is a valid answer
+	readonly accessToken?: string;
+	readonly refreshToken?: string;
+	readonly expiresIn?: number | null; // seconds, exactly as issued
+	readonly expiresAt?: Date | null; // the adapter's own now + expiresIn
+	readonly scope?: string; // space-delimited, as answered
+	readonly tokenType?: string; // as the library reports it: lower-cased by oauth4webapi
 }
 ```
+
+The answer is its own flat, all-optional type, structurally what core's
+`FederationGrantRefreshedToken` consumes: a refresh whose answer the adapter's
+library refused to parse — a `scope` that is not a string, a missing
+`access_token` — may still carry a rotated refresh token, and D5 has that one
+persisted whatever else is wrong. oauth4webapi throws before it returns such
+a body, so the generic adapter reads the token endpoint's raw body in its
+per-call fetch and, when the library throws an error that is not the IdP's
+own answer (`ResponseBodyError`), answers `{ refreshToken }` from what it
+read. An error the IdP answered with is thrown as the library throws it, for
+the classifier.
+
+Three rules the generic adapter keeps, and any adapter should:
+
+- `authorizationParams` may not name a parameter the adapter owns —
+  `client_id`, `response_type`, `redirect_uri`, `state`, `code_challenge`,
+  `code_challenge_method`, `nonce`, `scope`, `resource`, `request`,
+  `request_uri`, `response_mode` — and an adapter throws when one does, a
+  configuration fault like a missing nonce. openid-client sets `client_id`
+  and `response_type` only when absent, so a copied parameter would have sent
+  the consent to another registration or selected a flow the callback cannot
+  consume; `scope` is the intent's (D6); `resource` is a field of its own so
+  that authorization and refresh never disagree about it. `prompt=consent` is
+  added when `offline_access` is asked for (OIDC Core §11), and an operator's
+  own `prompt` wins over it; Google's `access_type=offline` is the operator's
+  to add.
+- The scopes are the intent's, and are not held to the adapter's login
+  scopes: the connection's ceiling is core's rule, and the two sets differ on
+  purpose. They must include `openid`, as the login scopes must.
+- One `Configuration` serves every call, JWKS cache included — an answer that
+  carries an id_token is verified against it under `enableNonRepudiationChecks`
+  — and what differs per call (the caller's signal, the captured body)
+  travels through an `AsyncLocalStorage` the adapter's `customFetch` reads,
+  combining the caller's signal with the library's own.
 
 The existing `refreshToken(refreshToken)` takes nothing else. An upstream that
 requires a resource indicator would authorize and then fail its first refresh,
@@ -1463,7 +1507,16 @@ signal, so the generic adapter passes this one through `customFetch`.
 `FederationProfile` and `RefreshedTokens` also gain the token response's
 `scope` and `token_type`. The generic OIDC adapter's `snapshot` drops both
 today, so the scope actually granted is unobservable, and both D7 check 7 and
-the refresh rule in D5 need it.
+the refresh rule in D5 need it. `RefreshedTokens` becomes an explicit
+interface for that: `Omit` over `FederationProfile`'s index signature kept
+only the index signature, and a snapshot whose access token was a number
+type-checked. Its fields stay optional, so `{ issuer, sub }` still passes; a
+wrong type on a named field does not, and an external adapter that used
+`scope` or `tokenType` as an extension field of another type is now a type
+error — the one way this slice is not "unaffected" for existing adapters.
+The login flow's `expiresAt` keeps its arithmetic (a countdown from when the
+answer arrived, which subtracts the UserInfo round trip); the raw fields sit
+beside it.
 
 They gain the raw `expires_in` too, as `expiresIn`, beside the `expiresAt`
 they have. D5 judges the lifetime a token was *issued* with, and that cannot
@@ -1481,8 +1534,10 @@ are unaffected; the retrieval reads an answer field by field and trusts none
 of it (D5). Core's structural type for that answer is all-optional for the
 same reason. `RefreshedTokens` as it stands today is still not assignable to
 it — `Omit` over a type with an index signature erases the named fields — and
-becomes so once slice 2 declares the additions on it. A connection whose federation lacks the capability is refused at
-boot. The first cut implements it for the generic OIDC adapter.
+becomes so once slice 2 declares the additions on it. A connection whose federation lacks the capability is refused at boot
+(slice 4, which reads the connections). The first cut implements it for the
+generic OIDC adapter; GitHub cannot (OAuth Apps issue no refresh token), and
+Google and Apple may gain it later.
 
 ### D18 — Audit, with a correlation ID
 
@@ -1615,7 +1670,12 @@ route test is written first and watched failing.
      and the last look after every outcome (D10). A port change, so its own
      slice, before slice 3 implements the port for Redis and before slice 4
      can reach the retrieval.
-2. **federation adapter capability** (D17), generic OIDC first.
+2. **federation adapter capability** (D17), generic OIDC first. Done: the
+   two methods and their guard, `RefreshedTokens` as an explicit interface,
+   the raw `expiresIn` / `scope` / `tokenType` on the profile and the
+   snapshot, D5's bearer-only rule, and the generic adapter's implementation
+   with the reserved parameters, the salvaged refresh token and the per-call
+   signal.
 3. **redis adapter** (D16), with the duplicated contract suite on a
    testcontainer, the guarded-write scripts and the grant-keyed lock.
 4. **package: token and status routes** (D9–D12), exercised on grants seeded

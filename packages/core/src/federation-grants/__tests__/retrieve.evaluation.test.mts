@@ -25,6 +25,7 @@ import {
 	harness,
 	MIN,
 	now,
+	refreshed,
 	request,
 	SCOPES,
 	SECRET,
@@ -107,6 +108,24 @@ describe("retrieveFederationGrantToken — what is evaluated before any token (#
 			h.deps.limits = { ...h.deps.limits, maxExpiresInMs: 15 * MIN };
 			setNow(at(10 * MIN));
 			expect(await retrieve()).toMatchObject({ ok: true, expiresIn: 300 });
+		});
+
+		it("is not disclosed when it is not a bearer token, however it got stored", async () => {
+			await h.seed({
+				credentials: {
+					refreshToken: SECRET,
+					accessToken: {
+						value: "at-dpop",
+						tokenType: "DPoP",
+						obtainedAt: T0,
+						issuedLifetime: 3600,
+						scopes: [...SCOPES],
+					},
+				},
+			});
+			h.refresh.mockResolvedValue(refreshed("1", now()));
+			setNow(at(MIN));
+			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-1", refreshed: true });
 		});
 
 		it("is judged against the CURRENT maximum: a cached token does not become disclosable by ageing", async () => {

@@ -14,10 +14,14 @@
  * limitations under the License.
  */
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { isLoopbackHostname } from "@o3co/auth-provider-core";
 import {
 	callbackUrlForExchange,
 	codeChallenge,
+	type DelegatedAuthorizationRequest,
+	type DelegatedRefreshRequest,
+	type DelegatedTokens,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationClientSecret,
@@ -26,6 +30,7 @@ import {
 	type MappedClaims,
 	type RefreshedTokens,
 	type SupportsClaimMapping,
+	type SupportsDelegatedAuthorization,
 	type SupportsLogout,
 	type SupportsRefresh,
 } from "@o3co/auth-provider-session";
@@ -97,6 +102,7 @@ export interface OidcProviderConfig {
 
 export type OidcProvider = FederationProvider &
 	SupportsRefresh &
+	SupportsDelegatedAuthorization &
 	SupportsClaimMapping &
 	Partial<SupportsLogout>;
 
@@ -128,6 +134,57 @@ const stringArray = (value: unknown): readonly string[] | undefined =>
 	Array.isArray(value) && value.every((entry) => typeof entry === "string")
 		? (value as string[])
 		: undefined;
+
+/**
+ * The authorization parameters this provider owns (#593, D17). An operator's
+ * `authorizationParams` may not name them: openid-client sets `client_id` and
+ * `response_type` only when absent, so a copied parameter would send the
+ * consent to another registration or select a flow the callback cannot
+ * consume; `scope` is the intent's; `resource` is a field of its own, so that
+ * authorization and refresh never disagree about it; a request object or a
+ * response mode would change what comes back to the callback.
+ */
+const RESERVED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
+	"client_id",
+	"response_type",
+	"redirect_uri",
+	"state",
+	"code_challenge",
+	"code_challenge_method",
+	"nonce",
+	"scope",
+	"resource",
+	"request",
+	"request_uri",
+	"response_mode",
+]);
+
+/**
+ * What a delegated refresh hands its fetch, for the duration of one library
+ * call: the caller's signal, and a place for the token endpoint's raw body.
+ * openid-client takes no per-call signal, and reads the body before it
+ * returns it — so the fetch that carries the request is where both live. One
+ * `Configuration` serves every call, JWKS cache included; what differs per
+ * call travels here instead.
+ */
+interface DelegatedCall {
+	readonly signal?: AbortSignal;
+	captured?: Record<string, unknown>;
+}
+const delegatedCalls = new AsyncLocalStorage<DelegatedCall>();
+
+/** The raw JSON of a token endpoint's answer, when it is one; anything else is nobody's to salvage from. */
+const readTokenBody = async (response: Response): Promise<Record<string, unknown> | undefined> => {
+	try {
+		if (response.status !== 200) return undefined;
+		const parsed: unknown = await response.clone().json();
+		return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+			? (parsed as Record<string, unknown>)
+			: undefined;
+	} catch {
+		return undefined;
+	}
+};
 
 function parseIssuer(label: string, issuer: unknown): URL {
 	if (typeof issuer !== "string" || issuer.length === 0) {
@@ -272,7 +329,29 @@ export async function createOidcProvider(
 		clientMetadata,
 		clientAuth,
 	);
-	if (config.fetch) configuration[oidc.customFetch] = config.fetch as unknown as oidc.CustomFetch;
+	// Every request the library makes goes through here. Outside a delegated
+	// refresh it is the configured fetch, or the global one, exactly as before.
+	// Inside one, the caller's signal is combined with the library's own, and
+	// the token endpoint's body is kept so that a rotated refresh token is not
+	// lost to a parser that refuses the rest of the answer (D5).
+	const baseFetch: typeof fetch = config.fetch ?? fetch;
+	const tokenEndpoint = optionalString(metadata.token_endpoint);
+	const delegatedFetch: oidc.CustomFetch = async (url, options) => {
+		const call = delegatedCalls.getStore();
+		if (call === undefined) return baseFetch(url, options);
+		const signals = [options?.signal, call.signal].filter(
+			(candidate): candidate is AbortSignal => candidate instanceof AbortSignal,
+		);
+		const response = await baseFetch(url, {
+			...options,
+			...(signals.length > 0 ? { signal: AbortSignal.any(signals) } : {}),
+		});
+		if (tokenEndpoint !== undefined && String(url) === tokenEndpoint) {
+			call.captured = await readTokenBody(response);
+		}
+		return response;
+	};
+	configuration[oidc.customFetch] = delegatedFetch;
 	if (insecure) oidc.allowInsecureRequests(configuration);
 	// openid-client 6 treats an id_token from the token endpoint as delivered
 	// over TLS and skips its signature by default. The issue asks for
@@ -301,13 +380,98 @@ export async function createOidcProvider(
 
 	const snapshot = (
 		tokens: oidc.TokenEndpointResponse & oidc.TokenEndpointResponseHelpers,
-	): Pick<FederationProfile, "accessToken" | "refreshToken" | "idToken" | "expiresAt"> => {
+	): Pick<
+		FederationProfile,
+		"accessToken" | "refreshToken" | "idToken" | "expiresAt" | "expiresIn" | "scope" | "tokenType"
+	> => {
+		// `expiresIn()` counts down from when the response arrived; the login
+		// flow's expiry has always been derived from it, and stays so. The raw
+		// `expires_in` beside it is what a rule that judges the issued lifetime
+		// reads (#593, D5).
 		const expiresIn = tokens.expiresIn();
+		const issued = tokens.expires_in;
 		return {
 			accessToken: tokens.access_token,
 			refreshToken: optionalString(tokens.refresh_token),
 			idToken: optionalString(tokens.id_token),
 			expiresAt: typeof expiresIn === "number" ? new Date(Date.now() + expiresIn * 1000) : null,
+			expiresIn: typeof issued === "number" ? issued : null,
+			...(optionalString(tokens.scope) !== undefined ? { scope: tokens.scope } : {}),
+			tokenType: tokens.token_type,
+		};
+	};
+
+	const delegatedAuthorizationUrl = (params: DelegatedAuthorizationRequest): URL => {
+		const nonce = requireNonce(params.nonce);
+		const scopes = params.scopes;
+		if (!Array.isArray(scopes) || scopes.some((s) => typeof s !== "string" || s.length === 0)) {
+			throw new Error(`${label}: delegated scopes must be a list of non-empty strings`);
+		}
+		if (!scopes.includes("openid")) {
+			throw new Error(
+				`${label}: delegated scopes must include "openid" — without it the IdP issues no id_token`,
+			);
+		}
+		const extra = params.authorizationParams ?? {};
+		for (const key of Object.keys(extra)) {
+			if (RESERVED_AUTHORIZATION_PARAMS.has(key)) {
+				throw new Error(
+					`${label}: authorizationParams may not set "${key}" — this provider owns it (#593, D17)`,
+				);
+			}
+		}
+		return oidc.buildAuthorizationUrl(configuration, {
+			// OIDC Core §11: offline_access is ignored unless the user is prompted
+			// for consent. An operator's own prompt wins.
+			...(scopes.includes("offline_access") && extra.prompt === undefined
+				? { prompt: "consent" }
+				: {}),
+			...extra,
+			...(params.resource !== undefined ? { resource: params.resource } : {}),
+			redirect_uri: params.redirectUri,
+			scope: scopes.join(" "),
+			state: params.state,
+			code_challenge: codeChallenge(params.codeVerifier),
+			code_challenge_method: "S256",
+			nonce,
+		});
+	};
+
+	const refreshDelegated = async (params: DelegatedRefreshRequest): Promise<DelegatedTokens> => {
+		const call: DelegatedCall = { ...(params.signal ? { signal: params.signal } : {}) };
+		const body = {
+			...(params.scopes !== undefined && params.scopes.length > 0
+				? { scope: params.scopes.join(" ") }
+				: {}),
+			...(params.resource !== undefined ? { resource: params.resource } : {}),
+		};
+		let tokens: oidc.TokenEndpointResponse & oidc.TokenEndpointResponseHelpers;
+		try {
+			tokens = await delegatedCalls.run(call, () =>
+				oidc.refreshTokenGrant(configuration, params.refreshToken, body),
+			);
+		} catch (error) {
+			// The IdP said no: the classifier reads the error as thrown. Anything
+			// else the library refused — an answer it could not parse — may still
+			// carry a rotated refresh token, and that one is never lost (D5).
+			if (error instanceof oidc.ResponseBodyError) throw error;
+			const rotated = optionalString(call.captured?.refresh_token);
+			if (rotated === undefined) throw error;
+			return { refreshToken: rotated };
+		}
+		const issued = tokens.expires_in;
+		const expiresIn = typeof issued === "number" && Number.isFinite(issued) ? issued : null;
+		return {
+			accessToken: tokens.access_token,
+			...(optionalString(tokens.refresh_token) !== undefined
+				? { refreshToken: tokens.refresh_token }
+				: {}),
+			expiresIn,
+			// On this adapter's clock, and no UserInfo call between the answer and
+			// this reading (#593, D17).
+			expiresAt: expiresIn !== null ? new Date(Date.now() + expiresIn * 1000) : null,
+			...(optionalString(tokens.scope) !== undefined ? { scope: tokens.scope } : {}),
+			tokenType: tokens.token_type,
 		};
 	};
 
@@ -391,6 +555,9 @@ export async function createOidcProvider(
 		async refreshToken(refreshTokenValue: string): Promise<RefreshedTokens> {
 			return snapshot(await oidc.refreshTokenGrant(configuration, refreshTokenValue));
 		},
+
+		buildDelegatedAuthorizationUrl: delegatedAuthorizationUrl,
+		refreshDelegatedToken: refreshDelegated,
 
 		mapClaims(profile: FederationProfile): MappedClaims {
 			const claims: Record<string, unknown> = {};

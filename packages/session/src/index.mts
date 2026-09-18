@@ -103,6 +103,9 @@ export {
 	mintFederationTransactionId,
 } from "./federations/transaction.mjs";
 export type {
+	DelegatedAuthorizationRequest,
+	DelegatedRefreshRequest,
+	DelegatedTokens,
 	EndSessionRequest,
 	EndSessionResult,
 	FederationProfile,
@@ -111,11 +114,13 @@ export type {
 	MappedClaims,
 	RefreshedTokens,
 	SupportsClaimMapping,
+	SupportsDelegatedAuthorization,
 	SupportsLogout,
 	SupportsRefresh,
 } from "./federations/types.mjs";
 export {
 	supportsClaimMapping,
+	supportsDelegatedAuthorization,
 	supportsLogout,
 	supportsRefresh,
 } from "./federations/types.mjs";

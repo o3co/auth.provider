@@ -32,14 +32,29 @@ describe("upstream token eligibility (#593, D5)", () => {
 	describe("judgeUpstreamAccessToken", () => {
 		// No default parameter: passing `undefined` has to reach the rule.
 		const judge = (
-			token: { issuedLifetime: number | null; scopes: readonly string[] },
+			token: { issuedLifetime: number | null; scopes: readonly string[]; tokenType?: string },
 			...max: [maxAccessTokenLifetime?: number]
 		) =>
 			judgeUpstreamAccessToken({
+				tokenType: "Bearer",
 				...token,
 				consentedScopes: CONSENTED,
 				maxAccessTokenLifetime: max.length === 0 ? 3600 : (max[0] as number),
 			});
+
+		it("accepts a bearer token however the upstream spells it, and nothing sender-constrained: a route with no proof key cannot present a DPoP token", () => {
+			for (const tokenType of ["Bearer", "bearer", "BEARER"]) {
+				expect(judge({ issuedLifetime: 3600, scopes: ["openid"], tokenType })).toEqual({
+					eligible: true,
+				});
+			}
+			for (const tokenType of ["dpop", "DPoP", "mac", "", "N_A"]) {
+				expect(judge({ issuedLifetime: 3600, scopes: ["openid"], tokenType }), tokenType).toEqual({
+					eligible: false,
+					reason: "token_type_unsupported",
+				});
+			}
+		});
 
 		it("accepts a finite lifetime within the maximum, carrying consented scopes", () => {
 			expect(judge({ issuedLifetime: 3600, scopes: ["openid", "calendar.read"] })).toEqual({

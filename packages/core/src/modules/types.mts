@@ -27,12 +27,14 @@ export type PathResolver = (specifier: string) => string;
  *
  * `FederationProvider` from `@o3co/auth-provider-session` carries the full
  * capability surface (`buildAuthorizationUrl`, `exchangeCode`, optional
- * `endSession` / `mapClaims` / `refreshToken`). Core cannot import that type
- * directly — it would create a circular dependency. This structural alias
- * captures only the shape that `oauth/routes` and similar core-adjacent
- * consumers use when looking up providers from the synthetic-key map. They
- * narrow with `instanceof` / type-guard helpers (`supportsLogout`,
- * `supportsRefresh`) after reading from the map.
+ * `endSession` / `mapClaims` / `refreshToken`, and the pair
+ * `buildDelegatedAuthorizationUrl` / `refreshDelegatedToken` behind federation
+ * grants, #593). Core cannot import that type directly — it would create a
+ * circular dependency. This structural alias captures only the shape that
+ * `oauth/routes` and similar core-adjacent consumers use when looking up
+ * providers from the synthetic-key map. They narrow with `instanceof` /
+ * type-guard helpers (`supportsLogout`, `supportsRefresh`,
+ * `supportsDelegatedAuthorization`) after reading from the map.
  */
 export interface FederationProviderHandle {
 	readonly name: string;

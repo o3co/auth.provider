@@ -59,6 +59,19 @@ export interface FederationProfile {
 	 * inventing a fallback expiry.
 	 */
 	readonly expiresAt: Date | null;
+	/**
+	 * `expires_in` exactly as the token response carried it, in seconds; `null`
+	 * when it carried none. `expiresAt` above is derived from it on the
+	 * adapter's clock, and one step of that clock is enough to turn 3600 into
+	 * 3601 — so a rule that judges the lifetime a token was ISSUED with reads
+	 * this, not the difference of two dates (#593, D5). Optional: adapters
+	 * written before it may omit it.
+	 */
+	readonly expiresIn?: number | null;
+	/** `scope` as the token response carried it, space-delimited (RFC 6749 §5.1). Absent when it carried none. */
+	readonly scope?: string;
+	/** `token_type` as the adapter's library reports it — oauth4webapi lower-cases it. */
+	readonly tokenType?: string;
 	/** Provider-specific extension claims (e.g. Google `hd`, Microsoft `tid`). */
 	readonly [key: string]: unknown;
 }
@@ -228,11 +241,29 @@ export function supportsClaimMapping(
  * `issuer` and `sub` are optional because callers reuse the stored identity from the
  * original federation profile — the refresh grant does not re-assert identity. All other
  * token fields follow the same semantics as `FederationProfile`.
+ *
+ * The fields are named rather than derived from `FederationProfile`: `Omit`
+ * over a type with a string index signature keeps only the index signature,
+ * and a snapshot with an access token that was a number type-checked. Every
+ * field is optional, so a snapshot of `{ issuer, sub }` still passes; a wrong
+ * type on a named field does not, which it should never have.
  */
-export type RefreshedTokens = Omit<FederationProfile, "issuer" | "sub"> & {
+export interface RefreshedTokens {
 	readonly issuer?: string;
 	readonly sub?: string;
-};
+	readonly email?: string;
+	readonly emailVerified?: boolean;
+	readonly name?: string;
+	readonly picture?: string;
+	readonly accessToken?: string;
+	readonly refreshToken?: string;
+	readonly idToken?: string;
+	readonly expiresAt?: Date | null;
+	readonly expiresIn?: number | null;
+	readonly scope?: string;
+	readonly tokenType?: string;
+	readonly [key: string]: unknown;
+}
 
 export interface SupportsRefresh {
 	/** Refresh an upstream IdP access token using its refresh token. Returns a partial token snapshot. */
@@ -244,4 +275,87 @@ export function supportsRefresh(
 ): p is FederationProvider & SupportsRefresh {
 	if (p == null) return false;
 	return typeof (p as { refreshToken?: unknown }).refreshToken === "function";
+}
+
+/**
+ * What a delegated authorization asks of an adapter (#593, D17): the URL a
+ * user is sent to so that a client may hold the upstream's tokens without a
+ * session. Unlike the login flow's `buildAuthorizationUrl`, the scopes are the
+ * intent's and not the adapter's, the nonce is required, and a resource
+ * indicator (RFC 8707) and an operator's extra parameters may come along.
+ */
+export interface DelegatedAuthorizationRequest {
+	readonly redirectUri: string;
+	readonly state: string;
+	readonly codeVerifier: string;
+	/** Required: the id_token that comes back is bound to it (OIDC Core §3.1.3.7). */
+	readonly nonce: string;
+	/** The intent's scopes (D6), which core has already held to the connection's ceiling. */
+	readonly scopes: readonly string[];
+	/** Sent as the RFC 8707 `resource` parameter. */
+	readonly resource?: string;
+	/**
+	 * The connection's extra parameters, e.g. Google's `access_type=offline`.
+	 * An adapter refuses any that would take over a parameter it owns — the
+	 * client, the response type, the callback, the state, the PKCE challenge,
+	 * the nonce, the scopes, the resource, a request object, the response mode.
+	 */
+	readonly authorizationParams?: Readonly<Record<string, string>>;
+}
+
+export interface DelegatedRefreshRequest {
+	readonly refreshToken: string;
+	/** The grant's scopes (D5): RFC 6749 §6 lets a refresh ask for no more than was granted. */
+	readonly scopes?: readonly string[];
+	/** The resource the grant was authorized for; an upstream that needs it at authorization needs it here too. */
+	readonly resource?: string;
+	/** Aborts the upstream request (D12). */
+	readonly signal?: AbortSignal;
+}
+
+/**
+ * What a delegated refresh answers. Every field is optional on purpose: an
+ * answer the adapter's library refused to parse may still carry the rotated
+ * refresh token, and that one must never be lost (#593, D5) — so `{ refreshToken }`
+ * alone is a valid answer, and core treats an answer without a usable access
+ * token as `malformed_token_response`. Structurally what core's
+ * `FederationGrantRefreshedToken` consumes; nothing in core imports this.
+ */
+export interface DelegatedTokens {
+	readonly accessToken?: string;
+	/** Absent when the upstream did not rotate it (RFC 6749 §6). */
+	readonly refreshToken?: string;
+	/** Seconds, exactly as issued; `null` when the upstream named none. */
+	readonly expiresIn?: number | null;
+	/** The adapter's own `now + expiresIn`; `null` with `expiresIn`. */
+	readonly expiresAt?: Date | null;
+	/** Space-delimited, as answered. Absent means as requested (RFC 6749 §5.1). */
+	readonly scope?: string;
+	/** As the library reports it — lower-cased by oauth4webapi. */
+	readonly tokenType?: string;
+}
+
+/**
+ * The capability behind federation grants (#593, D17): an adapter that can
+ * send a user to authorize a delegation, and refresh its tokens without a
+ * session. Detected by BOTH methods being present; an adapter with one and
+ * not the other does not have it.
+ */
+export interface SupportsDelegatedAuthorization {
+	buildDelegatedAuthorizationUrl(params: DelegatedAuthorizationRequest): URL;
+	refreshDelegatedToken(params: DelegatedRefreshRequest): Promise<DelegatedTokens>;
+}
+
+export function supportsDelegatedAuthorization(
+	p: FederationProvider | undefined | null,
+): p is FederationProvider & SupportsDelegatedAuthorization {
+	if (p == null) return false;
+	const candidate = p as {
+		buildDelegatedAuthorizationUrl?: unknown;
+		refreshDelegatedToken?: unknown;
+	};
+	return (
+		typeof candidate.buildDelegatedAuthorizationUrl === "function" &&
+		typeof candidate.refreshDelegatedToken === "function"
+	);
 }

@@ -96,7 +96,7 @@ interface FederationProvider {
 }
 ```
 
-カスタムの OAuth 2.0 / OIDC フェデレーションプロバイダーを追加する場合はこのインターフェースを実装する。`SupportsLogout` / `SupportsClaimMapping` / `SupportsRefresh` を必要に応じて mix-in できる。
+カスタムの OAuth 2.0 / OIDC フェデレーションプロバイダーを追加する場合はこのインターフェースを実装する。`SupportsLogout` / `SupportsClaimMapping` / `SupportsRefresh` / `SupportsDelegatedAuthorization` を必要に応じて mix-in できる。
 
 - `name` — プロバイダーの一意な識別子。`federationProviders` の Map キーとルートの `:name` パラメーターに対応する。
 - `scope` — OAuth 2.0 スコープ。
@@ -262,10 +262,25 @@ if (supportsClaimMapping(provider)) {
 リフレッシュトークンを使って新しいアクセストークンを取得できる provider 向けのオプショナル capability。
 
 ```ts
-type RefreshedTokens = Omit<FederationProfile, "issuer" | "sub"> & {
+interface RefreshedTokens {
   readonly issuer?: string;
   readonly sub?: string;
-};
+  readonly email?: string;
+  readonly emailVerified?: boolean;
+  readonly name?: string;
+  readonly picture?: string;
+  readonly accessToken?: string;
+  readonly refreshToken?: string;
+  readonly idToken?: string;
+  readonly expiresAt?: Date | null;
+  /** トークンレスポンスの `expires_in` そのまま。無ければ `null`。 */
+  readonly expiresIn?: number | null;
+  /** トークンレスポンスの `scope` そのまま（空白区切り）。 */
+  readonly scope?: string;
+  /** adapter のライブラリが報告する `token_type`（oauth4webapi は小文字化する）。 */
+  readonly tokenType?: string;
+  readonly [key: string]: unknown;
+}
 
 interface SupportsRefresh {
   refreshToken(refreshToken: string): Promise<RefreshedTokens>;
@@ -276,7 +291,59 @@ function supportsRefresh(
 ): provider is FederationProvider & SupportsRefresh;
 ```
 
+フィールドは `FederationProfile` から導出せず、名前で列挙する。文字列 index signature を持つ型に `Omit` をかけると index signature だけが残り、#593 までは `accessToken` が number のスナップショットでも型検査を通っていた。すべて optional なので `{ issuer, sub }` は今も通るが、名前付きフィールドの型違いは通らない。`scope` や `tokenType` を別の型の拡張フィールドとして使っていた adapter は型エラーになる。
+
 `SupportsRefresh` を実装した provider は、ユーザー操作なしにフェデレーショントークンを維持できる。`FederationTokenStore`（`AppOptions` で設定）が初回トークンを保存し、リフレッシュフローが自動的に取得・更新する。
+
+---
+
+### `SupportsDelegatedAuthorization`（オプショナル capability）
+
+federation grants（#593）を支える capability。セッションを持たない client が上流のトークンを保持する「委譲」の認可へユーザーを送り、セッションなしでそのトークンを refresh できる provider が実装する。**両方**のメソッドが揃って初めて検出される。
+
+```ts
+interface DelegatedAuthorizationRequest {
+  readonly redirectUri: string;
+  readonly state: string;
+  readonly codeVerifier: string;
+  readonly nonce: string;                                  // 必須
+  readonly scopes: readonly string[];                      // provider のログイン scope ではなく intent の scope
+  readonly resource?: string;                              // RFC 8707
+  readonly authorizationParams?: Readonly<Record<string, string>>;
+}
+
+interface DelegatedRefreshRequest {
+  readonly refreshToken: string;
+  readonly scopes?: readonly string[];                     // RFC 6749 §6: 付与された以上は求めない
+  readonly resource?: string;
+  readonly signal?: AbortSignal;
+}
+
+interface DelegatedTokens {                                // すべて optional: `{ refreshToken }` だけでも有効な応答
+  readonly accessToken?: string;
+  readonly refreshToken?: string;
+  readonly expiresIn?: number | null;                      // 発行された秒数そのまま
+  readonly expiresAt?: Date | null;                        // adapter 自身の now + expiresIn
+  readonly scope?: string;
+  readonly tokenType?: string;
+}
+
+interface SupportsDelegatedAuthorization {
+  buildDelegatedAuthorizationUrl(params: DelegatedAuthorizationRequest): URL;
+  refreshDelegatedToken(params: DelegatedRefreshRequest): Promise<DelegatedTokens>;
+}
+
+function supportsDelegatedAuthorization(
+  provider: FederationProvider | undefined | null,
+): provider is FederationProvider & SupportsDelegatedAuthorization;
+```
+
+実装が守る規則（generic OIDC adapter が守っているもの）:
+
+- scope は intent のもので、provider のログイン scope ではない。`nonce` は必須。`resource` は認可時も refresh 時も RFC 8707 のパラメータとして送る。
+- `authorizationParams` で provider が所有するパラメータ（`client_id`、`response_type`、`redirect_uri`、`state`、`code_challenge`、`code_challenge_method`、`nonce`、`scope`、`resource`、`request`、`request_uri`、`response_mode`）を指定すると throw する。openid-client は `client_id` と `response_type` を未指定のときにしか設定しないので、複製されたパラメータは別の registration へ consent を送ってしまう。`offline_access` を求めるときは `prompt=consent` を付ける（OIDC Core §11）。operator 自身の `prompt` が優先される。
+- ライブラリが解釈を拒んだ応答にも rotate 済みの refresh token が含まれ得る。adapter は throw せず `{ refreshToken }` を返し、唯一の有効な credential を失わない。IdP が返したエラーは、ライブラリが投げるまま投げる。
+- `expiresIn` は `expires_in` そのまま。`expiresAt` は adapter 自身の時計で、間に他の呼び出しを挟まない。`tokenType` はライブラリが報告するまま。
 
 ```ts
 import { supportsRefresh } from "@o3co/auth-provider-session";
@@ -474,7 +541,7 @@ v0.4.0 ではこのパッケージから passport を直接依存として削除
 5. **`createPassport()` と `SetupPassportContext` をパブリック API から削除。** 状態（CSRF）と PKCE はルート層が内部で管理する。プロバイダーは純粋関数になった。
 6. **`UserSessionStore` と `FederationTokenStore` が必須になった**（以前はオプショナルでレガシーフォールバックあり）。これらは `sessionModule.requires` に宣言され、該当 component を提供するモジュールが無い場合、boot planner が `BootError(reason: 'missing-required-component')` で拒否する。
 7. **`/login` エラーレスポンス** は RFC 6749 §5.2 の形式 `{ error, error_description }` に変更。旧フォーマット `{ message: "..." }` をクライアントが解析している場合は更新が必要。
-8. **`SupportsRefresh.refreshToken`** の戻り型が `RefreshedTokens`（新型）: `Omit<FederationProfile, "issuer"|"sub"> & { issuer?: string; sub?: string }` に変更。Google/GitHub のリフレッシュレスポンスは正当に `sub` を省略するため、ルート層が保存済み identity を維持する。
+8. **`SupportsRefresh.refreshToken`** の戻り型が `RefreshedTokens`（新型）に変更（#593 で名前付きフィールドの interface に作り直した。上の定義を参照）。Google/GitHub のリフレッシュレスポンスは正当に `sub` を省略するため、ルート層が保存済み identity を維持する。
 
 ### カスタムプロバイダーのマイグレーション例
 

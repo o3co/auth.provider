@@ -67,6 +67,14 @@ export interface FakeIdp {
 	discoveryStatus: number;
 	tokenStatus: number;
 	accessToken: string;
+	/**
+	 * Laid over the refresh answer's defaults; a value of `undefined` removes
+	 * the field. Lets a test make the answer carry a `scope`, an id_token, or
+	 * a field of the wrong shape.
+	 */
+	refreshAnswer: Record<string, unknown>;
+	/** Mint an id_token into the refresh answer (an IdP that re-issues one on refresh). */
+	refreshWithIdToken: boolean;
 	/** Replace the signing key; the JWKS then holds only the new one. */
 	rotateKey(): Promise<string>;
 	currentKid(): string;
@@ -136,6 +144,8 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		discoveryStatus: 200,
 		tokenStatus: 200,
 		accessToken: "at-1",
+		refreshAnswer: {},
+		refreshWithIdToken: false,
 		fetch: undefined as unknown as typeof fetch,
 		rotateKey: newKey,
 		currentKid: () => signer.kid,
@@ -194,12 +204,16 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		if (path === "/token" && method === "POST") {
 			if (idp.tokenStatus !== 200) return json({ error: "invalid_client" }, idp.tokenStatus);
 			if (body?.get("grant_type") === "refresh_token") {
-				return json({
+				const answer: Record<string, unknown> = {
 					access_token: "at-refreshed",
 					token_type: "Bearer",
 					expires_in: 1800,
 					refresh_token: "rt-2",
-				});
+					...(idp.refreshWithIdToken ? { id_token: await mintIdToken() } : {}),
+					...idp.refreshAnswer,
+				};
+				for (const key of Object.keys(answer)) if (answer[key] === undefined) delete answer[key];
+				return json(answer);
 			}
 			return json({
 				access_token: idp.accessToken,
