@@ -317,6 +317,47 @@ describe("a field the envelope does not cover (#593, D16, the reviewer)", () => 
 		expect(await held.listBySubject("u-1", at(DAY))).toStrictEqual([]);
 	});
 
+	it("still ends a grant whose horizon cannot even be computed: the credential does not outlive the attempt", async () => {
+		// The other half of the retention case, and the one that matters most:
+		// reads failing closed is no use if the credential stays at rest with no
+		// way to end it. A revocation has no version to match and always wins,
+		// so a horizon it cannot compute is not a reason to refuse — the record
+		// is broken, and that is exactly when an operator reaches for this
+		// (Copilot).
+		const held = await activated();
+		await redis.hdel(key("g-1", "grant"), "retentionMs");
+		await held.revoke("g-1", "operator", at(DAY));
+		expect(await redis.hget(key("g-1", "grant"), "status")).toBe("revoked");
+		expect(await redis.hget(key("g-1", "grant"), "revokedBy")).toBe("operator");
+		expect(await redis.exists(key("g-1", "cred"))).toBe(0);
+	});
+
+	it("still refuses a revocation for a record whose horizon says it has gone", async () => {
+		// Computable and past is a different thing from not computable: a
+		// tombstone is not revoked again, and the first revocation stays as it
+		// was recorded.
+		const held = await activated();
+		expect(await held.revoke("g-1", "client", at(DAY))).toStrictEqual(
+			expect.objectContaining({ ok: true }),
+		);
+		expect(await held.revoke("g-1", "operator", at(2 * DAY))).toStrictEqual({ ok: false });
+		expect(await redis.hget(key("g-1", "grant"), "revokedBy")).toBe("client");
+	});
+
+	it("hides nothing by leaving a member behind: a record it cannot decode answers nothing to `find` either", async () => {
+		// Copilot's inference from the rule above: a pending record revoked
+		// without a reservation keeps its old, earlier horizon in the index, so
+		// its member can be pruned while the tombstone's key lives on. It costs
+		// nothing, because the reads that would disagree go through the same
+		// decoding the reservation did — `find` answers null for exactly the
+		// records the reservation was skipped for.
+		const held = await activated();
+		await redis.hset(key("g-1", "grant"), "base", "not json");
+		await held.revoke("g-1", "operator", at(DAY));
+		expect(await held.find("g-1", at(DAY))).toBeNull();
+		expect(await held.listBySubject("u-1", at(DAY))).toStrictEqual([]);
+	});
+
 	it("still ends a grant whose record it cannot read: a revocation does not need to understand it", async () => {
 		// `revoke` is the one write with no version to match, and the port has it
 		// always win. Deciding from a record decoded a round trip earlier would

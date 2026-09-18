@@ -1035,10 +1035,19 @@ return {1, redis.call('HGETALL', KEYS[1])}
 const LUA_FG_REVOKE = `${LUA_FG_PRELUDE}
 local at = tonumber(ARGV[1])
 if at == nil then return {0} end
-local g = fg_visible(KEYS[1], at)
-if g == nil or g['status'] == 'revoked' then return {0} end
+local flat = redis.call('HGETALL', KEYS[1])
+if #flat == 0 then return {0} end
+local g = fg_fields(flat)
+if g['status'] == 'revoked' then return {0} end
+-- The one write that does not go through the visibility check, because it is
+-- the one that must always win. A horizon that CAN be computed is still
+-- honoured: a tombstone is not revoked again. One that cannot — a record
+-- whose retention someone deleted — is not a reason to leave a credential at
+-- rest with no way to end it, which is exactly the state an operator reaches
+-- for this in (the reviewer, then Copilot).
+local horizon = fg_horizon(g)
+if horizon ~= nil and not (at < horizon) then return {0} end
 local version = fg_num(g['version'])
-if version == nil then return {0} end
 local wasPending = g['status'] == 'pending'
 redis.call('HDEL', KEYS[1],
   'intentHandle', 'intentExpiresAt',
@@ -1046,14 +1055,21 @@ redis.call('HDEL', KEYS[1],
   'failureRetryAfterSeconds', 'failureUpstreamCode')
 redis.call('HSET', KEYS[1],
   'status', 'revoked',
-  'version', string.format('%.0f', version + 1),
   'revokedBy', ARGV[2],
   'revokedAt', ARGV[1])
+-- A version that is not a number is left as it is: it cannot be bumped, and
+-- refusing over it would be refusing the revocation. The caller is told the
+-- write could not be represented, and the credential is gone all the same.
+if version ~= nil then
+  redis.call('HSET', KEYS[1], 'version', string.format('%.0f', version + 1))
+end
 redis.call('DEL', KEYS[2])
 local fields = redis.call('HGETALL', KEYS[1])
 if wasPending then
-  local retention = fg_num(g['retentionMs']) or 0
-  redis.call('PEXPIREAT', KEYS[1], math.ceil(at + retention))
+  local retention = fg_num(g['retentionMs'])
+  if retention ~= nil then
+    redis.call('PEXPIREAT', KEYS[1], math.ceil(at + retention))
+  end
 end
 return {1, fields}
 `;

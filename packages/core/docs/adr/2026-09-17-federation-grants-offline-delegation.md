@@ -1500,11 +1500,18 @@ adapter that skips either is broken in a way its tests will not show:
   credential while every write — a revocation included — was refused for
   ever. A grant that cannot be ended is the one thing this store may never
   produce.
-- **A revocation reaches the store even for a record the adapter cannot
-  read.** It has no version to match and always wins, so the read in front of
-  it is for the subject its index is named after and nothing else: a record
-  whose fields no longer decode is exactly the state an operator needs to
-  end, with its credential still at rest beside it.
+- **A revocation reaches the store even for a record nothing can read.** It
+  has no version to match and always wins, so it is the one write that does
+  not go through the visibility check: a horizon that *can* be computed is
+  still honoured, since a tombstone is not revoked again, but one that cannot
+  — a record whose retention someone deleted — is not a reason to leave a
+  credential at rest with no way to end it. A `version` that is not a number
+  is left as it is rather than refused over, and the caller is told the write
+  could not be represented; the credential is gone all the same. The read in
+  front of the write is for the subject its index is named after and nothing
+  else. A record the adapter cannot decode answers nothing to `find` either,
+  so a member left at an earlier horizon hides nothing a caller could have
+  read.
 - **A credential is re-sealed only under an authorization the credential it
   replaces authenticates against.** A refresh seals the new credential under
   the authorization it read. If that text was rewritten in the keyspace — the
