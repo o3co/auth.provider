@@ -107,27 +107,100 @@ const LUA_COMPARE_AND_DELETE_SHA = createHash("sha1").update(LUA_COMPARE_AND_DEL
  * exist; both fall through to the proposed expiry, which is what makes an
  * expired watermark start fresh rather than being resurrected by the guard.
  */
-const LUA_SET_WATERMARK_MONOTONIC = `
-local before = tonumber(ARGV[1])
-local expiresAt = tonumber(ARGV[2])
+/**
+ * Both revocation boundaries, one key, one atomic write (#593, D13).
+ *
+ * The value is deliberately **not** JSON. `cjson.encode` writes numbers at
+ * fourteen significant digits by default and an epoch millisecond is thirteen
+ * — too close to a silent truncation for a value that decides whether a token
+ * is refused — and the common case here is a single number, which a delimited
+ * form keeps as a single number.
+ *
+ * That encoding is the other half of the rollback argument:
+ *
+ *   `<n>`          both boundaries are `n`. What `revokeBefore` always writes,
+ *                  so what every caller written before #593, and the whole
+ *                  `"revoke"` path, writes.
+ *   `v1:<s>:<g>`   they differ.
+ *   `v1:<s>:-`     the sessions boundary alone; no revocation has covered this
+ *                  subject's grants.
+ *
+ * A previous release reads the first form and only the first form. So a
+ * deployment that never makes a sessions-only stamp never writes anything an
+ * older reader would refuse and can roll back freely; one that does has the
+ * richer form only for the subjects it was used on, where an older reader
+ * fails closed — the safe direction, and the smallest set available.
+ *
+ * What is unsafe in BOTH directions, and has to be said out loud: a
+ * mixed-version writer. An old writer stamping over a `v1:` record reads it
+ * with `tonumber`, gets nil, and writes its own scalar — moving the grants
+ * boundary forward (safe) and the sessions boundary possibly backward (not).
+ * Drain old writers before allowing sessions-only stamps.
+ */
+const LUA_SET_REVOCATION_BOUNDARIES = `
+local mode = ARGV[1]
+local before = tonumber(ARGV[2])
+local expiresAt = tonumber(ARGV[3])
+local retention = tonumber(ARGV[4])
+if before == nil or expiresAt == nil or retention == nil then
+  return redis.error_reply("subject revocation: non-numeric argument")
+end
+
+local sessions = nil
+local grants = nil
 local current = redis.call("GET", KEYS[1])
 if current then
-  local currentBefore = tonumber(current)
-  if currentBefore and currentBefore > before then
-    before = currentBefore
+  if string.match(current, "^%-?%d+$") then
+    sessions = tonumber(current)
+    grants = sessions
+  else
+    local s, g = string.match(current, "^v1:(%-?%d+):(%-?%d+)$")
+    if s ~= nil then
+      sessions = tonumber(s)
+      grants = tonumber(g)
+    else
+      s = string.match(current, "^v1:(%-?%d+):%-$")
+      if s == nil then
+        return redis.error_reply("subject revocation: unreadable record")
+      end
+      sessions = tonumber(s)
+    end
   end
 end
-local currentExpiry = redis.call("PEXPIRETIME", KEYS[1])
-if currentExpiry > 0 and currentExpiry > expiresAt then
-  expiresAt = currentExpiry
+
+if sessions == nil or before > sessions then sessions = before end
+if mode == "all" then
+  if grants == nil or before > grants then grants = before end
 end
-redis.call("SET", KEYS[1], tostring(before), "PXAT", expiresAt)
-return tostring(before)
+
+local ttlAt = redis.call("PEXPIRETIME", KEYS[1])
+local persistent = (ttlAt == -1)
+if (not persistent) and ttlAt > 0 and ttlAt > expiresAt then expiresAt = ttlAt end
+if grants ~= nil then
+  local floor = grants + retention
+  if floor > expiresAt then expiresAt = floor end
+end
+
+local value
+if grants == nil then
+  value = "v1:" .. string.format("%.0f", sessions) .. ":-"
+elseif grants == sessions then
+  value = string.format("%.0f", sessions)
+else
+  value = "v1:" .. string.format("%.0f", sessions) .. ":" .. string.format("%.0f", grants)
+end
+
+if persistent then
+  redis.call("SET", KEYS[1], value)
+else
+  redis.call("SET", KEYS[1], value, "PXAT", expiresAt)
+end
+return value
 `.trim();
 
 /** See {@link LUA_COMPARE_AND_DELETE_SHA} for why the digest is precomputed. */
-const LUA_SET_WATERMARK_MONOTONIC_SHA = createHash("sha1")
-	.update(LUA_SET_WATERMARK_MONOTONIC)
+const LUA_SET_REVOCATION_BOUNDARIES_SHA = createHash("sha1")
+	.update(LUA_SET_REVOCATION_BOUNDARIES)
 	.digest("hex");
 
 /** Script-cache residency flag for {@link LUA_SET_WATERMARK_MONOTONIC}. */
@@ -1528,25 +1601,30 @@ export function makeIoredisClients(
 
 	const subjectRevocationClient: SubjectRevocationClient = {
 		get: (k) => io.get(k),
-		async setWatermarkMonotonic(key, beforeMs, expiresAtMs) {
+		async setRevocationBoundaries(key, mode, beforeMs, expiresAtMs, grantRetentionMs) {
 			// EVALSHA-first with a NOSCRIPT fallback to EVAL, matching
 			// `compareAndDelete` above — see `scriptCached` for why the flag is
 			// module-scoped and how a `SCRIPT FLUSH` or cluster failover is
 			// recovered from.
-			const args = [key, String(beforeMs), String(expiresAtMs)] as const;
+			const args = [
+				key,
+				mode,
+				String(beforeMs),
+				String(expiresAtMs),
+				String(grantRetentionMs),
+			] as const;
 			if (watermarkScriptCached) {
 				try {
-					const r = (await io.evalsha(LUA_SET_WATERMARK_MONOTONIC_SHA, 1, ...args)) as string;
-					return Number(r);
+					return (await io.evalsha(LUA_SET_REVOCATION_BOUNDARIES_SHA, 1, ...args)) as string;
 				} catch (err) {
 					if (!isNoScriptError(err)) throw err;
 					watermarkScriptCached = false;
 				}
 			}
-			const r = (await io.eval(LUA_SET_WATERMARK_MONOTONIC, 1, ...args)) as string;
+			const stored = (await io.eval(LUA_SET_REVOCATION_BOUNDARIES, 1, ...args)) as string;
 			// EVAL implicitly loads the script into Redis's server-side cache.
 			watermarkScriptCached = true;
-			return Number(r);
+			return stored;
 		},
 	};
 

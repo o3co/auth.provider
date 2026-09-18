@@ -14,7 +14,12 @@
  * limitations under the License.
  */
 
-import type { AdapterBuilder, SubjectRevocation } from "@o3co/auth-provider-core";
+import {
+	type AdapterBuilder,
+	SUBJECT_REVOCATION_MIN_RETENTION_MS,
+	type SubjectRevocation,
+	type SupportsSessionsOnlyRevocation,
+} from "@o3co/auth-provider-core";
 import type { SubjectRevocationClient } from "./clients.mjs";
 
 /**
@@ -56,31 +61,98 @@ export interface RedisSubjectRevocationOptions {
 
 export function createRedisSubjectRevocation(
 	deps: RedisSubjectRevocationOptions,
-): SubjectRevocation {
+): SubjectRevocation & SupportsSessionsOnlyRevocation {
 	const prefix = deps.keyPrefix ?? "ss:rev:";
 	const key = (subject: string): string => `${prefix}${subject}`;
+
+	// #593, D13: a driver built before the second boundary existed cannot
+	// express a sessions-only stamp, and one that quietly ignored the mode
+	// would answer every such stamp by revoking the subject's grants — the one
+	// operation the caller asked not to perform. So it fails here, at
+	// construction, rather than at the first password change.
+	if (
+		typeof (deps.client as { setRevocationBoundaries?: unknown }).setRevocationBoundaries !==
+		"function"
+	) {
+		throw new Error(
+			"createRedisSubjectRevocation: this driver has no `setRevocationBoundaries`. " +
+				"It predates the two revocation boundaries of #593 (D13) and can only advance " +
+				"one, so a sessions-only stamp made through it would revoke the subject's " +
+				"federation grants. Upgrade the driver rather than the adapter.",
+		);
+	}
+
+	/** Every comparison with NaN is false, so a NaN boundary covers nothing while looking like one. */
+	const instant = (value: Date, name: string): number => {
+		const ms = value?.getTime?.();
+		if (typeof ms !== "number" || Number.isNaN(ms)) {
+			throw new RangeError(`SubjectRevocation: ${name} must be a date`);
+		}
+		return ms;
+	};
+
+	/**
+	 * The stored value, in the two forms the script writes — and the one an
+	 * older release wrote, a bare decimal, which means both boundaries.
+	 *
+	 * Anything else is refused rather than read as `null`. Answering "nothing
+	 * was revoked" for a value this adapter does not understand would silently
+	 * disable revocation for that subject; `verifyJwt` already fails closed on
+	 * a throw from this store.
+	 */
+	const decode = (raw: string): { sessionsMs: number; grantsMs: number | null } => {
+		if (/^-?\d+$/.test(raw)) {
+			const both = Number(raw);
+			return { sessionsMs: both, grantsMs: both };
+		}
+		const parsed = /^v1:(-?\d+):(-?\d+|-)$/.exec(raw);
+		if (parsed === null) {
+			throw new Error(
+				`SubjectRevocation: the record for a subject is not a watermark (key prefix "${prefix}")`,
+			);
+		}
+		return {
+			sessionsMs: Number(parsed[1]),
+			grantsMs: parsed[2] === "-" ? null : Number(parsed[2]),
+		};
+	};
+
+	const read = async (subject: string) => {
+		const raw = await deps.client.get(key(subject));
+		return raw === null ? null : decode(raw);
+	};
 
 	return {
 		kind: "redis",
 
 		async revokeBefore(subject, before, expiresAt) {
-			await deps.client.setWatermarkMonotonic(key(subject), before.getTime(), expiresAt.getTime());
+			await deps.client.setRevocationBoundaries(
+				key(subject),
+				"all",
+				instant(before, "before"),
+				instant(expiresAt, "expiresAt"),
+				SUBJECT_REVOCATION_MIN_RETENTION_MS,
+			);
+		},
+
+		async revokeSessionsBefore(subject, before, expiresAt) {
+			await deps.client.setRevocationBoundaries(
+				key(subject),
+				"sessions",
+				instant(before, "before"),
+				instant(expiresAt, "expiresAt"),
+				SUBJECT_REVOCATION_MIN_RETENTION_MS,
+			);
 		},
 
 		async revokedBefore(subject) {
-			const raw = await deps.client.get(key(subject));
-			if (raw === null) return null;
-			const ms = Number(raw);
-			// A value this adapter did not write, or one corrupted in the store, is
-			// not a watermark. Answering `null` would silently disable revocation
-			// for the subject, so it is refused loudly instead — the caller
-			// (`verifyJwt`) already fails closed on a throw from this store.
-			if (!Number.isFinite(ms)) {
-				throw new Error(
-					`SubjectRevocation: watermark for a subject is not a number (key prefix "${prefix}")`,
-				);
-			}
-			return new Date(ms);
+			const record = await read(subject);
+			return record === null ? null : new Date(record.sessionsMs);
+		},
+
+		async grantsRevokedBefore(subject) {
+			const record = await read(subject);
+			return record?.grantsMs == null ? null : new Date(record.grantsMs);
 		},
 	};
 }
