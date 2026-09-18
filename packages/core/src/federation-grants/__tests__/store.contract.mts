@@ -53,8 +53,15 @@ const DAY = 86_400_000;
  *
  * Not on a whole second: an adapter that truncates an instant to seconds when
  * it stores it would otherwise hand every fixture back unchanged.
+ *
+ * Taken per test, and not once at import: a fixture's intent lapses ten
+ * minutes after this instant, and a suite that runs against a real store —
+ * a container to start, connections to open, locks that wait on real timers —
+ * takes long enough for a clock fixed at import to put that lapse in the
+ * past. The record would then be reclaimed by the store's own clock partway
+ * through the suite, which reads as a failure of whatever test looked next.
  */
-const T0 = new Date(Math.floor(Date.now() / 1000) * 1000 + 137);
+let T0 = new Date(Math.floor(Date.now() / 1000) * 1000 + 137);
 const at = (ms: number): Date => new Date(T0.getTime() + ms);
 const INVALID = new Date(Number.NaN);
 
@@ -135,6 +142,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 
 		beforeEach(async () => {
 			store = await factory.create();
+			// After the store is up: whatever creating it cost is not spent out of
+			// the fixtures' ten minutes.
+			T0 = new Date(Math.floor(Date.now() / 1000) * 1000 + 137);
 		});
 
 		afterEach(async () => {
@@ -1673,6 +1683,15 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					}),
 				).toEqual({ ok: false });
 				expect(await store.retireIntent({ grantId: "g-1", now: farAhead })).toEqual({ ok: false });
+				expect(
+					await store.noteRefreshFailure({
+						grantId: "g-1",
+						expectedVersion: grant.version,
+						failure: { at: farAhead, kind: "unavailable" },
+						rowMs: 300_000,
+						now: farAhead,
+					}),
+				).toEqual({ ok: false });
 				await store.touch("g-1", farAhead);
 				expect(await store.revoke("g-pending", "client", farAhead)).toEqual({ ok: false });
 				// An ID is taken for as long as its record is there, and not only for
@@ -1870,6 +1889,15 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					}),
 				).rejects.toThrow(RangeError);
 				await expect(store.revoke("g-1", "client", INVALID)).rejects.toThrow(RangeError);
+				await expect(
+					store.noteRefreshFailure({
+						grantId: "g-1",
+						expectedVersion: grant.version,
+						failure: { at: at(DAY), kind: "unavailable" },
+						rowMs: 300_000,
+						now: INVALID,
+					}),
+				).rejects.toThrow(RangeError);
 
 				// And nothing was changed, reclaimed or created on the way.
 				expect(await store.open("g-1", at(DAY))).toStrictEqual({

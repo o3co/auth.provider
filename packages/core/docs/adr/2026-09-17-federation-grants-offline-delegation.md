@@ -91,6 +91,7 @@ interface FederationGrantAuthorization {
 interface FederationGrantUsage {
 	readonly lastUsedAt?: Date;
 	readonly ineligible?: { reason; at: Date; judgedAgainst: number }; // D5
+	readonly refreshFailure?: { at: Date; kind; count: number; retryAfterSeconds?; upstreamCode? }; // D12
 }
 
 interface FederationGrantRevocation {
@@ -942,7 +943,9 @@ reuse-detecting IdP answers by revoking the family.
   only a *structured* `invalid_grant` or `invalid_token` requires
   reauthorization and deletes credentials. The classifier's substring fallback
   never does; it maps to `upstream_rejected`. 429 and 5xx/network failures
-  change nothing in the record.
+  touch neither the authorization, the status nor the credentials — they do
+  write the stamp of the failed refresh, which is a usage field (D1) and
+  bumps no version.
 - If the upstream refresh succeeds but the replacement cannot be persisted
   after bounded retries inside the lock, the call answers
   `temporarily_unavailable` / `storage`, the new credentials are dropped, and
