@@ -192,6 +192,15 @@ Module-level messages that arrive wrapped in a factory failure:
 
 - Keys: `privateKey or privateKeyPath is required for EdDSA algorithm — no signing key is configured` (with the `openssl` commands); `Duplicate kid values: …`; `previousKeys is not valid for HS256 — use previousSecrets` and the mirror for asymmetric algorithms (`packages/core/src/keys/factory.mts`).
 - Standalone Redis: `` `refreshTokenFamilyStore.redis.url` is required when any Redis-backed adapter is selected `` (`templates/standalone/src/modules.mts`).
+- Federation grants (#593): the same guard, the same environment variable, and
+  the message names `[federation-grants]` rather than `[federation-tokens]`
+  (`packages/redis/src/internal/encryption-mode.mts`). One more refusal of its
+  own: `mode "required" needs at least one encryption key`, at construction
+  rather than at the first write — a ring that cannot seal would otherwise be
+  discovered after a user had already consented. An old key stays in the ring
+  for as long as a paused grant may live (the one-year ceiling): a read never
+  re-seals, so dropping the key that sealed a grant makes it read
+  `key_unavailable` until it is put back.
 - Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs a `CRITICAL` line on every boot (`packages/redis/src/federation-tokens.mts`).
 - Per-process rate-limit fallbacks under `deployment.mode = "multi"` (#474): `deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login` and the same for `POST /oauth/webauthn/authentication/options` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `rateLimiter.adapter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`).
 - Device grant: the five refusals for `verification-uri`, the `session` slice, `rateLimit.failMode`, a `rateLimiter` component, and a usable `oauth.deviceAuthorization.rateLimit` budget (#448) (`packages/device-grant/src/module.mts`).

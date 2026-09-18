@@ -1,0 +1,513 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// What the Redis federation grant store does when the keyspace is not what it
+// wrote (#593, D16): a field someone edited, a credential copied from another
+// grant, a key that is gone, a ring a key was taken out of, a script cache
+// that was flushed.
+//
+// The contract suite proves the port; none of this is reachable through it,
+// because through the port the store is the only writer. Here it is not — a
+// mismatched restore, an operator with redis-cli, or a second deployment
+// pointed at the same keyspace all look like this.
+
+import {
+	type FederationGrantAuthorization,
+	type FederationGrantCredentials,
+	type FederationGrantStore,
+	hasFederationGrantAuthorization,
+} from "@o3co/auth-provider-core";
+import Redis from "ioredis";
+import { GenericContainer, type StartedTestContainer } from "testcontainers";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+	createRedisFederationGrantStore,
+	type FederationGrantKey,
+} from "../src/federation-grant-store.mjs";
+import { makeIoredisFederationGrantStoreClient } from "../src/ioredis.mjs";
+
+let container: StartedTestContainer;
+let redis: Redis;
+let run = 0;
+
+beforeAll(async () => {
+	container = await new GenericContainer("redis:7.2-alpine")
+		.withExposedPorts(6379)
+		.withStartupTimeout(60_000)
+		.start();
+	redis = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
+}, 90_000);
+
+afterAll(async () => {
+	await redis?.quit();
+	await container?.stop();
+});
+
+const MIN = 60_000;
+const DAY = 86_400_000;
+const material = (byte: number): Buffer => Buffer.alloc(32, byte);
+const KEY_A: FederationGrantKey = { id: "k-a", key: material(1) };
+const KEY_B: FederationGrantKey = { id: "k-b", key: material(2) };
+
+let prefix = "";
+let T0 = new Date();
+const at = (ms: number): Date => new Date(T0.getTime() + ms);
+
+beforeEach(() => {
+	run += 1;
+	prefix = `fgf${run}:`;
+	T0 = new Date(Math.floor(Date.now() / 1000) * 1000 + 137);
+});
+
+const store = (keys: readonly FederationGrantKey[] = [KEY_A]): FederationGrantStore =>
+	createRedisFederationGrantStore({
+		client: makeIoredisFederationGrantStoreClient(redis),
+		keyPrefix: prefix,
+		encryption: { mode: "required", keys },
+	});
+
+const key = (id: string, part: "grant" | "cred" | "lock"): string =>
+	`${prefix}{${Buffer.from(JSON.stringify(id), "utf8").toString("base64url")}}:${part}`;
+
+/**
+ * Which Cluster slot a key falls in: CRC16-CCITT of what is between the first
+ * `{` and the next `}`, modulo 16384, exactly as the Cluster specification
+ * defines it. Computed here rather than asked of the server, because
+ * `CLUSTER KEYSLOT` is refused by an instance with cluster support disabled,
+ * which is what a test container is.
+ */
+const slot = (name: string): number => {
+	const open = name.indexOf("{");
+	const close = open === -1 ? -1 : name.indexOf("}", open + 1);
+	const tag = open !== -1 && close > open + 1 ? name.slice(open + 1, close) : name;
+	const bytes = Buffer.from(tag, "utf8");
+	let crc = 0;
+	for (const byte of bytes) {
+		crc ^= byte << 8;
+		for (let bit = 0; bit < 8; bit += 1) {
+			crc = (crc & 0x8000) !== 0 ? ((crc << 1) ^ 0x1021) & 0xffff : (crc << 1) & 0xffff;
+		}
+	}
+	return crc % 16384;
+};
+
+const SCOPES = ["openid", "offline_access"];
+const authorization = (
+	over: Partial<FederationGrantAuthorization> = {},
+): FederationGrantAuthorization => ({
+	identityRevision: "identity-1",
+	authorizationRevision: "authorization-1",
+	upstream: { issuer: "https://dev-1.okta.test", subject: "00u-alice" },
+	scopes: [...SCOPES],
+	consent: { at: at(MIN), sid: "sid-1", scopes: [...SCOPES] },
+	authorizedAt: at(2 * MIN),
+	expiresAt: at(30 * DAY),
+	...over,
+});
+
+const credentials = (tag = "1"): FederationGrantCredentials => ({
+	refreshToken: `rt-${tag}`,
+	accessToken: {
+		value: `at-${tag}`,
+		tokenType: "Bearer",
+		obtainedAt: at(2 * MIN),
+		issuedLifetime: 3600,
+		scopes: [...SCOPES],
+	},
+});
+
+/** A grant taken to `active`, version 2, with a credential sealed under `keys`. */
+const activated = async (
+	id = "g-1",
+	keys: readonly FederationGrantKey[] = [KEY_A],
+	subject = "u-1",
+): Promise<FederationGrantStore> => {
+	const held = store(keys);
+	await held.createPending({
+		id,
+		subject,
+		clientId: "agent",
+		connection: "okta-calendar",
+		intent: { handle: `h-${id}`, expiresAt: at(10 * MIN) },
+		now: T0,
+	});
+	const written = await held.activate({
+		grantId: id,
+		intentHandle: `h-${id}`,
+		authorization: authorization(),
+		credentials: credentials(),
+		now: at(2 * MIN),
+	});
+	expect(written.ok).toBe(true);
+	return held;
+};
+
+describe("a field someone edited (#593, D16)", () => {
+	it("refuses the credential when any field the authorization is bound to is changed, and takes nothing away", async () => {
+		const held = await activated();
+		const original = (await redis.hgetall(key("g-1", "grant"))) as Record<string, string>;
+		const sealed = await redis.get(key("g-1", "cred"));
+
+		// Every field inside the authenticated data, one at a time. The key name
+		// is in there too, which the copy case below covers.
+		// Well-formed, and a different value: a `base` that no longer parses
+		// would make the record unreadable rather than the credential, which is
+		// the case below.
+		const base = JSON.parse(original.base as string) as string[];
+		const tampered: Record<string, string> = {
+			base: JSON.stringify([base[0], "u-2", base[2], base[3], base[4]]),
+			authorization: JSON.stringify([
+				"identity-1",
+				"authorization-2",
+				"https://dev-1.okta.test",
+				"00u-alice",
+				[],
+				SCOPES,
+				String(at(MIN).getTime()),
+				"sid-1",
+				SCOPES,
+				String(at(2 * MIN).getTime()),
+				String(at(30 * DAY).getTime()),
+			]),
+		};
+		for (const [field, value] of Object.entries(tampered)) {
+			await redis.hset(key("g-1", "grant"), field, value);
+			const opened = await held.open("g-1", at(DAY));
+			expect(opened?.credentials.state, field).toBe("unreadable");
+			// And nothing was reclaimed on the way: a record that cannot be read
+			// is never deleted on read (D16), because wrong key material or a bad
+			// restore must not durably flip every grant.
+			expect(await redis.exists(key("g-1", "grant")), field).toBe(1);
+			expect(await redis.get(key("g-1", "cred")), field).toBe(sealed);
+			await redis.hset(key("g-1", "grant"), field, original[field] as string);
+		}
+		// Put back, and it opens again.
+		expect((await held.open("g-1", at(DAY)))?.credentials.state).toBe("ok");
+	});
+
+	it("refuses the credential when a field the scripts guard on no longer agrees with the text", async () => {
+		// `expiresAtMs` and the three upstream fields are copies, outside the
+		// envelope: the text is authoritative, so tampering one of these would
+		// otherwise leave a credential that still authenticates under a record
+		// the store did not write.
+		const held = await activated();
+		for (const [field, value] of [
+			["expiresAtMs", String(at(60 * DAY).getTime())],
+			["identityRevision", "identity-2"],
+			["upstreamIssuer", "https://evil.test"],
+			["upstreamSubject", "00u-bob"],
+		] as const) {
+			const original = await redis.hget(key("g-1", "grant"), field);
+			await redis.hset(key("g-1", "grant"), field, value);
+			expect((await held.open("g-1", at(DAY)))?.credentials.state, field).toBe("unreadable");
+			await redis.hset(key("g-1", "grant"), field, original as string);
+		}
+		expect((await held.open("g-1", at(DAY)))?.credentials.state).toBe("ok");
+	});
+
+	it("keeps opening it when a field the authorization does not decide is changed", async () => {
+		// The usage fields are outside the envelope on purpose (D1): they change
+		// while the grant is in use, and none of them decides what it allows.
+		const held = await activated();
+		await redis.hset(key("g-1", "grant"), {
+			lastUsedAt: String(at(3 * MIN).getTime()),
+			ineligible: JSON.stringify(["no_finite_lifetime", String(at(3 * MIN).getTime()), "0"]),
+			failureAt: String(at(3 * MIN).getTime()),
+			failureKind: "unavailable",
+			failureCount: "4",
+		});
+		const opened = await held.open("g-1", at(DAY));
+		expect(opened?.credentials.state).toBe("ok");
+		expect(opened?.grant.status).toBe("active");
+	});
+
+	it("answers nothing at all for a record whose own shape is broken, and keeps it", async () => {
+		const held = await activated();
+		await redis.hset(key("g-1", "grant"), "base", "not json");
+		expect(await held.find("g-1", at(DAY))).toBeNull();
+		expect(await held.open("g-1", at(DAY))).toBeNull();
+		expect(await held.inspect("g-1", at(DAY))).toBeNull();
+		expect(await redis.exists(key("g-1", "grant"))).toBe(1);
+		// Nor is it listed — and its member is not dropped either, since the
+		// record is still physically there.
+		expect(await held.listBySubject("u-1", at(DAY))).toStrictEqual([]);
+	});
+});
+
+describe("a credential from somewhere else (#593, D16)", () => {
+	it("does not open under another grant, another subject's record, or another prefix", async () => {
+		const first = await activated("g-1");
+		await activated("g-2", [KEY_A], "u-2");
+		const sealed = (await redis.get(key("g-2", "cred"))) as string;
+		await redis.set(key("g-1", "cred"), sealed);
+		expect((await first.open("g-1", at(DAY)))?.credentials.state).toBe("unreadable");
+	});
+
+	it("does not open for a store whose key ring no longer holds the key that sealed it, and opens again when it does", async () => {
+		const held = await activated("g-1", [KEY_A]);
+		// The operator dropped the key. A configuration problem the status route
+		// reports as `key_unavailable` (D11) and which putting the key back undoes.
+		const without = store([KEY_B]);
+		expect((await without.open("g-1", at(DAY)))?.credentials.state).toBe("key_unavailable");
+		expect((await without.inspect("g-1", at(DAY)))?.credentials).toBe("key_unavailable");
+		expect(await redis.exists(key("g-1", "cred"))).toBe(1);
+		expect((await held.open("g-1", at(DAY)))?.credentials.state).toBe("ok");
+	});
+
+	it("tells wrong key material from a missing key: one never opens, the other is undone", async () => {
+		await activated("g-1", [KEY_A]);
+		const wrong = store([{ id: "k-a", key: material(9) }]);
+		expect((await wrong.open("g-1", at(DAY)))?.credentials.state).toBe("unreadable");
+	});
+});
+
+describe("a key ring that rotates (#593, D16)", () => {
+	it("opens what an older key sealed, seals new writes under the first, and never re-seals what it did not write", async () => {
+		await activated("g-1", [KEY_A]);
+		// A key introduced later: first in the ring seals, the old one still opens.
+		const rotated = store([KEY_B, KEY_A]);
+		expect((await rotated.open("g-1", at(DAY)))?.credentials.state).toBe("ok");
+		// A read did not re-seal it: the grant is still readable only because
+		// `k-a` is in the ring, which is what the runbook's "keep the old key for
+		// the one-year ceiling" is about.
+		const onlyNew = store([KEY_B]);
+		expect((await onlyNew.open("g-1", at(DAY)))?.credentials.state).toBe("key_unavailable");
+		// A write does re-seal, under the ring's first key.
+		const written = await rotated.replaceCredentials({
+			grantId: "g-1",
+			expectedVersion: 2,
+			credentials: credentials("2"),
+			ineligible: null,
+			now: at(DAY),
+		});
+		expect(written.ok).toBe(true);
+		expect((await onlyNew.open("g-1", at(DAY)))?.credentials.state).toBe("ok");
+	});
+});
+
+describe("the subject index against what `find` answers (#593, D16)", () => {
+	it("lists what `find` answers for at every stage of a grant's life", async () => {
+		const held = await activated("g-1");
+		const listed = async (now: Date): Promise<readonly string[]> =>
+			(await held.listBySubject("u-1", now)).map((grant) => grant.status);
+		expect(await listed(at(DAY))).toStrictEqual(["active"]);
+		await held.requireReauthorization({ grantId: "g-1", expectedVersion: 2, now: at(DAY) });
+		expect(await listed(at(DAY))).toStrictEqual(["reauthorization_required"]);
+		await held.revoke("g-1", "client", at(2 * DAY));
+		expect(await listed(at(2 * DAY))).toStrictEqual(["revoked"]);
+		// Past the expiry and inside the retention: `find` still answers, so the
+		// listing must too, which is why the index is scored by the horizon and
+		// not by the expiry.
+		expect(await held.find("g-1", at(31 * DAY))).not.toBeNull();
+		expect(await listed(at(31 * DAY))).toStrictEqual(["revoked"]);
+	});
+
+	it("never hands one subject another's grant, however the index was written", async () => {
+		const held = await activated("g-1", [KEY_A], "u-1");
+		// A dangling member, as a lost write or a reused ID leaves behind.
+		const member = Buffer.from(JSON.stringify("g-1"), "utf8").toString("base64url");
+		await redis.zadd(
+			`${prefix}sub:${Buffer.from(JSON.stringify("u-2"), "utf8").toString("base64url")}`,
+			String(at(60 * DAY).getTime()),
+			member,
+		);
+		expect(await held.listBySubject("u-2", at(DAY))).toStrictEqual([]);
+		expect((await held.listBySubject("u-1", at(DAY))).map((g) => g.id)).toStrictEqual(["g-1"]);
+	});
+
+	it("keeps a member whose record is still being written, and drops one whose horizon is long past", async () => {
+		const held = await activated("g-1");
+		const index = `${prefix}sub:${Buffer.from(JSON.stringify("u-1"), "utf8").toString("base64url")}`;
+		// A member for a record that does not exist: never dropped for being
+		// absent, because the record may be one round trip away from existing.
+		await redis.zadd(
+			index,
+			String(at(60 * DAY).getTime()),
+			Buffer.from(JSON.stringify("g-later"), "utf8").toString("base64url"),
+		);
+		await held.listBySubject("u-1", at(DAY));
+		expect(await redis.zcard(index)).toBe(2);
+		// One whose horizon is past by more than the allowance goes.
+		await redis.zadd(
+			index,
+			String(Date.now() - 3_600_000),
+			Buffer.from(JSON.stringify("g-gone"), "utf8").toString("base64url"),
+		);
+		await held.listBySubject("u-1", at(DAY));
+		expect(await redis.zcard(index)).toBe(2);
+	});
+});
+
+describe("two clocks (#593, D16)", () => {
+	it("tells a caller whose clock is far ahead nothing, and reclaims nothing on its behalf", async () => {
+		const held = await activated("g-1");
+		const farAhead = at(5_000 * DAY);
+		expect(await held.find("g-1", farAhead)).toBeNull();
+		expect(await held.open("g-1", farAhead)).toBeNull();
+		expect(await held.listBySubject("u-1", farAhead)).toStrictEqual([]);
+		// The keys, their deadlines and the index are exactly as they were.
+		expect(await redis.exists(key("g-1", "grant"))).toBe(1);
+		expect(await redis.exists(key("g-1", "cred"))).toBe(1);
+		expect(Number(await redis.call("PEXPIRETIME", key("g-1", "grant")))).toBeGreaterThan(
+			at(30 * DAY).getTime(),
+		);
+		expect((await held.find("g-1", at(DAY)))?.status).toBe("active");
+	});
+});
+
+describe("the keyspace as a Cluster sees it (#593, D16)", () => {
+	it("hashes a grant's three keys into one slot, and different grants into different ones", () => {
+		const grant = slot(key("g-1", "grant"));
+		expect(slot(key("g-1", "cred"))).toBe(grant);
+		expect(slot(key("g-1", "lock"))).toBe(grant);
+		// Different grants spread, which is the point of the per-grant tag: one
+		// tag for the namespace would put every grant in a deployment on one node.
+		expect(slot(key("g-2", "grant"))).not.toBe(grant);
+	});
+
+	it("keeps a hostile identifier out of the hash tag", () => {
+		// An ID carrying a brace would otherwise end the tag early and scatter a
+		// grant's keys across slots.
+		for (const id of ["a}x{b", "{}", "}{", "a{b}c", "x".repeat(200)]) {
+			expect(slot(key(id, "grant")), id).toBe(slot(key(id, "cred")));
+			expect(slot(key(id, "grant")), id).toBe(slot(key(id, "lock")));
+		}
+	});
+
+	it("refuses a prefix that would take the hash tag over", async () => {
+		expect(() =>
+			createRedisFederationGrantStore({
+				client: makeIoredisFederationGrantStoreClient(redis),
+				keyPrefix: "{fg}:",
+				encryption: { mode: "required", keys: [KEY_A] },
+			}),
+		).toThrow(/keyPrefix/);
+	});
+});
+
+describe("a script cache that was flushed (#593)", () => {
+	it("goes on working: the next call loads the script again", async () => {
+		const held = await activated("g-1");
+		await redis.script("FLUSH");
+		const written = await held.replaceCredentials({
+			grantId: "g-1",
+			expectedVersion: 2,
+			credentials: credentials("2"),
+			ineligible: null,
+			now: at(DAY),
+		});
+		expect(written.ok).toBe(true);
+		expect(hasFederationGrantAuthorization(written.ok ? written.grant : ({} as never))).toBe(true);
+	});
+});
+
+describe("a snapshot while the grant is being renewed (#593, D16)", () => {
+	it("is wholly one authorization or wholly the other, never one's record with the other's credential", async () => {
+		const held = await activated("g-1");
+		const renewal = authorization({
+			authorizationRevision: "authorization-2",
+			consent: { at: at(DAY), sid: "sid-2", scopes: [...SCOPES] },
+			authorizedAt: at(DAY),
+			expiresAt: at(60 * DAY),
+		});
+		for (let i = 0; i < 8; i += 1) {
+			await held.nameIntent({
+				grantId: "g-1",
+				intent: { handle: `h-re-${i}`, expiresAt: at(DAY + 10 * MIN) },
+				now: at(DAY),
+			});
+			const [opened] = await Promise.all([
+				held.open("g-1", at(DAY + MIN)),
+				held.activate({
+					grantId: "g-1",
+					intentHandle: `h-re-${i}`,
+					authorization: { ...renewal, authorizationRevision: `authorization-${i + 2}` },
+					credentials: credentials(`r${i}`),
+					now: at(DAY + MIN),
+				}),
+			]);
+			// Either the old pair or the new one — and never `unreadable`, which
+			// is what a record read apart from its credential would give.
+			expect(opened?.credentials.state, `iteration ${i}`).toBe("ok");
+		}
+	});
+});
+
+describe("plaintext, where an operator has allowed it (#593, D16)", () => {
+	it("stores a credential neither reader takes for the other's", async () => {
+		const plain = createRedisFederationGrantStore({
+			client: makeIoredisFederationGrantStoreClient(redis),
+			keyPrefix: prefix,
+			encryption: { mode: "allow-plaintext" },
+		});
+		await plain.createPending({
+			id: "g-1",
+			subject: "u-1",
+			clientId: "agent",
+			connection: "okta-calendar",
+			intent: { handle: "h-g-1", expiresAt: at(10 * MIN) },
+			now: T0,
+		});
+		await plain.activate({
+			grantId: "g-1",
+			intentHandle: "h-g-1",
+			authorization: authorization(),
+			credentials: credentials(),
+			now: at(2 * MIN),
+		});
+		expect((await plain.open("g-1", at(DAY)))?.credentials.state).toBe("ok");
+		expect(await redis.get(key("g-1", "cred"))).toMatch(/^p2\./);
+		// A store that requires encryption does not read it, and a plaintext one
+		// does not read a sealed credential.
+		expect((await store([KEY_A]).open("g-1", at(DAY)))?.credentials.state).toBe("unreadable");
+	});
+
+	it("is refused where plaintext is not acceptable, whatever the environment is called", async () => {
+		for (const guard of [
+			{ environment: "production" },
+			{ environment: "staging" },
+			{ deploymentMode: "multi" },
+		]) {
+			expect(
+				() =>
+					createRedisFederationGrantStore({
+						client: makeIoredisFederationGrantStoreClient(redis),
+						keyPrefix: prefix,
+						encryption: { mode: "allow-plaintext" },
+						guard,
+					}),
+				JSON.stringify(guard),
+			).toThrow(/federation-grants/);
+		}
+	});
+
+	it("refuses to be built with encryption required and no key to seal with", () => {
+		expect(() =>
+			createRedisFederationGrantStore({
+				client: makeIoredisFederationGrantStoreClient(redis),
+				keyPrefix: prefix,
+				encryption: { mode: "required", keys: [] },
+			}),
+		).toThrow(/encryption key/);
+		expect(() =>
+			createRedisFederationGrantStore({
+				client: makeIoredisFederationGrantStoreClient(redis),
+				keyPrefix: prefix,
+				encryption: { mode: "required", keys: [{ id: "k", key: Buffer.alloc(16, 1) }] },
+			}),
+		).toThrow(/32 bytes/);
+	});
+});
