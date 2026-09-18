@@ -986,6 +986,51 @@ export interface RetireFederationGrantIntentInput {
 	readonly handle?: string;
 }
 
+export interface ActivateFederationGrantInput {
+	readonly nowMs: number;
+	/** The intent's handle, JSON-encoded: only the current one activates. */
+	readonly handle: string;
+	/** The canonical authorization text, byte for byte as the credential was sealed under. */
+	readonly authorization: string;
+	/** The authorization's expiry, for the arithmetic the scripts do. */
+	readonly expiresAtMs: number;
+	/** Guard fields, repeated outside the authenticated text so a script can compare them. */
+	readonly identityRevision: string;
+	readonly upstreamIssuer: string;
+	readonly upstreamSubject: string;
+	/** The sealed credential. */
+	readonly credential: string;
+}
+
+export interface ReplaceFederationGrantCredentialsInput {
+	readonly nowMs: number;
+	readonly expectedVersion: number;
+	readonly credential: string;
+	/** The ineligibility marker as JSON `[reason, atMs, judgedAgainst]`, or `null` to remove it. */
+	readonly ineligible: string | null;
+}
+
+export interface RequireFederationGrantReauthorizationInput {
+	readonly nowMs: number;
+	readonly expectedVersion: number;
+}
+
+export interface RevokeFederationGrantInput {
+	readonly atMs: number;
+	readonly by: string;
+}
+
+export interface NoteFederationGrantRefreshFailureInput {
+	readonly nowMs: number;
+	readonly expectedVersion: number;
+	/** When the failure happened, which is what the row is measured from — not `nowMs`. */
+	readonly atMs: number;
+	readonly kind: string;
+	readonly rowMs: number;
+	readonly retryAfterSeconds?: number;
+	readonly upstreamCode?: string;
+}
+
 /** What one read returns: the record and its credential as they were at one instant. */
 export interface FederationGrantSnapshot {
 	readonly fields: FederationGrantHashFields;
@@ -1031,6 +1076,68 @@ export interface FederationGrantStoreClient {
 	retireIntent(
 		grantKey: string,
 		input: RetireFederationGrantIntentInput,
+	): Promise<FederationGrantHashFields | null>;
+	/**
+	 * Takes the grant from its current intent to `active` under a new
+	 * authorization, sealing the credential with it. Every guard is inside the
+	 * script, including the current intent — `nameIntent` and `retireIntent`
+	 * bump no version, so a version comparison cannot see a pointer that moved
+	 * under a caller that read it.
+	 *
+	 * A renewal never re-points a grant: the identity revision and the upstream
+	 * account must be the ones already recorded. The marker and the stamp of a
+	 * failed refresh go with the authorization they were about; a use recorded
+	 * before it stays.
+	 */
+	activate(
+		grantKey: string,
+		credKey: string,
+		input: ActivateFederationGrantInput,
+	): Promise<FederationGrantHashFields | null>;
+	/**
+	 * Replaces the credential of an `active` grant at `expectedVersion`, and
+	 * the marker whole — a refresh that found the token eligible removes one.
+	 * Forgets the stamp of a failed refresh, and moves no horizon: the
+	 * credential's deadline is the authorization's expiry again.
+	 */
+	replaceCredentials(
+		grantKey: string,
+		credKey: string,
+		input: ReplaceFederationGrantCredentialsInput,
+	): Promise<FederationGrantHashFields | null>;
+	/**
+	 * Takes the credential and asks for the user, at `expectedVersion`. The
+	 * only transition with no expiry guard: an upstream that says the
+	 * credential is dead is believed whenever it says it. The marker stays,
+	 * the horizon does not move.
+	 */
+	requireReauthorization(
+		grantKey: string,
+		credKey: string,
+		input: RequireFederationGrantReauthorizationInput,
+	): Promise<FederationGrantHashFields | null>;
+	/**
+	 * Ends the grant: the credential and the intent go, what it was authorized
+	 * for stays, and the first revocation stays as it was recorded. No version
+	 * guard — a revocation does not lose to a refresh in flight. A revocation
+	 * moves no horizon, except for a grant that was never authorized and has
+	 * no expiry to be retained from.
+	 */
+	revoke(
+		grantKey: string,
+		credKey: string,
+		input: RevokeFederationGrantInput,
+	): Promise<FederationGrantHashFields | null>;
+	/**
+	 * Stamps a failed refresh on an `active` grant at `expectedVersion`,
+	 * counting the stamps in a row, and bumps no version (D12). The version is
+	 * still compared: a failure that outlived its refresh must not install a
+	 * backoff over a credential written since. Never dated back, and an equal
+	 * instant counts onward.
+	 */
+	noteRefreshFailure(
+		grantKey: string,
+		input: NoteFederationGrantRefreshFailureInput,
 	): Promise<FederationGrantHashFields | null>;
 	/** Moves `lastUsedAt` forward, and never back. Writes nothing when there is no record. */
 	touch(grantKey: string, atMs: number): Promise<void>;

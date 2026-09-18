@@ -893,6 +893,219 @@ if clock == nil or allowance == nil then return 0 end
 return redis.call('ZREMRANGEBYSCORE', KEYS[1], '-inf', '(' .. string.format('%.0f', clock - allowance))
 `;
 
+/**
+ * Takes a grant from its current intent to `active`. `KEYS[1]` = the record,
+ * `KEYS[2]` = its credential; `ARGV` = the caller's clock, the handle, the
+ * authorization text, its expiry, the three guard fields, the sealed
+ * credential.
+ *
+ * The current intent is compared here and not by version, because naming and
+ * retiring an intent bump none: a caller that read a pointer and activated on
+ * it would otherwise activate a renewal the user had already superseded, or
+ * one a subject-wide revocation had retired. That is the mistake this script
+ * exists to make impossible.
+ *
+ * The stored expiry is checked unless the grant is `pending` — a new consent
+ * must not resurrect a lifetime that has ended — and the identity revision
+ * and upstream account must be the ones recorded, so that a renewal never
+ * re-points a grant at another account (D4, D7).
+ *
+ * The authorization is replaced as a whole, so the marker and the stamp of a
+ * failed refresh go with the one they were about. A use recorded before it
+ * stays: it says nothing about what the grant allows.
+ */
+const LUA_FG_ACTIVATE = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local expiresAt = tonumber(ARGV[4])
+if now == nil or expiresAt == nil then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil then return {0} end
+if g['status'] == 'revoked' then return {0} end
+if g['status'] ~= 'pending' then
+  local stored = fg_num(g['expiresAtMs'])
+  if stored == nil or not (now < stored) then return {0} end
+end
+if not fg_same(g['intentHandle'], ARGV[2]) then return {0} end
+local intentAt = fg_num(g['intentExpiresAt'])
+if intentAt == nil or not (now < intentAt) then return {0} end
+if g['authorization'] ~= nil then
+  if g['identityRevision'] ~= ARGV[5] then return {0} end
+  if g['upstreamIssuer'] ~= ARGV[6] then return {0} end
+  if g['upstreamSubject'] ~= ARGV[7] then return {0} end
+end
+local version = fg_num(g['version'])
+if version == nil then return {0} end
+redis.call('HDEL', KEYS[1],
+  'intentHandle', 'intentExpiresAt', 'ineligible',
+  'failureAt', 'failureKind', 'failureCount',
+  'failureRetryAfterSeconds', 'failureUpstreamCode')
+redis.call('HSET', KEYS[1],
+  'status', 'active',
+  'version', string.format('%.0f', version + 1),
+  'authorization', ARGV[3],
+  'expiresAtMs', ARGV[4],
+  'identityRevision', ARGV[5],
+  'upstreamIssuer', ARGV[6],
+  'upstreamSubject', ARGV[7])
+redis.call('SET', KEYS[2], ARGV[8])
+local fields = redis.call('HGETALL', KEYS[1])
+local retention = fg_num(g['retentionMs']) or 0
+redis.call('PEXPIREAT', KEYS[1], math.ceil(expiresAt + retention))
+redis.call('PEXPIREAT', KEYS[2], math.ceil(expiresAt))
+return {1, fields}
+`;
+
+/**
+ * Replaces the credential of an `active` grant. `KEYS[1]` = the record,
+ * `KEYS[2]` = its credential; `ARGV` = the caller's clock, the expected
+ * version, the sealed credential, whether a marker was given, the marker.
+ *
+ * The marker is replaced as a whole, including being removed: a refresh that
+ * found the token eligible says so by handing over none. The stamp of a
+ * failed refresh is forgotten, because this refresh succeeded. Neither
+ * horizon moves — the credential's deadline is set to the same expiry it
+ * already had, so a rotation does not extend what the user consented to.
+ */
+const LUA_FG_REPLACE = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local expected = tonumber(ARGV[2])
+if now == nil or expected == nil then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil or g['status'] ~= 'active' then return {0} end
+local version = fg_num(g['version'])
+if version == nil or version ~= expected then return {0} end
+local expiresAt = fg_num(g['expiresAtMs'])
+if expiresAt == nil or not (now < expiresAt) then return {0} end
+redis.call('HDEL', KEYS[1],
+  'ineligible', 'failureAt', 'failureKind', 'failureCount',
+  'failureRetryAfterSeconds', 'failureUpstreamCode')
+redis.call('HSET', KEYS[1], 'version', string.format('%.0f', version + 1))
+if ARGV[4] == '1' then
+  redis.call('HSET', KEYS[1], 'ineligible', ARGV[5])
+end
+redis.call('SET', KEYS[2], ARGV[3])
+local fields = redis.call('HGETALL', KEYS[1])
+redis.call('PEXPIREAT', KEYS[2], math.ceil(expiresAt))
+return {1, fields}
+`;
+
+/**
+ * Asks for the user again. `KEYS[1]` = the record, `KEYS[2]` = its
+ * credential; `ARGV` = the caller's clock, the expected version.
+ *
+ * The one transition with no expiry guard: an upstream that says the
+ * credential is dead is believed whenever it says it, and a record whose
+ * expiry passed while the answer was in flight must still lose its
+ * credential. The marker stays — it describes the tokens this authorization
+ * yields, which is exactly what the user is being asked about — and the
+ * horizon does not move, because what was consented to has not changed.
+ */
+const LUA_FG_REQUIRE_REAUTH = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local expected = tonumber(ARGV[2])
+if now == nil or expected == nil then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil or g['status'] ~= 'active' then return {0} end
+local version = fg_num(g['version'])
+if version == nil or version ~= expected then return {0} end
+redis.call('HDEL', KEYS[1],
+  'failureAt', 'failureKind', 'failureCount',
+  'failureRetryAfterSeconds', 'failureUpstreamCode')
+redis.call('HSET', KEYS[1],
+  'status', 'reauthorization_required',
+  'version', string.format('%.0f', version + 1))
+redis.call('DEL', KEYS[2])
+return {1, redis.call('HGETALL', KEYS[1])}
+`;
+
+/**
+ * Ends the grant. `KEYS[1]` = the record, `KEYS[2]` = its credential; `ARGV`
+ * = the instant, who revoked it.
+ *
+ * No version guard: a revocation does not lose to a refresh in flight, and
+ * whichever runs second is still correct — a revocation after a refresh takes
+ * the credential the refresh wrote, and a refresh after a revocation is
+ * refused by the status.
+ *
+ * What the grant was authorized for stays, so the status route can say what
+ * ended. A revocation moves no horizon — an authorized grant is retained from
+ * its expiry whenever it was revoked — except for one that was never
+ * authorized, which has no expiry to be retained from and runs from here.
+ */
+const LUA_FG_REVOKE = `${LUA_FG_PRELUDE}
+local at = tonumber(ARGV[1])
+if at == nil then return {0} end
+local g = fg_visible(KEYS[1], at)
+if g == nil or g['status'] == 'revoked' then return {0} end
+local version = fg_num(g['version'])
+if version == nil then return {0} end
+local wasPending = g['status'] == 'pending'
+redis.call('HDEL', KEYS[1],
+  'intentHandle', 'intentExpiresAt',
+  'failureAt', 'failureKind', 'failureCount',
+  'failureRetryAfterSeconds', 'failureUpstreamCode')
+redis.call('HSET', KEYS[1],
+  'status', 'revoked',
+  'version', string.format('%.0f', version + 1),
+  'revokedBy', ARGV[2],
+  'revokedAt', ARGV[1])
+redis.call('DEL', KEYS[2])
+local fields = redis.call('HGETALL', KEYS[1])
+if wasPending then
+  local retention = fg_num(g['retentionMs']) or 0
+  redis.call('PEXPIREAT', KEYS[1], math.ceil(at + retention))
+end
+return {1, fields}
+`;
+
+/**
+ * Stamps a failed refresh. `KEYS[1]` = the record; `ARGV` = the caller's
+ * clock, the expected version, when the failure happened, its kind, the row,
+ * and the two optional fields with a flag each.
+ *
+ * The version is compared although none is written: a failure that outlived
+ * its own refresh must not install a backoff over a credential written since
+ * (D12). The row is measured from the stamp it replaces and against the
+ * failure's own instant, not the caller's clock — a stamp that took a second
+ * to arrive is still one failure after the last. An equal instant counts
+ * onward; an earlier one is refused, so a stamp that arrives out of order
+ * never replaces a newer one.
+ *
+ * Only the stamp's fields are touched, so a use or a pointer written
+ * meanwhile survives — which is the reason this is a script and not a
+ * read, a count and a write.
+ */
+const LUA_FG_NOTE_FAILURE = `${LUA_FG_PRELUDE}
+local now = tonumber(ARGV[1])
+local expected = tonumber(ARGV[2])
+local failedAt = tonumber(ARGV[3])
+local row = tonumber(ARGV[5])
+if now == nil or expected == nil or failedAt == nil then return {0} end
+local g = fg_visible(KEYS[1], now)
+if g == nil or g['status'] ~= 'active' then return {0} end
+local version = fg_num(g['version'])
+if version == nil or version ~= expected then return {0} end
+local expiresAt = fg_num(g['expiresAtMs'])
+if expiresAt == nil or not (now < expiresAt) then return {0} end
+local previous = fg_num(g['failureAt'])
+local count = 1
+if previous ~= nil then
+  if failedAt < previous then return {0} end
+  local since = failedAt - previous
+  if row ~= nil and since <= row then
+    count = (fg_num(g['failureCount']) or 0) + 1
+  end
+end
+redis.call('HDEL', KEYS[1], 'failureRetryAfterSeconds', 'failureUpstreamCode')
+redis.call('HSET', KEYS[1],
+  'failureAt', ARGV[3],
+  'failureKind', ARGV[4],
+  'failureCount', string.format('%.0f', count))
+if ARGV[6] == '1' then redis.call('HSET', KEYS[1], 'failureRetryAfterSeconds', ARGV[7]) end
+if ARGV[8] == '1' then redis.call('HSET', KEYS[1], 'failureUpstreamCode', ARGV[9]) end
+return {1, redis.call('HGETALL', KEYS[1])}
+`;
+
 const FG_CREATE = defineScript(LUA_FG_CREATE);
 const FG_SNAPSHOT = defineScript(LUA_FG_SNAPSHOT);
 const FG_NAME_INTENT = defineScript(LUA_FG_NAME_INTENT);
@@ -900,6 +1113,11 @@ const FG_RETIRE_INTENT = defineScript(LUA_FG_RETIRE_INTENT);
 const FG_TOUCH = defineScript(LUA_FG_TOUCH);
 const FG_RESERVE = defineScript(LUA_FG_RESERVE);
 const FG_PRUNE = defineScript(LUA_FG_PRUNE);
+const FG_ACTIVATE = defineScript(LUA_FG_ACTIVATE);
+const FG_REPLACE = defineScript(LUA_FG_REPLACE);
+const FG_REQUIRE_REAUTH = defineScript(LUA_FG_REQUIRE_REAUTH);
+const FG_REVOKE = defineScript(LUA_FG_REVOKE);
+const FG_NOTE_FAILURE = defineScript(LUA_FG_NOTE_FAILURE);
 
 /**
  * Run `script` EVALSHA-first, falling back to EVAL — which implicitly loads
@@ -1693,6 +1911,86 @@ export function makeIoredisFederationGrantStoreClient(
 					FG_RETIRE_INTENT,
 					[grantKey],
 					[fgNumber(input.nowMs), input.handle === undefined ? "0" : "1", input.handle ?? ""],
+				),
+			);
+		},
+
+		async activate(grantKey, credKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_ACTIVATE,
+					[grantKey, credKey],
+					[
+						fgNumber(input.nowMs),
+						input.handle,
+						input.authorization,
+						fgNumber(input.expiresAtMs),
+						input.identityRevision,
+						input.upstreamIssuer,
+						input.upstreamSubject,
+						input.credential,
+					],
+				),
+			);
+		},
+
+		async replaceCredentials(grantKey, credKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_REPLACE,
+					[grantKey, credKey],
+					[
+						fgNumber(input.nowMs),
+						fgNumber(input.expectedVersion),
+						input.credential,
+						input.ineligible === null ? "0" : "1",
+						input.ineligible ?? "",
+					],
+				),
+			);
+		},
+
+		async requireReauthorization(grantKey, credKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_REQUIRE_REAUTH,
+					[grantKey, credKey],
+					[fgNumber(input.nowMs), fgNumber(input.expectedVersion)],
+				),
+			);
+		},
+
+		async revoke(grantKey, credKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_REVOKE,
+					[grantKey, credKey],
+					[fgNumber(input.atMs), input.by],
+				),
+			);
+		},
+
+		async noteRefreshFailure(grantKey, input) {
+			return fgWritten(
+				await runScript(
+					connection,
+					FG_NOTE_FAILURE,
+					[grantKey],
+					[
+						fgNumber(input.nowMs),
+						fgNumber(input.expectedVersion),
+						fgNumber(input.atMs),
+						input.kind,
+						fgNumber(input.rowMs),
+						input.retryAfterSeconds === undefined ? "0" : "1",
+						input.retryAfterSeconds === undefined ? "" : String(input.retryAfterSeconds),
+						input.upstreamCode === undefined ? "0" : "1",
+						input.upstreamCode ?? "",
+					],
 				),
 			);
 		},
