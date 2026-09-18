@@ -298,9 +298,66 @@ export const SUBJECT_REVOCATION_ABSENCE_POLICY = {
 
 export interface SubjectRevocation {
 	readonly kind: string;
+	/**
+	 * End everything for this subject: sessions, this provider's own tokens,
+	 * and — since #593 — the subject's federation grants.
+	 *
+	 * It advances **both** boundaries of D13, which is what makes a Store that
+	 * upgrades without touching this call site behave exactly as one watermark
+	 * always did. Keeping grants is the narrower, newer operation, and it takes
+	 * the deliberate call on {@link SupportsSessionsOnlyRevocation}.
+	 */
 	revokeBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;
-	/** The watermark, or `null` when this subject has none in force. */
+	/** The sessions watermark, or `null` when this subject has none in force. */
 	revokedBefore(subject: string): Promise<Date | null>;
+}
+
+/**
+ * The second boundary (#593, D13): sessions and grants, separately.
+ *
+ * A password change and "revoke everything" are different events. Ending every
+ * delegation on every password change puts the price in the wrong place — each
+ * agent and each paused job then needs a new login, a new grant, a new consent
+ * and a new upstream authorization — and the industry does not do it either:
+ * in Entra's own table a confidential client's token survives a password
+ * change, and only an explicit revocation ends every class.
+ *
+ * The two boundaries are two fields of **one record**, advanced by one atomic,
+ * monotonic write. Two writes would open a window between them: with the
+ * grants boundary written and the sessions boundary still to come, a session
+ * that should already be dead could consent, and that consent would be dated
+ * after the grants boundary and escape the backstop for good.
+ *
+ * A capability, detected by method presence like the others, so an adapter
+ * written before #593 keeps working in a deployment that has no grants. With
+ * federation grants enabled it is required, and boot refuses an adapter
+ * without it — method presence can only change which watermark is read; it
+ * cannot enforce the retention the backstop depends on.
+ */
+export interface SupportsSessionsOnlyRevocation {
+	/**
+	 * Advance the sessions boundary alone, leaving the grants boundary exactly
+	 * as it was — including absent. It is never a way back: a grant an earlier
+	 * revocation ended stays ended.
+	 */
+	revokeSessionsBefore(subject: string, before: Date, expiresAt: Date): Promise<void>;
+	/** The grants watermark, or `null` when this subject has none in force. */
+	grantsRevokedBefore(subject: string): Promise<Date | null>;
+}
+
+/**
+ * Both methods, or neither. One of the two is an adapter halfway through an
+ * upgrade, and reading its grants boundary would answer `null` — "nothing was
+ * revoked" — for a subject whose grants a revocation had ended.
+ */
+export function supportsSessionsOnlyRevocation(
+	value: SubjectRevocation,
+): value is SubjectRevocation & SupportsSessionsOnlyRevocation {
+	const candidate = value as Partial<SupportsSessionsOnlyRevocation> | null | undefined;
+	return (
+		typeof candidate?.revokeSessionsBefore === "function" &&
+		typeof candidate?.grantsRevokedBefore === "function"
+	);
 }
 
 // ---------------------------------------------------------------------------

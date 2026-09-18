@@ -318,7 +318,7 @@ const LEGACY_PAYLOAD_TYPE_MAP: Record<string, JwtType> = {
 	access: "access_token",
 };
 
-const DEFAULT_CLOCK_SKEW_MS = 300_000;
+export const DEFAULT_CLOCK_SKEW_MS = 300_000;
 
 /**
  * Default watermark allowance (#408). One second, because the comparison is
@@ -327,7 +327,7 @@ const DEFAULT_CLOCK_SKEW_MS = 300_000;
  * additional second is a second of post-reset logins refused. See
  * `JwtVerifyOptions.subjectRevocationSkewMs`.
  */
-const DEFAULT_SUBJECT_REVOCATION_SKEW_MS = 1_000;
+export const DEFAULT_SUBJECT_REVOCATION_SKEW_MS = 1_000;
 
 /**
  * Centralized JWT verification with alg / iss / aud / typ pinning.

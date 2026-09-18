@@ -201,21 +201,35 @@ describe("createInMemorySubjectRevocation (#296)", () => {
 		expect((await store.revokedBefore("u1"))?.getTime()).toBe(2_000_000);
 	});
 
-	it("expires the watermark once no token it could kill can still exist", async () => {
+	it("expires the watermark once no session it could kill can still exist", async () => {
+		// #593, D13: `revokeBefore` ends the subject's GRANTS as well, so its
+		// record is now floored at a year — a grant may have been consented for
+		// one, and a boundary that lapses under it takes the backstop with it.
+		// The caller's own TTL still bounds a sessions-only stamp, which is what
+		// this rule was always about.
+		vi.useFakeTimers();
+		const store = createInMemorySubjectRevocation();
+		await store.revokeSessionsBefore("u1", new Date(Date.now()), new Date(Date.now() + 1_000));
+		vi.advanceTimersByTime(2_000);
+		expect(await store.revokedBefore("u1")).toBeNull();
+	});
+
+	it("keeps a full revocation for as long as a grant it covers could live", async () => {
 		vi.useFakeTimers();
 		const store = createInMemorySubjectRevocation();
 		await store.revokeBefore("u1", new Date(Date.now()), new Date(Date.now() + 1_000));
 		vi.advanceTimersByTime(2_000);
-		expect(await store.revokedBefore("u1")).toBeNull();
+		expect(await store.revokedBefore("u1")).not.toBeNull();
+		expect(await store.grantsRevokedBefore("u1")).not.toBeNull();
 	});
 
 	it("starts a fresh watermark after the previous one expired", async () => {
 		// The monotonic guard must not resurrect an expired entry's value.
 		vi.useFakeTimers();
 		const store = createInMemorySubjectRevocation();
-		await store.revokeBefore("u1", new Date(9_000_000), new Date(Date.now() + 1_000));
+		await store.revokeSessionsBefore("u1", new Date(9_000_000), new Date(Date.now() + 1_000));
 		vi.advanceTimersByTime(2_000);
-		await store.revokeBefore("u1", new Date(1_000), new Date(Date.now() + 300_000));
+		await store.revokeSessionsBefore("u1", new Date(1_000), new Date(Date.now() + 300_000));
 		expect((await store.revokedBefore("u1"))?.getTime()).toBe(1_000);
 	});
 });

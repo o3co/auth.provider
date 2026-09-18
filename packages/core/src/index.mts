@@ -861,12 +861,26 @@ export {
 	type PendingFederationGrant,
 	type RevokedFederationGrant,
 } from "./federation-grants/types.mjs";
-
+// #593, D13: the two boundaries of a subject revocation, and how long each has
+// to be kept. The skew leaves `jwt/verify.mts` because the grants comparison
+// has to use the same allowance the watermark comparison already does.
+export {
+	DEFAULT_CLOCK_SKEW_MS,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+} from "./jwt/verify.mjs";
 // SF-3 + MIN-4 (v0.5.1): timing-safe primitives. Exported from the package
 // root because `packages/core/package.json#exports` does not register a
 // `./security/*` subpath — Codex Delta 1 confirmed the subpath approach
 // would fail at runtime under Node's exports gating.
 export { constantTimeStringEqual } from "./security/timingSafe.mjs";
+export {
+	resolveSubjectRevocationHorizonMs,
+	SUBJECT_REVOCATION_MIN_RETENTION_MS,
+} from "./user-sessions/retention.mjs";
+export {
+	type SupportsSessionsOnlyRevocation,
+	supportsSessionsOnlyRevocation,
+} from "./user-sessions/types.mjs";
 
 // ===========================================================================
 // Device Authorization Grant — DeviceCodeStore port + codes (RFC 8628, #298)
