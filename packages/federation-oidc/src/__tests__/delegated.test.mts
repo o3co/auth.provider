@@ -220,6 +220,50 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			expect(tokens).toStrictEqual({ refreshToken: "rt-rotated" });
 		});
 
+		it("keeps the rotated refresh token however the token endpoint is spelled: a default port in the metadata is the same endpoint", async () => {
+			// oauth4webapi normalizes the URL it fetches; the metadata's spelling
+			// must not decide whether the body is captured.
+			const { idp, provider } = await build({
+				endpoints: { tokenEndpoint: `${ISSUER}:443/token` },
+			});
+			idp.refreshAnswer = { scope: ["openid"], refresh_token: "rt-rotated" };
+			const tokens = await provider.refreshDelegatedToken({ refreshToken: "rt-1" });
+			expect(tokens).toStrictEqual({ refreshToken: "rt-rotated" });
+		});
+
+		it("dates the token from when the answer arrived, not from when the library was done verifying an id_token against a slow JWKS", async () => {
+			const { idp, provider } = await build();
+			idp.refreshWithIdToken = true;
+			idp.refreshAnswer = { expires_in: 2 };
+			idp.jwksDelayMs = 1_500;
+			const before = Date.now();
+			const tokens = await provider.refreshDelegatedToken({ refreshToken: "rt-1" });
+			const after = Date.now();
+			expect(after - before).toBeGreaterThanOrEqual(1_400);
+			expect(tokens.expiresIn).toBe(2);
+			// Anchored at receipt: at most two seconds past the start of the call,
+			// and not two seconds past the end of the verification.
+			expect(tokens.expiresAt?.getTime()).toBeLessThanOrEqual(before + 2_000 + 200);
+			expect(tokens.expiresAt?.getTime()).toBeGreaterThanOrEqual(before + 2_000 - 50);
+		});
+
+		it("judges the lifetime the upstream sent, not what the library coerced it to: a lifetime that is not a number withholds the access token and keeps the rotated refresh token", async () => {
+			const { idp, provider } = await build();
+			for (const garbage of [[3600, 7200], "1000seconds", { seconds: 3600 }, true]) {
+				idp.refreshAnswer = { expires_in: garbage, refresh_token: "rt-rotated" };
+				expect(
+					await provider.refreshDelegatedToken({ refreshToken: "rt-1" }),
+					JSON.stringify(garbage),
+				).toStrictEqual({ refreshToken: "rt-rotated" });
+			}
+			// A string of digits is unambiguous, and some IdPs send one.
+			idp.refreshAnswer = { expires_in: "3600" };
+			expect(await provider.refreshDelegatedToken({ refreshToken: "rt-1" })).toMatchObject({
+				accessToken: "at-refreshed",
+				expiresIn: 3600,
+			});
+		});
+
 		it("rethrows what the IdP refused with, for the classifier — even when the refusal's body carries a refresh_token", async () => {
 			const { idp, provider } = await build();
 			idp.tokenStatus = 400;

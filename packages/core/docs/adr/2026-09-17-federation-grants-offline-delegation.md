@@ -1470,10 +1470,17 @@ library refused to parse — a `scope` that is not a string, a missing
 `access_token` — may still carry a rotated refresh token, and D5 has that one
 persisted whatever else is wrong. oauth4webapi throws before it returns such
 a body, so the generic adapter reads the token endpoint's raw body in its
-per-call fetch and, when the library throws an error that is not the IdP's
-own answer (`ResponseBodyError`), answers `{ refreshToken }` from what it
-read. An error the IdP answered with is thrown as the library throws it, for
-the classifier.
+per-call fetch — the endpoint compared as a URL, however the metadata spells
+it — and, when the library throws, answers `{ refreshToken }` from what it
+read. Only a 200 is ever captured: an error the IdP answered with is a 4xx,
+has nothing to salvage from whatever its body says, and is thrown as the
+library throws it, for the classifier. The captured body is also where the
+lifetime is judged: the library coerces `expires_in` with `parseFloat`, so
+`[3600, 7200]` would read as 3600, and a value that is neither a number nor
+a string of digits withholds the access token and keeps the refresh token.
+And it is where the token is dated: at the moment the answer arrived, before
+any id_token the library goes on to verify against a JWKS it may have to
+fetch.
 
 Three rules the generic adapter keeps, and any adapter should:
 

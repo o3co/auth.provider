@@ -170,8 +170,41 @@ const RESERVED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
 interface DelegatedCall {
 	readonly signal?: AbortSignal;
 	captured?: Record<string, unknown>;
+	/** When the token endpoint's answer arrived: what dates the token, before any verification the library does. */
+	receivedAt?: number;
 }
 const delegatedCalls = new AsyncLocalStorage<DelegatedCall>();
+
+/** The same endpoint however it is spelled: oauth4webapi normalizes the URL it fetches (a default port, a trailing dot). */
+const sameEndpoint = (fetched: string, configured: string): boolean => {
+	try {
+		return new URL(fetched).href === new URL(configured).href;
+	} catch {
+		return fetched === configured;
+	}
+};
+
+/**
+ * The lifetime the upstream SENT, judged before the library's coercion: it
+ * applies `parseFloat` to whatever it finds, so `[3600, 7200]` reads as 3600
+ * and "1000seconds" as 1000, and neither is a lifetime an operator's maximum
+ * can be held against (D5). A number is one; so is a string of digits, which
+ * some IdPs send; nothing else. Without a captured body the coerced value is
+ * all there is.
+ */
+const rawLifetime = (
+	captured: Record<string, unknown> | undefined,
+	coerced: number | undefined,
+): { readonly ok: true; readonly seconds: number | null } | { readonly ok: false } => {
+	if (captured === undefined) {
+		return { ok: true, seconds: typeof coerced === "number" ? coerced : null };
+	}
+	const raw = captured.expires_in;
+	if (raw === undefined) return { ok: true, seconds: null };
+	if (typeof raw === "number" && Number.isFinite(raw)) return { ok: true, seconds: raw };
+	if (typeof raw === "string" && /^\d+$/.test(raw)) return { ok: true, seconds: Number(raw) };
+	return { ok: false };
+};
 
 /** The raw JSON of a token endpoint's answer, when it is one; anything else is nobody's to salvage from. */
 const readTokenBody = async (response: Response): Promise<Record<string, unknown> | undefined> => {
@@ -346,7 +379,8 @@ export async function createOidcProvider(
 			...options,
 			...(signals.length > 0 ? { signal: AbortSignal.any(signals) } : {}),
 		});
-		if (tokenEndpoint !== undefined && String(url) === tokenEndpoint) {
+		if (tokenEndpoint !== undefined && sameEndpoint(String(url), tokenEndpoint)) {
+			call.receivedAt = Date.now();
 			call.captured = await readTokenBody(response);
 		}
 		return response;
@@ -459,17 +493,20 @@ export async function createOidcProvider(
 			if (rotated === undefined) throw error;
 			return { refreshToken: rotated };
 		}
-		const issued = tokens.expires_in;
-		const expiresIn = typeof issued === "number" && Number.isFinite(issued) ? issued : null;
+		const rotated = optionalString(tokens.refresh_token);
+		const lifetime = rawLifetime(call.captured, tokens.expires_in);
+		// A lifetime that is not one withholds the access token — core marks
+		// the answer malformed — and keeps the rotated refresh token (D5).
+		if (!lifetime.ok) return rotated !== undefined ? { refreshToken: rotated } : {};
+		// Dated when the answer ARRIVED, on this adapter's clock: the library
+		// may have gone on to verify an id_token against a JWKS it had to fetch,
+		// and that time is not the token's (#593, D17).
+		const obtainedAt = call.receivedAt ?? Date.now();
 		return {
 			accessToken: tokens.access_token,
-			...(optionalString(tokens.refresh_token) !== undefined
-				? { refreshToken: tokens.refresh_token }
-				: {}),
-			expiresIn,
-			// On this adapter's clock, and no UserInfo call between the answer and
-			// this reading (#593, D17).
-			expiresAt: expiresIn !== null ? new Date(Date.now() + expiresIn * 1000) : null,
+			...(rotated !== undefined ? { refreshToken: rotated } : {}),
+			expiresIn: lifetime.seconds,
+			expiresAt: lifetime.seconds !== null ? new Date(obtainedAt + lifetime.seconds * 1000) : null,
 			...(optionalString(tokens.scope) !== undefined ? { scope: tokens.scope } : {}),
 			tokenType: tokens.token_type,
 		};

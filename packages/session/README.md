@@ -539,7 +539,7 @@ Rules an implementation keeps (the generic OIDC adapter does):
 - The scopes are the intent's, not the provider's login scopes; `nonce` is required; `resource` is sent as the RFC 8707 parameter at authorization and at refresh alike.
 - `authorizationParams` may not name a parameter the provider owns — `client_id`, `response_type`, `redirect_uri`, `state`, `code_challenge`, `code_challenge_method`, `nonce`, `scope`, `resource`, `request`, `request_uri`, `response_mode` — and the provider throws when one does: openid-client sets `client_id` and `response_type` only when absent, so a copied parameter would send the consent to another registration. `prompt=consent` is added when `offline_access` is asked for (OIDC Core §11); an operator's own `prompt` wins.
 - An answer the adapter's library refuses to parse may still carry the rotated refresh token; the adapter answers `{ refreshToken }` rather than throwing, so that the only valid credential is not lost. An error the IdP answered with is thrown as the library throws it.
-- `expiresIn` is the raw `expires_in`; `expiresAt` is the adapter's own reading, with no other call between; `tokenType` is as the library reports it.
+- `expiresIn` is the raw `expires_in` as sent — a number or a string of digits; anything else withholds the access token and keeps the refresh token; `expiresAt` is dated when the answer arrived, before any verification the library does; `tokenType` is as the library reports it.
 
 ---
 

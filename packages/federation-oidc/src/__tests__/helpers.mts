@@ -77,6 +77,8 @@ export interface FakeIdp {
 	refreshWithIdToken: boolean;
 	/** The body of a token endpoint refusal (when `tokenStatus` is not 200). */
 	refusal: Record<string, unknown>;
+	/** How long the JWKS takes to answer, in real milliseconds. */
+	jwksDelayMs: number;
 	/** Replace the signing key; the JWKS then holds only the new one. */
 	rotateKey(): Promise<string>;
 	currentKid(): string;
@@ -149,6 +151,7 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		refreshAnswer: {},
 		refreshWithIdToken: false,
 		refusal: { error: "invalid_client" },
+		jwksDelayMs: 0,
 		fetch: undefined as unknown as typeof fetch,
 		rotateKey: newKey,
 		currentKid: () => signer.kid,
@@ -203,7 +206,10 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 
 		const path = url.href.startsWith(`${issuer}/`) ? url.href.slice(issuer.length) : url.href;
 		if (path === "/.well-known/openid-configuration") return json(metadata, idp.discoveryStatus);
-		if (path === "/jwks") return json(jwks);
+		if (path === "/jwks") {
+			if (idp.jwksDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, idp.jwksDelayMs));
+			return json(jwks);
+		}
 		if (path === "/token" && method === "POST") {
 			if (idp.tokenStatus !== 200) return json(idp.refusal, idp.tokenStatus);
 			if (body?.get("grant_type") === "refresh_token") {
