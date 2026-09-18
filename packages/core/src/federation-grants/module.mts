@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { z } from "zod";
 import { defineModule } from "../modules/index.mjs";
 import { createMemoryFederationGrantStore } from "./memory.mjs";
 
@@ -31,7 +32,24 @@ export const memoryFederationGrantStoreModule = defineModule({
 		reason:
 			"federation grants fork per replica — a grant lodged or authorized on one replica is unknown to every other, one revoked there still yields upstream tokens here, and a refresh token rotated on one replica leaves every other presenting the old one, which a reuse-detecting IdP answers by revoking the family",
 	},
+	// #593 slice 4: the same `federationGrants.tombstoneRetention` the Redis
+	// store reads, in the same seconds — a deployment that shortens it must not
+	// find the in-memory adapter still keeping thirty days of tombstones. The
+	// key is optional and the adapter's own default applies without it, so this
+	// module needs no configuration to be installed.
+	requires: ["config"] as const,
+	configSchema: z.object({
+		federationGrants: z
+			.object({ tombstoneRetention: z.coerce.number().int().nonnegative().optional() })
+			.default({}),
+	}),
 	provides: {
-		federationGrantStore: () => createMemoryFederationGrantStore(),
+		federationGrantStore: (deps) => {
+			const seconds = (deps.config as { federationGrants?: { tombstoneRetention?: number } })
+				.federationGrants?.tombstoneRetention;
+			return createMemoryFederationGrantStore(
+				seconds === undefined ? {} : { tombstoneRetentionMs: seconds * 1000 },
+			);
+		},
 	},
 });

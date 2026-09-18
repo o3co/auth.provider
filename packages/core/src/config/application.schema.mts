@@ -1627,6 +1627,15 @@ export const fullSectionsSchema = z.object({
 	// it the encryption key the store cannot start without — before the
 	// module's own `configSchema` sees it. Defaults live in `reference.conf`
 	// and in the module.
+	// #593, D16: this adapter's own layout, beside the other stores' prefixes.
+	// What a grant may BE is `federationGrants` above; this is where its keys
+	// live and how far past a horizon the subject index keeps a member.
+	redisFederationGrantStore: z
+		.object({
+			keyPrefix: z.string().optional(),
+			listingAllowanceMs: z.coerce.number().int().nonnegative().optional(),
+		})
+		.optional(),
 	redisFederationTokenStore: z
 		.object({
 			keyPrefix: z.string().optional(),
