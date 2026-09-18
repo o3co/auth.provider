@@ -18,6 +18,7 @@ import {
 	classifyFederationRefreshError,
 	isKnownFederationRefreshErrorCode,
 } from "../federation-tokens/refresh-error.mjs";
+import { federationGrantAuditMetadata } from "./auditMetadata.mjs";
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
 import {
 	federationGrantIneligibilityRetry,
@@ -829,8 +830,6 @@ async function audit(
 	const sink = deps.audit;
 	if (sink === undefined) return;
 	// A grant that was never authorized has no upstream account and no scopes.
-	const authorized =
-		grant !== undefined && hasFederationGrantAuthorization(grant) ? grant : undefined;
 	const told = await within(
 		settle(() =>
 			sink({
@@ -839,14 +838,12 @@ async function audit(
 				grantId: request.grantId,
 				clientId: request.clientId,
 				subject: request.subject,
-				...(grant !== undefined ? { connection: grant.connection } : {}),
-				...(authorized !== undefined
-					? {
-							upstream: { ...authorized.upstream },
-							scopes: [...authorized.scopes],
-							...(authorized.resource !== undefined ? { resource: authorized.resource } : {}),
-						}
-					: {}),
+				// Through the shared helper, so this emitter and the two
+				// revocation ones cannot disagree about what a pending grant
+				// carries or about copying the record's own fields. An unknown
+				// grant carries none of it: there is nothing established, and a
+				// read would answer the question the identical 404 refuses.
+				...(grant === undefined ? {} : federationGrantAuditMetadata(grant)),
 				outcome,
 			}),
 		),

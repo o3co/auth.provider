@@ -35,7 +35,7 @@ import {
 	listFederationGrantsForSubject,
 	revokeFederationGrant,
 } from "#/federation-grants/revoke.mjs";
-import { harness, now, SECRET } from "./retrieve.harness.mjs";
+import { connection, harness, now, SCOPES, SECRET } from "./retrieve.harness.mjs";
 
 const deps = (over: Record<string, unknown> = {}) => {
 	const h = harness();
@@ -111,6 +111,59 @@ describe("revokeFederationGrant", () => {
 		expect(revoked[0]?.grantId).toBe("g-1");
 		expect(revoked[0]?.subject).toBe("u-1");
 		expect(JSON.stringify(events)).not.toContain(SECRET);
+	});
+
+	it("says what access it ended, not only which grant", async () => {
+		// D18 carries the upstream account, the connection, the resource and
+		// the scopes where they have been established — and the record the
+		// write returned is the establishment. Without them an operator
+		// reading a revocation has a grant id and has to go and look up what
+		// was taken away, from a record that may now be a tombstone.
+		const { h, deps: d, events } = deps();
+		await h.seed();
+		await revokeFederationGrant(d as never, "g-1", "operator");
+		const revoked = events.find((e) => e.type === "federation.grant.revoked");
+		expect(revoked).toMatchObject({
+			connection: connection.name,
+			upstream: { issuer: connection.upstreamIssuer, subject: "00u-alice" },
+			scopes: [...SCOPES],
+		});
+	});
+
+	it("reports no authorization for a grant that never had one", async () => {
+		// A grant revoked while `pending` has no upstream account and no
+		// scopes. The absence is the honest answer: nothing was authorized.
+		const { h, deps: d, events } = deps();
+		await h.store.createPending({
+			id: "g-pending",
+			subject: "u-1",
+			clientId: "agent",
+			connection: connection.name,
+			intent: { handle: "h", expiresAt: new Date(now().getTime() + 600_000) },
+			now: now(),
+		});
+		await revokeFederationGrant(d as never, "g-pending", "subject");
+		const revoked = events.find((e) => e.type === "federation.grant.revoked");
+		expect(revoked?.connection).toBe(connection.name);
+		expect(revoked?.upstream).toBeUndefined();
+		expect(revoked?.scopes).toBeUndefined();
+	});
+
+	it("hands the sink copies rather than the record's own fields", async () => {
+		// A sink that holds its argument, and edits it, must not be editing
+		// the record the store is still answering from.
+		const { h, deps: d, events } = deps();
+		await h.seed();
+		await revokeFederationGrant(d as never, "g-1", "operator");
+		const revoked = events.find((e) => e.type === "federation.grant.revoked");
+
+		if (revoked === undefined) throw new Error("expected a revocation event");
+		(revoked.scopes as string[]).push("injected.scope");
+		(revoked.upstream as { subject: string }).subject = "somebody-else";
+
+		const stored = await h.store.find("g-1", now());
+		expect((stored as { scopes: readonly string[] }).scopes).toEqual([...SCOPES]);
+		expect((stored as { upstream: { subject: string } }).upstream.subject).toBe("00u-alice");
 	});
 
 	it("does not let a failing sink undo a revocation that happened", async () => {

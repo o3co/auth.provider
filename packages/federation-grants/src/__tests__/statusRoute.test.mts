@@ -432,7 +432,45 @@ describe("the status route — the boundary and the backstop", () => {
 		expect(stored?.grant.status).toBe("revoked");
 		const revoked = h.events.filter((e) => e.type === "federation.grant.revoked");
 		expect(revoked).toHaveLength(1);
-		expect(revoked[0]?.details).toMatchObject({ outcome: "backstop", operation: "status" });
+		expect(revoked[0]?.details).toMatchObject({
+			outcome: "backstop",
+			operation: "status",
+			// What access ended, and not only which grant (D18).
+			connection: connection.name,
+			upstream: { issuer: connection.upstreamIssuer, subject: "upstream-subject" },
+			scopes: [...SCOPES],
+		});
+	});
+
+	it("describes the record it ended, not the one it read a moment earlier", async () => {
+		// Found by review. The backstop inspects, decides, and then writes —
+		// and a reauthorization landing between those two replaces the
+		// authorization. An event built from the earlier read would name the
+		// scopes that were NOT the ones taken away.
+		const h = harness();
+		await h.seed();
+		h.world.boundary = new Date(h.world.now.getTime() + 1000);
+		const real = h.store.revoke.bind(h.store);
+		vi.spyOn(h.store, "revoke").mockImplementation(async (id, by, at) => {
+			const written = await real(id, by, at);
+			if (!written.ok) return written;
+			return {
+				ok: true,
+				grant: {
+					...written.grant,
+					scopes: ["openid", "calendar.write"],
+					upstream: { issuer: connection.upstreamIssuer, subject: "reauthorized-subject" },
+				},
+			} as typeof written;
+		});
+
+		expect((await ask(h)).status).toBe(200);
+
+		const revoked = h.events.find((e) => e.type === "federation.grant.revoked");
+		expect(revoked?.details).toMatchObject({
+			upstream: { subject: "reauthorized-subject" },
+			scopes: ["openid", "calendar.write"],
+		});
 	});
 
 	it("writes the backstop down as a backstop, not as somebody's decision", async () => {

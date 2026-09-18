@@ -44,6 +44,8 @@ import {
 	type FederationGrantConnection,
 	type FederationGrantRetrievalLimits,
 	type FederationGrantStore,
+	type FederationGrantWrite,
+	federationGrantAuditMetadata,
 	type Logger,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler } from "express";
@@ -223,7 +225,12 @@ export function createFederationGrantStatusHandler(
 				// Written down, not merely reported: a revocation that only ever
 				// exists as a computation is recomputed by every later reader and
 				// disappears the day the boundary is lost.
-				let written: { readonly ok: boolean };
+				// The write's own result, not a narrowing of it: the event below
+				// is built from the record this call ended, and a
+				// reauthorization landing between the `inspect` above and this
+				// write would otherwise have it describe access that was not
+				// the access ended.
+				let written: FederationGrantWrite;
 				try {
 					written = await options.store.revoke(grantId, "backstop", at);
 				} catch (error) {
@@ -240,8 +247,8 @@ export function createFederationGrantStatusHandler(
 							correlationId,
 							grantId,
 							clientId: client.clientId,
-							subject: grant.subject,
-							connection: grant.connection,
+							subject: written.grant.subject,
+							...federationGrantAuditMetadata(written.grant),
 							outcome: "backstop",
 						}),
 					);

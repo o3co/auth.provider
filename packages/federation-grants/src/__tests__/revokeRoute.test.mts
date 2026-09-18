@@ -42,6 +42,7 @@ import {
 	connection,
 	GRANT_ID,
 	harness,
+	SCOPES,
 	SUBJECT,
 } from "./harness.mjs";
 
@@ -300,7 +301,15 @@ describe("the revoke route — the trail it leaves", () => {
 		expect(revoked[0]).toMatchObject({
 			subject: SUBJECT,
 			clientId: CLIENT_ID,
-			details: { grantId: GRANT_ID, outcome: "client", connection: connection.name },
+			details: {
+				grantId: GRANT_ID,
+				outcome: "client",
+				connection: connection.name,
+				// What access ended, and not only which grant: the record is a
+				// tombstone by the time anybody reads this.
+				upstream: { issuer: connection.upstreamIssuer, subject: "upstream-subject" },
+				scopes: [...SCOPES],
+			},
 		});
 	});
 

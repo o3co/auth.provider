@@ -42,6 +42,7 @@
  * projects the fields its page needs.
  */
 
+import { federationGrantAuditMetadata } from "./auditMetadata.mjs";
 import type { FederationGrantAuditEvent } from "./retrieve.mjs";
 import type { FederationGrantStore, FederationGrantWrite } from "./store.mjs";
 import type { FederationGrant, FederationGrantRevokedBy } from "./types.mjs";
@@ -115,7 +116,7 @@ async function tell(
 			grantId: grant.id,
 			clientId: grant.clientId,
 			subject: grant.subject,
-			connection: grant.connection,
+			...federationGrantAuditMetadata(grant),
 			outcome: by,
 		});
 	} catch {
