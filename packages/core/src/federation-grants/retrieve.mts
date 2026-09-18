@@ -729,6 +729,7 @@ async function evaluate(
 			scopes: token.scopes,
 			consentedScopes: grant.consent.scopes,
 			maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
+			tokenType: token.tokenType,
 		}).eligible;
 		const lifetimeMs = token.issuedLifetime * 1000;
 		const age = now.getTime() - token.obtainedAt.getTime();
@@ -1219,6 +1220,7 @@ async function refreshUnderLock(
 			scopes,
 			consentedScopes: grant.consent.scopes,
 			maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
+			tokenType: response.token.tokenType,
 		});
 		if (!judgement.eligible) {
 			ineligible = marker(judgement.reason);

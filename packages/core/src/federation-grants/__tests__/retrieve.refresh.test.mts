@@ -187,13 +187,14 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 		it("records the scopes and the token type the response names, and the grant's scopes and Bearer when it names none", async () => {
 			await h.seed();
 			setNow(DUE);
+			// As the upstream spelled it: a bearer token in any case is one (D5).
 			h.refresh.mockResolvedValue(
-				refreshed("1", DUE, { scope: "openid  calendar.read", tokenType: "DPoP" }),
+				refreshed("1", DUE, { scope: "openid  calendar.read", tokenType: "BEARER" }),
 			);
 			expect(await retrieve()).toMatchObject({
 				ok: true,
 				scopes: ["openid", "calendar.read"],
-				tokenType: "DPoP",
+				tokenType: "BEARER",
 			});
 
 			setNow(new Date(DUE.getTime() + HOUR));
@@ -288,6 +289,9 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			["no lifetime at all", { expiresIn: null, expiresAt: null }, "no_finite_lifetime"],
 			["a lifetime without the adapter's anchor", { expiresAt: null }, "no_finite_lifetime"],
 			["scopes beyond the consent", { scope: "openid files.readwrite" }, "scope_exceeded"],
+			// oauth4webapi lower-cases what the upstream sent; a route with no proof
+			// key cannot present a sender-constrained token.
+			["a token that is not a bearer token", { tokenType: "dpop" }, "token_type_unsupported"],
 		];
 
 		for (const [what, over, reason] of cases) {

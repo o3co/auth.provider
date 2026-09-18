@@ -67,6 +67,18 @@ export interface FakeIdp {
 	discoveryStatus: number;
 	tokenStatus: number;
 	accessToken: string;
+	/**
+	 * Laid over the refresh answer's defaults; a value of `undefined` removes
+	 * the field. Lets a test make the answer carry a `scope`, an id_token, or
+	 * a field of the wrong shape.
+	 */
+	refreshAnswer: Record<string, unknown>;
+	/** Mint an id_token into the refresh answer (an IdP that re-issues one on refresh). */
+	refreshWithIdToken: boolean;
+	/** The body of a token endpoint refusal (when `tokenStatus` is not 200). */
+	refusal: Record<string, unknown>;
+	/** How long the JWKS takes to answer, in real milliseconds. */
+	jwksDelayMs: number;
 	/** Replace the signing key; the JWKS then holds only the new one. */
 	rotateKey(): Promise<string>;
 	currentKid(): string;
@@ -136,6 +148,10 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		discoveryStatus: 200,
 		tokenStatus: 200,
 		accessToken: "at-1",
+		refreshAnswer: {},
+		refreshWithIdToken: false,
+		refusal: { error: "invalid_client" },
+		jwksDelayMs: 0,
 		fetch: undefined as unknown as typeof fetch,
 		rotateKey: newKey,
 		currentKid: () => signer.kid,
@@ -188,18 +204,32 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 				: new URLSearchParams(raw instanceof URLSearchParams ? raw : String(raw));
 		requests.push({ url, method, headers, body });
 
-		const path = url.href.startsWith(`${issuer}/`) ? url.href.slice(issuer.length) : url.href;
+		// One server, however its host is spelled: DNS resolves `idp.test.` and
+		// `idp.test` to the same address, so a request that carries the root dot
+		// reaches this IdP too, and the routing below must not turn it into a 404.
+		const routed = new URL(url.href);
+		routed.hostname = routed.hostname.replace(/\.$/, "");
+		const path = routed.href.startsWith(`${issuer}/`)
+			? routed.href.slice(issuer.length)
+			: routed.href;
 		if (path === "/.well-known/openid-configuration") return json(metadata, idp.discoveryStatus);
-		if (path === "/jwks") return json(jwks);
+		if (path === "/jwks") {
+			if (idp.jwksDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, idp.jwksDelayMs));
+			return json(jwks);
+		}
 		if (path === "/token" && method === "POST") {
-			if (idp.tokenStatus !== 200) return json({ error: "invalid_client" }, idp.tokenStatus);
+			if (idp.tokenStatus !== 200) return json(idp.refusal, idp.tokenStatus);
 			if (body?.get("grant_type") === "refresh_token") {
-				return json({
+				const answer: Record<string, unknown> = {
 					access_token: "at-refreshed",
 					token_type: "Bearer",
 					expires_in: 1800,
 					refresh_token: "rt-2",
-				});
+					...(idp.refreshWithIdToken ? { id_token: await mintIdToken() } : {}),
+					...idp.refreshAnswer,
+				};
+				for (const key of Object.keys(answer)) if (answer[key] === undefined) delete answer[key];
+				return json(answer);
 			}
 			return json({
 				access_token: idp.accessToken,

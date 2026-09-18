@@ -345,11 +345,20 @@ cannot cost every user a reconnect:
 - A rotated refresh token is **always** persisted, even when the access token
   that came with it is ineligible. Discarding the response would discard the
   only valid credential.
-- An access token is ineligible when it fails condition 2, or when the scopes
-  the refresh response reports are not within `consent.scopes`. The second
-  case is real: an IdP that accumulates consent returns, on refresh, every
-  scope the user has since granted to the same upstream client, and the
-  generic OIDC adapter sends no `scope` on refresh to narrow it.
+- An access token is ineligible when it fails condition 2, when the scopes
+  the refresh response reports are not within `consent.scopes`, or when it is
+  not a bearer token (`token_type_unsupported`). The second case is real: an
+  IdP that accumulates consent returns, on refresh, every scope the user has
+  since granted to the same upstream client; the delegated refresh sends the
+  grant's scopes to narrow it (D17), and an IdP that ignores that is what the
+  predicate is for. The third: a sender-constrained token — DPoP, or any
+  other — is bound to a key the client that receives it does not hold, and
+  disclosing it as a bearer token would hand out something that cannot be
+  used; `token_type` is compared without regard to case, since oauth4webapi
+  lower-cases what it was sent. Through the generic OIDC adapter only `dpop`
+  reaches this rule — oauth4webapi refuses any other token type before the
+  adapter sees the body, and the adapter answers `{ refreshToken }` — but a
+  cached token, and another adapter, are judged by it all the same.
 - An ineligible access token is withheld **and never written**. The call
   answers `upstream_token_ineligible` — unless the token the grant had still
   serves the request, as below — the grant is untouched, and an operator who
@@ -792,7 +801,7 @@ reason cannot be attached to a code that has none.
 | `access_denied` | `connection_not_permitted` | 403 | configuration: the client may not use the connection, the operator removed it, or its federation cannot refresh for a grant. Do not retry. Reported after a revocation, the backstop and an expiry, and before a changed identity (D10) |
 | `invalid_request` | `connection_mismatch`, `min_ttl_out_of_range` | 400 | the request is malformed; the reason is for an `error_description` |
 | `invalid_scope`, `invalid_target` | — | 400 | the request exceeds the grant — or, for `invalid_scope`, the stored token does not carry what was asked for and it is too early to ask the upstream again (D10): a refresh may bring the scope once the token is half spent |
-| `upstream_token_ineligible` | `no_finite_lifetime`, `lifetime_over_maximum` | 502 | operator; the grant is untouched; honour `retryAfterSeconds` |
+| `upstream_token_ineligible` | `no_finite_lifetime`, `lifetime_over_maximum`, `token_type_unsupported` | 502 | operator; the grant is untouched; honour `retryAfterSeconds`. `token_type_unsupported`: the upstream issues sender-constrained tokens for this client, which a bearer route cannot present |
 | `upstream_token_ineligible` | `malformed_token_response` | 502 | operator: the federation adapter reported an answer without a usable access token, or with a field of the wrong type. The grant is untouched; honour `retryAfterSeconds` |
 | `upstream_token_ineligible` | `scope_exceeded` | 502 | no operator action un-accumulates consent: `/reauthorize` for the wider set, or a new grant on a connection of its own (D19) |
 | `upstream_rejected` | the upstream's error code, or `unknown` | 502 | operator, e.g. an expired upstream client secret; the grant is untouched. Answered from the stamp of a failed refresh (D12) it carries `retryAfterSeconds`, and is answered only where nothing stored serves the request (D10). The code is repeated only when it is one of the RFC 6749, RFC 6750, RFC 8707 and OpenID Connect codes this provider knows, and is `unknown` otherwise — an allow-list, because any pattern that fits `invalid_client` fits an opaque token as well, and an upstream that echoes what it was sent must not get a refresh token repeated through this field |
@@ -1450,9 +1459,67 @@ interface SupportsDelegatedAuthorization {
 		readonly scopes?: readonly string[]; // the grant's; RFC 6749 §6 allows asking for no more
 		readonly resource?: string; // an upstream that needs it at authorization needs it here too
 		readonly signal?: AbortSignal; // D12
-	}): Promise<RefreshedTokens>;
+	}): Promise<DelegatedTokens>;
+}
+
+interface DelegatedTokens {
+	// every field optional: `{ refreshToken }` alone is a valid answer
+	readonly accessToken?: string;
+	readonly refreshToken?: string;
+	readonly expiresIn?: number | null; // seconds, exactly as issued
+	readonly expiresAt?: Date | null; // the adapter's own now + expiresIn
+	readonly scope?: string; // space-delimited, as answered
+	readonly tokenType?: string; // as the library reports it: lower-cased by oauth4webapi
 }
 ```
+
+The answer is its own flat, all-optional type, structurally what core's
+`FederationGrantRefreshedToken` consumes: a refresh whose answer the adapter's
+library refused to parse — a `scope` that is not a string, a missing
+`access_token` — may still carry a rotated refresh token, and D5 has that one
+persisted whatever else is wrong. oauth4webapi throws before it returns such
+a body, so the generic adapter reads the token endpoint's raw body in its
+per-call fetch — the endpoint compared as a URL, however the metadata spells
+it — and, when the library throws, answers `{ refreshToken }` from what it
+read. Only a 200 is ever captured: an error the IdP answered with is a 4xx,
+has nothing to salvage from whatever its body says, and is thrown as the
+library throws it, for the classifier. The rule is wider than "could not
+parse": a valid answer whose id_token the library then failed to verify —
+its JWKS unreachable, or the caller's abort landing during that fetch — is
+answered as `{ refreshToken }` too, since the credential it carries is the
+one to keep, and core treats it as after a malformed answer, marker and
+interval included. That is a transient reported as a broken adapter for one
+interval, bounded by the JWKS cache; rethrowing instead would keep the old
+refresh token in the store after the IdP had rotated it. The captured body is also where the
+lifetime is judged: the library coerces `expires_in` with `parseFloat`, so
+`[3600, 7200]` would read as 3600, and a value that is neither a number nor
+a string of digits withholds the access token and keeps the refresh token.
+And it is where the token is dated: at the moment the answer arrived, before
+any id_token the library goes on to verify against a JWKS it may have to
+fetch.
+
+Three rules the generic adapter keeps, and any adapter should:
+
+- `authorizationParams` may not name a parameter the adapter owns —
+  `client_id`, `response_type`, `redirect_uri`, `state`, `code_challenge`,
+  `code_challenge_method`, `nonce`, `scope`, `resource`, `request`,
+  `request_uri`, `response_mode` — and an adapter throws when one does, a
+  configuration fault like a missing nonce. openid-client sets `client_id`
+  and `response_type` only when absent, so a copied parameter would have sent
+  the consent to another registration or selected a flow the callback cannot
+  consume; `scope` is the intent's (D6); `resource` is a field of its own so
+  that authorization and refresh never disagree about it. `prompt=consent` is
+  added when `offline_access` is asked for (OIDC Core §11), and an operator's
+  own `prompt` wins over it; Google's `access_type=offline` is the operator's
+  to add.
+- The scopes are the intent's, and are not held to the adapter's login
+  scopes: the connection's ceiling is core's rule, and the two sets differ on
+  purpose. They must include `openid`, as the login scopes must.
+- One `Configuration` serves every call, JWKS cache included — an answer that
+  carries an id_token is verified against it under `enableNonRepudiationChecks`
+  — and what differs per call (the caller's signal, the captured body)
+  travels through an `AsyncLocalStorage` the adapter's `customFetch` reads,
+  combining the caller's signal with the library's own.
 
 The existing `refreshToken(refreshToken)` takes nothing else. An upstream that
 requires a resource indicator would authorize and then fail its first refresh,
@@ -1463,7 +1530,16 @@ signal, so the generic adapter passes this one through `customFetch`.
 `FederationProfile` and `RefreshedTokens` also gain the token response's
 `scope` and `token_type`. The generic OIDC adapter's `snapshot` drops both
 today, so the scope actually granted is unobservable, and both D7 check 7 and
-the refresh rule in D5 need it.
+the refresh rule in D5 need it. `RefreshedTokens` becomes an explicit
+interface for that: `Omit` over `FederationProfile`'s index signature kept
+only the index signature, and a snapshot whose access token was a number
+type-checked. Its fields stay optional, so `{ issuer, sub }` still passes; a
+wrong type on a named field does not, and an external adapter that used
+`scope` or `tokenType` as an extension field of another type is now a type
+error — the one way this slice is not "unaffected" for existing adapters.
+The login flow's `expiresAt` keeps its arithmetic (a countdown from when the
+answer arrived, which subtracts the UserInfo round trip); the raw fields sit
+beside it.
 
 They gain the raw `expires_in` too, as `expiresIn`, beside the `expiresAt`
 they have. D5 judges the lifetime a token was *issued* with, and that cannot
@@ -1481,8 +1557,10 @@ are unaffected; the retrieval reads an answer field by field and trusts none
 of it (D5). Core's structural type for that answer is all-optional for the
 same reason. `RefreshedTokens` as it stands today is still not assignable to
 it — `Omit` over a type with an index signature erases the named fields — and
-becomes so once slice 2 declares the additions on it. A connection whose federation lacks the capability is refused at
-boot. The first cut implements it for the generic OIDC adapter.
+becomes so once slice 2 declares the additions on it. A connection whose federation lacks the capability is refused at boot
+(slice 4, which reads the connections). The first cut implements it for the
+generic OIDC adapter; GitHub cannot (OAuth Apps issue no refresh token), and
+Google and Apple may gain it later.
 
 ### D18 — Audit, with a correlation ID
 
@@ -1615,7 +1693,12 @@ route test is written first and watched failing.
      and the last look after every outcome (D10). A port change, so its own
      slice, before slice 3 implements the port for Redis and before slice 4
      can reach the retrieval.
-2. **federation adapter capability** (D17), generic OIDC first.
+2. **federation adapter capability** (D17), generic OIDC first. Done: the
+   two methods and their guard, `RefreshedTokens` as an explicit interface,
+   the raw `expiresIn` / `scope` / `tokenType` on the profile and the
+   snapshot, D5's bearer-only rule, and the generic adapter's implementation
+   with the reserved parameters, the salvaged refresh token and the per-call
+   signal.
 3. **redis adapter** (D16), with the duplicated contract suite on a
    testcontainer, the guarded-write scripts and the grant-keyed lock.
 4. **package: token and status routes** (D9–D12), exercised on grants seeded

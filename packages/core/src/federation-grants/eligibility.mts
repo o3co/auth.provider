@@ -68,6 +68,11 @@ export type UpstreamTokenJudgement =
  *   that accumulates consent answers a refresh with every scope the user has
  *   since granted to the same upstream client, and an upstream token cannot be
  *   narrowed after the fact.
+ * - It must be a bearer token, however the upstream spells it (oauth4webapi
+ *   lower-cases what it was sent). A sender-constrained token — DPoP, or any
+ *   other — is bound to a key the client that receives it does not hold: the
+ *   route has no proof key to present, and disclosing such a token as a
+ *   bearer token would hand out something that cannot be used.
  *
  * A maximum that is not usable refuses every token. It is tested by name, and
  * not left to the comparison: a hand-built config that omits the key hands
@@ -82,6 +87,8 @@ export function judgeUpstreamAccessToken(token: {
 	readonly consentedScopes: readonly string[];
 	/** Seconds. */
 	readonly maxAccessTokenLifetime: number;
+	/** As the upstream answered it; compared without regard to case. */
+	readonly tokenType: string;
 }): UpstreamTokenJudgement {
 	const lifetime = token.issuedLifetime;
 	if (lifetime === null || !Number.isFinite(lifetime) || lifetime <= 0) {
@@ -95,6 +102,9 @@ export function judgeUpstreamAccessToken(token: {
 	}
 	if (!scopesWithin(token.scopes, token.consentedScopes)) {
 		return { eligible: false, reason: "scope_exceeded" };
+	}
+	if (typeof token.tokenType !== "string" || token.tokenType.toLowerCase() !== "bearer") {
+		return { eligible: false, reason: "token_type_unsupported" };
 	}
 	return { eligible: true };
 }

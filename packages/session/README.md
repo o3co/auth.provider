@@ -180,7 +180,7 @@ interface FederationProvider {
 }
 ```
 
-Implement this interface to add a custom OAuth 2.0 / OIDC federation provider. Optionally mix in `SupportsLogout`, `SupportsClaimMapping`, or `SupportsRefresh`.
+Implement this interface to add a custom OAuth 2.0 / OIDC federation provider. Optionally mix in `SupportsLogout`, `SupportsClaimMapping`, `SupportsRefresh`, or `SupportsDelegatedAuthorization`.
 
 - `name` — unique provider identifier. Used as both the Map key in `federationProviders` and the route `:name` parameter.
 - `scope` — OAuth 2.0 scopes to request.
@@ -457,22 +457,89 @@ The merge is exported as `mergeFederatedClaims` for consumers that build a claim
 
 Optional capability for providers that can exchange a refresh token for a fresh access token.
 
-> **Note**: `SupportsRefresh` and `supportsRefresh` are internal capability types used by the session package's federation wiring. They are not re-exported from `@o3co/auth-provider-session`'s public entrypoint and are not a stable public API (subject to change before 1.0). Custom providers implementing this capability should declare the interface shape locally or import from the package's internal federations module.
+> **Note**: `SupportsRefresh`, `RefreshedTokens` and `supportsRefresh` are exported from `@o3co/auth-provider-session`, and are not a stable public API (subject to change before 1.0).
 
 The interface shape is:
 
 ```ts
-type RefreshedTokens = Omit<FederationProfile, "issuer" | "sub"> & {
+interface RefreshedTokens {
   readonly issuer?: string;
   readonly sub?: string;
-};
+  readonly email?: string;
+  readonly emailVerified?: boolean;
+  readonly name?: string;
+  readonly picture?: string;
+  readonly accessToken?: string;
+  readonly refreshToken?: string;
+  readonly idToken?: string;
+  readonly expiresAt?: Date | null;
+  /** `expires_in` exactly as the token response carried it; `null` when it carried none. */
+  readonly expiresIn?: number | null;
+  /** `scope` as the token response carried it, space-delimited. */
+  readonly scope?: string;
+  /** `token_type` as the adapter's library reports it (oauth4webapi lower-cases it). */
+  readonly tokenType?: string;
+  readonly [key: string]: unknown;
+}
 
 interface SupportsRefresh {
   refreshToken(refreshToken: string): Promise<RefreshedTokens>;
 }
 ```
 
+The fields are named rather than derived from `FederationProfile`: `Omit` over a type with a string index signature keeps only the index signature, so until #593 a snapshot whose `accessToken` was a number type-checked. Every field is optional, so `{ issuer, sub }` still passes; a wrong type on a named field does not. An adapter that used `scope` or `tokenType` as an extension field of another type is now a type error.
+
 Providers implementing `SupportsRefresh` can keep federation tokens alive without user interaction. The `FederationTokenStore` (wired via `AppOptions`) stores the initial tokens; the refresh flow retrieves and updates them automatically.
+
+---
+
+### `SupportsDelegatedAuthorization` (optional capability)
+
+The capability behind federation grants (#593): a provider that can send a user to authorize a *delegation* — a client holding the upstream's tokens without a session — and refresh those tokens without one. Detected by **both** methods being present.
+
+```ts
+interface DelegatedAuthorizationRequest {
+  readonly redirectUri: string;
+  readonly state: string;
+  readonly codeVerifier: string;
+  readonly nonce: string;                                  // required
+  readonly scopes: readonly string[];                      // the intent's, not the provider's
+  readonly resource?: string;                              // RFC 8707
+  readonly authorizationParams?: Readonly<Record<string, string>>;
+}
+
+interface DelegatedRefreshRequest {
+  readonly refreshToken: string;
+  readonly scopes?: readonly string[];                     // RFC 6749 §6: no more than was granted
+  readonly resource?: string;
+  readonly signal?: AbortSignal;
+}
+
+interface DelegatedTokens {                                // every field optional: `{ refreshToken }` alone is a valid answer
+  readonly accessToken?: string;
+  readonly refreshToken?: string;
+  readonly expiresIn?: number | null;                      // seconds, exactly as issued
+  readonly expiresAt?: Date | null;                        // the adapter's own now + expiresIn
+  readonly scope?: string;
+  readonly tokenType?: string;
+}
+
+interface SupportsDelegatedAuthorization {
+  buildDelegatedAuthorizationUrl(params: DelegatedAuthorizationRequest): URL;
+  refreshDelegatedToken(params: DelegatedRefreshRequest): Promise<DelegatedTokens>;
+}
+
+function supportsDelegatedAuthorization(
+  provider: FederationProvider | undefined | null,
+): provider is FederationProvider & SupportsDelegatedAuthorization;
+```
+
+Rules an implementation keeps (the generic OIDC adapter does):
+
+- The scopes are the intent's, not the provider's login scopes; `nonce` is required; `resource` is sent as the RFC 8707 parameter at authorization and at refresh alike.
+- `authorizationParams` may not name a parameter the provider owns — `client_id`, `response_type`, `redirect_uri`, `state`, `code_challenge`, `code_challenge_method`, `nonce`, `scope`, `resource`, `request`, `request_uri`, `response_mode` — and the provider throws when one does: openid-client sets `client_id` and `response_type` only when absent, so a copied parameter would send the consent to another registration. `prompt=consent` is added when `offline_access` is asked for (OIDC Core §11); an operator's own `prompt` wins.
+- An answer the adapter's library did not accept — could not parse, or could not verify the id_token of, its JWKS unreachable — may still carry the rotated refresh token; the adapter answers `{ refreshToken }` rather than throwing, so that the only valid credential is not lost, and core treats it as after a malformed answer. An error the IdP answered with is thrown as the library throws it.
+- `expiresIn` is the raw `expires_in` as sent — a number or a string of digits; anything else withholds the access token and keeps the refresh token; `expiresAt` is dated when the answer arrived, before any verification the library does; `tokenType` is as the library reports it.
 
 ---
 
@@ -788,7 +855,7 @@ v0.4.0 removes passport as a direct dependency from this package.
 5. **`createPassport()` and `SetupPassportContext` removed from the public API.** State (CSRF) and PKCE are managed by the route layer internally; providers are pure functions.
 6. **`UserSessionStore` and `FederationTokenStore` are now required** (previously optional with legacy fallback). They are now declared in `sessionModule.requires`; the boot planner rejects with `BootError(reason: 'missing-required-component')` if no module provides them.
 7. **`/login` error responses** follow RFC 6749 §5.2 shape: `{ error, error_description }`. If your client parses the old `{ message: "..." }` format, update accordingly.
-8. **`SupportsRefresh.refreshToken`** returns `RefreshedTokens` (new type): `Omit<FederationProfile, "issuer"|"sub"> & { issuer?: string; sub?: string }`. Google/GitHub refresh responses legitimately omit `sub`; the route layer preserves stored identity.
+8. **`SupportsRefresh.refreshToken`** returns `RefreshedTokens` (new type), an interface of named optional fields since #593 — see its definition above; it was `Omit<FederationProfile, "issuer"|"sub"> & { issuer?: string; sub?: string }`, which checked nothing. Google/GitHub refresh responses legitimately omit `sub`; the route layer preserves stored identity.
 
 ### Custom provider migration example
 

@@ -210,6 +210,8 @@ export type FederationGrantIneligibilityReason =
 	| "no_finite_lifetime"
 	| "lifetime_over_maximum"
 	| "scope_exceeded"
+	/** Not a bearer token: a route with no proof key cannot present a sender-constrained one (D5). */
+	| "token_type_unsupported"
 	/**
 	 * The adapter reported a refresh without a usable access token, or with a
 	 * field of the wrong type. The refresh token it came with is kept all the

@@ -19,9 +19,11 @@ import {
 	type FederationProfile,
 	type FederationProvider,
 	type SupportsClaimMapping,
+	type SupportsDelegatedAuthorization,
 	type SupportsLogout,
 	type SupportsRefresh,
 	supportsClaimMapping,
+	supportsDelegatedAuthorization,
 	supportsLogout,
 	supportsRefresh,
 } from "../types.mjs";
@@ -53,6 +55,31 @@ describe("FederationProvider type guards", () => {
 			}),
 		};
 		expect(supportsRefresh(p)).toBe(true);
+	});
+
+	it("supportsDelegatedAuthorization needs BOTH methods: a provider that can only build the URL, or only refresh, does not have it", () => {
+		expect(supportsDelegatedAuthorization(minimalProvider)).toBe(false);
+		expect(supportsDelegatedAuthorization(null)).toBe(false);
+		expect(supportsDelegatedAuthorization(undefined)).toBe(false);
+		const halfway: FederationProvider & Partial<SupportsDelegatedAuthorization> = {
+			...minimalProvider,
+			buildDelegatedAuthorizationUrl: () => new URL("https://example.com/authorize"),
+		};
+		expect(supportsDelegatedAuthorization(halfway)).toBe(false);
+		const otherHalf: FederationProvider & Partial<SupportsDelegatedAuthorization> = {
+			...minimalProvider,
+			refreshDelegatedToken: async () => ({}),
+		};
+		expect(supportsDelegatedAuthorization(otherHalf)).toBe(false);
+	});
+
+	it("supportsDelegatedAuthorization narrows when both are functions", () => {
+		const p: FederationProvider & SupportsDelegatedAuthorization = {
+			...minimalProvider,
+			buildDelegatedAuthorizationUrl: () => new URL("https://example.com/authorize"),
+			refreshDelegatedToken: async () => ({ refreshToken: "rt-2" }),
+		};
+		expect(supportsDelegatedAuthorization(p)).toBe(true);
 	});
 
 	it("supportsLogout returns false for a provider lacking endSession", () => {
