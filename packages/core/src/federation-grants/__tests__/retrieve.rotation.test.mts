@@ -411,14 +411,8 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				{ name: "OperationProcessingError" },
 				"upstream_rejected",
 			],
-			[
-				"an error code this provider knows",
-				{ error: "invalid_client", status: 401 },
-				"upstream_rejected",
-			],
-			["a rate limit", { status: 429 }, "rate_limited"],
 		])(
-			"leaves nothing in flight — %s: the lock is let go of, and the next poll asks again at once",
+			"leaves nothing in flight — %s: the lock is let go of, and the next poll asks again at once (a refusal is remembered instead, D12)",
 			async (_, carried, code) => {
 				// If the IdP rotated before its answer was lost, the old refresh token
 				// is presented again whenever the next refresh comes: waiting out the

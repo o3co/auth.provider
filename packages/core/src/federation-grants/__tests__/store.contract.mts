@@ -17,11 +17,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { FEDERATION_GRANT_LIFETIME_CEILING_MS } from "#/federation-grants/lifetime.mjs";
 import type { FederationGrantStore, FederationGrantWrite } from "#/federation-grants/store.mjs";
-import type {
-	AuthorizedFederationGrant,
-	FederationGrantAuthorization,
-	FederationGrantCredentials,
-	FederationGrantIneligibilityMarker,
+import {
+	type AuthorizedFederationGrant,
+	type FederationGrantAuthorization,
+	type FederationGrantCredentials,
+	type FederationGrantIneligibilityMarker,
+	type FederationGrantRefreshFailureInput,
+	hasFederationGrantAuthorization,
 } from "#/federation-grants/types.mjs";
 
 export interface FederationGrantStoreContractFactory<
@@ -1287,6 +1289,178 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 		});
 
+		describe("noteRefreshFailure (D5, D12)", () => {
+			const failure = (over: Partial<FederationGrantRefreshFailureInput> = {}) => ({
+				at: at(DAY),
+				kind: "unavailable" as const,
+				...over,
+			});
+			const note = (
+				expectedVersion: number,
+				over: Partial<FederationGrantRefreshFailureInput> = {},
+				now = at(DAY),
+			) =>
+				store.noteRefreshFailure({ grantId: "g-1", expectedVersion, failure: failure(over), now });
+
+			it("stamps an active grant with the failure, counted from one, and bumps nothing", async () => {
+				const grant = await activated();
+				await store.touch("g-1", at(DAY - MIN));
+				const written = await note(grant.version, { kind: "rate_limited", retryAfterSeconds: 17 });
+				const expected = {
+					...grant,
+					lastUsedAt: at(DAY - MIN),
+					refreshFailure: { at: at(DAY), kind: "rate_limited", count: 1, retryAfterSeconds: 17 },
+				};
+				expect(written).toStrictEqual({ ok: true, grant: expected });
+				expect(await store.find("g-1", at(DAY))).toStrictEqual(expected);
+				// The version, the credentials and the intent are not its to touch.
+				expect(await store.open("g-1", at(DAY))).toMatchObject({
+					grant: { version: grant.version },
+					credentials: { state: "ok", value: credentials("1") },
+				});
+				expect(await store.isCurrentIntent("g-1", "h-g-1", at(DAY))).toBe(false);
+			});
+
+			it("counts consecutive failures, in the store: the caller never tells it the count", async () => {
+				const grant = await activated();
+				await note(grant.version);
+				const second = await note(grant.version, { at: at(DAY + MIN) }, at(DAY + MIN));
+				expect(second).toMatchObject({
+					ok: true,
+					grant: { refreshFailure: { at: at(DAY + MIN), kind: "unavailable", count: 2 } },
+				});
+				// A different kind counts on: what is counted is failures in a row.
+				const third = await note(
+					grant.version,
+					{ at: at(DAY + 2 * MIN), kind: "rejected" },
+					at(DAY + 2 * MIN),
+				);
+				expect(third).toMatchObject({
+					ok: true,
+					grant: { refreshFailure: { kind: "rejected", count: 3 } },
+				});
+				expect((await store.find("g-1", at(DAY + 2 * MIN)))?.refreshFailure).not.toHaveProperty(
+					"retryAfterSeconds",
+				);
+			});
+
+			it("refuses everything a refresh's own write would refuse, and changes nothing then", async () => {
+				const grant = await activated();
+				const before = await store.find("g-1", at(DAY));
+				// The version the caller read is not the record's: the failure was
+				// of a refresh token the grant no longer has.
+				expect(await note(grant.version + 1)).toEqual({ ok: false });
+				// After the stored expiry.
+				expect(await note(grant.version, {}, at(31 * DAY))).toEqual({ ok: false });
+				// A date that is not one.
+				expect(await note(grant.version, { at: INVALID })).toEqual({ ok: false });
+				expect(await store.find("g-1", at(DAY))).toStrictEqual(before);
+
+				await store.createPending(pendingInput("g-pending", "h-p"));
+				await needingUser("g-needs-user");
+				await activated("g-revoked");
+				await store.revoke("g-revoked", "client", at(DAY));
+				for (const [id, version] of [
+					["g-pending", 0],
+					["g-needs-user", 2],
+					["g-revoked", 2],
+					["g-unknown", 1],
+				] as const) {
+					expect(
+						await store.noteRefreshFailure({
+							grantId: id,
+							expectedVersion: version,
+							failure: failure({ at: at(5 * MIN) }),
+							now: at(5 * MIN),
+						}),
+						id,
+					).toEqual({ ok: false });
+				}
+				expect(await store.find("g-pending", at(5 * MIN))).not.toHaveProperty("refreshFailure");
+				expect(await store.find("g-needs-user", at(DAY))).not.toHaveProperty("refreshFailure");
+				expect(await store.find("g-revoked", at(DAY))).not.toHaveProperty("refreshFailure");
+			});
+
+			it("is cleared by whatever replaces or ends the credentials: a refresh that wrote, a renewal, a mark, a revocation", async () => {
+				const grant = await activated();
+				await note(grant.version);
+				const replaced = await store.replaceCredentials({
+					grantId: "g-1",
+					expectedVersion: grant.version,
+					credentials: { refreshToken: "rt-2" },
+					ineligible: marker(),
+					now: at(DAY + MIN),
+				});
+				expect(replaced.ok).toBe(true);
+				expect(await store.find("g-1", at(DAY + MIN))).not.toHaveProperty("refreshFailure");
+
+				// Stamped again, then renewed.
+				await note(grant.version + 1, { at: at(DAY + 2 * MIN) }, at(DAY + 2 * MIN));
+				await nameRenewalIntent();
+				expect((await renew()).ok).toBe(true);
+				expect(await store.find("g-1", at(DAY + 3 * MIN))).not.toHaveProperty("refreshFailure");
+
+				// Stamped again, then marked.
+				const renewed = await store.find("g-1", at(DAY + 3 * MIN));
+				if (renewed === null) throw new Error("fixture: the grant is gone");
+				await note(renewed.version, { at: at(DAY + 4 * MIN) }, at(DAY + 4 * MIN));
+				const marked = await store.requireReauthorization({
+					grantId: "g-1",
+					expectedVersion: renewed.version,
+					now: at(DAY + 4 * MIN),
+				});
+				expect(marked.ok).toBe(true);
+				expect(await store.find("g-1", at(DAY + 4 * MIN))).not.toHaveProperty("refreshFailure");
+
+				await activated("g-2");
+				const other = await store.find("g-2", at(DAY));
+				if (other === null || other.status !== "active") throw new Error("fixture");
+				await store.noteRefreshFailure({
+					grantId: "g-2",
+					expectedVersion: other.version,
+					failure: failure(),
+					now: at(DAY),
+				});
+				await store.revoke("g-2", "client", at(DAY + MIN));
+				expect(await store.find("g-2", at(DAY + MIN))).not.toHaveProperty("refreshFailure");
+			});
+
+			it("copies what it is given and what it returns: neither the caller's date nor the returned record reaches the store", async () => {
+				const grant = await activated();
+				const at1 = at(DAY);
+				const written = await store.noteRefreshFailure({
+					grantId: "g-1",
+					expectedVersion: grant.version,
+					failure: { at: at1, kind: "unavailable" },
+					now: at(DAY),
+				});
+				at1.setTime(0);
+				if (!written.ok || !hasFederationGrantAuthorization(written.grant))
+					throw new Error("fixture");
+				written.grant.refreshFailure?.at.setTime(1);
+				expect((await store.find("g-1", at(DAY)))?.refreshFailure).toStrictEqual({
+					at: at(DAY),
+					kind: "unavailable",
+					count: 1,
+				});
+			});
+
+			it("is on what listBySubject, inspect and open return", async () => {
+				const grant = await activated();
+				await note(grant.version);
+				const stamp = { at: at(DAY), kind: "unavailable", count: 1 };
+				expect((await store.listBySubject("u-1", at(DAY)))[0]).toHaveProperty(
+					"refreshFailure",
+					stamp,
+				);
+				expect((await store.inspect("g-1", at(DAY)))?.grant).toHaveProperty(
+					"refreshFailure",
+					stamp,
+				);
+				expect((await store.open("g-1", at(DAY)))?.grant).toHaveProperty("refreshFailure", stamp);
+			});
+		});
+
 		describe("touch", () => {
 			it("sets lastUsedAt on an active grant, without bumping the version", async () => {
 				const grant = await activated();
@@ -1864,6 +2038,110 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 						}));
 				}
 			};
+
+			// The stamp of a failed refresh does not bump `version` either, and it is
+			// written on records that other writes replace or end at the same time.
+			const stamp = (grant: AuthorizedFederationGrant, at1 = at(DAY)) =>
+				store.noteRefreshFailure({
+					grantId: "g-1",
+					expectedVersion: grant.version,
+					failure: { at: at1, kind: "unavailable" },
+					now: at1,
+				});
+
+			inBothOrders("a stamp against a touch: both land", async (start) => {
+				const grant = await activated();
+				await start(
+					() => stamp(grant),
+					() => store.touch("g-1", at(DAY)),
+				);
+				expect(await store.find("g-1", at(DAY))).toMatchObject({
+					lastUsedAt: at(DAY),
+					refreshFailure: { count: 1 },
+				});
+			});
+
+			inBothOrders("two stamps: both are counted", async (start) => {
+				const grant = await activated();
+				await start(
+					() => stamp(grant),
+					() => stamp(grant, at(DAY + 1)),
+				);
+				expect((await store.find("g-1", at(DAY + 1)))?.refreshFailure).toHaveProperty("count", 2);
+			});
+
+			inBothOrders(
+				"a stamp against a refresh that wrote: the record ends with the new credentials and no stamp",
+				async (start) => {
+					const grant = await activated();
+					await start(
+						() => stamp(grant),
+						() =>
+							store.replaceCredentials({
+								grantId: "g-1",
+								expectedVersion: grant.version,
+								credentials: credentials("2"),
+								ineligible: null,
+								now: at(DAY),
+							}),
+					);
+					expect(await store.find("g-1", at(DAY))).toMatchObject({ version: grant.version + 1 });
+					expect(await store.find("g-1", at(DAY))).not.toHaveProperty("refreshFailure");
+					expect(await store.open("g-1", at(DAY))).toMatchObject({
+						credentials: { state: "ok", value: credentials("2") },
+					});
+				},
+			);
+
+			inBothOrders(
+				"a stamp against a renewal: the record ends renewed, with no stamp",
+				async (start) => {
+					const grant = await activated();
+					await nameRenewalIntent();
+					await start(
+						() => stamp(grant),
+						() => renew(),
+					);
+					expect(await store.find("g-1", at(DAY + 2 * MIN))).toMatchObject({
+						status: "active",
+						version: grant.version + 1,
+					});
+					expect(await store.find("g-1", at(DAY + 2 * MIN))).not.toHaveProperty("refreshFailure");
+				},
+			);
+
+			inBothOrders(
+				"a stamp against a mark: the record ends needing the user, with no stamp",
+				async (start) => {
+					const grant = await activated();
+					await start(
+						() => stamp(grant),
+						() =>
+							store.requireReauthorization({
+								grantId: "g-1",
+								expectedVersion: grant.version,
+								now: at(DAY),
+							}),
+					);
+					expect(await store.find("g-1", at(DAY))).toMatchObject({
+						status: "reauthorization_required",
+					});
+					expect(await store.find("g-1", at(DAY))).not.toHaveProperty("refreshFailure");
+				},
+			);
+
+			inBothOrders(
+				"a stamp against a revocation: the record ends revoked, with no stamp",
+				async (start) => {
+					const grant = await activated();
+					await start(
+						() => stamp(grant),
+						() => store.revoke("g-1", "client", at(DAY)),
+					);
+					expect(await store.find("g-1", at(DAY))).toMatchObject({ status: "revoked" });
+					expect(await store.find("g-1", at(DAY))).not.toHaveProperty("refreshFailure");
+				},
+			);
 
 			inBothOrders(
 				"the retiring of an intent against the renewal it would end: exactly one of them happens",

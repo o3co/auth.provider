@@ -455,7 +455,7 @@ export function createMemoryFederationGrantStore(
 			if (!credentialDatesAreDates(input.credentials)) return failed();
 			if (input.ineligible !== null && !isDate(input.ineligible.at)) return failed();
 
-			const { ineligible: _cleared, ...kept } = grant;
+			const { ineligible: _cleared, refreshFailure: _forgotten, ...kept } = grant;
 			const next: AuthorizedFederationGrant = {
 				...kept,
 				version: grant.version + 1,
@@ -472,8 +472,9 @@ export function createMemoryFederationGrantStore(
 			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
 
 			entry.credentials = null;
+			const { refreshFailure: _forgotten, ...kept } = grant;
 			return written(entry, {
-				...grant,
+				...kept,
 				status: "reauthorization_required",
 				version: grant.version + 1,
 			});
@@ -489,12 +490,37 @@ export function createMemoryFederationGrantStore(
 
 			entry.intent = null;
 			entry.credentials = null;
+			const { refreshFailure: _forgotten, ...kept } = grant;
 			return written(entry, {
-				...grant,
+				...kept,
 				status: "revoked",
 				version: grant.version + 1,
 				revocation: { by, at: new Date(atMs) },
 			});
+		},
+
+		async noteRefreshFailure(input) {
+			const nowMs = instant(input.now, "now");
+			const entry = visible(input.grantId, nowMs);
+			if (entry === undefined) return failed();
+			const grant = entry.grant;
+			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
+			if (!(nowMs < grant.expiresAt.getTime())) return failed();
+			if (!isDate(input.failure.at)) return failed();
+			const { retryAfterSeconds, upstreamCode } = input.failure;
+			// In place, in one step: a stamp read, counted and written in three
+			// would lose to a touch, and a count to a second stamp.
+			const next: AuthorizedFederationGrant = {
+				...grant,
+				refreshFailure: {
+					at: new Date(input.failure.at.getTime()),
+					kind: input.failure.kind,
+					count: (grant.refreshFailure?.count ?? 0) + 1,
+					...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
+					...(upstreamCode !== undefined ? { upstreamCode } : {}),
+				},
+			};
+			return written(entry, next);
 		},
 
 		async touch(grantId, at) {

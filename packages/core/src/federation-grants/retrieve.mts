@@ -18,6 +18,7 @@ import { classifyFederationRefreshError } from "../federation-tokens/refresh-err
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
 import {
 	federationGrantIneligibilityRetry,
+	federationGrantRefreshFailureStands,
 	isUsableMaxUpstreamAccessTokenLifetime,
 	judgeUpstreamAccessToken,
 	scopesWithin,
@@ -31,6 +32,7 @@ import {
 	type FederationGrantCredentials,
 	type FederationGrantDenial,
 	type FederationGrantIneligibilityMarker,
+	type FederationGrantRefreshFailureInput,
 	type FederationGrantTokenResult,
 	type FederationGrantUnavailableReason,
 	hasFederationGrantAuthorization,
@@ -119,6 +121,13 @@ export interface FederationGrantRetrievalLimits {
 	 */
 	readonly refreshBufferMs: number;
 	readonly ineligibleRetryAfterMs: number;
+	/**
+	 * How long the upstream is not asked again after it failed twice in a row
+	 * (30 s), and the least a rate limit is honoured for (D12). The first
+	 * failure of a row is retried promptly. `ineligibleRetryAfterMs` is the
+	 * ceiling, and what a refusal with a code this provider knows waits.
+	 */
+	readonly refreshFailureBackoffMs: number;
 	/** The SOFT deadline: how long a caller waits for the upstream (D12). */
 	readonly upstreamTimeoutMs: number;
 	/** The HARD deadline: where the upstream request is aborted. */
@@ -252,7 +261,12 @@ export function assertFederationGrantRetrievalLimits(limits: FederationGrantRetr
 		"ineligibleRetryAfterMs",
 		"maxExpiresInMs",
 	] as const;
-	const allowances = ["revocationSkewMs", "refreshBufferMs", "lockWaitMs"] as const;
+	const allowances = [
+		"revocationSkewMs",
+		"refreshBufferMs",
+		"lockWaitMs",
+		"refreshFailureBackoffMs",
+	] as const;
 	for (const name of timed) {
 		const value = limits[name];
 		if (!Number.isFinite(value) || value <= 0) {
@@ -456,6 +470,10 @@ const unavailable = (reason: FederationGrantUnavailableReason): FederationGrantD
 	reason,
 });
 
+/** How far ahead of `now` a stored date is believed: what the refresh buffer absorbs, or replicas' clocks may differ by. */
+const dateAllowanceMs = (limits: FederationGrantRetrievalLimits): number =>
+	Math.max(limits.refreshBufferMs, limits.revocationSkewMs);
+
 const NOT_PERMITTED: FederationGrantDenial = {
 	code: "access_denied",
 	reason: "connection_not_permitted",
@@ -588,6 +606,7 @@ async function evaluate(
 		const retry = federationGrantIneligibilityRetry(grant.ineligible, {
 			now,
 			retryAfterMs: deps.limits.ineligibleRetryAfterMs,
+			allowanceMs: dateAllowanceMs(deps.limits),
 		});
 		const denial: FederationGrantDenial = {
 			code: "upstream_token_ineligible",
@@ -604,6 +623,28 @@ async function evaluate(
 		const unhandled: never = status;
 		void unhandled;
 		return { kind: "deny", denial: unavailable("storage"), grant };
+	}
+	// The stamp of a failed refresh (D12): while it stands the upstream is not
+	// asked either. The marker's denial comes first: an ineligible answer is the
+	// more specific fault.
+	const failure = federationGrantRefreshFailureStands(grant.refreshFailure, {
+		now,
+		allowanceMs: dateAllowanceMs(deps.limits),
+		backoffMs: deps.limits.refreshFailureBackoffMs,
+		ceilingMs: deps.limits.ineligibleRetryAfterMs,
+	});
+	if (notAsked === undefined && failure.stands) {
+		const { retryAfterSeconds } = failure;
+		notAsked =
+			failure.kind === "rate_limited"
+				? { code: "rate_limited", reason: "upstream", retryAfterSeconds }
+				: failure.kind === "rejected"
+					? {
+							code: "upstream_rejected",
+							reason: grant.refreshFailure?.upstreamCode ?? "unknown",
+							retryAfterSeconds,
+						}
+					: { code: "temporarily_unavailable", reason: "upstream", retryAfterSeconds };
 	}
 
 	// What the request asserts is checked here, so that a request that can
@@ -666,7 +707,7 @@ async function evaluate(
 		// rotation on the heels of the first, whenever the replica that refreshed
 		// is the one that is ahead. And no token has more life left than it was
 		// issued with, whatever its date says.
-		const believed = age >= -Math.max(deps.limits.refreshBufferMs, deps.limits.revocationSkewMs);
+		const believed = age >= -dateAllowanceMs(deps.limits);
 		const tokenEndsAt = Math.min(token.obtainedAt.getTime(), now.getTime()) + lifetimeMs;
 		const remainingMs = tokenEndsAt - now.getTime();
 		if (eligible && believed && remainingMs > 0) {
@@ -1036,23 +1077,43 @@ async function refreshUnderLock(
 				audits: [["federation.grant.reauthorization_required", "upstream_invalid_grant"]],
 			};
 		}
-		// None of the rest changes the record.
+		// None of the rest changes the credentials. The failure is stamped on the
+		// record (D12), so that the next request does not ask a failing upstream
+		// again at once — a refusal, and an outage from the second time on.
+		const ceilingSeconds = Math.floor(limits.ineligibleRetryAfterMs / 1000);
 		let denial: FederationGrantDenial;
+		let failure: FederationGrantRefreshFailureInput;
+		const at = deps.now();
 		if (classified.reason === "rate_limited") {
+			// Told to the failing caller no longer than to the next: capped at
+			// the ceiling, as the stamp's wait is.
+			const advice = classified.retryAfterSeconds;
 			denial = {
 				code: "rate_limited",
 				reason: "upstream",
-				...(classified.retryAfterSeconds !== undefined
-					? { retryAfterSeconds: classified.retryAfterSeconds }
-					: {}),
+				...(advice !== undefined ? { retryAfterSeconds: Math.min(advice, ceilingSeconds) } : {}),
+			};
+			failure = {
+				at,
+				kind: "rate_limited",
+				...(advice !== undefined ? { retryAfterSeconds: advice } : {}),
 			};
 		} else if (classified.reason === "network") {
 			denial = unavailable("upstream");
-		} else {
+			failure = { at, kind: "unavailable" };
+		} else if (classified.upstreamCode !== undefined) {
 			// The upstream's error code when it is one this provider knows, and
-			// never its message: this goes into a response.
-			denial = { code: "upstream_rejected", reason: classified.upstreamCode ?? "unknown" };
+			// never its message: this goes into a response. The IdP answered and
+			// said no: nothing was processed, and a refusal is remembered at once.
+			denial = { code: "upstream_rejected", reason: classified.upstreamCode };
+			failure = { at, kind: "rejected", upstreamCode: classified.upstreamCode };
+		} else {
+			// An error nobody can read: it may have been processed, and its answer
+			// lost, so it is retried promptly like an outage.
+			denial = { code: "upstream_rejected", reason: "unknown" };
+			failure = { at, kind: "unavailable" };
 		}
+		await stamp(deps, request, grant, failure, limits.persistRetryBudgetMs);
 		// The lock is let go of, whatever the failure was. A failure that ARRIVED
 		// leaves nothing of this call's in flight, which is what keeping the lock
 		// is for. If the IdP rotated before its answer was lost, the old refresh
@@ -1190,12 +1251,46 @@ async function refreshUnderLock(
 		await after(Math.min(PERSIST_RETRY_DELAY_MS, remaining)).elapsed;
 	}
 	// The new credentials are dropped. The stored refresh credential is not
-	// assumed to be still good: the next refresh decides (D12).
+	// assumed to be still good: the next refresh decides (D12). The failure is
+	// stamped all the same, best effort — the store is what failed, and one
+	// more write to it may fail too — so that the next request does not present
+	// the old refresh token again at once.
+	await stamp(deps, request, grant, { at: deps.now(), kind: "unavailable" }, SIDE_EFFECT_WAIT_MS);
 	return {
 		kind: "denied",
 		denial: unavailable("storage"),
 		audits: [["federation.grant.refresh_persist_failed", "storage"]],
 	};
+}
+
+/**
+ * Stamps a failed refresh on the record (D12): one attempt, bounded, under the
+ * lock, so that every waiter finds it. It never changes the answer — the last
+ * look answers a stored token that serves with or without it — and a store
+ * that will not take it is told to the logger.
+ */
+async function stamp(
+	deps: RetrieveFederationGrantTokenDeps,
+	request: RetrieveFederationGrantTokenRequest,
+	grant: AuthorizedFederationGrant,
+	failure: FederationGrantRefreshFailureInput,
+	budgetMs: number,
+): Promise<void> {
+	const noted = await within(
+		settle(() =>
+			deps.store.noteRefreshFailure({
+				grantId: grant.id,
+				expectedVersion: grant.version,
+				failure,
+				now: deps.now(),
+			}),
+		),
+		budgetMs,
+	);
+	if (noted === "elapsed") report(deps, request, "mark", NOT_ANSWERED);
+	else if (!noted.ok) report(deps, request, "mark", noted.error);
+	// Refused on the version, the stamp says nothing about the credentials the
+	// grant has now: nothing to report.
 }
 
 /** Lets go of a lock, waiting so long and no longer, and tells the logger when it could not. Never rejects. */

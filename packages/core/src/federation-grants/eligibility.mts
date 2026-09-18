@@ -18,6 +18,8 @@ import type {
 	FederationGrantConnection,
 	FederationGrantIneligibilityMarker,
 	FederationGrantIneligibilityReason,
+	FederationGrantRefreshFailure,
+	FederationGrantRefreshFailureKind,
 } from "./types.mjs";
 
 /**
@@ -132,22 +134,93 @@ export function federationGrantIneligibilityStands(
  * another chance to lose the credential, and a drain on an upstream rate limit
  * that other grants share.
  *
- * The wait is rounded up, so a client is never told to retry in zero seconds,
- * and clamped to the interval: the marker is outside the authenticated
- * envelope, so whoever can write the record can date it in the future. When
- * the arithmetic is not a number a retry is due. That is the safe direction
- * here, because `judgeUpstreamAccessToken` still guards what is disclosed.
+ * The marker is outside the authenticated envelope, so whoever can write the
+ * record can date it in the future. One dated further ahead than `allowanceMs`
+ * — what replicas' clocks may differ by, and the refresh buffer absorbs — is
+ * not believed, and a retry is due: clamping only what the client is TOLD
+ * would leave such a marker standing until its date caught up. The wait is
+ * rounded up, so a client is never told to retry in zero seconds, and never
+ * longer than the interval. When the arithmetic is not a number a retry is
+ * due. That is the safe direction here, because `judgeUpstreamAccessToken`
+ * still guards what is disclosed.
  */
 export function federationGrantIneligibilityRetry(
 	marker: FederationGrantIneligibilityMarker | undefined,
-	context: { readonly now: Date; readonly retryAfterMs: number },
+	context: { readonly now: Date; readonly retryAfterMs: number; readonly allowanceMs: number },
 ): { readonly due: true } | { readonly due: false; readonly retryAfterSeconds: number } {
 	if (marker === undefined) return { due: true };
-	const remainingMs = marker.at.getTime() + context.retryAfterMs - context.now.getTime();
+	const at = marker.at.getTime();
+	const now = context.now.getTime();
+	if (!(at <= now + context.allowanceMs)) return { due: true };
+	const remainingMs = at + context.retryAfterMs - now;
 	if (!(remainingMs > 0)) return { due: true };
 	return {
 		due: false,
 		retryAfterSeconds: Math.ceil(Math.min(remainingMs, context.retryAfterMs) / 1000),
+	};
+}
+
+/**
+ * Whether the stamp of a failed refresh (D12) still keeps `/token` from asking
+ * the upstream, and for how long a client is told to wait. What the wait is
+ * depends on what failed:
+ *
+ * - `unavailable` — nothing for the FIRST failure in a row: the request may
+ *   have been processed and its answer lost, and an IdP that keeps a grace
+ *   window for exactly that takes the old refresh token back on a prompt
+ *   retry, not a late one. The next poll is that retry. From the second
+ *   failure on, `backoffMs`.
+ * - `rate_limited` — the upstream's advice, never less than `backoffMs` and
+ *   never more than `ceilingMs`: a 429 was not processed, and there is
+ *   nothing to recover promptly.
+ * - `rejected` — `ceilingMs`: an error code this provider knows is a
+ *   configuration fault, the marker's class of problem, and gets the marker's
+ *   interval.
+ *
+ * A stamp dated further ahead than `allowanceMs` is not believed (as the
+ * marker above), one that is not a date does not stand, and the wait a
+ * client is told is rounded up and never longer than `ceilingMs`.
+ */
+export function federationGrantRefreshFailureStands(
+	failure: FederationGrantRefreshFailure | undefined,
+	context: {
+		readonly now: Date;
+		readonly allowanceMs: number;
+		readonly backoffMs: number;
+		readonly ceilingMs: number;
+	},
+):
+	| { readonly stands: false }
+	| {
+			readonly stands: true;
+			readonly kind: FederationGrantRefreshFailureKind;
+			readonly retryAfterSeconds: number;
+	  } {
+	if (failure === undefined) return { stands: false };
+	const at = failure.at.getTime();
+	const now = context.now.getTime();
+	if (!(at <= now + context.allowanceMs)) return { stands: false };
+	let waitMs: number;
+	switch (failure.kind) {
+		case "unavailable":
+			waitMs = failure.count > 1 ? context.backoffMs : 0;
+			break;
+		case "rate_limited":
+			waitMs = Math.min(
+				context.ceilingMs,
+				Math.max(context.backoffMs, (failure.retryAfterSeconds ?? 0) * 1000),
+			);
+			break;
+		case "rejected":
+			waitMs = context.ceilingMs;
+			break;
+	}
+	const remainingMs = at + waitMs - now;
+	if (!(remainingMs > 0)) return { stands: false };
+	return {
+		stands: true,
+		kind: failure.kind,
+		retryAfterSeconds: Math.ceil(Math.min(remainingMs, context.ceilingMs) / 1000),
 	};
 }
 

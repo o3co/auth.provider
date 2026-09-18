@@ -19,6 +19,7 @@ import type {
 	FederationGrantAuthorization,
 	FederationGrantCredentials,
 	FederationGrantIneligibilityMarker,
+	FederationGrantRefreshFailureInput,
 	FederationGrantRevokedBy,
 } from "./types.mjs";
 
@@ -247,6 +248,27 @@ export interface FederationGrantStore {
 	 * one already revoked, whose first revocation stays as recorded.
 	 */
 	revoke(grantId: string, by: FederationGrantRevokedBy, at: Date): Promise<FederationGrantWrite>;
+
+	/**
+	 * A refresh failed (D12). The grant must be `active`, its `version` the one
+	 * the caller read — a failure of a refresh token the grant no longer has
+	 * says nothing about the one it has now — and `now` before `expiresAt`. A
+	 * date that is not one refuses the write.
+	 *
+	 * Effect: `refreshFailure` set, with `count` one more than the stamp it
+	 * replaces, or `1`. It does not bump `version` — it must not cost anybody a
+	 * guarded write, and nothing reads it as a state of the grant — and it
+	 * touches nothing else. It is cleared by whatever replaces or ends the
+	 * credentials: `replaceCredentials`, `activate`, `requireReauthorization`,
+	 * `revoke`. An adapter writes it atomically: a read, a count and a write in
+	 * three steps would lose a stamp to a `touch`, and a count to a second stamp.
+	 */
+	noteRefreshFailure(input: {
+		readonly grantId: string;
+		readonly expectedVersion: number;
+		readonly failure: FederationGrantRefreshFailureInput;
+		readonly now: Date;
+	}): Promise<FederationGrantWrite>;
 
 	/**
 	 * Sets `lastUsedAt` on an `active` grant, and never moves it back: two

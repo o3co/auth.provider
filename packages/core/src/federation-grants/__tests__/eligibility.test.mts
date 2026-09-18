@@ -17,12 +17,14 @@
 import { describe, expect, it } from "vitest";
 import {
 	federationGrantIneligibilityRetry,
+	federationGrantRefreshFailureStands,
 	federationGrantIneligibilityStands,
 	isUsableMaxUpstreamAccessTokenLifetime,
 	judgeUpstreamAccessToken,
 	resolveFederationGrantIntentScopes,
 	scopesWithin,
 } from "#/federation-grants/eligibility.mjs";
+import type { FederationGrantRefreshFailure } from "#/federation-grants/types.mjs";
 
 const CONSENTED = ["openid", "offline_access", "calendar.read"];
 
@@ -185,7 +187,7 @@ describe("upstream token eligibility (#593, D5)", () => {
 
 		describe("federationGrantIneligibilityRetry — whether /token may call the upstream again", () => {
 			const retry = (now: Date, retryAfterMs = 300_000) =>
-				federationGrantIneligibilityRetry(marker, { now, retryAfterMs });
+				federationGrantIneligibilityRetry(marker, { now, retryAfterMs, allowanceMs: 30_000 });
 
 			it("is not due until the interval has passed, so a starved grant does not refresh on every call", () => {
 				expect(retry(later(0))).toEqual({ due: false, retryAfterSeconds: 300 });
@@ -198,15 +200,20 @@ describe("upstream token eligibility (#593, D5)", () => {
 				expect(retry(later(298_001))).toEqual({ due: false, retryAfterSeconds: 2 });
 			});
 
-			it("never makes a client wait longer than the interval, whatever the marker says", () => {
+			it("does not believe a marker dated further ahead than the allowance: it would stand until its date caught up, whatever the client was told", () => {
 				// The marker is outside the authenticated envelope: whoever can write
-				// the record can date it in the future.
-				expect(
+				// the record can date it in the future. Clamping only what the client
+				// is TOLD would leave the marker standing for a day.
+				const retryOf = (ahead: number) =>
 					federationGrantIneligibilityRetry(
-						{ ...marker, at: later(86_400_000) },
-						{ now: at, retryAfterMs: 300_000 },
-					),
-				).toEqual({ due: false, retryAfterSeconds: 300 });
+						{ ...marker, at: later(ahead) },
+						{ now: at, retryAfterMs: 300_000, allowanceMs: 30_000 },
+					);
+				expect(retryOf(86_400_000)).toEqual({ due: true });
+				expect(retryOf(30_001)).toEqual({ due: true });
+				// Within the allowance it is believed, and the wait is still never
+				// longer than the interval.
+				expect(retryOf(30_000)).toEqual({ due: false, retryAfterSeconds: 300 });
 			});
 
 			it("is due when the arithmetic is not: the eligibility rule still guards the disclosure", () => {
@@ -215,16 +222,112 @@ describe("upstream token eligibility (#593, D5)", () => {
 				expect(
 					federationGrantIneligibilityRetry(
 						{ ...marker, at: new Date(Number.NaN) },
-						{ now: at, retryAfterMs: 300_000 },
+						{ now: at, retryAfterMs: 300_000, allowanceMs: 30_000 },
 					),
 				).toEqual({ due: true });
 			});
 
 			it("is due when there is no marker", () => {
 				expect(
-					federationGrantIneligibilityRetry(undefined, { now: at, retryAfterMs: 300_000 }),
+					federationGrantIneligibilityRetry(undefined, {
+						now: at,
+						retryAfterMs: 300_000,
+						allowanceMs: 30_000,
+					}),
 				).toEqual({ due: true });
 			});
+		});
+	});
+
+	describe("the stamp of a failed refresh (D12)", () => {
+		const at = new Date("2026-09-18T00:00:00.000Z");
+		const later = (ms: number) => new Date(at.getTime() + ms);
+		const limits = { allowanceMs: 30_000, backoffMs: 30_000, ceilingMs: 300_000 };
+		const stamp = (
+			over: Partial<FederationGrantRefreshFailure> = {},
+		): FederationGrantRefreshFailure => ({
+			at,
+			kind: "unavailable",
+			count: 1,
+			...over,
+		});
+		const standing = (failure: FederationGrantRefreshFailure | undefined, now: Date) =>
+			federationGrantRefreshFailureStands(failure, { now, ...limits });
+
+		it("does not stand for the first outage: the next poll is the prompt retry an IdP's grace window takes", () => {
+			expect(standing(stamp(), at)).toEqual({ stands: false });
+			expect(standing(stamp(), later(1))).toEqual({ stands: false });
+		});
+
+		it("stands for the backoff from the second outage in a row", () => {
+			expect(standing(stamp({ count: 2 }), at)).toEqual({
+				stands: true,
+				kind: "unavailable",
+				retryAfterSeconds: 30,
+			});
+			expect(standing(stamp({ count: 2 }), later(29_999))).toEqual({
+				stands: true,
+				kind: "unavailable",
+				retryAfterSeconds: 1,
+			});
+			expect(standing(stamp({ count: 2 }), later(30_000))).toEqual({ stands: false });
+			expect(standing(stamp({ count: 9 }), later(29_999))).toMatchObject({ stands: true });
+		});
+
+		it("stands for the upstream's advice after a rate limit, never for less than the backoff nor for more than the ceiling", () => {
+			expect(standing(stamp({ kind: "rate_limited" }), at)).toMatchObject({
+				stands: true,
+				kind: "rate_limited",
+				retryAfterSeconds: 30,
+			});
+			expect(standing(stamp({ kind: "rate_limited", retryAfterSeconds: 120 }), at)).toMatchObject({
+				retryAfterSeconds: 120,
+			});
+			expect(
+				standing(stamp({ kind: "rate_limited", retryAfterSeconds: 120 }), later(120_000)),
+			).toEqual({
+				stands: false,
+			});
+			expect(standing(stamp({ kind: "rate_limited", retryAfterSeconds: 3600 }), at)).toMatchObject({
+				retryAfterSeconds: 300,
+			});
+			expect(
+				standing(stamp({ kind: "rate_limited", retryAfterSeconds: 3600 }), later(300_000)),
+			).toEqual({
+				stands: false,
+			});
+		});
+
+		it("stands for the ceiling after a refusal: a configuration fault is the marker's class of problem", () => {
+			expect(standing(stamp({ kind: "rejected" }), at)).toEqual({
+				stands: true,
+				kind: "rejected",
+				retryAfterSeconds: 300,
+			});
+			expect(standing(stamp({ kind: "rejected" }), later(300_000))).toEqual({ stands: false });
+		});
+
+		it("rounds the wait up: a client is never told to retry in zero seconds", () => {
+			expect(standing(stamp({ kind: "rejected" }), later(299_500))).toMatchObject({
+				retryAfterSeconds: 1,
+			});
+		});
+
+		it("does not believe a stamp dated further ahead than the allowance, nor one that is not a date, nor stand for none", () => {
+			expect(standing(stamp({ kind: "rejected", at: later(30_001) }), at)).toEqual({
+				stands: false,
+			});
+			expect(standing(stamp({ kind: "rejected", at: later(30_000) }), at)).toMatchObject({
+				stands: true,
+				retryAfterSeconds: 300,
+			});
+			expect(standing(stamp({ kind: "rejected", at: new Date(Number.NaN) }), at)).toEqual({
+				stands: false,
+			});
+			expect(standing(stamp({ kind: "rejected" }), new Date(Number.NaN))).toEqual({
+				stands: false,
+			});
+			expect(standing(undefined, at)).toEqual({ stands: false });
 		});
 	});
 });

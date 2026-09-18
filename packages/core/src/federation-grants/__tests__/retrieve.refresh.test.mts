@@ -391,7 +391,8 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			[
 				"an error code this provider knows",
 				Object.assign(new Error("x"), { error: "invalid_client", status: 401 }),
-				{ code: "upstream_rejected", reason: "invalid_client" },
+				// A refusal is remembered at once (D12): the wait is what the stamp says.
+				{ code: "upstream_rejected", reason: "invalid_client", retryAfterSeconds: 300 },
 			],
 			// An upstream that echoes what it was sent, in the one field that gets
 			// echoed on: not a code, so not repeated.
@@ -406,12 +407,13 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 					status: 429,
 					response: new Response(null, { status: 429, headers: { "retry-after": "17" } }),
 				}),
-				{ code: "rate_limited", reason: "upstream", retryAfterSeconds: 17 },
+				// The advice is honoured for the backoff at least: thirty seconds.
+				{ code: "rate_limited", reason: "upstream", retryAfterSeconds: 30 },
 			],
 			[
 				"a rate limit without",
 				Object.assign(new Error("x"), { status: 429 }),
-				{ code: "rate_limited", reason: "upstream" },
+				{ code: "rate_limited", reason: "upstream", retryAfterSeconds: 30 },
 			],
 			[
 				"an outage",

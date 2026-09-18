@@ -86,6 +86,7 @@ export const limits: RetrieveFederationGrantTokenDeps["limits"] = {
 	revocationSkewMs: 1_000,
 	refreshBufferMs: 30_000,
 	ineligibleRetryAfterMs: 300_000,
+	refreshFailureBackoffMs: 30_000,
 	upstreamTimeoutMs: 10_000,
 	upstreamHardTimeoutMs: 25_000,
 	refreshLockTtlMs: 30_000,

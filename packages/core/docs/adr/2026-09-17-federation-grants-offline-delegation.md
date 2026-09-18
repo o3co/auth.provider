@@ -143,10 +143,11 @@ not enough: the store enforces it at the write.
 | --- | --- | --- |
 | lodge first intent | no record is there under the ID, whether or not this caller's clock can see it; the intent has not already lapsed | create `pending`, naming this intent as current; key lives as long as the intent |
 | lodge reauthorization intent | the record exists; status is `active` or `reauthorization_required`; `now < expiresAt`; the intent has not already lapsed | name this intent as current, superseding any other; `version` is *not* bumped |
-| activate (callback succeeds) | status is `pending`, `active` or `reauthorization_required`; `now` is before the *stored* `expiresAt` unless `pending`; the intent is the grant's current intent and has not lapsed; the *new* `expiresAt` is after `now`, and `expiresAt − consent.at` is within the lifetime ceiling (D3); `consent.at` and `authorizedAt` are not after `now` (D13); unless `pending`, the upstream account and the identity revision are the stored ones (D4, D7) | `active`; replace the authorized fields as a whole; write credentials; clear the ineligibility marker (D5); retire the intent; `version++` |
-| replace credentials (refresh) | status is `active`; `version` equals the one read; `now < expiresAt` | replace credentials as a whole; set or clear the ineligibility marker (D5); `version++`; the current intent is left alone |
-| require reauthorization | status is `active`; `version` equals the one read | `reauthorization_required`; delete credentials; `version++` |
-| revoke | the record exists; status is not `revoked` | `revoked`; record `revocation`; delete credentials; retire the intent; `version++` — one atomic operation that always wins |
+| activate (callback succeeds) | status is `pending`, `active` or `reauthorization_required`; `now` is before the *stored* `expiresAt` unless `pending`; the intent is the grant's current intent and has not lapsed; the *new* `expiresAt` is after `now`, and `expiresAt − consent.at` is within the lifetime ceiling (D3); `consent.at` and `authorizedAt` are not after `now` (D13); unless `pending`, the upstream account and the identity revision are the stored ones (D4, D7) | `active`; replace the authorized fields as a whole; write credentials; clear the ineligibility marker (D5) and the stamp of a failed refresh (D12); retire the intent; `version++` |
+| replace credentials (refresh) | status is `active`; `version` equals the one read; `now < expiresAt` | replace credentials as a whole; set or clear the ineligibility marker (D5); clear the stamp of a failed refresh (D12); `version++`; the current intent is left alone |
+| note refresh failure | status is `active`; `version` equals the one read; `now < expiresAt` | set the stamp of a failed refresh (D12), its `count` one more than the stamp it replaces, or `1`; `version` is *not* bumped; nothing else changes |
+| require reauthorization | status is `active`; `version` equals the one read | `reauthorization_required`; delete credentials; clear the stamp; `version++` |
+| revoke | the record exists; status is not `revoked` | `revoked`; record `revocation`; delete credentials; clear the stamp; retire the intent; `version++` — one atomic operation that always wins |
 | retire intent | status is `active` or `reauthorization_required`; there is a current intent, and it is the named one when one is named | retire the intent; `version` is *not* bumped |
 | touch | the record exists; status is `active` | set `lastUsedAt` only, and never back |
 | first intent lapses unused | — | the `pending` grant is deleted with it |
@@ -732,9 +733,9 @@ may choose, and must not be a way round it.
 
 What the rule bounds is what a *client* can cause while the upstream answers:
 two rotations in a token's lifetime — or, under a standing marker beside a
-kept token, one per `ineligibleRetryAfter`. It does not bound an upstream
-that *fails*: a failed refresh is not remembered yet, so every request that
-needs one asks again (build order, slice 1d). And `min_ttl` is a request, never a guarantee:
+kept token, one per `ineligibleRetryAfter`. What an upstream that *fails*
+costs is bounded by the stamp of D12: one prompt retry, then one attempt per
+backoff. And `min_ttl` is a request, never a guarantee:
 one above half the lifetime the upstream issues cannot be met for most of a
 token's life, and `expires_in` is what tells the caller what it got.
 
@@ -796,7 +797,7 @@ reason cannot be attached to a code that has none.
 | `upstream_token_ineligible` | `no_finite_lifetime`, `lifetime_over_maximum` | 502 | operator; the grant is untouched; honour `retryAfterSeconds` |
 | `upstream_token_ineligible` | `malformed_token_response` | 502 | operator: the federation adapter reported an answer without a usable access token, or with a field of the wrong type. The grant is untouched; honour `retryAfterSeconds` |
 | `upstream_token_ineligible` | `scope_exceeded` | 502 | no operator action un-accumulates consent: `/reauthorize` for the wider set, or a new grant on a connection of its own (D19) |
-| `upstream_rejected` | the upstream's error code, or `unknown` | 502 | operator, e.g. an expired upstream client secret; the grant is untouched. The code is repeated only when it is one of the RFC 6749, RFC 6750, RFC 8707 and OpenID Connect codes this provider knows, and is `unknown` otherwise — an allow-list, because any pattern that fits `invalid_client` fits an opaque token as well, and an upstream that echoes what it was sent must not get a refresh token repeated through this field |
+| `upstream_rejected` | the upstream's error code, or `unknown` | 502 | operator, e.g. an expired upstream client secret; the grant is untouched. Answered from the stamp of a failed refresh (D12) it carries `retryAfterSeconds`, and is answered only where nothing stored serves the request (D10). The code is repeated only when it is one of the RFC 6749, RFC 6750, RFC 8707 and OpenID Connect codes this provider knows, and is `unknown` otherwise — an allow-list, because any pattern that fits `invalid_client` fits an opaque token as well, and an upstream that echoes what it was sent must not get a refresh token repeated through this field |
 | `rate_limited` | `provider`, `upstream` | 429 | retry after `Retry-After`. `upstream` is answered only where nothing stored serves the request (D10) |
 | `temporarily_unavailable` | `upstream`, `storage`, `lock_timeout`, `concurrent_update`, `key_unavailable` | 503 | retry; the grant is untouched. Each of these is answered only where nothing stored serves the request (D10). `concurrent_update`: this call's refresh was overtaken — its guarded write lost, or what it wrote was replaced before the last look — and what is stored now is nothing to answer with |
 
@@ -940,6 +941,40 @@ reuse-detecting IdP answers by revoking the family.
   `federation.grant.refresh_persist_failed` is audited. The stored refresh
   credential is *not* assumed to be still good: the next refresh decides, and
   an `invalid_grant` there becomes `reauthorization_required`.
+- **A failed refresh is remembered.** Every failure that arrived, other than
+  the structured `invalid_grant` that marks the grant, leaves a non-secret
+  stamp on the record — `{ at, kind, count, retryAfterSeconds?, upstreamCode? }`,
+  written under the lock by one guarded script that bumps no version and
+  touches nothing else, and cleared by whatever replaces or ends the
+  credentials (D2). A refresh whose answer could not be persisted leaves one
+  too, best effort: the store is what failed. While the stamp stands the
+  upstream is not asked: a stored token that serves the request is answered
+  as it is (D10), and otherwise the failure is, with what is left of the
+  wait as `retryAfterSeconds` — `temporarily_unavailable` / `upstream`,
+  `rate_limited` / `upstream`, or `upstream_rejected` with the code the
+  upstream gave. The marker of D5 comes first where both stand. Without the
+  stamp every request that needs a refresh asks a failing upstream again, and
+  N polls during an incident are N upstream calls: the lock serializes them,
+  it does not deduplicate them. With it, every waiter that acquires the lock
+  after the holder failed finds the stamp and asks nothing.
+  - What the stamp waits depends on what failed. An *outage* — a 5xx, a
+    connection that failed, an answer nobody could read — is retried promptly
+    ONCE: the request may have been processed and its answer lost, and an IdP
+    that keeps a grace window for exactly that takes the old refresh token
+    back on the next attempt, not a late one; from the second failure in a
+    row, `federationGrants.refreshFailureBackoff` (default 30 s). A *rate
+    limit* is remembered at once, for the upstream's advice, never less than
+    the backoff and never more than `ineligibleRetryAfter`: a 429 was not
+    processed, and there is nothing to recover promptly; the failing caller
+    is told the same capped wait as the next. A *refusal* with a code this
+    provider knows is remembered for `ineligibleRetryAfter`: a configuration
+    fault is the marker's class of problem, and gets the marker's interval.
+    The count is what tells the first outage from the second; a refresh that
+    wrote forgets it, so the next row starts over.
+  - The stamp is outside the authenticated envelope, as the marker is: one
+    dated further ahead than the refresh buffer absorbs is not believed — as
+    a marker is not — and never re-read "from now", which would let it stand
+    until its date caught up.
 
 This does not claim exactly-once behaviour across an external IdP. It claims
 that isolation holds and that every ambiguous outcome resolves toward asking
@@ -1349,9 +1384,10 @@ renewed consent; swapping `upstream` would weaken the account check at the
 next reauthorization. So the additional authenticated data is a canonical
 encoding of the key name together with `id`, `subject`, `clientId`,
 `connection` and every field of `FederationGrantAuthorization` (D1),
-recomputed from the HASH when the credential is opened. The usage fields,
-`lastUsedAt` and the ineligibility marker, are outside it: they change while
-the grant is in use, and neither decides what the grant allows. The
+recomputed from the HASH when the credential is opened. The usage fields —
+`lastUsedAt`, the ineligibility marker and the stamp of a failed refresh — are
+outside it: they change while the grant is in use, and none of them decides
+what the grant allows. The
 authorization fields change only at activation, which seals a new credential
 under the new fields and writes both in one script; a refresh re-seals under unchanged fields, which the `version`
 guard guarantees. A tampered field fails authentication and reads as
@@ -1556,19 +1592,16 @@ route test is written first and watched failing.
    ceiling, the transition rules, the two revisions, eligibility,
    `retrieveFederationGrantToken` with its typed result, the in-memory adapter
    and the contract suite, races and lock included.
-   - **1d: a failed refresh is remembered.** Today a failure changes nothing
-     in the record, so every request that needs a refresh asks the upstream
-     again — N polls during an IdP incident are N upstream calls, the lock
-     serializes them and does not deduplicate them; that includes a refresh
-     whose answer could not be persisted, where the rotation is lost for
-     certain — and a call whose refresh
-     failed answers the failure even where the stored token would still have
-     served it, which a refresh that brought nothing usable does not (D5).
-     Both want one thing: a non-secret stamp of the last failed attempt on
-     the record, written through the port as the marker is, under which the
-     upstream is not asked and a stored token that is good is answered as it
-     is. It changes the store port, so it is its own slice, and it lands
-     before slice 4: until a route exists nothing can reach the retrieval.
+   - **1d: a failed refresh is remembered, the lease is dated by the store,
+     and every refresh outcome ends in the last look.** Before it, a failure
+     changed nothing in the record, so every request that needs a refresh
+     asked the upstream again — N polls during an IdP incident were N
+     upstream calls — and a call whose refresh failed answered the failure
+     even where the stored token would still have served it. The stamp of
+     D12, `noteRefreshFailure` on the port, `waitedMs` in the lock's reply,
+     and the last look after every outcome (D10). A port change, so its own
+     slice, before slice 3 implements the port for Redis and before slice 4
+     can reach the retrieval.
 2. **federation adapter capability** (D17), generic OIDC first.
 3. **redis adapter** (D16), with the duplicated contract suite on a
    testcontainer, the guarded-write scripts and the grant-keyed lock.
