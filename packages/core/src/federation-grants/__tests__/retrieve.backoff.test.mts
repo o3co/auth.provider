@@ -421,6 +421,21 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 			},
 		);
 
+		it("tells the failing caller the row's wait even when its own stamp could not be written: the second outage is told the backoff", async () => {
+			await h.seed();
+			setNow(GONE);
+			h.refresh.mockRejectedValue(outage());
+			await retrieve();
+			expect(await stamp()).toMatchObject({ count: 1 });
+			vi.spyOn(h.store, "noteRefreshFailure").mockRejectedValueOnce(new Error("redis down"));
+			expect(await retrieve({ correlationId: "req-2" })).toStrictEqual({
+				ok: false,
+				code: "temporarily_unavailable",
+				reason: "upstream",
+				retryAfterSeconds: 30,
+			});
+		});
+
 		it("does not wait for a stamp that hangs past the persist budget, and tells the logger", async () => {
 			await h.seed();
 			setNow(GONE);
@@ -432,6 +447,44 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 			await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs + 50);
 			expect(await answer).toMatchObject({ code: "temporarily_unavailable", reason: "upstream" });
 			expect(reported).toEqual(["upstream", "mark"]);
+		});
+
+		it("does not let a stamp that outlived its budget replace a newer one: the store never moves back", async () => {
+			// The first call's outage stamp hangs past the persist budget; the lock is
+			// let go of; a second call's rate limit is stamped; then the first stamp
+			// lands. The rate limit's wait must be what stands.
+			await h.seed();
+			setNow(GONE);
+			const real = h.store.noteRefreshFailure.bind(h.store);
+			vi.spyOn(h.store, "noteRefreshFailure").mockImplementationOnce(async (input) => {
+				await new Promise((resolve) => setTimeout(resolve, limits.persistRetryBudgetMs + 2_000));
+				return real(input);
+			});
+			h.refresh.mockRejectedValueOnce(outage());
+			const first = retrieve();
+			await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs + 100);
+			expect(await first).toMatchObject({ code: "temporarily_unavailable", reason: "upstream" });
+
+			setNow(new Date(now().getTime() + 1_000));
+			h.refresh.mockRejectedValueOnce(
+				Object.assign(new Error("x"), {
+					status: 429,
+					response: new Response(null, { status: 429, headers: { "retry-after": "120" } }),
+				}),
+			);
+			expect(await retrieve({ correlationId: "req-2" })).toMatchObject({
+				code: "rate_limited",
+				retryAfterSeconds: 120,
+			});
+			await vi.advanceTimersByTimeAsync(3_000);
+			await Promise.all(h.background);
+			expect(await stamp()).toMatchObject({ kind: "rate_limited", retryAfterSeconds: 120 });
+			// Three seconds on: the rate limit's wait, and not the outage's.
+			expect(await retrieve({ correlationId: "req-3" })).toMatchObject({
+				code: "rate_limited",
+				retryAfterSeconds: 117,
+			});
+			expect(h.refresh).toHaveBeenCalledTimes(2);
 		});
 
 		it("changes no answer when it cannot be written, and tells the logger", async () => {

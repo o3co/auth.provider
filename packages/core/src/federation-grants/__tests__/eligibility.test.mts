@@ -17,8 +17,8 @@
 import { describe, expect, it } from "vitest";
 import {
 	federationGrantIneligibilityRetry,
-	federationGrantRefreshFailureStands,
 	federationGrantIneligibilityStands,
+	federationGrantRefreshFailureStands,
 	isUsableMaxUpstreamAccessTokenLifetime,
 	judgeUpstreamAccessToken,
 	resolveFederationGrantIntentScopes,

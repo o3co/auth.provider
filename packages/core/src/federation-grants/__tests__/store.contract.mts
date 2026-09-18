@@ -1367,6 +1367,24 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				expect((await store.find("g-1", at(2 * DAY)))?.refreshFailure).toHaveProperty("count", 1);
 			});
 
+			it("never moves back: a stamp dated before the one it would replace is refused, as a write that outlived its budget is", async () => {
+				const grant = await activated();
+				const newer = await note(grant.version, { kind: "rate_limited", retryAfterSeconds: 120 });
+				expect(newer.ok).toBe(true);
+				expect(await note(grant.version, { at: at(DAY - 1) }, at(DAY))).toEqual({ ok: false });
+				expect((await store.find("g-1", at(DAY)))?.refreshFailure).toMatchObject({
+					at: at(DAY),
+					kind: "rate_limited",
+					retryAfterSeconds: 120,
+					count: 1,
+				});
+				// The same instant is not before: a second stamp at the same date counts on.
+				expect(await note(grant.version)).toMatchObject({
+					ok: true,
+					grant: { refreshFailure: { count: 2 } },
+				});
+			});
+
 			it("refuses everything a refresh's own write would refuse, and changes nothing then", async () => {
 				const grant = await activated();
 				const before = await store.find("g-1", at(DAY));
@@ -2085,14 +2103,19 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				});
 			});
 
-			inBothOrders("two stamps: both are counted", async (start) => {
-				const grant = await activated();
-				await start(
-					() => stamp(grant),
-					() => stamp(grant, at(DAY + 1)),
-				);
-				expect((await store.find("g-1", at(DAY + 1)))?.refreshFailure).toHaveProperty("count", 2);
-			});
+			inBothOrders(
+				"two stamps: the one dated later is what stands, counted on when it came second and alone when it came first",
+				async (start) => {
+					const grant = await activated();
+					const [earlier, later] = await start(
+						() => stamp(grant),
+						() => stamp(grant, at(DAY + 1)),
+					);
+					expect(later.ok).toBe(true);
+					const stood = (await store.find("g-1", at(DAY + 1)))?.refreshFailure;
+					expect(stood).toMatchObject({ at: at(DAY + 1), count: earlier.ok ? 2 : 1 });
+				},
+			);
 
 			inBothOrders(
 				"a stamp against a refresh that wrote: the record ends with the new credentials and no stamp",

@@ -258,7 +258,9 @@ export interface FederationGrantStore {
 	 * Effect: `refreshFailure` set, with `count` one more than the stamp it
 	 * replaces when that one is no older than `rowMs` before `failure.at`, and
 	 * `1` otherwise: failures further apart than that are not a row, and a
-	 * day-old stamp must not cost today's failure its place as the first. It
+	 * day-old stamp must not cost today's failure its place as the first. A
+	 * stamp dated before the one it would replace is refused: a write that
+	 * outlived its caller's budget must not land over a newer failure. It
 	 * does not bump `version` — it must not cost anybody a guarded write, and
 	 * nothing reads it as a state of the grant — and it touches nothing else.
 	 * It is cleared by whatever replaces or ends the credentials:

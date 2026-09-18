@@ -510,6 +510,9 @@ export function createMemoryFederationGrantStore(
 			const { retryAfterSeconds, upstreamCode } = input.failure;
 			const atMs = input.failure.at.getTime();
 			const previous = grant.refreshFailure;
+			// Never back: a stamp that outlived its caller's budget arrives after a
+			// newer one, and must not replace it.
+			if (previous !== undefined && atMs < previous.at.getTime()) return failed();
 			// A row: the stamp it replaces is no further back than `rowMs`.
 			const inRow = previous !== undefined && atMs - previous.at.getTime() <= input.rowMs;
 			// In place, in one step: a stamp read, counted and written in three

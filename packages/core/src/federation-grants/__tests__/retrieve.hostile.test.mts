@@ -301,16 +301,21 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			await h.seed();
 			setNow(DUE);
 			h.refresh.mockResolvedValue(refreshed("1", DUE));
-			let calls = 0;
-			h.deps.now = () => {
-				calls += 1;
-				// Past the first look and the lock: the reading that starts the lease.
-				if (calls === 3) throw new Error("clock bug");
-				return now();
-			};
-			await expect(retrieve()).rejects.toThrow("clock bug");
-			h.deps.now = () => now();
-			expect(await lockIsFree(h)).toBe(true);
+			// Two readings for the first look, one before the lock is asked for, and
+			// the fourth acknowledges it: the first reading made with the lock held.
+			// The seventh is the one before the upstream is asked. (The fifth is
+			// made inside a settled read, and is answered as a store failure.)
+			for (const failing of [4, 7]) {
+				let calls = 0;
+				h.deps.now = () => {
+					calls += 1;
+					if (calls === failing) throw new Error("clock bug");
+					return now();
+				};
+				await expect(retrieve()).rejects.toThrow("clock bug");
+				h.deps.now = () => now();
+				expect(await lockIsFree(h), `reading ${failing}`).toBe(true);
+			}
 		});
 
 		it("still answers, and still lets go of the lock, when the late work cannot be handed over", async () => {
