@@ -855,7 +855,7 @@ v0.4.0 removes passport as a direct dependency from this package.
 5. **`createPassport()` and `SetupPassportContext` removed from the public API.** State (CSRF) and PKCE are managed by the route layer internally; providers are pure functions.
 6. **`UserSessionStore` and `FederationTokenStore` are now required** (previously optional with legacy fallback). They are now declared in `sessionModule.requires`; the boot planner rejects with `BootError(reason: 'missing-required-component')` if no module provides them.
 7. **`/login` error responses** follow RFC 6749 §5.2 shape: `{ error, error_description }`. If your client parses the old `{ message: "..." }` format, update accordingly.
-8. **`SupportsRefresh.refreshToken`** returns `RefreshedTokens` (new type): `Omit<FederationProfile, "issuer"|"sub"> & { issuer?: string; sub?: string }`. Google/GitHub refresh responses legitimately omit `sub`; the route layer preserves stored identity.
+8. **`SupportsRefresh.refreshToken`** returns `RefreshedTokens` (new type), an interface of named optional fields since #593 — see its definition above; it was `Omit<FederationProfile, "issuer"|"sub"> & { issuer?: string; sub?: string }`, which checked nothing. Google/GitHub refresh responses legitimately omit `sub`; the route layer preserves stored identity.
 
 ### Custom provider migration example
 

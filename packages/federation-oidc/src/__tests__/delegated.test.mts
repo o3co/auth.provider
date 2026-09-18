@@ -255,6 +255,17 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			expect(tokens).toStrictEqual({ refreshToken: "rt-rotated" });
 		});
 
+		it("keeps the rotated refresh token when the metadata's host carries a trailing DNS dot (Copilot on #605)", async () => {
+			// `URL.href` canonicalizes a default port but keeps a trailing dot, so
+			// the two spellings of one host must be brought together by hand.
+			const { idp, provider } = await build({
+				endpoints: { tokenEndpoint: `${ISSUER.replace("://idp-a.test", "://idp-a.test.")}/token` },
+			});
+			idp.refreshAnswer = { scope: ["openid"], refresh_token: "rt-rotated" };
+			const tokens = await provider.refreshDelegatedToken({ refreshToken: "rt-1" });
+			expect(tokens).toStrictEqual({ refreshToken: "rt-rotated" });
+		});
+
 		it("dates the token from when the answer arrived, not from when the library was done verifying an id_token against a slow JWKS", async () => {
 			const { idp, provider } = await build();
 			idp.refreshWithIdToken = true;

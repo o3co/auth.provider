@@ -204,7 +204,14 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 				: new URLSearchParams(raw instanceof URLSearchParams ? raw : String(raw));
 		requests.push({ url, method, headers, body });
 
-		const path = url.href.startsWith(`${issuer}/`) ? url.href.slice(issuer.length) : url.href;
+		// One server, however its host is spelled: DNS resolves `idp.test.` and
+		// `idp.test` to the same address, so a request that carries the root dot
+		// reaches this IdP too, and the routing below must not turn it into a 404.
+		const routed = new URL(url.href);
+		routed.hostname = routed.hostname.replace(/\.$/, "");
+		const path = routed.href.startsWith(`${issuer}/`)
+			? routed.href.slice(issuer.length)
+			: routed.href;
 		if (path === "/.well-known/openid-configuration") return json(metadata, idp.discoveryStatus);
 		if (path === "/jwks") {
 			if (idp.jwksDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, idp.jwksDelayMs));
