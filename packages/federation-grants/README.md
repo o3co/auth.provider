@@ -37,6 +37,8 @@ x-request-id: 4f1e…
 
 No description, deliberately. A body naming the feature would tell an unauthenticated caller that this deployment could do offline delegation if someone flipped one key. Nothing on that path parses a body, authenticates a client or reads a store either, so there is no timing to measure it by — and a deployment that leaves the feature off needs none of the components it would need to turn it on.
 
+What it is **not** is byte-identical to a deployment that never installed the package: there, nothing matches the path at all and the host's own fallback answers — Express's HTML 404 in a bare composition. Review measured the difference and it is the headers and the content type, not the body. So the property this actually has is the one worth having: the refusal names no feature, and nothing behind it runs. A deployment that wants the two indistinguishable gives its host a JSON 404 of its own.
+
 ## The two routes
 
 Both are `POST`, both are authenticated as a confidential client
@@ -59,8 +61,11 @@ access token, its own spelling of `token_type`, and the scopes that token
 holds. There is never a refresh token, an id token or an upstream response
 object in it.
 
-Everything else is `{"error": "<code>", "error_description": "<reason>"}` where
-both are **identifiers, not prose** — a client may switch on them. The status
+Everything else is `{"error": "<code>"}` with an `"error_description"`
+alongside it wherever the failure has a reason to give — `grant_not_found`,
+`invalid_scope`, `invalid_target` and `authorization_pending` have none, and
+carry the code alone. Both fields are **identifiers, not prose**: a client may
+switch on them. The status
 says what kind of problem it is: `400` the caller's, `403` the client's
 registration, `404` no such grant of theirs, `410` the user must be asked
 again, `429` slow down, `502` the upstream, `503` come back. `Retry-After` is
@@ -92,6 +97,29 @@ lock, never `touch`. It is also **not** a health check for `/token` — `active`
 does not promise a token, and an ineligible status can sit beside a perfectly
 usable cached one.
 
+## Install these modules before `oauthModule`
+
+These routes live under `/oauth`, and `oauthModule` mounts its own router there
+whose first two middlewares are `express.json()` and `express.urlencoded()`
+with the library's defaults. Express runs route contributions in mount order,
+so when that router is mounted first it sees `/oauth/federation-grants/...`
+requests before this one does — and `body-parser` does not parse a body twice.
+
+What that costs, and what it does not:
+
+- **It does not cost the body limit.** The 16 KiB bound is checked from
+  `Content-Length` ahead of the parsers, so it holds whatever else is mounted.
+- **It does cost one exit.** A body that is not valid JSON is rejected by
+  whichever parser reaches it first. Mounted second, that is the OAuth
+  router's, and its refusal carries neither this package's `x-request-id` nor
+  its `Cache-Control: no-store`, and does not pass this package's throttle.
+
+So list `federationGrantsModules` ahead of `oauthModule` at the composition
+root. This package deliberately does not declare a `before` edge against the
+OAuth router's id: that would refuse to boot for every deployment that runs
+federation grants *without* `/oauth/token`, which is a perfectly ordinary thing
+to want.
+
 ## `x-request-id`
 
 Every response this package produces carries one: the caller's when it matches `[A-Za-z0-9._:+/=#-]{1,128}` and arrived exactly once, a fresh UUID otherwise. An unusable value is *replaced*, never trimmed into a usable one.
@@ -107,6 +135,8 @@ A refresh against an upstream is not finished when the HTTP response is. The pro
 It is a **component** rather than a `lifecycleRegistrar` callback because `AppHandle.dispose()` runs component cleanups first and registrar callbacks afterwards — a drain registered there would run after the store's own cleanup, and an adapter that closes its client there would pull the connection out from under the write being waited for. The registry's `optional` edges on `federationGrantStore`, `subjectRevocation` and `auditSink` order it after all three at boot, and therefore before all three at shutdown.
 
 What it is not: durable job execution, guaranteed audit delivery, or protection against `SIGKILL`. It bounds nothing by itself — core bounds its own waits, and an adapter whose read can hang needs its own I/O timeout.
+
+And there is one thing it cannot wait for, by core's design rather than by omission: the wait for a refresh lock the call gave up on is kept outside the registry, because it may never end. If that lock arrives after the drain has finished, its release is registered into a registry nobody is waiting for. No answer and no credential is lost; what is left is a lock nobody released, which stands for its `refreshLockTtlMs` while other replicas answer `503 temporarily_unavailable/lock_timeout` for that one grant. A larger cleanup allowance does not help — the drain has already returned. A store whose lock acquisition is bounded does.
 
 ### Give the host enough cleanup allowance
 

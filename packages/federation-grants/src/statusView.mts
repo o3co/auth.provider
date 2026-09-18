@@ -44,9 +44,21 @@ export function federationGrantStatusView(
 	grant: FederationGrant,
 	status: EffectiveFederationGrantStatus,
 	maxExpiresInMs: number,
+	/**
+	 * Whether the client may still use this grant's connection.
+	 *
+	 * A grant that has ENDED is described whether or not the client may still
+	 * use its connection — that answer is what lets a client stop asking. What
+	 * it is not is a reason to keep handing back the upstream account, the
+	 * consented scope set and the dates to a client an operator has just taken
+	 * off the allowlist. Review asked the question the design had not: removing
+	 * a client from the allowlist is an operator's lever, and a lever that
+	 * changes the status code but not the payload is half a lever.
+	 */
+	permitted: boolean,
 ): Readonly<Record<string, unknown>> {
 	const reason = (status as { reason?: unknown }).reason;
-	const authorized = hasFederationGrantAuthorization(grant);
+	const authorized = hasFederationGrantAuthorization(grant) && permitted;
 	return {
 		grant_id: grant.id,
 		status: status.status,
@@ -73,6 +85,8 @@ export function federationGrantStatusView(
 					expires_at: instant(federationGrantEffectiveExpiry(grant, maxExpiresInMs)),
 				}
 			: {}),
-		...(grant.lastUsedAt === undefined ? {} : { last_used_at: instant(grant.lastUsedAt) }),
+		...(grant.lastUsedAt === undefined || !permitted
+			? {}
+			: { last_used_at: instant(grant.lastUsedAt) }),
 	};
 }

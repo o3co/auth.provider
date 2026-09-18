@@ -91,22 +91,53 @@ const FEDERATION_GRANT_REVOCATION_SKEW_MS = 1_000;
 type Settings = Partial<Record<keyof typeof FEDERATION_GRANT_SETTING_DEFAULTS, unknown>>;
 
 /**
+ * The largest any of these may be: one year, in whichever unit the key is
+ * written in.
+ *
+ * `assertFederationGrantRetrievalLimits` bounds the settings a TIMER is given,
+ * because those have to fit one. It does not bound the allowances — and review
+ * found what that leaves: `1e21` is an integer as far as `Number.isInteger` is
+ * concerned, and a refresh buffer that large makes every token look stale for
+ * ever while passing every check downstream.
+ */
+const MAXIMUM = { seconds: 31_536_000, milliseconds: 31_536_000_000 } as const;
+
+/** A plain decimal, which is the only shape an operator writes a duration in. */
+const DECIMAL = /^\d+$/;
+
+/**
  * A whole number an operator wrote, or the shipped default when they wrote
  * nothing. Anything else is refused by name — never replaced by the default,
  * which is what turns a typo into a deployment.
+ *
+ * "Anything else" used to mean `Number(written)`, and review showed how wide
+ * that door is: `null` and `[]` are `0`, `true` is `1`, `[45]` is `45`,
+ * `"0x10"` is `16`, and a `Date` is its epoch milliseconds. Two of those reach
+ * here through the SHIPPED schema rather than a hand-built config —
+ * `z.coerce.number().int().nonnegative()` reads `null` as `0` — and
+ * `refreshBuffer = 0` hands out tokens with milliseconds of life left instead
+ * of refreshing them. So the type is checked before the value is.
  */
 function setting(settings: Settings, key: keyof typeof FEDERATION_GRANT_SETTING_DEFAULTS): number {
 	const written = settings[key];
 	if (written === undefined) return FEDERATION_GRANT_SETTING_DEFAULTS[key];
-	// `z.coerce` upstream turns `"45"` into 45, but a hand-built config has
-	// been through no schema at all, and `Number("soon")` is NaN — which
-	// compares as fine against every bound there is.
-	const value = typeof written === "number" ? written : Number(written);
-	if (!Number.isInteger(value) || value < 0) {
+	const unit = key.endsWith("Ms") ? "milliseconds" : "seconds";
+	const refuse = (): never => {
 		throw new RangeError(
-			`federationGrants.${key} must be a whole number of ${key.endsWith("Ms") ? "milliseconds" : "seconds"}, and was ${JSON.stringify(written)}`,
+			`federationGrants.${key} must be a whole number of ${unit} no greater than ` +
+				`${MAXIMUM[unit]}, and was ${JSON.stringify(written)}`,
 		);
-	}
+	};
+	// A number, or the decimal string HOCON substitutes `${?VAR}` as. Nothing
+	// else: a value that has to be converted to be understood was not written
+	// as a duration.
+	const value =
+		typeof written === "number"
+			? written
+			: typeof written === "string" && DECIMAL.test(written.trim())
+				? Number(written.trim())
+				: Number.NaN;
+	if (!Number.isInteger(value) || value < 0 || value > MAXIMUM[unit]) refuse();
 	return value;
 }
 

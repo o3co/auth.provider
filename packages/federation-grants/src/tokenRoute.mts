@@ -58,7 +58,9 @@ import {
 import type { RequestHandler } from "express";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
+import { markHandlerReached } from "./denialAudit.mjs";
 import { parseFederationGrantTokenRequest } from "./parse.mjs";
+import { allowedConnectionsOf } from "./permission.mjs";
 import { createSanitizedReporter } from "./report.mjs";
 import { requestIdOf } from "./requestId.mjs";
 import { serializeFederationGrantTokenResult } from "./serialize.mjs";
@@ -97,6 +99,9 @@ export function createFederationGrantTokenHandler(
 	const report = options.logger === undefined ? undefined : createSanitizedReporter(options.logger);
 
 	return async (req, res) => {
+		// From here on this handler owns the denial; the chain's exit hook stands
+		// down so that one refusal is one event.
+		markHandlerReached(res);
 		const correlationId = requestIdOf(res);
 		// Opaque: an ID is whatever created it, and imposing the acquisition
 		// generator's shape on it would refuse every record a deployment seeded
@@ -187,9 +192,7 @@ export function createFederationGrantTokenHandler(
 					subject: parsed.value.subject,
 					// Absent means nothing is allowed: a client registered before
 					// offline delegation existed does not find itself opted into it.
-					allowedConnections:
-						(req as { oauthClient?: { allowedFederationGrantConnections?: readonly string[] } })
-							.oauthClient?.allowedFederationGrantConnections ?? [],
+					allowedConnections: allowedConnectionsOf(req),
 					correlationId,
 					...(parsed.value.connection === undefined ? {} : { connection: parsed.value.connection }),
 					...(parsed.value.scope === undefined ? {} : { scope: parsed.value.scope }),

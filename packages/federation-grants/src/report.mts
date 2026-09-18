@@ -31,7 +31,7 @@
  * arrives from another system.
  */
 
-import type { Logger } from "@o3co/auth-provider-core";
+import type { AuditSink, Logger } from "@o3co/auth-provider-core";
 
 /**
  * The closed set a failure is described by.
@@ -94,20 +94,70 @@ export function createSanitizedReporter(logger: Logger): (failure: SanitizedFail
 	};
 }
 
-/** Scalars are quotable; anything else is a shape that can hold an error. */
 const scalar = (value: unknown): value is string | number | boolean =>
 	typeof value === "string" || typeof value === "number" || typeof value === "boolean";
+
+/**
+ * The field NAMES this package will carry, and nothing else.
+ *
+ * It was a type check first — scalars through, objects redacted — and review
+ * found the hole: `checkWithFailMode` turns a limiter's exception into its
+ * `message` and logs `{ error: <that string>, … }`, so a driver that names a
+ * connection string in its error passed straight through as a perfectly
+ * ordinary string. A repository that throws a string does the same. **What a
+ * value's TYPE is says nothing about where it came from**, which is the whole
+ * argument for an allowlist, and this is now one.
+ *
+ * Adding a field here means deciding that this route may carry it. A field
+ * left out is redacted, not dropped: an operator can still see that there was
+ * one.
+ */
+const SAFE_FIELDS: ReadonlySet<string> = new Set([
+	// This package's own reports.
+	"event",
+	"during",
+	"grantId",
+	"correlationId",
+	"classification",
+	// What the shared middleware logs beside its errors.
+	"tag",
+	"mode",
+	"ip",
+	"clientId",
+	"method",
+	"path",
+	"status",
+	"limit",
+	"remaining",
+	"operation",
+]);
 
 const sanitizePayload = (payload: Record<string, unknown>): Record<string, unknown> => {
 	const safe: Record<string, unknown> = {};
 	for (const [key, value] of Object.entries(payload)) {
-		// An `Error`, a response, a nested object: any of them may carry what
-		// an upstream echoed. The key is kept so an operator can still see
-		// *that* there was one.
-		safe[key] = scalar(value) ? value : "[redacted]";
+		safe[key] = SAFE_FIELDS.has(key) && scalar(value) ? value : "[redacted]";
 	}
 	return safe;
 };
+
+/**
+ * The audit sink handed to the shared rate-limit guard.
+ *
+ * Its `rate_limit.unavailable` event carries `details.error` — the same
+ * stringified limiter exception the log line carries — so the sink needs the
+ * same allowlist the logger does. The event itself is kept: an operator's
+ * dashboard counts limiter outages, and the count is the useful part.
+ */
+export function createSanitizedAuditSink(sink: AuditSink): AuditSink {
+	return {
+		kind: sink.kind,
+		record: (event) =>
+			sink.record({
+				...event,
+				...(event.details === undefined ? {} : { details: sanitizePayload(event.details) }),
+			}),
+	};
+}
 
 /**
  * A {@link Logger} facade handed to the shared middleware this package mounts.

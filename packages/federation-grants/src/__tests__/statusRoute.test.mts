@@ -264,6 +264,66 @@ describe("the status route — who may ask", () => {
 		expect(response.body).toMatchObject({ status: "expired" });
 	});
 
+	it("requires the allowlist for a pending grant, which is not a terminal state", async () => {
+		// Found by review. The exemption is for grants that have ENDED — the
+		// answer that lets a client stop asking. A pending one has not started,
+		// and describing it to a client that may no longer use the connection
+		// is the ordinary authorization question.
+		const h = harness();
+		await h.store.createPending({
+			id: "pending-1",
+			subject: SUBJECT,
+			clientId: CLIENT_ID,
+			connection: connection.name,
+			intent: { handle: "h", expiresAt: new Date(h.world.now.getTime() + 600_000) },
+			now: h.world.now,
+		});
+		h.world.allowedConnections = [];
+
+		const response = await ask(h, "pending-1");
+
+		expect(response.status).toBe(403);
+		expect(response.body.error).toBe("access_denied");
+	});
+
+	it("tells a de-allowlisted client that the grant ended, and nothing more", async () => {
+		// Found by review. Removing a client from the allowlist is an
+		// operator's lever; one that changes the status code but hands back the
+		// same upstream account, the consented scope set and the dates is half
+		// a lever. What survives is what lets the client stop asking.
+		const h = harness();
+		await h.seed();
+		await h.store.revoke(GRANT_ID, "operator", h.world.now);
+		h.world.allowedConnections = [];
+
+		const response = await ask(h);
+
+		expect(response.status).toBe(200);
+		expect(response.body).toMatchObject({ status: "revoked", reason: "operator" });
+		for (const field of [
+			"upstream",
+			"scope",
+			"resource",
+			"authorized_at",
+			"expires_at",
+			"last_used_at",
+		]) {
+			expect(response.body, field).not.toHaveProperty(field);
+		}
+	});
+
+	it("reads an allowlist that is not a list as allowing nothing", async () => {
+		// `ClientRepository` is a port, and a deployment's own repository
+		// validates nothing this package can see. Review found what a
+		// comma-joined string does to `.includes`: `"calendar,mail"` would have
+		// allowed `"cal"`.
+		const h = harness();
+		await h.seed();
+		h.world.allowedConnections = "calendar,mail" as unknown as readonly string[];
+
+		expect((await ask(h)).status).toBe(403);
+	});
+
 	it("reads an absent allowlist as allowing nothing", async () => {
 		const h = harness();
 		await h.seed();
@@ -334,6 +394,23 @@ describe("the status route — the boundary and the backstop", () => {
 		expect(response.body).toMatchObject({ status: "revoked", reason: "subject" });
 	});
 
+	it("answers from the record for a revoked grant whose client lost the connection", async () => {
+		// Both exemptions at once, which is the case the early branch exists
+		// for: no boundary to compare with, and no allowlist to check against.
+		// A client that can no longer use the connection still gets the one
+		// answer that lets it stop asking.
+		const h = harness();
+		await h.seed();
+		await h.store.revoke(GRANT_ID, "subject", h.world.now);
+		h.world.boundary = new Error("boundary is down");
+		h.world.allowedConnections = [];
+
+		const response = await ask(h);
+
+		expect(response.status).toBe(200);
+		expect(response.body).toMatchObject({ status: "revoked", reason: "subject" });
+	});
+
 	it("writes the backstop down when it finds one, and says so once", async () => {
 		// The grant is covered by a subject-wide revocation that never reached
 		// the record. Reporting it is not enough: the next reader would compute
@@ -383,6 +460,24 @@ describe("the status route — the boundary and the backstop", () => {
 		expect(response.status).toBe(200);
 		expect(response.body).toMatchObject({ status: "revoked", reason: "backstop" });
 		expect(h.events.filter((e) => e.type === "federation.grant.revoked")).toHaveLength(0);
+	});
+
+	it("answers 503 storage when the record itself cannot be read", async () => {
+		// Found by review. A Redis outage on `/token` is 503
+		// `temporarily_unavailable/storage`; the same outage here fell into the
+		// handler's catch and answered 500 `server_error`, which tells a caller
+		// this provider has a bug rather than that it should come back.
+		const h = harness();
+		await h.seed();
+		vi.spyOn(h.store, "inspect").mockRejectedValue(new Error("store is down"));
+
+		const response = await ask(h);
+
+		expect(response.status).toBe(503);
+		expect(response.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "storage",
+		});
 	});
 
 	it("answers 503 when the backstop cannot be written down", async () => {

@@ -103,7 +103,7 @@ const SESSION_FEDERATION_STORES = {
 	refreshTokenFamilyRevocation: {},
 };
 
-const boot = async (withRevocation: boolean) => {
+const boot = async (withRevocation: boolean | "malformed") => {
 	const full = makeValidFullSections();
 	const handle = await createApp({
 		modules: [federationModule, ...federationGrantsModules, storeModule],
@@ -140,7 +140,14 @@ const boot = async (withRevocation: boolean) => {
 				defaultLimit: { limit: 100, windowSeconds: 60 },
 			}),
 			...SESSION_FEDERATION_STORES,
-			...(withRevocation ? { subjectRevocation: { revokedBefore: async () => null } } : {}),
+			...(withRevocation === false
+				? {}
+				: {
+						subjectRevocation: {
+							revokedBefore: async () =>
+								withRevocation === "malformed" ? (undefined as unknown as null) : null,
+						},
+					}),
 		} as unknown as BootstrapMap,
 	});
 	const store = handle.components.federationGrantStore as MemoryFederationGrantStore;
@@ -202,6 +209,34 @@ describe("the grants boundary the module wires", () => {
 			error: "temporarily_unavailable",
 			error_description: "storage",
 		});
+		await handle.dispose();
+	});
+
+	it("refuses an answer that is neither a date nor null, on both routes", async () => {
+		// Found by review. `null` is a statement — nothing was revoked for this
+		// subject — and an adapter that answers `undefined` has made none. The
+		// two routes read it through the same bridge, so they cannot disagree:
+		// before this, `/status` reported `active` while `/token` on the same
+		// input failed closed.
+		const { handle, app } = await boot("malformed");
+
+		const described = await request(app)
+			.post("/oauth/federation-grants/g-1/status")
+			.set("Authorization", basic())
+			.send({ sub: SUBJECT });
+		expect(described.status).toBe(503);
+		expect(described.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "storage",
+		});
+
+		const disclosed = await request(app)
+			.post("/oauth/federation-grants/g-1/token")
+			.set("Authorization", basic())
+			.send({ sub: SUBJECT });
+		expect(disclosed.status).toBe(503);
+		expect(disclosed.body.error).toBe("temporarily_unavailable");
+
 		await handle.dispose();
 	});
 

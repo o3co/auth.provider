@@ -251,7 +251,23 @@ const boundaryFor = (deps: AnyDeps): ((subject: string) => Promise<Date | null>)
 			);
 		};
 	}
-	return (subject) => revocation.revokedBefore(subject);
+	return async (subject) => {
+		const watermark = await revocation.revokedBefore(subject);
+		// The port says `Date | null`, and a `null` is a STATEMENT: nothing was
+		// revoked for this subject. An adapter that answers `undefined` — or
+		// anything else — has made no statement at all, and reading it as one
+		// switches the backstop off for that subject silently. Review found
+		// `/status` doing exactly that while `/token` failed closed on the same
+		// input, so the two disagreed about the same grant. This is where the
+		// contract belongs, and now both read it the same way.
+		if (watermark === null) return null;
+		if (watermark instanceof Date && !Number.isNaN(watermark.getTime())) return watermark;
+		throw new Error(
+			"federationGrantsModule: the subjectRevocation adapter answered something that is " +
+				"neither a date nor null for the subject's watermark. Fails closed: an answer " +
+				"that cannot be compared is not the same as no revocation (D13).",
+		);
+	};
 };
 
 export const federationGrantBackgroundModule = defineModule({

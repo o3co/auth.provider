@@ -46,6 +46,23 @@
  * The host's cleanup budget is what stops a pathological tail from holding a
  * shutdown open; a deployment mounting this package wants at least 45 seconds
  * of it, against a standalone default of ten.
+ *
+ * ### The one thing a drain cannot wait for
+ *
+ * Core deliberately keeps ONE thing out of this registry (D12): the wait for a
+ * refresh lock that the call gave up on. That wait may never end, and what is
+ * handed over here has to settle — so core watches it separately and hands
+ * over the RELEASE only if the lock later arrives. When a store is slow enough
+ * that the lock arrives after the drain has finished, the release is registered
+ * into a registry nobody is waiting for any more.
+ *
+ * Measured by review, and worth being exact about: the answer was already sent
+ * and nothing is lost. What is left behind is a refresh lock nobody released,
+ * which stands for its `refreshLockTtlMs` (thirty seconds by default) — and
+ * during that window every other replica's `/token` for that grant waits
+ * `lockWaitMs` and answers `503 temporarily_unavailable/lock_timeout`. A
+ * larger host cleanup allowance does not help, because the drain has already
+ * returned. What helps is a store whose lock acquisition is bounded.
  */
 
 /**
@@ -58,7 +75,10 @@ export interface FederationGrantBackground {
 	 * `background` seam of `RetrieveFederationGrantTokenDeps`.
 	 *
 	 * Accepted while closing, deliberately: the work a drain is waiting for is
-	 * exactly what registers the next piece of it.
+	 * exactly what registers the next piece of it. Accepted AFTER the drain has
+	 * finished too, where it is tracked and simply not waited for — an
+	 * abandoned lock that arrives late is the case, and refusing it there would
+	 * turn "not waited for" into "not released at all".
 	 */
 	register(work: Promise<void>): void;
 	/**

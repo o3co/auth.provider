@@ -50,6 +50,7 @@ import type { RequestHandler } from "express";
 import { createFederationGrantAuditBridge } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
 import { parseFederationGrantStatusRequest } from "./parse.mjs";
+import { allows } from "./permission.mjs";
 import { createSanitizedReporter } from "./report.mjs";
 import { requestIdOf } from "./requestId.mjs";
 import { federationGrantStatusView } from "./statusView.mjs";
@@ -116,12 +117,25 @@ export function createFederationGrantStatusHandler(
 			let boundaryFailed = false;
 			try {
 				boundary = await options.grantsBoundary(parsed.value.subject);
+				if (boundary !== null && !(boundary instanceof Date && !Number.isNaN(boundary.getTime()))) {
+					throw new TypeError("the grants boundary is neither a date nor null");
+				}
 			} catch (error) {
 				boundaryFailed = true;
 				report?.({ during: "boundary", error, grantId, correlationId });
 			}
 
-			const inspection = await options.store.inspect(grantId, now());
+			// Its own failure, not the handler's: a store that is down is an
+			// outage a caller should come back from, and the outer catch would
+			// call it a programming error.
+			let inspection: Awaited<ReturnType<FederationGrantStore["inspect"]>>;
+			try {
+				inspection = await options.store.inspect(grantId, now());
+			} catch (error) {
+				report?.({ during: "status", error, grantId, correlationId });
+				res.status(503).json(UNAVAILABLE("storage"));
+				return;
+			}
 			// Sampled after both reads: the status is judged at an instant no
 			// earlier than the data it is judged from.
 			const at = now();
@@ -142,18 +156,46 @@ export function createFederationGrantStatusHandler(
 			const connection = options.connections.get(grant.connection);
 			const maxExpiresInMs = options.limits.maxExpiresInMs;
 
-			if (grant.status === "revoked" || grant.status === "pending") {
+			const permitted = (): boolean => allows(req, grant.connection);
+			const refusePermission = (): void => {
+				res
+					.status(403)
+					.json({ error: "access_denied", error_description: "connection_not_permitted" });
+			};
+
+			// Both are answered from the record, boundary or no boundary: a
+			// revocation already written down needs nothing compared with it,
+			// and a grant that has not been consented to has no consent to date.
+			if (grant.status === "revoked") {
+				// Terminal, so the allowlist does not decide WHETHER to answer: a
+				// client whose registration changed can still be told that the
+				// grant it used to spend is over, which is the answer that lets
+				// it stop asking. It does decide WHAT is answered — see
+				// `federationGrantStatusView`.
 				res
 					.status(200)
 					.json(
 						federationGrantStatusView(
 							grant,
-							grant.status === "revoked"
-								? { status: "revoked", reason: grant.revocation.by }
-								: { status: "pending" },
+							{ status: "revoked", reason: grant.revocation.by },
 							maxExpiresInMs,
+							permitted(),
 						),
 					);
+				return;
+			}
+			if (grant.status === "pending") {
+				// NOT terminal. A pending grant has not started rather than
+				// ended, so describing it is the ordinary authorization
+				// question — found by review, which is where this exemption had
+				// quietly grown to cover it.
+				if (!permitted()) {
+					refusePermission();
+					return;
+				}
+				res
+					.status(200)
+					.json(federationGrantStatusView(grant, { status: "pending" }, maxExpiresInMs, true));
 				return;
 			}
 			if (boundaryFailed) {
@@ -165,6 +207,10 @@ export function createFederationGrantStatusHandler(
 				now: at,
 				connection,
 				maxExpiresInMs,
+				// `undefined` never reaches here from the module's bridge, which
+				// refuses an answer that is neither; a hand-mounted reader that
+				// returns one is treated as a failure above rather than as "nothing
+				// was revoked".
 				grantsBoundary: boundary ?? null,
 				revocationSkewMs: options.limits.revocationSkewMs,
 				// A key that is not in the ring is not a status — it is an outage,
@@ -206,16 +252,9 @@ export function createFederationGrantStatusHandler(
 			// consulted: a client whose registration changed can still be told
 			// that the grant it used to spend is over, which is the answer that
 			// lets it stop asking.
-			if (status.status !== "revoked" && status.status !== "expired") {
-				const allowed =
-					(req as { oauthClient?: { allowedFederationGrantConnections?: readonly string[] } })
-						.oauthClient?.allowedFederationGrantConnections ?? [];
-				if (!allowed.includes(grant.connection)) {
-					res
-						.status(403)
-						.json({ error: "access_denied", error_description: "connection_not_permitted" });
-					return;
-				}
+			if (status.status !== "revoked" && status.status !== "expired" && !permitted()) {
+				refusePermission();
+				return;
 			}
 
 			if (
@@ -229,7 +268,7 @@ export function createFederationGrantStatusHandler(
 				return;
 			}
 
-			res.status(200).json(federationGrantStatusView(grant, status, maxExpiresInMs));
+			res.status(200).json(federationGrantStatusView(grant, status, maxExpiresInMs, permitted()));
 		} catch (error) {
 			report?.({ during: "handler", error, grantId, correlationId });
 			res.status(500).json({ error: "server_error" });

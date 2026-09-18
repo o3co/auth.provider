@@ -144,6 +144,43 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 		).toThrow(/lockWaitMs.*whole number of milliseconds/);
 	});
 
+	it("refuses a value that is not a number, rather than coercing it into one", async () => {
+		// Found by review. `Number(x)` is a wide door: `null` and `[]` are 0,
+		// `true` is 1, `[45]` is 45, `"0x10"` is 16 and a `Date` is its epoch
+		// milliseconds. Two of those arrive through the SHIPPED schema, not
+		// only a hand-built config — `z.coerce.number().int().nonnegative()`
+		// takes `null` as 0 — and `refreshBuffer = 0` hands out tokens with
+		// milliseconds of life left instead of refreshing them.
+		for (const refreshBuffer of [null, true, false, [], [45], "0x10", "1e3", " ", new Date(1000)]) {
+			expect(
+				() => resolveFederationGrantRetrievalLimits({ federationGrants: { refreshBuffer } }),
+				JSON.stringify(refreshBuffer),
+			).toThrow(/refreshBuffer/);
+		}
+	});
+
+	it("takes the decimal string an environment variable arrives as", async () => {
+		// The other half of the same rule: HOCON substitutes `${?VAR}` as a
+		// string, always, so a plain decimal one is what an operator wrote.
+		expect(
+			resolveFederationGrantRetrievalLimits({ federationGrants: { refreshBuffer: "45" } })
+				.refreshBufferMs,
+		).toBe(45_000);
+	});
+
+	it("refuses an allowance so large that nothing is ever fresh", async () => {
+		// `1e21` is an integer as far as `Number.isInteger` is concerned, and
+		// `refreshBufferMs` is an allowance rather than a timer, so the
+		// downstream check only asked for finite and non-negative. A buffer
+		// past the ceiling makes every token look stale for ever.
+		expect(() =>
+			resolveFederationGrantRetrievalLimits({ federationGrants: { refreshBuffer: 1e21 } }),
+		).toThrow(/refreshBuffer/);
+		expect(() =>
+			resolveFederationGrantRetrievalLimits({ federationGrants: { lockWaitMs: 1e21 } }),
+		).toThrow(/lockWaitMs/);
+	});
+
 	it("refuses a soft deadline past the hard one, and a lock that cannot outlive a refresh", () => {
 		expect(() =>
 			resolveFederationGrantRetrievalLimits({

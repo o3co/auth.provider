@@ -31,6 +31,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import {
 	basic,
+	brokenLimiter,
 	CLIENT_ID,
 	clientWithoutAllowlist,
 	GRANT_ID,
@@ -258,6 +259,19 @@ describe("the token route — who may ask", () => {
 		expect(response.body.error).toBe("access_denied");
 	});
 
+	it("reads an allowlist that is not a list as allowing nothing", async () => {
+		const h = harness();
+		await h.seed();
+		h.world.allowedConnections = "calendar,mail" as unknown as readonly string[];
+
+		const response = await request(h.app)
+			.post(path())
+			.set("Authorization", basic())
+			.send({ sub: SUBJECT });
+
+		expect(response.status).toBe(403);
+	});
+
 	it("refuses a public client, whose only credential is not a secret", async () => {
 		const h = harness();
 		await h.seed();
@@ -384,6 +398,92 @@ describe("the token route — what it refuses before core", () => {
 			error_description: "shutting_down",
 		});
 		expect(h.refresh).not.toHaveBeenCalled();
+	});
+});
+
+describe("the token route — denials decided before the handler", () => {
+	it("audits an authentication failure, without naming the client it refused", async () => {
+		// Found by review: these exits terminate inside middleware, so the
+		// handler — which was the only thing emitting a denial — never ran, and
+		// every refused credential and every throttled attempt was outside the
+		// audit trail.
+		const h = harness();
+		await h.seed();
+
+		const response = await request(h.app)
+			.post(path())
+			.set("Authorization", basic(CLIENT_ID, "wrong"))
+			.send({ sub: SUBJECT });
+
+		expect(response.status).toBe(401);
+		const denied = h.events.filter((e) => e.type === "federation.grant.token.denied");
+		expect(denied).toHaveLength(1);
+		expect(denied[0]?.details).toMatchObject({ outcome: "invalid_client", grantId: GRANT_ID });
+		expect(denied[0]?.clientId).toBe("");
+	});
+
+	it("audits a throttled attempt", async () => {
+		const h = harness({ rateLimiter: refusingLimiter });
+		const response = await request(h.app).post(path()).send({ sub: SUBJECT });
+
+		expect(response.status).toBe(429);
+		const denied = h.events.filter((e) => e.type === "federation.grant.token.denied");
+		expect(denied).toHaveLength(1);
+		expect(denied[0]?.details?.outcome).toBe("rate_limited/provider");
+	});
+
+	it("audits a body the parsers refused", async () => {
+		const h = harness();
+		const response = await request(h.app)
+			.post(path())
+			.set("Authorization", basic())
+			.set("Content-Type", "application/xml")
+			.send("<sub/>");
+
+		expect(response.status).toBe(415);
+		const denied = h.events.filter((e) => e.type === "federation.grant.token.denied");
+		expect(denied).toHaveLength(1);
+		expect(denied[0]?.details?.outcome).toBe("invalid_request");
+	});
+
+	it("audits a limiter outage as one, and keeps its message out of the trail", async () => {
+		// Found by review. `checkWithFailMode` turns the limiter's exception
+		// into its MESSAGE and puts that string into both the log line and the
+		// `rate_limit.unavailable` event — and a string was passing this
+		// package's sanitizer, which trusted scalars.
+		const h = harness({ rateLimiter: brokenLimiter });
+		const response = await request(h.app).post(path()).send({ sub: SUBJECT });
+
+		expect(response.status).toBe(503);
+		expect(JSON.stringify(h.events)).not.toContain(SECRET);
+		expect(JSON.stringify(h.logs)).not.toContain(SECRET);
+		const denied = h.events.filter((e) => e.type === "federation.grant.token.denied");
+		expect(denied[0]?.details?.outcome).toBe("service_unavailable/rate_limiter");
+	});
+
+	it("writes exactly one denial for an exit the handler did reach", async () => {
+		// The handler emits its own; the exit hook must not double it.
+		const h = harness();
+		const response = await request(h.app)
+			.post(path())
+			.set("Authorization", basic())
+			.send({ sub: "" });
+
+		expect(response.status).toBe(400);
+		expect(h.events.filter((e) => e.type === "federation.grant.token.denied")).toHaveLength(1);
+	});
+
+	it("writes no denial for an answer that succeeded", async () => {
+		const h = harness();
+		await h.seed();
+		await request(h.app).post(path()).set("Authorization", basic()).send({ sub: SUBJECT });
+		expect(h.events.filter((e) => e.type === "federation.grant.token.denied")).toHaveLength(0);
+	});
+
+	it("writes no denial for the status route, which audits no denials at all", async () => {
+		const h = harness({ rateLimiter: refusingLimiter });
+		await request(h.app).post(`/oauth/federation-grants/${GRANT_ID}/status`).send({ sub: SUBJECT });
+		expect(h.events.filter((e) => e.type === "federation.grant.token.denied")).toHaveLength(0);
 	});
 });
 

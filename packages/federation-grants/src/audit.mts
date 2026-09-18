@@ -82,15 +82,14 @@ export function createFederationGrantAuditBridge(
 			},
 		};
 		// A sink that throws, rejects or never answers skips no write, holds no
-		// lock and delays no answer — core's contract, and it holds only if a
-		// synchronous throw here does not become the request's 500.
-		try {
-			await sink.record(mapped);
-		} catch {
-			// Deliberately silent: the reporter is the operator-visible channel
-			// for a failure, and a sink outage that logged through the sink
-			// would be the outage reporting itself.
-		}
+		// lock and delays no answer — but that is CORE's doing, not this
+		// bridge's: core settles this promise, bounds the wait and reports a
+		// failure through `report`. Swallowing it here made the bridge resolve,
+		// so core never reached that branch and an operator learned nothing
+		// about a sink that was dropping everything. The one thing this does
+		// add is that a synchronous throw arrives as a rejection, so both
+		// failures look the same to whoever is waiting.
+		await sink.record(mapped);
 	};
 }
 

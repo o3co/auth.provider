@@ -79,6 +79,16 @@ const absoluteUri = (value: unknown, name: string, key: string): string => {
 	if (url.hash !== "" || value.includes("#")) {
 		return refuse(name, `${key} must not carry a fragment`);
 	}
+	// `new URL()` parses `javascript:alert(1)` perfectly happily, and userinfo
+	// in a value this provider echoes to an upstream is a credential in a
+	// place nobody will look for one. Review found both; `callbackURL` already
+	// refused them and `resource` did not.
+	if (url.protocol !== "https:" && url.protocol !== "http:") {
+		return refuse(name, `${key} must be an http or https URI`);
+	}
+	if (url.username !== "" || url.password !== "") {
+		return refuse(name, `${key} must not carry userinfo`);
+	}
 	return value;
 };
 
@@ -90,9 +100,6 @@ const callbackUrl = (value: unknown, name: string): string => {
 		url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]";
 	if (url.protocol !== "https:" && !(url.protocol === "http:" && loopback)) {
 		return refuse(name, "callbackURL must be https, or http on a loopback host for development");
-	}
-	if (url.username !== "" || url.password !== "") {
-		return refuse(name, "callbackURL must not carry userinfo");
 	}
 	return spelled;
 };
@@ -144,10 +151,26 @@ const authorizationParams = (value: unknown, name: string): Readonly<Record<stri
 	return { ...(value as Record<string, string>) };
 };
 
+/** A plain decimal, which is the only shape an operator writes a duration in. */
+const DECIMAL = /^\d+$/;
+
+/**
+ * A whole positive number of seconds.
+ *
+ * The type is checked before the value, for the reason review gave: `Number(x)`
+ * read `true` as one second and `[5]` as five, and a fraction is not something
+ * an upstream's `expires_in` — whole seconds, by RFC 6749 §4.2.2 — can be
+ * compared with.
+ */
 const seconds = (value: unknown, name: string, key: string): number => {
-	const parsed = typeof value === "number" ? value : Number(value);
-	if (value === undefined || value === null || !Number.isFinite(parsed) || parsed <= 0) {
-		return refuse(name, `${key} must be a positive number of seconds`);
+	const parsed =
+		typeof value === "number"
+			? value
+			: typeof value === "string" && DECIMAL.test(value.trim())
+				? Number(value.trim())
+				: Number.NaN;
+	if (!Number.isInteger(parsed) || parsed <= 0) {
+		return refuse(name, `${key} must be a whole positive number of seconds`);
 	}
 	return parsed;
 };

@@ -46,7 +46,8 @@ import {
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express, { type ErrorRequestHandler, type RequestHandler, type Router } from "express";
-import { createSanitizedLogger } from "./report.mjs";
+import { createTokenDenialAudit } from "./denialAudit.mjs";
+import { createSanitizedAuditSink, createSanitizedLogger } from "./report.mjs";
 import { createRequestIdMiddleware } from "./requestId.mjs";
 import { createFederationGrantStatusHandler } from "./statusRoute.mjs";
 import {
@@ -59,6 +60,34 @@ export const FEDERATION_GRANTS_RATE_LIMIT_PREFIX = "federation_grants";
 
 /** At most 16 KiB of body — the same bound the OAuth routes use. */
 const BODY_LIMIT = "16kb";
+const BODY_LIMIT_BYTES = 16 * 1024;
+
+/**
+ * The body limit, restated ahead of the parsers.
+ *
+ * These routes live under `/oauth`, and `oauthModule` mounts its own router
+ * there whose first two middlewares are `express.json()` and
+ * `express.urlencoded()` with the library's defaults. Whenever that router is
+ * mounted ahead of this one, those parsers run first — and `body-parser` does
+ * not parse a body twice, so the `limit` below is simply skipped and a body up
+ * to the default 100 KiB arrives here. Checking `Content-Length` first is the
+ * one form of this bound that holds whatever else is mounted, and in whatever
+ * order.
+ *
+ * It does not make this package independent of mounting order: a malformed
+ * body is still rejected by whichever parser reaches it first, and that
+ * refusal carries neither this package's correlation nor its cache
+ * directives. See the README — a composition root that wants those installs
+ * `federationGrantsModules` ahead of `oauthModule`.
+ */
+const withinBodyLimit: RequestHandler = (req, res, next) => {
+	const declared = Number(req.headers["content-length"]);
+	if (Number.isFinite(declared) && declared > BODY_LIMIT_BYTES) {
+		res.status(413).json({ error: "invalid_request", error_description: "body_too_large" });
+		return;
+	}
+	next();
+};
 
 /**
  * `Cache-Control` / `Pragma` on every exit, live or refused, ahead of anything
@@ -161,6 +190,19 @@ export interface FederationGrantRouterOptions extends FederationGrantTokenHandle
 export function createFederationGrantRouter(options: FederationGrantRouterOptions): Router {
 	const router = express.Router();
 	router.use(transport());
+	// Before the throttle and before authentication, because what it watches
+	// for is a response those two write themselves: the handler is not the only
+	// thing that can refuse a token request, and until this existed it was the
+	// only thing auditing one.
+	router.use(
+		"/:grantId/token",
+		createTokenDenialAudit({
+			...(options.auditSink === undefined ? {} : { sink: options.auditSink }),
+			operation: "token",
+			now: options.now ?? (() => new Date()),
+			background: options.background,
+		}),
+	);
 	// Ahead of client authentication, as the token endpoint orders it: repeated
 	// unauthenticated hits are bounded before they reach a repository lookup.
 	// `deniedDescription` keeps this route's throttle speaking the same
@@ -173,10 +215,15 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 			failMode: options.failMode,
 			deniedDescription: "provider",
 			...(options.logger === undefined ? {} : { logger: createSanitizedLogger(options.logger) }),
-			...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
+			// Its `rate_limit.unavailable` event carries the limiter's own error
+			// message; the same allowlist the logger gets applies to the sink.
+			...(options.auditSink === undefined
+				? {}
+				: { auditSink: createSanitizedAuditSink(options.auditSink) }),
 		}),
 	);
 	router.use(supportedContentType);
+	router.use(withinBodyLimit);
 	router.use(express.json({ limit: BODY_LIMIT }));
 	router.use(express.urlencoded({ extended: false, limit: BODY_LIMIT }));
 	router.use(

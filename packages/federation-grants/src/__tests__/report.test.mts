@@ -27,7 +27,11 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { createSanitizedLogger, createSanitizedReporter } from "#/report.mjs";
+import {
+	createSanitizedAuditSink,
+	createSanitizedLogger,
+	createSanitizedReporter,
+} from "#/report.mjs";
 
 const SENTINEL = "s3cret-refresh-token-do-not-log";
 
@@ -134,19 +138,56 @@ describe("createSanitizedLogger", () => {
 		expect(JSON.stringify(error.mock.calls[0])).not.toContain(SENTINEL);
 	});
 
-	it("keeps a value it can vouch for, and replaces one it cannot", () => {
+	it("keeps the fields it has decided to carry, and replaces every other", () => {
+		// An allowlist of NAMES, not a test of types. This was a type check
+		// first — scalars through, objects redacted — and review found the hole
+		// it leaves: the rate-limit guard turns a limiter's exception into its
+		// `message` and logs `{ error: <that string> }`, so a driver naming a
+		// connection string in its error passed straight through as an
+		// ordinary string.
 		const { logger, error } = spyLogger();
 		createSanitizedLogger(logger).error({
+			tag: "federation_grants",
+			ip: "203.0.113.7",
+			mode: "closed",
+			error: `redis://user:${SENTINEL}@limiter:6379 refused`,
 			count: 3,
-			ok: true,
-			name: "x",
 			nested: { deep: SENTINEL },
 		});
 		expect(error.mock.calls[0]?.[0]).toEqual({
-			count: 3,
-			ok: true,
-			name: "x",
+			tag: "federation_grants",
+			ip: "203.0.113.7",
+			mode: "closed",
+			// Redacted rather than dropped: an operator can still see there was one.
+			error: "[redacted]",
+			count: "[redacted]",
 			nested: "[redacted]",
+		});
+		expect(JSON.stringify(error.mock.calls[0])).not.toContain(SENTINEL);
+	});
+
+	it("applies the same allowlist to an audit event's details", () => {
+		// `rate_limit.unavailable` carries the same stringified exception the
+		// log line does, on a channel the logger facade never sees.
+		const { logger } = spyLogger();
+		void logger;
+		const recorded: unknown[] = [];
+		const sanitized = createSanitizedAuditSink({
+			kind: "test",
+			record: async (event) => {
+				recorded.push(event);
+			},
+		});
+		void sanitized.record({
+			timestamp: new Date(),
+			type: "rate_limit.unavailable",
+			ip: "203.0.113.7",
+			details: { tag: "federation_grants", error: `secret ${SENTINEL}` },
+		});
+		expect(JSON.stringify(recorded)).not.toContain(SENTINEL);
+		expect((recorded[0] as { details: Record<string, unknown> }).details).toEqual({
+			tag: "federation_grants",
+			error: "[redacted]",
 		});
 	});
 

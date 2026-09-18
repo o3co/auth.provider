@@ -303,3 +303,14 @@ export const refusingLimiter: RateLimiter = {
 	kind: "refusing",
 	check: async () => ({ allowed: false, reason: "limit:federation_grants" }),
 };
+
+/**
+ * A limiter whose backend is down, carrying a secret in its message — which is
+ * what a driver does when a connection string fails to parse.
+ */
+export const brokenLimiter: RateLimiter = {
+	kind: "broken",
+	check: async () => {
+		throw new Error(`redis://user:${SECRET}@limiter:6379 refused the connection`);
+	},
+};

@@ -138,6 +138,34 @@ describe("resolveFederationGrantConnections", () => {
 		expect(() => resolve({ g: { ...CONNECTION, maxAccessTokenLifetime: "soon" } })).toThrow();
 	});
 
+	it("refuses an access-token maximum that is not a whole number of seconds", () => {
+		// Found by review. `Number(x)` took `true` as one second and `[5]` as
+		// five, and a fraction is not a thing an upstream's `expires_in` can
+		// be compared with.
+		for (const maxAccessTokenLifetime of [0.5, true, [5], "1e3", null, new Date(5)]) {
+			expect(
+				() => resolve({ g: { ...CONNECTION, maxAccessTokenLifetime } }),
+				JSON.stringify(maxAccessTokenLifetime),
+			).toThrow(/maxAccessTokenLifetime/);
+		}
+		expect(
+			resolve({ g: { ...CONNECTION, maxAccessTokenLifetime: "3600" } }).get("g")
+				?.maxAccessTokenLifetime,
+		).toBe(3600);
+	});
+
+	it("refuses a resource that is not somewhere this provider could ask for a token", () => {
+		// Found by review: `new URL()` parses `javascript:alert(1)` happily,
+		// and userinfo in a resource indicator is a credential in a value that
+		// is echoed to an upstream. `callbackURL` already refused both.
+		expect(() => resolve({ g: { ...CONNECTION, resource: "javascript:alert(1)" } })).toThrow(
+			/resource/,
+		);
+		expect(() => resolve({ g: { ...CONNECTION, resource: "https://u:p@api.example/" } })).toThrow(
+			/resource/,
+		);
+	});
+
 	it("takes a resource as an absolute URI without a fragment, spelled as written", () => {
 		expect(
 			resolve({ g: { ...CONNECTION, resource: "https://graph.example/v1.0" } }).get("g")?.resource,

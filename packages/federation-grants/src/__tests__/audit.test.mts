@@ -152,18 +152,32 @@ describe("createFederationGrantAuditBridge", () => {
 		await expect(createFederationGrantAuditBridge({ ...context })(FULL)).resolves.toBeUndefined();
 	});
 
-	it("does not let a sink that throws reach the caller that is being answered", async () => {
-		// A sink is told after the lock is let go of, and nothing waits for it.
-		// One that throws synchronously must not become the request's 500.
-		const sink = {
+	it("lets a failing sink be seen, because core reports what it cannot deliver", async () => {
+		// Found by review. Swallowing this made the bridge resolve, so core's
+		// own `audit()` helper never reached its reporting branch and an
+		// operator learned nothing about a sink that was dropping everything.
+		// Core already keeps an audit failure away from the HTTP answer — it
+		// settles this promise and bounds it — so there is nothing for the
+		// bridge to protect by hiding it.
+		const rejecting = {
 			kind: "test",
-			record: () => {
+			record: async () => {
 				throw new Error("sink is down");
 			},
 		} as unknown as AuditSink;
 		await expect(
-			createFederationGrantAuditBridge({ sink, ...context })(FULL),
-		).resolves.toBeUndefined();
+			createFederationGrantAuditBridge({ sink: rejecting, ...context })(FULL),
+		).rejects.toThrow("sink is down");
+
+		const throwing = {
+			kind: "test",
+			record: () => {
+				throw new Error("sink threw");
+			},
+		} as unknown as AuditSink;
+		await expect(
+			createFederationGrantAuditBridge({ sink: throwing, ...context })(FULL),
+		).rejects.toThrow("sink threw");
 	});
 
 	it("says which route the event came from, because status writes events too", () => {
