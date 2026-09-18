@@ -820,6 +820,12 @@ export {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "./federation-grants/revision.mjs";
+// #593 slice 4: the `federationGrants.*` block an operator writes, turned into
+// the limits the retrieval takes. In core because the block is core's.
+export {
+	FEDERATION_GRANT_SETTING_DEFAULTS,
+	resolveFederationGrantRetrievalLimits,
+} from "./federation-grants/settings.mjs";
 export type {
 	FederationGrantCredentialState,
 	FederationGrantInspection,

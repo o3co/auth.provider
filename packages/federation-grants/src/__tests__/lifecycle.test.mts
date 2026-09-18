@@ -44,10 +44,16 @@ import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { federationGrantBackgroundModule, federationGrantsModule } from "#/index.mjs";
 
+const clientRepository = {
+	findById: async () => null,
+	authenticate: async () => null,
+};
+
 const bootstrap = (): BootstrapMap =>
 	({
 		config: makeValidCoreConfig(),
 		pathResolver: (s: string) => s,
+		clientRepository,
 	}) as unknown as BootstrapMap;
 
 /**

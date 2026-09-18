@@ -341,6 +341,38 @@ export interface DelegatedTokens {
  * session. Detected by BOTH methods being present; an adapter with one and
  * not the other does not have it.
  */
+/**
+ * The authorization parameters a delegated adapter owns, and which an
+ * operator's `authorizationParams` may therefore not set (#593, D17).
+ *
+ * An exclusion rather than an allowlist: a closed list of permissible vendor
+ * parameters would have to be extended for every IdP that invents one, and
+ * the ones that matter are the ones this provider computes — the PKCE
+ * challenge, the state, the nonce, the redirect it will check the callback
+ * against. Setting any of those from configuration is not customisation, it
+ * is taking over the security parameters of the flow.
+ *
+ * It lives here, next to {@link SupportsDelegatedAuthorization}, because two
+ * readers need exactly the same set and neither owns it: the adapter that
+ * builds the URL refuses these at the point of use, and the federation-grant
+ * routes refuse them at boot, where an operator finds out before a user is
+ * standing in front of a consent page.
+ */
+export const RESERVED_DELEGATED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
+	"client_id",
+	"response_type",
+	"redirect_uri",
+	"state",
+	"code_challenge",
+	"code_challenge_method",
+	"nonce",
+	"scope",
+	"resource",
+	"request",
+	"request_uri",
+	"response_mode",
+]);
+
 export interface SupportsDelegatedAuthorization {
 	buildDelegatedAuthorizationUrl(params: DelegatedAuthorizationRequest): URL;
 	refreshDelegatedToken(params: DelegatedRefreshRequest): Promise<DelegatedTokens>;

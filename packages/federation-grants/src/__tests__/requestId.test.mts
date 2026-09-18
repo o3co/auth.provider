@@ -42,6 +42,11 @@ import { describe, expect, it } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
 import { resolveRequestId } from "#/requestId.mjs";
 
+const clientRepository = {
+	findById: async () => null,
+	authenticate: async () => null,
+};
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 const boot = async () => {
@@ -50,6 +55,7 @@ const boot = async () => {
 		bootstrapComponents: {
 			config: makeValidCoreConfig(),
 			pathResolver: (s: string) => s,
+			clientRepository,
 		} as unknown as BootstrapMap,
 	});
 	const app = express();

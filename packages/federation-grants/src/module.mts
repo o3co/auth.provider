@@ -50,27 +50,38 @@
  * and reads none of the feature's configuration or components on the way.
  */
 
-import { coerceBooleanFromEnv, defineModule } from "@o3co/auth-provider-core";
-import express, { type RequestHandler } from "express";
+import {
+	AUDIT_SINK_ABSENCE_POLICY,
+	defineModule,
+	type FederationGrantConnection,
+	type FederationGrantRefresher,
+	fullSectionsSchema,
+	type RateLimitFailMode,
+	resolveFederationGrantRetrievalLimits,
+} from "@o3co/auth-provider-core";
+import { supportsDelegatedAuthorization } from "@o3co/auth-provider-session";
 import { z } from "zod";
 import { createFederationGrantBackground } from "./background.mjs";
-import { createRequestIdMiddleware } from "./requestId.mjs";
+import { resolveFederationGrantConnections } from "./connections.mjs";
+import { createDisabledFederationGrantRouter, createFederationGrantRouter } from "./routes.mjs";
 import { FEDERATION_GRANTS_MOUNT_PATH } from "./types.mjs";
 
 /**
- * The slice both routes read. Core's `fullSectionsSchema` declares the whole
- * `federationGrants` block — it has to, since the standalone validates against
- * it before any module's `configSchema` runs and would otherwise strip what
- * only this package knew about — so what is restated here is the one key this
- * module reads, and its default.
+ * The slice both routes read — core's own declaration of it, projected.
  *
- * `coerceBooleanFromEnv` rather than `z.boolean()` (#288): HOCON substitutes
- * `${?FEDERATION_GRANTS_ENABLED}` as a string, always.
+ * Not a restatement. `AppConfigSchema` is a strip-mode object and the boot
+ * planner composes every module's `configSchema` into one parse, so a key this
+ * module does not declare is GONE by the time the factory reads it: a narrower
+ * copy here would leave the connections and every retrieval limit at their
+ * defaults while an operator's file said otherwise, and the boot refusals that
+ * exist to catch a bad one would never see it. That is how this was found.
+ *
+ * Taking core's shape rather than mirroring it also keeps the `${?VAR}`
+ * coercions (#288) in one place: HOCON substitutes every environment override
+ * as a string, and `enabled` is the one where a leftover string reads as off.
  */
 export const federationGrantsConfigSchema = z.object({
-	federationGrants: z
-		.object({ enabled: coerceBooleanFromEnv.default(false) })
-		.default({ enabled: false }),
+	federationGrants: fullSectionsSchema.shape.federationGrants,
 });
 
 // biome-ignore lint/suspicious/noExplicitAny: planner-inferred deps shape — the manifest reads only slots it declares in `requires` / `optional`
@@ -82,10 +93,9 @@ const isEnabled = (deps: AnyDeps): boolean =>
 /**
  * §5 refusal 1. An enabled deployment with nowhere to keep grants would
  * authenticate a client and then answer 503 to everything, having accepted
- * `enabled = true` as if it meant something. The rest of the boot refusals
- * arrive with the routes whose dependencies they are about.
+ * `enabled = true` as if it meant something.
  */
-const requireStore = (deps: AnyDeps): void => {
+const requireStore = (deps: AnyDeps): NonNullable<AnyDeps["federationGrantStore"]> => {
 	if (deps.federationGrantStore === undefined) {
 		throw new Error(
 			"federationGrantsModule: federationGrants.enabled = true requires a " +
@@ -96,33 +106,152 @@ const requireStore = (deps: AnyDeps): void => {
 				"redisFederationGrantStoreModule.",
 		);
 	}
+	return deps.federationGrantStore;
 };
 
 /**
- * `Cache-Control` / `Pragma` on every exit, live or refused, ahead of anything
- * that can answer. A 404 with no directives is the shape an intermediary
- * caches heuristically, and a cached "this deployment has no federation
- * grants" would outlive the operator turning them on.
+ * §5 refusal 2. Both routes are throttled before client authentication, so
+ * that repeated unauthenticated hits are bounded before they reach a
+ * repository lookup — and what happens when the limiter backend is down is the
+ * product's decision (`rateLimit.failMode`), not this module's to default.
  */
-const noStore: RequestHandler = (_req, res, next) => {
-	res.set("Cache-Control", "no-store").set("Pragma", "no-cache");
-	next();
+const requireLimiter = (deps: AnyDeps): NonNullable<AnyDeps["rateLimiter"]> => {
+	if (deps.rateLimiter === undefined) {
+		throw new Error(
+			"federationGrantsModule: federationGrants.enabled = true requires a rateLimiter " +
+				"component. These routes take an opaque grant id in the path and answer the " +
+				"same 404 for an unknown one, for another client's and for another subject's " +
+				"— which is only a defence while the number of guesses is bounded.",
+		);
+	}
+	return deps.rateLimiter;
+};
+
+const requireFailMode = (deps: AnyDeps): RateLimitFailMode => {
+	const failMode = deps.config?.rateLimit?.failMode;
+	if (failMode !== "open" && failMode !== "closed") {
+		throw new Error(
+			'federationGrantsModule: federationGrants.enabled = true requires rateLimit.failMode ("open" | "closed"). ' +
+				"It is the product's one policy for a limiter-backend outage, and these routes " +
+				"apply it like every other throttled route rather than choosing for themselves.",
+		);
+	}
+	return failMode;
 };
 
 /**
- * The last handler under the mount path: every method and sub-path this
- * package does not serve.
+ * §5 refusals 5 and 6, together, because they are one question asked of the
+ * same map: can this deployment actually refresh a grant on this connection
+ * without the user?
  *
- * The body carries no description, unlike the neighbouring packages' refusals.
- * That is the point of a disabled deployment: `{"error":"not_found"}` is
- * byte-identical to what a deployment without the package installed answers,
- * so an unauthenticated caller cannot learn that offline delegation is one
- * configuration key away. It is also the answer for a bad method on an enabled
- * deployment, where a description would be equally uninteresting — there is no
- * `GET` status alias to point anyone at.
+ * Resolved in the route contribution phase rather than while components are
+ * materialised: named federation contributions are assembled first, and
+ * checking the synthetic map earlier would refuse a configuration whose
+ * provider simply had not been contributed yet.
+ *
+ * Refusal 6 is about BOTH delegated methods. An adapter with an ordinary
+ * `refreshToken` is not enough: that one refreshes a session's token with the
+ * session's own credentials, and says nothing about whether this provider may
+ * act for a user who is not here. Slice 2 implemented the pair for the generic
+ * OIDC adapter only, so a `form_post` federation such as Apple's is refused
+ * here, by this rule, for the true reason — which is why this slice has no
+ * separate refusal about response modes.
  */
-const notFound: RequestHandler = (_req, res) => {
-	res.status(404).json({ error: "not_found" });
+const requireDelegatedCapability = (
+	deps: AnyDeps,
+	connections: ReadonlyMap<string, FederationGrantConnection>,
+): void => {
+	const providers = deps.federationProviders as ReadonlyMap<string, unknown> | undefined;
+	for (const connection of connections.values()) {
+		const provider = providers?.get(connection.federation);
+		if (provider === undefined) {
+			throw new Error(
+				`federationGrantsModule: federationGrants.connections.${connection.name} names the ` +
+					`federation "${connection.federation}", which no installed module contributes. ` +
+					"A connection whose provider is absent can never be refreshed, and a grant on " +
+					"it would be created and then fail every time it is spent.",
+			);
+		}
+		if (!supportsDelegatedAuthorization(provider as never)) {
+			throw new Error(
+				`federationGrantsModule: the federation "${connection.federation}", named by ` +
+					`federationGrants.connections.${connection.name}, has no delegated ` +
+					"authorization capability. Offline delegation needs BOTH " +
+					"`buildDelegatedAuthorizationUrl` and `refreshDelegatedToken`: an ordinary " +
+					"`refreshToken` renews a token inside a session and says nothing about " +
+					"acting for a user who is not present.",
+			);
+		}
+	}
+};
+
+/**
+ * §5 refusal 9. #363's rule — optional to wire, not optional to decide — for
+ * the events an operator needs most: every disclosure of a credential that
+ * works while nobody is watching.
+ *
+ * Checked here rather than through `absencePolicies`, which the boot planner
+ * applies to a module whether or not its feature is on. A deployment that
+ * installs this package and leaves `enabled = false` must owe nothing, and a
+ * configuration declaration is still something to owe. The message is built
+ * from the shared policy so it cannot drift from the one every other module
+ * gives for the same slot.
+ */
+const requireAuditDecision = (deps: AnyDeps): void => {
+	if (deps.auditSink !== undefined) return;
+	const declared = deps.config?.audit?.sink?.type;
+	if (declared === AUDIT_SINK_ABSENCE_POLICY.absentValue) return;
+	throw new Error(
+		"federationGrantsModule: federationGrants.enabled = true with no auditSink component. " +
+			`Wire one, or set ${AUDIT_SINK_ABSENCE_POLICY.configKey.join(".")} = ` +
+			`"${AUDIT_SINK_ABSENCE_POLICY.absentValue}" to declare the capability absent on purpose. ` +
+			AUDIT_SINK_ABSENCE_POLICY.hint,
+	);
+};
+
+/** The refresher core calls: the connection's provider, or nothing for one that lost its capability. */
+const refresherFor =
+	(deps: AnyDeps) =>
+	(connection: FederationGrantConnection): FederationGrantRefresher | undefined => {
+		const providers = deps.federationProviders as ReadonlyMap<string, unknown> | undefined;
+		const provider = providers?.get(connection.federation);
+		if (!supportsDelegatedAuthorization(provider as never)) return undefined;
+		return {
+			refreshDelegatedToken: (params) =>
+				(
+					provider as { refreshDelegatedToken: FederationGrantRefresher["refreshDelegatedToken"] }
+				).refreshDelegatedToken(params),
+		};
+	};
+
+/**
+ * The subject's grants boundary (D13), as far as this slice goes.
+ *
+ * `subjectRevocation.revokedBefore` is the watermark every other subject-wide
+ * revocation already reads. Where a deployment has none, this **throws** —
+ * which core turns into 503/storage for an authorized grant — rather than
+ * answering `null`. `null` is a statement: "nothing was revoked for this
+ * subject". An absent capability does not know that, and treating the two as
+ * the same silently switches core's backstop off.
+ *
+ * Slice 5 replaces this bridge with the grants boundary of D13 proper, and
+ * moves a missing or insufficient capability to a boot refusal — at which
+ * point a deployment finds out at boot rather than per request.
+ */
+const boundaryFor = (deps: AnyDeps): ((subject: string) => Promise<Date | null>) => {
+	const revocation = deps.subjectRevocation as
+		| { revokedBefore(subject: string): Promise<Date | null> }
+		| undefined;
+	if (revocation === undefined) {
+		return async () => {
+			throw new Error(
+				"federationGrantsModule: no subjectRevocation component, so the subject's grants " +
+					"boundary cannot be read. Wire one — a grant outlives the session, and the " +
+					"backstop that covers a subject-wide revocation is what makes that safe (D13).",
+			);
+		};
+	}
+	return (subject) => revocation.revokedBefore(subject);
 };
 
 export const federationGrantBackgroundModule = defineModule({
@@ -158,34 +287,57 @@ export const federationGrantBackgroundModule = defineModule({
 export const federationGrantsModule = defineModule({
 	name: "federation-grants",
 	configSchema: federationGrantsConfigSchema,
-	requires: ["config", "federationGrantBackground"] as const,
-	optional: ["federationGrantStore"] as const,
+	requires: ["config", "federationGrantBackground", "clientRepository"] as const,
+	optional: [
+		"federationGrantStore",
+		"rateLimiter",
+		"auditSink",
+		"subjectRevocation",
+		"replaySeenSet",
+		"logger",
+		"federationProviders",
+	] as const,
 	contributes: {
 		routes: [
 			(deps: AnyDeps) => {
-				const router = express.Router();
-				// Cache directives and correlation first, so that the one
-				// response that escapes early is not the one with neither —
-				// and they are the same on both branches, because a disabled
-				// deployment must not be distinguishable by its headers.
-				router.use(noStore);
-				router.use(createRequestIdMiddleware());
-				if (isEnabled(deps)) {
-					requireStore(deps);
-					// The rate-limit guard, the parsers, client authentication
-					// and the two handlers are mounted here, ahead of the
-					// terminal 404 below.
+				if (!isEnabled(deps)) {
+					// Nothing below this line is read: not a component, not a
+					// connection, not the rest of the configuration. That is the
+					// whole of what `enabled = false` promises.
+					return {
+						id: "federation-grants",
+						mountPath: FEDERATION_GRANTS_MOUNT_PATH,
+						handler: createDisabledFederationGrantRouter(),
+					};
 				}
-				// Nothing feature-specific ran on a disabled deployment: no
-				// component was read, no body was parsed, no client was
-				// authenticated. That is the whole of what `enabled = false`
-				// promises, and it is why the check is a branch here rather
-				// than a refusal inside a handler.
-				router.use(notFound);
+				// In §5's order, so that the most fundamental omission is the one
+				// an operator is told about: a deployment with no store has not
+				// half-configured the feature, it has not configured it.
+				const store = requireStore(deps);
+				const rateLimiter = requireLimiter(deps);
+				const failMode = requireFailMode(deps);
+				const limits = resolveFederationGrantRetrievalLimits(deps.config);
+				const connections = resolveFederationGrantConnections(deps.config);
+				requireDelegatedCapability(deps, connections);
+				requireAuditDecision(deps);
 				return {
 					id: "federation-grants",
 					mountPath: FEDERATION_GRANTS_MOUNT_PATH,
-					handler: router,
+					handler: createFederationGrantRouter({
+						store,
+						connections,
+						refresher: refresherFor(deps),
+						grantsBoundary: boundaryFor(deps),
+						limits,
+						background: deps.federationGrantBackground,
+						clientRepository: deps.clientRepository,
+						issuer: deps.config.oauth.jwt.issuer,
+						rateLimiter,
+						failMode,
+						...(deps.replaySeenSet === undefined ? {} : { replaySeenSet: deps.replaySeenSet }),
+						...(deps.auditSink === undefined ? {} : { auditSink: deps.auditSink }),
+						...(deps.logger === undefined ? {} : { logger: deps.logger }),
+					}),
 				};
 			},
 		],

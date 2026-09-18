@@ -25,9 +25,16 @@
  * one, and what lets a logout revoke grants through the port with these routes
  * not installed at all.
  *
- * The transport helpers stay private for the same reason they exist: they are
- * how these two routes are spelled, not a second HTTP convention for the
- * product.
+ * Also not exported: the HTTP serialization, the body parser, the audit bridge
+ * and the connection resolver. They are how these two routes are spelled, not
+ * a second HTTP convention for the product — and a composition root that
+ * needed one of them directly would be building a route this package should
+ * have built.
+ *
+ * `createFederationGrantRouter` IS exported, because a root that mounts the
+ * handlers itself needs the middleware chain rather than an approximation of
+ * it: the order — correlation, then the throttle, then parsing, then client
+ * authentication — is the security property.
  */
 
 export {
@@ -40,4 +47,14 @@ export {
 	federationGrantsModule,
 	federationGrantsModules,
 } from "./module.mjs";
+export {
+	createDisabledFederationGrantRouter,
+	createFederationGrantRouter,
+	FEDERATION_GRANTS_RATE_LIMIT_PREFIX,
+	type FederationGrantRouterOptions,
+} from "./routes.mjs";
+export {
+	createFederationGrantTokenHandler,
+	type FederationGrantTokenHandlerOptions,
+} from "./tokenRoute.mjs";
 export { FEDERATION_GRANTS_MOUNT_PATH } from "./types.mjs";

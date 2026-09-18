@@ -148,6 +148,27 @@ describe("createRateLimitGuard — deny path", () => {
 		expect(res.body).toEqual({ error: "rate_limited", error_description: "limit:token" });
 	});
 
+	it("answers with a caller's fixed description where one was declared (#593)", async () => {
+		// The federation-grant routes answer in core's denial vocabulary, where
+		// a throttle is `rate_limited/provider` and `error_description` is a
+		// stable identifier a client switches on rather than prose. Without
+		// this, one throttle on that route would say "provider" (core's) and
+		// the other would say whatever the limiter adapter called its budget.
+		const limiter = scriptedLimiter(() => ({ allowed: false, reason: "limit:federation_grants" }));
+		const res = await hit(
+			makeApp(
+				createRateLimitGuard({
+					limiter,
+					tag: "federation_grants",
+					failMode: "open",
+					deniedDescription: "provider",
+				}),
+			),
+		);
+		expect(res.status).toBe(429);
+		expect(res.body).toEqual({ error: "rate_limited", error_description: "provider" });
+	});
+
 	it("falls back to the stock description when reason is empty (AS-2 `||`, not `??`)", async () => {
 		const limiter = scriptedLimiter(() => ({ allowed: false, reason: "" }));
 		const res = await hit(

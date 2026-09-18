@@ -60,6 +60,22 @@ export interface RateLimitGuardOptions {
 	 * measured against.
 	 */
 	readonly headerFallback?: RateLimitSpec;
+	/**
+	 * A fixed `error_description` for this route's 429, in place of the
+	 * limiter's own `decision.reason` (#593).
+	 *
+	 * For a route whose error bodies are a vocabulary rather than prose: the
+	 * federation-grant routes answer in core's denial union, where a throttle
+	 * is `rate_limited` with the reason `provider`, and a client switches on
+	 * that identifier. Without this the same route would answer `provider`
+	 * when core throttled and whatever the limiter adapter happened to call
+	 * its budget when this guard did.
+	 *
+	 * Leave it unset — the default — wherever `error_description` is for a
+	 * human, which is every other route: `decision.reason` is the
+	 * operator-visible cause, and losing it makes an outage harder to read.
+	 */
+	readonly deniedDescription?: string;
 }
 
 /**
@@ -184,6 +200,7 @@ export const createRateLimitGuard = ({
 	logger = consoleLogger,
 	auditSink,
 	headerFallback,
+	deniedDescription,
 }: RateLimitGuardOptions): RequestHandler => {
 	const policy: RateLimitPolicyOptions = { limiter, tag, failMode, logger, auditSink };
 	return async (req: Request, res: Response, next): Promise<void> => {
@@ -239,7 +256,14 @@ export const createRateLimitGuard = ({
 			// `||` (not `??`) so that `decision.reason: ""` from a custom rate
 			// limiter also falls back — the envelope helper would otherwise drop
 			// the empty string and produce a 429 response with no `error_description`.
-			res.status(429).json(errorEnvelope("rate_limited", decision.reason || "Rate limit exceeded"));
+			res
+				.status(429)
+				.json(
+					errorEnvelope(
+						"rate_limited",
+						deniedDescription ?? (decision.reason || "Rate limit exceeded"),
+					),
+				);
 			return;
 		}
 		next();

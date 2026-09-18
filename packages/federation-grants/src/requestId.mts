@@ -33,7 +33,7 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { RequestHandler } from "express";
+import type { RequestHandler, Response } from "express";
 
 /** The header, in the spelling everything downstream reads it by. */
 export const REQUEST_ID_HEADER = "x-request-id";
@@ -72,4 +72,16 @@ export function createRequestIdMiddleware(): RequestHandler {
 		res.set(REQUEST_ID_HEADER, resolveRequestId(req.headers[REQUEST_ID_HEADER]));
 		next();
 	};
+}
+
+/**
+ * The ID this response is being answered under.
+ *
+ * Read back off the response rather than kept in a second place: the header is
+ * already the one copy, it is set before anything can answer, and a handler
+ * reading it cannot disagree with what the caller is told.
+ */
+export function requestIdOf(res: Response): string {
+	const set = res.getHeader(REQUEST_ID_HEADER);
+	return typeof set === "string" ? set : "";
 }
