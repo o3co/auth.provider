@@ -216,6 +216,42 @@ describe("resolveFederationGrantConnections", () => {
 		).toThrow(/callbackURL/);
 	});
 
+	it("refuses a connection entry that is not a configuration block", () => {
+		expect(() => resolve({ g: "not-a-block" })).toThrow(/g/);
+		expect(() => resolve({ g: ["not", "a", "block"] })).toThrow(/g/);
+		expect(() => resolve({ g: null })).toThrow(/g/);
+	});
+
+	it("refuses a connection that names no federation", () => {
+		expect(() => resolve({ g: { ...CONNECTION, federation: undefined } })).toThrow(/federation/);
+		expect(() => resolve({ g: { ...CONNECTION, federation: "" } })).toThrow(/federation/);
+		expect(() => resolve({ g: { ...CONNECTION, federation: 7 } })).toThrow(/federation/);
+	});
+
+	it("refuses a federation with no configured client id", () => {
+		expect(() =>
+			resolve({ g: CONNECTION }, { upstream: { enabled: true, issuer: "https://i.example" } }),
+		).toThrow(/clientId/);
+	});
+
+	it("names the four spellings when allowScopeSubsets is none of them", () => {
+		expect(() => resolve({ g: { ...CONNECTION, allowScopeSubsets: "maybe" } })).toThrow(
+			/"true", "false", "1" or "0"/,
+		);
+		expect(() => resolve({ g: { ...CONNECTION, allowScopeSubsets: 1 } })).toThrow(
+			/allowScopeSubsets/,
+		);
+	});
+
+	it("refuses authorizationParams that is not a map", () => {
+		for (const authorizationParams of ["prompt=consent", ["prompt"], 7]) {
+			expect(
+				() => resolve({ g: { ...CONNECTION, authorizationParams } }),
+				JSON.stringify(authorizationParams),
+			).toThrow(/authorizationParams/);
+		}
+	});
+
 	it("names the connection in every refusal, because an operator has more than one", () => {
 		expect(() => resolve({ graph: { ...CONNECTION, boundary: "" } })).toThrow(/graph/);
 	});

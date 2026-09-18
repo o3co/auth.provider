@@ -161,7 +161,7 @@ const supportedContentType: RequestHandler = (req, res, next) => {
  * offending input into its message for a JSON syntax error, so the `type` it
  * classifies with is all that is read.
  */
-const parserErrors: ErrorRequestHandler = (error, _req, res, next) => {
+export const parserErrors: ErrorRequestHandler = (error, _req, res, next) => {
 	if (res.headersSent) return next(error);
 	const type = (error as { type?: unknown }).type;
 	if (type === "entity.too.large") {

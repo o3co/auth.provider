@@ -51,7 +51,7 @@ import {
 import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
 import { basic, CLIENT_ID, CLIENT_SECRET, connection, DAY, MIN, SUBJECT } from "./harness.mjs";
 
@@ -70,9 +70,17 @@ const clientRepository: ClientRepository = {
 		id === CLIENT_ID && secret === CLIENT_SECRET ? (client as never) : null,
 };
 
+const refreshed = vi.fn(async () => ({
+	accessToken: "rotated-access-token",
+	refreshToken: "rotated-refresh-token",
+	expiresIn: 3600,
+	expiresAt: new Date(Date.now() + 3_600_000),
+	tokenType: "Bearer",
+}));
+
 const delegated = {
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
-	refreshDelegatedToken: async () => ({}),
+	refreshDelegatedToken: refreshed,
 } as unknown as FederationProvider;
 
 const federationModule = defineModule({
@@ -103,7 +111,7 @@ const SESSION_FEDERATION_STORES = {
 	refreshTokenFamilyRevocation: {},
 };
 
-const boot = async (withRevocation: boolean | "malformed") => {
+const boot = async (withRevocation: boolean | "malformed", spent = false) => {
 	const full = makeValidFullSections();
 	const handle = await createApp({
 		modules: [federationModule, ...federationGrantsModules, storeModule],
@@ -184,7 +192,10 @@ const boot = async (withRevocation: boolean | "malformed") => {
 			accessToken: {
 				value: "upstream-access-token",
 				tokenType: "Bearer",
-				obtainedAt: at,
+				// Ten seconds left of an hour: past half spent AND inside the
+				// refresh buffer, which is what makes a refresh due — and the
+				// only way the module's own refresher wiring is exercised.
+				obtainedAt: spent ? new Date(at.getTime() - 3_590_000) : at,
 				issuedLifetime: 3600,
 				scopes: [...connection.scopes],
 			},
@@ -237,6 +248,24 @@ describe("the grants boundary the module wires", () => {
 		expect(disclosed.status).toBe(503);
 		expect(disclosed.body.error).toBe("temporarily_unavailable");
 
+		await handle.dispose();
+	});
+
+	it("reaches the federation adapter through the capability the module resolved", async () => {
+		// The refresher the module builds is only exercised by a grant that
+		// actually needs a refresh; everything else in this file is answered
+		// from the stored token.
+		refreshed.mockClear();
+		const { handle, app } = await boot(true, true);
+
+		const response = await request(app)
+			.post("/oauth/federation-grants/g-1/token")
+			.set("Authorization", basic())
+			.send({ sub: SUBJECT });
+
+		expect(response.status).toBe(200);
+		expect(response.body.access_token).toBe("rotated-access-token");
+		expect(refreshed).toHaveBeenCalledTimes(1);
 		await handle.dispose();
 	});
 
