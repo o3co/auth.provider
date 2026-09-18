@@ -17,6 +17,7 @@
 import {
 	type AuthorizedFederationGrant,
 	DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS,
+	defineModule,
 	type FederationGrant,
 	type FederationGrantAuthorization,
 	type FederationGrantCredentials,
@@ -29,6 +30,7 @@ import {
 	type FederationGrantWrite,
 	withinFederationGrantLifetimeCeiling,
 } from "@o3co/auth-provider-core";
+import { z } from "zod";
 import type { FederationGrantHashFields, FederationGrantStoreClient } from "./clients.mjs";
 import {
 	type FederationGrantKey,
@@ -800,3 +802,170 @@ export function createRedisFederationGrantStore(
 		},
 	};
 }
+
+// --- configuration --------------------------------------------------------
+
+/**
+ * The `federationGrants` block this store reads, and the `redisFederationGrantStore`
+ * one beside it (#593, D16).
+ *
+ * Two sections because they answer to different people: what a grant is
+ * allowed to be — its retention, its key ring — is grant policy, and an
+ * operator sets it whether the store is Redis or not; a key prefix and a
+ * listing allowance are this adapter's layout, and live beside the other
+ * stores' prefixes.
+ *
+ * Durations are whole seconds in the policy block, as every duration an
+ * operator writes there is, and milliseconds where the adapter takes them.
+ */
+/**
+ * A duration an operator wrote, read strictly.
+ *
+ * Copilot's finding, and the same one core's own block had: `z.coerce.number()`
+ * reads `null` and `[]` as `0`, `true` as `1` and `"1e3"` as `1000` — so
+ * `tombstoneRetention: null` silently became "keep no tombstones", which is
+ * indistinguishable from thirty days of them until somebody asks why a revoked
+ * grant cannot be looked up. This module resolves the store independently of
+ * core's strict reader, so it needs the rule itself.
+ */
+const durationFromEnv = (bounds: z.ZodNumber) =>
+	z.preprocess((value) => {
+		if (typeof value === "number") return value;
+		if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+		return value;
+	}, bounds);
+
+const moduleConfigSchema = z.object({
+	federationGrants: z
+		.object({
+			tombstoneRetention: durationFromEnv(z.number().int().nonnegative()).optional(),
+			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
+			encryptionKeys: z
+				.array(z.object({ id: z.string().min(1), key: z.string().min(1) }))
+				.optional(),
+		})
+		.default({}),
+	redisFederationGrantStore: z
+		.object({
+			keyPrefix: z.string().default("fg:"),
+			listingAllowanceMs: durationFromEnv(z.number().int().nonnegative()).optional(),
+		})
+		.default({ keyPrefix: "fg:" }),
+	deployment: z.object({ mode: z.string().optional() }).optional(),
+});
+
+/** What a composition root tells the module that its configuration cannot (#473). */
+export interface RedisFederationGrantStoreModuleOptions {
+	/** The environment the configuration was selected by, when the root knows it by another name than `NODE_ENV`. */
+	readonly environment?: string;
+}
+
+/** Canonical base64 of exactly 32 bytes, or a refusal that names the key. */
+const KEY_BYTES = 32;
+
+/**
+ * Canonical base64 of exactly 32 bytes — which is what the comment always
+ * said, and now what the code checks.
+ *
+ * Copilot found both halves of the gap: `Buffer.from(…, "base64")` ignores
+ * embedded whitespace, and the comparison stripped it before comparing, so
+ * `"<key>\n"` — a key pasted out of a file, or wrapped by a secret manager —
+ * was accepted as canonical; and the length was left to the crypto layer, so a
+ * key of the wrong size failed per grant rather than at boot, after a user had
+ * already consented.
+ */
+const keyMaterial = (id: string, encoded: string): Buffer => {
+	const refuse = (): never => {
+		throw new Error(
+			`federation grant store: encryption key "${id}" must be canonical base64 of ${KEY_BYTES} bytes`,
+		);
+	};
+	// No whitespace anywhere, not even at the ends: a value that has to be
+	// tidied up to be read is not the value an operator checked.
+	if (/\s/.test(encoded)) refuse();
+	const bytes = Buffer.from(encoded, "base64");
+	if (bytes.toString("base64") !== encoded) refuse();
+	if (bytes.length !== KEY_BYTES) refuse();
+	return bytes;
+};
+
+/**
+ * The options the adapter takes, from the configuration an operator wrote.
+ *
+ * A function of its own, and exported, because the conversion is where a
+ * module goes wrong silently: seconds forwarded as milliseconds keep a
+ * tombstone for thirty seconds instead of thirty days, and a `0` read as
+ * "unset" gives a deployment that wanted no tombstones the default thirty
+ * days of them.
+ */
+export function resolveRedisFederationGrantStoreOptions(
+	rawConfig: unknown,
+	moduleOptions: RedisFederationGrantStoreModuleOptions,
+): Omit<RedisFederationGrantStoreOptions, "client"> {
+	const config = moduleConfigSchema.parse(rawConfig);
+	const grants = config.federationGrants;
+	const mode = grants.encryptionMode ?? "required";
+	return {
+		keyPrefix: config.redisFederationGrantStore.keyPrefix,
+		...(grants.tombstoneRetention !== undefined
+			? { tombstoneRetentionMs: grants.tombstoneRetention * 1000 }
+			: {}),
+		...(config.redisFederationGrantStore.listingAllowanceMs !== undefined
+			? { listingAllowanceMs: config.redisFederationGrantStore.listingAllowanceMs }
+			: {}),
+		encryption:
+			mode === "allow-plaintext"
+				? { mode: "allow-plaintext" }
+				: {
+						mode: "required",
+						// In the order they were written: the first seals.
+						keys: (grants.encryptionKeys ?? []).map((entry) => ({
+							id: entry.id,
+							key: keyMaterial(entry.id, entry.key),
+						})),
+					},
+		guard: {
+			...(moduleOptions.environment !== undefined
+				? { environment: moduleOptions.environment }
+				: {}),
+			...(config.deployment?.mode !== undefined ? { deploymentMode: config.deployment.mode } : {}),
+		},
+	};
+}
+
+/**
+ * `defineModule` manifest for the Redis federation grant store (#593, D16).
+ *
+ * Its own module, and not a branch of the route package's, because the store
+ * is what a deployment installs whether or not it mounts the routes —
+ * `revokeAllForSubject` and a logout reach grants through the port.
+ *
+ * The plaintext guard reads `deployment.mode` off the configuration and the
+ * selected environment off `options`, for the reason the federation-token
+ * store's does: the module cannot know how a composition root chose its
+ * configuration file.
+ */
+export function redisFederationGrantStoreModuleFor(
+	options: RedisFederationGrantStoreModuleOptions = {},
+) {
+	return defineModule({
+		name: "redis-federation-grant-store",
+		requires: ["federationGrantStoreClient", "config"] as const,
+		configSchema: moduleConfigSchema,
+		provides: {
+			federationGrantStore: (deps) =>
+				createRedisFederationGrantStore({
+					client: deps.federationGrantStoreClient,
+					...resolveRedisFederationGrantStoreOptions(deps.config, options),
+				}),
+		},
+	});
+}
+
+/**
+ * The module with no environment named: the plaintext guard reads `NODE_ENV`
+ * and `deployment.mode` (#473). A composition root that selects its
+ * configuration by another name builds its own with
+ * {@link redisFederationGrantStoreModuleFor}.
+ */
+export const redisFederationGrantStoreModule = redisFederationGrantStoreModuleFor();

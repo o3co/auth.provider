@@ -77,7 +77,7 @@ function extractNetworkCode(error: unknown): string | undefined {
  * through this field. Anything else an upstream sends is left out, and a
  * caller reports it as unknown.
  */
-const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set([
+export const KNOWN_ERROR_CODES: ReadonlySet<string> = new Set([
 	// RFC 6749 §5.2 — the token endpoint.
 	"invalid_request",
 	"invalid_client",
@@ -151,6 +151,20 @@ function structuredReason(error: object): FederationRefreshErrorReason | undefin
  * it acts on `reason` alone. The federation grant retrieval (#593, D12) is the
  * second caller.
  */
+/**
+ * Whether a code may be repeated to a caller (#593, D11, D18).
+ *
+ * The allow-list above is applied where a classification is *made*, and a
+ * stamped code is read back where one is *remembered* (D12) — a stamp a
+ * fixture seeded, a version wrote before this list, or someone edited in the
+ * keyspace would otherwise reach a caller unchecked. So the same question is
+ * asked again wherever a reason is built from stored data, which is what keeps
+ * D11's promise true rather than merely intended.
+ */
+export function isKnownFederationRefreshErrorCode(code: unknown): code is string {
+	return typeof code === "string" && KNOWN_ERROR_CODES.has(code);
+}
+
 export function classifyFederationRefreshError(
 	error: unknown,
 ): FederationRefreshErrorClassification {

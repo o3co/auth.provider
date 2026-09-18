@@ -145,7 +145,11 @@ export {
 	DEFAULT_FEDERATION_GRANT_LISTING_ALLOWANCE_MS,
 	type FederationGrantEncryption,
 	type FederationGrantKey,
+	type RedisFederationGrantStoreModuleOptions,
 	type RedisFederationGrantStoreOptions,
+	redisFederationGrantStoreModule,
+	redisFederationGrantStoreModuleFor,
+	resolveRedisFederationGrantStoreOptions,
 } from "./federation-grant-store.mjs";
 export {
 	createRedisFederationTokenStore,

@@ -239,6 +239,52 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@26.5.1)(@vitest/coverage-v8@5.0.0)(msw@2.15.0(@types/node@26.5.1)(typescript@6.0.3))(vite@8.0.11(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0))
 
+  packages/federation-grants:
+    dependencies:
+      zod:
+        specifier: ^4.6.2
+        version: 4.6.2
+    devDependencies:
+      '@o3co/auth-provider-core':
+        specifier: workspace:*
+        version: link:../core
+      '@o3co/auth-provider-oauth':
+        specifier: workspace:*
+        version: link:../oauth
+      '@o3co/auth-provider-redis':
+        specifier: workspace:*
+        version: link:../redis
+      '@o3co/auth-provider-session':
+        specifier: workspace:*
+        version: link:../session
+      '@types/express':
+        specifier: ^5.0.6
+        version: 5.0.6
+      '@types/supertest':
+        specifier: ^7.2.1
+        version: 7.2.1
+      '@vitest/coverage-v8':
+        specifier: ^5.0.0
+        version: 5.0.0(vitest@5.0.0)
+      express:
+        specifier: ^5.0.0
+        version: 5.2.1
+      ioredis:
+        specifier: ^6.0.0
+        version: 6.0.0
+      supertest:
+        specifier: ^7.2.2
+        version: 7.2.2
+      testcontainers:
+        specifier: ^12.1.0
+        version: 12.1.0
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@26.5.1)(@vitest/coverage-v8@5.0.0)(msw@2.15.0(@types/node@26.5.1)(typescript@6.0.3))(vite@8.0.11(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0))
+
   packages/federation-oidc:
     dependencies:
       jose:

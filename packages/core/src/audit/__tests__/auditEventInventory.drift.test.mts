@@ -89,9 +89,80 @@ function emittedEventTypes(): ReadonlySet<string> {
 			const literal = /type:\s*"([^"]+)"/.exec(windowText);
 			if (literal?.[1]) found.add(literal[1]);
 		}
+		for (const type of federationGrantEmissions(source)) found.add(type);
 	}
 	return found;
 }
+
+/**
+ * #593's emissions, which the two receivers above cannot see.
+ *
+ * `retrieveFederationGrantToken` does not build an `AuditEvent` and does not
+ * know a sink: it calls its own `audit(deps, request, "<type>", outcome, …)`
+ * seam, and the branches that audit *after* answering return
+ * `audits: [["<type>", outcome]]` tuples for the caller to hand over. The
+ * routes package then maps whatever arrives onto `sink.record(mapped)`, with
+ * `type` copied from the event — so there is no literal at the sink call
+ * either, and both directions of this guard would be blind to the whole
+ * family.
+ *
+ * Narrow on purpose, and narrow in the same way the receivers above are: a
+ * `"federation.grant.*"` literal counts only where it is an argument to that
+ * seam or an entry in one of those tuples. The union that declares the seven
+ * type names does NOT count — a type nothing emits any more has to fail here,
+ * and a declaration is not an emission.
+ */
+function federationGrantEmissions(source: string): readonly string[] {
+	const found: string[] = [];
+	// `audit(deps, request, "federation.grant.x", …)` — the seam's third argument.
+	for (const call of source.matchAll(
+		/\baudit\((?:[^()"]|\([^()]*\))*?"(federation\.grant\.[\w.]+)"/g,
+	)) {
+		if (call[1]) found.push(call[1]);
+	}
+	// A `PendingAudit` tuple: `["federation.grant.x", "<outcome>"]`, whether it
+	// sits inside an `audits: [[…]]` list or is bound to a name first. Matched
+	// as "the first element of an array literal", which is what a tuple is and
+	// what the `| "federation.grant.x"` members of the type union are not.
+	for (const tuple of source.matchAll(/\[\s*"(federation\.grant\.[\w.]+)"/g)) {
+		if (tuple[1]) found.push(tuple[1]);
+	}
+	return found;
+}
+
+describe("the federation-grant emission scan (#593)", () => {
+	// The guard's second direction — "lists no event nothing emits any more" —
+	// only means something while a DECLARATION does not count as an emission.
+	// Core declares the seven type names in one union, so a scan wide enough to
+	// see that union would report every one of them as emitted for ever, and
+	// the day an emission site is deleted nothing would notice.
+	it("does not count the type union that declares the names", () => {
+		expect(
+			federationGrantEmissions(
+				'readonly type:\n\t\t| "federation.grant.token.success"\n\t\t| "federation.grant.revoked";',
+			),
+		).toEqual([]);
+	});
+
+	it("counts a call to core's audit seam", () => {
+		expect(
+			federationGrantEmissions(
+				'audit(deps, request, "federation.grant.token.denied", outcomeOf(denial), grant)',
+			),
+		).toEqual(["federation.grant.token.denied"]);
+	});
+
+	it("counts a pending-audit tuple, bound to a name or inside a list", () => {
+		expect(federationGrantEmissions('audits: [["federation.grant.refresh_failed", "x"]]')).toEqual([
+			"federation.grant.refresh_failed",
+		]);
+		expect(
+			federationGrantEmissions(
+				'const a: PendingAudit = ["federation.grant.refreshed", "success"];',
+			),
+		).toEqual(["federation.grant.refreshed"]);
+	});
+});
 
 describe("built-in audit event inventory (#369)", () => {
 	const emitted = emittedEventTypes();

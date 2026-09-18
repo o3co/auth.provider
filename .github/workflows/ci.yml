@@ -217,6 +217,22 @@ jobs:
           disable_search: true
           fail_ci_if_error: false
 
+      # #593: a package whose coverage is never uploaded is a package whose
+      # tests nobody's dashboard can see, and whose diff lines codecov has no
+      # data for. This list is hand-maintained and only ever had four entries;
+      # the rest of `packages/**` runs `test:coverage` in the step above and
+      # then has its report thrown away. Adding the new one here rather than
+      # all of them: turning the others on changes the project ratio for code
+      # this branch does not touch, which is its own change.
+      - name: Upload coverage to Codecov (federation-grants)
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: packages/federation-grants/coverage/coverage-final.json
+          flags: federation-grants
+          disable_search: true
+          fail_ci_if_error: false
+
       - name: Upload coverage to Codecov (foundation)
         uses: codecov/codecov-action@v5
         with:

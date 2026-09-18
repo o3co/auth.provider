@@ -131,8 +131,14 @@ const MAX_DURATION_MS = 31_536_000_000;
  * takes `yes` / `no` / `on` / `off`: those used to work by accident on the
  * leaves the bridge could reach, and now fail at boot naming the four
  * spellings that are real.
+ *
+ * Exported since #593: the federation-grants routes ship in a package of their
+ * own and read `federationGrants.enabled`, which `reference.conf` lets
+ * `FEDERATION_GRANTS_ENABLED` reach. A second copy of these spellings out
+ * there is a second vocabulary to drift from this one, and the feature it
+ * would drift on is one whose default is off.
  */
-const coerceBooleanFromEnv = z.preprocess(
+export const coerceBooleanFromEnv = z.preprocess(
 	(val) => {
 		if (typeof val === "boolean") return val;
 		if (typeof val === "string") {
@@ -1129,6 +1135,30 @@ export function composeConfigSchema(moduleSchemas: z.ZodObject<z.ZodRawShape>[])
 	return schema;
 }
 
+/**
+ * A duration an operator wrote, read strictly (#593).
+ *
+ * `z.coerce.number()` is the house default for a value HOCON may substitute as
+ * a string, and for most sections it is right. It is wrong for this block, and
+ * Copilot named why: `Number()` reads `null` and `[]` as `0`, `true` as `1` and
+ * `"1e3"` as `1000`, so a malformed duration was NORMALISED here and the
+ * package's own strict reader — which refuses exactly those — never saw the
+ * value an operator wrote. `tombstoneRetention: null` silently disabled
+ * tombstones; `refreshBuffer: null` handed out tokens with milliseconds left.
+ *
+ * So: a number, or the plain decimal string an environment variable arrives
+ * as. Anything that would have to be converted to be understood was not
+ * written as a duration, and fails boot naming the key.
+ */
+const durationFromEnv = (bounds: z.ZodNumber) =>
+	z.preprocess((value) => {
+		if (typeof value === "number") return value;
+		if (typeof value === "string" && /^\d+$/.test(value.trim())) return Number(value.trim());
+		// Handed through unchanged, and refused by `bounds` with a message that
+		// names what is acceptable.
+		return value;
+	}, bounds);
+
 const federationEntrySchema = z
 	.object({
 		enabled: coerceBooleanFromEnv,
@@ -1137,6 +1167,70 @@ const federationEntrySchema = z
 	.passthrough();
 
 export const fullSectionsSchema = z.object({
+	// #593, D9/D16: the federation-grants section. Declared here for the
+	// reason `deviceAuthorization` above is — this object strips keys it
+	// does not know and the standalone validates against it before any
+	// module's own `configSchema` runs — and for one of its own: the
+	// bundled Redis grant store reads the same block, and it is installed
+	// whether or not the routes are. An undeclared block would take an
+	// operator's encryption keys and lifetime bound with it, silently.
+	//
+	// Presence and shape only, as elsewhere here. The bounds live where the
+	// values are used (`assertFederationGrantRetrievalLimits`, the store's
+	// constructor) and the defaults in `config/reference.conf`. Numbers ride
+	// `z.coerce` and booleans `coerceBooleanFromEnv` for the #288 reason: a
+	// `${?VAR}` arrives as a string.
+	federationGrants: z
+		.object({
+			enabled: coerceBooleanFromEnv.optional(),
+			// Seconds. A grant's own lifetime (D3): what a new one gets, and
+			// the most an operator permits — the code's one-year ceiling still
+			// applies above it.
+			defaultExpiresIn: durationFromEnv(z.number().int().positive()).optional(),
+			maxExpiresIn: durationFromEnv(z.number().int().positive()).optional(),
+			// Seconds. The retrieval's timings (D10, D12).
+			refreshBuffer: durationFromEnv(z.number().int().nonnegative()).optional(),
+			ineligibleRetryAfter: durationFromEnv(z.number().int().positive()).optional(),
+			refreshFailureBackoff: durationFromEnv(z.number().int().nonnegative()).optional(),
+			// Milliseconds, as the limits they become are.
+			upstreamTimeoutMs: durationFromEnv(z.number().int().positive()).optional(),
+			upstreamHardTimeoutMs: durationFromEnv(z.number().int().positive()).optional(),
+			refreshLockTtlMs: durationFromEnv(z.number().int().positive()).optional(),
+			lockWaitMs: durationFromEnv(z.number().int().nonnegative()).optional(),
+			persistRetryBudgetMs: durationFromEnv(z.number().int().positive()).optional(),
+			// Seconds. How long a record answers past the end of what it was
+			// authorized for (D16). Zero is a deployment that keeps no
+			// tombstones.
+			tombstoneRetention: durationFromEnv(z.number().int().nonnegative()).optional(),
+			// The credential envelope's key ring (D16). The first key seals;
+			// every listed key opens, so one stays in the ring for as long as
+			// a paused grant may live.
+			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
+			encryptionKeys: z
+				.array(z.object({ id: z.string().min(1), key: z.string().min(1) }))
+				.optional(),
+			// What a grant may be for (D6). An empty map is valid: removing the
+			// last connection must remain an operable change.
+			connections: z
+				.record(
+					z.string().min(1),
+					z.object({
+						federation: z.string().min(1),
+						scopes: z.array(z.string().min(1)).min(1),
+						resource: z.string().min(1).optional(),
+						// No default for either: a guessed access-token maximum
+						// invents a residual-access policy (D15), and a guessed
+						// boundary silently shares one (D13).
+						boundary: z.string().min(1),
+						maxAccessTokenLifetime: durationFromEnv(z.number().int().positive()),
+						allowScopeSubsets: coerceBooleanFromEnv.optional(),
+						authorizationParams: z.record(z.string(), z.string()).optional(),
+						callbackURL: z.string().min(1).optional(),
+					}),
+				)
+				.optional(),
+		})
+		.optional(),
 	session: z
 		.object({
 			// #282: the session secret signs the cookie that IS the
@@ -1563,6 +1657,15 @@ export const fullSectionsSchema = z.object({
 	// it the encryption key the store cannot start without — before the
 	// module's own `configSchema` sees it. Defaults live in `reference.conf`
 	// and in the module.
+	// #593, D16: this adapter's own layout, beside the other stores' prefixes.
+	// What a grant may BE is `federationGrants` above; this is where its keys
+	// live and how far past a horizon the subject index keeps a member.
+	redisFederationGrantStore: z
+		.object({
+			keyPrefix: z.string().optional(),
+			listingAllowanceMs: z.coerce.number().int().nonnegative().optional(),
+		})
+		.optional(),
 	redisFederationTokenStore: z
 		.object({
 			keyPrefix: z.string().optional(),

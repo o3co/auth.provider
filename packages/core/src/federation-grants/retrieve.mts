@@ -14,7 +14,10 @@
  * limitations under the License.
  */
 
-import { classifyFederationRefreshError } from "../federation-tokens/refresh-error.mjs";
+import {
+	classifyFederationRefreshError,
+	isKnownFederationRefreshErrorCode,
+} from "../federation-tokens/refresh-error.mjs";
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
 import {
 	federationGrantIneligibilityRetry,
@@ -674,7 +677,11 @@ async function evaluate(
 				: failure.kind === "rejected"
 					? {
 							code: "upstream_rejected",
-							reason: grant.refreshFailure?.upstreamCode ?? "unknown",
+							// Asked again on the way out: the allow-list was applied
+							// when the stamp was written, and this reads one back.
+							reason: isKnownFederationRefreshErrorCode(grant.refreshFailure?.upstreamCode)
+								? grant.refreshFailure.upstreamCode
+								: "unknown",
 							retryAfterSeconds,
 						}
 					: { code: "temporarily_unavailable", reason: "upstream", retryAfterSeconds };

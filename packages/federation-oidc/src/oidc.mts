@@ -28,6 +28,7 @@ import {
 	type FederationProfile,
 	type FederationProvider,
 	type MappedClaims,
+	RESERVED_DELEGATED_AUTHORIZATION_PARAMS,
 	type RefreshedTokens,
 	type SupportsClaimMapping,
 	type SupportsDelegatedAuthorization,
@@ -144,21 +145,6 @@ const stringArray = (value: unknown): readonly string[] | undefined =>
  * authorization and refresh never disagree about it; a request object or a
  * response mode would change what comes back to the callback.
  */
-const RESERVED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new Set([
-	"client_id",
-	"response_type",
-	"redirect_uri",
-	"state",
-	"code_challenge",
-	"code_challenge_method",
-	"nonce",
-	"scope",
-	"resource",
-	"request",
-	"request_uri",
-	"response_mode",
-]);
-
 /**
  * What a delegated refresh hands its fetch, for the duration of one library
  * call: the caller's signal, and a place for the token endpoint's raw body.
@@ -448,7 +434,7 @@ export async function createOidcProvider(
 		}
 		const extra = params.authorizationParams ?? {};
 		for (const [key, value] of Object.entries(extra)) {
-			if (RESERVED_AUTHORIZATION_PARAMS.has(key)) {
+			if (RESERVED_DELEGATED_AUTHORIZATION_PARAMS.has(key)) {
 				throw new Error(
 					`${label}: authorizationParams may not set "${key}" — this provider owns it (#593, D17)`,
 				);

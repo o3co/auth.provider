@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import { z } from "zod";
+import { fullSectionsSchema } from "../config/application.schema.mjs";
 import { defineModule } from "../modules/index.mjs";
 import { createMemoryFederationGrantStore } from "./memory.mjs";
 
@@ -31,7 +33,27 @@ export const memoryFederationGrantStoreModule = defineModule({
 		reason:
 			"federation grants fork per replica — a grant lodged or authorized on one replica is unknown to every other, one revoked there still yields upstream tokens here, and a refresh token rotated on one replica leaves every other presenting the old one, which a reuse-detecting IdP answers by revoking the family",
 	},
+	// #593 slice 4: the same `federationGrants.tombstoneRetention` the Redis
+	// store reads, in the same seconds — a deployment that shortens it must not
+	// find the in-memory adapter still keeping thirty days of tombstones. The
+	// key is optional and the adapter's own default applies without it, so this
+	// module needs no configuration to be installed.
+	requires: ["config"] as const,
+	// Projected from core's own declaration rather than restated: a narrower
+	// copy here read `tombstoneRetention: null` as zero — Copilot's finding —
+	// and silently gave a deployment no tombstones at all, which is the one
+	// setting where "no tombstones" and "thirty days" look identical until
+	// somebody asks why a revoked grant cannot be looked up.
+	configSchema: z.object({
+		federationGrants: fullSectionsSchema.shape.federationGrants,
+	}),
 	provides: {
-		federationGrantStore: () => createMemoryFederationGrantStore(),
+		federationGrantStore: (deps) => {
+			const seconds = (deps.config as { federationGrants?: { tombstoneRetention?: number } })
+				.federationGrants?.tombstoneRetention;
+			return createMemoryFederationGrantStore(
+				seconds === undefined ? {} : { tombstoneRetentionMs: seconds * 1000 },
+			);
+		},
 	},
 });

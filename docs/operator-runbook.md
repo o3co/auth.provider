@@ -396,6 +396,36 @@ The rules a Store must apply before it links — never on an unverified or
 relay address, never by e-mail alone, `sub` verbatim — are in
 [`packages/session/README.md`](../packages/session/README.md#account-linking-across-federations-482).
 
+### Federation grants — what each answer means (#593)
+
+`POST /oauth/federation-grants/:grantId/token` hands a client an **upstream**
+access token on a user's standing consent. The user is not present, so the
+question an operator asks about any failure is *"does this need me, or does it
+need them?"* — and the status says which.
+
+| What you see | What it is | What to do |
+| --- | --- | --- |
+| `503 temporarily_unavailable` / `storage` | The revocation boundary, the store, or the backstop write failed. Fails closed deliberately: without the boundary there is no way to know the subject's grants were not revoked, and D13 does not read an unknown answer as "nothing was revoked". | Restore the store. No grant is lost and nothing has to be re-consented. |
+| `503 temporarily_unavailable` / `key_unavailable` | The credential is sealed under a key id that is not in the ring. | Put the key back. The records and the credentials are untouched — this is recoverable, which is why it is a 503 and not a 410. |
+| `410 reauthorization_required` / `credential_unreadable` | The credential is there and does not authenticate under any key in the ring. | Investigate the key material first, and restore it if it was replaced rather than rotated. Only ask the user again once you are sure the material is right: consent you spend needlessly is consent you cannot get back. |
+| `503 temporarily_unavailable` / `lock_timeout` or `concurrent_update` | Another replica is refreshing, or this call's write lost. | Retry, at the client. Do NOT add a retry inside the route — a second attempt can cost a second upstream rotation. |
+| `502 upstream_rejected` | The upstream refused with a code this provider knows. `Retry-After` is present when the answer came from a stamped failure. | Read the reason. `invalid_client` is your configuration; `invalid_grant` ends the credential and arrives as `410 reauthorization_required` instead. |
+| `502 upstream_token_ineligible` | The upstream answered with a token that may not be handed on: no finite lifetime, a lifetime over the connection's `maxAccessTokenLifetime`, scopes beyond the consent, a token type that is not bearer, or an answer that could not be read. | The reason names it. All but the last are a connection setting against an upstream policy — raise the maximum deliberately, or ask for fewer scopes. |
+| `429 rate_limited` / `provider` | This deployment's own throttle, keyed `federation_grants:ip:<ip>`. | Configure `limits.federation_grants` on the limiter adapter if the budget is genuinely too small. |
+| `429 rate_limited` / `upstream` | The IdP throttled us. `Retry-After` when it said when. | Back off at the client. |
+| `503 service_unavailable` / `shutting_down` | The process has begun draining and will not start work nothing will wait for. | Normal during a rolling restart. Size the host's cleanup allowance at **45 seconds or more** — the standalone default of ten is shorter than the upstream hard timeout plus the persist budget, so a shutdown under it abandons exactly the rotation the drain exists to wait for. |
+| `503 service_unavailable`, "Rate limiter temporarily unavailable" | The limiter backend is down and `rateLimit.failMode = "closed"`. | The product-wide policy, not this route's. |
+| `federation.grant.refresh_persist_failed` (`storage`, `write_in_flight`, `hard_timeout`) | A refresh succeeded upstream and this process could not write down what it got. | A rotation may be lost: the IdP has moved to a refresh token this deployment does not have. Reconnect the grant only if subsequent calls actually answer `410 reauthorization_required`; an IdP with a rotation grace period often does not. |
+| `federation_grant.failure` (warn) | The sanitized report core makes for every cause it turns into an answer. Carries `during`, `grantId`, `correlationId` and a classification — never the error, its message, its stack or anything an upstream echoed. | Correlate by `correlationId`, which is the caller's `x-request-id` and is the same on events written after the response. |
+
+A failed audit, touch or lock release does not change an answer that has
+already been decided; it is reported through `federation_grant.failure` and
+nothing waits for it.
+
+**A grant needs a federation that is enabled**, and enabling a federation
+brings the session-federation stores with it. A deployment that wants offline
+delegation and nothing else still wires those.
+
 ---
 
 ## 4. Alerts
@@ -484,6 +514,10 @@ check this page, so when the two disagree, the constant is right:
 
 `authorize.granted`, `authorize.rejected`, `consent.denied`, `consent.granted`,
 `device.approved`, `device.denied`, `device.rate_limited`,
+`federation.grant.reauthorization_required`,
+`federation.grant.refresh_failed`, `federation.grant.refresh_persist_failed`,
+`federation.grant.refreshed`, `federation.grant.revoked`,
+`federation.grant.token.denied`, `federation.grant.token.success`,
 `federation.identity.link_refused`, `federation.identity.linked`,
 `federation.logout.idp_unreachable`,
 `federation.logout.success`, `federation.token.family_revoked`,

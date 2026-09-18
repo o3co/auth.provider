@@ -139,6 +139,9 @@ export {
 	AppConfigSchema,
 	type CoreConfig,
 	CoreConfigSchema,
+	// #593: the four spellings an environment variable may say a boolean in,
+	// for the packages outside core that read a section this file declares.
+	coerceBooleanFromEnv,
 	composeConfigSchema,
 	fullSectionsSchema,
 	readAccessTokenRevocationMode,
@@ -164,6 +167,7 @@ export {
 	classifyFederationRefreshError,
 	type FederationRefreshErrorClassification,
 	type FederationRefreshErrorReason,
+	isKnownFederationRefreshErrorCode,
 } from "./federation-tokens/refresh-error.mjs";
 // FederationTokenStore — TODO-F-1. Backing client interface
 // (FederationTokenStoreClient) lives in @o3co/auth-provider-redis (S3).
@@ -816,6 +820,12 @@ export {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "./federation-grants/revision.mjs";
+// #593 slice 4: the `federationGrants.*` block an operator writes, turned into
+// the limits the retrieval takes. In core because the block is core's.
+export {
+	FEDERATION_GRANT_SETTING_DEFAULTS,
+	resolveFederationGrantRetrievalLimits,
+} from "./federation-grants/settings.mjs";
 export type {
 	FederationGrantCredentialState,
 	FederationGrantInspection,

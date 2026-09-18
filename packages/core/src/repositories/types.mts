@@ -142,6 +142,26 @@ export interface Client {
 	 */
 	readonly allowedAzpForFederationToken?: boolean;
 	/**
+	 * The federation grant connections (#593, D9) this client may spend a
+	 * grant on. Absent or empty means none: a registration made before
+	 * offline delegation existed must not find itself opted into it.
+	 *
+	 * Deny-by-absence rather than a wildcard, and exact names rather than a
+	 * pattern, for the reason {@link allowedAzpForFederationToken} is opt-in:
+	 * a grant hands a client the user's access at an upstream, and the blast
+	 * radius of a mistake is every user who ever connected.
+	 */
+	readonly allowedFederationGrantConnections?: readonly string[];
+	/**
+	 * Where the connect flow may return to for this client (#593, D7). Absent
+	 * or empty means nowhere, and {@link allowedRedirectUris} is never
+	 * inherited: the two flows end in different places, and a worker that only
+	 * spends grants never performs the browser flow at all.
+	 *
+	 * Held to the same rules as any other redirect URI.
+	 */
+	readonly federationGrantRedirectUris?: readonly string[];
+	/**
 	 * Sender-constraint requirement for this client. See Wave 2 Token-
 	 * binding Cluster spec §4.8. Surfaces through `PublicClient` (via
 	 * `Omit`) and `AuthenticatedClient` (via the `/token` route's
