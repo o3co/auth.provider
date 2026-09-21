@@ -833,6 +833,20 @@ export {
 	withinFederationGrantLifetimeCeiling,
 } from "./federation-grants/lifetime.mjs";
 export {
+	type FederationGrantAcquisitionConnection,
+	type FederationGrantLodged,
+	type FederationGrantLodgingClient,
+	type FederationGrantLodgingDeps,
+	type FederationGrantLodgingRefusal,
+	type FederationGrantLodgingRequest,
+	type FederationGrantLodgingResult,
+	type FederationGrantReauthorizationRequest,
+	type FederationGrantReauthorizationResult,
+	federationGrantRedirectUriReservedParameter,
+	lodgeFederationGrantIntent,
+	lodgeFederationGrantReauthorization,
+} from "./federation-grants/lodge.mjs";
+export {
 	createMemoryFederationGrantStore,
 	DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS,
 	type MemoryFederationGrantStore,
@@ -874,6 +888,7 @@ export {
 // the limits the retrieval takes. In core because the block is core's.
 export {
 	FEDERATION_GRANT_SETTING_DEFAULTS,
+	resolveFederationGrantAcquisitionLimits,
 	resolveFederationGrantKeepPolicy,
 	resolveFederationGrantRetrievalLimits,
 } from "./federation-grants/settings.mjs";
