@@ -24,6 +24,7 @@
  * subject's boundary, and the upstream's authorization endpoint.
  */
 
+import { randomUUID } from "node:crypto";
 import {
 	type AuditEvent,
 	createMemoryFederationGrantIntentStore,
@@ -33,6 +34,7 @@ import {
 	lodgeFederationGrantIntent,
 	lodgeFederationGrantReauthorization,
 	type RateLimiter,
+	type RateLimitFailMode,
 	type UserSession,
 } from "@o3co/auth-provider-core";
 import express from "express";
@@ -42,8 +44,10 @@ import { createFederationGrantBackground } from "#/background.mjs";
 import {
 	createFederationGrantBrowserRouter,
 	FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
+	type FederationGrantBrowserRouterOptions,
 	type FederationGrantDelegatedAuthorizer,
 } from "#/browserRoutes.mjs";
+import { brokenLimiter, refusingLimiter } from "./harness.mjs";
 
 const ISSUER = "https://auth.test";
 const REDIRECT = "https://client.test/connected";
@@ -75,7 +79,15 @@ interface Browser {
 	readonly sid?: string;
 }
 
-function world(options: { rateLimiter?: RateLimiter } = {}) {
+interface WorldOptions {
+	readonly rateLimiter?: RateLimiter;
+	readonly failMode?: RateLimitFailMode;
+	readonly identityLookup?: FederationGrantBrowserRouterOptions["identityLookup"];
+	/** Replaces the repository whose lookup records into `state.lookups`. */
+	readonly userRepository?: FederationGrantBrowserRouterOptions["userRepository"];
+}
+
+function world(options: WorldOptions = {}) {
 	const grants = createMemoryFederationGrantStore();
 	const intents = createMemoryFederationGrantIntentStore();
 	const background = createFederationGrantBackground();
@@ -113,8 +125,47 @@ function world(options: { rateLimiter?: RateLimiter } = {}) {
 		},
 		exchangeThrows: undefined as Error | undefined,
 		exchanged: [] as Record<string, unknown>[],
+		/**
+		 * An outage on cue: a method's name, and how many calls to it still
+		 * succeed before it — and every call after — throws. Applied to what the
+		 * router is handed, never to the stores a test reads directly.
+		 */
+		faults: new Map<string, number>(),
+		/** Run once, just before the named method: another request landing in between. */
+		before: new Map<string, () => Promise<unknown>>(),
+		/** Ids the router draws, in order, before it falls back to random ones. */
+		ids: [] as string[],
+		auditFails: false,
+		authorizerMissing: false,
+		configurationThrows: false,
 	};
 	const now = () => state.now;
+
+	const intercept = async (name: string): Promise<void> => {
+		const hook = state.before.get(name);
+		if (hook !== undefined) {
+			state.before.delete(name);
+			await hook();
+		}
+		const passes = state.faults.get(name);
+		if (passes === undefined) return;
+		if (passes > 0) {
+			state.faults.set(name, passes - 1);
+			return;
+		}
+		throw new Error(`injected outage: ${name}`);
+	};
+	const faulty = <T extends object>(target: T): T =>
+		new Proxy(target, {
+			get(object, key) {
+				const value = Reflect.get(object, key);
+				if (typeof value !== "function") return value;
+				return async (...args: unknown[]) => {
+					await intercept(String(key));
+					return await value.apply(object, args);
+				};
+			},
+		});
 
 	const app = express();
 	// A stand-in for express-session: which browser this is comes from a header.
@@ -129,14 +180,20 @@ function world(options: { rateLimiter?: RateLimiter } = {}) {
 	app.use(
 		FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
 		createFederationGrantBrowserRouter({
-			intentStore: intents,
-			grantStore: grants,
+			intentStore: faulty(intents),
+			grantStore: faulty(grants),
 			clientRepository: {
-				findById: async (id: string) => (id === CLIENT.clientId ? (state.client as never) : null),
+				findById: async (id: string) => {
+					await intercept("findById");
+					return id === CLIENT.clientId ? (state.client as never) : null;
+				},
 				authenticate: async () => null,
 			} as never,
 			userSessionStore: {
-				get: async (sid: string) => durable.get(sid) ?? null,
+				get: async (sid: string) => {
+					await intercept("userSessionStore.get");
+					return durable.get(sid) ?? null;
+				},
 			} as never,
 			sessionsBoundary: async () => {
 				if (state.sessionsBoundary instanceof Error) throw state.sessionsBoundary;
@@ -144,10 +201,13 @@ function world(options: { rateLimiter?: RateLimiter } = {}) {
 			},
 			revocationSkewMs: 1000,
 			connections: {
-				get: (name: string) => state.connections.get(name),
+				get: (name: string) => {
+					if (state.configurationThrows) throw new Error("injected: configuration unreadable");
+					return state.connections.get(name);
+				},
 			} as ReadonlyMap<string, FederationGrantAcquisitionConnection>,
 			authorizerFor: (federation) =>
-				federation === "upstream"
+				federation === "upstream" && !state.authorizerMissing
 					? {
 							buildDelegatedAuthorizationUrl: (params) => {
 								if (state.authorizerThrows) throw new Error("reserved parameter");
@@ -174,21 +234,32 @@ function world(options: { rateLimiter?: RateLimiter } = {}) {
 				if (state.grantsBoundary instanceof Error) throw state.grantsBoundary;
 				return state.grantsBoundary;
 			},
-			identityLookup: "required",
-			userRepository: {
-				findSubjectByFederatedIdentity: async (identity) => {
-					state.lookups.push({ ...identity });
-					return state.linked.get(identity.sub) ?? null;
-				},
-			},
+			identityLookup: options.identityLookup ?? "required",
+			userRepository:
+				"userRepository" in options
+					? options.userRepository
+					: {
+							findSubjectByFederatedIdentity: async (identity) => {
+								await intercept("findSubjectByFederatedIdentity");
+								state.lookups.push({ ...identity });
+								return state.linked.get(identity.sub) ?? null;
+							},
+						},
 			upstreamTimeoutMs: 5_000,
 			rateLimiter:
 				options.rateLimiter ??
 				createMemoryRateLimiter({ limits: {}, defaultLimit: { limit: 1000, windowSeconds: 60 } }),
-			failMode: "closed",
+			failMode: options.failMode ?? "closed",
 			background,
 			now,
-			auditSink: { kind: "test", record: async (event) => void events.push(event) },
+			randomId: () => state.ids.shift() ?? randomUUID(),
+			auditSink: {
+				kind: "test",
+				record: async (event) => {
+					if (state.auditFails) throw new Error("injected: the audit sink is down");
+					events.push(event);
+				},
+			},
 		}),
 	);
 
@@ -862,28 +933,37 @@ describe("GET /session/federation-grants/callback/:connection — activating the
 	});
 });
 
-describe("the callback for a renewal", () => {
-	/** An active grant, then a renewal lodged, connected and approved in a second browser. */
-	async function renewal(w: World) {
-		const first = await approved(w, "b-1");
-		returned(await callback(w, { state: first.state, code: "c" }, "b-1"));
-		const lodged = await lodgeFederationGrantReauthorization(w.deps, {
-			client: CLIENT,
-			grantId: first.grantId,
-			subject: "alice",
-			redirectUri: REDIRECT,
-			clientState: "client-state-2",
-			correlationId: "corr-2",
-		});
-		if (!lodged.ok) throw new Error(`fixture: ${lodged.reason}`);
-		w.signIn("b-2");
-		const challenge = await w.challengeFor(lodged.handle, "b-2");
-		const answered = await w.answer({ challenge, decision: "accept" }, "b-2");
-		const state = new URL(answered.headers.location as string).searchParams.get("state") ?? "";
-		const before = await w.grants.find(first.grantId, w.state.now);
-		return { grantId: first.grantId, state, before };
-	}
+/** An active grant, then a renewal lodged and connected in a second browser: the question it parks. */
+async function renewalChallenge(w: World) {
+	const first = await approved(w, "b-1");
+	returned(await callback(w, { state: first.state, code: "c" }, "b-1"));
+	const lodged = await lodgeFederationGrantReauthorization(w.deps, {
+		client: CLIENT,
+		grantId: first.grantId,
+		subject: "alice",
+		redirectUri: REDIRECT,
+		clientState: "client-state-2",
+		correlationId: "corr-2",
+	});
+	if (!lodged.ok) throw new Error(`fixture: ${lodged.reason}`);
+	w.signIn("b-2");
+	return {
+		grantId: first.grantId,
+		handle: lodged.handle,
+		challenge: await w.challengeFor(lodged.handle, "b-2"),
+	};
+}
 
+/** The same renewal, approved: the state its browser comes back from the upstream in. */
+async function renewal(w: World) {
+	const { grantId, challenge } = await renewalChallenge(w);
+	const answered = await w.answer({ challenge, decision: "accept" }, "b-2");
+	const state = new URL(answered.headers.location as string).searchParams.get("state") ?? "";
+	const before = await w.grants.find(grantId, w.state.now);
+	return { grantId, state, before };
+}
+
+describe("the callback for a renewal", () => {
 	it("replaces the authorization in place and audits it as a reauthorization", async () => {
 		const w = world();
 		const { grantId, state, before } = await renewal(w);
@@ -1231,5 +1311,471 @@ describe("what the adversarial review found", () => {
 				(e) => e.type === "federation.grant.authorization_failed" && e.details?.grantId === grantId,
 			)?.details,
 		).toMatchObject({ outcome: "access_denied" });
+	});
+});
+
+// ---------------------------------------------------------------------------
+// What the coverage report on #610 showed no test reached: mostly the outage
+// branches, each of which promises to fail closed, and the races a real store
+// can lose. Every one is a promise; none was held to it.
+// ---------------------------------------------------------------------------
+
+const noPending = {
+	error: "invalid_request",
+	error_description: expect.stringContaining("no pending consent"),
+};
+
+describe("connect, when the world fails or moves", () => {
+	it("fails closed when the intent store cannot read the flow or park the question, and parks nothing", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		w.state.faults.set("getIntent", 0);
+		const unread = await w.connect(handle, "b-1");
+		expect(unread.status).toBe(503);
+		isPlain(unread);
+
+		w.state.faults.clear();
+		w.state.faults.set("parkConsent", 0);
+		w.state.ids.push("challenge-1");
+		const unparked = await w.connect(handle, "b-1");
+		expect(unparked.status).toBe(503);
+		isPlain(unparked);
+		expect(await w.intents.getConsent("challenge-1", w.state.now)).toBeNull();
+	});
+
+	it("parks nothing for a flow that finished while this browser was being judged", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		w.state.before.set("userSessionStore.get", () => w.intents.finishIntent(handle, w.state.now));
+		const response = await w.connect(handle, "b-1");
+		expect(response.status).toBe(400);
+		isPlain(response);
+		expect(response.text).toMatch(/expired or has already been used/);
+	});
+
+	it("asks a browser with no durable session behind its cookie to sign in again", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		w.browsers.set("b-bare", { isAuthenticated: true, user: { id: "alice" } });
+		const response = await w.connect(handle, "b-bare");
+		expect(response.status).toBe(403);
+		expect(response.text).toMatch(/sign in again/i);
+	});
+
+	it("reads a sessions boundary that is neither a date nor null as an outage", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		w.state.sessionsBoundary = "yesterday" as never;
+		expect((await w.connect(handle, "b-1")).status).toBe(503);
+	});
+
+	it("refuses a client whose registration no longer lists any connection", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		w.state.client = { clientId: CLIENT.clientId } as never;
+		const response = await w.connect(handle, "b-1");
+		expect(response.status).toBe(403);
+		expect(response.text).toMatch(/may no longer use this connection/);
+	});
+
+	it("answers a failure nothing expected with a plain 500", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		w.state.configurationThrows = true;
+		const response = await w.connect(handle, "b-1");
+		expect(response.status).toBe(500);
+		isPlain(response);
+	});
+});
+
+describe("the browser throttle, when the limiter is down", () => {
+	it("refuses every route in its own representation when the policy fails closed", async () => {
+		const w = world({ rateLimiter: brokenLimiter, failMode: "closed" });
+		const connect = await w.connect("any");
+		expect(connect.status).toBe(503);
+		isPlain(connect);
+		const page = await w.page("any");
+		expect(page.status).toBe(503);
+		expect(page.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "rate_limiter",
+		});
+		const back = await callback(w, { state: "any", code: "c" });
+		expect(back.status).toBe(503);
+		isPlain(back);
+	});
+
+	it("lets the request through when the policy fails open", async () => {
+		const w = world({ rateLimiter: brokenLimiter, failMode: "open" });
+		// Past the throttle, to the handler's own refusal of a link without a handle.
+		const response = await request(w.app).get(`${FEDERATION_GRANTS_BROWSER_MOUNT_PATH}/connect`);
+		expect(response.status).toBe(400);
+		isPlain(response);
+	});
+
+	it("answers the consent page's budget as /oauth/consent does", async () => {
+		const w = world({ rateLimiter: refusingLimiter });
+		const response = await w.page("any");
+		expect(response.status).toBe(429);
+		expect(response.body).toEqual({ error: "rate_limited", error_description: "provider" });
+	});
+});
+
+describe("the consent, when the world fails or moves", () => {
+	/** A question parked for alice's browser `b-1`. */
+	async function parked(w: World) {
+		const lodged = await w.lodge();
+		w.signIn("b-1");
+		return { ...lodged, challenge: await w.challengeFor(lodged.handle, "b-1") };
+	}
+
+	it("fails closed when the question cannot be read", async () => {
+		const w = world();
+		const { challenge } = await parked(w);
+		w.state.faults.set("getConsent", 0);
+		const response = await w.page(challenge, "b-1");
+		expect(response.status).toBe(503);
+		expect(response.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "storage",
+		});
+	});
+
+	it("stops a parked question the world has moved past, each with its own answer", async () => {
+		const w = world();
+		const { challenge, grantId } = await parked(w);
+
+		w.state.sessionsBoundary = new Error("down");
+		const unreadable = await w.page(challenge, "b-1");
+		expect(unreadable.status).toBe(503);
+		expect(unreadable.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "storage",
+		});
+		w.state.sessionsBoundary = null;
+
+		w.state.client = { ...CLIENT, allowedFederationGrantConnections: [] };
+		const withdrawn = await w.page(challenge, "b-1");
+		expect(withdrawn.status).toBe(403);
+		expect(withdrawn.body).toEqual({
+			error: "access_denied",
+			error_description: "connection_not_permitted",
+		});
+		w.state.client = { ...CLIENT };
+
+		// The grant ended between the park and the read: nothing left to answer.
+		await w.grants.revoke(grantId, "operator", w.state.now);
+		const stale = await w.page(challenge, "b-1");
+		expect(stale.status).toBe(400);
+		expect(stale.body).toEqual(noPending);
+	});
+
+	it("fails closed when the client registry cannot describe the client", async () => {
+		const w = world();
+		const { challenge } = await parked(w);
+		// The judgement's own read succeeds; the description's fails.
+		w.state.faults.set("findById", 1);
+		const response = await w.page(challenge, "b-1");
+		expect(response.status).toBe(503);
+		expect(response.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "client registry unavailable",
+		});
+	});
+
+	it("answers a failure nothing expected with a JSON 500, on both methods", async () => {
+		const w = world();
+		const { challenge } = await parked(w);
+		w.state.configurationThrows = true;
+		for (const response of [
+			await w.page(challenge, "b-1"),
+			await w.answer({ challenge, decision: "accept" }, "b-1"),
+		]) {
+			expect(response.status).toBe(500);
+			expect(response.body).toEqual({
+				error: "server_error",
+				error_description: "unexpected_error",
+			});
+		}
+	});
+
+	it("tells the page that an answer another tab sent first leaves nothing to answer", async () => {
+		const w = world();
+		const binding = { sessionId: "b-1", sid: "sid-b-1", subject: "alice" };
+		const first = await parked(w);
+		// Approved in another tab while this one was refusing.
+		w.state.before.set("answerConsent", () =>
+			w.intents.answerConsent({
+				challenge: first.challenge,
+				binding,
+				answer: { decision: "accept", state: "s-other", codeVerifier: "v", nonce: "n" },
+				now: w.state.now,
+			}),
+		);
+		const refused = await w.answer({ challenge: first.challenge, decision: "deny" }, "b-1");
+		expect(refused.status).toBe(400);
+		expect(refused.body).toEqual(noPending);
+
+		// Refused in another tab while this one was approving.
+		const second = await parked(w);
+		w.state.before.set("answerConsent", () =>
+			w.intents.answerConsent({
+				challenge: second.challenge,
+				binding,
+				answer: { decision: "deny" },
+				now: w.state.now,
+			}),
+		);
+		const approved = await w.answer({ challenge: second.challenge, decision: "accept" }, "b-1");
+		expect(approved.status).toBe(400);
+		expect(approved.body).toEqual(noPending);
+	});
+
+	it("does not spend the user's answer on an upstream state another flow already holds", async () => {
+		const w = world();
+		const first = await parked(w);
+		w.state.ids.push("same-state", "nonce-1", "verifier-1");
+		expect((await w.answer({ challenge: first.challenge, decision: "accept" }, "b-1")).status).toBe(
+			303,
+		);
+		const second = await parked(w);
+		w.state.ids.push("same-state", "nonce-2", "verifier-2");
+		const collided = await w.answer({ challenge: second.challenge, decision: "accept" }, "b-1");
+		expect(collided.status).toBe(503);
+		expect(collided.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "storage",
+		});
+		// Still parked: the user can answer again.
+		expect((await w.page(second.challenge, "b-1")).status).toBe(200);
+	});
+
+	it("returns a declined renewal to the client even when its pointer cannot be retired", async () => {
+		const w = world();
+		const { challenge } = await renewalChallenge(w);
+		w.state.faults.set("retireIntent", 0);
+		const response = await w.answer({ challenge, decision: "deny" }, "b-2");
+		expect(response.status).toBe(303);
+		const back = new URL(response.headers.location as string);
+		expect(back.searchParams.get("error")).toBe("access_denied");
+		expect(back.searchParams.get("state")).toBe("client-state-2");
+	});
+
+	it("keeps the answer when the federation's capability has gone", async () => {
+		const w = world();
+		const { challenge } = await parked(w);
+		w.state.authorizerMissing = true;
+		const response = await w.answer({ challenge, decision: "accept" }, "b-1");
+		expect(response.status).toBe(503);
+		expect(response.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "upstream_unavailable",
+		});
+		w.state.authorizerMissing = false;
+		expect((await w.page(challenge, "b-1")).status).toBe(200);
+	});
+
+	it("answers a body it cannot parse, and one too large, as the JSON routes do", async () => {
+		const w = world();
+		const path = `${FEDERATION_GRANTS_BROWSER_MOUNT_PATH}/consent`;
+		const malformed = await request(w.app)
+			.post(path)
+			.set("Content-Type", "application/json")
+			.send("{");
+		expect(malformed.status).toBe(400);
+		expect(malformed.body).toEqual({
+			error: "invalid_request",
+			error_description: "malformed_body",
+		});
+		const large = await request(w.app)
+			.post(path)
+			.send({ challenge: "x".repeat(16 * 1024), decision: "accept" });
+		expect(large.status).toBe(413);
+		expect(large.body).toEqual({ error: "invalid_request", error_description: "body_too_large" });
+	});
+});
+
+describe("the callback, when the world fails or moves", () => {
+	it("fails closed when the transaction cannot be read, and sends the browser nowhere", async () => {
+		const w = world();
+		const a = await approved(w);
+		w.state.faults.set("consumeTransaction", 0);
+		const response = await callback(w, { state: a.state, code: "c" }, "b-1");
+		expect(response.status).toBe(503);
+		isPlain(response);
+		expect(response.headers.location).toBeUndefined();
+	});
+
+	it("activates the grant and returns the browser even when the flow cannot be closed", async () => {
+		const w = world();
+		const a = await approved(w);
+		w.state.faults.set("finishIntent", 0);
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).has("error")).toBe(
+			false,
+		);
+		expect((await w.grants.find(a.grantId, w.state.now))?.status).toBe("active");
+	});
+
+	it("fails closed on a grants boundary it cannot read before the exchange, or that is not a date", async () => {
+		const w = world();
+		const a = await approved(w, "b-1");
+		w.state.grantsBoundary = new Error("down");
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"temporarily_unavailable",
+		);
+		const b = await approved(w, "b-2");
+		w.state.grantsBoundary = "yesterday" as never;
+		expect(returned(await callback(w, { state: b.state, code: "c" }, "b-2")).get("error")).toBe(
+			"temporarily_unavailable",
+		);
+		expect(w.state.exchanged).toHaveLength(0);
+	});
+
+	it("reads a return carrying neither a code nor an error as the upstream's fault", async () => {
+		const w = world();
+		const a = await approved(w);
+		expect(returned(await callback(w, { state: a.state }, "b-1")).get("error")).toBe(
+			"upstream_error",
+		);
+		expect(w.state.exchanged).toHaveLength(0);
+	});
+
+	it("fails closed when the session cannot be read", async () => {
+		const w = world();
+		const a = await approved(w);
+		w.state.faults.set("userSessionStore.get", 0);
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"temporarily_unavailable",
+		);
+	});
+
+	it("fails closed on the re-read and on the activation, and names a lost guard as such", async () => {
+		const w = world();
+		// Check 2's read succeeds; the re-read after the exchange does not.
+		const a = await approved(w, "b-1");
+		w.state.faults.set("isCurrentIntent", 1);
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"temporarily_unavailable",
+		);
+		w.state.faults.clear();
+
+		const b = await approved(w, "b-2");
+		w.state.faults.set("activate", 0);
+		expect(returned(await callback(w, { state: b.state, code: "c" }, "b-2")).get("error")).toBe(
+			"temporarily_unavailable",
+		);
+		w.state.faults.clear();
+
+		// Revoked after the re-read, before the write: the store's guard is what
+		// stops it, and the answer says no more than the store did.
+		const c = await approved(w, "b-3");
+		w.state.before.set("activate", () => w.grants.revoke(c.grantId, "operator", w.state.now));
+		expect(returned(await callback(w, { state: c.state, code: "c" }, "b-3")).get("error")).toBe(
+			"grant_not_authorizable",
+		);
+		for (const { grantId } of [a, b, c]) {
+			expect((await w.grants.find(grantId, w.state.now))?.status).not.toBe("active");
+		}
+	});
+
+	it("returns the browser with an outage when something nothing expected fails after check 1", async () => {
+		const w = world();
+		const a = await approved(w);
+		w.state.configurationThrows = true;
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"temporarily_unavailable",
+		);
+	});
+
+	it("fails closed when a renewal's grant cannot be read, at the backstop or at the account check", async () => {
+		const atBackstop = world();
+		const first = await renewal(atBackstop);
+		atBackstop.state.faults.set("find", 0);
+		expect(
+			returned(await callback(atBackstop, { state: first.state, code: "c2" }, "b-2")).get("error"),
+		).toBe("temporarily_unavailable");
+		expect(atBackstop.state.exchanged).toHaveLength(1);
+
+		const atAccount = world();
+		const second = await renewal(atAccount);
+		atAccount.state.faults.set("find", 1);
+		expect(
+			returned(await callback(atAccount, { state: second.state, code: "c2" }, "b-2")).get("error"),
+		).toBe("temporarily_unavailable");
+		expect(await atAccount.grants.find(second.grantId, atAccount.state.now)).toEqual(second.before);
+	});
+});
+
+describe("the identity lookup (D7 check 5), when it cannot answer", () => {
+	it("fails closed when the lookup is required and throws, or has gone from the repository", async () => {
+		const throwing = world();
+		const a = await approved(throwing);
+		throwing.state.faults.set("findSubjectByFederatedIdentity", 0);
+		expect(
+			returned(await callback(throwing, { state: a.state, code: "c" }, "b-1")).get("error"),
+		).toBe("temporarily_unavailable");
+
+		const missing = world({ userRepository: {} });
+		const b = await approved(missing);
+		expect(
+			returned(await callback(missing, { state: b.state, code: "c" }, "b-1")).get("error"),
+		).toBe("temporarily_unavailable");
+	});
+
+	it("asks nothing when the deployment recorded it cannot, and says so in the audit", async () => {
+		const w = world({ identityLookup: "unsupported", userRepository: {} });
+		const a = await approved(w);
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).has("error")).toBe(
+			false,
+		);
+		await w.background.drain();
+		expect(w.events.find((e) => e.type === "federation.grant.authorized")?.details).toMatchObject({
+			outcome: "unsupported",
+		});
+	});
+});
+
+describe("an audit sink that drops everything", () => {
+	it("changes no answer the browser half gives, and fails no drain", async () => {
+		const w = world();
+		w.state.auditFails = true;
+		// A refusal audited as authorization_failed.
+		w.signIn("b-0");
+		expect((await w.connect("no-such-handle", "b-0")).status).toBe(400);
+		// A first grant, authorized.
+		const a = await approved(w, "b-1");
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).has("error")).toBe(
+			false,
+		);
+		await w.background.drain();
+		expect(w.events).toEqual([]);
+	});
+
+	it("changes nothing a renewal writes, whether it is authorized or revoked by the backstop", async () => {
+		const renewed = world();
+		const first = await renewal(renewed);
+		renewed.state.auditFails = true;
+		expect(
+			returned(await callback(renewed, { state: first.state, code: "c2" }, "b-2")).has("error"),
+		).toBe(false);
+
+		const backstopped = world();
+		const second = await renewal(backstopped);
+		backstopped.state.auditFails = true;
+		backstopped.state.grantsBoundary = new Date(backstopped.state.now.getTime());
+		expect(
+			returned(await callback(backstopped, { state: second.state, code: "c2" }, "b-2")).get(
+				"error",
+			),
+		).toBe("grant_not_authorizable");
+		expect((await backstopped.grants.find(second.grantId, backstopped.state.now))?.status).toBe(
+			"revoked",
+		);
+		await Promise.all([renewed.background.drain(), backstopped.background.drain()]);
 	});
 });

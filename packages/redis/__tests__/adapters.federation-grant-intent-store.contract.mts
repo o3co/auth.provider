@@ -215,6 +215,17 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 				expect(await store.getIntent(record.handle, record.expiresAt)).toBeNull();
 			});
 
+			it("reads a retry whose parameters were written in another order as the same record", async () => {
+				await lodge({ authorizationParams: { prompt: "consent", access_type: "offline" } });
+				expect(
+					await store.putIntent(
+						intent({ authorizationParams: { access_type: "offline", prompt: "consent" } }),
+						at(MIN),
+					),
+				).toEqual({ outcome: "unchanged" });
+				expect(await factory.reservations(store, "agent", "u-1")).toBe(1);
+			});
+
 			it("refuses a different record under a resident handle", async () => {
 				await lodge();
 				expect(await store.putIntent(intent({ subject: "u-2", grantId: "g-2" }), at(MIN))).toEqual({

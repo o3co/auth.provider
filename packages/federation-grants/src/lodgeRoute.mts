@@ -64,8 +64,6 @@ export interface FederationGrantAcquisitionRouteOptions {
 	readonly connections: ReadonlyMap<string, FederationGrantAcquisitionConnection>;
 	/** From `resolveFederationGrantAcquisitionLimits`. */
 	readonly limits: { readonly defaultLifetimeMs: number; readonly maxLifetimeMs: number };
-	/** A seam for tests; the default is 256 random bits. */
-	readonly randomId?: () => string;
 }
 
 export interface FederationGrantLodgeHandlerOptions {
@@ -173,9 +171,6 @@ function createLodgeHandler(
 				connections: options.acquisition.connections,
 				limits: options.acquisition.limits,
 				now,
-				...(options.acquisition.randomId === undefined
-					? {}
-					: { randomId: options.acquisition.randomId }),
 				grantsRevokedBefore: options.grantsBoundary,
 				revocationSkewMs: options.limits.revocationSkewMs,
 				maxExpiresInMs: options.limits.maxExpiresInMs,

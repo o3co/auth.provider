@@ -269,10 +269,15 @@ describe("resolveFederationGrantAcquisitionLimits", () => {
 		).toThrow(/defaultExpiresIn .* must not exceed/);
 	});
 
-	it("refuses a default of nothing, and a maximum past the ceiling", () => {
+	it("refuses a default of nothing, a maximum of nothing, and a maximum past the ceiling", () => {
 		expect(() =>
 			resolveFederationGrantAcquisitionLimits({ federationGrants: { defaultExpiresIn: 0 } }),
 		).toThrow(/positive/);
+		// Zero passes the seconds reader, which takes any whole number from 0;
+		// a grant that may live no time at all is the maximum's own refusal.
+		expect(() =>
+			resolveFederationGrantAcquisitionLimits({ federationGrants: { maxExpiresIn: 0 } }),
+		).toThrow(/maxExpiresIn must be a positive number of seconds/);
 		expect(() =>
 			resolveFederationGrantAcquisitionLimits({
 				federationGrants: { maxExpiresIn: 31_536_001 },

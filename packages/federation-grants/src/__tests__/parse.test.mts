@@ -32,6 +32,8 @@
 
 import { describe, expect, it } from "vitest";
 import {
+	parseFederationGrantCreateRequest,
+	parseFederationGrantReauthorizeRequest,
 	parseFederationGrantRevokeRequest,
 	parseFederationGrantStatusRequest,
 	parseFederationGrantTokenRequest,
@@ -215,6 +217,21 @@ describe("the routes that take a subject and nothing else", () => {
 			expect(!parse({}).ok && (parse({}) as { description: string }).description).toBe(
 				"sub_required",
 			);
+		});
+	}
+});
+
+describe("the lodging routes' bodies (slice 6)", () => {
+	for (const [name, parse] of [
+		["create", parseFederationGrantCreateRequest],
+		["reauthorize", parseFederationGrantReauthorizeRequest],
+	] as const) {
+		it(`${name} refuses a body that is not an object`, () => {
+			for (const body of [undefined, null, "sub=u", 42, []]) {
+				const parsed = parse(body);
+				expect(parsed.ok, JSON.stringify(body)).toBe(false);
+				expect(!parsed.ok && parsed.description).toBe("invalid_body");
+			}
 		});
 	}
 });

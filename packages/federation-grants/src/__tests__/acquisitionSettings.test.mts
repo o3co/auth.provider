@@ -89,6 +89,7 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 			"javascript:alert(1)",
 			"consent",
 			`${ISSUER}/consent#fragment`,
+			"/consent#fragment",
 			// A path that normalises to another host (the adversarial review).
 			"/.//evil.example/consent",
 		]) {
@@ -112,6 +113,19 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 				JSON.stringify(endpoints),
 			).toThrow(/endpoints\.login\.url/);
 		}
+	});
+
+	it("refuses an issuer it cannot take an origin from", () => {
+		// The origin every consent page and callback is held to is the issuer's.
+		expect(() =>
+			resolveFederationGrantAcquisitionSettings(
+				{ oauth: { jwt: {} }, federationGrants: { consent: { url: "/c" } } },
+				new Map(),
+			),
+		).toThrow(/oauth\.jwt\.issuer must be configured/);
+		expect(() => resolve({ consent: { url: "/c" } }, [], "auth.example.test")).toThrow(
+			/oauth\.jwt\.issuer must be an absolute URL/,
+		);
 	});
 
 	it("refuses an identity lookup setting it would have to guess at", () => {

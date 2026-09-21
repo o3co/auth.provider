@@ -685,4 +685,87 @@ describe("lodging a reauthorization (D6, D13)", () => {
 		});
 		expect(await intents.getIntent("id-1", at(3 * MIN))).toBeNull();
 	});
+
+	it("answers every grant-store call a renewal cannot make as an outage, never as a guess", async () => {
+		await establish();
+		const throwing = async () => {
+			throw new Error("down");
+		};
+		// The first read, before anything is judged.
+		expect(
+			await lodgeFederationGrantReauthorization(
+				deps({ grantStore: { ...grants, inspect: throwing } }),
+				renewal(),
+			),
+		).toEqual({ ok: false, reason: "storage" });
+		// The backstop's durable write.
+		expect(
+			await lodgeFederationGrantReauthorization(
+				deps({
+					grantStore: { ...grants, revoke: throwing },
+					grantsRevokedBefore: async () => at(2 * MIN),
+				}),
+				renewal(),
+			),
+		).toEqual({ ok: false, reason: "storage" });
+		expect((await grants.find("g-est", at(3 * MIN)))?.status).toBe("active");
+		expect(intents.size).toBe(0);
+	});
+
+	it("asks whether a pointer write whose answer was lost landed, and keeps it when it did", async () => {
+		await establish();
+		const lost: FederationGrantStore = {
+			...grants,
+			nameIntent: async (input) => {
+				await grants.nameIntent(input);
+				throw new Error("connection reset");
+			},
+		};
+		expect(
+			await lodgeFederationGrantReauthorization(deps({ grantStore: lost }), renewal()),
+		).toMatchObject({ ok: true, grantId: "g-est", handle: "id-1" });
+		expect(await grants.isCurrentIntent("g-est", "id-1", at(3 * MIN))).toBe(true);
+	});
+
+	it("reads a lost pointer write it cannot confirm as not landed, and a grant it cannot re-read as an outage", async () => {
+		await establish();
+		const unconfirmed: FederationGrantStore = {
+			...grants,
+			nameIntent: async () => {
+				throw new Error("connection reset");
+			},
+			isCurrentIntent: async () => {
+				throw new Error("connection reset");
+			},
+		};
+		// Still renewable when re-read: the honest answer is that this attempt did not take.
+		expect(
+			await lodgeFederationGrantReauthorization(deps({ grantStore: unconfirmed }), renewal()),
+		).toEqual({ ok: false, reason: "storage" });
+		expect(await intents.getIntent("id-1", at(3 * MIN))).toBeNull();
+
+		let reads = 0;
+		const unreadable: FederationGrantStore = {
+			...unconfirmed,
+			inspect: async (id, when) => {
+				reads += 1;
+				if (reads > 1) throw new Error("down");
+				return await grants.inspect(id, when);
+			},
+		};
+		expect(
+			await lodgeFederationGrantReauthorization(deps({ grantStore: unreadable }), renewal()),
+		).toEqual({ ok: false, reason: "storage" });
+		expect(await intents.getIntent("id-2", at(3 * MIN))).toBeNull();
+	});
+});
+
+describe("lodging without an id source of the caller's", () => {
+	it("draws a 256-bit handle and grant id of its own", async () => {
+		const result = await lodgeFederationGrantIntent(deps({ randomId: undefined }), initial());
+		expect(result).toMatchObject({ ok: true });
+		if (!result.ok) return;
+		for (const id of [result.grantId, result.handle]) expect(id).toMatch(/^[A-Za-z0-9_-]{43}$/);
+		expect(result.grantId).not.toBe(result.handle);
+	});
 });

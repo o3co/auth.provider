@@ -24,9 +24,15 @@
  * again (410), and which are the caller's own fault (400, 403, 404).
  */
 
-import type { FederationGrantTokenResult } from "@o3co/auth-provider-core";
+import type {
+	FederationGrantReauthorizationResult,
+	FederationGrantTokenResult,
+} from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import { serializeFederationGrantTokenResult } from "#/serialize.mjs";
+import {
+	serializeFederationGrantLodgingRefusal,
+	serializeFederationGrantTokenResult,
+} from "#/serialize.mjs";
 
 describe("serializeFederationGrantTokenResult", () => {
 	it("renders a disclosed token as an OAuth token response and nothing else", () => {
@@ -155,5 +161,127 @@ describe("serializeFederationGrantTokenResult", () => {
 		// enumerate grant ids or discover whose they are.
 		const rendered = serializeFederationGrantTokenResult({ ok: false, code: "grant_not_found" });
 		expect(JSON.stringify(rendered.body)).toBe('{"error":"grant_not_found"}');
+	});
+});
+
+describe("serializeFederationGrantLodgingRefusal", () => {
+	type Refusal = Exclude<FederationGrantReauthorizationResult, { ok: true }>;
+	const refusal = (fields: Record<string, unknown>) => ({ ok: false, ...fields }) as Refusal;
+
+	it("renders every refusal lodging can give as D6's exit for it", () => {
+		const rows: [Record<string, unknown>, number, Record<string, string>][] = [
+			[
+				{ reason: "connection_not_permitted" },
+				403,
+				{ error: "access_denied", error_description: "connection_not_permitted" },
+			],
+			[
+				{ reason: "connection_not_configured" },
+				503,
+				{ error: "temporarily_unavailable", error_description: "connection_not_configured" },
+			],
+			[
+				{ reason: "storage" },
+				503,
+				{ error: "temporarily_unavailable", error_description: "storage" },
+			],
+			[
+				{ reason: "key_unavailable" },
+				503,
+				{ error: "temporarily_unavailable", error_description: "key_unavailable" },
+			],
+			[
+				{ reason: "redirect_uri_not_registered" },
+				400,
+				{ error: "invalid_request", error_description: "redirect_uri_not_registered" },
+			],
+			[
+				{ reason: "redirect_uri_invalid" },
+				400,
+				{ error: "invalid_request", error_description: "redirect_uri_invalid" },
+			],
+			[
+				{ reason: "redirect_uri_reserved_parameter" },
+				400,
+				{ error: "invalid_request", error_description: "redirect_uri_reserved_parameter" },
+			],
+			[
+				{ reason: "expires_in_out_of_range" },
+				400,
+				{ error: "invalid_request", error_description: "expires_in_out_of_range" },
+			],
+			[
+				{ reason: "connection_mismatch" },
+				400,
+				{ error: "invalid_request", error_description: "connection_mismatch" },
+			],
+			[
+				{ reason: "scope_exceeded" },
+				400,
+				{ error: "invalid_scope", error_description: "scope_exceeded" },
+			],
+			[
+				{ reason: "openid_required" },
+				400,
+				{ error: "invalid_scope", error_description: "openid_required" },
+			],
+			[
+				{ reason: "offline_access_required" },
+				400,
+				{ error: "invalid_scope", error_description: "offline_access_required" },
+			],
+			[
+				{ reason: "scope_subsets_not_allowed" },
+				400,
+				{ error: "invalid_scope", error_description: "scope_subsets_not_allowed" },
+			],
+			[
+				{ reason: "intent_limit" },
+				429,
+				{ error: "rate_limited", error_description: "intent_limit" },
+			],
+			[{ reason: "grant_not_found" }, 404, { error: "grant_not_found" }],
+			[{ reason: "authorization_pending" }, 400, { error: "authorization_pending" }],
+			[
+				{ reason: "grant_revoked", revokedBy: "backstop", revokedNow: false },
+				410,
+				{ error: "grant_revoked", error_description: "backstop" },
+			],
+			[
+				{ reason: "grant_expired", expiredBy: "operator_maximum" },
+				410,
+				{ error: "grant_expired", error_description: "operator_maximum" },
+			],
+			[{ reason: "connection_identity_changed" }, 410, { error: "connection_identity_changed" }],
+			[
+				{ reason: "upstream_token_ineligible", ineligibleBy: "lifetime_over_maximum" },
+				502,
+				{ error: "upstream_token_ineligible", error_description: "lifetime_over_maximum" },
+			],
+		];
+		for (const [fields, status, body] of rows) {
+			expect(
+				serializeFederationGrantLodgingRefusal(refusal(fields)),
+				String(fields.reason),
+			).toEqual({
+				status,
+				body,
+			});
+		}
+	});
+
+	it("never renders the record a backstop revocation returned", () => {
+		const rendered = serializeFederationGrantLodgingRefusal(
+			refusal({
+				reason: "grant_revoked",
+				revokedBy: "backstop",
+				revokedNow: true,
+				revoked: { id: "g-1", subject: "u-1", clientId: "agent" },
+			}),
+		);
+		expect(rendered).toEqual({
+			status: 410,
+			body: { error: "grant_revoked", error_description: "backstop" },
+		});
 	});
 });

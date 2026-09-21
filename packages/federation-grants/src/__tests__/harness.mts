@@ -130,6 +130,8 @@ export interface Harness {
 
 export interface HarnessOptions {
 	readonly withSink?: boolean;
+	/** Replaces the sink that records into `events`. */
+	readonly sink?: AuditSink;
 	readonly rateLimiter?: RateLimiter;
 	readonly background?: FederationGrantBackground;
 }
@@ -193,12 +195,12 @@ export function harness(options: HarnessOptions = {}): Harness {
 	const sink: AuditSink | undefined =
 		options.withSink === false
 			? undefined
-			: {
+			: (options.sink ?? {
 					kind: "test",
 					record: async (event) => {
 						events.push(event);
 					},
-				};
+				});
 
 	// `inspect` goes through the world, so a test can say what the credential
 	// state is without a store that can seal anything.

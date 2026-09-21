@@ -160,6 +160,8 @@ interface Setup {
 	readonly withIntentStore?: boolean;
 	/** Slice 6: the repository D7 check 5 asks; `null` installs one without the lookup. */
 	readonly userRepository?: "with-lookup" | "without-lookup";
+	/** Slice 6: the durable sessions the connect flow re-reads. */
+	readonly withUserSessionStore?: boolean;
 	/** Slice 6: where connect sends a browser that is not signed in. */
 	readonly withLoginUrl?: boolean;
 }
@@ -212,6 +214,7 @@ const boot = (setup: Setup) => {
 			// guard is not this feature's. Present but empty: what is under test
 			// here is the grant refusals, and nothing in this file logs anyone in.
 			...SESSION_FEDERATION_STORES,
+			...(setup.withUserSessionStore === false ? { userSessionStore: undefined } : {}),
 			// The boundary a grant is compared against on every disclosure
 			// (D13). Bundled here because every composition that enables the
 			// feature needs one, which is the point of the refusals below.
@@ -400,6 +403,12 @@ describe("what creating a grant needs (slice 6)", () => {
 		const { callbackURL: _none, ...withoutCallback } = CONNECTION;
 		await expect(boot({ connections: { calendar: withoutCallback } })).rejects.toThrow(
 			/connections\.calendar\.callbackURL/,
+		);
+	});
+
+	it("refuses a deployment with no durable sessions for the connect flow to re-read", async () => {
+		await expect(boot({ withUserSessionStore: false })).rejects.toThrow(
+			/federationGrantsModule: federation grants are enabled and no userSessionStore/,
 		);
 	});
 

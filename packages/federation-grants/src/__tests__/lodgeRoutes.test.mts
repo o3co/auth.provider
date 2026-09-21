@@ -323,3 +323,52 @@ describe("POST /oauth/federation-grants/:grantId/reauthorize — renewing a gran
 		expect(JSON.stringify(h.logs)).not.toContain(SECRET);
 	});
 });
+
+describe("what the coverage report on #610 showed no test reached", () => {
+	it("refuses to lodge once the drain has begun, and writes nothing", async () => {
+		const h = harness();
+		const draining = h.background.drain();
+		for (const response of [await lodge(h), await renew(h)]) {
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "service_unavailable",
+				error_description: "shutting_down",
+			});
+		}
+		expect(h.intents.size).toBe(0);
+		expect(h.store.size).toBe(0);
+		await draining;
+	});
+
+	it("answers a failure nothing expected with a fixed 500, and logs nothing it carried", async () => {
+		const h = harness();
+		// A configuration that cannot be read, with a secret in the message.
+		h.world.connections.get = () => {
+			throw new Error(`redis://user:${SECRET}@config refused the connection`);
+		};
+		const response = await lodge(h);
+		expect(response.status).toBe(500);
+		expect(response.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(h.logs.length).toBeGreaterThan(0);
+		expect(JSON.stringify(h.logs)).not.toContain(SECRET);
+	});
+
+	it("changes no answer, and no write, when the audit sink drops everything", async () => {
+		const h = harness({
+			sink: {
+				kind: "down",
+				record: async () => {
+					throw new Error("the audit sink is down");
+				},
+			},
+		});
+		// Requested, refused, and a backstop revocation a renewal wrote.
+		expect((await lodge(h)).status).toBe(201);
+		expect((await lodge(h, { redirect_uri: "https://evil.test/" })).status).toBe(400);
+		await h.seed();
+		h.world.boundary = new Date(h.world.now.getTime() + 1);
+		expect((await renew(h)).status).toBe(410);
+		expect((await h.store.find(GRANT_ID, h.world.now))?.status).toBe("revoked");
+		await h.background.drain();
+	});
+});

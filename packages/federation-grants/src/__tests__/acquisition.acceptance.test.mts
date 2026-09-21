@@ -28,7 +28,12 @@
  * each rule; this tests that they are the same deployment.
  */
 
-import type { BootstrapMap, ClientRepository, UserSession } from "@o3co/auth-provider-core";
+import type {
+	BootstrapMap,
+	ClientRepository,
+	SubjectRevocation,
+	UserSession,
+} from "@o3co/auth-provider-core";
 import {
 	createApp,
 	createInMemorySubjectRevocation,
@@ -141,7 +146,7 @@ const sessionMiddleware = defineModule({
 	},
 });
 
-const boot = async () => {
+const boot = async (subjectRevocation: SubjectRevocation = createInMemorySubjectRevocation()) => {
 	const full = makeValidFullSections();
 	const handle = await createApp({
 		modules: [
@@ -197,7 +202,7 @@ const boot = async () => {
 			sessionFederationIndex: {},
 			federationTokenStore: {},
 			refreshTokenFamilyRevocation: {},
-			subjectRevocation: createInMemorySubjectRevocation(),
+			subjectRevocation,
 			rateLimiter: createMemoryRateLimiter({
 				limits: {},
 				defaultLimit: { limit: 1000, windowSeconds: 60 },
@@ -305,6 +310,20 @@ describe("a grant created end to end, and spent", () => {
 		return new URL(lodged.body.connect_uri as string);
 	};
 
+	/** A browser signed in as alice at `authTime`, with its durable session. */
+	const signIn = (browser: string, authTime: Date) => {
+		const sid = `sid-${browser}`;
+		browsers.set(browser, { isAuthenticated: true, user: { id: "alice" }, sid });
+		durable.set(sid, {
+			sid,
+			sub: "alice",
+			authTime,
+			createdAt: authTime,
+			expiresAt: new Date(Date.now() + 86_400_000),
+			claims: {},
+		} as UserSession);
+	};
+
 	it("sends a browser that is not signed in to the configured login page, and back to exactly this link", async () => {
 		const { handle, app } = await boot();
 		try {
@@ -314,6 +333,42 @@ describe("a grant created end to end, and spent", () => {
 			const login = new URL(anonymous.headers.location as string, ISSUER);
 			expect(login.pathname).toBe(ACQUISITION_ENDPOINTS.login.url);
 			expect(login.searchParams.get("redirect_to")).toBe(connect.href);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("holds the browser to the subject's sessions boundary, as the revocation adapter records it", async () => {
+		const revocation = createInMemorySubjectRevocation();
+		const { handle, app } = await boot(revocation);
+		try {
+			const connect = await lodgeFor(app);
+			// Signed in a minute before every one of alice's sessions was revoked.
+			signIn("b-revoked", new Date(Date.now() - 60_000));
+			await revocation.revokeBefore("alice", new Date(), new Date(Date.now() + 86_400_000));
+			const refused = await request(app)
+				.get(`${connect.pathname}${connect.search}`)
+				.set("x-browser", "b-revoked");
+			expect(refused.status).toBe(403);
+			expect(refused.text).toMatch(/sign in again/i);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("fails closed on a revocation adapter that answers neither a date nor null", async () => {
+		const broken = {
+			...createInMemorySubjectRevocation(),
+			revokedBefore: async () => "yesterday" as unknown as Date,
+		};
+		const { handle, app } = await boot(broken);
+		try {
+			const connect = await lodgeFor(app);
+			signIn("b-broken", new Date());
+			const refused = await request(app)
+				.get(`${connect.pathname}${connect.search}`)
+				.set("x-browser", "b-broken");
+			expect(refused.status).toBe(503);
 		} finally {
 			await handle.dispose();
 		}
