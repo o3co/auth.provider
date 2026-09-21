@@ -1068,3 +1068,28 @@ describe("what the browser-half mutation pass found", () => {
 		expect((await w.answer({ challenge, decision: "accept" }, "b-copy")).status).toBe(400);
 	});
 });
+
+describe("shutting down (Codex on slice 6)", () => {
+	it("refuses new browser work once the drain has begun, and spends nothing doing so", async () => {
+		// A callback admitted into the drain is waited for; one that is not could
+		// consume its transaction and then have the grant store closed under it
+		// before the credential is written.
+		const w = world();
+		const a = await approved(w);
+		const draining = w.background.drain();
+		const refused = await callback(w, { state: a.state, code: "c" }, "b-1");
+		expect(refused.status).toBe(503);
+		isPlain(refused);
+		// The transaction was not consumed: the flow was never started.
+		expect(
+			await w.intents.consumeTransaction({
+				state: a.state,
+				connection: CONNECTION.name,
+				now: w.state.now,
+			}),
+		).not.toBeNull();
+		const { handle } = await w.lodge();
+		expect((await w.connect(handle, "b-1")).status).toBe(503);
+		await draining;
+	});
+});

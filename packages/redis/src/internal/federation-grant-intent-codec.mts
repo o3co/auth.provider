@@ -86,7 +86,12 @@ const params = (value: unknown, what: string): Readonly<Record<string, string>> 
 	// Sorted, so that two records differing only in the order an operator wrote
 	// their parameters encode to the same text.
 	for (const key of Object.keys(value as Record<string, unknown>).sort()) {
-		out[key] = str((value as Record<string, unknown>)[key], `${what}.${key}`);
+		// A string, and possibly an empty one: the connection resolver accepts
+		// `login_hint: ""`, and a codec stricter than the configuration it stores
+		// turns a working connection into a storage failure (Codex).
+		const param = (value as Record<string, unknown>)[key];
+		if (typeof param !== "string") throw BAD(`${what}.${key}`);
+		out[key] = param;
 	}
 	return out;
 };

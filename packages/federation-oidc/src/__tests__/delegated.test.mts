@@ -241,6 +241,15 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			expect(unbounded.tokens.accessToken).toBe(idp.accessToken);
 		});
 
+		it("keeps a scope the upstream answered as empty, so the callback can refuse it (Codex on slice 6)", async () => {
+			// Dropped, an empty scope reads as omitted — "as requested" — and the
+			// callback would grant every consented scope on an answer that named none.
+			const { idp, provider } = await build();
+			idp.nonce = "nonce-1";
+			idp.codeAnswer = { scope: "" };
+			expect((await exchange(provider)).tokens.scope).toBe("");
+		});
+
 		it("answers no refresh token when the upstream issued none, and leaves the refusal to core", async () => {
 			const { idp, provider } = await build();
 			idp.nonce = "nonce-1";

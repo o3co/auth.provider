@@ -287,6 +287,27 @@ describe("the Redis intent store, where the contract cannot look", () => {
 		await sweep();
 	});
 
+	it("will not re-park a flow whose parked consent was dropped (Codex on slice 6)", async () => {
+		// The intent's pointer says a challenge was issued; the key it names is
+		// gone. Parking a fresh one would bind the flow to whichever browser
+		// asked next, which the memory adapter refuses and so must this.
+		const store = fresh("fgd");
+		const now = new Date();
+		await store.putIntent(fixture(), now);
+		await store.parkConsent({ handle: "h-1", challenge: "c-1", binding: BINDING, now });
+		await first().del(`${space()}c:${keyPart("c-1")}`);
+		expect(
+			await store.parkConsent({
+				handle: "h-1",
+				challenge: "c-2",
+				binding: { sessionId: "express-2", sid: "sid-2", subject: "u-1" },
+				now,
+			}),
+		).toBeNull();
+		expect(await first().exists(`${space()}c:${keyPart("c-2")}`)).toBe(0);
+		await sweep();
+	});
+
 	it("shows no consent whose intent is gone, whichever key Redis dropped first", async () => {
 		// An eviction policy (allkeys-lru and the like) can take one key of a
 		// flow and leave the other. A page shown a question for a flow that

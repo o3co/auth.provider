@@ -568,7 +568,12 @@ export async function createOidcProvider(
 				expiresIn: lifetime.seconds,
 				expiresAt:
 					lifetime.seconds !== null ? new Date(obtainedAt + lifetime.seconds * 1000) : null,
-				...(optionalString(tokens.scope) !== undefined ? { scope: tokens.scope } : {}),
+				// Kept when empty, unlike the refresh's: on a refresh an absent and
+				// an empty scope both mean "what the grant already has", but here an
+				// empty one dropped would read as omitted — "as requested" — and the
+				// callback would grant every consented scope on an answer that named
+				// none. Present and empty is the callback's to refuse (Codex).
+				...(typeof tokens.scope === "string" ? { scope: tokens.scope } : {}),
 				tokenType: tokens.token_type,
 			},
 		};

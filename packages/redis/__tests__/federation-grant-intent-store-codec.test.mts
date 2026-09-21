@@ -60,6 +60,14 @@ describe("the intent codec", () => {
 		);
 	});
 
+	it("takes an empty parameter value, as the connection resolver does (Codex on slice 6)", () => {
+		// `login_hint: ""` is a configuration the resolver accepts and the memory
+		// store keeps; refusing it here made every lodging on that connection a
+		// storage failure under Redis alone.
+		const written = intent({ login_hint: "" });
+		expect(decodeFederationGrantIntent(encodeFederationGrantIntent(written))).toEqual(written);
+	});
+
 	it("reads back what it wrote", () => {
 		const written = intent({ access_type: "offline" });
 		expect(decodeFederationGrantIntent(encodeFederationGrantIntent(written))).toEqual(written);

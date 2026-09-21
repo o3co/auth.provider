@@ -381,6 +381,31 @@ export function createFederationGrantBrowserRouter(
 			next();
 		};
 
+	/**
+	 * Admits a handler that writes into the shutdown drain, as the JSON routes
+	 * are admitted: a drain waits for what it admitted, and a callback it did
+	 * not admit could consume its transaction and then have the grant store
+	 * closed under it before the credential is written (Codex). Once the drain
+	 * has begun, new work is refused before it touches anything.
+	 */
+	const admitted =
+		(render: (res: Response) => void, handler: RequestHandler): RequestHandler =>
+		async (req, res, next) => {
+			const release = options.background.admit();
+			if (release === undefined) {
+				render(res);
+				return;
+			}
+			try {
+				await handler(req, res, next);
+			} finally {
+				release();
+			}
+		};
+	const shuttingDownPlain = (res: Response) => plain(res, 503, "Temporarily unavailable.");
+	const shuttingDownJson = (res: Response) =>
+		jsonError(res, 503, "service_unavailable", "shutting_down");
+
 	router.use(noStoreNoReferrer);
 	router.use(createRequestIdMiddleware());
 
@@ -390,7 +415,7 @@ export function createFederationGrantBrowserRouter(
 		throttle((res, status) =>
 			plain(res, status, status === 429 ? "Too many requests." : "Temporarily unavailable."),
 		),
-		async (req, res) => {
+		admitted(shuttingDownPlain, async (req, res) => {
 			try {
 				// A prefetch is not the user asking: nothing is parked for it.
 				if (isPrefetch(req)) {
@@ -466,7 +491,7 @@ export function createFederationGrantBrowserRouter(
 				report?.({ during: "connect", error, grantId: "", correlationId: requestIdOf(res) });
 				plain(res, 500, "Something went wrong.");
 			}
-		},
+		}),
 	);
 
 	// --- GET / POST /consent -------------------------------------------------
@@ -578,7 +603,7 @@ export function createFederationGrantBrowserRouter(
 		consentThrottle,
 		express.json({ limit: BODY_LIMIT }),
 		express.urlencoded({ extended: false, limit: BODY_LIMIT }),
-		async (req, res) => {
+		admitted(shuttingDownJson, async (req, res) => {
 			try {
 				// Belt to the challenge's braces: a page on this origin sends
 				// `same-origin`, and a navigation from nowhere sends `none`.
@@ -689,7 +714,7 @@ export function createFederationGrantBrowserRouter(
 				report?.({ during: "consent_post", error, grantId: "", correlationId: requestIdOf(res) });
 				jsonError(res, 500, "server_error", "unexpected_error");
 			}
-		},
+		}),
 	);
 
 	// --- GET /callback/:connection -----------------------------------------
@@ -709,7 +734,7 @@ export function createFederationGrantBrowserRouter(
 		throttle((res, status) =>
 			plain(res, status, status === 429 ? "Too many requests." : "Temporarily unavailable."),
 		),
-		async (req, res) => {
+		admitted(shuttingDownPlain, async (req, res) => {
 			const correlationId = requestIdOf(res);
 			const audit = auditFor(req);
 			let transaction: FederationGrantConnectTransaction | null;
@@ -1011,7 +1036,7 @@ export function createFederationGrantBrowserRouter(
 				report?.({ during: "callback", error, grantId: intent.grantId, correlationId });
 				await fail("temporarily_unavailable");
 			}
-		},
+		}),
 	);
 
 	/**
@@ -1126,10 +1151,19 @@ export function createFederationGrantBrowserRouter(
 			}
 		}
 		if (options.identityLookup === "required") {
-			const lookup = options.userRepository?.findSubjectByFederatedIdentity;
-			if (lookup === undefined) return "temporarily_unavailable";
+			// Called THROUGH the repository, never detached from it: a Store written
+			// as a class reads its own fields, and `this` is lost the moment the
+			// method is taken off the object — which every test stub written as an
+			// arrow function hid, and the bundled repository did not (Codex).
+			const repository = options.userRepository;
+			if (typeof repository?.findSubjectByFederatedIdentity !== "function") {
+				return "temporarily_unavailable";
+			}
 			try {
-				const owner = await lookup({ provider: intent.federation, sub: upstream.subject });
+				const owner = await repository.findSubjectByFederatedIdentity({
+					provider: intent.federation,
+					sub: upstream.subject,
+				});
 				if (owner !== null && owner !== intent.subject) return "identity_conflict";
 			} catch (error) {
 				report?.({

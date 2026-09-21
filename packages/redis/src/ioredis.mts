@@ -2219,13 +2219,16 @@ local exp = tonumber(redis.call('HGET', KEYS[1], 'expiresAt'))
 if exp == nil or not (now < exp) then return false end
 local parked = redis.call('HGET', KEYS[1], 'challenge')
 if parked then
+  -- One challenge per intent, and the pointer says one was issued. A consent
+  -- key that is gone (evicted, say) is not room for a new one: parking again
+  -- would bind the flow to whichever browser asked next. The memory adapter
+  -- refuses, and so does this.
   local pkey = ARGV[1] .. 'c:' .. parked
-  if redis.call('EXISTS', pkey) == 1 then
-    if redis.call('HGET', pkey, 'binding') == ARGV[5] then
-      return redis.call('HGET', pkey, 'record')
-    end
-    return false
+  if redis.call('EXISTS', pkey) == 0 then return false end
+  if redis.call('HGET', pkey, 'binding') == ARGV[5] then
+    return redis.call('HGET', pkey, 'record')
   end
+  return false
 end
 local ckey = ARGV[1] .. 'c:' .. ARGV[3]
 if redis.call('EXISTS', ckey) == 1 then return false end

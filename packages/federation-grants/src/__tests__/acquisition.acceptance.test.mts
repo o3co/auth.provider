@@ -36,6 +36,7 @@ import {
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
 	defineModule,
+	InMemoryUserRepository,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
 import type { Request, RequestHandler } from "express";
@@ -183,11 +184,12 @@ const boot = async () => {
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
-			userRepository: {
-				authenticate: async () => null,
-				authenticateByToken: async () => null,
-				findSubjectByFederatedIdentity: async () => null,
-			},
+			// The bundled repository, not a stub: a class whose lookup reads its
+			// own fields. Codex found the callback calling it detached from its
+			// receiver, which every stub written as an arrow function hid.
+			userRepository: new InMemoryUserRepository(
+				new Map([["alice", { password: "unused", id: "alice" }]]),
+			),
 			userSessionStore: { get: async (sid: string) => durable.get(sid) ?? null },
 			sessionRPRegistry: {},
 			sessionFamilyIndex: {},
