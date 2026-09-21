@@ -65,6 +65,28 @@ export interface UserRepository {
 		userId: string,
 		identity: FederatedIdentityLink,
 	): Promise<LinkFederatedIdentityResult>;
+	/**
+	 * The local subject an upstream identity is linked to, or `null` when it is
+	 * linked to nobody (#593, D7 check 5). Optional; a deployment says which it
+	 * has with `federationGrants.identityLookup`, and one that requires it is
+	 * refused at boot without it.
+	 *
+	 * The grant callback asks this to refuse a delegation whose upstream account
+	 * already belongs to another local user. `authenticateByToken` cannot stand
+	 * in: it carries login semantics, and a Store may stamp a last login or
+	 * provision a user on first sight. So this one MUST change nothing — no
+	 * login recorded, no link made, no user created, no claims merged, nothing
+	 * inferred from an email — and answers the user's `id` (what `User.id` is
+	 * everywhere else), keyed exactly as `linkFederatedIdentity` keys a link:
+	 * the federation's name and the upstream's `sub`.
+	 *
+	 * A backend that cannot answer throws, and so does one whose data names more
+	 * than one owner: the answer decides whether a delegation is refused as
+	 * somebody else's, and an arbitrary pick is worse than an outage.
+	 */
+	findSubjectByFederatedIdentity?(
+		identity: Readonly<Pick<FederatedIdentityLink, "provider" | "sub">>,
+	): Promise<string | null>;
 }
 
 // ---------------------------------------------------------------------------

@@ -102,6 +102,24 @@ describe("a client's federation grant fields (#593, D9)", () => {
 		expect(found?.allowedRedirectUris).toStrictEqual(["https://app.example.test/cb"]);
 	});
 
+	it("refuses, at registration, a return destination that already carries a result parameter (#593 slice 6)", () => {
+		// The end of a flow appends grant_id, state and error. A registered URI
+		// carrying one would hand the client two of it, and which it reads is its
+		// framework's choice. Refused here, where a configured deployment hears it
+		// at boot — lodging refuses it again for a repository that validates
+		// nothing, but by then a user is waiting.
+		for (const name of ["grant_id", "state", "error"]) {
+			expect(
+				() =>
+					repository({ federationGrantRedirectUris: [`https://app.example.test/cb?${name}=x`] }),
+				name,
+			).toThrow(new RegExp(name));
+		}
+		expect(() =>
+			repository({ federationGrantRedirectUris: ["https://app.example.test/cb?tenant=a"] }),
+		).not.toThrow();
+	});
+
 	it("cannot be registered by a public client: a grant is a confidential client's to hold", async () => {
 		for (const field of ["allowedFederationGrantConnections", "federationGrantRedirectUris"]) {
 			expect(

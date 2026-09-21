@@ -17,6 +17,7 @@
 import crypto from "node:crypto";
 import bcrypt from "bcrypt";
 import { z } from "zod";
+import { federationGrantRedirectUriReservedParameter } from "../federation-grants/lodge.mjs";
 import { isLoopbackHostname } from "../net/loopback.mjs";
 import { checkRedirectUri, describeRedirectUriRejection } from "../net/redirect-uri.mjs";
 import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
@@ -314,6 +315,18 @@ export const ClientEntrySchema = z
 				ctx.addIssue({
 					code: z.ZodIssueCode.custom,
 					message: `federationGrantRedirectUris: ${rejection.reason}`,
+					path: ["federationGrantRedirectUris"],
+				});
+			}
+			// #593 slice 6: the end of a flow appends these. Refused here so a
+			// configured deployment hears it at boot, not when a user is waiting.
+			const reserved = federationGrantRedirectUriReservedParameter(uri);
+			if (reserved !== undefined) {
+				ctx.addIssue({
+					code: z.ZodIssueCode.custom,
+					message:
+						`federationGrantRedirectUris: ${uri} already carries "${reserved}", which the end of ` +
+						"a grant flow appends — the client would receive it twice",
 					path: ["federationGrantRedirectUris"],
 				});
 			}

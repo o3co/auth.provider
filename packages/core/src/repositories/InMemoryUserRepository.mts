@@ -95,6 +95,37 @@ export class InMemoryUserRepository implements UserRepository {
 		}
 		return null;
 	}
+	/**
+	 * #593 — see {@link UserRepository.findSubjectByFederatedIdentity}. Reads
+	 * the runtime links and the configured `token` entries, the two places
+	 * `authenticateByToken` looks, and writes to neither. The token is
+	 * `<provider>:<sub>`, unambiguous because a federation's name cannot
+	 * contain a colon.
+	 */
+	async findSubjectByFederatedIdentity(
+		identity: Readonly<Pick<FederatedIdentityLink, "provider" | "sub">>,
+	): Promise<string | null> {
+		const token = `${identity.provider}:${identity.sub}`;
+		const linked = this.linkedTokens.get(token);
+		const configured = [...this.users.entries()].filter(
+			([, entry]) => (entry as Record<string, unknown>).token === token,
+		);
+		const owners = new Set<string>();
+		if (linked !== undefined) {
+			const entry = this.users.get(linked);
+			if (entry) owners.add(entry.id ?? linked);
+		}
+		for (const [username, entry] of configured) owners.add(entry.id ?? username);
+		if (owners.size > 1) {
+			throw new Error(
+				`InMemoryUserRepository: the federated identity ${JSON.stringify(token)} is linked to more ` +
+					"than one user; refusing to choose between them",
+			);
+		}
+		const [owner] = owners;
+		return owner ?? null;
+	}
+
 	/** #482 — see {@link UserRepository.linkFederatedIdentity}. In memory only. */
 	async linkFederatedIdentity(
 		userId: string,
