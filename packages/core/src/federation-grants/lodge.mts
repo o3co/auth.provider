@@ -51,6 +51,7 @@
  */
 
 import { randomBytes } from "node:crypto";
+import { checkRedirectUri } from "../net/redirect-uri.mjs";
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
 import { resolveFederationGrantIntentScopes } from "./eligibility.mjs";
 import {
@@ -134,6 +135,7 @@ export type FederationGrantLodgingRefusal =
 	| "connection_not_permitted"
 	| "connection_not_configured"
 	| "redirect_uri_not_registered"
+	| "redirect_uri_invalid"
 	| "redirect_uri_reserved_parameter"
 	| "scope_exceeded"
 	| "openid_required"
@@ -244,6 +246,13 @@ function checkRequest(
 	// fallback to the client's ordinary redirect URIs.
 	if (!registered.includes(request.redirectUri)) {
 		return { ok: false, reason: "redirect_uri_not_registered" };
+	}
+	// Registered, and still held to what registration would have refused: a
+	// repository that validates nothing could hand back a URI that does not
+	// parse, and the flow would fail only at its end — after activating the
+	// grant — when the browser has to be sent there (the adversarial review).
+	if (checkRedirectUri(request.redirectUri) !== null) {
+		return { ok: false, reason: "redirect_uri_invalid" };
 	}
 	if (federationGrantRedirectUriReservedParameter(request.redirectUri) !== undefined) {
 		return { ok: false, reason: "redirect_uri_reserved_parameter" };

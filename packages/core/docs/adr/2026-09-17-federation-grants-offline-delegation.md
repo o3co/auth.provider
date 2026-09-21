@@ -590,6 +590,31 @@ callback. Every terminal outcome after check 1 finishes the intent, releasing
 its place against the bound. A form_post federation is refused at boot even
 where a custom adapter has the capability.
 
+**What check 5's lookup can and cannot see** (found by review, after the
+design settled). `findSubjectByFederatedIdentity` is keyed as a login links an
+identity: by federation name and upstream `sub`. The callback passes the name
+the *connection* names, so the check finds a login-time link only when the
+connection uses the same federation registration as the login. D19 tells an
+operator to give a consent-accumulating IdP a registration of its own for
+grants — and with such a connection the lookup misses the login's link; where
+the IdP's `sub` is pairwise per registration, as Entra's is, no
+`(name, sub)` key could find it at all. So `identityLookup = "required"` is a
+real protection for a connection on the login registration, and none for one
+on a dedicated registration unless the Store resolves the person across
+registrations. The lookup is therefore also given the verified `issuer`, so a
+Store that can (by issuer where `sub` is not pairwise, or by an IdP's
+tenant-stable id) may implement that; the bundled repository keys by name and
+ignores it. A per-connection setting naming which login federation to consult
+was considered and not added: it helps only a dedicated registration on an IdP
+whose `sub` is NOT pairwise, which is not the case D19 describes. The package
+README states the limit where an operator configures the check. Also from that
+review: a registered redirect URI that registration itself would refuse is
+refused at lodging (`redirect_uri_invalid`) for a repository that validates
+nothing, rather than failing after activation; the consent page's location is
+always an absolute URL on the issuer, and a path that normalises onto another
+host is refused at boot; and every event of one flow correlates by the id its
+lodging carried.
+
 **The mandatory re-read.** Immediately before `activate` the callback re-reads
 the sessions boundary, the durable session's liveness, `isCurrentIntent`, and
 the grants boundary against the NEW consent — the last for a first grant too,

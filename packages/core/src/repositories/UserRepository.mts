@@ -83,9 +83,22 @@ export interface UserRepository {
 	 * A backend that cannot answer throws, and so does one whose data names more
 	 * than one owner: the answer decides whether a delegation is refused as
 	 * somebody else's, and an arbitrary pick is worse than an outage.
+	 *
+	 * **What this key can and cannot see.** `provider` is the federation the
+	 * GRANT'S connection names, and a login links under the federation the user
+	 * logged in through. When those are one registration, a link is found. When
+	 * a connection uses a registration of its own — D19's rule for an IdP that
+	 * accumulates consent — a lookup by `provider` misses the login's link, and
+	 * with an IdP whose `sub` is pairwise per registration (Entra's is) no
+	 * `(name, sub)` key could find it. `issuer` is the verified upstream issuer,
+	 * passed so that a Store able to resolve a person across registrations (by
+	 * issuer, or by an IdP's tenant-stable id) can implement that; the bundled
+	 * repository keys by `provider` and ignores it.
 	 */
 	findSubjectByFederatedIdentity?(
-		identity: Readonly<Pick<FederatedIdentityLink, "provider" | "sub">>,
+		identity: Readonly<
+			Pick<FederatedIdentityLink, "provider" | "sub"> & { readonly issuer?: string }
+		>,
 	): Promise<string | null>;
 }
 

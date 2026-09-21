@@ -135,6 +135,7 @@ export interface FederationGrantBrowserRouterOptions {
 		readonly findSubjectByFederatedIdentity?: (identity: {
 			readonly provider: string;
 			readonly sub: string;
+			readonly issuer?: string;
 		}) => Promise<string | null>;
 	};
 	/** Milliseconds: where the code exchange is aborted (`upstreamHardTimeoutMs`). */
@@ -300,8 +301,11 @@ async function judge(
 function consentLocation(consentUrl: string, issuer: string, challenge: string): string {
 	const url = new URL(consentUrl, issuer);
 	url.searchParams.set("challenge", challenge);
-	// A path stays a path: the page is on this origin, and the browser resolves it.
-	return consentUrl.startsWith("/") ? `${url.pathname}${url.search}` : url.href;
+	// Always absolute, on the issuer. Emitting the normalised path instead
+	// turned `/.//evil.example/consent` into `//evil.example/consent` — a
+	// protocol-relative Location carrying the challenge to another host (the
+	// adversarial review). Boot refuses such a path too; this is the belt.
+	return url.href;
 }
 
 /** Where a declined flow ends: the client's own URI, with what it needs and nothing else. */
@@ -340,7 +344,10 @@ export function createFederationGrantBrowserRouter(
 			auditFor(req)(
 				routeDeniedEvent({
 					type: "federation.grant.authorization_failed",
-					correlationId: requestIdOf(res),
+					// The FLOW's id once its intent is known — the one the lodging
+					// request carried, so that every event of one flow correlates.
+					// Before that there is only this request's own.
+					correlationId: intent?.correlationId ?? requestIdOf(res),
 					// An early failure has no grant to name, and none is invented.
 					grantId: intent?.grantId ?? "",
 					outcome,
@@ -771,6 +778,8 @@ export function createFederationGrantBrowserRouter(
 			}
 
 			const { intent } = transaction;
+			/** What this flow's events correlate by: the id its lodging carried. */
+			const flowId = intent.correlationId;
 			/** Every terminal outcome after check 1 ends here: the flow is over either way. */
 			const finish = async (): Promise<void> => {
 				try {
@@ -810,7 +819,7 @@ export function createFederationGrantBrowserRouter(
 					return;
 				}
 				if (intent.kind === "reauthorization") {
-					const backstopped = await backstop(intent, grantsBoundary, audit, correlationId);
+					const backstopped = await backstop(intent, grantsBoundary, audit, flowId);
 					if (backstopped !== "clear") {
 						await fail(
 							backstopped === "revoked" ? "grant_not_authorizable" : "temporarily_unavailable",
@@ -1009,7 +1018,7 @@ export function createFederationGrantBrowserRouter(
 					options.background.register(
 						audit({
 							type: "federation.grant.authorized",
-							correlationId,
+							correlationId: flowId,
 							grantId: grant.id,
 							clientId: grant.clientId,
 							subject: grant.subject,
@@ -1021,7 +1030,7 @@ export function createFederationGrantBrowserRouter(
 					options.background.register(
 						audit({
 							type: "federation.grant.reauthorized",
-							correlationId,
+							correlationId: flowId,
 							grantId: grant.id,
 							clientId: grant.clientId,
 							subject: grant.subject,
@@ -1160,9 +1169,14 @@ export function createFederationGrantBrowserRouter(
 				return "temporarily_unavailable";
 			}
 			try {
+				// Keyed as login links are — the federation's name and the upstream
+				// sub — with the verified issuer beside them for a Store that can
+				// resolve a person across registrations. The limit of that key is in
+				// D7: it cannot see a link made through another registration.
 				const owner = await repository.findSubjectByFederatedIdentity({
 					provider: intent.federation,
 					sub: upstream.subject,
+					issuer: upstream.issuer,
 				});
 				if (owner !== null && owner !== intent.subject) return "identity_conflict";
 			} catch (error) {

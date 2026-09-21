@@ -83,6 +83,16 @@ const consentUrl = (config: unknown, origin: string): string => {
 	if (written.startsWith("/") && !written.startsWith("//")) {
 		if (written.includes("#"))
 			return refuse("federationGrants.consent.url must not carry a fragment");
+		// A path has to STAY a path once resolved: `/.//evil.example/consent`
+		// normalises to `//evil.example/consent`, which a browser reads as another
+		// host. Resolved against the provider's origin, it must still be on it.
+		const resolved = new URL(written, origin);
+		if (resolved.origin !== origin || resolved.pathname.startsWith("//")) {
+			return refuse(
+				`federationGrants.consent.url ${JSON.stringify(written)} does not stay on the provider's ` +
+					"own origin once resolved",
+			);
+		}
 		return written;
 	}
 	let url: URL;

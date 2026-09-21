@@ -96,6 +96,8 @@ function world(options: { rateLimiter?: RateLimiter } = {}) {
 		grantsBoundary: null as Date | null | Error,
 		/** Which local user an upstream subject is already linked to. */
 		linked: new Map<string, string>(),
+		/** What the identity lookup was asked. */
+		lookups: [] as Record<string, unknown>[],
 		/** What the upstream's token endpoint answers the next exchange with. */
 		exchange: {
 			upstream: { issuer: CONNECTION.upstreamIssuer, subject: "00u-alice" },
@@ -174,7 +176,10 @@ function world(options: { rateLimiter?: RateLimiter } = {}) {
 			},
 			identityLookup: "required",
 			userRepository: {
-				findSubjectByFederatedIdentity: async ({ sub }) => state.linked.get(sub) ?? null,
+				findSubjectByFederatedIdentity: async (identity) => {
+					state.lookups.push({ ...identity });
+					return state.linked.get(identity.sub) ?? null;
+				},
 			},
 			upstreamTimeoutMs: 5_000,
 			rateLimiter:
@@ -1091,5 +1096,117 @@ describe("shutting down (Codex on slice 6)", () => {
 		const { handle } = await w.lodge();
 		expect((await w.connect(handle, "b-1")).status).toBe(503);
 		await draining;
+	});
+});
+
+describe("what the adversarial review found", () => {
+	it("correlates every event of one flow by the id its lodging carried", async () => {
+		const w = world();
+		const a = await approved(w, "b-1");
+		returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+		const b = await approved(w, "b-2");
+		// Declined at the upstream: a failure, after the intent is known.
+		returned(await callback(w, { state: b.state, error: "access_denied" }, "b-2"));
+		await w.background.drain();
+		const authorized = w.events.find((e) => e.type === "federation.grant.authorized");
+		const failed = w.events.find(
+			(e) => e.type === "federation.grant.authorization_failed" && e.details?.grantId === b.grantId,
+		);
+		expect(authorized?.details?.correlationId).toBe("corr-1");
+		expect(failed?.details?.correlationId).toBe("corr-1");
+	});
+
+	it("sends the browser to the consent page by an absolute URL on the issuer, never a relative one", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		const location = (await w.connect(handle, "b-1")).headers.location as string;
+		expect(location.startsWith(`${ISSUER}/consent/grants?`)).toBe(true);
+	});
+
+	it("hands the identity lookup the verified issuer beside the federation's name and the subject", async () => {
+		const w = world();
+		const a = await approved(w, "b-1");
+		returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+		expect(w.state.lookups.at(-1)).toEqual({
+			provider: "upstream",
+			sub: "00u-alice",
+			issuer: CONNECTION.upstreamIssuer,
+		});
+	});
+
+	it("does not exchange a code for a flow whose callback moved since it was approved", async () => {
+		const w = world();
+		const a = await approved(w, "b-1");
+		w.state.connections.set(CONNECTION.name, {
+			...CONNECTION,
+			callbackUri: `${ISSUER}/v2/session/federation-grants/callback/calendar`,
+		});
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"grant_not_authorizable",
+		);
+		expect(w.state.exchanged).toHaveLength(0);
+	});
+
+	it("holds the callback to both halves of the browser's session, and to a live one", async () => {
+		const w = world();
+		// Another express session carrying the same durable session.
+		const a = await approved(w, "b-1");
+		w.browsers.set("b-copy", { isAuthenticated: true, user: { id: "alice" }, sid: "sid-b-1" });
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-copy")).get("error")).toBe(
+			"reauthentication_required",
+		);
+		// Signed out since.
+		const b = await approved(w, "b-2");
+		w.browsers.set("b-2", { isAuthenticated: false, user: { id: "alice" }, sid: "sid-b-2" });
+		expect(returned(await callback(w, { state: b.state, code: "c" }, "b-2")).get("error")).toBe(
+			"reauthentication_required",
+		);
+		// A durable session that has expired.
+		const c = await approved(w, "b-3");
+		const durable = w.durable.get("sid-b-3") as UserSession;
+		w.durable.set("sid-b-3", { ...durable, expiresAt: new Date(w.state.now.getTime() - 1) });
+		expect(returned(await callback(w, { state: c.state, code: "c" }, "b-3")).get("error")).toBe(
+			"reauthentication_required",
+		);
+	});
+
+	it("asks a browser whose durable session expired to sign in again at connect", async () => {
+		const w = world();
+		const { handle } = await w.lodge();
+		const sid = w.signIn("b-1");
+		const durable = w.durable.get(sid) as UserSession;
+		w.durable.set(sid, { ...durable, expiresAt: new Date(w.state.now.getTime() - 1) });
+		const response = await w.connect(handle, "b-1");
+		expect(response.status).toBe(403);
+		expect(response.text).toMatch(/sign in again/i);
+	});
+
+	it("reads a connection that could not be made as an outage, not the upstream's fault", async () => {
+		const w = world();
+		const a = await approved(w, "b-1");
+		w.state.exchangeThrows = new TypeError("fetch failed", {
+			cause: new Error("connect ECONNREFUSED"),
+		});
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"temporarily_unavailable",
+		);
+	});
+
+	it("audits a declined consent, and parks nothing for a prerender", async () => {
+		const w = world();
+		const { handle, grantId } = await w.lodge();
+		w.signIn("b-1");
+		expect((await w.connect(handle, "b-1").set("Sec-Purpose", "prefetch;prerender")).status).toBe(
+			204,
+		);
+		const challenge = await w.challengeFor(handle, "b-1");
+		await w.answer({ challenge, decision: "deny" }, "b-1");
+		await w.background.drain();
+		expect(
+			w.events.find(
+				(e) => e.type === "federation.grant.authorization_failed" && e.details?.grantId === grantId,
+			)?.details,
+		).toMatchObject({ outcome: "access_denied" });
 	});
 });

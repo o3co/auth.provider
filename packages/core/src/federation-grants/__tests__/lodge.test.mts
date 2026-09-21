@@ -207,6 +207,16 @@ describe("lodging a first-time intent (D6, D16)", () => {
 		expect(intents.size).toBe(0);
 	});
 
+	it("refuses a registered redirect URI that registration itself would have refused", async () => {
+		// A repository that validates nothing can hand one back; the flow would
+		// otherwise fail only at its end, after the grant was activated.
+		const client = { ...CLIENT, federationGrantRedirectUris: ["not a uri"] };
+		expect(
+			await lodgeFederationGrantIntent(deps(), initial({ client, redirectUri: "not a uri" })),
+		).toEqual({ ok: false, reason: "redirect_uri_invalid" });
+		expect(intents.size).toBe(0);
+	});
+
 	it("holds the scopes to the connection and names what was wrong", async () => {
 		const scoped = (scopes: readonly string[], connection = CONNECTION) =>
 			lodgeFederationGrantIntent(

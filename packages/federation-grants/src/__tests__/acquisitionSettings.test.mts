@@ -85,6 +85,8 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 			"javascript:alert(1)",
 			"consent",
 			`${ISSUER}/consent#fragment`,
+			// A path that normalises to another host (the adversarial review).
+			"/.//evil.example/consent",
 		]) {
 			expect(() => resolve({ consent: { url } }), url).toThrow(/consent\.url/);
 		}

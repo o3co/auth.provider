@@ -107,7 +107,7 @@ keep `offline_access` where the connection lists it.
 | `scope` present and empty | 400 | `invalid_request` | `invalid_scope` |
 | `expires_in` not a whole positive number of seconds | 400 | `invalid_request` | `invalid_expires_in` |
 | Any other body parameter (`resource`, `expires_at`, …) | 400 | `invalid_request` | `unexpected_parameter` |
-| `redirect_uri` not registered, or carrying a result parameter | 400 | `invalid_request` | `redirect_uri_not_registered` / `redirect_uri_reserved_parameter` |
+| `redirect_uri` not registered, registered but not a valid redirect URI, or carrying a result parameter | 400 | `invalid_request` | `redirect_uri_not_registered` / `redirect_uri_invalid` / `redirect_uri_reserved_parameter` |
 | `scope` outside the connection / without `openid` / without `offline_access` / a subset where subsets are off | 400 | `invalid_scope` | `scope_exceeded` / `openid_required` / `offline_access_required` / `scope_subsets_not_allowed` |
 | The client may not use this connection — whether or not it exists | 403 | `access_denied` | `connection_not_permitted` |
 | Sixteen live first-time intents for this client and this user | 429 | `rate_limited` | `intent_limit` |
@@ -371,6 +371,18 @@ It checks, in this order:
    account already on the grant; the client's `upstream_sub` if it sent one;
    and — unless `identityLookup = "unsupported"` — not already another local
    user's. One linked to nobody is accepted.
+
+   **What that last check can see.** It asks
+   `findSubjectByFederatedIdentity({ provider, sub, issuer })` with `provider`
+   = the federation the *connection* names, which is how a login links an
+   identity — under the federation the user logged in through. So it finds a
+   link only when the connection uses the same federation registration as the
+   login did. A connection on a registration of its own (the rule for an IdP
+   that accumulates consent, such as Entra) misses the login's link, and where
+   the IdP's `sub` is pairwise per registration (Entra's is) no name-and-`sub`
+   key could find it. `identityLookup = "required"` does not protect such a
+   connection unless the Store resolves the person across registrations — by
+   the `issuer` it is also given, or by an IdP's tenant-stable id.
 6. **Eligibility**: a refresh token, and an access token with a finite lifetime
    within `maxAccessTokenLifetime`, of a type a route without a proof key can
    present.

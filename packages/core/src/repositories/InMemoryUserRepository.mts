@@ -103,7 +103,9 @@ export class InMemoryUserRepository implements UserRepository {
 	 * contain a colon.
 	 */
 	async findSubjectByFederatedIdentity(
-		identity: Readonly<Pick<FederatedIdentityLink, "provider" | "sub">>,
+		identity: Readonly<
+			Pick<FederatedIdentityLink, "provider" | "sub"> & { readonly issuer?: string }
+		>,
 	): Promise<string | null> {
 		const token = `${identity.provider}:${identity.sub}`;
 		const linked = this.linkedTokens.get(token);

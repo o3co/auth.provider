@@ -134,6 +134,7 @@ export function serializeFederationGrantLodgingRefusal(
 		case "key_unavailable":
 			return answer(503, "temporarily_unavailable", result.reason);
 		case "redirect_uri_not_registered":
+		case "redirect_uri_invalid":
 		case "redirect_uri_reserved_parameter":
 		case "expires_in_out_of_range":
 		case "connection_mismatch":
