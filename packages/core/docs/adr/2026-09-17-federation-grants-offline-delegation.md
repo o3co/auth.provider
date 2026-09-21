@@ -1792,6 +1792,51 @@ Cluster hash tag, as the consent store's do:
   supersession is enforced at activation, by the grant's current-intent
   pointer (D2).
 
+**Amended in slice 6: the intent port as built.** `FederationGrantIntentStore`
+is seven operations: `putIntent` (admission and the bound, one step),
+`getIntent`, `parkConsent`, `getConsent`, `answerConsent` (removes the
+challenge, spends the intent and — for an approval — writes the connect
+transaction, or none of it), `consumeTransaction` (read and remove,
+conditionally on the connection) and `finishIntent` (idempotent; closes the
+handle, drops what is left under it, releases the bound's place once).
+
+- **One deadline.** The intent's `expiresAt`, ten minutes after lodging
+  (`FEDERATION_GRANT_FLOW_BUDGET_MS`), is the whole flow's budget: the consent
+  and the transaction carry it rather than a TTL of their own, because a
+  record that outlived the intent could never activate — nothing extends a
+  `pending` grant's pointer. A user who spends nine minutes on the consent
+  page leaves one for the upstream.
+- **The bound refuses; it does not evict.** Sixteen live first-time intents per
+  `(client, subject)` (`FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT`).
+  `putIntent` is the only admission control in front of `createPending`, and
+  every admitted intent creates a `pending` grant that lives to its deadline,
+  so eviction would uncap records in the GRANT store while the intent count
+  stayed at sixteen. A renewal takes no place. An approval keeps its place
+  until the flow finishes; a denial releases it.
+- **Core orders the writes**: the intent first, then `createPending` or
+  `nameIntent`. An orphan intent activates nothing and lapses; a refused second
+  write closes the intent; a second write whose answer was lost is asked about
+  with `isCurrentIntent`, never retried — `nameIntent` is not safely
+  retryable once a newer intent may have superseded this one.
+- **A spent handle leaves a marker** until the original deadline, so a retried
+  admission cannot resurrect it; the same record again is `unchanged`, neither
+  extending the deadline nor taking a second place.
+- **Two clocks**, as for grants: the caller's `now` decides what it is told;
+  the adapter's own clock reclaims — including the bound's places, which the
+  Redis adapter prunes on the server's time.
+- **A record that cannot be read is refused, not reclaimed**, as the grant
+  store treats unreadable state: it may be a newer release's.
+- **Redis**: every key under one constant tag, `<prefix>{intents}:`, so a
+  script routed by one key may derive the rest; the bound as a ZSET of
+  reservations scored by deadline, not a counter. Five operations are scripts —
+  the ones that read, decide and write across keys, which Redis makes one step
+  only with a script or with WATCH/MULTI on a connection of their own. The two
+  reads are plain commands. The adapter judges nothing the answer script
+  judges, so the check a race meets is the check a test reaches. The connect
+  transaction's PKCE verifier and nonce are not sealed, as the login flow's
+  own transaction is not: they are worthless once the flow's ten minutes are
+  over, and the sealing above is for refresh tokens that outlive it.
+
 The retention a grant was created with is kept **with the record**, and its
 horizon derived from that: a key's TTL and an index score are written once, so
 a store reopened under a different setting would otherwise disagree with the
@@ -2315,6 +2360,19 @@ route test is written first and watched failing.
    optional `UserRepository` lookup, and the second port of D16 —
    `FederationGrantIntentStore`, both adapters, and the core function that
    orders an intent's two writes.
+   Done: the intent port with its memory and Redis adapters and a shared
+   contract suite held in step by a parity test; `lodgeFederationGrantIntent`
+   and `lodgeFederationGrantReauthorization`, which order the two writes;
+   `exchangeDelegatedCode`, the capability's third method (D17);
+   `findSubjectByFederatedIdentity?` and `federationGrants.identityLookup`;
+   `federationGrants.consent.url` and each connection's `callbackURL`, both
+   refused at boot when missing; the create and reauthorize routes; the
+   browser half (connect, consent, callback) as a router of its own mounted
+   after the session middleware; five audit types. The amendments are marked
+   where they stand, in D6, D7, D8, D13, D16, D17 and D18. What this slice
+   deliberately did not do: close D13's `"keep"` window beyond the re-read
+   before activation (write fencing is deferred), and give the Google, Apple
+   or GitHub adapters the capability.
 7. **standalone template, documentation, CHANGELOG.** Includes the key-ring
    retention rule and the provider-specific `offline_access` guide. The
    operator runbook rows and the `adapter-surface.md` rows are not left for
