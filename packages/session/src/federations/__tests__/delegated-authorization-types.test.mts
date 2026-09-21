@@ -46,6 +46,10 @@ describe("delegated authorization types (#593, D17)", () => {
 		const asCoreToo: FederationGrantRefreshedToken = rotationOnly;
 		const adapter: SupportsDelegatedAuthorization = {
 			buildDelegatedAuthorizationUrl: () => new URL("https://idp.test/authorize"),
+			exchangeDelegatedCode: async () => ({
+				upstream: { issuer: "https://idp.test", subject: "s" },
+				tokens,
+			}),
 			refreshDelegatedToken: async () => tokens,
 		};
 		const refresher: FederationGrantRefresher = adapter;

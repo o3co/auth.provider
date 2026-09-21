@@ -104,6 +104,8 @@ export {
 } from "./federations/transaction.mjs";
 export type {
 	DelegatedAuthorizationRequest,
+	DelegatedAuthorizationResult,
+	DelegatedCodeExchangeRequest,
 	DelegatedRefreshRequest,
 	DelegatedTokens,
 	EndSessionRequest,

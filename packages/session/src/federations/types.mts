@@ -337,9 +337,12 @@ export interface DelegatedTokens {
 
 /**
  * The capability behind federation grants (#593, D17): an adapter that can
- * send a user to authorize a delegation, and refresh its tokens without a
- * session. Detected by BOTH methods being present; an adapter with one and
- * not the other does not have it.
+ * send a user to authorize a delegation, exchange the code that comes back for
+ * the grant's first tokens, and refresh them without a session. Detected by
+ * ALL THREE methods being present; an adapter with some and not the others
+ * does not have it — slice 6 added the exchange, and an adapter written
+ * against the earlier pair is refused at boot by name rather than failing at a
+ * callback with a user waiting.
  */
 /**
  * The authorization parameters a delegated adapter owns, and which an
@@ -373,8 +376,55 @@ export const RESERVED_DELEGATED_AUTHORIZATION_PARAMS: ReadonlySet<string> = new 
 	"response_mode",
 ]);
 
+/**
+ * What the connect callback asks of an adapter (#593, D7, D17): exchange the
+ * code the upstream sent back for the grant's first tokens, and say whose they
+ * are.
+ *
+ * Not the login flow's `exchangeCode`. That one answers a login profile — it
+ * may call UserInfo, map claims, and fill a lifetime the upstream never sent —
+ * and it has no place for three things an acquisition needs: the RFC 8707
+ * `resource` at the token endpoint, the lifetime the upstream SENT rather than
+ * what a library coerced it to, and a per-call signal for the callback's time
+ * budget.
+ */
+export interface DelegatedCodeExchangeRequest {
+	readonly code: string;
+	readonly codeVerifier: string;
+	/** The connection's `callbackURL`, exactly as the authorization request sent it. */
+	readonly redirectUri: string;
+	/** Required: the id_token is bound to it (OIDC Core §3.1.3.7). */
+	readonly nonce: string;
+	/** Sent at the token endpoint too (RFC 8707 §2.2). */
+	readonly resource?: string;
+	/**
+	 * The rest of the callback's parameters, as for `exchangeCode`: `code` and
+	 * `state` excluded, `iss` (RFC 9207) forwarded to the mix-up check.
+	 */
+	readonly callbackParams?: Readonly<Record<string, string>>;
+	/** Aborts the upstream request. */
+	readonly signal?: AbortSignal;
+}
+
+/**
+ * The grant's first tokens and whose they are. `upstream` comes from an
+ * id_token the adapter VERIFIED — signature, issuer, audience, expiry, nonce,
+ * and `at_hash` where present — and from nothing else: not UserInfo, not an
+ * email. An exchange whose identity could not be verified throws, and salvages
+ * nothing: unlike a refresh, it has no authorization a refresh token could be
+ * kept under.
+ */
+export interface DelegatedAuthorizationResult {
+	readonly upstream: { readonly issuer: string; readonly subject: string };
+	/** As a delegated refresh answers them: `{ refreshToken }` alone when the lifetime was not one. */
+	readonly tokens: DelegatedTokens;
+}
+
 export interface SupportsDelegatedAuthorization {
 	buildDelegatedAuthorizationUrl(params: DelegatedAuthorizationRequest): URL;
+	exchangeDelegatedCode(
+		params: DelegatedCodeExchangeRequest,
+	): Promise<DelegatedAuthorizationResult>;
 	refreshDelegatedToken(params: DelegatedRefreshRequest): Promise<DelegatedTokens>;
 }
 
@@ -384,10 +434,12 @@ export function supportsDelegatedAuthorization(
 	if (p == null) return false;
 	const candidate = p as {
 		buildDelegatedAuthorizationUrl?: unknown;
+		exchangeDelegatedCode?: unknown;
 		refreshDelegatedToken?: unknown;
 	};
 	return (
 		typeof candidate.buildDelegatedAuthorizationUrl === "function" &&
+		typeof candidate.exchangeDelegatedCode === "function" &&
 		typeof candidate.refreshDelegatedToken === "function"
 	);
 }

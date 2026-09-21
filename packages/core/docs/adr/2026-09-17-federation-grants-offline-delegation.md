@@ -1832,7 +1832,7 @@ carries no authorization authentication at all, and its spelling is its own,
 so neither reader takes the other's. The in-memory adapter declares
 `replicaSafety: unsafe`.
 
-### D17 — The federation adapter surface gains one capability, in two methods
+### D17 — The federation adapter surface gains one capability, in three methods
 
 Every adapter fixes its authorization parameters today, so `offline_access`
 with `prompt=consent` — what OIDC Core §11 requires — cannot be sent at all.
@@ -1958,6 +1958,48 @@ becomes so once slice 2 declares the additions on it. A connection whose federat
 (slice 4, which reads the connections). The first cut implements it for the
 generic OIDC adapter; GitHub cannot (OAuth Apps issue no refresh token), and
 Google and Apple may gain it later.
+
+**Amended in slice 6: the capability is three methods, not two.** The
+decision above gave the connect callback nothing to exchange the code with,
+and the login flow's `exchangeCode` cannot stand in for it. Compared with
+`refreshDelegatedToken` it lacks four things an acquisition needs — the RFC
+8707 `resource` at the token endpoint (§2.2 asks for it there too), the
+lifetime judged on the captured body rather than on what the library coerced,
+the token dated at receipt rather than after a slow JWKS, and a per-call
+signal for the callback's time budget — and it does work a delegation must
+not depend on: it may call UserInfo, and it maps a login profile. So:
+
+```ts
+exchangeDelegatedCode(params: {
+	readonly code: string;
+	readonly codeVerifier: string;
+	readonly redirectUri: string; // the connection's callbackURL, exactly as authorization sent it
+	readonly nonce: string; // required
+	readonly resource?: string; // RFC 8707, at the token endpoint too
+	readonly callbackParams?: Readonly<Record<string, string>>; // `iss` forwarded (RFC 9207)
+	readonly signal?: AbortSignal;
+}): Promise<{
+	readonly upstream: { readonly issuer: string; readonly subject: string };
+	readonly tokens: DelegatedTokens;
+}>;
+```
+
+`upstream` comes from a VERIFIED id_token and from nothing else — not
+UserInfo, not an email. The exchange shares the refresh's capture and dating,
+and deliberately not its salvage: a refresh keeps a rotated refresh token out
+of an answer the library refused, because the grant it rotates exists; an
+acquisition whose answer could not be verified has no grant and no identity to
+bind one to, so the failure is thrown whole. A lifetime the library accepted
+but the captured body shows was not one (`parseFloat` turns `"1000seconds"`
+into 1000) withholds the access token and still reports the verified identity,
+so core refuses the activation for the true reason.
+
+`supportsDelegatedAuthorization` requires all three, and the boot refusal
+names the missing exchange. That is a break for a custom adapter written
+against the earlier pair, and it is taken now because it cannot be cheaper
+later: until this slice nothing could create a grant, so no deployment holds
+one that such an adapter serves. The generic OIDC adapter implements it; the
+others remain as the paragraph above leaves them.
 
 ### D18 — Audit, with a correlation ID
 

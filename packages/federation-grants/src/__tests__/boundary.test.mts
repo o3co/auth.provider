@@ -84,6 +84,10 @@ const refreshed = vi.fn(async () => ({
 
 const delegated = {
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
+	exchangeDelegatedCode: async () => ({
+		upstream: { issuer: "https://issuer.example", subject: "upstream-1" },
+		tokens: {},
+	}),
 	refreshDelegatedToken: refreshed,
 } as unknown as FederationProvider;
 

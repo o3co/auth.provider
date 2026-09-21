@@ -151,7 +151,8 @@ const requireFailMode = (deps: AnyDeps): RateLimitFailMode => {
  * checking the synthetic map earlier would refuse a configuration whose
  * provider simply had not been contributed yet.
  *
- * Refusal 6 is about BOTH delegated methods. An adapter with an ordinary
+ * Refusal 6 is about ALL THREE delegated methods (slice 6 added the code
+ * exchange the connect callback makes). An adapter with an ordinary
  * `refreshToken` is not enough: that one refreshes a session's token with the
  * session's own credentials, and says nothing about whether this provider may
  * act for a user who is not here. Slice 2 implemented the pair for the generic
@@ -178,10 +179,11 @@ const requireDelegatedCapability = (
 			throw new Error(
 				`federationGrantsModule: the federation "${connection.federation}", named by ` +
 					`federationGrants.connections.${connection.name}, has no delegated ` +
-					"authorization capability. Offline delegation needs BOTH " +
-					"`buildDelegatedAuthorizationUrl` and `refreshDelegatedToken`: an ordinary " +
-					"`refreshToken` renews a token inside a session and says nothing about " +
-					"acting for a user who is not present.",
+					"authorization capability. Offline delegation needs ALL THREE of " +
+					"`buildDelegatedAuthorizationUrl`, `exchangeDelegatedCode` and " +
+					"`refreshDelegatedToken` — an adapter written against the earlier pair lacks the " +
+					"exchange the connect callback makes. An ordinary `refreshToken` renews a token " +
+					"inside a session and says nothing about acting for a user who is not present.",
 			);
 		}
 	}

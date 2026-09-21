@@ -77,6 +77,10 @@ const clientRepository: ClientRepository = {
 
 const delegated = {
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
+	exchangeDelegatedCode: async () => ({
+		upstream: { issuer: "https://issuer.example", subject: "upstream-1" },
+		tokens: {},
+	}),
 	refreshDelegatedToken: async () => ({
 		accessToken: "rotated-access-token",
 		refreshToken: "rotated-refresh-token",

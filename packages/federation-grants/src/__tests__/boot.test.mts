@@ -80,8 +80,18 @@ const olderRevocation = {
 	revokedBefore: async () => null,
 };
 
-/** An adapter with BOTH delegated methods: the capability slice 2 defined. */
+/** An adapter with all three delegated methods: the capability as slice 6 completed it. */
 const delegated = {
+	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
+	exchangeDelegatedCode: async () => ({
+		upstream: { issuer: "https://issuer.example", subject: "upstream-1" },
+		tokens: {},
+	}),
+	refreshDelegatedToken: async () => ({}),
+} as unknown as FederationProvider;
+
+/** The pair slice 2 shipped, without the code exchange slice 6 added: what a custom adapter written before it has. */
+const slice2Pair = {
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
 	refreshDelegatedToken: async () => ({}),
 } as unknown as FederationProvider;
@@ -280,6 +290,9 @@ describe("enabling the feature", () => {
 		// provider may act for a user who is not present, which is the entire
 		// question offline delegation asks.
 		await expect(boot({ provider: sessionOnly })).rejects.toThrow(/delegated/);
+		// And the earlier pair, by name: the callback would otherwise be the
+		// first place it failed, with a user standing in front of it.
+		await expect(boot({ provider: slice2Pair })).rejects.toThrow(/exchangeDelegatedCode/);
 	});
 
 	it("refuses to discard every disclosure without being told to", async () => {
