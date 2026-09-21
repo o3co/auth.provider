@@ -846,7 +846,15 @@ export function createFederationGrantBrowserRouter(
 					return;
 				}
 
-				// 4. The upstream's own answer, validated by the adapter.
+				// 4. The upstream's own answer, validated by the adapter. A parameter
+				// it carried twice is a malformed response (RFC 6749 §3.1), not one
+				// of its values: dropping the copies would hand the adapter a
+				// response without the `iss` it said, and whether RFC 9207's check
+				// then ran would turn on the issuer's metadata (Copilot).
+				if (Object.values(req.query).some((value) => typeof value !== "string")) {
+					await fail("upstream_error");
+					return;
+				}
 				const upstreamError = single(req.query.error);
 				if (upstreamError !== undefined) {
 					await fail(upstreamError === "access_denied" ? "access_denied" : "upstream_error");

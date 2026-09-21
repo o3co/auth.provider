@@ -1779,3 +1779,32 @@ describe("an audit sink that drops everything", () => {
 		await Promise.all([renewed.background.drain(), backstopped.background.drain()]);
 	});
 });
+
+describe("a callback that carries a parameter twice (Copilot on #610)", () => {
+	it("refuses it as a malformed response rather than dropping the copies, and exchanges nothing", async () => {
+		// A repeated `iss` used to be dropped from what the adapter was handed —
+		// so whether RFC 9207's check ran depended on the issuer's metadata, not
+		// on what the response said. RFC 6749 §3.1: a response parameter MUST
+		// NOT be included more than once.
+		const w = world();
+		const a = await approved(w, "b-1");
+		const response = await request(w.app)
+			.get(
+				`${FEDERATION_GRANTS_BROWSER_MOUNT_PATH}/callback/${CONNECTION.name}?state=${encodeURIComponent(a.state)}&code=c&iss=${encodeURIComponent(CONNECTION.upstreamIssuer)}&iss=https%3A%2F%2Fevil.example`,
+			)
+			.set("x-browser", "b-1");
+		expect(returned(response).get("error")).toBe("upstream_error");
+		expect(w.state.exchanged).toHaveLength(0);
+		expect((await w.grants.find(a.grantId, w.state.now))?.status).toBe("pending");
+
+		// Any parameter, not only `iss`: the response is malformed either way.
+		const b = await approved(w, "b-2");
+		const other = await request(w.app)
+			.get(
+				`${FEDERATION_GRANTS_BROWSER_MOUNT_PATH}/callback/${CONNECTION.name}?state=${encodeURIComponent(b.state)}&code=c&session_state=x&session_state=y`,
+			)
+			.set("x-browser", "b-2");
+		expect(returned(other).get("error")).toBe("upstream_error");
+		expect(w.state.exchanged).toHaveLength(0);
+	});
+});

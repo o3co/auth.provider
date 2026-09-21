@@ -369,7 +369,10 @@ It checks, in this order:
 4. **The upstream's answer**, validated by the adapter's
    `exchangeDelegatedCode`: PKCE, the id_token's signature, issuer, audience,
    expiry and nonce, `iss` forwarded (RFC 9207), the resource sent at the token
-   endpoint, aborted at `upstreamHardTimeoutMs`.
+   endpoint, aborted at `upstreamHardTimeoutMs`. A response carrying any
+   parameter twice is refused as malformed (`upstream_error`) before the code
+   is exchanged, rather than having the copies dropped — a dropped `iss` would
+   leave RFC 9207's check to the issuer's metadata.
 5. **The upstream account**: the connection's issuer; for a renewal, the
    account already on the grant; the client's `upstream_sub` if it sent one;
    and — unless `identityLookup = "unsupported"` — not already another local
