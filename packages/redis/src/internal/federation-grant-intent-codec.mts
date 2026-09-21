@@ -91,7 +91,15 @@ const params = (value: unknown, what: string): Readonly<Record<string, string>> 
 		// turns a working connection into a storage failure (Codex).
 		const param = (value as Record<string, unknown>)[key];
 		if (typeof param !== "string") throw BAD(`${what}.${key}`);
-		out[key] = param;
+		// Defined, not assigned: assigning `__proto__` calls the prototype
+		// setter and drops the key, where the memory store's spread keeps it
+		// (Copilot). The resolver refuses the name; this does not rely on it.
+		Object.defineProperty(out, key, {
+			value: param,
+			enumerable: true,
+			writable: true,
+			configurable: true,
+		});
 	}
 	return out;
 };

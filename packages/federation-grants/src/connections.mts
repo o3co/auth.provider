@@ -136,6 +136,12 @@ const authorizationParams = (value: unknown, name: string): Readonly<Record<stri
 		return refuse(name, "authorizationParams must be a map of strings");
 	}
 	for (const [key, param] of Object.entries(value)) {
+		if (key === "__proto__") {
+			// An own `__proto__` survives a spread and is lost to an assignment,
+			// so two stores keeping the same intent would disagree about it. No
+			// authorization server defines the name (Copilot).
+			return refuse(name, 'authorizationParams may not set "__proto__"');
+		}
 		if (RESERVED_DELEGATED_AUTHORIZATION_PARAMS.has(key)) {
 			// The exclusion slice 2 applies at the point of use, applied here at
 			// boot: setting one of these from configuration is not customising

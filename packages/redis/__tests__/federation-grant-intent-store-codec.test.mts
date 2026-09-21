@@ -68,6 +68,16 @@ describe("the intent codec", () => {
 		expect(decodeFederationGrantIntent(encodeFederationGrantIntent(written))).toEqual(written);
 	});
 
+	it("keeps every parameter it is handed as its own key, as the memory store does (Copilot)", () => {
+		// Assigning a decoded `__proto__` into `{}` invokes the prototype setter
+		// and drops it; the memory store's spread keeps it. The resolver refuses
+		// the name at boot, and the codec does not rely on that.
+		const written = intent(JSON.parse('{"__proto__": "x", "prompt": "consent"}'));
+		const read = decodeFederationGrantIntent(encodeFederationGrantIntent(written));
+		expect(Object.keys(read.authorizationParams).sort()).toEqual(["__proto__", "prompt"]);
+		expect(Object.getOwnPropertyDescriptor(read.authorizationParams, "__proto__")?.value).toBe("x");
+	});
+
 	it("reads back what it wrote", () => {
 		const written = intent({ access_type: "offline" });
 		expect(decodeFederationGrantIntent(encodeFederationGrantIntent(written))).toEqual(written);
