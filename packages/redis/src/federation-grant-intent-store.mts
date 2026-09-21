@@ -141,11 +141,6 @@ export function createRedisFederationGrantIntentStore(
 		return text === null ? null : decodeFederationGrantConsent(text);
 	};
 
-	const bindingsMatch = (
-		a: FederationGrantBrowserBinding,
-		b: FederationGrantBrowserBinding,
-	): boolean => federationGrantBindingText(a) === federationGrantBindingText(b);
-
 	return {
 		kind: "redis",
 
@@ -214,12 +209,12 @@ export function createRedisFederationGrantIntentStore(
 			readonly now: Date;
 		}): Promise<FederationGrantConsentAnswerResult> {
 			const nowMs = instant(now, "now");
-			const parked = await readConsent(challenge, nowMs);
-			if (parked === null) return { outcome: "empty" };
-			if (!bindingsMatch(parked.binding, binding)) return { outcome: "empty" };
-			const intent = await readIntent(parked.intentHandle, nowMs);
-			if (intent === null) return { outcome: "empty" };
 
+			// The script is the one that judges: the binding, both deadlines,
+			// whether the intent is still live. Nothing here decides any of that
+			// first — a check made outside the script would be the one a test
+			// exercises, and the script's own, which is the one a race meets,
+			// would never be reached.
 			if (answer.decision === "deny") {
 				const answered = await client.answerConsent(prefix, {
 					challenge: keyPart(challenge),
@@ -232,6 +227,14 @@ export function createRedisFederationGrantIntentStore(
 				}
 				return { outcome: "denied", intent: decodeFederationGrantIntent(answered.record) };
 			}
+
+			// An approval needs what the consent showed and the intent it spends,
+			// to build the transaction the script writes. Read, not judged: if the
+			// browser is the wrong one, the script refuses and this is discarded.
+			const parked = await readConsent(challenge, nowMs);
+			if (parked === null) return { outcome: "empty" };
+			const intent = await readIntent(parked.intentHandle, nowMs);
+			if (intent === null) return { outcome: "empty" };
 
 			// Built here and written by the script, so that `consent.at` is the
 			// answer's instant and the grant's expiry is derived from it — neither
