@@ -49,7 +49,10 @@ export type {
 	DeviceCodeRecordFields,
 	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
+	FederationGrantConsentAnswered,
 	FederationGrantHashFields,
+	FederationGrantIntentAdmission,
+	FederationGrantIntentStoreClient,
 	FederationGrantSnapshot,
 	FederationGrantStoreClient,
 	FederationTokenStoreClient,
@@ -122,6 +125,13 @@ export {
 	redisDeviceCodeStoreBuilder,
 	redisDeviceCodeStoreModule,
 } from "./device-code-store.mjs";
+export {
+	createRedisFederationGrantIntentStore,
+	FEDERATION_GRANT_RESERVATION_ALLOWANCE_MS,
+	type RedisFederationGrantIntentStoreOptions,
+	redisFederationGrantIntentStoreModule,
+	resolveRedisFederationGrantIntentStoreOptions,
+} from "./federation-grant-intent-store.mjs";
 // ---------------------------------------------------------------------------
 // DPoP replay store adapter (Wave 2 Phase 2 Sub-PR 2a) is exposed on the
 // dedicated `@o3co/auth-provider-redis/dpop` subpath rather than re-exported
@@ -137,8 +147,8 @@ export {
 // Adapter relocated from core; module pattern added for declarative wiring
 // parity with other v0.5.0 redis adapters.
 // ---------------------------------------------------------------------------
-// Federation grants (#593, D16): the offline-delegation store. No module
-// factory here — slice 4 wires the routes and the configuration.
+// Federation grants (#593, D16): the offline-delegation store, and
+// acquisition's records beside it (slice 6).
 // ---------------------------------------------------------------------------
 export {
 	createRedisFederationGrantStore,
