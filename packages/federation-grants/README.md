@@ -47,11 +47,102 @@ No description, deliberately. A body naming the feature would tell an unauthenti
 
 What it is **not** is byte-identical to a deployment that never installed the package: there, nothing matches the path at all and the host's own fallback answers — Express's HTML 404 in a bare composition. Review measured the difference and it is the headers and the content type, not the body. So the property this actually has is the one worth having: the refusal names no feature, and nothing behind it runs. A deployment that wants the two indistinguishable gives its host a JSON 404 of its own.
 
-## The three routes
+## The routes a client calls
 
-All three are `POST`, all are authenticated as a confidential client
-(`client_secret_basic`, `client_secret_post` or `private_key_jwt`), and all
-take the grant id as an opaque path segment.
+All five are `POST` and all are authenticated as a confidential client
+(`client_secret_basic`, `client_secret_post` or `private_key_jwt`). The three
+that address a grant take its id as an opaque path segment; the two that lodge
+an intent (slice 6) answer where to send the user's browser.
+
+### `POST /oauth/federation-grants` — lodging a first-time intent
+
+```json
+{
+  "connection": "calendar",
+  "sub": "local-subject",
+  "redirect_uri": "https://client.example/connected",
+  "state": "opaque-client-state",
+  "scope": "openid offline_access calendar.read",
+  "expires_in": 2592000,
+  "upstream_sub": "00u-expected"
+}
+```
+
+`scope`, `expires_in` and `upstream_sub` are optional. The answer is where to
+send the user, and nothing has been granted yet:
+
+```json
+{
+  "grant_id": "…",
+  "status": "pending",
+  "connect_uri": "https://provider.example/session/federation-grants/connect?request=…",
+  "connect_expires_in": 600,
+  "expires_in": 2592000
+}
+```
+
+- `connect_uri` is built on the issuer, never on a request header. The handle
+  in it is single-use and the whole flow — connect, consent, the upstream,
+  the callback — has to finish within `connect_expires_in` seconds: ten
+  minutes, measured from this answer. A user who spends nine of them on the
+  consent page has one left for the upstream; start again if it runs out.
+- `expires_in` is the grant lifetime that applied — a request above
+  `federationGrants.maxExpiresIn` is clamped, not refused. There is no
+  `expires_at` yet: a grant is dated from the user's consent.
+- `sub` is what the client asserts. The connect flow is where a browser
+  session proves it, and a session for anyone else is refused.
+
+`redirect_uri` must be one of the client's `federationGrantRedirectUris`,
+exactly — no prefix, no fallback to its ordinary redirect URIs — and may not
+already carry `grant_id`, `state` or `error`, which the end of the flow
+appends. `scope` must be within the connection's scopes, keep `openid`, and
+keep `offline_access` where the connection lists it.
+
+| Exit | HTTP | `error` | `error_description` |
+|---|---:|---|---|
+| Lodged | 201 | — | — |
+| Body is not an object | 400 | `invalid_request` | `invalid_body` |
+| A required field missing or empty | 400 | `invalid_request` | `sub_required` / `connection_required` / `redirect_uri_required` / `state_required` |
+| A field repeated, or not a string | 400 | `invalid_request` | `duplicate_<field>` / `invalid_<field>` |
+| `scope` present and empty | 400 | `invalid_request` | `invalid_scope` |
+| `expires_in` not a whole positive number of seconds | 400 | `invalid_request` | `invalid_expires_in` |
+| Any other body parameter (`resource`, `expires_at`, …) | 400 | `invalid_request` | `unexpected_parameter` |
+| `redirect_uri` not registered, or carrying a result parameter | 400 | `invalid_request` | `redirect_uri_not_registered` / `redirect_uri_reserved_parameter` |
+| `scope` outside the connection / without `openid` / without `offline_access` / a subset where subsets are off | 400 | `invalid_scope` | `scope_exceeded` / `openid_required` / `offline_access_required` / `scope_subsets_not_allowed` |
+| The client may not use this connection — whether or not it exists | 403 | `access_denied` | `connection_not_permitted` |
+| Sixteen live first-time intents for this client and this user | 429 | `rate_limited` | `intent_limit` |
+| The connection is not configured | 503 | `temporarily_unavailable` | `connection_not_configured` |
+| A store could not be read or written | 503 | `temporarily_unavailable` | `storage` |
+| Admitted as the process began shutting down | 503 | `service_unavailable` | `shutting_down` |
+| Unexpected fault | 500 | `server_error` | `unexpected_error` |
+
+A lodged intent emits `federation.grant.requested` (`outcome: "initial"`) with
+the connection and the resolved scopes; a refused one emits
+`federation.grant.request.denied` with the fixed outcome. Neither carries the
+handle.
+
+### `POST /oauth/federation-grants/:grantId/reauthorize` — renewing a grant
+
+The same body without `connection` (sent anyway, it is checked against the
+grant's and never moves it: `400 invalid_request/connection_mismatch`). The
+answer has the same shape; `status` is the grant's own — `active` or
+`reauthorization_required` — because a renewal changes nothing a client can
+see until the user finishes it.
+
+Ownership first, with the same `404 grant_not_found` for an unknown id,
+another client's grant and another subject's. Then the subject's grants
+boundary: a grant a subject-wide revocation covers is revoked here, durably,
+before anything else is asked of it, and answers `410 grant_revoked/backstop`.
+Then what a renewal cannot mend — each with the status `/token` gives it:
+`400 authorization_pending`, `410 grant_revoked/<by>`,
+`410 grant_expired/<reason>`, `410 connection_identity_changed`,
+`502 upstream_token_ineligible/<reason>`, and a key missing from the ring as
+`503 temporarily_unavailable/key_unavailable`, an outage rather than a reason
+to send the user through consent again. Then the client's current permission
+and the request itself, as above. A renewal takes no place against the bound.
+
+A renewal emits `federation.grant.requested` with `outcome: "reauthorization"`;
+a backstop it wrote emits `federation.grant.revoked` with `outcome: "backstop"`.
 
 ### `POST /oauth/federation-grants/:grantId/token`
 

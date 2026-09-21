@@ -473,6 +473,27 @@ per `(client, subject)` by a constant on the intent port (D16), as
 
 A login never creates a grant, and a connect never creates a login link.
 
+**Amended in slice 6: the contract as built.** The 201 carries `expires_in`,
+the grant lifetime that applied — a request above `maxExpiresIn` is clamped
+and the answer says so, where a refusal would make a client guess the
+maximum. `connect_expires_in` is what remains of the flow's one deadline
+when the answer is written, not a constant. There is no `expires_at`: a grant
+is dated from consent (D3). A renewal answers the grant's own status, `active`
+or `reauthorization_required`; it does not become `pending`, because nothing a
+client can see changes until the user finishes. A `connection` sent to
+`/reauthorize` is an assertion, as on `/token`, answered
+`invalid_request/connection_mismatch` and never a way to move a grant. A
+connection a client may not use is refused identically whether or not it is
+configured. D6's accepted set is applied as written: `upstream_token_ineligible`
+is refused although a renewal would clear its marker. The bound answers
+`429 rate_limited/intent_limit` and refuses rather than evicting: this
+bound is the only admission control in front of `createPending`, and eviction
+would uncap records in the grant store (D16). The route adds transport,
+authentication, serialization and audit; lodging itself — the order of the two
+writes, the backstop, every rule above — is core's
+`lodgeFederationGrantIntent` / `lodgeFederationGrantReauthorization`. Events:
+`federation.grant.requested` and `federation.grant.request.denied` (D18).
+
 ### D7 — The connect flow binds its callback, and refuses on any mismatch
 
 **Start.** `GET <connect_uri>` is a cross-site navigation by construction: the

@@ -120,6 +120,8 @@ describe("lodging a first-time intent (D6, D16)", () => {
 			handle: "id-2",
 			intentExpiresAt: at(FEDERATION_GRANT_FLOW_BUDGET_MS),
 			lifetimeMs: 30 * DAY,
+			connection: "okta-calendar",
+			scopes: CONNECTION.scopes,
 		});
 
 		const intent = await intents.getIntent("id-2", at(MIN));
@@ -432,6 +434,8 @@ describe("lodging a reauthorization (D6, D13)", () => {
 			handle: "id-1",
 			intentExpiresAt: at(2 * MIN + FEDERATION_GRANT_FLOW_BUDGET_MS),
 			lifetimeMs: 30 * DAY,
+			connection: "okta-calendar",
+			scopes: CONNECTION.scopes,
 			status: "active",
 		});
 		expect(await grants.isCurrentIntent("g-est", "id-1", at(3 * MIN))).toBe(true);
@@ -467,11 +471,13 @@ describe("lodging a reauthorization (D6, D13)", () => {
 				redirectUri: "https://evil.test/",
 			}),
 		);
-		expect(result).toEqual({
+		expect(result).toMatchObject({
 			ok: false,
 			reason: "grant_revoked",
 			revokedBy: "backstop",
 			revokedNow: true,
+			// The record the write returned, so the audit describes what ended.
+			revoked: { id: "g-est", status: "revoked" },
 		});
 		const grant = await grants.find("g-est", at(3 * MIN));
 		expect(grant?.status).toBe("revoked");
@@ -623,6 +629,16 @@ describe("lodging a reauthorization (D6, D13)", () => {
 				renewal({ client: { ...CLIENT, allowedFederationGrantConnections: [] } }),
 			),
 		).toEqual({ ok: false, reason: "connection_not_permitted" });
+	});
+
+	it("refuses a connection the caller asserts that is not the grant's — an assertion, never a move", async () => {
+		await establish();
+		expect(
+			await lodgeFederationGrantReauthorization(deps(), renewal({ connection: "another" })),
+		).toEqual({ ok: false, reason: "connection_mismatch" });
+		expect(
+			await lodgeFederationGrantReauthorization(deps(), renewal({ connection: CONNECTION.name })),
+		).toMatchObject({ ok: true });
 	});
 
 	it("validates the renewal's own request as a first intent's is validated", async () => {

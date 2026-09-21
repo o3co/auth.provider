@@ -232,3 +232,152 @@ function parseWithout(
 	}
 	return parseFederationGrantTokenRequest(body);
 }
+
+// ---------------------------------------------------------------------------
+// Slice 6: lodging (D6)
+// ---------------------------------------------------------------------------
+
+/** What a lodging body says, in the shape core's lodging takes. */
+export interface FederationGrantLodgingBody {
+	readonly subject: string;
+	/** Required on a first intent; on a renewal an assertion about the grant, and nothing more. */
+	readonly connection?: string;
+	readonly redirectUri: string;
+	readonly clientState: string;
+	readonly scope?: readonly string[];
+	readonly expiresInSeconds?: number;
+	readonly upstreamSubject?: string;
+}
+
+export type ParsedFederationGrantLodgingRequest =
+	| { readonly ok: true; readonly value: FederationGrantLodgingBody }
+	| { readonly ok: false; readonly description: string };
+
+const LODGING_KNOWN = new Set([
+	"sub",
+	"connection",
+	"redirect_uri",
+	"state",
+	"scope",
+	"expires_in",
+	"upstream_sub",
+	"client_id",
+	"client_secret",
+	"client_assertion",
+	"client_assertion_type",
+]);
+
+const lodgingRefuse = (description: string): ParsedFederationGrantLodgingRequest => ({
+	ok: false,
+	description,
+});
+
+/**
+ * A lifetime in whole seconds: a JSON number, or the plain decimal a form body
+ * carries it as. Nothing that has to be interpreted to be read — no fraction,
+ * no exponent, no hex, no boolean — and nothing past what a safe integer holds.
+ * A request above the maximum is not refused here: core clamps it and the
+ * answer says what applied.
+ */
+const seconds = (value: unknown): number | undefined => {
+	const parsed =
+		typeof value === "number"
+			? value
+			: typeof value === "string" && /^\d+$/.test(value)
+				? Number(value)
+				: Number.NaN;
+	return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+};
+
+function parseLodging(
+	body: unknown,
+	requireConnection: boolean,
+): ParsedFederationGrantLodgingRequest {
+	if (typeof body !== "object" || body === null || Array.isArray(body)) {
+		return lodgingRefuse("invalid_body");
+	}
+	const fields = body as Record<string, unknown>;
+	for (const field of Object.keys(fields)) {
+		// Refused rather than ignored, and not named: a caller that sent
+		// `resource` or `expires_at` asked for something that will not happen.
+		// Neither is a lodging parameter — the resource is the connection's, and
+		// an expiry is dated from consent, which has not happened yet.
+		if (!LODGING_KNOWN.has(field)) return lodgingRefuse("unexpected_parameter");
+	}
+
+	const read = (field: string): Read => single(fields[field], field);
+	const sub = read("sub");
+	if (!sub.ok) return lodgingRefuse(sub.description);
+	if (sub.value === undefined || sub.value === "") return lodgingRefuse("sub_required");
+
+	const connection = read("connection");
+	if (!connection.ok) return lodgingRefuse(connection.description);
+	if (connection.value === "") return lodgingRefuse("invalid_connection");
+	if (requireConnection && connection.value === undefined)
+		return lodgingRefuse("connection_required");
+
+	const redirect = read("redirect_uri");
+	if (!redirect.ok) return lodgingRefuse(redirect.description);
+	if (redirect.value === undefined || redirect.value === "") {
+		return lodgingRefuse("redirect_uri_required");
+	}
+
+	const state = read("state");
+	if (!state.ok) return lodgingRefuse(state.description);
+	// Required and not trimmed: the client binds it to its own session and
+	// compares it on the way back, byte for byte.
+	if (state.value === undefined || state.value === "") return lodgingRefuse("state_required");
+
+	const scope = read("scope");
+	if (!scope.ok) return lodgingRefuse(scope.description);
+	let scopes: readonly string[] | undefined;
+	if (scope.value !== undefined) {
+		const tokens = scope.value.split(" ").filter((token) => token !== "");
+		// Present and empty is not "the connection's full set" — that is what
+		// leaving it out says, and the two must not be confused.
+		if (tokens.length === 0) return lodgingRefuse("invalid_scope");
+		scopes = tokens;
+	}
+
+	let expiresInSeconds: number | undefined;
+	if (fields.expires_in !== undefined) {
+		if (Array.isArray(fields.expires_in)) return lodgingRefuse("duplicate_expires_in");
+		expiresInSeconds = seconds(fields.expires_in);
+		if (expiresInSeconds === undefined) return lodgingRefuse("invalid_expires_in");
+	}
+
+	const upstream = read("upstream_sub");
+	if (!upstream.ok) return lodgingRefuse(upstream.description);
+	if (upstream.value === "") return lodgingRefuse("invalid_upstream_sub");
+
+	return {
+		ok: true,
+		value: {
+			subject: sub.value,
+			...(connection.value === undefined ? {} : { connection: connection.value }),
+			redirectUri: redirect.value,
+			clientState: state.value,
+			...(scopes === undefined ? {} : { scope: scopes }),
+			...(expiresInSeconds === undefined ? {} : { expiresInSeconds }),
+			...(upstream.value === undefined ? {} : { upstreamSubject: upstream.value }),
+		},
+	};
+}
+
+/** `POST /oauth/federation-grants`: `connection` is required. */
+export function parseFederationGrantCreateRequest(
+	body: unknown,
+): ParsedFederationGrantLodgingRequest {
+	return parseLodging(body, true);
+}
+
+/**
+ * `POST /oauth/federation-grants/:grantId/reauthorize`: the connection is the
+ * grant's. One sent anyway is an assertion, checked against the grant, and never
+ * a way to move it to another connection.
+ */
+export function parseFederationGrantReauthorizeRequest(
+	body: unknown,
+): ParsedFederationGrantLodgingRequest {
+	return parseLodging(body, false);
+}

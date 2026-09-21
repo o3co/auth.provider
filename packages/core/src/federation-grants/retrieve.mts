@@ -101,7 +101,15 @@ export interface FederationGrantAuditEvent {
 		 * handed out, the other is a credential still live that somebody tried
 		 * to end.
 		 */
-		| "federation.grant.revoke.denied";
+		| "federation.grant.revoke.denied"
+		/** Slice 6: a client lodged an intent — a first grant, or a renewal (D6). */
+		| "federation.grant.requested"
+		/**
+		 * Slice 6: a lodging that did not happen. Its own type, for the reason
+		 * `.revoke.denied` is: a refused request to CREATE access is not a
+		 * refused disclosure of access that exists.
+		 */
+		| "federation.grant.request.denied";
 	readonly correlationId: string;
 	readonly grantId: string;
 	/** The caller. */

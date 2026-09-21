@@ -58,6 +58,7 @@ import {
 	fullSectionsSchema,
 	type RateLimitFailMode,
 	requireFederationGrantSubjectRevocation,
+	resolveFederationGrantAcquisitionLimits,
 	resolveFederationGrantRetrievalLimits,
 	type SupportsSessionsOnlyRevocation,
 } from "@o3co/auth-provider-core";
@@ -352,8 +353,9 @@ export const federationGrantsModule = defineModule({
 				// intent, and — unless the deployment records that it has none —
 				// the lookup D7 check 5 asks.
 				const acquisition = resolveFederationGrantAcquisitionSettings(deps.config, connections);
-				requireFederationGrantIntentStore(deps.federationGrantIntentStore);
+				const intentStore = requireFederationGrantIntentStore(deps.federationGrantIntentStore);
 				requireFederationGrantIdentityLookup(acquisition.identityLookup, deps.userRepository);
+				const lifetimes = resolveFederationGrantAcquisitionLimits(deps.config);
 				return {
 					id: "federation-grants",
 					mountPath: FEDERATION_GRANTS_MOUNT_PATH,
@@ -364,6 +366,11 @@ export const federationGrantsModule = defineModule({
 						grantsBoundary: boundaryFor(revocation),
 						limits,
 						background: deps.federationGrantBackground,
+						acquisition: {
+							intentStore,
+							connections: acquisition.connections,
+							limits: lifetimes,
+						},
 						clientRepository: deps.clientRepository,
 						issuer: deps.config.oauth.jwt.issuer,
 						rateLimiter,

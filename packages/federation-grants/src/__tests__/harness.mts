@@ -38,10 +38,13 @@ import type {
 	RateLimiter,
 } from "@o3co/auth-provider-core";
 import {
+	createMemoryFederationGrantIntentStore,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
+	type FederationGrantAcquisitionConnection,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
+	type MemoryFederationGrantIntentStore,
 	type MemoryFederationGrantStore,
 	resolveFederationGrantRetrievalLimits,
 } from "@o3co/auth-provider-core";
@@ -73,7 +76,11 @@ export const connection: FederationGrantConnection = {
 	scopes: [...SCOPES],
 	boundary: "production",
 	maxAccessTokenLifetime: 3600,
+	callbackUri: "https://auth.test/session/federation-grants/callback/calendar",
 };
+
+/** Where the client's browser is sent back to at the end of a connect flow. */
+export const REDIRECT_URI = "https://client.test/connected";
 
 const confidentialClient = {
 	clientId: CLIENT_ID,
@@ -82,11 +89,14 @@ const confidentialClient = {
 	defaultScopes: ["openid"],
 	allowedGrantTypes: [],
 	allowedFederationGrantConnections: [connection.name],
+	federationGrantRedirectUris: [REDIRECT_URI],
 };
 
 export interface Harness {
 	readonly app: express.Express;
 	readonly store: MemoryFederationGrantStore;
+	/** Slice 6: where an intent is lodged. */
+	readonly intents: MemoryFederationGrantIntentStore;
 	readonly background: FederationGrantBackground;
 	readonly refresh: ReturnType<typeof vi.fn<FederationGrantRefresher["refreshDelegatedToken"]>>;
 	readonly events: AuditEvent[];
@@ -106,6 +116,8 @@ export interface Harness {
 		credentials: FederationGrantCredentialState;
 		client: Client;
 		now: Date;
+		/** Slice 6: the lifetimes lodging offers. */
+		lifetimes: { defaultLifetimeMs: number; maxLifetimeMs: number };
 	};
 	seed(over?: {
 		credentials?: FederationGrantCredentials;
@@ -124,6 +136,7 @@ export interface HarnessOptions {
 
 export function harness(options: HarnessOptions = {}): Harness {
 	const store = createMemoryFederationGrantStore();
+	const intents = createMemoryFederationGrantIntentStore();
 	const refresh = vi.fn<FederationGrantRefresher["refreshDelegatedToken"]>();
 	const events: AuditEvent[] = [];
 	const logs: unknown[][] = [];
@@ -143,6 +156,7 @@ export function harness(options: HarnessOptions = {}): Harness {
 		now: new Date(Date.now() + 3 * DAY),
 		maxExpiresInMs: 30 * DAY,
 		credentials: "ok",
+		lifetimes: { defaultLifetimeMs: 30 * DAY, maxLifetimeMs: 30 * DAY },
 	};
 
 	const clientRepository: ClientRepository = {
@@ -233,12 +247,29 @@ export function harness(options: HarnessOptions = {}): Harness {
 				createMemoryRateLimiter({ limits: {}, defaultLimit: { limit: 1000, windowSeconds: 60 } }),
 			failMode: "closed",
 			logger,
+			acquisition: {
+				intentStore: intents,
+				// Read through the world, so a test can remove a connection or
+				// change the lifetimes between two requests.
+				connections: {
+					get: (name: string) => {
+						const found = world.connections.get(name);
+						return found === undefined
+							? undefined
+							: (found as FederationGrantAcquisitionConnection);
+					},
+				} as ReadonlyMap<string, FederationGrantAcquisitionConnection>,
+				get limits() {
+					return world.lifetimes;
+				},
+			},
 		}),
 	);
 
 	return {
 		app,
 		store,
+		intents,
 		background,
 		refresh,
 		events,

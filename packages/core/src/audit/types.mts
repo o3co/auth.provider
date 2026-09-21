@@ -53,6 +53,8 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"federation.grant.refresh_failed",
 	"federation.grant.refresh_persist_failed",
 	"federation.grant.refreshed",
+	"federation.grant.request.denied",
+	"federation.grant.requested",
 	"federation.grant.revoke.denied",
 	"federation.grant.revoked",
 	"federation.grant.token.denied",

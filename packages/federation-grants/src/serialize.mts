@@ -25,7 +25,10 @@
  * offered, and then it can no longer be reworded.
  */
 
-import type { FederationGrantTokenResult } from "@o3co/auth-provider-core";
+import type {
+	FederationGrantReauthorizationResult,
+	FederationGrantTokenResult,
+} from "@o3co/auth-provider-core";
 
 export interface SerializedFederationGrantResponse {
 	readonly status: number;
@@ -104,4 +107,57 @@ export function serializeFederationGrantTokenResult(
 		},
 		...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Slice 6: lodging's refusals as HTTP (D6), in the same vocabulary — `error` a
+// code, `error_description` a stable identifier, never prose.
+// ---------------------------------------------------------------------------
+
+type LodgingRefusal = Exclude<FederationGrantReauthorizationResult, { ok: true }>;
+
+/** Exhaustive: a new refusal is a compile error here, not a 500 in production. */
+export function serializeFederationGrantLodgingRefusal(
+	result: LodgingRefusal,
+): SerializedFederationGrantResponse {
+	const answer = (status: number, error: string, description?: string) => ({
+		status,
+		body: { error, ...(description === undefined ? {} : { error_description: description }) },
+	});
+	switch (result.reason) {
+		case "connection_not_permitted":
+			return answer(403, "access_denied", result.reason);
+		// The client asked for something the deployment should have; it is the
+		// deployment that is wrong, and it may be put right without the client.
+		case "connection_not_configured":
+		case "storage":
+		case "key_unavailable":
+			return answer(503, "temporarily_unavailable", result.reason);
+		case "redirect_uri_not_registered":
+		case "redirect_uri_reserved_parameter":
+		case "expires_in_out_of_range":
+		case "connection_mismatch":
+			return answer(400, "invalid_request", result.reason);
+		case "scope_exceeded":
+		case "openid_required":
+		case "offline_access_required":
+		case "scope_subsets_not_allowed":
+			return answer(400, "invalid_scope", result.reason);
+		// The bound is on this client and this user: the client's own throttle,
+		// in the words this package's throttle already uses.
+		case "intent_limit":
+			return answer(429, "rate_limited", result.reason);
+		case "grant_not_found":
+			return answer(404, "grant_not_found");
+		case "authorization_pending":
+			return answer(400, "authorization_pending");
+		case "grant_revoked":
+			return answer(410, "grant_revoked", result.revokedBy);
+		case "grant_expired":
+			return answer(410, "grant_expired", result.expiredBy);
+		case "connection_identity_changed":
+			return answer(410, "connection_identity_changed");
+		case "upstream_token_ineligible":
+			return answer(502, "upstream_token_ineligible", result.ineligibleBy);
+	}
 }

@@ -65,6 +65,7 @@ import {
 } from "./revision.mjs";
 import type { FederationGrantStore } from "./store.mjs";
 import type {
+	FederationGrant,
 	FederationGrantConnection,
 	FederationGrantExpiredReason,
 	FederationGrantIneligibilityReason,
@@ -121,6 +122,11 @@ export interface FederationGrantLodgingRequest extends CommonRequest {
 
 export interface FederationGrantReauthorizationRequest extends CommonRequest {
 	readonly grantId: string;
+	/**
+	 * The connection the caller believes the grant is on — an assertion, as on
+	 * the token route, and never a way to move the grant to another one.
+	 */
+	readonly connection?: string;
 }
 
 /** Why a request was refused before anything was written, or why a write failed. */
@@ -146,6 +152,10 @@ export interface FederationGrantLodged {
 	readonly intentExpiresAt: Date;
 	/** The grant lifetime that applied, after the clamp. */
 	readonly lifetimeMs: number;
+	/** What was lodged, for the audit of it: the connection, the resolved scopes, the resource. */
+	readonly connection: string;
+	readonly scopes: readonly string[];
+	readonly resource?: string;
 }
 
 export type FederationGrantLodgingResult =
@@ -158,7 +168,10 @@ export type FederationGrantReauthorizationResult =
 			readonly status: "active" | "reauthorization_required";
 	  })
 	| { readonly ok: false; readonly reason: FederationGrantLodgingRefusal }
-	| { readonly ok: false; readonly reason: "grant_not_found" | "authorization_pending" }
+	| {
+			readonly ok: false;
+			readonly reason: "grant_not_found" | "authorization_pending" | "connection_mismatch";
+	  }
 	| { readonly ok: false; readonly reason: "connection_identity_changed" }
 	| {
 			readonly ok: false;
@@ -166,6 +179,8 @@ export type FederationGrantReauthorizationResult =
 			readonly revokedBy: FederationGrantRevokedBy;
 			/** Whether THIS call wrote the revocation — what decides whether it is audited. */
 			readonly revokedNow: boolean;
+			/** The record the write returned, when `revokedNow`: what the audit of it describes (D18). */
+			readonly revoked?: FederationGrant;
 	  }
 	| {
 			readonly ok: false;
@@ -394,6 +409,9 @@ export async function lodgeFederationGrantIntent(
 		handle,
 		intentExpiresAt: record.expiresAt,
 		lifetimeMs: checked.lifetimeMs,
+		connection: connection.name,
+		scopes: record.scopes,
+		...(record.resource === undefined ? {} : { resource: record.resource }),
 	};
 }
 
@@ -527,7 +545,15 @@ async function judgeAndLodge(
 		} catch {
 			return { ok: false, reason: "storage" };
 		}
-		return { ok: false, reason: "grant_revoked", revokedBy: "backstop", revokedNow: written.ok };
+		return written.ok
+			? {
+					ok: false,
+					reason: "grant_revoked",
+					revokedBy: "backstop",
+					revokedNow: true,
+					revoked: written.grant,
+				}
+			: { ok: false, reason: "grant_revoked", revokedBy: "backstop", revokedNow: false };
 	}
 	const refused = lifecycleRefusal(status);
 	if (refused !== null) return refused;
@@ -543,6 +569,9 @@ async function judgeAndLodge(
 	// Defined here: a connection that is not configured was refused above.
 	const connection = deps.connections.get(grant.connection) as FederationGrantAcquisitionConnection;
 
+	if (request.connection !== undefined && request.connection !== grant.connection) {
+		return { ok: false, reason: "connection_mismatch" };
+	}
 	if (!permits(request.client, connection.name)) {
 		return { ok: false, reason: "connection_not_permitted" };
 	}
@@ -580,6 +609,9 @@ async function judgeAndLodge(
 			handle,
 			intentExpiresAt: record.expiresAt,
 			lifetimeMs: checked.lifetimeMs,
+			connection: connection.name,
+			scopes: record.scopes,
+			...(record.resource === undefined ? {} : { resource: record.resource }),
 			status: status.status === "active" ? "active" : "reauthorization_required",
 		};
 	}

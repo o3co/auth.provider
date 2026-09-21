@@ -46,7 +46,7 @@ export interface FederationGrantAuditBridgeOptions {
 	readonly ip?: string;
 	readonly userAgent?: string;
 	/** Which route the event came from: status writes a backstop revocation too. */
-	readonly operation: "token" | "status" | "revoke";
+	readonly operation: "token" | "status" | "revoke" | "request";
 	/** Sampled when the event is handed over, not when the request arrived. */
 	readonly now: () => Date;
 }
@@ -100,7 +100,10 @@ export interface RouteDeniedEventInput {
 	 * together, and they mean opposite things — one is a credential not handed
 	 * out, the other a credential still live that somebody tried to end.
 	 */
-	readonly type?: "federation.grant.token.denied" | "federation.grant.revoke.denied";
+	readonly type?:
+		| "federation.grant.token.denied"
+		| "federation.grant.revoke.denied"
+		| "federation.grant.request.denied";
 	readonly correlationId: string;
 	readonly grantId: string;
 	/** A fixed identifier: `invalid_request`, `invalid_client`, `rate_limited/provider`, … */
