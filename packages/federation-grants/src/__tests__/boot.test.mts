@@ -39,6 +39,7 @@ import {
 	ACQUISITION_GRANT_SETTINGS,
 	acquisitionComponents,
 	callbackUrlFor,
+	sessionMiddlewareModule,
 } from "./acquisitionFixture.mjs";
 
 const clientRepository: ClientRepository = {
@@ -155,6 +156,7 @@ const boot = (setup: Setup) => {
 		setup.provider === null ? [] : [federationModule("upstream", setup.provider ?? delegated)];
 	const modules = [
 		...(setup.federationFirst === false ? [] : federation),
+		sessionMiddlewareModule,
 		...federationGrantsModules,
 		...(setup.withStore === false
 			? []

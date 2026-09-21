@@ -62,6 +62,7 @@ import {
 	ACQUISITION_GRANT_SETTINGS,
 	acquisitionComponents,
 	callbackUrlFor,
+	sessionMiddlewareModule,
 } from "./acquisitionFixture.mjs";
 import { basic, CLIENT_ID, CLIENT_SECRET, connection, DAY, MIN, SUBJECT } from "./harness.mjs";
 
@@ -130,7 +131,12 @@ const boot = async (allowKeep: boolean) => {
 	const components = shared();
 	const events: { type: string; details?: Record<string, unknown> }[] = [];
 	const handle = await createApp({
-		modules: [federationModule, ...federationGrantsModules, subjectRevocationServiceModule],
+		modules: [
+			federationModule,
+			sessionMiddlewareModule,
+			...federationGrantsModules,
+			subjectRevocationServiceModule,
+		],
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),

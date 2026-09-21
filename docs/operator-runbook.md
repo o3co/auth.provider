@@ -571,6 +571,7 @@ check this page, so when the two disagree, the constant is right:
 
 `authorize.granted`, `authorize.rejected`, `consent.denied`, `consent.granted`,
 `device.approved`, `device.denied`, `device.rate_limited`,
+`federation.grant.authorization_failed`,
 `federation.grant.reauthorization_required`,
 `federation.grant.refresh_failed`, `federation.grant.refresh_persist_failed`,
 `federation.grant.refreshed`, `federation.grant.request.denied`,

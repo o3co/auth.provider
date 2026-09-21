@@ -22,7 +22,7 @@
  * none of it to be what they are about — so it lives here once.
  */
 
-import { createMemoryFederationGrantIntentStore } from "@o3co/auth-provider-core";
+import { createMemoryFederationGrantIntentStore, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 
 const ISSUER = (makeValidCoreConfig() as { oauth: { jwt: { issuer: string } } }).oauth.jwt.issuer;
@@ -41,5 +41,23 @@ export const acquisitionComponents = () => ({
 		authenticate: async () => null,
 		authenticateByToken: async () => null,
 		findSubjectByFederatedIdentity: async () => null,
+	},
+});
+
+/**
+ * A stand-in for `sessionStoreModule`'s `session-middleware` route, which the
+ * browser half mounts after. In a real composition that is express-session;
+ * these tests log nobody in, so a pass-through is all `after` needs to find.
+ */
+export const sessionMiddlewareModule = defineModule({
+	name: "test-session-middleware",
+	contributes: {
+		routes: [
+			() => ({
+				id: "session-middleware",
+				mountPath: "/",
+				handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+			}),
+		],
 	},
 });

@@ -580,6 +580,24 @@ declined), `reauthentication_required`, `account_mismatch`,
 `scope_exceeded`, `upstream_error`, `temporarily_unavailable`,
 `grant_not_authorizable`. Success redirects with `grant_id` and `state`.
 
+**Amended in slice 6: the start and the consent, as built.** The browser
+half is a router of its own under `/session/federation-grants`, mounted after
+the session middleware by an explicit `after`, and it has two transports
+because two different things read it: `GET /connect` is a navigation and
+answers only with redirects and plain text; `GET`/`POST /consent` is the
+deployment page's contract and mirrors `/oauth/consent` — JSON page data, JSON
+errors, `401 login_required`, one sentence for every challenge with nothing
+behind it, `303` on both success paths. The start re-reads the durable session
+(`userSessionStore`) and requires both halves of the browser's identity — the
+express-session record the challenge is bound to and the durable `sid` the
+consent records — and the consent's GET and POST repeat every check, the
+grant's current-intent pointer, the client's permission and the pinned
+revisions included. A prefetch parks nothing. The upstream authorization URL
+is built before the answer is spent, so a configuration fault cannot consume
+a consent. A refused renewal retires that renewal's pointer, conditionally on
+its handle. The POST additionally refuses an explicit cross-site
+`Sec-Fetch-Site`. Events: `federation.grant.authorization_failed` (D18).
+
 The grant ID in the redirect is not proof of anything. Every grant-addressed
 route requires `sub` (D9), so a grant that belongs to another user cannot be
 adopted by mistake, and the status response carries `upstream` so the client
@@ -621,6 +639,22 @@ purpose. It cannot prove that a page exists; it makes enabling the feature a
 recorded statement that one does.
 The upstream's own consent screen cannot stand in: it does not name the
 client, the expiry, or the fact that this outlives logout.
+
+**Amended in slice 6.** One challenge per intent: a reload of the connect link
+is given the challenge already parked for that browser, and another browser
+gets nothing. Answering it is one atomic step with spending the intent and —
+for an approval — creating the connect transaction (D16), so an accept and a
+deny in flight cannot both apply. The page is told `grant_expires_in`, a
+duration counted from the answer, rather than an absolute date that would be an
+estimate; and `continues_after_logout: true` as data. `federationGrants.consent.url`
+must be a path or an absolute URL on the provider's own origin: the page reads
+the consent data with the session cookie, and this provider never answers a
+credentialed cross-origin read. What `grant.consent` records is `{ at, sid,
+scopes }` — the time of the answer, the durable session it came through, and
+the scopes shown — not a copy of every field the page displayed. The CSRF
+argument for exempting connect from the request-origin check rests on this
+step, and the conditions it depends on are listed in the package README;
+making consent skippable would be a redesign of that exemption.
 
 ### D9 — POST-only, client-authenticated routes in a new package
 

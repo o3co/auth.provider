@@ -261,6 +261,104 @@ emits `federation.grant.revoke.denied` — its own type, not a
 still live are opposite facts, and a dashboard counting one must not count the
 other.
 
+## The browser half: connect and consent
+
+Mounted at `/session/federation-grants`, **after** the session middleware — the
+module declares `after: ["session-middleware"]`, so a composition without it is
+a boot error rather than a flow that reads every signed-in user as signed out.
+
+### `GET /session/federation-grants/connect?request=<handle>`
+
+Where `connect_uri` sends the browser. A navigation: it answers with redirects
+and plain text, never a JSON body.
+
+1. A prefetch parks nothing (`204`).
+2. An unknown, spent or expired handle: `400`, plain.
+3. Not signed in: `303` to `endpoints.login.url?redirect_to=<this link>` —
+   the handle and nothing else from the original query. The login page must
+   be able to send the user back to it.
+4. Signed in as someone other than the intent's subject: `403`, plain, and no
+   redirect anywhere.
+5. The durable session is gone or expired, or authenticated at or before the
+   subject's sessions boundary: `403` "sign in again". `authTime` never
+   changes, so signing in again is the remedy.
+6. The grant no longer names this intent, the client may no longer use the
+   connection, or the connection changed since the intent was lodged: `400` /
+   `403`, plain.
+7. Otherwise one consent challenge is parked for this browser — a reload gets
+   the same one — and the browser is sent to `federationGrants.consent.url`
+   with `?challenge=`.
+
+It does not apply the login flow's `Sec-Fetch-Site` refusal: a client's site
+sending the browser here is what connect is for. That is sound only because
+holding the handle authorizes nothing — see "What the exemption depends on"
+below.
+
+### `GET` and `POST /session/federation-grants/consent`
+
+The deployment page's contract, and deliberately the same one `/oauth/consent`
+has, so one page can serve both kinds of consent.
+
+`GET ?challenge=` answers what to show:
+
+```json
+{
+  "challenge": "…",
+  "client_id": "worker",
+  "client_name": "Calendar Agent",
+  "connection": "calendar",
+  "scopes": ["openid", "offline_access", "calendar.read"],
+  "resource": "https://calendar.example/",
+  "grant_expires_in": 2592000,
+  "continues_after_logout": true,
+  "expires_in": 540
+}
+```
+
+`grant_expires_in` is the duration **after approval** — the grant is dated
+from the answer, so an absolute date computed when the page renders would be
+an estimate the grant does not keep. `continues_after_logout` is what D8
+obliges the page to tell the user. `expires_in` is what is left of the flow.
+
+`POST` with `challenge` and `decision` (`accept` or `deny`). Both success paths
+are `303`: an approval to the upstream's authorization endpoint, a refusal
+back to the client's `redirect_uri` with `error=access_denied`, the client's
+own `state` and the `grant_id`. A refused renewal ends that renewal and
+nothing else; the grant keeps working.
+
+| Exit | HTTP | `error` | `error_description` |
+|---|---:|---|---|
+| Page data | 200 | — | — |
+| Answered | 303 | — | — |
+| No authenticated session | 401 | `login_required` | `no authenticated session` |
+| No challenge | 400 | `invalid_request` | `challenge is required` |
+| Unknown, answered, expired, another browser's, stale | 400 | `invalid_request` | one sentence for all of them |
+| `decision` neither `accept` nor `deny` | 400 | `invalid_request` | (nothing is spent) |
+| The session was revoked, or predates the sessions boundary | 403 | `reauthentication_required` | — |
+| The client may no longer use the connection | 403 | `access_denied` | `connection_not_permitted` |
+| A cross-site `Sec-Fetch-Site` on the answer | 403 | `invalid_request` | `cross-site answer refused` |
+| A store, the session store or the boundary could not answer | 503 | `temporarily_unavailable` | `storage` |
+| The upstream URL could not be built (nothing is spent) | 503 | `temporarily_unavailable` | `upstream_unavailable` |
+
+A challenge is not a bearer token: it is answerable only from the browser it
+was issued to, by the same durable session and subject, and every answer
+re-reads that session and the sessions boundary.
+
+### What the exemption depends on
+
+Connect skips the request-origin check because consent is its CSRF defence.
+That holds only while connect never approves anything, every grant and renewal
+goes through consent (first-party clients included), the answer needs the
+challenge and the exact session binding, the consent data is never readable
+cross-origin with credentials (hence the same-origin page), and the challenge
+never leaks through a referrer (`Referrer-Policy: no-referrer` on every
+response). Making consent skippable later is a redesign of this, not a UI
+option.
+
+A flow that ended without a grant — declined, the wrong account, a session to
+refresh, a stale link — emits `federation.grant.authorization_failed` with a
+fixed outcome and only the facts established by then.
+
 ## Install these modules before `oauthModule`
 
 These routes live under `/oauth`, and `oauthModule` mounts its own router there

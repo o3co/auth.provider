@@ -61,6 +61,7 @@ import {
 	ACQUISITION_GRANT_SETTINGS,
 	acquisitionComponents,
 	callbackUrlFor,
+	sessionMiddlewareModule,
 } from "./acquisitionFixture.mjs";
 import { basic, CLIENT_ID, CLIENT_SECRET, connection, DAY, MIN, SUBJECT } from "./harness.mjs";
 
@@ -133,7 +134,7 @@ type Boundaries = { grants?: Date | null | "malformed" | "invalid"; sessions?: D
 const boot = async (boundaries: Boundaries = {}, spent = false) => {
 	const full = makeValidFullSections();
 	const handle = await createApp({
-		modules: [federationModule, ...federationGrantsModules, storeModule],
+		modules: [federationModule, sessionMiddlewareModule, ...federationGrantsModules, storeModule],
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),

@@ -49,6 +49,7 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	// carried to the sink by the federation-grants routes, which is why the
 	// inventory scanner has to know about core's own `audit(...)` calls and
 	// `audits: [[...]]` tuples as well as `emitAuditEvent` — see the guard.
+	"federation.grant.authorization_failed",
 	"federation.grant.reauthorization_required",
 	"federation.grant.refresh_failed",
 	"federation.grant.refresh_persist_failed",

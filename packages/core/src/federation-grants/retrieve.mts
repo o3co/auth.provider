@@ -109,7 +109,14 @@ export interface FederationGrantAuditEvent {
 		 * `.revoke.denied` is: a refused request to CREATE access is not a
 		 * refused disclosure of access that exists.
 		 */
-		| "federation.grant.request.denied";
+		| "federation.grant.request.denied"
+		/**
+		 * Slice 6: a connect flow that ended without a grant — the user
+		 * declined, the session was not the right one, the flow went stale.
+		 * Only facts established by then are carried: an early failure may
+		 * have no grant id to name (D18 amended).
+		 */
+		| "federation.grant.authorization_failed";
 	readonly correlationId: string;
 	readonly grantId: string;
 	/** The caller. */

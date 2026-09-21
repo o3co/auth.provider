@@ -46,7 +46,7 @@ export interface FederationGrantAuditBridgeOptions {
 	readonly ip?: string;
 	readonly userAgent?: string;
 	/** Which route the event came from: status writes a backstop revocation too. */
-	readonly operation: "token" | "status" | "revoke" | "request";
+	readonly operation: "token" | "status" | "revoke" | "request" | "connect";
 	/** Sampled when the event is handed over, not when the request arrived. */
 	readonly now: () => Date;
 }
@@ -103,7 +103,8 @@ export interface RouteDeniedEventInput {
 	readonly type?:
 		| "federation.grant.token.denied"
 		| "federation.grant.revoke.denied"
-		| "federation.grant.request.denied";
+		| "federation.grant.request.denied"
+		| "federation.grant.authorization_failed";
 	readonly correlationId: string;
 	readonly grantId: string;
 	/** A fixed identifier: `invalid_request`, `invalid_client`, `rate_limited/provider`, … */
@@ -112,6 +113,8 @@ export interface RouteDeniedEventInput {
 	readonly clientId?: string;
 	/** Only once the body has been parsed; it is an assertion, not an identity. */
 	readonly subject?: string;
+	/** Slice 6: the connection a connect flow was for, once its intent is known. */
+	readonly connection?: string;
 }
 
 /**
@@ -132,6 +135,7 @@ export function routeDeniedEvent(input: RouteDeniedEventInput): FederationGrantA
 		grantId: input.grantId,
 		clientId: input.clientId ?? "",
 		subject: input.subject ?? "",
+		...(input.connection === undefined ? {} : { connection: input.connection }),
 		outcome: input.outcome,
 	};
 }
