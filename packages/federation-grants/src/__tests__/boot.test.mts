@@ -35,6 +35,11 @@ import {
 import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
+import {
+	ACQUISITION_GRANT_SETTINGS,
+	acquisitionComponents,
+	callbackUrlFor,
+} from "./acquisitionFixture.mjs";
 
 const clientRepository: ClientRepository = {
 	findById: async () => null,
@@ -120,6 +125,7 @@ const CONNECTION = {
 	scopes: ["openid", "offline_access"],
 	boundary: "production",
 	maxAccessTokenLifetime: 3600,
+	callbackURL: callbackUrlFor("calendar"),
 };
 
 interface Setup {
@@ -137,6 +143,10 @@ interface Setup {
 	readonly provider?: FederationProvider | null;
 	/** The federation module listed BEFORE the routes, or after. */
 	readonly federationFirst?: boolean;
+	/** Slice 6: somewhere to lodge an intent. */
+	readonly withIntentStore?: boolean;
+	/** Slice 6: the repository D7 check 5 asks; `null` installs one without the lookup. */
+	readonly userRepository?: "with-lookup" | "without-lookup";
 }
 
 const boot = (setup: Setup) => {
@@ -164,11 +174,22 @@ const boot = (setup: Setup) => {
 				federationGrants: {
 					enabled: setup.enabled ?? true,
 					connections: setup.connections ?? { calendar: CONNECTION },
+					...ACQUISITION_GRANT_SETTINGS,
 					...(setup.grants ?? {}),
 				},
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
+			...(() => {
+				const { federationGrantIntentStore, userRepository } = acquisitionComponents();
+				return {
+					...(setup.withIntentStore === false ? {} : { federationGrantIntentStore }),
+					userRepository:
+						setup.userRepository === "without-lookup"
+							? { authenticate: async () => null, authenticateByToken: async () => null }
+							: userRepository,
+				};
+			})(),
 			// Enabling a federation at all brings the session-federation stores
 			// with it — a federation is first of all a way to log in, and that
 			// guard is not this feature's. Present but empty: what is under test
@@ -346,5 +367,45 @@ describe("leaving the feature off", () => {
 		};
 		const issue = issues.find((i) => i.path.join(".") === "federationGrants.enabled");
 		expect(issue?.message).toMatch(/"true", "false", "1" or "0"/);
+	});
+});
+
+describe("what creating a grant needs (slice 6)", () => {
+	it("refuses a deployment with no consent page, before a user could reach one that is not there", async () => {
+		await expect(boot({ grants: { consent: {} } })).rejects.toThrow(
+			/federationGrants\.consent\.url/,
+		);
+	});
+
+	it("refuses a connection with no callback of its own", async () => {
+		const { callbackURL: _none, ...withoutCallback } = CONNECTION;
+		await expect(boot({ connections: { calendar: withoutCallback } })).rejects.toThrow(
+			/connections\.calendar\.callbackURL/,
+		);
+	});
+
+	it("refuses a deployment with nowhere to lodge an intent", async () => {
+		await expect(boot({ withIntentStore: false })).rejects.toThrow(/federationGrantIntentStore/);
+	});
+
+	it("refuses a required identity lookup the repository cannot answer, and boots once it is recorded as unsupported", async () => {
+		await expect(boot({ userRepository: "without-lookup" })).rejects.toThrow(
+			/findSubjectByFederatedIdentity/,
+		);
+		const handle = await boot({
+			userRepository: "without-lookup",
+			grants: { identityLookup: "unsupported" },
+		});
+		await handle.dispose();
+	});
+
+	it("asks none of it of a deployment that has not enabled the feature", async () => {
+		const handle = await boot({
+			enabled: false,
+			withIntentStore: false,
+			userRepository: "without-lookup",
+			grants: { consent: {} },
+		});
+		await handle.dispose();
 	});
 });

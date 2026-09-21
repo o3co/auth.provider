@@ -1208,6 +1208,16 @@ export const fullSectionsSchema = z.object({
 			// what happened are both reported, and boot refuses the pairing with
 			// an adapter that cannot stamp the two boundaries separately.
 			allowKeepOnSubjectRevocation: coerceBooleanFromEnv.optional(),
+			// Whether the connect callback refuses an upstream account already
+			// linked to another local user (D7 check 5), which needs
+			// `UserRepository.findSubjectByFederatedIdentity`. "required" — the
+			// default — refuses to boot without it; "unsupported" records that
+			// this deployment does not make that check.
+			identityLookup: z.enum(["required", "unsupported"]).optional(),
+			// The deployment's consent page for grants (D8). No default: enabling
+			// the feature is a statement that such a page exists, and boot refuses
+			// it without one. A path, or an absolute URL on the provider's origin.
+			consent: z.object({ url: z.string().min(1).optional() }).optional(),
 			// The credential envelope's key ring (D16). The first key seals;
 			// every listed key opens, so one stays in the ring for as long as
 			// a paused grant may live.

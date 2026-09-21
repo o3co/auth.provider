@@ -57,6 +57,11 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
+import {
+	ACQUISITION_GRANT_SETTINGS,
+	acquisitionComponents,
+	callbackUrlFor,
+} from "./acquisitionFixture.mjs";
 import { basic, CLIENT_ID, CLIENT_SECRET, connection, DAY, MIN, SUBJECT } from "./harness.mjs";
 
 const client = {
@@ -151,12 +156,15 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 							scopes: [...connection.scopes],
 							boundary: connection.boundary,
 							maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
+							callbackURL: callbackUrlFor(connection.name),
 						},
 					},
+					...ACQUISITION_GRANT_SETTINGS,
 				},
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
+			...acquisitionComponents(),
 			rateLimiter: createMemoryRateLimiter({
 				limits: {},
 				defaultLimit: { limit: 100, windowSeconds: 60 },

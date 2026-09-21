@@ -63,6 +63,11 @@ import {
 } from "@o3co/auth-provider-core";
 import { supportsDelegatedAuthorization } from "@o3co/auth-provider-session";
 import { z } from "zod";
+import {
+	requireFederationGrantIdentityLookup,
+	requireFederationGrantIntentStore,
+	resolveFederationGrantAcquisitionSettings,
+} from "./acquisitionSettings.mjs";
 import { createFederationGrantBackground } from "./background.mjs";
 import { resolveFederationGrantConnections } from "./connections.mjs";
 import { createDisabledFederationGrantRouter, createFederationGrantRouter } from "./routes.mjs";
@@ -304,6 +309,8 @@ export const federationGrantsModule = defineModule({
 		"replaySeenSet",
 		"logger",
 		"federationProviders",
+		"federationGrantIntentStore",
+		"userRepository",
 	] as const,
 	contributes: {
 		routes: [
@@ -339,6 +346,14 @@ export const federationGrantsModule = defineModule({
 				const connections = resolveFederationGrantConnections(deps.config);
 				requireDelegatedCapability(deps, connections);
 				requireAuditDecision(deps);
+				// Slice 6: what creating a grant needs, refused here rather than at
+				// the end of somebody's consent. The consent page, a callback per
+				// connection on the provider's own origin, somewhere to lodge an
+				// intent, and — unless the deployment records that it has none —
+				// the lookup D7 check 5 asks.
+				const acquisition = resolveFederationGrantAcquisitionSettings(deps.config, connections);
+				requireFederationGrantIntentStore(deps.federationGrantIntentStore);
+				requireFederationGrantIdentityLookup(acquisition.identityLookup, deps.userRepository);
 				return {
 					id: "federation-grants",
 					mountPath: FEDERATION_GRANTS_MOUNT_PATH,
