@@ -39,6 +39,8 @@ export type FederationGrantIdentityLookup = "required" | "unsupported";
 export interface FederationGrantAcquisitionSettings {
 	/** The deployment's consent page, as configured: a path, or an absolute URL on {@link origin}. */
 	readonly consentUrl: string;
+	/** Where connect sends a browser that is not signed in: `endpoints.login.url`. */
+	readonly loginUrl: string;
 	readonly identityLookup: FederationGrantIdentityLookup;
 	/** The provider's browser-facing origin — the issuer's — never a request header. */
 	readonly origin: string;
@@ -118,6 +120,24 @@ const consentUrl = (config: unknown, origin: string): string => {
 	return written;
 };
 
+/**
+ * The login page connect sends a browser that is not signed in to. Core's
+ * schema leaves `endpoints.login.url` optional and only `oauthModule` requires
+ * it, so a deployment that enables grants without that module would boot and
+ * then answer every such browser with a 500 — the first page of the flow, and
+ * the one a user reaches most often.
+ */
+const loginUrl = (config: unknown): string => {
+	const written = (config as { endpoints?: { login?: { url?: unknown } } })?.endpoints?.login?.url;
+	if (typeof written !== "string" || written === "") {
+		return refuse(
+			"endpoints.login.url must be configured: the connect flow sends a browser that is not " +
+				"signed in to the login page, and back to the link it came from",
+		);
+	}
+	return written;
+};
+
 const identityLookup = (config: unknown): FederationGrantIdentityLookup => {
 	const written = (config as { federationGrants?: { identityLookup?: unknown } })?.federationGrants
 		?.identityLookup;
@@ -167,6 +187,7 @@ export function resolveFederationGrantAcquisitionSettings(
 	const origin = issuerOrigin(config);
 	const settings: FederationGrantAcquisitionSettings = {
 		consentUrl: consentUrl(config, origin),
+		loginUrl: loginUrl(config),
 		identityLookup: identityLookup(config),
 		origin,
 		connections: new Map(

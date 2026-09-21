@@ -276,7 +276,10 @@ and plain text, never a JSON body.
 2. An unknown, spent or expired handle: `400`, plain.
 3. Not signed in: `303` to `endpoints.login.url?redirect_to=<this link>` —
    the handle and nothing else from the original query. The login page must
-   be able to send the user back to it.
+   be able to send the user back to it. Core's schema leaves
+   `endpoints.login.url` optional and only `oauthModule` requires it, so an
+   enabled deployment without it is refused at boot rather than answering
+   this step with a 500.
 4. Signed in as someone other than the intent's subject: `403`, plain, and no
    redirect anywhere.
 5. The durable session is gone or expired, or authenticated at or before the

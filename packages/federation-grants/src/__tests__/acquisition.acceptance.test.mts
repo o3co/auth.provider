@@ -44,7 +44,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
-import { callbackUrlFor } from "./acquisitionFixture.mjs";
+import { ACQUISITION_ENDPOINTS, callbackUrlFor } from "./acquisitionFixture.mjs";
 
 const ISSUER = (makeValidCoreConfig() as { oauth: { jwt: { issuer: string } } }).oauth.jwt.issuer;
 const REDIRECT = "https://client.test/connected";
@@ -168,6 +168,7 @@ const boot = async () => {
 				},
 				rateLimit: { ...full.rateLimit, failMode: "closed" },
 				audit: { sink: { type: "none" } },
+				endpoints: ACQUISITION_ENDPOINTS,
 				federationGrants: {
 					enabled: true,
 					consent: { url: "/consent/grants" },
@@ -289,6 +290,30 @@ describe("a grant created end to end, and spent", () => {
 				access_token: "upstream-access-token",
 				token_type: "bearer",
 			});
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	/** A client lodges an intent for alice; the connect link's path and query. */
+	const lodgeFor = async (app: express.Express): Promise<URL> => {
+		const lodged = await request(app)
+			.post("/oauth/federation-grants")
+			.set("Authorization", basic)
+			.send({ connection: "calendar", sub: "alice", redirect_uri: REDIRECT, state: "s" });
+		expect(lodged.status).toBe(201);
+		return new URL(lodged.body.connect_uri as string);
+	};
+
+	it("sends a browser that is not signed in to the configured login page, and back to exactly this link", async () => {
+		const { handle, app } = await boot();
+		try {
+			const connect = await lodgeFor(app);
+			const anonymous = await request(app).get(`${connect.pathname}${connect.search}`);
+			expect(anonymous.status).toBe(303);
+			const login = new URL(anonymous.headers.location as string, ISSUER);
+			expect(login.pathname).toBe(ACQUISITION_ENDPOINTS.login.url);
+			expect(login.searchParams.get("redirect_to")).toBe(connect.href);
 		} finally {
 			await handle.dispose();
 		}

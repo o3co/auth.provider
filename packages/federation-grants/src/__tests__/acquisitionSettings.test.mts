@@ -47,7 +47,11 @@ const resolve = (
 	issuer = ISSUER,
 ) =>
 	resolveFederationGrantAcquisitionSettings(
-		{ oauth: { jwt: { issuer } }, federationGrants: grants },
+		{
+			oauth: { jwt: { issuer } },
+			endpoints: { login: { url: "/login" } },
+			federationGrants: grants,
+		},
 		new Map(connections.map((entry) => [entry.name, entry])),
 	);
 
@@ -89,6 +93,24 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 			"/.//evil.example/consent",
 		]) {
 			expect(() => resolve({ consent: { url } }), url).toThrow(/consent\.url/);
+		}
+	});
+
+	it("refuses a deployment with no login page: connect sends a browser that is not signed in there", () => {
+		expect(resolve({ consent: { url: "/c" } }).loginUrl).toBe("/login");
+		for (const endpoints of [undefined, {}, { login: {} }, { login: { url: "" } }]) {
+			expect(
+				() =>
+					resolveFederationGrantAcquisitionSettings(
+						{
+							oauth: { jwt: { issuer: ISSUER } },
+							endpoints,
+							federationGrants: { consent: { url: "/c" } },
+						},
+						new Map(),
+					),
+				JSON.stringify(endpoints),
+			).toThrow(/endpoints\.login\.url/);
 		}
 	});
 

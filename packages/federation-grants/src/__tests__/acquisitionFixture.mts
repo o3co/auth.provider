@@ -30,6 +30,9 @@ const ISSUER = (makeValidCoreConfig() as { oauth: { jwt: { issuer: string } } })
 /** Merged into `federationGrants`. */
 export const ACQUISITION_GRANT_SETTINGS = { consent: { url: "/consent/grants" } } as const;
 
+/** The config root's `endpoints`: where connect sends a browser that is not signed in. */
+export const ACQUISITION_ENDPOINTS = { login: { url: "/login" } } as const;
+
 /** A connection's `callbackURL` on the test issuer's origin. */
 export const callbackUrlFor = (connection: string): string =>
 	`${new URL(ISSUER).origin}/session/federation-grants/callback/${connection}`;

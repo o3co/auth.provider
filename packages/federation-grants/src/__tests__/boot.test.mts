@@ -36,6 +36,7 @@ import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-
 import { describe, expect, it } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
 import {
+	ACQUISITION_ENDPOINTS,
 	ACQUISITION_GRANT_SETTINGS,
 	acquisitionComponents,
 	callbackUrlFor,
@@ -159,6 +160,8 @@ interface Setup {
 	readonly withIntentStore?: boolean;
 	/** Slice 6: the repository D7 check 5 asks; `null` installs one without the lookup. */
 	readonly userRepository?: "with-lookup" | "without-lookup";
+	/** Slice 6: where connect sends a browser that is not signed in. */
+	readonly withLoginUrl?: boolean;
 }
 
 const boot = (setup: Setup) => {
@@ -184,6 +187,7 @@ const boot = (setup: Setup) => {
 				},
 				rateLimit: { ...full.rateLimit, failMode: setup.failMode ?? "closed" },
 				...(setup.withAudit === false ? {} : { audit: { sink: { type: "none" } } }),
+				...(setup.withLoginUrl === false ? {} : { endpoints: ACQUISITION_ENDPOINTS }),
 				federationGrants: {
 					enabled: setup.enabled ?? true,
 					connections: setup.connections ?? { calendar: CONNECTION },
@@ -397,6 +401,13 @@ describe("what creating a grant needs (slice 6)", () => {
 		await expect(boot({ connections: { calendar: withoutCallback } })).rejects.toThrow(
 			/connections\.calendar\.callbackURL/,
 		);
+	});
+
+	it("refuses a deployment with no login page to send a browser that is not signed in to", async () => {
+		// Core's schema leaves it optional and only oauthModule requires it; this
+		// composition has no oauthModule, which is what used to boot and then
+		// answer every such browser with a 500.
+		await expect(boot({ withLoginUrl: false })).rejects.toThrow(/endpoints\.login\.url/);
 	});
 
 	it("refuses a deployment with nowhere to lodge an intent", async () => {

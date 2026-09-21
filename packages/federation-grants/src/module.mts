@@ -494,7 +494,7 @@ export const federationGrantsModule = defineModule({
 						connections: acquisition.connections,
 						authorizerFor: authorizerFor(deps),
 						consentUrl: acquisition.consentUrl,
-						loginUrl: () => deps.config.endpoints.login.url,
+						loginUrl: () => acquisition.loginUrl,
 						issuer: deps.config.oauth.jwt.issuer,
 						rateLimiter: requireLimiter(deps),
 						failMode: requireFailMode(deps),

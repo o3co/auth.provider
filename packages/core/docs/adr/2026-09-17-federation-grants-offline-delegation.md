@@ -2390,8 +2390,9 @@ route test is written first and watched failing.
    and `lodgeFederationGrantReauthorization`, which order the two writes;
    `exchangeDelegatedCode`, the capability's third method (D17);
    `findSubjectByFederatedIdentity?` and `federationGrants.identityLookup`;
-   `federationGrants.consent.url` and each connection's `callbackURL`, both
-   refused at boot when missing; the create and reauthorize routes; the
+   `federationGrants.consent.url`, each connection's `callbackURL` and
+   `endpoints.login.url` (which core's schema leaves optional and only
+   `oauthModule` requires), all refused at boot when missing; the create and reauthorize routes; the
    browser half (connect, consent, callback) as a router of its own mounted
    after the session middleware; five audit types. The amendments are marked
    where they stand, in D6, D7, D8, D13, D16, D17 and D18. What this slice
