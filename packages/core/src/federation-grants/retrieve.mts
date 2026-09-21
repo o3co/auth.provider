@@ -116,7 +116,11 @@ export interface FederationGrantAuditEvent {
 		 * Only facts established by then are carried: an early failure may
 		 * have no grant id to name (D18 amended).
 		 */
-		| "federation.grant.authorization_failed";
+		| "federation.grant.authorization_failed"
+		/** Slice 6: a connect flow created a grant (D7 check 8 won). */
+		| "federation.grant.authorized"
+		/** Slice 6: a renewal replaced a grant's authorization in place. */
+		| "federation.grant.reauthorized";
 	readonly correlationId: string;
 	readonly grantId: string;
 	/** The caller. */

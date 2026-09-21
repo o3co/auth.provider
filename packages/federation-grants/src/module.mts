@@ -200,6 +200,18 @@ const requireDelegatedCapability = (
 					"inside a session and says nothing about acting for a user who is not present.",
 			);
 		}
+		// Slice 6: the connect callback proves whose grant it is from the browser's
+		// session, and a `form_post` callback arrives as a cross-site POST without
+		// the session cookie — check 3 of D7 could not run. No bundled adapter with
+		// the capability declares it; a custom one may.
+		if ((provider as { responseMode?: unknown }).responseMode === "form_post") {
+			throw new Error(
+				`federationGrantsModule: the federation "${connection.federation}", named by ` +
+					`federationGrants.connections.${connection.name}, declares response_mode=form_post. ` +
+					"The connect callback proves whose grant it is from the browser's session, and a " +
+					"form_post callback arrives without the session cookie.",
+			);
+		}
 	}
 };
 
@@ -487,6 +499,11 @@ export const federationGrantsModule = defineModule({
 						rateLimiter: requireLimiter(deps),
 						failMode: requireFailMode(deps),
 						background: deps.federationGrantBackground,
+						// The GRANTS boundary, for the callback's backstop and re-read.
+						grantsBoundary: boundaryFor(revocation),
+						identityLookup: acquisition.identityLookup,
+						...(deps.userRepository === undefined ? {} : { userRepository: deps.userRepository }),
+						upstreamTimeoutMs: limits.upstreamHardTimeoutMs,
 						...(deps.auditSink === undefined ? {} : { auditSink: deps.auditSink }),
 						...(deps.logger === undefined ? {} : { logger: deps.logger }),
 					}),

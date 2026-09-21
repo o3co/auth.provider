@@ -66,16 +66,20 @@ import {
 	coveredByRevocationBoundary,
 	type FederationGrantAcquisitionConnection,
 	type FederationGrantBrowserBinding,
+	type FederationGrantConnectTransaction,
 	type FederationGrantIntent,
 	type FederationGrantIntentStore,
 	type FederationGrantStore,
+	federationGrantAuditMetadata,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
+	judgeUpstreamAccessToken,
 	type Logger,
 	type RateLimiter,
 	type RateLimitFailMode,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
+import type { SupportsDelegatedAuthorization } from "@o3co/auth-provider-session";
 import express, {
 	type ErrorRequestHandler,
 	type Request,
@@ -92,18 +96,15 @@ import { createRequestIdMiddleware, requestIdOf } from "./requestId.mjs";
 /** Where this router is mounted. */
 export const FEDERATION_GRANTS_BROWSER_MOUNT_PATH = "/session/federation-grants";
 
-/** What the connect flow needs of a federation: the delegated authorization URL (D17). */
-export interface FederationGrantDelegatedAuthorizer {
-	buildDelegatedAuthorizationUrl(params: {
-		readonly redirectUri: string;
-		readonly state: string;
-		readonly codeVerifier: string;
-		readonly nonce: string;
-		readonly scopes: readonly string[];
-		readonly resource?: string;
-		readonly authorizationParams?: Readonly<Record<string, string>>;
-	}): URL;
-}
+/**
+ * What the connect flow needs of a federation (D17): the authorization URL the
+ * consent answer sends the user to, and the exchange the callback makes. The
+ * capability's refresh is the token route's business, not this router's.
+ */
+export type FederationGrantDelegatedAuthorizer = Pick<
+	SupportsDelegatedAuthorization,
+	"buildDelegatedAuthorizationUrl" | "exchangeDelegatedCode"
+>;
 
 export interface FederationGrantBrowserRouterOptions {
 	readonly intentStore: FederationGrantIntentStore;
@@ -126,6 +127,18 @@ export interface FederationGrantBrowserRouterOptions {
 	readonly rateLimiter: RateLimiter;
 	readonly failMode: RateLimitFailMode;
 	readonly background: FederationGrantBackground;
+	/** The subject's GRANTS boundary (D13): what the callback's backstop and re-read compare a consent with. */
+	readonly grantsBoundary: (subject: string) => Promise<Date | null>;
+	/** D7 check 5: whether an upstream account linked to another local user is refused. */
+	readonly identityLookup: "required" | "unsupported";
+	readonly userRepository?: {
+		readonly findSubjectByFederatedIdentity?: (identity: {
+			readonly provider: string;
+			readonly sub: string;
+		}) => Promise<string | null>;
+	};
+	/** Milliseconds: where the code exchange is aborted (`upstreamHardTimeoutMs`). */
+	readonly upstreamTimeoutMs: number;
 	readonly now?: () => Date;
 	/** 256 random bits, base64url. A seam for tests. */
 	readonly randomId?: () => string;
@@ -679,6 +692,458 @@ export function createFederationGrantBrowserRouter(
 		},
 	);
 
+	// --- GET /callback/:connection -----------------------------------------
+	/**
+	 * Where the upstream returns the browser (D7). Query mode only: a
+	 * `form_post` callback arrives without the session cookie, and check 3
+	 * could not run — boot refuses such a federation.
+	 *
+	 * Check 1 decides whether there is anywhere trustworthy to send the browser
+	 * at all, so its failures are a plain 400 from here. Every later failure
+	 * goes back to the intent's own `redirect_uri` with the client's own
+	 * `state`, the `grant_id`, and one of D7's ten codes — never an upstream's
+	 * description, a thrown message, or anything the callback carried.
+	 */
+	router.get(
+		"/callback/:connection",
+		throttle((res, status) =>
+			plain(res, status, status === 429 ? "Too many requests." : "Temporarily unavailable."),
+		),
+		async (req, res) => {
+			const correlationId = requestIdOf(res);
+			const audit = auditFor(req);
+			let transaction: FederationGrantConnectTransaction | null;
+			try {
+				const state = single(req.query.state);
+				const connectionName = single(req.params.connection);
+				if (state === undefined || connectionName === undefined) {
+					plain(res, 400, "This request is not valid.");
+					return;
+				}
+				// 1. The transaction: exists, names this connection, and is spent
+				// HERE, before any code is exchanged — two callbacks cannot both
+				// get as far as the upstream.
+				try {
+					transaction = await options.intentStore.consumeTransaction({
+						state,
+						connection: connectionName,
+						now: now(),
+					});
+				} catch (error) {
+					report?.({ during: "callback_transaction", error, grantId: "", correlationId });
+					plain(res, 503, "Temporarily unavailable.");
+					return;
+				}
+				if (transaction === null) {
+					failed(req, res, "unknown_transaction");
+					plain(res, 400, "This request has expired or has already been used. Start again.");
+					return;
+				}
+			} catch (error) {
+				report?.({ during: "callback", error, grantId: "", correlationId });
+				plain(res, 500, "Something went wrong.");
+				return;
+			}
+
+			const { intent } = transaction;
+			/** Every terminal outcome after check 1 ends here: the flow is over either way. */
+			const finish = async (): Promise<void> => {
+				try {
+					await options.intentStore.finishIntent(intent.handle, now());
+				} catch (error) {
+					// Cannot undo anything, and the flow budget ends it regardless.
+					report?.({ during: "callback_finish", error, grantId: intent.grantId, correlationId });
+				}
+			};
+			const fail = async (code: CallbackError): Promise<void> => {
+				failed(req, res, code, intent);
+				await finish();
+				res.redirect(303, clientReturn(intent, code));
+			};
+
+			try {
+				const connection = options.connections.get(intent.connection);
+				const at = now();
+
+				// 2. Still the grant's current intent, within the flow's one deadline;
+				// the configuration it was lodged against; and, for a renewal, the
+				// grant it would renew still standing under the subject's boundary.
+				let grantsBoundary: Date | null;
+				try {
+					grantsBoundary = await readBoundary(options.grantsBoundary, intent.subject);
+					if (!(await options.grantStore.isCurrentIntent(intent.grantId, intent.handle, at))) {
+						await fail("grant_not_authorizable");
+						return;
+					}
+				} catch (error) {
+					report?.({ during: "callback_current", error, grantId: intent.grantId, correlationId });
+					await fail("temporarily_unavailable");
+					return;
+				}
+				if (!pinned(connection, intent)) {
+					await fail("grant_not_authorizable");
+					return;
+				}
+				if (intent.kind === "reauthorization") {
+					const backstopped = await backstop(intent, grantsBoundary, audit, correlationId);
+					if (backstopped !== "clear") {
+						await fail(
+							backstopped === "revoked" ? "grant_not_authorizable" : "temporarily_unavailable",
+						);
+						return;
+					}
+				}
+
+				// 3. The browser the flow started in, still live, the intent's
+				// subject's, and signed in after the subject's sessions boundary.
+				const session = await sessionHolds(req, transaction);
+				if (session !== "ok") {
+					await fail(session);
+					return;
+				}
+
+				// 4. The upstream's own answer, validated by the adapter.
+				const upstreamError = single(req.query.error);
+				if (upstreamError !== undefined) {
+					await fail(upstreamError === "access_denied" ? "access_denied" : "upstream_error");
+					return;
+				}
+				const code = single(req.query.code);
+				const authorizer = options.authorizerFor(intent.federation);
+				if (code === undefined || authorizer === undefined || connection === undefined) {
+					await fail("upstream_error");
+					return;
+				}
+				const calledAt = now().getTime();
+				let exchanged: Awaited<
+					ReturnType<FederationGrantDelegatedAuthorizer["exchangeDelegatedCode"]>
+				>;
+				try {
+					exchanged = await authorizer.exchangeDelegatedCode({
+						code,
+						codeVerifier: transaction.codeVerifier,
+						redirectUri: intent.callbackUri,
+						nonce: transaction.nonce,
+						...(intent.resource === undefined ? {} : { resource: intent.resource }),
+						callbackParams: callbackParamsOf(req),
+						signal: AbortSignal.timeout(options.upstreamTimeoutMs),
+					});
+				} catch (error) {
+					report?.({ during: "callback_exchange", error, grantId: intent.grantId, correlationId });
+					await fail(isOutage(error) ? "temporarily_unavailable" : "upstream_error");
+					return;
+				}
+				const receivedAt = now().getTime();
+
+				// 5. Account binding.
+				const bound = await accountHolds(intent, connection, exchanged.upstream, correlationId);
+				if (bound !== "ok") {
+					await fail(bound);
+					return;
+				}
+
+				// 6. Eligibility (D5): a refresh token, and an access token this
+				// provider may disclose — judged on its lifetime and type here, and
+				// on its scope in step 7, so that each failure names its own check.
+				const tokens = exchanged.tokens;
+				const refreshToken =
+					typeof tokens.refreshToken === "string" && tokens.refreshToken.length > 0
+						? tokens.refreshToken
+						: undefined;
+				if (refreshToken === undefined) {
+					await fail("refresh_token_absent");
+					return;
+				}
+				const scopeText = tokens.scope;
+				const granted =
+					scopeText === undefined
+						? [...transaction.consent.scopes]
+						: scopeText.split(" ").filter(Boolean);
+				const lifetime =
+					typeof tokens.expiresIn === "number" &&
+					Number.isFinite(tokens.expiresIn) &&
+					tokens.expiresAt instanceof Date &&
+					!Number.isNaN(tokens.expiresAt.getTime())
+						? tokens.expiresIn
+						: null;
+				if (typeof tokens.accessToken !== "string" || tokens.accessToken.length === 0) {
+					await fail("upstream_token_ineligible");
+					return;
+				}
+				// The scope is judged in step 7 and given here as consented, so this
+				// can only refuse for the lifetime or the token type.
+				const judgement = judgeUpstreamAccessToken({
+					issuedLifetime: lifetime,
+					scopes: granted,
+					consentedScopes: granted,
+					maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
+					tokenType: typeof tokens.tokenType === "string" ? tokens.tokenType : "",
+				});
+				if (!judgement.eligible || lifetime === null) {
+					await fail("upstream_token_ineligible");
+					return;
+				}
+
+				// 7. Scope containment: an upstream that granted more than the user
+				// was shown is refused, because a token cannot be narrowed after
+				// the fact. Omitted means as requested (RFC 6749 §5.1); present and
+				// empty is not an answer.
+				if (scopeText !== undefined && granted.length === 0) {
+					await fail("upstream_token_ineligible");
+					return;
+				}
+				const shown = new Set(transaction.consent.scopes);
+				if (!granted.every((scope) => shown.has(scope))) {
+					await fail("scope_exceeded");
+					return;
+				}
+
+				// The mandatory re-read, immediately before the write. The upstream
+				// work above may have taken seconds, and a subject-wide revocation
+				// may have landed in them — a "keep" stamps the sessions boundary
+				// and nothing else. This narrows what was an attacker-controlled
+				// window (hold the upstream redirect, finish the callback minutes
+				// later) to the gap between these reads and the activation. It does
+				// not close it; that needs write fencing (D13).
+				const again = await sessionHolds(req, transaction);
+				if (again !== "ok") {
+					await fail(again);
+					return;
+				}
+				try {
+					const boundaryNow = await readBoundary(options.grantsBoundary, intent.subject);
+					if (
+						!(await options.grantStore.isCurrentIntent(intent.grantId, intent.handle, now())) ||
+						coveredByRevocationBoundary(
+							transaction.consent.at,
+							boundaryNow,
+							options.revocationSkewMs,
+						)
+					) {
+						await fail("grant_not_authorizable");
+						return;
+					}
+				} catch (error) {
+					report?.({ during: "callback_reread", error, grantId: intent.grantId, correlationId });
+					await fail("temporarily_unavailable");
+					return;
+				}
+
+				// 8. The guarded activation (D2).
+				const expiresAtMs = (tokens.expiresAt as Date).getTime();
+				// When the token was obtained, on the adapter's clock, held inside the
+				// window of the exchange — the retrieval's rule (retrieve.mts), so a
+				// wild `expiresAt` can neither date a token in the future nor
+				// lengthen its life.
+				const obtainedAt = Math.min(Math.max(expiresAtMs - lifetime * 1000, calledAt), receivedAt);
+				let written: Awaited<ReturnType<FederationGrantStore["activate"]>>;
+				try {
+					written = await options.grantStore.activate({
+						grantId: intent.grantId,
+						intentHandle: intent.handle,
+						authorization: {
+							identityRevision: intent.identityRevision,
+							authorizationRevision: intent.authorizationRevision,
+							upstream: { issuer: exchanged.upstream.issuer, subject: exchanged.upstream.subject },
+							...(intent.resource === undefined ? {} : { resource: intent.resource }),
+							scopes: granted,
+							consent: {
+								at: transaction.consent.at,
+								sid: transaction.consent.sid,
+								scopes: [...transaction.consent.scopes],
+							},
+							authorizedAt: now(),
+							expiresAt: transaction.grantExpiresAt,
+						},
+						credentials: {
+							refreshToken,
+							accessToken: {
+								value: tokens.accessToken,
+								tokenType: tokens.tokenType as string,
+								obtainedAt: new Date(obtainedAt),
+								issuedLifetime: lifetime,
+								scopes: granted,
+							},
+						},
+						now: now(),
+					});
+				} catch (error) {
+					report?.({ during: "callback_activate", error, grantId: intent.grantId, correlationId });
+					await fail("temporarily_unavailable");
+					return;
+				}
+				if (!written.ok) {
+					// The guard lost: superseded, revoked or expired in between. The
+					// store says no more than that, and neither does this.
+					await fail("grant_not_authorizable");
+					return;
+				}
+
+				const grant = written.grant;
+				if (intent.kind === "initial") {
+					options.background.register(
+						audit({
+							type: "federation.grant.authorized",
+							correlationId,
+							grantId: grant.id,
+							clientId: grant.clientId,
+							subject: grant.subject,
+							...federationGrantAuditMetadata(grant),
+							outcome: options.identityLookup,
+						}).catch(() => undefined),
+					);
+				} else {
+					options.background.register(
+						audit({
+							type: "federation.grant.reauthorized",
+							correlationId,
+							grantId: grant.id,
+							clientId: grant.clientId,
+							subject: grant.subject,
+							...federationGrantAuditMetadata(grant),
+							outcome: options.identityLookup,
+						}).catch(() => undefined),
+					);
+				}
+				await finish();
+				res.redirect(303, clientReturn(intent));
+			} catch (error) {
+				report?.({ during: "callback", error, grantId: intent.grantId, correlationId });
+				await fail("temporarily_unavailable");
+			}
+		},
+	);
+
+	/**
+	 * Check 3, asked twice: before the exchange and again just before the
+	 * activation. The browser presents the same express-session record and the
+	 * same durable session the flow started in; that session is live, is the
+	 * intent's subject's, and authenticated after the sessions boundary.
+	 */
+	async function sessionHolds(
+		req: Request,
+		transaction: FederationGrantConnectTransaction,
+	): Promise<"ok" | "reauthentication_required" | "account_mismatch" | "temporarily_unavailable"> {
+		const { binding, intent } = transaction;
+		if (!authenticated(req)) return "reauthentication_required";
+		if (subjectOf(req) !== intent.subject || binding.subject !== intent.subject) {
+			return "account_mismatch";
+		}
+		if (sessionIdOf(req) !== binding.sessionId || durableSidOf(req) !== binding.sid) {
+			return "reauthentication_required";
+		}
+		try {
+			const durable = await options.userSessionStore.get(binding.sid);
+			if (
+				durable === null ||
+				durable === undefined ||
+				durable.sub !== intent.subject ||
+				!(now().getTime() < durable.expiresAt.getTime())
+			) {
+				return "reauthentication_required";
+			}
+			const boundary = await readBoundary(options.sessionsBoundary, intent.subject);
+			if (coveredByRevocationBoundary(durable.authTime, boundary, options.revocationSkewMs)) {
+				return "reauthentication_required";
+			}
+		} catch {
+			return "temporarily_unavailable";
+		}
+		return "ok";
+	}
+
+	/**
+	 * A renewal's backstop (D13, amended in slice 5): the grant it would renew,
+	 * compared with the subject's GRANTS boundary. A hit is revoked, durably —
+	 * the one failure here meant to change the record — and audited once, by
+	 * whichever call wrote it.
+	 */
+	async function backstop(
+		intent: FederationGrantIntent,
+		boundary: Date | null,
+		audit: ReturnType<typeof auditFor>,
+		correlationId: string,
+	): Promise<"clear" | "revoked" | "unavailable"> {
+		try {
+			const grant = await options.grantStore.find(intent.grantId, now());
+			if (grant === null || grant.status === "revoked") return "revoked";
+			if (grant.status === "pending") return "clear";
+			if (!coveredByRevocationBoundary(grant.consent.at, boundary, options.revocationSkewMs)) {
+				return "clear";
+			}
+			const written = await options.grantStore.revoke(grant.id, "backstop", now());
+			if (written.ok) {
+				options.background.register(
+					audit({
+						type: "federation.grant.revoked",
+						correlationId,
+						grantId: written.grant.id,
+						clientId: written.grant.clientId,
+						subject: written.grant.subject,
+						...federationGrantAuditMetadata(written.grant),
+						outcome: "backstop",
+					}).catch(() => undefined),
+				);
+			}
+			return "revoked";
+		} catch {
+			return "unavailable";
+		}
+	}
+
+	/**
+	 * Check 5. The verified issuer is the connection's; a renewal's upstream
+	 * account is the one already on the grant; an expectation the client
+	 * lodged is met; and — unless the deployment recorded that it cannot ask —
+	 * the upstream account is not already another local user's. One linked to
+	 * nobody is accepted.
+	 */
+	async function accountHolds(
+		intent: FederationGrantIntent,
+		connection: FederationGrantAcquisitionConnection,
+		upstream: { readonly issuer: string; readonly subject: string },
+		correlationId: string,
+	): Promise<
+		"ok" | "account_mismatch" | "identity_conflict" | "upstream_error" | "temporarily_unavailable"
+	> {
+		if (upstream.issuer !== connection.upstreamIssuer) return "upstream_error";
+		if (intent.upstreamSubject !== undefined && upstream.subject !== intent.upstreamSubject) {
+			return "account_mismatch";
+		}
+		if (intent.kind === "reauthorization") {
+			try {
+				const grant = await options.grantStore.find(intent.grantId, now());
+				const recorded = grant !== null && grant.status !== "pending" ? grant.upstream : undefined;
+				if (
+					recorded === undefined ||
+					recorded.issuer !== upstream.issuer ||
+					recorded.subject !== upstream.subject
+				) {
+					return "account_mismatch";
+				}
+			} catch {
+				return "temporarily_unavailable";
+			}
+		}
+		if (options.identityLookup === "required") {
+			const lookup = options.userRepository?.findSubjectByFederatedIdentity;
+			if (lookup === undefined) return "temporarily_unavailable";
+			try {
+				const owner = await lookup({ provider: intent.federation, sub: upstream.subject });
+				if (owner !== null && owner !== intent.subject) return "identity_conflict";
+			} catch (error) {
+				report?.({
+					during: "callback_identity_lookup",
+					error,
+					grantId: intent.grantId,
+					correlationId,
+				});
+				return "temporarily_unavailable";
+			}
+		}
+		return "ok";
+	}
+
 	// Everything else under the mount: plain, not the JSON router's 404.
 	router.use((_req, res) => plain(res, 404, "Not found."));
 	const parserErrors: ErrorRequestHandler = (error, _req, res, next) => {
@@ -693,6 +1158,69 @@ export function createFederationGrantBrowserRouter(
 	};
 	router.use(parserErrors);
 	return router;
+}
+
+/** D7's ten codes: what a failed callback sends back to the client, and nothing else. */
+type CallbackError =
+	| "access_denied"
+	| "reauthentication_required"
+	| "account_mismatch"
+	| "identity_conflict"
+	| "refresh_token_absent"
+	| "upstream_token_ineligible"
+	| "scope_exceeded"
+	| "upstream_error"
+	| "temporarily_unavailable"
+	| "grant_not_authorizable";
+
+/** A boundary, or a refusal: an answer that is neither a date nor `null` is not "nothing revoked". */
+async function readBoundary(
+	read: (subject: string) => Promise<Date | null>,
+	subject: string,
+): Promise<Date | null> {
+	const boundary = await read(subject);
+	if (boundary !== null && !(boundary instanceof Date && !Number.isNaN(boundary.getTime()))) {
+		throw new TypeError("the boundary is neither a date nor null");
+	}
+	return boundary;
+}
+
+/** Whether the connection is still what the intent was lodged against (D4). */
+function pinned(
+	connection: FederationGrantAcquisitionConnection | undefined,
+	intent: FederationGrantIntent,
+): connection is FederationGrantAcquisitionConnection {
+	return (
+		connection !== undefined &&
+		federationGrantIdentityRevision(connection) === intent.identityRevision &&
+		federationGrantAuthorizationRevision(connection) === intent.authorizationRevision &&
+		connection.callbackUri === intent.callbackUri
+	);
+}
+
+/**
+ * The rest of the callback's parameters, string values only, without `code`
+ * and `state` — which the flow binds itself — exactly as `exchangeCode` takes
+ * them, so an adapter forwards `iss` (RFC 9207) the one way it knows.
+ */
+function callbackParamsOf(req: Request): Readonly<Record<string, string>> {
+	const params: Record<string, string> = {};
+	for (const [key, value] of Object.entries(req.query)) {
+		if (key === "code" || key === "state") continue;
+		if (typeof value === "string") params[key] = value;
+	}
+	return params;
+}
+
+/** A failure to REACH the upstream — not one it answered — is an outage, not an upstream error. */
+function isOutage(error: unknown): boolean {
+	const name = (error as { name?: unknown })?.name;
+	if (name === "AbortError" || name === "TimeoutError") return true;
+	const cause = (error as { cause?: unknown })?.cause;
+	const causeName = (cause as { name?: unknown })?.name;
+	if (causeName === "AbortError" || causeName === "TimeoutError") return true;
+	const message = `${(error as Error)?.message ?? ""} ${(cause as Error)?.message ?? ""}`;
+	return /fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|EAI_AGAIN/.test(message);
 }
 
 function messageFor(reason: Exclude<Judgement, { ok: true }>["reason"]): string {

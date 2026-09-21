@@ -102,6 +102,17 @@ const slice2Pair = {
 	refreshDelegatedToken: async () => ({}),
 } as unknown as FederationProvider;
 
+/** A custom adapter with the capability, whose callbacks arrive as a cross-site POST. */
+const formPost = {
+	responseMode: "form_post",
+	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
+	exchangeDelegatedCode: async () => ({
+		upstream: { issuer: "https://issuer.example", subject: "s" },
+		tokens: {},
+	}),
+	refreshDelegatedToken: async () => ({}),
+} as unknown as FederationProvider;
+
 /** An adapter with an ordinary session refresh and nothing else. */
 const sessionOnly = { refreshToken: async () => ({}) } as unknown as FederationProvider;
 
@@ -316,6 +327,8 @@ describe("enabling the feature", () => {
 		// And the earlier pair, by name: the callback would otherwise be the
 		// first place it failed, with a user standing in front of it.
 		await expect(boot({ provider: slice2Pair })).rejects.toThrow(/exchangeDelegatedCode/);
+		// And one whose callback would arrive without the session cookie.
+		await expect(boot({ provider: formPost })).rejects.toThrow(/form_post/);
 	});
 
 	it("refuses to discard every disclosure without being told to", async () => {

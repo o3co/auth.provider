@@ -569,6 +569,33 @@ order:
 `form_post` federations are not eligible: the session cookie is absent on
 their callback, so check 3 cannot run.
 
+**Amended in slice 6: the callback as built.** Check 1 consumes the
+transaction conditionally on the connection in the path, in one step (D16), so
+a callback on another connection's path spends nothing. Check 2 runs before
+the code exchange and includes the pinned revisions and the callback URI, so a
+flow whose configuration moved never reaches the upstream — a code exchanged
+for a grant that cannot be activated would leave a refresh token there that
+nothing uses. Check 4 is the capability's third method, `exchangeDelegatedCode`
+(D17), aborted at `upstreamHardTimeoutMs`; a failure to REACH the upstream is
+`temporarily_unavailable`, one it answered is `upstream_error`. Check 5 also
+requires the verified issuer to be the connection's configured one. Check 6
+judges the lifetime and the token type and check 7 the scope, each naming its
+own code: the shared `judgeUpstreamAccessToken` is given the granted scopes as
+consented, so it cannot answer `scope_exceeded` before check 7 does. Present
+and empty `scope` is not an answer (`upstream_token_ineligible`); omitted is
+"as requested". The token is dated inside the window of the exchange, the
+retrieval's rule. The grant's `consent.at` and `expiresAt` come from the
+transaction — the answer's instant, fixed by the store — never from the
+callback. Every terminal outcome after check 1 finishes the intent, releasing
+its place against the bound. A form_post federation is refused at boot even
+where a custom adapter has the capability.
+
+**The mandatory re-read.** Immediately before `activate` the callback re-reads
+the sessions boundary, the durable session's liveness, `isCurrentIntent`, and
+the grants boundary against the NEW consent — the last for a first grant too,
+since a consent the grants boundary covers is one the backstop would revoke at
+its first use. See D13 for what this does and does not close.
+
 **Outcomes.** A failure of check 1 has no trustworthy redirect target and
 answers a plain 400 from the provider. Every later failure leaves an existing
 grant exactly as it was — **amended in slice 5**: except a backstop hit, which
@@ -1556,6 +1583,21 @@ the same trade for `cascadeLogout`.
 `"retireIntent"` from the service. A per-grant failure carries `grantId`
 beside the existing `sid`.
 
+**Amended in slice 6: the residual window of `"keep"`, stated.** The subject
+revocation service stamps the sessions boundary and then retires each grant's
+current-intent pointer, and nothing makes those two steps atomic with a
+callback's activation. A connect flow that passed check 3 before the stamp
+could otherwise activate after it — and before this slice's re-read the
+window was the caller's to choose: hold the upstream redirect, finish the
+callback minutes later. The callback now re-reads the sessions boundary, the
+durable session, the current-intent pointer and the grants boundary
+immediately before `activate`, so what remains open is **the gap between that
+read and the write**. Closing it needs write fencing — an operation spanning
+the revocation and the activation, enforced at the write — which is a change
+to the coordination surface of D2/D16 and is deferred. A retirement or
+revocation that lands before the activation's write still wins, because
+`activate` is guarded by the pointer (D2).
+
 ### D14 — Grants survive logout; a logout policy is designed, and deferred
 
 By default session expiry, local logout and upstream logout leave a grant
@@ -2109,6 +2151,20 @@ outside that: the retrieval's `report` hands a cause to the composer's logger
 as it was thrown, and an upstream's error may carry what the upstream echoed.
 The package logs its name and its classification, never the error whole
 (slice 4).
+
+**Amended in slice 6.** Acquisition adds five events:
+`federation.grant.requested` and `federation.grant.request.denied` from the
+client-authenticated routes, and `federation.grant.authorized`,
+`federation.grant.reauthorized` and `federation.grant.authorization_failed`
+from the browser half. A `requested` event's subject is what the client
+ASSERTED; the connect flow is where a session establishes it. An early failure
+— an unknown handle, an unknown transaction — carries no grant id, and none
+is invented: "every event carries the grant id" was too absolute. A foreign
+grant's refusal is never enriched with that grant's owner or upstream account.
+None of them carries a handle, a challenge, a code, a state, a PKCE verifier,
+a nonce, or an upstream token. Backstop revocations found by `/reauthorize`
+or the callback use `.revoked` with `outcome: "backstop"`, once, by whichever
+call's write changed the record.
 
 ### D19 — Entra: on-behalf-of is not implemented, and consent accumulates
 

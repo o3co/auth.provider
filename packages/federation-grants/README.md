@@ -344,6 +344,65 @@ A challenge is not a bearer token: it is answerable only from the browser it
 was issued to, by the same durable session and subject, and every answer
 re-reads that session and the sessions boundary.
 
+### `GET /session/federation-grants/callback/:connection`
+
+Where the upstream returns the browser: each connection's `callbackURL`
+points here. Query mode only — a `form_post` federation is refused at boot,
+because that callback arrives without the session cookie.
+
+It checks, in this order:
+
+1. **The transaction** — the `state` is one this provider issued, for THIS
+   connection, and it is spent before any code is exchanged. Otherwise a plain
+   `400` and no redirect: there is nowhere trustworthy to send the browser.
+2. **The intent** is still the grant's current one, within the flow's deadline,
+   and the connection is still what it was lodged against; for a renewal, the
+   grant it would renew is checked against the subject's grants boundary and
+   **revoked there, durably,** if a subject-wide revocation should have ended
+   it — the one failure meant to change a record.
+3. **The browser** is the one the flow started in — the same express session
+   and durable session — still live, the intent's subject's, and signed in
+   after the subject's sessions boundary.
+4. **The upstream's answer**, validated by the adapter's
+   `exchangeDelegatedCode`: PKCE, the id_token's signature, issuer, audience,
+   expiry and nonce, `iss` forwarded (RFC 9207), the resource sent at the token
+   endpoint, aborted at `upstreamHardTimeoutMs`.
+5. **The upstream account**: the connection's issuer; for a renewal, the
+   account already on the grant; the client's `upstream_sub` if it sent one;
+   and — unless `identityLookup = "unsupported"` — not already another local
+   user's. One linked to nobody is accepted.
+6. **Eligibility**: a refresh token, and an access token with a finite lifetime
+   within `maxAccessTokenLifetime`, of a type a route without a proof key can
+   present.
+7. **Scope containment**: nothing beyond what the user was shown. An omitted
+   `scope` means as requested; an upstream that granted more is refused,
+   because a token cannot be narrowed after the fact.
+8. **Activation**, immediately after re-reading the session, the sessions
+   boundary, the current-intent pointer and the grants boundary.
+
+Every failure after check 1 goes back to the intent's `redirect_uri` with the
+client's own `state`, the `grant_id`, and one of: `access_denied`,
+`reauthentication_required`, `account_mismatch`, `identity_conflict`,
+`refresh_token_absent`, `upstream_token_ineligible`, `scope_exceeded`,
+`upstream_error`, `temporarily_unavailable`, `grant_not_authorizable`. Nothing
+an upstream described, and no thrown message, reaches it. Success goes back
+with `grant_id` and `state` — never a token. The `grant_id` proves nothing on
+its own: every grant-addressed route needs `sub`, and `/status` says which
+upstream account the grant got.
+
+**What the re-read before activation does, and does not, do.** The upstream
+leg can take seconds, and a caller can hold the redirect and finish it much
+later. A subject-wide revocation that keeps established grants (`"keep"`)
+stamps the sessions boundary and nothing else, so without a second look a
+flow that passed check 3 before the stamp could activate after it. The re-read
+narrows that from a window the caller controls to the gap between the read and
+the write. It does not close it: that needs write fencing, which is deferred.
+
+A grant created emits `federation.grant.authorized`, a renewal
+`federation.grant.reauthorized`, each described from the record the write
+returned and carrying the deployment's `identityLookup` as its outcome. A
+failed flow emits `federation.grant.authorization_failed`.
+
 ### What the exemption depends on
 
 Connect skips the request-origin check because consent is its CSRF defence.
