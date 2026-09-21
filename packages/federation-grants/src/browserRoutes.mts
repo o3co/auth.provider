@@ -565,45 +565,55 @@ export function createFederationGrantBrowserRouter(
 		return { consent, intent, binding: judged.binding, challenge: presented };
 	};
 
-	router.get("/consent", consentThrottle, async (req, res) => {
-		try {
-			const found = await pendingFor(req, res, req.query.challenge);
-			if (found === null) return;
-			const { consent, intent } = found;
-			let client: Awaited<ReturnType<ClientRepository["findById"]>>;
+	// Admitted like the POST: reading the question touches the durable session,
+	// the intent store and the client registry, and a drain that has begun must
+	// not have them closed under a read it never waited for (Copilot).
+	router.get(
+		"/consent",
+		consentThrottle,
+		admitted(shuttingDownJson, async (req, res) => {
 			try {
-				client = await options.clientRepository.findById(intent.clientId);
-			} catch (error) {
-				report?.({
-					during: "consent_client",
-					error,
-					grantId: intent.grantId,
-					correlationId: requestIdOf(res),
+				const found = await pendingFor(req, res, req.query.challenge);
+				if (found === null) return;
+				const { consent, intent } = found;
+				let client: Awaited<ReturnType<ClientRepository["findById"]>>;
+				try {
+					client = await options.clientRepository.findById(intent.clientId);
+				} catch (error) {
+					report?.({
+						during: "consent_client",
+						error,
+						grantId: intent.grantId,
+						correlationId: requestIdOf(res),
+					});
+					jsonError(res, 503, "temporarily_unavailable", "client registry unavailable");
+					return;
+				}
+				const described = client as { clientName?: string; clientUri?: string } | null;
+				res.status(200).json({
+					challenge: consent.challenge,
+					client_id: intent.clientId,
+					...(described?.clientName === undefined ? {} : { client_name: described.clientName }),
+					...(described?.clientUri === undefined ? {} : { client_uri: described.clientUri }),
+					connection: intent.connection,
+					scopes: [...consent.scopes],
+					...(intent.resource === undefined ? {} : { resource: intent.resource }),
+					// The grant's duration, counted from the answer — an absolute date
+					// computed now would be an estimate the grant does not keep (D3).
+					grant_expires_in: Math.floor(consent.lifetimeMs / 1000),
+					// What D8 obliges the page to say, as data rather than as prose.
+					continues_after_logout: true,
+					expires_in: Math.max(
+						0,
+						Math.floor((consent.expiresAt.getTime() - now().getTime()) / 1000),
+					),
 				});
-				jsonError(res, 503, "temporarily_unavailable", "client registry unavailable");
-				return;
+			} catch (error) {
+				report?.({ during: "consent_get", error, grantId: "", correlationId: requestIdOf(res) });
+				jsonError(res, 500, "server_error", "unexpected_error");
 			}
-			const described = client as { clientName?: string; clientUri?: string } | null;
-			res.status(200).json({
-				challenge: consent.challenge,
-				client_id: intent.clientId,
-				...(described?.clientName === undefined ? {} : { client_name: described.clientName }),
-				...(described?.clientUri === undefined ? {} : { client_uri: described.clientUri }),
-				connection: intent.connection,
-				scopes: [...consent.scopes],
-				...(intent.resource === undefined ? {} : { resource: intent.resource }),
-				// The grant's duration, counted from the answer — an absolute date
-				// computed now would be an estimate the grant does not keep (D3).
-				grant_expires_in: Math.floor(consent.lifetimeMs / 1000),
-				// What D8 obliges the page to say, as data rather than as prose.
-				continues_after_logout: true,
-				expires_in: Math.max(0, Math.floor((consent.expiresAt.getTime() - now().getTime()) / 1000)),
-			});
-		} catch (error) {
-			report?.({ during: "consent_get", error, grantId: "", correlationId: requestIdOf(res) });
-			jsonError(res, 500, "server_error", "unexpected_error");
-		}
-	});
+		}),
+	);
 
 	router.post(
 		"/consent",

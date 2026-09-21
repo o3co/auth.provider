@@ -1097,6 +1097,29 @@ describe("shutting down (Codex on slice 6)", () => {
 		expect((await w.connect(handle, "b-1")).status).toBe(503);
 		await draining;
 	});
+
+	it("refuses to show the question once the drain has begun, as it refuses the answer (Copilot)", async () => {
+		// Reading the question touches the durable session, the intent store and
+		// the client registry — each of which the drain is about to close.
+		const w = world();
+		const { handle } = await w.lodge();
+		w.signIn("b-1");
+		const challenge = await w.challengeFor(handle, "b-1");
+		const draining = w.background.drain();
+		for (const response of [
+			await w.page(challenge, "b-1"),
+			await w.answer({ challenge, decision: "accept" }, "b-1"),
+		]) {
+			expect(response.status).toBe(503);
+			expect(response.body).toEqual({
+				error: "service_unavailable",
+				error_description: "shutting_down",
+			});
+		}
+		// Nothing was answered: the question is still parked.
+		expect(await w.intents.getConsent(challenge, w.state.now)).not.toBeNull();
+		await draining;
+	});
 });
 
 describe("what the adversarial review found", () => {
