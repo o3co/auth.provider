@@ -17,6 +17,7 @@
 import type { AdapterFactory, UserRepository } from "@o3co/auth-provider-core";
 import {
 	DEFAULT_MAX_RESPONSE_BYTES,
+	type FederatedIdentityLookupCoverage,
 	HttpUserRepository,
 } from "./repositories/HttpUserRepository.mjs";
 
@@ -62,6 +63,21 @@ export const registerBuiltinAdapters = (factories: {
 			// #482: optional. Present → the repository can link a federated identity.
 			...(typeof config.linkFederatedIdentityUrl === "string"
 				? { linkFederatedIdentityUrl: config.linkFederatedIdentityUrl }
+				: {}),
+			// #613: optional. Forwarded whenever SET, not only when well-typed —
+			// the link URL above vanishes when misspelt, and for the lookup a value
+			// that vanishes is a deployment that believes itself covered and is
+			// not. The constructor refuses what is not a URL, or not a list.
+			...(config.findSubjectByFederatedIdentityUrl !== undefined
+				? {
+						findSubjectByFederatedIdentityUrl: config.findSubjectByFederatedIdentityUrl as string,
+					}
+				: {}),
+			...(config.federatedIdentityLookupCoverage !== undefined
+				? {
+						federatedIdentityLookupCoverage:
+							config.federatedIdentityLookupCoverage as readonly FederatedIdentityLookupCoverage[],
+					}
 				: {}),
 			timeout: toNumber(config.timeout, DEFAULT_TIMEOUT_MS),
 			maxResponseBytes: toNumber(config.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES),

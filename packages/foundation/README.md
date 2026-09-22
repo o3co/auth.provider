@@ -41,6 +41,8 @@ class HttpUserRepository implements UserRepository {
     authenticateUrl: string;        // POST endpoint for username/password auth
     authenticateByTokenUrl: string; // POST endpoint for token-based auth
     linkFederatedIdentityUrl?: string; // POST endpoint that links a federated identity (#482)
+    findSubjectByFederatedIdentityUrl?: string; // POST endpoint that says who holds an upstream identity (#613)
+    federatedIdentityLookupCoverage?: FederatedIdentityLookupCoverage[]; // what that lookup covers (#613)
     timeout: number;                // request timeout in milliseconds
     maxResponseBytes?: number;      // response body cap, default 1 MiB
   });
@@ -54,8 +56,17 @@ class HttpUserRepository implements UserRepository {
   // POST linkFederatedIdentityUrl with body: { userId, provider, sub, token, claims }
   // — present only when the URL is configured (#482)
   linkFederatedIdentity?(userId: string, identity: FederatedIdentityLink): Promise<LinkFederatedIdentityResult>;
+
+  // From the coverage declaration alone; the Store is not asked (#613).
+  // Present together with the lookup, only when its URL is configured.
+  supportsFederatedIdentityLookup?(registration: { provider, issuer, clientId }, identityClaims: string[]): boolean;
+
+  // POST findSubjectByFederatedIdentityUrl with body: { provider, issuer, clientId, sub, claims }
+  findSubjectByFederatedIdentity?(identity: FederatedIdentityLookup): Promise<FederatedIdentityLookupResult>;
 }
 ```
+
+For `authenticate` and `authenticateByToken`:
 
 - Returns `null` on HTTP 401 or 403.
 - Throws an error on any other non-OK HTTP status.
@@ -71,13 +82,77 @@ class HttpUserRepository implements UserRepository {
   e-mail alone — is in the
   [session package README](../session/README.md#account-linking-across-federations-482).
 
+#### The identity lookup (#613)
+
+What a federation-grant deployment (`@o3co/auth-provider-federation-grants`,
+D7 check 5) asks of the Store: who holds an upstream identity, so that a
+delegation is refused when the account belongs to another local user. The
+Store answers about ownership across **every** registration of the IdP, not
+only the one the identity came through — a login links under the federation
+the user signed in through, and an IdP whose `sub` is pairwise per app
+registration (Entra's is) gives the same person another `sub` under each. For
+D19's separate grants registration, that means: to answer `unlinked`
+honestly, your Store must resolve the verified `(tid, oid)` against an
+authoritative directory complete for the relevant tenant and all local
+ownership links across registrations; no match in a partial directory or an
+unfamiliar identity is `identity_not_resolvable`, and multiple distinct local
+owners are a server error. Declaring coverage attests to that strategy; boot
+neither discovers nor proves the remote directory's completeness.
+
+The request is `POST findSubjectByFederatedIdentityUrl` with
+
+```json
+{ "provider": "entra-files", "issuer": "https://login.microsoftonline.com/<tenant>/v2.0",
+  "clientId": "<the grants app registration>", "sub": "<verified sub>",
+  "claims": { "tid": "<verified>", "oid": "<verified>" } }
+```
+
+— the registration exactly as the connection is configured, the verified
+`sub`, and every claim the connection's `identityClaims` named (verified,
+from the id_token; `{}` when it named none). The lookup must change nothing:
+no login stamped, no link made, no user provisioned. The answer is a `2xx`
+JSON body, one of
+
+| Body | Meaning |
+|---|---|
+| `{ "kind": "linked", "subject": "<local User.id>" }` | exactly one local user holds it |
+| `{ "kind": "unlinked" }` | a **complete** resolution found nobody |
+| `{ "kind": "indeterminate", "reason": "registration_not_covered" }` | no strategy for this registration |
+| `{ "kind": "indeterminate", "reason": "identity_not_resolvable" }` | a strategy, and this identity is not in it |
+
+Fields beyond those are ignored. **Everything else is an outage, never
+"nobody"**: any status but a `2xx` — `404`, `401`, `403`, `409`, `5xx` — a
+`2xx` whose body is empty or not one of the four, a redirect (never followed:
+the body carries a verified identity), a timeout, or a body over the cap all
+throw, and the callback answers `temporarily_unavailable`. More than one
+distinct local owner is a `500` from the Store. What is thrown names the
+endpoint and the status, never the body or the identity.
+
+**Coverage.** The probe the grants module asks at boot is synchronous and
+cannot reach the Store, so `federatedIdentityLookupCoverage` relays what the
+Store's lookup covers: one entry per registration,
+`{ provider, issuer, clientId, requiredClaims }`, all four fields, compared
+exactly (no trimming, no case folding, no trailing-slash tolerance), and
+`requiredClaims` the claim names the strategy needs — `[]` for one on the
+registration and `sub` alone. `supportsFederatedIdentityLookup(registration,
+identityClaims)` is `true` when an entry equals the registration and every
+`requiredClaims` name is among `identityClaims`; the grants module refuses at
+boot every connection it is `false` for. A registration nobody declared is
+answered `registration_not_covered` locally, and a declared one arriving
+without a required claim `identity_not_resolvable`, with no request either
+way. The declaration is snapshotted at construction; a duplicate registration,
+a malformed entry, or coverage without the URL is a construction error. It has
+no environment-variable form (a list is HOCON's), as `federationGrants.connections`
+has none.
+
 ### Constructor validation
 
 Every option is validated in the **constructor**, so a misconfigured deployment
 fails at boot rather than at the first login attempt.
 
-**Every URL must use `https://`** (the link endpoint included). They carry plaintext user credentials — a
-password on `authenticateUrl`, a token on `authenticateByTokenUrl` — so an
+**Every URL must use `https://`** (the link and lookup endpoints included). They carry plaintext user credentials — a
+password on `authenticateUrl`, a token on `authenticateByTokenUrl`, a verified
+upstream identity on `findSubjectByFederatedIdentityUrl` — so an
 `http://` URL does not merely weaken the connection, it publishes the credential
 to every hop on the path.
 

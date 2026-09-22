@@ -106,6 +106,75 @@ describe("registerBuiltinAdapters", () => {
 		expect(typeof withLink.linkFederatedIdentity).toBe("function");
 	});
 
+	it("http builder wires the identity lookup and its coverage only when the config carries them (#613)", async () => {
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		registerBuiltinAdapters({ userFactory });
+		const base = {
+			type: "http",
+			authenticateUrl: `${BASE_URL}/auth`,
+			authenticateByTokenUrl: `${BASE_URL}/auth/token`,
+			timeout: 5000,
+		};
+		const registration = {
+			provider: "entra-files",
+			issuer: "https://login.microsoftonline.com/T-1/v2.0",
+			clientId: "grants-client",
+		};
+		const without = await userFactory.create(base);
+		expect(without.supportsFederatedIdentityLookup).toBeUndefined();
+		expect(without.findSubjectByFederatedIdentity).toBeUndefined();
+
+		const seen: unknown[] = [];
+		server.use(
+			http.post(`${BASE_URL}/auth/identity`, async ({ request }) => {
+				seen.push(await request.json());
+				return HttpResponse.json({ kind: "linked", subject: "u-bob" });
+			}),
+		);
+		const configured = await userFactory.create({
+			...base,
+			findSubjectByFederatedIdentityUrl: `${BASE_URL}/auth/identity`,
+			federatedIdentityLookupCoverage: [{ ...registration, requiredClaims: ["tid", "oid"] }],
+		});
+		expect(configured.supportsFederatedIdentityLookup?.(registration, ["oid", "tid"])).toBe(true);
+		expect(configured.supportsFederatedIdentityLookup?.(registration, ["oid"])).toBe(false);
+		expect(
+			await configured.findSubjectByFederatedIdentity?.({
+				...registration,
+				sub: "pairwise-B",
+				claims: { tid: "T-1", oid: "O-B" },
+			}),
+		).toStrictEqual({ kind: "linked", subject: "u-bob" });
+		expect(seen).toHaveLength(1);
+	});
+
+	it("http builder refuses a lookup URL or coverage that is not what the constructor takes, rather than dropping it", async () => {
+		// The link URL is forwarded only when it is a string, which lets a
+		// misspelt value vanish. For the lookup a value that vanishes is a
+		// deployment that believes itself covered and is not.
+		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
+		registerBuiltinAdapters({ userFactory });
+		const base = {
+			type: "http",
+			authenticateUrl: `${BASE_URL}/auth`,
+			authenticateByTokenUrl: `${BASE_URL}/auth/token`,
+			timeout: 5000,
+		};
+		await expect(
+			userFactory.create({ ...base, findSubjectByFederatedIdentityUrl: 42 }),
+		).rejects.toThrow(/findSubjectByFederatedIdentityUrl/);
+		await expect(
+			userFactory.create({
+				...base,
+				findSubjectByFederatedIdentityUrl: `${BASE_URL}/auth/identity`,
+				federatedIdentityLookupCoverage: "entra-files",
+			}),
+		).rejects.toThrow(/federatedIdentityLookupCoverage/);
+		await expect(
+			userFactory.create({ ...base, federatedIdentityLookupCoverage: [] }),
+		).resolves.toBeDefined();
+	});
+
 	it("http builder coerces string timeout to number (env-override path)", async () => {
 		const userFactory = createAdapterFactory<UserRepository>("UserRepository");
 		registerBuiltinAdapters({ userFactory });

@@ -2576,10 +2576,17 @@ route test is written first and watched failing.
    give the process 60; the key-ring rotation procedure is in the operator
    runbook; the provider guide is `packages/federation-grants/docs/offline-access.md`.
    The CHANGELOG is the release cut's to write (release policy R2): the
-   slice's PR carries the draft. Left for a follow-up, and said so in the
-   template README: the HTTP user repository has no identity lookup, so a
-   template deployment with a connection configured chooses
-   `identityLookup = "unsupported"` or composes a covering Store.
+   slice's PR carries the draft. What that slice left for a follow-up the
+   owner made a release prerequisite, #613: the foundation package's
+   `HttpUserRepository` gained the lookup — `findSubjectByFederatedIdentityUrl`,
+   a `POST` of `{ provider, issuer, clientId, sub, claims }` answered by one
+   of the port's three answers in a `2xx` body, everything else an outage and
+   never "nobody" — and, since the boot probe cannot reach a remote Store,
+   an operator's declaration of what it covers per registration and claims
+   (`federatedIdentityLookupCoverage`), which boot holds every connection
+   to. What the declaration attests — a directory complete for the tenant,
+   ownership across every registration — remains the deployment's Store's
+   responsibility; boot neither discovers nor proves it.
 
 Slices 1–3 change no behaviour. Nothing can create a grant until slice 6, and
 revocation exists from slice 5, so no release cut between slices ships an
