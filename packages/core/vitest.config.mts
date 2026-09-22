@@ -46,6 +46,9 @@ export default defineConfig({
 				// test for the FederationGrant union — a revoked or pending grant
 				// with only some of the authorization fields must not compile.
 				"src/federation-grants/__tests__/types.test.mts",
+				// #626 P2: `GrantDependencies` is pinned to ComponentMap slot types.
+				// Paired with tsconfig.test.json, as #343 requires.
+				"src/grants/__tests__/dependencies.types.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
 			// itself, where 4 was content to let an imported helper register

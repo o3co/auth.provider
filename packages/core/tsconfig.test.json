@@ -34,7 +34,9 @@
 		// #593: paired with vitest.config.mts, as #343 requires. The
 		// `@ts-expect-error` directives in this file are the regression test for
 		// the FederationGrant union.
-		"src/federation-grants/**/*.mts"
+		"src/federation-grants/**/*.mts",
+		// #626 P2: paired with vitest.config.mts, as #343 requires.
+		"src/grants/__tests__/dependencies.types.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }
