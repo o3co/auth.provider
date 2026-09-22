@@ -25,7 +25,7 @@ It owns no grant type. `authorization_code`, `refresh_token`, `client_credential
 
 ## Dependencies
 
-- Imports: `../keys/KeyStore` (signing), `../user-sessions/types` (claims, session stores, `SubjectRevocation`), `../policy/types` (`GrantPolicyHook`), `../repositories/types` (`TokenEndpointAuthMethod`, type-only), `../refresh-token-family/types`, `../config/application.schema`, `../modules/types`, `../logging/Logger`; `node:crypto`, `zod` (type).
+- Imports: `../keys/KeyStore` (signing), `../user-sessions/types` (claims, session stores, `SubjectRevocation`), `../repositories/types` (`TokenEndpointAuthMethod`, type-only), `../modules/manifest/provider` (`ProviderDeps`); `node:crypto`, `zod` (type). What a grant may depend on is no longer a list of imports here: `GrantDependencies` is `ProviderDeps<"config" | "keyStore", …>` over `ComponentMap`, so the config type, the stores, the policy hook and the logger reach this directory through the slots each package augments rather than by importing `../config/application.schema`, `../policy/types`, `../refresh-token-family/types`, `../modules/types` or `../logging/Logger` (#626).
 - Imported by: `../boot/create-app.mts` (registry), `../middleware/protectedResourceBinding.mts` (`BINDING_PROFILES`, `matchConfirmation`) and `../accessTokenHeader.mts` (`BINDING_PROFILES`), `../middleware/tokenBinding.mts` and `../middleware/express.mts` (the `TokenBinding` type only), `../modules/manifest/contributes-map.mts` (`GrantHandler`), `../repositories/types.mts` (`SenderConstraint`, type-only), the root barrel, `../testing/`.
 - The `grants` ↔ `repositories` edge is type-only in both directions. This directory must never import `boot/`, `middleware/`, `routes/`, an adapter package, or `testing/`.
 
