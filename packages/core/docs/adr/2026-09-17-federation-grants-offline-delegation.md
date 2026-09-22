@@ -669,7 +669,13 @@ method is not enough either: under `"required"` the Store must also answer
 literal `true` for every configured connection, or the module refuses to boot,
 naming the connection — a deployment whose Store cannot place a dedicated
 registration's identities finds out at boot, not from each user who
-connects. `indeterminate` stays necessary at run time: coverage is a strategy,
+connects. With no connection configured nothing is required, not even the
+methods: nothing can reach check 5, and removing the last connection must stay
+operable. Because boot probes under the name a connection has now, the
+federation's name is pinned with the revisions: a connection re-pointed onto
+another entry for the same registration mid-flow ends that flow
+(`grant_not_authorizable`) rather than asking the Store about a registration
+boot never probed. `indeterminate` stays necessary at run time: coverage is a strategy,
 not a promise about every person.
 
 Also from that

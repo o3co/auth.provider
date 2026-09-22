@@ -335,6 +335,20 @@ describe("requireFederationGrantIdentityLookup", () => {
 		).toThrow(/connections\.calendar[\s\S]*identityLookup = "unsupported"/);
 	});
 
+	it("requires nothing with no connection configured, not even the methods: no callback can ask (Copilot, #612)", () => {
+		// Removing the last connection must stay operable for a deployment whose
+		// repository has no lookup at all: nothing can reach check 5.
+		for (const repository of [
+			{},
+			undefined,
+			{ findSubjectByFederatedIdentity: async () => null },
+		]) {
+			expect(() =>
+				requireFederationGrantIdentityLookup("required", repository as never, connections()),
+			).not.toThrow();
+		}
+	});
+
 	it("probes nothing with no connection configured: removing the last one stays operable", () => {
 		const store = new Covering(() => false);
 		expect(() =>

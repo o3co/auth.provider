@@ -285,6 +285,9 @@ async function judge(
 	const connection = options.connections.get(intent.connection);
 	if (
 		connection === undefined ||
+		// The revisions pin the issuer and client, not the federation's name;
+		// boot probed the Store under the name the connection has NOW (#611).
+		connection.federation !== intent.federation ||
 		federationGrantIdentityRevision(connection) !== intent.identityRevision ||
 		federationGrantAuthorizationRevision(connection) !== intent.authorizationRevision ||
 		connection.callbackUri !== intent.callbackUri
@@ -1219,10 +1222,8 @@ export function createFederationGrantBrowserRouter(
 			// per registration.
 			answer = lookupAnswer(
 				await repository.findSubjectByFederatedIdentity({
-					// The federation the exchange went through — the intent's; not
-					// pinned by a revision, so a connection renamed onto another
-					// entry is asked about under the name boot did not probe, and
-					// a Store that does not cover it says so.
+					// The federation the exchange went through — the intent's, which
+					// check 2 holds equal to the connection's: the name boot probed.
 					...federationGrantIdentityRegistration({
 						federation: intent.federation,
 						upstreamIssuer: connection.upstreamIssuer,
@@ -1312,7 +1313,10 @@ function requiredIdentityClaims(
 ): Readonly<Record<string, string>> | undefined {
 	const claims: Record<string, string> = {};
 	if (names.length === 0) return claims;
-	if (typeof answered !== "object" || answered === null) return undefined;
+	// An array is an object, and `"0"` a legal claim name (Copilot, #612).
+	if (typeof answered !== "object" || answered === null || Array.isArray(answered)) {
+		return undefined;
+	}
 	for (const name of names) {
 		if (!Object.hasOwn(answered, name)) return undefined;
 		const value = (answered as Record<string, unknown>)[name];
@@ -1371,6 +1375,10 @@ function pinned(
 ): connection is FederationGrantAcquisitionConnection {
 	return (
 		connection !== undefined &&
+		// Not in either revision, and still pinned: a connection re-pointed onto
+		// another federation entry mid-flow would have check 5 ask the Store
+		// about a registration boot never probed (Copilot, #612).
+		connection.federation === intent.federation &&
 		federationGrantIdentityRevision(connection) === intent.identityRevision &&
 		federationGrantAuthorizationRevision(connection) === intent.authorizationRevision &&
 		connection.callbackUri === intent.callbackUri

@@ -1281,17 +1281,29 @@ describe("what the adversarial review found", () => {
 		]);
 	});
 
-	it("asks the Store under the federation the exchange went through, even when the connection has since been re-pointed", async () => {
-		// Revisions pin the issuer and the client, not the federation's name, so
-		// a connection can move onto another entry for the same registration
-		// between approval and callback. The identity came through the intent's
-		// federation, and that is the name the Store is asked about; a Store that
-		// boot never probed under it answers that it does not cover it.
+	it("does not finish a flow whose connection was re-pointed onto another federation since it was lodged (Copilot, #612)", async () => {
+		// The revisions pin the issuer and the client, not the federation's
+		// name, so a connection could move onto another entry for the same
+		// registration mid-flow. Boot probed the Store's coverage under the NEW
+		// name; the flow would have asked it about the old one. The name is
+		// pinned with the rest: nothing is exchanged and nothing is asked.
 		const w = world();
 		const a = await approved(w, "b-1");
 		w.state.connections.set(CONNECTION.name, { ...CONNECTION, federation: "upstream-renamed" });
-		returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
-		expect(w.state.lookups.map((lookup) => lookup.provider)).toEqual(["upstream"]);
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"grant_not_authorizable",
+		);
+		expect(w.state.exchanged).toHaveLength(0);
+		expect(w.state.lookups).toHaveLength(0);
+
+		// And the consent refuses to show a question about the old one.
+		const { handle } = await w.lodge();
+		w.signIn("b-2");
+		const challenge = await w.challengeFor(handle, "b-2");
+		w.state.connections.set(CONNECTION.name, { ...CONNECTION, federation: "upstream-other" });
+		const shown = await w.page(challenge, "b-2");
+		expect(shown.status).toBe(400);
+		expect(shown.body.error_description ?? shown.body.error).toBeDefined();
 	});
 
 	it("does not exchange a code for a flow whose callback moved since it was approved", async () => {
@@ -1971,6 +1983,20 @@ describe("#611: verified identity claims let a Store place a pairwise sub", () =
 		);
 		expect(await w.grants.find(grantId, w.state.now)).toEqual(before);
 		expect(directory.asked).toHaveLength(1);
+	});
+
+	it("refuses an array answered as the claims, even under a claim name an array has (Copilot, #612)", async () => {
+		// `"0"` is a legal claim name, and `typeof [] === "object"`: an adapter
+		// answering `["owner-id"]` would otherwise pass for `{ "0": "owner-id" }`.
+		const directory = new TenantDirectory(new Map());
+		const w = world({ userRepository: directory });
+		w.state.connections.set(CONNECTION.name, { ...CONNECTION, identityClaims: ["0"] });
+		const a = await approved(w);
+		asUpstream(w, "grant-A", ["owner-id"]);
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"identity_unverifiable",
+		);
+		expect(directory.asked).toHaveLength(0);
 	});
 
 	it("keeps the claims out of the grant, the audit, the logs and the redirect", async () => {

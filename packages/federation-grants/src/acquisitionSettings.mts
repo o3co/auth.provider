@@ -233,7 +233,8 @@ const IDENTITY_LOOKUP_REMEDY =
  * check that cannot see the answer. So the Store says, per connection's
  * registration, whether it covers it, and anything but a literal `true` is
  * refused here rather than met by every user who connects. With no connection
- * configured nothing is asked: removing the last one must stay operable.
+ * configured nothing is required, not even the methods: removing the last one
+ * must stay operable on any repository.
  */
 export function requireFederationGrantIdentityLookup(
 	mode: FederationGrantIdentityLookup,
@@ -244,7 +245,10 @@ export function requireFederationGrantIdentityLookup(
 		| undefined,
 	connections: ReadonlyMap<string, FederationGrantConnection>,
 ): void {
-	if (mode === "unsupported") return;
+	// Nothing can reach check 5 without a connection, so nothing is required —
+	// not even the methods: removing the last connection must stay operable
+	// for a repository that has no lookup at all (Copilot, #612).
+	if (mode === "unsupported" || connections.size === 0) return;
 	if (typeof userRepository?.findSubjectByFederatedIdentity !== "function") {
 		refuse(
 			'federationGrants.identityLookup is "required" (the default), and the userRepository has no ' +
