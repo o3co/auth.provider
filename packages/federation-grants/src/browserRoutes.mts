@@ -71,6 +71,7 @@ import {
 	type FederationGrantIntent,
 	type FederationGrantIntentStore,
 	type FederationGrantStore,
+	federationGrantAllowlist,
 	federationGrantAuditMetadata,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
@@ -270,9 +271,12 @@ async function judge(
 			return { ok: false, status: 400, reason: "stale" };
 		}
 		const client = await options.clientRepository.findById(intent.clientId);
-		const allowed =
-			(client as { allowedFederationGrantConnections?: readonly string[] } | null)
-				?.allowedFederationGrantConnections ?? [];
+		// Read as a list or as nothing (`federationGrantAllowlist`, D9): a
+		// repository answering a string would otherwise match by substring.
+		const allowed = federationGrantAllowlist(
+			(client as { allowedFederationGrantConnections?: unknown } | null)
+				?.allowedFederationGrantConnections,
+		);
 		if (client === null || !allowed.includes(intent.connection)) {
 			return { ok: false, status: 403, reason: "connection_not_permitted" };
 		}

@@ -26,20 +26,23 @@
  * `"calendar,mail".includes("cal")` is `true` and a client is allowed a
  * connection nobody granted it.
  *
- * So anything that is not an array of strings is read as an empty allowlist,
- * which is the same thing absence means: nothing is allowed.
+ * So anything that is not an array is read as an empty allowlist, which is
+ * the same thing absence means: nothing is allowed, and an array keeps only
+ * its strings. The reader is core's `federationGrantAllowlist`, shared with
+ * lodging and the consent page.
  */
 
+import { federationGrantAllowlist } from "@o3co/auth-provider-core";
 import type { Request } from "express";
 
 export function allowedConnectionsOf(req: Request): readonly string[] {
-	const registered = (
-		req as unknown as {
-			oauthClient?: { allowedFederationGrantConnections?: unknown };
-		}
-	).oauthClient?.allowedFederationGrantConnections;
-	if (!Array.isArray(registered)) return [];
-	return registered.filter((entry): entry is string => typeof entry === "string");
+	return federationGrantAllowlist(
+		(
+			req as unknown as {
+				oauthClient?: { allowedFederationGrantConnections?: unknown };
+			}
+		).oauthClient?.allowedFederationGrantConnections,
+	);
 }
 
 export const allows = (req: Request, connection: string): boolean =>
