@@ -629,7 +629,14 @@ because the login records only `<provider>:<sub>` and `mapClaims` drops both,
 so a Store would have nothing to match them against. A per-connection setting
 naming which login federation to consult is still not added: it changes the
 namespace and not the `sub`, which is the part that is pairwise. The
-success events record which answer let a grant through (D18).
+success events record which answer let a grant through (D18). Having the
+method is not enough either: under `"required"` the Store must also answer
+`supportsFederatedIdentityLookup(registration)` with a literal `true` for
+every configured connection's registration, or the module refuses to boot,
+naming the connection — a deployment whose Store cannot place a dedicated
+registration's identities finds out at boot, not from each user who
+connects. `indeterminate` stays necessary at run time: coverage is a strategy,
+not a promise about every person.
 
 Also from that
 review: a registered redirect URI that registration itself would refuse is
@@ -2293,6 +2300,25 @@ registration used for login, whose `profile` and `email` consent accumulates
 just the same. A dedicated registration alone is not enough. What Entra adds
 to a reported scope by itself is to be verified on a real tenant for that
 guide.
+
+**Amended for #611: the dedicated registration and D7 check 5.** Separating
+the registration also separates the subject: Entra's `sub` is pairwise per
+registration, so the grants registration's `sub` for a person is one no login
+ever saw. Under `identityLookup = "required"` the Store must declare that it
+covers each grants registration and must place its identities against every
+local link, whichever registration that link was made through (D7). The
+bundled `InMemoryUserRepository` cannot, and a deployment on it is refused at
+boot with a connection configured. To keep `"required"`, install a Store with
+a registration-qualified alias directory — which local user each
+registration's `sub` belongs to. A strategy on Entra's tenant-stable `oid` and
+`tid` would additionally need those claims carried from a verified id_token on
+acquisition (D17 carries only `{ issuer, subject }`) and a local index of them
+populated at login or by provisioning; neither is built, because the login
+records only `<provider>:<sub>`. A missing mapping is an inability to check,
+not evidence that the identity is unlinked. Otherwise the operator chooses
+`identityLookup = "unsupported"` and accepts the loss of this check. Sharing
+the login registration for grants is not the escape: it brings back the
+accumulation this decision exists to avoid.
 
 ## Acceptance criteria
 

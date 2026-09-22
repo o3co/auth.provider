@@ -19,7 +19,11 @@
 // would otherwise meet at the end of a consent, which is the worst place to
 // find out that the deployment was never set up to finish it.
 
-import type { FederationGrantConnection } from "@o3co/auth-provider-core";
+import {
+	type FederatedIdentityRegistration,
+	type FederationGrantConnection,
+	InMemoryUserRepository,
+} from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import {
 	requireFederationGrantIdentityLookup,
@@ -161,22 +165,136 @@ describe("resolveFederationGrantAcquisitionSettings", () => {
 });
 
 describe("requireFederationGrantIdentityLookup", () => {
+	const connections = (...entries: FederationGrantConnection[]) =>
+		new Map(entries.map((entry) => [entry.name, entry]));
+	const unlinked = async () => ({ kind: "unlinked" as const });
+
+	/** A Store written as a class, so a probe taken off the instance fails. */
+	class Covering {
+		readonly asked: FederatedIdentityRegistration[] = [];
+		constructor(
+			private readonly answer: (registration: FederatedIdentityRegistration) => unknown,
+		) {}
+		supportsFederatedIdentityLookup(registration: FederatedIdentityRegistration): boolean {
+			this.asked.push({ ...registration });
+			return this.answer(registration) as boolean;
+		}
+		async findSubjectByFederatedIdentity() {
+			return { kind: "unlinked" as const };
+		}
+	}
+
 	it("refuses a required lookup the repository cannot answer, and says what to do", () => {
-		expect(() => requireFederationGrantIdentityLookup("required", {})).toThrow(
-			/findSubjectByFederatedIdentity/,
-		);
-		expect(() => requireFederationGrantIdentityLookup("required", undefined)).toThrow(
-			/findSubjectByFederatedIdentity/,
-		);
+		for (const repository of [{}, undefined, { supportsFederatedIdentityLookup: () => true }]) {
+			expect(() =>
+				requireFederationGrantIdentityLookup("required", repository, connections(connection())),
+			).toThrow(/findSubjectByFederatedIdentity[\s\S]*identityLookup = "unsupported"/);
+		}
+	});
+
+	it("refuses a lookup that cannot say which registrations it covers (#611)", () => {
 		expect(() =>
-			requireFederationGrantIdentityLookup("required", {
-				findSubjectByFederatedIdentity: async () => null,
-			}),
+			requireFederationGrantIdentityLookup(
+				"required",
+				{ findSubjectByFederatedIdentity: unlinked },
+				connections(connection()),
+			),
+		).toThrow(/supportsFederatedIdentityLookup/);
+	});
+
+	it("asks the Store about every connection's registration, through the Store, and boots when it covers them all", () => {
+		const store = new Covering(() => true);
+		expect(() =>
+			requireFederationGrantIdentityLookup(
+				"required",
+				store,
+				connections(
+					connection(),
+					connection({ name: "mail", federation: "entra-mail", upstreamClientId: "mail-client" }),
+				),
+			),
 		).not.toThrow();
+		expect(store.asked).toEqual([
+			{ provider: "upstream", issuer: "https://issuer.example", clientId: "cid" },
+			{ provider: "entra-mail", issuer: "https://issuer.example", clientId: "mail-client" },
+		]);
+	});
+
+	it("refuses the one registration the Store does not cover, by connection and registration, with both remedies", () => {
+		// D19's case: the login registration is covered, the grants one is not.
+		const store = new Covering((registration) => registration.clientId !== "grants-client");
+		let error: unknown;
+		try {
+			requireFederationGrantIdentityLookup(
+				"required",
+				store,
+				connections(
+					connection(),
+					connection({
+						name: "mail",
+						federation: "entra-grants",
+						upstreamClientId: "grants-client",
+					}),
+				),
+			);
+		} catch (caught) {
+			error = caught;
+		}
+		const message = (error as Error | undefined)?.message ?? "";
+		expect(message).toMatch(/connections\.mail/);
+		expect(message).toMatch(/entra-grants/);
+		expect(message).toMatch(/grants-client/);
+		expect(message).toMatch(/identityLookup = "unsupported"/);
+		expect(message).not.toMatch(/connections\.calendar/);
+	});
+
+	it("takes only a literal true as coverage: a truthy value, a promise or a throw refuses", () => {
+		for (const answer of ["true", 1, {}, Promise.resolve(true), undefined, null, false]) {
+			expect(
+				() =>
+					requireFederationGrantIdentityLookup(
+						"required",
+						new Covering(() => answer),
+						connections(connection()),
+					),
+				String(answer),
+			).toThrow(/connections\.calendar/);
+		}
+		expect(() =>
+			requireFederationGrantIdentityLookup(
+				"required",
+				new Covering(() => {
+					throw new Error("directory offline");
+				}),
+				connections(connection()),
+			),
+		).toThrow(/connections\.calendar/);
+	});
+
+	it("refuses the bundled repository for any connection: it covers no registration", () => {
+		const bundled = new InMemoryUserRepository(new Map());
+		expect(() =>
+			requireFederationGrantIdentityLookup("required", bundled, connections(connection())),
+		).toThrow(/connections\.calendar[\s\S]*identityLookup = "unsupported"/);
+	});
+
+	it("probes nothing with no connection configured: removing the last one stays operable", () => {
+		const store = new Covering(() => false);
+		expect(() =>
+			requireFederationGrantIdentityLookup("required", store, connections()),
+		).not.toThrow();
+		expect(store.asked).toEqual([]);
 	});
 
 	it("lets a deployment record that it has none — and then asks nothing of the repository", () => {
-		expect(() => requireFederationGrantIdentityLookup("unsupported", {})).not.toThrow();
+		const store = new Covering(() => false);
+		expect(() =>
+			requireFederationGrantIdentityLookup("unsupported", {}, connections(connection())),
+		).not.toThrow();
+		expect(() =>
+			requireFederationGrantIdentityLookup("unsupported", store, connections(connection())),
+		).not.toThrow();
+		expect(store.asked).toEqual([]);
 	});
 });
 

@@ -89,6 +89,7 @@ import express, {
 	type Response,
 	type Router,
 } from "express";
+import { federationGrantIdentityRegistration } from "./acquisitionSettings.mjs";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
 import { federationGrantConnectUri } from "./lodgeRoute.mjs";
@@ -1198,9 +1199,15 @@ export function createFederationGrantBrowserRouter(
 			// per registration.
 			answer = lookupAnswer(
 				await repository.findSubjectByFederatedIdentity({
-					provider: intent.federation,
-					issuer: connection.upstreamIssuer,
-					clientId: connection.upstreamClientId,
+					// The federation the exchange went through — the intent's; not
+					// pinned by a revision, so a connection renamed onto another
+					// entry is asked about under the name boot did not probe, and
+					// a Store that does not cover it says so.
+					...federationGrantIdentityRegistration({
+						federation: intent.federation,
+						upstreamIssuer: connection.upstreamIssuer,
+						upstreamClientId: connection.upstreamClientId,
+					}),
 					sub: upstream.subject,
 				}),
 			);
