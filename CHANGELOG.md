@@ -263,6 +263,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   a lone `revokeFederationGrant` one for its event; a caller's own ID is used
   as before. The routes' `x-request-id` is unchanged.
 
+- **A client's grant registration is read as a list or as nothing everywhere
+  it is judged (`@o3co/auth-provider-core`,
+  `@o3co/auth-provider-federation-grants`)**
+  ([#632](https://github.com/o3co/auth.provider/pull/632)). The token and
+  status routes read `allowedFederationGrantConnections` defensively, but
+  lodging and the consent page's re-check read it bare, and lodging read
+  `federationGrantRedirectUris` bare as well. A deployment's own
+  `ClientRepository` answering a string would have turned the membership
+  check into a substring match: a client registered for `calendar-prod`
+  could lodge `connection=calendar` and obtain an upstream refresh token
+  under a connection nobody permitted, though `/token` would refuse to spend
+  it. One reader, `federationGrantAllowlist`, is now used at every site and
+  exported from core. The bundled repository validates both fields and was
+  never affected.
+
+- **A scaffolded project's `supertest-loopback` test failed under supertest
+  7.3 (standalone template)**
+  ([#633](https://github.com/o3co/auth.provider/pull/633)). supertest 7.3.0
+  closes only the servers it starts itself. `vitest.supertest-loopback.mts`
+  binds the server to `127.0.0.1` itself, so under 7.3 that server stayed
+  open after the response, and a fresh scaffold, which resolves `^7.1.0` to
+  7.3.0, failed its own test. The shim now closes the server it bound when
+  supertest has not, a no-op under 7.2. A project scaffolded earlier can
+  copy the file.
+
 ### Security
 
 - **The RFC 9207 `iss` response parameter reaches the code exchange in the
