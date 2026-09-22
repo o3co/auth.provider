@@ -385,6 +385,20 @@ describe("#593 slice 7: the cleanup allowance federation grants need", () => {
 		).toEqual({ cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS });
 	});
 
+	it("never asks a timer for more than Node can count: an oversized sum is capped, not overflowed (Copilot, #614)", () => {
+		// setTimeout takes a 32-bit signed delay; past it the timer fires after
+		// about a millisecond, which would turn a generous allowance into none.
+		const oversized = cleanupAllowanceFor({
+			federationGrants: {
+				enabled: true,
+				upstreamHardTimeoutMs: 2_000_000_000,
+				persistRetryBudgetMs: 2_000_000_000,
+				lockWaitMs: 5_000,
+			},
+		});
+		expect(oversized).toEqual({ cleanupTimeoutMs: 2_147_483_647 });
+	});
+
 	it("is honoured by the shutdown: a cleanup that needs longer than the drain is given it", async () => {
 		vi.useFakeTimers();
 		try {

@@ -126,6 +126,14 @@ export const FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS = 45_000;
 export const FEDERATION_GRANTS_CLEANUP_MARGIN_MS = 12_000;
 
 /**
+ * The most a timer can be asked for: Node's `setTimeout` takes a 32-bit signed
+ * delay, and a larger one fires after ~1 ms instead. A sum of budgets an
+ * operator set high enough to reach it would otherwise turn the allowance
+ * into no allowance at all (Copilot, #614).
+ */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/**
  * The `cleanupTimeoutMs` to hand {@link installGracefulShutdown}, from the
  * config: while the feature is on, the longer of the floor above and the
  * configured refresh tail plus the margin; while it is off, nothing — the
@@ -152,7 +160,12 @@ export function cleanupAllowanceFor(config: {
 				FEDERATION_GRANTS_CLEANUP_MARGIN_MS,
 			)
 		: 0;
-	return { cleanupTimeoutMs: Math.max(FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS, tail) };
+	return {
+		cleanupTimeoutMs: Math.min(
+			Math.max(FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS, tail),
+			MAX_TIMER_MS,
+		),
+	};
 }
 
 export function installGracefulShutdown(server: Server, options: GracefulShutdownOptions): void {

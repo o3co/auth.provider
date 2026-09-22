@@ -102,15 +102,23 @@ federationGrants.connections.files {
   not revoked for B2B users in their resource tenant. The token needs to be
   revoked in the home tenant."
 
-**One registration per scope set, and not the login's** (D19): Entra returns
-every scope the user has consented to for a resource and client, not only the
-ones asked for, and on refresh as well — so two grants with different scope
-subsets on one registration broaden each other, and D5 withholds the wider
-token. The rule is one connection per fixed scope set with
+**One registration per scope set, and not the login's** (D19). **Provider
+docs** ([Resources and scopes, MSAL.js](https://learn.microsoft.com/en-us/entra/msal/javascript/browser/resources-and-scopes),
+"Consent lifetime"): "In Microsoft Entra ID, consent lives beyond the lifetime
+of the application." — "when you request an **Access Token** for a resource,
+all the scopes you have previously consented to for that resource will be
+returned, regardless of what scope was requested at the time." So two grants
+with different scope subsets on one registration broaden each other: the
+narrower one's token comes back carrying the wider one's scopes, check 7
+refuses it, and the narrower grant is unusable until reauthorized for the
+wider set (D5). The rule is one connection per fixed scope set with
 `allowScopeSubsets = false`, each on an app registration of its own, separate
 from the login registration (whose `profile` and `email` consent accumulates
-just the same). On-behalf-of is not supported: an OBO assertion has to be an
-access token issued for the middle-tier API, which nothing here holds.
+just the same). **Unverified**: that the same accumulation applies to the
+token a *refresh* returns — D19 records it as the working assumption, and the
+procedure at the end is how to check it on your tenant. On-behalf-of is not
+supported: an OBO assertion has to be an access token issued for the
+middle-tier API, which nothing here holds.
 
 **The Store** (#611): with `identityLookup = "required"`, the Store must
 declare it covers the `entra-files` registration with claims `oid` and `tid`,
