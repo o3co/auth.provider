@@ -123,6 +123,14 @@ describe("revokeFederationGrant", () => {
 		expect(revoked[0]?.correlationId).toMatch(UUID);
 	});
 
+	it("treats an empty correlation ID as none given: an empty string correlates nothing (#618)", async () => {
+		const { h, deps: d, events } = deps({ correlationId: "" });
+		await h.seed();
+		await revokeFederationGrant(d as never, "g-1", "subject");
+		const revoked = events.filter((e) => e.type === "federation.grant.revoked");
+		expect(revoked[0]?.correlationId).toMatch(UUID);
+	});
+
 	it("says what access it ended, not only which grant", async () => {
 		// D18 carries the upstream account, the connection, the resource and
 		// the scopes where they have been established — and the record the

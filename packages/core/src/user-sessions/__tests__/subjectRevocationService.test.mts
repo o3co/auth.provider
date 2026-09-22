@@ -307,6 +307,23 @@ describe("createSubjectRevocationService", () => {
 			for (const id of ids) expect(id).toMatch(UUID);
 		});
 
+		it("treats a service composed with an empty correlation ID as composed without one (#618)", async () => {
+			const h = harness();
+			await h.seed();
+			const events: { correlationId: string }[] = [];
+			const service = createSubjectRevocationService(
+				keeping({
+					federationGrantStore: h.store,
+					correlationId: "",
+					federationGrantAudit: (event: { correlationId: string }) => {
+						events.push(event);
+					},
+				}),
+			);
+			await service.revokeAllForSubject({ subject: "u-1" });
+			expect(events[0]?.correlationId).toMatch(UUID);
+		});
+
 		it("gives a keep pass one correlation ID of its own too: what it ends — the pending grants — reads as one operation (#618)", async () => {
 			const h = harness();
 			for (const id of ["g-p1", "g-p2"]) {

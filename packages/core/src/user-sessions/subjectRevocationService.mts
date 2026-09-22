@@ -37,9 +37,11 @@
  * that matters operationally.
  */
 
-import { randomUUID } from "node:crypto";
 import type { FederationGrantAuditEvent } from "../federation-grants/retrieve.mjs";
-import { revokeFederationGrant } from "../federation-grants/revoke.mjs";
+import {
+	federationGrantCorrelationId,
+	revokeFederationGrant,
+} from "../federation-grants/revoke.mjs";
 import type { FederationGrantStore } from "../federation-grants/store.mjs";
 import { hasFederationGrantAuthorization } from "../federation-grants/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
@@ -203,7 +205,7 @@ export function createSubjectRevocationService(
 
 			// One correlation ID per call, on either path (#618): the service's
 			// own, when it was composed with one, and otherwise this call's.
-			const correlationId = deps.correlationId ?? randomUUID();
+			const correlationId = federationGrantCorrelationId(deps.correlationId);
 			if (applied === "revoke") {
 				const result = await revokeAllForSubject({
 					subject: request.subject,

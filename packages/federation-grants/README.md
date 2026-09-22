@@ -44,10 +44,11 @@ Enabling the feature also requires a `subjectRevocation` component that carries 
 
 ### What is audited, and where it goes
 
-Every operation on a grant emits its event — `federation.grant.requested`,
-`.authorized`, `.reauthorized`, `.token.issued`, `.token.denied`,
-`.refreshed`, `.refresh_failed`, `.reauthorization_required`, `.revoked` and
-the rest — with a correlation ID that is never empty: the request's
+Every operation on a grant emits its event — the `federation.grant.*` types,
+`.authorization_failed`, `.authorized`, `.reauthorization_required`,
+`.reauthorized`, `.refresh_failed`, `.refresh_persist_failed`, `.refreshed`,
+`.request.denied`, `.requested`, `.revoke.denied`, `.revoked`,
+`.token.denied`, `.token.success` — with a correlation ID that is never empty: the request's
 `x-request-id` on the routes, and on the library path (`revokeFederationGrant`,
 `revokeAllForSubject`, the subject revocation service) the caller's own, or
 one generated for the call when the caller gives none, so that a pass over a

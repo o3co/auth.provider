@@ -48,6 +48,17 @@ import type { FederationGrantAuditEvent } from "./retrieve.mjs";
 import type { FederationGrantStore, FederationGrantWrite } from "./store.mjs";
 import type { FederationGrant, FederationGrantRevokedBy } from "./types.mjs";
 
+/**
+ * The correlation ID an operation's events carry (#618): the caller's, when it
+ * gave one that is not empty, and otherwise one generated for the operation —
+ * an empty string correlates nothing, and is not a value a caller means.
+ * Called once per operation, so that everything the operation audits shares
+ * the one ID.
+ */
+export function federationGrantCorrelationId(given: string | undefined): string {
+	return typeof given === "string" && given.length > 0 ? given : randomUUID();
+}
+
 export interface FederationGrantAdministrationDeps {
 	readonly store: FederationGrantStore;
 	/** Sampled at the write, never once per batch. */
@@ -118,7 +129,7 @@ async function tell(
 	try {
 		await sink({
 			type: "federation.grant.revoked",
-			correlationId: deps.correlationId ?? randomUUID(),
+			correlationId: federationGrantCorrelationId(deps.correlationId),
 			grantId: grant.id,
 			clientId: grant.clientId,
 			subject: grant.subject,

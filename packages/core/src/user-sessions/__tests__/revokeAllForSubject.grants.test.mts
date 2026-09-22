@@ -240,6 +240,25 @@ describe("revokeAllForSubject with a grant store", () => {
 		expect(first.has(events[2]?.correlationId ?? "")).toBe(false);
 	});
 
+	it("treats an empty correlation ID as none given, once for the pass (#618)", async () => {
+		const h = harness();
+		await h.seed();
+		await h.seed({ id: "g-2" });
+		const events: { correlationId: string }[] = [];
+		await revokeAllForSubject({
+			...base(),
+			federationGrantStore: h.store,
+			federationGrantAudit: (event) => {
+				events.push(event as (typeof events)[number]);
+			},
+			correlationId: "",
+			now: () => now().getTime(),
+		});
+		const ids = new Set(events.map((event) => event.correlationId));
+		expect(ids.size).toBe(1);
+		for (const id of ids) expect(id).toMatch(UUID);
+	});
+
 	it("samples the clock at each write rather than once for the batch", async () => {
 		// Two grants revoked in one pass are two facts that happened at two
 		// instants. A batch-wide timestamp would put a write before the moment
