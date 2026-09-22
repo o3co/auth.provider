@@ -277,6 +277,12 @@ export function requireFederationGrantIdentityLookup(
 			threw = true;
 		}
 		if (covered !== true) {
+			// A probe written as `async` answers a promise: not `true`, so refused
+			// — and if it rejects, nothing else would ever observe that, and the
+			// host would see an unhandled rejection beside the refusal (Copilot).
+			if (typeof (covered as { then?: unknown } | null)?.then === "function") {
+				(covered as PromiseLike<unknown>).then(undefined, () => undefined);
+			}
 			refuse(
 				`federationGrants.connections.${connection.name}: the userRepository ` +
 					(threw ? "threw when asked whether it covers" : "does not cover") +

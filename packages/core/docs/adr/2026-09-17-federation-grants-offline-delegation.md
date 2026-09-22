@@ -665,8 +665,8 @@ naming which login federation to consult is still not added: it changes the
 namespace and not the `sub`, which is the part that is pairwise. The
 success events record which answer let a grant through (D18). Having the
 method is not enough either: under `"required"` the Store must also answer
-`supportsFederatedIdentityLookup(registration)` with a literal `true` for
-every configured connection's registration, or the module refuses to boot,
+`supportsFederatedIdentityLookup(registration, identityClaims)` with a
+literal `true` for every configured connection, or the module refuses to boot,
 naming the connection — a deployment whose Store cannot place a dedicated
 registration's identities finds out at boot, not from each user who
 connects. `indeterminate` stays necessary at run time: coverage is a strategy,

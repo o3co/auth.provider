@@ -305,6 +305,29 @@ describe("requireFederationGrantIdentityLookup", () => {
 		expect(store.claimsAsked).toEqual([["oid", "tid"], []]);
 	});
 
+	it("refuses a probe written as async that rejects, and leaves no unhandled rejection behind (Copilot, #612)", async () => {
+		// The probe is synchronous; one declared `async` answers a promise, which
+		// is not `true` and is refused. If that promise rejects, nothing else
+		// would ever observe it, and the host would see an unhandled rejection
+		// beside the boot refusal.
+		const rejections: unknown[] = [];
+		const onRejection = (reason: unknown) => rejections.push(reason);
+		process.on("unhandledRejection", onRejection);
+		try {
+			expect(() =>
+				requireFederationGrantIdentityLookup(
+					"required",
+					new Covering(() => Promise.reject(new Error("directory offline"))),
+					connections(connection()),
+				),
+			).toThrow(/connections\.calendar/);
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			expect(rejections).toEqual([]);
+		} finally {
+			process.off("unhandledRejection", onRejection);
+		}
+	});
+
 	it("refuses the bundled repository for any connection: it covers no registration", () => {
 		const bundled = new InMemoryUserRepository(new Map());
 		expect(() =>
