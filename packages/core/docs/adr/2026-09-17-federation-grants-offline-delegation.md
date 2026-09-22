@@ -591,23 +591,47 @@ its place against the bound. A form_post federation is refused at boot even
 where a custom adapter has the capability.
 
 **What check 5's lookup can and cannot see** (found by review, after the
-design settled). `findSubjectByFederatedIdentity` is keyed as a login links an
-identity: by federation name and upstream `sub`. The callback passes the name
-the *connection* names, so the check finds a login-time link only when the
-connection uses the same federation registration as the login. D19 tells an
+design settled). `findSubjectByFederatedIdentity` was keyed as a login links an
+identity: by federation name and upstream `sub`. The callback passed the name
+the *connection* names, so the check found a login-time link only when the
+connection used the same federation registration as the login. D19 tells an
 operator to give a consent-accumulating IdP a registration of its own for
-grants — and with such a connection the lookup misses the login's link; where
+grants — and with such a connection the lookup missed the login's link; where
 the IdP's `sub` is pairwise per registration, as Entra's is, no
-`(name, sub)` key could find it at all. So `identityLookup = "required"` is a
-real protection for a connection on the login registration, and none for one
-on a dedicated registration unless the Store resolves the person across
-registrations. The lookup is therefore also given the verified `issuer`, so a
-Store that can (by issuer where `sub` is not pairwise, or by an IdP's
-tenant-stable id) may implement that; the bundled repository keys by name and
-ignores it. A per-connection setting naming which login federation to consult
-was considered and not added: it helps only a dedicated registration on an IdP
-whose `sub` is NOT pairwise, which is not the case D19 describes. The package
-README states the limit where an operator configures the check. Also from that
+`(name, sub)` key could find it at all. Every such lookup read as "linked to
+nobody", so `identityLookup = "required"` was satisfied by a lookup that could
+not see the answer.
+
+**Amended for #611 (a release blocker): "nobody" and "cannot tell" are
+different answers.** The lookup is given the registration the identity was
+issued under — `{ provider, issuer, clientId }`, all three the connection's
+configuration, the issuer already compared with the verified one — and the
+verified `sub`, and it answers `linked` (a complete resolution found exactly
+one local owner), `unlinked` (a complete resolution found none) or
+`indeterminate` (`registration_not_covered` or `identity_not_resolvable`).
+"Complete" is the contract: a Store that searched only the namespace it was
+handed has not established `unlinked`. Multiple owners and a backend failure
+stay throws. Under `"required"`, `linked` to the intent's subject and
+`unlinked` pass, `linked` to another is `identity_conflict`, `indeterminate` is
+a new, eleventh code, `identity_unverifiable` — not `temporarily_unavailable`,
+because asking again does not change it — and a throw, a missing method or an
+answer that is not one of the three is `temporarily_unavailable`, reported.
+The answer is recognised positively: a Store still answering the slice 6
+`string | null` cannot fall through to a pass. The check order is unchanged
+and `"unsupported"` still skips only this last test. The bundled
+`InMemoryUserRepository` keys links by name and `sub` and knows nothing of
+registrations, so it answers `indeterminate` for every identity — including
+one its name-and-`sub` scan would match, since a hit under one registration
+does not show that no other registration's link names somebody else. The
+capability's result (D17) is unchanged, `{ issuer, subject }`: carrying
+verified claims such as Entra's `oid`/`tid` would finish nothing on its own,
+because the login records only `<provider>:<sub>` and `mapClaims` drops both,
+so a Store would have nothing to match them against. A per-connection setting
+naming which login federation to consult is still not added: it changes the
+namespace and not the `sub`, which is the part that is pairwise. The
+success events record which answer let a grant through (D18).
+
+Also from that
 review: a registered redirect URI that registration itself would refuse is
 refused at lodging (`redirect_uri_invalid`) for a repository that validates
 nothing, rather than failing after activation; the consent page's location is
@@ -628,9 +652,10 @@ deliberately revokes it, and is the one failure here meant to change the
 record — and redirects to the intent's `redirect_uri` with
 `grant_id`, `state` and one of: `access_denied` (the user or the upstream
 declined), `reauthentication_required`, `account_mismatch`,
-`identity_conflict`, `refresh_token_absent`, `upstream_token_ineligible`,
-`scope_exceeded`, `upstream_error`, `temporarily_unavailable`,
-`grant_not_authorizable`. Success redirects with `grant_id` and `state`.
+`identity_conflict`, `identity_unverifiable` (added for #611),
+`refresh_token_absent`, `upstream_token_ineligible`, `scope_exceeded`,
+`upstream_error`, `temporarily_unavailable`, `grant_not_authorizable`.
+Success redirects with `grant_id` and `state`.
 
 **Amended in slice 6: the start and the consent, as built.** The browser
 half is a router of its own under `/session/federation-grants`, mounted after
@@ -2235,6 +2260,17 @@ None of them carries a handle, a challenge, a code, a state, a PKCE verifier,
 a nonce, or an upstream token. Backstop revocations found by `/reauthorize`
 or the callback use `.revoked` with `outcome: "backstop"`, once, by whichever
 call's write changed the record.
+
+**Amended for #611.** `.authorized` and `.reauthorized` carried the deployment's
+`identityLookup` mode as their outcome, which could not tell a grant the Store
+placed with its user from one it placed with nobody. The outcome is now what
+check 5 let the grant through on — `required/linked`, `required/unlinked` or
+`unsupported` — in the `code/reason` form the other events use.
+`.authorization_failed` for an `indeterminate` answer carries
+`identity_unverifiable/<reason>`; the client hears only the code. No event
+names the other owner of a conflicting account, and nothing beyond the
+established `{ issuer, subject }` of the upstream identity is carried — no
+claim, no directory record, no thrown message.
 
 ### D19 — Entra: on-behalf-of is not implemented, and consent accumulates
 

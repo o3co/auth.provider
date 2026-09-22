@@ -391,20 +391,37 @@ It checks, in this order:
    leave RFC 9207's check to the issuer's metadata.
 5. **The upstream account**: the connection's issuer; for a renewal, the
    account already on the grant; the client's `upstream_sub` if it sent one;
-   and — unless `identityLookup = "unsupported"` — not already another local
-   user's. One linked to nobody is accepted.
+   and — unless `identityLookup = "unsupported"` — the Store's answer to who
+   holds it. Held by this user, or by nobody, passes; held by another user is
+   `identity_conflict`; an answer that establishes neither is
+   `identity_unverifiable`.
 
-   **What that last check can see.** It asks
-   `findSubjectByFederatedIdentity({ provider, sub, issuer })` with `provider`
-   = the federation the *connection* names, which is how a login links an
-   identity — under the federation the user logged in through. So it finds a
-   link only when the connection uses the same federation registration as the
-   login did. A connection on a registration of its own (the rule for an IdP
-   that accumulates consent, such as Entra) misses the login's link, and where
-   the IdP's `sub` is pairwise per registration (Entra's is) no name-and-`sub`
-   key could find it. `identityLookup = "required"` does not protect such a
-   connection unless the Store resolves the person across registrations — by
-   the `issuer` it is also given, or by an IdP's tenant-stable id.
+   **What the Store is asked, and what it must answer (#611).** The callback
+   calls `findSubjectByFederatedIdentity({ provider, issuer, clientId, sub })`:
+   the registration the identity was issued under — the connection's
+   federation name, its configured issuer (already compared with the verified
+   id_token's) and client — and the verified `sub`. It answers one of:
+
+   - `{ kind: "linked", subject }` — it looked everywhere a link to this
+     person could be, and found exactly one local user;
+   - `{ kind: "unlinked" }` — it looked everywhere, and nobody holds them;
+   - `{ kind: "indeterminate", reason }` — it cannot say either:
+     `registration_not_covered` (no strategy for this registration) or
+     `identity_not_resolvable` (a strategy, and this identity is not in it).
+
+   "Everywhere" is the point. A login links an identity under the federation
+   the user signed in through, and an IdP whose `sub` is pairwise per
+   registration (Entra's is) gives the same person a different `sub` under
+   every registration — so a connection on a registration of its own, as D19
+   recommends for an IdP that accumulates consent, finds nothing under its own
+   name even for an account another user holds. A Store that searched only
+   the name and `sub` it was given has not established `unlinked`, and must
+   not answer it. A backend that cannot answer throws, and so does data that
+   names more than one owner; either, and any answer that is not one of the
+   three, is `temporarily_unavailable`.
+
+   The bundled `InMemoryUserRepository` keys links by name and `sub` and knows
+   nothing of registrations, so it answers `indeterminate` for every identity.
 6. **Eligibility**: a refresh token, and an access token with a finite lifetime
    within `maxAccessTokenLifetime`, of a type a route without a proof key can
    present.
@@ -417,8 +434,9 @@ It checks, in this order:
 Every failure after check 1 goes back to the intent's `redirect_uri` with the
 client's own `state`, the `grant_id`, and one of: `access_denied`,
 `reauthentication_required`, `account_mismatch`, `identity_conflict`,
-`refresh_token_absent`, `upstream_token_ineligible`, `scope_exceeded`,
-`upstream_error`, `temporarily_unavailable`, `grant_not_authorizable`. Nothing
+`identity_unverifiable`, `refresh_token_absent`, `upstream_token_ineligible`,
+`scope_exceeded`, `upstream_error`, `temporarily_unavailable`,
+`grant_not_authorizable`. Nothing
 an upstream described, and no thrown message, reaches it. Success goes back
 with `grant_id` and `state` — never a token. The `grant_id` proves nothing on
 its own: every grant-addressed route needs `sub`, and `/status` says which
@@ -434,8 +452,13 @@ the write. It does not close it: that needs write fencing, which is deferred.
 
 A grant created emits `federation.grant.authorized`, a renewal
 `federation.grant.reauthorized`, each described from the record the write
-returned and carrying the deployment's `identityLookup` as its outcome. A
-failed flow emits `federation.grant.authorization_failed`.
+returned. Its outcome is what check 5 let it through on: `required/linked`
+(the Store placed the upstream account with this user), `required/unlinked`
+(with nobody), or `unsupported` (the deployment does not ask). A failed flow
+emits `federation.grant.authorization_failed` with the code as its outcome —
+for `identity_unverifiable`, with the Store's reason after a slash
+(`identity_unverifiable/identity_not_resolvable`). Neither ever names the other
+owner of a conflicting account.
 
 ### What the exemption depends on
 

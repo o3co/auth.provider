@@ -30,7 +30,10 @@ import {
 	createMemoryFederationGrantIntentStore,
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
+	type FederatedIdentityLookup,
+	type FederatedIdentityLookupResult,
 	type FederationGrantAcquisitionConnection,
+	InMemoryUserRepository,
 	lodgeFederationGrantIntent,
 	lodgeFederationGrantReauthorization,
 	type RateLimiter,
@@ -79,6 +82,35 @@ interface Browser {
 	readonly sid?: string;
 }
 
+/**
+ * The Store the callback asks by default, written as a class: its lookup reads
+ * its own fields, so a call detached from the instance fails every flow — the
+ * slice 6 bug every arrow-function stub hid. It covers every registration and
+ * answers what `owners` says for a subject, `unlinked` otherwise; a value there
+ * need not be a valid answer, so that a malformed one can be tested.
+ */
+class Directory {
+	constructor(
+		private readonly owners: Map<string, unknown>,
+		private readonly lookups: Record<string, unknown>[],
+		private readonly intercept: (name: string) => Promise<void>,
+	) {}
+
+	supportsFederatedIdentityLookup(): boolean {
+		return true;
+	}
+
+	async findSubjectByFederatedIdentity(
+		identity: FederatedIdentityLookup,
+	): Promise<FederatedIdentityLookupResult> {
+		await this.intercept("findSubjectByFederatedIdentity");
+		this.lookups.push({ ...identity });
+		return (
+			this.owners.has(identity.sub) ? this.owners.get(identity.sub) : { kind: "unlinked" }
+		) as FederatedIdentityLookupResult;
+	}
+}
+
 interface WorldOptions {
 	readonly rateLimiter?: RateLimiter;
 	readonly failMode?: RateLimitFailMode;
@@ -106,8 +138,8 @@ function world(options: WorldOptions = {}) {
 		]),
 		authorizerThrows: false,
 		grantsBoundary: null as Date | null | Error,
-		/** Which local user an upstream subject is already linked to. */
-		linked: new Map<string, string>(),
+		/** What the Store answers for an upstream subject; `unlinked` when absent. */
+		owners: new Map<string, unknown>(),
 		/** What the identity lookup was asked. */
 		lookups: [] as Record<string, unknown>[],
 		/** What the upstream's token endpoint answers the next exchange with. */
@@ -138,6 +170,8 @@ function world(options: WorldOptions = {}) {
 		auditFails: false,
 		authorizerMissing: false,
 		configurationThrows: false,
+		/** What the router's sanitized reporter wrote. */
+		logged: [] as Record<string, unknown>[],
 	};
 	const now = () => state.now;
 
@@ -238,13 +272,15 @@ function world(options: WorldOptions = {}) {
 			userRepository:
 				"userRepository" in options
 					? options.userRepository
-					: {
-							findSubjectByFederatedIdentity: async (identity) => {
-								await intercept("findSubjectByFederatedIdentity");
-								state.lookups.push({ ...identity });
-								return state.linked.get(identity.sub) ?? null;
-							},
-						},
+					: new Directory(state.owners, state.lookups, intercept),
+			logger: {
+				debug: () => undefined,
+				info: () => undefined,
+				warn: (payload: Record<string, unknown>) => {
+					state.logged.push(payload);
+				},
+				error: () => undefined,
+			} as never,
 			upstreamTimeoutMs: 5_000,
 			rateLimiter:
 				options.rateLimiter ??
@@ -750,7 +786,7 @@ describe("GET /session/federation-grants/callback/:connection — activating the
 		expect(w.events.find((e) => e.type === "federation.grant.authorized")).toMatchObject({
 			clientId: "worker",
 			subject: "alice",
-			details: { grantId, connection: CONNECTION.name, outcome: "required" },
+			details: { grantId, connection: CONNECTION.name, outcome: "required/unlinked" },
 		});
 		expect(JSON.stringify(w.events)).not.toContain("upstream-refresh");
 	});
@@ -842,17 +878,17 @@ describe("GET /session/federation-grants/callback/:connection — activating the
 		const w = world();
 		// Linked to another local user.
 		const a = await approved(w, "b-1");
-		w.state.linked.set("00u-alice", "bob");
+		w.state.owners.set("00u-alice", { kind: "linked", subject: "bob" });
 		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
 			"identity_conflict",
 		);
 		// Linked to this very user is fine.
 		const b = await approved(w, "b-2");
-		w.state.linked.set("00u-alice", "alice");
+		w.state.owners.set("00u-alice", { kind: "linked", subject: "alice" });
 		expect(returned(await callback(w, { state: b.state, code: "c" }, "b-2")).has("error")).toBe(
 			false,
 		);
-		w.state.linked.clear();
+		w.state.owners.clear();
 		// Another issuer's identity, however it got here.
 		const c = await approved(w, "b-3");
 		w.state.exchange = {
@@ -1227,15 +1263,21 @@ describe("what the adversarial review found", () => {
 		expect(location.startsWith(`${ISSUER}/consent/grants?`)).toBe(true);
 	});
 
-	it("hands the identity lookup the verified issuer beside the federation's name and the subject", async () => {
+	it("hands the identity lookup the registration the identity was issued under, and the verified subject", async () => {
+		// The registration — name, issuer, client — is what a Store needs to
+		// place a pairwise `sub` (#611). All three are the connection's
+		// configuration; nothing the upstream said stands in for them.
 		const w = world();
 		const a = await approved(w, "b-1");
 		returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
-		expect(w.state.lookups.at(-1)).toEqual({
-			provider: "upstream",
-			sub: "00u-alice",
-			issuer: CONNECTION.upstreamIssuer,
-		});
+		expect(w.state.lookups).toEqual([
+			{
+				provider: "upstream",
+				issuer: CONNECTION.upstreamIssuer,
+				clientId: "provider-client",
+				sub: "00u-alice",
+			},
+		]);
 	});
 
 	it("does not exchange a code for a flow whose callback moved since it was approved", async () => {
@@ -1737,6 +1779,133 @@ describe("the identity lookup (D7 check 5), when it cannot answer", () => {
 		expect(w.events.find((e) => e.type === "federation.grant.authorized")?.details).toMatchObject({
 			outcome: "unsupported",
 		});
+	});
+});
+
+describe("#611: an answer that establishes no ownership refuses the delegation", () => {
+	for (const reason of ["registration_not_covered", "identity_not_resolvable"] as const) {
+		it(`refuses on indeterminate/${reason}: no activation, no grant event, the flow spent`, async () => {
+			const w = world();
+			const a = await approved(w);
+			w.state.owners.set("00u-alice", { kind: "indeterminate", reason });
+			const back = returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+			expect(back.get("error")).toBe("identity_unverifiable");
+			expect(back.get("grant_id")).toBe(a.grantId);
+			expect(back.get("state")).toBe("client-state-1");
+			// It was the lookup that refused: it was reached, once, and asked.
+			expect(w.state.lookups).toHaveLength(1);
+			expect((await w.grants.find(a.grantId, w.state.now))?.status).toBe("pending");
+			expect(w.intents.reservations("worker", "alice")).toBe(0);
+			// The transaction is spent: the same answer cannot be replayed into a grant.
+			expect((await callback(w, { state: a.state, code: "c" }, "b-1")).status).toBe(400);
+			await w.background.drain();
+			expect(w.events.some((e) => e.type === "federation.grant.authorized")).toBe(false);
+			expect(
+				w.events.find((e) => e.type === "federation.grant.authorization_failed")?.details,
+			).toMatchObject({ grantId: a.grantId, outcome: `identity_unverifiable/${reason}` });
+		});
+	}
+
+	it("refuses, with the bundled repository, a dedicated registration whose pairwise sub it cannot place", async () => {
+		// D19's recommended setup: Bob signed in through the LOGIN registration,
+		// whose pairwise `sub` for him is `login-pairwise-B`; the grant's own
+		// registration gives the same person `grant-pairwise-B`. Before #611 the
+		// lookup found no link under the grant's name and let Alice take Bob's
+		// upstream account. The bundled repository cannot see across the two, so
+		// it says so, and that refuses.
+		const w = world({
+			userRepository: new InMemoryUserRepository(
+				new Map([
+					["alice", { password: "x", id: "alice" }],
+					["bob", { password: "y", id: "bob", token: "entra-login:login-pairwise-B" }],
+				]),
+			),
+		});
+		const a = await approved(w);
+		w.state.exchange = {
+			...w.state.exchange,
+			upstream: { issuer: CONNECTION.upstreamIssuer, subject: "grant-pairwise-B" },
+		};
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"identity_unverifiable",
+		);
+		expect((await w.grants.find(a.grantId, w.state.now))?.status).toBe("pending");
+	});
+
+	it("leaves a grant a refused renewal would have replaced exactly as it was", async () => {
+		const w = world();
+		const { grantId, state, before } = await renewal(w);
+		w.state.owners.set("00u-alice", { kind: "indeterminate", reason: "identity_not_resolvable" });
+		expect(returned(await callback(w, { state, code: "c2" }, "b-2")).get("error")).toBe(
+			"identity_unverifiable",
+		);
+		expect(await w.grants.find(grantId, w.state.now)).toEqual(before);
+		await w.background.drain();
+		expect(w.events.some((e) => e.type === "federation.grant.reauthorized")).toBe(false);
+	});
+
+	it("reads an answer that is not one of the port's as an outage, and reports it", async () => {
+		// Positively recognised or refused: the slice 6 contract answered a
+		// string or null, and neither may now fall through to success.
+		const malformed: unknown[] = [
+			null,
+			"bob",
+			{},
+			{ kind: "linked" },
+			{ kind: "linked", subject: "" },
+			{ kind: "linked", subject: 7 },
+			{ kind: "indeterminate" },
+			{ kind: "indeterminate", reason: "unknown_reason" },
+			{ kind: "unlinked-ish" },
+		];
+		for (const answer of malformed) {
+			const w = world();
+			const a = await approved(w);
+			w.state.owners.set("00u-alice", answer);
+			expect(
+				returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error"),
+				JSON.stringify(answer),
+			).toBe("temporarily_unavailable");
+			expect((await w.grants.find(a.grantId, w.state.now))?.status).toBe("pending");
+			expect(w.state.logged).toContainEqual(
+				expect.objectContaining({ during: "callback_identity_lookup" }),
+			);
+		}
+	});
+
+	it("records, on the grant it lets through, which answer did: linked to this user, or to nobody", async () => {
+		const linked = world();
+		const a = await approved(linked);
+		linked.state.owners.set("00u-alice", { kind: "linked", subject: "alice" });
+		expect(
+			returned(await callback(linked, { state: a.state, code: "c" }, "b-1")).has("error"),
+		).toBe(false);
+		await linked.background.drain();
+		expect(
+			linked.events.find((e) => e.type === "federation.grant.authorized")?.details,
+		).toMatchObject({ outcome: "required/linked" });
+
+		const renewed = world();
+		const r = await renewal(renewed);
+		returned(await callback(renewed, { state: r.state, code: "c2" }, "b-2"));
+		await renewed.background.drain();
+		expect(
+			renewed.events.find((e) => e.type === "federation.grant.reauthorized")?.details,
+		).toMatchObject({ outcome: "required/unlinked" });
+	});
+
+	it("audits a conflict as a conflict, and never names the other owner", async () => {
+		const w = world();
+		const a = await approved(w);
+		w.state.owners.set("00u-alice", { kind: "linked", subject: "bob-the-other-owner" });
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"identity_conflict",
+		);
+		await w.background.drain();
+		expect(
+			w.events.find((e) => e.type === "federation.grant.authorization_failed")?.details,
+		).toMatchObject({ outcome: "identity_conflict" });
+		expect(JSON.stringify(w.events)).not.toContain("bob-the-other-owner");
 	});
 });
 

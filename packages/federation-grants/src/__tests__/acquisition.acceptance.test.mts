@@ -31,6 +31,9 @@
 import type {
 	BootstrapMap,
 	ClientRepository,
+	FederatedIdentityLookup,
+	FederatedIdentityLookupResult,
+	FederatedIdentityRegistration,
 	SubjectRevocation,
 	UserSession,
 } from "@o3co/auth-provider-core";
@@ -50,6 +53,32 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
 import { ACQUISITION_ENDPOINTS, callbackUrlFor } from "./acquisitionFixture.mjs";
+
+/**
+ * The bundled repository, with a lookup that covers this deployment's one
+ * registration — which the bundled one alone does not (#611). Both methods
+ * read the instance's own fields, so a caller that takes either off the
+ * object loses `this` and fails: the slice 6 bug every arrow-function stub
+ * hid (Codex).
+ */
+class DirectoryRepository extends InMemoryUserRepository {
+	private readonly covered = "upstream";
+	private readonly owners = new Map<string, string>();
+
+	override supportsFederatedIdentityLookup(registration: FederatedIdentityRegistration): boolean {
+		return registration.provider === this.covered;
+	}
+
+	override async findSubjectByFederatedIdentity(
+		identity: FederatedIdentityLookup,
+	): Promise<FederatedIdentityLookupResult> {
+		if (identity.provider !== this.covered) {
+			return { kind: "indeterminate", reason: "registration_not_covered" };
+		}
+		const owner = this.owners.get(identity.sub);
+		return owner === undefined ? { kind: "unlinked" } : { kind: "linked", subject: owner };
+	}
+}
 
 const ISSUER = (makeValidCoreConfig() as { oauth: { jwt: { issuer: string } } }).oauth.jwt.issuer;
 const REDIRECT = "https://client.test/connected";
@@ -190,10 +219,7 @@ const boot = async (subjectRevocation: SubjectRevocation = createInMemorySubject
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
-			// The bundled repository, not a stub: a class whose lookup reads its
-			// own fields. Codex found the callback calling it detached from its
-			// receiver, which every stub written as an arrow function hid.
-			userRepository: new InMemoryUserRepository(
+			userRepository: new DirectoryRepository(
 				new Map([["alice", { password: "unused", id: "alice" }]]),
 			),
 			userSessionStore: { get: async (sid: string) => durable.get(sid) ?? null },
