@@ -17,7 +17,11 @@
 import { delay, HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
-import { DEFAULT_MAX_RESPONSE_BYTES, HttpUserRepository } from "../HttpUserRepository.mjs";
+import {
+	DEFAULT_MAX_RESPONSE_BYTES,
+	type FederatedIdentityLookupCoverage,
+	HttpUserRepository,
+} from "../HttpUserRepository.mjs";
 
 // Loopback, so it exercises the documented `http://` carve-out rather than
 // needing a TLS fixture. See `src/endpointUrl.mts`.
@@ -605,6 +609,39 @@ describe("findSubjectByFederatedIdentity over HTTP (#613)", () => {
 			entries.pop();
 			expect(r.supportsFederatedIdentityLookup?.(REG, ["tid", "oid"])).toBe(true);
 		});
+
+		it("freezes the declaration it keeps — the list, each entry, each claim list — so nothing in-process widens the probe", () => {
+			// The boot probe is the check that refuses a hijacked upstream
+			// account; a repository whose coverage anything holding it could push
+			// onto would let that check be widened after boot (review).
+			const r = looking();
+			const kept = (r as unknown as { coverage: FederatedIdentityLookupCoverage[] }).coverage;
+			expect(Object.isFrozen(kept)).toBe(true);
+			expect(Object.isFrozen(kept[0])).toBe(true);
+			expect(Object.isFrozen(kept[0]?.requiredClaims)).toBe(true);
+			expect(() =>
+				kept.push({ provider: "x", issuer: "y", clientId: "z", requiredClaims: [] }),
+			).toThrow();
+			expect(() => kept[0]?.requiredClaims.pop()).toThrow();
+			expect(
+				r.supportsFederatedIdentityLookup?.({ provider: "x", issuer: "y", clientId: "z" }, []),
+			).toBe(false);
+			expect(r.supportsFederatedIdentityLookup?.(REG, ["tid"])).toBe(false);
+			// And a bare `[]` from no declaration is frozen too.
+			expect(
+				Object.isFrozen((looking(undefined) as unknown as { coverage: unknown }).coverage),
+			).toBe(true);
+		});
+
+		it("takes a field only from the entry itself, not from its prototype, and only a list of claim names", () => {
+			const inherited = Object.assign(Object.create({ ...COVER }), { provider: COVER.provider });
+			expect(() => looking([inherited])).toThrow(/\[0\]\.issuer/);
+			const r = looking();
+			// `includes` on a string would match a substring.
+			expect(
+				r.supportsFederatedIdentityLookup?.(REG, "tid,oid" as unknown as readonly string[]),
+			).toBe(false);
+		});
 	});
 
 	describe("the probe", () => {
@@ -788,6 +825,24 @@ describe("findSubjectByFederatedIdentity over HTTP (#613)", () => {
 				expect(text).not.toContain("pairwise-B");
 				expect(text).not.toContain("O-B");
 			}
+		});
+
+		it("aborts the request at the deadline rather than waiting for headers that never come", async () => {
+			// The deadline race in the body read covers a stalled body; headers
+			// that never arrive are the abort signal's to cut, and without it the
+			// caller would still be told "timed out" — after the upstream finally
+			// answered. So the failure must land before the upstream does.
+			server.use(
+				http.post(LOOKUP_URL, async () => {
+					await delay(400);
+					return HttpResponse.json({ kind: "unlinked" });
+				}),
+			);
+			const started = Date.now();
+			await expect(
+				looking([COVER], { timeout: 20 }).findSubjectByFederatedIdentity?.(IDENTITY),
+			).rejects.toThrow(/timed out after 20ms/);
+			expect(Date.now() - started).toBeLessThan(250);
 		});
 
 		it("reports a transport that failed before any response with a fixed message, and no cause", async () => {

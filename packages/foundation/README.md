@@ -115,7 +115,7 @@ JSON body, one of
 
 | Body | Meaning |
 |---|---|
-| `{ "kind": "linked", "subject": "<local User.id>" }` | exactly one local user holds it |
+| `{ "kind": "linked", "subject": "<local User.id>" }` | exactly one local user holds it. `subject` is that user's `id` **byte for byte** — the callback compares it with the signed-in user's `sub` exactly, so a padded or otherwise normalised id reads as another user's |
 | `{ "kind": "unlinked" }` | a **complete** resolution found nobody |
 | `{ "kind": "indeterminate", "reason": "registration_not_covered" }` | no strategy for this registration |
 | `{ "kind": "indeterminate", "reason": "identity_not_resolvable" }` | a strategy, and this identity is not in it |
@@ -126,7 +126,8 @@ Fields beyond those are ignored. **Everything else is an outage, never
 the body carries a verified identity), a timeout, or a body over the cap all
 throw, and the callback answers `temporarily_unavailable`. More than one
 distinct local owner is a `500` from the Store. What is thrown names the
-endpoint and the status, never the body or the identity.
+endpoint — and, for an answer with a status, the status — never the body,
+the identity, a status text or an underlying cause.
 
 **Coverage.** The probe the grants module asks at boot is synchronous and
 cannot reach the Store, so `federatedIdentityLookupCoverage` relays what the

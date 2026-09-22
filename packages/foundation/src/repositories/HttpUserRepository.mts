@@ -104,18 +104,21 @@ const coverageError = (at: string, problem: string): Error =>
 	new Error(`HttpUserRepository: "${at}" ${problem}`);
 
 /**
- * The declaration, checked field by field and snapshotted, so a later
- * mutation of the caller's list cannot widen coverage. Diagnostics name the
- * option, the entry and the field — never the value: a registration's client
- * id is configuration an operator may not want in a log line.
+ * The declaration, checked field by field and frozen — the list, each entry
+ * and each claim list — so that neither a later mutation of the caller's list
+ * nor anything in-process holding the repository can widen what the boot
+ * probe accepts. Diagnostics name the option, the entry and the field (a
+ * field NAME an operator wrote wrongly is quoted) — never a value: a
+ * registration's client id is configuration an operator may not want in a
+ * log line.
  */
 function validateCoverage(value: unknown): readonly FederatedIdentityLookupCoverage[] {
-	if (value === undefined) return [];
+	if (value === undefined) return Object.freeze([]);
 	if (!Array.isArray(value)) {
 		throw coverageError(COVERAGE_FIELD, "must be a list of registrations");
 	}
 	const seen = new Set<string>();
-	return value.map((entry, index) => {
+	const entries = value.map((entry, index) => {
 		const at = `${COVERAGE_FIELD}[${index}]`;
 		if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
 			throw coverageError(
@@ -126,7 +129,14 @@ function validateCoverage(value: unknown): readonly FederatedIdentityLookupCover
 		for (const key of Object.keys(entry)) {
 			if (!COVERAGE_KEYS.has(key)) throw coverageError(at, `has a field it may not have: "${key}"`);
 		}
-		const { provider, issuer, clientId, requiredClaims } = entry as Record<string, unknown>;
+		// Own properties only: a field that lives on the entry's prototype is
+		// not one the operator wrote.
+		const own = (field: string): unknown =>
+			Object.hasOwn(entry, field) ? (entry as Record<string, unknown>)[field] : undefined;
+		const provider = own("provider");
+		const issuer = own("issuer");
+		const clientId = own("clientId");
+		const requiredClaims = own("requiredClaims");
 		for (const [field, candidate] of [
 			["provider", provider],
 			["issuer", issuer],
@@ -161,6 +171,7 @@ function validateCoverage(value: unknown): readonly FederatedIdentityLookupCover
 			requiredClaims: Object.freeze([...names]),
 		});
 	});
+	return Object.freeze(entries);
 }
 
 /** A lookup answer if it is one the port defines — a fresh object of the contract's fields, nothing else. */
@@ -370,9 +381,14 @@ export class HttpUserRepository implements UserRepository {
 				"findSubjectByFederatedIdentityUrl",
 			);
 			this.supportsFederatedIdentityLookup = (registration, identityClaims) =>
-				this.declared(registration)?.requiredClaims.every((name) =>
+				// A list, as the port types it: `includes` on a string would match
+				// a substring, and a caller that is not the boot probe may hand
+				// over anything.
+				Array.isArray(identityClaims) &&
+				(this.declared(registration)?.requiredClaims.every((name) =>
 					identityClaims.includes(name),
-				) ?? false;
+				) ??
+					false);
 			this.findSubjectByFederatedIdentity = (identity) => this.lookupViaHttp(identity);
 		} else if (this.coverage.length > 0) {
 			throw new Error(
@@ -469,8 +485,9 @@ export class HttpUserRepository implements UserRepository {
 	 * three answers is an answer, and everything else throws — as an outage,
 	 * which is what a lookup that could not be made is. Redirects are never
 	 * followed: the body carries a verified identity, and a `Location` is not a
-	 * configured endpoint. What is thrown names the endpoint and the status,
-	 * and never the body, the identity, a status text or an underlying cause.
+	 * configured endpoint. What is thrown names the endpoint — and, for an
+	 * answer with a status, the status — and never the body, the identity, a
+	 * status text or an underlying cause.
 	 */
 	private async postLookup(url: string, body: unknown): Promise<FederatedIdentityLookupResult> {
 		const controller = new AbortController();
