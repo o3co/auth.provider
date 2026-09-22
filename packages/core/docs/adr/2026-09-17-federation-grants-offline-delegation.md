@@ -27,7 +27,7 @@ What exists today is session-bound by design, and works as designed:
 Loosening those checks would break the guarantee #276 established: after
 logout the provider holds nothing that can act as the user. So this is a new,
 explicit lifecycle next to the session-bound path, not a change to it. It is
-additive and targets the next minor release.
+additive; it shipped in v0.15.0.
 
 No standard covers this yet. The IETF has no adopted document for delegation
 to agents that outlives a session; the OpenID Foundation calls revocation in

@@ -4,6 +4,323 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [0.15.0] - 2026-09-22
+
+### Added
+
+- **Federation grants — a client obtains upstream access tokens on a user's
+  standing consent, with no session behind the call
+  (`@o3co/auth-provider-federation-grants`, a new package;
+  `@o3co/auth-provider-core`, `@o3co/auth-provider-redis`,
+  `@o3co/auth-provider-session`, `@o3co/auth-provider-federation-oidc`,
+  `@o3co/auth-provider-oauth`)**
+  ([#593](https://github.com/o3co/auth.provider/issues/593),
+  [#594](https://github.com/o3co/auth.provider/pull/594),
+  [#601](https://github.com/o3co/auth.provider/pull/601),
+  [#602](https://github.com/o3co/auth.provider/pull/602),
+  [#603](https://github.com/o3co/auth.provider/pull/603),
+  [#604](https://github.com/o3co/auth.provider/pull/604),
+  [#606](https://github.com/o3co/auth.provider/pull/606),
+  [#607](https://github.com/o3co/auth.provider/pull/607),
+  [#608](https://github.com/o3co/auth.provider/pull/608),
+  [#610](https://github.com/o3co/auth.provider/pull/610),
+  [#612](https://github.com/o3co/auth.provider/pull/612),
+  [#619](https://github.com/o3co/auth.provider/pull/619)). The federation
+  token route, `POST /oauth/federation/:name/token`, needs a live session, and
+  logout deletes the upstream tokens it serves; it cannot serve a background
+  operation that resumes days later. A federation grant is a separate record
+  of consent — one user, one owning client, one connection, the scopes
+  approved and an absolute expiry — that survives logout and a restart. The
+  client lodges an intent (`POST /oauth/federation-grants`), sends the browser
+  through `GET /session/federation-grants/connect?request=<handle>`, the
+  deployment's consent page and the upstream's authorization flow, and then
+  calls `POST /oauth/federation-grants/:grantId/token`, `/status`, `/revoke`
+  and `/reauthorize`, client-authenticated. Every retrieval re-evaluates the
+  record and the deployment — the connection's revisions, the subject's
+  revocation boundaries, scope containment, the lifetime ceiling — and never
+  the upstream: an upstream withdrawal is seen when a refresh is refused, and
+  a stored token that still serves is disclosed until then. A refresh runs at
+  most once per call under a durable lease, and a rotated refresh token is
+  never lost. Grants live in memory, on one replica, or in Redis, sealed under
+  a key ring (`federationGrants.encryptionMode`, shipped `required`;
+  `allow-plaintext` is refused in production, staging and `multi` unless
+  `FEDERATION_TOKENS_ALLOW_INSECURE=1`, the one override both this store and
+  the federation-token store honour); the memory store is refused under
+  `deployment.mode = "multi"`, and a grant store that outlives the process
+  beside a `subjectRevocation` adapter kept in memory is refused, since the
+  grants would outlive the boundary that ends them. A subject-wide revocation ends them:
+  `revokeAllForSubject` always, when it is given the store, and the subject
+  revocation service by default, which alone may be asked to keep them
+  (`federationGrants.allowKeepOnSubjectRevocation`, shipped `false`); an
+  ordinary logout leaves them alone. Before a grant is created, the upstream
+  account is checked against the local users (`federationGrants.identityLookup
+  = "required"`, the default): a `UserRepository` that covers the registration
+  answers `findSubjectByFederatedIdentity` with `linked`, `unlinked` or
+  `indeterminate`, and a connection's `identityClaims` name the verified
+  id_token claims an IdP with pairwise subjects needs. The bundled in-memory
+  repository covers none, and `HttpUserRepository` covers what its coverage
+  declaration says (below); `"unsupported"` is the recorded opt-out. Every
+  operation emits a `federation.grant.*` audit event, from `.requested` to
+  `.revoked`, with a correlation ID that is never empty, and the module
+  refuses to boot with the feature enabled and no audit sink unless
+  `audit.sink.type = "none"` declares the absence. Off by default
+  (`federationGrants.enabled`); a disabled deployment is indistinguishable
+  from one without the package. The package README has each route and its
+  answers, `packages/federation-grants/docs/offline-access.md` what each IdP
+  needs before it issues a refresh token, `docs/operator-runbook.md` the
+  key-ring rotation and the boot refusals, and
+  `packages/core/docs/adr/2026-09-17-federation-grants-offline-delegation.md`
+  the decisions.
+
+- **A refresh the upstream refuses for the user's absence reads
+  `reauthorization_required`, and `/reauthorize` admits a scope-starved grant
+  (`@o3co/auth-provider-federation-grants`, `@o3co/auth-provider-core`,
+  `@o3co/auth-provider-redis`)**
+  ([#616](https://github.com/o3co/auth.provider/issues/616),
+  [#622](https://github.com/o3co/auth.provider/pull/622)). An upstream that
+  answers a refresh with `interaction_required`, `login_required`,
+  `consent_required` or `account_selection_required` is saying the user must
+  come back, not that the provider should retry. `/token` answers `410
+  reauthorization_required` with the code as the reason (`upstream_<code>`),
+  no `Retry-After` and no cached token; `/status` reads the same; the
+  credentials are kept until a reauthorization activates, and a later
+  transient failure does not overwrite the stamp. A grant reading
+  `upstream_token_ineligible/scope_exceeded` — the upstream accumulated a
+  consent wider than the grant's — is admitted to `POST
+  /oauth/federation-grants/:grantId/reauthorize` (`201`, whose `status` may
+  now be `upstream_token_ineligible`), since a wider consent is its remedy. A
+  custom `FederationGrantStore` must make `noteRefreshFailure` refuse to
+  replace a stamp that carries one of the four codes; the contract suite
+  checks it.
+
+- **The delegated-authorization capability on federation adapters, in three
+  methods (`@o3co/auth-provider-session`,
+  `@o3co/auth-provider-federation-oidc`)**
+  ([#605](https://github.com/o3co/auth.provider/pull/605),
+  [#610](https://github.com/o3co/auth.provider/pull/610),
+  [#612](https://github.com/o3co/auth.provider/pull/612)).
+  `SupportsDelegatedAuthorization` is `buildDelegatedAuthorizationUrl`,
+  `exchangeDelegatedCode` and `refreshDelegatedToken`, with the RFC 8707
+  `resource`, the raw `expires_in` / `scope` / `token_type`, a per-call
+  `AbortSignal`, `prompt=consent` for `offline_access`, and `identityClaims`
+  copied from the verified id_token only. The generic OIDC adapter implements
+  it; Google, Apple and GitHub do not, so a connection on those federations
+  is refused at boot.
+
+- **The standalone template composes federation grants (standalone
+  template)** ([#614](https://github.com/o3co/auth.provider/pull/614)).
+  `FEDERATION_GRANTS_ENABLED=true` installs the routes and the stores;
+  `FEDERATION_GRANT_STORE_ADAPTER` and `FEDERATION_GRANT_INTENT_STORE_ADAPTER`
+  are `memory | redis` (shipped `redis`, off the shared socket), the consent
+  page is `FEDERATION_GRANTS_CONSENT_URL`, and the connections and the key
+  ring are declared in HOCON. With the feature on, boot refuses: no consent
+  page; a connection without a callback, on a disabled federation or one
+  without the delegated capability; `identityLookup = "required"` with a
+  repository that covers no registration; Redis grants beside memory
+  user-session stores; no encryption key; a memory store under `multi`. A
+  shutdown then gives cleanup `upstreamHardTimeoutMs + persistRetryBudgetMs +
+  lockWaitMs + 12 s`, never below 45 s, instead of the drain's 10, and both
+  compose files declare `stop_grace_period: 60s`; an orchestrator with its own
+  grace must allow 60 s or more. `handle.components.subjectRevocationService`
+  is available while the feature is on. The template's `pnpm test` now runs
+  `tsc --noEmit` before vitest, and a scaffolded project inherits that.
+  Nothing changes for a deployment that leaves the feature off.
+
+- **The identity lookup over HTTP, with the coverage a Store declares
+  (`@o3co/auth-provider-foundation`, standalone template)**
+  ([#613](https://github.com/o3co/auth.provider/issues/613),
+  [#615](https://github.com/o3co/auth.provider/pull/615)). `HttpUserRepository`
+  gains `findSubjectByFederatedIdentityUrl`
+  (`CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL`) — a five-field `POST`
+  (`provider`, `issuer`, `clientId`, `sub`, `claims`) the Store answers with
+  `linked`, `unlinked` or `indeterminate`; anything else is an outage, never
+  "nobody" — and `repositories.user.http.federatedIdentityLookupCoverage`, the
+  operator's declaration of which registrations and claims the Store covers,
+  which answers the boot probe. Unset, nothing changes: the methods are
+  absent, as before. Coverage without the URL, a malformed, duplicate or
+  padded declaration, or a claim name that is not one, is refused at
+  construction. The foundation README carries the contract a Store implements.
+
+- **`tools/live-check` — a hand-run login at a real IdP against a build of
+  this repository (repository only, not published)**
+  ([#600](https://github.com/o3co/auth.provider/issues/600),
+  [#620](https://github.com/o3co/auth.provider/pull/620)). The suites prove
+  the handling of a callback the test wrote; what an IdP actually sends is
+  known only by signing in. The release runbook's step 0 runs it for each
+  federation the release diff touches and records the result on the tracking
+  issue, as #600 did for Google.
+
+### Changed
+
+- **BREAKING: subject revocation carries two boundaries, and its retention
+  floor is the grant lifetime ceiling plus a minute
+  (`@o3co/auth-provider-core`, `@o3co/auth-provider-redis`)**
+  ([#608](https://github.com/o3co/auth.provider/pull/608)). A subject-wide
+  revocation writes an `all` boundary, or a `sessions` one that leaves grants
+  alone. A full revocation (`revokeBefore`) keeps its key for at least
+  `SUBJECT_REVOCATION_MIN_RETENTION_MS` — a year and a minute — rather than the
+  caller's TTL, for every deployment, grants or not: it is what makes a grant
+  the caller knew nothing about unusable after the boundary. A sessions-only
+  stamp keeps the caller's TTL unless a grants boundary is already on the
+  record. In the Redis
+  package, `SubjectRevocationClient.setWatermarkMonotonic(key, beforeMs,
+  expiresAtMs)` is gone and `setRevocationBoundaries(key, mode, beforeMs,
+  expiresAtMs, grantRetentionMs)`, answering a string, replaces it. With
+  `federationGrants.enabled = true` and no two-boundary `subjectRevocation`
+  adapter, boot is refused.
+
+  **Upgrade note.** A custom Redis client written against
+  `SubjectRevocationClient` implements `setRevocationBoundaries`; the
+  bundled ioredis client already does, and `createRedisSubjectRevocation`
+  refuses a client without it at construction, not only at type-check. A full
+  revocation still writes the record v0.14.0 wrote, so a deployment that never
+  makes a sessions-only stamp — the subject revocation service's keep path,
+  under `federationGrants.allowKeepOnSubjectRevocation` — can roll back
+  freely.
+  Where one was made, that subject's record is in a form a v0.14.0 reader
+  refuses (it fails closed, the safe direction), and a v0.14.0 **writer**
+  overwrites it with a plain watermark, which can move the sessions boundary
+  backward. Drain every pre-0.15.0 replica before allowing sessions-only
+  stamps, and do not roll back to one while such records remain.
+
+- **BREAKING: the `OidcProvider` type includes the delegated-authorization
+  capability (`@o3co/auth-provider-federation-oidc`)**
+  ([#605](https://github.com/o3co/auth.provider/pull/605),
+  [#610](https://github.com/o3co/auth.provider/pull/610)). `OidcProvider`,
+  the type `createOidcProvider` returns, is now also
+  `SupportsDelegatedAuthorization`, so a value typed as `OidcProvider` must
+  carry `buildDelegatedAuthorizationUrl`, `exchangeDelegatedCode` and
+  `refreshDelegatedToken`. A consumer that only calls `createOidcProvider`
+  is unaffected.
+
+  **Upgrade note.** A wrapper, a hand-built provider or a test double typed
+  as `OidcProvider` implements the three methods, or is typed by the
+  capabilities it has (`FederationProvider & SupportsRefresh &
+  SupportsClaimMapping`).
+
+- **BREAKING: `revokeAllForSubject`'s result has three more required fields,
+  and its unions are wider (`@o3co/auth-provider-core`)**
+  ([#608](https://github.com/o3co/auth.provider/pull/608),
+  [#609](https://github.com/o3co/auth.provider/pull/609),
+  [#624](https://github.com/o3co/auth.provider/pull/624)).
+  `RevokeAllForSubjectResult` gains `grantsRequested`, `grantsRevoked` and
+  `grantsFailed`; `RevokeAllForSubjectCapability` gains
+  `"federationGrantStore"`; the failure `operation` union gains the grant
+  operations `listBySubject`, `revoke`, `revokeSessionsBefore` and
+  `retireIntent`; `RevokeAllForSubjectFailure` gains an optional `grantId`.
+  A call without a grant store behaves as before and answers
+  `grantsRequested: false` with two empty lists. An exhaustive `switch` over
+  either union needs new cases, and anything that constructs a
+  `RevokeAllForSubjectResult` — a mock, a wrapper that reshapes it — carries
+  the three fields. The deps accept an optional `federationGrantStore`,
+  `federationGrantAudit` and `correlationId`.
+
+- **Federation token snapshots carry the raw `expiresIn`, `scope` and
+  `tokenType`, and `RefreshedTokens` is an explicit interface
+  (`@o3co/auth-provider-session`, `@o3co/auth-provider-federation-oidc`)**
+  ([#605](https://github.com/o3co/auth.provider/pull/605)). An adapter that
+  extended the old shape with a field of an incompatible type is a compile
+  error now.
+
+- **`createOidcProvider` binds its `fetch` at construction
+  (`@o3co/auth-provider-federation-oidc`)**
+  ([#605](https://github.com/o3co/auth.provider/pull/605)). The provider now
+  always installs a fetch wrapper that captures `config.fetch`, or the global
+  `fetch` as it is when the provider is created, where it used to install one
+  only when `config.fetch` was given. A test harness that replaces
+  `globalThis.fetch` after creating the provider is no longer honoured; pass
+  `fetch` in the config, or replace it first.
+
+- **The federation-grants documentation says what the code does, and the
+  ADR's deferred list is four classes** ([#617](https://github.com/o3co/auth.provider/issues/617),
+  [#623](https://github.com/o3co/auth.provider/pull/623)). `expires_in` on
+  `/token` is a cache hint clamped by the grant's effective expiry, never
+  enforcement; lowering the maximum shortens nothing already disclosed;
+  `last_used_at` is the last disclosure, a cached one included; the `"keep"`
+  residual window is the gap between the callback's final re-read and its
+  activation write. The ADR's `## Deferred` is `## Outside the first
+  release`: planned, conditional, options with no delivery commitment, and
+  not needed. Documentation only.
+
+### Fixed
+
+- **Revocation audits say what access ended (`@o3co/auth-provider-core`,
+  `@o3co/auth-provider-oauth`, `@o3co/auth-provider-federation-grants`)**
+  ([#609](https://github.com/o3co/auth.provider/pull/609)).
+  `federation.grant.revoked` carries the connection, the upstream account,
+  the resource and the scopes where they are established — a grant revoked
+  while `pending` carries none — and a refused withdrawal is
+  `federation.grant.revoke.denied`, not a denied disclosure.
+
+- **A federation-grant audit event on the library path never carries an empty
+  correlation ID (`@o3co/auth-provider-core`)**
+  ([#618](https://github.com/o3co/auth.provider/issues/618),
+  [#624](https://github.com/o3co/auth.provider/pull/624)).
+  `revokeFederationGrant` and `revokeAllForSubject` wrote `""` when the caller
+  gave no `correlationId`, so a Store-driven revocation could not be told
+  apart from any other. A pass over a subject's grants now carries one
+  generated ID, the subject revocation service one per call on both paths, and
+  a lone `revokeFederationGrant` one for its event; a caller's own ID is used
+  as before. The routes' `x-request-id` is unchanged.
+
+- **A client's grant registration is read as a list or as nothing everywhere
+  it is judged (`@o3co/auth-provider-core`,
+  `@o3co/auth-provider-federation-grants`)**
+  ([#632](https://github.com/o3co/auth.provider/pull/632)). The token and
+  status routes read `allowedFederationGrantConnections` defensively, but
+  lodging and the consent page's re-check read it bare, and lodging read
+  `federationGrantRedirectUris` bare as well. A deployment's own
+  `ClientRepository` answering a string would have turned the membership
+  check into a substring match: a client registered for `calendar-prod`
+  could lodge `connection=calendar` and obtain an upstream refresh token
+  under a connection nobody permitted, though `/token` would refuse to spend
+  it. One reader, `federationGrantAllowlist`, is now used at every site and
+  exported from core. The bundled repository validates both fields and was
+  never affected.
+
+- **A scaffolded project's `supertest-loopback` test failed under supertest
+  7.3 (standalone template)**
+  ([#633](https://github.com/o3co/auth.provider/pull/633)). supertest 7.3.0
+  closes only the servers it starts itself. `vitest.supertest-loopback.mts`
+  binds the server to `127.0.0.1` itself, so under 7.3 that server stayed
+  open after the response, and a fresh scaffold, which resolves `^7.1.0` to
+  7.3.0, failed its own test. The shim now closes the server it bound when
+  supertest has not, a no-op under 7.2. A project scaffolded earlier can
+  copy the file.
+
+### Security
+
+- **The RFC 9207 `iss` response parameter reaches the code exchange in the
+  generic OIDC, Google and Apple adapters, and Google requires it
+  (`@o3co/auth-provider-federation-oidc`,
+  `@o3co/auth-provider-federation-google`,
+  `@o3co/auth-provider-federation-apple`, `@o3co/auth-provider-session`)**
+  ([#596](https://github.com/o3co/auth.provider/pull/596),
+  [#599](https://github.com/o3co/auth.provider/pull/599),
+  [#600](https://github.com/o3co/auth.provider/issues/600)). The session's
+  federation routes handed every callback parameter to the adapter, but the
+  generic OIDC, Google and Apple adapters rebuilt the callback URL for the
+  exchange from `redirectUri` and `code` alone, so the `iss` the response
+  carried never reached the mix-up check, and every login against an issuer
+  that advertises `authorization_response_iss_parameter_supported` failed the
+  exchange. `callbackUrlForExchange` (session) now carries it and the three
+  adapters use it. Google documents
+  `iss` as always returned and the adapter **requires** it: a callback without
+  it is refused (`502 exchange_failed`);
+  `federations.google.requireAuthorizationResponseIss = false` relaxes that,
+  and the template's `application.conf` carries the environment binding
+  (`FEDERATIONS_GOOGLE_REQUIRE_AUTHORIZATION_RESPONSE_ISS`) as a commented
+  line. Apple checks `iss` when present. GitHub is deliberately unchanged
+  ([#598](https://github.com/o3co/auth.provider/issues/598)). A live Google
+  login against `develop` at `0420a99b`, which v0.15.0 contains, carried
+  `iss` (#600).
+
+  **Upgrade note.** A deployment with a gateway or front end that relays the
+  Google callback must pass `iss` through, and a composition that calls the
+  Google provider's `exchangeCode` from a route of its own must forward the
+  callback's `iss` in `callbackParams` — otherwise every Google login is
+  refused. `requireAuthorizationResponseIss = false` relaxes it until then.
+
 ## [0.14.0] - 2026-09-17
 
 ### Added

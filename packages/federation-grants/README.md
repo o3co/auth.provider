@@ -44,7 +44,9 @@ Enabling the feature also requires a `subjectRevocation` component that carries 
 
 ### What is audited, and where it goes
 
-Every operation on a grant emits its event — the `federation.grant.*` types,
+Every operation on a grant emits its event — a status inspection excepted,
+which audits only the backstop revocation it writes, and no denial — the
+`federation.grant.*` types,
 `.authorization_failed`, `.authorized`, `.reauthorization_required`,
 `.reauthorized`, `.refresh_failed`, `.refresh_persist_failed`, `.refreshed`,
 `.request.denied`, `.requested`, `.revoke.denied`, `.revoked`,
@@ -164,8 +166,11 @@ Ownership first, with the same `404 grant_not_found` for an unknown id,
 another client's grant and another subject's. Then the subject's grants
 boundary: a grant a subject-wide revocation covers is revoked here, durably,
 before anything else is asked of it, and answers `410 grant_revoked/backstop`.
-Then what a renewal cannot mend — each with the status `/token` gives it:
-`400 authorization_pending`, `410 grant_revoked/<by>`,
+Then what a renewal cannot mend — each with the status `/token` gives it,
+but for a connection the deployment no longer configures, which is
+`503 temporarily_unavailable/connection_not_configured` here, an outage the
+deployment may put right without the client, where `/token` folds it into
+`403 access_denied/connection_not_permitted`: `400 authorization_pending`, `410 grant_revoked/<by>`,
 `410 grant_expired/<reason>`, `410 connection_identity_changed`,
 `502 upstream_token_ineligible/<reason>` for every reason but one — a consent
 mends no token lifetime, type or shape, but it does mend a consent an
@@ -268,8 +273,11 @@ disclosure, a cached one included: it is written best-effort after the answer,
 so it may lag a disclosure the store did not get to write down. It is not the
 last time the upstream was asked, and no measure of an upstream's idle window.
 
-Status calls `inspect` and nothing else: never a refresh, never the refresh
-lock, never `touch`. It is also **not** a health check for `/token` — `active`
+Status opens no credential, refreshes nothing, takes no refresh lock and
+never `touch`es. The one thing it writes is the backstop: a grant the
+subject's grants boundary covers is revoked here, durably, and
+`federation.grant.revoked` with `outcome: "backstop"` is emitted before the
+`revoked` status is answered. It is also **not** a health check for `/token` — `active`
 does not promise a token, and an ineligible status can sit beside a perfectly
 usable cached one. A refresh the upstream refused for the user's absence reads
 `reauthorization_required` with `upstream_<code>` as the reason, for as long
@@ -394,6 +402,11 @@ from the answer, so an absolute date computed when the page renders would be
 an estimate the grant does not keep. `continues_after_logout` is what D8
 obliges the page to tell the user. `expires_in` is what is left of the flow.
 
+The page's URL carries the challenge, so the page sends
+`Referrer-Policy: no-referrer` on its own responses: the provider's
+`no-referrer` covers only the provider's answers, and an outbound link the
+page renders would otherwise hand the challenge to its target.
+
 `POST` with `challenge` and `decision` (`accept` or `deny`). Both success paths
 are `303`: an approval to the upstream's authorization endpoint, a refusal
 back to the client's `redirect_uri` with `error=access_denied`, the client's
@@ -408,7 +421,7 @@ nothing else; the grant keeps working.
 | No challenge | 400 | `invalid_request` | `challenge is required` |
 | Unknown, answered, expired, another browser's, stale | 400 | `invalid_request` | one sentence for all of them |
 | `decision` neither `accept` nor `deny` | 400 | `invalid_request` | (nothing is spent) |
-| The session was revoked, or predates the sessions boundary | 403 | `reauthentication_required` | — |
+| The session was revoked, or predates the sessions boundary | 403 | `reauthentication_required` | `sign in again to continue` |
 | The client may no longer use the connection | 403 | `access_denied` | `connection_not_permitted` |
 | A cross-site `Sec-Fetch-Site` on the answer | 403 | `invalid_request` | `cross-site answer refused` |
 | A store, the session store or the boundary could not answer | 503 | `temporarily_unavailable` | `storage` |
@@ -590,7 +603,8 @@ goes through consent (first-party clients included), the answer needs the
 challenge and the exact session binding, the consent data is never readable
 cross-origin with credentials (hence the same-origin page), and the challenge
 never leaks through a referrer (`Referrer-Policy: no-referrer` on every
-response). Making consent skippable later is a redesign of this, not a UI
+response, the deployment's page included). Making consent skippable later is
+a redesign of this, not a UI
 option.
 
 A flow that ended without a grant — declined, the wrong account, a session to
