@@ -1,0 +1,21 @@
+{
+	"name": "@o3co/auth-provider-live-check",
+	"version": "0.0.0",
+	"private": true,
+	"description": "A real IdP login against the standalone template at this checkout — the hand-run check a federation change needs before a release",
+	"license": "Apache-2.0",
+	"engines": {
+		"node": ">=22.0.0"
+	},
+	"type": "module",
+	"scripts": {
+		"start": "./live-check.sh start",
+		"stop": "./live-check.sh stop",
+		"test": "tsc --noEmit && vitest run"
+	},
+	"devDependencies": {
+		"@types/node": "^26.5.1",
+		"typescript": "^6.0.3",
+		"vitest": "^5.0.0"
+	}
+}

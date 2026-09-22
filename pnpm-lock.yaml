@@ -644,6 +644,18 @@ importers:
         specifier: ^5.0.0
         version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@26.5.1)(@vitest/coverage-v8@5.0.0)(msw@2.15.0(@types/node@26.5.1)(typescript@6.0.3))(vite@8.0.11(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0))
 
+  tools/live-check:
+    devDependencies:
+      '@types/node':
+        specifier: ^26.5.1
+        version: 26.5.1
+      typescript:
+        specifier: ^6.0.3
+        version: 6.0.3
+      vitest:
+        specifier: ^5.0.0
+        version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@26.5.1)(@vitest/coverage-v8@5.0.0)(msw@2.15.0(@types/node@26.5.1)(typescript@6.0.3))(vite@8.0.11(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0))
+
 packages:
 
   '@babel/helper-string-parser@7.29.7':

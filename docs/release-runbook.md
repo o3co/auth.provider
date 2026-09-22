@@ -8,6 +8,7 @@ This runbook captures patterns established through `v0.7.0` (manual bootstrap re
 
 ## TL;DR
 
+0. **If the release touches a federation**, sign in at the real IdP through [`tools/live-check`](../tools/live-check/README.md) and put the record on the tracking issue (as #600 did) — before the audit, so a finding there is a fix in the cut, not a re-cut.
 1. **Run cumulative final audit** (multi-agent + FCoT) on the cut diff BEFORE pushing the tag — not after.
 2. **For each new monorepo package, pre-flight `npm view`**. If 404, pre-bootstrap with a 0.0.1 dummy publish from local BEFORE pushing the tag.
 3. **Run R6 label audit** per [release-policy.md §R6](release-policy.md#r6-release-cut-audit-pass-mandatory-checklist-before-tagging).
@@ -17,6 +18,26 @@ This runbook captures patterns established through `v0.7.0` (manual bootstrap re
 ---
 
 ## Pre-release checklist
+
+### Step 0. Live IdP login (when a federation changed)
+
+The suites never reach a real identity provider: they prove the provider's
+handling of a callback the test wrote. What Google (or any IdP the template
+ships) actually sends — which parameters, which `iss` — is only known by
+signing in. When the release diff touches a federation adapter, the session's
+federation routes, the callback handling or the RFC 9207 `iss` rule, run
+[`tools/live-check`](../tools/live-check/README.md) for each concerned
+provider the template ships and paste its report on the tracking issue, as
+#600 did for #599. A refusal there (a callback without the `iss` a default
+requires) is a change to make before the cut, not after the tag.
+
+```bash
+cd tools/live-check
+cp profiles/google.env.example profiles/google.env   # the IdP client; git-ignored
+./live-check.sh start google                          # prints the URL and the redirect URI to register
+./live-check.sh report                                # after signing in at http://localhost:3210/
+./live-check.sh stop
+```
 
 ### Step 1. Cumulative final audit (mandatory)
 
