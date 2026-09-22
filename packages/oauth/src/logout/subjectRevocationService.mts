@@ -37,6 +37,7 @@ import {
 	type FederationGrantAuditEvent,
 	fullSectionsSchema,
 	type Logger,
+	type ProviderDeps,
 	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantKeepPolicy,
 	resolveSubjectRevocationHorizonMs,
@@ -56,11 +57,43 @@ const configSchema = z.object({
 	federationGrants: fullSectionsSchema.shape.federationGrants,
 });
 
-// biome-ignore lint/suspicious/noExplicitAny: planner-inferred deps shape — the manifest reads only slots it declares in `requires` / `optional`
-type AnyDeps = any;
+const REQUIRES = [
+	"config",
+	// The four-store cascade, plus the two stores `cascadeLogout` fans out to.
+	"userSessionStore",
+	"sessionRPRegistry",
+	"sessionFamilyIndex",
+	"sessionFederationIndex",
+	"refreshTokenFamilyRevocation",
+	"federationTokenStore",
+] as const;
+/**
+ * What turns "this subject" into sessions, and what outlives them — both
+ * `optional`, and not because the service can do without them. #406 lets a
+ * deployment declare either capability absent, and a module that REQUIRED
+ * them could not be installed there at all; absence is reported instead,
+ * in `unavailable`, exactly as `revokeAllForSubject` has always reported
+ * it. What is refused is the pairing that matters: no boundary while
+ * federation grants are enabled, in the provider below.
+ */
+const OPTIONAL = [
+	"subjectSessionIndex",
+	"subjectRevocation",
+	"federationGrantStore",
+	"auditSink",
+	"logger",
+] as const;
 
-const grantsEnabled = (deps: AnyDeps): boolean =>
-	(deps.config as { federationGrants?: { enabled?: boolean } }).federationGrants?.enabled === true;
+/**
+ * The deps the provider receives: exactly the module's `requires` /
+ * `optional`, typed (#626 P2).
+ */
+type Requires = (typeof REQUIRES)[number];
+type Optional = (typeof OPTIONAL)[number];
+export type SubjectRevocationServiceModuleDeps = ProviderDeps<Requires, Optional>;
+
+const grantsEnabled = (deps: SubjectRevocationServiceModuleDeps): boolean =>
+	deps.config.federationGrants?.enabled === true;
 
 /**
  * What ended a grant, told to the deployment's sink.
@@ -130,35 +163,11 @@ const auditor = (
  * They apply only when grants are enabled: a deployment with the feature off
  * gets exactly the service #296 would have had.
  */
-export const subjectRevocationServiceModule = defineModule({
+export const subjectRevocationServiceModule = defineModule<Requires, Optional>({
 	name: "subject-revocation-service",
 	configSchema,
-	requires: [
-		"config",
-		// The four-store cascade, plus the two stores `cascadeLogout` fans out to.
-		"userSessionStore",
-		"sessionRPRegistry",
-		"sessionFamilyIndex",
-		"sessionFederationIndex",
-		"refreshTokenFamilyRevocation",
-		"federationTokenStore",
-	] as const,
-	/**
-	 * What turns "this subject" into sessions, and what outlives them — both
-	 * `optional`, and not because the service can do without them. #406 lets a
-	 * deployment declare either capability absent, and a module that REQUIRED
-	 * them could not be installed there at all; absence is reported instead,
-	 * in `unavailable`, exactly as `revokeAllForSubject` has always reported
-	 * it. What is refused is the pairing that matters: no boundary while
-	 * federation grants are enabled, below.
-	 */
-	optional: [
-		"subjectSessionIndex",
-		"subjectRevocation",
-		"federationGrantStore",
-		"auditSink",
-		"logger",
-	] as const,
+	requires: REQUIRES,
+	optional: OPTIONAL,
 	/**
 	 * Eager, because its consumer is not a module.
 	 *
@@ -174,7 +183,7 @@ export const subjectRevocationServiceModule = defineModule({
 	 */
 	lifecycle: { subjectRevocationService: { eager: true } },
 	provides: {
-		subjectRevocationService: (deps: AnyDeps) => {
+		subjectRevocationService: (deps: SubjectRevocationServiceModuleDeps) => {
 			const enabled = grantsEnabled(deps);
 			const store = deps.federationGrantStore;
 			if (enabled && store === undefined) {
@@ -231,5 +240,5 @@ export const subjectRevocationServiceModule = defineModule({
 				...(deps.logger === undefined ? {} : { logger: deps.logger }),
 			});
 		},
-	} as never,
+	},
 });

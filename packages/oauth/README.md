@@ -87,16 +87,18 @@ Registers the `"authorization_code"` and `"refresh_token"` grant types in the gr
 function createOAuthRouter(
   express: ExpressLike,
   options: {
-    registry: GrantHandlerResolver;
+    registry: Pick<GrantHandlerResolver, "get">;
     config: AppConfig;
     clientRepository: ClientRepository;
     codeRepository: CodeRepository;
     keyStore: KeyStore;
   }
-): Promise<{ router: Router; registry: GrantHandlerResolver }>;
+): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }>;
 ```
 
-Low-level factory. Creates the Express router and the fully-configured grant registry. Called internally by `oauthModule`; use directly when you need access to the registry instance after construction. Client authentication at `/oauth/introspect` is handled by `createClientAuthMiddleware(clientRepository)` — no Passport dependency required.
+Low-level factory. Creates the Express router and the fully-configured grant registry. Called internally by `oauthModule`; use directly when you need access to the registry instance after construction.
+
+`registry` is `Pick<GrantHandlerResolver, "get">` because `get` is all the router reads: `/oauth/token` looks a `grant_type` up, and `grant_types_supported` is derived in `oauthModule` from the boot planner's resolver, not from this one (#626). A full `GrantHandlerResolver` satisfies it, and so does any object with `get`. The returned `registry` is the same value narrowed to the same type, so a caller that needs `entries()` should read the planner's `grantHandlerResolver` slot instead. Client authentication at `/oauth/introspect` is handled by `createClientAuthMiddleware(clientRepository)` — no Passport dependency required.
 
 ## Usage Example
 

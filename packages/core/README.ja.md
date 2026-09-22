@@ -50,64 +50,7 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 
 #### インターフェースと型
 
-```typescript
-interface SessionData {
-  user?: Record<string, unknown>;
-  client?: Record<string, unknown>;
-  code?: string;
-  code_client_id?: string;
-  granted_scopes?: string[];
-  isAuthenticated?: boolean;
-}
-
-interface GrantContext {
-  body: Record<string, unknown>;
-  session: SessionData;
-  issuer?: string;
-  metadata: Record<string, unknown>;
-}
-
-interface GrantSuccess {
-  status: number;
-  tokens: TokenResponse;
-}
-
-interface GrantError {
-  status: number;
-  error: string;
-  errorDescription?: string;
-}
-
-type GrantResult = GrantSuccess | GrantError;
-
-interface SessionMutation {
-  clear?: string[];
-  set?: Record<string, unknown>;
-}
-
-interface GrantHandlerResult {
-  result: GrantResult;
-  sessionMutation?: SessionMutation;
-}
-
-interface GrantHandler {
-  handle(ctx: GrantContext): Promise<GrantHandlerResult>;
-  cleanup?(): void;
-}
-
-interface GrantDependencies {
-  config: AppConfig;
-  keyStore: KeyStore;
-  pathResolver?: PathResolver;
-}
-
-type GrantFactory = (deps: GrantDependencies) => GrantHandler;
-
-interface GrantModule {
-  grants: Record<string, GrantFactory>;
-  configSchema?: z.ZodType;
-}
-```
+正式な定義は [`src/grants/types.mts`](src/grants/types.mts) にあります: `GrantHandler`、`GrantContext`、`SessionData`、`AuthenticatedClient`、`GrantHandlerResult`、`GrantDependencies`、`GrantFactory`、`GrantModule`。ここには転記しません: 以前の転記は、v0.5.1 が `SessionData` から `code_client_id` と `granted_scopes` を削除した後（D-1 で identity binding はコードレコード `CodeData.client_id` / `redirect_uri` に移動）もそれらを載せ続け、`GrantDependencies` が #626 で `ComponentMap` のスロットから導出される型になった後も `pathResolver` を載せていました。ハンドラーが信頼してよいもの（`authenticatedClient`。決して `body.client_id` ではない）と、してはならないことは各フィールドに記述されています。ディレクトリの責務マップは [`src/grants/README.md`](src/grants/README.md) です。
 
 #### グラントハンドラーの登録
 

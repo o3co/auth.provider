@@ -77,16 +77,18 @@ grant レジストリに `"authorization_code"` および `"refresh_token"` gran
 function createOAuthRouter(
   express: ExpressLike,
   options: {
-    registry: GrantHandlerResolver;
+    registry: Pick<GrantHandlerResolver, "get">;
     config: AppConfig;
     clientRepository: ClientRepository;
     codeRepository: CodeRepository;
     keyStore: KeyStore;
   }
-): Promise<{ router: Router; registry: GrantHandlerResolver }>;
+): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }>;
 ```
 
-低レベルのファクトリ関数。Express ルーターと設定済み grant レジストリを生成する。通常は `oauthModule` 内部で呼び出される。構築後のレジストリインスタンスに直接アクセスしたい場合に使用する。`/oauth/introspect` のクライアント認証は `createClientAuthMiddleware(clientRepository)` が担う — Passport 依存なし。
+低レベルのファクトリ関数。Express ルーターと設定済み grant レジストリを生成する。通常は `oauthModule` 内部で呼び出される。構築後のレジストリインスタンスに直接アクセスしたい場合に使用する。
+
+`registry` が `Pick<GrantHandlerResolver, "get">` なのは、router が読むのが `get` だけだからである: `/oauth/token` は `grant_type` を引くだけで、`grant_types_supported` は `oauthModule` が boot planner の resolver から導出する (#626)。`GrantHandlerResolver` をそのまま渡せるし、`get` を持つ任意のオブジェクトでもよい。戻り値の `registry` も同じ型に絞られているので、`entries()` が必要な呼び出し元は planner の `grantHandlerResolver` slot を読むこと。`/oauth/introspect` のクライアント認証は `createClientAuthMiddleware(clientRepository)` が担う — Passport 依存なし。
 
 ## 使い方
 

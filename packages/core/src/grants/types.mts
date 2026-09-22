@@ -14,21 +14,8 @@
  * limitations under the License.
  */
 import type { z } from "zod";
-import type { CoreConfig } from "../config/application.schema.mjs";
-import type { KeyStore } from "../keys/KeyStore.mjs";
-import type { PathResolver } from "../modules/types.mjs";
-import type { GrantPolicyHook } from "../policy/types.mjs";
-import type {
-	RefreshTokenFamilyRevocation,
-	RefreshTokenFamilyRotation,
-} from "../refresh-token-family/types.mjs";
+import type { ProviderDeps } from "../modules/manifest/provider.mjs";
 import type { TokenEndpointAuthMethod } from "../repositories/types.mjs";
-import type {
-	SessionFamilyIndex,
-	SessionFederationIndex,
-	SessionRPRegistry,
-	UserSessionStore,
-} from "../user-sessions/types.mjs";
 import type { SenderConstraint } from "./senderConstraint.mjs";
 import type { TokenBinding } from "./tokenBinding.mjs";
 
@@ -236,35 +223,52 @@ export interface GrantHandler {
 	readonly requiresExplicitGrantAllowlist?: boolean;
 }
 
-export interface GrantDependencies {
-	config: CoreConfig & Record<string, unknown>;
-	keyStore: KeyStore;
-	pathResolver?: PathResolver;
-	refreshTokenFamilyRotation?: RefreshTokenFamilyRotation;
-	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
-	grantPolicy?: GrantPolicyHook;
-	userSessionStore?: UserSessionStore;
-	sessionRPRegistry?: SessionRPRegistry;
-	sessionFamilyIndex?: SessionFamilyIndex;
-	sessionFederationIndex?: SessionFederationIndex;
-	/**
-	 * #376: the #296 subject-revocation watermark, consulted by the refresh
-	 * grant at RT redemption as the backstop for a partial #322 cascade
-	 * failure — an RT family the cascade could not revoke must not keep
-	 * minting fresh access tokens for a subject whose credential changed.
-	 * A rotated RT carries a fresh `iat`, so the check only bites RTs minted
-	 * before the credential change: exactly the intended set.
-	 */
-	subjectRevocation?: import("../user-sessions/types.mjs").SubjectRevocation;
-	/**
-	 * Optional structured logger for security-relevant grant audit events
-	 * (RT replay detection, unknown-family policy decisions, legacy-token
-	 * acceptance). Falls back silently when absent so the grant factory
-	 * remains usable from minimal test harnesses; production wires the
-	 * `logger` slot per `ComponentMap.logger` declaration merge.
-	 */
-	logger?: import("../logging/Logger.mjs").Logger;
-}
+/**
+ * The slots a grant may depend on, in `ComponentMap` terms (#626 P2, D4).
+ *
+ * One definition, derived from the DI graph rather than restated beside it:
+ * every entry is a `ComponentMap` slot with that slot's type, `config` and
+ * `keyStore` required, the rest optional. A grant factory takes
+ * `Pick<GrantDependencies, …>` of the slots it reads (plus
+ * `ProviderDeps<…>` for a slot no other grant shares, such as the
+ * authorization grant's repositories), and a module's own
+ * `ProviderDeps<R, O>` has to satisfy that pick at the wiring — so a slot a
+ * grant reads without its module declaring it is a compile error, not a
+ * runtime `undefined`.
+ *
+ * Why these are optional, slot by slot:
+ * - `refreshTokenFamilyRotation` / `refreshTokenFamilyRevocation` — rotation
+ *   persistence and the PB-1 replay revocation (RFC 6819 §5.2.2); a
+ *   deployment without rotation wired has no replay path to reach.
+ * - `grantPolicy` — the CP-18 policy gate; absent means no policy declared.
+ * - `userSessionStore` / `sessionRPRegistry` / `sessionFamilyIndex` /
+ *   `sessionFederationIndex` — session liveness and the four-store cascade;
+ *   a back-channel deployment with no browser sessions wires none.
+ * - `subjectRevocation` — #376: the #296 subject-revocation watermark,
+ *   consulted by the refresh grant at RT redemption as the backstop for a
+ *   partial #322 cascade failure — an RT family the cascade could not
+ *   revoke must not keep minting fresh access tokens for a subject whose
+ *   credential changed. A rotated RT carries a fresh `iat`, so the check
+ *   only bites RTs minted before the credential change: exactly the
+ *   intended set.
+ * - `logger` — structured logger for security-relevant grant audit events
+ *   (RT replay detection, unknown-family policy decisions, legacy-token
+ *   acceptance). Falls back silently when absent so the grant factory
+ *   remains usable from minimal test harnesses; production wires the
+ *   `logger` slot.
+ */
+export type GrantDependencies = ProviderDeps<
+	"config" | "keyStore",
+	| "refreshTokenFamilyRotation"
+	| "refreshTokenFamilyRevocation"
+	| "grantPolicy"
+	| "userSessionStore"
+	| "sessionRPRegistry"
+	| "sessionFamilyIndex"
+	| "sessionFederationIndex"
+	| "subjectRevocation"
+	| "logger"
+>;
 
 /**
  * Factory function type for creating grant handlers.

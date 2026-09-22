@@ -47,7 +47,13 @@ const GRANT_TYPE = "client_credentials";
  * The issued access token has `sub = client.clientId` (RFC 6749 §4.4.2: no
  * end-user) and no refresh token is issued (RFC 6749 §4.4.3).
  */
-export const createClientCredentialsGrant = (deps: GrantDependencies): GrantHandler => {
+/** What the client_credentials grant reads (#626 P2); see `AuthorizationGrantDeps`. */
+export type ClientCredentialsGrantDeps = Pick<
+	GrantDependencies,
+	"config" | "keyStore" | "grantPolicy"
+>;
+
+export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): GrantHandler => {
 	const { config, keyStore } = deps;
 
 	return {

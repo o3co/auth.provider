@@ -18,6 +18,7 @@ import {
 	defineModule,
 	type GrantHandler,
 	type Module,
+	type ProviderDeps,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import { createAuthorizationGrant } from "./grants/authorization.mjs";
@@ -40,6 +41,45 @@ import { createRefreshTokenGrant } from "./grants/refreshToken.mjs";
 function isExplicitlyEnabled(value: unknown): boolean {
 	return value === true || value === "true";
 }
+
+const REQUIRES = ["config", "clientRepository", "codeRepository", "keyStore"] as const;
+const OPTIONAL = [
+	// Both grant factories (createAuthorizationGrant / createRefreshTokenGrant)
+	// read these to back refresh-token rotation persistence and CP-18 grant
+	// policy enforcement. Boot planner only injects keys listed here, so
+	// omitting them silently drops both features at the grant boundary.
+	"refreshTokenFamilyRotation", // A3 §5.2 — replaces legacy refreshTokenStore (#101)
+	// PB-1 (v0.5.1): the refresh grant must call `revokeFamily` on
+	// rotation `replayed` outcome (RFC 6819 §5.2.2). Listed optional so
+	// deployments without rotation wired (no replay path reachable)
+	// remain valid; when rotation IS wired, omitting revocation is
+	// caught at runtime by the fail-closed 503 path in
+	// `refreshToken.mts` rather than silently no-op-ing.
+	"refreshTokenFamilyRevocation",
+	// #376: the #296 subject watermark, consulted at RT redemption as
+	// the backstop for a partial credential-change cascade (#322).
+	"subjectRevocation",
+	// #301: read by the jwt-bearer grant. Optional so a deployment that
+	// never enables that grant is not made to wire one; the grant
+	// factory refuses at composition when it is enabled without one.
+	"assertionVerifier",
+	"userRepository",
+	"grantPolicy",
+	"userSessionStore",
+	"sessionRPRegistry", // Amendment 4 (§1.1.4)
+	"sessionFamilyIndex", // Amendment 4 (§1.1.4)
+	"sessionFederationIndex", // Amendment 4 (§1.1.4)
+	"logger", // D-4 — structured logger; security audit logs (PB-1/CC-2/SF-6)
+] as const;
+
+/**
+ * The deps every contribution of {@link oauthAuthorizationModule} receives:
+ * exactly its `requires` / `optional`, typed (#626 P2). Each grant factory
+ * declares the subset it reads, so the wiring below is checked, not trusted.
+ */
+type Requires = (typeof REQUIRES)[number];
+type Optional = (typeof OPTIONAL)[number];
+export type OAuthAuthorizationModuleDeps = ProviderDeps<Requires, Optional>;
 
 /**
  * Declarative manifest for the authorization_code and refresh_token grants.
@@ -66,14 +106,10 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// the strict opt-in narrowing.
 	const grantsCfg = params.config.oauth.grants as Record<string, { enabled?: unknown }>;
 
-	// Per plan Task 3 line 586: type the local grants record as
-	// `Record<string, (deps: any) => GrantHandler>` and let `defineModule`
-	// infer — the planner accepts the shape. The grant factories
-	// (`createAuthorizationGrant`, `createRefreshTokenGrant`) declare stricter
-	// `GrantDependencies & {...}` deps shapes pre-Phase-9; redesigning their
-	// signatures to consume `ProviderDeps<R, O>` directly is out of scope.
-	// biome-ignore lint/suspicious/noExplicitAny: planner-inferred deps shape; see comment above.
-	const grants: Record<string, (deps: any) => GrantHandler> = {};
+	// Each factory takes `Pick<GrantDependencies, …>` of the slots it reads,
+	// and this module's typed deps satisfy every pick — so a grant reading a
+	// slot this module never declared is a compile error at its wiring below.
+	const grants: Record<string, (deps: OAuthAuthorizationModuleDeps) => GrantHandler> = {};
 	// Per the secure-default opt-in discipline: a grant is registered only
 	// when `enabled` is explicitly truthy (boolean `true` or the string `"true"`
 	// from HOCON env-var substitution — see `isExplicitlyEnabled` above).
@@ -93,7 +129,8 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// than registering one that would accept anything.
 	if (isExplicitlyEnabled(grantsCfg["urn:ietf:params:oauth:grant-type:jwt-bearer"]?.enabled)) {
 		grants[JWT_BEARER_GRANT_TYPE] = (deps) => {
-			if (!deps.userRepository) {
+			const { userRepository, assertionVerifier } = deps;
+			if (!userRepository) {
 				throw new Error(
 					`${JWT_BEARER_GRANT_TYPE} is enabled but no userRepository is wired. ` +
 						"The grant resolves the verified handle through " +
@@ -102,7 +139,7 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 						"at boot.",
 				);
 			}
-			if (!deps.assertionVerifier) {
+			if (!assertionVerifier) {
 				throw new Error(
 					`${JWT_BEARER_GRANT_TYPE} is enabled but no assertionVerifier is wired. ` +
 						"This grant turns a presented assertion into a login, so there is no " +
@@ -111,7 +148,9 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 						"or your own for a platform attestation), or disable the grant.",
 				);
 			}
-			return createJwtBearerGrant(deps);
+			// Both are `optional` here and required by the grant; the checks
+			// above are what narrow them, so they are handed over by name.
+			return createJwtBearerGrant({ ...deps, assertionVerifier, userRepository });
 		};
 	}
 	// Wave 1 §3.5: client_credentials follows the same opt-in semantics.
@@ -132,37 +171,10 @@ export const oauthAuthorizationModule = (params: { config: AppConfig }): Module 
 	// validates these fields via the core schema. Declare a configSchema here
 	// only if a future change adds a read of a `config.<full-section>` key
 	// that lives in `fullSectionsSchema` (e.g. `config.session`, `config.endpoints`).
-	return defineModule({
+	return defineModule<Requires, Optional>({
 		name: "oauth-authorization",
-		requires: ["config", "clientRepository", "codeRepository", "keyStore"],
-		optional: [
-			// Both grant factories (createAuthorizationGrant / createRefreshTokenGrant)
-			// read these to back refresh-token rotation persistence and CP-18 grant
-			// policy enforcement. Boot planner only injects keys listed here, so
-			// omitting them silently drops both features at the grant boundary.
-			"refreshTokenFamilyRotation", // A3 §5.2 — replaces legacy refreshTokenStore (#101)
-			// PB-1 (v0.5.1): the refresh grant must call `revokeFamily` on
-			// rotation `replayed` outcome (RFC 6819 §5.2.2). Listed optional so
-			// deployments without rotation wired (no replay path reachable)
-			// remain valid; when rotation IS wired, omitting revocation is
-			// caught at runtime by the fail-closed 503 path in
-			// `refreshToken.mts` rather than silently no-op-ing.
-			"refreshTokenFamilyRevocation",
-			// #376: the #296 subject watermark, consulted at RT redemption as
-			// the backstop for a partial credential-change cascade (#322).
-			"subjectRevocation",
-			// #301: read by the jwt-bearer grant. Optional so a deployment that
-			// never enables that grant is not made to wire one; the grant
-			// factory refuses at composition when it is enabled without one.
-			"assertionVerifier",
-			"userRepository",
-			"grantPolicy",
-			"userSessionStore",
-			"sessionRPRegistry", // Amendment 4 (§1.1.4)
-			"sessionFamilyIndex", // Amendment 4 (§1.1.4)
-			"sessionFederationIndex", // Amendment 4 (§1.1.4)
-			"logger", // D-4 — structured logger; security audit logs (PB-1/CC-2/SF-6)
-		],
+		requires: REQUIRES,
+		optional: OPTIONAL,
 		// #406: `subjectRevocation` is optional to wire, not optional to decide.
 		// This module reads the slot on its own — a composition that mounts it
 		// without `oauthModule` (the grants alone, no routes) would otherwise

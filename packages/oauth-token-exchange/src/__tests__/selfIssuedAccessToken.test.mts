@@ -29,6 +29,8 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 
 	it("throws when issuer is missing from validator options", () => {
 		expect(() =>
+			// @ts-expect-error — `issuer` is omitted on purpose: the runtime refusal
+			// for a caller the types cannot reach is what this asserts.
 			createSelfIssuedAccessTokenValidator({
 				keyStore,
 				refreshTokenFamilyRevocation: makeFamilyRevocation(),

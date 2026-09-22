@@ -15,7 +15,6 @@
  */
 
 import type {
-	ClientRepository,
 	GrantContext,
 	GrantDependencies,
 	GrantHandler,
@@ -23,6 +22,7 @@ import type {
 	GrantPolicyContext,
 	GrantPolicyDecision,
 	GrantPolicyRequest,
+	ProviderDeps,
 	PublicClient,
 } from "@o3co/auth-provider-core";
 import {
@@ -53,9 +53,20 @@ export interface ExchangeTokenValidatorResolver {
 	get(tokenType: string): ExchangeTokenValidator | undefined;
 }
 
-export interface TokenExchangeDependencies extends GrantDependencies {
-	tokenExchangeValidatorResolver: ExchangeTokenValidatorResolver;
-	clientRepository: ClientRepository;
+/**
+ * What the exchange reads (#626 P2): the shared grant slots it uses, the
+ * client repository, and the validator resolver narrowed to this package's
+ * concrete validator type (see {@link ExchangeTokenValidatorResolver}). The
+ * module's `ProviderDeps<R, O>` satisfies every slot but that resolver,
+ * which it bridges until P1 makes core's own resolver concrete.
+ */
+export interface TokenExchangeDependencies
+	extends Pick<
+			GrantDependencies,
+			"config" | "keyStore" | "logger" | "grantPolicy" | "refreshTokenFamilyRevocation"
+		>,
+		ProviderDeps<"clientRepository"> {
+	readonly tokenExchangeValidatorResolver: ExchangeTokenValidatorResolver;
 }
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {

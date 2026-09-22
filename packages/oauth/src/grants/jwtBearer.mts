@@ -20,6 +20,7 @@ import type {
 	GrantDependencies,
 	GrantHandler,
 	GrantHandlerResult,
+	ProviderDeps,
 	UserRepository,
 } from "@o3co/auth-provider-core";
 import {
@@ -142,12 +143,19 @@ export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-beare
  *   common → `invalid_grant`, logged as `jwt_bearer_issuer_audience_mismatch`
  *   (#525): two registrations the operator wrote disagree.
  */
-export const createJwtBearerGrant = (
-	deps: GrantDependencies & {
-		readonly assertionVerifier: AssertionVerifier;
-		readonly userRepository: UserRepository;
-	},
-): GrantHandler => {
+/**
+ * What the jwt-bearer grant reads (#626 P2); see `AuthorizationGrantDeps`.
+ * The verifier and the repository are required here and `optional` on the
+ * module, which checks for both before handing over — an enabled grant with
+ * either missing is refused at composition, not at the first request.
+ */
+export type JwtBearerGrantDeps = Pick<
+	GrantDependencies,
+	"config" | "keyStore" | "grantPolicy" | "logger"
+> &
+	ProviderDeps<"assertionVerifier" | "userRepository">;
+
+export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => {
 	const { config, keyStore, assertionVerifier, userRepository } = deps;
 	// #297: deployment config, resolved once at construction like the session
 	// grant does — `resolveOAuthOptions` owns the defensive read.
