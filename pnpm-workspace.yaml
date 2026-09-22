@@ -2,6 +2,7 @@ packages:
   - "packages/*"
   - "templates/*"
   - "create-app"
+  - "tools/*"
 
 # pnpm 10.29 reads these from here, not from package.json `pnpm.*` (#360 —
 # the old location was silently ignored, so everything below was inert from

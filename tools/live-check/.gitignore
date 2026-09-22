@@ -1,0 +1,4 @@
+# Generated at `live-check.sh start`: keys, the session secret, pids, logs.
+.state/
+# Filled-in profiles carry an IdP client secret; only the *.env.example ship.
+profiles/*.env
