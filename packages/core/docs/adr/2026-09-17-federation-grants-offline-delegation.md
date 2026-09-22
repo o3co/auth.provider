@@ -2412,6 +2412,24 @@ ordinary `.token.denied`. A refused or unconfirmed stamp write uses the
 existing refresh-failure outcomes, `mark_lost` and `mark_not_written`. No
 upstream message and no credential is included.
 
+**Amended in #618: what the audit criterion means.** #593 asks that creation,
+use, refresh, reauthorization, denial and revocation be audited, with a
+correlation ID. The provider's side of that is the event: every one of those
+operations emits its event, on the routes and on the library path alike, and
+every event carries a non-empty correlation ID — the request's on the routes,
+the caller's on the library path, and one generated for the call when the
+caller gives none, so that a pass over a subject's grants reads as one
+operation in the sink. Recording and delivery are the deployment's. A sink is
+declared absent by the product-wide policy, `audit.sink.type = "none"`
+(`AUDIT_SINK_ABSENCE_POLICY`), which federation grants follow like token
+issuance and login do: an operator who declares it has opted the whole
+provider out of audit, and the module refuses to boot without either a sink
+or that declaration. Grants are not carved out of the policy — the standalone
+registers no `"none"` builder, so a template deployment has a sink or does
+not boot — and a library composition that declared it has chosen. A Store
+that drives a revocation without passing `audit` records nothing of it, by
+the same choice; what it passes gets the correlation ID above.
+
 ### D19 — Entra: on-behalf-of is not implemented, and consent accumulates
 
 An OBO assertion must be an access token issued for the middle-tier API that
@@ -2485,7 +2503,7 @@ accumulation this decision exists to avoid.
 | 6 | concurrent refresh, lock expiry, restart, persistence failure | D2, D12 | two replicas on one testcontainer; lock TTL forced to expire; guarded-write loser; injected persist failure; refresh response without `refresh_token`; refresh straddling `expiresAt`. #616: an interaction stamp that could not be written, that lost, that landed under a renewal, that was overtaken by a replacement whose token does not serve; a late one against an admitted refresh's outage and against its success; the lease kept on a timed-out write (`retrieve.refresh.test.mts`; the store contract, both copies) |
 | 7 | duplicate, stale, wrong-account callbacks cannot replace or broaden | D5, D6, D7 | replayed callback; superseded intent; expired intent; different upstream `sub`; upstream grants more scopes than consented. Broadening through refresh: G1 consented for one scope, G2 later for two on the same connection, G1's refresh returns both — G1's client gets `upstream_token_ineligible`, never the token, and G2's client is served by the same answer (`retrieve.refresh.test.mts`, "row 7: G1, G2"). Added for #611: an upstream account the Store places with another user is `identity_conflict`; one it cannot place — a dedicated registration's pairwise `sub`, with the login's link under another registration — is `identity_unverifiable`, and the bundled repository beside a connection is refused at boot; a directory Store keyed by `(tid, oid)` finds Bob behind a `sub` no login saw (`identity_conflict`), and a callback missing a named claim refuses without asking it. #616: a grant starved of scope renewed for the wider set on the same id, the markers cleared only by the activation, a refused renewal leaving them; the other four ineligibilities refused before an intent is lodged (`lodge.test.mts`, `lodgeRoutes.test.mts`, `browserRoutes.test.mts`, `acquisition.acceptance.test.mts`) |
 | 8 | session-expiry / logout / subject-revocation behaviour; session-bound endpoint preserved | D13, D14 | slice 5, its proof completed after it: `POST /session/logout` and `POST /oauth/logout` driven on the standalone with a grant seeded beside a live session — the session's records go; the grant, its credential and `/token` stay (`templates/standalone/src/__tests__/federation-grants-survive-logout.test.mts`); subject revocation ends them; existing `federationToken` suite untouched and green. The policy-on cases are deferred with D14 |
-| 9 | no refresh token or long-lived secret in responses, audit or logs | D18 | a sentinel secret is grepped for in every response body, audit event and captured log line; #616's denials and stamps carry an allow-listed code and nothing an upstream said |
+| 9 | no refresh token or long-lived secret in responses, audit or logs | D18 | a sentinel secret is grepped for in every response body, audit event and captured log line; #616's denials and stamps carry an allow-listed code and nothing an upstream said; (#618) every event carries a non-empty correlation ID — the caller's, or one generated per call (`revoke.test.mts`, `revokeAllForSubject.grants.test.mts`, `subjectRevocationService.test.mts`); a sink declared absent records nothing, by the product-wide policy |
 | — | the storage guarantees D1 and D16 claim | D1, D3, D4, D16 | a rewritten `clientId`, `expiresAt` or `authorizationRevision` reads as `credential_unreadable`; an unknown key ID answers 503, keeps the record, and restoring the key restores the grant; an identity change reads as `connection_identity_changed` and reverting it restores the grant; activation beyond the ceiling is refused |
 | 10 | provider-specific `offline_access` documentation | D19 | documentation review; #616: the guide's refusal passage and its Entra passage against the tested recovery paths |
 

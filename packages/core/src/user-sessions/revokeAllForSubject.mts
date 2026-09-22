@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { randomUUID } from "node:crypto";
 import type { FederationGrantAuditEvent } from "../federation-grants/retrieve.mjs";
 import {
 	listFederationGrantsForSubject,
@@ -251,7 +252,9 @@ export async function revokeAllForSubject(
 			store: grantStore,
 			now: () => new Date(now()),
 			audit: opts.federationGrantAudit,
-			correlationId: opts.correlationId,
+			// One ID for the pass, so that its events read as one operation
+			// (#618); the caller's own when it has one.
+			correlationId: opts.correlationId ?? randomUUID(),
 		};
 		let grants: readonly FederationGrant[] = [];
 		try {

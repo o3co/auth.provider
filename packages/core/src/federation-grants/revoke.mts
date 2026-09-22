@@ -42,6 +42,7 @@
  * projects the fields its page needs.
  */
 
+import { randomUUID } from "node:crypto";
 import { federationGrantAuditMetadata } from "./auditMetadata.mjs";
 import type { FederationGrantAuditEvent } from "./retrieve.mjs";
 import type { FederationGrantStore, FederationGrantWrite } from "./store.mjs";
@@ -57,7 +58,12 @@ export interface FederationGrantAdministrationDeps {
 	 * worse than not reporting at all.
 	 */
 	audit?(event: FederationGrantAuditEvent): void | Promise<void>;
-	/** Carried into the audit event when the caller has one to correlate by. */
+	/**
+	 * What correlates this call's events with the caller's own record of it —
+	 * a request ID, a job ID. Absent, the events get one of their own (#618):
+	 * a correlation ID that is empty correlates nothing, and an operator
+	 * reading the sink still has to tell one pass from another.
+	 */
 	readonly correlationId?: string;
 }
 
@@ -112,7 +118,7 @@ async function tell(
 	try {
 		await sink({
 			type: "federation.grant.revoked",
-			correlationId: deps.correlationId ?? "",
+			correlationId: deps.correlationId ?? randomUUID(),
 			grantId: grant.id,
 			clientId: grant.clientId,
 			subject: grant.subject,

@@ -58,6 +58,8 @@ const sessionsOnlyUnaware = (): SubjectRevocation => {
 	};
 };
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 describe("createSubjectRevocationService", () => {
 	describe("what it refuses to be built as", () => {
 		it("refuses to allow keeping on an adapter that cannot stamp sessions alone", () => {
@@ -282,6 +284,60 @@ describe("createSubjectRevocationService", () => {
 			expect(events).toEqual([
 				expect.objectContaining({ grantId: "g-pending", outcome: "subject" }),
 			]);
+		});
+
+		it("gives each call one correlation ID of its own when the service was composed without one (#618)", async () => {
+			const h = harness();
+			await h.seed();
+			await h.seed({ id: "g-2" });
+			const events: { correlationId: string }[] = [];
+			const service = createSubjectRevocationService(
+				keeping({
+					federationGrantStore: h.store,
+					federationGrantAudit: (event: { correlationId: string }) => {
+						events.push(event);
+					},
+				}),
+			);
+
+			await service.revokeAllForSubject({ subject: "u-1" });
+			expect(events).toHaveLength(2);
+			const ids = new Set(events.map((event) => event.correlationId));
+			expect(ids.size).toBe(1);
+			for (const id of ids) expect(id).toMatch(UUID);
+		});
+
+		it("gives a keep pass one correlation ID of its own too: what it ends — the pending grants — reads as one operation (#618)", async () => {
+			const h = harness();
+			for (const id of ["g-p1", "g-p2"]) {
+				await h.store.createPending({
+					id,
+					subject: "u-1",
+					clientId: "agent",
+					connection: "okta-calendar",
+					intent: { handle: `h-${id}`, expiresAt: new Date(now().getTime() + 10 * MIN) },
+					now: now(),
+				});
+			}
+			const events: { correlationId: string }[] = [];
+			const service = createSubjectRevocationService(
+				keeping({
+					federationGrantStore: h.store,
+					federationGrantAudit: (event: { correlationId: string }) => {
+						events.push(event);
+					},
+				}),
+			);
+
+			const result = await service.revokeAllForSubject({
+				subject: "u-1",
+				federationGrants: "keep",
+			});
+			expect([...result.grantsRevoked].sort()).toEqual(["g-p1", "g-p2"]);
+			expect(events).toHaveLength(2);
+			const ids = new Set(events.map((event) => event.correlationId));
+			expect(ids.size).toBe(1);
+			for (const id of ids) expect(id).toMatch(UUID);
 		});
 
 		it("writes nothing to a grant that is already over", async () => {

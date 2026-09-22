@@ -37,6 +37,7 @@
  * that matters operationally.
  */
 
+import { randomUUID } from "node:crypto";
 import type { FederationGrantAuditEvent } from "../federation-grants/retrieve.mjs";
 import { revokeFederationGrant } from "../federation-grants/revoke.mjs";
 import type { FederationGrantStore } from "../federation-grants/store.mjs";
@@ -200,6 +201,9 @@ export function createSubjectRevocationService(
 					? { requested, applied }
 					: { requested, applied, reason: "keep_not_allowed" };
 
+			// One correlation ID per call, on either path (#618): the service's
+			// own, when it was composed with one, and otherwise this call's.
+			const correlationId = deps.correlationId ?? randomUUID();
 			if (applied === "revoke") {
 				const result = await revokeAllForSubject({
 					subject: request.subject,
@@ -209,7 +213,7 @@ export function createSubjectRevocationService(
 					subjectRevocation: revocation,
 					federationGrantStore: deps.federationGrantStore,
 					federationGrantAudit: deps.federationGrantAudit,
-					correlationId: deps.correlationId,
+					correlationId,
 					logger: deps.logger,
 					now,
 				});
@@ -224,6 +228,7 @@ export function createSubjectRevocationService(
 					now,
 					request.subject,
 					since,
+					correlationId,
 				)),
 				federationGrants,
 			};
@@ -248,6 +253,7 @@ async function keep(
 	now: () => number,
 	subject: string,
 	since: Date | undefined,
+	correlationId: string,
 ): Promise<Omit<SubjectRevocationReport, "federationGrants">> {
 	const failures: RevokeAllForSubjectFailure[] = [];
 	const unavailable: RevokeAllForSubjectCapability[] = [];
@@ -292,7 +298,7 @@ async function keep(
 			store,
 			now: () => new Date(now()),
 			audit: deps.federationGrantAudit,
-			correlationId: deps.correlationId,
+			correlationId,
 		};
 		let grants: Awaited<ReturnType<FederationGrantStore["listBySubject"]>> = [];
 		try {
