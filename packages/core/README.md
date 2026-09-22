@@ -62,7 +62,7 @@ The authoritative definitions are in [`src/grants/types.mts`](src/grants/types.m
 
 Grant handlers are wired into the boot planner via `contributes.grants` on a module's `defineModule` manifest (see A2-γ §3.3). The boot planner instantiates each `GrantFactory`, registers the resulting handler, and (after `addModule` for all modules) calls `freeze()` so post-boot mutation throws loudly.
 
-Consumer code does NOT need to import or instantiate any registry class. Cleanup of grant handlers runs through the unified `handle.dispose()` returned by `createApp` — `AppHandle.dispose()` runs per-component `lifecycle[K].cleanup` callbacks in reverse-topological order per A2-β §8.1.
+Consumer code does NOT need to import or instantiate any registry class. A `GrantHandler.cleanup?()` is not called by `handle.dispose()`: `AppHandle.dispose()` runs each provided component's `lifecycle[K].cleanup` in reverse-topological order (A2-β §8.1), then `Symbol.asyncDispose` on module-provided values that declared none, then the `LifecycleRegistrar` drain — and never touches the registry (`GrantRegistry.cleanup()` has no caller). A module that holds a resource on a handler's behalf releases it through its own `lifecycle[K].cleanup`; see [`src/grants/README.md`](src/grants/README.md).
 
 > **Removed**: the `GrantRegistry` and `GrantRegistryError` classes (deprecated as public re-exports in v0.5.1 per AS-8) are no longer exported from `@o3co/auth-provider-core`. They remain as internal implementation detail of the boot planner. Existing consumers of the v0.4.x `new GrantRegistry()` pattern should migrate to module-based `contributes.grants` declarations. See CHANGELOG for the release that performed this removal.
 
@@ -179,6 +179,9 @@ const store = await createRemoteSigningKeyStore({
     },
   },
 });
+```
+
+```typescript
 function createKeyStoreFactory(): KeyStoreFactory;
 function registerBuiltinKeyStores(factory: KeyStoreFactory): void;
 ```
@@ -233,7 +236,7 @@ Repository interfaces define the data access contract. Built-in in-memory implem
 
 #### Interfaces and types
 
-The ports are [`src/repositories/ClientRepository.mts`](src/repositories/ClientRepository.mts) (`findById`, `authenticate`; `PublicClient` is `Client` without `clientSecret`), [`src/repositories/UserRepository.mts`](src/repositories/UserRepository.mts) (`authenticate`, `authenticateByToken`, and the optional federated-identity link and lookup methods of #482 / #611) and [`src/repositories/CodeRepository.mts`](src/repositories/CodeRepository.mts) (`createCode`, `findByCode`, `consumeByCode` — the atomic single-use gate — and `removeByCode`). The records — `Client`, `User`, `CodeData`, `Code`, `TokenEndpointAuthMethod` — are in [`src/repositories/types.mts`](src/repositories/types.mts), where each field's semantics are documented once. Since v0.5.1 `createCode` requires `client_id` and `redirect_uri`, and `Client.tokenEndpointAuthMethod` is required. The directory's responsibility map is [`src/repositories/README.md`](src/repositories/README.md).
+The ports are [`src/repositories/ClientRepository.mts`](src/repositories/ClientRepository.mts) (`findById`, `authenticate`; `PublicClient` is `Client` without `clientSecret`), [`src/repositories/UserRepository.mts`](src/repositories/UserRepository.mts) (`authenticate`, `authenticateByToken`, and the optional federated-identity link and lookup methods of #482 / #611) and [`src/repositories/CodeRepository.mts`](src/repositories/CodeRepository.mts) (`createCode`, `findByCode`, `consumeByCode` — the atomic single-use gate — and `removeByCode`). The records — `Client`, `User`, `CodeData`, `Code`, `TokenEndpointAuthMethod` — are in [`src/repositories/types.mts`](src/repositories/types.mts), where a field's semantics are documented once, on the field — except the three logout URI fields, which carry no doc there: `postLogoutRedirectUris` takes the registered-redirect-URI grammar of `allowedRedirectUris`, custom schemes included (#498), while `backchannelLogoutUri` and `frontchannelLogoutUri` are http/https only; that note sits beside the schema in [`src/repositories/InMemoryClientRepository.mts`](src/repositories/InMemoryClientRepository.mts). Since v0.5.1 `createCode` requires `client_id` and `redirect_uri`, and `Client.tokenEndpointAuthMethod` is required. The directory's responsibility map is [`src/repositories/README.md`](src/repositories/README.md).
 
 #### Built-in implementations
 
@@ -268,49 +271,13 @@ function loadYamlMap<T extends z.ZodTypeAny>(
 
 #### Adapter factory primitives
 
-```typescript
-interface BuilderContext {
-  // Every field is optional and additions stay additive-only.
-  lifecycle?: LifecycleRegistrar; // cleanups drained by AppHandle.dispose()
-  readiness?: ReadinessRegistrar; // a probe for a connection the builder opened
-  logger?: Logger;
-}
-
-type AdapterBuilder<T> = (
-  config: Record<string, unknown>,
-  ctx: BuilderContext,
-) => Promise<T> | T;
-
-interface AdapterFactory<T> {
-  register(type: string, builder: AdapterBuilder<T>): void;
-  replace(type: string, builder: AdapterBuilder<T>): void;
-  create(config: { type: string; [key: string]: unknown }): Promise<T>;
-  registeredTypes(): string[];
-}
-
-function createAdapterFactory<T>(
-  kind: string,
-  ctx?: BuilderContext,
-): AdapterFactory<T>;
-
-class AdapterFactoryError extends Error {
-  readonly kind: string;
-  readonly type: string;
-  readonly registered: readonly string[];
-}
-
-function createRepositoryFactories(ctx?: BuilderContext): {
-  clientFactory: AdapterFactory<ClientRepository>;
-  userFactory: AdapterFactory<UserRepository>;
-  codeFactory: AdapterFactory<CodeRepository>;
-};
-```
+`createAdapterFactory<T>(kind, ctx?)`, `AdapterFactory<T>` (`register`, `replace`, `create`, `registeredTypes`), `AdapterBuilder<T>` (a function of the config section and a read-only `BuilderContext`), `BuilderContext` (`lifecycle?`, `readiness?`, `logger?` — every field optional, additions additive-only), `LifecycleRegistrar` and `AdapterFactoryError` are defined in [`src/adapters/AdapterFactory.mts`](src/adapters/AdapterFactory.mts). `createRepositoryFactories(ctx?)` in [`src/repositories/RepositoryFactory.mts`](src/repositories/RepositoryFactory.mts) returns the client, user and code factories.
 
 Key contract properties:
 
 - `create()` always returns `Promise<T>`, even for synchronous builders.
 - `register()` throws if a `type` is registered twice (silent-override prevention); `replace()` is the explicit override and throws for a `type` that is not registered.
-- `create()` throws `AdapterFactoryError` when `type` is not registered; the error carries the `kind`, `type`, and `registered` list.
+- `create()` throws `AdapterFactoryError` when `type` is not registered; the error carries a `reason` (`unknown`, `duplicate` or `unknown-replace`), the `kind`, the `type`, and the `registered` list.
 - `BuilderContext` is shared by reference across builder invocations for a given factory. Treat it as read-only from builders.
 
 `createRepositoryFactories` returns three factories pre-registered with the built-in `yaml`/`static` (client, user) and `memory` (code) types. Use `registerBuiltinAdapters` from `@o3co/auth-provider-foundation` to add the `http` user-authentication adapter, or register your own types to support other backends. For Redis-backed code/store adapters, see `@o3co/auth-provider-redis`.
@@ -348,9 +315,9 @@ const myModule = defineModule({
 
 `createApp` validates the manifests, composes and parses the configuration, materialises the component graph, applies every contribution, freezes the world and mounts the routes. The returned `router` is ready to mount (`app.use(handle.router)`) or to serve through `handle.listen(port)`; `handle.dispose()` runs every cleanup in reverse-topological order and rejects with an `AggregateError` carrying every failure. There is no separate `init()` step.
 
-What core mounts on its own: `corsMw` first (when `cors.allowedOrigins` is set), the protected-resource sender-constraint check, the single `tokenBindingMw` composed from the contributed mechanisms, the `grantMiddleware` contributions ahead of grant dispatch, and the OIDC discovery route when an issuer is configured and a module declares `providerRoot`. Everything else — JWKS (`jwksModule`), liveness and readiness (`createHealthcheckRouter`, `createReadinessRouter`), the OAuth and session routes — is a module or a router the composition root installs.
+What core mounts on its own, in this order: `corsMw` when `cors.allowedOrigins` is non-empty, the single `tokenBindingMw` composed from the contributed mechanisms when at least one was contributed, the protected-resource sender-constraint check (always), the `grantMiddleware` contributions ahead of grant dispatch, and the OIDC discovery route when an issuer is configured and a module declares `providerRoot`. Everything else — JWKS (`jwksModule`), liveness and readiness (`createHealthcheckRouter`, `createReadinessRouter`), the OAuth and session routes — is a module or a router the composition root installs.
 
-`express` is an optional peer dependency: `createApp` resolves it lazily and needs it only to build the router.
+`express` is an optional peer dependency: `createApp` loads it lazily (`await import("express")`, with `createRequire` as the fallback) to build the router, and `handle.listen()` also needs the `express()` factory to wrap the router in an app.
 
 ## CORS
 
@@ -512,7 +479,7 @@ Five extension points introduced in v0.4.0.
 - `MfaProvider`, optional `SupportsEnrollment` / `SupportsRevocation` capabilities
 - Factory: `createMfaProviderFactory()`, type guards `supportsEnrollment()` / `supportsRevocation()`
 - Flow: `/oauth/authorize` + `/auth/federation/callback` consult `MfaCoordinator.listEnrolled(userId)`; on MFA required, transaction saved via `MfaTransactionStore`, user posts to `POST /auth/mfa/verify { transaction_id, proof }`, core dispatches via `providerKind`
-- No built-in providers in v0.4.0 — TOTP / WebAuthn / backup codes ship in later spec
+- No factor is bundled in core, and none of the TOTP / backup-code factors the v0.4.0 text anticipated exists in this repository; `@o3co/auth-provider-webauthn` ships passkeys as a grant (`contributes.grants`), not as an `mfaFactors` contribution
 
 #### Audit
 
@@ -523,9 +490,8 @@ Five extension points introduced in v0.4.0.
 #### Rate limiter
 
 - `RateLimiter.check(key, ctx)` atomic check + increment
-- Factory: `createRateLimiterFactory()`, built-in `"memory"` and `"redis"` via `registerBuiltinRateLimiters()`
+- Factory: `createRateLimiterFactory()`; `registerBuiltinRateLimiters()` registers `"memory"` only. The `"redis"` backend is `@o3co/auth-provider-redis` (`redisRateLimiterBuilder`, or the declarative `redisRateLimiterModule`); `ratelimit/__tests__/factory.test.mts` asserts it is not registered here
 - 429 + `Retry-After` emitted by core on denial
-- The built-in `"redis"` limiter requires `config.client` matching `{ incr(key): Promise<number>; expire(key, seconds): Promise<number> }`. Core does not depend on the `redis` package and does not create its own client (`RateLimiter` has no disposal hook — lifecycle stays with the consumer). Any redis-compatible client satisfying that shape works.
 
 #### RefreshTokenStore (RFC 6819 §5.2.2.3 replay detection)
 
@@ -539,7 +505,7 @@ Five extension points introduced in v0.4.0.
 - `/oauth/authorize` evaluates once; `/oauth/token` re-uses `grantedScope` / `grantedAudience` persisted on the Code record (no re-evaluation for `authorization_code`)
 - Other grants (refresh / client_credentials / token-exchange) evaluate at the token endpoint
 
-All five adapters are optional — absence = no-op default.
+All five adapters are optional. The audit sink carries an absence policy (`AUDIT_SINK_ABSENCE_POLICY`): when nothing fills the slot, the config must declare it absent (`audit.sink.type = "none"`) or boot refuses. The other four are simply off when absent.
 
 ### Token-binding mechanisms (Wave 2)
 
@@ -551,7 +517,7 @@ for the full design rationale.
 
 #### Public types
 
-- `TokenBinding` — `{ readonly kind: string; readonly confirmation: Confirmation }`. The cross-cutting binding shape; `kind` is open so downstream mechanisms can extend additively.
+- `TokenBinding` ([`src/grants/tokenBinding.mts`](src/grants/tokenBinding.mts)) — the cross-cutting binding shape: a `kind`, the `confirmation`, and since #530 the optional `responseHeaders` a mechanism asks the response to carry (`DPoP-Nonce`). `kind` is open so downstream mechanisms can extend additively.
 - `Confirmation` — narrow union `{ readonly jkt: string } | { readonly "x5t#S256": string }`. RFC 7800 cnf claim payload; adding a new variant is a core semver-minor change.
 - `TokenBindingMechanism` — `{ kind, intentExplicit, extract(req) }`. The verb-side abstraction; `intentExplicit: true` for header-driven mechanisms (DPoP), `false` for ambient ones (mTLS).
 - `TokenBindingMechanismFactory<Deps>` — `(deps) => TokenBindingMechanism | null`. The contribution-slot entry shape; return `null` when the module is disabled by config (secure-default opt-in).
@@ -583,7 +549,7 @@ Two optional component slots for federation + OIDC support, provided by a module
 - `userSessionStore`: sid-keyed session metadata (auth_time, active RPs, family IDs, OIDC claims). Built-in adapters: `memory`, `redis`.
 - `federationTokenStore`: `(sid, federationName)`-keyed upstream IdP tokens. Built-in adapters: `memory`, `redis` (with mandatory AES-256-GCM encryption of refresh_token; `allow-plaintext` is opt-in and emits a warning).
 
-Both stores are consumed by upcoming TODO-F-3 (cascading revocation), F-4 (id_token + /userinfo), F-5 (logout), and F-6 (/oauth/federation/:name/token). This plan (F-1) only adds the plumbing. See the exported type signatures in `@o3co/auth-provider-core` (`UserSessionStore`, `FederationTokenStore`) for the full interface; the redis adapter's encryption contract is documented inline at its construction site.
+Both stores are consumed by cascading revocation (F-3), id_token + `/userinfo` (F-4), logout (F-5) and `POST /oauth/federation/:name/token` (F-6) in `@o3co/auth-provider-oauth`. See the exported type signatures in `@o3co/auth-provider-core` (`UserSessionStore`, `FederationTokenStore`) for the full interface; the redis adapter's encryption contract is documented inline at its construction site.
 
 **F-3 consumers activated.** `CodeData` now carries two optional fields wired by the login paths:
 
@@ -694,11 +660,11 @@ The structural, pino-compatible logger in [`src/logging/Logger.mts`](src/logging
 
 Low-level building blocks used by `POST /oauth/federation/:name/token` in `@o3co/auth-provider-oauth`.
 
-The lock primitives below (`createInProcessLock`, `createRedisLock`) are **internal implementation details** of the built-in adapters and are not exported from `@o3co/auth-provider-core`'s public entrypoint. Custom stores that need locking should expose the public `SupportsLock` capability rather than depending on these internal helpers.
+The lock primitives below are **internal implementation details** of the built-in adapters: `createInProcessLock` is core's (`src/federation-tokens/lock/memory.mts`) and is not exported from the public entrypoint; `createRedisLock` is `@o3co/auth-provider-redis`'s (`src/internal/lock.mts`), not core's. Custom stores that need locking should expose the public `SupportsLock` capability rather than depending on these internal helpers.
 
 - `SupportsLock` — optional capability on `FederationTokenStore` for per-`(sid, federationName)` advisory locks. Used to prevent concurrent-refresh thundering herds. Built-in memory and redis adapters both implement this capability. Consumers detect it via the `supportsLock(store)` type guard.
 - `createInProcessLock()` — internal in-memory lock implementation used by the built-in memory adapter. Not exported from `@o3co/auth-provider-core`'s public entrypoint.
-- `createRedisLock({ client, keyPrefix })` — internal redis-backed lock implementation used by the built-in redis adapter. Not exported from the public entrypoint. Custom stores that need locking should expose the public `SupportsLock` capability rather than depending on this internal helper.
+- `createRedisLock({ client, keyPrefix })` — internal redis-backed lock implementation in `@o3co/auth-provider-redis`, used by that package's federation token store. Not exported from core. Custom stores that need locking should expose the public `SupportsLock` capability rather than depending on this internal helper.
 - `Client.allowedAzpForFederationToken` — opt-in flag on the `Client` interface; default `false`. Clients that consume `POST /oauth/federation/:name/token` must set this to `true`.
 
 ## See Also

@@ -23,8 +23,8 @@ It decides nothing at runtime. `defineModule` returns its argument unchanged; ev
 
 ## Dependencies
 
-- Imports, all type-only: `../../audit/types`, `../../mfa/types`, `../../policy/types`, `../../grants/types` (the four substituted contribution value types), `../../discovery/types`, `../../middleware/tokenBinding` (the value types of `discoveryMetadata` and `tokenBindingMechanisms`), `express`, `zod`. Nothing from `boot/` and no implementation.
-- Imported by every stage in `boot/`, by every bundled `…Module` in core (`../../user-sessions/modules/memory.mts`, `../../access-token-denylist/module.mts`, …), by `../../discovery/planRoute.mts`, `../../policy/types.mts`, `../../device-authorization/types.mts`, and by every downstream package that authors a manifest.
+- Imports, all type-only: `../../audit/types`, `../../mfa/types`, `../../policy/types`, `../../grants/types` (the four substituted contribution value types), `../../discovery/types` (the `discoveryMetadata` value type), `../../middleware/tokenBinding` (the `tokenBindingMechanisms` value type), `express`, `zod`. Nothing from `boot/` and no implementation.
+- Imported by every stage in `boot/`, by every bundled `…Module` in core (`../../user-sessions/modules/memory.mts`, `../../access-token-denylist/module.mts`, …), by `../../discovery/planRoute.mts`, `../../device-authorization/types.mts` (`AbsencePolicy`), and by every downstream package that authors a manifest.
 - Direction: `boot` → `manifest`, never the reverse. This directory must not import `boot/`, an adapter package, or `testing/`.
 
 ## Invariants
@@ -35,7 +35,7 @@ Type-level, checked by the TypeScript checker under vitest's typecheck mode (`vi
 - `ComponentMap` carries none of the v0.4.x `*Base` legacy slots — [`component-map.test.mts`](./__tests__/component-map.test.mts), [`legacy-slots-absent.test.mts`](./__tests__/legacy-slots-absent.test.mts).
 - `Module` is `ModuleSpec<ComponentKey, ComponentKey>`, so any authored manifest is assignable; `ModuleSpec` has ten readonly fields — [`module-spec.test.mts`](./__tests__/module-spec.test.mts).
 - `ProviderDeps` derives the required + optional shape and strips `| undefined` from required slots — [`provider.test.mts`](./__tests__/provider.test.mts).
-- `defineModule` infers literal `requires` / `optional` without `as const` — [`define-module.test.mts`](./__tests__/define-module.test.mts).
+- The `const` generic inference of literal `requires` / `optional` without `as const` is proven on a local mirror (`defineLocalModule`), and the real `defineModule`'s signature by a compile smoke check — [`define-module.test.mts`](./__tests__/define-module.test.mts).
 - `ContributesMap` has the seven base kinds plus `grantMiddleware`, `tokenBindingMechanisms` and `discoveryMetadata`; list-shaped kinds are readonly arrays, name-keyed kinds readonly records — [`contributes-map.test.mts`](./__tests__/contributes-map.test.mts).
 - `RouteContribution` / `RouteAdvertisement` / `HttpMethod` — [`route-contribution.test.mts`](./__tests__/route-contribution.test.mts), [`route-contribution.types.test.mts`](./__tests__/route-contribution.types.test.mts); `ComponentLifecycle` — [`lifecycle.types.test.mts`](./__tests__/lifecycle.types.test.mts).
 - The two deferred types are still `unknown` — pinned in [`../../__tests__/contributes-map-substitution.test.mts`](../../__tests__/contributes-map-substitution.test.mts) (lines 74 and 79) so that a substitution is a deliberate change, not a drift.

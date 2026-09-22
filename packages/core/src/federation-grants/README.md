@@ -47,7 +47,7 @@ State ownership: `FederationGrantStore` holds the record, the sealed credential 
 - Refusal is a typed denial (`FederationGrantDenial`: `grant_revoked`, `reauthorization_required`, …); failure is `temporarily_unavailable` with a reason (`upstream`, `storage`, `lock_timeout`, `concurrent_update`, `key_unavailable`). Nothing is destroyed because it could not be read (D16); a boundary that cannot be read is an outage answered 503, never a status.
 - Deadlines: a retrieval has a soft deadline (the caller is answered; the late result is still persisted) and a hard one (the upstream call is aborted, the lock released); every deadline counts from when the store took the lock. An acquisition has one deadline, the intent's, ten minutes from lodging.
 - Boot-time refusals: `requireFederationGrantSubjectRevocation` refuses no boundary at all, a single-boundary adapter, and durable grants beside an in-memory boundary; both memory modules are refused under `deployment.mode = "multi"`.
-- Cleanup: the memory adapters sweep amortized on writes and hold no timers; a retrieval leaves no timer once answered and its late work done. Nothing to dispose.
+- Cleanup: the memory adapters sweep amortized on writes and hold no standing timers — the lock wait polls with a bounded `setTimeout` that never outlives the call; a retrieval leaves no timer once answered and its late work done. Nothing to dispose.
 
 ## Contract tests
 

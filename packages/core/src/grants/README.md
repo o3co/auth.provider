@@ -8,7 +8,7 @@ It owns no grant type. `authorization_code`, `refresh_token`, `client_credential
 
 ## Public contract
 
-- [`types.mts`](./types.mts) — `GrantHandler`, `GrantContext`, `SessionData`, `AuthenticatedClient`, `GrantHandlerResult`, `GrantDependencies`, `GrantFactory`, `GrantModule`. The contribution-side `GrantHandler` in `../modules/manifest/contributes-map.mts` is this type.
+- [`types.mts`](./types.mts) — `GrantHandler`, `GrantContext`, `SessionData`, `AuthenticatedClient`, `GrantHandlerResult` with `GrantResult` (`GrantSuccess` | `GrantError`) and `SessionMutation`, `GrantDependencies`, `GrantFactory`, `GrantModule`. The contribution-side `GrantHandler` in `../modules/manifest/contributes-map.mts` is this type.
 - [`token.mts`](./token.mts) — `Token`, `TokenResponse`, `GenerateTokenOptions`, `generateToken`, `generateTokenResponse`, `formatObject`.
 - [`idToken.mts`](./idToken.mts), [`logoutToken.mts`](./logoutToken.mts), [`claimFilter.mts`](./claimFilter.mts), [`grantPolicy.mts`](./grantPolicy.mts), [`confirmation.mts`](./confirmation.mts), [`confirmationMatch.mts`](./confirmationMatch.mts), [`tokenBinding.mts`](./tokenBinding.mts), [`senderConstraint.mts`](./senderConstraint.mts), [`authenticationClaims.mts`](./authenticationClaims.mts), [`emailVerifiedGate.mts`](./emailVerifiedGate.mts).
 - [`registry.mts`](./registry.mts) — `GrantRegistry` / `GrantRegistryError`, `@internal`: not exported from the root barrel since AS-8; `../boot/create-app.mts` wraps it as the `grants` collector, and `../testing/` re-exports it for tests that build a registry by hand.
@@ -26,7 +26,7 @@ It owns no grant type. `authorization_code`, `refresh_token`, `client_credential
 ## Dependencies
 
 - Imports: `../keys/KeyStore` (signing), `../user-sessions/types` (claims, session stores, `SubjectRevocation`), `../policy/types` (`GrantPolicyHook`), `../repositories/types` (`TokenEndpointAuthMethod`, type-only), `../refresh-token-family/types`, `../config/application.schema`, `../modules/types`, `../logging/Logger`; `node:crypto`, `zod` (type).
-- Imported by: `../boot/create-app.mts` (registry), `../middleware/{tokenBinding,protectedResourceBinding,express}` and `../accessTokenHeader.mts` (confirmation matching, `BINDING_PROFILES`), `../modules/manifest/contributes-map.mts` (`GrantHandler`), `../repositories/types.mts` (`SenderConstraint`, type-only), the root barrel, `../testing/`.
+- Imported by: `../boot/create-app.mts` (registry), `../middleware/protectedResourceBinding.mts` (`BINDING_PROFILES`, `matchConfirmation`) and `../accessTokenHeader.mts` (`BINDING_PROFILES`), `../middleware/tokenBinding.mts` and `../middleware/express.mts` (the `TokenBinding` type only), `../modules/manifest/contributes-map.mts` (`GrantHandler`), `../repositories/types.mts` (`SenderConstraint`, type-only), the root barrel, `../testing/`.
 - The `grants` ↔ `repositories` edge is type-only in both directions. This directory must never import `boot/`, `middleware/`, `routes/`, an adapter package, or `testing/`.
 
 ## Invariants

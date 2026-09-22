@@ -4,16 +4,16 @@
 
 Rules that hold for the whole tree (checked by grep at the time of writing; `__tests__/` pins several of them):
 
-- core imports no `@o3co/auth-provider-*` package. The only occurrences of that string are `declare module "@o3co/auth-provider-core"` augmentations of `ComponentMap`. A contract a sibling package needs lives here; core never reaches back into a sibling. `redis` / `ioredis` are never imported, and `express` is an optional peer used as a type, resolved lazily at runtime with `createRequire` where a router is actually built.
+- No import statement in `src/` names a sibling `@o3co/auth-provider-*` package; the only `@o3co/auth-provider-core` mentions in code are the `declare module` augmentations of `ComponentMap` (plus three test files that import the package by its own name, in four import statements). A contract a sibling package needs lives here; core never reaches back into a sibling. `redis` / `ioredis` are never imported, and `express` is an optional peer used as a type; where a router is built it is loaded lazily — `await import("express")` in `boot/create-app.mts`, with `createRequire` as the fallback in `boot/assemble-app.mts` and the mechanism in `jwks/module.mts`.
 - Product code never imports `testing/`; only `__tests__/` and downstream test code do.
-- Nothing outside `boot/` imports `boot/` except the barrel (`index.mts`, `app.mts`), `discovery/planRoute.mts` (F4 in #626) and `testing/`.
+- Outside `__tests__/`, nothing imports `boot/` except the barrel (`index.mts`, `app.mts`), `discovery/planRoute.mts` (F4 in #626) and `testing/`; elsewhere, three wiring tests boot a real app through it and three adapter tests read `replicaUnsafeReason` from it.
 - A directory that owns a port also owns its in-process adapter, its `AdapterFactory` builder and, where there is one, the bundled `memory…Module` that provides the slot and declares `replicaSafety` (`boot/__tests__/replica-safety.drift.test.mts`).
 
 Package-level documentation is [`../README.md`](../README.md). Directories with a README of their own are linked below; a small directory is described here by its parent rather than given one.
 
 ## Contracts and domain rules
 
-The ports, the record types, and the rules every implementation must satisfy. These directories import one another's types plus `adapters/`, `logging/`, `net/` and `security/`; none imports `boot/`, `middleware/`, `routes/` or `testing/`.
+The ports, the record types, and the rules every implementation must satisfy. These directories import one another's types plus `adapters/`, `config/`, `logging/`, `net/` and `security/`; none imports `routes/` or `testing/`, and two cross the line drawn here: `modules/manifest/contributes-map.mts` takes the `TokenBindingMechanism` type from `middleware/tokenBinding.mts` (type-only), and `discovery/planRoute.mts` takes `BootError` from `boot/types.mts` (a value; F4 in #626).
 
 | Directory | Owns | Must not |
 | --- | --- | --- |
@@ -48,7 +48,7 @@ The ports, the record types, and the rules every implementation must satisfy. Th
 
 ## Standard implementations
 
-The in-process adapters live beside their port — `memory.mts`, `memory/`, `adapters/memory.mts` or `InMemory*.mts` in the directories above — each with a `factory.mts` and, where a slot is provided, a `module.mts` exporting a `memory…Module`. All are single-replica: `boot/replica-safety.mts` refuses them under `deployment.mode = "multi"`. `keys/` (local and remote-signing key stores), `ratelimit/memory.mts`, `logging/consoleLogger.mts` and `repositories/InMemory*.mts` are the same kind of thing without the word "memory". Durable adapters are `packages/redis`; the HTTP user repository is `packages/foundation`.
+The in-process adapters live beside their port — `memory.mts`, `memory/`, `adapters/memory.mts` or `InMemory*.mts` in the directories above — each with a `factory.mts` and, where a slot is provided, a `module.mts` exporting a `memory…Module`. Those twelve modules are `REPLICA_UNSAFE_BUNDLED_MODULES` in `boot/replica-safety.mts`, and `deployment.mode = "multi"` refuses each of them by name. `repositories/InMemory*.mts` and `logging/consoleLogger.mts` are in-process too, but core ships no module for them: a composition root that provides them declares `replicaSafety` on its own module (#455). `keys/` is not in this group — it holds the local key stores and `createRemoteSigningKeyStore`, a KMS/HSM-backed store. Durable adapters are `packages/redis`; the HTTP user repository is `packages/foundation`.
 
 ## HTTP
 
