@@ -190,6 +190,11 @@ two. `deviceCodeStore` joined with #443, which this paragraph missed while it
 still said "three"; the table is now checked against the manifests that attach
 each policy, the same way the slot table is (#458).
 
+A declaration says why a slot is empty; it does not stand in for the component
+where a feature needs it. `oauth.deviceAuthorization.store = "unsupported"` is
+for a deployment that leaves the grant off — `deviceGrantModule` with the grant
+enabled refuses to boot without a store, whatever the declaration says (#626).
+
 **Replica safety.** In-process state stores are correct on one node and wrong on
 several. `deployment.mode = "multi"` with one wired refuses boot, naming each
 offender and what diverges per replica; `"single"` is silent; unset warns. The
