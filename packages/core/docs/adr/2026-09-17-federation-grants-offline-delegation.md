@@ -1,6 +1,6 @@
 # Federation grants: session-independent delegated access to upstream APIs
 
-- Status: proposed
+- Status: accepted (implemented through slice 7; D14 deferred)
 - Date: 2026-09-17
 - Tracks: #593 (the direction, the survey of prior art and two review
   conditions are recorded in that issue's comments; this ADR turns them into
@@ -2051,8 +2051,10 @@ mistake here revokes every user's delegation at once:
   session-bound store keeps; `v1` carries no key ID and its reader rejects any
   other shape. An unknown
   key ID is a configuration problem: 503 `key_unavailable`, record kept.
-  Paused grants are not re-sealed, so the runbook says an old key stays in the
-  ring for the one-year ceiling.
+  Paused grants are not re-sealed, so an old key stays in the ring for the
+  one-year ceiling after the last replica that sealed with it stopped — the
+  runbook has the procedure (new key last, then first; `maxExpiresIn` is not
+  the bound, because lowering it shortens no grant already written).
 - **No self-heal delete.** A record that cannot be read is never deleted on
   read, and neither is its credential or its index membership.
   `credential_unreadable` is computed, not persisted (D1): wrong key material
@@ -2562,6 +2564,20 @@ route test is written first and watched failing.
    operator runbook rows and the `adapter-surface.md` rows are not left for
    this slice: the drift tests require them of whichever slice adds a module
    or a slot.
+   Done: the template composes the feature from `FEDERATION_GRANTS_ENABLED`
+   — the routes before `oauthModule`, one grant store and one intent store
+   by two new switches (`federationGrantStore.adapter`,
+   `federationGrantIntentStore.adapter`, declared in core as the switches
+   before them), the two client slots off the shared socket, and the
+   subject-revocation service — and installs nothing while it is off; a
+   shutdown gives cleanup 45 seconds while it is on and the compose files
+   give the process 60; the key-ring rotation procedure is in the operator
+   runbook; the provider guide is `packages/federation-grants/docs/offline-access.md`.
+   The CHANGELOG is the release cut's to write (release policy R2): the
+   slice's PR carries the draft. Left for a follow-up, and said so in the
+   template README: the HTTP user repository has no identity lookup, so a
+   template deployment with a connection configured chooses
+   `identityLookup = "unsupported"` or composes a covering Store.
 
 Slices 1–3 change no behaviour. Nothing can create a grant until slice 6, and
 revocation exists from slice 5, so no release cut between slices ships an

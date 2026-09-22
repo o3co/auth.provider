@@ -198,10 +198,9 @@ Module-level messages that arrive wrapped in a factory failure:
   (`packages/redis/src/internal/encryption-mode.mts`). One more refusal of its
   own: `mode "required" needs at least one encryption key`, at construction
   rather than at the first write — a ring that cannot seal would otherwise be
-  discovered after a user had already consented. An old key stays in the ring
-  for as long as a paused grant may live (the one-year ceiling): a read never
-  re-seals, so dropping the key that sealed a grant makes it read
-  `key_unavailable` until it is put back.
+  discovered after a user had already consented. A read never re-seals, so
+  dropping the key that sealed a grant makes it read `key_unavailable` until
+  it is put back; the rotation procedure below says when a key may leave.
 - Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs a `CRITICAL` line on every boot (`packages/redis/src/federation-tokens.mts`).
 - Per-process rate-limit fallbacks under `deployment.mode = "multi"` (#474): `deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login` and the same for `POST /oauth/webauthn/authentication/options` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `rateLimiter.adapter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`).
 - Device grant: the five refusals for `verification-uri`, the `session` slice, `rateLimit.failMode`, a `rateLimiter` component, and a usable `oauth.deviceAuthorization.rateLimit` budget (#448) (`packages/device-grant/src/module.mts`).
@@ -411,10 +410,10 @@ need them?"* — and the status says which.
 | `410 reauthorization_required` / `credential_unreadable` | The credential is there and does not authenticate under any key in the ring. | Investigate the key material first, and restore it if it was replaced rather than rotated. Only ask the user again once you are sure the material is right: consent you spend needlessly is consent you cannot get back. |
 | `503 temporarily_unavailable` / `lock_timeout` or `concurrent_update` | Another replica is refreshing, or this call's write lost. | Retry, at the client. Do NOT add a retry inside the route — a second attempt can cost a second upstream rotation. |
 | `502 upstream_rejected` | The upstream refused with a code this provider knows. `Retry-After` is present when the answer came from a stamped failure. | Read the reason. `invalid_client` is your configuration; `invalid_grant` ends the credential and arrives as `410 reauthorization_required` instead. |
-| `502 upstream_token_ineligible` | The upstream answered with a token that may not be handed on: no finite lifetime, a lifetime over the connection's `maxAccessTokenLifetime`, scopes beyond the consent, a token type that is not bearer, or an answer that could not be read. | The reason names it. All but the last are a connection setting against an upstream policy — raise the maximum deliberately, or ask for fewer scopes. |
+| `502 upstream_token_ineligible` | The upstream answered with a token that may not be handed on: no finite lifetime, a lifetime over the connection's `maxAccessTokenLifetime`, scopes beyond the consent, a token type that is not bearer, or an answer that could not be read. | The reason names it. All but the last are a connection setting against an upstream policy — raise the maximum deliberately, or ask for fewer scopes. Except at an IdP that accumulates consent (Entra): there a narrower grant is broadened by a wider one on the same registration, and asking for less does not help — one registration per scope set is the rule (D19, `docs/offline-access.md`). |
 | `429 rate_limited` / `provider` | This deployment's own throttle, keyed `federation_grants:ip:<ip>`. | Configure `limits.federation_grants` on the limiter adapter if the budget is genuinely too small. |
 | `429 rate_limited` / `upstream` | The IdP throttled us. `Retry-After` when it said when. | Back off at the client. |
-| `503 service_unavailable` / `shutting_down` | The process has begun draining and will not start work nothing will wait for. | Normal during a rolling restart. Size the host's cleanup allowance at **45 seconds or more** — the standalone default of ten is shorter than the upstream hard timeout plus the persist budget, so a shutdown under it abandons exactly the rotation the drain exists to wait for. |
+| `503 service_unavailable` / `shutting_down` | The process has begun draining and will not start work nothing will wait for. | Normal during a rolling restart. Size the host's cleanup allowance at **45 seconds or more** — a ten-second drain is shorter than the upstream hard timeout plus the persist budget, so a shutdown under it abandons exactly the rotation the drain exists to wait for. The standalone gives cleanup 45 s while the feature is on and its compose files give the process 60. |
 | `503 service_unavailable`, "Rate limiter temporarily unavailable" | The limiter backend is down and `rateLimit.failMode = "closed"`. | The product-wide policy, not this route's. |
 | `federation.grant.refresh_persist_failed` (`storage`, `write_in_flight`, `hard_timeout`) | A refresh succeeded upstream and this process could not write down what it got. | A rotation may be lost: the IdP has moved to a refresh token this deployment does not have. Reconnect the grant only if subsequent calls actually answer `410 reauthorization_required`; an IdP with a rotation grace period often does not. |
 | `federation_grant.failure` (warn) | The sanitized report core makes for every cause it turns into an answer. Carries `during`, `grantId`, `correlationId` and a classification — never the error, its message, its stack or anything an upstream echoed. | Correlate by `correlationId`, which is the caller's `x-request-id` and is the same on events written after the response. |
@@ -482,6 +481,47 @@ would destroy exactly what the policy chose to keep.
 **A grant needs a federation that is enabled**, and enabling a federation
 brings the session-federation stores with it. A deployment that wants offline
 delegation and nothing else still wires those.
+
+### Acquisition refusals an operator meets (#593 slice 6, #611)
+
+| What you see | What it is | What to do |
+| --- | --- | --- |
+| boot: `federationGrants.connections.<name>: the userRepository does not cover the registration …` | Under `identityLookup = "required"` (the default) the Store must say, per connection, that it can place an upstream identity from that registration; the bundled in-memory repository covers none, and the HTTP repository has no lookup. | Install a Store that implements `supportsFederatedIdentityLookup` / `findSubjectByFederatedIdentity` (federation-grants README, check 5), or set `federationGrants.identityLookup = "unsupported"` — the recorded decision not to refuse an upstream account another local user holds. |
+| redirect `error=identity_unverifiable` | The Store could not establish who holds the upstream account (`indeterminate`), or a claim the connection's `identityClaims` names was not in the id_token — the audit outcome says which. Not transient: asking again does not change it. | For a missing claim, the upstream does not issue it for this registration (Entra's `oid` needs `profile` in the scopes); for `identity_not_resolvable`, the person is not in the Store's directory. |
+| redirect `error=identity_conflict` | The upstream account is another local user's. | Working as designed; the user signed in upstream as someone else. |
+| redirect `error=grant_not_authorizable` at the callback, after a config change | The connection moved (issuer, client, scopes, resource, boundary, callback or federation name) between the consent and the callback; the flow ends before any code is exchanged. | Start the flow again. |
+
+### Rotating the federation-grant key ring (#593, D16)
+
+`federationGrants.encryptionKeys` is a ring: **the first key seals** every
+credential written from then on — activation and every refresh — and
+**every listed key opens**, the envelope naming the key that sealed it. A
+read never re-seals, so a paused grant stays under the key it was written
+with until its next refresh, and inactivity is no evidence that a key is
+unused. The ring is read once, at construction: changing it means a restart.
+
+1. **Add the new key at the end** of the ring on every replica, and deploy.
+   Every replica can now open what the new key seals; none seals with it yet.
+2. **Move it to the first position** on every replica, and deploy. New
+   writes seal under it. Keep the old key listed.
+3. **Record when the last replica that sealed with the old key stopped**,
+   and prevent a rollback to a ring that has the old key first.
+4. **Keep the old key listed for 365 days after that instant** — the code's
+   lifetime ceiling (`FEDERATION_GRANT_LIFETIME_CEILING_MS`), which is the
+   longest any credential sealed under it can still be live. Not
+   `maxExpiresIn`: lowering it does not shorten grants already written, and
+   raising it later would make them usable again. Earlier only with
+   evidence: every grant that was active at step 3 has since been replaced
+   by a refresh, revoked, or passed its stored `expiresAt`. `tombstoneRetention`
+   adds nothing — a credential past its stored expiry is refused, sealed or
+   not.
+5. **Remove it from every replica together**, with the rollback configuration.
+   Never reuse an id with different material: that is not rotation, it is a
+   credential nobody can open, read as `credential_unreadable`.
+
+A key dropped too early reads as `503 key_unavailable` on every grant it
+sealed — recoverable by putting it back, which is why the store never deletes
+on that answer.
 
 ---
 

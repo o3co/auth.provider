@@ -115,6 +115,7 @@ Other multi-replica considerations covered by the default modules:
 - The replay seen-set — the `jti` single-use record behind `private_key_jwt` client authentication (#484) — switches on `replaySeenSet.adapter` (`REPLAY_SEEN_SET_ADAPTER`); the template ships `"redis"` on the shared connection, and `memory` is refused under `DEPLOYMENT_MODE=multi` because a captured client assertion would replay once per replica.
 - The consent step for clients that are not first-party (#527) switches on `consentStore.adapter` (`CONSENT_STORE_ADAPTER`). It is off (`none`) by default; `memory` is refused under `DEPLOYMENT_MODE=multi`, because a consent granted on one replica would be asked for again on every other and a consent page's parked request would be unknown to the replica that receives the answer. `redis` (#561) keeps both on the shared connection. See [Consent Store](#consent-store).
 - The federation token store defaults to memory. Set `FEDERATION_TOKEN_STORE_TYPE=redis` (`federationTokenStore.type = "redis"`) and supply `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` — 32 bytes, base64-encoded (`openssl rand -base64 32`); the store encrypts the upstream refresh tokens it holds. It shares the ioredis socket configured by `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`. See [Federation Token Store](#federation-token-store).
+- Federation grants (#593), when enabled, keep two more stores: the grants themselves (`FEDERATION_GRANT_STORE_ADAPTER`) and acquisition's records (`FEDERATION_GRANT_INTENT_STORE_ADAPTER`). Both ship `redis` on the shared socket; `memory` for either is refused under `DEPLOYMENT_MODE=multi`, and Redis grants beside memory user-session stores are refused on any replica count, because the grants would outlive the boundary that ends them. See [Federation Grants](#federation-grants).
 
 ## Usage
 
@@ -443,6 +444,122 @@ socket configured by `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`.
 |---|---|---|
 | `CONSENT_STORE_ADAPTER` | `none` | Consent store for clients that are not first-party (#527): `none` (such clients are refused), `memory` (single replica) or `redis` (shared, #561) |
 
+### Federation Grants
+
+Offline delegation of an upstream IdP's tokens (#593): a user consents once
+that a client — a backend, an agent — may obtain access tokens for one
+upstream connection on their behalf, and the client obtains them over HTTP
+later, with the user not present. A grant **survives logout**; a credential
+change ends it through the subject-revocation service. Off by default, and
+off installs nothing. The routes and what each answer means are in the
+[package README](../../packages/federation-grants/README.md); what each IdP
+needs before it issues a refresh token is in
+[`docs/offline-access.md`](../../packages/federation-grants/docs/offline-access.md).
+
+| Variable | Default | Description |
+|---|---|---|
+| `FEDERATION_GRANTS_ENABLED` | `false` | Installs the routes, the two stores below and the subject-revocation service |
+| `FEDERATION_GRANTS_CONSENT_URL` | — | The deployment's consent page for grants: a path, or an absolute URL on the provider's origin. No default — enabling grants is a statement that the page exists, and boot refuses without it |
+| `FEDERATION_GRANTS_IDENTITY_LOOKUP` | `required` | Whether the connect callback refuses an upstream account already linked to another local user. `required` needs a user repository that covers every connection's registration (below); `unsupported` records that the check is not made |
+| `FEDERATION_GRANT_STORE_ADAPTER` | `redis` | Where grants live: `memory` (one replica; lost on restart, every user reconnects) or `redis` (the shared socket) |
+| `FEDERATION_GRANT_INTENT_STORE_ADAPTER` | `redis` | Where acquisition's records live — the intent a backend lodged, the consent challenge, the connect transaction: `memory` (one replica; a restart loses flows in progress and nothing else) or `redis` |
+| `FEDERATION_GRANTS_ENCRYPTION_MODE` | `required` | `required` or `allow-plaintext`. Plaintext is refused in production/staging and under `DEPLOYMENT_MODE=multi` unless `FEDERATION_TOKENS_ALLOW_INSECURE=1` |
+| `FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION` | `false` | Whether a subject-wide revocation may be *asked* to leave established grants standing. An allowance, not an instruction |
+| `REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX` | `fg:` | Key namespace of the Redis grant store |
+
+**Two things have no environment form**, because a list is HOCON's: the
+connections, and the encryption key ring. Write them in a deployment-owned
+layer — `config/production.conf`, say:
+
+```hocon
+federationGrants {
+  encryptionKeys = [
+    # The first key seals; every listed key opens. GRANT_KEY_2026_09 is a name
+    # you choose (openssl rand -base64 32), not a template override.
+    { id = "2026-09", key = ${GRANT_KEY_2026_09} }
+  ]
+  connections {
+    files {
+      federation = "entra-files"   # an enabled federations.<name> of type "oidc", with an app registration of its own
+      scopes = ["openid", "profile", "offline_access", "Files.Read"]
+      boundary = "production"
+      maxAccessTokenLifetime = 3600
+      # The grant flow's own callback on this provider's origin — not the
+      # federation's login callback.
+      callbackURL = "https://auth.example/session/federation-grants/callback/files"
+      allowScopeSubsets = false
+      identityClaims = ["oid", "tid"]
+    }
+  }
+}
+```
+
+**What boot refuses**, each named, rather than met by a user mid-flow: no
+consent page; a connection without `callbackURL`, on a federation that is not
+enabled, or on one whose adapter lacks the delegated capability — only the
+generic OIDC adapter has it, so a Google connection is a `type = "oidc"`
+federation; `required` with a user repository that does not cover a
+connection's registration; Redis grants beside memory user-session stores
+(`USER_SESSION_STORES_ADAPTER=memory` — the grants would outlive the boundary
+that ends them; both compose files set `redis`); `encryptionMode = "required"`
+with no key; `memory` for either store under `DEPLOYMENT_MODE=multi`.
+
+**The user repository.** Under `required`, boot asks the repository whether it
+covers each connection's registration, and the connect callback asks it who
+holds the upstream account. The template's `http` repository has no such
+lookup ([#613](https://github.com/o3co/auth.provider/issues/613)), and the
+bundled in-memory one covers no registration. So with a connection configured
+you either set `FEDERATION_GRANTS_IDENTITY_LOOKUP=unsupported` — the recorded
+decision not to refuse an upstream account another local user already holds —
+or compose a repository that implements `supportsFederatedIdentityLookup` and
+`findSubjectByFederatedIdentity` (the package README's check 5 says what they
+must answer). With no connection configured nothing is required.
+
+**Registering a client.** In `config/clients.yaml`, a confidential client that
+may hold grants names the connections it may ask for and where the browser
+may be returned. Neither its `allowedRedirectUris` nor `firstParty` grants
+either:
+
+```yaml
+worker:
+  tokenEndpointAuthMethod: "client_secret_basic"
+  clientSecret: "$2b$10$…"
+  allowedFederationGrantConnections: ["files"]
+  federationGrantRedirectUris: ["https://worker.example/connected"]
+```
+
+**The flow, from the client's side.** `POST /oauth/federation-grants`
+(client-authenticated) lodges an intent for a `sub` and answers a `grant_id`
+and a `connect_uri`; the client sends the user's browser there. The provider
+signs the user in if needed, shows your consent page, sends them to the
+upstream, and returns the browser to the client's `redirect_uri` with
+`grant_id` and `state` — never a token. The client then calls
+`/oauth/federation-grants/:grantId/token`, `/status` and `/revoke` with its
+own credentials and the user's `sub`, with no user present.
+
+**The consent page** is yours, same-origin with the provider, and its contract
+is `/oauth/consent`'s, so one page can serve both. `GET
+/session/federation-grants/consent?challenge=…` answers JSON: `client_id`,
+`client_name`, `connection`, `scopes`, `resource`, `grant_expires_in` (a
+duration after approval, not a date), `continues_after_logout` (which the page
+must show), and `expires_in` (what is left of the flow). `POST` with
+`challenge` and `decision` (`accept` | `deny`) answers `303` — to the upstream,
+or back to the client. Every acquisition and renewal goes through it.
+
+**The login page** is the one `ENDPOINTS_LOGIN_URL` names, reached with
+`redirect_to=<the connect link>`; it signs the user in and navigates back to
+that link unchanged, as it does for `/oauth/authorize`. Do not submit the link
+to `POST /session/login` as its `redirect_to`: that route's exact-match
+allowlist is for landing pages and refuses a per-flow handle.
+
+**Operating it.** Rotate the key ring by the procedure in the
+[operator runbook](../../docs/operator-runbook.md) — new key last, then first,
+old key kept 365 days. A shutdown gives cleanup 45 seconds while the feature
+is on and both compose files give the process 60; see
+[Shutdown guarantees](#shutdown-guarantees). Disabling the feature is not
+revoking: grants stay in Redis until revoked, so end them first, and keep the
+keys and the revocation boundaries through any temporary shutdown.
+
 ### Redis Namespacing
 
 For multi-tenant Redis clusters, set deployment-specific key prefixes so two
@@ -695,7 +812,9 @@ installGracefulShutdown(server, { logger, cleanup: () => handle.dispose() });
 4. **Past the deadline the remaining connections are cut and the process exits non-zero.** An orchestrator that only ever sees `0` cannot tell a clean drain from one that ran out of time.
 5. **`cleanup` runs after draining, before exit** — `handle.dispose()`, i.e. reverse-topological component cleanup plus the Redis/timer drain. A failure there is logged through this service's own logger (NDJSON, like every other line) and reflected in the exit code. A dispose that throws still exits; it never wedges the process.
 
-**Size `drainTimeoutMs` below your orchestrator's kill grace period** — Kubernetes `terminationGracePeriodSeconds` and compose `stop_grace_period` are both 30s by default. The point is to close on your terms before `SIGKILL` arrives on someone else's.
+6. **With federation grants on, `cleanup` gets 45 seconds** (`cleanupAllowanceFor` in `src/shutdown.mts`) instead of inheriting the drain's ten: the dispose waits for a rotated upstream credential's write, and the package's upstream hard timeout and persist budget add up to more than ten. Off, the cleanup budget stays the drain's.
+
+**Size `drainTimeoutMs` below your orchestrator's kill grace period** — Kubernetes `terminationGracePeriodSeconds` is 30s by default and compose's `stop_grace_period` is 10s; the shipped compose files set 60s (drain + the grants cleanup + an exit margin). The point is to close on your terms before `SIGKILL` arrives on someone else's.
 
 ## npm Scripts
 
