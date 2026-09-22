@@ -4,23 +4,35 @@ Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) �
 
 Optional. Nothing here is active until `federationGrants.enabled = true`.
 
-> **Work in progress.** Both routes are here; the Redis-backed integration coverage and the ADR amendments land in the commit that follows.
+> **Work in progress (#593).** Every route is here. The standalone template, the documentation roll-up and the CHANGELOG are slice 7, and #611 — check 5's identity lookup across registrations — is to be settled before the release.
 
 ## Install both modules
 
 ```ts
 import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
-import { memoryFederationGrantStoreModule } from "@o3co/auth-provider-core";
+import {
+  memoryFederationGrantIntentStoreModule,
+  memoryFederationGrantStoreModule,
+} from "@o3co/auth-provider-core";
 
 const app = await createApp({
-  modules: [...federationGrantsModules, memoryFederationGrantStoreModule],
+  modules: [
+    ...federationGrantsModules,
+    memoryFederationGrantStoreModule,
+    // Where a client's intent waits for the user's consent and the upstream's answer.
+    memoryFederationGrantIntentStoreModule,
+    // …and the session modules you already run: the browser half mounts after
+    // `session-middleware` and re-reads the durable session behind the cookie.
+  ],
   bootstrapComponents: { config, clientRepository, keyStore },
 });
 ```
 
 `federationGrantsModules` is a pair: the routes, and the background registry a shutdown drains. They are separate manifests because their dependency edges point in different directions — see below — and mounting the routes without the registry is a boot refusal rather than a shutdown that quietly drops rotated credentials.
 
-The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a logout and a subject-wide revocation reach grants through the same port. `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`.
+The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a logout and a subject-wide revocation reach grants through the same port. `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`. The same holds for the intent store (slice 6): `memoryFederationGrantIntentStoreModule` on one replica, `redisFederationGrantIntentStoreModule` on several — an intent lodged on one replica is otherwise unknown to the one the browser lands on.
+
+Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federationGrants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, `endpoints.login.url`, a `userSessionStore`, and either a `userRepository` with `findSubjectByFederatedIdentity` or `federationGrants.identityLookup = "unsupported"`. Each is described where the flow uses it, below.
 
 Enabling the feature also requires a `subjectRevocation` component that carries the **grants boundary** — `revokeSessionsBefore` and `grantsRevokedBefore` beside the pair #296 shipped (D13). A grant outlives the session it was agreed through, so that boundary is what reaches one on a replica that never saw the withdrawal, and every disclosure is compared against it. Three compositions are refused at boot rather than per request:
 
@@ -275,8 +287,12 @@ and plain text, never a JSON body.
 1. A prefetch parks nothing (`204`).
 2. An unknown, spent or expired handle: `400`, plain.
 3. Not signed in: `303` to `endpoints.login.url?redirect_to=<this link>` —
-   the handle and nothing else from the original query. The login page must
-   be able to send the user back to it. Core's schema leaves
+   the handle and nothing else from the original query. It is `/oauth/authorize`'s
+   login round trip: the login page signs the user in and then returns the
+   browser to `redirect_to` **verbatim** itself. It is not a value to post as
+   `redirect_to` to `POST /session/login`, whose exact-match allowlist names
+   fixed landing pages and would refuse this link — as it would refuse an
+   authorize URL — for carrying a per-flow handle. Core's schema leaves
    `endpoints.login.url` optional and only `oauthModule` requires it, so an
    enabled deployment without it is refused at boot rather than answering
    this step with a 500.
