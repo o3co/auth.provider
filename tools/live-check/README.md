@@ -57,9 +57,13 @@ After the sign-in the page shows, and `report` prints:
 - the callback's **query parameter names** (Google: `state, iss, code, scope,
   authuser, hd, prompt`) and the **`iss` value in full**, judged against the
   profile's `LIVE_CHECK_EXPECTED_ISS` when one is set;
-- the **provider's answer**: `302` to the page means the login succeeded; a
-  `4xx` comes with its JSON body (`error`, `error_description`), which is the
-  provider's refusal and the thing to read;
+- the **provider's answer**: `302` to the page means the login succeeded. A
+  refusal the route makes itself is a `4xx` with its JSON body (`error`,
+  `error_description`); a refusal made inside the exchange — a callback
+  without the `iss` Google's default requires, say — is a generic
+  `502 exchange_failed`, and its reason is in the provider's log, which
+  `report` appends (what it logged at warn or above since start, message
+  fields only);
 - whether the **session cookie** was set, and what the user Store was asked
   for (`google:••••••••••••2336` — the last four characters of the `sub`).
 
@@ -67,6 +71,11 @@ After the sign-in the page shows, and `report` prints:
 token, no id_token claim, no profile field and no password ever reaches the
 front: the id_token is exchanged and verified inside the provider, as in any
 deployment. The record lives in the front's memory and is gone at `stop`.
+The provider's own session record (its user id carries the `sub`) lives in
+Redis: in the container `stop` removes, or in database `15`
+(`LIVE_CHECK_REDIS_DB`) of a Redis found on `:6379`, which `stop` flushes. A
+Redis named by `LIVE_CHECK_REDIS_URL` is left as it is — give it a database
+of its own, and clear it yourself.
 
 A verdict of **OK** means: the login completed, and — when the profile sets
 `LIVE_CHECK_EXPECTED_ISS` — the callback carried that `iss`. Without an
@@ -79,7 +88,7 @@ with that default on; the issue for the provider says what to do next.
 ## How it is wired
 
 ```
-browser ──▶ :3210  live-check front (proxy.mjs)  ──▶ :3000  standalone template (develop, default config)
+browser ──▶ :3210  live-check front (proxy.mjs)  ──▶ :3000  standalone template (this checkout, default config)
              │  /                 the page                    │  federations.<name>: enabled, your client,
              │  /__live-check/*   the record                  │    callbackURL → :3210, clientUrl → :3210/
              │  /__store/*        a user Store that accepts   │  repositories.user.http → :3210/__store/*
@@ -89,6 +98,8 @@ browser ──▶ :3210  live-check front (proxy.mjs)  ──▶ :3000  standalo
 
 - The front is the only process that sees the raw callback URL; it relays the
   request untouched and records the parts above. It binds `127.0.0.1` only.
+- The profile's client id and secret are read by the provider's own process
+  and by nothing else the tool runs.
 - The provider runs the template's `src/app.mts` (`tsx`, no build) with
   `config/application.conf` as shipped plus one overlay,
   `config/live-check.local.conf` (`federations.<name>.clientUrl`, the one key
@@ -97,7 +108,9 @@ browser ──▶ :3210  live-check front (proxy.mjs)  ──▶ :3000  standalo
   else goes in through the environment switches the template documents.
 - The Store accepts every identity of the federation as a user, so the check
   never fails for want of a local account. **That is what makes this rig unfit
-  for anything but a loopback check** — never expose either port.
+  for anything but a loopback check** — never expose either port. The front
+  binds `127.0.0.1`; the template, as shipped, listens on every interface, so
+  a host firewall is what keeps `:3000` on this machine.
 - A throwaway Ed25519 key pair and session secret are generated into
   `.state/` on first `start` and reused after; `.state/` is git-ignored.
 

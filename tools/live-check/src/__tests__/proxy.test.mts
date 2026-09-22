@@ -25,12 +25,13 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const PROXY = fileURLToPath(new URL("../../proxy.mjs", import.meta.url));
 
-async function freePort(): Promise<number> {
-	const s = http.createServer();
-	await new Promise<void>((resolve) => s.listen(0, "127.0.0.1", resolve));
-	const port = (s.address() as AddressInfo).port;
-	await new Promise((resolve) => s.close(resolve));
-	return port;
+/** Two ports, both held while the other is picked, so they cannot coincide. */
+async function freePorts(): Promise<[number, number]> {
+	const servers = [http.createServer(), http.createServer()];
+	for (const s of servers) await new Promise<void>((resolve) => s.listen(0, "127.0.0.1", resolve));
+	const ports = servers.map((s) => (s.address() as AddressInfo).port) as [number, number];
+	for (const s of servers) await new Promise((resolve) => s.close(resolve));
+	return ports;
 }
 
 type Seen = { method: string; url: string; host: string | undefined; body: string };
@@ -87,12 +88,16 @@ async function startProxy(env: Record<string, string>): Promise<ChildProcess> {
 	});
 	await new Promise<void>((resolve, reject) => {
 		let out = "";
+		let err = "";
 		child.stdout?.on("data", (chunk) => {
 			out += String(chunk);
 			if (out.includes("live-check: http://")) resolve();
 		});
-		child.stderr?.on("data", (chunk) => reject(new Error(String(chunk))));
-		child.on("exit", (code) => reject(new Error(`proxy exited with ${code}: ${out}`)));
+		// A warning on stderr is not a failure; an exit before the listen line is.
+		child.stderr?.on("data", (chunk) => {
+			err += String(chunk);
+		});
+		child.on("exit", (code) => reject(new Error(`proxy exited with ${code}: ${out}${err}`)));
 	});
 	return child;
 }
@@ -143,8 +148,7 @@ describe("tools/live-check proxy, judging the iss against an expected issuer", (
 	let child: ChildProcess;
 
 	beforeAll(async () => {
-		proxyPort = await freePort();
-		providerPort = await freePort();
+		[proxyPort, providerPort] = await freePorts();
 		base = `http://127.0.0.1:${proxyPort}`;
 		provider = fakeProvider(providerPort, "google", `http://localhost:${proxyPort}/`);
 		await provider.listen();
@@ -366,8 +370,7 @@ describe("tools/live-check proxy without an expected issuer", () => {
 	let base: string;
 
 	beforeAll(async () => {
-		const proxyPort = await freePort();
-		const providerPort = await freePort();
+		const [proxyPort, providerPort] = await freePorts();
 		base = `http://127.0.0.1:${proxyPort}`;
 		provider = fakeProvider(providerPort, "oidc", `http://localhost:${proxyPort}/`);
 		await provider.listen();
