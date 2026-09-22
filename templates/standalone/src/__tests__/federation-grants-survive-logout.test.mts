@@ -79,6 +79,8 @@ const CONNECTION = "calendar";
 const SCOPES: readonly string[] = ["openid", "offline_access", "calendar.read"];
 const BOUNDARY = "production";
 const GRANT_ID = "g-1";
+const REFRESH_TOKEN = "SENTINEL-refresh-token";
+const ACCESS_TOKEN = "upstream-access-token";
 
 const ENV: Readonly<Record<string, string>> = {
 	OAUTH_JWT_ALGORITHM: "HS256",
@@ -236,9 +238,9 @@ async function seedGrant(store: MemoryFederationGrantStore): Promise<void> {
 			expiresAt: new Date(at.getTime() + 30 * DAY),
 		},
 		credentials: {
-			refreshToken: "SENTINEL-refresh-token",
+			refreshToken: REFRESH_TOKEN,
 			accessToken: {
-				value: "upstream-access-token",
+				value: ACCESS_TOKEN,
 				tokenType: "Bearer",
 				obtainedAt: at,
 				issuedLifetime: 3600,
@@ -357,13 +359,24 @@ describe("#593 AC8: a grant outlives the browser session at both logout endpoint
 			.set("Authorization", BASIC)
 			.send({ sub: SUB });
 
-	/** What a logout has to leave: the record, its credential, and a disclosure that still answers. */
+	/**
+	 * What a logout has to leave: the record, its credential — the values, not
+	 * only a readable state, since a rotated or dropped refresh token beside an
+	 * untouched access token would still read `"ok"` — and a disclosure that
+	 * still answers.
+	 */
 	async function expectGrantUntouched(app: express.Express, store: MemoryFederationGrantStore) {
 		expect((await store.find(GRANT_ID, new Date()))?.status).toBe("active");
-		expect((await store.open(GRANT_ID, new Date()))?.credentials.state).toBe("ok");
+		const opened = await store.open(GRANT_ID, new Date());
+		if (opened?.credentials.state !== "ok")
+			throw new Error("the grant's credential is not readable");
+		expect(opened.credentials.value).toMatchObject({
+			refreshToken: REFRESH_TOKEN,
+			accessToken: { value: ACCESS_TOKEN },
+		});
 		const response = await disclose(app);
 		expect(response.status).toBe(200);
-		expect(response.body.access_token).toBe("upstream-access-token");
+		expect(response.body.access_token).toBe(ACCESS_TOKEN);
 	}
 
 	it("POST /session/logout ends the session's own records and leaves the grant spendable", async () => {
