@@ -37,6 +37,13 @@
  * is sent (`end`, which `then` and `expect(..., fn)` go through). A server the
  * test started itself is never touched.
  *
+ * Which version of supertest closes the server it started, and when, has
+ * changed under this file once (7.3.0): 7.2 closed `_server` before asserting;
+ * 7.3 tracks the servers it started itself in a private registry and closes
+ * only those, so a server this file bound is left listening. The patched
+ * `end` therefore closes the server this request started, before the test's
+ * callback, whenever supertest has not — the same order either way.
+ *
  * supertest is loaded from the package that owns the running test file (the
  * nearest `package.json` above it), so the patched class is the one that test
  * imports, whatever directory vitest was started from. A package that does
@@ -188,6 +195,14 @@ function patch(proto: TestPrototype): void {
 		let called = false;
 		const callback = (err: unknown, res?: unknown) => {
 			called = true;
+			// supertest 7.2 has closed the server it started by now, before the
+			// callback; 7.3 closes only servers in its own private registry, which
+			// this bind is not in. Close what this request started, if it is
+			// still open, before the callback — the order 7.2 kept.
+			if (this._server === server && server.listening) {
+				server.close(() => fn?.(err, res));
+				return;
+			}
 			fn?.(err, res);
 		};
 		// Unpatched, whatever `end` throws while building the request (a header
