@@ -38,7 +38,11 @@
  * than optional for a different reason: RFC 8628 §5.1 computes the user
  * code's entropy budget *against* a rate limit, so an unlimited deployment is
  * not a slower version of a limited one, it is 34.5 bits against an unbounded
- * attacker. Both fail at boot rather than at the first request.
+ * attacker. Both fail at boot rather than at the first request. So does an
+ * enabled grant with no `deviceCodeStore` (#626): the slot is optional to
+ * wire, because the #363 absence policy lets a deployment that leaves the
+ * grant off boot without one, and declaring it absent says why it is missing
+ * — it does not make the grant work without it.
  *
  * ### The verification endpoint is a CSRF target, and is guarded as one
  *
@@ -309,6 +313,31 @@ const requireRateLimiter = (deps: AnyDeps): NonNullable<AnyDeps["rateLimiter"]> 
 };
 
 /**
+ * The store is read by the grant and by both endpoints, and the slot is
+ * optional — so this is the presence check, a boot refusal in the same shape
+ * as the limiter's (#626). Before it, an enabled grant with the store declared
+ * absent (`oauth.deviceAuthorization.store = "unsupported"`) booted and
+ * mounted endpoints that threw on the first request; the declaration is for a
+ * deployment that leaves the grant off (#363), not a way to run it without
+ * one. An enabled grant with no store and no declaration is still refused
+ * earlier, by the absence policy, naming the config key.
+ */
+const requireDeviceCodeStore = (deps: AnyDeps): NonNullable<AnyDeps["deviceCodeStore"]> => {
+	if (deps.deviceCodeStore === undefined) {
+		throw new Error(
+			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires a " +
+				"deviceCodeStore component. The grant has nowhere to record a pending " +
+				"authorization, so no device could ever be authorized; declaring the store " +
+				'absent (oauth.deviceAuthorization.store = "unsupported") says why it is ' +
+				"missing and does not make the grant work without one. Install " +
+				"memoryDeviceCodeStoreModule (single replica only) or " +
+				"redisDeviceCodeStoreModule, or leave the grant disabled.",
+		);
+	}
+	return deps.deviceCodeStore;
+};
+
+/**
  * #448: the budget the refusal above reasons from has to be one the limiter
  * was actually seeded with.
  *
@@ -377,7 +406,7 @@ export const deviceGrantModule = defineModule({
 					};
 				}
 				return createDeviceCodeGrant({
-					store: deps.deviceCodeStore,
+					store: requireDeviceCodeStore(deps),
 					keyStore: deps.keyStore,
 					accessTokenExpiresIn: resolveAccessTokenLifetime(deps.config).defaultExpiresIn,
 					logger: deps.logger,
@@ -435,7 +464,7 @@ export const deviceGrantModule = defineModule({
 				router.post(
 					"/",
 					createDeviceAuthorizationHandler({
-						store: deps.deviceCodeStore,
+						store: requireDeviceCodeStore(deps),
 						settings: {
 							verificationUri: requireVerificationUri(slice),
 							verificationUriComplete: slice["verification-uri-complete"],
@@ -482,7 +511,7 @@ export const deviceGrantModule = defineModule({
 						...(deps.logger ? { logger: deps.logger } : {}),
 					}),
 					createDeviceVerificationHandler({
-						store: deps.deviceCodeStore,
+						store: requireDeviceCodeStore(deps),
 						rateLimiter: requireRateLimiter(deps),
 						// The same outage policy the device_authorization guard
 						// applies, from the same key (#457): the handler keys
