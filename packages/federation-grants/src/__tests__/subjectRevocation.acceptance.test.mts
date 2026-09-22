@@ -253,6 +253,12 @@ const disclose = (app: express.Express) =>
 		.set("Authorization", basic())
 		.send({ sub: SUBJECT });
 
+const inspect = (app: express.Express) =>
+	request(app)
+		.post("/oauth/federation-grants/g-1/status")
+		.set("Authorization", basic())
+		.send({ sub: SUBJECT });
+
 describe("a subject-wide revocation, from the service to the disclosure", () => {
 	it("leaves an established grant usable when the operator allows keeping it", async () => {
 		const { handle, app, service, subjectRevocation } = await boot(true);
@@ -491,6 +497,16 @@ describe("a revocation outlives the watermark retention sized before #593 (revie
 		// the deployment could see would be a day too.
 		const components = shared();
 		const lowered = await boot(true, { components, lifetimeSeconds: 86_400 });
+		// The lowered maximum, observed: the grant was stored with thirty days,
+		// and this deployment reads its effective expiry as a day out. (Read
+		// before the revocation — afterwards a status call is the backstop's,
+		// and would write the revocation this case wants left to the boundary.)
+		const seen = await inspect(lowered.app);
+		expect(seen.status).toBe(200);
+		expect(seen.body.status).toBe("active");
+		const remainingMs = Date.parse(seen.body.expires_at as string) - Date.now();
+		expect(remainingMs).toBeGreaterThan(0);
+		expect(remainingMs).toBeLessThanOrEqual(86_400_000);
 		const result = await revokeAllForSubject({
 			subject: SUBJECT,
 			watermarkTtlMs: lowered.horizonMs,
