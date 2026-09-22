@@ -454,8 +454,10 @@ consented at or after it is ended anyway.
 Two things `"keep"` does not keep, on purpose: a `pending` grant, which is a
 consent the user had not finished giving, and any reauthorization in flight,
 whose pointer is retired so it cannot widen the grant afterwards. One window
-stays open as wide as two replicas' clocks disagree, and it is recorded in
-D13.
+stays open: the gap between a callback's final re-read and its activation
+write, which exists with perfectly agreeing clocks and closes only with write
+fencing, which is not built (D13). A renewal that passed its re-read before
+the revocation landed can activate after it.
 
 If a subject-wide revocation reports `complete: false`, **retry it**, and
 which failure you are looking at decides how much the retry matters:

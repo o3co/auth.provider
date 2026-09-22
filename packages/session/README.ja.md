@@ -299,7 +299,7 @@ function supportsRefresh(
 
 ### `SupportsDelegatedAuthorization`（オプショナル capability）
 
-federation grants（#593）を支える capability。セッションを持たない client が上流のトークンを保持する「委譲」の認可へユーザーを送り、セッションなしでそのトークンを refresh できる provider が実装する。**両方**のメソッドが揃って初めて検出される。
+federation grants（#593）を支える capability。セッションを持たない client が上流のトークンを保持する「委譲」の認可へユーザーを送り、callback が持ち帰った code を交換し、セッションなしでそのトークンを refresh できる provider が実装する。**3 つ**のメソッドが揃って初めて検出される。
 
 ```ts
 interface DelegatedAuthorizationRequest {
@@ -310,6 +310,22 @@ interface DelegatedAuthorizationRequest {
   readonly scopes: readonly string[];                      // provider のログイン scope ではなく intent の scope
   readonly resource?: string;                              // RFC 8707
   readonly authorizationParams?: Readonly<Record<string, string>>;
+}
+
+interface DelegatedCodeExchangeRequest {
+  readonly code: string;
+  readonly codeVerifier: string;
+  readonly redirectUri: string;
+  readonly nonce: string;                                  // 認可時に送ったもの
+  readonly resource?: string;
+  readonly callbackParams?: Readonly<Record<string, string>>;  // callback が運んできたもの（RFC 9207 の `iss` など）
+  readonly signal?: AbortSignal;
+  readonly identityClaims?: readonly string[];             // connection が指定した claim。検証済み id_token から取り出す
+}
+
+interface DelegatedAuthorizationResult {
+  readonly upstream: { readonly issuer: string; readonly subject: string; readonly claims: Readonly<Record<string, string>> };
+  readonly tokens: DelegatedTokens;
 }
 
 interface DelegatedRefreshRequest {
@@ -330,6 +346,7 @@ interface DelegatedTokens {                                // すべて optional
 
 interface SupportsDelegatedAuthorization {
   buildDelegatedAuthorizationUrl(params: DelegatedAuthorizationRequest): URL;
+  exchangeDelegatedCode(params: DelegatedCodeExchangeRequest): Promise<DelegatedAuthorizationResult>;
   refreshDelegatedToken(params: DelegatedRefreshRequest): Promise<DelegatedTokens>;
 }
 

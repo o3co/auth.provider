@@ -48,6 +48,11 @@ And what the callback holds the answer to (`packages/federation-grants/README.md
   answer the library could not otherwise parse (D5, D12). The connect
   callback's exchange has no such salvage: an acquisition whose answer could
   not be verified has no grant to keep a token under, and fails whole;
+- every retrieval re-evaluates the record — the grant, the boundaries, the
+  client, the connection — and never the upstream. A consent withdrawn at the
+  IdP, or an account disabled there, is seen when a refresh is refused, and a
+  stored token that serves is disclosed until then: at most one access-token
+  lifetime on;
 - the grant's own lifetime is an upper bound on the local authorization, not
   a promise that the upstream's refresh token lasts that long. A structured
   `invalid_grant` or `invalid_token` answer to a refresh makes the grant read
