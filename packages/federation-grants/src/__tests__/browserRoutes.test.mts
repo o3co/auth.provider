@@ -1780,6 +1780,9 @@ describe("the identity lookup (D7 check 5), when it cannot answer", () => {
 		expect(
 			returned(await callback(missing, { state: b.state, code: "c" }, "b-1")).get("error"),
 		).toBe("temporarily_unavailable");
+		expect(missing.state.logged).toContainEqual(
+			expect.objectContaining({ during: "callback_identity_lookup" }),
+		);
 	});
 
 	it("asks nothing when the deployment recorded it cannot, and says so in the audit", async () => {
@@ -1792,6 +1795,37 @@ describe("the identity lookup (D7 check 5), when it cannot answer", () => {
 		expect(w.events.find((e) => e.type === "federation.grant.authorized")?.details).toMatchObject({
 			outcome: "unsupported",
 		});
+	});
+});
+
+describe('identityLookup = "unsupported" skips the lookup and nothing else', () => {
+	// The opt-out is a recorded decision about ONE test. The issuer and the
+	// renewal's account binding are not the Store's to answer, and an early
+	// return placed above them would let a renewal swap the upstream account
+	// on an existing grant (#611 review).
+	it("still refuses another issuer's identity", async () => {
+		const w = world({ identityLookup: "unsupported", userRepository: {} });
+		const a = await approved(w);
+		w.state.exchange = {
+			...w.state.exchange,
+			upstream: { issuer: "https://attacker.test", subject: "00u-alice" },
+		};
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"upstream_error",
+		);
+	});
+
+	it("still holds a renewal to the upstream account already on the grant", async () => {
+		const w = world({ identityLookup: "unsupported", userRepository: {} });
+		const { grantId, state, before } = await renewal(w);
+		w.state.exchange = {
+			...w.state.exchange,
+			upstream: { issuer: CONNECTION.upstreamIssuer, subject: "00u-someone-else" },
+		};
+		expect(returned(await callback(w, { state, code: "c2" }, "b-2")).get("error")).toBe(
+			"account_mismatch",
+		);
+		expect(await w.grants.find(grantId, w.state.now)).toEqual(before);
 	});
 });
 

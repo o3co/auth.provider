@@ -623,6 +623,12 @@ and `"unsupported"` still skips only this last test. The bundled
 registrations, so it answers `indeterminate` for every identity — including
 one its name-and-`sub` scan would match, since a hit under one registration
 does not show that no other registration's link names somebody else. The
+cost is weighed, not missed: on a single registration whose `sub` is not
+pairwise, the old scan was a sound conflict check for links made through that
+registration, and a deployment on the bundled repository now has to choose
+`"unsupported"` there. A best-effort mode — `linked` on a hit, `indeterminate`
+on a miss — was not added: a miss is exactly the case the scan cannot decide,
+so under `"required"` it would refuse every user who has no link yet. The
 capability's result (D17) is unchanged, `{ issuer, subject }`: carrying
 verified claims such as Entra's `oid`/`tid` would finish nothing on its own,
 because the login records only `<provider>:<sub>` and `mapClaims` drops both,

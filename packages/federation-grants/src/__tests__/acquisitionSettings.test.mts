@@ -260,15 +260,24 @@ describe("requireFederationGrantIdentityLookup", () => {
 				String(answer),
 			).toThrow(/connections\.calendar/);
 		}
-		expect(() =>
+		// A probe that throws says so, and not what it threw: a Store's message
+		// may carry the credentials it was connected with.
+		let thrown: unknown;
+		try {
 			requireFederationGrantIdentityLookup(
 				"required",
 				new Covering(() => {
-					throw new Error("directory offline");
+					throw new Error("directory offline at postgres://admin:hunter2@db");
 				}),
 				connections(connection()),
-			),
-		).toThrow(/connections\.calendar/);
+			);
+		} catch (error) {
+			thrown = error;
+		}
+		const message = (thrown as Error | undefined)?.message ?? "";
+		expect(message).toMatch(/connections\.calendar[\s\S]*threw/);
+		expect(message).not.toContain("hunter2");
+		expect(message).not.toContain("directory offline");
 	});
 
 	it("refuses the bundled repository for any connection: it covers no registration", () => {

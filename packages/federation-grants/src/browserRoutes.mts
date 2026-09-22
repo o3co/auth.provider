@@ -741,7 +741,7 @@ export function createFederationGrantBrowserRouter(
 	 * Check 1 decides whether there is anywhere trustworthy to send the browser
 	 * at all, so its failures are a plain 400 from here. Every later failure
 	 * goes back to the intent's own `redirect_uri` with the client's own
-	 * `state`, the `grant_id`, and one of D7's ten codes — never an upstream's
+	 * `state`, the `grant_id`, and one of D7's eleven codes — never an upstream's
 	 * description, a thrown message, or anything the callback carried.
 	 */
 	router.get(
@@ -1189,6 +1189,14 @@ export function createFederationGrantBrowserRouter(
 		// arrow function hid, and the bundled repository did not (Codex).
 		const repository = options.userRepository;
 		if (typeof repository?.findSubjectByFederatedIdentity !== "function") {
+			// Boot refused this under "required"; a repository that lost the
+			// method since is a composition fault an operator must hear about.
+			report?.({
+				during: "callback_identity_lookup",
+				error: new TypeError("the userRepository has no findSubjectByFederatedIdentity"),
+				grantId: intent.grantId,
+				correlationId,
+			});
 			return refused("temporarily_unavailable");
 		}
 		let answer: FederatedIdentityLookupResult | undefined;
