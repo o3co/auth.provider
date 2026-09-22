@@ -160,7 +160,7 @@ describe("oauthSessionModule", () => {
 		await handle.dispose();
 	});
 
-	it("registered handler returns 401 for unauthenticated session", async () => {
+	it("registered handler returns 401 unauthorized for an unauthenticated session", async () => {
 		const config = makeValidAppConfig();
 		const handle = await createTestApp({
 			modules: [oauthSessionModule({ config }), keyStoreModule],
@@ -171,14 +171,24 @@ describe("oauthSessionModule", () => {
 		// concrete type. Cast to the concrete GrantHandler from grants/types.mts here.
 		const handler = handle.inspect.grants.get("session") as GrantHandler | undefined;
 		if (!handler) throw new Error("expected session grant to be registered");
+		// A real client, because the grant answers `401 invalid_client` for a
+		// missing one BEFORE it looks at the session (#626): with
+		// `authenticatedClient: null` this test used to pass on the client
+		// branch under the session's name. `session.test.mts` covers
+		// `invalid_client`; this asserts the branch it is named after.
 		const { result } = await handler.handle({
 			body: {},
 			session: { isAuthenticated: false },
 			issuer: "localhost",
 			metadata: {},
-			authenticatedClient: null,
+			authenticatedClient: {
+				clientId: "my-app",
+				tokenEndpointAuthMethod: "client_secret_basic",
+				allowedScopes: ["read"],
+			},
 		});
 		expect(result.status).toBe(401);
+		expect(result).toMatchObject({ error: "unauthorized" });
 		await handle.dispose();
 	});
 });
