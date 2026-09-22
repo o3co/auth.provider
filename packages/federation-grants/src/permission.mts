@@ -26,9 +26,10 @@
  * `"calendar,mail".includes("cal")` is `true` and a client is allowed a
  * connection nobody granted it.
  *
- * So anything that is not an array of strings is read as an empty allowlist,
- * which is the same thing absence means: nothing is allowed. The reader is
- * core's `federationGrantAllowlist`, shared with lodging and the consent page.
+ * So anything that is not an array is read as an empty allowlist, which is
+ * the same thing absence means: nothing is allowed, and an array keeps only
+ * its strings. The reader is core's `federationGrantAllowlist`, shared with
+ * lodging and the consent page.
  */
 
 import { federationGrantAllowlist } from "@o3co/auth-provider-core";
