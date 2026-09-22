@@ -50,7 +50,11 @@
  * not declare supertest is left alone. Everything else this file cannot do —
  * no test path, a declared supertest that does not load, a supertest whose
  * internals no longer look like this — throws, so the guard is never silently
- * off.
+ * off. That load-time check sees only the two methods' presence; a supertest
+ * that moved the `listen` out of `serverAddress` would pass it and leave the
+ * guard off. The behavioural tests catch that shape of change: this
+ * template's `supertest-loopback.test.mts` and its twin in the session
+ * package assert the address the server actually bound.
  *
  * This file is part of the project template and ships with every scaffold.
  * The auth.provider workspace loads this same file for its packages (see
@@ -167,8 +171,8 @@ function patch(proto: TestPrototype): void {
 		const protocol = app instanceof TlsServer ? "https" : "http";
 		let ready = binding.get(app);
 		if (!ready) {
-			// supertest closes `_server` after the response, as it does for the
-			// server it would have started itself.
+			// supertest 7.2 closes `_server` after the response; 7.3 does not,
+			// and the callback in the patched `end` below closes it instead.
 			this._server = app.listen(0, LOOPBACK);
 			// Subscribed now, not in `end`: a listen error emitted before the test
 			// sends the request must still reach it, not crash the worker as an
