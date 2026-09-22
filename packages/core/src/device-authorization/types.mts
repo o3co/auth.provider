@@ -186,8 +186,10 @@ export const DEVICE_CODE_STORE_ABSENCE_POLICY: AbsencePolicy = {
 	absentValue: "unsupported",
 	hint:
 		"the device authorization grant has nowhere to record a pending authorization, " +
-		"so no device can ever be authorized. The declaration is for a deployment that " +
-		"leaves the grant off; an enabled grant needs a store and refuses to boot without one",
+		"so no device can ever be authorized. With oauth.deviceAuthorization.enabled = true " +
+		"wire a store (memoryDeviceCodeStoreModule on a single replica, " +
+		"redisDeviceCodeStoreModule otherwise) — the declaration is refused there; it is " +
+		"for a deployment that leaves the grant off",
 };
 
 declare module "@o3co/auth-provider-core" {
