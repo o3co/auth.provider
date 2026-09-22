@@ -16,6 +16,9 @@
 
 import type {
 	FederatedIdentityLink,
+	FederatedIdentityLookup,
+	FederatedIdentityLookupResult,
+	FederatedIdentityRegistration,
 	LinkFederatedIdentityResult,
 	User,
 	UserRepository,
@@ -60,6 +63,129 @@ function isUser(v: unknown): v is User {
 	if (typeof v !== "object" || v === null) return false;
 	const o = v as Record<string, unknown>;
 	return typeof o.id === "string" && typeof o.username === "string";
+}
+
+/**
+ * What the Store declares it can place (#613): identities issued under one
+ * registration — the federation's name, the issuer and the client, exactly as
+ * a federation-grant connection is configured — given at least these claims
+ * from the verified id_token. The synchronous probe D7 check 5 asks at boot
+ * cannot reach the Store, so the operator relays the Store's own claim here;
+ * boot then holds every connection to it. `requiredClaims = []` is a strategy
+ * on the registration and the `sub` alone.
+ */
+export interface FederatedIdentityLookupCoverage {
+	readonly provider: string;
+	readonly issuer: string;
+	readonly clientId: string;
+	readonly requiredClaims: readonly string[];
+}
+
+const COVERAGE_FIELD = "federatedIdentityLookupCoverage";
+const COVERAGE_KEYS: ReadonlySet<string> = new Set([
+	"provider",
+	"issuer",
+	"clientId",
+	"requiredClaims",
+]);
+/** A claim name: printable ASCII, no spaces (the shape the connection side accepts). */
+const CLAIM_NAME = /^[\x21-\x7E]{1,256}$/;
+const FORBIDDEN_CLAIM_NAMES: ReadonlySet<string> = new Set([
+	"__proto__",
+	"constructor",
+	"prototype",
+]);
+
+/** A registration field: a non-empty string carrying no surrounding whitespace, compared exactly. */
+const exactString = (value: unknown): value is string =>
+	typeof value === "string" && value.length > 0 && value.trim() === value;
+
+const coverageError = (at: string, problem: string): Error =>
+	new Error(`HttpUserRepository: "${at}" ${problem}`);
+
+/**
+ * The declaration, checked field by field and snapshotted, so a later
+ * mutation of the caller's list cannot widen coverage. Diagnostics name the
+ * option, the entry and the field — never the value: a registration's client
+ * id is configuration an operator may not want in a log line.
+ */
+function validateCoverage(value: unknown): readonly FederatedIdentityLookupCoverage[] {
+	if (value === undefined) return [];
+	if (!Array.isArray(value)) {
+		throw coverageError(COVERAGE_FIELD, "must be a list of registrations");
+	}
+	const seen = new Set<string>();
+	return value.map((entry, index) => {
+		const at = `${COVERAGE_FIELD}[${index}]`;
+		if (typeof entry !== "object" || entry === null || Array.isArray(entry)) {
+			throw coverageError(
+				at,
+				"must be an object with provider, issuer, clientId and requiredClaims",
+			);
+		}
+		for (const key of Object.keys(entry)) {
+			if (!COVERAGE_KEYS.has(key)) throw coverageError(at, `has a field it may not have: "${key}"`);
+		}
+		const { provider, issuer, clientId, requiredClaims } = entry as Record<string, unknown>;
+		for (const [field, candidate] of [
+			["provider", provider],
+			["issuer", issuer],
+			["clientId", clientId],
+		] as const) {
+			if (!exactString(candidate)) {
+				throw coverageError(
+					`${at}.${field}`,
+					"must be a non-empty string without surrounding whitespace",
+				);
+			}
+		}
+		if (!Array.isArray(requiredClaims)) {
+			throw coverageError(`${at}.requiredClaims`, "must be a list of claim names (empty for none)");
+		}
+		const names = new Set<string>();
+		for (const name of requiredClaims) {
+			if (typeof name !== "string" || !CLAIM_NAME.test(name) || FORBIDDEN_CLAIM_NAMES.has(name)) {
+				throw coverageError(`${at}.requiredClaims`, "holds a name that is not a claim name");
+			}
+			if (names.has(name)) throw coverageError(`${at}.requiredClaims`, "lists a claim twice");
+			names.add(name);
+		}
+		const key = JSON.stringify([provider, issuer, clientId]);
+		if (seen.has(key))
+			throw coverageError(at, "declares a registration an earlier entry already declares");
+		seen.add(key);
+		return Object.freeze({
+			provider: provider as string,
+			issuer: issuer as string,
+			clientId: clientId as string,
+			requiredClaims: Object.freeze([...names]),
+		});
+	});
+}
+
+/** A lookup answer if it is one the port defines — a fresh object of the contract's fields, nothing else. */
+function lookupAnswer(value: unknown): FederatedIdentityLookupResult | undefined {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const answer = value as {
+		readonly kind?: unknown;
+		readonly subject?: unknown;
+		readonly reason?: unknown;
+	};
+	switch (answer.kind) {
+		case "linked":
+			return typeof answer.subject === "string" && answer.subject.length > 0
+				? { kind: "linked", subject: answer.subject }
+				: undefined;
+		case "unlinked":
+			return { kind: "unlinked" };
+		case "indeterminate":
+			return answer.reason === "registration_not_covered" ||
+				answer.reason === "identity_not_resolvable"
+				? { kind: "indeterminate", reason: answer.reason }
+				: undefined;
+		default:
+			return undefined;
+	}
 }
 
 /** Whether `value` is a positive integer that fits `bound`. */
@@ -178,6 +304,8 @@ export class HttpUserRepository implements UserRepository {
 	private timeout: number;
 	private maxResponseBytes: number;
 	private linkFederatedIdentityUrl?: string;
+	private findSubjectByFederatedIdentityUrl?: string;
+	private readonly coverage: readonly FederatedIdentityLookupCoverage[];
 	/**
 	 * #482 — see {@link UserRepository.linkFederatedIdentity}. Present only when
 	 * `linkFederatedIdentityUrl` is configured, which is how the federation routes
@@ -187,11 +315,28 @@ export class HttpUserRepository implements UserRepository {
 		userId: string,
 		identity: FederatedIdentityLink,
 	) => Promise<LinkFederatedIdentityResult>;
+	/**
+	 * #613 — see {@link UserRepository.supportsFederatedIdentityLookup}. Present
+	 * together with the lookup, only when `findSubjectByFederatedIdentityUrl` is
+	 * configured: absent, a deployment that requires the lookup is refused at
+	 * boot by the method's name, which is the message that says what to set.
+	 * Answers from the declaration alone — the Store is not asked at boot.
+	 */
+	readonly supportsFederatedIdentityLookup?: (
+		registration: FederatedIdentityRegistration,
+		identityClaims: readonly string[],
+	) => boolean;
+	/** #613 — see {@link UserRepository.findSubjectByFederatedIdentity}. Present with the probe. */
+	readonly findSubjectByFederatedIdentity?: (
+		identity: FederatedIdentityLookup,
+	) => Promise<FederatedIdentityLookupResult>;
 
 	constructor({
 		authenticateUrl,
 		authenticateByTokenUrl,
 		linkFederatedIdentityUrl,
+		findSubjectByFederatedIdentityUrl,
+		federatedIdentityLookupCoverage,
 		timeout,
 		maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
 	}: {
@@ -199,6 +344,10 @@ export class HttpUserRepository implements UserRepository {
 		authenticateByTokenUrl: string;
 		/** #482: optional; the Store's link endpoint. Same https rule as the other two. */
 		linkFederatedIdentityUrl?: string;
+		/** #613: optional; the Store's identity lookup. Same https rule; carries a verified identity. */
+		findSubjectByFederatedIdentityUrl?: string;
+		/** #613: which registrations the Store's lookup covers. Needs the URL; `[]` covers none. */
+		federatedIdentityLookupCoverage?: readonly FederatedIdentityLookupCoverage[];
 		timeout: number;
 		maxResponseBytes?: number;
 	}) {
@@ -213,6 +362,23 @@ export class HttpUserRepository implements UserRepository {
 				"linkFederatedIdentityUrl",
 			);
 			this.linkFederatedIdentity = (userId, identity) => this.linkViaHttp(userId, identity);
+		}
+		this.coverage = validateCoverage(federatedIdentityLookupCoverage);
+		if (findSubjectByFederatedIdentityUrl !== undefined) {
+			this.findSubjectByFederatedIdentityUrl = assertSecureEndpoint(
+				findSubjectByFederatedIdentityUrl,
+				"findSubjectByFederatedIdentityUrl",
+			);
+			this.supportsFederatedIdentityLookup = (registration, identityClaims) =>
+				this.declared(registration)?.requiredClaims.every((name) =>
+					identityClaims.includes(name),
+				) ?? false;
+			this.findSubjectByFederatedIdentity = (identity) => this.lookupViaHttp(identity);
+		} else if (this.coverage.length > 0) {
+			throw new Error(
+				`HttpUserRepository: "${COVERAGE_FIELD}" declares what the Store's lookup covers, and no ` +
+					'"findSubjectByFederatedIdentityUrl" names that lookup — set the URL, or remove the declaration',
+			);
 		}
 
 		if (!isPositiveIntegerWithin(timeout, MAX_TIMEOUT_MS)) {
@@ -253,6 +419,127 @@ export class HttpUserRepository implements UserRepository {
 		if (answer === CONFLICT) return { ok: false, reason: "conflict" };
 		if (answer === null) return { ok: false, reason: "refused" };
 		return { ok: true, user: answer };
+	}
+
+	/** The declaration for a registration, if the operator made one. Exact on all three. */
+	private declared(
+		registration: FederatedIdentityRegistration,
+	): FederatedIdentityLookupCoverage | undefined {
+		return this.coverage.find(
+			(entry) =>
+				entry.provider === registration.provider &&
+				entry.issuer === registration.issuer &&
+				entry.clientId === registration.clientId,
+		);
+	}
+
+	/**
+	 * POST `{ provider, issuer, clientId, sub, claims }` to the Store's lookup
+	 * (#613) and read one of the port's three answers. Answered locally, with
+	 * no request, where the declaration already decides: a registration nobody
+	 * declared is `registration_not_covered`, and a declared one arriving
+	 * without a claim its strategy needs is `identity_not_resolvable`. Every
+	 * claim the connection supplied is sent, not only the required ones: what
+	 * the Store matches on is the Store's business.
+	 */
+	private async lookupViaHttp(
+		identity: FederatedIdentityLookup,
+	): Promise<FederatedIdentityLookupResult> {
+		const entry = this.declared(identity);
+		if (entry === undefined) return { kind: "indeterminate", reason: "registration_not_covered" };
+		for (const name of entry.requiredClaims) {
+			const value = Object.hasOwn(identity.claims, name) ? identity.claims[name] : undefined;
+			if (typeof value !== "string" || value.length === 0) {
+				return { kind: "indeterminate", reason: "identity_not_resolvable" };
+			}
+		}
+		return this.postLookup(this.findSubjectByFederatedIdentityUrl as string, {
+			provider: identity.provider,
+			issuer: identity.issuer,
+			clientId: identity.clientId,
+			sub: identity.sub,
+			claims: { ...identity.claims },
+		});
+	}
+
+	/**
+	 * The lookup's transport: the same deadline, cap and abort as {@link post},
+	 * and none of its readings. A `401`/`403` is not "nobody", a `409` is not a
+	 * conflict, a `404` is not an absence: only a `2xx` carrying one of the
+	 * three answers is an answer, and everything else throws — as an outage,
+	 * which is what a lookup that could not be made is. Redirects are never
+	 * followed: the body carries a verified identity, and a `Location` is not a
+	 * configured endpoint. What is thrown names the endpoint and the status,
+	 * and never the body, the identity, a status text or an underlying cause.
+	 */
+	private async postLookup(url: string, body: unknown): Promise<FederatedIdentityLookupResult> {
+		const controller = new AbortController();
+		let timedOut = false;
+		const timeoutError = (): Error => {
+			const error = new Error(
+				`HttpUserRepository: request to ${url} timed out after ${this.timeout}ms`,
+			);
+			error.name = "TimeoutError";
+			return error;
+		};
+		let fireDeadline: () => void = () => {};
+		const deadline = new Promise<never>((_resolve, reject) => {
+			fireDeadline = () => reject(timeoutError());
+		});
+		deadline.catch(() => {});
+		const timer = setTimeout(() => {
+			timedOut = true;
+			controller.abort();
+			fireDeadline();
+		}, this.timeout);
+
+		try {
+			let res: Response;
+			try {
+				res = await fetch(url, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(body),
+					signal: controller.signal,
+					redirect: "manual",
+				});
+			} catch (err) {
+				if (timedOut && isAbortError(err)) throw timeoutError();
+				// A fixed message, without the cause: what a transport reports may
+				// quote what it was sending.
+				throw new Error(`HttpUserRepository: identity lookup at ${url} could not be reached`);
+			}
+			if (!res.ok) {
+				discardBody(res);
+				throw new Error(
+					`HttpUserRepository: identity lookup at ${url} answered HTTP ${res.status}`,
+				);
+			}
+			let raw: string;
+			try {
+				raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline);
+			} catch (err) {
+				if (timedOut) throw timeoutError();
+				if (err instanceof Error && err.message.startsWith("HttpUserRepository:")) throw err;
+				throw new Error(`HttpUserRepository: identity lookup at ${url} could not be read`);
+			}
+			let parsed: unknown;
+			try {
+				parsed = JSON.parse(raw);
+			} catch {
+				throw new Error(`HttpUserRepository: upstream ${url} returned a non-JSON body`);
+			}
+			const answer = lookupAnswer(parsed);
+			if (answer === undefined) {
+				throw new Error(
+					`HttpUserRepository: identity lookup at ${url} answered a body that is not one of the ` +
+						"port's answers (linked / unlinked / indeterminate)",
+				);
+			}
+			return answer;
+		} finally {
+			clearTimeout(timer);
+		}
 	}
 
 	private async post(

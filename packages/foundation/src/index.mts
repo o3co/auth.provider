@@ -71,5 +71,6 @@ export const registerBuiltinAdapters = (factories: {
 
 export {
 	DEFAULT_MAX_RESPONSE_BYTES,
+	type FederatedIdentityLookupCoverage,
 	HttpUserRepository,
 } from "./repositories/HttpUserRepository.mjs";
