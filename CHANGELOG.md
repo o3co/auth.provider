@@ -42,10 +42,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   a stored token that still serves is disclosed until then. A refresh runs at
   most once per call under a durable lease, and a rotated refresh token is
   never lost. Grants live in memory, on one replica, or in Redis, sealed under
-  a key ring (`federationGrants.encryptionMode`, shipped `required`); the
-  memory store is refused under `deployment.mode = "multi"`, and Redis grants
-  beside memory user-session stores are refused, since the grants would
-  outlive the boundary that ends them. A subject-wide revocation —
+  a key ring (`federationGrants.encryptionMode`, shipped `required`;
+  `allow-plaintext` is refused in production, staging and `multi` unless
+  `FEDERATION_TOKENS_ALLOW_INSECURE=1`, the one override both this store and
+  the federation-token store honour); the memory store is refused under
+  `deployment.mode = "multi"`, and a grant store that outlives the process
+  beside a `subjectRevocation` adapter kept in memory is refused, since the
+  grants would outlive the boundary that ends them. A subject-wide
+  revocation —
   `revokeAllForSubject`, or the subject revocation service — ends them by
   default and may be asked to keep them
   (`federationGrants.allowKeepOnSubjectRevocation`, shipped `false`); an
@@ -166,7 +170,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
   **Upgrade note.** A custom Redis client written against
   `SubjectRevocationClient` implements `setRevocationBoundaries`; the
-  bundled ioredis client already does. A full revocation still writes the
+  bundled ioredis client already does, and `createRedisSubjectRevocation`
+  refuses a client without it at construction, not only at type-check. A
+  full revocation still writes the
   record v0.14.0 wrote, so a deployment that never makes a sessions-only
   stamp — the subject revocation service's keep path, under
   `federationGrants.allowKeepOnSubjectRevocation` — can roll back freely.
@@ -191,8 +197,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   capabilities it has (`FederationProvider & SupportsRefresh &
   SupportsClaimMapping`).
 
-- **Callers of `revokeAllForSubject` see three more fields and wider unions
-  (`@o3co/auth-provider-core`)**
+- **BREAKING: `revokeAllForSubject`'s result has three more required fields,
+  and its unions are wider (`@o3co/auth-provider-core`)**
   ([#608](https://github.com/o3co/auth.provider/pull/608),
   [#609](https://github.com/o3co/auth.provider/pull/609),
   [#624](https://github.com/o3co/auth.provider/pull/624)).
@@ -200,7 +206,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `grantsFailed`; `RevokeAllForSubjectCapability` gains
   `"federationGrantStore"`; the failure `operation` union gains the grant
   operations `listBySubject`, `revoke`, `revokeSessionsBefore` and
-  `retireIntent`. An exhaustive `switch` over either union needs new cases. The deps accept an optional `federationGrantStore`,
+  `retireIntent`; `RevokeAllForSubjectFailure` gains an optional `grantId`.
+  A call without a grant store behaves as before and answers
+  `grantsRequested: false` with two empty lists. An exhaustive `switch` over
+  either union needs new cases, and anything that constructs a
+  `RevokeAllForSubjectResult` — a mock, a wrapper that reshapes it — carries
+  the three fields. The deps accept an optional `federationGrantStore`,
   `federationGrantAudit` and `correlationId`.
 
 - **Federation token snapshots carry the raw `expiresIn`, `scope` and
@@ -209,6 +220,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ([#605](https://github.com/o3co/auth.provider/pull/605)). An adapter that
   extended the old shape with a field of an incompatible type is a compile
   error now.
+
+- **`createOidcProvider` binds its `fetch` at construction
+  (`@o3co/auth-provider-federation-oidc`)**
+  ([#605](https://github.com/o3co/auth.provider/pull/605)). The provider now
+  always installs a fetch wrapper that captures `config.fetch`, or the global
+  `fetch` as it is when the provider is created, where it used to install one
+  only when `config.fetch` was given. A test harness that replaces
+  `globalThis.fetch` after creating the provider is no longer honoured; pass
+  `fetch` in the config, or replace it first.
 
 - **The federation-grants documentation says what the code does, and the
   ADR's deferred list is four classes** ([#617](https://github.com/o3co/auth.provider/issues/617),
@@ -252,10 +272,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   ([#596](https://github.com/o3co/auth.provider/pull/596),
   [#599](https://github.com/o3co/auth.provider/pull/599),
   [#600](https://github.com/o3co/auth.provider/issues/600)). The session's
-  federation routes dropped the `iss` the authorization response carried, so
-  the mix-up check never ran, and every login against an issuer that
-  advertises `authorization_response_iss_parameter_supported` failed the
-  exchange. The parameter is now forwarded and compared. Google documents
+  federation routes handed every callback parameter to the adapter, but the
+  generic OIDC, Google and Apple adapters rebuilt the callback URL for the
+  exchange from `redirectUri` and `code` alone, so the `iss` the response
+  carried never reached the mix-up check, and every login against an issuer
+  that advertises `authorization_response_iss_parameter_supported` failed the
+  exchange. `callbackUrlForExchange` (session) now carries it and the three
+  adapters use it. Google documents
   `iss` as always returned and the adapter **requires** it: a callback without
   it is refused (`502 exchange_failed`);
   `federations.google.requireAuthorizationResponseIss = false` relaxes that,
@@ -267,8 +290,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   `iss` (#600).
 
   **Upgrade note.** A deployment with a gateway or front end that relays the
-  Google callback must pass `iss` through, or set
-  `requireAuthorizationResponseIss = false` until it does.
+  Google callback must pass `iss` through, and a composition that calls the
+  Google provider's `exchangeCode` from a route of its own must forward the
+  callback's `iss` in `callbackParams` — otherwise every Google login is
+  refused. `requireAuthorizationResponseIss = false` relaxes it until then.
 
 ## [0.14.0] - 2026-09-17
 
