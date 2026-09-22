@@ -71,6 +71,10 @@ describe("the federationGrants section (#593)", () => {
 					allowScopeSubsets: true,
 					authorizationParams: { prompt: "consent" },
 					callbackURL: "https://app.example.test/grants/cb",
+					// #611: what check 5's Store matches a person on. Undeclared in
+					// the connection's value schema it would be stripped here, and
+					// check 5 would ask the Store with no evidence at all.
+					identityClaims: ["oid", "tid"],
 				},
 			},
 		};

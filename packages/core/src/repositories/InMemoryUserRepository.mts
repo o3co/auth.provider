@@ -20,6 +20,9 @@ import { z } from "zod";
 import type { User } from "./types.mjs";
 import type {
 	FederatedIdentityLink,
+	FederatedIdentityLookup,
+	FederatedIdentityLookupResult,
+	FederatedIdentityRegistration,
 	LinkFederatedIdentityResult,
 	UserRepository,
 } from "./UserRepository.mjs";
@@ -96,36 +99,30 @@ export class InMemoryUserRepository implements UserRepository {
 		return null;
 	}
 	/**
-	 * #593 — see {@link UserRepository.findSubjectByFederatedIdentity}. Reads
-	 * the runtime links and the configured `token` entries, the two places
-	 * `authenticateByToken` looks, and writes to neither. The token is
-	 * `<provider>:<sub>`, unambiguous because a federation's name cannot
-	 * contain a colon.
+	 * #611 — see {@link UserRepository.supportsFederatedIdentityLookup}. No
+	 * registration: this repository keys links by federation name and `sub`,
+	 * and knows neither which registration a name is nor which other
+	 * registrations of an IdP a person signed in through. A deployment that
+	 * requires the lookup installs a Store that does, or records that it does
+	 * not with `federationGrants.identityLookup = "unsupported"`.
+	 */
+	supportsFederatedIdentityLookup(
+		_registration: FederatedIdentityRegistration,
+		_identityClaims: readonly string[],
+	): boolean {
+		return false;
+	}
+
+	/**
+	 * #593, #611 — see {@link UserRepository.findSubjectByFederatedIdentity}.
+	 * Always `indeterminate`, including where a name-and-`sub` entry matches: a
+	 * hit under one registration does not show that no link under another names
+	 * somebody else, and a miss does not show that nobody holds the person.
 	 */
 	async findSubjectByFederatedIdentity(
-		identity: Readonly<
-			Pick<FederatedIdentityLink, "provider" | "sub"> & { readonly issuer?: string }
-		>,
-	): Promise<string | null> {
-		const token = `${identity.provider}:${identity.sub}`;
-		const linked = this.linkedTokens.get(token);
-		const configured = [...this.users.entries()].filter(
-			([, entry]) => (entry as Record<string, unknown>).token === token,
-		);
-		const owners = new Set<string>();
-		if (linked !== undefined) {
-			const entry = this.users.get(linked);
-			if (entry) owners.add(entry.id ?? linked);
-		}
-		for (const [username, entry] of configured) owners.add(entry.id ?? username);
-		if (owners.size > 1) {
-			throw new Error(
-				`InMemoryUserRepository: the federated identity ${JSON.stringify(token)} is linked to more ` +
-					"than one user; refusing to choose between them",
-			);
-		}
-		const [owner] = owners;
-		return owner ?? null;
+		_identity: FederatedIdentityLookup,
+	): Promise<FederatedIdentityLookupResult> {
+		return { kind: "indeterminate", reason: "registration_not_covered" };
 	}
 
 	/** #482 — see {@link UserRepository.linkFederatedIdentity}. In memory only. */

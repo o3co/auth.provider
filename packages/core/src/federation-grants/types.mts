@@ -212,6 +212,14 @@ export interface FederationGrantConnection {
 	 * `FederationGrantAcquisitionConnection`, where it is required.
 	 */
 	readonly callbackUri?: string;
+	/**
+	 * #611: the id_token claims the connect callback asks the adapter for and
+	 * hands the Store beside the subject — what a Store matches a person on
+	 * across registrations where `sub` is pairwise (Entra's `tid` and `oid`).
+	 * The package's resolver always sets it (`[]` when unset). In neither
+	 * revision: it changes what check 5 can see, not what was consented to.
+	 */
+	readonly identityClaims?: readonly string[];
 }
 
 export type FederationGrantIneligibilityReason =

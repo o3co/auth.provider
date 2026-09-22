@@ -74,7 +74,11 @@ export function createFederationGrantAuditBridge(
 				...(event.connection === undefined ? {} : { connection: event.connection }),
 				// Copies, so that a sink which holds its argument cannot be
 				// handed a reference into a record core is still working with.
-				...(event.upstream === undefined ? {} : { upstream: { ...event.upstream } }),
+				// Projected, not spread: the established pair and nothing else an
+				// object handed in might carry (#611).
+				...(event.upstream === undefined
+					? {}
+					: { upstream: { issuer: event.upstream.issuer, subject: event.upstream.subject } }),
 				...(event.resource === undefined ? {} : { resource: event.resource }),
 				...(event.scopes === undefined ? {} : { scopes: [...event.scopes] }),
 				outcome: event.outcome,

@@ -37,13 +37,19 @@ export const ACQUISITION_ENDPOINTS = { login: { url: "/login" } } as const;
 export const callbackUrlFor = (connection: string): string =>
 	`${new URL(ISSUER).origin}/session/federation-grants/callback/${connection}`;
 
-/** Merged into `bootstrapComponents`. The lookup answers "linked to nobody". */
+/**
+ * Merged into `bootstrapComponents`. The Store covers every registration and
+ * establishes "linked to nobody" — a test composition's answer, not a
+ * production one: a real Store says `unlinked` only after it has looked
+ * everywhere a link could be (#611).
+ */
 export const acquisitionComponents = () => ({
 	federationGrantIntentStore: createMemoryFederationGrantIntentStore(),
 	userRepository: {
 		authenticate: async () => null,
 		authenticateByToken: async () => null,
-		findSubjectByFederatedIdentity: async () => null,
+		supportsFederatedIdentityLookup: () => true,
+		findSubjectByFederatedIdentity: async () => ({ kind: "unlinked" as const }),
 	},
 });
 

@@ -31,6 +31,9 @@
 import type {
 	BootstrapMap,
 	ClientRepository,
+	FederatedIdentityLookup,
+	FederatedIdentityLookupResult,
+	FederatedIdentityRegistration,
 	SubjectRevocation,
 	UserSession,
 } from "@o3co/auth-provider-core";
@@ -50,6 +53,41 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
 import { ACQUISITION_ENDPOINTS, callbackUrlFor } from "./acquisitionFixture.mjs";
+
+/**
+ * The bundled repository, with a lookup that covers this deployment's one
+ * registration — which the bundled one alone does not (#611). Both methods
+ * read the instance's own fields, so a caller that takes either off the
+ * object loses `this` and fails: the slice 6 bug every arrow-function stub
+ * hid (Codex).
+ */
+class DirectoryRepository extends InMemoryUserRepository {
+	private readonly covered = "upstream";
+	private readonly owners = new Map<string, string>();
+	/** What the callback asked, so a test can see the composed deployment asked at all. */
+	readonly asked: FederatedIdentityLookup[] = [];
+
+	/** Records that `sub` at the covered registration belongs to local user `owner`. */
+	own(sub: string, owner: string): this {
+		this.owners.set(sub, owner);
+		return this;
+	}
+
+	override supportsFederatedIdentityLookup(registration: FederatedIdentityRegistration): boolean {
+		return registration.provider === this.covered;
+	}
+
+	override async findSubjectByFederatedIdentity(
+		identity: FederatedIdentityLookup,
+	): Promise<FederatedIdentityLookupResult> {
+		if (identity.provider !== this.covered) {
+			return { kind: "indeterminate", reason: "registration_not_covered" };
+		}
+		this.asked.push({ ...identity });
+		const owner = this.owners.get(identity.sub);
+		return owner === undefined ? { kind: "unlinked" } : { kind: "linked", subject: owner };
+	}
+}
 
 const ISSUER = (makeValidCoreConfig() as { oauth: { jwt: { issuer: string } } }).oauth.jwt.issuer;
 const REDIRECT = "https://client.test/connected";
@@ -146,7 +184,13 @@ const sessionMiddleware = defineModule({
 	},
 });
 
-const boot = async (subjectRevocation: SubjectRevocation = createInMemorySubjectRevocation()) => {
+const directory = () =>
+	new DirectoryRepository(new Map([["alice", { password: "unused", id: "alice" }]]));
+
+const boot = async (
+	subjectRevocation: SubjectRevocation = createInMemorySubjectRevocation(),
+	userRepository: DirectoryRepository = directory(),
+) => {
 	const full = makeValidFullSections();
 	const handle = await createApp({
 		modules: [
@@ -190,12 +234,7 @@ const boot = async (subjectRevocation: SubjectRevocation = createInMemorySubject
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
-			// The bundled repository, not a stub: a class whose lookup reads its
-			// own fields. Codex found the callback calling it detached from its
-			// receiver, which every stub written as an arrow function hid.
-			userRepository: new InMemoryUserRepository(
-				new Map([["alice", { password: "unused", id: "alice" }]]),
-			),
+			userRepository,
 			userSessionStore: { get: async (sid: string) => durable.get(sid) ?? null },
 			sessionRPRegistry: {},
 			sessionFamilyIndex: {},
@@ -323,6 +362,48 @@ describe("a grant created end to end, and spent", () => {
 			claims: {},
 		} as UserSession);
 	};
+
+	it("asks the Store, through the composed deployment, and refuses an upstream account it places with another user (#611)", async () => {
+		// The composition — not the router's options in a unit test — is what
+		// decides whether check 5 runs: a module that handed the router
+		// "unsupported" would boot, probe coverage, and then skip the check on
+		// every callback.
+		const repository = directory().own("00u-alice", "bob");
+		const { handle, app } = await boot(undefined, repository);
+		try {
+			const connect = await lodgeFor(app);
+			signIn("b-conflict", new Date());
+			const started = await request(app)
+				.get(`${connect.pathname}${connect.search}`)
+				.set("x-browser", "b-conflict");
+			const challenge =
+				new URL(started.headers.location as string, ISSUER).searchParams.get("challenge") ?? "";
+			const approved = await request(app)
+				.post("/session/federation-grants/consent")
+				.set("x-browser", "b-conflict")
+				.send({ challenge, decision: "accept" });
+			const state = new URL(approved.headers.location as string).searchParams.get("state") ?? "";
+			const returned = await request(app)
+				.get("/session/federation-grants/callback/calendar")
+				.query({ state, code: "code-1" })
+				.set("x-browser", "b-conflict");
+			expect(returned.status).toBe(303);
+			expect(new URL(returned.headers.location as string).searchParams.get("error")).toBe(
+				"identity_conflict",
+			);
+			expect(repository.asked).toEqual([
+				{
+					provider: "upstream",
+					issuer: "https://issuer.example",
+					clientId: "provider-client",
+					sub: "00u-alice",
+					claims: {},
+				},
+			]);
+		} finally {
+			await handle.dispose();
+		}
+	});
 
 	it("sends a browser that is not signed in to the configured login page, and back to exactly this link", async () => {
 		const { handle, app } = await boot();

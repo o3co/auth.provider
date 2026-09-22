@@ -47,7 +47,7 @@ describe("delegated authorization types (#593, D17)", () => {
 		const adapter: SupportsDelegatedAuthorization = {
 			buildDelegatedAuthorizationUrl: () => new URL("https://idp.test/authorize"),
 			exchangeDelegatedCode: async () => ({
-				upstream: { issuer: "https://idp.test", subject: "s" },
+				upstream: { issuer: "https://idp.test", subject: "s", claims: {} },
 				tokens,
 			}),
 			refreshDelegatedToken: async () => tokens,

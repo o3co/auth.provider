@@ -424,7 +424,11 @@ export const federationGrantsModule = defineModule({
 				// the lookup D7 check 5 asks.
 				const acquisition = resolveFederationGrantAcquisitionSettings(deps.config, connections);
 				const intentStore = requireFederationGrantIntentStore(deps.federationGrantIntentStore);
-				requireFederationGrantIdentityLookup(acquisition.identityLookup, deps.userRepository);
+				requireFederationGrantIdentityLookup(
+					acquisition.identityLookup,
+					deps.userRepository,
+					connections,
+				);
 				const lifetimes = resolveFederationGrantAcquisitionLimits(deps.config);
 				return {
 					id: "federation-grants",

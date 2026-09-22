@@ -565,6 +565,9 @@ export type {
 } from "./repositories/types.mjs";
 export type {
 	FederatedIdentityLink,
+	FederatedIdentityLookup,
+	FederatedIdentityLookupResult,
+	FederatedIdentityRegistration,
 	LinkFederatedIdentityResult,
 	UserRepository,
 } from "./repositories/UserRepository.mjs";

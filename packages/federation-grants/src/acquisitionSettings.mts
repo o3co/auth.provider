@@ -26,9 +26,11 @@
  */
 
 import type {
+	FederatedIdentityRegistration,
 	FederationGrantAcquisitionConnection,
 	FederationGrantConnection,
 	FederationGrantIntentStore,
+	UserRepository,
 } from "@o3co/auth-provider-core";
 
 /** Where the connect flow's callback route lives under the provider's origin. */
@@ -198,24 +200,103 @@ export function resolveFederationGrantAcquisitionSettings(
 }
 
 /**
+ * The registration an identity arriving through `connection` was issued
+ * under, as the Store is asked about it (#611) — at boot, whether it covers
+ * it, and in the callback, who holds an identity from it. Configuration only:
+ * the federation's name, its configured issuer and the client it was issued to.
+ */
+export function federationGrantIdentityRegistration(
+	connection: Pick<FederationGrantConnection, "federation" | "upstreamIssuer" | "upstreamClientId">,
+): FederatedIdentityRegistration {
+	return {
+		provider: connection.federation,
+		issuer: connection.upstreamIssuer,
+		clientId: connection.upstreamClientId,
+	};
+}
+
+const IDENTITY_LOOKUP_REMEDY =
+	'install a userRepository that covers it, or set federationGrants.identityLookup = "unsupported" ' +
+	"to record that this deployment does not refuse an upstream account already linked to another user";
+
+/**
  * D7 check 5 asks whether the upstream identity is already another local
  * user's, which needs a lookup the Store port has only optionally. `"required"`
  * — the default — refuses to boot without it; `"unsupported"` is the recorded
  * decision to skip that one check, and it is recorded in the audit of every
  * acquisition rather than taken silently.
+ *
+ * #611: having the method is not enough. A lookup that can see only the
+ * namespace it is handed answers "linked to nobody" for an identity from a
+ * registration no login linked under — D19's dedicated registration, whose
+ * pairwise `sub` no login ever saw — and `"required"` would be satisfied by a
+ * check that cannot see the answer. So the Store says, per connection's
+ * registration, whether it covers it, and anything but a literal `true` is
+ * refused here rather than met by every user who connects. With no connection
+ * configured nothing is required, not even the methods: removing the last one
+ * must stay operable on any repository.
  */
 export function requireFederationGrantIdentityLookup(
 	mode: FederationGrantIdentityLookup,
-	userRepository: { readonly findSubjectByFederatedIdentity?: unknown } | undefined,
+	userRepository:
+		| Partial<
+				Pick<UserRepository, "findSubjectByFederatedIdentity" | "supportsFederatedIdentityLookup">
+		  >
+		| undefined,
+	connections: ReadonlyMap<string, FederationGrantConnection>,
 ): void {
-	if (mode === "unsupported") return;
+	// Nothing can reach check 5 without a connection, so nothing is required —
+	// not even the methods: removing the last connection must stay operable
+	// for a repository that has no lookup at all (Copilot, #612).
+	if (mode === "unsupported" || connections.size === 0) return;
 	if (typeof userRepository?.findSubjectByFederatedIdentity !== "function") {
 		refuse(
 			'federationGrants.identityLookup is "required" (the default), and the userRepository has no ' +
-				"findSubjectByFederatedIdentity. Implement it — side-effect-free, answering the local user " +
-				'an upstream identity is linked to — or set identityLookup = "unsupported" to record that ' +
-				"this deployment does not refuse an upstream account already linked to another user",
+				"findSubjectByFederatedIdentity. Implement it — side-effect-free, answering who holds an " +
+				'upstream identity across every registration — or set identityLookup = "unsupported" to ' +
+				"record that this deployment does not refuse an upstream account already linked to another user",
 		);
+	}
+	if (typeof userRepository?.supportsFederatedIdentityLookup !== "function") {
+		refuse(
+			'federationGrants.identityLookup is "required" (the default), and the userRepository has no ' +
+				"supportsFederatedIdentityLookup: it cannot say which upstream registrations its lookup " +
+				"covers, so a lookup that sees only the name and sub it is handed would read an account " +
+				`another user holds as linked to nobody. Implement it, or ${IDENTITY_LOOKUP_REMEDY}`,
+		);
+	}
+	const repository = userRepository as Pick<UserRepository, "supportsFederatedIdentityLookup">;
+	for (const connection of connections.values()) {
+		const registration = federationGrantIdentityRegistration(connection);
+		let covered: unknown;
+		let threw = false;
+		try {
+			// Through the repository, never detached: a Store written as a class reads its own fields.
+			covered = repository.supportsFederatedIdentityLookup?.(
+				registration,
+				connection.identityClaims ?? [],
+			);
+		} catch {
+			// Not the error itself: a Store's message may carry what it was connected with.
+			threw = true;
+		}
+		if (covered !== true) {
+			// A probe written as `async` answers a promise: not `true`, so refused
+			// — and if it rejects, nothing else would ever observe that, and the
+			// host would see an unhandled rejection beside the refusal (Copilot).
+			if (typeof (covered as { then?: unknown } | null)?.then === "function") {
+				(covered as PromiseLike<unknown>).then(undefined, () => undefined);
+			}
+			refuse(
+				`federationGrants.connections.${connection.name}: the userRepository ` +
+					(threw ? "threw when asked whether it covers" : "does not cover") +
+					` the registration its identities are issued under (federation "${registration.provider}", ` +
+					`issuer ${registration.issuer}, client ${registration.clientId}, identityClaims ` +
+					`${JSON.stringify(connection.identityClaims ?? [])}), so it could not tell an ` +
+					"upstream account linked to nobody from one another user holds through another " +
+					`registration. Remove the connection, ${IDENTITY_LOOKUP_REMEDY}`,
+			);
+		}
 	}
 }
 

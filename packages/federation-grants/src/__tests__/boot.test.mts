@@ -31,6 +31,7 @@ import {
 	createMemoryFederationGrantStore,
 	createMemoryRateLimiter,
 	defineModule,
+	InMemoryUserRepository,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
@@ -158,8 +159,11 @@ interface Setup {
 	readonly federationFirst?: boolean;
 	/** Slice 6: somewhere to lodge an intent. */
 	readonly withIntentStore?: boolean;
-	/** Slice 6: the repository D7 check 5 asks; `null` installs one without the lookup. */
-	readonly userRepository?: "with-lookup" | "without-lookup";
+	/**
+	 * Slice 6: the repository D7 check 5 asks. `without-lookup` has no lookup;
+	 * `bundled` is `InMemoryUserRepository`, which covers no registration (#611).
+	 */
+	readonly userRepository?: "with-lookup" | "without-lookup" | "bundled";
 	/** Slice 6: the durable sessions the connect flow re-reads. */
 	readonly withUserSessionStore?: boolean;
 	/** Slice 6: where connect sends a browser that is not signed in. */
@@ -206,7 +210,9 @@ const boot = (setup: Setup) => {
 					userRepository:
 						setup.userRepository === "without-lookup"
 							? { authenticate: async () => null, authenticateByToken: async () => null }
-							: userRepository,
+							: setup.userRepository === "bundled"
+								? new InMemoryUserRepository(new Map())
+								: userRepository,
 				};
 			})(),
 			// Enabling a federation at all brings the session-federation stores
@@ -429,6 +435,17 @@ describe("what creating a grant needs (slice 6)", () => {
 		);
 		const handle = await boot({
 			userRepository: "without-lookup",
+			grants: { identityLookup: "unsupported" },
+		});
+		await handle.dispose();
+	});
+
+	it("refuses the bundled repository beside a connection, and boots once the deployment records it does not ask (#611)", async () => {
+		await expect(boot({ userRepository: "bundled" })).rejects.toThrow(
+			/connections\.calendar[\s\S]*identityLookup = "unsupported"/,
+		);
+		const handle = await boot({
+			userRepository: "bundled",
 			grants: { identityLookup: "unsupported" },
 		});
 		await handle.dispose();

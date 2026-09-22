@@ -155,56 +155,52 @@ describe("InMemoryUserRepository", () => {
 		});
 	});
 
-	describe("findSubjectByFederatedIdentity (#593, D7 check 5)", () => {
+	describe("findSubjectByFederatedIdentity (#593, D7 check 5; #611)", () => {
+		// The contract is a complete answer about ownership — linked to one
+		// user, or established as linked to nobody — or an admission that it
+		// cannot tell. This repository keys links by federation name and `sub`
+		// and knows nothing of which registration a name is, or which other
+		// registrations of the same IdP a person signed in through. So it can
+		// establish neither answer, and says so, even where a name-and-sub
+		// entry matches: a hit under one registration does not show that no
+		// other registration's link names somebody else (#611).
+		const registration = {
+			provider: "okta",
+			issuer: "https://okta.example",
+			clientId: "grants-client",
+		};
 		const repo = () =>
 			new InMemoryUserRepository(
 				new Map([
 					["alice", { password: "x", id: "u1" }],
 					["bob", { password: "y", id: "u2", token: "okta:00u-bob" }],
-					["carol", { password: "z", token: "okta:00u-carol" }],
 				]),
 			);
 
-		it("answers the local subject an upstream identity is linked to, configured or linked at runtime", async () => {
+		it("declares that it covers no registration", () => {
 			const r = repo();
-			expect(await r.findSubjectByFederatedIdentity({ provider: "okta", sub: "00u-bob" })).toBe(
-				"u2",
-			);
-			// No `id` on the entry: the user's id is the username, as authenticateByToken answers.
-			expect(await r.findSubjectByFederatedIdentity({ provider: "okta", sub: "00u-carol" })).toBe(
-				"carol",
-			);
-			await r.linkFederatedIdentity("u1", {
-				provider: "okta",
-				sub: "00u-alice",
-				token: "okta:00u-alice",
-				claims: {},
-			});
-			expect(await r.findSubjectByFederatedIdentity({ provider: "okta", sub: "00u-alice" })).toBe(
-				"u1",
+			expect(r.supportsFederatedIdentityLookup(registration)).toBe(false);
+			expect(r.supportsFederatedIdentityLookup({ ...registration, provider: "google" })).toBe(
+				false,
 			);
 		});
 
-		it("answers null for an identity linked to nobody, and keys it by the federation's name", async () => {
+		it("cannot tell, for an identity linked to somebody and for one linked to nobody alike", async () => {
 			const r = repo();
-			expect(
-				await r.findSubjectByFederatedIdentity({ provider: "okta", sub: "00u-nobody" }),
-			).toBeNull();
-			expect(
-				await r.findSubjectByFederatedIdentity({ provider: "google", sub: "00u-bob" }),
-			).toBeNull();
+			for (const sub of ["00u-bob", "00u-nobody"]) {
+				expect(
+					await r.findSubjectByFederatedIdentity({ ...registration, sub, claims: {} }),
+				).toEqual({
+					kind: "indeterminate",
+					reason: "registration_not_covered",
+				});
+			}
 		});
 
 		it("changes nothing: a lookup is not a login, a link, or a provisioning", async () => {
-			// The grant callback asks whether an identity already belongs to
-			// somebody else. A Store whose lookup stamped a login or linked on
-			// first sight would turn that question into an account change.
 			const r = repo();
-			expect(
-				await r.findSubjectByFederatedIdentity({ provider: "okta", sub: "00u-dave" }),
-			).toBeNull();
+			await r.findSubjectByFederatedIdentity({ ...registration, sub: "00u-dave", claims: {} });
 			expect(await r.authenticateByToken("okta:00u-dave")).toBeNull();
-			// Nothing was reserved for anyone: the identity can still go to u2.
 			expect(
 				await r.linkFederatedIdentity("u2", {
 					provider: "okta",
@@ -213,21 +209,6 @@ describe("InMemoryUserRepository", () => {
 					claims: {},
 				}),
 			).toMatchObject({ ok: true });
-		});
-
-		it("refuses to choose between two owners of one identity rather than answering the first", async () => {
-			// authenticateByToken takes the first match, which is a login's
-			// problem. Here the answer decides whether a delegation is refused as
-			// somebody else's, and an arbitrary one is worse than an outage.
-			const r = new InMemoryUserRepository(
-				new Map([
-					["erin", { password: "x", id: "u5", token: "okta:00u-shared" }],
-					["frank", { password: "y", id: "u6", token: "okta:00u-shared" }],
-				]),
-			);
-			await expect(
-				r.findSubjectByFederatedIdentity({ provider: "okta", sub: "00u-shared" }),
-			).rejects.toThrow(/more than one/);
 		});
 	});
 

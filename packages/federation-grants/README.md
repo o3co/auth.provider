@@ -32,7 +32,7 @@ const app = await createApp({
 
 The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a logout and a subject-wide revocation reach grants through the same port. `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`. The same holds for the intent store (slice 6): `memoryFederationGrantIntentStoreModule` on one replica, `redisFederationGrantIntentStoreModule` on several — an intent lodged on one replica is otherwise unknown to the one the browser lands on.
 
-Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federationGrants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, `endpoints.login.url`, a `userSessionStore`, and either a `userRepository` with `findSubjectByFederatedIdentity` or `federationGrants.identityLookup = "unsupported"`. Each is described where the flow uses it, below.
+Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federationGrants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, `endpoints.login.url`, a `userSessionStore`, and, once a connection is configured, either a `userRepository` whose `supportsFederatedIdentityLookup` answers `true` for every connection's registration (with `findSubjectByFederatedIdentity` beside it) or `federationGrants.identityLookup = "unsupported"`. The bundled `InMemoryUserRepository` covers no registration, so a deployment on it with a connection configured must choose the second. Each is described where the flow uses it, below.
 
 Enabling the feature also requires a `subjectRevocation` component that carries the **grants boundary** — `revokeSessionsBefore` and `grantsRevokedBefore` beside the pair #296 shipped (D13). A grant outlives the session it was agreed through, so that boundary is what reaches one on a replica that never saw the withdrawal, and every disclosure is compared against it. Three compositions are refused at boot rather than per request:
 
@@ -391,20 +391,96 @@ It checks, in this order:
    leave RFC 9207's check to the issuer's metadata.
 5. **The upstream account**: the connection's issuer; for a renewal, the
    account already on the grant; the client's `upstream_sub` if it sent one;
-   and — unless `identityLookup = "unsupported"` — not already another local
-   user's. One linked to nobody is accepted.
+   and — unless `identityLookup = "unsupported"` — the Store's answer to who
+   holds it. Held by this user, or by nobody, passes; held by another user is
+   `identity_conflict`; an answer that establishes neither is
+   `identity_unverifiable`.
 
-   **What that last check can see.** It asks
-   `findSubjectByFederatedIdentity({ provider, sub, issuer })` with `provider`
-   = the federation the *connection* names, which is how a login links an
-   identity — under the federation the user logged in through. So it finds a
-   link only when the connection uses the same federation registration as the
-   login did. A connection on a registration of its own (the rule for an IdP
-   that accumulates consent, such as Entra) misses the login's link, and where
-   the IdP's `sub` is pairwise per registration (Entra's is) no name-and-`sub`
-   key could find it. `identityLookup = "required"` does not protect such a
-   connection unless the Store resolves the person across registrations — by
-   the `issuer` it is also given, or by an IdP's tenant-stable id.
+   **What the Store is asked, and what it must answer (#611).** The callback
+   calls `findSubjectByFederatedIdentity({ provider, issuer, clientId, sub, claims })`:
+   the registration the identity was issued under — the connection's
+   federation name, its configured issuer (already compared with the verified
+   id_token's) and client — the verified `sub`, and `claims`: the id_token
+   claims the connection names in `identityClaims` (`{}` when it names none),
+   exactly those, as the adapter verified them. If any named claim is missing
+   or not a non-empty string, the Store is not asked and the flow is
+   `identity_unverifiable`. The Store must not log, keep or echo them. It
+   answers one of:
+
+   - `{ kind: "linked", subject }` — it looked everywhere a link to this
+     person could be, and found exactly one local user;
+   - `{ kind: "unlinked" }` — it looked everywhere, and nobody holds them;
+   - `{ kind: "indeterminate", reason }` — it cannot say either:
+     `registration_not_covered` (no strategy for this registration) or
+     `identity_not_resolvable` (a strategy, and this identity is not in it).
+
+   "Everywhere" is the point. A login links an identity under the federation
+   the user signed in through, and an IdP whose `sub` is pairwise per
+   registration (Entra's is) gives the same person a different `sub` under
+   every registration — so a connection on a registration of its own, as D19
+   recommends for an IdP that accumulates consent, finds nothing under its own
+   name even for an account another user holds. A Store that searched only
+   the name and `sub` it was given has not established `unlinked`, and must
+   not answer it. A backend that cannot answer throws, and so does data that
+   names more than one owner; either, and any answer that is not one of the
+   three, is `temporarily_unavailable`.
+
+   **At boot**, under `"required"`, the Store is asked
+   `supportsFederatedIdentityLookup({ provider, issuer, clientId }, identityClaims)`
+   for every configured connection — two on one registration are asked about
+   separately, each with its own claims — and anything but a literal `true` —
+   `false`, a truthy value, a throw — refuses to start, naming the connection
+   and the registration. A deployment finds out there, not from the first user
+   who connects. With no connection configured nothing is required — not even
+   the two methods — because no callback can reach check 5; removing the last
+   connection stays operable on any repository. A connection re-pointed onto
+   another `federations.<name>` entry mid-flow ends that flow
+   (`grant_not_authorizable`), because boot probed the Store under the new
+   name.
+
+   The bundled `InMemoryUserRepository` keys links by name and `sub` and knows
+   nothing of registrations, so it covers none and answers `indeterminate` for
+   every identity: a deployment on it that configures a connection sets
+   `identityLookup = "unsupported"` — the recorded decision not to make this
+   check — or installs a Store that covers the registration.
+
+   **For an IdP with a registration of its own for grants** (D19 — Entra, for
+   one): **a Store that learns identities only from logins cannot satisfy
+   `"required"` there.** A login tells it `<provider>:<sub>`, and the grants
+   registration's pairwise `sub` is one no login ever saw. What can is a Store
+   with its own directory keyed by what does not change across registrations
+   — for Entra, the tenant and object id, provisioned from Entra onto each
+   local user — with the connection naming them:
+
+   ```hocon
+   federationGrants.connections.files {
+     federation = "entra-files"          # its own app registration
+     scopes = ["openid", "profile", "offline_access", "Files.Read"]
+     allowScopeSubsets = false
+     identityClaims = ["oid", "tid"]
+   }
+   ```
+
+   Name **immutable identifiers only**. `email`, `preferred_username` and
+   `upn` pass the name check but are attributes the account's holder or an
+   administrator can change — Microsoft says so of all three, and that a guest's
+   `email` need not be correct — so a Store matching on them can be walked
+   past: change the attribute, get `unlinked`. Two things boot cannot see and
+   the first connect will: an upstream that does not issue a named claim (Entra
+   without `profile` omits `oid`), and a custom adapter that returns no
+   `claims`. Either refuses every flow, after consent, as
+   `identity_unverifiable/identity_claims_unavailable` — fail closed, but try
+   one connect before telling users. Under `identityLookup = "unsupported"`
+   `identityClaims` is ignored: nothing is asked for and nothing is required.
+
+   `profile` is there because Entra issues `oid` only with it. The Store
+   resolves `(tid, oid)`, answers `unlinked` only where its directory is
+   complete for the tenant, and `identity_not_resolvable` for a person it was
+   never given; its `supportsFederatedIdentityLookup` answers `false` for a
+   connection that does not name both claims. Not verified on a real tenant:
+   that both claims are issued for your registration and account types, and
+   the scope set Entra reports with `profile` added. Otherwise, choose
+   `identityLookup = "unsupported"` and accept the loss of this one check.
 6. **Eligibility**: a refresh token, and an access token with a finite lifetime
    within `maxAccessTokenLifetime`, of a type a route without a proof key can
    present.
@@ -417,8 +493,9 @@ It checks, in this order:
 Every failure after check 1 goes back to the intent's `redirect_uri` with the
 client's own `state`, the `grant_id`, and one of: `access_denied`,
 `reauthentication_required`, `account_mismatch`, `identity_conflict`,
-`refresh_token_absent`, `upstream_token_ineligible`, `scope_exceeded`,
-`upstream_error`, `temporarily_unavailable`, `grant_not_authorizable`. Nothing
+`identity_unverifiable`, `refresh_token_absent`, `upstream_token_ineligible`,
+`scope_exceeded`, `upstream_error`, `temporarily_unavailable`,
+`grant_not_authorizable`. Nothing
 an upstream described, and no thrown message, reaches it. Success goes back
 with `grant_id` and `state` — never a token. The `grant_id` proves nothing on
 its own: every grant-addressed route needs `sub`, and `/status` says which
@@ -434,8 +511,13 @@ the write. It does not close it: that needs write fencing, which is deferred.
 
 A grant created emits `federation.grant.authorized`, a renewal
 `federation.grant.reauthorized`, each described from the record the write
-returned and carrying the deployment's `identityLookup` as its outcome. A
-failed flow emits `federation.grant.authorization_failed`.
+returned. Its outcome is what check 5 let it through on: `required/linked`
+(the Store placed the upstream account with this user), `required/unlinked`
+(with nobody), or `unsupported` (the deployment does not ask). A failed flow
+emits `federation.grant.authorization_failed` with the code as its outcome —
+for `identity_unverifiable`, with the Store's reason after a slash
+(`identity_unverifiable/identity_not_resolvable`). Neither ever names the other
+owner of a conflicting account.
 
 ### What the exemption depends on
 

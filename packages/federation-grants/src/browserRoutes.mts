@@ -64,6 +64,7 @@ import {
 	type ClientRepository,
 	checkWithFailMode,
 	coveredByRevocationBoundary,
+	type FederatedIdentityLookupResult,
 	type FederationGrantAcquisitionConnection,
 	type FederationGrantBrowserBinding,
 	type FederationGrantConnectTransaction,
@@ -77,6 +78,7 @@ import {
 	type Logger,
 	type RateLimiter,
 	type RateLimitFailMode,
+	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { SupportsDelegatedAuthorization } from "@o3co/auth-provider-session";
@@ -87,6 +89,7 @@ import express, {
 	type Response,
 	type Router,
 } from "express";
+import { federationGrantIdentityRegistration } from "./acquisitionSettings.mjs";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
 import { federationGrantConnectUri } from "./lodgeRoute.mjs";
@@ -131,13 +134,8 @@ export interface FederationGrantBrowserRouterOptions {
 	readonly grantsBoundary: (subject: string) => Promise<Date | null>;
 	/** D7 check 5: whether an upstream account linked to another local user is refused. */
 	readonly identityLookup: "required" | "unsupported";
-	readonly userRepository?: {
-		readonly findSubjectByFederatedIdentity?: (identity: {
-			readonly provider: string;
-			readonly sub: string;
-			readonly issuer?: string;
-		}) => Promise<string | null>;
-	};
+	/** The port's own signature, not a copy of it: the two cannot drift apart (#611). */
+	readonly userRepository?: Pick<UserRepository, "findSubjectByFederatedIdentity">;
 	/** Milliseconds: where the code exchange is aborted (`upstreamHardTimeoutMs`). */
 	readonly upstreamTimeoutMs: number;
 	readonly now?: () => Date;
@@ -287,6 +285,9 @@ async function judge(
 	const connection = options.connections.get(intent.connection);
 	if (
 		connection === undefined ||
+		// The revisions pin the issuer and client, not the federation's name;
+		// boot probed the Store under the name the connection has NOW (#611).
+		connection.federation !== intent.federation ||
 		federationGrantIdentityRevision(connection) !== intent.identityRevision ||
 		federationGrantAuthorizationRevision(connection) !== intent.authorizationRevision ||
 		connection.callbackUri !== intent.callbackUri
@@ -743,7 +744,7 @@ export function createFederationGrantBrowserRouter(
 	 * Check 1 decides whether there is anywhere trustworthy to send the browser
 	 * at all, so its failures are a plain 400 from here. Every later failure
 	 * goes back to the intent's own `redirect_uri` with the client's own
-	 * `state`, the `grant_id`, and one of D7's ten codes — never an upstream's
+	 * `state`, the `grant_id`, and one of D7's eleven codes — never an upstream's
 	 * description, a thrown message, or anything the callback carried.
 	 */
 	router.get(
@@ -799,8 +800,9 @@ export function createFederationGrantBrowserRouter(
 					report?.({ during: "callback_finish", error, grantId: intent.grantId, correlationId });
 				}
 			};
-			const fail = async (code: CallbackError): Promise<void> => {
-				failed(req, res, code, intent);
+			/** `reason` is the audit's alone (`code/reason`); the client hears the code. */
+			const fail = async (code: CallbackError, reason?: string): Promise<void> => {
+				failed(req, res, reason === undefined ? code : `${code}/${reason}`, intent);
 				await finish();
 				res.redirect(303, clientReturn(intent, code));
 			};
@@ -879,6 +881,10 @@ export function createFederationGrantBrowserRouter(
 						...(intent.resource === undefined ? {} : { resource: intent.resource }),
 						callbackParams: callbackParamsOf(req),
 						signal: AbortSignal.timeout(options.upstreamTimeoutMs),
+						// #611: only what check 5 will hand the Store, and nothing
+						// when the deployment does not ask it.
+						identityClaims:
+							options.identityLookup === "required" ? [...(connection.identityClaims ?? [])] : [],
 					});
 				} catch (error) {
 					report?.({ during: "callback_exchange", error, grantId: intent.grantId, correlationId });
@@ -889,8 +895,8 @@ export function createFederationGrantBrowserRouter(
 
 				// 5. Account binding.
 				const bound = await accountHolds(intent, connection, exchanged.upstream, correlationId);
-				if (bound !== "ok") {
-					await fail(bound);
+				if (!bound.holds) {
+					await fail(bound.code, bound.reason);
 					return;
 				}
 
@@ -1041,7 +1047,7 @@ export function createFederationGrantBrowserRouter(
 							clientId: grant.clientId,
 							subject: grant.subject,
 							...federationGrantAuditMetadata(grant),
-							outcome: options.identityLookup,
+							outcome: bound.outcome,
 						}).catch(() => undefined),
 					);
 				} else {
@@ -1053,7 +1059,7 @@ export function createFederationGrantBrowserRouter(
 							clientId: grant.clientId,
 							subject: grant.subject,
 							...federationGrantAuditMetadata(grant),
-							outcome: options.identityLookup,
+							outcome: bound.outcome,
 						}).catch(() => undefined),
 					);
 				}
@@ -1147,20 +1153,26 @@ export function createFederationGrantBrowserRouter(
 	 * Check 5. The verified issuer is the connection's; a renewal's upstream
 	 * account is the one already on the grant; an expectation the client
 	 * lodged is met; and — unless the deployment recorded that it cannot ask —
-	 * the upstream account is not already another local user's. One linked to
-	 * nobody is accepted.
+	 * the Store establishes who holds the upstream account: this user, or
+	 * nobody. Another user is a conflict. An answer that establishes neither
+	 * refuses as well (#611): "I cannot see where the link would be" is not
+	 * "linked to nobody", and reading it as one is what let a dedicated
+	 * registration's pairwise `sub` through.
 	 */
 	async function accountHolds(
 		intent: FederationGrantIntent,
 		connection: FederationGrantAcquisitionConnection,
-		upstream: { readonly issuer: string; readonly subject: string },
+		upstream: { readonly issuer: string; readonly subject: string; readonly claims?: unknown },
 		correlationId: string,
-	): Promise<
-		"ok" | "account_mismatch" | "identity_conflict" | "upstream_error" | "temporarily_unavailable"
-	> {
-		if (upstream.issuer !== connection.upstreamIssuer) return "upstream_error";
+	): Promise<AccountBinding> {
+		const refused = (code: CallbackError, reason?: string): AccountBinding => ({
+			holds: false,
+			code,
+			...(reason === undefined ? {} : { reason }),
+		});
+		if (upstream.issuer !== connection.upstreamIssuer) return refused("upstream_error");
 		if (intent.upstreamSubject !== undefined && upstream.subject !== intent.upstreamSubject) {
-			return "account_mismatch";
+			return refused("account_mismatch");
 		}
 		if (intent.kind === "reauthorization") {
 			try {
@@ -1171,43 +1183,78 @@ export function createFederationGrantBrowserRouter(
 					recorded.issuer !== upstream.issuer ||
 					recorded.subject !== upstream.subject
 				) {
-					return "account_mismatch";
+					return refused("account_mismatch");
 				}
 			} catch {
-				return "temporarily_unavailable";
+				return refused("temporarily_unavailable");
 			}
 		}
-		if (options.identityLookup === "required") {
-			// Called THROUGH the repository, never detached from it: a Store written
-			// as a class reads its own fields, and `this` is lost the moment the
-			// method is taken off the object — which every test stub written as an
-			// arrow function hid, and the bundled repository did not (Codex).
-			const repository = options.userRepository;
-			if (typeof repository?.findSubjectByFederatedIdentity !== "function") {
-				return "temporarily_unavailable";
-			}
-			try {
-				// Keyed as login links are — the federation's name and the upstream
-				// sub — with the verified issuer beside them for a Store that can
-				// resolve a person across registrations. The limit of that key is in
-				// D7: it cannot see a link made through another registration.
-				const owner = await repository.findSubjectByFederatedIdentity({
-					provider: intent.federation,
+		if (options.identityLookup === "unsupported") return { holds: true, outcome: "unsupported" };
+		// Called THROUGH the repository, never detached from it: a Store written
+		// as a class reads its own fields, and `this` is lost the moment the
+		// method is taken off the object — which every test stub written as an
+		// arrow function hid, and the bundled repository did not (Codex).
+		const repository = options.userRepository;
+		if (typeof repository?.findSubjectByFederatedIdentity !== "function") {
+			// Boot refused this under "required"; a repository that lost the
+			// method since is a composition fault an operator must hear about.
+			report?.({
+				during: "callback_identity_lookup",
+				error: new TypeError("the userRepository has no findSubjectByFederatedIdentity"),
+				grantId: intent.grantId,
+				correlationId,
+			});
+			return refused("temporarily_unavailable");
+		}
+		// #611: every claim the connection names, as the adapter verified it, or
+		// no question at all — a lookup handed part of its evidence could answer
+		// "nobody" for want of the rest. A fresh object of exactly those names:
+		// nothing else the adapter answered reaches the Store.
+		const claims = requiredIdentityClaims(upstream.claims, connection.identityClaims ?? []);
+		if (claims === undefined) {
+			return refused("identity_unverifiable", "identity_claims_unavailable");
+		}
+		let answer: FederatedIdentityLookupResult | undefined;
+		try {
+			// The registration the identity was issued under — every part of it
+			// the connection's configuration, the issuer already compared with the
+			// verified one — so that a Store can place a `sub` that is pairwise
+			// per registration.
+			answer = lookupAnswer(
+				await repository.findSubjectByFederatedIdentity({
+					// The federation the exchange went through — the intent's, which
+					// check 2 holds equal to the connection's: the name boot probed.
+					...federationGrantIdentityRegistration({
+						federation: intent.federation,
+						upstreamIssuer: connection.upstreamIssuer,
+						upstreamClientId: connection.upstreamClientId,
+					}),
 					sub: upstream.subject,
-					issuer: upstream.issuer,
-				});
-				if (owner !== null && owner !== intent.subject) return "identity_conflict";
-			} catch (error) {
-				report?.({
-					during: "callback_identity_lookup",
-					error,
-					grantId: intent.grantId,
-					correlationId,
-				});
-				return "temporarily_unavailable";
+					claims,
+				}),
+			);
+			if (answer === undefined) {
+				throw new TypeError("the identity lookup answered something the port does not define");
 			}
+		} catch (error) {
+			report?.({
+				during: "callback_identity_lookup",
+				error,
+				grantId: intent.grantId,
+				correlationId,
+			});
+			return refused("temporarily_unavailable");
 		}
-		return "ok";
+		switch (answer.kind) {
+			case "linked":
+				return answer.subject === intent.subject
+					? { holds: true, outcome: "required/linked" }
+					: refused("identity_conflict");
+			case "unlinked":
+				return { holds: true, outcome: "required/unlinked" };
+			case "indeterminate":
+				return refused("identity_unverifiable", answer.reason);
+		}
 	}
 
 	// Everything else under the mount: plain, not the JSON router's 404.
@@ -1226,18 +1273,88 @@ export function createFederationGrantBrowserRouter(
 	return router;
 }
 
-/** D7's ten codes: what a failed callback sends back to the client, and nothing else. */
+/**
+ * D7's eleven codes: what a failed callback sends back to the client, and
+ * nothing else. `identity_unverifiable` (#611) is not `temporarily_unavailable`:
+ * the Store could not establish who holds the upstream account, and asking
+ * again will not change that.
+ */
 type CallbackError =
 	| "access_denied"
 	| "reauthentication_required"
 	| "account_mismatch"
 	| "identity_conflict"
+	| "identity_unverifiable"
 	| "refresh_token_absent"
 	| "upstream_token_ineligible"
 	| "scope_exceeded"
 	| "upstream_error"
 	| "temporarily_unavailable"
 	| "grant_not_authorizable";
+
+/**
+ * Check 5's verdict. When it holds, `outcome` is what the grant's event
+ * records: which answer let it through, or that the deployment does not ask.
+ */
+type AccountBinding =
+	| {
+			readonly holds: true;
+			readonly outcome: "required/linked" | "required/unlinked" | "unsupported";
+	  }
+	| { readonly holds: false; readonly code: CallbackError; readonly reason?: string };
+
+/**
+ * The named claims out of what the adapter answered, as a fresh object, or
+ * `undefined` if any is not an own, non-empty string (#611).
+ */
+function requiredIdentityClaims(
+	answered: unknown,
+	names: readonly string[],
+): Readonly<Record<string, string>> | undefined {
+	const claims: Record<string, string> = {};
+	if (names.length === 0) return claims;
+	// An array is an object, and `"0"` a legal claim name (Copilot, #612).
+	if (typeof answered !== "object" || answered === null || Array.isArray(answered)) {
+		return undefined;
+	}
+	for (const name of names) {
+		if (!Object.hasOwn(answered, name)) return undefined;
+		const value = (answered as Record<string, unknown>)[name];
+		if (typeof value !== "string" || value.length === 0) return undefined;
+		claims[name] = value;
+	}
+	return claims;
+}
+
+/**
+ * A lookup's answer if it is one the port defines, and `undefined` otherwise.
+ * Recognised positively: the slice 6 contract answered a string or `null`, and
+ * a Store still written against it — or one answering anything else — must
+ * not fall through to either outcome that lets a grant through.
+ */
+function lookupAnswer(value: unknown): FederatedIdentityLookupResult | undefined {
+	if (typeof value !== "object" || value === null) return undefined;
+	const answer = value as {
+		readonly kind?: unknown;
+		readonly subject?: unknown;
+		readonly reason?: unknown;
+	};
+	switch (answer.kind) {
+		case "linked":
+			return typeof answer.subject === "string" && answer.subject.length > 0
+				? { kind: "linked", subject: answer.subject }
+				: undefined;
+		case "unlinked":
+			return { kind: "unlinked" };
+		case "indeterminate":
+			return answer.reason === "registration_not_covered" ||
+				answer.reason === "identity_not_resolvable"
+				? { kind: "indeterminate", reason: answer.reason }
+				: undefined;
+		default:
+			return undefined;
+	}
+}
 
 /** A boundary, or a refusal: an answer that is neither a date nor `null` is not "nothing revoked". */
 async function readBoundary(
@@ -1258,6 +1375,10 @@ function pinned(
 ): connection is FederationGrantAcquisitionConnection {
 	return (
 		connection !== undefined &&
+		// Not in either revision, and still pinned: a connection re-pointed onto
+		// another federation entry mid-flow would have check 5 ask the Store
+		// about a registration boot never probed (Copilot, #612).
+		connection.federation === intent.federation &&
 		federationGrantIdentityRevision(connection) === intent.identityRevision &&
 		federationGrantAuthorizationRevision(connection) === intent.authorizationRevision &&
 		connection.callbackUri === intent.callbackUri

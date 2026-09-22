@@ -404,6 +404,86 @@ export interface DelegatedCodeExchangeRequest {
 	readonly callbackParams?: Readonly<Record<string, string>>;
 	/** Aborts the upstream request. */
 	readonly signal?: AbortSignal;
+	/**
+	 * The id_token claims to carry beside the subject (#611) — what a Store
+	 * matches a person on across registrations where `sub` is pairwise, such
+	 * as Entra's `tid` and `oid`. A local allowlist: nothing about it is sent
+	 * upstream. Omitted means none. Names are checked by
+	 * {@link identityClaimsProblem}.
+	 */
+	readonly identityClaims?: readonly string[];
+}
+
+/**
+ * The id_token claims {@link DelegatedCodeExchangeRequest.identityClaims} may
+ * not name (#611): the protocol's own bindings and the token's and session's
+ * identifiers, which are the adapter's to check and say nothing stable about
+ * who a person is — and the names that would reach an object's prototype.
+ */
+export const RESERVED_IDENTITY_CLAIMS: ReadonlySet<string> = new Set([
+	"sub",
+	"iss",
+	"aud",
+	"azp",
+	"nonce",
+	"exp",
+	"iat",
+	"nbf",
+	"auth_time",
+	"at_hash",
+	"c_hash",
+	"s_hash",
+	"jti",
+	// Entra's token identifier — its `jti` by another name.
+	"uti",
+	"sid",
+	"__proto__",
+	"constructor",
+	"prototype",
+]);
+
+const IDENTITY_CLAIM_NAME = /^[\x21-\x7E]{1,256}$/;
+
+/**
+ * Why `names` is not a usable `identityClaims` list, or `undefined` when it
+ * is (#611). Case-sensitive names of printable ASCII without spaces, none
+ * reserved, none repeated — refused rather than trimmed or de-duplicated,
+ * because a list an operator wrote wrongly is a list they meant differently.
+ * Shared by the adapter, which refuses at the point of use, and the grant
+ * routes, which refuse at boot.
+ */
+export function identityClaimsProblem(names: readonly unknown[]): string | undefined {
+	const seen = new Set<string>();
+	for (const name of names) {
+		if (typeof name !== "string" || !IDENTITY_CLAIM_NAME.test(name)) {
+			return `identityClaims: ${JSON.stringify(name)} is not a claim name (printable ASCII, no spaces)`;
+		}
+		if (RESERVED_IDENTITY_CLAIMS.has(name)) {
+			return `identityClaims: "${name}" is a claim the protocol owns, not an identity to match on`;
+		}
+		if (seen.has(name)) return `identityClaims: "${name}" is listed twice`;
+		seen.add(name);
+	}
+	return undefined;
+}
+
+/**
+ * The claims asked for, out of a VERIFIED id_token's (#611): own properties
+ * only, non-empty strings only, nothing coerced. A claim absent or of another
+ * type is left out rather than failed on here — the caller knows which ones
+ * it cannot do without.
+ */
+export function selectIdentityClaims(
+	claims: Readonly<Record<string, unknown>>,
+	names: readonly string[],
+): Readonly<Record<string, string>> {
+	const selected: Record<string, string> = {};
+	for (const name of names) {
+		if (!Object.hasOwn(claims, name)) continue;
+		const value = claims[name];
+		if (typeof value === "string" && value.length > 0) selected[name] = value;
+	}
+	return selected;
 }
 
 /**
@@ -415,7 +495,16 @@ export interface DelegatedCodeExchangeRequest {
  * kept under.
  */
 export interface DelegatedAuthorizationResult {
-	readonly upstream: { readonly issuer: string; readonly subject: string };
+	/**
+	 * `claims` holds the {@link DelegatedCodeExchangeRequest.identityClaims}
+	 * the verified id_token carried as non-empty strings — possibly fewer than
+	 * were asked for, always a fresh object, empty when none were asked for.
+	 */
+	readonly upstream: {
+		readonly issuer: string;
+		readonly subject: string;
+		readonly claims: Readonly<Record<string, string>>;
+	};
 	/** As a delegated refresh answers them: `{ refreshToken }` alone when the lifetime was not one. */
 	readonly tokens: DelegatedTokens;
 }

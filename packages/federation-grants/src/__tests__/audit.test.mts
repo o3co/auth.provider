@@ -95,6 +95,24 @@ describe("createFederationGrantAuditBridge", () => {
 		});
 	});
 
+	it("carries the upstream identity as issuer and subject only, whatever else the event's object holds (#611)", () => {
+		// Verified claims travel beside the subject into check 5 and nowhere
+		// else. The bridge is its own boundary: it does not trust every caller
+		// to have projected them away.
+		const { sink, record } = sinkSpy();
+		void createFederationGrantAuditBridge({ sink, ...context })({
+			...FULL,
+			upstream: {
+				...FULL.upstream,
+				claims: { oid: "sentinel-oid" },
+			} as unknown as FederationGrantAuditEvent["upstream"],
+		});
+		expect((only(record).details as { upstream: unknown }).upstream).toStrictEqual({
+			issuer: "https://issuer.example",
+			subject: "upstream-subject",
+		});
+	});
+
 	it("returns the sink's promise so core can bound it and a shutdown can drain it", async () => {
 		let settle!: () => void;
 		const pending = new Promise<void>((resolve) => {

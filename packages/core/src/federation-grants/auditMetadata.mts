@@ -51,7 +51,9 @@ export function federationGrantAuditMetadata(
 	if (!hasFederationGrantAuthorization(grant)) return { connection: grant.connection };
 	return {
 		connection: grant.connection,
-		upstream: { ...grant.upstream },
+		// Projected, not spread: an event carries the established pair and
+		// nothing else a record's object might hold (#611).
+		upstream: { issuer: grant.upstream.issuer, subject: grant.upstream.subject },
 		...(grant.resource === undefined ? {} : { resource: grant.resource }),
 		scopes: [...grant.scopes],
 	};

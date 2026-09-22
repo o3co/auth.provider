@@ -121,7 +121,10 @@ export type {
 	SupportsRefresh,
 } from "./federations/types.mjs";
 export {
+	identityClaimsProblem,
 	RESERVED_DELEGATED_AUTHORIZATION_PARAMS,
+	RESERVED_IDENTITY_CLAIMS,
+	selectIdentityClaims,
 	supportsClaimMapping,
 	supportsDelegatedAuthorization,
 	supportsLogout,
