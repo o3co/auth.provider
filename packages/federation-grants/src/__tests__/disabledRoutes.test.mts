@@ -90,6 +90,27 @@ describe("the routes a disabled deployment mounts", () => {
 		await handle.dispose();
 	});
 
+	it("answers the lodging routes and the browser half the same way (slice 6)", async () => {
+		const { handle, app } = await boot();
+		const lodged = await request(app)
+			.post("/oauth/federation-grants")
+			.send({ sub: "local-subject", connection: "calendar" });
+		expect(lodged.status).toBe(404);
+		expect(lodged.body).toEqual({ error: "not_found" });
+		// The browser half is a navigation: a plain 404, no JSON, no redirect to
+		// a login page for a feature that is not there.
+		for (const path of [
+			"/session/federation-grants/connect?request=h",
+			"/session/federation-grants/consent?challenge=c",
+		]) {
+			const response = await request(app).get(path);
+			expect(response.status, path).toBe(404);
+			expect(response.headers["content-type"], path).toMatch(/^text\/plain/);
+			expect(response.headers.location, path).toBeUndefined();
+		}
+		await handle.dispose();
+	});
+
 	it("answers the same 404 on the status route", async () => {
 		const { handle, app } = await boot();
 		const response = await request(app)

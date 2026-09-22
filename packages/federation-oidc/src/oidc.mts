@@ -20,6 +20,8 @@ import {
 	callbackUrlForExchange,
 	codeChallenge,
 	type DelegatedAuthorizationRequest,
+	type DelegatedAuthorizationResult,
+	type DelegatedCodeExchangeRequest,
 	type DelegatedRefreshRequest,
 	type DelegatedTokens,
 	type EndSessionRequest,
@@ -503,6 +505,80 @@ export async function createOidcProvider(
 		};
 	};
 
+	/**
+	 * The connect callback's exchange (#593, D7, D17). It shares the refresh's
+	 * capture of the raw answer — the lifetime the upstream SENT, dated at
+	 * receipt — and none of the login exchange's profile work: no UserInfo, no
+	 * claim mapping. The identity is the verified id_token's, and only that.
+	 *
+	 * What it does NOT share with the refresh is the salvage. A refresh keeps a
+	 * rotated refresh token out of an answer the library refused to parse,
+	 * because the grant it rotates already exists. An acquisition whose answer
+	 * could not be verified has no grant, and no identity to bind one to; the
+	 * failure is thrown whole.
+	 */
+	const exchangeDelegated = async (
+		params: DelegatedCodeExchangeRequest,
+	): Promise<DelegatedAuthorizationResult> => {
+		const nonce = requireNonce(params.nonce);
+		const callbackUrl = callbackUrlForExchange({
+			redirectUri: params.redirectUri,
+			code: params.code,
+			callbackParams: params.callbackParams,
+		});
+		const call: DelegatedCall = { ...(params.signal ? { signal: params.signal } : {}) };
+		const tokens = await delegatedCalls.run(call, () =>
+			oidc.authorizationCodeGrant(
+				configuration,
+				callbackUrl,
+				{
+					pkceCodeVerifier: params.codeVerifier,
+					// `state` was compared against the connect transaction by the route.
+					expectedState: oidc.skipStateCheck,
+					expectedNonce: nonce,
+					idTokenExpected: true,
+				},
+				params.resource !== undefined ? { resource: params.resource } : undefined,
+			),
+		);
+		const claims = tokens.claims();
+		if (!claims) throw new Error(`${label}: the token response carried no id_token`);
+		const subject = claims.sub;
+		if (typeof subject !== "string" || subject.length === 0) {
+			throw new Error(`${label}: id_token has no sub claim (OIDC Core §2)`);
+		}
+		if (claims.at_hash !== undefined) {
+			verifyAtHash(label, tokens.id_token ?? "", tokens.access_token, claims.at_hash);
+		}
+		const upstream = { issuer: claims.iss, subject };
+		const refreshToken = optionalString(tokens.refresh_token);
+		const lifetime = rawLifetime(call.captured, tokens.expires_in);
+		// A lifetime that is not one withholds the access token — core then reads
+		// the answer as malformed and refuses the activation (D5) — as a refresh
+		// does. The identity above was verified, so it is still reported.
+		if (!lifetime.ok) {
+			return { upstream, tokens: refreshToken !== undefined ? { refreshToken } : {} };
+		}
+		const obtainedAt = call.receivedAt ?? Date.now();
+		return {
+			upstream,
+			tokens: {
+				accessToken: tokens.access_token,
+				...(refreshToken !== undefined ? { refreshToken } : {}),
+				expiresIn: lifetime.seconds,
+				expiresAt:
+					lifetime.seconds !== null ? new Date(obtainedAt + lifetime.seconds * 1000) : null,
+				// Kept when empty, unlike the refresh's: on a refresh an absent and
+				// an empty scope both mean "what the grant already has", but here an
+				// empty one dropped would read as omitted — "as requested" — and the
+				// callback would grant every consented scope on an answer that named
+				// none. Present and empty is the callback's to refuse (Codex).
+				...(typeof tokens.scope === "string" ? { scope: tokens.scope } : {}),
+				tokenType: tokens.token_type,
+			},
+		};
+	};
+
 	const endSession = async (req: EndSessionRequest): Promise<EndSessionResult> => {
 		const url = oidc.buildEndSessionUrl(configuration, {
 			...(req.idTokenHint ? { id_token_hint: req.idTokenHint } : {}),
@@ -585,6 +661,7 @@ export async function createOidcProvider(
 		},
 
 		buildDelegatedAuthorizationUrl: delegatedAuthorizationUrl,
+		exchangeDelegatedCode: exchangeDelegated,
 		refreshDelegatedToken: refreshDelegated,
 
 		mapClaims(profile: FederationProfile): MappedClaims {

@@ -145,6 +145,55 @@ function setting(settings: Settings, key: keyof typeof FEDERATION_GRANT_SETTING_
 	return value;
 }
 
+const settingsOf = (config: unknown): Settings =>
+	((config as { federationGrants?: Settings } | undefined)?.federationGrants ?? {}) as Settings;
+
+/** `maxExpiresIn`, in milliseconds, within the ceiling the code enforces above any setting. */
+function resolveMaxExpiresInMs(settings: Settings): number {
+	const maxExpiresInMs = setting(settings, "maxExpiresIn") * 1000;
+	if (maxExpiresInMs <= 0 || maxExpiresInMs > FEDERATION_GRANT_LIFETIME_CEILING_MS) {
+		throw new RangeError(
+			"federationGrants.maxExpiresIn must be a positive number of seconds no greater than " +
+				`${FEDERATION_GRANT_LIFETIME_CEILING_MS / 1000} (one year), the ceiling the code enforces`,
+		);
+	}
+	return maxExpiresInMs;
+}
+
+/**
+ * The lifetimes acquisition offers, from the configuration an operator wrote
+ * (D3): what a new grant gets, and the most a client may ask for.
+ *
+ * `defaultExpiresIn` had been in the schema and in `reference.conf` since slice
+ * 4, and nothing read it — this is its reader.
+ *
+ * A default above the maximum is refused rather than clamped. Lodging clamps a
+ * CLIENT's request, and says so in the lifetime it answers with; an operator's
+ * default that the maximum silently cut down would give every grant a lifetime
+ * nobody wrote anywhere.
+ */
+export function resolveFederationGrantAcquisitionLimits(config: unknown): {
+	readonly defaultLifetimeMs: number;
+	readonly maxLifetimeMs: number;
+} {
+	const settings = settingsOf(config);
+	const maxLifetimeMs = resolveMaxExpiresInMs(settings);
+	const defaultLifetimeMs = setting(settings, "defaultExpiresIn") * 1000;
+	if (defaultLifetimeMs <= 0) {
+		throw new RangeError(
+			"federationGrants.defaultExpiresIn must be a positive number of seconds: a grant needs a lifetime",
+		);
+	}
+	if (defaultLifetimeMs > maxLifetimeMs) {
+		throw new RangeError(
+			`federationGrants.defaultExpiresIn (${defaultLifetimeMs / 1000}) must not exceed ` +
+				`federationGrants.maxExpiresIn (${maxLifetimeMs / 1000}): a default the maximum cut down ` +
+				"would give every grant a lifetime nobody configured",
+		);
+	}
+	return { defaultLifetimeMs, maxLifetimeMs };
+}
+
 /**
  * The limits `retrieveFederationGrantToken` takes, from the configuration an
  * operator wrote.
@@ -159,15 +208,8 @@ function setting(settings: Settings, key: keyof typeof FEDERATION_GRANT_SETTING_
 export function resolveFederationGrantRetrievalLimits(
 	config: unknown,
 ): FederationGrantRetrievalLimits {
-	const settings = ((config as { federationGrants?: Settings } | undefined)?.federationGrants ??
-		{}) as Settings;
-	const maxExpiresInMs = setting(settings, "maxExpiresIn") * 1000;
-	if (maxExpiresInMs <= 0 || maxExpiresInMs > FEDERATION_GRANT_LIFETIME_CEILING_MS) {
-		throw new RangeError(
-			"federationGrants.maxExpiresIn must be a positive number of seconds no greater than " +
-				`${FEDERATION_GRANT_LIFETIME_CEILING_MS / 1000} (one year), the ceiling the code enforces`,
-		);
-	}
+	const settings = settingsOf(config);
+	const maxExpiresInMs = resolveMaxExpiresInMs(settings);
 	const limits: FederationGrantRetrievalLimits = {
 		maxExpiresInMs,
 		revocationSkewMs: FEDERATION_GRANT_REVOCATION_SKEW_MS,

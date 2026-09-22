@@ -4,23 +4,35 @@ Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) �
 
 Optional. Nothing here is active until `federationGrants.enabled = true`.
 
-> **Work in progress.** Both routes are here; the Redis-backed integration coverage and the ADR amendments land in the commit that follows.
+> **Work in progress (#593).** Every route is here. The standalone template, the documentation roll-up and the CHANGELOG are slice 7, and #611 — check 5's identity lookup across registrations — is to be settled before the release.
 
 ## Install both modules
 
 ```ts
 import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
-import { memoryFederationGrantStoreModule } from "@o3co/auth-provider-core";
+import {
+  memoryFederationGrantIntentStoreModule,
+  memoryFederationGrantStoreModule,
+} from "@o3co/auth-provider-core";
 
 const app = await createApp({
-  modules: [...federationGrantsModules, memoryFederationGrantStoreModule],
+  modules: [
+    ...federationGrantsModules,
+    memoryFederationGrantStoreModule,
+    // Where a client's intent waits for the user's consent and the upstream's answer.
+    memoryFederationGrantIntentStoreModule,
+    // …and the session modules you already run: the browser half mounts after
+    // `session-middleware` and re-reads the durable session behind the cookie.
+  ],
   bootstrapComponents: { config, clientRepository, keyStore },
 });
 ```
 
 `federationGrantsModules` is a pair: the routes, and the background registry a shutdown drains. They are separate manifests because their dependency edges point in different directions — see below — and mounting the routes without the registry is a boot refusal rather than a shutdown that quietly drops rotated credentials.
 
-The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a logout and a subject-wide revocation reach grants through the same port. `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`.
+The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a logout and a subject-wide revocation reach grants through the same port. `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`. The same holds for the intent store (slice 6): `memoryFederationGrantIntentStoreModule` on one replica, `redisFederationGrantIntentStoreModule` on several — an intent lodged on one replica is otherwise unknown to the one the browser lands on.
+
+Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federationGrants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, `endpoints.login.url`, a `userSessionStore`, and either a `userRepository` with `findSubjectByFederatedIdentity` or `federationGrants.identityLookup = "unsupported"`. Each is described where the flow uses it, below.
 
 Enabling the feature also requires a `subjectRevocation` component that carries the **grants boundary** — `revokeSessionsBefore` and `grantsRevokedBefore` beside the pair #296 shipped (D13). A grant outlives the session it was agreed through, so that boundary is what reaches one on a replica that never saw the withdrawal, and every disclosure is compared against it. Three compositions are refused at boot rather than per request:
 
@@ -47,11 +59,102 @@ No description, deliberately. A body naming the feature would tell an unauthenti
 
 What it is **not** is byte-identical to a deployment that never installed the package: there, nothing matches the path at all and the host's own fallback answers — Express's HTML 404 in a bare composition. Review measured the difference and it is the headers and the content type, not the body. So the property this actually has is the one worth having: the refusal names no feature, and nothing behind it runs. A deployment that wants the two indistinguishable gives its host a JSON 404 of its own.
 
-## The three routes
+## The routes a client calls
 
-All three are `POST`, all are authenticated as a confidential client
-(`client_secret_basic`, `client_secret_post` or `private_key_jwt`), and all
-take the grant id as an opaque path segment.
+All five are `POST` and all are authenticated as a confidential client
+(`client_secret_basic`, `client_secret_post` or `private_key_jwt`). The three
+that address a grant take its id as an opaque path segment; the two that lodge
+an intent (slice 6) answer where to send the user's browser.
+
+### `POST /oauth/federation-grants` — lodging a first-time intent
+
+```json
+{
+  "connection": "calendar",
+  "sub": "local-subject",
+  "redirect_uri": "https://client.example/connected",
+  "state": "opaque-client-state",
+  "scope": "openid offline_access calendar.read",
+  "expires_in": 2592000,
+  "upstream_sub": "00u-expected"
+}
+```
+
+`scope`, `expires_in` and `upstream_sub` are optional. The answer is where to
+send the user, and nothing has been granted yet:
+
+```json
+{
+  "grant_id": "…",
+  "status": "pending",
+  "connect_uri": "https://provider.example/session/federation-grants/connect?request=…",
+  "connect_expires_in": 600,
+  "expires_in": 2592000
+}
+```
+
+- `connect_uri` is built on the issuer, never on a request header. The handle
+  in it is single-use and the whole flow — connect, consent, the upstream,
+  the callback — has to finish within `connect_expires_in` seconds: ten
+  minutes, measured from this answer. A user who spends nine of them on the
+  consent page has one left for the upstream; start again if it runs out.
+- `expires_in` is the grant lifetime that applied — a request above
+  `federationGrants.maxExpiresIn` is clamped, not refused. There is no
+  `expires_at` yet: a grant is dated from the user's consent.
+- `sub` is what the client asserts. The connect flow is where a browser
+  session proves it, and a session for anyone else is refused.
+
+`redirect_uri` must be one of the client's `federationGrantRedirectUris`,
+exactly — no prefix, no fallback to its ordinary redirect URIs — and may not
+already carry `grant_id`, `state` or `error`, which the end of the flow
+appends. `scope` must be within the connection's scopes, keep `openid`, and
+keep `offline_access` where the connection lists it.
+
+| Exit | HTTP | `error` | `error_description` |
+|---|---:|---|---|
+| Lodged | 201 | — | — |
+| Body is not an object | 400 | `invalid_request` | `invalid_body` |
+| A required field missing or empty | 400 | `invalid_request` | `sub_required` / `connection_required` / `redirect_uri_required` / `state_required` |
+| A field repeated, or not a string | 400 | `invalid_request` | `duplicate_<field>` / `invalid_<field>` |
+| `scope` present and empty | 400 | `invalid_request` | `invalid_scope` |
+| `expires_in` not a whole positive number of seconds | 400 | `invalid_request` | `invalid_expires_in` |
+| Any other body parameter (`resource`, `expires_at`, …) | 400 | `invalid_request` | `unexpected_parameter` |
+| `redirect_uri` not registered, registered but not a valid redirect URI, or carrying a result parameter | 400 | `invalid_request` | `redirect_uri_not_registered` / `redirect_uri_invalid` / `redirect_uri_reserved_parameter` |
+| `scope` outside the connection / without `openid` / without `offline_access` / a subset where subsets are off | 400 | `invalid_scope` | `scope_exceeded` / `openid_required` / `offline_access_required` / `scope_subsets_not_allowed` |
+| The client may not use this connection — whether or not it exists | 403 | `access_denied` | `connection_not_permitted` |
+| Sixteen live first-time intents for this client and this user | 429 | `rate_limited` | `intent_limit` |
+| The connection is not configured | 503 | `temporarily_unavailable` | `connection_not_configured` |
+| A store could not be read or written | 503 | `temporarily_unavailable` | `storage` |
+| Admitted as the process began shutting down | 503 | `service_unavailable` | `shutting_down` |
+| Unexpected fault | 500 | `server_error` | `unexpected_error` |
+
+A lodged intent emits `federation.grant.requested` (`outcome: "initial"`) with
+the connection and the resolved scopes; a refused one emits
+`federation.grant.request.denied` with the fixed outcome. Neither carries the
+handle.
+
+### `POST /oauth/federation-grants/:grantId/reauthorize` — renewing a grant
+
+The same body without `connection` (sent anyway, it is checked against the
+grant's and never moves it: `400 invalid_request/connection_mismatch`). The
+answer has the same shape; `status` is the grant's own — `active` or
+`reauthorization_required` — because a renewal changes nothing a client can
+see until the user finishes it.
+
+Ownership first, with the same `404 grant_not_found` for an unknown id,
+another client's grant and another subject's. Then the subject's grants
+boundary: a grant a subject-wide revocation covers is revoked here, durably,
+before anything else is asked of it, and answers `410 grant_revoked/backstop`.
+Then what a renewal cannot mend — each with the status `/token` gives it:
+`400 authorization_pending`, `410 grant_revoked/<by>`,
+`410 grant_expired/<reason>`, `410 connection_identity_changed`,
+`502 upstream_token_ineligible/<reason>`, and a key missing from the ring as
+`503 temporarily_unavailable/key_unavailable`, an outage rather than a reason
+to send the user through consent again. Then the client's current permission
+and the request itself, as above. A renewal takes no place against the bound.
+
+A renewal emits `federation.grant.requested` with `outcome: "reauthorization"`;
+a backstop it wrote emits `federation.grant.revoked` with `outcome: "backstop"`.
 
 ### `POST /oauth/federation-grants/:grantId/token`
 
@@ -169,6 +272,185 @@ emits `federation.grant.revoke.denied` — its own type, not a
 `.token.denied`: a credential that was not handed out and a credential that is
 still live are opposite facts, and a dashboard counting one must not count the
 other.
+
+## The browser half: connect and consent
+
+Mounted at `/session/federation-grants`, **after** the session middleware — the
+module declares `after: ["session-middleware"]`, so a composition without it is
+a boot error rather than a flow that reads every signed-in user as signed out.
+
+### `GET /session/federation-grants/connect?request=<handle>`
+
+Where `connect_uri` sends the browser. A navigation: it answers with redirects
+and plain text, never a JSON body.
+
+1. A prefetch parks nothing (`204`).
+2. An unknown, spent or expired handle: `400`, plain.
+3. Not signed in: `303` to `endpoints.login.url?redirect_to=<this link>` —
+   the handle and nothing else from the original query. It is `/oauth/authorize`'s
+   login round trip: the login page signs the user in and then returns the
+   browser to `redirect_to` **verbatim** itself. It is not a value to post as
+   `redirect_to` to `POST /session/login`, whose exact-match allowlist names
+   fixed landing pages and would refuse this link — as it would refuse an
+   authorize URL — for carrying a per-flow handle. Core's schema leaves
+   `endpoints.login.url` optional and only `oauthModule` requires it, so an
+   enabled deployment without it is refused at boot rather than answering
+   this step with a 500.
+4. Signed in as someone other than the intent's subject: `403`, plain, and no
+   redirect anywhere.
+5. The durable session is gone or expired, or authenticated at or before the
+   subject's sessions boundary: `403` "sign in again". `authTime` never
+   changes, so signing in again is the remedy.
+6. The grant no longer names this intent, the client may no longer use the
+   connection, or the connection changed since the intent was lodged: `400` /
+   `403`, plain.
+7. Otherwise one consent challenge is parked for this browser — a reload gets
+   the same one — and the browser is sent to `federationGrants.consent.url`
+   with `?challenge=`.
+
+It does not apply the login flow's `Sec-Fetch-Site` refusal: a client's site
+sending the browser here is what connect is for. That is sound only because
+holding the handle authorizes nothing — see "What the exemption depends on"
+below.
+
+### `GET` and `POST /session/federation-grants/consent`
+
+The deployment page's contract, and deliberately the same one `/oauth/consent`
+has, so one page can serve both kinds of consent.
+
+`GET ?challenge=` answers what to show:
+
+```json
+{
+  "challenge": "…",
+  "client_id": "worker",
+  "client_name": "Calendar Agent",
+  "connection": "calendar",
+  "scopes": ["openid", "offline_access", "calendar.read"],
+  "resource": "https://calendar.example/",
+  "grant_expires_in": 2592000,
+  "continues_after_logout": true,
+  "expires_in": 540
+}
+```
+
+`grant_expires_in` is the duration **after approval** — the grant is dated
+from the answer, so an absolute date computed when the page renders would be
+an estimate the grant does not keep. `continues_after_logout` is what D8
+obliges the page to tell the user. `expires_in` is what is left of the flow.
+
+`POST` with `challenge` and `decision` (`accept` or `deny`). Both success paths
+are `303`: an approval to the upstream's authorization endpoint, a refusal
+back to the client's `redirect_uri` with `error=access_denied`, the client's
+own `state` and the `grant_id`. A refused renewal ends that renewal and
+nothing else; the grant keeps working.
+
+| Exit | HTTP | `error` | `error_description` |
+|---|---:|---|---|
+| Page data | 200 | — | — |
+| Answered | 303 | — | — |
+| No authenticated session | 401 | `login_required` | `no authenticated session` |
+| No challenge | 400 | `invalid_request` | `challenge is required` |
+| Unknown, answered, expired, another browser's, stale | 400 | `invalid_request` | one sentence for all of them |
+| `decision` neither `accept` nor `deny` | 400 | `invalid_request` | (nothing is spent) |
+| The session was revoked, or predates the sessions boundary | 403 | `reauthentication_required` | — |
+| The client may no longer use the connection | 403 | `access_denied` | `connection_not_permitted` |
+| A cross-site `Sec-Fetch-Site` on the answer | 403 | `invalid_request` | `cross-site answer refused` |
+| A store, the session store or the boundary could not answer | 503 | `temporarily_unavailable` | `storage` |
+| The upstream URL could not be built (nothing is spent) | 503 | `temporarily_unavailable` | `upstream_unavailable` |
+
+A challenge is not a bearer token: it is answerable only from the browser it
+was issued to, by the same durable session and subject, and every answer
+re-reads that session and the sessions boundary.
+
+### `GET /session/federation-grants/callback/:connection`
+
+Where the upstream returns the browser: each connection's `callbackURL`
+points here. Query mode only — a `form_post` federation is refused at boot,
+because that callback arrives without the session cookie.
+
+It checks, in this order:
+
+1. **The transaction** — the `state` is one this provider issued, for THIS
+   connection, and it is spent before any code is exchanged. Otherwise a plain
+   `400` and no redirect: there is nowhere trustworthy to send the browser.
+2. **The intent** is still the grant's current one, within the flow's deadline,
+   and the connection is still what it was lodged against; for a renewal, the
+   grant it would renew is checked against the subject's grants boundary and
+   **revoked there, durably,** if a subject-wide revocation should have ended
+   it — the one failure meant to change a record.
+3. **The browser** is the one the flow started in — the same express session
+   and durable session — still live, the intent's subject's, and signed in
+   after the subject's sessions boundary.
+4. **The upstream's answer**, validated by the adapter's
+   `exchangeDelegatedCode`: PKCE, the id_token's signature, issuer, audience,
+   expiry and nonce, `iss` forwarded (RFC 9207), the resource sent at the token
+   endpoint, aborted at `upstreamHardTimeoutMs`. A response carrying any
+   parameter twice is refused as malformed (`upstream_error`) before the code
+   is exchanged, rather than having the copies dropped — a dropped `iss` would
+   leave RFC 9207's check to the issuer's metadata.
+5. **The upstream account**: the connection's issuer; for a renewal, the
+   account already on the grant; the client's `upstream_sub` if it sent one;
+   and — unless `identityLookup = "unsupported"` — not already another local
+   user's. One linked to nobody is accepted.
+
+   **What that last check can see.** It asks
+   `findSubjectByFederatedIdentity({ provider, sub, issuer })` with `provider`
+   = the federation the *connection* names, which is how a login links an
+   identity — under the federation the user logged in through. So it finds a
+   link only when the connection uses the same federation registration as the
+   login did. A connection on a registration of its own (the rule for an IdP
+   that accumulates consent, such as Entra) misses the login's link, and where
+   the IdP's `sub` is pairwise per registration (Entra's is) no name-and-`sub`
+   key could find it. `identityLookup = "required"` does not protect such a
+   connection unless the Store resolves the person across registrations — by
+   the `issuer` it is also given, or by an IdP's tenant-stable id.
+6. **Eligibility**: a refresh token, and an access token with a finite lifetime
+   within `maxAccessTokenLifetime`, of a type a route without a proof key can
+   present.
+7. **Scope containment**: nothing beyond what the user was shown. An omitted
+   `scope` means as requested; an upstream that granted more is refused,
+   because a token cannot be narrowed after the fact.
+8. **Activation**, immediately after re-reading the session, the sessions
+   boundary, the current-intent pointer and the grants boundary.
+
+Every failure after check 1 goes back to the intent's `redirect_uri` with the
+client's own `state`, the `grant_id`, and one of: `access_denied`,
+`reauthentication_required`, `account_mismatch`, `identity_conflict`,
+`refresh_token_absent`, `upstream_token_ineligible`, `scope_exceeded`,
+`upstream_error`, `temporarily_unavailable`, `grant_not_authorizable`. Nothing
+an upstream described, and no thrown message, reaches it. Success goes back
+with `grant_id` and `state` — never a token. The `grant_id` proves nothing on
+its own: every grant-addressed route needs `sub`, and `/status` says which
+upstream account the grant got.
+
+**What the re-read before activation does, and does not, do.** The upstream
+leg can take seconds, and a caller can hold the redirect and finish it much
+later. A subject-wide revocation that keeps established grants (`"keep"`)
+stamps the sessions boundary and nothing else, so without a second look a
+flow that passed check 3 before the stamp could activate after it. The re-read
+narrows that from a window the caller controls to the gap between the read and
+the write. It does not close it: that needs write fencing, which is deferred.
+
+A grant created emits `federation.grant.authorized`, a renewal
+`federation.grant.reauthorized`, each described from the record the write
+returned and carrying the deployment's `identityLookup` as its outcome. A
+failed flow emits `federation.grant.authorization_failed`.
+
+### What the exemption depends on
+
+Connect skips the request-origin check because consent is its CSRF defence.
+That holds only while connect never approves anything, every grant and renewal
+goes through consent (first-party clients included), the answer needs the
+challenge and the exact session binding, the consent data is never readable
+cross-origin with credentials (hence the same-origin page), and the challenge
+never leaks through a referrer (`Referrer-Policy: no-referrer` on every
+response). Making consent skippable later is a redesign of this, not a UI
+option.
+
+A flow that ended without a grant — declined, the wrong account, a session to
+refresh, a stale link — emits `federation.grant.authorization_failed` with a
+fixed outcome and only the facts established by then.
 
 ## Install these modules before `oauthModule`
 

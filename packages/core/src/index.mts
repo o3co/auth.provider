@@ -801,6 +801,30 @@ export {
 	registerBuiltinFederationGrantStores,
 } from "./federation-grants/factory.mjs";
 export {
+	createFederationGrantIntentStoreFactory,
+	type FederationGrantIntentStoreFactory,
+	registerBuiltinFederationGrantIntentStores,
+} from "./federation-grants/intentFactory.mjs";
+export {
+	createMemoryFederationGrantIntentStore,
+	MEMORY_FEDERATION_GRANT_INTENT_STORE_SWEEP_FLOOR,
+	type MemoryFederationGrantIntentStore,
+} from "./federation-grants/intentMemory.mjs";
+export {
+	FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT,
+	FEDERATION_GRANT_FLOW_BUDGET_MS,
+	type FederationGrantBrowserBinding,
+	type FederationGrantConnectTransaction,
+	type FederationGrantConsentAnswer,
+	type FederationGrantConsentAnswerResult,
+	type FederationGrantConsentRecord,
+	type FederationGrantIntent,
+	type FederationGrantIntentRefusal,
+	type FederationGrantIntentStore,
+	type FederationGrantIntentWrite,
+	federationGrantConsentExpiry,
+} from "./federation-grants/intentStore.mjs";
+export {
 	FEDERATION_GRANT_LIFETIME_CEILING_MS,
 	federationGrantEffectiveExpiry,
 	federationGrantExpiresAt,
@@ -809,12 +833,29 @@ export {
 	withinFederationGrantLifetimeCeiling,
 } from "./federation-grants/lifetime.mjs";
 export {
+	type FederationGrantAcquisitionConnection,
+	type FederationGrantLodged,
+	type FederationGrantLodgingClient,
+	type FederationGrantLodgingDeps,
+	type FederationGrantLodgingRefusal,
+	type FederationGrantLodgingRequest,
+	type FederationGrantLodgingResult,
+	type FederationGrantReauthorizationRequest,
+	type FederationGrantReauthorizationResult,
+	federationGrantRedirectUriReservedParameter,
+	lodgeFederationGrantIntent,
+	lodgeFederationGrantReauthorization,
+} from "./federation-grants/lodge.mjs";
+export {
 	createMemoryFederationGrantStore,
 	DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS,
 	type MemoryFederationGrantStore,
 	type MemoryFederationGrantStoreOptions,
 } from "./federation-grants/memory.mjs";
-export { memoryFederationGrantStoreModule } from "./federation-grants/module.mjs";
+export {
+	memoryFederationGrantIntentStoreModule,
+	memoryFederationGrantStoreModule,
+} from "./federation-grants/module.mjs";
 export {
 	assertFederationGrantRetrievalLimits,
 	FEDERATION_GRANT_REFRESH_LOCK_MARGIN_MS,
@@ -847,6 +888,7 @@ export {
 // the limits the retrieval takes. In core because the block is core's.
 export {
 	FEDERATION_GRANT_SETTING_DEFAULTS,
+	resolveFederationGrantAcquisitionLimits,
 	resolveFederationGrantKeepPolicy,
 	resolveFederationGrantRetrievalLimits,
 } from "./federation-grants/settings.mjs";

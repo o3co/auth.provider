@@ -473,6 +473,27 @@ per `(client, subject)` by a constant on the intent port (D16), as
 
 A login never creates a grant, and a connect never creates a login link.
 
+**Amended in slice 6: the contract as built.** The 201 carries `expires_in`,
+the grant lifetime that applied — a request above `maxExpiresIn` is clamped
+and the answer says so, where a refusal would make a client guess the
+maximum. `connect_expires_in` is what remains of the flow's one deadline
+when the answer is written, not a constant. There is no `expires_at`: a grant
+is dated from consent (D3). A renewal answers the grant's own status, `active`
+or `reauthorization_required`; it does not become `pending`, because nothing a
+client can see changes until the user finishes. A `connection` sent to
+`/reauthorize` is an assertion, as on `/token`, answered
+`invalid_request/connection_mismatch` and never a way to move a grant. A
+connection a client may not use is refused identically whether or not it is
+configured. D6's accepted set is applied as written: `upstream_token_ineligible`
+is refused although a renewal would clear its marker. The bound answers
+`429 rate_limited/intent_limit` and refuses rather than evicting: this
+bound is the only admission control in front of `createPending`, and eviction
+would uncap records in the grant store (D16). The route adds transport,
+authentication, serialization and audit; lodging itself — the order of the two
+writes, the backstop, every rule above — is core's
+`lodgeFederationGrantIntent` / `lodgeFederationGrantReauthorization`. Events:
+`federation.grant.requested` and `federation.grant.request.denied` (D18).
+
 ### D7 — The connect flow binds its callback, and refuses on any mismatch
 
 **Start.** `GET <connect_uri>` is a cross-site navigation by construction: the
@@ -548,6 +569,58 @@ order:
 `form_post` federations are not eligible: the session cookie is absent on
 their callback, so check 3 cannot run.
 
+**Amended in slice 6: the callback as built.** Check 1 consumes the
+transaction conditionally on the connection in the path, in one step (D16), so
+a callback on another connection's path spends nothing. Check 2 runs before
+the code exchange and includes the pinned revisions and the callback URI, so a
+flow whose configuration moved never reaches the upstream — a code exchanged
+for a grant that cannot be activated would leave a refresh token there that
+nothing uses. Check 4 is the capability's third method, `exchangeDelegatedCode`
+(D17), aborted at `upstreamHardTimeoutMs`; a failure to REACH the upstream is
+`temporarily_unavailable`, one it answered is `upstream_error`. Check 5 also
+requires the verified issuer to be the connection's configured one. Check 6
+judges the lifetime and the token type and check 7 the scope, each naming its
+own code: the shared `judgeUpstreamAccessToken` is given the granted scopes as
+consented, so it cannot answer `scope_exceeded` before check 7 does. Present
+and empty `scope` is not an answer (`upstream_token_ineligible`); omitted is
+"as requested". The token is dated inside the window of the exchange, the
+retrieval's rule. The grant's `consent.at` and `expiresAt` come from the
+transaction — the answer's instant, fixed by the store — never from the
+callback. Every terminal outcome after check 1 finishes the intent, releasing
+its place against the bound. A form_post federation is refused at boot even
+where a custom adapter has the capability.
+
+**What check 5's lookup can and cannot see** (found by review, after the
+design settled). `findSubjectByFederatedIdentity` is keyed as a login links an
+identity: by federation name and upstream `sub`. The callback passes the name
+the *connection* names, so the check finds a login-time link only when the
+connection uses the same federation registration as the login. D19 tells an
+operator to give a consent-accumulating IdP a registration of its own for
+grants — and with such a connection the lookup misses the login's link; where
+the IdP's `sub` is pairwise per registration, as Entra's is, no
+`(name, sub)` key could find it at all. So `identityLookup = "required"` is a
+real protection for a connection on the login registration, and none for one
+on a dedicated registration unless the Store resolves the person across
+registrations. The lookup is therefore also given the verified `issuer`, so a
+Store that can (by issuer where `sub` is not pairwise, or by an IdP's
+tenant-stable id) may implement that; the bundled repository keys by name and
+ignores it. A per-connection setting naming which login federation to consult
+was considered and not added: it helps only a dedicated registration on an IdP
+whose `sub` is NOT pairwise, which is not the case D19 describes. The package
+README states the limit where an operator configures the check. Also from that
+review: a registered redirect URI that registration itself would refuse is
+refused at lodging (`redirect_uri_invalid`) for a repository that validates
+nothing, rather than failing after activation; the consent page's location is
+always an absolute URL on the issuer, and a path that normalises onto another
+host is refused at boot; and every event of one flow correlates by the id its
+lodging carried.
+
+**The mandatory re-read.** Immediately before `activate` the callback re-reads
+the sessions boundary, the durable session's liveness, `isCurrentIntent`, and
+the grants boundary against the NEW consent — the last for a first grant too,
+since a consent the grants boundary covers is one the backstop would revoke at
+its first use. See D13 for what this does and does not close.
+
 **Outcomes.** A failure of check 1 has no trustworthy redirect target and
 answers a plain 400 from the provider. Every later failure leaves an existing
 grant exactly as it was — **amended in slice 5**: except a backstop hit, which
@@ -558,6 +631,24 @@ declined), `reauthentication_required`, `account_mismatch`,
 `identity_conflict`, `refresh_token_absent`, `upstream_token_ineligible`,
 `scope_exceeded`, `upstream_error`, `temporarily_unavailable`,
 `grant_not_authorizable`. Success redirects with `grant_id` and `state`.
+
+**Amended in slice 6: the start and the consent, as built.** The browser
+half is a router of its own under `/session/federation-grants`, mounted after
+the session middleware by an explicit `after`, and it has two transports
+because two different things read it: `GET /connect` is a navigation and
+answers only with redirects and plain text; `GET`/`POST /consent` is the
+deployment page's contract and mirrors `/oauth/consent` — JSON page data, JSON
+errors, `401 login_required`, one sentence for every challenge with nothing
+behind it, `303` on both success paths. The start re-reads the durable session
+(`userSessionStore`) and requires both halves of the browser's identity — the
+express-session record the challenge is bound to and the durable `sid` the
+consent records — and the consent's GET and POST repeat every check, the
+grant's current-intent pointer, the client's permission and the pinned
+revisions included. A prefetch parks nothing. The upstream authorization URL
+is built before the answer is spent, so a configuration fault cannot consume
+a consent. A refused renewal retires that renewal's pointer, conditionally on
+its handle. The POST additionally refuses an explicit cross-site
+`Sec-Fetch-Site`. Events: `federation.grant.authorization_failed` (D18).
 
 The grant ID in the redirect is not proof of anything. Every grant-addressed
 route requires `sub` (D9), so a grant that belongs to another user cannot be
@@ -600,6 +691,22 @@ purpose. It cannot prove that a page exists; it makes enabling the feature a
 recorded statement that one does.
 The upstream's own consent screen cannot stand in: it does not name the
 client, the expiry, or the fact that this outlives logout.
+
+**Amended in slice 6.** One challenge per intent: a reload of the connect link
+is given the challenge already parked for that browser, and another browser
+gets nothing. Answering it is one atomic step with spending the intent and —
+for an approval — creating the connect transaction (D16), so an accept and a
+deny in flight cannot both apply. The page is told `grant_expires_in`, a
+duration counted from the answer, rather than an absolute date that would be an
+estimate; and `continues_after_logout: true` as data. `federationGrants.consent.url`
+must be a path or an absolute URL on the provider's own origin: the page reads
+the consent data with the session cookie, and this provider never answers a
+credentialed cross-origin read. What `grant.consent` records is `{ at, sid,
+scopes }` — the time of the answer, the durable session it came through, and
+the scopes shown — not a copy of every field the page displayed. The CSRF
+argument for exempting connect from the request-origin check rests on this
+step, and the conditions it depends on are listed in the package README;
+making consent skippable would be a redesign of that exemption.
 
 ### D9 — POST-only, client-authenticated routes in a new package
 
@@ -1501,6 +1608,21 @@ the same trade for `cascadeLogout`.
 `"retireIntent"` from the service. A per-grant failure carries `grantId`
 beside the existing `sid`.
 
+**Amended in slice 6: the residual window of `"keep"`, stated.** The subject
+revocation service stamps the sessions boundary and then retires each grant's
+current-intent pointer, and nothing makes those two steps atomic with a
+callback's activation. A connect flow that passed check 3 before the stamp
+could otherwise activate after it — and before this slice's re-read the
+window was the caller's to choose: hold the upstream redirect, finish the
+callback minutes later. The callback now re-reads the sessions boundary, the
+durable session, the current-intent pointer and the grants boundary
+immediately before `activate`, so what remains open is **the gap between that
+read and the write**. Closing it needs write fencing — an operation spanning
+the revocation and the activation, enforced at the write — which is a change
+to the coordination surface of D2/D16 and is deferred. A retirement or
+revocation that lands before the activation's write still wins, because
+`activate` is guarded by the pointer (D2).
+
 ### D14 — Grants survive logout; a logout policy is designed, and deferred
 
 By default session expiry, local logout and upstream logout leave a grant
@@ -1695,6 +1817,51 @@ Cluster hash tag, as the consent store's do:
   supersession is enforced at activation, by the grant's current-intent
   pointer (D2).
 
+**Amended in slice 6: the intent port as built.** `FederationGrantIntentStore`
+is seven operations: `putIntent` (admission and the bound, one step),
+`getIntent`, `parkConsent`, `getConsent`, `answerConsent` (removes the
+challenge, spends the intent and — for an approval — writes the connect
+transaction, or none of it), `consumeTransaction` (read and remove,
+conditionally on the connection) and `finishIntent` (idempotent; closes the
+handle, drops what is left under it, releases the bound's place once).
+
+- **One deadline.** The intent's `expiresAt`, ten minutes after lodging
+  (`FEDERATION_GRANT_FLOW_BUDGET_MS`), is the whole flow's budget: the consent
+  and the transaction carry it rather than a TTL of their own, because a
+  record that outlived the intent could never activate — nothing extends a
+  `pending` grant's pointer. A user who spends nine minutes on the consent
+  page leaves one for the upstream.
+- **The bound refuses; it does not evict.** Sixteen live first-time intents per
+  `(client, subject)` (`FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT`).
+  `putIntent` is the only admission control in front of `createPending`, and
+  every admitted intent creates a `pending` grant that lives to its deadline,
+  so eviction would uncap records in the GRANT store while the intent count
+  stayed at sixteen. A renewal takes no place. An approval keeps its place
+  until the flow finishes; a denial releases it.
+- **Core orders the writes**: the intent first, then `createPending` or
+  `nameIntent`. An orphan intent activates nothing and lapses; a refused second
+  write closes the intent; a second write whose answer was lost is asked about
+  with `isCurrentIntent`, never retried — `nameIntent` is not safely
+  retryable once a newer intent may have superseded this one.
+- **A spent handle leaves a marker** until the original deadline, so a retried
+  admission cannot resurrect it; the same record again is `unchanged`, neither
+  extending the deadline nor taking a second place.
+- **Two clocks**, as for grants: the caller's `now` decides what it is told;
+  the adapter's own clock reclaims — including the bound's places, which the
+  Redis adapter prunes on the server's time.
+- **A record that cannot be read is refused, not reclaimed**, as the grant
+  store treats unreadable state: it may be a newer release's.
+- **Redis**: every key under one constant tag, `<prefix>{intents}:`, so a
+  script routed by one key may derive the rest; the bound as a ZSET of
+  reservations scored by deadline, not a counter. Five operations are scripts —
+  the ones that read, decide and write across keys, which Redis makes one step
+  only with a script or with WATCH/MULTI on a connection of their own. The two
+  reads are plain commands. The adapter judges nothing the answer script
+  judges, so the check a race meets is the check a test reaches. The connect
+  transaction's PKCE verifier and nonce are not sealed, as the login flow's
+  own transaction is not: they are worthless once the flow's ten minutes are
+  over, and the sealing above is for refresh tokens that outlive it.
+
 The retention a grant was created with is kept **with the record**, and its
 horizon derived from that: a key's TTL and an index score are written once, so
 a store reopened under a different setting would otherwise disagree with the
@@ -1832,7 +1999,7 @@ carries no authorization authentication at all, and its spelling is its own,
 so neither reader takes the other's. The in-memory adapter declares
 `replicaSafety: unsafe`.
 
-### D17 — The federation adapter surface gains one capability, in two methods
+### D17 — The federation adapter surface gains one capability, in three methods
 
 Every adapter fixes its authorization parameters today, so `offline_access`
 with `prompt=consent` — what OIDC Core §11 requires — cannot be sent at all.
@@ -1959,6 +2126,48 @@ becomes so once slice 2 declares the additions on it. A connection whose federat
 generic OIDC adapter; GitHub cannot (OAuth Apps issue no refresh token), and
 Google and Apple may gain it later.
 
+**Amended in slice 6: the capability is three methods, not two.** The
+decision above gave the connect callback nothing to exchange the code with,
+and the login flow's `exchangeCode` cannot stand in for it. Compared with
+`refreshDelegatedToken` it lacks four things an acquisition needs — the RFC
+8707 `resource` at the token endpoint (§2.2 asks for it there too), the
+lifetime judged on the captured body rather than on what the library coerced,
+the token dated at receipt rather than after a slow JWKS, and a per-call
+signal for the callback's time budget — and it does work a delegation must
+not depend on: it may call UserInfo, and it maps a login profile. So:
+
+```ts
+exchangeDelegatedCode(params: {
+	readonly code: string;
+	readonly codeVerifier: string;
+	readonly redirectUri: string; // the connection's callbackURL, exactly as authorization sent it
+	readonly nonce: string; // required
+	readonly resource?: string; // RFC 8707, at the token endpoint too
+	readonly callbackParams?: Readonly<Record<string, string>>; // `iss` forwarded (RFC 9207)
+	readonly signal?: AbortSignal;
+}): Promise<{
+	readonly upstream: { readonly issuer: string; readonly subject: string };
+	readonly tokens: DelegatedTokens;
+}>;
+```
+
+`upstream` comes from a VERIFIED id_token and from nothing else — not
+UserInfo, not an email. The exchange shares the refresh's capture and dating,
+and deliberately not its salvage: a refresh keeps a rotated refresh token out
+of an answer the library refused, because the grant it rotates exists; an
+acquisition whose answer could not be verified has no grant and no identity to
+bind one to, so the failure is thrown whole. A lifetime the library accepted
+but the captured body shows was not one (`parseFloat` turns `"1000seconds"`
+into 1000) withholds the access token and still reports the verified identity,
+so core refuses the activation for the true reason.
+
+`supportsDelegatedAuthorization` requires all three, and the boot refusal
+names the missing exchange. That is a break for a custom adapter written
+against the earlier pair, and it is taken now because it cannot be cheaper
+later: until this slice nothing could create a grant, so no deployment holds
+one that such an adapter serves. The generic OIDC adapter implements it; the
+others remain as the paragraph above leaves them.
+
 ### D18 — Audit, with a correlation ID
 
 New event types, each added to `BUILT_IN_AUDIT_EVENT_TYPES`:
@@ -2012,6 +2221,20 @@ outside that: the retrieval's `report` hands a cause to the composer's logger
 as it was thrown, and an upstream's error may carry what the upstream echoed.
 The package logs its name and its classification, never the error whole
 (slice 4).
+
+**Amended in slice 6.** Acquisition adds five events:
+`federation.grant.requested` and `federation.grant.request.denied` from the
+client-authenticated routes, and `federation.grant.authorized`,
+`federation.grant.reauthorized` and `federation.grant.authorization_failed`
+from the browser half. A `requested` event's subject is what the client
+ASSERTED; the connect flow is where a session establishes it. An early failure
+— an unknown handle, an unknown transaction — carries no grant id, and none
+is invented: "every event carries the grant id" was too absolute. A foreign
+grant's refusal is never enriched with that grant's owner or upstream account.
+None of them carries a handle, a challenge, a code, a state, a PKCE verifier,
+a nonce, or an upstream token. Backstop revocations found by `/reauthorize`
+or the callback use `.revoked` with `outcome: "backstop"`, once, by whichever
+call's write changed the record.
 
 ### D19 — Entra: on-behalf-of is not implemented, and consent accumulates
 
@@ -2162,6 +2385,20 @@ route test is written first and watched failing.
    optional `UserRepository` lookup, and the second port of D16 —
    `FederationGrantIntentStore`, both adapters, and the core function that
    orders an intent's two writes.
+   Done: the intent port with its memory and Redis adapters and a shared
+   contract suite held in step by a parity test; `lodgeFederationGrantIntent`
+   and `lodgeFederationGrantReauthorization`, which order the two writes;
+   `exchangeDelegatedCode`, the capability's third method (D17);
+   `findSubjectByFederatedIdentity?` and `federationGrants.identityLookup`;
+   `federationGrants.consent.url`, each connection's `callbackURL` and
+   `endpoints.login.url` (which core's schema leaves optional and only
+   `oauthModule` requires), all refused at boot when missing; the create and reauthorize routes; the
+   browser half (connect, consent, callback) as a router of its own mounted
+   after the session middleware; five audit types. The amendments are marked
+   where they stand, in D6, D7, D8, D13, D16, D17 and D18. What this slice
+   deliberately did not do: close D13's `"keep"` window beyond the re-read
+   before activation (write fencing is deferred), and give the Google, Apple
+   or GitHub adapters the capability.
 7. **standalone template, documentation, CHANGELOG.** Includes the key-ring
    retention rule and the provider-specific `offline_access` guide. The
    operator runbook rows and the `adapter-surface.md` rows are not left for

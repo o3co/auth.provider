@@ -70,6 +70,22 @@ describe("core barrel — #593 federation grant domain rules", () => {
 		expect(core.memoryFederationGrantStoreModule.name).toBe("core-federation-grant-store-memory");
 	});
 
+	it("re-exports acquisition's second port, its memory adapter, and the one deadline a flow has", () => {
+		for (const name of [
+			"createMemoryFederationGrantIntentStore",
+			"createFederationGrantIntentStoreFactory",
+			"registerBuiltinFederationGrantIntentStores",
+			"federationGrantConsentExpiry",
+		] as const) {
+			expect(typeof (core as Record<string, unknown>)[name], name).toBe("function");
+		}
+		expect(core.FEDERATION_GRANT_FLOW_BUDGET_MS).toBe(600_000);
+		expect(core.FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT).toBe(16);
+		expect(core.memoryFederationGrantIntentStoreModule.name).toBe(
+			"core-federation-grant-intent-store-memory",
+		);
+	});
+
 	it("re-exports the retrieval the package maps to HTTP, and the timing rule it checks at boot", () => {
 		expect(typeof core.retrieveFederationGrantToken).toBe("function");
 		expect(() =>

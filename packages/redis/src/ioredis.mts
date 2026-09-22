@@ -14,7 +14,10 @@ import type {
 	DeviceCodeRecordFields,
 	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
+	FederationGrantConsentAnswered,
 	FederationGrantHashFields,
+	FederationGrantIntentAdmission,
+	FederationGrantIntentStoreClient,
 	FederationGrantStoreClient,
 	FederationTokenStoreClient,
 	PendingConsentStoreClient,
@@ -2139,6 +2142,346 @@ export function makeIoredisFederationGrantStoreClient(
 
 		async prune(indexKey, clockMs, allowanceMs) {
 			await runScript(connection, FG_PRUNE, [indexKey], [fgNumber(clockMs), fgNumber(allowanceMs)]);
+		},
+	};
+}
+
+// --- federation grant intents (#593, D16, slice 6) ------------------------
+//
+// Five of the seven operations are scripts — the ones that read, decide and
+// write across keys, which Redis can only make one step with a script or with
+// WATCH/MULTI on a connection of their own (#449 is why this package prefers
+// the script). The two reads are plain commands.
+//
+// Every script is routed by the one key it is given (KEYS[1]) and derives the
+// others from ARGV[1], the `<prefix>{intents}:` namespace. They share that
+// constant hash tag, so every key a script derives is in the slot it was
+// routed to: a Cluster node treats them as local, and the operation stays one
+// atomic step. No script reaches a grant's keys (`<prefix>{<id>}:…`).
+//
+// A caller's `now` decides what it is told. What is RECLAIMED is Redis's:
+// the key TTLs, and the server time the admission script reads to prune the
+// bound. No script deletes a record because a caller's clock says it lapsed.
+
+/**
+ * Admission. KEYS[1] = the intent. ARGV: prefix, handle, record, expiresAtMs,
+ * nowMs, pair, counts ("1"/"0"), limit, allowanceMs.
+ *
+ * Residency before visibility: a record that is THERE takes the handle, however
+ * far ahead the caller's clock is. The same text again is the retry of a write
+ * whose answer was lost, and changes nothing. The bound is pruned on the
+ * server's clock, counted, and taken in the same step as the write.
+ */
+const LUA_FGI_ADMIT = `
+local now = tonumber(ARGV[5])
+local exp = tonumber(ARGV[4])
+if now == nil or exp == nil then return {'refused', 'expired'} end
+if redis.call('EXISTS', KEYS[1]) == 1 then
+  if redis.call('HGET', KEYS[1], 'closed') == '1' then return {'refused', 'closed'} end
+  if redis.call('HGET', KEYS[1], 'record') == ARGV[3] then return {'unchanged'} end
+  return {'refused', 'collision'}
+end
+if not (now < exp) then return {'refused', 'expired'} end
+if ARGV[7] == '1' then
+  local rkey = ARGV[1] .. 'r:' .. ARGV[6]
+  local t = redis.call('TIME')
+  local serverMs = (tonumber(t[1]) * 1000) + math.floor(tonumber(t[2]) / 1000)
+  redis.call('ZREMRANGEBYSCORE', rkey, '-inf', serverMs)
+  if redis.call('ZCARD', rkey) >= tonumber(ARGV[8]) then return {'refused', 'limit'} end
+  redis.call('ZADD', rkey, exp, ARGV[2])
+  local last = redis.call('ZRANGE', rkey, -1, -1, 'WITHSCORES')
+  redis.call('PEXPIREAT', rkey, math.ceil(tonumber(last[2]) + tonumber(ARGV[9])))
+end
+redis.call('HSET', KEYS[1],
+  'format', '1',
+  'record', ARGV[3],
+  'expiresAt', ARGV[4],
+  'pair', ARGV[6],
+  'counts', ARGV[7])
+redis.call('PEXPIREAT', KEYS[1], math.ceil(exp))
+return {'created'}
+`;
+
+/**
+ * KEYS[1] = the intent. ARGV: prefix, handle, challenge, record, binding,
+ * expiresAtMs, nowMs.
+ *
+ * One challenge per intent: the browser that parked it gets the same one back,
+ * any other browser gets nothing. A challenge another intent holds is never
+ * taken.
+ */
+const LUA_FGI_PARK = `
+local now = tonumber(ARGV[7])
+if now == nil then return false end
+if redis.call('EXISTS', KEYS[1]) == 0 then return false end
+if redis.call('HGET', KEYS[1], 'closed') == '1' then return false end
+local exp = tonumber(redis.call('HGET', KEYS[1], 'expiresAt'))
+if exp == nil or not (now < exp) then return false end
+local parked = redis.call('HGET', KEYS[1], 'challenge')
+if parked then
+  -- One challenge per intent, and the pointer says one was issued. A consent
+  -- key that is gone (evicted, say) is not room for a new one: parking again
+  -- would bind the flow to whichever browser asked next. The memory adapter
+  -- refuses, and so does this.
+  local pkey = ARGV[1] .. 'c:' .. parked
+  if redis.call('EXISTS', pkey) == 0 then return false end
+  if redis.call('HGET', pkey, 'binding') == ARGV[5] then
+    return redis.call('HGET', pkey, 'record')
+  end
+  return false
+end
+local ckey = ARGV[1] .. 'c:' .. ARGV[3]
+if redis.call('EXISTS', ckey) == 1 then return false end
+redis.call('HSET', ckey,
+  'format', '1',
+  'record', ARGV[4],
+  'binding', ARGV[5],
+  'expiresAt', ARGV[6],
+  'intent', ARGV[2])
+redis.call('PEXPIREAT', ckey, math.ceil(exp))
+redis.call('HSET', KEYS[1], 'challenge', ARGV[3])
+return ARGV[4]
+`;
+
+/**
+ * KEYS[1] = the consent. ARGV: prefix, nowMs, binding, decision, state,
+ * transaction, transactionExpiresAtMs, connection.
+ *
+ * The whole answer in one step: the challenge goes, the intent is marked spent,
+ * and an approval writes the transaction — or nothing happens. The consent's
+ * own deadline is checked as well as the intent's although the two are the
+ * same date: they are two keys, and Redis may reclaim them at two instants, so
+ * checking both is what makes the answer the same whichever went first. A
+ * state already held by a transaction refuses the approval and spends nothing.
+ */
+const LUA_FGI_ANSWER = `
+local now = tonumber(ARGV[2])
+if now == nil then return {'empty'} end
+if redis.call('EXISTS', KEYS[1]) == 0 then return {'empty'} end
+local exp = tonumber(redis.call('HGET', KEYS[1], 'expiresAt'))
+if exp == nil or not (now < exp) then return {'empty'} end
+if redis.call('HGET', KEYS[1], 'binding') ~= ARGV[3] then return {'empty'} end
+local handle = redis.call('HGET', KEYS[1], 'intent')
+if not handle then return {'empty'} end
+local ikey = ARGV[1] .. 'i:' .. handle
+if redis.call('EXISTS', ikey) == 0 then return {'empty'} end
+if redis.call('HGET', ikey, 'closed') == '1' then return {'empty'} end
+local iexp = tonumber(redis.call('HGET', ikey, 'expiresAt'))
+if iexp == nil or not (now < iexp) then return {'empty'} end
+if ARGV[4] == 'accept' then
+  local txkey = ARGV[1] .. 'tx:' .. ARGV[5]
+  if redis.call('EXISTS', txkey) == 1 then return {'state_collision'} end
+  redis.call('DEL', KEYS[1])
+  redis.call('HSET', ikey, 'closed', '1', 'state', ARGV[5])
+  redis.call('HDEL', ikey, 'challenge')
+  redis.call('HSET', txkey,
+    'format', '1',
+    'record', ARGV[6],
+    'expiresAt', ARGV[7],
+    'connection', ARGV[8],
+    'intent', handle)
+  redis.call('PEXPIREAT', txkey, math.ceil(tonumber(ARGV[7])))
+  return {'accepted', ARGV[6]}
+end
+local record = redis.call('HGET', ikey, 'record')
+redis.call('DEL', KEYS[1])
+redis.call('HSET', ikey, 'closed', '1')
+redis.call('HDEL', ikey, 'challenge')
+if redis.call('HGET', ikey, 'counts') == '1' then
+  local pair = redis.call('HGET', ikey, 'pair')
+  if pair then redis.call('ZREM', ARGV[1] .. 'r:' .. pair, handle) end
+end
+return {'denied', record}
+`;
+
+/**
+ * KEYS[1] = the transaction. ARGV: prefix, connection, nowMs. Read and removed
+ * in one step, and only for the connection it belongs to: a callback on
+ * another connection's path leaves it exactly where it is.
+ */
+const LUA_FGI_CONSUME = `
+local now = tonumber(ARGV[3])
+if now == nil then return false end
+if redis.call('EXISTS', KEYS[1]) == 0 then return false end
+local exp = tonumber(redis.call('HGET', KEYS[1], 'expiresAt'))
+if exp == nil or not (now < exp) then return false end
+local handle = redis.call('HGET', KEYS[1], 'intent')
+if not handle then return false end
+local ikey = ARGV[1] .. 'i:' .. handle
+if redis.call('EXISTS', ikey) == 0 then return false end
+if redis.call('HGET', KEYS[1], 'connection') ~= ARGV[2] then return false end
+local record = redis.call('HGET', KEYS[1], 'record')
+redis.call('DEL', KEYS[1])
+redis.call('HDEL', ikey, 'state')
+return record
+`;
+
+/**
+ * KEYS[1] = the intent. ARGV: prefix, handle. Closes the handle, drops the
+ * consent and transaction still under it, and releases its place — ZREM is
+ * idempotent, so a second call releases nothing a second time.
+ */
+const LUA_FGI_FINISH = `
+if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end
+local challenge = redis.call('HGET', KEYS[1], 'challenge')
+if challenge then redis.call('DEL', ARGV[1] .. 'c:' .. challenge) end
+local state = redis.call('HGET', KEYS[1], 'state')
+if state then redis.call('DEL', ARGV[1] .. 'tx:' .. state) end
+if redis.call('HGET', KEYS[1], 'counts') == '1' then
+  local pair = redis.call('HGET', KEYS[1], 'pair')
+  if pair then redis.call('ZREM', ARGV[1] .. 'r:' .. pair, ARGV[2]) end
+end
+redis.call('HSET', KEYS[1], 'closed', '1')
+redis.call('HDEL', KEYS[1], 'challenge', 'state')
+return 1
+`;
+
+const FGI_ADMIT = defineScript(LUA_FGI_ADMIT);
+const FGI_PARK = defineScript(LUA_FGI_PARK);
+const FGI_ANSWER = defineScript(LUA_FGI_ANSWER);
+const FGI_CONSUME = defineScript(LUA_FGI_CONSUME);
+const FGI_FINISH = defineScript(LUA_FGI_FINISH);
+
+/** What the intent scripts need of a connection: the script calls, and nothing else. */
+export interface FederationGrantIntentRedisCommands {
+	evalsha(sha: string, numkeys: number, ...args: (string | number)[]): Promise<unknown>;
+	eval(script: string, numkeys: number, ...args: (string | number)[]): Promise<unknown>;
+	hmget(key: string, ...fields: string[]): Promise<(string | null)[]>;
+	exists(key: string): Promise<number>;
+}
+
+/**
+ * The two reads are plain commands, not scripts: nothing is written, so
+ * nothing needs to be one step with anything else. Whatever a read concludes,
+ * the write that follows it — parking, answering — checks again inside its own
+ * script, so a read that raced a write can only make a caller give up early,
+ * never let one through.
+ */
+const fgiLiveUntil = (fields: readonly (string | null)[], nowMs: number): boolean => {
+	const expiresAt = Number(fields[0]);
+	return Number.isFinite(expiresAt) && nowMs < expiresAt;
+};
+
+const fgiText = (reply: unknown): string | null => (typeof reply === "string" ? reply : null);
+
+const ADMISSION_REFUSALS = new Set(["limit", "collision", "closed", "expired"]);
+
+/**
+ * The federation grant intent store's connection (#593, D16, slice 6). It may
+ * be the grant store's own connection: nothing here needs a second one, and
+ * the keys live under a different hash tag either way.
+ */
+export function makeIoredisFederationGrantIntentStoreClient(
+	io: FederationGrantIntentRedisCommands,
+): FederationGrantIntentStoreClient {
+	const connection = io as unknown as Redis;
+	return {
+		async admitIntent(prefix, input): Promise<FederationGrantIntentAdmission> {
+			const reply = await runScript(
+				connection,
+				FGI_ADMIT,
+				[`${prefix}i:${input.handle}`],
+				[
+					prefix,
+					input.handle,
+					input.record,
+					fgNumber(input.expiresAtMs),
+					fgNumber(input.nowMs),
+					input.pair,
+					input.counts ? "1" : "0",
+					fgNumber(input.limit),
+					fgNumber(input.reservationAllowanceMs),
+				],
+			);
+			const outcome = Array.isArray(reply) ? reply[0] : undefined;
+			if (outcome === "created" || outcome === "unchanged") return { outcome };
+			const reason = Array.isArray(reply) ? reply[1] : undefined;
+			if (outcome === "refused" && typeof reason === "string" && ADMISSION_REFUSALS.has(reason)) {
+				return {
+					outcome: "refused",
+					reason: reason as FederationGrantIntentAdmission["reason"] & string,
+				};
+			}
+			// A reply this release does not know is not an admission: say so rather
+			// than let a record the caller believes it wrote go unwritten silently.
+			throw new Error(
+				"federation grant intent store: the admission script answered nothing it knows",
+			);
+		},
+
+		async readIntent(prefix, handle, nowMs) {
+			const fields = await io.hmget(`${prefix}i:${handle}`, "expiresAt", "closed", "record");
+			if (fields[1] === "1" || !fgiLiveUntil(fields, nowMs)) return null;
+			return fields[2] ?? null;
+		},
+
+		async parkConsent(prefix, input) {
+			return fgiText(
+				await runScript(
+					connection,
+					FGI_PARK,
+					[`${prefix}i:${input.handle}`],
+					[
+						prefix,
+						input.handle,
+						input.challenge,
+						input.record,
+						input.binding,
+						fgNumber(input.expiresAtMs),
+						fgNumber(input.nowMs),
+					],
+				),
+			);
+		},
+
+		async readConsent(prefix, challenge, nowMs) {
+			const fields = await io.hmget(`${prefix}c:${challenge}`, "expiresAt", "intent", "record");
+			if (!fgiLiveUntil(fields, nowMs) || fields[1] === null || fields[1] === undefined)
+				return null;
+			// While its intent is still there: a consent outliving a reclaimed intent
+			// answers nothing, whichever key Redis happened to drop first.
+			if ((await io.exists(`${prefix}i:${fields[1]}`)) === 0) return null;
+			return fields[2] ?? null;
+		},
+
+		async answerConsent(prefix, input): Promise<FederationGrantConsentAnswered> {
+			const reply = await runScript(
+				connection,
+				FGI_ANSWER,
+				[`${prefix}c:${input.challenge}`],
+				[
+					prefix,
+					fgNumber(input.nowMs),
+					input.binding,
+					input.decision,
+					input.state ?? "",
+					input.transaction ?? "",
+					fgNumber(input.transactionExpiresAtMs ?? 0),
+					input.connection ?? "",
+				],
+			);
+			const outcome = Array.isArray(reply) ? reply[0] : undefined;
+			const record = Array.isArray(reply) && typeof reply[1] === "string" ? reply[1] : undefined;
+			if (outcome === "denied" || outcome === "accepted") {
+				return record === undefined ? { outcome } : { outcome, record };
+			}
+			if (outcome === "state_collision" || outcome === "empty") return { outcome };
+			throw new Error("federation grant intent store: the answer script answered nothing it knows");
+		},
+
+		async consumeTransaction(prefix, input) {
+			return fgiText(
+				await runScript(
+					connection,
+					FGI_CONSUME,
+					[`${prefix}tx:${input.state}`],
+					[prefix, input.connection, fgNumber(input.nowMs)],
+				),
+			);
+		},
+
+		async finishIntent(prefix, handle, _nowMs) {
+			await runScript(connection, FGI_FINISH, [`${prefix}i:${handle}`], [prefix, handle]);
 		},
 	};
 }

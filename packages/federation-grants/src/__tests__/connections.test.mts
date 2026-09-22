@@ -195,6 +195,14 @@ describe("resolveFederationGrantConnections", () => {
 		).toEqual({ prompt: "consent" });
 	});
 
+	it("refuses a parameter named __proto__, which objects keep or lose depending on how they are built (Copilot)", () => {
+		// An own `__proto__` survives a spread and is lost to an assignment, so
+		// two adapters storing the same intent would disagree about it. No
+		// authorization server defines the name.
+		const authorizationParams = JSON.parse('{"__proto__": "x", "prompt": "consent"}');
+		expect(() => resolve({ g: { ...CONNECTION, authorizationParams } })).toThrow(/__proto__/);
+	});
+
 	it("takes a callback URL when one is supplied, and refuses an unusable one", () => {
 		// Optional here: a worker spending a grant never performs the browser
 		// flow. Slice 6 makes it mandatory, with the flow it belongs to.

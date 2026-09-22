@@ -30,6 +30,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
 	FEDERATION_GRANT_SETTING_DEFAULTS,
+	resolveFederationGrantAcquisitionLimits,
 	resolveFederationGrantKeepPolicy,
 	resolveFederationGrantRetrievalLimits,
 } from "#/federation-grants/settings.mjs";
@@ -244,5 +245,43 @@ describe("resolveFederationGrantRetrievalLimits", () => {
 				federationGrants: { refreshFailureBackoff: 600, ineligibleRetryAfter: 300 },
 			}),
 		).toThrow();
+	});
+});
+
+describe("resolveFederationGrantAcquisitionLimits", () => {
+	it("reads defaultExpiresIn, which nothing read before, in the milliseconds lodging takes", () => {
+		expect(resolveFederationGrantAcquisitionLimits({})).toEqual({
+			defaultLifetimeMs: 2_592_000_000,
+			maxLifetimeMs: 2_592_000_000,
+		});
+		expect(
+			resolveFederationGrantAcquisitionLimits({
+				federationGrants: { defaultExpiresIn: 86_400, maxExpiresIn: "604800" },
+			}),
+		).toEqual({ defaultLifetimeMs: 86_400_000, maxLifetimeMs: 604_800_000 });
+	});
+
+	it("refuses a default the maximum would silently cut down", () => {
+		expect(() =>
+			resolveFederationGrantAcquisitionLimits({
+				federationGrants: { defaultExpiresIn: 7_776_000, maxExpiresIn: 2_592_000 },
+			}),
+		).toThrow(/defaultExpiresIn .* must not exceed/);
+	});
+
+	it("refuses a default of nothing, a maximum of nothing, and a maximum past the ceiling", () => {
+		expect(() =>
+			resolveFederationGrantAcquisitionLimits({ federationGrants: { defaultExpiresIn: 0 } }),
+		).toThrow(/positive/);
+		// Zero passes the seconds reader, which takes any whole number from 0;
+		// a grant that may live no time at all is the maximum's own refusal.
+		expect(() =>
+			resolveFederationGrantAcquisitionLimits({ federationGrants: { maxExpiresIn: 0 } }),
+		).toThrow(/maxExpiresIn must be a positive number of seconds/);
+		expect(() =>
+			resolveFederationGrantAcquisitionLimits({
+				federationGrants: { maxExpiresIn: 31_536_001 },
+			}),
+		).toThrow(/one year|no greater than/);
 	});
 });

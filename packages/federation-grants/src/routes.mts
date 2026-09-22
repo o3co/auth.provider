@@ -47,6 +47,11 @@ import {
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
 import express, { type ErrorRequestHandler, type RequestHandler, type Router } from "express";
 import { createRouteDenialAudit } from "./denialAudit.mjs";
+import {
+	createFederationGrantCreateHandler,
+	createFederationGrantReauthorizeHandler,
+	type FederationGrantAcquisitionRouteOptions,
+} from "./lodgeRoute.mjs";
 import { createSanitizedAuditSink, createSanitizedLogger } from "./report.mjs";
 import { createRequestIdMiddleware } from "./requestId.mjs";
 import { createFederationGrantRevokeHandler } from "./revokeRoute.mjs";
@@ -179,6 +184,12 @@ export const parserErrors: ErrorRequestHandler = (error, _req, res, next) => {
 };
 
 export interface FederationGrantRouterOptions extends FederationGrantTokenHandlerOptions {
+	/**
+	 * Slice 6: what creating a grant needs. Absent, the two lodging routes are
+	 * not mounted and answer as any unknown path does; the module always passes
+	 * it, having refused at boot a deployment that could not supply it.
+	 */
+	readonly acquisition?: FederationGrantAcquisitionRouteOptions;
 	readonly clientRepository: ClientRepository;
 	/** `oauth.jwt.issuer`: the Basic realm, and the audience an assertion may name. */
 	readonly issuer: string;
@@ -205,6 +216,18 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 				background: options.background,
 			}),
 		);
+	}
+	if (options.acquisition !== undefined) {
+		const requestDenials = createRouteDenialAudit({
+			...(options.auditSink === undefined ? {} : { sink: options.auditSink }),
+			operation: "request",
+			now: options.now ?? (() => new Date()),
+			background: options.background,
+		});
+		// `all` on the exact collection path, not `use`: `use("/")` would match
+		// every path under the mount and count a token refusal as a lodging one.
+		router.all("/", requestDenials);
+		router.use("/:grantId/reauthorize", requestDenials);
 	}
 	// Ahead of client authentication, as the token endpoint orders it: repeated
 	// unauthenticated hits are bounded before they reach a repository lookup.
@@ -242,6 +265,11 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 	router.post("/:grantId/token", createFederationGrantTokenHandler(options));
 	router.post("/:grantId/status", createFederationGrantStatusHandler(options));
 	router.post("/:grantId/revoke", createFederationGrantRevokeHandler(options));
+	if (options.acquisition !== undefined) {
+		const lodging = { ...options, acquisition: options.acquisition };
+		router.post("/", createFederationGrantCreateHandler(lodging));
+		router.post("/:grantId/reauthorize", createFederationGrantReauthorizeHandler(lodging));
+	}
 	router.use(notFound);
 	router.use(parserErrors);
 	return router;

@@ -58,6 +58,13 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
+import {
+	ACQUISITION_ENDPOINTS,
+	ACQUISITION_GRANT_SETTINGS,
+	acquisitionComponents,
+	callbackUrlFor,
+	sessionMiddlewareModule,
+} from "./acquisitionFixture.mjs";
 import { basic, CLIENT_ID, CLIENT_SECRET, connection, DAY, MIN, SUBJECT } from "./harness.mjs";
 
 const client = {
@@ -77,6 +84,10 @@ const clientRepository: ClientRepository = {
 
 const delegated = {
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
+	exchangeDelegatedCode: async () => ({
+		upstream: { issuer: "https://issuer.example", subject: "upstream-1" },
+		tokens: {},
+	}),
 	refreshDelegatedToken: async () => ({
 		accessToken: "rotated-access-token",
 		refreshToken: "rotated-refresh-token",
@@ -121,7 +132,12 @@ const boot = async (allowKeep: boolean) => {
 	const components = shared();
 	const events: { type: string; details?: Record<string, unknown> }[] = [];
 	const handle = await createApp({
-		modules: [federationModule, ...federationGrantsModules, subjectRevocationServiceModule],
+		modules: [
+			federationModule,
+			sessionMiddlewareModule,
+			...federationGrantsModules,
+			subjectRevocationServiceModule,
+		],
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),
@@ -137,6 +153,7 @@ const boot = async (allowKeep: boolean) => {
 				},
 				rateLimit: { ...full.rateLimit, failMode: "closed" },
 				audit: { sink: { type: "none" } },
+				endpoints: ACQUISITION_ENDPOINTS,
 				federationGrants: {
 					enabled: true,
 					allowKeepOnSubjectRevocation: allowKeep,
@@ -146,12 +163,15 @@ const boot = async (allowKeep: boolean) => {
 							scopes: [...connection.scopes],
 							boundary: connection.boundary,
 							maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
+							callbackURL: callbackUrlFor(connection.name),
 						},
 					},
+					...ACQUISITION_GRANT_SETTINGS,
 				},
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
+			...acquisitionComponents(),
 			rateLimiter: createMemoryRateLimiter({
 				limits: {},
 				defaultLimit: { limit: 100, windowSeconds: 60 },

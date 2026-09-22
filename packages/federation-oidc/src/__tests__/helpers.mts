@@ -75,6 +75,11 @@ export interface FakeIdp {
 	refreshAnswer: Record<string, unknown>;
 	/** Mint an id_token into the refresh answer (an IdP that re-issues one on refresh). */
 	refreshWithIdToken: boolean;
+	/**
+	 * Laid over the authorization-code answer's defaults; a value of `undefined`
+	 * removes the field. What the delegated exchange's tests shape (#593, D17).
+	 */
+	codeAnswer: Record<string, unknown>;
 	/** The body of a token endpoint refusal (when `tokenStatus` is not 200). */
 	refusal: Record<string, unknown>;
 	/** How long the JWKS takes to answer, in real milliseconds. */
@@ -145,6 +150,7 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		omitIdToken: false,
 		atHash: "none",
 		userinfoClaims: {},
+		codeAnswer: {},
 		discoveryStatus: 200,
 		tokenStatus: 200,
 		accessToken: "at-1",
@@ -231,13 +237,16 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 				for (const key of Object.keys(answer)) if (answer[key] === undefined) delete answer[key];
 				return json(answer);
 			}
-			return json({
+			const answer: Record<string, unknown> = {
 				access_token: idp.accessToken,
 				token_type: "Bearer",
 				expires_in: 3600,
 				refresh_token: "rt-1",
 				...(idp.omitIdToken ? {} : { id_token: await mintIdToken() }),
-			});
+				...idp.codeAnswer,
+			};
+			for (const key of Object.keys(answer)) if (answer[key] === undefined) delete answer[key];
+			return json(answer);
 		}
 		if (path === "/userinfo") {
 			return json({

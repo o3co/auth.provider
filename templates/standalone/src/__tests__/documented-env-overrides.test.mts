@@ -182,6 +182,10 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	FEDERATION_GRANTS_ENABLED: "true",
 	FEDERATION_GRANTS_ENCRYPTION_MODE: "required",
 	FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION: "false",
+	// Slice 6: acquisition's two deployment decisions — whether the callback
+	// refuses an upstream account linked to another user, and the consent page.
+	FEDERATION_GRANTS_IDENTITY_LOOKUP: "required",
+	FEDERATION_GRANTS_CONSENT_URL: "/consent/grants",
 	REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX: "fg:",
 
 	// --- federation ---------------------------------------------------

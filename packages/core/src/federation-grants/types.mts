@@ -204,6 +204,14 @@ export interface FederationGrantConnection {
 	readonly maxAccessTokenLifetime: number;
 	/** `false`: every intent gets the full scope set (D19). Default `true`. */
 	readonly allowScopeSubsets?: boolean;
+	/**
+	 * `callbackURL`, exactly as configured: where the upstream returns the
+	 * browser at the end of a connect flow (D7). Optional here because spending
+	 * a grant never needs it; a deployment that creates grants is refused at
+	 * boot without it, and acquisition takes the connection as
+	 * `FederationGrantAcquisitionConnection`, where it is required.
+	 */
+	readonly callbackUri?: string;
 }
 
 export type FederationGrantIneligibilityReason =

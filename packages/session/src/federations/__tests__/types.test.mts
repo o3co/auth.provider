@@ -57,26 +57,38 @@ describe("FederationProvider type guards", () => {
 		expect(supportsRefresh(p)).toBe(true);
 	});
 
-	it("supportsDelegatedAuthorization needs BOTH methods: a provider that can only build the URL, or only refresh, does not have it", () => {
+	it("supportsDelegatedAuthorization needs ALL THREE methods: an adapter written against the earlier pair does not have it", () => {
 		expect(supportsDelegatedAuthorization(minimalProvider)).toBe(false);
 		expect(supportsDelegatedAuthorization(null)).toBe(false);
 		expect(supportsDelegatedAuthorization(undefined)).toBe(false);
-		const halfway: FederationProvider & Partial<SupportsDelegatedAuthorization> = {
-			...minimalProvider,
+		const methods = {
 			buildDelegatedAuthorizationUrl: () => new URL("https://example.com/authorize"),
-		};
-		expect(supportsDelegatedAuthorization(halfway)).toBe(false);
-		const otherHalf: FederationProvider & Partial<SupportsDelegatedAuthorization> = {
-			...minimalProvider,
+			exchangeDelegatedCode: async () => ({
+				upstream: { issuer: "https://example.com", subject: "s" },
+				tokens: {},
+			}),
 			refreshDelegatedToken: async () => ({}),
 		};
-		expect(supportsDelegatedAuthorization(otherHalf)).toBe(false);
+		// Every subset of two — including the pair slice 2 shipped, which is what
+		// a custom adapter written before slice 6 has.
+		for (const missing of Object.keys(methods) as (keyof typeof methods)[]) {
+			const { [missing]: _dropped, ...rest } = methods;
+			const partial: FederationProvider & Partial<SupportsDelegatedAuthorization> = {
+				...minimalProvider,
+				...rest,
+			};
+			expect(supportsDelegatedAuthorization(partial), `without ${missing}`).toBe(false);
+		}
 	});
 
-	it("supportsDelegatedAuthorization narrows when both are functions", () => {
+	it("supportsDelegatedAuthorization narrows when all three are functions", () => {
 		const p: FederationProvider & SupportsDelegatedAuthorization = {
 			...minimalProvider,
 			buildDelegatedAuthorizationUrl: () => new URL("https://example.com/authorize"),
+			exchangeDelegatedCode: async () => ({
+				upstream: { issuer: "https://example.com", subject: "s" },
+				tokens: { refreshToken: "rt-1" },
+			}),
 			refreshDelegatedToken: async () => ({ refreshToken: "rt-2" }),
 		};
 		expect(supportsDelegatedAuthorization(p)).toBe(true);

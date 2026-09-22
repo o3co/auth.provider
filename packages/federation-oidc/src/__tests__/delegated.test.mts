@@ -139,6 +139,182 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 		});
 	});
 
+	describe("the delegated code exchange (#593, D17 — the capability's third method)", () => {
+		const exchange = (
+			provider: Awaited<ReturnType<typeof build>>["provider"],
+			over: Partial<Parameters<typeof provider.exchangeDelegatedCode>[0]> = {},
+		) =>
+			provider.exchangeDelegatedCode({
+				code: "code-1",
+				codeVerifier: VERIFIER,
+				redirectUri: CALLBACK,
+				nonce: "nonce-1",
+				...over,
+			});
+
+		it("exchanges the code at the grant's callback with PKCE, and answers the verified upstream identity beside the raw token fields", async () => {
+			const { idp, provider } = await build();
+			idp.nonce = "nonce-1";
+			idp.codeAnswer = { scope: "openid offline_access calendar.read" };
+			const before = Date.now();
+			const result = await exchange(provider);
+			const req = idp.lastTokenRequest();
+			expect(req?.body?.get("grant_type")).toBe("authorization_code");
+			expect(req?.body?.get("code")).toBe("code-1");
+			expect(req?.body?.get("code_verifier")).toBe(VERIFIER);
+			// The grant's callback, not the login one the provider was built with.
+			expect(req?.body?.get("redirect_uri")).toBe(CALLBACK);
+			expect(result.upstream).toEqual({ issuer: idp.issuer, subject: idp.sub });
+			expect(result.tokens).toMatchObject({
+				accessToken: idp.accessToken,
+				refreshToken: "rt-1",
+				expiresIn: 3600,
+				scope: "openid offline_access calendar.read",
+				tokenType: "bearer",
+			});
+			expect(result.tokens.expiresAt?.getTime()).toBeGreaterThanOrEqual(before + 3_600_000);
+			// The id_token is verified and not handed on: nothing downstream needs it.
+			expect(result.tokens).not.toHaveProperty("idToken");
+		});
+
+		it("sends the resource indicator at the token endpoint too (RFC 8707 §2.2), and none when the connection names none", async () => {
+			const { idp, provider } = await build();
+			idp.nonce = "nonce-1";
+			await exchange(provider, { resource: "https://calendar.example/" });
+			expect(idp.lastTokenRequest()?.body?.get("resource")).toBe("https://calendar.example/");
+			await exchange(provider);
+			expect(idp.lastTokenRequest()?.body?.has("resource")).toBe(false);
+		});
+
+		it("never calls UserInfo: a delegation needs the verified subject, not a login profile", async () => {
+			const { idp, provider } = await build({ userInfo: true });
+			idp.nonce = "nonce-1";
+			await exchange(provider);
+			expect(idp.requestsTo("/userinfo")).toHaveLength(0);
+		});
+
+		it("refuses an id_token bound to another nonce, and one missing altogether — and salvages nothing from either", async () => {
+			const { idp, provider } = await build();
+			idp.nonce = "someone-elses-nonce";
+			await expect(exchange(provider)).rejects.toThrow();
+			idp.nonce = "nonce-1";
+			idp.omitIdToken = true;
+			// Refused by the library itself (`idTokenExpected`), before this
+			// adapter's own check — the message is the library's.
+			await expect(exchange(provider)).rejects.toThrow();
+			// And a nonce is required of the caller, as for the authorization URL.
+			await expect(exchange(provider, { nonce: "" })).rejects.toThrow(/nonce/);
+		});
+
+		it("salvages no refresh token from an answer whose identity failed: there is no authorization to keep it under", async () => {
+			// Unlike a refresh, which rotates a credential a grant already holds, an
+			// acquisition that could not verify who the user is has nothing a
+			// refresh token could belong to.
+			const { idp, provider } = await build();
+			idp.nonce = "nonce-1";
+			idp.atHash = "wrong";
+			await expect(exchange(provider)).rejects.toThrow();
+		});
+
+		it("judges the lifetime the upstream sent: one the library would coerce withholds the access token, and absence is no finite lifetime", async () => {
+			const { idp, provider } = await build();
+			idp.nonce = "nonce-1";
+			// oauth4webapi reads a non-number with parseFloat, so these arrive at
+			// this adapter as 1000 and 3600 — lifetimes the upstream never sent.
+			for (const garbage of ["1000seconds", [3600, 7200]]) {
+				idp.codeAnswer = { expires_in: garbage };
+				const garbled = await exchange(provider);
+				expect(garbled.tokens, JSON.stringify(garbage)).toStrictEqual({ refreshToken: "rt-1" });
+				// The identity was verified, so it is still reported; core refuses
+				// the activation on the tokens.
+				expect(garbled.upstream.subject).toBe(idp.sub);
+			}
+			// What the library cannot read at all it refuses whole, and an
+			// acquisition salvages nothing from a refusal.
+			idp.codeAnswer = { expires_in: "soon" };
+			await expect(exchange(provider)).rejects.toThrow();
+
+			idp.codeAnswer = { expires_in: undefined };
+			const unbounded = await exchange(provider);
+			expect(unbounded.tokens.expiresIn).toBeNull();
+			expect(unbounded.tokens.expiresAt).toBeNull();
+			expect(unbounded.tokens.accessToken).toBe(idp.accessToken);
+		});
+
+		it("keeps a scope the upstream answered as empty, so the callback can refuse it (Codex on slice 6)", async () => {
+			// Dropped, an empty scope reads as omitted — "as requested" — and the
+			// callback would grant every consented scope on an answer that named none.
+			const { idp, provider } = await build();
+			idp.nonce = "nonce-1";
+			idp.codeAnswer = { scope: "" };
+			expect((await exchange(provider)).tokens.scope).toBe("");
+		});
+
+		it("answers no refresh token when the upstream issued none, and leaves the refusal to core", async () => {
+			const { idp, provider } = await build();
+			idp.nonce = "nonce-1";
+			idp.codeAnswer = { refresh_token: undefined };
+			const result = await exchange(provider);
+			expect(result.tokens).not.toHaveProperty("refreshToken");
+			expect(result.tokens.accessToken).toBe(idp.accessToken);
+		});
+
+		it("dates the token from when the answer arrived, not from when a slow JWKS let the verification finish", async () => {
+			const { idp, provider } = await build();
+			idp.nonce = "nonce-1";
+			idp.codeAnswer = { expires_in: 2 };
+			idp.jwksDelayMs = 1_500;
+			const before = Date.now();
+			const result = await exchange(provider);
+			expect(Date.now() - before).toBeGreaterThanOrEqual(1_400);
+			expect(result.tokens.expiresAt?.getTime()).toBeLessThanOrEqual(before + 2_000 + 200);
+			expect(result.tokens.expiresAt?.getTime()).toBeGreaterThanOrEqual(before + 2_000 - 50);
+		});
+
+		it("forwards the callback's iss to the mix-up check (RFC 9207), and refuses another issuer's", async () => {
+			const { idp, provider } = await build();
+			idp.nonce = "nonce-1";
+			idp.metadata.authorization_response_iss_parameter_supported = true;
+			await expect(
+				exchange(provider, { callbackParams: { iss: "https://attacker.test" } }),
+			).rejects.toThrow();
+			const ok = await exchange(provider, { callbackParams: { iss: idp.issuer } });
+			expect(ok.upstream.issuer).toBe(idp.issuer);
+		});
+
+		it("is aborted by the caller's signal", async () => {
+			const idp = await createFakeIdp({ issuer: ISSUER });
+			const real = idp.fetch;
+			const hanging: typeof fetch = (url, init) => {
+				if (String(url).endsWith("/token")) {
+					return new Promise((_, reject) => {
+						init?.signal?.addEventListener("abort", () => reject(init?.signal?.reason));
+					});
+				}
+				return real(url, init);
+			};
+			const provider = await createOidcProvider("idp-a", {
+				issuer: idp.issuer,
+				clientId: idp.clientId,
+				clientSecret: "s3cret",
+				callbackURL: "https://auth.test/session/oauth/federation/idp-a/callback",
+				fetch: hanging,
+			});
+			if (!supportsDelegatedAuthorization(provider)) throw new Error("fixture: no capability");
+			const controller = new AbortController();
+			const pending = exchange(provider, { signal: controller.signal });
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			controller.abort(new Error("the callback gave up"));
+			await expect(pending).rejects.toSatisfy((error: unknown) => {
+				const cause = (error as { cause?: unknown }).cause;
+				return (
+					/gave up/.test(String((error as Error).message)) ||
+					(cause instanceof Error && /gave up/.test(cause.message))
+				);
+			});
+		});
+	});
+
 	describe("the delegated refresh", () => {
 		it("runs the refresh_token grant with the grant's scopes and resource, and answers the raw fields: expires_in as issued, scope as answered, token_type as the library reports it", async () => {
 			const { idp, provider } = await build();

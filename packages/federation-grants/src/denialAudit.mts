@@ -95,7 +95,9 @@ export function createRouteDenialAudit(options: DenialAuditOptions): RequestHand
 	const type =
 		options.operation === "revoke"
 			? ("federation.grant.revoke.denied" as const)
-			: ("federation.grant.token.denied" as const);
+			: options.operation === "request"
+				? ("federation.grant.request.denied" as const)
+				: ("federation.grant.token.denied" as const);
 	return (req, res, next) => {
 		const correlationId = requestIdOf(res);
 		const matched = req.params.grantId;

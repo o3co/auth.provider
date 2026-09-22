@@ -35,6 +35,13 @@ import {
 import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
+import {
+	ACQUISITION_ENDPOINTS,
+	ACQUISITION_GRANT_SETTINGS,
+	acquisitionComponents,
+	callbackUrlFor,
+	sessionMiddlewareModule,
+} from "./acquisitionFixture.mjs";
 
 const clientRepository: ClientRepository = {
 	findById: async () => null,
@@ -80,9 +87,30 @@ const olderRevocation = {
 	revokedBefore: async () => null,
 };
 
-/** An adapter with BOTH delegated methods: the capability slice 2 defined. */
+/** An adapter with all three delegated methods: the capability as slice 6 completed it. */
 const delegated = {
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
+	exchangeDelegatedCode: async () => ({
+		upstream: { issuer: "https://issuer.example", subject: "upstream-1" },
+		tokens: {},
+	}),
+	refreshDelegatedToken: async () => ({}),
+} as unknown as FederationProvider;
+
+/** The pair slice 2 shipped, without the code exchange slice 6 added: what a custom adapter written before it has. */
+const slice2Pair = {
+	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
+	refreshDelegatedToken: async () => ({}),
+} as unknown as FederationProvider;
+
+/** A custom adapter with the capability, whose callbacks arrive as a cross-site POST. */
+const formPost = {
+	responseMode: "form_post",
+	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
+	exchangeDelegatedCode: async () => ({
+		upstream: { issuer: "https://issuer.example", subject: "s" },
+		tokens: {},
+	}),
 	refreshDelegatedToken: async () => ({}),
 } as unknown as FederationProvider;
 
@@ -110,6 +138,7 @@ const CONNECTION = {
 	scopes: ["openid", "offline_access"],
 	boundary: "production",
 	maxAccessTokenLifetime: 3600,
+	callbackURL: callbackUrlFor("calendar"),
 };
 
 interface Setup {
@@ -127,6 +156,14 @@ interface Setup {
 	readonly provider?: FederationProvider | null;
 	/** The federation module listed BEFORE the routes, or after. */
 	readonly federationFirst?: boolean;
+	/** Slice 6: somewhere to lodge an intent. */
+	readonly withIntentStore?: boolean;
+	/** Slice 6: the repository D7 check 5 asks; `null` installs one without the lookup. */
+	readonly userRepository?: "with-lookup" | "without-lookup";
+	/** Slice 6: the durable sessions the connect flow re-reads. */
+	readonly withUserSessionStore?: boolean;
+	/** Slice 6: where connect sends a browser that is not signed in. */
+	readonly withLoginUrl?: boolean;
 }
 
 const boot = (setup: Setup) => {
@@ -135,6 +172,7 @@ const boot = (setup: Setup) => {
 		setup.provider === null ? [] : [federationModule("upstream", setup.provider ?? delegated)];
 	const modules = [
 		...(setup.federationFirst === false ? [] : federation),
+		sessionMiddlewareModule,
 		...federationGrantsModules,
 		...(setup.withStore === false
 			? []
@@ -151,19 +189,32 @@ const boot = (setup: Setup) => {
 				},
 				rateLimit: { ...full.rateLimit, failMode: setup.failMode ?? "closed" },
 				...(setup.withAudit === false ? {} : { audit: { sink: { type: "none" } } }),
+				...(setup.withLoginUrl === false ? {} : { endpoints: ACQUISITION_ENDPOINTS }),
 				federationGrants: {
 					enabled: setup.enabled ?? true,
 					connections: setup.connections ?? { calendar: CONNECTION },
+					...ACQUISITION_GRANT_SETTINGS,
 					...(setup.grants ?? {}),
 				},
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
+			...(() => {
+				const { federationGrantIntentStore, userRepository } = acquisitionComponents();
+				return {
+					...(setup.withIntentStore === false ? {} : { federationGrantIntentStore }),
+					userRepository:
+						setup.userRepository === "without-lookup"
+							? { authenticate: async () => null, authenticateByToken: async () => null }
+							: userRepository,
+				};
+			})(),
 			// Enabling a federation at all brings the session-federation stores
 			// with it — a federation is first of all a way to log in, and that
 			// guard is not this feature's. Present but empty: what is under test
 			// here is the grant refusals, and nothing in this file logs anyone in.
 			...SESSION_FEDERATION_STORES,
+			...(setup.withUserSessionStore === false ? { userSessionStore: undefined } : {}),
 			// The boundary a grant is compared against on every disclosure
 			// (D13). Bundled here because every composition that enables the
 			// feature needs one, which is the point of the refusals below.
@@ -280,6 +331,11 @@ describe("enabling the feature", () => {
 		// provider may act for a user who is not present, which is the entire
 		// question offline delegation asks.
 		await expect(boot({ provider: sessionOnly })).rejects.toThrow(/delegated/);
+		// And the earlier pair, by name: the callback would otherwise be the
+		// first place it failed, with a user standing in front of it.
+		await expect(boot({ provider: slice2Pair })).rejects.toThrow(/exchangeDelegatedCode/);
+		// And one whose callback would arrive without the session cookie.
+		await expect(boot({ provider: formPost })).rejects.toThrow(/form_post/);
 	});
 
 	it("refuses to discard every disclosure without being told to", async () => {
@@ -333,5 +389,58 @@ describe("leaving the feature off", () => {
 		};
 		const issue = issues.find((i) => i.path.join(".") === "federationGrants.enabled");
 		expect(issue?.message).toMatch(/"true", "false", "1" or "0"/);
+	});
+});
+
+describe("what creating a grant needs (slice 6)", () => {
+	it("refuses a deployment with no consent page, before a user could reach one that is not there", async () => {
+		await expect(boot({ grants: { consent: {} } })).rejects.toThrow(
+			/federationGrants\.consent\.url/,
+		);
+	});
+
+	it("refuses a connection with no callback of its own", async () => {
+		const { callbackURL: _none, ...withoutCallback } = CONNECTION;
+		await expect(boot({ connections: { calendar: withoutCallback } })).rejects.toThrow(
+			/connections\.calendar\.callbackURL/,
+		);
+	});
+
+	it("refuses a deployment with no durable sessions for the connect flow to re-read", async () => {
+		await expect(boot({ withUserSessionStore: false })).rejects.toThrow(
+			/federationGrantsModule: federation grants are enabled and no userSessionStore/,
+		);
+	});
+
+	it("refuses a deployment with no login page to send a browser that is not signed in to", async () => {
+		// Core's schema leaves it optional and only oauthModule requires it; this
+		// composition has no oauthModule, which is what used to boot and then
+		// answer every such browser with a 500.
+		await expect(boot({ withLoginUrl: false })).rejects.toThrow(/endpoints\.login\.url/);
+	});
+
+	it("refuses a deployment with nowhere to lodge an intent", async () => {
+		await expect(boot({ withIntentStore: false })).rejects.toThrow(/federationGrantIntentStore/);
+	});
+
+	it("refuses a required identity lookup the repository cannot answer, and boots once it is recorded as unsupported", async () => {
+		await expect(boot({ userRepository: "without-lookup" })).rejects.toThrow(
+			/findSubjectByFederatedIdentity/,
+		);
+		const handle = await boot({
+			userRepository: "without-lookup",
+			grants: { identityLookup: "unsupported" },
+		});
+		await handle.dispose();
+	});
+
+	it("asks none of it of a deployment that has not enabled the feature", async () => {
+		const handle = await boot({
+			enabled: false,
+			withIntentStore: false,
+			userRepository: "without-lookup",
+			grants: { consent: {} },
+		});
+		await handle.dispose();
 	});
 });

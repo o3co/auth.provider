@@ -58,12 +58,26 @@ import {
 	fullSectionsSchema,
 	type RateLimitFailMode,
 	requireFederationGrantSubjectRevocation,
+	resolveFederationGrantAcquisitionLimits,
 	resolveFederationGrantRetrievalLimits,
+	type SubjectRevocation,
 	type SupportsSessionsOnlyRevocation,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { supportsDelegatedAuthorization } from "@o3co/auth-provider-session";
 import { z } from "zod";
+import {
+	requireFederationGrantIdentityLookup,
+	requireFederationGrantIntentStore,
+	resolveFederationGrantAcquisitionSettings,
+} from "./acquisitionSettings.mjs";
 import { createFederationGrantBackground } from "./background.mjs";
+import {
+	createDisabledFederationGrantBrowserRouter,
+	createFederationGrantBrowserRouter,
+	FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
+	type FederationGrantDelegatedAuthorizer,
+} from "./browserRoutes.mjs";
 import { resolveFederationGrantConnections } from "./connections.mjs";
 import { createDisabledFederationGrantRouter, createFederationGrantRouter } from "./routes.mjs";
 import { FEDERATION_GRANTS_MOUNT_PATH } from "./types.mjs";
@@ -151,7 +165,8 @@ const requireFailMode = (deps: AnyDeps): RateLimitFailMode => {
  * checking the synthetic map earlier would refuse a configuration whose
  * provider simply had not been contributed yet.
  *
- * Refusal 6 is about BOTH delegated methods. An adapter with an ordinary
+ * Refusal 6 is about ALL THREE delegated methods (slice 6 added the code
+ * exchange the connect callback makes). An adapter with an ordinary
  * `refreshToken` is not enough: that one refreshes a session's token with the
  * session's own credentials, and says nothing about whether this provider may
  * act for a user who is not here. Slice 2 implemented the pair for the generic
@@ -178,10 +193,23 @@ const requireDelegatedCapability = (
 			throw new Error(
 				`federationGrantsModule: the federation "${connection.federation}", named by ` +
 					`federationGrants.connections.${connection.name}, has no delegated ` +
-					"authorization capability. Offline delegation needs BOTH " +
-					"`buildDelegatedAuthorizationUrl` and `refreshDelegatedToken`: an ordinary " +
-					"`refreshToken` renews a token inside a session and says nothing about " +
-					"acting for a user who is not present.",
+					"authorization capability. Offline delegation needs ALL THREE of " +
+					"`buildDelegatedAuthorizationUrl`, `exchangeDelegatedCode` and " +
+					"`refreshDelegatedToken` — an adapter written against the earlier pair lacks the " +
+					"exchange the connect callback makes. An ordinary `refreshToken` renews a token " +
+					"inside a session and says nothing about acting for a user who is not present.",
+			);
+		}
+		// Slice 6: the connect callback proves whose grant it is from the browser's
+		// session, and a `form_post` callback arrives as a cross-site POST without
+		// the session cookie — check 3 of D7 could not run. No bundled adapter with
+		// the capability declares it; a custom one may.
+		if ((provider as { responseMode?: unknown }).responseMode === "form_post") {
+			throw new Error(
+				`federationGrantsModule: the federation "${connection.federation}", named by ` +
+					`federationGrants.connections.${connection.name}, declares response_mode=form_post. ` +
+					"The connect callback proves whose grant it is from the browser's session, and a " +
+					"form_post callback arrives without the session cookie.",
 			);
 		}
 	}
@@ -209,6 +237,34 @@ const requireAuditDecision = (deps: AnyDeps): void => {
 			`"${AUDIT_SINK_ABSENCE_POLICY.absentValue}" to declare the capability absent on purpose. ` +
 			AUDIT_SINK_ABSENCE_POLICY.hint,
 	);
+};
+
+/** The authorizer the connect flow sends a user upstream with: the connection's provider's (D17). */
+const authorizerFor =
+	(deps: AnyDeps) =>
+	(federation: string): FederationGrantDelegatedAuthorizer | undefined => {
+		const providers = deps.federationProviders as ReadonlyMap<string, unknown> | undefined;
+		const provider = providers?.get(federation);
+		if (!supportsDelegatedAuthorization(provider as never)) return undefined;
+		return provider as FederationGrantDelegatedAuthorizer;
+	};
+
+/**
+ * Slice 6: the connect flow re-reads the durable session behind the cookie at
+ * every step (D7), so a deployment that creates grants needs the store it
+ * lives in. Every deployment that enables a federation already has one — the
+ * federation guard asks for it — and this says why this feature needs it too.
+ */
+const requireUserSessionStore = (deps: AnyDeps): UserSessionStore => {
+	const store = deps.userSessionStore as UserSessionStore | undefined;
+	if (store === undefined) {
+		throw new Error(
+			"federationGrantsModule: federation grants are enabled and no userSessionStore is installed. " +
+				"The connect flow proves whose grant it is from the durable session behind the browser's " +
+				"cookie, and re-reads it before the consent is shown, answered, and activated",
+		);
+	}
+	return store;
 };
 
 /** The refresher core calls: the connection's provider, or nothing for one that lost its capability. */
@@ -240,6 +296,27 @@ const refresherFor =
  * not get here. What stays is the answer's own validation, because boot cannot
  * establish what a backend will say about a subject that does not exist yet.
  */
+/**
+ * The subject's SESSIONS boundary (D13, D7): `revokedBefore`, which every
+ * subject revocation moves. The connect flow refuses a session that
+ * authenticated at or before it, so that a session a revocation has not yet
+ * reached cannot mint a consent dated after it. Refuses an answer that is not
+ * a date or `null`, as the grants reader does.
+ */
+const sessionsBoundaryFor =
+	(
+		revocation: Pick<SubjectRevocation, "revokedBefore">,
+	): ((subject: string) => Promise<Date | null>) =>
+	async (subject) => {
+		const watermark = await revocation.revokedBefore(subject);
+		if (watermark === null) return null;
+		if (watermark instanceof Date && !Number.isNaN(watermark.getTime())) return watermark;
+		throw new Error(
+			"federationGrantsModule: the subjectRevocation adapter answered something that is neither " +
+				"a date nor null for the subject's sessions boundary. Fails closed (D13).",
+		);
+	};
+
 const boundaryFor =
 	(revocation: SupportsSessionsOnlyRevocation): ((subject: string) => Promise<Date | null>) =>
 	async (subject) => {
@@ -302,6 +379,9 @@ export const federationGrantsModule = defineModule({
 		"replaySeenSet",
 		"logger",
 		"federationProviders",
+		"federationGrantIntentStore",
+		"userRepository",
+		"userSessionStore",
 	] as const,
 	contributes: {
 		routes: [
@@ -337,6 +417,15 @@ export const federationGrantsModule = defineModule({
 				const connections = resolveFederationGrantConnections(deps.config);
 				requireDelegatedCapability(deps, connections);
 				requireAuditDecision(deps);
+				// Slice 6: what creating a grant needs, refused here rather than at
+				// the end of somebody's consent. The consent page, a callback per
+				// connection on the provider's own origin, somewhere to lodge an
+				// intent, and — unless the deployment records that it has none —
+				// the lookup D7 check 5 asks.
+				const acquisition = resolveFederationGrantAcquisitionSettings(deps.config, connections);
+				const intentStore = requireFederationGrantIntentStore(deps.federationGrantIntentStore);
+				requireFederationGrantIdentityLookup(acquisition.identityLookup, deps.userRepository);
+				const lifetimes = resolveFederationGrantAcquisitionLimits(deps.config);
 				return {
 					id: "federation-grants",
 					mountPath: FEDERATION_GRANTS_MOUNT_PATH,
@@ -347,11 +436,74 @@ export const federationGrantsModule = defineModule({
 						grantsBoundary: boundaryFor(revocation),
 						limits,
 						background: deps.federationGrantBackground,
+						acquisition: {
+							intentStore,
+							connections: acquisition.connections,
+							limits: lifetimes,
+						},
 						clientRepository: deps.clientRepository,
 						issuer: deps.config.oauth.jwt.issuer,
 						rateLimiter,
 						failMode,
 						...(deps.replaySeenSet === undefined ? {} : { replaySeenSet: deps.replaySeenSet }),
+						...(deps.auditSink === undefined ? {} : { auditSink: deps.auditSink }),
+						...(deps.logger === undefined ? {} : { logger: deps.logger }),
+					}),
+				};
+			},
+			// Slice 6: the browser half — connect and consent — under `/session`.
+			// Its own contribution because it must mount AFTER the session
+			// middleware: it reads `req.session`, and a declaration-order accident
+			// would hand it a request with none, which reads as "not signed in"
+			// and sends a signed-in user to the login page. `after` makes a
+			// composition without the middleware a boot error instead.
+			(deps: AnyDeps) => {
+				if (!isEnabled(deps)) {
+					return {
+						id: "federation-grants-browser",
+						mountPath: FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
+						handler: createDisabledFederationGrantBrowserRouter(),
+					};
+				}
+				// The JSON contribution has already refused everything shared —
+				// no store, no boundary, no consent page, no intent store — in the
+				// order an operator should hear it; this only asks what the
+				// browser half needs besides.
+				const store = requireStore(deps);
+				const revocation = requireFederationGrantSubjectRevocation({
+					module: "federationGrantsModule",
+					subjectRevocation: deps.subjectRevocation,
+					federationGrantStore: store,
+				});
+				const connections = resolveFederationGrantConnections(deps.config);
+				const acquisition = resolveFederationGrantAcquisitionSettings(deps.config, connections);
+				const limits = resolveFederationGrantRetrievalLimits(deps.config);
+				return {
+					id: "federation-grants-browser",
+					mountPath: FEDERATION_GRANTS_BROWSER_MOUNT_PATH,
+					after: ["session-middleware"],
+					handler: createFederationGrantBrowserRouter({
+						intentStore: requireFederationGrantIntentStore(deps.federationGrantIntentStore),
+						grantStore: store,
+						clientRepository: deps.clientRepository,
+						userSessionStore: requireUserSessionStore(deps),
+						// The SESSIONS boundary: what a session must have authenticated
+						// after (D7). Not the grants one, which the callback reads.
+						sessionsBoundary: sessionsBoundaryFor(revocation),
+						revocationSkewMs: limits.revocationSkewMs,
+						connections: acquisition.connections,
+						authorizerFor: authorizerFor(deps),
+						consentUrl: acquisition.consentUrl,
+						loginUrl: () => acquisition.loginUrl,
+						issuer: deps.config.oauth.jwt.issuer,
+						rateLimiter: requireLimiter(deps),
+						failMode: requireFailMode(deps),
+						background: deps.federationGrantBackground,
+						// The GRANTS boundary, for the callback's backstop and re-read.
+						grantsBoundary: boundaryFor(revocation),
+						identityLookup: acquisition.identityLookup,
+						...(deps.userRepository === undefined ? {} : { userRepository: deps.userRepository }),
+						upstreamTimeoutMs: limits.upstreamHardTimeoutMs,
 						...(deps.auditSink === undefined ? {} : { auditSink: deps.auditSink }),
 						...(deps.logger === undefined ? {} : { logger: deps.logger }),
 					}),

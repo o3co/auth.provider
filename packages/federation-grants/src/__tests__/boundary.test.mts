@@ -57,6 +57,13 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
+import {
+	ACQUISITION_ENDPOINTS,
+	ACQUISITION_GRANT_SETTINGS,
+	acquisitionComponents,
+	callbackUrlFor,
+	sessionMiddlewareModule,
+} from "./acquisitionFixture.mjs";
 import { basic, CLIENT_ID, CLIENT_SECRET, connection, DAY, MIN, SUBJECT } from "./harness.mjs";
 
 const client = {
@@ -84,6 +91,10 @@ const refreshed = vi.fn(async () => ({
 
 const delegated = {
 	buildDelegatedAuthorizationUrl: () => new URL("https://issuer.example/authorize"),
+	exchangeDelegatedCode: async () => ({
+		upstream: { issuer: "https://issuer.example", subject: "upstream-1" },
+		tokens: {},
+	}),
 	refreshDelegatedToken: refreshed,
 } as unknown as FederationProvider;
 
@@ -124,7 +135,7 @@ type Boundaries = { grants?: Date | null | "malformed" | "invalid"; sessions?: D
 const boot = async (boundaries: Boundaries = {}, spent = false) => {
 	const full = makeValidFullSections();
 	const handle = await createApp({
-		modules: [federationModule, ...federationGrantsModules, storeModule],
+		modules: [federationModule, sessionMiddlewareModule, ...federationGrantsModules, storeModule],
 		bootstrapComponents: {
 			config: {
 				...makeValidCoreConfig(),
@@ -139,6 +150,7 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 				},
 				rateLimit: { ...full.rateLimit, failMode: "closed" },
 				audit: { sink: { type: "none" } },
+				endpoints: ACQUISITION_ENDPOINTS,
 				federationGrants: {
 					enabled: true,
 					connections: {
@@ -147,12 +159,15 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 							scopes: [...connection.scopes],
 							boundary: connection.boundary,
 							maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
+							callbackURL: callbackUrlFor(connection.name),
 						},
 					},
+					...ACQUISITION_GRANT_SETTINGS,
 				},
 			},
 			pathResolver: (s: string) => s,
 			clientRepository,
+			...acquisitionComponents(),
 			rateLimiter: createMemoryRateLimiter({
 				limits: {},
 				defaultLimit: { limit: 100, windowSeconds: 60 },
