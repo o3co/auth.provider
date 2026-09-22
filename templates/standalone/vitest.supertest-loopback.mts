@@ -37,13 +37,24 @@
  * is sent (`end`, which `then` and `expect(..., fn)` go through). A server the
  * test started itself is never touched.
  *
+ * Which version of supertest closes the server it started, and when, has
+ * changed under this file once (7.3.0): 7.2 closed `_server` before asserting;
+ * 7.3 tracks the servers it started itself in a private registry and closes
+ * only those, so a server this file bound is left listening. The patched
+ * `end` therefore closes the server this request started, before the test's
+ * callback, whenever supertest has not — the same order either way.
+ *
  * supertest is loaded from the package that owns the running test file (the
  * nearest `package.json` above it), so the patched class is the one that test
  * imports, whatever directory vitest was started from. A package that does
  * not declare supertest is left alone. Everything else this file cannot do —
  * no test path, a declared supertest that does not load, a supertest whose
  * internals no longer look like this — throws, so the guard is never silently
- * off.
+ * off. That load-time check sees only the two methods' presence; a supertest
+ * that moved the `listen` out of `serverAddress` would pass it and leave the
+ * guard off. The behavioural tests catch that shape of change: this
+ * template's `supertest-loopback.test.mts` and its twin in the session
+ * package assert the address the server actually bound.
  *
  * This file is part of the project template and ships with every scaffold.
  * The auth.provider workspace loads this same file for its packages (see
@@ -160,8 +171,8 @@ function patch(proto: TestPrototype): void {
 		const protocol = app instanceof TlsServer ? "https" : "http";
 		let ready = binding.get(app);
 		if (!ready) {
-			// supertest closes `_server` after the response, as it does for the
-			// server it would have started itself.
+			// supertest 7.2 closes `_server` after the response; 7.3 does not,
+			// and the callback in the patched `end` below closes it instead.
 			this._server = app.listen(0, LOOPBACK);
 			// Subscribed now, not in `end`: a listen error emitted before the test
 			// sends the request must still reach it, not crash the worker as an
@@ -188,6 +199,14 @@ function patch(proto: TestPrototype): void {
 		let called = false;
 		const callback = (err: unknown, res?: unknown) => {
 			called = true;
+			// supertest 7.2 has closed the server it started by now, before the
+			// callback; 7.3 closes only servers in its own private registry, which
+			// this bind is not in. Close what this request started, if it is
+			// still open, before the callback — the order 7.2 kept.
+			if (this._server === server && server.listening) {
+				server.close(() => fn?.(err, res));
+				return;
+			}
 			fn?.(err, res);
 		};
 		// Unpatched, whatever `end` throws while building the request (a header
