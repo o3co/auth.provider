@@ -3,10 +3,21 @@
 	"compilerOptions": {
 		"noEmit": true
 	},
-	"include": [
-		"src/validator/**/*.mts",
-		"src/__tests__/readonly-types.test.mts",
-		"src/__tests__/module.types.test.mts"
-	],
-	"exclude": ["node_modules", "dist"]
+	// #626: the build config excludes `__tests__`, so a type assertion made in
+	// a test was never compiled. Paired with vitest.config.mts's `typecheck`
+	// block, as core's tsconfig.test.json requires: vitest decides which test
+	// files it collects, this decides what tsc is given, and a file in only
+	// one of the two looks checked but is not.
+	"include": ["src/**/*.mts"],
+	// The files below are the same list as `typecheck.exclude` in
+	// vitest.config.mts, where each one's error count and cause are recorded.
+	// They have to be kept out of tsc's program as well: vitest reports an
+	// error in a file it did not collect as an "Unhandled Source Error" and
+	// fails the run. TODO(#626): remove a file here and there as it is fixed.
+	"exclude": [
+		"node_modules",
+		"dist",
+		"src/__tests__/grant.test.mts",
+		"src/__tests__/hardening.test.mts"
+	]
 }

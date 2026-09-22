@@ -3,10 +3,11 @@
 	"compilerOptions": {
 		"noEmit": true
 	},
-	"include": [
-		"src/validator/**/*.mts",
-		"src/__tests__/readonly-types.test.mts",
-		"src/__tests__/module.types.test.mts"
-	],
+	// #626: the build config excludes `__tests__`, so a type assertion made in
+	// a test was never compiled. Paired with vitest.config.mts's `typecheck`
+	// block, as core's tsconfig.test.json requires: vitest decides which test
+	// files it collects, this decides what tsc is given, and a file in only
+	// one of the two looks checked but is not.
+	"include": ["src/**/*.mts"],
 	"exclude": ["node_modules", "dist"]
 }

@@ -56,6 +56,7 @@ const mockConfig = {
 
 const publicClient = (): PublicClient => ({
 	clientId: "client-a",
+	tokenEndpointAuthMethod: "none",
 	allowedRedirectUris: [],
 	// `signSelfIssuedAccessToken` defaults the subject to `scope: "read"`, so
 	// the registration names it — the client's `allowedScopes` is a ceiling on

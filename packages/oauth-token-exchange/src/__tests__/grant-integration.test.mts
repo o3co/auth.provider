@@ -31,6 +31,7 @@ const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 
 const client: PublicClient = {
 	clientId: "client-a",
+	tokenEndpointAuthMethod: "none",
 	allowedRedirectUris: [],
 	allowedScopes: ["read", "write"],
 	allowedAudiences: ["billing"],
@@ -103,6 +104,9 @@ const ctx = (body: Record<string, unknown>): GrantContext => ({
 	session: {},
 	issuer: ISSUER,
 	metadata: {},
+	// The client is resolved from the body here; the grant reads a `null`
+	// and an absent `authenticatedClient` the same way.
+	authenticatedClient: null,
 });
 
 describe("token_exchange — integration", () => {
@@ -127,7 +131,8 @@ describe("token_exchange — integration", () => {
 		);
 
 		expect(result.status).toBe(200);
-		if (result.status !== 200) return;
+		// Both `GrantResult` members carry `status`, so only the field narrows.
+		if (!("tokens" in result)) return;
 		const payload = decodeJwt(result.tokens.access_token);
 		expect(payload.aud).toBe("billing");
 		expect(payload.scope).toBe("read");
