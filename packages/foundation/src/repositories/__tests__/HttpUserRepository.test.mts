@@ -622,7 +622,7 @@ describe("findSubjectByFederatedIdentity over HTTP (#613)", () => {
 			expect(() =>
 				kept.push({ provider: "x", issuer: "y", clientId: "z", requiredClaims: [] }),
 			).toThrow();
-			expect(() => kept[0]?.requiredClaims.pop()).toThrow();
+			expect(() => (kept[0]?.requiredClaims as string[] | undefined)?.pop()).toThrow();
 			expect(
 				r.supportsFederatedIdentityLookup?.({ provider: "x", issuer: "y", clientId: "z" }, []),
 			).toBe(false);

@@ -95,12 +95,12 @@ const makeReq = (
 	host = "as.example",
 	proto = "https",
 ): Partial<Request> => ({
-	get: (name: string) => {
+	get: ((name: string) => {
 		const lc = name.toLowerCase();
 		if (lc === "dpop") return dpopHeader;
 		if (lc === "host") return host;
 		return undefined;
-	},
+	}) as Request["get"],
 	method,
 	originalUrl: path,
 	protocol: proto,

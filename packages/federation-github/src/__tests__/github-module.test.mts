@@ -47,6 +47,8 @@ describe("githubFederationModule const Module", () => {
 				callbackURL: "https://example.com/cb",
 			},
 		} as never);
-		expect(provider.name).toBe("github");
+		// #626 P1: the contribution type is still `unknown` (core's contributes-map.mts);
+		// the cast goes when it is not.
+		expect((provider as { name: string }).name).toBe("github");
 	});
 });

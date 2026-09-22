@@ -148,7 +148,7 @@ describe("x-request-id", () => {
 		const { handle, app } = await boot();
 		const response = await request(app)
 			.post("/oauth/federation-grants/g1/token")
-			.set("x-request-id", ["first", "second"]);
+			.set({ "x-request-id": ["first", "second"] });
 
 		expect(response.headers["x-request-id"]).not.toBe("first");
 		expect(response.headers["x-request-id"]).not.toBe("second");

@@ -235,7 +235,7 @@ describe("the hook that audits what middleware refused", () => {
 		createRouteDenialAudit({
 			sink: {
 				kind: "test",
-				record: async (event) => {
+				record: async (event: unknown) => {
 					events.push(event);
 					await record(event);
 				},

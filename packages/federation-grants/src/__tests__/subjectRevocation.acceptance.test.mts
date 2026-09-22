@@ -361,7 +361,7 @@ describe("a subject-wide revocation, from the service to the disclosure", () => 
 
 		const result = await cascadeLogout({
 			sid: "sid",
-			...(CASCADE_STORES as unknown as Parameters<typeof cascadeLogout>[0]),
+			...(CASCADE_STORES as unknown as Omit<Parameters<typeof cascadeLogout>[0], "sid">),
 		});
 		expect(result.outcome).toBe("done");
 

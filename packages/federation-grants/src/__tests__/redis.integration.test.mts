@@ -57,7 +57,7 @@ import {
 // vendor-agnostic; a deployment on another driver imports neither.
 import { makeIoredisFederationGrantStoreClient } from "@o3co/auth-provider-redis/ioredis";
 import express from "express";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import request from "supertest";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";

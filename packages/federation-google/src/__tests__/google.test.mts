@@ -163,6 +163,7 @@ describe("createGoogleProvider on openid-client", () => {
 			name: "Alice",
 			picture: "https://example.com/p",
 			hd: "example.com",
+			expiresAt: null,
 		});
 		expect(claims.email).toBe("alice@example.com");
 		expect(claims.emailVerified).toBe(true);
