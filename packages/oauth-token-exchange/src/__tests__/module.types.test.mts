@@ -61,6 +61,7 @@ describe("tokenExchangeModule's deps are the slots it declares (#626 P2)", () =>
 		if (false as boolean) {
 			const deps = {} as TokenExchangeModuleDeps;
 			const usePolicy = (_policy: GrantPolicyHook): void => {};
+			// A dropped slot would satisfy this too (TS2339, not TS2345); the pin above catches that.
 			// @ts-expect-error — `grantPolicy` is optional: `GrantPolicyHook | undefined`
 			usePolicy(deps.grantPolicy);
 			if (deps.grantPolicy) usePolicy(deps.grantPolicy);

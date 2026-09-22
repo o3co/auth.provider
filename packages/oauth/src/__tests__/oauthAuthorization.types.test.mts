@@ -81,6 +81,7 @@ describe("oauthAuthorizationModule's deps are the slots it declares (#626 P2)", 
 		if (false as boolean) {
 			const deps = {} as OAuthAuthorizationModuleDeps;
 			const usePolicy = (_policy: GrantPolicyHook): void => {};
+			// A dropped slot would satisfy this too (TS2339, not TS2345); the pin above catches that.
 			// @ts-expect-error — `grantPolicy` is optional: `GrantPolicyHook | undefined`
 			usePolicy(deps.grantPolicy);
 			// The presence check is what makes it usable.

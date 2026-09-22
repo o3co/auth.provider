@@ -65,6 +65,7 @@ describe("deviceGrantModule's deps are the slots it declares (#626 P2)", () => {
 				accessTokenExpiresIn: 60,
 			});
 			const useLimiter = (_limiter: RateLimiter): void => {};
+			// A dropped slot would satisfy this too (TS2339, not TS2345); the pin above catches that.
 			// @ts-expect-error — `rateLimiter` is optional too
 			useLimiter(deps.rateLimiter);
 			if (deps.rateLimiter) useLimiter(deps.rateLimiter);

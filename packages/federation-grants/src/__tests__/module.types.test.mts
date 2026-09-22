@@ -59,6 +59,7 @@ describe("federationGrantsModule's deps are the slots it declares (#626 P2)", ()
 		if (false as boolean) {
 			const deps = {} as FederationGrantsModuleDeps;
 			const useStore = (_store: FederationGrantStore): void => {};
+			// A dropped slot would satisfy this too (TS2339, not TS2345); the pin above catches that.
 			// @ts-expect-error — `federationGrantStore` is `FederationGrantStore | undefined`
 			useStore(deps.federationGrantStore);
 			const useLimiter = (_limiter: RateLimiter): void => {};
