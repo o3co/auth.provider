@@ -245,9 +245,10 @@ to and its dates in UTC.
 `expires_at` is **effective** expiry, computed from `maxExpiresIn` as it is
 configured now. Lowering the maximum therefore moves it earlier for grants that
 already exist, possibly into the past; raising it moves it back, never beyond
-the stored expiry, which never changes. `last_used_at` is the last disclosure,
-a cached one included — not the last time the upstream was asked, and no
-measure of an upstream's idle window.
+the stored expiry, which never changes. `last_used_at` is the last *recorded*
+disclosure, a cached one included: it is written best-effort after the answer,
+so it may lag a disclosure the store did not get to write down. It is not the
+last time the upstream was asked, and no measure of an upstream's idle window.
 
 Status calls `inspect` and nothing else: never a refresh, never the refresh
 lock, never `touch`. It is also **not** a health check for `/token` — `active`
