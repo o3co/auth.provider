@@ -16,6 +16,7 @@
 
 import {
 	federationGrantIneligibilityStands,
+	federationGrantInteractionCode,
 	isUsableMaxUpstreamAccessTokenLifetime,
 } from "./eligibility.mjs";
 import { federationGrantExpiryState } from "./lifetime.mjs";
@@ -114,7 +115,9 @@ export interface EffectiveFederationGrantStatusContext {
  * 4. a changed upstream identity, which no reauthorization can mend — before
  *    the stored `invalid_grant`, because `/reauthorize` refuses such a grant;
  * 5. what a reauthorization does mend: a stored `invalid_grant`, a changed
- *    connection, a credential that does not open;
+ *    connection, a credential that does not open — and an upstream that asked
+ *    for the user (#616): a refusal stamped with an interaction code, read for
+ *    as long as it stands, since time mends nothing there;
  * 6. a grant that cannot yield a token: a `maxAccessTokenLifetime` no token
  *    can satisfy — known without asking the upstream, and named as the reason
  *    whatever an older marker says, because that is what `/token` answers —
@@ -161,6 +164,15 @@ export function effectiveFederationGrantStatus(
 	}
 	if (context.credentials === "unreadable") {
 		return { status: "reauthorization_required", reason: "credential_unreadable" };
+	}
+	// The upstream asked for the user (#616, D11, D12): a refusal stamped with
+	// one of the four interaction codes, read for as long as it stands. Its
+	// date, count and advice are the timed backoff's and are not consulted —
+	// waiting mends nothing here — and it comes before the maximum and the
+	// marker below, which waiting might.
+	const interaction = federationGrantInteractionCode(grant.refreshFailure);
+	if (interaction !== undefined) {
+		return { status: "reauthorization_required", reason: `upstream_${interaction}` };
 	}
 
 	const maximum = connection.maxAccessTokenLifetime;

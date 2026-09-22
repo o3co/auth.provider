@@ -789,9 +789,12 @@ export {
 	effectiveFederationGrantStatus,
 } from "./federation-grants/effective-status.mjs";
 export {
+	FEDERATION_GRANT_INTERACTION_CODES,
 	type FederationGrantIntentScopes,
+	type FederationGrantInteractionCode,
 	federationGrantIneligibilityRetry,
 	federationGrantIneligibilityStands,
+	federationGrantInteractionCode,
 	federationGrantRefreshFailureStands,
 	isUsableMaxUpstreamAccessTokenLifetime,
 	judgeUpstreamAccessToken,
