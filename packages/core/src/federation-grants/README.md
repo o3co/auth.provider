@@ -1,0 +1,54 @@
+# federation-grants
+
+## Responsibility
+
+Session-independent delegated access to an upstream API (#593). A *federation grant* is one user's recorded consent that one confidential client may obtain upstream access tokens through one connection, within stated scopes, until a stated time — and it survives logout. This directory owns the record and its lifecycle, the two store ports, the in-process adapters with their bundled modules, and the domain rules: lifetime (D3), connection revisions (D4), token eligibility (D5), lodging an intent (D6), effective status (D1, D13), retrieval with a coordinated refresh (D10–D12), revocation and listing (D13), the wiring a deployment must have before a grant may outlive a session, audit metadata (D18), and the operator settings.
+
+The design record is the ADR [2026-09-17-federation-grants-offline-delegation.md](../../docs/adr/2026-09-17-federation-grants-offline-delegation.md); every rule here cites its D-number, and this README does not restate the reasons. Not here: the HTTP routes and the consent page (`packages/federation-grants`), the upstream calls (the federation adapters in `packages/session`, reached through the structural `FederationGrantRefresher`), the Redis adapters (`packages/redis`), and the session-bound token path ([`../federation-tokens/`](../federation-tokens/)), which logout deletes and this directory never touches. "Grant" here is never an OAuth grant type ([`../grants/`](../grants/README.md)), which is why every export says `FederationGrant`.
+
+State ownership: `FederationGrantStore` holds the record, the sealed credential and the refresh lock; `FederationGrantIntentStore` holds what an acquisition remembers (the intent, the consent challenge, the connect transaction, the per-`(client, subject)` bound); the subject boundary lives in [`../user-sessions/`](../user-sessions/README.md). No operation spans both ports; core orders the two writes once, in `lodge.mts`.
+
+## Public contract
+
+- [`types.mts`](./types.mts) — the `FederationGrant` union, `FederationGrantConnection`, `EffectiveFederationGrantStatus`, `FederationGrantDenial`, `FederationGrantTokenResult`, `FederationGrantCredentials`.
+- [`store.mts`](./store.mts) — `FederationGrantStore`, `FederationGrantWrite`, `FederationGrantLockResult`; slot `federationGrantStore`. [`intentStore.mts`](./intentStore.mts) — `FederationGrantIntentStore`, `FEDERATION_GRANT_FLOW_BUDGET_MS`, `FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT`; slot `federationGrantIntentStore`.
+- Adapters and wiring: [`memory.mts`](./memory.mts), [`intentMemory.mts`](./intentMemory.mts), [`factory.mts`](./factory.mts), [`intentFactory.mts`](./intentFactory.mts), [`module.mts`](./module.mts) (`memoryFederationGrantStoreModule`, `memoryFederationGrantIntentStoreModule`), [`revocationWiring.mts`](./revocationWiring.mts).
+- Rules: [`lifetime.mts`](./lifetime.mts), [`revision.mts`](./revision.mts), [`eligibility.mts`](./eligibility.mts), [`effective-status.mts`](./effective-status.mts), [`lodge.mts`](./lodge.mts), [`retrieve.mts`](./retrieve.mts), [`revoke.mts`](./revoke.mts), [`settings.mts`](./settings.mts), [`allowlist.mts`](./allowlist.mts), [`auditMetadata.mts`](./auditMetadata.mts).
+- All of it is exported from the root barrel, `FederationGrant` in every name — [`../__tests__/index.barrel.test.mts`](../__tests__/index.barrel.test.mts).
+
+## Inputs and outputs
+
+- Time is the caller's for every record operation: each takes the caller's instant (`now`, or `at` for `revoke` and `touch`), sampled at the write, and what the caller is told is judged on it; what an adapter reclaims is judged on its own clock; no call deletes anything because of a caller's time; a non-date is refused with a `RangeError`, never compared. The refresh lock is the exception: `acquireRefreshLock` takes `ttlMs` and `waitForMs`, measures its own wait, and reports `waitedMs`, which is where the lease's deadlines count from.
+- Every transition is a guarded write inside the store; a write that fails says only that it failed, and the caller re-reads and re-evaluates rather than acting on a reason.
+- `expired` is never stored; status is computed on every read by `effectiveFederationGrantStatus`, so reverting a configuration change or restoring a key restores the grant.
+- Intent handles and credentials never appear on a `FederationGrant`; reads return copies; a `FederationGrantConnection` is built by the package from configuration, with the issuer exactly as configured.
+- A client's registration fields are read through `federationGrantAllowlist`: anything but an array is an empty list.
+- A retrieval answers one typed `FederationGrantTokenResult`; the HTTP mapping is the package's. An upstream refresh answer is untrusted field by field, and the rotated refresh token is kept whatever else is wrong. No secret enters a denial or an audit event.
+
+## Dependencies
+
+- Imports: `../user-sessions/types` (`SubjectRevocation` and its capability guard, in `revocationWiring.mts`), `../federation-tokens/refresh-error` (the classifier both token paths share), `../net/redirect-uri`, `../security/timingSafe`, `../jwt/verify` (the skew constant), `../config/application.schema` (the module's schema projection), `../modules/index` (`defineModule`), `../adapters/AdapterFactory`, `../logging/*`; `node:crypto`, `zod`.
+- Imported by: `../user-sessions/{revokeAllForSubject,subjectRevocationService,retention}`, `../repositories/InMemoryClientRepository.mts` (the reserved-parameter check), `../boot/replica-safety.mts`, the root barrel; downstream `packages/federation-grants`, `redis`, `oauth`.
+- Must never import `boot/`, `middleware/`, `routes/`, a federation adapter or `packages/session`, or `testing/`.
+
+## Invariants
+
+- Store contract — [`store.contract.mts`](./__tests__/store.contract.mts), run against memory in [`store.memory.test.mts`](./__tests__/store.memory.test.mts) and against Redis from a copy that `packages/redis/__tests__/federation-grant-contract-parity.test.mts` holds in step: `createPending` refuses a taken ID whatever its state; `activate` takes only the current intent, once, within the lifetime ceiling, with consent not after `now`, never re-pointing a grant, and a refusal changes nothing; `replaceCredentials` / `requireReauthorization` are version-guarded and replace as a whole; `revoke` always wins, in any state, idempotently, and deletes the credential (checked from outside the port); `noteRefreshFailure` counts in the store and never moves back; `touch` never moves back and bumps nothing; conflicting writes run concurrently end with the grant revoked and no credential behind, and exactly one of two refreshes, callbacks or lodgings wins; the lock excludes, reports `waitedMs`, never acquires after `waitForMs`, has no renewal, releases idempotently and refuses NaN.
+- Intent-store contract — [`intentStore.contract.mts`](./__tests__/intentStore.contract.mts), memory in [`intentStore.memory.test.mts`](./__tests__/intentStore.memory.test.mts), a Redis copy with its own parity test: `putIntent` reserves against the bound atomically and is idempotent for the same record; a reauthorization is not counted; `answerConsent` answers once; `consumeTransaction` hands over once and only for its connection; `finishIntent` releases capacity once.
+- The union refuses, at compile time, a revoked or pending grant with only some authorization fields — [`types.test.mts`](./__tests__/types.test.mts) (typecheck-included).
+- Lifetime: a one-year ceiling, clamp rather than reject, expiry counted from consent — [`lifetime.test.mts`](./__tests__/lifetime.test.mts). Revisions: the persisted format is pinned; identity and authorization change for different reasons — [`revision.test.mts`](./__tests__/revision.test.mts).
+- Eligibility, the markers and the failure stamp — [`eligibility.test.mts`](./__tests__/eligibility.test.mts); the reporting order, terminal facts first — [`effective-status.test.mts`](./__tests__/effective-status.test.mts).
+- Lodging admits the intent before the grant, closes the intent on a refused second write, and keeps an ambiguous write that landed — [`lodge.test.mts`](./__tests__/lodge.test.mts).
+- Retrieval reads the record last, samples time after the reads, refreshes at most once per call, never returns a token from a write that lost, asks the upstream once under the lock, answers at the soft deadline and aborts at the hard one, and remembers a failed refresh — [`retrieve.evaluation.test.mts`](./__tests__/retrieve.evaluation.test.mts), [`retrieve.refresh.test.mts`](./__tests__/retrieve.refresh.test.mts), [`retrieve.rotation.test.mts`](./__tests__/retrieve.rotation.test.mts), [`retrieve.fallback.test.mts`](./__tests__/retrieve.fallback.test.mts), [`retrieve.backoff.test.mts`](./__tests__/retrieve.backoff.test.mts), [`retrieve.hostile.test.mts`](./__tests__/retrieve.hostile.test.mts).
+- `revokeFederationGrant` is idempotent, does not read first, and audits only a transition it made — [`revoke.test.mts`](./__tests__/revoke.test.mts); the wiring refusals — [`revocationWiring.test.mts`](./__tests__/revocationWiring.test.mts); the settings equal `reference.conf` value for value and refuse rather than default over an invalid value — [`settings.test.mts`](./__tests__/settings.test.mts); [`allowlist.test.mts`](./__tests__/allowlist.test.mts), [`auditMetadata.test.mts`](./__tests__/auditMetadata.test.mts), [`module.test.mts`](./__tests__/module.test.mts).
+
+## Failure and lifecycle
+
+- Refusal is a typed denial (`FederationGrantDenial`: `grant_revoked`, `reauthorization_required`, …); failure is `temporarily_unavailable` with a reason (`upstream`, `storage`, `lock_timeout`, `concurrent_update`, `key_unavailable`). Nothing is destroyed because it could not be read (D16); a boundary that cannot be read is an outage answered 503, never a status.
+- Deadlines: a retrieval has a soft deadline (the caller is answered; the late result is still persisted) and a hard one (the upstream call is aborted, the lock released); every deadline counts from when the store took the lock. An acquisition has one deadline, the intent's, ten minutes from lodging.
+- Boot-time refusals: `requireFederationGrantSubjectRevocation` refuses no boundary at all, a single-boundary adapter, and durable grants beside an in-memory boundary; both memory modules are refused under `deployment.mode = "multi"`.
+- Cleanup: the memory adapters sweep amortized on writes and hold no standing timers — the lock wait polls with a bounded `setTimeout` that never outlives the call; a retrieval leaves no timer once answered and its late work done. Nothing to dispose.
+
+## Contract tests
+
+[`__tests__/`](./__tests__/) — the suites above; [`retrieve.harness.mts`](./__tests__/retrieve.harness.mts) is the shared harness behind the `retrieve.*` files.
