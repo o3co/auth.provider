@@ -18,7 +18,7 @@ State ownership: `FederationGrantStore` holds the record, the sealed credential 
 
 ## Inputs and outputs
 
-- Time is the caller's: every store operation takes `now`, sampled at the write, and what the caller is told is judged on it; what an adapter reclaims is judged on its own clock; no call deletes anything because of a caller's time; a non-date is refused with a `RangeError`, never compared.
+- Time is the caller's for every record operation: each takes the caller's instant (`now`, or `at` for `revoke` and `touch`), sampled at the write, and what the caller is told is judged on it; what an adapter reclaims is judged on its own clock; no call deletes anything because of a caller's time; a non-date is refused with a `RangeError`, never compared. The refresh lock is the exception: `acquireRefreshLock` takes `ttlMs` and `waitForMs`, measures its own wait, and reports `waitedMs`, which is where the lease's deadlines count from.
 - Every transition is a guarded write inside the store; a write that fails says only that it failed, and the caller re-reads and re-evaluates rather than acting on a reason.
 - `expired` is never stored; status is computed on every read by `effectiveFederationGrantStatus`, so reverting a configuration change or restoring a key restores the grant.
 - Intent handles and credentials never appear on a `FederationGrant`; reads return copies; a `FederationGrantConnection` is built by the package from configuration, with the issuer exactly as configured.

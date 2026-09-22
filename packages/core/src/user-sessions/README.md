@@ -19,7 +19,7 @@ State ownership: these stores hold the session state; the browser cookie session
 - Every index write takes the session's `expiresAt`, and the adapter syncs storage TTL to it. Expiry is a `Date` here (the A4 aggregates) and epoch-ms in the A3 primitives; the conversion is explicit at the boundary.
 - `listFederations` returns insertion order — load-bearing for the post-logout redirect.
 - The watermark is compared inclusively against a token's `iat`. `revokeBefore` advances both boundaries; `revokeSessionsBefore` only the sessions one; neither ever moves a boundary backwards. The `expiresAt` of a stamp is the caller's, sized by `resolveSubjectRevocationHorizonMs`; the memory adapter raises it to `SUBJECT_REVOCATION_MIN_RETENTION_MS` whenever the grants boundary advances.
-- `revokeAllForSubject` and the service report rather than throw: `unavailable` is a composition gap, `failures` are backend outages, and `complete` is the one field a caller checks. Keeping grants on a subject-wide revocation is operator policy (`federationGrants.allowKeepOnSubjectRevocation`), not a call argument.
+- `revokeAllForSubject` and the service report rather than throw: `unavailable` is a composition gap, `failures` are backend outages, and `complete` is the one field a caller checks. A caller may ask for its federation grants to be kept (`SubjectRevocationRequest.federationGrants: "keep"`); whether that is honoured is operator policy (`federationGrants.allowKeepOnSubjectRevocation`, default `false`), a refused keep is carried out as a full revocation, and the report says both what was asked and what happened.
 
 ## Dependencies
 
