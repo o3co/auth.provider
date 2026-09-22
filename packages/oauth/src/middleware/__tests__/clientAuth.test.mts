@@ -604,6 +604,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			// takes an options object but keeps the legacy form working.
 			const calls: { ctx: unknown; msg?: string }[] = [];
 			const logger = {
+				trace: () => {},
 				debug: () => {},
 				info: () => {},
 				warn: (ctx: unknown, msg?: string) => {

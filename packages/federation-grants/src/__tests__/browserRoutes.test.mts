@@ -932,7 +932,7 @@ describe("GET /session/federation-grants/callback/:connection — activating the
 			tokens: { ...w.state.exchange.tokens, scope: "openid offline_access" },
 		};
 		returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
-		expect((await w.grants.find(a.grantId, w.state.now)) as { scopes: string[] }).toMatchObject({
+		expect(await w.grants.find(a.grantId, w.state.now)).toMatchObject({
 			scopes: ["openid", "offline_access"],
 		});
 	});
@@ -1594,7 +1594,7 @@ describe("the consent, when the world fails or moves", () => {
 		// list or as nothing, the rule the token route already applies.
 		w.state.client = {
 			...CLIENT,
-			allowedFederationGrantConnections: "calendar-prod" as unknown as readonly string[],
+			allowedFederationGrantConnections: "calendar-prod" as unknown as string[],
 		};
 		const misread = await w.page(challenge, "b-1");
 		expect(misread.status).toBe(403);

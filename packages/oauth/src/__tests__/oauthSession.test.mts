@@ -176,6 +176,7 @@ describe("oauthSessionModule", () => {
 			session: { isAuthenticated: false },
 			issuer: "localhost",
 			metadata: {},
+			authenticatedClient: null,
 		});
 		expect(result.status).toBe(401);
 		await handle.dispose();

@@ -229,7 +229,7 @@ describe("createGithubProvider on openid-client", () => {
 
 	it("does NOT implement SupportsRefresh (GitHub OAuth Apps do not issue refresh tokens)", () => {
 		const p = createGithubProvider(baseConfig);
-		expect((p as Record<string, unknown>).refreshToken).toBeUndefined();
+		expect((p as unknown as Record<string, unknown>).refreshToken).toBeUndefined();
 	});
 
 	it("mapClaims maps first-class claims from FederationProfile", () => {
@@ -241,6 +241,7 @@ describe("createGithubProvider on openid-client", () => {
 			emailVerified: true,
 			name: "Bob",
 			picture: "https://avatars.githubusercontent.com/u/12345678",
+			expiresAt: null,
 		});
 		expect(claims.email).toBe("bob@work.com");
 		expect(claims.emailVerified).toBe(true);

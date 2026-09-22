@@ -43,6 +43,7 @@ const TOKEN_ENDPOINT = "https://auth.test/oauth/token";
 const CLIENT_ID = "rp-1";
 
 const silent: Logger = {
+	trace: () => {},
 	debug: () => {},
 	info: () => {},
 	warn: () => {},
@@ -254,7 +255,7 @@ describe("createClientAssertionVerifier (#484)", () => {
 		});
 
 		it("fetches jwks_uri once, caches it, and refuses what it does not hold", async () => {
-			const fetchImpl = vi.fn(
+			const fetchImpl = vi.fn<typeof fetch>(
 				async () =>
 					new Response(JSON.stringify({ keys: [rp.publicJwk] }), {
 						status: 200,

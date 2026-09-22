@@ -382,6 +382,7 @@ describe("createSessionGrant", () => {
 					session: { isAuthenticated: true, user: { id: "u1" } },
 					issuer: "localhost",
 					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: null,
 				});
 
 				expect(result.status).toBe(401);

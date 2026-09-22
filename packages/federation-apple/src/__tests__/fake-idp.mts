@@ -172,7 +172,10 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 			init?.method ?? (input instanceof Request ? input.method : "GET")
 		).toUpperCase();
 		const headers = new Headers(
-			(init?.headers ?? (input instanceof Request ? input.headers : undefined)) as HeadersInit,
+			(init?.headers ??
+				(input instanceof Request ? input.headers : undefined)) as ConstructorParameters<
+				typeof Headers
+			>[0],
 		);
 		const raw = init?.body;
 		const body =

@@ -31,7 +31,7 @@
  *     exists to refuse.
  */
 
-import type { AuditSink, FederationGrantAuditEvent } from "@o3co/auth-provider-core";
+import type { AuditEvent, AuditSink, FederationGrantAuditEvent } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "#/audit.mjs";
 
