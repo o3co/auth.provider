@@ -119,7 +119,14 @@ export const createOAuthRouter = async (
 		getFederationProviders = () => undefined,
 		logger = consoleLogger,
 	}: {
-		registry: GrantHandlerResolver;
+		/**
+		 * Where `/oauth/token` looks a `grant_type` up. Only `get` is read —
+		 * `grant_types_supported` is derived in `module.mts` from the planner's
+		 * resolver, not from this one — so this is the contract (#626): the
+		 * planner's `GrantHandlerResolver` satisfies it, and so does a test's
+		 * bare `GrantRegistry`.
+		 */
+		registry: Pick<GrantHandlerResolver, "get">;
 		config: AppConfig;
 		clientRepository: ClientRepository;
 		codeRepository: CodeRepository;
@@ -176,7 +183,7 @@ export const createOAuthRouter = async (
 		getFederationProviders?: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
 		logger?: Logger;
 	},
-): Promise<{ router: Router; registry: GrantHandlerResolver }> => {
+): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }> => {
 	const router = express.Router();
 
 	// #328: every `oauth.*` knob this router consumes is resolved exactly once,
