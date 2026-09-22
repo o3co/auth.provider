@@ -1301,4 +1301,24 @@ describe("jwt-bearer grant — enabling it without a verifier (#301)", () => {
 		// Secure-default opt-in: a deployment that says nothing gets nothing.
 		expect(grantsOf(false)[JWT_BEARER_GRANT_TYPE]).toBeUndefined();
 	});
+
+	it("builds the grant when both slots are wired, handing the factory the narrowed values (#626)", () => {
+		// The path past both refusals: the module lists `assertionVerifier` and
+		// `userRepository` optional, the grant requires them, and the two checks
+		// above are what narrow them — so this is where the wiring either passes
+		// them on or drops them. Neither refusal fires and a handler for this
+		// grant type comes back.
+		const factory = grantsOf(true)[JWT_BEARER_GRANT_TYPE];
+		expect(factory).toBeDefined();
+		const handler = factory?.({
+			config: configWith(true),
+			keyStore,
+			assertionVerifier: verifierFor({ subjectHandle: "d" }),
+			userRepository: userRepoFor({ id: "u-1" }),
+		}) as { handle: unknown; requiresExplicitGrantAllowlist?: boolean };
+		expect(typeof handler.handle).toBe("function");
+		// #326: the grant this module built is the one that refuses acquisition
+		// by omission, so the values really reached `createJwtBearerGrant`.
+		expect(handler.requiresExplicitGrantAllowlist).toBe(true);
+	});
 });
