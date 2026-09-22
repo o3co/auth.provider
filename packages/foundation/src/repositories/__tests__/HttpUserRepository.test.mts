@@ -790,6 +790,20 @@ describe("findSubjectByFederatedIdentity over HTTP (#613)", () => {
 			}
 		});
 
+		it("reports a transport that failed before any response with a fixed message, and no cause", async () => {
+			// What a transport reports may quote what it was sending; the client
+			// says only that the endpoint could not be reached.
+			server.use(http.post(LOOKUP_URL, () => HttpResponse.error()));
+			let thrown: unknown;
+			try {
+				await looking().findSubjectByFederatedIdentity?.(IDENTITY);
+			} catch (error) {
+				thrown = error;
+			}
+			expect((thrown as Error).message).toMatch(/identity lookup at .* could not be reached/);
+			expect((thrown as Error).cause).toBeUndefined();
+		});
+
 		it("holds the exchange to the timeout and the body cap, as the other endpoints are", async () => {
 			server.use(
 				http.post(LOOKUP_URL, async () => {
