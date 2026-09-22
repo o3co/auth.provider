@@ -42,6 +42,24 @@ Enabling the feature also requires a `subjectRevocation` component that carries 
 | an adapter with only `revokeBefore` / `revokedBefore` | There is no second boundary to compare a grant against, and a subject-wide revocation could not be asked to keep one. |
 | a non-`memory` grant store beside a `memory` `subjectRevocation` | The grants outlive the process and the boundary does not, so a restart — or the replica that never held it — discloses a credential for a grant that was revoked. A custom store of any other `kind` is treated as durable: `kind` is all the port exposes, and refusing a pairing that would lose the boundary is the conservative direction. |
 
+### What is audited, and where it goes
+
+Every operation on a grant emits its event — the `federation.grant.*` types,
+`.authorization_failed`, `.authorized`, `.reauthorization_required`,
+`.reauthorized`, `.refresh_failed`, `.refresh_persist_failed`, `.refreshed`,
+`.request.denied`, `.requested`, `.revoke.denied`, `.revoked`,
+`.token.denied`, `.token.success` — with a correlation ID that is never empty: the request's
+`x-request-id` on the routes, and on the library path (`revokeFederationGrant`,
+`revokeAllForSubject`, the subject revocation service) the caller's own, or
+one generated for the call when the caller gives none, so that a pass over a
+subject's grants reads as one operation in the sink (#618). Recording and
+delivery are the deployment's: the module refuses to boot with the feature
+enabled and no `auditSink` unless `audit.sink.type = "none"` declares the
+capability absent on purpose — the product-wide declaration, which opts the
+whole provider out of audit and which the standalone does not offer. A Store
+that drives a revocation through the library without passing `audit` records
+nothing of it, by the same choice.
+
 ## A disabled deployment is indistinguishable from an uninstalled one
 
 `federationGrants.enabled` defaults to `false`, and while it is false both paths answer:

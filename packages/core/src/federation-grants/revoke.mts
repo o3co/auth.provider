@@ -42,10 +42,22 @@
  * projects the fields its page needs.
  */
 
+import { randomUUID } from "node:crypto";
 import { federationGrantAuditMetadata } from "./auditMetadata.mjs";
 import type { FederationGrantAuditEvent } from "./retrieve.mjs";
 import type { FederationGrantStore, FederationGrantWrite } from "./store.mjs";
 import type { FederationGrant, FederationGrantRevokedBy } from "./types.mjs";
+
+/**
+ * The correlation ID an operation's events carry (#618): the caller's, when it
+ * gave one that is not empty, and otherwise one generated for the operation —
+ * an empty string correlates nothing, and is not a value a caller means.
+ * Called once per operation, so that everything the operation audits shares
+ * the one ID.
+ */
+export function federationGrantCorrelationId(given: string | undefined): string {
+	return typeof given === "string" && given.length > 0 ? given : randomUUID();
+}
 
 export interface FederationGrantAdministrationDeps {
 	readonly store: FederationGrantStore;
@@ -57,7 +69,12 @@ export interface FederationGrantAdministrationDeps {
 	 * worse than not reporting at all.
 	 */
 	audit?(event: FederationGrantAuditEvent): void | Promise<void>;
-	/** Carried into the audit event when the caller has one to correlate by. */
+	/**
+	 * What correlates this call's events with the caller's own record of it —
+	 * a request ID, a job ID. Absent, the events get one of their own (#618):
+	 * a correlation ID that is empty correlates nothing, and an operator
+	 * reading the sink still has to tell one pass from another.
+	 */
 	readonly correlationId?: string;
 }
 
@@ -112,7 +129,7 @@ async function tell(
 	try {
 		await sink({
 			type: "federation.grant.revoked",
-			correlationId: deps.correlationId ?? "",
+			correlationId: federationGrantCorrelationId(deps.correlationId),
 			grantId: grant.id,
 			clientId: grant.clientId,
 			subject: grant.subject,

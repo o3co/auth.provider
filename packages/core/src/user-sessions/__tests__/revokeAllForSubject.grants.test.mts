@@ -48,6 +48,8 @@ const base = () => ({
 	subjectRevocation: createInMemorySubjectRevocation(),
 });
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+
 describe("revokeAllForSubject with a grant store", () => {
 	it("ends every grant the subject has, pending ones included", async () => {
 		const h = harness();
@@ -208,6 +210,53 @@ describe("revokeAllForSubject with a grant store", () => {
 			expect(event.outcome).toBe("subject");
 			expect(event.correlationId).toBe("corr-1");
 		}
+	});
+
+	it("gives a pass one correlation ID of its own when the caller passes none: every event of the pass carries it, and the next pass another (#618)", async () => {
+		const h = harness();
+		await h.seed();
+		await h.seed({ id: "g-2" });
+		const events: { correlationId: string }[] = [];
+		const pass = () =>
+			revokeAllForSubject({
+				...base(),
+				federationGrantStore: h.store,
+				federationGrantAudit: (event) => {
+					events.push(event as (typeof events)[number]);
+				},
+				now: () => now().getTime(),
+			});
+
+		await pass();
+		expect(events).toHaveLength(2);
+		const first = new Set(events.map((event) => event.correlationId));
+		expect(first.size).toBe(1);
+		for (const id of first) expect(id).toMatch(UUID);
+
+		await h.seed({ id: "g-3" });
+		await pass();
+		expect(events).toHaveLength(3);
+		expect(events[2]?.correlationId).toMatch(UUID);
+		expect(first.has(events[2]?.correlationId ?? "")).toBe(false);
+	});
+
+	it("treats an empty correlation ID as none given, once for the pass (#618)", async () => {
+		const h = harness();
+		await h.seed();
+		await h.seed({ id: "g-2" });
+		const events: { correlationId: string }[] = [];
+		await revokeAllForSubject({
+			...base(),
+			federationGrantStore: h.store,
+			federationGrantAudit: (event) => {
+				events.push(event as (typeof events)[number]);
+			},
+			correlationId: "",
+			now: () => now().getTime(),
+		});
+		const ids = new Set(events.map((event) => event.correlationId));
+		expect(ids.size).toBe(1);
+		for (const id of ids) expect(id).toMatch(UUID);
 	});
 
 	it("samples the clock at each write rather than once for the batch", async () => {

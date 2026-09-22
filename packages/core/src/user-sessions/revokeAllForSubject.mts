@@ -16,6 +16,7 @@
 
 import type { FederationGrantAuditEvent } from "../federation-grants/retrieve.mjs";
 import {
+	federationGrantCorrelationId,
 	listFederationGrantsForSubject,
 	revokeFederationGrant,
 } from "../federation-grants/revoke.mjs";
@@ -251,7 +252,9 @@ export async function revokeAllForSubject(
 			store: grantStore,
 			now: () => new Date(now()),
 			audit: opts.federationGrantAudit,
-			correlationId: opts.correlationId,
+			// One ID for the pass, so that its events read as one operation
+			// (#618); the caller's own when it has one.
+			correlationId: federationGrantCorrelationId(opts.correlationId),
 		};
 		let grants: readonly FederationGrant[] = [];
 		try {
