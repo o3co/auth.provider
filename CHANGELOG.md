@@ -54,8 +54,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   = "required"`, the default): a `UserRepository` that covers the registration
   answers `findSubjectByFederatedIdentity` with `linked`, `unlinked` or
   `indeterminate`, and a connection's `identityClaims` name the verified
-  id_token claims an IdP with pairwise subjects needs. The bundled
-  repositories cover none; `"unsupported"` is the recorded opt-out. Every
+  id_token claims an IdP with pairwise subjects needs. The bundled in-memory
+  repository covers none, and `HttpUserRepository` covers what its coverage
+  declaration says (below); `"unsupported"` is the recorded opt-out. Every
   operation emits a `federation.grant.*` audit event, from `.requested` to
   `.revoked`, with a correlation ID that is never empty, and the module
   refuses to boot with the feature enabled and no audit sink unless
@@ -159,16 +160,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the caller knew nothing about unusable after the boundary. In the Redis
   package, `SubjectRevocationClient.setWatermarkMonotonic(key, beforeMs,
   expiresAtMs)` is gone and `setRevocationBoundaries(key, mode, beforeMs,
-  expiresAtMs, grantRetentionMs)`, answering a string, replaces it. The
-  `sessions` stamp the Redis adapter writes cannot be rolled back to a writer
-  that predates it. With `federationGrants.enabled = true` and no two-boundary
-  `subjectRevocation` adapter, boot is refused.
+  expiresAtMs, grantRetentionMs)`, answering a string, replaces it. With
+  `federationGrants.enabled = true` and no two-boundary `subjectRevocation`
+  adapter, boot is refused.
 
   **Upgrade note.** A custom Redis client written against
   `SubjectRevocationClient` implements `setRevocationBoundaries`; the
-  bundled ioredis client already does. A deployment that rolls back to
-  v0.14.0 after a `sessions` boundary has been written keeps the record, but
-  the older writer cannot read it.
+  bundled ioredis client already does. A full revocation still writes the
+  record v0.14.0 wrote, so a deployment that never makes a sessions-only
+  stamp — the subject revocation service's keep path, under
+  `federationGrants.allowKeepOnSubjectRevocation` — can roll back freely.
+  Where one was made, that subject's record is in a form a v0.14.0 reader
+  refuses (it fails closed, the safe direction), and a v0.14.0 **writer**
+  overwrites it with a plain watermark, which can move the sessions boundary
+  backward. Drain every pre-0.15.0 replica before allowing sessions-only
+  stamps, and do not roll back to one while such records remain.
+
+- **BREAKING: the `OidcProvider` type includes the delegated-authorization
+  capability (`@o3co/auth-provider-federation-oidc`)**
+  ([#605](https://github.com/o3co/auth.provider/pull/605),
+  [#610](https://github.com/o3co/auth.provider/pull/610)). `OidcProvider`,
+  the type `createOidcProvider` returns, is now also
+  `SupportsDelegatedAuthorization`, so a value typed as `OidcProvider` must
+  carry `buildDelegatedAuthorizationUrl`, `exchangeDelegatedCode` and
+  `refreshDelegatedToken`. A consumer that only calls `createOidcProvider`
+  is unaffected.
+
+  **Upgrade note.** A wrapper, a hand-built provider or a test double typed
+  as `OidcProvider` implements the three methods, or is typed by the
+  capabilities it has (`FederationProvider & SupportsRefresh &
+  SupportsClaimMapping`).
 
 - **Callers of `revokeAllForSubject` see three more fields and wider unions
   (`@o3co/auth-provider-core`)**
