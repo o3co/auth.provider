@@ -22,11 +22,11 @@ import type {
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { createAuthorizationGrant } from "#/grants/authorization.mjs";
-import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
-import { createJwtBearerGrant } from "#/grants/jwtBearer.mjs";
-import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
-import { createSessionGrant } from "#/grants/session.mjs";
+import type { createAuthorizationGrant } from "#/grants/authorization.mjs";
+import type { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
+import type { createJwtBearerGrant } from "#/grants/jwtBearer.mjs";
+import type { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import type { createSessionGrant } from "#/grants/session.mjs";
 import {
 	type OAuthAuthorizationModuleDeps,
 	oauthAuthorizationModule,
@@ -136,9 +136,7 @@ describe("the grant factories declare the slots they read (#626 P2)", () => {
 		expectTypeOf<keyof AuthorizationDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
 		expectTypeOf<keyof RefreshDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
 		expectTypeOf<keyof JwtBearerDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
-		expectTypeOf<keyof ClientCredentialsDeps>().toMatchTypeOf<
-			keyof OAuthAuthorizationModuleDeps
-		>();
+		expectTypeOf<keyof ClientCredentialsDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
 		expect(true).toBe(true);
 	});
 

@@ -42,7 +42,10 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
  * decision reads the raw body). #295 kept the parameter for compatibility
  * after removing the read; #331 removed it.
  */
-export const createSessionGrant = (deps: GrantDependencies): GrantHandler => {
+/** What the session grant reads (#626 P2); see `AuthorizationGrantDeps`. */
+export type SessionGrantDeps = Pick<GrantDependencies, "config" | "keyStore" | "userSessionStore">;
+
+export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 	const { config, keyStore } = deps;
 	// #328: deployment config, not request state — resolved once at grant
 	// construction, matching the altitude the router resolves its knobs at.

@@ -49,7 +49,20 @@ import {
  */
 const CAPPED_EXPIRY_DRIFT_MARGIN_MS = 1_000;
 
-export const createRefreshTokenGrant = (deps: GrantDependencies): GrantHandler => {
+/** What the refresh grant reads (#626 P2); see `AuthorizationGrantDeps`. */
+export type RefreshTokenGrantDeps = Pick<
+	GrantDependencies,
+	| "config"
+	| "keyStore"
+	| "logger"
+	| "grantPolicy"
+	| "refreshTokenFamilyRotation"
+	| "refreshTokenFamilyRevocation"
+	| "subjectRevocation"
+	| "userSessionStore"
+>;
+
+export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandler => {
 	const { config, keyStore, logger, subjectRevocation } = deps;
 
 	return {

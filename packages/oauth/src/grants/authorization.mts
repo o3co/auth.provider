@@ -16,8 +16,6 @@
 import crypto from "node:crypto";
 
 import {
-	type ClientRepository,
-	type CodeRepository,
 	constantTimeStringEqual,
 	type GrantContext,
 	type GrantDependencies,
@@ -26,6 +24,7 @@ import {
 	generateIdToken,
 	generateToken,
 	generateTokenResponse,
+	type ProviderDeps,
 	resolveAccessTokenLifetime,
 	type Token,
 	type UserSession,
@@ -37,9 +36,25 @@ import { decodeJwtPayload } from "./_jwtPayload.mjs";
 import { extractResourceParam, unrepresentedResources } from "./_resourceIndicator.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
 
-export const createAuthorizationGrant = (
-	deps: GrantDependencies & { codeRepository: CodeRepository; clientRepository: ClientRepository },
-): GrantHandler => {
+/**
+ * What the authorization-code grant reads (#626 P2): the shared grant slots
+ * it uses, plus the two repositories only this grant redeems against. The
+ * module's `ProviderDeps<R, O>` has to satisfy this at the wiring, so a slot
+ * read here without the module declaring it is a compile error.
+ */
+export type AuthorizationGrantDeps = Pick<
+	GrantDependencies,
+	| "config"
+	| "keyStore"
+	| "logger"
+	| "userSessionStore"
+	| "refreshTokenFamilyRotation"
+	| "sessionFamilyIndex"
+	| "sessionRPRegistry"
+> &
+	ProviderDeps<"codeRepository" | "clientRepository">;
+
+export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHandler => {
 	const { config, codeRepository, clientRepository, keyStore, logger } = deps;
 
 	// TODO-F-4: id_token issuance requires a configured issuer URL. We read it
