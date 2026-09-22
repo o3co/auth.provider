@@ -202,10 +202,14 @@ export function federationGrantInteractionCode(
 	failure: FederationGrantRefreshFailure | undefined,
 ): FederationGrantInteractionCode | undefined {
 	if (failure === undefined || failure.kind !== "rejected") return undefined;
-	const code = failure.upstreamCode;
-	return typeof code === "string" && INTERACTION_CODES.has(code)
-		? (code as FederationGrantInteractionCode)
-		: undefined;
+	return isFederationGrantInteractionCode(failure.upstreamCode) ? failure.upstreamCode : undefined;
+}
+
+/** Whether an upstream's error code — one the classifier read off the error's own field — is one of the four. */
+export function isFederationGrantInteractionCode(
+	code: unknown,
+): code is FederationGrantInteractionCode {
+	return typeof code === "string" && INTERACTION_CODES.has(code);
 }
 
 /**
