@@ -128,6 +128,20 @@ describe("the grant factories declare the slots they read (#626 P2)", () => {
 		expect(true).toBe(true);
 	});
 
+	it("read only slots the module declares, optional ones included", () => {
+		// `Pick<…, "grantPolicy">` is satisfied by a deps type WITHOUT
+		// `grantPolicy` (an optional key accepts absence), so assignability
+		// alone lets a grant read an optional slot its module never declared
+		// and see `undefined` forever. The key sets close that gap.
+		expectTypeOf<keyof AuthorizationDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
+		expectTypeOf<keyof RefreshDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
+		expectTypeOf<keyof JwtBearerDeps>().toMatchTypeOf<keyof OAuthAuthorizationModuleDeps>();
+		expectTypeOf<keyof ClientCredentialsDeps>().toMatchTypeOf<
+			keyof OAuthAuthorizationModuleDeps
+		>();
+		expect(true).toBe(true);
+	});
+
 	it("still carry every slot the grant does read", () => {
 		expectTypeOf<AuthorizationDeps>().toHaveProperty("codeRepository");
 		expectTypeOf<AuthorizationDeps>().toHaveProperty("userSessionStore");

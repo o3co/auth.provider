@@ -89,6 +89,10 @@ describe("createTokenExchangeGrant declares the slots it reads (#626 P2)", () =>
 		expectTypeOf<Omit<TokenExchangeModuleDeps, "tokenExchangeValidatorResolver">>().toMatchTypeOf<
 			Omit<GrantDeps, "tokenExchangeValidatorResolver">
 		>();
+		// And the grant reads only keys the module declares, optional ones
+		// included — assignability alone would let it read an undeclared
+		// optional slot and see `undefined` forever.
+		expectTypeOf<keyof GrantDeps>().toMatchTypeOf<keyof TokenExchangeModuleDeps>();
 		expectTypeOf<GrantDeps>().toHaveProperty("clientRepository");
 		expectTypeOf<GrantDeps>().toHaveProperty("refreshTokenFamilyRevocation");
 		expectTypeOf<GrantDeps>().toHaveProperty("grantPolicy");
