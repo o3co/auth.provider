@@ -103,10 +103,10 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 	// them into a typed const array would require restating R / O at the
 	// type level.
 	//
-	// createOAuthRouter retains its legacy explicit-deps signature
-	// (`registry: GrantHandlerResolver`, `getFederationProviders: () => ...`).
-	// The route factory bridges typed `deps` to that shape per plan line 710 —
-	// the router internals are NOT redesigned in this task.
+	// createOAuthRouter takes explicit options rather than the module's deps
+	// (`registry: Pick<GrantHandlerResolver, "get">` — what it reads, #626 —
+	// and `getFederationProviders: () => ...`). The route factory bridges the
+	// typed `deps` to that shape; the router internals are not redesigned here.
 	//
 	// Explicit `defineModule<R, O>` generics: needed so contextual typing
 	// reaches the conditional-spread factory below (TS does not propagate
