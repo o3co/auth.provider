@@ -25,7 +25,13 @@ import { type DeviceGrantModuleDeps, deviceGrantModule } from "#/module.mjs";
 // file is in both typecheck lists (vitest.config.mts and tsconfig.test.json).
 
 const REQUIRES = ["config", "clientRepository", "keyStore"] as const;
-const OPTIONAL = ["deviceCodeStore", "rateLimiter", "replaySeenSet", "logger", "auditSink"] as const;
+const OPTIONAL = [
+	"deviceCodeStore",
+	"rateLimiter",
+	"replaySeenSet",
+	"logger",
+	"auditSink",
+] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
 describe("deviceGrantModule's deps are the slots it declares (#626 P2)", () => {

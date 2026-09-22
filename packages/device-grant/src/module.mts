@@ -85,6 +85,7 @@ import {
 	DEVICE_CODE_STORE_ABSENCE_POLICY,
 	defineModule,
 	isDeviceVerificationRateLimitSpec,
+	type ProviderDeps,
 	type RateLimitFailMode,
 	type RateLimitSpec,
 	resolveAccessTokenLifetime,
@@ -184,10 +185,30 @@ interface DeviceAuthorizationConfigSlice {
 	readonly rateLimit?: unknown;
 }
 
-// biome-ignore lint/suspicious/noExplicitAny: planner-inferred deps shape — the manifest reads only slots it declares in `requires` / `optional`
-type AnyDeps = any;
+const REQUIRES = ["config", "clientRepository", "keyStore"] as const;
+// #484: `replaySeenSet` is what records a client assertion's single-use
+// `jti`. Optional here for the same reason it is optional on the OAuth
+// router — a composition with no `private_key_jwt` client needs none —
+// and a request using the method without one is `server_error`, never an
+// assertion accepted unchecked.
+const OPTIONAL = [
+	"deviceCodeStore",
+	"rateLimiter",
+	"replaySeenSet",
+	"logger",
+	"auditSink",
+] as const;
 
-const readSettings = (deps: AnyDeps): DeviceAuthorizationConfigSlice | null => {
+/**
+ * The deps every contribution of {@link deviceGrantModule} receives: exactly
+ * its `requires` / `optional`, typed (#626 P2). The helpers below read the
+ * optional slots behind a presence check or not at all.
+ */
+type Requires = (typeof REQUIRES)[number];
+type Optional = (typeof OPTIONAL)[number];
+export type DeviceGrantModuleDeps = ProviderDeps<Requires, Optional>;
+
+const readSettings = (deps: DeviceGrantModuleDeps): DeviceAuthorizationConfigSlice | null => {
 	const slice = deps.config?.oauth?.deviceAuthorization as
 		| DeviceAuthorizationConfigSlice
 		| undefined;
@@ -251,7 +272,7 @@ const disabledRoute = (id: string, mountPath: string) => {
  */
 const SAME_SITE_VALUES: ReadonlySet<unknown> = new Set(["lax", "strict", "none"]);
 
-const requireSessionSlice = (deps: AnyDeps): SessionCsrfConfigSlice => {
+const requireSessionSlice = (deps: DeviceGrantModuleDeps): SessionCsrfConfigSlice => {
 	const session = deps.config?.session as Partial<SessionCsrfConfigSlice> | undefined;
 	// Every field `createCsrfProtectionFromConfig` reads is checked here, not
 	// just the secret: a slice with no `name` would mint a cookie called
@@ -284,7 +305,7 @@ const requireSessionSlice = (deps: AnyDeps): SessionCsrfConfigSlice => {
  * route factories call this (#457), so the refusal does not depend on which
  * one the planner happens to run first.
  */
-const requireFailMode = (deps: AnyDeps): RateLimitFailMode => {
+const requireFailMode = (deps: DeviceGrantModuleDeps): RateLimitFailMode => {
 	const failMode = deps.config?.rateLimit?.failMode;
 	if (failMode !== "open" && failMode !== "closed") {
 		throw new Error(
@@ -298,7 +319,9 @@ const requireFailMode = (deps: AnyDeps): RateLimitFailMode => {
 	return failMode;
 };
 
-const requireRateLimiter = (deps: AnyDeps): NonNullable<AnyDeps["rateLimiter"]> => {
+const requireRateLimiter = (
+	deps: DeviceGrantModuleDeps,
+): NonNullable<DeviceGrantModuleDeps["rateLimiter"]> => {
 	if (deps.rateLimiter === undefined) {
 		throw new Error(
 			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires a " +
@@ -322,7 +345,9 @@ const requireRateLimiter = (deps: AnyDeps): NonNullable<AnyDeps["rateLimiter"]> 
  * one. An enabled grant with no store and no declaration is still refused
  * earlier, by the absence policy, naming the config key.
  */
-const requireDeviceCodeStore = (deps: AnyDeps): NonNullable<AnyDeps["deviceCodeStore"]> => {
+const requireDeviceCodeStore = (
+	deps: DeviceGrantModuleDeps,
+): NonNullable<DeviceGrantModuleDeps["deviceCodeStore"]> => {
 	if (deps.deviceCodeStore === undefined) {
 		throw new Error(
 			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires a " +
@@ -367,16 +392,11 @@ const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): Ra
 	return spec;
 };
 
-export const deviceGrantModule = defineModule({
+export const deviceGrantModule = defineModule<Requires, Optional>({
 	name: "device-grant",
 	configSchema: deviceGrantConfigSchema,
-	requires: ["config", "clientRepository", "keyStore"],
-	// #484: `replaySeenSet` is what records a client assertion's single-use
-	// `jti`. Optional here for the same reason it is optional on the OAuth
-	// router — a composition with no `private_key_jwt` client needs none —
-	// and a request using the method without one is `server_error`, never an
-	// assertion accepted unchecked.
-	optional: ["deviceCodeStore", "rateLimiter", "replaySeenSet", "logger", "auditSink"],
+	requires: REQUIRES,
+	optional: OPTIONAL,
 	// #363: optional to wire, not optional to decide. A composition with no
 	// sink discards every device approval — a consent event — with no
 	// symptom, so it has to write `audit.sink.type = "none"` to say so.
@@ -386,7 +406,7 @@ export const deviceGrantModule = defineModule({
 	},
 	contributes: {
 		grants: {
-			[DEVICE_CODE_GRANT_TYPE]: (deps: AnyDeps) => {
+			[DEVICE_CODE_GRANT_TYPE]: (deps: DeviceGrantModuleDeps) => {
 				const slice = readSettings(deps);
 				if (slice === null) {
 					// Disabled: contribute a handler that refuses, rather than
@@ -414,7 +434,7 @@ export const deviceGrantModule = defineModule({
 			},
 		},
 		routes: [
-			(deps: AnyDeps) => {
+			(deps: DeviceGrantModuleDeps) => {
 				const slice = readSettings(deps);
 				if (slice === null) {
 					return disabledRoute("device-authorization", "/oauth/device_authorization");
@@ -480,7 +500,7 @@ export const deviceGrantModule = defineModule({
 					handler: router,
 				};
 			},
-			(deps: AnyDeps) => {
+			(deps: DeviceGrantModuleDeps) => {
 				const slice = readSettings(deps);
 				if (slice === null) {
 					return disabledRoute("device-verification", "/oauth/device/verification");
@@ -536,7 +556,7 @@ export const deviceGrantModule = defineModule({
 			},
 		],
 		discoveryMetadata: [
-			(deps: AnyDeps) => {
+			(deps: DeviceGrantModuleDeps) => {
 				const slice = readSettings(deps);
 				if (slice === null) return {};
 				// RFC 8628 §4. A client that cannot discover this endpoint cannot
