@@ -16,7 +16,7 @@
 
 import type { GrantPolicyHook, ProviderDeps } from "@o3co/auth-provider-core";
 import { describe, expect, expectTypeOf, it } from "vitest";
-import { createTokenExchangeGrant, type TokenExchangeDependencies } from "#/grant.mjs";
+import type { createTokenExchangeGrant, TokenExchangeDependencies } from "#/grant.mjs";
 import { type TokenExchangeModuleDeps, tokenExchangeModule } from "#/module.mjs";
 
 // #626 P2 (D4): the manifest's contribution callbacks read only the slots it
@@ -24,7 +24,12 @@ import { type TokenExchangeModuleDeps, tokenExchangeModule } from "#/module.mjs"
 // facts: they fire under vitest's typecheck mode only, so this file is in
 // both typecheck lists (vitest.config.mts and tsconfig.test.json).
 
-const REQUIRES = ["tokenExchangeValidatorResolver", "clientRepository", "keyStore", "config"] as const;
+const REQUIRES = [
+	"tokenExchangeValidatorResolver",
+	"clientRepository",
+	"keyStore",
+	"config",
+] as const;
 const OPTIONAL = [
 	"refreshTokenFamilyRevocation",
 	"grantPolicy",

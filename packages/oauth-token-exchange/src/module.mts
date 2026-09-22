@@ -17,12 +17,16 @@
 import {
 	ACCESS_TOKEN_DENYLIST_ABSENCE_POLICY,
 	defineModule,
-	type GrantHandler,
 	type Module,
+	type ProviderDeps,
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
-import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "./grant.mjs";
+import {
+	createTokenExchangeGrant,
+	type ExchangeTokenValidatorResolver,
+	TOKEN_EXCHANGE_GRANT_TYPE,
+} from "./grant.mjs";
 import {
 	ACCESS_TOKEN_TYPE,
 	createSelfIssuedAccessTokenValidator,
@@ -77,41 +81,54 @@ const tokenExchangeConfigSchema = z.object({
  * Theme D (immutability — no addModule mutation, no consumer-facing freeze),
  * Theme E (typed deps; no lazy registry-getter closure).
  */
-// biome-ignore lint/suspicious/noExplicitAny: planner-inferred deps shape; grant + validator factories use legacy GrantDependencies-narrowed signatures (plan §3.3 escape hatch)
-type AnyDeps = any;
+const REQUIRES = [
+	"tokenExchangeValidatorResolver",
+	"clientRepository",
+	"keyStore",
+	"config",
+] as const;
+const OPTIONAL = [
+	// The token-exchange grant (grant.mts family_revoked re-surface) AND
+	// the built-in self-issued validator (createSelfIssuedAccessTokenValidator
+	// below) both read deps.refreshTokenFamilyRevocation for the read-only
+	// isFamilyRevoked check (A3 spec §5.3). RFC 8693 §7.2 state 1 demands
+	// family revocation be observable; the grant handler fail-closes when
+	// this slot is absent.
+	"refreshTokenFamilyRevocation",
+	// The token-exchange grant reads deps.grantPolicy to enforce the CP-18
+	// fail-closed policy gate. Sibling grants (auth-code, refresh-token)
+	// declare grantPolicy in oauthAuthorizationModule; without declaring
+	// it here, token-exchange would silently sit outside CP-18 enforcement
+	// while sibling grants are gated.
+	"grantPolicy",
+	// SF-1: forwarded to the central JWT verifier so verifier rejection /
+	// aud-skip warnings emit through the operator's structured logger
+	// rather than being silently dropped.
+	"logger",
+	// #367: a subject_token is an access token presented as a credential,
+	// so the exchange consults the same revocation stores every other
+	// token-accepting surface does — otherwise revoking an AT and then
+	// exchanging it launders the revocation away. Declaring
+	// `accessTokenDenylist` here also enrolls this module in the #277
+	// boot guard: a composition mounting token exchange must wire a
+	// denylist or declare `oauth.revocation.accessToken = "unsupported"`.
+	"accessTokenDenylist",
+	"subjectRevocation",
+] as const;
 
-export const tokenExchangeModule: Module = defineModule({
+/**
+ * The deps every contribution of {@link tokenExchangeModule} receives:
+ * exactly its `requires` / `optional`, typed (#626 P2).
+ */
+type Requires = (typeof REQUIRES)[number];
+type Optional = (typeof OPTIONAL)[number];
+export type TokenExchangeModuleDeps = ProviderDeps<Requires, Optional>;
+
+export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 	name: "oauth-token-exchange",
 	configSchema: tokenExchangeConfigSchema,
-	requires: ["tokenExchangeValidatorResolver", "clientRepository", "keyStore", "config"],
-	optional: [
-		// The token-exchange grant (grant.mts family_revoked re-surface) AND
-		// the built-in self-issued validator (createSelfIssuedAccessTokenValidator
-		// below) both read deps.refreshTokenFamilyRevocation for the read-only
-		// isFamilyRevoked check (A3 spec §5.3). RFC 8693 §7.2 state 1 demands
-		// family revocation be observable; the grant handler fail-closes when
-		// this slot is absent.
-		"refreshTokenFamilyRevocation",
-		// The token-exchange grant reads deps.grantPolicy to enforce the CP-18
-		// fail-closed policy gate. Sibling grants (auth-code, refresh-token)
-		// declare grantPolicy in oauthAuthorizationModule; without declaring
-		// it here, token-exchange would silently sit outside CP-18 enforcement
-		// while sibling grants are gated.
-		"grantPolicy",
-		// SF-1: forwarded to the central JWT verifier so verifier rejection /
-		// aud-skip warnings emit through the operator's structured logger
-		// rather than being silently dropped.
-		"logger",
-		// #367: a subject_token is an access token presented as a credential,
-		// so the exchange consults the same revocation stores every other
-		// token-accepting surface does — otherwise revoking an AT and then
-		// exchanging it launders the revocation away. Declaring
-		// `accessTokenDenylist` here also enrolls this module in the #277
-		// boot guard: a composition mounting token exchange must wire a
-		// denylist or declare `oauth.revocation.accessToken = "unsupported"`.
-		"accessTokenDenylist",
-		"subjectRevocation",
-	],
+	requires: REQUIRES,
+	optional: OPTIONAL,
 	// #375: same policy constant as oauthModule — an unfilled denylist slot
 	// must be declared with oauth.revocation.accessToken = "unsupported".
 	// #406: subject-level revocation is optional to wire, not optional to
@@ -124,12 +141,20 @@ export const tokenExchangeModule: Module = defineModule({
 	},
 	contributes: {
 		grants: {
-			[TOKEN_EXCHANGE_GRANT_TYPE]: ((deps: AnyDeps) => createTokenExchangeGrant(deps)) as (
-				deps: AnyDeps,
-			) => GrantHandler,
+			[TOKEN_EXCHANGE_GRANT_TYPE]: (deps: TokenExchangeModuleDeps) =>
+				createTokenExchangeGrant({
+					...deps,
+					// #626 P1: core's `TokenExchangeValidatorResolver.get()` returns
+					// `unknown` — `ExchangeTokenValidator` is still a placeholder in
+					// contributes-map.mts (F1) — where the grant needs the concrete
+					// validator this package owns. The one bridge P2 leaves standing;
+					// P1 moves the contract to core and deletes it.
+					tokenExchangeValidatorResolver:
+						deps.tokenExchangeValidatorResolver as ExchangeTokenValidatorResolver,
+				}),
 		},
 		tokenExchangeValidators: {
-			[ACCESS_TOKEN_TYPE]: (deps: AnyDeps) =>
+			[ACCESS_TOKEN_TYPE]: (deps: TokenExchangeModuleDeps) =>
 				createSelfIssuedAccessTokenValidator({
 					keyStore: deps.keyStore,
 					issuer: deps.config.oauth.jwt.issuer,
