@@ -188,7 +188,9 @@ describe("InMemoryUserRepository", () => {
 		it("cannot tell, for an identity linked to somebody and for one linked to nobody alike", async () => {
 			const r = repo();
 			for (const sub of ["00u-bob", "00u-nobody"]) {
-				expect(await r.findSubjectByFederatedIdentity({ ...registration, sub })).toEqual({
+				expect(
+					await r.findSubjectByFederatedIdentity({ ...registration, sub, claims: {} }),
+				).toEqual({
 					kind: "indeterminate",
 					reason: "registration_not_covered",
 				});
@@ -197,7 +199,7 @@ describe("InMemoryUserRepository", () => {
 
 		it("changes nothing: a lookup is not a login, a link, or a provisioning", async () => {
 			const r = repo();
-			await r.findSubjectByFederatedIdentity({ ...registration, sub: "00u-dave" });
+			await r.findSubjectByFederatedIdentity({ ...registration, sub: "00u-dave", claims: {} });
 			expect(await r.authenticateByToken("okta:00u-dave")).toBeNull();
 			expect(
 				await r.linkFederatedIdentity("u2", {

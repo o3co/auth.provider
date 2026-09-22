@@ -628,11 +628,32 @@ pairwise, the old scan was a sound conflict check for links made through that
 registration, and a deployment on the bundled repository now has to choose
 `"unsupported"` there. A best-effort mode — `linked` on a hit, `indeterminate`
 on a miss — was not added: a miss is exactly the case the scan cannot decide,
-so under `"required"` it would refuse every user who has no link yet. The
-capability's result (D17) is unchanged, `{ issuer, subject }`: carrying
-verified claims such as Entra's `oid`/`tid` would finish nothing on its own,
-because the login records only `<provider>:<sub>` and `mapClaims` drops both,
-so a Store would have nothing to match them against. A per-connection setting
+so under `"required"` it would refuse every user who has no link yet.
+
+**The lookup is also handed stable identifiers** (#611, the owner's
+decision: "pass a stable identifier to the lookup port"). Review showed the
+first cut left D19's setup with no Store anyone could build: the grants
+registration's pairwise `sub` is first seen at the grant callback, the lookup
+must change nothing, and the login records only `<provider>:<sub>`, so a Store
+that learns identities from logins can only ever answer
+`identity_not_resolvable` there. What CAN place such a person is a Store with
+its own directory keyed by what does not change across registrations —
+Entra's tenant and object id, provisioned from the IdP — if it is told them.
+So each connection names `identityClaims` (default none), the callback asks
+the adapter for exactly those (D17), and the lookup receives them as
+`claims`. Under `"required"` every named claim must be present as a non-empty
+string, or the callback refuses `identity_unverifiable` without asking the
+Store — a lookup handed part of its evidence could answer "nobody" for want of
+the rest — and the audit's reason is `identity_claims_unavailable`, a third
+reason that is the callback's own, not the Store's. The Store receives a fresh
+object of exactly the named claims; nothing else the adapter answered reaches
+it, and the claims are carried nowhere else: not on the grant, not in the
+intent or transaction, not in an event, a log line or the redirect. Boot tells
+`supportsFederatedIdentityLookup` which claims each connection names, so a
+directory Store refuses a registration configured without the claims it
+needs; two connections on one registration are asked about separately. The
+names are in neither revision: they change what check 5 can see, not what was
+consented to, and changing them retires no grant. A per-connection setting
 naming which login federation to consult is still not added: it changes the
 namespace and not the `sub`, which is the part that is pairwise. The
 success events record which answer let a grant through (D18). Having the
@@ -2199,6 +2220,20 @@ but the captured body shows was not one (`parseFloat` turns `"1000seconds"`
 into 1000) withholds the access token and still reports the verified identity,
 so core refuses the activation for the true reason.
 
+**Amended for #611: the exchange carries the verified claims it is asked
+for.** `DelegatedCodeExchangeRequest` gains `identityClaims?: readonly
+string[]`, a local allowlist of id_token claim names — nothing about it is
+sent upstream — and the result's `upstream` gains `claims`, always present:
+the named claims the VERIFIED id_token carried as own, non-empty string
+properties, copied after the `at_hash` check, never from UserInfo, the
+callback's parameters or `mapClaims`, never coerced, and possibly fewer than
+were asked for — the caller knows which it cannot do without. A name the
+protocol owns (`sub`, `iss`, `aud`, `azp`, `nonce`, `exp`, `iat`, `nbf`,
+`auth_time`, the three hashes, `jti`, `sid`) or that would reach a
+prototype, a malformed name and a repeat are refused before the code is
+spent; the grant routes refuse the same list at boot, by the same exported
+rule (`identityClaimsProblem`).
+
 `supportsDelegatedAuthorization` requires all three, and the boot refusal
 names the missing exchange. That is a break for a custom adapter written
 against the earlier pair, and it is taken now because it cannot be cheaper
@@ -2280,7 +2315,12 @@ placed with its user from one it placed with nobody. The outcome is now what
 check 5 let the grant through on — `required/linked`, `required/unlinked` or
 `unsupported` — in the `code/reason` form the other events use.
 `.authorization_failed` for an `indeterminate` answer carries
-`identity_unverifiable/<reason>`; the client hears only the code. No event
+`identity_unverifiable/<reason>`, and for a callback that could not assemble
+the connection's identity claims
+`identity_unverifiable/identity_claims_unavailable`; the client hears only the
+code. The audit helpers project the upstream identity to `{ issuer, subject }`
+explicitly rather than spreading whatever object they are handed, so the
+claims check 5 carries cannot leak through a caller that forgot to. No event
 names the other owner of a conflicting account, and nothing beyond the
 established `{ issuer, subject }` of the upstream identity is carried — no
 claim, no directory record, no thrown message.
@@ -2314,14 +2354,34 @@ ever saw. Under `identityLookup = "required"` the Store must declare that it
 covers each grants registration and must place its identities against every
 local link, whichever registration that link was made through (D7). The
 bundled `InMemoryUserRepository` cannot, and a deployment on it is refused at
-boot with a connection configured. To keep `"required"`, install a Store with
-a registration-qualified alias directory — which local user each
-registration's `sub` belongs to. A strategy on Entra's tenant-stable `oid` and
-`tid` would additionally need those claims carried from a verified id_token on
-acquisition (D17 carries only `{ issuer, subject }`) and a local index of them
-populated at login or by provisioning; neither is built, because the login
-records only `<provider>:<sub>`. A missing mapping is an inability to check,
-not evidence that the identity is unlinked. Otherwise the operator chooses
+boot with a connection configured. A Store that learns identities only from
+logins cannot either: the login tells it `<provider>:<sub>`, and the grants
+registration's `sub` is one no login saw. What keeps `"required"` is a Store
+with its own directory keyed by Entra's tenant and object id — provisioned
+from Entra so that each local user carries the `tid` and `oid` Entra gives
+them (the Graph user `id` is the `oid`; a SCIM integration that does not keep
+it is not enough) — and a connection that names them:
+
+```hocon
+federationGrants.connections.files {
+  federation = "entra-files"          # its own app registration
+  scopes = ["openid", "profile", "offline_access", "Files.Read"]
+  allowScopeSubsets = false
+  identityClaims = ["oid", "tid"]     # handed to the Store beside the sub
+}
+```
+
+`profile` is in the scopes because Entra puts `oid` in the id_token only with
+it; it is a consented scope, so it is in the connection's authorization
+revision like any other. The Store resolves `(tid, oid)` to a local user,
+refuses a tenant it does not trust, and answers `unlinked` only when its
+directory is complete for that tenant — a person it was never provisioned is
+`identity_not_resolvable`. What is not verified on a real tenant: that `oid`
+and `tid` are issued for the chosen registration and account types (guest
+accounts carry the resource tenant's `tid`), and what Entra reports as the
+granted scope set with `profile` added, at the exchange and on refresh. A
+missing mapping is an inability to check, not evidence that the identity is
+unlinked. Otherwise the operator chooses
 `identityLookup = "unsupported"` and accepts the loss of this check. Sharing
 the login registration for grants is not the escape: it brings back the
 accumulation this decision exists to avoid.
@@ -2336,7 +2396,7 @@ accumulation this decision exists to avoid.
 | 4 | expired or revoked upstream credentials → reauthorization, no fallback | D11, D12 | structured upstream `invalid_grant`; assert no other grant or credential is read |
 | 5 | transient failures distinguishable and non-destructive | D5, D11, D12 | injected 5xx, 429, storage throw, `invalid_client`, over-long token lifetime, unreadable watermark; record unchanged in each. A rotating upstream that answers between the soft and the hard deadline: the late credential is persisted, `.refreshed` is audited, the next call succeeds. One that answers after the hard deadline: an acknowledged loss, handled as a persist failure. A starved grant calls the upstream once per retry interval, not once per request |
 | 6 | concurrent refresh, lock expiry, restart, persistence failure | D2, D12 | two replicas on one testcontainer; lock TTL forced to expire; guarded-write loser; injected persist failure; refresh response without `refresh_token`; refresh straddling `expiresAt` |
-| 7 | duplicate, stale, wrong-account callbacks cannot replace or broaden | D5, D6, D7 | replayed callback; superseded intent; expired intent; different upstream `sub`; upstream grants more scopes than consented. Broadening through refresh: G1 consented for one scope, G2 later for two on the same connection, G1's refresh returns both — G1's client gets `upstream_token_ineligible`, never the token. Added for #611: an upstream account the Store places with another user is `identity_conflict`; one it cannot place — a dedicated registration's pairwise `sub`, with the login's link under another registration — is `identity_unverifiable`, and the bundled repository beside a connection is refused at boot |
+| 7 | duplicate, stale, wrong-account callbacks cannot replace or broaden | D5, D6, D7 | replayed callback; superseded intent; expired intent; different upstream `sub`; upstream grants more scopes than consented. Broadening through refresh: G1 consented for one scope, G2 later for two on the same connection, G1's refresh returns both — G1's client gets `upstream_token_ineligible`, never the token. Added for #611: an upstream account the Store places with another user is `identity_conflict`; one it cannot place — a dedicated registration's pairwise `sub`, with the login's link under another registration — is `identity_unverifiable`, and the bundled repository beside a connection is refused at boot; a directory Store keyed by `(tid, oid)` finds Bob behind a `sub` no login saw (`identity_conflict`), and a callback missing a named claim refuses without asking it |
 | 8 | session-expiry / logout / subject-revocation behaviour; session-bound endpoint preserved | D13, D14 | slice 5: both logout endpoints leave grants alone, subject revocation ends them, existing `federationToken` suite untouched and green. The policy-on cases are deferred with D14 |
 | 9 | no refresh token or long-lived secret in responses, audit or logs | D18 | a sentinel secret is grepped for in every response body, audit event and captured log line |
 | — | the storage guarantees D1 and D16 claim | D1, D3, D4, D16 | a rewritten `clientId`, `expiresAt` or `authorizationRevision` reads as `credential_unreadable`; an unknown key ID answers 503, keeps the record, and restoring the key restores the grant; an identity change reads as `connection_identity_changed` and reverting it restores the grant; activation beyond the ceiling is refused |
@@ -2477,9 +2537,13 @@ route test is written first and watched failing.
      `identity_unverifiable`; boot asks the Store whether it covers every
      connection's registration and refuses anything but `true`; the bundled
      repository covers none; the success events say which answer let a
-     grant through. Amended where they stand: D7, D18, D19. Not done, and
-     not needed to make `"required"` honest: carrying Entra's `oid`/`tid`
-     from the id_token, which would also need the login to record them.
+     grant through; and — after review showed D19's setup had no buildable
+     Store without it — each connection names `identityClaims`, the adapter
+     carries exactly those from the verified id_token, and the lookup receives
+     them, a missing one refusing without asking. Amended where they stand:
+     D7, D17, D18, D19. Not done: a login-side index of those claims — a Store
+     that has only what logins told it still cannot cover a pairwise
+     registration, and D19 says so.
 7. **standalone template, documentation, CHANGELOG.** Includes the key-ring
    retention rule and the provider-specific `offline_access` guide. The
    operator runbook rows and the `adapter-surface.md` rows are not left for

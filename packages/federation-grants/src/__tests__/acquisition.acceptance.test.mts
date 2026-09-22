@@ -397,6 +397,7 @@ describe("a grant created end to end, and spent", () => {
 					issuer: "https://issuer.example",
 					clientId: "provider-client",
 					sub: "00u-alice",
+					claims: {},
 				},
 			]);
 		} finally {

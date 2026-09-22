@@ -172,12 +172,20 @@ describe("requireFederationGrantIdentityLookup", () => {
 	/** A Store written as a class, so a probe taken off the instance fails. */
 	class Covering {
 		readonly asked: FederatedIdentityRegistration[] = [];
+		readonly claimsAsked: (readonly string[])[] = [];
 		constructor(
-			private readonly answer: (registration: FederatedIdentityRegistration) => unknown,
+			private readonly answer: (
+				registration: FederatedIdentityRegistration,
+				identityClaims: readonly string[],
+			) => unknown,
 		) {}
-		supportsFederatedIdentityLookup(registration: FederatedIdentityRegistration): boolean {
+		supportsFederatedIdentityLookup(
+			registration: FederatedIdentityRegistration,
+			identityClaims: readonly string[],
+		): boolean {
 			this.asked.push({ ...registration });
-			return this.answer(registration) as boolean;
+			this.claimsAsked.push([...identityClaims]);
+			return this.answer(registration, identityClaims) as boolean;
 		}
 		async findSubjectByFederatedIdentity() {
 			return { kind: "unlinked" as const };
@@ -278,6 +286,23 @@ describe("requireFederationGrantIdentityLookup", () => {
 		expect(message).toMatch(/connections\.calendar[\s\S]*threw/);
 		expect(message).not.toContain("hunter2");
 		expect(message).not.toContain("directory offline");
+	});
+
+	it("tells the Store which claims each connection will hand it, connection by connection, even on one registration (#611)", () => {
+		// A directory keyed by tenant and object id covers a registration only
+		// when both are named; the same registration configured without them
+		// on another connection is refused, not covered by its neighbour.
+		const store = new Covering(
+			(_registration, claims) => claims.includes("oid") && claims.includes("tid"),
+		);
+		expect(() =>
+			requireFederationGrantIdentityLookup(
+				"required",
+				store,
+				connections(connection({ identityClaims: ["oid", "tid"] }), connection({ name: "bare" })),
+			),
+		).toThrow(/connections\.bare/);
+		expect(store.claimsAsked).toEqual([["oid", "tid"], []]);
 	});
 
 	it("refuses the bundled repository for any connection: it covers no registration", () => {

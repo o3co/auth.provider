@@ -67,6 +67,23 @@ describe("resolveFederationGrantConnections", () => {
 		});
 	});
 
+	it("carries the identity claims check 5 hands the Store, and none when unset (#611)", () => {
+		expect(resolve({ graph: CONNECTION }).get("graph")?.identityClaims).toEqual([]);
+		expect(
+			resolve({ graph: { ...CONNECTION, identityClaims: ["oid", "tid"] } }).get("graph")
+				?.identityClaims,
+		).toEqual(["oid", "tid"]);
+	});
+
+	it("refuses at boot an identity claim the protocol owns, a malformed one, a repeat or a non-list", () => {
+		for (const identityClaims of [["sub"], ["nonce"], ["a b"], ["oid", "oid"], "oid", [7]]) {
+			expect(
+				() => resolve({ graph: { ...CONNECTION, identityClaims } }),
+				JSON.stringify(identityClaims),
+			).toThrow(/connections\.graph[\s\S]*identityClaims/);
+		}
+	});
+
 	it("is empty, and valid, when an operator has removed every connection", () => {
 		// Removing the last one must stay an operable change: a deployment with
 		// no connections issues no new grants and still answers about the ones

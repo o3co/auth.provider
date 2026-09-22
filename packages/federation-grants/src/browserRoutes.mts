@@ -878,6 +878,10 @@ export function createFederationGrantBrowserRouter(
 						...(intent.resource === undefined ? {} : { resource: intent.resource }),
 						callbackParams: callbackParamsOf(req),
 						signal: AbortSignal.timeout(options.upstreamTimeoutMs),
+						// #611: only what check 5 will hand the Store, and nothing
+						// when the deployment does not ask it.
+						identityClaims:
+							options.identityLookup === "required" ? [...(connection.identityClaims ?? [])] : [],
 					});
 				} catch (error) {
 					report?.({ during: "callback_exchange", error, grantId: intent.grantId, correlationId });
@@ -1155,7 +1159,7 @@ export function createFederationGrantBrowserRouter(
 	async function accountHolds(
 		intent: FederationGrantIntent,
 		connection: FederationGrantAcquisitionConnection,
-		upstream: { readonly issuer: string; readonly subject: string },
+		upstream: { readonly issuer: string; readonly subject: string; readonly claims?: unknown },
 		correlationId: string,
 	): Promise<AccountBinding> {
 		const refused = (code: CallbackError, reason?: string): AccountBinding => ({
@@ -1199,6 +1203,14 @@ export function createFederationGrantBrowserRouter(
 			});
 			return refused("temporarily_unavailable");
 		}
+		// #611: every claim the connection names, as the adapter verified it, or
+		// no question at all — a lookup handed part of its evidence could answer
+		// "nobody" for want of the rest. A fresh object of exactly those names:
+		// nothing else the adapter answered reaches the Store.
+		const claims = requiredIdentityClaims(upstream.claims, connection.identityClaims ?? []);
+		if (claims === undefined) {
+			return refused("identity_unverifiable", "identity_claims_unavailable");
+		}
 		let answer: FederatedIdentityLookupResult | undefined;
 		try {
 			// The registration the identity was issued under — every part of it
@@ -1217,6 +1229,7 @@ export function createFederationGrantBrowserRouter(
 						upstreamClientId: connection.upstreamClientId,
 					}),
 					sub: upstream.subject,
+					claims,
 				}),
 			);
 			if (answer === undefined) {
@@ -1288,6 +1301,26 @@ type AccountBinding =
 			readonly outcome: "required/linked" | "required/unlinked" | "unsupported";
 	  }
 	| { readonly holds: false; readonly code: CallbackError; readonly reason?: string };
+
+/**
+ * The named claims out of what the adapter answered, as a fresh object, or
+ * `undefined` if any is not an own, non-empty string (#611).
+ */
+function requiredIdentityClaims(
+	answered: unknown,
+	names: readonly string[],
+): Readonly<Record<string, string>> | undefined {
+	const claims: Record<string, string> = {};
+	if (names.length === 0) return claims;
+	if (typeof answered !== "object" || answered === null) return undefined;
+	for (const name of names) {
+		if (!Object.hasOwn(answered, name)) return undefined;
+		const value = (answered as Record<string, unknown>)[name];
+		if (typeof value !== "string" || value.length === 0) return undefined;
+		claims[name] = value;
+	}
+	return claims;
+}
 
 /**
  * A lookup's answer if it is one the port defines, and `undefined` otherwise.

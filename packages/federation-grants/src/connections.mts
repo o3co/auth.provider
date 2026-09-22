@@ -28,7 +28,10 @@
  */
 
 import type { FederationGrantConnection } from "@o3co/auth-provider-core";
-import { RESERVED_DELEGATED_AUTHORIZATION_PARAMS } from "@o3co/auth-provider-session";
+import {
+	identityClaimsProblem,
+	RESERVED_DELEGATED_AUTHORIZATION_PARAMS,
+} from "@o3co/auth-provider-session";
 
 /** A connection name: what appears in a key, an audit event and an operator's head. */
 const NAME = /^[A-Za-z0-9_-]+$/;
@@ -157,6 +160,19 @@ const authorizationParams = (value: unknown, name: string): Readonly<Record<stri
 	return { ...(value as Record<string, string>) };
 };
 
+/**
+ * #611: the id_token claims check 5 hands the Store. Refused at boot by the
+ * adapter's own rule, so a list the adapter would refuse at the callback — a
+ * name the protocol owns, a repeat — is found before a user consents.
+ */
+const identityClaims = (value: unknown, name: string): readonly string[] => {
+	if (value === undefined) return [];
+	if (!Array.isArray(value)) return refuse(name, "identityClaims must be a list of claim names");
+	const problem = identityClaimsProblem(value);
+	if (problem !== undefined) return refuse(name, problem);
+	return [...(value as string[])];
+};
+
 /** A plain decimal, which is the only shape an operator writes a duration in. */
 const DECIMAL = /^\d+$/;
 
@@ -255,6 +271,7 @@ export function resolveFederationGrantConnections(
 					? true
 					: boolean(entry.allowScopeSubsets, name, "allowScopeSubsets"),
 			authorizationParams: authorizationParams(entry.authorizationParams, name),
+			identityClaims: identityClaims(entry.identityClaims, name),
 			...(entry.resource === undefined
 				? {}
 				: { resource: absoluteUri(entry.resource, name, "resource") }),

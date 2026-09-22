@@ -163,7 +163,12 @@ never reaches the Store.
   builds the authorization request for a federation grant: the intent's
   scopes, a required nonce, the RFC 8707 `resource`, `prompt=consent` when
   `offline_access` is asked for, and the connection's `authorizationParams`,
-  which may not name a parameter the adapter owns. `refreshDelegatedToken()`
+  which may not name a parameter the adapter owns. `exchangeDelegatedCode()`
+  exchanges the connect callback's code — PKCE, the nonce, the `resource` at
+  the token endpoint, `iss` forwarded — never calls UserInfo, and answers the
+  verified id_token's issuer and subject, plus the claims the caller names in
+  `identityClaims` (#611), copied from that id_token only, as non-empty
+  strings only. `refreshDelegatedToken()`
   runs the `refresh_token` grant with the grant's scopes and resource under
   the caller's `AbortSignal`, answers the raw `expires_in`, `scope` and
   `token_type`, and keeps a rotated refresh token out of an answer the library

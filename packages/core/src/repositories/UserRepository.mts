@@ -54,6 +54,13 @@ export interface FederatedIdentityRegistration {
 export interface FederatedIdentityLookup extends FederatedIdentityRegistration {
 	/** The verified id_token's `sub`. Pairwise per registration at some IdPs. */
 	readonly sub: string;
+	/**
+	 * The connection's `identityClaims`, each one present, from the verified
+	 * id_token and nowhere else (#611) — `{}` when the connection names none. A
+	 * callback missing any of them does not ask. Transient: the Store must not
+	 * log, persist or echo them.
+	 */
+	readonly claims: Readonly<Record<string, string>>;
 }
 
 /** What {@link UserRepository.findSubjectByFederatedIdentity} answers (#611). */
@@ -110,8 +117,18 @@ export interface UserRepository {
 	 * and an IdP whose `sub` is pairwise per registration (Entra's is) gives the
 	 * same person another `sub` under every registration. Required together
 	 * with the lookup; one without the other is refused at boot.
+	 *
+	 * `identityClaims` is what the connection will hand the lookup as `claims`
+	 * (#611). A Store whose strategy needs claims answers `false` unless they
+	 * are named — a directory keyed by Entra's tenant and object id needs both
+	 * `tid` and `oid`. A Store that learns identities only from logins, where
+	 * `<provider>:<sub>` is all it is told, cannot cover a registration whose
+	 * `sub` is pairwise at all: that `sub` is first seen at the grant callback.
 	 */
-	supportsFederatedIdentityLookup?(registration: FederatedIdentityRegistration): boolean;
+	supportsFederatedIdentityLookup?(
+		registration: FederatedIdentityRegistration,
+		identityClaims: readonly string[],
+	): boolean;
 	/**
 	 * Who an upstream identity belongs to locally (#593, D7 check 5; #611).
 	 * Optional; a deployment says whether it has it with

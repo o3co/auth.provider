@@ -1242,6 +1242,9 @@ export const fullSectionsSchema = z.object({
 						allowScopeSubsets: coerceBooleanFromEnv.optional(),
 						authorizationParams: z.record(z.string(), z.string()).optional(),
 						callbackURL: z.string().min(1).optional(),
+						// #611: the verified id_token claims D7 check 5 hands the
+						// Store beside the subject. Names only; the package checks them.
+						identityClaims: z.array(z.string()).optional(),
 					}),
 				)
 				.optional(),

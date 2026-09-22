@@ -166,3 +166,15 @@ describe("connection revisions (#593, D4)", () => {
 		});
 	});
 });
+
+describe("what the revisions leave out (#611)", () => {
+	it("is not changed by the identity claims check 5 hands the Store: they change what can be checked, not what was consented to", () => {
+		const withClaims = changed({ identityClaims: ["oid", "tid"] });
+		expect(identityRevision(withClaims)).toBe(identityRevision(base));
+		expect(authorizationRevision(withClaims)).toBe(authorizationRevision(base));
+		// Asking for `profile` to receive `oid` is a scope, and scopes are consent.
+		expect(authorizationRevision(changed({ scopes: [...base.scopes, "profile"] }))).not.toBe(
+			authorizationRevision(base),
+		);
+	});
+});

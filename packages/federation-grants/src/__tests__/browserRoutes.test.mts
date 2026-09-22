@@ -1276,6 +1276,7 @@ describe("what the adversarial review found", () => {
 				issuer: CONNECTION.upstreamIssuer,
 				clientId: "provider-client",
 				sub: "00u-alice",
+				claims: {},
 			},
 		]);
 	});
@@ -1826,6 +1827,158 @@ describe('identityLookup = "unsupported" skips the lookup and nothing else', () 
 			"account_mismatch",
 		);
 		expect(await w.grants.find(grantId, w.state.now)).toEqual(before);
+	});
+});
+
+/**
+ * A Store with its own directory, keyed by what does not change across
+ * registrations: Entra's tenant and object id, provisioned from the IdP. The
+ * only kind of Store that can cover a registration whose `sub` is pairwise —
+ * a login told it `<provider>:<sub>`, and that is a different `sub` (#611).
+ */
+class TenantDirectory {
+	readonly asked: FederatedIdentityLookup[] = [];
+	constructor(private readonly people: ReadonlyMap<string, string>) {}
+
+	supportsFederatedIdentityLookup(_registration: unknown, identityClaims: readonly string[]) {
+		return identityClaims.includes("tid") && identityClaims.includes("oid");
+	}
+
+	async findSubjectByFederatedIdentity(
+		identity: FederatedIdentityLookup,
+	): Promise<FederatedIdentityLookupResult> {
+		this.asked.push({ ...identity, claims: { ...identity.claims } });
+		const owner = this.people.get(`${identity.claims.tid}|${identity.claims.oid}`);
+		return owner === undefined ? { kind: "unlinked" } : { kind: "linked", subject: owner };
+	}
+}
+
+describe("#611: verified identity claims let a Store place a pairwise sub", () => {
+	const ENTRA = { ...CONNECTION, identityClaims: ["oid", "tid"] };
+	const entraWorld = (people: ReadonlyMap<string, string>) => {
+		const directory = new TenantDirectory(people);
+		const w = world({ userRepository: directory });
+		w.state.connections.set(CONNECTION.name, ENTRA);
+		return { w, directory };
+	};
+	const asUpstream = (w: World, subject: string, claims: unknown) => {
+		w.state.exchange = {
+			...w.state.exchange,
+			upstream: { issuer: CONNECTION.upstreamIssuer, subject, claims } as never,
+		};
+	};
+
+	it("refuses Bob's upstream account to Alice, found by tenant and object id although its sub is one no login saw", async () => {
+		// Bob signed in through the login registration, whose pairwise sub for
+		// him is `login-B`. The grants registration calls him `grant-B`. Only
+		// `(tid, oid)` is the same person in both.
+		const { w, directory } = entraWorld(
+			new Map([
+				["T-1|O-BOB", "bob"],
+				["T-1|O-ALICE", "alice"],
+			]),
+		);
+		const a = await approved(w);
+		asUpstream(w, "grant-B", { oid: "O-BOB", tid: "T-1" });
+		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
+			"identity_conflict",
+		);
+		expect(directory.asked).toEqual([
+			{
+				provider: "upstream",
+				issuer: CONNECTION.upstreamIssuer,
+				clientId: "provider-client",
+				sub: "grant-B",
+				claims: { oid: "O-BOB", tid: "T-1" },
+			},
+		]);
+		// Alice's own account, under the same registration, passes.
+		const b = await approved(w, "b-2");
+		asUpstream(w, "grant-A", { oid: "O-ALICE", tid: "T-1" });
+		expect(returned(await callback(w, { state: b.state, code: "c" }, "b-2")).has("error")).toBe(
+			false,
+		);
+	});
+
+	it("asks the adapter for the connection's claims, and for none when the deployment does not ask the Store", async () => {
+		const { w } = entraWorld(new Map());
+		const a = await approved(w);
+		asUpstream(w, "grant-A", { oid: "O", tid: "T" });
+		returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+		expect(w.state.exchanged.at(-1)?.identityClaims).toEqual(["oid", "tid"]);
+
+		const off = world({ identityLookup: "unsupported", userRepository: {} });
+		off.state.connections.set(CONNECTION.name, ENTRA);
+		const b = await approved(off);
+		returned(await callback(off, { state: b.state, code: "c" }, "b-1"));
+		expect(off.state.exchanged.at(-1)?.identityClaims).toEqual([]);
+	});
+
+	it("hands the Store exactly the connection's claims, never what else the adapter answered", async () => {
+		const { w, directory } = entraWorld(new Map());
+		const a = await approved(w);
+		asUpstream(w, "grant-A", { oid: "O", tid: "T", unrequested: "sentinel-extra" });
+		returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+		expect(directory.asked[0]?.claims).toStrictEqual({ oid: "O", tid: "T" });
+	});
+
+	it("refuses without asking the Store when any claim the connection needs is missing or not a string", async () => {
+		const inherited = Object.assign(Object.create({ tid: "T" }), { oid: "O" });
+		const cases: unknown[] = [
+			{},
+			{ oid: "O" },
+			{ oid: "O", tid: 42 },
+			{ oid: "O", tid: "" },
+			{ oid: "O", tid: ["T"] },
+			inherited,
+			null,
+			undefined,
+			"oid=O;tid=T",
+		];
+		for (const claims of cases) {
+			const { w, directory } = entraWorld(new Map());
+			const a = await approved(w);
+			asUpstream(w, "grant-A", claims);
+			const label = JSON.stringify(claims) ?? String(claims);
+			expect(
+				returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error"),
+				label,
+			).toBe("identity_unverifiable");
+			expect(directory.asked, label).toHaveLength(0);
+			expect((await w.grants.find(a.grantId, w.state.now))?.status, label).toBe("pending");
+			expect(w.intents.reservations("worker", "alice"), label).toBe(0);
+			await w.background.drain();
+			expect(
+				w.events.find((e) => e.type === "federation.grant.authorization_failed")?.details,
+				label,
+			).toMatchObject({ outcome: "identity_unverifiable/identity_claims_unavailable" });
+		}
+	});
+
+	it("leaves a grant a renewal without the claims would have replaced exactly as it was", async () => {
+		const { w, directory } = entraWorld(new Map());
+		asUpstream(w, "00u-alice", { oid: "O", tid: "T" });
+		const { grantId, state, before } = await renewal(w);
+		asUpstream(w, "00u-alice", { oid: "O" });
+		expect(returned(await callback(w, { state, code: "c2" }, "b-2")).get("error")).toBe(
+			"identity_unverifiable",
+		);
+		expect(await w.grants.find(grantId, w.state.now)).toEqual(before);
+		expect(directory.asked).toHaveLength(1);
+	});
+
+	it("keeps the claims out of the grant, the audit, the logs and the redirect", async () => {
+		const { w } = entraWorld(new Map());
+		const a = await approved(w);
+		asUpstream(w, "grant-A", { oid: "SENTINEL-OID", tid: "SENTINEL-TID" });
+		const response = await callback(w, { state: a.state, code: "c" }, "b-1");
+		expect(response.headers.location).not.toContain("SENTINEL");
+		const grant = await w.grants.find(a.grantId, w.state.now);
+		expect(grant?.status).toBe("active");
+		expect(JSON.stringify(grant)).not.toContain("SENTINEL");
+		await w.background.drain();
+		expect(JSON.stringify(w.events)).not.toContain("SENTINEL");
+		expect(JSON.stringify(w.state.logged)).not.toContain("SENTINEL");
 	});
 });
 

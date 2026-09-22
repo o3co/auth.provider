@@ -268,7 +268,10 @@ export function requireFederationGrantIdentityLookup(
 		let threw = false;
 		try {
 			// Through the repository, never detached: a Store written as a class reads its own fields.
-			covered = repository.supportsFederatedIdentityLookup?.(registration);
+			covered = repository.supportsFederatedIdentityLookup?.(
+				registration,
+				connection.identityClaims ?? [],
+			);
 		} catch {
 			// Not the error itself: a Store's message may carry what it was connected with.
 			threw = true;
@@ -278,7 +281,8 @@ export function requireFederationGrantIdentityLookup(
 				`federationGrants.connections.${connection.name}: the userRepository ` +
 					(threw ? "threw when asked whether it covers" : "does not cover") +
 					` the registration its identities are issued under (federation "${registration.provider}", ` +
-					`issuer ${registration.issuer}, client ${registration.clientId}), so it could not tell an ` +
+					`issuer ${registration.issuer}, client ${registration.clientId}, identityClaims ` +
+					`${JSON.stringify(connection.identityClaims ?? [])}), so it could not tell an ` +
 					"upstream account linked to nobody from one another user holds through another " +
 					`registration. Remove the connection, ${IDENTITY_LOOKUP_REMEDY}`,
 			);

@@ -96,7 +96,10 @@ const auditor = (
 				// so a sink that holds its argument cannot be handed a
 				// reference into what core is still working with.
 				...(event.connection === undefined ? {} : { connection: event.connection }),
-				...(event.upstream === undefined ? {} : { upstream: { ...event.upstream } }),
+				// Projected, not spread: the established pair and nothing else (#611).
+				...(event.upstream === undefined
+					? {}
+					: { upstream: { issuer: event.upstream.issuer, subject: event.upstream.subject } }),
 				...(event.resource === undefined ? {} : { resource: event.resource }),
 				...(event.scopes === undefined ? {} : { scopes: [...event.scopes] }),
 				outcome: event.outcome,

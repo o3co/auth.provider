@@ -106,7 +106,10 @@ export class InMemoryUserRepository implements UserRepository {
 	 * requires the lookup installs a Store that does, or records that it does
 	 * not with `federationGrants.identityLookup = "unsupported"`.
 	 */
-	supportsFederatedIdentityLookup(_registration: FederatedIdentityRegistration): boolean {
+	supportsFederatedIdentityLookup(
+		_registration: FederatedIdentityRegistration,
+		_identityClaims: readonly string[],
+	): boolean {
 		return false;
 	}
 

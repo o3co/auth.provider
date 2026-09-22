@@ -397,10 +397,15 @@ It checks, in this order:
    `identity_unverifiable`.
 
    **What the Store is asked, and what it must answer (#611).** The callback
-   calls `findSubjectByFederatedIdentity({ provider, issuer, clientId, sub })`:
+   calls `findSubjectByFederatedIdentity({ provider, issuer, clientId, sub, claims })`:
    the registration the identity was issued under — the connection's
    federation name, its configured issuer (already compared with the verified
-   id_token's) and client — and the verified `sub`. It answers one of:
+   id_token's) and client — the verified `sub`, and `claims`: the id_token
+   claims the connection names in `identityClaims` (`{}` when it names none),
+   exactly those, as the adapter verified them. If any named claim is missing
+   or not a non-empty string, the Store is not asked and the flow is
+   `identity_unverifiable`. The Store must not log, keep or echo them. It
+   answers one of:
 
    - `{ kind: "linked", subject }` — it looked everywhere a link to this
      person could be, and found exactly one local user;
@@ -421,8 +426,9 @@ It checks, in this order:
    three, is `temporarily_unavailable`.
 
    **At boot**, under `"required"`, the Store is asked
-   `supportsFederatedIdentityLookup({ provider, issuer, clientId })` for every
-   configured connection's registration, and anything but a literal `true` —
+   `supportsFederatedIdentityLookup({ provider, issuer, clientId }, identityClaims)`
+   for every configured connection — two on one registration are asked about
+   separately, each with its own claims — and anything but a literal `true` —
    `false`, a truthy value, a throw — refuses to start, naming the connection
    and the registration. A deployment finds out there, not from the first user
    who connects. With no connection configured nothing is asked.
@@ -434,14 +440,30 @@ It checks, in this order:
    check — or installs a Store that covers the registration.
 
    **For an IdP with a registration of its own for grants** (D19 — Entra, for
-   one): the Store must place the grants registration's pairwise `sub` with
-   the person, whichever registration they signed in through — an alias
-   directory it owns, or its own record of which local user each
-   registration's `sub` belongs to. Carrying Entra's tenant-stable `oid`/`tid`
-   is not built: the login records only `<provider>:<sub>`, so there would be
-   nothing to match them against. A missing mapping is `indeterminate`, not
-   `unlinked`. Otherwise, choose `identityLookup = "unsupported"` and accept the
-   loss of this one check.
+   one): **a Store that learns identities only from logins cannot satisfy
+   `"required"` there.** A login tells it `<provider>:<sub>`, and the grants
+   registration's pairwise `sub` is one no login ever saw. What can is a Store
+   with its own directory keyed by what does not change across registrations
+   — for Entra, the tenant and object id, provisioned from Entra onto each
+   local user — with the connection naming them:
+
+   ```hocon
+   federationGrants.connections.files {
+     federation = "entra-files"          # its own app registration
+     scopes = ["openid", "profile", "offline_access", "Files.Read"]
+     allowScopeSubsets = false
+     identityClaims = ["oid", "tid"]
+   }
+   ```
+
+   `profile` is there because Entra issues `oid` only with it. The Store
+   resolves `(tid, oid)`, answers `unlinked` only where its directory is
+   complete for the tenant, and `identity_not_resolvable` for a person it was
+   never given; its `supportsFederatedIdentityLookup` answers `false` for a
+   connection that does not name both claims. Not verified on a real tenant:
+   that both claims are issued for your registration and account types, and
+   the scope set Entra reports with `profile` added. Otherwise, choose
+   `identityLookup = "unsupported"` and accept the loss of this one check.
 6. **Eligibility**: a refresh token, and an access token with a finite lifetime
    within `maxAccessTokenLifetime`, of a type a route without a proof key can
    present.
