@@ -1676,6 +1676,26 @@ export const fullSectionsSchema = z.object({
 	// it the encryption key the store cannot start without — before the
 	// module's own `configSchema` sees it. Defaults live in `reference.conf`
 	// and in the module.
+	// #593 slice 7: the two adapter switches a composition like the standalone
+	// installs federation grants from, declared for the reason
+	// `federationTokenStore` above is — undeclared, the operator's choice is
+	// stripped before `buildModules` reads it. Two switches because the grant
+	// store and the intent store are installed independently: grants in Redis
+	// with acquisition in memory is a supported single-replica shape (a restart
+	// loses flows in progress and nothing else). Both `"memory"` modules declare
+	// `replicaSafety` and are refused by name under `deployment.mode = "multi"`;
+	// a Redis grant store beside a memory subject revocation is refused by the
+	// routes module itself (D13). Defaults live in `reference.conf`.
+	federationGrantStore: z
+		.object({
+			adapter: z.enum(["memory", "redis"]).optional(),
+		})
+		.optional(),
+	federationGrantIntentStore: z
+		.object({
+			adapter: z.enum(["memory", "redis"]).optional(),
+		})
+		.optional(),
 	// #593, D16: this adapter's own layout, beside the other stores' prefixes.
 	// What a grant may BE is `federationGrants` above; this is where its keys
 	// live and how far past a horizon the subject index keeps a member.
