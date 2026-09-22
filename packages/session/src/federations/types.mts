@@ -434,6 +434,8 @@ export const RESERVED_IDENTITY_CLAIMS: ReadonlySet<string> = new Set([
 	"c_hash",
 	"s_hash",
 	"jti",
+	// Entra's token identifier — its `jti` by another name.
+	"uti",
 	"sid",
 	"__proto__",
 	"constructor",

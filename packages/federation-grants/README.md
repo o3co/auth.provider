@@ -456,6 +456,18 @@ It checks, in this order:
    }
    ```
 
+   Name **immutable identifiers only**. `email`, `preferred_username` and
+   `upn` pass the name check but are attributes the account's holder or an
+   administrator can change — Microsoft says so of all three, and that a guest's
+   `email` need not be correct — so a Store matching on them can be walked
+   past: change the attribute, get `unlinked`. Two things boot cannot see and
+   the first connect will: an upstream that does not issue a named claim (Entra
+   without `profile` omits `oid`), and a custom adapter that returns no
+   `claims`. Either refuses every flow, after consent, as
+   `identity_unverifiable/identity_claims_unavailable` — fail closed, but try
+   one connect before telling users. Under `identityLookup = "unsupported"`
+   `identityClaims` is ignored: nothing is asked for and nothing is required.
+
    `profile` is there because Entra issues `oid` only with it. The Store
    resolves `(tid, oid)`, answers `unlinked` only where its directory is
    complete for the tenant, and `identity_not_resolvable` for a person it was

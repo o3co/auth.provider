@@ -653,7 +653,14 @@ intent or transaction, not in an event, a log line or the redirect. Boot tells
 directory Store refuses a registration configured without the claims it
 needs; two connections on one registration are asked about separately. The
 names are in neither revision: they change what check 5 can see, not what was
-consented to, and changing them retires no grant. A per-connection setting
+consented to, and changing them retires no grant. Two limits are stated rather
+than closed. The name check accepts any claim that is not the protocol's, and
+a Store matching on a mutable one — `email`, `preferred_username`, `upn` — can
+be walked past by changing it; the documentation says to name immutable
+identifiers only. And boot cannot see whether the upstream will issue a named
+claim or a custom adapter will carry it: that is found at the first connect,
+after consent, and fails closed. Under `"unsupported"` the names are ignored.
+A per-connection setting
 naming which login federation to consult is still not added: it changes the
 namespace and not the `sub`, which is the part that is pairwise. The
 success events record which answer let a grant through (D18). Having the
@@ -2229,7 +2236,7 @@ properties, copied after the `at_hash` check, never from UserInfo, the
 callback's parameters or `mapClaims`, never coerced, and possibly fewer than
 were asked for — the caller knows which it cannot do without. A name the
 protocol owns (`sub`, `iss`, `aud`, `azp`, `nonce`, `exp`, `iat`, `nbf`,
-`auth_time`, the three hashes, `jti`, `sid`) or that would reach a
+`auth_time`, the three hashes, `jti` and Entra's `uti`, `sid`) or that would reach a
 prototype, a malformed name and a repeat are refused before the code is
 spent; the grant routes refuse the same list at boot, by the same exported
 rule (`identityClaimsProblem`).

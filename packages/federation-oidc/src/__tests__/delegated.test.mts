@@ -211,6 +211,17 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			expect(body).not.toContain("tid");
 		});
 
+		it("never takes a claim from the token response: only the signed id_token carries identity (#611 review)", async () => {
+			// The token endpoint's JSON is not signed, and a field there named like
+			// a claim is not one. Absent from the id_token, it is absent.
+			const { idp, provider } = await build();
+			idp.nonce = "nonce-1";
+			idp.idTokenClaims = { tid: "T-1" };
+			idp.codeAnswer = { oid: "O-FROM-TOKEN-RESPONSE", tid: "T-FROM-TOKEN-RESPONSE" };
+			const result = await exchange(provider, { identityClaims: ["oid", "tid"] });
+			expect(result.upstream.claims).toStrictEqual({ tid: "T-1" });
+		});
+
 		it("leaves out a claim asked for that is absent, empty, or not a string — never coerced", async () => {
 			const { idp, provider } = await build();
 			idp.nonce = "nonce-1";

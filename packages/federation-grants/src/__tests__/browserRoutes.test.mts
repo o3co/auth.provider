@@ -1907,10 +1907,16 @@ describe("#611: verified identity claims let a Store place a pairwise sub", () =
 		returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
 		expect(w.state.exchanged.at(-1)?.identityClaims).toEqual(["oid", "tid"]);
 
+		// Asked for none, the adapter answers none — and the flow still succeeds:
+		// under "unsupported" the connection's claims are not evidence anyone
+		// needs, so their absence refuses nothing.
 		const off = world({ identityLookup: "unsupported", userRepository: {} });
 		off.state.connections.set(CONNECTION.name, ENTRA);
 		const b = await approved(off);
-		returned(await callback(off, { state: b.state, code: "c" }, "b-1"));
+		asUpstream(off, "grant-A", {});
+		expect(returned(await callback(off, { state: b.state, code: "c" }, "b-1")).has("error")).toBe(
+			false,
+		);
 		expect(off.state.exchanged.at(-1)?.identityClaims).toEqual([]);
 	});
 
@@ -1969,10 +1975,23 @@ describe("#611: verified identity claims let a Store place a pairwise sub", () =
 
 	it("keeps the claims out of the grant, the audit, the logs and the redirect", async () => {
 		const { w } = entraWorld(new Map());
+		// What the router hands `activate`, not what the memory store keeps: both
+		// bundled stores re-project the upstream, and a custom one that stored
+		// the authorization whole would keep whatever it was handed (#611 review).
+		const activations: unknown[] = [];
+		const activate = w.grants.activate.bind(w.grants);
+		(w.grants as { activate: typeof activate }).activate = async (input) => {
+			activations.push(input);
+			return await activate(input);
+		};
 		const a = await approved(w);
 		asUpstream(w, "grant-A", { oid: "SENTINEL-OID", tid: "SENTINEL-TID" });
 		const response = await callback(w, { state: a.state, code: "c" }, "b-1");
 		expect(response.headers.location).not.toContain("SENTINEL");
+		expect(activations).toHaveLength(1);
+		expect(
+			(activations[0] as { authorization: { upstream: unknown } }).authorization.upstream,
+		).toStrictEqual({ issuer: CONNECTION.upstreamIssuer, subject: "grant-A" });
 		const grant = await w.grants.find(a.grantId, w.state.now);
 		expect(grant?.status).toBe("active");
 		expect(JSON.stringify(grant)).not.toContain("SENTINEL");
