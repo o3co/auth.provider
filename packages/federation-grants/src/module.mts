@@ -125,7 +125,7 @@ type Optional = (typeof OPTIONAL)[number];
 export type FederationGrantsModuleDeps = ProviderDeps<Requires, Optional>;
 
 const isEnabled = (deps: FederationGrantsModuleDeps): boolean =>
-	(deps.config as { federationGrants?: { enabled?: boolean } }).federationGrants?.enabled === true;
+	deps.config.federationGrants?.enabled === true;
 
 /**
  * §5 refusal 1. An enabled deployment with nowhere to keep grants would
@@ -281,7 +281,7 @@ const authorizerFor =
  * federation guard asks for it — and this says why this feature needs it too.
  */
 const requireUserSessionStore = (deps: FederationGrantsModuleDeps): UserSessionStore => {
-	const store = deps.userSessionStore as UserSessionStore | undefined;
+	const store = deps.userSessionStore;
 	if (store === undefined) {
 		throw new Error(
 			"federationGrantsModule: federation grants are enabled and no userSessionStore is installed. " +
