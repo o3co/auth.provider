@@ -2330,7 +2330,7 @@ accumulation this decision exists to avoid.
 | 4 | expired or revoked upstream credentials → reauthorization, no fallback | D11, D12 | structured upstream `invalid_grant`; assert no other grant or credential is read |
 | 5 | transient failures distinguishable and non-destructive | D5, D11, D12 | injected 5xx, 429, storage throw, `invalid_client`, over-long token lifetime, unreadable watermark; record unchanged in each. A rotating upstream that answers between the soft and the hard deadline: the late credential is persisted, `.refreshed` is audited, the next call succeeds. One that answers after the hard deadline: an acknowledged loss, handled as a persist failure. A starved grant calls the upstream once per retry interval, not once per request |
 | 6 | concurrent refresh, lock expiry, restart, persistence failure | D2, D12 | two replicas on one testcontainer; lock TTL forced to expire; guarded-write loser; injected persist failure; refresh response without `refresh_token`; refresh straddling `expiresAt` |
-| 7 | duplicate, stale, wrong-account callbacks cannot replace or broaden | D5, D6, D7 | replayed callback; superseded intent; expired intent; different upstream `sub`; upstream grants more scopes than consented. Broadening through refresh: G1 consented for one scope, G2 later for two on the same connection, G1's refresh returns both — G1's client gets `upstream_token_ineligible`, never the token |
+| 7 | duplicate, stale, wrong-account callbacks cannot replace or broaden | D5, D6, D7 | replayed callback; superseded intent; expired intent; different upstream `sub`; upstream grants more scopes than consented. Broadening through refresh: G1 consented for one scope, G2 later for two on the same connection, G1's refresh returns both — G1's client gets `upstream_token_ineligible`, never the token. Added for #611: an upstream account the Store places with another user is `identity_conflict`; one it cannot place — a dedicated registration's pairwise `sub`, with the login's link under another registration — is `identity_unverifiable`, and the bundled repository beside a connection is refused at boot |
 | 8 | session-expiry / logout / subject-revocation behaviour; session-bound endpoint preserved | D13, D14 | slice 5: both logout endpoints leave grants alone, subject revocation ends them, existing `federationToken` suite untouched and green. The policy-on cases are deferred with D14 |
 | 9 | no refresh token or long-lived secret in responses, audit or logs | D18 | a sentinel secret is grepped for in every response body, audit event and captured log line |
 | — | the storage guarantees D1 and D16 claim | D1, D3, D4, D16 | a rewritten `clientId`, `expiresAt` or `authorizationRevision` reads as `credential_unreadable`; an unknown key ID answers 503, keeps the record, and restoring the key restores the grant; an identity change reads as `connection_identity_changed` and reverting it restores the grant; activation beyond the ceiling is refused |
@@ -2461,6 +2461,19 @@ route test is written first and watched failing.
    deliberately did not do: close D13's `"keep"` window beyond the re-read
    before activation (write fencing is deferred), and give the Google, Apple
    or GitHub adapters the capability.
+   - **#611, before any release: check 5 across registrations.** Found on
+     slice 6's review and merged as a documented limit by the owner's
+     decision, then fixed before release rather than shipped: on D19's
+     dedicated registration, `identityLookup = "required"` was satisfied by
+     a lookup that could not see the answer. Done: the lookup takes the
+     registration and answers `linked` / `unlinked` / `indeterminate`; the
+     callback refuses `indeterminate` with an eleventh code,
+     `identity_unverifiable`; boot asks the Store whether it covers every
+     connection's registration and refuses anything but `true`; the bundled
+     repository covers none; the success events say which answer let a
+     grant through. Amended where they stand: D7, D18, D19. Not done, and
+     not needed to make `"required"` honest: carrying Entra's `oid`/`tid`
+     from the id_token, which would also need the login to record them.
 7. **standalone template, documentation, CHANGELOG.** Includes the key-ring
    retention rule and the provider-specific `offline_access` guide. The
    operator runbook rows and the `adapter-surface.md` rows are not left for
