@@ -44,10 +44,11 @@ cp profiles/google.env.example profiles/google.env   # fill in the client id and
 ```
 
 `start` refuses, by name, what is missing: the profile, a taken port, a
-provider that does not boot (its log is printed), a federation whose start
-route does not redirect to the IdP. `status` prints the record as JSON;
-`logs` the tail of both logs; `stop` ends both processes, removes the overlay
-it wrote and the Redis container it started (never one it found running).
+provider that does not boot (its log is printed), a start route that does not
+answer with a redirect to somewhere off this machine. `status` prints the
+record as JSON; `logs` the tail of both logs; `stop` ends both processes,
+removes the overlay it wrote and the Redis container it started (never one it
+found running).
 
 ## What the page records — and does not
 
@@ -67,10 +68,13 @@ token, no id_token claim, no profile field and no password ever reaches the
 front: the id_token is exchanged and verified inside the provider, as in any
 deployment. The record lives in the front's memory and is gone at `stop`.
 
-A verdict of **OK** means: the callback carried an `iss` (equal to the expected
-one, when set) and the login completed. **NG — no iss** on a provider whose
-default requires one (Google, #599) is the finding that stops a release with
-that default on; the issue for the provider says what to do next.
+A verdict of **OK** means: the login completed, and — when the profile sets
+`LIVE_CHECK_EXPECTED_ISS` — the callback carried that `iss`. Without an
+expected issuer the `iss` is recorded, not judged: an IdP whose metadata does
+not advertise `authorization_response_iss_parameter_supported` may send none,
+and the provider then does not require one. **NG — no iss** on a provider
+whose default requires one (Google, #599) is the finding that stops a release
+with that default on; the issue for the provider says what to do next.
 
 ## How it is wired
 

@@ -92,7 +92,8 @@ fs.writeFileSync(`${dir}/session-secret`, randomBytes(32).toString("hex"), { mod
 redis() {
 	if [ -n "${LIVE_CHECK_REDIS_URL:-}" ]; then
 		REDIS_URL="$LIVE_CHECK_REDIS_URL"
-		say "using Redis at $REDIS_URL"
+		# Not the URL itself: it may carry a password, and this line lands in shell captures.
+		say "using the Redis LIVE_CHECK_REDIS_URL names"
 		return 0
 	fi
 	REDIS_URL="redis://localhost:6379"
@@ -187,13 +188,24 @@ start() {
 		die "the provider did not come up in 90 s — see $STATE/provider.log"
 	fi
 
-	local code
-	code="$(curl -s -o /dev/null -w '%{http_code}' "http://localhost:$PORT/session/oauth/federation/$fed")"
+	# The start route has to send the browser to the IdP: a 302 alone could be
+	# a redirect back to a local page, and the check would begin nowhere.
+	local probe code idp
+	probe="$(curl -s -o /dev/null -w '%{http_code} %{redirect_url}' "http://localhost:$PORT/session/oauth/federation/$fed")"
+	code="${probe%% *}"
+	idp="${probe#* }"
 	if [ "$code" != "302" ]; then
 		stop
 		die "GET /session/oauth/federation/$fed answered $code, not a redirect to the IdP — see $STATE/provider.log"
 	fi
-	say "up. Open   http://localhost:$PORT/"
+	case "$idp" in
+	http://localhost* | http://127.* | https://localhost* | https://127.* | "")
+		stop
+		die "GET /session/oauth/federation/$fed redirected to '${idp:-nowhere}', not to an IdP — see $STATE/provider.log"
+		;;
+	esac
+	say "up. The start route redirects to ${idp%%\?*}"
+	say "Open   http://localhost:$PORT/"
 	say "the IdP client must have exactly this redirect URI:   http://localhost:$PORT/session/oauth/federation/$fed/callback"
 }
 

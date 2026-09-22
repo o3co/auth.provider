@@ -13,8 +13,9 @@
 
 /**
  * The live-check front, against a fake provider: what it relays, what it
- * records of a callback, and what it must never record. The real provider is
- * not booted here — `live-check.sh start` does that, and a person signs in.
+ * records of a callback, what it must never record, and what it renders as
+ * text rather than markup. The real provider is not booted here —
+ * `live-check.sh start` does that, and a person signs in.
  */
 import { type ChildProcess, spawn } from "node:child_process";
 import http from "node:http";
@@ -23,8 +24,6 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const PROXY = fileURLToPath(new URL("../../proxy.mjs", import.meta.url));
-const START = "/session/oauth/federation/google";
-const CALLBACK = `${START}/callback`;
 
 async function freePort(): Promise<number> {
 	const s = http.createServer();
@@ -34,34 +33,45 @@ async function freePort(): Promise<number> {
 	return port;
 }
 
-type Seen = { method: string; url: string; host: string | undefined };
+type Seen = { method: string; url: string; host: string | undefined; body: string };
 
-/** A provider that answers the two federation routes the way the real one does, and echoes the rest. */
-function fakeProvider(port: number, landing: string) {
+/**
+ * A provider that answers the federation's two routes the way the real one
+ * does — the start as a redirect to the IdP, the callback as a redirect to the
+ * landing page or, with `fail=1`, as a JSON refusal — and echoes the rest.
+ */
+function fakeProvider(port: number, federation: string, landing: string) {
+	const start = `/session/oauth/federation/${federation}`;
+	const callback = `${start}/callback`;
 	const seen: Seen[] = [];
 	const server = http.createServer((req, res) => {
-		seen.push({ method: req.method ?? "", url: req.url ?? "", host: req.headers.host });
-		const url = new URL(req.url ?? "/", "http://provider");
-		if (url.pathname === START) {
-			res.writeHead(302, {
-				location: "https://idp.test/authorize?client_id=c&state=s",
-				"set-cookie": "auth.session=pre; Path=/; HttpOnly",
-			});
-			return res.end();
-		}
-		if (url.pathname === CALLBACK) {
-			if (url.searchParams.get("fail") === "1") {
-				res.writeHead(400, { "content-type": "application/json" });
-				return res.end(JSON.stringify({ error: "invalid_request", error_description: "no iss" }));
+		const chunks: Buffer[] = [];
+		req.on("data", (c: Buffer) => chunks.push(c));
+		req.on("end", () => {
+			const body = Buffer.concat(chunks).toString("utf8");
+			seen.push({ method: req.method ?? "", url: req.url ?? "", host: req.headers.host, body });
+			const url = new URL(req.url ?? "/", "http://provider");
+			if (url.pathname === start) {
+				res.writeHead(302, {
+					location: "https://idp.test/authorize?client_id=c&state=s",
+					"set-cookie": "auth.session=pre; Path=/; HttpOnly",
+				});
+				return res.end();
 			}
-			res.writeHead(302, {
-				location: landing,
-				"set-cookie": ["auth.session.csrf=x; Path=/", "auth.session=post; Path=/; HttpOnly"],
-			});
-			return res.end();
-		}
-		res.writeHead(200, { "content-type": "application/json", "x-echo": "yes" });
-		res.end(JSON.stringify({ path: req.url }));
+			if (url.pathname === callback) {
+				if (url.searchParams.get("fail") === "1") {
+					res.writeHead(400, { "content-type": "application/json" });
+					return res.end(JSON.stringify({ error: "invalid_request", error_description: "no iss" }));
+				}
+				res.writeHead(302, {
+					location: landing,
+					"set-cookie": ["auth.session.csrf=x; Path=/", "auth.session=post; Path=/; HttpOnly"],
+				});
+				return res.end();
+			}
+			res.writeHead(200, { "content-type": "application/json", "x-echo": "yes" });
+			res.end(JSON.stringify({ path: req.url, method: req.method, body }));
+		});
 	});
 	return {
 		seen,
@@ -110,13 +120,22 @@ type State = {
 		sessionCookieSet: boolean;
 	} | null;
 	store: { accepted: boolean; token: string } | null;
-	verdict: { issPresent: boolean; issOk: boolean; loginOk: boolean; ok: boolean } | null;
+	verdict: {
+		issJudged: boolean;
+		issPresent: boolean;
+		issOk: boolean;
+		loginOk: boolean;
+		ok: boolean;
+	} | null;
 	report: string;
+	fragment: string;
 };
 const state = async (base: string): Promise<State> =>
 	(await (await get(base, "/__live-check/state")).json()) as State;
 
-describe("tools/live-check proxy", () => {
+describe("tools/live-check proxy, judging the iss against an expected issuer", () => {
+	const START = "/session/oauth/federation/google";
+	const CALLBACK = `${START}/callback`;
 	let proxyPort: number;
 	let providerPort: number;
 	let base: string;
@@ -127,7 +146,7 @@ describe("tools/live-check proxy", () => {
 		proxyPort = await freePort();
 		providerPort = await freePort();
 		base = `http://127.0.0.1:${proxyPort}`;
-		provider = fakeProvider(providerPort, `http://localhost:${proxyPort}/`);
+		provider = fakeProvider(providerPort, "google", `http://localhost:${proxyPort}/`);
 		await provider.listen();
 		child = await startProxy({
 			LIVE_CHECK_PORT: String(proxyPort),
@@ -142,13 +161,14 @@ describe("tools/live-check proxy", () => {
 		await provider?.close();
 	});
 
-	it("serves the page with the federation's sign-in link", async () => {
+	it("serves the page with the federation's sign-in link and the expected issuer", async () => {
 		const res = await get(base, "/");
 		expect(res.status).toBe(200);
 		expect(res.headers.get("content-type")).toContain("text/html");
 		const html = await res.text();
 		expect(html).toContain(`href="${START}"`);
 		expect(html).toContain("Sign in with google");
+		expect(html).toContain("expecting <code>iss=https://accounts.google.com</code>");
 	});
 
 	it("is a Store that accepts every token of its federation and nothing else", async () => {
@@ -182,16 +202,32 @@ describe("tools/live-check proxy", () => {
 		expect(provider.seen.filter((s) => s.url.startsWith("/__store/"))).toHaveLength(0);
 	});
 
-	it("relays any other request to the provider — method, path, query, status, headers, body", async () => {
+	it("relays any other request to the provider — method, path, query, body, status, headers", async () => {
 		const res = await get(base, "/.well-known/openid-configuration?x=1");
 		expect(res.status).toBe(200);
 		expect(res.headers.get("x-echo")).toBe("yes");
-		expect(await res.json()).toEqual({ path: "/.well-known/openid-configuration?x=1" });
-		const last = provider.seen.at(-1);
-		expect(last).toEqual({
+		expect(await res.json()).toEqual({
+			path: "/.well-known/openid-configuration?x=1",
+			method: "GET",
+			body: "",
+		});
+		expect(provider.seen.at(-1)).toEqual({
 			method: "GET",
 			url: "/.well-known/openid-configuration?x=1",
 			host: `localhost:${providerPort}`,
+			body: "",
+		});
+
+		const posted = await post(base, "/session/logout", { everything: "arrives" });
+		expect(await posted.json()).toEqual({
+			path: "/session/logout",
+			method: "POST",
+			body: '{"everything":"arrives"}',
+		});
+		expect(provider.seen.at(-1)).toMatchObject({
+			method: "POST",
+			url: "/session/logout",
+			body: '{"everything":"arrives"}',
 		});
 	});
 
@@ -206,6 +242,9 @@ describe("tools/live-check proxy", () => {
 		expect(s.store).toBeNull();
 		expect(s.verdict).toBeNull();
 		expect(s.report).toContain("no callback recorded yet");
+		expect(s.fragment).toContain(
+			"Redirected to https://idp.test/authorize — waiting for the callback",
+		);
 	});
 
 	it("records a callback the provider accepted: keys, iss, lengths, the redirect, the cookie — and no values", async () => {
@@ -229,13 +268,24 @@ describe("tools/live-check proxy", () => {
 			providerAnswer: null,
 			sessionCookieSet: true,
 		});
-		expect(s.verdict).toEqual({ issPresent: true, issOk: true, loginOk: true, ok: true });
+		expect(s.verdict).toEqual({
+			issJudged: true,
+			issPresent: true,
+			issOk: true,
+			loginOk: true,
+			ok: true,
+		});
 		expect(s.report).toContain(
 			"iss: https://accounts.google.com (expected https://accounts.google.com) ✅",
 		);
 		expect(s.report).toContain("302 → http://localhost:");
 		expect(s.report).toContain("callback query keys: state, code, iss, scope, hd");
+		expect(s.fragment).toContain(
+			"OK — the callback carried the expected iss and the login succeeded",
+		);
+		expect(s.fragment).toContain("code 13 chars, state 6 chars (values not recorded)");
 
+		// Neither the record, nor the report, nor the rendered page carries a value.
 		const everything = JSON.stringify(s);
 		expect(everything).not.toContain("secretcode123");
 		expect(everything).not.toContain("abcdef");
@@ -257,9 +307,16 @@ describe("tools/live-check proxy", () => {
 			providerAnswer: { error: "invalid_request", error_description: "no iss" },
 			sessionCookieSet: false,
 		});
-		expect(s.verdict).toEqual({ issPresent: false, issOk: false, loginOk: false, ok: false });
-		expect(s.report).toContain("iss: (absent)");
-		expect(s.report).toContain("❌");
+		expect(s.verdict).toEqual({
+			issJudged: true,
+			issPresent: false,
+			issOk: false,
+			loginOk: false,
+			ok: false,
+		});
+		expect(s.report).toContain("iss: (absent) (expected https://accounts.google.com) ❌");
+		expect(s.fragment).toContain("NG — the callback carried no iss");
+		expect(s.fragment).toContain("HTTP 400");
 		expect(JSON.stringify(s)).not.toContain("secretcode123");
 	});
 
@@ -269,7 +326,26 @@ describe("tools/live-check proxy", () => {
 			`${CALLBACK}?state=abcdef&code=c&iss=${encodeURIComponent("https://accounts.google.com.evil")}`,
 		);
 		const s = await state(base);
-		expect(s.verdict).toEqual({ issPresent: true, issOk: false, loginOk: true, ok: false });
+		expect(s.verdict).toEqual({
+			issJudged: true,
+			issPresent: true,
+			issOk: false,
+			loginOk: true,
+			ok: false,
+		});
+		expect(s.fragment).toContain("NG — iss is not the expected issuer");
+	});
+
+	it("renders what the IdP or the provider sent as text, never as markup", async () => {
+		const evil = "</code><script>alert(1)</script>";
+		await get(base, `${CALLBACK}?state=s&code=c&iss=${encodeURIComponent(evil)}&<b>=1`);
+		const s = await state(base);
+		expect(s.callback?.iss).toBe(evil);
+		expect(s.callback?.queryKeys).toEqual(["state", "code", "iss", "<b>"]);
+		expect(s.fragment).not.toContain("<script>");
+		expect(s.fragment).not.toContain("<b>");
+		expect(s.fragment).toContain("&lt;/code&gt;&lt;script&gt;alert(1)&lt;/script&gt;");
+		expect(s.fragment).toContain("state, code, iss, &lt;b&gt;");
 	});
 
 	it("answers 502 when the provider is not there, rather than hanging", async () => {
@@ -277,12 +353,14 @@ describe("tools/live-check proxy", () => {
 		const res = await get(base, "/anything");
 		expect(res.status).toBe(502);
 		expect(await res.json()).toMatchObject({ error: "provider_unreachable" });
-		provider = fakeProvider(providerPort, `http://localhost:${proxyPort}/`);
+		provider = fakeProvider(providerPort, "google", `http://localhost:${proxyPort}/`);
 		await provider.listen();
 	});
 });
 
 describe("tools/live-check proxy without an expected issuer", () => {
+	const START = "/session/oauth/federation/oidc";
+	const CALLBACK = `${START}/callback`;
 	let child: ChildProcess;
 	let provider: ReturnType<typeof fakeProvider>;
 	let base: string;
@@ -291,7 +369,7 @@ describe("tools/live-check proxy without an expected issuer", () => {
 		const proxyPort = await freePort();
 		const providerPort = await freePort();
 		base = `http://127.0.0.1:${proxyPort}`;
-		provider = fakeProvider(providerPort, `http://localhost:${proxyPort}/`);
+		provider = fakeProvider(providerPort, "oidc", `http://localhost:${proxyPort}/`);
 		await provider.listen();
 		child = await startProxy({
 			LIVE_CHECK_PORT: String(proxyPort),
@@ -305,19 +383,51 @@ describe("tools/live-check proxy without an expected issuer", () => {
 		await provider?.close();
 	});
 
-	it("names its federation in the paths it watches and accepts any iss that arrives", async () => {
-		const start = "/session/oauth/federation/oidc";
-		expect((await get(base, "/")).status).toBe(200);
-		expect(await (await get(base, "/")).text()).toContain(`href="${start}"`);
+	it("names its federation in the paths it watches and in the page", async () => {
+		const html = await (await get(base, "/")).text();
+		expect(html).toContain(`href="${START}"`);
+		expect(html).toContain("iss recorded, not judged");
 		expect((await state(base)).expectedIss).toBeNull();
+	});
+
+	it("records an iss that arrives without judging it — a login is OK on its own", async () => {
 		await get(
 			base,
-			`${start}/callback?state=s&code=c&iss=${encodeURIComponent("https://idp.example.com")}`,
+			`${CALLBACK}?state=s&code=c&iss=${encodeURIComponent("https://idp.example.com")}`,
 		);
 		const s = await state(base);
-		// The fake answers 200 for a path it does not know — the callback path is per federation.
-		expect(s.callback?.providerStatus).toBe(200);
-		expect(s.verdict).toMatchObject({ issPresent: true, issOk: true, loginOk: false, ok: false });
-		expect(s.report).toContain("iss: https://idp.example.com ✅");
+		expect(s.callback?.providerStatus).toBe(302);
+		expect(s.verdict).toEqual({
+			issJudged: false,
+			issPresent: true,
+			issOk: true,
+			loginOk: true,
+			ok: true,
+		});
+		expect(s.report).toContain(
+			"iss: https://idp.example.com (not judged: the profile names no expected issuer)",
+		);
+		expect(s.fragment).toContain("OK — the login succeeded (iss recorded, not judged)");
+	});
+
+	it("does not fail a callback without an iss — the provider did not require one", async () => {
+		await get(base, `${CALLBACK}?state=s&code=c`);
+		const s = await state(base);
+		expect(s.verdict).toEqual({
+			issJudged: false,
+			issPresent: false,
+			issOk: true,
+			loginOk: true,
+			ok: true,
+		});
+		expect(s.report).toContain("iss: (absent) (not judged: the profile names no expected issuer)");
+		expect(s.fragment).toContain("OK — the login succeeded (iss absent, not judged)");
+	});
+
+	it("still reports a refused login as not OK", async () => {
+		await get(base, `${CALLBACK}?state=s&code=c&fail=1`);
+		const s = await state(base);
+		expect(s.verdict).toMatchObject({ issJudged: false, loginOk: false, ok: false });
+		expect(s.fragment).toContain("iss absent, but the login failed (HTTP 400)");
 	});
 });

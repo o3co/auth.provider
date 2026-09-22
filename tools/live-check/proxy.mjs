@@ -140,24 +140,31 @@ function proxy(req, res, url) {
 }
 
 // ---- the verdict, shared by the page and the report -------------------------------
+// The `iss` is judged only when the profile names the issuer it must equal.
+// Without one it is recorded as it came: an IdP whose metadata does not
+// advertise the parameter may send none, and the provider then requires none.
 function verdict(s) {
 	const c = s.callback;
 	if (!c) return null;
+	const issJudged = s.expectedIss !== null;
 	const issPresent = typeof c.iss === "string" && c.iss.length > 0;
-	const issOk = issPresent && (s.expectedIss === null || c.iss === s.expectedIss);
+	const issOk = issJudged ? issPresent && c.iss === s.expectedIss : true;
 	const loginOk = c.providerStatus === 302 || c.providerStatus === 303;
-	return { issPresent, issOk, loginOk, ok: issOk && loginOk };
+	return { issJudged, issPresent, issOk, loginOk, ok: issOk && loginOk };
 }
 
 function report(s) {
 	const c = s.callback;
 	if (!c) return `live-check (${s.federation}) — no callback recorded yet\n`;
 	const v = verdict(s);
+	const iss = v.issJudged
+		? `${c.iss ?? "(absent)"} (expected ${s.expectedIss}) ${v.issOk ? "✅" : "❌"}`
+		: `${c.iss ?? "(absent)"} (not judged: the profile names no expected issuer)`;
 	return [
 		`live-check — ${s.federation} — ${c.at}`,
 		"- build: this checkout, standalone template with its default config (requireAuthorizationResponseIss unset)",
 		`- callback query keys: ${c.queryKeys.join(", ")}`,
-		`- iss: ${c.iss ?? "(absent)"}${s.expectedIss ? ` (expected ${s.expectedIss})` : ""} ${v.issOk ? "✅" : "❌"}`,
+		`- iss: ${iss}`,
 		`- provider answer: ${
 			v.loginOk
 				? `${c.providerStatus} → ${c.providerLocation} (login succeeded) ✅`
@@ -171,8 +178,75 @@ function report(s) {
 }
 
 // ---- the page ---------------------------------------------------------------------
+// The result is rendered here, not in the browser: everything in the record
+// but the lengths came from the IdP or the provider, and an `iss` of
+// `</code><script>…` must show as text on a page that can reach the Store.
+const ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+function esc(value) {
+	return String(value).replace(/[&<>"']/g, (ch) => ESCAPES[ch]);
+}
+const row = (k, v) => `<dt>${k}</dt><dd>${v}</dd>`;
+const ok = (text) => `<span class="ok">${text}</span>`;
+const ng = (text) => `<span class="ng">${text}</span>`;
+
+function fragment(s) {
+	if (!s.callback) {
+		return `<p class="verdict wait">${
+			s.start
+				? `Redirected to ${esc(s.start.redirectedTo ?? "(no Location)")} — waiting for the callback`
+				: "No sign-in yet"
+		}</p>`;
+	}
+	const c = s.callback;
+	const v = verdict(s);
+	let banner;
+	if (v.ok) {
+		banner = ok(
+			v.issJudged
+				? "OK — the callback carried the expected iss and the login succeeded"
+				: `OK — the login succeeded (iss ${v.issPresent ? "recorded" : "absent"}, not judged)`,
+		);
+	} else if (v.issJudged && !v.issPresent) {
+		banner = ng("NG — the callback carried no iss");
+	} else if (v.issJudged && !v.issOk) {
+		banner = ng("NG — iss is not the expected issuer");
+	} else {
+		banner = ng(
+			`iss ${v.issPresent ? "present" : "absent"}, but the login failed (HTTP ${esc(c.providerStatus)})`,
+		);
+	}
+	let iss;
+	if (v.issPresent) {
+		iss = `<code>${esc(c.iss)}</code> ${
+			v.issJudged ? (v.issOk ? ok("✓") : ng("✗ not the expected issuer")) : "(not judged)"
+		}`;
+	} else {
+		iss = v.issJudged ? ng("✗ absent") : "absent (not judged)";
+	}
+	const answer = v.loginOk
+		? ok(`${esc(c.providerStatus)} → ${esc(c.providerLocation)}`)
+		: `${ng(`HTTP ${esc(c.providerStatus)}`)} <code>${esc(JSON.stringify(c.providerAnswer))}</code>`;
+	const asked = s.store
+		? `${s.store.accepted ? ok("✓") : ng("✗")} <code>${esc(s.store.token)}</code>`
+		: '<span class="wait">nothing</span>';
+	return [
+		`<p class="verdict">${banner}</p><dl>`,
+		row("callback at", esc(c.at)),
+		row("query keys", `<code>${esc(c.queryKeys.join(", "))}</code>`),
+		row("iss", iss),
+		row(
+			"code / state",
+			`code ${esc(c.codeLength)} chars, state ${esc(c.stateLength)} chars (values not recorded)`,
+		),
+		row("provider answer", answer),
+		row("Store asked for", asked),
+		row("session cookie", c.sessionCookieSet ? ok("✓ set") : ng("✗ not set")),
+		"</dl>",
+	].join("");
+}
+
 const PAGE = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>live-check — ${FEDERATION}</title>
+<html lang="en"><head><meta charset="utf-8"><title>live-check — ${esc(FEDERATION)}</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <style>
 :root{--bg:#f6f7f9;--fg:#1c1f26;--muted:#5b6170;--card:#fff;--line:#e2e5ea;--ok:#1a7f4b;--ng:#b42318;--accent:#2f5bea}
@@ -189,10 +263,14 @@ code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px}
 pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;overflow:auto;font-size:12.5px;white-space:pre-wrap}
 .verdict{font-size:17px;font-weight:700;margin:0 0 10px}
 </style></head><body><main>
-<h1>live-check — <code>${FEDERATION}</code> callback</h1>
-<p class="sub">standalone template, default config${EXPECTED_ISS ? ` — expecting <code>iss=${EXPECTED_ISS}</code>` : ""}</p>
+<h1>live-check — <code>${esc(FEDERATION)}</code> callback</h1>
+<p class="sub">standalone template, default config${
+	EXPECTED_ISS
+		? ` — expecting <code>iss=${esc(EXPECTED_ISS)}</code>`
+		: " — iss recorded, not judged"
+}</p>
 <div class="card">
-  <a class="btn" href="${START_PATH}">Sign in with ${FEDERATION}</a>
+  <a class="btn" href="${esc(START_PATH)}">Sign in with ${esc(FEDERATION)}</a>
   <span style="margin-left:12px;color:var(--muted)">→ the IdP sends you back here and the record fills in</span>
 </div>
 <div class="card" id="result"><p class="verdict wait">No sign-in yet</p></div>
@@ -201,28 +279,9 @@ pre{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:
 </main>
 <script>
 const $=s=>document.querySelector(s);
-function row(k,v){return '<dt>'+k+'</dt><dd>'+v+'</dd>'}
 function render(s){
-  const r=$('#result');
-  if(!s.callback){
-    r.innerHTML='<p class="verdict wait">'+(s.start?'Redirected to '+s.start.redirectedTo+' — waiting for the callback':'No sign-in yet')+'</p>';
-    $('#report').hidden=true; return;
-  }
-  const c=s.callback, v=s.verdict;
-  const banner= v.ok ? '<p class="verdict ok">OK — the callback carried iss and the login succeeded</p>'
-    : !v.issPresent ? '<p class="verdict ng">NG — the callback carried no iss</p>'
-    : !v.issOk ? '<p class="verdict ng">NG — iss is not the expected issuer</p>'
-    : '<p class="verdict ng">iss present, but the login failed (HTTP '+c.providerStatus+')</p>';
-  r.innerHTML=banner+'<dl>'
-   +row('callback at',c.at)
-   +row('query keys','<code>'+c.queryKeys.join(', ')+'</code>')
-   +row('iss', c.iss? '<code>'+c.iss+'</code> '+(v.issOk?'<span class="ok">✓</span>':'<span class="ng">✗ not the expected issuer</span>') : '<span class="ng">✗ absent</span>')
-   +row('code / state', 'code '+c.codeLength+' chars, state '+c.stateLength+' chars (values not recorded)')
-   +row('provider answer', v.loginOk? '<span class="ok">'+c.providerStatus+' → '+c.providerLocation+'</span>' : '<span class="ng">HTTP '+c.providerStatus+'</span> <code>'+(c.providerAnswer?JSON.stringify(c.providerAnswer):'')+'</code>')
-   +row('Store asked for', s.store? (s.store.accepted?'<span class="ok">✓</span> ':'<span class="ng">✗</span> ')+'<code>'+s.store.token+'</code>' : '<span class="wait">nothing</span>')
-   +row('session cookie', c.sessionCookieSet?'<span class="ok">✓ set</span>':'<span class="ng">✗ not set</span>')
-   +'</dl>';
-  $('#report').textContent=s.report; $('#report').hidden=false;
+  $('#result').innerHTML=s.fragment;
+  $('#report').textContent=s.report; $('#report').hidden=!s.callback;
 }
 async function load(){ try{ render(await (await fetch('/__live-check/state',{cache:'no-store'})).json()); }catch(e){} }
 $('#reload').onclick=load;
@@ -241,7 +300,12 @@ http
 			return res.end(PAGE);
 		}
 		if (url.pathname === "/__live-check/state") {
-			return json(res, 200, { ...state, verdict: verdict(state), report: report(state) });
+			return json(res, 200, {
+				...state,
+				verdict: verdict(state),
+				report: report(state),
+				fragment: fragment(state),
+			});
 		}
 		if (url.pathname === "/__live-check/report") {
 			res.writeHead(200, {
