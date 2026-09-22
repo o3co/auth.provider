@@ -44,6 +44,7 @@ import request from "supertest";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
+import { cleanupAllowanceFor, FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS } from "../shutdown.mjs";
 
 // The same stand-ins `replica-safety.test.mts` boots under: no socket opens,
 // and the shared clients module's readiness probe gets its PONG.
@@ -288,6 +289,15 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 
 		handleRef = await boot(config);
 		expect(handleRef.components.federationGrantStore?.kind).toBe("redis");
+	});
+
+	it("gives cleanup the documented 45 seconds under the shipped budgets, and nothing while off", () => {
+		// The allowance is derived from reference.conf's budgets; if those move,
+		// the number every README states moves with them, and this says so.
+		expect(cleanupAllowanceFor(resolveConfig({ ...BASE_ENV, ...GRANTS_ON }))).toEqual({
+			cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS,
+		});
+		expect(cleanupAllowanceFor(resolveConfig(BASE_ENV))).toEqual({});
 	});
 
 	it("adds the shared Redis client for the grant stores alone", () => {

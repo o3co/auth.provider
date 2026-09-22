@@ -154,11 +154,11 @@ dedicated `federation-google` adapter, which has no delegated capability.
   also cover any scopes to which the user previously granted the
   application access", which is exactly what check 7 (scope containment)
   refuses.
-- An app whose OAuth consent screen is for an external user type "and a
-  publishing status of "Testing" is issued a refresh token expiring in 7
-  days, unless the only OAuth scopes requested are a subset of name, email
-  address, and user profile". A paused grant on such a project dies in a
-  week, whatever its own lifetime.
+- "A Google Cloud Platform project with an OAuth consent screen configured
+  for an external user type and a publishing status of 'Testing' is issued a
+  refresh token expiring in 7 days, unless the only OAuth scopes requested
+  are a subset of name, email address, and user profile". A paused grant on
+  such a project dies in a week, whatever its own lifetime.
 - Refresh tokens also stop working when "The refresh token has not been used
   for six months.", when "The user changed passwords and the refresh token
   contains Gmail scopes.", and "There is currently a limit of 100 refresh

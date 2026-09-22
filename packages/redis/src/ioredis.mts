@@ -2142,9 +2142,10 @@ export function makeIoredisFederationGrantStoreClient(
 		},
 
 		async members(indexKey) {
-			// Through `connection`, as every script is: the union parameter above
-			// has no one `zrange` signature to call.
-			return await connection.zrange(indexKey, "0", "-1");
+			// Through the narrow interface, with numbers: a client written to it —
+			// a Cluster's, an operator's own — is promised numbers, and the union
+			// parameter above has no one `zrange` signature to call directly.
+			return await (io as FederationGrantRedisCommands).zrange(indexKey, 0, -1);
 		},
 
 		async prune(indexKey, clockMs, allowanceMs) {

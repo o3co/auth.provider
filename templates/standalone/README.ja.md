@@ -226,7 +226,7 @@ worker:
 
 **ログインページ**は `ENDPOINTS_LOGIN_URL` のもので、`redirect_to=<connect リンク>` 付きで呼ばれる。ログイン後はそのリンクへそのまま戻す（`/oauth/authorize` と同じ往復）。そのリンクを `POST /session/login` の `redirect_to` に送ってはいけない — あちらの完全一致 allowlist はランディングページ用で、フローごとの handle を拒否する。
 
-**運用。** 鍵リングのローテーションは[オペレーター runbook](../../docs/operator-runbook.md)の手順で（新しい鍵を末尾に → 先頭に、古い鍵は 365 日残す）。シャットダウンは機能が有効なら cleanup に 45 秒を与え、compose 2 本はプロセスに 60 秒を与える（[シャットダウンの保証](#シャットダウンの保証)）。無効化は失効ではない: グラントは失効させるまで Redis に残るので、先に終わらせること。一時停止中も鍵と失効境界は保持する。
+**運用。** 鍵リングのローテーションは[オペレーター runbook](../../docs/operator-runbook.md)の手順で（新しい鍵を末尾に → 先頭に、古い鍵は 365 日残す）。シャットダウンは機能が有効なら cleanup に 45 秒を与え（`upstreamHardTimeoutMs` / `persistRetryBudgetMs` / `lockWaitMs` を上げればその合計 + 余裕まで増える）、compose 2 本はプロセスに 60 秒を与える（[シャットダウンの保証](#シャットダウンの保証)）。無効化は失効ではない: グラントは失効させるまで Redis に残るので、先に終わらせること。一時停止中も鍵と失効境界は保持する。
 
 ### エンドポイント
 
@@ -358,7 +358,7 @@ installGracefulShutdown(server, { logger, cleanup: () => handle.dispose() });
 4. **deadline を超えたら残接続を切り、プロセスは非ゼロ終了する。** 常に `0` しか見えない orchestrator では、正常な drain と時間切れの強制切断を区別できない。
 5. **`cleanup` は drain 後・exit 前**に走る(`handle.dispose()` = 逆トポロジカルなコンポーネント cleanup + Redis/タイマーの drain)。失敗はこのサービス自身の logger(他の行と同じ NDJSON)に出し、exit code にも反映する。dispose が throw してもプロセスは終了する。
 
-6. **フェデレーショングラントが有効なら `cleanup` に 45 秒**（`src/shutdown.mts` の `cleanupAllowanceFor`）。drain の 10 秒を継承しない — dispose はローテーションした上流資格情報の書き込みを待ち、パッケージの upstream hard timeout と persist budget の合計は 10 秒を超えるため。無効なら cleanup の予算は drain のまま。
+6. **フェデレーショングラントが有効なら `cleanup` に「refresh の最長の尻尾 + 余裕」**（`src/shutdown.mts` の `cleanupAllowanceFor`）: `federationGrants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 秒、下限 45 秒 — 同梱の予算（25 + 3 + 5 + 12）ではちょうど 45 秒。drain の 10 秒を継承しないのは、dispose がローテーションした上流資格情報の書き込みを待つため。予算を上げれば allowance も増えるので、orchestrator の grace も合わせて上げる。無効なら cleanup の予算は drain のまま。
 
 **`drainTimeoutMs` と `cleanupTimeoutMs` の合計が orchestrator の kill grace period を下回るようにすること。** Kubernetes の `terminationGracePeriodSeconds` は既定 30 秒、compose の `stop_grace_period` は既定 10 秒。フェデレーショングラントが有効なときの最悪値は drain 10 秒 + cleanup 45 秒 = 55 秒なので、**grace は 60 秒以上**にする — 同梱の compose 2 本はそうしてあり、Kubernetes では `terminationGracePeriodSeconds: 60` を自分で設定する。さもないとローリング再起動のたびに、cleanup が待っている書き込みの途中で `SIGKILL` される。他人の都合の `SIGKILL` が来る前に、自分の都合で閉じるのが目的。
 

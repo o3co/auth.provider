@@ -556,7 +556,9 @@ allowlist is for landing pages and refuses a per-flow handle.
 **Operating it.** Rotate the key ring by the procedure in the
 [operator runbook](../../docs/operator-runbook.md) — new key last, then first,
 old key kept 365 days. A shutdown gives cleanup 45 seconds while the feature
-is on and both compose files give the process 60; see
+is on — more if you raise `upstreamHardTimeoutMs`, `persistRetryBudgetMs` or
+`lockWaitMs`, since the allowance is their sum plus a margin — and both
+compose files give the process 60; see
 [Shutdown guarantees](#shutdown-guarantees). Disabling the feature is not
 revoking: grants stay in Redis until revoked, so end them first, and keep the
 keys and the revocation boundaries through any temporary shutdown.
@@ -813,7 +815,7 @@ installGracefulShutdown(server, { logger, cleanup: () => handle.dispose() });
 4. **Past the deadline the remaining connections are cut and the process exits non-zero.** An orchestrator that only ever sees `0` cannot tell a clean drain from one that ran out of time.
 5. **`cleanup` runs after draining, before exit** — `handle.dispose()`, i.e. reverse-topological component cleanup plus the Redis/timer drain. A failure there is logged through this service's own logger (NDJSON, like every other line) and reflected in the exit code. A dispose that throws still exits; it never wedges the process.
 
-6. **With federation grants on, `cleanup` gets 45 seconds** (`cleanupAllowanceFor` in `src/shutdown.mts`) instead of inheriting the drain's ten: the dispose waits for a rotated upstream credential's write, and the package's upstream hard timeout and persist budget add up to more than ten. Off, the cleanup budget stays the drain's.
+6. **With federation grants on, `cleanup` gets the longest refresh tail plus a margin** (`cleanupAllowanceFor` in `src/shutdown.mts`): `federationGrants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 s, never below 45 s — exactly 45 s under the shipped budgets (25 + 3 + 5 + 12) — instead of inheriting the drain's ten, because the dispose waits for a rotated upstream credential's write. Raise a budget and the allowance grows with it; raise your orchestrator's grace to match. Off, the cleanup budget stays the drain's.
 
 **Size `drainTimeoutMs` and `cleanupTimeoutMs` together below your orchestrator's kill grace period.** Kubernetes `terminationGracePeriodSeconds` is 30s by default and compose's `stop_grace_period` is 10s; with federation grants on, the worst case is drain (10s) + cleanup (45s) = 55s, so **set the grace to 60s or more** — the shipped compose files do, and a Kubernetes deployment must set `terminationGracePeriodSeconds: 60` itself, or a rolling restart SIGKILLs the process in the middle of the write the cleanup exists to finish. The point is to close on your terms before `SIGKILL` arrives on someone else's.
 

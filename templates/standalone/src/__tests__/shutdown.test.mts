@@ -37,6 +37,7 @@ import {
 	cleanupAllowanceFor,
 	deferExit,
 	FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS,
+	FEDERATION_GRANTS_CLEANUP_MARGIN_MS,
 	installGracefulShutdown,
 } from "../shutdown.mjs";
 
@@ -348,6 +349,40 @@ describe("#593 slice 7: the cleanup allowance federation grants need", () => {
 		// Off, nothing: the cleanup budget stays the drain's, as it was.
 		expect(cleanupAllowanceFor({ federationGrants: { enabled: false } })).toEqual({});
 		expect(cleanupAllowanceFor({})).toEqual({});
+	});
+
+	it("grows with the configured refresh tail, so a raised budget is not cut off by a fixed timer (Copilot, #614)", () => {
+		// The longest tail one refresh has: the upstream hard timeout, the
+		// persist budget and the wait for the lock, back to back, plus an exit
+		// margin. The shipped budgets (25 s + 3 s + 5 s) land exactly on the
+		// floor; a deployment that doubles its upstream timeout gets more.
+		const shipped = {
+			upstreamHardTimeoutMs: 25_000,
+			persistRetryBudgetMs: 3_000,
+			lockWaitMs: 5_000,
+		};
+		expect(
+			25_000 + 3_000 + 5_000 + FEDERATION_GRANTS_CLEANUP_MARGIN_MS,
+			"the margin is what makes the shipped budgets the floor",
+		).toBe(FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS);
+		expect(cleanupAllowanceFor({ federationGrants: { enabled: true, ...shipped } })).toEqual({
+			cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS,
+		});
+		expect(
+			cleanupAllowanceFor({
+				federationGrants: { enabled: true, ...shipped, upstreamHardTimeoutMs: 60_000 },
+			}),
+		).toEqual({ cleanupTimeoutMs: 60_000 + 3_000 + 5_000 + FEDERATION_GRANTS_CLEANUP_MARGIN_MS });
+		// Lowered budgets never go below the documented minimum, and a config
+		// without budgets (built by hand) gets the floor rather than a guess.
+		expect(
+			cleanupAllowanceFor({
+				federationGrants: { enabled: true, ...shipped, upstreamHardTimeoutMs: 1_000 },
+			}),
+		).toEqual({ cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS });
+		expect(
+			cleanupAllowanceFor({ federationGrants: { enabled: true, upstreamHardTimeoutMs: 90_000 } }),
+		).toEqual({ cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS });
 	});
 
 	it("is honoured by the shutdown: a cleanup that needs longer than the drain is given it", async () => {

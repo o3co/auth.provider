@@ -104,34 +104,55 @@ const DEFAULT_DRAIN_TIMEOUT_MS = 10_000;
 const SIGNALS: readonly NodeJS.Signals[] = ["SIGTERM", "SIGINT"];
 
 /**
- * The cleanup allowance federation grants ask for (#593 slice 7): at least 45
+ * The least cleanup allowance federation grants get (#593 slice 7): 45
  * seconds. The package's background registry drains on dispose — it waits for
- * a rotated upstream credential's write, and the upstream hard timeout and
- * persist budget it ships with add up to more than the ten-second drain that
- * cleanup would otherwise inherit. A shutdown under the default would abandon
- * exactly the write the drain exists to wait for, and the IdP has already
- * moved on to the new refresh token.
+ * a rotated upstream credential's write — and the longest tail one refresh
+ * can have is the upstream hard timeout, the persist budget and the wait for
+ * the grant's lock, back to back. With the shipped budgets (25 s + 3 s + 5 s)
+ * and {@link FEDERATION_GRANTS_CLEANUP_MARGIN_MS} that is exactly this floor;
+ * a deployment that raises a budget raises the allowance with it, below.
+ * The ten-second drain that cleanup would otherwise inherit is shorter than
+ * the tail, and a shutdown under it would abandon exactly the write the drain
+ * exists to wait for, after the IdP had moved on to the new refresh token.
  *
  * A host policy, not a grant setting: what it bounds is `handle.dispose()`,
  * and the orchestrator's grace period has to cover the drain, this and an exit
- * margin — the compose files ship 60 seconds for the shipped defaults. An
- * operator who raises `federationGrants.upstreamHardTimeoutMs` or
- * `persistRetryBudgetMs` raises this and the grace with them.
+ * margin — the compose files ship 60 seconds for the shipped budgets, and an
+ * operator who raises a budget raises the grace to match.
  */
 export const FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS = 45_000;
 
+/** What the allowance adds to the longest refresh tail: an exit margin. */
+export const FEDERATION_GRANTS_CLEANUP_MARGIN_MS = 12_000;
+
 /**
  * The `cleanupTimeoutMs` to hand {@link installGracefulShutdown}, from the
- * config: the grants allowance while the feature is on, and nothing — the
- * drain's own budget, as before — while it is off. A fragment to spread, so an
- * absent allowance is absent rather than `undefined`.
+ * config: while the feature is on, the longer of the floor above and the
+ * configured refresh tail plus the margin; while it is off, nothing — the
+ * drain's own budget, as before. A fragment to spread, so an absent allowance
+ * is absent rather than `undefined`. A config that carries no budgets (one
+ * built by hand, without `reference.conf`) gets the floor.
  */
 export function cleanupAllowanceFor(config: {
-	readonly federationGrants?: { readonly enabled?: boolean | undefined } | undefined;
+	readonly federationGrants?:
+		| {
+				readonly enabled?: boolean | undefined;
+				readonly upstreamHardTimeoutMs?: number | undefined;
+				readonly persistRetryBudgetMs?: number | undefined;
+				readonly lockWaitMs?: number | undefined;
+		  }
+		| undefined;
 }): { readonly cleanupTimeoutMs: number } | Record<string, never> {
-	return config.federationGrants?.enabled === true
-		? { cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS }
-		: {};
+	const grants = config.federationGrants;
+	if (grants?.enabled !== true) return {};
+	const budgets = [grants.upstreamHardTimeoutMs, grants.persistRetryBudgetMs, grants.lockWaitMs];
+	const tail = budgets.every((budget) => typeof budget === "number" && Number.isFinite(budget))
+		? (budgets as number[]).reduce(
+				(sum, budget) => sum + budget,
+				FEDERATION_GRANTS_CLEANUP_MARGIN_MS,
+			)
+		: 0;
+	return { cleanupTimeoutMs: Math.max(FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS, tail) };
 }
 
 export function installGracefulShutdown(server: Server, options: GracefulShutdownOptions): void {

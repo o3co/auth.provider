@@ -53,7 +53,8 @@ services:
     # budget alone. With federation grants on, `src/app.mts` gives cleanup 45
     # more for the drain of a rotated upstream credential's write, and SIGKILL
     # has to arrive after that: drain (10) + cleanup (45) + an exit margin.
-    # Raise it with `federationGrants.upstreamHardTimeoutMs` / `persistRetryBudgetMs`.
+    # The cleanup allowance grows by itself with `federationGrants.upstreamHardTimeoutMs`,
+    # `persistRetryBudgetMs` and `lockWaitMs`; raise this to match when you raise them.
     stop_grace_period: 60s
     depends_on:
       redis:

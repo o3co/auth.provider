@@ -1214,8 +1214,9 @@ reuse-detecting IdP answers by revoking the family.
   registers more. It bounds nothing itself: core bounds its own waits, an
   adapter whose read can hang needs its own I/O timeout, and the host's
   cleanup allowance is what stops a pathological tail — **45 seconds or more**
-  for a deployment mounting these routes, against the standalone's default of
-  ten, which is shorter than the hard timeout plus the persist budget. One
+  for a deployment mounting these routes; the standalone derives it from the
+  budgets (slice 7), where a bare ten-second drain would be shorter than the
+  hard timeout plus the persist budget. One
   thing is detached any other way: the wait for a lock that was given up on,
   which may never arrive, while what is handed over has to settle. Letting go
   of that lock, once it has arrived, is handed over like any other release:
@@ -2570,7 +2571,8 @@ route test is written first and watched failing.
    `federationGrantIntentStore.adapter`, declared in core as the switches
    before them), the two client slots off the shared socket, and the
    subject-revocation service — and installs nothing while it is off; a
-   shutdown gives cleanup 45 seconds while it is on and the compose files
+   shutdown gives cleanup the configured refresh tail plus a margin (45
+   seconds under the shipped budgets) while it is on and the compose files
    give the process 60; the key-ring rotation procedure is in the operator
    runbook; the provider guide is `packages/federation-grants/docs/offline-access.md`.
    The CHANGELOG is the release cut's to write (release policy R2): the
