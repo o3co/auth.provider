@@ -516,52 +516,53 @@ export type FederationGrantRenewableStatus =
 	| "reauthorization_required"
 	| "upstream_token_ineligible";
 
+/** What the lifecycle says of a renewal: the status it is admitted from, or the answer it gets instead. */
+type Admission =
+	| { readonly admitted: FederationGrantRenewableStatus }
+	| { readonly refused: FederationGrantReauthorizationResult };
+
 /**
- * What a reauthorization cannot mend, as the answer it gets — or `null` for
- * what D6 admits: `active`, `reauthorization_required`, and (#616) a grant
- * starved of scope. An IdP that accumulates consent answers a narrower grant's
- * refresh with a wider grant's scopes, and a wider consent is exactly the
- * remedy; the other ineligibilities — a lifetime, a type, a shape no consent
- * changes — are refused as ever, and judged as they read NOW, not as a marker
- * was left: a maximum no token can satisfy outranks an old scope marker.
+ * What a reauthorization cannot mend, as the answer it gets — or the status it
+ * is admitted from, for what D6 admits: `active`, `reauthorization_required`,
+ * and (#616) a grant starved of scope. An IdP that accumulates consent answers
+ * a narrower grant's refresh with a wider grant's scopes, and a wider consent
+ * is exactly the remedy; the other ineligibilities — a lifetime, a type, a
+ * shape no consent changes — are refused as ever, and judged as they read
+ * NOW, not as a marker was left: a maximum no token can satisfy outranks an
+ * old scope marker. The admitted status is what the 201 reports, unchanged.
  */
-function lifecycleRefusal(
-	status: ReturnType<typeof effectiveFederationGrantStatus>,
-): FederationGrantReauthorizationResult | null {
+function admission(status: ReturnType<typeof effectiveFederationGrantStatus>): Admission {
 	switch (status.status) {
 		case "revoked":
-			return { ok: false, reason: "grant_revoked", revokedBy: status.reason, revokedNow: false };
+			return {
+				refused: {
+					ok: false,
+					reason: "grant_revoked",
+					revokedBy: status.reason,
+					revokedNow: false,
+				},
+			};
 		case "pending":
-			return { ok: false, reason: "authorization_pending" };
+			return { refused: { ok: false, reason: "authorization_pending" } };
 		case "expired":
-			return { ok: false, reason: "grant_expired", expiredBy: status.reason };
+			return { refused: { ok: false, reason: "grant_expired", expiredBy: status.reason } };
 		case "connection_not_configured":
-			return { ok: false, reason: "connection_not_configured" };
+			return { refused: { ok: false, reason: "connection_not_configured" } };
 		case "connection_identity_changed":
-			return { ok: false, reason: "connection_identity_changed" };
+			return { refused: { ok: false, reason: "connection_identity_changed" } };
 		case "upstream_token_ineligible":
-			if (status.reason === "scope_exceeded") return null;
-			return { ok: false, reason: "upstream_token_ineligible", ineligibleBy: status.reason };
+			return status.reason === "scope_exceeded"
+				? { admitted: "upstream_token_ineligible" }
+				: {
+						refused: {
+							ok: false,
+							reason: "upstream_token_ineligible",
+							ineligibleBy: status.reason,
+						},
+					};
 		case "active":
 		case "reauthorization_required":
-			return null;
-	}
-}
-
-/** The status a renewal was admitted from — what `lifecycleRefusal` let through, named for the 201. */
-function admittedStatus(
-	status: ReturnType<typeof effectiveFederationGrantStatus>,
-): FederationGrantRenewableStatus {
-	switch (status.status) {
-		case "active":
-		case "reauthorization_required":
-		case "upstream_token_ineligible":
-			return status.status;
-		default:
-			// Composed wrong: `lifecycleRefusal` admitted what it must refuse.
-			throw new Error(
-				`lodgeFederationGrantReauthorization: a renewal admitted from ${status.status}`,
-			);
+			return { admitted: status.status };
 	}
 }
 
@@ -595,8 +596,8 @@ async function judgeAndLodge(
 				}
 			: { ok: false, reason: "grant_revoked", revokedBy: "backstop", revokedNow: false };
 	}
-	const refused = lifecycleRefusal(status);
-	if (refused !== null) return refused;
+	const judged = admission(status);
+	if ("refused" in judged) return judged.refused;
 	if (
 		status.status === "reauthorization_required" &&
 		status.reason === "credential_unreadable" &&
@@ -652,7 +653,7 @@ async function judgeAndLodge(
 			connection: connection.name,
 			scopes: record.scopes,
 			...(record.resource === undefined ? {} : { resource: record.resource }),
-			status: admittedStatus(status),
+			status: judged.admitted,
 		};
 	}
 
@@ -669,7 +670,6 @@ async function judgeAndLodge(
 	if (fresh === null) return { ok: false, reason: "grant_not_found" };
 	// Still renewable: the write lost to something that left it so, and the
 	// honest answer is that this attempt did not take.
-	return (
-		lifecycleRefusal(statusOf(deps, fresh, boundary, now())) ?? { ok: false, reason: "storage" }
-	);
+	const again = admission(statusOf(deps, fresh, boundary, now()));
+	return "refused" in again ? again.refused : { ok: false, reason: "storage" };
 }
