@@ -934,7 +934,14 @@ neither `no-store` nor `WWW-Authenticate`; and a client with
 `senderConstrained.required` would have to present DPoP or mTLS proof for a
 token that cannot carry `cnf`. The route keeps RFC 6749 field names, so a
 token-exchange profile can be added later as a thin facade if a standard
-settles. RFC 9396 `authorization_details` is likewise left for later.
+settles. RFC 9396 `authorization_details` is likewise left for later, with a
+reason of its own (#617): nothing the first release authorizes has a claim
+shape it would carry. A grant's authorization is a connection, a scope set and
+a resource, which `scope` and `resource` name in full; `authorization_details`
+earns its place when an authorization is a structured object — an amount, an
+account, an action — and none is here. Comment 2 on #593 decided to build on
+RFC 8693, 9396, 8707 and 7009: 8707's `resource` and 7009's endpoint style are
+used, and this paragraph is the departure for the other two.
 
 ### D10 — Every retrieval re-evaluates the grant
 
@@ -1086,6 +1093,18 @@ the caller decides.
 `expires_in` in the response is `min(token remaining, effectiveExpiry − now)`.
 That clamp is a cache hint for a cooperating worker. It is documented as such
 and never as enforcement (D15).
+
+**Amended in #617.** What every retrieval re-evaluates is the record and the
+deployment — the grant's status, the boundaries, the client's permission, the
+connection's revisions, the maximum — and never the upstream. An upstream
+consent withdrawal or account disablement is seen only when a refresh is
+refused (D14), and until a refresh is due a stored token that serves is
+disclosed: at most one access-token lifetime after the upstream's change,
+which is D15's residual window seen from the provider's side. The provider
+receives no upstream events; a deployment that has them ends the grant itself,
+through `/revoke` or `revokeAllForSubject`. A Shared Signals receiver that
+would carry them is recorded under *Outside the first release* as an option
+with no delivery commitment.
 
 ### D11 — One typed result, one HTTP mapping
 
@@ -1768,8 +1787,11 @@ nothing. It waits because it edits both logout paths that #276 hardened, and
 the first release already has its safety valve in the per-grant and
 per-subject revocations. Until then, a Store that wants logout to end
 delegations calls `listFederationGrantsForSubject` and `revokeFederationGrant`
-from its own logout flow. The design is recorded here so that the later slice
-starts from it.
+from its own logout flow — which ends the grants that were listed, and sets no
+boundary: a grant activated between the listing and the last write survives
+it (#617). A deployment that wants the guarantee, sessions and all, calls
+`revokeAllForSubject`, whose grants boundary reaches what the listing did not
+(D13). The design is recorded here so that the later slice starts from it.
 
 `federationGrants.revokeOnLogout` (default `false`) would make logout revoke
 the subject's grants as well. The two logout endpoints can honour it
@@ -1791,7 +1813,8 @@ Subject disablement and consent withdrawal are the Store's events: it calls
 `revokeAllForSubject` or `revokeFederationGrant`. The provider cannot receive
 upstream logout or security events today, so an upstream account being
 disabled is seen only as `invalid_grant` on the next refresh. A Shared Signals
-receiver could map such events to per-subject revocation later.
+receiver could map such events to per-subject revocation; it is an option with
+no delivery commitment (*Outside the first release*).
 
 ### D15 — "Retrieval stops" and "residual access" are separate boundaries
 
@@ -2479,11 +2502,11 @@ accumulation this decision exists to avoid.
 | --- | --- | --- | --- |
 | 1 | survives restart and session expiry | D1, D14, D16 | Redis adapter: new client instance, token returned (`redis.integration.test.mts`); and through the connect flow — the grant agreed, the browser session and its durable record deleted, the process disposed of, a fresh deployment on the same stores answering `/status` and `/token` (`acquisition.acceptance.test.mts`, "#593 AC1") |
 | 2 | not renewable without refresh credentials | D5 | callback with no `refresh_token`: no credential is stored, the grant never leaves `pending`, the redirect says `refresh_token_absent` |
-| 3 | wrong client / subject / connection / environment / resource / scopes denied, grant ID known | D4, D9, D10 | one case per dimension, on all four grant-addressed routes; "not yours" responses are byte-identical; `boundary` change reads as `connection_changed` |
+| 3 | wrong client / subject / connection / environment / resource / scopes denied, grant ID known | D4, D9, D10 | wrong client and wrong subject on all four grant-addressed routes, with "not yours" responses byte-identical; the connection allowlist on `/token`, `/status` and `/reauthorize` — `/revoke` ignores it on purpose, so that a client whose registration changed can still clean up; an asserted `connection`, `resource` and `scope` on `/token`, the only route that takes them (`unexpected_parameter` elsewhere); `boundary` change reads as `connection_changed` everywhere the revisions are compared |
 | 4 | expired or revoked upstream credentials → reauthorization, no fallback | D11, D12 | structured upstream `invalid_grant`; assert no other grant or credential is read. #616: the four interaction codes — `reauthorization_required` by the code's name at `/token` (410, no `Retry-After`, no cached token) and at `/status`, both tokens kept, no refresh while the stamp stands, never from a message, a code beside a 429 or a 5xx still the user (`retrieve.refresh.test.mts`, `effective-status.test.mts`, `tokenRoute.test.mts`, `statusRoute.test.mts`) |
 | 5 | transient failures distinguishable and non-destructive | D5, D11, D12 | injected 5xx, 429, storage throw, `invalid_client`, over-long token lifetime, unreadable watermark; the authorization unchanged in each. The refresh credential is unchanged where the upstream did not answer with a token (5xx, 429, storage throw, `invalid_client`, unreadable watermark), and deliberately rotated where it did — the over-long lifetime is a real refresh answer, and D5 persists its rotated refresh token while withholding the access token. The failure stamp and the ineligibility marker change by design. A rotating upstream that answers between the soft and the hard deadline: the late credential is persisted, `.refreshed` is audited, the next call succeeds. One that answers after the hard deadline: an acknowledged loss, handled as a persist failure. A starved grant calls the upstream once per retry interval, not once per request. #616: the interaction codes are outside the timed backoff — a persistent pause the record remembers, not a wait |
 | 6 | concurrent refresh, lock expiry, restart, persistence failure | D2, D12 | two replicas on one testcontainer; lock TTL forced to expire; guarded-write loser; injected persist failure; refresh response without `refresh_token`; refresh straddling `expiresAt`. #616: an interaction stamp that could not be written, that lost, that landed under a renewal, that was overtaken by a replacement whose token does not serve; a late one against an admitted refresh's outage and against its success; the lease kept on a timed-out write (`retrieve.refresh.test.mts`; the store contract, both copies) |
-| 7 | duplicate, stale, wrong-account callbacks cannot replace or broaden | D5, D6, D7 | replayed callback; superseded intent; expired intent; different upstream `sub`; upstream grants more scopes than consented. Broadening through refresh: G1 consented for one scope, G2 later for two on the same connection, G1's refresh returns both — G1's client gets `upstream_token_ineligible`, never the token, and G2's client is served by the same answer (`retrieve.refresh.test.mts`, "row 7: G1, G2"). Added for #611: an upstream account the Store places with another user is `identity_conflict`; one it cannot place — a dedicated registration's pairwise `sub`, with the login's link under another registration — is `identity_unverifiable`, and the bundled repository beside a connection is refused at boot; a directory Store keyed by `(tid, oid)` finds Bob behind a `sub` no login saw (`identity_conflict`), and a callback missing a named claim refuses without asking it. #616: a grant starved of scope renewed for the wider set on the same id, the markers cleared only by the activation, a refused renewal leaving them; the other four ineligibilities refused before an intent is lodged (`lodge.test.mts`, `lodgeRoutes.test.mts`, `browserRoutes.test.mts`, `acquisition.acceptance.test.mts`) |
+| 7 | duplicate, stale, wrong-account callbacks cannot replace or broaden | D5, D6, D7 | replayed callback; superseded intent; expired intent; different upstream `sub`; upstream grants more scopes than consented. Broadening through refresh: G1 consented for one scope, G2 later for two on the same connection, G1's refresh returns both — G1's client gets `upstream_token_ineligible`, never the token, and G2's client is served by the same answer (`retrieve.refresh.test.mts`, "row 7: G1, G2"). Added for #611: an upstream account the Store places with another user is `identity_conflict`; one it cannot place — a dedicated registration's pairwise `sub`, with the login's link under another registration — is `identity_unverifiable`, and the bundled repository beside a connection is refused at boot; a directory Store keyed by `(tid, oid)` finds Bob behind a `sub` no login saw (`identity_conflict`), and a callback missing a named claim refuses without asking it. #616: a grant starved of scope renewed for the wider set on the same id, the markers cleared only by the activation, a refused renewal leaving them; the other four ineligibilities refused before an intent is lodged (`lodge.test.mts`, `lodgeRoutes.test.mts`, `browserRoutes.test.mts`, `acquisition.acceptance.test.mts`). What holds regardless of `identityLookup`: an existing grant's upstream account is pinned, and a renewal from another account is refused. What holds under `required` with a Store that covers the registration: the first acquisition of an account the Store places with another user is refused. Under `unsupported` that first check is skipped, by the deployment's declaration (D7 check 5, #613) |
 | 8 | session-expiry / logout / subject-revocation behaviour; session-bound endpoint preserved | D13, D14 | slice 5, its proof completed after it: `POST /session/logout` and `POST /oauth/logout` driven on the standalone with a grant seeded beside a live session — the session's records go; the grant, its credential and `/token` stay (`templates/standalone/src/__tests__/federation-grants-survive-logout.test.mts`); subject revocation ends them; existing `federationToken` suite untouched and green. The policy-on cases are deferred with D14 |
 | 9 | no refresh token or long-lived secret in responses, audit or logs | D18 | a sentinel secret is grepped for in every response body, audit event and captured log line; #616's denials and stamps carry an allow-listed code and nothing an upstream said |
 | — | the storage guarantees D1 and D16 claim | D1, D3, D4, D16 | a rewritten `clientId`, `expiresAt` or `authorizationRevision` reads as `credential_unreadable`; an unknown key ID answers 503, keeps the record, and restoring the key restores the grant; an identity change reads as `connection_identity_changed` and reverting it restores the grant; activation beyond the ceiling is refused |
@@ -2702,25 +2725,63 @@ which owns scheduling, can refresh a paused job's grant before the window
 closes. A connection may carry a documented idle lifetime later; the provider
 does not hard-code one and does not promise indefinite unattended execution.
 
-## Deferred
+## Outside the first release
 
-Nothing is left open. These are designed or considered, and not in the first
-release:
+Four kinds of thing, which the first version of this section listed as one
+(#617). What follows is the whole list; the issue comments name nothing else.
 
-- the logout policy (D14);
-- an adapter capability for upstream revocation, which could admit connections
-  with unbounded token lifetimes as an explicit opt-in (D5);
-- a token-exchange (RFC 8693) facade and RFC 9396 `authorization_details`, if
-  a standard settles (D9);
-- a Shared Signals receiver that maps upstream security events to per-subject
-  revocation (D14);
-- Entra on-behalf-of (D19);
-- revoking everything one client holds. A leaked client secret is answered by
-  rotating it, which leaves the legitimate client its grants, and a disabled
-  client cannot authenticate to use them. The store lists by subject and not
-  by client, so adding this later means an index with a backfill; and a
-  store-level ceiling on how long a first intent may live, which today is a
-  constant of core's (D6) with no configuration to bypass.
+**Planned — a design to start from, and a slice that will.**
+
+- The logout policy, `federationGrants.revokeOnLogout` (D14). Off by default
+  and additive, it waits only because it edits the two logout paths #276
+  hardened, and the first release has its safety valve in the per-grant and
+  per-subject revocations.
+
+**Conditional — built when the stated trigger occurs, and not before.**
+
+- A token-exchange (RFC 8693) facade, and RFC 9396 `authorization_details`,
+  if a standard for delegated access to a background worker settles (D9).
+- Entra on-behalf-of, if there is demand (D19). The supported path — an
+  authorization-code connect flow against Entra as an OIDC federation with
+  `offline_access` — exists today.
+
+**Options — recorded so that a later design starts from them. No delivery
+commitment: nothing here is coming unless somebody decides it is.**
+
+- An adapter capability for upstream revocation (RFC 7009 or provider-specific),
+  which could admit connections with unbounded token lifetimes as an explicit
+  opt-in (D5).
+- A Shared Signals receiver that maps upstream security events to per-subject
+  revocation (D10, D14). Until one exists, an upstream change is seen when a
+  refresh is refused.
+- Write fencing between a subject-wide revocation and a callback's activation
+  (D13): the callback's re-read narrows the window to the gap between that read
+  and the write, and closing it needs an operation spanning both, which changes
+  the coordination surface of D2/D16.
+- A login-side index of the identity claims D7's check 5 needs: a Store that
+  learns only from logins still cannot cover a pairwise registration (D19).
+- The delegated capability on the Google and Apple adapters (D17); the generic
+  OIDC adapter carries it, and Apple's `form_post` callback is a second problem.
+- A documented idle lifetime per connection (D15): the provider runs no
+  scheduler and does not hard-code an upstream's disuse window; `last_used_at`
+  is what the application, which owns scheduling, reads.
+- A JSON-in-environment form of the HOCON-only lists — connections, keys,
+  coverage — for a deployment that cannot ship a config file.
+- The README roll-ups: the root, core and oauth READMEs, which do not yet
+  describe federation grants.
+
+**Not needed — the reasoning says the need is met otherwise.**
+
+- Revoking everything one client holds. A leaked client secret is answered by
+  rotating it, which leaves the legitimate client its grants; a client that a
+  deployment has disabled — removed from its `ClientRepository`, so that
+  neither `findById` nor `authenticate` returns it, on every authentication
+  method — cannot authenticate to use them. The store lists by subject and not
+  by client, so adding this later means an index with a backfill.
+- A store-level ceiling on how long a first intent may live. The lodging path
+  fixes it at `FEDERATION_GRANT_FLOW_BUDGET_MS`, a constant of core's with no
+  configuration to bypass; a caller of the store's `createPending` directly is
+  not bounded by it, and is composing the provider, not deploying it.
 
 ## References
 

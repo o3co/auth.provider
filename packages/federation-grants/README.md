@@ -176,6 +176,21 @@ access token, its own spelling of `token_type`, and the scopes that token
 holds. There is never a refresh token, an id token or an upstream response
 object in it.
 
+`expires_in` is the smaller of the token's remaining life and the grant's
+effective expiry: a cache hint for a cooperating worker, never enforcement.
+The token is valid at the upstream for as long as the upstream says, and
+lowering `maxAccessTokenLifetime` shortens nothing already disclosed — only
+what is disclosed next. `min_ttl` is a request, not a guarantee: a fresh token
+still shorter than it is returned with its true `expires_in`, and the caller
+decides.
+
+Every retrieval re-evaluates the record and the deployment — never the
+upstream. A consent withdrawn at the IdP, or an account disabled there, is seen
+when a refresh is refused; until one is due, a stored token that serves is
+disclosed, so the upstream's change reaches the grant at most one access-token
+lifetime on. The provider receives no upstream events. A deployment that has
+them ends the grant itself, through `/revoke` or `revokeAllForSubject`.
+
 Everything else is `{"error": "<code>"}` with an `"error_description"`
 alongside it wherever the failure has a reason to give — `grant_not_found`,
 `invalid_scope`, `invalid_target` and `authorization_pending` have none, and
@@ -230,7 +245,9 @@ to and its dates in UTC.
 `expires_at` is **effective** expiry, computed from `maxExpiresIn` as it is
 configured now. Lowering the maximum therefore moves it earlier for grants that
 already exist, possibly into the past; raising it moves it back, never beyond
-the stored expiry, which never changes.
+the stored expiry, which never changes. `last_used_at` is the last disclosure,
+a cached one included — not the last time the upstream was asked, and no
+measure of an upstream's idle window.
 
 Status calls `inspect` and nothing else: never a refresh, never the refresh
 lock, never `touch`. It is also **not** a health check for `/token` — `active`

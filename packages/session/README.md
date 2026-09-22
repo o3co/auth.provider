@@ -495,7 +495,7 @@ Providers implementing `SupportsRefresh` can keep federation tokens alive withou
 
 ### `SupportsDelegatedAuthorization` (optional capability)
 
-The capability behind federation grants (#593): a provider that can send a user to authorize a *delegation* — a client holding the upstream's tokens without a session — and refresh those tokens without one. Detected by **both** methods being present.
+The capability behind federation grants (#593): a provider that can send a user to authorize a *delegation* — a client holding the upstream's tokens without a session — exchange the code its callback brings back, and refresh those tokens without a session. Detected by **all three** methods being present.
 
 ```ts
 interface DelegatedAuthorizationRequest {
@@ -506,6 +506,22 @@ interface DelegatedAuthorizationRequest {
   readonly scopes: readonly string[];                      // the intent's, not the provider's
   readonly resource?: string;                              // RFC 8707
   readonly authorizationParams?: Readonly<Record<string, string>>;
+}
+
+interface DelegatedCodeExchangeRequest {
+  readonly code: string;
+  readonly codeVerifier: string;
+  readonly redirectUri: string;
+  readonly nonce: string;                                  // the one sent at authorization
+  readonly resource?: string;
+  readonly callbackParams?: Readonly<Record<string, string>>;  // what the callback carried, e.g. RFC 9207 `iss`
+  readonly signal?: AbortSignal;
+  readonly identityClaims?: readonly string[];             // the connection's, carried off the verified id_token
+}
+
+interface DelegatedAuthorizationResult {
+  readonly upstream: { readonly issuer: string; readonly subject: string; readonly claims: Readonly<Record<string, string>> };
+  readonly tokens: DelegatedTokens;
 }
 
 interface DelegatedRefreshRequest {
@@ -526,6 +542,7 @@ interface DelegatedTokens {                                // every field option
 
 interface SupportsDelegatedAuthorization {
   buildDelegatedAuthorizationUrl(params: DelegatedAuthorizationRequest): URL;
+  exchangeDelegatedCode(params: DelegatedCodeExchangeRequest): Promise<DelegatedAuthorizationResult>;
   refreshDelegatedToken(params: DelegatedRefreshRequest): Promise<DelegatedTokens>;
 }
 
