@@ -197,10 +197,20 @@ const sessionMiddleware = defineModule({
 const directory = () =>
 	new DirectoryRepository(new Map([["alice", { password: "unused", id: "alice" }]]));
 
+/** The two stores a deployment reads its grants from, to hand a second deployment the first one's. */
+interface GrantStores {
+	readonly grants: ReturnType<typeof createMemoryFederationGrantStore>;
+	readonly intents: ReturnType<typeof createMemoryFederationGrantIntentStore>;
+}
+
 const boot = async (
 	subjectRevocation: SubjectRevocation = createInMemorySubjectRevocation(),
 	userRepository: UserRepository = directory(),
 	connections: Record<string, Record<string, unknown>> = {},
+	stores: GrantStores = {
+		grants: createMemoryFederationGrantStore(),
+		intents: createMemoryFederationGrantIntentStore(),
+	},
 ) => {
 	const full = makeValidFullSections();
 	const handle = await createApp({
@@ -210,8 +220,8 @@ const boot = async (
 			defineModule({
 				name: "test-stores",
 				provides: {
-					federationGrantStore: () => createMemoryFederationGrantStore(),
-					federationGrantIntentStore: () => createMemoryFederationGrantIntentStore(),
+					federationGrantStore: () => stores.grants,
+					federationGrantIntentStore: () => stores.intents,
 				} as never,
 			}),
 			sessionMiddleware,
@@ -644,5 +654,95 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 		await expect(boot(undefined, httpRepository(), { ...connections(), mail })).rejects.toThrow(
 			/connections\.mail[\s\S]*identityClaims/,
 		);
+	});
+});
+
+describe("#593 AC1: a consented grant survives the initiating session's end and a restart", () => {
+	/** The whole connect flow for alice, in the browser named, down to the grant it created. */
+	const acquire = async (app: express.Express, browser: string): Promise<string> => {
+		const lodged = await request(app)
+			.post("/oauth/federation-grants")
+			.set("Authorization", basic)
+			.send({ connection: "calendar", sub: "alice", redirect_uri: REDIRECT, state: "s" });
+		expect(lodged.status).toBe(201);
+		const connect = new URL(lodged.body.connect_uri as string);
+
+		const started = await request(app)
+			.get(`${connect.pathname}${connect.search}`)
+			.set("x-browser", browser);
+		expect(started.status).toBe(303);
+		const challenge =
+			new URL(started.headers.location as string, ISSUER).searchParams.get("challenge") ?? "";
+		const approved = await request(app)
+			.post("/session/federation-grants/consent")
+			.set("x-browser", browser)
+			.send({ challenge, decision: "accept" });
+		expect(approved.status).toBe(303);
+		const state = new URL(approved.headers.location as string).searchParams.get("state") ?? "";
+
+		const returned = await request(app)
+			.get("/session/federation-grants/callback/calendar")
+			.query({ state, code: "code-1" })
+			.set("x-browser", browser);
+		expect(returned.status).toBe(303);
+		const back = new URL(returned.headers.location as string);
+		expect(back.searchParams.has("error")).toBe(false);
+		return back.searchParams.get("grant_id") as string;
+	};
+
+	it("is spent by a fresh deployment after the session that agreed it is gone", async () => {
+		// The row of the ADR's acceptance table reads "new client instance,
+		// session deleted, token returned". The grant is agreed through the
+		// real flow, so that what survives is what the flow wrote and not a
+		// seed; then the browser session that agreed it ends, both halves —
+		// the cookie's and the durable record's — and the process that saw the
+		// consent is disposed of. The next process has only the stores.
+		const stores: GrantStores = {
+			grants: createMemoryFederationGrantStore(),
+			intents: createMemoryFederationGrantIntentStore(),
+		};
+		const first = await boot(undefined, undefined, {}, stores);
+		let grantId: string;
+		try {
+			const sid = "sid-ac1";
+			browsers.set("b-ac1", { isAuthenticated: true, user: { id: "alice" }, sid });
+			durable.set(sid, {
+				sid,
+				sub: "alice",
+				authTime: new Date(),
+				createdAt: new Date(),
+				expiresAt: new Date(Date.now() + 86_400_000),
+				claims: {},
+			} as UserSession);
+			grantId = await acquire(first.app, "b-ac1");
+
+			// The session ends: the browser's half and the durable half.
+			browsers.delete("b-ac1");
+			durable.delete(sid);
+		} finally {
+			await first.handle.dispose();
+		}
+
+		const second = await boot(undefined, undefined, {}, stores);
+		try {
+			const status = await request(second.app)
+				.post(`/oauth/federation-grants/${grantId}/status`)
+				.set("Authorization", basic)
+				.send({ sub: "alice" });
+			expect(status.status).toBe(200);
+			expect(status.body.status).toBe("active");
+
+			const token = await request(second.app)
+				.post(`/oauth/federation-grants/${grantId}/token`)
+				.set("Authorization", basic)
+				.send({ sub: "alice" });
+			expect(token.status).toBe(200);
+			expect(token.body).toMatchObject({
+				access_token: "upstream-access-token",
+				token_type: "bearer",
+			});
+		} finally {
+			await second.handle.dispose();
+		}
 	});
 });

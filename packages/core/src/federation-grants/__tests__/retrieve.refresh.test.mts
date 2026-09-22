@@ -318,6 +318,71 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			});
 		}
 
+		it("a wider consent on the same connection does not widen the narrower grant (row 7: G1, G2)", async () => {
+			// G1 consented for the narrow set; G2, later, for the whole
+			// connection. An IdP that accumulates consent (D19) answers G1's
+			// refresh with G2's scopes. G1 is starved — the token is never
+			// written, the rotated refresh token is kept for the
+			// reauthorization — and G2, whose consent covers the answer, is
+			// served by the same answer. The judgement is against what each
+			// grant's user consented to, so both are seeded here by hand.
+			const seededAt = now();
+			const consented = async (id: string, scopes: readonly string[]) => {
+				await h.store.createPending({
+					id,
+					subject: "u-1",
+					clientId: "agent",
+					connection: connection.name,
+					intent: { handle: `h-${id}`, expiresAt: new Date(seededAt.getTime() + 10 * MIN) },
+					now: seededAt,
+				});
+				const written = await h.store.activate({
+					grantId: id,
+					intentHandle: `h-${id}`,
+					authorization: {
+						identityRevision: federationGrantIdentityRevision(connection),
+						authorizationRevision: federationGrantAuthorizationRevision(connection),
+						upstream: { issuer: connection.upstreamIssuer, subject: "00u-alice" },
+						scopes: [...scopes],
+						consent: { at: seededAt, sid: `sid-${id}`, scopes: [...scopes] },
+						authorizedAt: seededAt,
+						expiresAt: new Date(seededAt.getTime() + 30 * DAY),
+					},
+					credentials: {
+						refreshToken: `${SECRET}-${id}`,
+						accessToken: {
+							value: `at-${id}-0`,
+							tokenType: "Bearer",
+							obtainedAt: seededAt,
+							issuedLifetime: 3600,
+							scopes: [...scopes],
+						},
+					},
+					now: seededAt,
+				});
+				expect(written.ok).toBe(true);
+			};
+			await consented("g-1", SCOPES);
+			await consented("g-2", CONSENTED);
+
+			setNow(GONE);
+			h.refresh.mockResolvedValue(refreshed("w", GONE, { scope: CONSENTED.join(" ") }));
+
+			expect(await retrieve()).toMatchObject({
+				ok: false,
+				code: "upstream_token_ineligible",
+				reason: "scope_exceeded",
+			});
+			expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-w` });
+			expect(await h.store.find("g-1", GONE)).toMatchObject({
+				status: "active",
+				ineligible: { reason: "scope_exceeded" },
+			});
+
+			expect(await retrieve({ grantId: "g-2" })).toMatchObject({ ok: true, accessToken: "at-w" });
+			expect(await h.store.find("g-2", now())).not.toHaveProperty("ineligible");
+		});
+
 		it("asks the upstream once per retry interval, and not once per request", async () => {
 			await h.seed();
 			setNow(DUE);
