@@ -412,3 +412,17 @@ function dockerignoreExcludes(dockerignore: string, file: string): boolean {
 	}
 	return excluded;
 }
+
+describe("#593 slice 7 — the compose files give the process time to finish a shutdown", () => {
+	it.each(["/docker-compose.yml", "/docker-compose.production.yml"])(
+		"%s declares a stop_grace_period covering the HTTP drain, the grants cleanup and an exit margin",
+		(rel) => {
+			// compose's own default is ten seconds — the drain budget alone. With
+			// federation grants on, the cleanup that drains a rotated credential's
+			// write gets 45 more, and SIGKILL must arrive after that, not during.
+			const match = /^\s+stop_grace_period:\s*(\d+)s\s*$/m.exec(read(rel));
+			expect(match, `${rel} has no stop_grace_period`).not.toBeNull();
+			expect(Number(match?.[1])).toBeGreaterThanOrEqual(60);
+		},
+	);
+});

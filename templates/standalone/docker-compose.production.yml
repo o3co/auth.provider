@@ -49,6 +49,12 @@ services:
       # security group, a firewall rule, or the proxy's own network. Do not
       # widen this line and call it done.
       - "127.0.0.1:3000:3000"
+    # #593 slice 7: compose's default grace is ten seconds — the HTTP drain
+    # budget alone. With federation grants on, `src/app.mts` gives cleanup 45
+    # more for the drain of a rotated upstream credential's write, and SIGKILL
+    # has to arrive after that: drain (10) + cleanup (45) + an exit margin.
+    # Raise it with `federationGrants.upstreamHardTimeoutMs` / `persistRetryBudgetMs`.
+    stop_grace_period: 60s
     depends_on:
       redis:
         condition: service_healthy

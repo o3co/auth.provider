@@ -33,7 +33,12 @@
 import type { Server } from "node:http";
 import type { Logger } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
-import { deferExit, installGracefulShutdown } from "../shutdown.mjs";
+import {
+	cleanupAllowanceFor,
+	deferExit,
+	FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS,
+	installGracefulShutdown,
+} from "../shutdown.mjs";
 
 /** A `Server` double whose `close` callback fires only when we say so. */
 function makeServer() {
@@ -80,7 +85,13 @@ const makeLogger = () => {
 };
 
 /** Drive one shutdown without touching the real `process` or exiting. */
-function install(opts: { cleanup?: () => void | Promise<void>; drainTimeoutMs?: number } = {}) {
+function install(
+	opts: {
+		cleanup?: () => void | Promise<void>;
+		drainTimeoutMs?: number;
+		cleanupTimeoutMs?: number;
+	} = {},
+) {
 	const { server, spies, finishDraining, failClose } = makeServer();
 	const logger = makeLogger();
 	const exit = vi.fn();
@@ -90,6 +101,7 @@ function install(opts: { cleanup?: () => void | Promise<void>; drainTimeoutMs?: 
 		logger,
 		cleanup: opts.cleanup ?? (() => {}),
 		...(opts.drainTimeoutMs === undefined ? {} : { drainTimeoutMs: opts.drainTimeoutMs }),
+		...(opts.cleanupTimeoutMs === undefined ? {} : { cleanupTimeoutMs: opts.cleanupTimeoutMs }),
 		exit,
 		onSignal: (name, handler) => signals.set(name, handler),
 		offSignal: (name) => signals.delete(name),
@@ -320,5 +332,38 @@ describe("installGracefulShutdown (#290)", () => {
 		const { signals } = install();
 		signals.get("SIGTERM")?.();
 		expect(signals.size).toBe(0);
+	});
+});
+
+describe("#593 slice 7: the cleanup allowance federation grants need", () => {
+	it("is at least the 45 seconds the package asks for, and only when the feature is on", () => {
+		// The package's drain waits for a rotated credential's write; the
+		// default cleanup budget is the ten-second drain, which is shorter than
+		// the upstream hard timeout and persist budget the feature ships with —
+		// a shutdown under it abandons exactly the write the drain exists for.
+		expect(FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS).toBeGreaterThanOrEqual(45_000);
+		expect(cleanupAllowanceFor({ federationGrants: { enabled: true } })).toEqual({
+			cleanupTimeoutMs: FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS,
+		});
+		// Off, nothing: the cleanup budget stays the drain's, as it was.
+		expect(cleanupAllowanceFor({ federationGrants: { enabled: false } })).toEqual({});
+		expect(cleanupAllowanceFor({})).toEqual({});
+	});
+
+	it("is honoured by the shutdown: a cleanup that needs longer than the drain is given it", async () => {
+		vi.useFakeTimers();
+		try {
+			const { signals, finishDraining, exit } = install({
+				cleanup: () => new Promise<void>((resolve) => setTimeout(resolve, 30_000)),
+				drainTimeoutMs: 5_000,
+				...cleanupAllowanceFor({ federationGrants: { enabled: true } }),
+			});
+			signals.get("SIGTERM")?.();
+			finishDraining();
+			await vi.advanceTimersByTimeAsync(31_000);
+			expect(exit).toHaveBeenCalledExactlyOnceWith(0);
+		} finally {
+			vi.useRealTimers();
+		}
 	});
 });
