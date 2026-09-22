@@ -14,6 +14,9 @@ export default defineConfig({
 				// CC-5 readonly compile-time contract tests. The @ts-expect-error
 				// directives in this file only fire under typecheck mode.
 				"src/__tests__/readonly-types.test.mts",
+				// #626 P2: the manifest's typed deps and the grant's narrowed
+				// signature. Paired with tsconfig.test.json, as #343 requires.
+				"src/__tests__/module.types.test.mts",
 			],
 			tsconfig: "./tsconfig.test.json",
 		},
