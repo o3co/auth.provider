@@ -1356,6 +1356,105 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				expect(await store.isCurrentIntent("g-1", "h-g-1", at(DAY))).toBe(false);
 			});
 
+			describe("a stamp that says the user has to come back (D11, D12, #616)", () => {
+				// The four codes an IdP answers a refresh with when it wants the user
+				// and not a new token. Such a stamp is the grant's memory of that,
+				// read as `reauthorization_required` until an activation clears it —
+				// so no later failure may replace it: an outage or a rate limit
+				// stamped over it would turn a grant that needs the user back into
+				// one that is merely waiting.
+				const INTERACTION = [
+					"interaction_required",
+					"login_required",
+					"consent_required",
+					"account_selection_required",
+				] as const;
+				const later = at(DAY + MIN);
+				const incoming: Array<Partial<FederationGrantRefreshFailureInput>> = [
+					{ kind: "unavailable" },
+					{ kind: "rate_limited", retryAfterSeconds: 30 },
+					{ kind: "rejected", upstreamCode: "invalid_client" },
+					{ kind: "rejected", upstreamCode: "login_required" },
+				];
+
+				for (const code of INTERACTION) {
+					it(`does not replace ${code} with another failure, later or not, and bumps nothing`, async () => {
+						const grant = await activated();
+						const marked = await note(grant.version, { kind: "rejected", upstreamCode: code });
+						expect(marked).toMatchObject({
+							ok: true,
+							grant: { refreshFailure: { kind: "rejected", upstreamCode: code, count: 1 } },
+						});
+						for (const failure of incoming) {
+							expect(await note(grant.version, { at: later, ...failure }, later)).toStrictEqual({
+								ok: false,
+							});
+							expect(await note(grant.version, { at: at(DAY), ...failure }, later)).toStrictEqual({
+								ok: false,
+							});
+						}
+						const kept = await store.find("g-1", later);
+						expect(kept?.refreshFailure).toStrictEqual({
+							at: at(DAY),
+							kind: "rejected",
+							count: 1,
+							upstreamCode: code,
+						});
+						expect(kept?.version).toBe(grant.version);
+						expect(await store.open("g-1", later)).toMatchObject({
+							credentials: { state: "ok", value: credentials("1") },
+						});
+					});
+				}
+
+				it("is a refusal and nothing else: a stamp of another kind carrying the same string is replaced like any", async () => {
+					const grant = await activated();
+					await note(grant.version, { kind: "unavailable", upstreamCode: "consent_required" });
+					expect(
+						await note(
+							grant.version,
+							{ at: later, kind: "rejected", upstreamCode: "invalid_client" },
+							later,
+						),
+					).toMatchObject({
+						ok: true,
+						grant: { refreshFailure: { upstreamCode: "invalid_client" } },
+					});
+				});
+
+				it("is cleared by what clears any stamp: a credential replacement, the destructive transition", async () => {
+					const grant = await activated();
+					await note(grant.version, { kind: "rejected", upstreamCode: "consent_required" });
+					const replaced = await store.replaceCredentials({
+						grantId: "g-1",
+						expectedVersion: grant.version,
+						credentials: credentials("2"),
+						ineligible: null,
+						now: later,
+					});
+					expect(replaced).toMatchObject({ ok: true });
+					expect(await store.find("g-1", later)).not.toHaveProperty("refreshFailure");
+
+					const again = await note(
+						(await store.find("g-1", later))?.version ?? -1,
+						{
+							at: later,
+							kind: "rejected",
+							upstreamCode: "consent_required",
+						},
+						later,
+					);
+					expect(again).toMatchObject({ ok: true });
+					const ended = await store.requireReauthorization({
+						grantId: "g-1",
+						expectedVersion: (await store.find("g-1", later))?.version ?? -1,
+						now: at(DAY + 2 * MIN),
+					});
+					expect(ended).toMatchObject({ ok: true });
+					expect(await store.find("g-1", at(DAY + 2 * MIN))).not.toHaveProperty("refreshFailure");
+				});
+			});
+
 			it("counts consecutive failures, in the store: the caller never tells it the count", async () => {
 				const grant = await activated();
 				await note(grant.version);

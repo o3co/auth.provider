@@ -137,9 +137,10 @@ handle.
 
 The same body without `connection` (sent anyway, it is checked against the
 grant's and never moves it: `400 invalid_request/connection_mismatch`). The
-answer has the same shape; `status` is the grant's own — `active` or
-`reauthorization_required` — because a renewal changes nothing a client can
-see until the user finishes it.
+answer has the same shape; `status` is the grant's own — `active`,
+`reauthorization_required`, or `upstream_token_ineligible` for a grant starved
+of scope (below) — because a renewal changes nothing a client can see until
+the user finishes it.
 
 Ownership first, with the same `404 grant_not_found` for an unknown id,
 another client's grant and another subject's. Then the subject's grants
@@ -148,9 +149,12 @@ before anything else is asked of it, and answers `410 grant_revoked/backstop`.
 Then what a renewal cannot mend — each with the status `/token` gives it:
 `400 authorization_pending`, `410 grant_revoked/<by>`,
 `410 grant_expired/<reason>`, `410 connection_identity_changed`,
-`502 upstream_token_ineligible/<reason>`, and a key missing from the ring as
-`503 temporarily_unavailable/key_unavailable`, an outage rather than a reason
-to send the user through consent again. Then the client's current permission
+`502 upstream_token_ineligible/<reason>` for every reason but one — a consent
+mends no token lifetime, type or shape, but it does mend a consent an
+accumulating IdP widened under a narrower grant, so `scope_exceeded` is
+admitted and the 201 reports it (#616; the guide's Entra section says how) —
+and a key missing from the ring as `503 temporarily_unavailable/key_unavailable`,
+an outage rather than a reason to send the user through consent again. Then the client's current permission
 and the request itself, as above. A renewal takes no place against the bound.
 
 A renewal emits `federation.grant.requested` with `outcome: "reauthorization"`;
@@ -200,6 +204,17 @@ on `429`.
 An unknown grant id, a grant belonging to another client and one belonging to
 another subject all answer the same `404` body, byte for byte.
 
+A refresh the upstream refused for the user's absence — `interaction_required`,
+`login_required`, `consent_required` or `account_selection_required`, read off
+the error's own code and never off a message — answers
+`410 reauthorization_required` with the code as the description
+(`upstream_consent_required`), with no `Retry-After` and no cached token:
+nothing said the refresh token is bad, so it is kept; nothing is mended by
+waiting, so nothing is told to wait (#616). The record remembers it, and
+`/status` says the same, until a reauthorization activates. Pause the grant's
+work, lodge one renewal, send the user through its `connect_uri`, and resume
+on the callback; polling `/token` against it changes nothing.
+
 ### `POST /oauth/federation-grants/:grantId/status`
 
 ```json
@@ -220,7 +235,11 @@ the stored expiry, which never changes.
 Status calls `inspect` and nothing else: never a refresh, never the refresh
 lock, never `touch`. It is also **not** a health check for `/token` — `active`
 does not promise a token, and an ineligible status can sit beside a perfectly
-usable cached one.
+usable cached one. A refresh the upstream refused for the user's absence reads
+`reauthorization_required` with `upstream_<code>` as the reason, for as long
+as the record carries it; a grant starved of scope by an accumulating IdP reads
+`upstream_token_ineligible/scope_exceeded`, the one ineligibility
+`/reauthorize` admits (#616).
 
 ### `POST /oauth/federation-grants/:grantId/revoke`
 
@@ -492,7 +511,11 @@ It checks, in this order:
    `scope` means as requested; an upstream that granted more is refused,
    because a token cannot be narrowed after the fact.
 8. **Activation**, immediately after re-reading the session, the sessions
-   boundary, the current-intent pointer and the grants boundary.
+   boundary, the current-intent pointer and the grants boundary. It replaces
+   the authorization and the credentials together, and clears with them the
+   ineligibility marker and the stamp of a refresh the upstream refused for
+   the user's absence (#616); a renewal refused at any check above leaves all
+   of it exactly as it was.
 
 Every failure after check 1 goes back to the intent's `redirect_uri` with the
 client's own `state`, the `grant_id`, and one of: `access_denied`,

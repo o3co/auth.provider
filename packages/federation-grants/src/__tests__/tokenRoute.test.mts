@@ -508,6 +508,33 @@ describe("the token route — how a failure is carried", () => {
 		});
 	});
 
+	it("answers a grant whose refresh was refused for the user's absence with 410 by that name, no Retry-After, and never its cached token (#616)", async () => {
+		const h = harness();
+		await h.seed();
+		const grant = await h.store.find(GRANT_ID, h.world.now);
+		const noted = await h.store.noteRefreshFailure({
+			grantId: GRANT_ID,
+			expectedVersion: grant?.version ?? -1,
+			failure: { at: h.world.now, kind: "rejected", upstreamCode: "consent_required" },
+			rowMs: 300_000,
+			now: h.world.now,
+		});
+		expect(noted.ok).toBe(true);
+
+		const response = await request(h.app)
+			.post(path())
+			.set("Authorization", basic())
+			.send({ sub: SUBJECT });
+
+		expect(response.status).toBe(410);
+		expect(response.body).toEqual({
+			error: "reauthorization_required",
+			error_description: "upstream_consent_required",
+		});
+		expect(response.headers["retry-after"]).toBeUndefined();
+		expect(h.refresh).not.toHaveBeenCalled();
+	});
+
 	it("carries Retry-After from a denial that is not a throttle", async () => {
 		const h = harness();
 		await h.seed({

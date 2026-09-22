@@ -171,6 +171,48 @@ export function federationGrantIneligibilityRetry(
 }
 
 /**
+ * The codes an IdP answers a refresh with when it wants the user, and not a
+ * new token (OIDC Core §3.1.2.6, echoed by RFC 6749 §5.2 token endpoints):
+ * conditional access changed under a paused job, a consent was withdrawn, a
+ * session policy demands a fresh sign-in. None of them says the refresh token
+ * is bad — the next refresh after the user returns may well succeed — so the
+ * credential is kept, and none of them is mended by waiting.
+ */
+export const FEDERATION_GRANT_INTERACTION_CODES = [
+	"interaction_required",
+	"login_required",
+	"consent_required",
+	"account_selection_required",
+] as const;
+
+export type FederationGrantInteractionCode = (typeof FEDERATION_GRANT_INTERACTION_CODES)[number];
+
+const INTERACTION_CODES: ReadonlySet<string> = new Set(FEDERATION_GRANT_INTERACTION_CODES);
+
+/**
+ * What a stamp remembers when a refresh was refused for the user's absence
+ * (#616, D11, D12): the code, when the stamp is a refusal carrying one of the
+ * four, and `undefined` for every other stamp — an outage or a rate limit that
+ * happens to carry the same string is not the user being asked for. A stamp
+ * that answers here reads as `reauthorization_required` for as long as it
+ * stands, whatever its date, its count or its retry advice say: those are the
+ * timed backoff's, and time mends nothing here.
+ */
+export function federationGrantInteractionCode(
+	failure: FederationGrantRefreshFailure | undefined,
+): FederationGrantInteractionCode | undefined {
+	if (failure === undefined || failure.kind !== "rejected") return undefined;
+	return isFederationGrantInteractionCode(failure.upstreamCode) ? failure.upstreamCode : undefined;
+}
+
+/** Whether an upstream's error code — one the classifier read off the error's own field — is one of the four. */
+export function isFederationGrantInteractionCode(
+	code: unknown,
+): code is FederationGrantInteractionCode {
+	return typeof code === "string" && INTERACTION_CODES.has(code);
+}
+
+/**
  * Whether the stamp of a failed refresh (D12) still keeps `/token` from asking
  * the upstream, and for how long a client is told to wait. What the wait is
  * depends on what failed:

@@ -244,6 +244,15 @@ adapter to supply a probe from outside the port — for Redis, whether the
 credential key exists — and asks it after the transitions away from `active`,
 a revocation past the expiry included, and after refused writes.
 
+**Amended in #616.** The failure stamp's write gains one guard, in both
+adapters: an established stamp that says the user has to come back — a refusal
+carrying one of the four interaction codes (D11) — is not replaced by any later
+stamp. It still does not bump `version`, and what clears every stamp clears it:
+an activation, a credential replacement, the destructive transition, a
+revocation. The suite runs a late interaction stamp against an admitted
+refresh's outage and against its success: the outage's stamp is refused, the
+success's credential replacement lands and clears it.
+
 ### D3 — Expiry is absolute, required, and bounded by the operator
 
 `federationGrants.defaultExpiresIn` and `federationGrants.maxExpiresIn` follow
@@ -427,6 +436,16 @@ Not in the first cut: an adapter capability for upstream revocation (RFC 7009
 or provider-specific) could admit connections with unbounded token lifetimes
 as an explicit opt-in.
 
+**Amended in #616.** `upstream_token_ineligible` admits a reauthorization for
+one reason, `scope_exceeded`: a new consent can authorize the wider scope set
+an accumulating IdP now returns (D19); it cannot repair an unsupported token
+type, a malformed token response or an unsuitable lifetime, which remain
+operator remedies under the existing marker retry and `judgedAgainst` rules.
+Lodging an intent clears nothing. The callback's activation replaces the
+authorization and the credentials atomically and clears the markers; a refused
+activation preserves the grant. Scope containment is never relaxed to make a
+renewal succeed.
+
 ### D6 — Acquisition starts with an intent the backend lodges
 
 ```
@@ -493,6 +512,16 @@ authentication, serialization and audit; lodging itself — the order of the two
 writes, the backstop, every rule above — is core's
 `lodgeFederationGrantIntent` / `lodgeFederationGrantReauthorization`. Events:
 `federation.grant.requested` and `federation.grant.request.denied` (D18).
+
+**Amended in #616.** Reauthorization additionally accepts an effective
+`upstream_token_ineligible/scope_exceeded`, subject to every existing
+ownership, revocation, lifetime, connection, request and consent check; the
+other effective ineligibility reasons remain refused, judged as they read now
+and not as a marker was left. The successful lodging reports the status it was
+admitted from, `upstream_token_ineligible` included: lodging does not change
+it. The interaction reasons D11 adds use the already-admitted
+`reauthorization_required`. Naming an intent neither clears a stamp nor
+changes credentials; only the guarded activation completes the recovery.
 
 ### D7 — The connect flow binds its callback, and refuses on any mismatch
 
@@ -1078,13 +1107,13 @@ reason cannot be attached to a code that has none.
 | `grant_expired` | `consented_lifetime`, `operator_maximum` | 410 | ask for a new grant; only `operator_maximum` can lift by itself |
 | `grant_revoked` | `client`, `subject`, `operator`, `logout_policy`, `backstop` | 410 | terminal. Stop the work and tell the user; offer a fresh authorization, which is a new grant. Never retry, never `/reauthorize` |
 | `connection_identity_changed` | — | 410 | terminal while it lasts; ask for a new grant |
-| `reauthorization_required` | `upstream_invalid_grant`, `connection_changed`, `credential_unreadable` | 410 | call `/reauthorize`, send the user, retry later |
+| `reauthorization_required` | `upstream_invalid_grant`, `connection_changed`, `credential_unreadable`; and (#616) `upstream_interaction_required`, `upstream_login_required`, `upstream_consent_required`, `upstream_account_selection_required` — the credentials kept, no `Retry-After`, no cached token | 410 | call `/reauthorize`, send the user, retry later |
 | `access_denied` | `connection_not_permitted` | 403 | configuration: the client may not use the connection, the operator removed it, or its federation cannot refresh for a grant. Do not retry. Reported after a revocation, the backstop and an expiry, and before a changed identity (D10) |
 | `invalid_request` | `connection_mismatch`, `min_ttl_out_of_range` | 400 | the request is malformed; the reason is for an `error_description` |
 | `invalid_scope`, `invalid_target` | — | 400 | the request exceeds the grant — or, for `invalid_scope`, the stored token does not carry what was asked for and it is too early to ask the upstream again (D10): a refresh may bring the scope once the token is half spent |
 | `upstream_token_ineligible` | `no_finite_lifetime`, `lifetime_over_maximum`, `token_type_unsupported` | 502 | operator; the grant is untouched; honour `retryAfterSeconds`. `token_type_unsupported`: the upstream issues sender-constrained tokens for this client, which a bearer route cannot present |
 | `upstream_token_ineligible` | `malformed_token_response` | 502 | operator: the federation adapter reported an answer without a usable access token, or with a field of the wrong type. The grant is untouched; honour `retryAfterSeconds` |
-| `upstream_token_ineligible` | `scope_exceeded` | 502 | no operator action un-accumulates consent: `/reauthorize` for the wider set, or a new grant on a connection of its own (D19) |
+| `upstream_token_ineligible` | `scope_exceeded` | 502 | no operator action un-accumulates consent: `/reauthorize` for the wider set — the one ineligibility that admits it (#616) — or a new grant on a connection of its own (D19) |
 | `upstream_rejected` | the upstream's error code, or `unknown` (see the amendments below) | 502 | operator, e.g. an expired upstream client secret; the grant is untouched. Answered from the stamp of a failed refresh (D12) it carries `retryAfterSeconds`, and is answered only where nothing stored serves the request (D10). The code is repeated only when it is one of the RFC 6749, RFC 6750, RFC 8707 and OpenID Connect codes this provider knows, and is `unknown` otherwise — an allow-list, because any pattern that fits `invalid_client` fits an opaque token as well, and an upstream that echoes what it was sent must not get a refresh token repeated through this field |
 | `rate_limited` | `provider`, `upstream` | 429 | retry after `Retry-After`. `upstream` is answered only where nothing stored serves the request (D10) |
 | `temporarily_unavailable` | `upstream`, `storage`, `lock_timeout`, `concurrent_update`, `key_unavailable` | 503 | retry; the grant is untouched. Each of these is answered only where nothing stored serves the request (D10). `concurrent_update`: this call's refresh was overtaken — its guarded write lost, or what it wrote was replaced before the last look — and what is stored now is nothing to answer with |
@@ -1120,6 +1149,23 @@ the predicate again where the reason is constructed, in core rather than at any
 one consumer: the promise is about the result union, so sanitizing at the HTTP
 boundary alone would leave the hole for slice 5's revoke route and for anything
 reading the union directly.
+
+**Amended in #616.** A structured refresh error of `interaction_required`,
+`login_required`, `consent_required` or `account_selection_required` — read
+off the error's own code, never off a message — is remembered on the record
+as the refusal stamp D12 already writes, with the credentials kept: the IdP
+wants the user, not a new token. Its effective status and its token denial are
+`reauthorization_required`, with `upstream_` followed by the code as the
+reason; the token route answers 410 without `Retry-After`, the status route
+200 with that status and reason. The application pauses retrieval and
+completes a reauthorization. The stamp blocks cached disclosure and further
+refreshes, does not expire on any interval, and is cleared by a successful
+activation. Structured `invalid_grant` and `invalid_token` retain their
+separate, credential-deleting transition. Other refresh failures retain D12's
+failure stamp and backoff. What is answered comes from the final look at the
+record, never from the error in hand: a stamp that could not be written
+answers an outage, or a stored token that still serves; one superseded by a
+renewal answers the renewal.
 
 ### D12 — Refresh is coordinated per grant, and fails safe
 
@@ -1331,6 +1377,19 @@ reuse-detecting IdP answers by revoking the family.
 This does not claim exactly-once behaviour across an external IdP. It claims
 that isolation holds and that every ambiguous outcome resolves toward asking
 the user again.
+
+**Amended in #616.** A `rejected` failure stamp carrying one of the four
+interaction codes requires reauthorization independently of its timestamp,
+count, retry advice or backoff: the timed reader ignores it, the effective
+status reads it. Another failure stamp cannot replace it (D2). Activation,
+credential replacement, the destructive reauthorization transition and
+revocation clear it; lodging, consent alone and elapsed time do not. No new
+refresh starts from an evaluation that observes it. A refresh admitted before
+a delayed stamp became visible may still complete and replace the credentials,
+clearing the stamp; its rotated credential must be retained. A timed-out
+interaction stamp write keeps the lease until it expires. The stamp's `count`
+and `retryAfterSeconds` are written and ignored for these codes: an overload
+of one record, stated rather than a second one.
 
 ### D13 — Revocation is persisted on the grant; the watermark is the backstop
 
@@ -2074,6 +2133,10 @@ carries no authorization authentication at all, and its spelling is its own,
 so neither reader takes the other's. The in-memory adapter declares
 `replicaSafety: unsafe`.
 
+**Amended in #616.** No new persisted field: the failure stamp's existing
+representation carries the user's absence, distinguished by its kind and code.
+The port gains no operation; `noteRefreshFailure` gains the guard D2 names.
+
 ### D17 — The federation adapter surface gains one capability, in three methods
 
 Every adapter fixes its authorization parameters today, so `offline_access`
@@ -2341,6 +2404,14 @@ names the other owner of a conflicting account, and nothing beyond the
 established `{ issuer, subject }` of the upstream identity is carried — no
 claim, no directory record, no thrown message.
 
+**Amended in #616.** `.reauthorization_required` also records an acknowledged
+write of the interaction stamp, with outcome `upstream_` followed by its
+allow-listed code; this event does not imply credential deletion. Reading an
+existing stamp emits no new transition event; the token denials retain their
+ordinary `.token.denied`. A refused or unconfirmed stamp write uses the
+existing refresh-failure outcomes, `mark_lost` and `mark_not_written`. No
+upstream message and no credential is included.
+
 ### D19 — Entra: on-behalf-of is not implemented, and consent accumulates
 
 An OBO assertion must be an access token issued for the middle-tier API that
@@ -2409,14 +2480,14 @@ accumulation this decision exists to avoid.
 | 1 | survives restart and session expiry | D1, D14, D16 | Redis adapter: new client instance, token returned (`redis.integration.test.mts`); and through the connect flow — the grant agreed, the browser session and its durable record deleted, the process disposed of, a fresh deployment on the same stores answering `/status` and `/token` (`acquisition.acceptance.test.mts`, "#593 AC1") |
 | 2 | not renewable without refresh credentials | D5 | callback with no `refresh_token`: no credential is stored, the grant never leaves `pending`, the redirect says `refresh_token_absent` |
 | 3 | wrong client / subject / connection / environment / resource / scopes denied, grant ID known | D4, D9, D10 | one case per dimension, on all four grant-addressed routes; "not yours" responses are byte-identical; `boundary` change reads as `connection_changed` |
-| 4 | expired or revoked upstream credentials → reauthorization, no fallback | D11, D12 | structured upstream `invalid_grant`; assert no other grant or credential is read |
-| 5 | transient failures distinguishable and non-destructive | D5, D11, D12 | injected 5xx, 429, storage throw, `invalid_client`, over-long token lifetime, unreadable watermark; the authorization unchanged in each. The refresh credential is unchanged where the upstream did not answer with a token (5xx, 429, storage throw, `invalid_client`, unreadable watermark), and deliberately rotated where it did — the over-long lifetime is a real refresh answer, and D5 persists its rotated refresh token while withholding the access token. The failure stamp and the ineligibility marker change by design. A rotating upstream that answers between the soft and the hard deadline: the late credential is persisted, `.refreshed` is audited, the next call succeeds. One that answers after the hard deadline: an acknowledged loss, handled as a persist failure. A starved grant calls the upstream once per retry interval, not once per request |
-| 6 | concurrent refresh, lock expiry, restart, persistence failure | D2, D12 | two replicas on one testcontainer; lock TTL forced to expire; guarded-write loser; injected persist failure; refresh response without `refresh_token`; refresh straddling `expiresAt` |
-| 7 | duplicate, stale, wrong-account callbacks cannot replace or broaden | D5, D6, D7 | replayed callback; superseded intent; expired intent; different upstream `sub`; upstream grants more scopes than consented. Broadening through refresh: G1 consented for one scope, G2 later for two on the same connection, G1's refresh returns both — G1's client gets `upstream_token_ineligible`, never the token, and G2's client is served by the same answer (`retrieve.refresh.test.mts`, "row 7: G1, G2"). Added for #611: an upstream account the Store places with another user is `identity_conflict`; one it cannot place — a dedicated registration's pairwise `sub`, with the login's link under another registration — is `identity_unverifiable`, and the bundled repository beside a connection is refused at boot; a directory Store keyed by `(tid, oid)` finds Bob behind a `sub` no login saw (`identity_conflict`), and a callback missing a named claim refuses without asking it |
+| 4 | expired or revoked upstream credentials → reauthorization, no fallback | D11, D12 | structured upstream `invalid_grant`; assert no other grant or credential is read. #616: the four interaction codes — `reauthorization_required` by the code's name at `/token` (410, no `Retry-After`, no cached token) and at `/status`, both tokens kept, no refresh while the stamp stands, never from a message, a code beside a 429 or a 5xx still the user (`retrieve.refresh.test.mts`, `effective-status.test.mts`, `tokenRoute.test.mts`, `statusRoute.test.mts`) |
+| 5 | transient failures distinguishable and non-destructive | D5, D11, D12 | injected 5xx, 429, storage throw, `invalid_client`, over-long token lifetime, unreadable watermark; the authorization unchanged in each. The refresh credential is unchanged where the upstream did not answer with a token (5xx, 429, storage throw, `invalid_client`, unreadable watermark), and deliberately rotated where it did — the over-long lifetime is a real refresh answer, and D5 persists its rotated refresh token while withholding the access token. The failure stamp and the ineligibility marker change by design. A rotating upstream that answers between the soft and the hard deadline: the late credential is persisted, `.refreshed` is audited, the next call succeeds. One that answers after the hard deadline: an acknowledged loss, handled as a persist failure. A starved grant calls the upstream once per retry interval, not once per request. #616: the interaction codes are outside the timed backoff — a persistent pause the record remembers, not a wait |
+| 6 | concurrent refresh, lock expiry, restart, persistence failure | D2, D12 | two replicas on one testcontainer; lock TTL forced to expire; guarded-write loser; injected persist failure; refresh response without `refresh_token`; refresh straddling `expiresAt`. #616: an interaction stamp that could not be written, that lost, that landed under a renewal, that was overtaken by a replacement whose token does not serve; a late one against an admitted refresh's outage and against its success; the lease kept on a timed-out write (`retrieve.refresh.test.mts`; the store contract, both copies) |
+| 7 | duplicate, stale, wrong-account callbacks cannot replace or broaden | D5, D6, D7 | replayed callback; superseded intent; expired intent; different upstream `sub`; upstream grants more scopes than consented. Broadening through refresh: G1 consented for one scope, G2 later for two on the same connection, G1's refresh returns both — G1's client gets `upstream_token_ineligible`, never the token, and G2's client is served by the same answer (`retrieve.refresh.test.mts`, "row 7: G1, G2"). Added for #611: an upstream account the Store places with another user is `identity_conflict`; one it cannot place — a dedicated registration's pairwise `sub`, with the login's link under another registration — is `identity_unverifiable`, and the bundled repository beside a connection is refused at boot; a directory Store keyed by `(tid, oid)` finds Bob behind a `sub` no login saw (`identity_conflict`), and a callback missing a named claim refuses without asking it. #616: a grant starved of scope renewed for the wider set on the same id, the markers cleared only by the activation, a refused renewal leaving them; the other four ineligibilities refused before an intent is lodged (`lodge.test.mts`, `lodgeRoutes.test.mts`, `browserRoutes.test.mts`, `acquisition.acceptance.test.mts`) |
 | 8 | session-expiry / logout / subject-revocation behaviour; session-bound endpoint preserved | D13, D14 | slice 5, its proof completed after it: `POST /session/logout` and `POST /oauth/logout` driven on the standalone with a grant seeded beside a live session — the session's records go; the grant, its credential and `/token` stay (`templates/standalone/src/__tests__/federation-grants-survive-logout.test.mts`); subject revocation ends them; existing `federationToken` suite untouched and green. The policy-on cases are deferred with D14 |
-| 9 | no refresh token or long-lived secret in responses, audit or logs | D18 | a sentinel secret is grepped for in every response body, audit event and captured log line |
+| 9 | no refresh token or long-lived secret in responses, audit or logs | D18 | a sentinel secret is grepped for in every response body, audit event and captured log line; #616's denials and stamps carry an allow-listed code and nothing an upstream said |
 | — | the storage guarantees D1 and D16 claim | D1, D3, D4, D16 | a rewritten `clientId`, `expiresAt` or `authorizationRevision` reads as `credential_unreadable`; an unknown key ID answers 503, keeps the record, and restoring the key restores the grant; an identity change reads as `connection_identity_changed` and reverting it restores the grant; activation beyond the ceiling is refused |
-| 10 | provider-specific `offline_access` documentation | D19 | documentation review |
+| 10 | provider-specific `offline_access` documentation | D19 | documentation review; #616: the guide's refusal passage and its Entra passage against the tested recovery paths |
 
 The two review conditions add:
 

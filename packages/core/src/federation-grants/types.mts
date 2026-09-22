@@ -250,7 +250,13 @@ export interface FederationGrantIneligibilityMarker {
 export type FederationGrantReauthorizationReason =
 	| "upstream_invalid_grant"
 	| "connection_changed"
-	| "credential_unreadable";
+	| "credential_unreadable"
+	// The upstream asked for the user (#616, D11): the refresh was refused
+	// with one of the four interaction codes, and the credential is kept.
+	| "upstream_interaction_required"
+	| "upstream_login_required"
+	| "upstream_consent_required"
+	| "upstream_account_selection_required";
 
 export type FederationGrantExpiredReason = "consented_lifetime" | "operator_maximum";
 

@@ -1016,6 +1016,61 @@ describe("the callback for a renewal", () => {
 		expect(w.events.some((e) => e.type === "federation.grant.reauthorized")).toBe(true);
 	});
 
+	/** A renewal approved, on a grant left both starved of scope and asked for by the upstream (#616). */
+	const renewalOfAStarvedGrant = async (w: World) => {
+		const { grantId, state } = await renewal(w);
+		const grant = await w.grants.find(grantId, w.state.now);
+		const marked = await w.grants.replaceCredentials({
+			grantId,
+			expectedVersion: grant?.version ?? -1,
+			credentials: { refreshToken: "rt-starved" },
+			ineligible: {
+				reason: "scope_exceeded",
+				at: w.state.now,
+				judgedAgainst: CONNECTION.maxAccessTokenLifetime,
+			},
+			now: w.state.now,
+		});
+		if (!marked.ok) throw new Error("fixture: the marker was not left");
+		const noted = await w.grants.noteRefreshFailure({
+			grantId,
+			expectedVersion: marked.grant.version,
+			failure: { at: w.state.now, kind: "rejected", upstreamCode: "consent_required" },
+			rowMs: 300_000,
+			now: w.state.now,
+		});
+		if (!noted.ok) throw new Error("fixture: the stamp was not written");
+		const before = await w.grants.find(grantId, w.state.now);
+		expect(before).toMatchObject({
+			ineligible: { reason: "scope_exceeded" },
+			refreshFailure: { upstreamCode: "consent_required" },
+		});
+		return { grantId, state, before };
+	};
+
+	it("clears the stamp of the user's absence and the ineligibility marker together when the renewal activates (#616)", async () => {
+		const w = world();
+		const { grantId, state } = await renewalOfAStarvedGrant(w);
+		returned(await callback(w, { state, code: "c2" }, "b-2"));
+		const after = await w.grants.find(grantId, w.state.now);
+		expect(after?.status).toBe("active");
+		expect(after).not.toHaveProperty("ineligible");
+		expect(after).not.toHaveProperty("refreshFailure");
+	});
+
+	it("leaves both exactly as they were when the renewal is refused for another upstream account (#616)", async () => {
+		const w = world();
+		const { grantId, state, before } = await renewalOfAStarvedGrant(w);
+		w.state.exchange = {
+			...w.state.exchange,
+			upstream: { issuer: CONNECTION.upstreamIssuer, subject: "00u-someone-else" },
+		};
+		expect(returned(await callback(w, { state, code: "c2" }, "b-2")).get("error")).toBe(
+			"account_mismatch",
+		);
+		expect(await w.grants.find(grantId, w.state.now)).toEqual(before);
+	});
+
 	it("refuses another upstream account and leaves the grant exactly as it was", async () => {
 		const w = world();
 		const { grantId, state, before } = await renewal(w);

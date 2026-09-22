@@ -23,6 +23,7 @@ import { effectiveFederationGrantStatus } from "./effective-status.mjs";
 import {
 	federationGrantIneligibilityRetry,
 	federationGrantRefreshFailureStands,
+	isFederationGrantInteractionCode,
 	isUsableMaxUpstreamAccessTokenLifetime,
 	judgeUpstreamAccessToken,
 	scopesWithin,
@@ -1146,6 +1147,54 @@ async function refreshUnderLock(
 				audits: [["federation.grant.reauthorization_required", "upstream_invalid_grant"]],
 			};
 		}
+		// The upstream asked for the user (#616, D11): one of the four interaction
+		// codes, read off the error's own field — the classifier puts nothing a
+		// message said there — and ahead of the transport it came with, since a
+		// 429 or a 5xx that names the user is the user. Nothing said the refresh
+		// token is bad, so the credentials are kept; nothing is mended by waiting,
+		// so no wait is told. What is answered comes from the record: the stamp
+		// the record carries at the last look, or whatever replaced it — never
+		// the code in hand, which a renewal or a revocation may have overtaken
+		// while the stamp was being written.
+		if (isFederationGrantInteractionCode(classified.upstreamCode)) {
+			const reason = `upstream_${classified.upstreamCode}` as const;
+			const noted = await stamp(
+				deps,
+				request,
+				grant,
+				{ at: deps.now(), kind: "rejected", upstreamCode: classified.upstreamCode },
+				limits.persistRetryBudgetMs,
+			);
+			switch (noted) {
+				case "written":
+					// The last look reads it back as `reauthorization_required`. The
+					// fallback is for a record that no longer carries it.
+					return {
+						kind: "denied",
+						denial: unavailable("concurrent_update"),
+						audits: [["federation.grant.reauthorization_required", reason]],
+					};
+				case "refused":
+					// Refused on the version: renewed or ended while the upstream was
+					// answering. What it is now is the answer.
+					return { kind: "lost", audits: [["federation.grant.refresh_failed", "mark_lost"]] };
+				case "failed":
+					return {
+						kind: "denied",
+						denial: unavailable("storage"),
+						audits: [["federation.grant.refresh_failed", "mark_not_written"]],
+					};
+				case "elapsed":
+					// The write may still land. The lease is kept so that it does not
+					// land under the next holder's refresh (D12).
+					return {
+						kind: "denied",
+						denial: unavailable("storage"),
+						audits: [["federation.grant.refresh_failed", "mark_not_written"]],
+						keepLock: true,
+					};
+			}
+		}
 		// None of the rest changes the credentials. The failure is stamped on the
 		// record (D12), so that the next request does not ask a failing upstream
 		// again at once — a refusal, and an outage from the second time on.
@@ -1358,9 +1407,12 @@ async function refreshUnderLock(
 
 /**
  * Stamps a failed refresh on the record (D12): one attempt, bounded, under the
- * lock, so that every waiter finds it. It never changes the answer — the last
- * look answers a stored token that serves with or without it — and a store
- * that will not take it is told to the logger.
+ * lock, so that every waiter finds it. For the timed backoff it never changes
+ * the answer — the last look answers a stored token that serves with or
+ * without it — and a store that will not take it is told to the logger. What
+ * it came to is returned for the one stamp that IS the answer, the user's
+ * absence (#616): `written`, `refused` on the guard, `failed` on a throw, or
+ * `elapsed` past the budget, when the write may still land.
  */
 async function stamp(
 	deps: RetrieveFederationGrantTokenDeps,
@@ -1368,7 +1420,7 @@ async function stamp(
 	grant: AuthorizedFederationGrant,
 	failure: FederationGrantRefreshFailureInput,
 	budgetMs: number,
-): Promise<void> {
+): Promise<"written" | "refused" | "failed" | "elapsed"> {
 	const noted = await within(
 		settle(() =>
 			deps.store.noteRefreshFailure({
@@ -1381,10 +1433,17 @@ async function stamp(
 		),
 		budgetMs,
 	);
-	if (noted === "elapsed") report(deps, request, "mark", NOT_ANSWERED);
-	else if (!noted.ok) report(deps, request, "mark", noted.error);
+	if (noted === "elapsed") {
+		report(deps, request, "mark", NOT_ANSWERED);
+		return "elapsed";
+	}
+	if (!noted.ok) {
+		report(deps, request, "mark", noted.error);
+		return "failed";
+	}
 	// Refused on the version, the stamp says nothing about the credentials the
 	// grant has now: nothing to report.
+	return noted.value.ok ? "written" : "refused";
 }
 
 /** Lets go of a lock, waiting so long and no longer, and tells the logger when it could not. Never rejects. */

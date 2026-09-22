@@ -28,6 +28,7 @@ import type {
 	AuthorizedFederationGrant,
 	FederationGrant,
 	FederationGrantConnection,
+	FederationGrantRefreshFailure,
 } from "#/federation-grants/types.mjs";
 
 const DAY = 86_400_000;
@@ -243,6 +244,123 @@ describe("effectiveFederationGrantStatus (#593, D1)", () => {
 			expect(
 				effectiveFederationGrantStatus(starved, { ...context, credentials: "unreadable" }),
 			).toEqual({ status: "reauthorization_required", reason: "credential_unreadable" });
+		});
+	});
+
+	describe("an upstream that asked for the user (#616, D11, D12)", () => {
+		// A refresh refused with one of the four interaction codes leaves the
+		// stamp any refusal leaves (D12). What the stamp means is different: the
+		// IdP wants the user, not a new token, so the grant reads as needing a
+		// reauthorization — for as long as the stamp stands, since time mends
+		// nothing here — and the credential is kept, since nothing said it was bad.
+		const codes = [
+			"interaction_required",
+			"login_required",
+			"consent_required",
+			"account_selection_required",
+		] as const;
+		const askedFor = (
+			code: string,
+			over: Partial<FederationGrantRefreshFailure> = {},
+		): AuthorizedFederationGrant => ({
+			...active,
+			refreshFailure: {
+				at: at(DAY - 60_000),
+				kind: "rejected",
+				count: 1,
+				upstreamCode: code,
+				...over,
+			},
+		});
+
+		for (const code of codes) {
+			it(`reports a refusal of ${code} as a reauthorization, by that name`, () => {
+				expect(effectiveFederationGrantStatus(askedFor(code), context)).toEqual({
+					status: "reauthorization_required",
+					reason: `upstream_${code}`,
+				});
+			});
+		}
+
+		it("reports it for as long as the stamp stands, whatever its date, count or advice say", () => {
+			expect(
+				effectiveFederationGrantStatus(
+					askedFor("consent_required", { count: 7, retryAfterSeconds: 60 }),
+					{ ...context, now: at(10 * DAY) },
+				),
+			).toEqual({ status: "reauthorization_required", reason: "upstream_consent_required" });
+		});
+
+		it("is a refusal and nothing else: an outage or a rate limit carrying the same string is not the user being asked for", () => {
+			expect(
+				effectiveFederationGrantStatus(
+					askedFor("consent_required", { kind: "unavailable" }),
+					context,
+				),
+			).toEqual({ status: "active" });
+			expect(
+				effectiveFederationGrantStatus(
+					askedFor("login_required", { kind: "rate_limited" }),
+					context,
+				),
+			).toEqual({ status: "active" });
+		});
+
+		it("is not what any other refusal is: a code outside the four is the timed backoff's, and the grant reads active", () => {
+			expect(effectiveFederationGrantStatus(askedFor("invalid_client"), context)).toEqual({
+				status: "active",
+			});
+		});
+
+		it("comes after what is reported ahead of every reauthorization: a revocation, an expiry, a stored invalid_grant, a credential that does not open", () => {
+			expect(
+				effectiveFederationGrantStatus(
+					{
+						...askedFor("consent_required"),
+						status: "revoked",
+						revocation: { by: "client", at: at(DAY) },
+					} as FederationGrant,
+					context,
+				),
+			).toEqual({ status: "revoked", reason: "client" });
+			expect(
+				effectiveFederationGrantStatus(askedFor("consent_required"), {
+					...context,
+					now: at(31 * DAY),
+				}),
+			).toEqual({ status: "expired", reason: "consented_lifetime" });
+			expect(
+				effectiveFederationGrantStatus(
+					{
+						...askedFor("consent_required"),
+						status: "reauthorization_required",
+					} as FederationGrant,
+					context,
+				),
+			).toEqual({ status: "reauthorization_required", reason: "upstream_invalid_grant" });
+			expect(
+				effectiveFederationGrantStatus(askedFor("consent_required"), {
+					...context,
+					credentials: "unreadable",
+				}),
+			).toEqual({ status: "reauthorization_required", reason: "credential_unreadable" });
+		});
+
+		it("comes before what waiting might mend: a maximum no token can satisfy, and a standing marker, give way to the user", () => {
+			const starved: AuthorizedFederationGrant = {
+				...askedFor("consent_required"),
+				ineligible: { reason: "scope_exceeded", at: at(DAY - 60_000), judgedAgainst: 3600 },
+			};
+			expect(effectiveFederationGrantStatus(starved, context)).toEqual({
+				status: "reauthorization_required",
+				reason: "upstream_consent_required",
+			});
+			expect(
+				effectiveFederationGrantStatus(askedFor("consent_required"), {
+					...context,
+					connection: { ...connection, maxAccessTokenLifetime: 0 },
+				}),
+			).toEqual({ status: "reauthorization_required", reason: "upstream_consent_required" });
 		});
 	});
 

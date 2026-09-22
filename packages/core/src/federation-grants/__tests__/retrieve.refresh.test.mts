@@ -97,6 +97,8 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 	};
 
 	/** A refresh whose upstream call is held open until the test settles it. */
+	const stamp = async () => (await h.store.find("g-1", now()))?.refreshFailure;
+
 	const pendingUpstream = () => {
 		const call = deferred<FederationGrantRefreshedToken>();
 		h.refresh.mockReturnValueOnce(call.promise);
@@ -448,6 +450,303 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 				ok: false,
 				code: "grant_revoked",
 				reason: "subject",
+			});
+		});
+
+		describe("an upstream that asked for the user (#616, D11, D12)", () => {
+			// The four codes an IdP answers with when it wants the user and not a
+			// new token. Nothing said the refresh token is bad, so both tokens are
+			// kept; nothing is mended by waiting, so no wait is told; and the
+			// answer is read off the record, never off the error in hand.
+			const codes = [
+				"interaction_required",
+				"login_required",
+				"consent_required",
+				"account_selection_required",
+			] as const;
+			const asksFor = (code: string, over: object = {}) =>
+				Object.assign(new Error("server responded with an error"), { error: code, ...over });
+			const renewal = () => ({
+				identityRevision: federationGrantIdentityRevision(connection),
+				authorizationRevision: federationGrantAuthorizationRevision(connection),
+				upstream: { issuer: connection.upstreamIssuer, subject: "00u-alice" },
+				scopes: [...SCOPES],
+				consent: { at: now(), sid: "sid-re", scopes: [...CONSENTED] },
+				authorizedAt: now(),
+				expiresAt: new Date(now().getTime() + 30 * DAY),
+			});
+
+			for (const code of codes) {
+				it(`remembers a structured ${code} as the user being asked for: both tokens kept, named, no wait`, async () => {
+					const grant = await h.seed();
+					setNow(DUE);
+					h.refresh.mockRejectedValue(asksFor(code));
+					expect(await retrieve()).toStrictEqual({
+						ok: false,
+						code: "reauthorization_required",
+						reason: `upstream_${code}`,
+					});
+					expect(await h.store.find("g-1", DUE)).toMatchObject({
+						status: "active",
+						version: grant.version,
+						refreshFailure: { kind: "rejected", upstreamCode: code, count: 1 },
+					});
+					expect(h.store.holdsCredential("g-1")).toBe(true);
+					expect(await stored()).toMatchObject({
+						refreshToken: SECRET,
+						accessToken: { value: "at-0" },
+					});
+					expect(await types()).toEqual(
+						expect.arrayContaining([
+							`federation.grant.reauthorization_required upstream_${code}`,
+							`federation.grant.token.denied reauthorization_required/upstream_${code}`,
+						]),
+					);
+				});
+			}
+
+			it("prefers the structured code to the transport it came with: beside a 429 it is still the user", async () => {
+				await h.seed();
+				setNow(DUE);
+				h.refresh.mockRejectedValue(
+					asksFor("consent_required", {
+						status: 429,
+						response: new Response(null, { status: 429, headers: { "retry-after": "120" } }),
+					}),
+				);
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "reauthorization_required",
+					reason: "upstream_consent_required",
+				});
+			});
+
+			it("and beside a 503 as well: an outage that names the user is the user", async () => {
+				await h.seed();
+				setNow(DUE);
+				h.refresh.mockRejectedValue(asksFor("login_required", { status: 503 }));
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "reauthorization_required",
+					reason: "upstream_login_required",
+				});
+			});
+
+			it("does not establish it from a message alone: a proxy's page that says consent_required is a refusal nobody can read", async () => {
+				await h.seed();
+				setNow(GONE);
+				h.refresh.mockRejectedValue(new Error("consent_required: said a proxy's error page"));
+				expect(await retrieve()).toMatchObject({
+					ok: false,
+					code: "upstream_rejected",
+					reason: "unknown",
+				});
+				expect((await h.store.find("g-1", DUE))?.refreshFailure).not.toHaveProperty("upstreamCode");
+			});
+
+			it("asks the upstream once and never again while the stamp stands: a call a week on is answered from the record", async () => {
+				await h.seed();
+				setNow(DUE);
+				h.refresh.mockRejectedValue(asksFor("login_required"));
+				await retrieve();
+				setNow(new Date(DUE.getTime() + 7 * DAY));
+				expect(await retrieve({ correlationId: "req-2" })).toStrictEqual({
+					ok: false,
+					code: "reauthorization_required",
+					reason: "upstream_login_required",
+				});
+				expect(h.refresh).toHaveBeenCalledTimes(1);
+			});
+
+			it("answers storage when the stamp could not be written — nothing remembered, the credentials kept — and what is stored when it lost", async () => {
+				await h.seed();
+				setNow(GONE);
+				h.refresh.mockRejectedValue(asksFor("consent_required"));
+				const note = vi
+					.spyOn(h.store, "noteRefreshFailure")
+					.mockRejectedValueOnce(new Error("redis down"));
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				expect(await h.store.find("g-1", DUE)).toMatchObject({ status: "active" });
+				expect(await h.store.find("g-1", DUE)).not.toHaveProperty("refreshFailure");
+				expect(await stored()).toMatchObject({ refreshToken: SECRET });
+				expect(await types()).toContain("federation.grant.refresh_failed mark_not_written");
+
+				// Lost: the grant was revoked while the upstream was answering. The
+				// revocation is what is reported, never the denial in hand.
+				note.mockImplementationOnce(async () => {
+					await h.store.revoke("g-1", "subject", now());
+					return { ok: false };
+				});
+				expect(await retrieve({ correlationId: "req-2" })).toStrictEqual({
+					ok: false,
+					code: "grant_revoked",
+					reason: "subject",
+				});
+				expect(await types()).toContain("federation.grant.refresh_failed mark_lost");
+			});
+
+			it("does not repeat a denial the record no longer carries: a renewal that landed between the stamp and the last look is what is answered", async () => {
+				await h.seed();
+				setNow(DUE);
+				h.refresh.mockRejectedValue(asksFor("consent_required"));
+				const real = h.store.noteRefreshFailure.bind(h.store);
+				vi.spyOn(h.store, "noteRefreshFailure").mockImplementationOnce(async (input) => {
+					const noted = await real(input);
+					// The user came back meanwhile: a reauthorization activates over the stamp.
+					await h.store.nameIntent({
+						grantId: "g-1",
+						intent: { handle: "h-re", expiresAt: new Date(now().getTime() + 10 * MIN) },
+						now: now(),
+					});
+					const renewed = await h.store.activate({
+						grantId: "g-1",
+						intentHandle: "h-re",
+						authorization: renewal(),
+						credentials: {
+							refreshToken: `${SECRET}-re`,
+							accessToken: {
+								value: "at-re",
+								tokenType: "Bearer",
+								obtainedAt: now(),
+								issuedLifetime: 3600,
+								scopes: [...SCOPES],
+							},
+						},
+						now: now(),
+					});
+					if (!renewed.ok) throw new Error("fixture: the renewal did not activate");
+					return noted;
+				});
+				expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-re" });
+				expect(await h.store.find("g-1", now())).not.toHaveProperty("refreshFailure");
+			});
+
+			it("answers concurrent_update, never the user, when the record was replaced under it by a token that does not serve", async () => {
+				// The stamp was written, and between that and the last look another
+				// writer replaced the credentials — with a token already run out, so
+				// the look would refresh. The denial in hand says the user; the
+				// record says nothing of the kind any more. What is answered is
+				// that this call was overtaken.
+				await h.seed();
+				setNow(GONE);
+				h.refresh.mockRejectedValue(asksFor("consent_required"));
+				const real = h.store.noteRefreshFailure.bind(h.store);
+				vi.spyOn(h.store, "noteRefreshFailure").mockImplementationOnce(async (input) => {
+					const noted = await real(input);
+					const replaced = await h.store.replaceCredentials({
+						grantId: "g-1",
+						expectedVersion: input.expectedVersion,
+						credentials: {
+							refreshToken: `${SECRET}-other`,
+							accessToken: {
+								value: "at-other",
+								tokenType: "Bearer",
+								obtainedAt: new Date(now().getTime() - 2 * HOUR),
+								issuedLifetime: 3600,
+								scopes: [...SCOPES],
+							},
+						},
+						ineligible: null,
+						now: now(),
+					});
+					if (!replaced.ok) throw new Error("fixture: the replacement did not land");
+					return noted;
+				});
+				expect(await retrieve()).toStrictEqual({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "concurrent_update",
+				});
+				expect(await stamp()).toBeUndefined();
+			});
+
+			it("keeps the lease while the stamp is still being written: one past the budget must not land under the next holder", async () => {
+				await h.seed();
+				setNow(GONE);
+				h.refresh.mockRejectedValue(asksFor("consent_required"));
+				vi.spyOn(h.store, "noteRefreshFailure").mockReturnValue(new Promise(() => {}));
+				const answer = retrieve();
+				await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs + 50);
+				expect(await answer).toStrictEqual({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "storage",
+				});
+				const second = retrieve({ correlationId: "req-2" });
+				await vi.advanceTimersByTimeAsync(limits.lockWaitMs + 3_100);
+				expect(await second).toStrictEqual({
+					ok: false,
+					code: "temporarily_unavailable",
+					reason: "lock_timeout",
+				});
+				expect(h.refresh).toHaveBeenCalledTimes(1);
+			});
+
+			it("is not overwritten by an admitted refresh's failure: a stamp that landed late stands, and the next holder is answered from it", async () => {
+				// A's stamp hangs past the budget and past the lease; B takes the
+				// lock and is asking the upstream when A's stamp lands; B's outage
+				// arrives after it. The store refuses B's stamp (commit 1), and B's
+				// last look reads the user.
+				await h.seed();
+				setNow(GONE);
+				const real = h.store.noteRefreshFailure.bind(h.store);
+				vi.spyOn(h.store, "noteRefreshFailure").mockImplementationOnce(async (input) => {
+					await new Promise((resolve) => setTimeout(resolve, limits.refreshLockTtlMs + 5_000));
+					return real(input);
+				});
+				h.refresh.mockRejectedValueOnce(asksFor("consent_required"));
+				const first = retrieve();
+				await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs + 100);
+				expect(await first).toMatchObject({ code: "temporarily_unavailable", reason: "storage" });
+
+				await vi.advanceTimersByTimeAsync(limits.refreshLockTtlMs + 1_000);
+				const call = pendingUpstream();
+				const second = retrieve({ correlationId: "req-2" });
+				await vi.advanceTimersByTimeAsync(100);
+				expect(h.refresh).toHaveBeenCalledTimes(2);
+				// A's stamp lands while B is still waiting on the upstream — and
+				// inside B's own deadline, so that what B does next is B's write.
+				await vi.advanceTimersByTimeAsync(2_000);
+				expect(await stamp()).toMatchObject({ kind: "rejected", upstreamCode: "consent_required" });
+				call.reject(Object.assign(new Error("x"), { status: 503 }));
+				expect(await second).toStrictEqual({
+					ok: false,
+					code: "reauthorization_required",
+					reason: "upstream_consent_required",
+				});
+				await Promise.all(h.background);
+				expect(await stamp()).toMatchObject({ kind: "rejected", upstreamCode: "consent_required" });
+			});
+
+			it("is overtaken by an admitted refresh that succeeds: its rotated credential is what is stored, and the stamp is gone", async () => {
+				await h.seed();
+				setNow(GONE);
+				const real = h.store.noteRefreshFailure.bind(h.store);
+				vi.spyOn(h.store, "noteRefreshFailure").mockImplementationOnce(async (input) => {
+					await new Promise((resolve) => setTimeout(resolve, limits.refreshLockTtlMs + 5_000));
+					return real(input);
+				});
+				h.refresh.mockRejectedValueOnce(asksFor("consent_required"));
+				const first = retrieve();
+				await vi.advanceTimersByTimeAsync(limits.persistRetryBudgetMs + 100);
+				expect(await first).toMatchObject({ code: "temporarily_unavailable", reason: "storage" });
+
+				await vi.advanceTimersByTimeAsync(limits.refreshLockTtlMs + 1_000);
+				const call = pendingUpstream();
+				const second = retrieve({ correlationId: "req-2" });
+				await vi.advanceTimersByTimeAsync(100);
+				expect(h.refresh).toHaveBeenCalledTimes(2);
+				await vi.advanceTimersByTimeAsync(2_000);
+				expect(await stamp()).toMatchObject({ kind: "rejected", upstreamCode: "consent_required" });
+				call.resolve(refreshed("b", now()));
+				expect(await second).toMatchObject({ ok: true, accessToken: "at-b" });
+				await Promise.all(h.background);
+				expect(await stamp()).toBeUndefined();
+				expect(await stored()).toMatchObject({ refreshToken: `${SECRET}-b` });
 			});
 		});
 

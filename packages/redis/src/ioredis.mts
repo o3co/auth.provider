@@ -1196,6 +1196,15 @@ local previous = fg_num(g['failureAt'])
 local count = 1
 if previous ~= nil then
   if failedAt < previous then return {0} end
+  -- Never over the user (#616, D12): a refusal that says the user has to come
+  -- back is read as reauthorization_required, and no later stamp replaces it.
+  if g['failureKind'] == 'rejected' then
+    local code = g['failureUpstreamCode']
+    if code == 'interaction_required' or code == 'login_required'
+      or code == 'consent_required' or code == 'account_selection_required' then
+      return {0}
+    end
+  end
   local since = failedAt - previous
   if row ~= nil and since <= row then
     count = (fg_num(g['failureCount']) or 0) + 1

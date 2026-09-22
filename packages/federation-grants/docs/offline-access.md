@@ -49,8 +49,19 @@ And what the callback holds the answer to (`packages/federation-grants/README.md
   callback's exchange has no such salvage: an acquisition whose answer could
   not be verified has no grant to keep a token under, and fails whole;
 - the grant's own lifetime is an upper bound on the local authorization, not
-  a promise that the upstream's refresh token lasts that long. When the
-  upstream refuses a refresh, the grant reads `reauthorization_required`.
+  a promise that the upstream's refresh token lasts that long. A structured
+  `invalid_grant` or `invalid_token` answer to a refresh makes the grant read
+  `reauthorization_required` with reason `upstream_invalid_grant`, and deletes
+  its stored credentials. A structured `interaction_required`,
+  `login_required`, `consent_required` or `account_selection_required` answer
+  — the IdP wants the user, not a new token — also makes it read
+  `reauthorization_required`, with reason `upstream_` followed by that code,
+  but keeps the credentials (#616). `/token` then answers 410 with no
+  `Retry-After` and no cached token, until a reauthorization activates; pause
+  the worker and send the user through `/reauthorize` — elapsed time alone
+  resumes nothing. Other refresh failures follow the outage, rate-limit and
+  refusal rules and their backoff. An error's message alone establishes none
+  of this; only the code the IdP put on the error does.
 
 ## Microsoft Entra ID
 
@@ -109,9 +120,24 @@ of the application." — "when you request an **Access Token** for a resource,
 all the scopes you have previously consented to for that resource will be
 returned, regardless of what scope was requested at the time." So two grants
 with different scope subsets on one registration broaden each other: the
-narrower one's token comes back carrying the wider one's scopes, check 7
-refuses it, and the narrower grant is unusable until reauthorized for the
-wider set (D5). The rule is one connection per fixed scope set with
+narrower one's token comes back carrying the wider one's scopes, and the
+provider withholds it — the callback refuses such an authorization, and a
+refresh that returns one leaves the grant `upstream_token_ineligible` with
+reason `scope_exceeded`, a stored token that still serves being served
+meanwhile (D5).
+
+To keep the same grant, call `POST /oauth/federation-grants/:grantId/reauthorize`
+for a scope set that covers what the registration now returns — within the
+connection's configured set — and have the user consent to it:
+`scope_exceeded` is the one ineligibility that admits a renewal (#616), since
+a wider consent is exactly its remedy. Lodging the renewal leaves the old
+authorization, credential and marker in place; only the callback's activation
+replaces them and clears the marker. Asking again for the narrower set undoes
+no accumulated consent and fails the same way.
+
+If the user should not consent to the wider set, revoke the grant and lodge a
+new one on a connection with an app registration of its own and the intended
+fixed scope set; a renewal never moves a grant to another connection. The rule is one connection per fixed scope set with
 `allowScopeSubsets = false`, each on an app registration of its own, separate
 from the login registration (whose `profile` and `email` consent accumulates
 just the same). **Unverified**: that the same accumulation applies to the

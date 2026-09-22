@@ -54,7 +54,7 @@ import express from "express";
 import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import request from "supertest";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
 import { ACQUISITION_ENDPOINTS, callbackUrlFor } from "./acquisitionFixture.mjs";
 
@@ -743,6 +743,219 @@ describe("#593 AC1: a consented grant survives the initiating session's end and 
 			});
 		} finally {
 			await second.handle.dispose();
+		}
+	});
+});
+
+describe("#616: a grant the upstream asked the user for, and one starved of scope, recover on the same grant id", () => {
+	const codes = [
+		"interaction_required",
+		"login_required",
+		"consent_required",
+		"account_selection_required",
+	] as const;
+	const original = {
+		refreshDelegatedToken: upstream.refreshDelegatedToken,
+		exchangeDelegatedCode: upstream.exchangeDelegatedCode,
+	};
+	afterEach(() => {
+		Object.assign(upstream, original);
+		vi.useRealTimers();
+	});
+
+	/** A browser signed in as alice now, with its durable session. */
+	const signIn = (browser: string): void => {
+		const sid = `sid-${browser}`;
+		browsers.set(browser, { isAuthenticated: true, user: { id: "alice" }, sid });
+		durable.set(sid, {
+			sid,
+			sub: "alice",
+			authTime: new Date(),
+			createdAt: new Date(),
+			expiresAt: new Date(Date.now() + 86_400_000),
+			claims: {},
+		} as UserSession);
+	};
+
+	/** The browser half of a lodged intent: connect, consent, callback; what came back to the client. */
+	const walk = async (app: express.Express, browser: string, connectUri: string): Promise<URL> => {
+		const connect = new URL(connectUri);
+		const started = await request(app)
+			.get(`${connect.pathname}${connect.search}`)
+			.set("x-browser", browser);
+		expect(started.status).toBe(303);
+		const challenge =
+			new URL(started.headers.location as string, ISSUER).searchParams.get("challenge") ?? "";
+		const approved = await request(app)
+			.post("/session/federation-grants/consent")
+			.set("x-browser", browser)
+			.send({ challenge, decision: "accept" });
+		expect(approved.status).toBe(303);
+		const state = new URL(approved.headers.location as string).searchParams.get("state") ?? "";
+		const returned = await request(app)
+			.get("/session/federation-grants/callback/calendar")
+			.query({ state, code: "code-616" })
+			.set("x-browser", browser);
+		expect(returned.status).toBe(303);
+		const back = new URL(returned.headers.location as string);
+		expect(back.searchParams.get("error")).toBeNull();
+		return back;
+	};
+
+	/** A grant agreed for alice through the real flow, lodged with `body` over the defaults. */
+	const agree = async (
+		app: express.Express,
+		browser: string,
+		body: Record<string, unknown> = {},
+	): Promise<string> => {
+		const lodged = await request(app)
+			.post("/oauth/federation-grants")
+			.set("Authorization", basic)
+			.send({ connection: "calendar", sub: "alice", redirect_uri: REDIRECT, state: "s", ...body });
+		expect(lodged.status).toBe(201);
+		signIn(browser);
+		const back = await walk(app, browser, lodged.body.connect_uri as string);
+		return back.searchParams.get("grant_id") as string;
+	};
+
+	const token = (app: express.Express, grantId: string) =>
+		request(app)
+			.post(`/oauth/federation-grants/${grantId}/token`)
+			.set("Authorization", basic)
+			.send({ sub: "alice" });
+	const status = (app: express.Express, grantId: string) =>
+		request(app)
+			.post(`/oauth/federation-grants/${grantId}/status`)
+			.set("Authorization", basic)
+			.send({ sub: "alice" });
+	const reauthorize = (app: express.Express, grantId: string, body: Record<string, unknown> = {}) =>
+		request(app)
+			.post(`/oauth/federation-grants/${grantId}/reauthorize`)
+			.set("Authorization", basic)
+			.send({ sub: "alice", redirect_uri: REDIRECT, state: "s2", ...body });
+
+	/** An hour and a second on: the token the flow obtained has run out, and the next call refreshes. */
+	const runDown = (): void => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(Date.now() + 3_601_000));
+	};
+
+	for (const code of codes) {
+		it(`recovers from ${code}: 410 by name and no wait, the status says the same, one renewal, then a token`, async () => {
+			const { handle, app } = await boot();
+			try {
+				const grantId = await agree(app, `b-${code}`);
+				// The job pauses; meanwhile the IdP's policy changes under it, and
+				// the next refresh is answered with the user's absence.
+				Object.assign(upstream, {
+					refreshDelegatedToken: async () => {
+						throw Object.assign(new Error("server responded with an error"), { error: code });
+					},
+				});
+				runDown();
+				const denied = await token(app, grantId);
+				expect(denied.status).toBe(410);
+				expect(denied.body).toEqual({
+					error: "reauthorization_required",
+					error_description: `upstream_${code}`,
+				});
+				expect(denied.headers["retry-after"]).toBeUndefined();
+				expect((await status(app, grantId)).body).toMatchObject({
+					status: "reauthorization_required",
+					reason: `upstream_${code}`,
+				});
+				// Polling changes nothing: the record remembers, and the upstream is not asked.
+				let asked = 0;
+				Object.assign(upstream, {
+					refreshDelegatedToken: async () => {
+						asked += 1;
+						throw new Error("must not be asked");
+					},
+				});
+				expect((await token(app, grantId)).status).toBe(410);
+				expect(asked).toBe(0);
+
+				// The user comes back: one renewal, the browser through connect, consent
+				// and the callback, and the same grant serves again.
+				const renewed = await reauthorize(app, grantId);
+				expect(renewed.status).toBe(201);
+				expect(renewed.body).toMatchObject({
+					grant_id: grantId,
+					status: "reauthorization_required",
+				});
+				signIn(`b-${code}-2`);
+				const back = await walk(app, `b-${code}-2`, renewed.body.connect_uri as string);
+				expect(back.searchParams.get("grant_id")).toBe(grantId);
+				const served = await token(app, grantId);
+				expect(served.status).toBe(200);
+				expect(served.body.access_token).toBe("upstream-access-token");
+				expect((await status(app, grantId)).body).toMatchObject({ status: "active" });
+			} finally {
+				await handle.dispose();
+			}
+		});
+	}
+
+	it("recovers a grant starved of scope through a wider consent, on the same grant id", async () => {
+		const { handle, app } = await boot();
+		try {
+			// A narrow first consent, which the upstream honours as asked.
+			Object.assign(upstream, {
+				exchangeDelegatedCode: async () => {
+					const base = await original.exchangeDelegatedCode();
+					return { ...base, tokens: { ...base.tokens, scope: "openid offline_access" } };
+				},
+			});
+			const grantId = await agree(app, "b-narrow", { scope: "openid offline_access" });
+			expect((await status(app, grantId)).body).toMatchObject({ scope: "openid offline_access" });
+
+			// Later, a wider consent on the same registration: the IdP now answers
+			// every refresh with the accumulated set (D19), and this grant is starved.
+			Object.assign(upstream, {
+				refreshDelegatedToken: async () => ({
+					accessToken: "wide-token",
+					refreshToken: "rt-wide",
+					expiresIn: 3600,
+					expiresAt: new Date(Date.now() + 3_600_000),
+					tokenType: "bearer",
+					scope: "openid offline_access calendar.read",
+				}),
+			});
+			runDown();
+			const starved = await token(app, grantId);
+			expect(starved.status).toBe(502);
+			expect(starved.body).toMatchObject({
+				error: "upstream_token_ineligible",
+				error_description: "scope_exceeded",
+			});
+			expect((await status(app, grantId)).body).toMatchObject({
+				status: "upstream_token_ineligible",
+				reason: "scope_exceeded",
+			});
+
+			// The way back: a renewal for the set the registration now returns,
+			// consented to by the user, activated by the callback.
+			Object.assign(upstream, { exchangeDelegatedCode: original.exchangeDelegatedCode });
+			const renewed = await reauthorize(app, grantId, {
+				scope: "openid offline_access calendar.read",
+			});
+			expect(renewed.status).toBe(201);
+			expect(renewed.body).toMatchObject({
+				grant_id: grantId,
+				status: "upstream_token_ineligible",
+			});
+			signIn("b-wide");
+			const back = await walk(app, "b-wide", renewed.body.connect_uri as string);
+			expect(back.searchParams.get("grant_id")).toBe(grantId);
+			const served = await token(app, grantId);
+			expect(served.status).toBe(200);
+			expect(served.body.access_token).toBe("upstream-access-token");
+			expect((await status(app, grantId)).body).toMatchObject({
+				status: "active",
+				scope: "openid offline_access calendar.read",
+			});
+		} finally {
+			await handle.dispose();
 		}
 	});
 });

@@ -239,6 +239,45 @@ describe("POST /oauth/federation-grants/:grantId/reauthorize — renewing a gran
 		expect((await h.store.find(GRANT_ID, h.world.now))?.status).toBe("active");
 	});
 
+	it("admits a grant starved of scope and answers 201 with the ineligibility it does not change (#616)", async () => {
+		const h = harness();
+		await h.seed();
+		const grant = await h.store.find(GRANT_ID, h.world.now);
+		const marked = await h.store.replaceCredentials({
+			grantId: GRANT_ID,
+			expectedVersion: grant?.version ?? -1,
+			credentials: { refreshToken: SECRET },
+			ineligible: {
+				reason: "scope_exceeded",
+				at: h.world.now,
+				judgedAgainst: connection.maxAccessTokenLifetime,
+			},
+			now: h.world.now,
+		});
+		expect(marked.ok).toBe(true);
+		const response = await renew(h);
+		expect(response.status).toBe(201);
+		expect(response.body).toMatchObject({
+			grant_id: GRANT_ID,
+			status: "upstream_token_ineligible",
+		});
+		expect((await h.store.find(GRANT_ID, h.world.now))?.ineligible).toMatchObject({
+			reason: "scope_exceeded",
+		});
+	});
+
+	it("refuses every other ineligibility as it did: 502, by its reason, and no intent (#616)", async () => {
+		const h = harness();
+		await h.seed();
+		h.world.connections.set(connection.name, { ...connection, maxAccessTokenLifetime: 0 });
+		const response = await renew(h);
+		expect(response.status).toBe(502);
+		expect(response.body).toEqual({
+			error: "upstream_token_ineligible",
+			error_description: "lifetime_over_maximum",
+		});
+	});
+
 	it("answers one way for an unknown grant, another client's and another subject's", async () => {
 		const h = harness();
 		await h.seed({ clientId: "someone-else" });

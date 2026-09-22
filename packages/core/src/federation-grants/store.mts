@@ -260,9 +260,13 @@ export interface FederationGrantStore {
 	 * `1` otherwise: failures further apart than that are not a row, and a
 	 * day-old stamp must not cost today's failure its place as the first. A
 	 * stamp dated before the one it would replace is refused: a write that
-	 * outlived its caller's budget must not land over a newer failure. It
-	 * does not bump `version` — it must not cost anybody a guarded write, and
-	 * nothing reads it as a state of the grant — and it touches nothing else.
+	 * outlived its caller's budget must not land over a newer failure. A stamp
+	 * that says the user has to come back — a refusal carrying one of the
+	 * codes `federationGrantInteractionCode` names (#616, D11) — is not
+	 * replaced by any later stamp: it is what the grant reads as
+	 * `reauthorization_required`, and only what clears every stamp clears it.
+	 * It does not bump `version` — it must not cost anybody a guarded write —
+	 * and it touches nothing else.
 	 * It is cleared by whatever replaces or ends the credentials:
 	 * `replaceCredentials`, `activate`, `requireReauthorization`, `revoke`. An
 	 * adapter writes it atomically: a read, a count and a write in three steps
