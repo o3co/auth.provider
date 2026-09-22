@@ -21,20 +21,26 @@ import {
 	type Module,
 	memoryAccessTokenDenylistModule,
 	memoryConsentStoreModule,
+	memoryFederationGrantIntentStoreModule,
+	memoryFederationGrantStoreModule,
 	memoryRateLimiterModule,
 	memoryReplaySeenSetModule,
 } from "@o3co/auth-provider-core";
 import { googleFederationModule } from "@o3co/auth-provider-federation-google";
+import { federationGrantsModules } from "@o3co/auth-provider-federation-grants";
 import { oidcFederationModule, oidcFederationNames } from "@o3co/auth-provider-federation-oidc";
 import {
 	oauthAuthorizationModule,
 	oauthModule,
 	oauthSessionModule,
+	subjectRevocationServiceModule,
 } from "@o3co/auth-provider-oauth";
 import {
 	redisAccessTokenDenylistModule,
 	redisCodeRepositoryModule,
 	redisConsentStoreModule,
+	redisFederationGrantIntentStoreModule,
+	redisFederationGrantStoreModuleFor,
 	redisFederationTokenStoreModuleFor,
 	redisRateLimiterModule,
 	redisRefreshTokenFamilyStoreModule,
@@ -174,6 +180,22 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	// promised and what the previous factory-based module never delivered: it
 	// built the Redis store without a client and failed at boot.
 	const federationTokenStoreAdapter = config.federationTokenStore?.type ?? "memory";
+	// #593 slice 7: federation grants — a user's standing consent that a client
+	// may obtain upstream tokens with no session behind the call. Off by
+	// default, and off installs nothing: no store, no socket, no boot
+	// requirement a deployment that never asked for grants would have to meet.
+	// On, the routes and the background registry the shutdown drains come as a
+	// pair, each store follows its own switch (grants in Redis with acquisition
+	// in memory is a supported single-replica shape), and the subject-revocation
+	// service is installed so a credential change can reach the grants — its
+	// `federationGrantStore` edge is what makes "revoke everything this subject
+	// holds" include them. Enabling the feature is also a statement that the
+	// deployment has a consent page, a callback per connection and a user
+	// repository that covers each connection's registration; the routes module
+	// refuses at boot what is missing, naming it.
+	const federationGrantsEnabled = config.federationGrants?.enabled === true;
+	const federationGrantStoreAdapter = config.federationGrantStore?.adapter ?? "memory";
+	const federationGrantIntentStoreAdapter = config.federationGrantIntentStore?.adapter ?? "memory";
 
 	// OR-9: effective code-repo adapter. `oauth.code.adapter` is the
 	// authoritative switch; the legacy `repositories.code.type = "redis"`
@@ -234,7 +256,11 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		accessTokenDenylistAdapter === "redis" ||
 		replaySeenSetAdapter === "redis" ||
 		consentStoreAdapter === "redis" ||
-		federationTokenStoreAdapter === "redis";
+		federationTokenStoreAdapter === "redis" ||
+		// Only while the feature is on: a switch left at "redis" for a feature
+		// that is off must not open a socket.
+		(federationGrantsEnabled &&
+			(federationGrantStoreAdapter === "redis" || federationGrantIntentStoreAdapter === "redis"));
 
 	// The four user-session stores switch on `userSessionStores.adapter`; the
 	// federation-token store is always wired and switches on its own key
@@ -299,6 +325,29 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 			? [redisFederationTokenStoreModuleFor({ environment: overrides.environment })]
 			: [inMemoryFederationTokenStoreModule];
 
+	// #593 slice 7: one module per store, nothing while the feature is off.
+	// The Redis grant store is built for this composition root so its
+	// plaintext guard knows which environment selected the config (#473), as
+	// the federation-token store's is. Both memory modules declare
+	// `replicaSafety`, so `deployment.mode = "multi"` refuses them by name; a
+	// Redis grant store beside memory user-session stores is refused by the
+	// routes module itself, because the grants would outlive the boundary that
+	// ends them (D13).
+	const federationGrantStoreModules: Module[] = !federationGrantsEnabled
+		? []
+		: federationGrantStoreAdapter === "redis"
+			? [
+					overrides.environment === undefined
+						? redisFederationGrantStoreModuleFor()
+						: redisFederationGrantStoreModuleFor({ environment: overrides.environment }),
+				]
+			: [memoryFederationGrantStoreModule];
+	const federationGrantIntentStoreModules: Module[] = !federationGrantsEnabled
+		? []
+		: federationGrantIntentStoreAdapter === "redis"
+			? [redisFederationGrantIntentStoreModule]
+			: [memoryFederationGrantIntentStoreModule];
+
 	return [
 		// D-5: sessionStoreModule wires the express-session middleware into the
 		// boot-planner-managed lifecycle. **Mount order is enforced by this
@@ -310,6 +359,13 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		// `session.storage.type = "memory"` declares itself replica-unsafe and
 		// `deployment.mode = "multi"` refuses it by name like the other stores.
 		sessionStoreModuleFor(config),
+		// #593 slice 7: before `oauthModule`, whose router mounts under the same
+		// `/oauth` prefix with body parsers of its own — mounted after it, a
+		// malformed body would be refused by the OAuth router's parser without
+		// this package's request id, `Cache-Control: no-store` or throttle (the
+		// package README's mounting-order rule). The browser half sits after the
+		// session middleware by its own `after`, wherever it is listed.
+		...(federationGrantsEnabled ? federationGrantsModules : []),
 		oauthModule({ config }),
 		oauthSessionModule({ config }),
 		oauthAuthorizationModule({ config }),
@@ -343,6 +399,9 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		// bundled into `storesModule` pre-Wave-5d, and the redis session-stores
 		// branch dropped the provider.
 		...federationTokenStoreModules,
+		// #593 slice 7: the grant store and the intent store, when the feature is on.
+		...federationGrantStoreModules,
+		...federationGrantIntentStoreModules,
 		// User-session-store family: redis (multi-replica) or memory (dev).
 		...sessionStoresModules,
 		// OAuth-endpoint rate limiter: redis (shared counters) or memory.
@@ -361,5 +420,10 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		...refreshTokenFamilyModules,
 		defaultRefreshTokenFamilyRotationModule,
 		defaultRefreshTokenFamilyRevocationModule,
+		// #593 slice 7: the composed "end everything this subject holds" a
+		// credential change calls, reached as `handle.components.subjectRevocationService`.
+		// Installed with the feature: its grant edge is what makes it reach the
+		// grants, and a deployment without grants keeps the service #296 gave it.
+		...(federationGrantsEnabled ? [subjectRevocationServiceModule] : []),
 	];
 }

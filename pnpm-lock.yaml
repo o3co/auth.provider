@@ -567,6 +567,9 @@ importers:
       '@o3co/auth-provider-federation-google':
         specifier: workspace:*
         version: link:../../packages/federation-google
+      '@o3co/auth-provider-federation-grants':
+        specifier: workspace:*
+        version: link:../../packages/federation-grants
       '@o3co/auth-provider-federation-oidc':
         specifier: workspace:*
         version: link:../../packages/federation-oidc
