@@ -48,10 +48,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   the federation-token store honour); the memory store is refused under
   `deployment.mode = "multi"`, and a grant store that outlives the process
   beside a `subjectRevocation` adapter kept in memory is refused, since the
-  grants would outlive the boundary that ends them. A subject-wide
-  revocation —
-  `revokeAllForSubject`, or the subject revocation service — ends them by
-  default and may be asked to keep them
+  grants would outlive the boundary that ends them. A subject-wide revocation ends them:
+  `revokeAllForSubject` always, when it is given the store, and the subject
+  revocation service by default, which alone may be asked to keep them
   (`federationGrants.allowKeepOnSubjectRevocation`, shipped `false`); an
   ordinary logout leaves them alone. Before a grant is created, the upstream
   account is checked against the local users (`federationGrants.identityLookup
@@ -158,10 +157,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   (`@o3co/auth-provider-core`, `@o3co/auth-provider-redis`)**
   ([#608](https://github.com/o3co/auth.provider/pull/608)). A subject-wide
   revocation writes an `all` boundary, or a `sessions` one that leaves grants
-  alone, and a revocation key is kept for at least
+  alone. A full revocation (`revokeBefore`) keeps its key for at least
   `SUBJECT_REVOCATION_MIN_RETENTION_MS` — a year and a minute — rather than the
   caller's TTL, for every deployment, grants or not: it is what makes a grant
-  the caller knew nothing about unusable after the boundary. In the Redis
+  the caller knew nothing about unusable after the boundary. A sessions-only
+  stamp keeps the caller's TTL unless a grants boundary is already on the
+  record. In the Redis
   package, `SubjectRevocationClient.setWatermarkMonotonic(key, beforeMs,
   expiresAtMs)` is gone and `setRevocationBoundaries(key, mode, beforeMs,
   expiresAtMs, grantRetentionMs)`, answering a string, replaces it. With
@@ -171,11 +172,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   **Upgrade note.** A custom Redis client written against
   `SubjectRevocationClient` implements `setRevocationBoundaries`; the
   bundled ioredis client already does, and `createRedisSubjectRevocation`
-  refuses a client without it at construction, not only at type-check. A
-  full revocation still writes the
-  record v0.14.0 wrote, so a deployment that never makes a sessions-only
-  stamp — the subject revocation service's keep path, under
-  `federationGrants.allowKeepOnSubjectRevocation` — can roll back freely.
+  refuses a client without it at construction, not only at type-check. A full
+  revocation still writes the record v0.14.0 wrote, so a deployment that never
+  makes a sessions-only stamp — the subject revocation service's keep path,
+  under `federationGrants.allowKeepOnSubjectRevocation` — can roll back
+  freely.
   Where one was made, that subject's record is in a form a v0.14.0 reader
   refuses (it fails closed, the safe direction), and a v0.14.0 **writer**
   overwrites it with a plain watermark, which can move the sessions boundary
