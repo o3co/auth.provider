@@ -50,14 +50,22 @@ kill_tree() {
 	for child in $(pgrep -P "$pid" 2>/dev/null || true); do kill_tree "$child"; done
 	kill "$pid" 2>/dev/null || true
 }
+# A pid file names the process and its start time, so a pid reused after a
+# reboot (or by anything else) is recognised as not ours and left alone.
+started_at() { ps -p "$1" -o lstart= 2>/dev/null | tr -s ' ' | sed 's/^ *//;s/ *$//'; }
+record_pid() { printf '%s|%s\n' "$1" "$(started_at "$1")" >"$STATE/$2.pid"; }
 kill_pidfile() {
-	local f="$STATE/$1.pid" pid
+	local f="$STATE/$1.pid" pid then now
 	[ -f "$f" ] || return 0
-	pid="$(cat "$f")"
+	pid="$(cut -d'|' -f1 "$f")"
+	then="$(cut -d'|' -f2- "$f")"
 	rm -f "$f"
-	# A pid file that survived a reboot may now name anything.
-	if ! ps -p "$pid" -o command= 2>/dev/null | grep -q -e proxy.mjs -e tsx -e pnpm -e node; then
-		say "pid $pid in $1.pid is not ours any more — left alone"
+	now="$(started_at "$pid")"
+	if [ -z "$now" ]; then
+		return 0
+	fi
+	if [ "$now" != "$then" ]; then
+		say "pid $pid in $1.pid is not the process start began (started $now, ours $then) — left alone"
 		return 0
 	fi
 	kill_tree "$pid"
@@ -128,7 +136,10 @@ redis() {
 		docker exec "$REDIS_CONTAINER" redis-cli ping 2>/dev/null | grep -q PONG && return 0
 		sleep 0.5
 	done
-	die "Redis did not answer"
+	# Not left behind: the next start would find its port and treat it as a Redis of its own.
+	docker rm -f "$REDIS_CONTAINER" >/dev/null 2>&1 || true
+	rm -f "$STATE/redis.mode"
+	die "Redis did not answer within 10 s — its container was removed"
 }
 
 # The template ships ioredis, so no redis-cli is needed to clear the database.
@@ -151,6 +162,20 @@ overlay() {
 # form: where the browser lands after the callback — the live-check page.
 federations { $1 { clientUrl = "http://localhost:$PORT/" } }
 EOF
+}
+
+# Empty when the URL is an http(s) one on some other machine; otherwise why
+# not. curl has already resolved a relative Location against the request.
+not_an_idp() {
+	node -e '
+let u;
+try { u = new URL(process.argv[1]); } catch { console.log("not a URL"); process.exit(0); }
+if (u.protocol !== "http:" && u.protocol !== "https:") { console.log(`scheme ${u.protocol}`); process.exit(0); }
+const h = u.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+if (h === "localhost" || h.endsWith(".localhost") || h === "::1" || h === "0.0.0.0" || /^127\./.test(h)) {
+	console.log(`on this machine (${h})`);
+}
+' "$1"
 }
 
 # One value out of the profile, read in a subshell so the client id and
@@ -189,7 +214,7 @@ start() {
 	LIVE_CHECK_PORT="$PORT" LIVE_CHECK_PROVIDER_PORT="$PROVIDER_PORT" SESSION_NAME=auth.session \
 		LIVE_CHECK_FEDERATION="$fed" LIVE_CHECK_EXPECTED_ISS="$expected" \
 		node "$HERE/proxy.mjs" >"$STATE/proxy.log" 2>&1 &
-	echo $! >"$STATE/proxy.pid"
+	record_pid $! proxy
 
 	# The template's default configuration plus what a plain-http local run
 	# needs: the session cookie without Secure and without the __Host- prefix,
@@ -218,12 +243,12 @@ start() {
 		export NODE_OPTIONS='--conditions=development'
 		exec pnpm exec tsx src/app.mts
 	) >"$STATE/provider.log" 2>&1 &
-	echo $! >"$STATE/provider.pid"
+	record_pid $! provider
 
 	local i
 	for i in $(seq 1 90); do
 		grep -q "Server is running" "$STATE/provider.log" 2>/dev/null && break
-		if ! kill -0 "$(cat "$STATE/provider.pid")" 2>/dev/null; then
+		if ! kill -0 "$(cut -d'|' -f1 "$STATE/provider.pid")" 2>/dev/null; then
 			tail -n 30 "$STATE/provider.log" >&2
 			stop
 			die "the provider refused to boot — its log is above"
@@ -251,12 +276,12 @@ start() {
 		stop
 		die "GET /session/oauth/federation/$fed answered $code, not a redirect to the IdP — see $STATE/provider.log"
 	fi
-	case "$idp" in
-	http://localhost* | http://127.* | https://localhost* | https://127.* | "")
+	local why
+	why="$(not_an_idp "$idp")"
+	if [ -n "$why" ]; then
 		stop
-		die "GET /session/oauth/federation/$fed redirected to '${idp:-nowhere}', not to an IdP — see $STATE/provider.log"
-		;;
-	esac
+		die "GET /session/oauth/federation/$fed redirected to '${idp:-nowhere}' — $why, not an IdP — see $STATE/provider.log"
+	fi
 	trap - INT TERM
 	say "up. The start route redirects to ${idp%%\?*}"
 	say "Open   http://localhost:$PORT/"
