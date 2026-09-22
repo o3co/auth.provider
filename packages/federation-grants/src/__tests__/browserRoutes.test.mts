@@ -1280,6 +1280,19 @@ describe("what the adversarial review found", () => {
 		]);
 	});
 
+	it("asks the Store under the federation the exchange went through, even when the connection has since been re-pointed", async () => {
+		// Revisions pin the issuer and the client, not the federation's name, so
+		// a connection can move onto another entry for the same registration
+		// between approval and callback. The identity came through the intent's
+		// federation, and that is the name the Store is asked about; a Store that
+		// boot never probed under it answers that it does not cover it.
+		const w = world();
+		const a = await approved(w, "b-1");
+		w.state.connections.set(CONNECTION.name, { ...CONNECTION, federation: "upstream-renamed" });
+		returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+		expect(w.state.lookups.map((lookup) => lookup.provider)).toEqual(["upstream"]);
+	});
+
 	it("does not exchange a code for a flow whose callback moved since it was approved", async () => {
 		const w = world();
 		const a = await approved(w, "b-1");
