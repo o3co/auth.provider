@@ -50,13 +50,14 @@ import {
 	defineModule,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
+	resolveSubjectRevocationHorizonMs,
 	revokeAllForSubject,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
 import { cascadeLogout, subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
 import express from "express";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
 import {
 	ACQUISITION_ENDPOINTS,
@@ -127,10 +128,52 @@ const CASCADE_STORES = {
 	refreshTokenFamilyRevocation: { revokeFamily: async () => undefined },
 };
 
-const boot = async (allowKeep: boolean) => {
+interface BootOptions {
+	/** Stores and boundaries to compose over, for a second deployment on the first one's state. */
+	readonly components?: ReturnType<typeof shared>;
+	/** `defaultExpiresIn` and `maxExpiresIn` together, in seconds — a deployment whose maximum was moved. */
+	readonly lifetimeSeconds?: number;
+	/** `false` when the grant is already in the store handed in. */
+	readonly seed?: boolean;
+}
+
+const boot = async (allowKeep: boolean, opts: BootOptions = {}) => {
 	const full = makeValidFullSections();
-	const components = shared();
+	const components = opts.components ?? shared();
 	const events: { type: string; details?: Record<string, unknown> }[] = [];
+	const config = {
+		...makeValidCoreConfig(),
+		// The service sizes the boundary from the lifetimes it has to
+		// outlive, and reads them here.
+		session: full.session,
+		federations: {
+			upstream: {
+				enabled: true,
+				issuer: connection.upstreamIssuer,
+				clientId: connection.upstreamClientId,
+			},
+		},
+		rateLimit: { ...full.rateLimit, failMode: "closed" },
+		audit: { sink: { type: "none" } },
+		endpoints: ACQUISITION_ENDPOINTS,
+		federationGrants: {
+			enabled: true,
+			allowKeepOnSubjectRevocation: allowKeep,
+			connections: {
+				[connection.name]: {
+					federation: "upstream",
+					scopes: [...connection.scopes],
+					boundary: connection.boundary,
+					maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
+					callbackURL: callbackUrlFor(connection.name),
+				},
+			},
+			...ACQUISITION_GRANT_SETTINGS,
+			...(opts.lifetimeSeconds === undefined
+				? {}
+				: { defaultExpiresIn: opts.lifetimeSeconds, maxExpiresIn: opts.lifetimeSeconds }),
+		},
+	};
 	const handle = await createApp({
 		modules: [
 			federationModule,
@@ -139,36 +182,7 @@ const boot = async (allowKeep: boolean) => {
 			subjectRevocationServiceModule,
 		],
 		bootstrapComponents: {
-			config: {
-				...makeValidCoreConfig(),
-				// The service sizes the boundary from the lifetimes it has to
-				// outlive, and reads them here.
-				session: full.session,
-				federations: {
-					upstream: {
-						enabled: true,
-						issuer: connection.upstreamIssuer,
-						clientId: connection.upstreamClientId,
-					},
-				},
-				rateLimit: { ...full.rateLimit, failMode: "closed" },
-				audit: { sink: { type: "none" } },
-				endpoints: ACQUISITION_ENDPOINTS,
-				federationGrants: {
-					enabled: true,
-					allowKeepOnSubjectRevocation: allowKeep,
-					connections: {
-						[connection.name]: {
-							federation: "upstream",
-							scopes: [...connection.scopes],
-							boundary: connection.boundary,
-							maxAccessTokenLifetime: connection.maxAccessTokenLifetime,
-							callbackURL: callbackUrlFor(connection.name),
-						},
-					},
-					...ACQUISITION_GRANT_SETTINGS,
-				},
-			},
+			config,
 			pathResolver: (s: string) => s,
 			clientRepository,
 			...acquisitionComponents(),
@@ -187,45 +201,50 @@ const boot = async (allowKeep: boolean) => {
 	});
 
 	const store = components.federationGrantStore as MemoryFederationGrantStore;
-	const resolved = { ...connection, allowScopeSubsets: true, authorizationParams: {} };
-	const at = new Date();
-	await store.createPending({
-		id: "g-1",
-		subject: SUBJECT,
-		clientId: CLIENT_ID,
-		connection: connection.name,
-		intent: { handle: "h", expiresAt: new Date(at.getTime() + 10 * MIN) },
-		now: at,
-	});
-	await store.activate({
-		grantId: "g-1",
-		intentHandle: "h",
-		authorization: {
-			identityRevision: federationGrantIdentityRevision(resolved),
-			authorizationRevision: federationGrantAuthorizationRevision(resolved),
-			upstream: { issuer: connection.upstreamIssuer, subject: "upstream-subject" },
-			scopes: [...connection.scopes],
-			consent: { at, sid: "sid", scopes: [...connection.scopes] },
-			authorizedAt: at,
-			expiresAt: new Date(at.getTime() + 30 * DAY),
-		},
-		credentials: {
-			refreshToken: "r",
-			accessToken: {
-				value: "upstream-access-token",
-				tokenType: "Bearer",
-				obtainedAt: at,
-				issuedLifetime: 3600,
+	if (opts.seed !== false) {
+		const resolved = { ...connection, allowScopeSubsets: true, authorizationParams: {} };
+		const at = new Date();
+		await store.createPending({
+			id: "g-1",
+			subject: SUBJECT,
+			clientId: CLIENT_ID,
+			connection: connection.name,
+			intent: { handle: "h", expiresAt: new Date(at.getTime() + 10 * MIN) },
+			now: at,
+		});
+		await store.activate({
+			grantId: "g-1",
+			intentHandle: "h",
+			authorization: {
+				identityRevision: federationGrantIdentityRevision(resolved),
+				authorizationRevision: federationGrantAuthorizationRevision(resolved),
+				upstream: { issuer: connection.upstreamIssuer, subject: "upstream-subject" },
 				scopes: [...connection.scopes],
+				consent: { at, sid: "sid", scopes: [...connection.scopes] },
+				authorizedAt: at,
+				expiresAt: new Date(at.getTime() + 30 * DAY),
 			},
-		},
-		now: at,
-	});
+			credentials: {
+				refreshToken: "r",
+				accessToken: {
+					value: "upstream-access-token",
+					tokenType: "Bearer",
+					obtainedAt: at,
+					issuedLifetime: 3600,
+					scopes: [...connection.scopes],
+				},
+			},
+			now: at,
+		});
+	}
 
 	const app = express();
 	app.use(handle.router);
 	const service = handle.components.subjectRevocationService as SubjectRevocationService;
-	return { handle, app, service, events, ...components };
+	// What a caller written before #593 sized the watermark to: the longest
+	// of the session, refresh-token and access-token lifetimes, plus skew.
+	const horizonMs = resolveSubjectRevocationHorizonMs(config);
+	return { handle, app, service, events, horizonMs, ...components };
 };
 
 const disclose = (app: express.Express) =>
@@ -326,9 +345,12 @@ describe("a subject-wide revocation, from the service to the disclosure", () => 
 	it("is not what an ordinary logout does", async () => {
 		// A logout ends a session. A grant outlives the session it was agreed
 		// through — that is the whole of what a federation grant is — so the
-		// four-store cascade both logout endpoints run must leave it, and its
+		// four-store cascade `/oauth/logout` runs must leave it, and its
 		// credential, exactly as they were. The composition here has the grant
 		// store in it, so a cascade that grew a path to it would fail this.
+		// `/session/logout` runs its own hygiene, not this cascade; the two HTTP
+		// endpoints are driven, on the standalone, in
+		// `templates/standalone/src/__tests__/federation-grants-survive-logout.test.mts`.
 		const { handle, app, federationGrantStore } = await boot(true);
 
 		const result = await cascadeLogout({
@@ -370,5 +392,122 @@ describe("a subject-wide revocation, from the service to the disclosure", () => 
 		const response = await disclose(app);
 		expect(response.status).toBe(410);
 		await handle.dispose();
+	});
+});
+
+describe("a revocation outlives the watermark retention sized before #593 (review condition 1)", () => {
+	// A caller written before #593 sized the watermark to the longest-lived
+	// refresh token (`revokeAllForSubject` documents it so), and the adapter
+	// treated an expired watermark as absent. A grant lives longer. So a
+	// boundary that lapsed with that horizon would let a revoked grant come
+	// back — comment 3 on #593 asked for exactly this test, and comment 4
+	// accepted it. Every case here ends in a disclosure AFTER that horizon has
+	// elapsed, and the answer has to be the revocation and not an expiry: the
+	// grant's own lifetime is thirty days, well past the clock.
+	afterEach(() => {
+		vi.useRealTimers();
+	});
+
+	/** The pre-#593 horizon, and an hour: the watermark a caller of that time wrote has lapsed. */
+	const elapse = (horizonMs: number): void => {
+		vi.useFakeTimers({ toFake: ["Date"] });
+		vi.setSystemTime(new Date(Date.now() + horizonMs + 60 * MIN));
+	};
+
+	const expectRevoked = async (app: express.Express, store: MemoryFederationGrantStore) => {
+		const response = await disclose(app);
+		expect(response.status).toBe(410);
+		expect(response.body.error).toBe("grant_revoked");
+		expect((await store.find("g-1", new Date()))?.status).toBe("revoked");
+	};
+
+	/** A store whose first revocation write fails, and every later one goes through. */
+	const failingOnce = (store: MemoryFederationGrantStore) => {
+		let failed = false;
+		return {
+			...store,
+			revoke: async (...args: Parameters<MemoryFederationGrantStore["revoke"]>) => {
+				if (!failed) {
+					failed = true;
+					throw new Error("store is down");
+				}
+				return store.revoke(...args);
+			},
+		} as unknown as MemoryFederationGrantStore;
+	};
+
+	it("on the durable path", async () => {
+		const { handle, app, service, horizonMs, federationGrantStore } = await boot(false);
+		await service.revokeAllForSubject({ subject: SUBJECT });
+		elapse(horizonMs);
+		await expectRevoked(app, federationGrantStore);
+		await handle.dispose();
+	});
+
+	it("when the write to the grant failed part-way, and only the boundary is left to end it", async () => {
+		const components = shared();
+		const { handle, app, subjectRevocation, subjectSessionIndex, horizonMs } = await boot(true, {
+			components,
+		});
+		const result = await revokeAllForSubject({
+			subject: SUBJECT,
+			watermarkTtlMs: horizonMs,
+			cascadeSession: async () => ({ ok: true }),
+			subjectSessionIndex,
+			subjectRevocation,
+			federationGrantStore: failingOnce(components.federationGrantStore),
+		});
+		expect(result.complete).toBe(false);
+		expect(result.grantsFailed).toEqual(["g-1"]);
+		// The record never heard: it is `active` in the store.
+		expect((await components.federationGrantStore.find("g-1", new Date()))?.status).toBe("active");
+
+		elapse(horizonMs);
+		await expectRevoked(app, components.federationGrantStore);
+		await handle.dispose();
+	});
+
+	it("when the Store passed no grant store at all", async () => {
+		const { handle, app, subjectRevocation, subjectSessionIndex, horizonMs, federationGrantStore } =
+			await boot(true);
+		const result = await revokeAllForSubject({
+			subject: SUBJECT,
+			watermarkTtlMs: horizonMs,
+			cascadeSession: async () => ({ ok: true }),
+			subjectSessionIndex,
+			subjectRevocation,
+		});
+		expect(result.complete).toBe(true);
+		expect(result.grantsRequested).toBe(false);
+
+		elapse(horizonMs);
+		await expectRevoked(app, federationGrantStore);
+		await handle.dispose();
+	});
+
+	it("when the maximum was lowered at the revocation, the write failed, and the maximum was raised again", async () => {
+		// Lowered: a deployment whose grants may live a day. Under it the
+		// grant's effective expiry is a day out, and a horizon sized from what
+		// the deployment could see would be a day too.
+		const components = shared();
+		const lowered = await boot(true, { components, lifetimeSeconds: 86_400 });
+		const result = await revokeAllForSubject({
+			subject: SUBJECT,
+			watermarkTtlMs: lowered.horizonMs,
+			cascadeSession: async () => ({ ok: true }),
+			subjectSessionIndex: lowered.subjectSessionIndex,
+			subjectRevocation: lowered.subjectRevocation,
+			federationGrantStore: failingOnce(components.federationGrantStore),
+		});
+		expect(result.complete).toBe(false);
+		await lowered.handle.dispose();
+
+		// Raised again: the same stores and boundaries, under a deployment that
+		// lets the grant live its stored thirty days. Past the day it is not
+		// expired, so nothing but the boundary can end it.
+		const raised = await boot(true, { components, seed: false });
+		elapse(lowered.horizonMs);
+		await expectRevoked(raised.app, components.federationGrantStore);
+		await raised.handle.dispose();
 	});
 });

@@ -245,12 +245,19 @@ describe("POST /oauth/federation-grants/:grantId/reauthorize — renewing a gran
 		for (const [body, id] of [
 			[{}, "no-such-grant"],
 			[{}, GRANT_ID],
-			[{ sub: "another-subject" }, GRANT_ID],
 		] as const) {
 			const response = await renew(h, body, id);
 			expect(response.status).toBe(404);
 			expect(response.body).toEqual({ error: "grant_not_found" });
 		}
+		// The subject is judged on the client's OWN grant. Run against the
+		// fixture above, this case would pass with the subject comparison
+		// deleted — the client mismatch answers first.
+		const own = harness();
+		await own.seed();
+		const response = await renew(own, { sub: "another-subject" }, GRANT_ID);
+		expect(response.status).toBe(404);
+		expect(response.body).toEqual({ error: "grant_not_found" });
 	});
 
 	it("revokes, and audits, a grant the subject-wide boundary covers — before it looks at anything else", async () => {
