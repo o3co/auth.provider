@@ -184,6 +184,34 @@ describe("lodging a first-time intent (D6, D16)", () => {
 		expect(intents.size).toBe(0);
 	});
 
+	it("reads the client's registration as a list or as nothing: a repository answering a string is not a substring match", async () => {
+		// A deployment's own `ClientRepository` validates nothing this code can
+		// see. Read with a bare `.includes`, a comma-joined string would let
+		// "okta-calendar-prod" permit "okta-calendar" — the rule the token
+		// route already applies (D9), applied at lodging too.
+		const asString = (value: string) => value as unknown as readonly string[];
+		expect(
+			await lodgeFederationGrantIntent(
+				deps(),
+				initial({
+					connection: "okta-calendar",
+					client: { ...CLIENT, allowedFederationGrantConnections: asString("okta-calendar-prod") },
+				}),
+			),
+		).toEqual({ ok: false, reason: "connection_not_permitted" });
+		expect(
+			await lodgeFederationGrantIntent(
+				deps(),
+				initial({
+					client: {
+						...CLIENT,
+						federationGrantRedirectUris: asString("https://client.test/connected"),
+					},
+				}),
+			),
+		).toEqual({ ok: false, reason: "redirect_uri_not_registered" });
+	});
+
 	it("takes the redirect URI only by exact membership, and never one that would carry two answers", async () => {
 		for (const redirectUri of [
 			"https://client.test/connected/",
@@ -705,6 +733,22 @@ describe("lodging a reauthorization (D6, D13)", () => {
 			await lodgeFederationGrantReauthorization(
 				deps(),
 				renewal({ client: { ...CLIENT, allowedFederationGrantConnections: [] } }),
+			),
+		).toEqual({ ok: false, reason: "connection_not_permitted" });
+	});
+
+	it("reads the renewal's permission as a list or as nothing, as lodging does", async () => {
+		await establish();
+		expect(
+			await lodgeFederationGrantReauthorization(
+				deps(),
+				renewal({
+					client: {
+						...CLIENT,
+						allowedFederationGrantConnections:
+							`${CONNECTION.name}-prod` as unknown as readonly string[],
+					},
+				}),
 			),
 		).toEqual({ ok: false, reason: "connection_not_permitted" });
 	});

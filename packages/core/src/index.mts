@@ -769,6 +769,7 @@ export {
 	type PendingConsentRecord,
 	type PendingConsentStore,
 } from "./consents/types.mjs";
+export { federationGrantAllowlist } from "./federation-grants/allowlist.mjs";
 // #593 (D18): what an audit event says about the grant it concerns. Its own
 // module because the retrieval, the revocation library call and the routes all
 // need the same answer and cannot import each other.

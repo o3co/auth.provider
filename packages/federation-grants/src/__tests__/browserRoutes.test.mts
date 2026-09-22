@@ -1589,6 +1589,19 @@ describe("the consent, when the world fails or moves", () => {
 			error: "access_denied",
 			error_description: "connection_not_permitted",
 		});
+		// A deployment's own repository that answers a string instead of a list
+		// would turn the check into a substring match; the field is read as a
+		// list or as nothing, the rule the token route already applies.
+		w.state.client = {
+			...CLIENT,
+			allowedFederationGrantConnections: "calendar-prod" as unknown as readonly string[],
+		};
+		const misread = await w.page(challenge, "b-1");
+		expect(misread.status).toBe(403);
+		expect(misread.body).toEqual({
+			error: "access_denied",
+			error_description: "connection_not_permitted",
+		});
 		w.state.client = { ...CLIENT };
 
 		// The grant ended between the park and the read: nothing left to answer.

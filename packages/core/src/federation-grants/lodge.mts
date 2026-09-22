@@ -52,6 +52,7 @@
 
 import { randomBytes } from "node:crypto";
 import { checkRedirectUri } from "../net/redirect-uri.mjs";
+import { federationGrantAllowlist } from "./allowlist.mjs";
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
 import { resolveFederationGrantIntentScopes } from "./eligibility.mjs";
 import {
@@ -245,7 +246,9 @@ function checkRequest(
 	request: CommonRequest,
 	connection: FederationGrantAcquisitionConnection,
 ): RequestCheck {
-	const registered = request.client.federationGrantRedirectUris ?? [];
+	// Read as a list or as nothing (`federationGrantAllowlist`): a repository
+	// answering a string would otherwise match by substring.
+	const registered = federationGrantAllowlist(request.client.federationGrantRedirectUris);
 	// Exact membership, and nothing else: no prefix, no normalization, no
 	// fallback to the client's ordinary redirect URIs.
 	if (!registered.includes(request.redirectUri)) {
@@ -292,7 +295,7 @@ function checkRequest(
 }
 
 const permits = (client: FederationGrantLodgingClient, connection: string): boolean =>
-	(client.allowedFederationGrantConnections ?? []).includes(connection);
+	federationGrantAllowlist(client.allowedFederationGrantConnections).includes(connection);
 
 function intentRecord(input: {
 	readonly handle: string;
