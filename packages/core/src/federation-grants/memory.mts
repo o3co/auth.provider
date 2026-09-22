@@ -15,6 +15,7 @@
  */
 
 import { constantTimeStringEqual } from "../security/timingSafe.mjs";
+import { federationGrantInteractionCode } from "./eligibility.mjs";
 import { withinFederationGrantLifetimeCeiling } from "./lifetime.mjs";
 import type {
 	FederationGrantCredentialState,
@@ -513,6 +514,11 @@ export function createMemoryFederationGrantStore(
 			// Never back: a stamp that outlived its caller's budget arrives after a
 			// newer one, and must not replace it.
 			if (previous !== undefined && atMs < previous.at.getTime()) return failed();
+			// Never over the user (#616, D12): a stamp that says the user has to
+			// come back is what the grant reads as `reauthorization_required`, and
+			// no later outage, rate limit or refusal says otherwise. Only what
+			// replaces or ends the credentials clears it.
+			if (federationGrantInteractionCode(previous) !== undefined) return failed();
 			// A row: the stamp it replaces is no further back than `rowMs`.
 			const inRow = previous !== undefined && atMs - previous.at.getTime() <= input.rowMs;
 			// In place, in one step: a stamp read, counted and written in three
