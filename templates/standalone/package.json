@@ -12,7 +12,7 @@
 		"build": "tsc",
 		"start": "node dist/app.mjs",
 		"debug": "NODE_OPTIONS='--conditions=development' tsx watch src/app.mts",
-		"test": "vitest run --passWithNoTests"
+		"test": "tsc --noEmit && vitest run --passWithNoTests"
 	},
 	"imports": {
 		"#/*": {

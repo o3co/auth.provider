@@ -1982,7 +1982,12 @@ const fgWritten = (reply: unknown): FederationGrantHashFields | null => {
  * {@link makeIoredisClients} so that a Cluster deployment can have one.
  */
 export function makeIoredisFederationGrantStoreClient(
-	io: FederationGrantRedisCommands,
+	// `Redis` beside the narrow interface: ioredis declares `zrange` as a
+	// stack of overloads that TypeScript will not assign to the three-argument
+	// signature above, so a strict caller handing over its `Redis` — the
+	// standalone template is one — could not compile against the interface
+	// alone. A Cluster client still satisfies the interface (#593 slice 7).
+	io: FederationGrantRedisCommands | Redis,
 ): FederationGrantStoreClient {
 	const connection = io as unknown as Redis;
 	return {
@@ -2137,7 +2142,9 @@ export function makeIoredisFederationGrantStoreClient(
 		},
 
 		async members(indexKey) {
-			return await io.zrange(indexKey, 0, -1);
+			// Through `connection`, as every script is: the union parameter above
+			// has no one `zrange` signature to call.
+			return await connection.zrange(indexKey, "0", "-1");
 		},
 
 		async prune(indexKey, clockMs, allowanceMs) {

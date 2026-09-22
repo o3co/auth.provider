@@ -188,16 +188,17 @@ const testKeyStoreModule = defineModule({
 	},
 });
 
-const modulesFor = (config: AppConfig, memoryOnly = false) =>
+const modulesFor = (config: AppConfig, memoryOnly = false, environment?: string) =>
 	buildModules(config, {
 		keyStoreModule: testKeyStoreModule,
 		repositoriesModule: testRepositoriesModule,
 		...(memoryOnly ? { refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule] } : {}),
+		...(environment === undefined ? {} : { environment }),
 	});
 
-const boot = (config: AppConfig, memoryOnly = false) =>
+const boot = (config: AppConfig, memoryOnly = false, environment?: string) =>
 	createApp({
-		modules: modulesFor(config, memoryOnly),
+		modules: modulesFor(config, memoryOnly, environment),
 		bootstrapComponents: { config, pathResolver: (s) => s },
 	});
 
@@ -330,6 +331,31 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 			error = caught;
 		}
 		expect(messageChain(error)).toMatch(/subject boundary is kept in "memory"/);
+	});
+
+	it("hands the Redis grant store the environment the config was selected by, so its plaintext guard reads it (#473)", async () => {
+		// The federation-token store's guard reads `environment` beside
+		// NODE_ENV so that CONFIG_ENV=production is production to it; the grant
+		// store's must too, or a deployment selecting its config by CONFIG_ENV
+		// with NODE_ENV unset would keep its refresh tokens in plaintext.
+		const config = resolveConfig({
+			...BASE_ENV,
+			...GRANTS_ON,
+			USER_SESSION_STORES_ADAPTER: "redis",
+			FEDERATION_GRANT_STORE_ADAPTER: "redis",
+			FEDERATION_GRANTS_ENCRYPTION_MODE: "allow-plaintext",
+		});
+		let error: unknown;
+		try {
+			handleRef = await boot(config, false, "production");
+		} catch (caught) {
+			error = caught;
+		}
+		expect(messageChain(error)).toMatch(/federation-grants[\s\S]*allow-plaintext[\s\S]*production/);
+		// The same config under the test environment boots: it is the name that
+		// selected the config, not a hard refusal of plaintext.
+		handleRef = await boot(config);
+		expect(handleRef.components.federationGrantStore?.kind).toBe("redis");
 	});
 
 	it("keeps Redis grants beside memory intents on a single replica", async () => {

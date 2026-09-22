@@ -422,8 +422,9 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		defaultRefreshTokenFamilyRevocationModule,
 		// #593 slice 7: the composed "end everything this subject holds" a
 		// credential change calls, reached as `handle.components.subjectRevocationService`.
-		// Installed with the feature: its grant edge is what makes it reach the
-		// grants, and a deployment without grants keeps the service #296 gave it.
+		// Installed with the feature, which is what makes it reach the grants;
+		// the template never installed it before, so a deployment without
+		// grants is as it was — a Store there calls core's revokeAllForSubject.
 		...(federationGrantsEnabled ? [subjectRevocationServiceModule] : []),
 	];
 }
