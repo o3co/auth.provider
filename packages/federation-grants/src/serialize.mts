@@ -57,8 +57,10 @@ function statusOf(result: Exclude<FederationGrantTokenResult, { ok: true }>): nu
 			return 400;
 		case "access_denied":
 			return 403;
-		// 410 Gone, for the four ways a grant has ended: the user has to be
-		// asked again, and no amount of retrying changes that.
+		// 410 Gone, for the four ways a grant has ended — and for the one way it
+		// has not, the upstream asking for the user (#616), whose credential is
+		// kept: either way the user has to be asked again, and no amount of
+		// retrying changes that.
 		case "grant_expired":
 		case "grant_revoked":
 		case "connection_identity_changed":

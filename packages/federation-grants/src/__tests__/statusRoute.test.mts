@@ -58,6 +58,34 @@ const ask = (h: ReturnType<typeof harness>, id = GRANT_ID, body: unknown = { sub
 		.send(body as object);
 
 describe("the status route — what it reports", () => {
+	it("reports a refresh refused for the user's absence as needing the user, through inspect alone (#616)", async () => {
+		const h = harness();
+		await h.seed();
+		const grant = await h.store.find(GRANT_ID, h.world.now);
+		const noted = await h.store.noteRefreshFailure({
+			grantId: GRANT_ID,
+			expectedVersion: grant?.version ?? -1,
+			failure: { at: h.world.now, kind: "rejected", upstreamCode: "login_required" },
+			rowMs: 300_000,
+			now: h.world.now,
+		});
+		expect(noted.ok).toBe(true);
+
+		const response = await request(h.app)
+			.post(`/oauth/federation-grants/${GRANT_ID}/status`)
+			.set("Authorization", basic())
+			.send({ sub: SUBJECT });
+
+		expect(response.status).toBe(200);
+		expect(response.body).toMatchObject({
+			status: "reauthorization_required",
+			reason: "upstream_login_required",
+		});
+		// Inspect only: no refresh, and no touch — a status call is not a use.
+		expect(h.refresh).not.toHaveBeenCalled();
+		expect(response.body).not.toHaveProperty("last_used_at");
+	});
+
 	it("describes an active grant without touching its credential", async () => {
 		const h = harness();
 		await h.seed();

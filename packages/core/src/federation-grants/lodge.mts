@@ -166,8 +166,12 @@ export type FederationGrantLodgingResult =
 
 export type FederationGrantReauthorizationResult =
 	| (FederationGrantLodged & {
-			/** The grant's effective status, unchanged: a renewal does not make it pending. */
-			readonly status: "active" | "reauthorization_required";
+			/**
+			 * The grant's effective status, unchanged: a renewal does not make it
+			 * pending, and does not end a starvation — `upstream_token_ineligible`
+			 * is what a grant admitted for `scope_exceeded` still reads (#616).
+			 */
+			readonly status: FederationGrantRenewableStatus;
 	  })
 	| { readonly ok: false; readonly reason: FederationGrantLodgingRefusal }
 	| {
@@ -506,11 +510,20 @@ function statusOf(
 	});
 }
 
+/** The statuses a renewal is admitted from, which its 201 reports unchanged (D6, #616). */
+export type FederationGrantRenewableStatus =
+	| "active"
+	| "reauthorization_required"
+	| "upstream_token_ineligible";
+
 /**
- * What a reauthorization cannot mend, as the answer it gets — or `null` for the
- * two statuses D6 accepts, `active` and `reauthorization_required`. A grant
- * reading as `upstream_token_ineligible` is refused although a renewal would
- * clear the marker: that it would is not a reason to widen D6's accepted set.
+ * What a reauthorization cannot mend, as the answer it gets — or `null` for
+ * what D6 admits: `active`, `reauthorization_required`, and (#616) a grant
+ * starved of scope. An IdP that accumulates consent answers a narrower grant's
+ * refresh with a wider grant's scopes, and a wider consent is exactly the
+ * remedy; the other ineligibilities — a lifetime, a type, a shape no consent
+ * changes — are refused as ever, and judged as they read NOW, not as a marker
+ * was left: a maximum no token can satisfy outranks an old scope marker.
  */
 function lifecycleRefusal(
 	status: ReturnType<typeof effectiveFederationGrantStatus>,
@@ -527,10 +540,28 @@ function lifecycleRefusal(
 		case "connection_identity_changed":
 			return { ok: false, reason: "connection_identity_changed" };
 		case "upstream_token_ineligible":
+			if (status.reason === "scope_exceeded") return null;
 			return { ok: false, reason: "upstream_token_ineligible", ineligibleBy: status.reason };
 		case "active":
 		case "reauthorization_required":
 			return null;
+	}
+}
+
+/** The status a renewal was admitted from — what `lifecycleRefusal` let through, named for the 201. */
+function admittedStatus(
+	status: ReturnType<typeof effectiveFederationGrantStatus>,
+): FederationGrantRenewableStatus {
+	switch (status.status) {
+		case "active":
+		case "reauthorization_required":
+		case "upstream_token_ineligible":
+			return status.status;
+		default:
+			// Composed wrong: `lifecycleRefusal` admitted what it must refuse.
+			throw new Error(
+				`lodgeFederationGrantReauthorization: a renewal admitted from ${status.status}`,
+			);
 	}
 }
 
@@ -621,7 +652,7 @@ async function judgeAndLodge(
 			connection: connection.name,
 			scopes: record.scopes,
 			...(record.resource === undefined ? {} : { resource: record.resource }),
-			status: status.status === "active" ? "active" : "reauthorization_required",
+			status: admittedStatus(status),
 		};
 	}
 

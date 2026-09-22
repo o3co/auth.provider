@@ -40,6 +40,7 @@ import {
 	federationGrantIdentityRevision,
 } from "#/federation-grants/revision.mjs";
 import type { FederationGrantStore } from "#/federation-grants/store.mjs";
+import type { FederationGrantIneligibilityReason } from "#/federation-grants/types.mjs";
 
 const MIN = 60_000;
 const DAY = 86_400_000;
@@ -591,6 +592,73 @@ describe("lodging a reauthorization (D6, D13)", () => {
 			await lodgeFederationGrantReauthorization(deps({ connections: new Map() }), renewal()),
 		).toEqual({ ok: false, reason: "connection_not_configured" });
 		// No token could ever satisfy the connection's maximum.
+		expect(
+			await lodgeFederationGrantReauthorization(
+				deps({
+					connections: new Map([[CONNECTION.name, { ...CONNECTION, maxAccessTokenLifetime: 0 }]]),
+				}),
+				renewal(),
+			),
+		).toEqual({
+			ok: false,
+			reason: "upstream_token_ineligible",
+			ineligibleBy: "lifetime_over_maximum",
+		});
+		expect(intents.size).toBe(0);
+	});
+
+	/** The established grant, left ineligible by a refresh that answered a token nobody may use. */
+	const starved = async (reason: FederationGrantIneligibilityReason) => {
+		const grant = await grants.find("g-est", clock);
+		const marked = await grants.replaceCredentials({
+			grantId: "g-est",
+			expectedVersion: grant?.version ?? -1,
+			credentials: { refreshToken: "rt-1" },
+			ineligible: { reason, at: clock, judgedAgainst: CONNECTION.maxAccessTokenLifetime },
+			now: clock,
+		});
+		if (!marked.ok) throw new Error("fixture: the marker was not left");
+		return marked.grant;
+	};
+
+	it("admits a grant starved of scope — a wider consent is exactly the remedy — and reports the ineligibility it does not change (#616)", async () => {
+		await establish();
+		const before = await starved("scope_exceeded");
+		const result = await lodgeFederationGrantReauthorization(deps(), renewal());
+		expect(result).toMatchObject({
+			ok: true,
+			grantId: "g-est",
+			status: "upstream_token_ineligible",
+		});
+		expect(intents.size).toBe(1);
+		// Lodging clears nothing: the marker, the credential and the version are
+		// as they were. Only the callback's activation ends the starvation.
+		expect(await grants.find("g-est", clock)).toMatchObject({
+			version: before.version,
+			ineligible: { reason: "scope_exceeded" },
+		});
+	});
+
+	it("refuses every other ineligibility before an intent is lodged: a consent mends none of them (#616)", async () => {
+		await establish();
+		for (const reason of [
+			"no_finite_lifetime",
+			"token_type_unsupported",
+			"malformed_token_response",
+		] as const) {
+			await starved(reason);
+			expect(await lodgeFederationGrantReauthorization(deps(), renewal())).toEqual({
+				ok: false,
+				reason: "upstream_token_ineligible",
+				ineligibleBy: reason,
+			});
+			expect(intents.size).toBe(0);
+		}
+	});
+
+	it("judges the ineligibility as it reads now, not as the marker was left: a maximum no token can satisfy outranks an old scope marker (#616)", async () => {
+		await establish();
+		await starved("scope_exceeded");
 		expect(
 			await lodgeFederationGrantReauthorization(
 				deps({
