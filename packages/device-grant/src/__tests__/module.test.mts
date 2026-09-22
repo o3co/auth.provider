@@ -156,12 +156,27 @@ describe("deviceGrantModule — boot", () => {
 		);
 	});
 
-	it("boots when the operator declares the store absent on purpose", async () => {
+	it("boots when the operator declares the store absent on purpose and leaves the grant off", async () => {
+		// The absence policy is applied whether or not the feature is on, so
+		// this is the declaration a deployment that installs the package and
+		// never enables the grant has to write.
 		const handle = await boot({
-			deviceAuthorization: { ...ENABLED, store: "unsupported" },
+			deviceAuthorization: { enabled: false, store: "unsupported" },
 			withStore: false,
 		});
 		await handle.dispose();
+	});
+
+	it("refuses to boot enabled with the store declared absent, naming the component", async () => {
+		// `store = "unsupported"` says why the slot is empty; it does not make
+		// the grant work without one. An enabled grant with no store used to
+		// boot and mount endpoints that threw on the first request; the
+		// refusal belongs at boot, beside `rateLimiter` and `verification-uri`.
+		// The phrase is the module's own, not the stage-1 policy message,
+		// which also names `deviceCodeStore`.
+		await expect(
+			boot({ deviceAuthorization: { ...ENABLED, store: "unsupported" }, withStore: false }),
+		).rejects.toThrow(/enabled = true requires a deviceCodeStore component/);
 	});
 
 	it("boots with everything wired", async () => {

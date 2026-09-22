@@ -168,7 +168,7 @@ Two things about the Redis adapter are worth knowing before choosing it:
 
 The standalone template provides `deviceCodeStoreClient` from its shared ioredis connection but does not mount this grant; a deployment that adds `deviceGrantModule` to that manifest selects `redisDeviceCodeStoreModule` alongside it.
 
-Mounting the module without any store fails boot naming `oauth.deviceAuthorization.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363).
+Mounting the module without any store fails boot naming `oauth.deviceAuthorization.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363) — for a deployment that leaves the grant off; with `enabled = true` the module refuses to boot without a store whatever the declaration says (#626).
 
 ## License
 

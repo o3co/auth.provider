@@ -172,14 +172,24 @@ export interface DeviceCodeStore {
  * waiting, so the grant cannot work at all. The policy makes that a boot
  * failure with a config key to set rather than a runtime surprise on the
  * first `/oauth/device_authorization` request.
+ *
+ * The declaration is for a deployment that installs the package and leaves
+ * the grant off — the policy is applied whether or not the feature is on. It
+ * says why the slot is empty; it does not make an enabled grant work without
+ * a store, and `deviceGrantModule` refuses that composition at boot on its
+ * own (#626). The hint below is quoted into the stage-1 boot error, so it
+ * must not send an operator with the grant enabled to write a line that is
+ * itself refused.
  */
 export const DEVICE_CODE_STORE_ABSENCE_POLICY: AbsencePolicy = {
 	configKey: ["oauth", "deviceAuthorization", "store"],
 	absentValue: "unsupported",
 	hint:
 		"the device authorization grant has nowhere to record a pending authorization, " +
-		"so no device can ever be authorized — every /oauth/device_authorization request " +
-		"would fail at runtime instead of at boot",
+		"so no device can ever be authorized. With oauth.deviceAuthorization.enabled = true " +
+		"wire a store (memoryDeviceCodeStoreModule on a single replica, " +
+		"redisDeviceCodeStoreModule otherwise) — the declaration is refused there; it is " +
+		"for a deployment that leaves the grant off",
 };
 
 declare module "@o3co/auth-provider-core" {
