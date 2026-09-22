@@ -56,6 +56,7 @@ import {
 	type FederationGrantConnection,
 	type FederationGrantRefresher,
 	fullSectionsSchema,
+	type ProviderDeps,
 	type RateLimitFailMode,
 	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantAcquisitionLimits,
@@ -100,10 +101,30 @@ export const federationGrantsConfigSchema = z.object({
 	federationGrants: fullSectionsSchema.shape.federationGrants,
 });
 
-// biome-ignore lint/suspicious/noExplicitAny: planner-inferred deps shape — the manifest reads only slots it declares in `requires` / `optional`
-type AnyDeps = any;
+const REQUIRES = ["config", "federationGrantBackground", "clientRepository"] as const;
+const OPTIONAL = [
+	"federationGrantStore",
+	"rateLimiter",
+	"auditSink",
+	"subjectRevocation",
+	"replaySeenSet",
+	"logger",
+	"federationProviders",
+	"federationGrantIntentStore",
+	"userRepository",
+	"userSessionStore",
+] as const;
 
-const isEnabled = (deps: AnyDeps): boolean =>
+/**
+ * The deps every contribution of {@link federationGrantsModule} receives:
+ * exactly its `requires` / `optional`, typed (#626 P2). Every `require*`
+ * helper below is the presence check for one optional slot.
+ */
+type Requires = (typeof REQUIRES)[number];
+type Optional = (typeof OPTIONAL)[number];
+export type FederationGrantsModuleDeps = ProviderDeps<Requires, Optional>;
+
+const isEnabled = (deps: FederationGrantsModuleDeps): boolean =>
 	(deps.config as { federationGrants?: { enabled?: boolean } }).federationGrants?.enabled === true;
 
 /**
@@ -111,7 +132,9 @@ const isEnabled = (deps: AnyDeps): boolean =>
  * authenticate a client and then answer 503 to everything, having accepted
  * `enabled = true` as if it meant something.
  */
-const requireStore = (deps: AnyDeps): NonNullable<AnyDeps["federationGrantStore"]> => {
+const requireStore = (
+	deps: FederationGrantsModuleDeps,
+): NonNullable<FederationGrantsModuleDeps["federationGrantStore"]> => {
 	if (deps.federationGrantStore === undefined) {
 		throw new Error(
 			"federationGrantsModule: federationGrants.enabled = true requires a " +
@@ -131,7 +154,9 @@ const requireStore = (deps: AnyDeps): NonNullable<AnyDeps["federationGrantStore"
  * repository lookup — and what happens when the limiter backend is down is the
  * product's decision (`rateLimit.failMode`), not this module's to default.
  */
-const requireLimiter = (deps: AnyDeps): NonNullable<AnyDeps["rateLimiter"]> => {
+const requireLimiter = (
+	deps: FederationGrantsModuleDeps,
+): NonNullable<FederationGrantsModuleDeps["rateLimiter"]> => {
 	if (deps.rateLimiter === undefined) {
 		throw new Error(
 			"federationGrantsModule: federationGrants.enabled = true requires a rateLimiter " +
@@ -143,7 +168,7 @@ const requireLimiter = (deps: AnyDeps): NonNullable<AnyDeps["rateLimiter"]> => {
 	return deps.rateLimiter;
 };
 
-const requireFailMode = (deps: AnyDeps): RateLimitFailMode => {
+const requireFailMode = (deps: FederationGrantsModuleDeps): RateLimitFailMode => {
 	const failMode = deps.config?.rateLimit?.failMode;
 	if (failMode !== "open" && failMode !== "closed") {
 		throw new Error(
@@ -175,7 +200,7 @@ const requireFailMode = (deps: AnyDeps): RateLimitFailMode => {
  * separate refusal about response modes.
  */
 const requireDelegatedCapability = (
-	deps: AnyDeps,
+	deps: FederationGrantsModuleDeps,
 	connections: ReadonlyMap<string, FederationGrantConnection>,
 ): void => {
 	const providers = deps.federationProviders as ReadonlyMap<string, unknown> | undefined;
@@ -227,7 +252,7 @@ const requireDelegatedCapability = (
  * from the shared policy so it cannot drift from the one every other module
  * gives for the same slot.
  */
-const requireAuditDecision = (deps: AnyDeps): void => {
+const requireAuditDecision = (deps: FederationGrantsModuleDeps): void => {
 	if (deps.auditSink !== undefined) return;
 	const declared = deps.config?.audit?.sink?.type;
 	if (declared === AUDIT_SINK_ABSENCE_POLICY.absentValue) return;
@@ -241,7 +266,7 @@ const requireAuditDecision = (deps: AnyDeps): void => {
 
 /** The authorizer the connect flow sends a user upstream with: the connection's provider's (D17). */
 const authorizerFor =
-	(deps: AnyDeps) =>
+	(deps: FederationGrantsModuleDeps) =>
 	(federation: string): FederationGrantDelegatedAuthorizer | undefined => {
 		const providers = deps.federationProviders as ReadonlyMap<string, unknown> | undefined;
 		const provider = providers?.get(federation);
@@ -255,7 +280,7 @@ const authorizerFor =
  * lives in. Every deployment that enables a federation already has one — the
  * federation guard asks for it — and this says why this feature needs it too.
  */
-const requireUserSessionStore = (deps: AnyDeps): UserSessionStore => {
+const requireUserSessionStore = (deps: FederationGrantsModuleDeps): UserSessionStore => {
 	const store = deps.userSessionStore as UserSessionStore | undefined;
 	if (store === undefined) {
 		throw new Error(
@@ -269,7 +294,7 @@ const requireUserSessionStore = (deps: AnyDeps): UserSessionStore => {
 
 /** The refresher core calls: the connection's provider, or nothing for one that lost its capability. */
 const refresherFor =
-	(deps: AnyDeps) =>
+	(deps: FederationGrantsModuleDeps) =>
 	(connection: FederationGrantConnection): FederationGrantRefresher | undefined => {
 		const providers = deps.federationProviders as ReadonlyMap<string, unknown> | undefined;
 		const provider = providers?.get(connection.federation);
@@ -367,25 +392,14 @@ export const federationGrantBackgroundModule = defineModule({
 	},
 });
 
-export const federationGrantsModule = defineModule({
+export const federationGrantsModule = defineModule<Requires, Optional>({
 	name: "federation-grants",
 	configSchema: federationGrantsConfigSchema,
-	requires: ["config", "federationGrantBackground", "clientRepository"] as const,
-	optional: [
-		"federationGrantStore",
-		"rateLimiter",
-		"auditSink",
-		"subjectRevocation",
-		"replaySeenSet",
-		"logger",
-		"federationProviders",
-		"federationGrantIntentStore",
-		"userRepository",
-		"userSessionStore",
-	] as const,
+	requires: REQUIRES,
+	optional: OPTIONAL,
 	contributes: {
 		routes: [
-			(deps: AnyDeps) => {
+			(deps: FederationGrantsModuleDeps) => {
 				if (!isEnabled(deps)) {
 					// Nothing below this line is read: not a component, not a
 					// connection, not the rest of the configuration. That is the
@@ -461,7 +475,7 @@ export const federationGrantsModule = defineModule({
 			// would hand it a request with none, which reads as "not signed in"
 			// and sends a signed-in user to the login page. `after` makes a
 			// composition without the middleware a boot error instead.
-			(deps: AnyDeps) => {
+			(deps: FederationGrantsModuleDeps) => {
 				if (!isEnabled(deps)) {
 					return {
 						id: "federation-grants-browser",
