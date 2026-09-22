@@ -61,10 +61,11 @@ import type { Logger } from "@o3co/auth-provider-core";
  *    reports through its callback, and treating that as success would tell an
  *    orchestrator the listener came down when it did not.
  *
- * Size `drainTimeoutMs` **below** the orchestrator's own kill grace period
- * (Kubernetes `terminationGracePeriodSeconds`, compose `stop_grace_period`,
- * both 30s by default) — the point is to close on our terms before SIGKILL
- * arrives on someone else's.
+ * Size `drainTimeoutMs` plus `cleanupTimeoutMs` **below** the orchestrator's
+ * own kill grace period (Kubernetes `terminationGracePeriodSeconds` is 30s by
+ * default, compose `stop_grace_period` 10s; with federation grants on the sum
+ * is 55s, so the grace is 60s or more) — the point is to close on our terms
+ * before SIGKILL arrives on someone else's.
  */
 export interface GracefulShutdownOptions {
 	readonly logger: Logger;
@@ -101,6 +102,71 @@ export function deferExit(code: number, exitProcess: (code: number) => void = pr
 
 const DEFAULT_DRAIN_TIMEOUT_MS = 10_000;
 const SIGNALS: readonly NodeJS.Signals[] = ["SIGTERM", "SIGINT"];
+
+/**
+ * The least cleanup allowance federation grants get (#593 slice 7): 45
+ * seconds. The package's background registry drains on dispose — it waits for
+ * a rotated upstream credential's write — and the longest tail one refresh
+ * can have is the upstream hard timeout, the persist budget and the wait for
+ * the grant's lock, back to back. With the shipped budgets (25 s + 3 s + 5 s)
+ * and {@link FEDERATION_GRANTS_CLEANUP_MARGIN_MS} that is exactly this floor;
+ * a deployment that raises a budget raises the allowance with it, below.
+ * The ten-second drain that cleanup would otherwise inherit is shorter than
+ * the tail, and a shutdown under it would abandon exactly the write the drain
+ * exists to wait for, after the IdP had moved on to the new refresh token.
+ *
+ * A host policy, not a grant setting: what it bounds is `handle.dispose()`,
+ * and the orchestrator's grace period has to cover the drain, this and an exit
+ * margin — the compose files ship 60 seconds for the shipped budgets, and an
+ * operator who raises a budget raises the grace to match.
+ */
+export const FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS = 45_000;
+
+/** What the allowance adds to the longest refresh tail: an exit margin. */
+export const FEDERATION_GRANTS_CLEANUP_MARGIN_MS = 12_000;
+
+/**
+ * The most a timer can be asked for: Node's `setTimeout` takes a 32-bit signed
+ * delay, and a larger one fires after ~1 ms instead. A sum of budgets an
+ * operator set high enough to reach it would otherwise turn the allowance
+ * into no allowance at all (Copilot, #614).
+ */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/**
+ * The `cleanupTimeoutMs` to hand {@link installGracefulShutdown}, from the
+ * config: while the feature is on, the longer of the floor above and the
+ * configured refresh tail plus the margin; while it is off, nothing — the
+ * drain's own budget, as before. A fragment to spread, so an absent allowance
+ * is absent rather than `undefined`. A config that carries no budgets (one
+ * built by hand, without `reference.conf`) gets the floor.
+ */
+export function cleanupAllowanceFor(config: {
+	readonly federationGrants?:
+		| {
+				readonly enabled?: boolean | undefined;
+				readonly upstreamHardTimeoutMs?: number | undefined;
+				readonly persistRetryBudgetMs?: number | undefined;
+				readonly lockWaitMs?: number | undefined;
+		  }
+		| undefined;
+}): { readonly cleanupTimeoutMs: number } | Record<string, never> {
+	const grants = config.federationGrants;
+	if (grants?.enabled !== true) return {};
+	const budgets = [grants.upstreamHardTimeoutMs, grants.persistRetryBudgetMs, grants.lockWaitMs];
+	const tail = budgets.every((budget) => typeof budget === "number" && Number.isFinite(budget))
+		? (budgets as number[]).reduce(
+				(sum, budget) => sum + budget,
+				FEDERATION_GRANTS_CLEANUP_MARGIN_MS,
+			)
+		: 0;
+	return {
+		cleanupTimeoutMs: Math.min(
+			Math.max(FEDERATION_GRANTS_CLEANUP_ALLOWANCE_MS, tail),
+			MAX_TIMER_MS,
+		),
+	};
+}
 
 export function installGracefulShutdown(server: Server, options: GracefulShutdownOptions): void {
 	const {

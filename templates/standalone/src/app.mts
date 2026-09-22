@@ -29,7 +29,7 @@ import { buildModules } from "./buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "./configPath.mjs";
 import { createAppLogger } from "./logger.mjs";
 import { createMetrics } from "./metrics.mjs";
-import { installGracefulShutdown } from "./shutdown.mjs";
+import { cleanupAllowanceFor, installGracefulShutdown } from "./shutdown.mjs";
 import { createTerminalErrorHandler } from "./terminalError.mjs";
 
 // Step 1: Load and validate application config (HOCON → Zod schema).
@@ -164,8 +164,16 @@ await (async (): Promise<void> => {
 	// from the code you deploy. See `shutdown.mts` for the stated guarantees
 	// and for the deadline the previous implementation did not have. Size
 	// `drainTimeoutMs` below your orchestrator's kill grace period.
+	//
+	// #593 slice 7: with federation grants on, cleanup gets the longest refresh
+	// tail the configured budgets allow plus a margin — 45 s under the shipped
+	// ones — rather than inheriting the drain's ten: the dispose is what waits
+	// for a rotated credential's write. The compose files size
+	// `stop_grace_period` to cover the drain, this and an exit margin for the
+	// shipped budgets; a raised budget raises both.
 	installGracefulShutdown(server, {
 		logger,
 		cleanup: () => handle.dispose(),
+		...cleanupAllowanceFor(config),
 	});
 })();

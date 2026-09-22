@@ -167,6 +167,67 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `CLIENT_CODE_PASSWORD` | — | コードストア用 Redis パスワード |
 | `CLIENT_CODE_DEFAULT_EXPIRES_IN` | `600` | 認可コードのデフォルト有効期間（秒） |
 
+### フェデレーショングラント（#593）
+
+上流 IdP のトークンをオフラインで委譲する仕組み。ユーザーが一度同意すると、クライアント（バックエンドやエージェント）は本人不在のまま、後から HTTP で上流のアクセストークンを取得できる。グラントは**ログアウトを越えて残り**、資格情報の変更（subject-revocation service）で終わる。既定はオフで、オフなら何もインストールされない。ルートと各応答の意味は[パッケージ README](../../packages/federation-grants/README.md)、IdP ごとに必要な設定は [`docs/offline-access.md`](../../packages/federation-grants/docs/offline-access.md) を参照。
+
+| 変数 | デフォルト | 説明 |
+|---|---|---|
+| `FEDERATION_GRANTS_ENABLED` | `false` | ルート、下記 2 つのストア、subject-revocation service をインストールする |
+| `FEDERATION_GRANTS_CONSENT_URL` | — | グラント用の同意ページ（デプロイ側が用意する）。パス、またはプロバイダー origin 上の絶対 URL。既定値なし — 有効化は「ページがある」という宣言で、無ければ起動を拒否する |
+| `FEDERATION_GRANTS_IDENTITY_LOOKUP` | `required` | connect callback で、別ローカルユーザーに紐づいた上流アカウントを拒否するか。`required` は各 connection の registration を cover するユーザーリポジトリが必要（下記）。`unsupported` は「この検査をしない」という記録された決定 |
+| `FEDERATION_GRANT_STORE_ADAPTER` | `redis` | グラントの保存先: `memory`（1 レプリカ、再起動で消え全ユーザーが再接続）/ `redis`（共有ソケット） |
+| `FEDERATION_GRANT_INTENT_STORE_ADAPTER` | `redis` | 取得フローの記録（intent、同意チャレンジ、connect トランザクション）の保存先: `memory`（1 レプリカ、再起動で進行中のフローだけ失う）/ `redis` |
+| `FEDERATION_GRANTS_ENCRYPTION_MODE` | `required` | `required` / `allow-plaintext`。平文は production/staging と `DEPLOYMENT_MODE=multi` で拒否される（`FEDERATION_TOKENS_ALLOW_INSECURE=1` を除く） |
+| `FEDERATION_GRANTS_ALLOW_KEEP_ON_SUBJECT_REVOCATION` | `false` | subject 全体の失効で、確立済みグラントを残すよう*求められる*ことを許すか。許可であって指示ではない |
+| `REDIS_FEDERATION_GRANT_STORE_KEY_PREFIX` | `fg:` | Redis グラントストアのキー名前空間 |
+
+**環境変数の形を持たないものが 2 つ**ある — connection と暗号鍵リング。リストは HOCON のものなので、デプロイ側のレイヤー（例: `config/production.conf`）に書く:
+
+```hocon
+federationGrants {
+  encryptionKeys = [
+    # 先頭の鍵で封じ、列挙した全鍵で開く。GRANT_KEY_2026_09 は自分で決める名前
+    # (openssl rand -base64 32) で、テンプレートの override ではない。
+    { id = "2026-09", key = ${GRANT_KEY_2026_09} }
+  ]
+  connections {
+    files {
+      federation = "entra-files"   # 有効な type = "oidc" の federations.<name>。専用の app registration を持つ
+      scopes = ["openid", "profile", "offline_access", "Files.Read"]
+      boundary = "production"
+      maxAccessTokenLifetime = 3600
+      # グラントフロー自身の callback（このプロバイダーの origin 上）。federation のログイン callback ではない
+      callbackURL = "https://auth.example/session/federation-grants/callback/files"
+      allowScopeSubsets = false
+      identityClaims = ["oid", "tid"]
+    }
+  }
+}
+```
+
+**起動時に拒否されるもの**（ユーザーがフロー途中で出会う代わりに、名指しで）: 同意ページ未設定 / `callbackURL` のない connection、無効な federation を指す connection、委譲 capability を持たないアダプターの federation（持つのは汎用 OIDC アダプターだけ — Google の connection は `type = "oidc"` の federation にする）/ `required` なのに connection の registration を cover しないユーザーリポジトリ / Redis グラント + memory のユーザーセッションストア（`USER_SESSION_STORES_ADAPTER=memory` — グラントがそれを終わらせる境界より長生きしてしまう。compose 2 本は `redis` を設定済み）/ Redis グラントストアで `encryptionMode = "required"` なのにリングに鍵がない（memory ストアは何も封じないので鍵不要）/ `DEPLOYMENT_MODE=multi` でどちらかのストアが `memory`。
+
+**ユーザーリポジトリ。** `required` では、起動時に各 connection の registration を cover するかをリポジトリに問い、connect callback で上流アカウントの持ち主を問う。テンプレート既定の `http` リポジトリにはこの lookup が無く（[#613](https://github.com/o3co/auth.provider/issues/613)）、同梱の in-memory リポジトリはどの registration も cover しない。connection を設定するなら、`FEDERATION_GRANTS_IDENTITY_LOOKUP=unsupported`（別ローカルユーザーが既に持つ上流アカウントを拒否しない、という記録された決定）にするか、`supportsFederatedIdentityLookup` と `findSubjectByFederatedIdentity` を実装したリポジトリを合成する（何を答えるべきかはパッケージ README の check 5）。connection が無ければ何も要求されない。
+
+**クライアント登録。** `config/clients.yaml` で、グラントを持てる confidential クライアントに、要求できる connection とブラウザの戻り先を書く。`allowedRedirectUris` や `firstParty` はどちらも代わりにならない:
+
+```yaml
+worker:
+  tokenEndpointAuthMethod: "client_secret_basic"
+  clientSecret: "$2b$10$…"
+  allowedFederationGrantConnections: ["files"]
+  federationGrantRedirectUris: ["https://worker.example/connected"]
+```
+
+**クライアント側から見たフロー。** `POST /oauth/federation-grants`（クライアント認証）で `sub` に対する intent を登録すると `grant_id` と `connect_uri` が返るので、ユーザーのブラウザをそこへ送る。プロバイダーは必要ならログインさせ、同意ページを見せ、上流へ送り、`grant_id` と `state` を付けてクライアントの `redirect_uri` に戻す — トークンは決して載らない。以後クライアントは自身の資格情報とユーザーの `sub` で `/oauth/federation-grants/:grantId/token` / `/status` / `/revoke` を呼ぶ。本人は不在でよい。
+
+**同意ページ**はデプロイ側のもので、プロバイダーと same-origin。契約は `/oauth/consent` と同じなので 1 ページで両方を担える。`GET /session/federation-grants/consent?challenge=…` は JSON を返す: `client_id`、`client_name`、`connection`、`scopes`、`resource`、`grant_expires_in`（承認後の期間。日付ではない）、`continues_after_logout`（ページが必ず表示するもの）、`expires_in`（フローの残り時間）。`POST` に `challenge` と `decision`（`accept` | `deny`）を送ると `303` — 上流へ、または クライアントへ戻る。取得も更新も必ずここを通る。
+
+**ログインページ**は `ENDPOINTS_LOGIN_URL` のもので、`redirect_to=<connect リンク>` 付きで呼ばれる。ログイン後はそのリンクへそのまま戻す（`/oauth/authorize` と同じ往復）。そのリンクを `POST /session/login` の `redirect_to` に送ってはいけない — あちらの完全一致 allowlist はランディングページ用で、フローごとの handle を拒否する。
+
+**運用。** 鍵リングのローテーションは[オペレーター runbook](../../docs/operator-runbook.md)の手順で（新しい鍵を末尾に → 先頭に、古い鍵は 365 日残す）。シャットダウンは機能が有効なら cleanup に 45 秒を与え（`upstreamHardTimeoutMs` / `persistRetryBudgetMs` / `lockWaitMs` を上げればその合計 + 余裕まで増える）、compose 2 本はプロセスに 60 秒を与える（[シャットダウンの保証](#シャットダウンの保証)）。無効化は失効ではない: グラントは失効させるまで Redis に残るので、先に終わらせること。一時停止中も鍵と失効境界は保持する。
+
 ### エンドポイント
 
 | 変数 | デフォルト | 説明 |
@@ -297,7 +358,9 @@ installGracefulShutdown(server, { logger, cleanup: () => handle.dispose() });
 4. **deadline を超えたら残接続を切り、プロセスは非ゼロ終了する。** 常に `0` しか見えない orchestrator では、正常な drain と時間切れの強制切断を区別できない。
 5. **`cleanup` は drain 後・exit 前**に走る(`handle.dispose()` = 逆トポロジカルなコンポーネント cleanup + Redis/タイマーの drain)。失敗はこのサービス自身の logger(他の行と同じ NDJSON)に出し、exit code にも反映する。dispose が throw してもプロセスは終了する。
 
-**`drainTimeoutMs` は orchestrator の kill grace period より短く設定すること** — Kubernetes の `terminationGracePeriodSeconds`、compose の `stop_grace_period` はいずれも既定 30 秒。他人の都合の `SIGKILL` が来る前に、自分の都合で閉じるのが目的。
+6. **フェデレーショングラントが有効なら `cleanup` に「refresh の最長の尻尾 + 余裕」**（`src/shutdown.mts` の `cleanupAllowanceFor`）: `federationGrants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 秒、下限 45 秒 — 同梱の予算（25 + 3 + 5 + 12）ではちょうど 45 秒。drain の 10 秒を継承しないのは、dispose がローテーションした上流資格情報の書き込みを待つため。予算を上げれば allowance も増えるので、orchestrator の grace も合わせて上げる。無効なら cleanup の予算は drain のまま。
+
+**`drainTimeoutMs` と `cleanupTimeoutMs` の合計が orchestrator の kill grace period を下回るようにすること。** Kubernetes の `terminationGracePeriodSeconds` は既定 30 秒、compose の `stop_grace_period` は既定 10 秒。フェデレーショングラントが有効なときの最悪値は drain 10 秒 + cleanup 45 秒 = 55 秒なので、**grace は 60 秒以上**にする — 同梱の compose 2 本はそうしてあり、Kubernetes では `terminationGracePeriodSeconds: 60` を自分で設定する。さもないとローリング再起動のたびに、cleanup が待っている書き込みの途中で `SIGKILL` される。他人の都合の `SIGKILL` が来る前に、自分の都合で閉じるのが目的。
 
 ## npm スクリプト
 

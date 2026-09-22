@@ -48,6 +48,7 @@ pnpm build
 - **oauth** — OAuth routes (`/oauth/token`, `/oauth/authorize`, `/oauth/introspect`). Required for any token issuance.
 - **session** — Session login + provider-registered OAuth federation. Optional — skip for API-only deployments.
 - **federation-google / federation-github / federation-apple / federation-oidc** — Concrete OAuth federation providers; `federation-oidc` brokers to any OpenID Connect IdP by issuer, one instance per issuer. Optional — install only the providers you register. An iOS app offering Google or GitHub login must offer Sign in with Apple too (App Store Review Guideline 4.8).
+- **federation-grants** — Offline delegation of an upstream IdP's tokens to a backend or an agent, on a consent that survives logout (#593). Optional; needs `federation-oidc`.
 - **foundation** — Production HTTP user-authentication adapter (client of "the Store"). Optional.
 - **webauthn / dpop / mtls / oauth-token-exchange / device-grant / redis** — Optional capability and adapter modules; see [Packages](#packages).
 
@@ -67,6 +68,7 @@ pnpm build
 | [`packages/federation-github`](packages/federation-github/) | `@o3co/auth-provider-federation-github` | GitHub federation provider |
 | [`packages/federation-apple`](packages/federation-apple/) | `@o3co/auth-provider-federation-apple` | Sign in with Apple federation provider — `form_post` callback, rotating ES256 client secret |
 | [`packages/federation-oidc`](packages/federation-oidc/) | `@o3co/auth-provider-federation-oidc` | Generic OpenID Connect federation provider — any OIDC IdP by issuer (Okta, Entra ID, Auth0, Keycloak), one instance per issuer, no JIT provisioning |
+| [`packages/federation-grants`](packages/federation-grants/) | `@o3co/auth-provider-federation-grants` | Federation grants (#593) — a client obtains upstream access tokens on a user's standing consent, with no session behind the call; the consent page, the connect flow, token/status/revoke routes |
 | [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | Redis-backed adapters and `defineModule` manifests |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | Production HTTP user-authentication adapter ("the Store" client) |
 | [`templates/standalone`](templates/standalone/) | — | Deployable server template (composition root) |

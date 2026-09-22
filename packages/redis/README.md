@@ -230,7 +230,10 @@ configured key opens, and the envelope names the one that sealed it, so a key
 can be introduced without re-sealing grants that are paused. A key that is not
 in the ring reads as `key_unavailable` — a configuration problem an operator
 undoes by putting it back — and is told apart from a credential that will
-never open again. Nothing is ever deleted on a read.
+never open again. Nothing is ever deleted on a read. Rotate by adding the new
+key last, then moving it first, and keep the old one listed for 365 days after
+the last replica that sealed with it stopped — the procedure, and why it is
+the ceiling and not `maxExpiresIn`, is in `docs/operator-runbook.md`.
 
 The index (`idx:`) is what lets `removeBySid` name the keys it must delete
 instead of hunting for them, at a cost of O(that session's federations). Before

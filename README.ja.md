@@ -41,6 +41,7 @@ pnpm build
 - **core** — インターフェース、設定スキーマ、トークンサービス、アプリファクトリ。常に必要。
 - **oauth** — OAuth ルート (`/oauth/token`, `/oauth/authorize`, `/oauth/introspect`)。トークン発行に必須。
 - **session** — セッションログイン + OAuth フェデレーション（Google、GitHub、Apple、拡張可能）。オプション — API のみのデプロイではスキップ可能。
+- **federation-grants** — 上流 IdP のトークンをバックエンドやエージェントへオフライン委譲する（#593）。ログアウトを越えて残る同意。オプション、`federation-oidc` が必要。
 - **foundation** — 本番向け HTTP ユーザー認証アダプター（「the Store」のクライアント）。オプション。
 - **webauthn / dpop / mtls / oauth-token-exchange / redis** — オプションの capability / アダプターモジュール。[パッケージ構成](#パッケージ構成)を参照。
 
@@ -59,6 +60,7 @@ pnpm build
 | [`packages/federation-github`](packages/federation-github/) | `@o3co/auth-provider-federation-github` | GitHub フェデレーションプロバイダー |
 | [`packages/federation-apple`](packages/federation-apple/) | `@o3co/auth-provider-federation-apple` | Sign in with Apple フェデレーションプロバイダー — `form_post` コールバック、ローテーションする ES256 クライアントシークレット |
 | [`packages/federation-oidc`](packages/federation-oidc/) | `@o3co/auth-provider-federation-oidc` | 汎用 OpenID Connect フェデレーションプロバイダー — issuer 指定で任意の OIDC IdP（Okta, Entra ID, Auth0, Keycloak）、issuer ごとに 1 インスタンス、JIT プロビジョニングなし |
+| [`packages/federation-grants`](packages/federation-grants/) | `@o3co/auth-provider-federation-grants` | フェデレーショングラント（#593）— ユーザーの継続的な同意に基づき、セッションなしでクライアントが上流アクセストークンを取得する。同意ページ、connect フロー、token/status/revoke ルート |
 | [`packages/redis`](packages/redis/) | `@o3co/auth-provider-redis` | Redis バックエンドのアダプターと `defineModule` マニフェスト |
 | [`packages/foundation`](packages/foundation/) | `@o3co/auth-provider-foundation` | 本番向け HTTP ユーザー認証アダプター（「the Store」のクライアント） |
 | [`templates/standalone`](templates/standalone/) | — | デプロイ可能なサーバーテンプレート (コンポジションルート) |

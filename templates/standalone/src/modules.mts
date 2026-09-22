@@ -39,7 +39,11 @@ import {
 import type { GoogleProviderConfig } from "@o3co/auth-provider-federation-google";
 import { readOidcFederationConfigs } from "@o3co/auth-provider-federation-oidc";
 import { registerBuiltinAdapters } from "@o3co/auth-provider-foundation";
-import { makeIoredisClients } from "@o3co/auth-provider-redis/ioredis";
+import {
+	makeIoredisClients,
+	makeIoredisFederationGrantIntentStoreClient,
+	makeIoredisFederationGrantStoreClient,
+} from "@o3co/auth-provider-redis/ioredis";
 import { extractFederationSection } from "@o3co/auth-provider-session";
 // Named import is required here, not default. ioredis is CJS and its entry
 // does `module.exports = Redis` with the class re-exported as both `default`
@@ -438,6 +442,28 @@ export const standaloneRedisClientsModule: Module = defineModule({
 			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
 				.sessionFederationIndexClient;
 		},
+		// #593 slice 7: the grant store and the intent store, off the same
+		// socket. Consumed by the Redis grant modules when their switches say
+		// "redis"; provided whenever this module is installed, as every slot
+		// here is, because a slot is cheap and the socket is the cost.
+		federationGrantStoreClient: async ({
+			config,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.federationGrantStoreClient;
+		},
+		federationGrantIntentStoreClient: async ({
+			config,
+			lifecycleRegistrar,
+			readinessRegistrar,
+			logger,
+		}) => {
+			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
+				.federationGrantIntentStoreClient;
+		},
 		// #484: the replay seen-set behind private_key_jwt client assertions.
 		replaySeenSetClient: async ({ config, lifecycleRegistrar, readinessRegistrar, logger }) => {
 			return getOrCreateClients(config as AppConfig, lifecycleRegistrar, readinessRegistrar, logger)
@@ -630,13 +656,26 @@ const SHARED_REDIS_TIMEOUTS = {
 // on PR #121). When `lifecycleRegistrar` is undefined (test scenarios
 // that don't seed it), each call creates a fresh client; tests are
 // isolated and don't need cross-slot sharing.
-const clientsCache = new WeakMap<LifecycleRegistrar, ReturnType<typeof makeIoredisClients>>();
+/**
+ * Every per-purpose client off the one socket: the general bundle, plus the
+ * two the federation-grant stores need (#593 slice 7). Those two have their
+ * own factories in the Redis package, so a Cluster deployment can give the
+ * grants a connection of their own; this template shares the socket, as it
+ * does for every other store.
+ */
+type StandaloneRedisClients = ReturnType<typeof makeIoredisClients> & {
+	readonly federationGrantStoreClient: ReturnType<typeof makeIoredisFederationGrantStoreClient>;
+	readonly federationGrantIntentStoreClient: ReturnType<
+		typeof makeIoredisFederationGrantIntentStoreClient
+	>;
+};
+const clientsCache = new WeakMap<LifecycleRegistrar, StandaloneRedisClients>();
 function getOrCreateClients(
 	config: AppConfig,
 	lifecycleRegistrar: LifecycleRegistrar | undefined,
 	readinessRegistrar?: ReadinessRegistrar,
 	injectedLogger?: Logger,
-): ReturnType<typeof makeIoredisClients> {
+): StandaloneRedisClients {
 	const logger = injectedLogger ?? consoleLogger;
 	const cached = lifecycleRegistrar ? clientsCache.get(lifecycleRegistrar) : undefined;
 	if (cached) return cached;
@@ -676,7 +715,11 @@ function getOrCreateClients(
 	// The wrapper opens its own connections for refresh rotation
 	// (`refreshTokenFamilyClient.duplicate()`), which inherit no listeners from
 	// `io`; passing the logger lets those report through the same channel.
-	const clients = makeIoredisClients(io, { logger });
+	const clients: StandaloneRedisClients = {
+		...makeIoredisClients(io, { logger }),
+		federationGrantStoreClient: makeIoredisFederationGrantStoreClient(io),
+		federationGrantIntentStoreClient: makeIoredisFederationGrantIntentStoreClient(io),
+	};
 	if (lifecycleRegistrar) clientsCache.set(lifecycleRegistrar, clients);
 	return clients;
 }

@@ -12,7 +12,7 @@
 		"build": "tsc",
 		"start": "node dist/app.mjs",
 		"debug": "NODE_OPTIONS='--conditions=development' tsx watch src/app.mts",
-		"test": "vitest run --passWithNoTests"
+		"test": "tsc --noEmit && vitest run --passWithNoTests"
 	},
 	"imports": {
 		"#/*": {
@@ -23,6 +23,7 @@
 	"dependencies": {
 		"@o3co/auth-provider-core": "workspace:*",
 		"@o3co/auth-provider-federation-google": "workspace:*",
+		"@o3co/auth-provider-federation-grants": "workspace:*",
 		"@o3co/auth-provider-federation-oidc": "workspace:*",
 		"@o3co/auth-provider-foundation": "workspace:*",
 		"@o3co/auth-provider-oauth": "workspace:*",
