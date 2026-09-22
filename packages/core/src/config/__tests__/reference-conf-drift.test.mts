@@ -246,6 +246,37 @@ describe("core's reference.conf declares the operator keys a composition layerin
 		expect(parsed.repositories?.user?.http).not.toHaveProperty("linkFederatedIdentityUrl");
 	});
 
+	it("substitutes CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL and keeps it through AppConfigSchema (#613)", () => {
+		const raw = parseFile(REFERENCE_CONF_PATH, {
+			env: {
+				...REQUIRED_ENV,
+				CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL: "https://store.example/identity",
+			},
+		});
+		const parsed = validate(raw, AppConfigSchema) as {
+			repositories?: { user?: { http?: { findSubjectByFederatedIdentityUrl?: unknown } } };
+		};
+		expect(parsed.repositories?.user?.http?.findSubjectByFederatedIdentityUrl).toBe(
+			"https://store.example/identity",
+		);
+	});
+
+	it("leaves the lookup URL absent when unset, and ships an empty coverage declaration (#613)", () => {
+		// Absent, not blank: the repository defines the two lookup methods only
+		// when the URL is there, and that absence is the boot refusal an
+		// operator reads. The coverage list is HOCON's to fill; an empty default
+		// is what a deployment that never declares any gets — and it must reach
+		// the factory as a list, not vanish.
+		const parsed = validate(
+			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),
+			AppConfigSchema,
+		) as {
+			repositories?: { user?: { http?: Record<string, unknown> } };
+		};
+		expect(parsed.repositories?.user?.http).not.toHaveProperty("findSubjectByFederatedIdentityUrl");
+		expect(parsed.repositories?.user?.http?.federatedIdentityLookupCoverage).toEqual([]);
+	});
+
 	it("declares oauth.authorize.acrValues, empty, so an unset table resolves to no acr values", () => {
 		const parsed = validate(
 			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),

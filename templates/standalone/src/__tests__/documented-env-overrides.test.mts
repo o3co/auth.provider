@@ -209,6 +209,9 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	CLIENT_USER_AUTHENTICATE_URL: "https://users.example.com/authenticate",
 	CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL: "https://users.example.com/authenticate-by-token",
 	CLIENT_USER_LINK_FEDERATED_IDENTITY_URL: "https://users.example.com/link-federated-identity",
+	// #613: the Store's identity lookup for federation grants (D7 check 5).
+	CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL:
+		"https://users.example.com/find-subject-by-federated-identity",
 	CLIENT_USER_TIMEOUT: "5000",
 	CLIENT_USER_MAX_RESPONSE_BYTES: "1048576",
 	CLIENT_CODE_TYPE: "redis",

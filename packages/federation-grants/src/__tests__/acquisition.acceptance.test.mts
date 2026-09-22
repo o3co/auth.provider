@@ -35,6 +35,7 @@ import type {
 	FederatedIdentityLookupResult,
 	FederatedIdentityRegistration,
 	SubjectRevocation,
+	UserRepository,
 	UserSession,
 } from "@o3co/auth-provider-core";
 import {
@@ -47,10 +48,13 @@ import {
 	InMemoryUserRepository,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
+import { HttpUserRepository } from "@o3co/auth-provider-foundation";
 import type { Request, RequestHandler } from "express";
 import express from "express";
+import { HttpResponse, http } from "msw";
+import { setupServer } from "msw/node";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { federationGrantsModules } from "#/index.mjs";
 import { ACQUISITION_ENDPOINTS, callbackUrlFor } from "./acquisitionFixture.mjs";
 
@@ -111,6 +115,12 @@ const clientRepository: ClientRepository = {
 		id === CLIENT_ID && secret === SECRET ? (client as never) : null,
 };
 
+/** Whose account the fake upstream's exchange verifies; a test may add claims. */
+let exchangeUpstream: { issuer: string; subject: string; claims?: Record<string, string> } = {
+	issuer: "https://issuer.example",
+	subject: "00u-alice",
+};
+
 /** The upstream: an authorization endpoint the test never visits, and a token endpoint it answers. */
 const upstream = {
 	name: "upstream",
@@ -125,7 +135,7 @@ const upstream = {
 		return url;
 	},
 	exchangeDelegatedCode: async () => ({
-		upstream: { issuer: "https://issuer.example", subject: "00u-alice" },
+		upstream: { ...exchangeUpstream, claims: { ...(exchangeUpstream.claims ?? {}) } },
 		tokens: {
 			accessToken: "upstream-access-token",
 			refreshToken: "upstream-refresh-token",
@@ -189,7 +199,8 @@ const directory = () =>
 
 const boot = async (
 	subjectRevocation: SubjectRevocation = createInMemorySubjectRevocation(),
-	userRepository: DirectoryRepository = directory(),
+	userRepository: UserRepository = directory(),
+	connections: Record<string, Record<string, unknown>> = {},
 ) => {
 	const full = makeValidFullSections();
 	const handle = await createApp({
@@ -229,6 +240,7 @@ const boot = async (
 							maxAccessTokenLifetime: 3600,
 							callbackURL: callbackUrlFor("calendar"),
 						},
+						...connections,
 					},
 				},
 			},
@@ -453,5 +465,184 @@ describe("a grant created end to end, and spent", () => {
 		} finally {
 			await handle.dispose();
 		}
+	});
+});
+
+// #613: the identity lookup over HTTP, composed — a deployment on
+// `HttpUserRepository` keeps `identityLookup = "required"` with a connection
+// configured, given a Store that answers, and the callback reads the Store's
+// answer as the port's.
+describe("#613: the identity lookup over HTTP, composed", () => {
+	const STORE = "http://localhost:18081";
+	const LOOKUP = `${STORE}/identity/lookup`;
+	const server = setupServer();
+	/** What the Store answers, and what it was asked. */
+	const store = { status: 200, body: { kind: "unlinked" } as unknown, asked: [] as unknown[] };
+	beforeAll(() => {
+		// Only the Store is mocked: supertest's own requests to the composed app
+		// pass through, and anything else aimed at the Store's origin is an error.
+		server.listen({
+			onUnhandledRequest: (req, print) => {
+				if (req.url.startsWith(STORE)) print.error();
+			},
+		});
+		server.use(
+			http.post(LOOKUP, async ({ request: req }) => {
+				store.asked.push(await req.json());
+				return store.body === undefined
+					? new HttpResponse(null, { status: store.status })
+					: HttpResponse.json(store.body as never, { status: store.status });
+			}),
+		);
+	});
+	afterEach(() => {
+		store.status = 200;
+		store.body = { kind: "unlinked" };
+		store.asked = [];
+		exchangeUpstream = { issuer: "https://issuer.example", subject: "00u-alice" };
+	});
+	afterAll(() => server.close());
+
+	const httpRepository = () =>
+		new HttpUserRepository({
+			authenticateUrl: `${STORE}/authenticate`,
+			authenticateByTokenUrl: `${STORE}/authenticate/token`,
+			findSubjectByFederatedIdentityUrl: LOOKUP,
+			federatedIdentityLookupCoverage: [
+				{
+					provider: "upstream",
+					issuer: "https://issuer.example",
+					clientId: "provider-client",
+					requiredClaims: ["tid", "oid"],
+				},
+			],
+			timeout: 5000,
+		});
+	const claimed = { calendar: { identityClaims: ["oid", "tid"] } };
+	/** The `calendar` connection with the claims the Store's strategy needs. */
+	const connections = () => ({
+		calendar: {
+			federation: "upstream",
+			scopes: ["openid", "offline_access", "calendar.read"],
+			boundary: "production",
+			maxAccessTokenLifetime: 3600,
+			callbackURL: callbackUrlFor("calendar"),
+			...claimed.calendar,
+		},
+	});
+
+	/** A client lodges an intent for alice; the connect link's path and query. */
+	const lodgeFor = async (app: express.Express): Promise<URL> => {
+		const lodged = await request(app)
+			.post("/oauth/federation-grants")
+			.set("Authorization", basic)
+			.send({ connection: "calendar", sub: "alice", redirect_uri: REDIRECT, state: "s" });
+		expect(lodged.status).toBe(201);
+		return new URL(lodged.body.connect_uri as string);
+	};
+
+	/** A browser signed in as alice now, with its durable session. */
+	const signIn = (browser: string) => {
+		const sid = `sid-${browser}`;
+		browsers.set(browser, { isAuthenticated: true, user: { id: "alice" }, sid });
+		durable.set(sid, {
+			sid,
+			sub: "alice",
+			authTime: new Date(),
+			createdAt: new Date(),
+			expiresAt: new Date(Date.now() + 86_400_000),
+			claims: {},
+		} as UserSession);
+	};
+
+	/** Lodge, sign in, consent, and come back from the upstream: the callback's redirect. */
+	const connectAs = async (app: express.Express, browser: string) => {
+		const connect = await lodgeFor(app);
+		signIn(browser);
+		const started = await request(app)
+			.get(`${connect.pathname}${connect.search}`)
+			.set("x-browser", browser);
+		const challenge =
+			new URL(started.headers.location as string, ISSUER).searchParams.get("challenge") ?? "";
+		const approved = await request(app)
+			.post("/session/federation-grants/consent")
+			.set("x-browser", browser)
+			.send({ challenge, decision: "accept" });
+		const state = new URL(approved.headers.location as string).searchParams.get("state") ?? "";
+		const returned = await request(app)
+			.get("/session/federation-grants/callback/calendar")
+			.query({ state, code: "code-1" })
+			.set("x-browser", browser);
+		expect(returned.status).toBe(303);
+		return new URL(returned.headers.location as string).searchParams;
+	};
+
+	it("boots under required with a connection, asking the Store nothing at boot", async () => {
+		const { handle } = await boot(undefined, httpRepository(), connections());
+		try {
+			expect(store.asked).toEqual([]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("activates on the Store's unlinked, having sent it the registration, the sub and the claims", async () => {
+		exchangeUpstream = { ...exchangeUpstream, claims: { oid: "O-ALICE", tid: "T-1" } };
+		const { handle, app } = await boot(undefined, httpRepository(), connections());
+		try {
+			const back = await connectAs(app, "b-http-1");
+			expect(back.has("error")).toBe(false);
+			expect(store.asked).toEqual([
+				{
+					provider: "upstream",
+					issuer: "https://issuer.example",
+					clientId: "provider-client",
+					sub: "00u-alice",
+					claims: { oid: "O-ALICE", tid: "T-1" },
+				},
+			]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses on the Store's indeterminate, and reads its linked-to-another as a conflict", async () => {
+		exchangeUpstream = { ...exchangeUpstream, claims: { oid: "O-BOB", tid: "T-1" } };
+		const { handle, app } = await boot(undefined, httpRepository(), connections());
+		try {
+			store.body = { kind: "indeterminate", reason: "identity_not_resolvable" };
+			expect((await connectAs(app, "b-http-2")).get("error")).toBe("identity_unverifiable");
+			store.body = { kind: "linked", subject: "bob" };
+			expect((await connectAs(app, "b-http-3")).get("error")).toBe("identity_conflict");
+			expect(store.asked).toHaveLength(2);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("reads a Store that answers 404, or a body that is not an answer, as an outage — never as nobody", async () => {
+		exchangeUpstream = { ...exchangeUpstream, claims: { oid: "O-ALICE", tid: "T-1" } };
+		const { handle, app } = await boot(undefined, httpRepository(), connections());
+		try {
+			store.status = 404;
+			store.body = { kind: "unlinked" };
+			expect((await connectAs(app, "b-http-4")).get("error")).toBe("temporarily_unavailable");
+			store.status = 200;
+			store.body = { found: false };
+			expect((await connectAs(app, "b-http-5")).get("error")).toBe("temporarily_unavailable");
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses at boot a connection that does not name a claim the Store's strategy needs", async () => {
+		const mail = {
+			...connections().calendar,
+			callbackURL: callbackUrlFor("mail"),
+			identityClaims: ["oid"],
+		};
+		await expect(boot(undefined, httpRepository(), { ...connections(), mail })).rejects.toThrow(
+			/connections\.mail[\s\S]*identityClaims/,
+		);
 	});
 });

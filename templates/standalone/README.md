@@ -392,6 +392,7 @@ is documented in [its README](../../packages/federation-oidc/README.md).
 | `CLIENT_USER_AUTHENTICATE_URL` | — | URL for password-based user authentication. **https required** (see below) |
 | `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | — | URL for token-based user authentication. **https required** (see below) |
 | `CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` | — | Optional. URL the Store links a federated identity at (#482); enables `?link=1` on the federation start route. **https required** |
+| `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | — | Optional. URL the Store answers who holds an upstream identity at (#613, federation grants' check 5). With it, declare what the Store covers in `repositories.user.http.federatedIdentityLookupCoverage` (HOCON). **https required** |
 | `CLIENT_USER_TIMEOUT` | `5000` | HTTP request timeout in milliseconds. Positive integer ≤ `2147483647` |
 | `CLIENT_USER_MAX_RESPONSE_BYTES` | `1048576` | Largest upstream response body accepted, in bytes |
 
@@ -507,14 +508,28 @@ nothing and needs none); `memory` for either store under `DEPLOYMENT_MODE=multi`
 
 **The user repository.** Under `required`, boot asks the repository whether it
 covers each connection's registration, and the connect callback asks it who
-holds the upstream account. The template's `http` repository has no such
-lookup ([#613](https://github.com/o3co/auth.provider/issues/613)), and the
-bundled in-memory one covers no registration. So with a connection configured
-you either set `FEDERATION_GRANTS_IDENTITY_LOOKUP=unsupported` — the recorded
-decision not to refuse an upstream account another local user already holds —
-or compose a repository that implements `supportsFederatedIdentityLookup` and
-`findSubjectByFederatedIdentity` (the package README's check 5 says what they
-must answer). With no connection configured nothing is required.
+holds the upstream account. The template's `http` repository asks your Store
+(#613): set `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` to the
+endpoint, and declare what that endpoint covers — one entry per registration,
+with the claims the Store's strategy needs — in a HOCON layer:
+
+```hocon
+repositories.user.http.federatedIdentityLookupCoverage = [
+  { provider = "entra-files", issuer = "https://login.microsoftonline.com/<tenant>/v2.0",
+    clientId = "<the grants app registration>", requiredClaims = ["tid", "oid"] }
+]
+```
+
+Boot then holds every connection to it: one whose registration is not
+declared, or whose `identityClaims` misses a required claim, is refused by
+name. The wire contract the Store implements — and what "unlinked" obliges it
+to have checked — is in the
+[foundation README](../../packages/foundation/README.md#the-identity-lookup-613);
+the Store is not asked at boot. The bundled in-memory repository covers no
+registration. Without a covering Store, set
+`FEDERATION_GRANTS_IDENTITY_LOOKUP=unsupported` — the recorded decision not to
+refuse an upstream account another local user already holds. With no
+connection configured nothing is required.
 
 **Registering a client.** In `config/clients.yaml`, a confidential client that
 may hold grants names the connections it may ask for and where the browser

@@ -442,7 +442,11 @@ It checks, in this order:
    nothing of registrations, so it covers none and answers `indeterminate` for
    every identity: a deployment on it that configures a connection sets
    `identityLookup = "unsupported"` — the recorded decision not to make this
-   check — or installs a Store that covers the registration.
+   check — or installs a Store that covers the registration. The foundation
+   package's `HttpUserRepository` (#613) asks a deployment's own Store over
+   HTTP and answers the boot probe from an operator's declaration of what that
+   Store covers, per registration and claims; its README carries the wire
+   contract a Store implements.
 
    **For an IdP with a registration of its own for grants** (D19 — Entra, for
    one): **a Store that learns identities only from logins cannot satisfy

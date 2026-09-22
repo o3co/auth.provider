@@ -155,6 +155,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 | `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | — | トークン認証用のユーザー認証 URL。**https 必須**（下記参照） |
 | `CLIENT_USER_TIMEOUT` | `5000` | HTTP リクエストタイムアウト（ミリ秒）。`2147483647` 以下の正の整数 |
 | `CLIENT_USER_MAX_RESPONSE_BYTES` | `1048576` | 上流レスポンスボディの受け入れ上限（バイト） |
+| `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | — | 任意。上流 identity の持ち主を Store に問う URL（#613、フェデレーショングラントの check 5）。設定したら Store が cover する registration を `repositories.user.http.federatedIdentityLookupCoverage`（HOCON）に宣言する。**https 必須** |
 
 ユーザー認証 URL は 2 つとも上流ストアへ**平文のユーザー資格情報**を運ぶため、いずれも絶対 `https://` URL でなければならない。`http://` は loopback ホスト（`localhost`、`127.0.0.0/8` 内のアドレス、`[::1]`）に限って許可され、ローカル開発で証明書を用意せずに済むようにしている。プライベートレンジのアドレス（`http://10.0.0.5/…`）やコンテナネットワークのサービス名（`http://user-service/…`）には `https://` が必要 — これらはデプロイが端から端まで制御していないネットワークを越えるため。URL・タイムアウト・レスポンス上限のいずれかが不正なら、最初のログイン時ではなく起動時に失敗する。
 
@@ -208,7 +209,16 @@ federationGrants {
 
 **起動時に拒否されるもの**（ユーザーがフロー途中で出会う代わりに、名指しで）: 同意ページ未設定 / `callbackURL` のない connection、無効な federation を指す connection、委譲 capability を持たないアダプターの federation（持つのは汎用 OIDC アダプターだけ — Google の connection は `type = "oidc"` の federation にする）/ `required` なのに connection の registration を cover しないユーザーリポジトリ / Redis グラント + memory のユーザーセッションストア（`USER_SESSION_STORES_ADAPTER=memory` — グラントがそれを終わらせる境界より長生きしてしまう。compose 2 本は `redis` を設定済み）/ Redis グラントストアで `encryptionMode = "required"` なのにリングに鍵がない（memory ストアは何も封じないので鍵不要）/ `DEPLOYMENT_MODE=multi` でどちらかのストアが `memory`。
 
-**ユーザーリポジトリ。** `required` では、起動時に各 connection の registration を cover するかをリポジトリに問い、connect callback で上流アカウントの持ち主を問う。テンプレート既定の `http` リポジトリにはこの lookup が無く（[#613](https://github.com/o3co/auth.provider/issues/613)）、同梱の in-memory リポジトリはどの registration も cover しない。connection を設定するなら、`FEDERATION_GRANTS_IDENTITY_LOOKUP=unsupported`（別ローカルユーザーが既に持つ上流アカウントを拒否しない、という記録された決定）にするか、`supportsFederatedIdentityLookup` と `findSubjectByFederatedIdentity` を実装したリポジトリを合成する（何を答えるべきかはパッケージ README の check 5）。connection が無ければ何も要求されない。
+**ユーザーリポジトリ。** `required` では、起動時に各 connection の registration を cover するかをリポジトリに問い、connect callback で上流アカウントの持ち主を問う。テンプレート既定の `http` リポジトリはこれを Store に問う（#613）: `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` にエンドポイントを設定し、そのエンドポイントが cover するもの（registration ごとに 1 エントリ、Store の戦略が必要とする claim 付き）を HOCON レイヤーに宣言する:
+
+```hocon
+repositories.user.http.federatedIdentityLookupCoverage = [
+  { provider = "entra-files", issuer = "https://login.microsoftonline.com/<tenant>/v2.0",
+    clientId = "<グラント用 app registration>", requiredClaims = ["tid", "oid"] }
+]
+```
+
+起動時にすべての connection がこれと突き合わされる: registration が宣言されていない、または `identityClaims` に必要な claim が欠けている connection は名指しで拒否される。Store が実装する wire 契約と、`unlinked` と答えるために何を確認していなければならないかは [foundation README](../../packages/foundation/README.md#the-identity-lookup-613) にある。起動時に Store は問われない。同梱の in-memory リポジトリはどの registration も cover しない。cover する Store が無いなら `FEDERATION_GRANTS_IDENTITY_LOOKUP=unsupported`（別ローカルユーザーが既に持つ上流アカウントを拒否しない、という記録された決定）にする。connection が無ければ何も要求されない。
 
 **クライアント登録。** `config/clients.yaml` で、グラントを持てる confidential クライアントに、要求できる connection とブラウザの戻り先を書く。`allowedRedirectUris` や `firstParty` はどちらも代わりにならない:
 

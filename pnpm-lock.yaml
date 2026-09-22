@@ -248,6 +248,9 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
+      '@o3co/auth-provider-foundation':
+        specifier: workspace:*
+        version: link:../foundation
       '@o3co/auth-provider-oauth':
         specifier: workspace:*
         version: link:../oauth
@@ -272,6 +275,9 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
+      msw:
+        specifier: ^2.15.0
+        version: 2.15.0(@types/node@26.5.1)(typescript@6.0.3)
       supertest:
         specifier: ^7.2.2
         version: 7.2.2
