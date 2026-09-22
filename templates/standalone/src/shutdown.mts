@@ -61,10 +61,11 @@ import type { Logger } from "@o3co/auth-provider-core";
  *    reports through its callback, and treating that as success would tell an
  *    orchestrator the listener came down when it did not.
  *
- * Size `drainTimeoutMs` **below** the orchestrator's own kill grace period
- * (Kubernetes `terminationGracePeriodSeconds`, compose `stop_grace_period`,
- * both 30s by default) — the point is to close on our terms before SIGKILL
- * arrives on someone else's.
+ * Size `drainTimeoutMs` plus `cleanupTimeoutMs` **below** the orchestrator's
+ * own kill grace period (Kubernetes `terminationGracePeriodSeconds` is 30s by
+ * default, compose `stop_grace_period` 10s; with federation grants on the sum
+ * is 55s, so the grace is 60s or more) — the point is to close on our terms
+ * before SIGKILL arrives on someone else's.
  */
 export interface GracefulShutdownOptions {
 	readonly logger: Logger;

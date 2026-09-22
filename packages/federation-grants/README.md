@@ -577,7 +577,7 @@ And there is one thing it cannot wait for, by core's design rather than by omiss
 
 ### Give the host enough cleanup allowance
 
-A deployment mounting this package wants **at least 45 seconds** of cleanup allowance: the ten-second drain a host would otherwise give cleanup is shorter than the upstream hard timeout and persist budget this feature ships with, so a shutdown under it would abandon exactly the write the drain exists to wait for. The standalone template gives cleanup 45 seconds while the feature is on and its compose files give the process 60. HTTP draining and the orchestrator's termination grace are sized separately, and both have to be longer again.
+A deployment mounting this package wants **at least 45 seconds** of cleanup allowance: the ten-second drain a host would otherwise give cleanup is shorter than the upstream hard timeout and persist budget this feature ships with, so a shutdown under it would abandon exactly the write the drain exists to wait for. The standalone template gives cleanup 45 seconds while the feature is on and its compose files give the process 60; Kubernetes' default `terminationGracePeriodSeconds` of 30 is below drain plus cleanup and has to be raised to 60 or more. HTTP draining and the orchestrator's termination grace are sized separately, and both have to be longer again.
 
 ## License
 

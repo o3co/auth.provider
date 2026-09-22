@@ -206,7 +206,7 @@ federationGrants {
 }
 ```
 
-**起動時に拒否されるもの**（ユーザーがフロー途中で出会う代わりに、名指しで）: 同意ページ未設定 / `callbackURL` のない connection、無効な federation を指す connection、委譲 capability を持たないアダプターの federation（持つのは汎用 OIDC アダプターだけ — Google の connection は `type = "oidc"` の federation にする）/ `required` なのに connection の registration を cover しないユーザーリポジトリ / Redis グラント + memory のユーザーセッションストア（`USER_SESSION_STORES_ADAPTER=memory` — グラントがそれを終わらせる境界より長生きしてしまう。compose 2 本は `redis` を設定済み）/ `encryptionMode = "required"` で鍵なし / `DEPLOYMENT_MODE=multi` でどちらかのストアが `memory`。
+**起動時に拒否されるもの**（ユーザーがフロー途中で出会う代わりに、名指しで）: 同意ページ未設定 / `callbackURL` のない connection、無効な federation を指す connection、委譲 capability を持たないアダプターの federation（持つのは汎用 OIDC アダプターだけ — Google の connection は `type = "oidc"` の federation にする）/ `required` なのに connection の registration を cover しないユーザーリポジトリ / Redis グラント + memory のユーザーセッションストア（`USER_SESSION_STORES_ADAPTER=memory` — グラントがそれを終わらせる境界より長生きしてしまう。compose 2 本は `redis` を設定済み）/ Redis グラントストアで `encryptionMode = "required"` なのにリングに鍵がない（memory ストアは何も封じないので鍵不要）/ `DEPLOYMENT_MODE=multi` でどちらかのストアが `memory`。
 
 **ユーザーリポジトリ。** `required` では、起動時に各 connection の registration を cover するかをリポジトリに問い、connect callback で上流アカウントの持ち主を問う。テンプレート既定の `http` リポジトリにはこの lookup が無く（[#613](https://github.com/o3co/auth.provider/issues/613)）、同梱の in-memory リポジトリはどの registration も cover しない。connection を設定するなら、`FEDERATION_GRANTS_IDENTITY_LOOKUP=unsupported`（別ローカルユーザーが既に持つ上流アカウントを拒否しない、という記録された決定）にするか、`supportsFederatedIdentityLookup` と `findSubjectByFederatedIdentity` を実装したリポジトリを合成する（何を答えるべきかはパッケージ README の check 5）。connection が無ければ何も要求されない。
 
@@ -360,7 +360,7 @@ installGracefulShutdown(server, { logger, cleanup: () => handle.dispose() });
 
 6. **フェデレーショングラントが有効なら `cleanup` に 45 秒**（`src/shutdown.mts` の `cleanupAllowanceFor`）。drain の 10 秒を継承しない — dispose はローテーションした上流資格情報の書き込みを待ち、パッケージの upstream hard timeout と persist budget の合計は 10 秒を超えるため。無効なら cleanup の予算は drain のまま。
 
-**`drainTimeoutMs` は orchestrator の kill grace period より短く設定すること** — Kubernetes の `terminationGracePeriodSeconds` は既定 30 秒、compose の `stop_grace_period` は既定 10 秒。同梱の compose 2 本は 60 秒（drain + グラントの cleanup + 終了の余裕）にしてある。他人の都合の `SIGKILL` が来る前に、自分の都合で閉じるのが目的。
+**`drainTimeoutMs` と `cleanupTimeoutMs` の合計が orchestrator の kill grace period を下回るようにすること。** Kubernetes の `terminationGracePeriodSeconds` は既定 30 秒、compose の `stop_grace_period` は既定 10 秒。フェデレーショングラントが有効なときの最悪値は drain 10 秒 + cleanup 45 秒 = 55 秒なので、**grace は 60 秒以上**にする — 同梱の compose 2 本はそうしてあり、Kubernetes では `terminationGracePeriodSeconds: 60` を自分で設定する。さもないとローリング再起動のたびに、cleanup が待っている書き込みの途中で `SIGKILL` される。他人の都合の `SIGKILL` が来る前に、自分の都合で閉じるのが目的。
 
 ## npm スクリプト
 

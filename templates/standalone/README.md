@@ -501,8 +501,9 @@ generic OIDC adapter has it, so a Google connection is a `type = "oidc"`
 federation; `required` with a user repository that does not cover a
 connection's registration; Redis grants beside memory user-session stores
 (`USER_SESSION_STORES_ADAPTER=memory` — the grants would outlive the boundary
-that ends them; both compose files set `redis`); `encryptionMode = "required"`
-with no key; `memory` for either store under `DEPLOYMENT_MODE=multi`.
+that ends them; both compose files set `redis`); the Redis grant store under
+`encryptionMode = "required"` with no key in the ring (the memory store seals
+nothing and needs none); `memory` for either store under `DEPLOYMENT_MODE=multi`.
 
 **The user repository.** Under `required`, boot asks the repository whether it
 covers each connection's registration, and the connect callback asks it who
@@ -814,7 +815,7 @@ installGracefulShutdown(server, { logger, cleanup: () => handle.dispose() });
 
 6. **With federation grants on, `cleanup` gets 45 seconds** (`cleanupAllowanceFor` in `src/shutdown.mts`) instead of inheriting the drain's ten: the dispose waits for a rotated upstream credential's write, and the package's upstream hard timeout and persist budget add up to more than ten. Off, the cleanup budget stays the drain's.
 
-**Size `drainTimeoutMs` below your orchestrator's kill grace period** — Kubernetes `terminationGracePeriodSeconds` is 30s by default and compose's `stop_grace_period` is 10s; the shipped compose files set 60s (drain + the grants cleanup + an exit margin). The point is to close on your terms before `SIGKILL` arrives on someone else's.
+**Size `drainTimeoutMs` and `cleanupTimeoutMs` together below your orchestrator's kill grace period.** Kubernetes `terminationGracePeriodSeconds` is 30s by default and compose's `stop_grace_period` is 10s; with federation grants on, the worst case is drain (10s) + cleanup (45s) = 55s, so **set the grace to 60s or more** — the shipped compose files do, and a Kubernetes deployment must set `terminationGracePeriodSeconds: 60` itself, or a rolling restart SIGKILLs the process in the middle of the write the cleanup exists to finish. The point is to close on your terms before `SIGKILL` arrives on someone else's.
 
 ## npm Scripts
 

@@ -44,8 +44,10 @@ And what the callback holds the answer to (`packages/federation-grants/README.md
   compared exactly, on the names the connection configures. The adapter
   normalizes nothing: configure the names the IdP reports, including any it
   adds by itself. An omitted `scope` in the answer means "as requested";
-- a refresh token the upstream rotates is persisted, even out of an answer
-  the library could not otherwise parse (D5, D12);
+- on a **refresh**, a rotated refresh token is persisted even out of an
+  answer the library could not otherwise parse (D5, D12). The connect
+  callback's exchange has no such salvage: an acquisition whose answer could
+  not be verified has no grant to keep a token under, and fails whole;
 - the grant's own lifetime is an upper bound on the local authorization, not
   a promise that the upstream's refresh token lasts that long. When the
   upstream refuses a refresh, the grant reads `reauthorization_required`.
