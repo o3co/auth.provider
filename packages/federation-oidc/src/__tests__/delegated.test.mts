@@ -164,7 +164,8 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			expect(req?.body?.get("code_verifier")).toBe(VERIFIER);
 			// The grant's callback, not the login one the provider was built with.
 			expect(req?.body?.get("redirect_uri")).toBe(CALLBACK);
-			expect(result.upstream).toEqual({ issuer: idp.issuer, subject: idp.sub });
+			// No claim asked for, none carried.
+			expect(result.upstream).toEqual({ issuer: idp.issuer, subject: idp.sub, claims: {} });
 			expect(result.tokens).toMatchObject({
 				accessToken: idp.accessToken,
 				refreshToken: "rt-1",
@@ -184,6 +185,67 @@ describe("the generic OIDC adapter's delegated authorization (#593, D17)", () =>
 			expect(idp.lastTokenRequest()?.body?.get("resource")).toBe("https://calendar.example/");
 			await exchange(provider);
 			expect(idp.lastTokenRequest()?.body?.has("resource")).toBe(false);
+		});
+
+		it("carries the claims asked for from the verified id_token, and nothing else (#611)", async () => {
+			// What a Store with its own directory matches a person on across
+			// registrations — Entra's tenant and object id — where the `sub` is
+			// pairwise. Copied from the id_token the library verified, never
+			// from UserInfo or the callback, and only the names asked for.
+			const { idp, provider } = await build({ userInfo: true });
+			idp.nonce = "nonce-1";
+			idp.idTokenClaims = { oid: "O-A", tid: "T-1", unrequested: "sentinel-claim" };
+			const result = await exchange(provider, {
+				identityClaims: ["oid", "tid"],
+				callbackParams: { oid: "O-FROM-CALLBACK" },
+			});
+			expect(result.upstream).toEqual({
+				issuer: idp.issuer,
+				subject: idp.sub,
+				claims: { oid: "O-A", tid: "T-1" },
+			});
+			expect(idp.requestsTo("/userinfo")).toHaveLength(0);
+			// A local allowlist, not a request: nothing about it goes upstream.
+			const body = idp.lastTokenRequest()?.body?.toString() ?? "";
+			expect(body).not.toContain("oid");
+			expect(body).not.toContain("tid");
+		});
+
+		it("leaves out a claim asked for that is absent, empty, or not a string — never coerced", async () => {
+			const { idp, provider } = await build();
+			idp.nonce = "nonce-1";
+			idp.idTokenClaims = { tid: 42, oid: "", a: null, b: ["x"], c: { d: 1 }, e: true };
+			const result = await exchange(provider, {
+				identityClaims: ["tid", "oid", "a", "b", "c", "e", "missing"],
+			});
+			expect(result.upstream.claims).toEqual({});
+			// A name the id_token has only by inheritance is not one it carries.
+			idp.idTokenClaims = {};
+			const inherited = await exchange(provider, { identityClaims: ["toString"] });
+			expect(inherited.upstream.claims).toEqual({});
+		});
+
+		it("refuses a claim name the protocol already owns, a malformed one, or a repeat: configuration faults", async () => {
+			const { idp, provider } = await build();
+			idp.nonce = "nonce-1";
+			for (const names of [
+				["sub"],
+				["iss"],
+				["nonce"],
+				["__proto__"],
+				["a b"],
+				[""],
+				["oid", "oid"],
+			]) {
+				await expect(
+					exchange(provider, { identityClaims: names }),
+					JSON.stringify(names),
+				).rejects.toThrow(/identityClaims/);
+			}
+			// Refused before the code is spent at the upstream.
+			const before = idp.requestsTo("/token").length;
+			await expect(exchange(provider, { identityClaims: ["sub"] })).rejects.toThrow();
+			expect(idp.requestsTo("/token")).toHaveLength(before);
 		});
 
 		it("never calls UserInfo: a delegation needs the verified subject, not a login profile", async () => {

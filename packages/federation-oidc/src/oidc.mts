@@ -29,6 +29,7 @@ import {
 	type FederationClientSecret,
 	type FederationProfile,
 	type FederationProvider,
+	identityClaimsProblem,
 	type MappedClaims,
 	RESERVED_DELEGATED_AUTHORIZATION_PARAMS,
 	type RefreshedTokens,
@@ -36,6 +37,7 @@ import {
 	type SupportsDelegatedAuthorization,
 	type SupportsLogout,
 	type SupportsRefresh,
+	selectIdentityClaims,
 } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 import { verifyAtHash } from "./at-hash.mjs";
@@ -521,6 +523,11 @@ export async function createOidcProvider(
 		params: DelegatedCodeExchangeRequest,
 	): Promise<DelegatedAuthorizationResult> => {
 		const nonce = requireNonce(params.nonce);
+		// Checked before the code is spent: a list that cannot be honoured is a
+		// configuration fault, and the upstream should not be asked first.
+		const identityClaims = params.identityClaims ?? [];
+		const problem = identityClaimsProblem(identityClaims);
+		if (problem !== undefined) throw new Error(`${label}: ${problem}`);
 		const callbackUrl = callbackUrlForExchange({
 			redirectUri: params.redirectUri,
 			code: params.code,
@@ -550,7 +557,13 @@ export async function createOidcProvider(
 		if (claims.at_hash !== undefined) {
 			verifyAtHash(label, tokens.id_token ?? "", tokens.access_token, claims.at_hash);
 		}
-		const upstream = { issuer: claims.iss, subject };
+		// The claims asked for, from the id_token the library verified and the
+		// hash check above accepted — never UserInfo, the callback or mapClaims.
+		const upstream = {
+			issuer: claims.iss,
+			subject,
+			claims: selectIdentityClaims(claims as Record<string, unknown>, identityClaims),
+		};
 		const refreshToken = optionalString(tokens.refresh_token);
 		const lifetime = rawLifetime(call.captured, tokens.expires_in);
 		// A lifetime that is not one withholds the access token — core then reads

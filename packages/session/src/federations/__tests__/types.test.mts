@@ -18,10 +18,13 @@ import { describe, expect, it } from "vitest";
 import {
 	type FederationProfile,
 	type FederationProvider,
+	identityClaimsProblem,
+	RESERVED_IDENTITY_CLAIMS,
 	type SupportsClaimMapping,
 	type SupportsDelegatedAuthorization,
 	type SupportsLogout,
 	type SupportsRefresh,
+	selectIdentityClaims,
 	supportsClaimMapping,
 	supportsDelegatedAuthorization,
 	supportsLogout,
@@ -64,7 +67,7 @@ describe("FederationProvider type guards", () => {
 		const methods = {
 			buildDelegatedAuthorizationUrl: () => new URL("https://example.com/authorize"),
 			exchangeDelegatedCode: async () => ({
-				upstream: { issuer: "https://example.com", subject: "s" },
+				upstream: { issuer: "https://example.com", subject: "s", claims: {} },
 				tokens: {},
 			}),
 			refreshDelegatedToken: async () => ({}),
@@ -86,7 +89,7 @@ describe("FederationProvider type guards", () => {
 			...minimalProvider,
 			buildDelegatedAuthorizationUrl: () => new URL("https://example.com/authorize"),
 			exchangeDelegatedCode: async () => ({
-				upstream: { issuer: "https://example.com", subject: "s" },
+				upstream: { issuer: "https://example.com", subject: "s", claims: {} },
 				tokens: { refreshToken: "rt-1" },
 			}),
 			refreshDelegatedToken: async () => ({ refreshToken: "rt-2" }),
@@ -166,5 +169,44 @@ describe("FederationProfile shape", () => {
 			expiresAt: new Date(0),
 		};
 		expect(oidc.expiresAt).toBeInstanceOf(Date);
+	});
+});
+
+describe("identity claims (#611)", () => {
+	it("accepts printable names, and an empty list", () => {
+		expect(identityClaimsProblem([])).toBeUndefined();
+		expect(
+			identityClaimsProblem(["oid", "tid", "https://example.test/claims/employee"]),
+		).toBeUndefined();
+	});
+
+	it("refuses a reserved, malformed, non-string or repeated name, by name", () => {
+		for (const name of RESERVED_IDENTITY_CLAIMS) {
+			expect(identityClaimsProblem([name]), name).toMatch(new RegExp(`"${name}"`));
+		}
+		for (const bad of ["", "a b", "tab\t", "é", "x".repeat(257), 7, null]) {
+			expect(identityClaimsProblem([bad]), String(bad)).toMatch(/not a claim name/);
+		}
+		expect(identityClaimsProblem(["oid", "oid"])).toMatch(/twice/);
+	});
+
+	it("selects own, non-empty string claims only, into a fresh object", () => {
+		const claims = Object.assign(Object.create({ inherited: "from-prototype" }), {
+			oid: "O",
+			tid: 42,
+			empty: "",
+			list: ["x"],
+		}) as Record<string, unknown>;
+		const selected = selectIdentityClaims(claims, [
+			"oid",
+			"tid",
+			"empty",
+			"list",
+			"inherited",
+			"absent",
+		]);
+		expect(selected).toEqual({ oid: "O" });
+		expect(selected).not.toBe(claims);
+		expect(selectIdentityClaims(claims, [])).toEqual({});
 	});
 });
