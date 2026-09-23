@@ -300,7 +300,7 @@ codec はそれを含むレコードを拒否する）。反対側では、ア�
 | 404 | `federation_not_linked` | 指定のフェデレーションがセッションに紐付いていない |
 | 410 | `refresh_token_absent` | 保存済みトークンに refresh_token がない（ログイン時に upstream が返さなかった） |
 | 410 | `re_authentication_required` | IdP が `invalid_grant` を返した — セッションのフェデレーションはクリアされる。ユーザーは IdP で再認証が必要 |
-| 500 | `refresh_failed` | IdP リフレッシュの汎用エラー |
+| 500 | `refresh_failed` | IdP リフレッシュの汎用エラー、またはこのルートが読めない応答。SIEM は監査の `details.reason` でグルーピングすること |
 | 502 | `upstream_token_ineligible` | upstream のトークンがこのプロバイダーの渡せる型ではない。理由は `error_description` が名乗る（現状は `token_type_unsupported` のみ、#645）。`Retry-After: 300` を付ける |
 | 503 | `refresh_not_supported` | プロバイダーが `SupportsRefresh` を実装していない |
 | 503 | `lock_timeout` | 待機ウィンドウ内に advisory lock を取得できなかった |
@@ -330,9 +330,9 @@ clients:
 - `federation.token.success` — トークン発行時（詳細に `refreshed: boolean` が含まれ、キャッシュヒットかリフレッシュパスかを区別できる）
 - `federation.token.forbidden` — 403 発生時（クライアントが opt-in していない）
 - `federation.token.family_revoked` — family 失効による 401 発生時
-- `federation.token.refresh_failed` — `provider.refreshToken` が throw したとき（`invalid_grant` 以外）
+- `federation.token.refresh_failed` — `provider.refreshToken` が分類できないエラーで throw したとき、およびこのルートが読めない応答が返ったとき。SF-13 (v0.5.1): throw の場合 `details.reason` は分類器の値（`"invalid_grant" | "rate_limited" | "network" | "unknown"`）、応答は返ったが使えなかった場合は `"no_access_token"`・`"invalid_expiry"`・`"invalid_token_type"` のいずれか。SIEM ルールはこのフィールドでグルーピングすること — 全 7 値。v0.5.1 以前は `details.error: <raw message>` だった — ダッシュボードを移行すること
 - `federation.token.reauthentication_required` — IdP から `invalid_grant` を受け取ったとき
-- `federation.token.upstream_ineligible` — 502 発生時。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま（token 型として不正な値もそのまま — それこそ見る価値がある。文字列ですらない場合は `null`）。どの upstream が別の型を返し始めたかをオペレーターが追える。呼び出し元には型を伝えない — 再試行以外にできることがないため
+- `federation.token.upstream_ineligible` — 502 発生時。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま（token 型として不正な値もそのまま — それこそ見る価値がある。文字列ですらない場合は `null`）。どの upstream が別の型を返し始めたかをオペレーターが追える。レスポンスには `Retry-After: 300` を付ける — `federationGrants.ineligibleRetryAfter` の既定値と同じで、この状態はオペレーターが upstream の登録を戻すまで終わらないため。呼び出し元には型を伝えない — 再試行以外にできることがないため
 
 ## v0.3.x → v0.4.0 マイグレーション
 

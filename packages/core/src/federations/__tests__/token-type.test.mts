@@ -24,8 +24,9 @@ describe("canonicalTokenType — RFC 6749 §A.13's `token-type`", () => {
 		["another registered type", "DPoP"],
 		// §A.13 is `token-type = type-name / URI-reference`, and this is only a
 		// token type through the second alternative — `name-char` has no `:`.
-		// NQCHAR admits both, which is why the check borrowed is a superset.
 		["a URI, which §A.13 admits beside a type name", "urn:ietf:params:oauth:token-type:jwt"],
+		["an absolute URI with a query and a fragment", "https://example.com/tt?v=1#x"],
+		["a pct-encoded octet", "a%20b"],
 		["one the registry does not hold", "mac"],
 	])("keeps %s exactly as it was given", (_label, value) => {
 		expect(canonicalTokenType(value)).toBe(value);
@@ -38,8 +39,20 @@ describe("canonicalTokenType — RFC 6749 §A.13's `token-type`", () => {
 		["a tab", "\t"],
 		["a leading space", " Bearer"],
 		["a trailing space", "Bearer "],
-		["a double quote, excluded by NQCHAR", '"'],
-		["a backslash, excluded by NQCHAR", "\\"],
+		["a double quote, which no URI may contain", '"'],
+		["a backslash, which no URI may contain", "\\"],
+		// Printable ASCII the old NQCHAR bound admitted and §A.13 does not:
+		// neither a `name-char` nor a character RFC 3986 permits in a URI.
+		// Reading these as names sent an adapter's garbage down the refusal
+		// meant for a real type the upstream issued (#649 review).
+		["a caret", "Bearer^"],
+		["braces", "a{b}"],
+		["a pipe", "a|b"],
+		["a backtick", "a`b"],
+		["angle brackets", "a<b>"],
+		["a `%` that does not begin a pct-encoded octet", "a%zz"],
+		["a truncated pct-encoding", "a%2"],
+		["a non-ASCII letter", "é"],
 	])("names nothing for %s", (_label, value) => {
 		expect(canonicalTokenType(value)).toBeUndefined();
 	});

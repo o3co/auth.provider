@@ -14,8 +14,6 @@
  * limitations under the License.
  */
 
-import { isScopeToken } from "./scope.mjs";
-
 /**
  * The one type an upstream access token may be handed on as, spelled as RFC
  * 6750 §2.1 spells the scheme. RFC 6749 §5.1 makes the comparison
@@ -26,32 +24,66 @@ import { isScopeToken } from "./scope.mjs";
 export const BEARER_TOKEN_TYPE = "Bearer";
 
 /**
+ * RFC 3986 §2: the characters a URI may contain outside a percent-encoding —
+ * unreserved (`ALPHA DIGIT - . _ ~`), gen-delims (`: / ? # [ ] @`) and
+ * sub-delims (`! $ & ' ( ) * + , ; =`). `%` is not here: it is only valid as
+ * the start of a pct-encoded octet, which is checked on its own.
+ */
+const URI_CHARACTER = /[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=]/;
+const PCT_ENCODED = /^%[0-9A-Fa-f]{2}/;
+
+/**
+ * Whether a value is a `token-type` in the sense of RFC 6749 §A.13:
+ *
+ *     token-type = type-name / URI-reference
+ *     type-name  = 1*name-char
+ *     name-char  = "-" / "." / "_" / DIGIT / ALPHA
+ *
+ * Every `name-char` is an RFC 3986 unreserved character, so every
+ * `type-name` is itself a valid (relative) URI reference and the union
+ * reduces to one question: is this a URI reference? That is answered
+ * lexically — every character is one RFC 3986 admits, and every `%` begins a
+ * pct-encoded octet. The structural rules a full parse would add (`[` only in
+ * an IP-literal host, no `:` in a relative reference's first segment) are not
+ * checked; a value that breaks only those is a URI-shaped string nobody
+ * issues as a token type, and reading it as a name changes only WHICH
+ * refusal it gets, never whether it is refused.
+ *
+ * `"Bearer^"`, `"a{b}"`, `"DPoP "` and `""` are not token types: each has a
+ * character no URI may contain, or none at all.
+ */
+function isTokenType(value: string): boolean {
+	if (value.length === 0) return false;
+	let i = 0;
+	while (i < value.length) {
+		if (value[i] === "%") {
+			if (!PCT_ENCODED.test(value.slice(i))) return false;
+			i += 3;
+			continue;
+		}
+		if (!URI_CHARACTER.test(value[i] ?? "")) return false;
+		i += 1;
+	}
+	return true;
+}
+
+/**
  * The stored form of an upstream `token_type`: the name the upstream gave, or
- * `undefined` when it gave none that is a name.
+ * `undefined` when what it gave is not a token type at all (RFC 6749 §A.13,
+ * {@link isTokenType}).
  *
- * This is a bound on what could be a token type, not a parse of one. RFC 6749
- * §A.13 writes `token-type = type-name / URI-reference` with `type-name =
- * 1*name-char`, and `name-char` is only `-`, `.`, `_`, DIGIT and ALPHA — while
- * the URI-reference alternative admits far more (`urn:ietf:params:oauth:
- * token-type:jwt` is a token type and is not a `type-name`). Checking the
- * union properly would mean parsing a URI reference, for no gain: the check
- * next door is what decides, and everything this admits and §A.13 would not is
- * refused there anyway.
- *
- * So the check borrowed is `isScopeToken`, §3.3's `scope-token = 1*NQCHAR` —
- * printable ASCII without the space, the double quote or the backslash. NQCHAR
- * is a SUPERSET of both §A.13 alternatives (a URI reference cannot contain a
- * space, a quote or a backslash either), so nothing a token type may be is
- * rejected here. What it buys is the distinction the callers need: a name,
- * against `""`, a value with a space in it, and anything that is not a string
- * — an adapter answering something that could not be a token type at all.
+ * This is what separates an adapter answering something BROKEN from an
+ * upstream answering a real type this provider may not hand on — the two
+ * refusals `POST /oauth/federation/:name/token` gives on a refresh. It has to
+ * be the grammar and not a looser bound, or garbage such as `"Bearer^"` is
+ * read as a type name and answered as if the upstream had meant it.
  *
  * Nothing is trimmed or re-cased. The spelling is the upstream's, and
  * {@link isBearerTokenType} is what reads it.
  */
 export function canonicalTokenType(value: unknown): string | undefined {
 	if (typeof value !== "string") return undefined;
-	return isScopeToken(value) ? value : undefined;
+	return isTokenType(value) ? value : undefined;
 }
 
 /**

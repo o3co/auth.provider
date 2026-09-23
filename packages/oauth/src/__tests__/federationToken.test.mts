@@ -2655,6 +2655,10 @@ describe("POST /oauth/federation/:name/token", () => {
 			["an empty string", ""],
 			["a value with a space in it", "Bearer token"],
 			["something that is not a string", 7],
+			// Printable, and not a token type: no URI may contain `^`. The old
+			// NQCHAR bound read this as a type name and sent it down the 502
+			// meant for a real type the upstream issued (#649 review).
+			["a value with a character no URI may contain", "Bearer^"],
 		])("refuses the refresh when the answered type is %s", async (_label, tokenType) => {
 			// Not a name at all: §A.13's `token-type` admits a `type-name` or a URI
 			// reference, and none of these is either. The
