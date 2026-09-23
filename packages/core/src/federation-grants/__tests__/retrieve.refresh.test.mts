@@ -803,12 +803,20 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			async (_, error, denial) => {
 				const grant = await h.seed();
 				setNow(GONE);
+				const before = await h.store.open("g-1", GONE);
 				h.refresh.mockRejectedValueOnce(error);
 				expect(await retrieve()).toStrictEqual({ ok: false, ...denial });
-				expect(await h.store.open("g-1", GONE)).toMatchObject({
+				const after = await h.store.open("g-1", GONE);
+				expect(after).toMatchObject({
 					grant: { status: "active", version: grant.version },
 					credentials: { state: "ok", value: { refreshToken: SECRET } },
 				});
+				// Nothing but the failure stamp: the credentials whole, and the grant
+				// whole apart from it — key for key (#626).
+				expect(after?.credentials).toStrictEqual(before?.credentials);
+				const { refreshFailure: _after, ...afterRest } = after?.grant ?? {};
+				const { refreshFailure: _before, ...beforeRest } = before?.grant ?? {};
+				expect(afterRest).toStrictEqual(beforeRest);
 				expect(
 					(await types()).filter((entry) => entry.startsWith("federation.grant.refresh_failed ")),
 				).toHaveLength(1);

@@ -1070,7 +1070,7 @@ describe("the callback for a renewal", () => {
 		expect(returned(await callback(w, { state, code: "c2" }, "b-2")).get("error")).toBe(
 			"account_mismatch",
 		);
-		expect(await w.grants.find(grantId, w.state.now)).toEqual(before);
+		expect(await w.grants.find(grantId, w.state.now)).toStrictEqual(before);
 	});
 
 	it("refuses another upstream account and leaves the grant exactly as it was", async () => {
@@ -1083,7 +1083,7 @@ describe("the callback for a renewal", () => {
 		expect(returned(await callback(w, { state, code: "c2" }, "b-2")).get("error")).toBe(
 			"account_mismatch",
 		);
-		expect(await w.grants.find(grantId, w.state.now)).toEqual(before);
+		expect(await w.grants.find(grantId, w.state.now)).toStrictEqual(before);
 	});
 
 	it("revokes, durably and once, a grant the subject's grants boundary covers — the one failure meant to change it", async () => {
@@ -1845,7 +1845,9 @@ describe("the callback, when the world fails or moves", () => {
 		expect(
 			returned(await callback(atAccount, { state: second.state, code: "c2" }, "b-2")).get("error"),
 		).toBe("temporarily_unavailable");
-		expect(await atAccount.grants.find(second.grantId, atAccount.state.now)).toEqual(second.before);
+		expect(await atAccount.grants.find(second.grantId, atAccount.state.now)).toStrictEqual(
+			second.before,
+		);
 	});
 });
 
@@ -1908,7 +1910,7 @@ describe('identityLookup = "unsupported" skips the lookup and nothing else', () 
 		expect(returned(await callback(w, { state, code: "c2" }, "b-2")).get("error")).toBe(
 			"account_mismatch",
 		);
-		expect(await w.grants.find(grantId, w.state.now)).toEqual(before);
+		expect(await w.grants.find(grantId, w.state.now)).toStrictEqual(before);
 	});
 });
 
@@ -2051,7 +2053,7 @@ describe("#611: verified identity claims let a Store place a pairwise sub", () =
 		expect(returned(await callback(w, { state, code: "c2" }, "b-2")).get("error")).toBe(
 			"identity_unverifiable",
 		);
-		expect(await w.grants.find(grantId, w.state.now)).toEqual(before);
+		expect(await w.grants.find(grantId, w.state.now)).toStrictEqual(before);
 		expect(directory.asked).toHaveLength(1);
 	});
 
@@ -2154,7 +2156,7 @@ describe("#611: an answer that establishes no ownership refuses the delegation",
 		expect(returned(await callback(w, { state, code: "c2" }, "b-2")).get("error")).toBe(
 			"identity_unverifiable",
 		);
-		expect(await w.grants.find(grantId, w.state.now)).toEqual(before);
+		expect(await w.grants.find(grantId, w.state.now)).toStrictEqual(before);
 		await w.background.drain();
 		expect(w.events.some((e) => e.type === "federation.grant.reauthorized")).toBe(false);
 	});

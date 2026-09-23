@@ -1548,10 +1548,11 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				const newer = await note(grant.version, { kind: "rate_limited", retryAfterSeconds: 120 });
 				expect(newer.ok).toBe(true);
 				expect(await note(grant.version, { at: at(DAY - 1) }, at(DAY))).toEqual({ ok: false });
-				expect((await store.find("g-1", at(DAY)))?.refreshFailure).toMatchObject({
+				expect((await store.find("g-1", at(DAY)))?.refreshFailure).toStrictEqual({
 					at: at(DAY),
 					kind: "rate_limited",
 					retryAfterSeconds: 120,
+					upstreamCode: undefined,
 					count: 1,
 				});
 				// The same instant is not before: a second stamp at the same date counts on.

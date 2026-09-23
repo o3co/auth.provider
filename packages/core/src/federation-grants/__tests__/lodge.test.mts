@@ -479,7 +479,7 @@ describe("lodging a reauthorization (D6, D13)", () => {
 			status: "active",
 		});
 		expect(await grants.isCurrentIntent("g-est", "id-1", at(3 * MIN))).toBe(true);
-		expect(await grants.find("g-est", at(3 * MIN))).toEqual(before);
+		expect(await grants.find("g-est", at(3 * MIN))).toStrictEqual(before);
 		expect((await intents.getIntent("id-1", at(3 * MIN)))?.kind).toBe("reauthorization");
 		// A renewal takes no place against the bound.
 		expect(intents.reservations("agent", "u-1")).toBe(0);
