@@ -562,7 +562,7 @@ export function assembleApp(
 		| undefined;
 	// No `try` here. The planner hands back a document that failed to validate
 	// as a value, and only that; everything else it runs — the key store's
-	// algorithm, the contributions' getters, this collector, the router factory
+	// algorithm, this collector, a contribution's `providerRoot`, the router factory
 	// below — is host-supplied, and whatever it throws arrives as itself. A
 	// `try` around the planner kept converting some of it: two review rounds on
 	// #650 found one such path each (the router factory, then the host reads).

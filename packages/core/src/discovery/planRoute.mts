@@ -38,12 +38,19 @@
  * converts it into its own failure taxonomy, and it must convert exactly that
  * and nothing else — which a `try` around the planner could not promise: the
  * planner also runs host-supplied code (the key store's algorithm, the
- * contributions' getters, the collector, the router factory), and any of it
- * could throw an error that merely has the right type. Two review rounds on
+ * collector, a contribution's `providerRoot`, the router factory), and any of
+ * it could throw an error that merely has the right type. Two review rounds on
  * #650 found one such path each. Catching only around
  * {@link buildDiscoveryDocument} here and handing the error back as a value
  * makes provenance structural: the caller cannot mistake anything else for
  * it, because nothing else arrives as a value.
+ *
+ * The line is drawn at the builder, and it is the line the conversion had
+ * before #626 F4 moved it: whatever raises while the builder runs is the
+ * builder's. That includes a contribution's `endpoints` or `metadata` getter,
+ * which the builder reads — a `DiscoveryDocumentError` from one comes back as
+ * `"invalid"`, as it was converted before. Snapshotting the contributions to
+ * move the line further in would be a change of behaviour, not of structure.
  *
  * {@link discoveryRouteFor} builds the route for a planned document,
  * separately, because it calls the router factory.

@@ -229,6 +229,27 @@ describe("planDiscoveryDocument + discoveryRouteFor — what fails, and how", ()
 		expect(() => planDocument(input(failure))).toThrow(failure);
 	});
 
+	it("treats what raises while the builder reads a contribution as the builder's (#650)", () => {
+		// The line is the builder, and this pins which side a contribution
+		// getter the builder reads falls on: the builder's, as it did before
+		// #626 F4 — the old catch wrapped the same call. Moving it (by
+		// snapshotting the contributions first) would change behaviour, so
+		// that is a decision for its own change, made on purpose.
+		const failure = new DiscoveryDocumentError("thrown by an endpoints getter");
+		const planning = planDocument({
+			metadata: [
+				{
+					providerRoot: true,
+					get endpoints(): never {
+						throw failure;
+					},
+				},
+			],
+		});
+
+		expect(planning).toEqual({ outcome: "invalid", error: failure });
+	});
+
 	it("builds no router while planning, so a router failure cannot surface as a document error", () => {
 		// The router factory is the route step's alone.
 		let built = false;
