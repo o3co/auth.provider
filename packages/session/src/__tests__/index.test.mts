@@ -94,9 +94,9 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 
 	it("exports the transaction and client-secret surface a federation package needs", async () => {
 		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
-		// A federation package (federation-apple) declares `responseMode` and may
-		// hand the route layer a computed client secret; both need the shared
-		// vocabulary rather than a private copy per adapter.
+		// A federation package may hand the route layer a computed client secret,
+		// and the transaction store is this router's. The response-mode vocabulary
+		// it also needs is core's since #626 P1 — asserted absent above.
 		expect(typeof mod.createFederationTransactionStore).toBe("function");
 		expect(typeof mod.deriveFederationTransactionCookieName).toBe("function");
 		expect(typeof mod.mintFederationTransactionId).toBe("function");

@@ -44,9 +44,9 @@ export interface TokenExchangeValidatorResolver {
 }
 
 /**
- * Re-export of FederationProvider for downstream consumers that need the
- * structural placeholder. The concrete type is wired in Phase 9 when the
- * federation packages migrate to manifest shape.
+ * Re-export of `FederationProvider` for consumers that name the slot's value
+ * type. It is the adapter port itself since #626 P1 — it was a placeholder
+ * while the contract lived in `packages/session`.
  */
 export type { FederationProvider };
 

@@ -106,3 +106,20 @@ describe("createTokenExchangeGrant declares the slots it reads (#626 P2)", () =>
 		expect(true).toBe(true);
 	});
 });
+
+describe("#626 P1: the validator contract is core's", () => {
+	it("is not re-exported from this package", async () => {
+		// The same hard break as session's: one type, one path. These are
+		// type-only names, so the runtime surface is what can be asserted — an
+		// accidental `export type ... from` would not show here, which is why the
+		// type test above pins the identity as well.
+		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
+		for (const name of [
+			"ExchangeTokenValidator",
+			"ExchangeTokenValidationContext",
+			"ValidatedToken",
+		]) {
+			expect(name in mod).toBe(false);
+		}
+	});
+});

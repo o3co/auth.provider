@@ -25,7 +25,6 @@ import type {
 	RefreshTokenFamilyRevocation,
 	SessionFederationIndex,
 	SubjectRevocation,
-	SupportsRefresh,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -44,15 +43,10 @@ type ExpressLike = {
 	urlencoded: (opts: { extended: boolean }) => RequestHandler;
 };
 
-/**
- * `supportsRefresh` is core's, and so is the capability it narrows to: this
- * route used to carry a structural copy of both because the contract lived in
- * `@o3co/auth-provider-session`, which depends on core (#626 P1).
- */
-const providerSupportsRefresh = (
-	provider: FederationProvider | undefined | null,
-): provider is FederationProvider & SupportsRefresh =>
-	provider != null && supportsRefresh(provider);
+// `supportsRefresh` is core's, and so is the capability it narrows to: this
+// route carried a structural copy of both while the contract lived in
+// `@o3co/auth-provider-session`, which depends on core (#626 P1). It answers
+// `false` for a missing provider, so a `Map.get()` result goes straight in.
 
 export interface FederationTokenRouterOptions {
 	keyStore: KeyStore;
@@ -368,7 +362,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 
 		// 11a: Get provider and check supportsRefresh.
 		const provider = opts.getFederationProviders()?.get(name);
-		if (!providerSupportsRefresh(provider)) {
+		if (!supportsRefresh(provider)) {
 			logger.warn(
 				`POST /oauth/federation/${name}/token: provider does not support refresh or not found`,
 			);

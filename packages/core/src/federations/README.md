@@ -26,14 +26,14 @@ The federation adapter port: what an upstream-IdP adapter implements, and what e
 
 ## Dependencies
 
-`types` → `response-mode` (the `responseMode` field) · `response-mode` → `types` (`Pick<FederationProvider, "responseMode">`), type-only in both directions. Nothing else: no store, no config, no logger. Imported by `../modules/manifest/contributes-map`, `../modules/manifest/synthetic-keys`, `../boot/`, `../federation-grants/retrieve` and, outside core, by the session router, `oauth`'s logout and federation-token routes, `federation-grants` and the four adapters.
+`types` → `response-mode` (the `responseMode` field) · `response-mode` → `types` (`Pick<FederationProvider, "responseMode">`), type-only in both directions. Nothing else: no store, no config, no logger. Imported inside core by `../modules/manifest/contributes-map` (which is how `../modules/manifest/synthetic-keys` and `../boot/` reach it), `../federation-grants/retrieve` and the package root; outside core, by the session router, `oauth`'s logout and federation-token routes, `federation-grants` and the four adapters.
 
 ## Invariants
 
 1. **A capability is declared by having the method, and read by the guard.** `supportsLogout`, `supportsClaimMapping`, `supportsRefresh` and `supportsDelegatedAuthorization` each answer `false` for `null` and `undefined`, so a caller can pass a `Map.get()` result straight in. `supportsDelegatedAuthorization` needs all three methods, not one — [`types.test.mts`](./__tests__/types.test.mts).
 2. **The response mode defaults rather than refuses.** An unrecognised value reads as `query`, because absence has to mean `query` for every provider written before the field existed — [`response-mode.test.mts`](./__tests__/response-mode.test.mts).
 3. **A delegated authorization may not carry the reserved parameters**, and the identity claims it may select are the listed ones — `RESERVED_DELEGATED_AUTHORIZATION_PARAMS`, `RESERVED_IDENTITY_CLAIMS`, `identityClaimsProblem`, `selectIdentityClaims` in [`types.mts`](./types.mts).
-4. **What the capability answers is what the retrieval consumes.** `SupportsDelegatedAuthorization.refreshDelegatedToken` and `FederationGrantRefresher.refresh` both answer with `DelegatedTokens`; they were two identical declarations until #626 P1 — [`delegated-authorization-types.test.mts`](./__tests__/delegated-authorization-types.test.mts).
+4. **What the capability answers is what the retrieval consumes.** `SupportsDelegatedAuthorization.refreshDelegatedToken` and `FederationGrantRefresher.refreshDelegatedToken` both answer with `DelegatedTokens`; they were two identical declarations until #626 P1 — [`delegated-authorization-types.test.mts`](./__tests__/delegated-authorization-types.test.mts).
 
 ## Failure and lifecycle
 

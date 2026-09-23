@@ -15,7 +15,6 @@
  */
 
 import type {
-	ExchangeTokenValidator,
 	GrantContext,
 	GrantDependencies,
 	GrantHandler,
@@ -45,10 +44,10 @@ const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange";
 
 /**
  * What the exchange reads (#626 P2): the shared grant slots it uses, the
- * client repository, and the validator resolver narrowed to this package's
- * validator resolver core hands back. The
- * module's `ProviderDeps<R, O>` satisfies every slot but that resolver,
- * which it bridges until P1 makes core's own resolver concrete.
+ * client repository, and the validator resolver core hands back — whose
+ * `get` answers with the contract this grant consumes, since #626 P1 moved
+ * that contract into core. The module's `ProviderDeps<R, O>` satisfies every
+ * slot, with no cast left between them.
  */
 export interface TokenExchangeDependencies
 	extends Pick<

@@ -340,7 +340,7 @@ import type {
   SupportsLogout,
   EndSessionRequest,
   EndSessionResult,
-} from "@o3co/auth-provider-session";
+} from "@o3co/auth-provider-core";
 
 function createMyIdPProvider(): FederationProvider & SupportsLogout {
   return {

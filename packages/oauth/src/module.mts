@@ -20,7 +20,6 @@ import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	consoleLogger,
 	defineModule,
-	type FederationProvider,
 	type Module,
 	type ProviderDeps,
 	readAccessTokenRevocationMode,

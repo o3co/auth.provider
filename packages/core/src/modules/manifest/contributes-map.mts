@@ -111,7 +111,10 @@ export type GrantPolicyHookContribution = GrantPolicyHook;
  * legitimately `async`. The contract says what boot accepts.
  *
  * It does not widen what a consumer reads: the collector holds the awaited
- * value, so `federationProviders` is still a map of `FederationProvider`.
+ * value, so `federationProviders` is still a map of `FederationProvider`. Every
+ * kind boot awaits says so — the three list-shaped ones below as well as the
+ * six above — since a rule that held for six of nine would be the same
+ * half-stated contract in a smaller place.
  */
 export type Contributed<T> = T | Promise<T>;
 
@@ -133,7 +136,9 @@ export type GrantPolicyHookFactory<Deps> = (deps: Deps) => Contributed<GrantPoli
  * one document (issuer-gated). List-shaped: multiple modules contribute
  * (oauth its endpoints + capabilities, jwks its `jwks_uri`, …).
  */
-export type OidcDiscoveryContributionFactory<Deps> = (deps: Deps) => OidcDiscoveryContribution;
+export type OidcDiscoveryContributionFactory<Deps> = (
+	deps: Deps,
+) => Contributed<OidcDiscoveryContribution>;
 
 /**
  * Factory type for the `grantMiddleware` contribution kind.
@@ -146,7 +151,7 @@ export type OidcDiscoveryContributionFactory<Deps> = (deps: Deps) => OidcDiscove
  *
  * Per Wave 2 Token-binding Cluster spec §4.7 / Phase 2 DPoP spec §11.1.
  */
-export type GrantMiddlewareFactory<Deps> = (deps: Deps) => RequestHandler | null;
+export type GrantMiddlewareFactory<Deps> = (deps: Deps) => Contributed<RequestHandler | null>;
 
 /**
  * Factory type for the `tokenBindingMechanisms` contribution kind.
@@ -167,7 +172,9 @@ export type GrantMiddlewareFactory<Deps> = (deps: Deps) => RequestHandler | null
  * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
  * for the cross-mechanism design rationale.
  */
-export type TokenBindingMechanismFactory<Deps> = (deps: Deps) => TokenBindingMechanism | null;
+export type TokenBindingMechanismFactory<Deps> = (
+	deps: Deps,
+) => Contributed<TokenBindingMechanism | null>;
 
 /**
  * Declaration-merged map of contribution kinds.

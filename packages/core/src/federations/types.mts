@@ -191,7 +191,8 @@ export interface FederationProvider {
 		 * an adapter must treat anything read here as self-asserted, and the
 		 * route layer keeps whatever `mapClaims` makes of it under
 		 * `claims.federated[<provider>]` subject to the ordinary promotion
-		 * rules (see `claim-precedence.mts`) — never as an authorization input.
+		 * rules (see `federations/claim-precedence.mts` in
+		 * `@o3co/auth-provider-session`) — never as an authorization input.
 		 */
 		readonly callbackParams?: Readonly<Record<string, string>>;
 	}): Promise<FederationProfile>;
@@ -332,11 +333,25 @@ export interface DelegatedTokens {
 	readonly accessToken?: string;
 	/** Absent when the upstream did not rotate it (RFC 6749 §6). */
 	readonly refreshToken?: string;
-	/** Seconds, exactly as issued; `null` when the upstream named none. */
+	/**
+	 * Seconds, exactly as the upstream issued them; `null` when it named none.
+	 * This is what a grant's eligibility judges, and it cannot be recovered from
+	 * `expiresAt`: one step of the clock between the adapter and the consumer
+	 * turns 3600 into 3601, which starves every grant on a connection whose
+	 * maximum is 3600.
+	 */
 	readonly expiresIn?: number | null;
-	/** The adapter's own `now + expiresIn`; `null` with `expiresIn`. */
+	/**
+	 * The adapter's own `now + expiresIn`. Paired with `expiresIn` it anchors
+	 * when the token was obtained on the ADAPTER's reading of the clock; pairing
+	 * `expiresIn` with a later reading taken downstream would extend the expiry.
+	 * `null` when the upstream named no lifetime.
+	 */
 	readonly expiresAt?: Date | null;
-	/** Space-delimited, as answered. Absent means as requested (RFC 6749 §5.1). */
+	/**
+	 * Space-delimited, as in the token response. Absent means the scope the
+	 * request already carried — for a refresh, the grant's (RFC 6749 §6).
+	 */
 	readonly scope?: string;
 	/** As the library reports it — lower-cased by oauth4webapi. */
 	readonly tokenType?: string;

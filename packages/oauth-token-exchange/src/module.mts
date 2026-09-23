@@ -140,10 +140,9 @@ export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 			[TOKEN_EXCHANGE_GRANT_TYPE]: (deps: TokenExchangeModuleDeps) =>
 				createTokenExchangeGrant({
 					...deps,
-					// #626 P1: core's `TokenExchangeValidatorResolver.get()` returns
-					// `unknown` — `ExchangeTokenValidator` is still a placeholder in
-					// No cast since #626 P1: the resolver core hands back returns the
-					// contract this grant reads, because the contract is core's.
+					// No cast since #626 P1: core's
+					// `TokenExchangeValidatorResolver.get()` returns the contract this
+					// grant reads, because the contract is core's.
 					tokenExchangeValidatorResolver: deps.tokenExchangeValidatorResolver,
 				}),
 		},
