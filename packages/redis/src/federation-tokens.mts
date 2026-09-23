@@ -165,6 +165,8 @@ interface Envelope {
 	expiresAtMs: number | null;
 	tokenType?: string;
 	scope?: string;
+	/** #647 — the link-time ceiling; absent on a record written before it. */
+	grantedScope?: string;
 	rawParams?: Record<string, unknown>;
 }
 
@@ -218,7 +220,8 @@ function isEnvelope(value: unknown): value is Envelope {
 		!isOptionalString(value.refreshToken) ||
 		!isOptionalString(value.idToken) ||
 		!isOptionalString(value.tokenType) ||
-		!isOptionalString(value.scope)
+		!isOptionalString(value.scope) ||
+		!isOptionalString(value.grantedScope)
 	) {
 		return false;
 	}
@@ -303,6 +306,7 @@ export function createRedisFederationTokenStore(
 		expiresAtMs: t.expiresAt === null ? null : t.expiresAt.getTime(),
 		tokenType: t.tokenType,
 		scope: t.scope,
+		grantedScope: t.grantedScope,
 		rawParams: t.rawParams as Record<string, unknown> | undefined,
 	});
 
@@ -313,6 +317,7 @@ export function createRedisFederationTokenStore(
 		expiresAt: e.expiresAtMs === null ? null : new Date(e.expiresAtMs),
 		tokenType: e.tokenType,
 		scope: e.scope,
+		grantedScope: e.grantedScope,
 		rawParams: e.rawParams,
 	});
 

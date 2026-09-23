@@ -457,6 +457,11 @@ export const createRouter = (
 					refreshToken: profile.refreshToken,
 					idToken: profile.idToken,
 					expiresAt: profile.expiresAt,
+					// #647 — what the user just consented to. `scope` moves with the
+					// token, `grantedScope` is the ceiling a later refresh is bounded
+					// by (RFC 6749 §6) and never moves. They start equal.
+					scope: profile.scope,
+					grantedScope: profile.scope,
 				});
 			}
 		} catch (err) {
@@ -957,6 +962,9 @@ export const createRouter = (
 					refreshToken: profile.refreshToken,
 					idToken: profile.idToken,
 					expiresAt: profile.expiresAt,
+					// #647 — as above: the consented scope, and the ceiling it sets.
+					scope: profile.scope,
+					grantedScope: profile.scope,
 				});
 				attachedToFederation = true;
 			}

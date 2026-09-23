@@ -26,7 +26,27 @@ export interface FederationTokens {
 	 */
 	readonly expiresAt: Date | null;
 	readonly tokenType?: string;
+	/**
+	 * What the token holds now, space-delimited (RFC 6749 §3.3). A refresh may
+	 * narrow it, and this field moves with the token.
+	 */
 	readonly scope?: string;
+	/**
+	 * What the user consented to when the federation was linked: the ceiling a
+	 * refreshed scope is bounded by, per RFC 6749 §6 — "the scope of the access
+	 * token … MUST NOT include any scope not originally granted". Written once,
+	 * at link time, and never moved by a refresh.
+	 *
+	 * It has to be its own field because `scope` moves. Judging a refresh
+	 * against the current value makes the first narrowing permanent: an upstream
+	 * that narrows once and later answers with the full grant again is within
+	 * its rights, and the record could never be repaired (#647).
+	 *
+	 * Absent on a record written before #647, and on one whose adapter named no
+	 * scope. The consumer then has only `scope` to bound against, which is
+	 * conservative rather than wrong.
+	 */
+	readonly grantedScope?: string;
 	readonly rawParams?: Readonly<Record<string, unknown>>;
 }
 

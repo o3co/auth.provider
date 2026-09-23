@@ -1327,9 +1327,11 @@ describe("POST /oauth/federation/:name/token", () => {
 			};
 			const refreshProvider = {
 				...federationBase("google"),
-				refreshToken: vi
-					.fn()
-					.mockResolvedValue({ accessToken: "new-at", expiresIn: 3600, scope: "openid email admin" }),
+				refreshToken: vi.fn().mockResolvedValue({
+					accessToken: "new-at",
+					expiresIn: 3600,
+					scope: "openid email admin",
+				}),
 			} as unknown as FederationProvider;
 			const fedTokenStore = makeFedTokenStore({
 				get: vi.fn().mockResolvedValue(narrowed),

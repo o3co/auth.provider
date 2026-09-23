@@ -129,6 +129,22 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		expect(await store.get("sid-1", "google")).toEqual(tokens);
 	});
 
+	it("round-trips grantedScope, and a record written without one (#647)", async () => {
+		// The ceiling a refresh is bounded by has to survive the store, and a
+		// record written before the field existed has to keep opening.
+		const store = createRedisFederationTokenStore({
+			client: redis,
+			encryption: { mode: "required", key: encryptionKey },
+		});
+		const withCeiling = { ...tokens, scope: "openid", grantedScope: "openid email" };
+		await store.attach("sid-1", "google", withCeiling);
+		expect(await store.get("sid-1", "google")).toEqual(withCeiling);
+
+		await store.attach("sid-2", "google", tokens);
+		const legacy = await store.get("sid-2", "google");
+		expect(legacy?.grantedScope).toBeUndefined();
+	});
+
 	it("removeBySid removes all federations for sid", async () => {
 		const store = createRedisFederationTokenStore({
 			client: redis,

@@ -101,16 +101,18 @@ const isUsableDate = (value: unknown): value is Date =>
  * given. Absent, empty, or widening all keep what is stored. Mirrors
  * `scopesWithin` in `core/federation-grants/eligibility.mts`.
  *
- * The ceiling here is the STORED scope, not the original grant's, because
- * `FederationTokens` keeps one `scope` field and no record of what was first
- * consented to. The two differ after a narrowing: an upstream that answers
- * `openid` once and `openid email` later is within the original grant, and
- * this reports the narrower value for both. That is the conservative error —
- * the store under-reports what the token can do rather than claiming access it
- * was never given — and the ceiling the RFC names needs a field the record
- * does not have. Filed as #647 rather than approximated further.
+ * The ceiling is `grantedScope`, what the user consented to when the
+ * federation was linked, so a narrowing is not permanent: an upstream that
+ * answers `openid` once and `openid email` later is within the original grant
+ * and is accepted (#647). A record written before that field existed, or one
+ * whose adapter named no scope, has only its current scope to be judged
+ * against, which under-reports rather than over-claims.
  */
-const narrowedScope = (answered: unknown, stored: string | undefined): string | undefined => {
+const narrowedScope = (
+	answered: unknown,
+	stored: string | undefined,
+	granted: string | undefined,
+): string | undefined => {
 	if (typeof answered !== "string") return stored;
 	// Decide on the parsed lists, never on the raw strings. RFC 6749 §3.3 makes
 	// a scope a space-delimited list, so `"   "` names nothing — and an empty
@@ -119,10 +121,13 @@ const narrowedScope = (answered: unknown, stored: string | undefined): string | 
 	// empty and whitespace-only are one case: the upstream named no scope.
 	const asked = answered.split(" ").filter((entry) => entry !== "");
 	if (asked.length === 0) return stored;
-	const granted = typeof stored === "string" ? stored.split(" ").filter((e) => e !== "") : [];
+	// The link-time ceiling when the record carries one, the current scope when
+	// it does not.
+	const ceiling = typeof granted === "string" ? granted : stored;
+	const bounds = typeof ceiling === "string" ? ceiling.split(" ").filter((e) => e !== "") : [];
 	// Nothing to bound the answer against, so nothing to accept it on.
-	if (granted.length === 0) return stored;
-	const allowed = new Set(granted);
+	if (bounds.length === 0) return stored;
+	const allowed = new Set(bounds);
 	// Re-joined rather than echoed, so what is stored is always the canonical
 	// form of what was accepted.
 	return asked.every((entry) => allowed.has(entry)) ? asked.join(" ") : stored;
@@ -854,7 +859,10 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				// recorded: §6 forbids a refresh from granting a scope the user
 				// never consented to, so an answer that adds one is the adapter
 				// or the upstream misbehaving, not a grant.
-				scope: narrowedScope(answer.scope, currentTokens.scope),
+				scope: narrowedScope(answer.scope, currentTokens.scope, currentTokens.grantedScope),
+				// The ceiling itself never moves: a refresh is bounded by the grant,
+				// not by the token it replaces (RFC 6749 §6).
+				grantedScope: currentTokens.grantedScope,
 				rawParams: currentTokens.rawParams,
 			};
 			try {
