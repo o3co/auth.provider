@@ -76,6 +76,15 @@ const isUsableDate = (value: unknown): value is Date =>
  * and recording it would leave the store claiming consent that was never
  * given. Absent, empty, or widening all keep what is stored. Mirrors
  * `scopesWithin` in `core/federation-grants/eligibility.mts`.
+ *
+ * The ceiling here is the STORED scope, not the original grant's, because
+ * `FederationTokens` keeps one `scope` field and no record of what was first
+ * consented to. The two differ after a narrowing: an upstream that answers
+ * `openid` once and `openid email` later is within the original grant, and
+ * this reports the narrower value for both. That is the conservative error —
+ * the store under-reports what the token can do rather than claiming access it
+ * was never given — and the ceiling the RFC names needs a field the record
+ * does not have. Filed as #647 rather than approximated further.
  */
 const narrowedScope = (answered: unknown, stored: string | undefined): string | undefined => {
 	if (!isNonEmptyString(answered)) return stored;
@@ -639,9 +648,30 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// `federation-grants/eligibility.mts`, `no_finite_lifetime`.
 			const statedLifetime = answer.expiresIn !== undefined && answer.expiresIn !== null;
 			const statedInstant = answer.expiresAt !== undefined && answer.expiresAt !== null;
+
+			// The instant the token expires at, derived here so the refusal below
+			// can judge it. `null` is the upstream committing to no finite
+			// lifetime; `undefined` on both fields is it saying nothing, which this
+			// route has always stored as `null`.
+			const derivedExpiry: Date | null = isUsableDate(answer.expiresAt)
+				? answer.expiresAt
+				: answer.expiresAt === null
+					? null
+					: isUsableLifetime(answer.expiresIn)
+						? new Date(Date.now() + answer.expiresIn * 1000)
+						: null;
+
+			// The DERIVED instant is what gets judged, not only the reading it came
+			// from: a finite, positive `expiresIn` can still overflow the Date range
+			// (`1e13` seconds puts it past the 8.64e15 ms maximum), and the Invalid
+			// Date that results serialises to `null` in the store — the "never
+			// expires" sentinel again, by a different route.
 			const lifetimeIsBroken =
 				(statedLifetime && !isUsableLifetime(answer.expiresIn)) ||
-				(statedInstant && !isUsableDate(answer.expiresAt));
+				(statedInstant && !isUsableDate(answer.expiresAt)) ||
+				((statedLifetime || statedInstant) &&
+					derivedExpiry !== null &&
+					!isUsableDate(derivedExpiry));
 
 			if (!isUsableToken(answer.accessToken) || lifetimeIsBroken) {
 				// A rotated refresh token has to be kept even though the refresh
@@ -705,13 +735,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// block exists to prevent, reached through the adapter instead of
 			// through the store. An unusable reading falls through to the next
 			// source, and to `null` when none of them is usable.
-			const nextExpiresAt = isUsableDate(answer.expiresAt)
-				? answer.expiresAt
-				: answer.expiresAt === null
-					? null
-					: isUsableLifetime(answer.expiresIn)
-						? new Date(Date.now() + answer.expiresIn * 1000)
-						: null;
+			const nextExpiresAt = derivedExpiry;
 			const updatedTokens = {
 				accessToken: answer.accessToken,
 				// `??` would let `""` through, and an empty string overwriting a

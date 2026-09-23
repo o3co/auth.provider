@@ -925,6 +925,20 @@ describe("POST /oauth/federation/:name/token", () => {
 				},
 			);
 
+			it("refuses the refresh for a lifetime that overflows the Date range", async () => {
+				// `1e13` seconds is finite and positive, so it passes the lifetime
+				// check, and still puts the instant past the 8.64e15 ms maximum. The
+				// Invalid Date that results serialises to `null` in the store, which
+				// is the never-expires sentinel again by a different route, so the
+				// DERIVED instant is judged and not only the reading it came from.
+				const { app, fedTokenStore } = refreshingApp({ accessToken: "new-at", expiresIn: 1e13 });
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(500);
+				expect(res.body.error).toBe("refresh_failed");
+				expect(fedTokenStore.update).not.toHaveBeenCalled();
+			});
+
 			it("refuses the refresh for an Invalid Date", async () => {
 				const { app, fedTokenStore } = refreshingApp({
 					accessToken: "new-at",
