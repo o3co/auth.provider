@@ -334,6 +334,11 @@ describe("redis FederationTokenStore implements SupportsLock", () => {
 		await store.attach("s", "google", {
 			accessToken: "at",
 			expiresAt: new Date(Date.now() + 3600_000),
+			refreshToken: undefined,
+			idToken: undefined,
+			tokenType: undefined,
+			scope: undefined,
+			grantedScope: undefined,
 		});
 		const r = await (store as FederationTokenStore & SupportsLock).acquireLock({
 			sid: "s",
