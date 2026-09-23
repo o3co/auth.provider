@@ -5,7 +5,7 @@ OIDC-compliant identity provider — Okta, Entra ID, Auth0, Keycloak, a
 customer's own tenant — from configuration alone, and as many instances as a
 deployment has issuers (#524).
 
-The `FederationProvider` contract lives in `@o3co/auth-provider-session`; the
+The `FederationProvider` contract lives in `@o3co/auth-provider-core` (#626 P1); the
 Google, GitHub and Apple packages implement it for one IdP each. This package
 implements it for every IdP that publishes an OpenID Connect discovery
 document, so adding an IdP is a config section, not a package.
