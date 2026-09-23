@@ -90,24 +90,24 @@ interface Entry {
 	deviceCode: string;
 	userCode: string;
 	clientId: string;
-	requestedScope?: readonly string[];
+	requestedScope: readonly string[] | undefined;
 	expiresAtMs: number;
 	intervalSeconds: number;
 	status: "pending" | "approved" | "denied";
-	subject?: string;
-	grantedScope?: readonly string[];
+	subject: string | undefined;
+	grantedScope: readonly string[] | undefined;
 	lastPolledAtMs?: number;
 }
 
 const toAuthorization = (entry: Entry): DeviceAuthorization => ({
 	userCode: entry.userCode,
 	clientId: entry.clientId,
-	...(entry.requestedScope ? { requestedScope: entry.requestedScope } : {}),
+	requestedScope: entry.requestedScope,
 	expiresAtMs: entry.expiresAtMs,
 	intervalSeconds: entry.intervalSeconds,
 	status: entry.status,
-	...(entry.subject === undefined ? {} : { subject: entry.subject }),
-	...(entry.grantedScope ? { grantedScope: entry.grantedScope } : {}),
+	subject: entry.subject,
+	grantedScope: entry.grantedScope,
 });
 
 /**
@@ -255,10 +255,12 @@ export const createMemoryDeviceCodeStore = (
 				deviceCode: input.deviceCode,
 				userCode: input.userCode,
 				clientId: input.clientId,
-				...(input.requestedScope ? { requestedScope: input.requestedScope } : {}),
+				requestedScope: input.requestedScope,
 				expiresAtMs: input.expiresAtMs,
 				intervalSeconds: input.intervalSeconds,
 				status: "pending",
+				subject: undefined,
+				grantedScope: undefined,
 			};
 			byDeviceCode.set(entry.deviceCode, entry);
 			byUserCode.set(entry.userCode, entry);

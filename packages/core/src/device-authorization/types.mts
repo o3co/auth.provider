@@ -40,21 +40,28 @@ import type { AbsencePolicy } from "../modules/manifest/absence-policy.mjs";
  * bearer credential and the only thing that redeems the grant, so it is a
  * lookup key rather than a field to hand back. Adapters that must persist it
  * do so under their own key space.
+ *
+ * Every field is a required key, `undefined` where there is none (#626).
+ * Both bundled stores rebuild the record field by field on every read, and a
+ * field a copy forgot was dropped with no error — `subject` gone refuses an
+ * approval the user gave, `grantedScope` gone mints a token with no scope
+ * while the approval's audit event records `requestedScope` instead. Naming
+ * the key makes that copy a compile error.
  */
 export interface DeviceAuthorization {
 	/** The code the human types. Normalised — see `normaliseUserCode`. */
 	readonly userCode: string;
 	readonly clientId: string;
-	/** Scope the device asked for, before any policy narrowing. */
-	readonly requestedScope?: readonly string[];
+	/** Scope the device asked for, before any policy narrowing; `undefined` when it asked for none. */
+	readonly requestedScope: readonly string[] | undefined;
 	readonly expiresAtMs: number;
 	/** Minimum seconds between polls, as advertised to the device. */
 	readonly intervalSeconds: number;
 	readonly status: DeviceAuthorizationStatus;
-	/** Set when `status === "approved"`: who approved it. */
-	readonly subject?: string;
-	/** Set when `status === "approved"`: what they approved. */
-	readonly grantedScope?: readonly string[];
+	/** Set when `status === "approved"`: who approved it. `undefined` before. */
+	readonly subject: string | undefined;
+	/** Set when `status === "approved"`: what they approved. `undefined` before. */
+	readonly grantedScope: readonly string[] | undefined;
 }
 
 export type DeviceAuthorizationStatus = "pending" | "approved" | "denied";
@@ -84,7 +91,11 @@ export interface CreateDeviceAuthorizationInput {
 	readonly deviceCode: string;
 	readonly userCode: string;
 	readonly clientId: string;
-	readonly requestedScope?: readonly string[];
+	/**
+	 * `undefined` when the device asked for no scope. A required key (#626): a
+	 * writer that left it out would park a request that grants nothing.
+	 */
+	readonly requestedScope: readonly string[] | undefined;
 	readonly expiresAtMs: number;
 	readonly intervalSeconds: number;
 }

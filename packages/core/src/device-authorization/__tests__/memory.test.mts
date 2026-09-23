@@ -47,6 +47,7 @@ describe("memory DeviceCodeStore — sweep", () => {
 				clientId: "tv",
 				expiresAtMs: Date.now() + 10,
 				intervalSeconds: 5,
+				requestedScope: undefined,
 			});
 			expect(store.size()).toBe(1);
 
@@ -83,6 +84,7 @@ describe("memory DeviceCodeStore — bounded growth", () => {
 		clientId: "tv",
 		expiresAtMs,
 		intervalSeconds: 5,
+		requestedScope: undefined,
 	});
 
 	const fill = async (
@@ -246,6 +248,7 @@ describe("memory DeviceCodeStore — eviction and decision edge cases", () => {
 		clientId: "c",
 		expiresAtMs,
 		intervalSeconds: 5,
+		requestedScope: undefined,
 	});
 
 	it("drops a record with a non-finite expiry on sight when the cap is reached", async () => {

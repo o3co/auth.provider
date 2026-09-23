@@ -121,24 +121,20 @@ const parseScope = (json: string | undefined): readonly string[] | undefined => 
 };
 
 /**
- * The memory adapter's `toAuthorization`, from hash fields: optional fields
- * absent in the record stay absent in the result rather than becoming
- * `undefined` properties.
+ * The memory adapter's `toAuthorization`, from hash fields. A field the hash
+ * does not hold is `undefined` in the result, and every field is named, so a
+ * field this copy forgot is a compile error rather than a drop (#626).
  */
-const toAuthorization = (fields: DeviceCodeRecordFields): DeviceAuthorization => {
-	const requestedScope = parseScope(fields.requestedScope);
-	const grantedScope = parseScope(fields.grantedScope);
-	return {
-		userCode: fields.userCode,
-		clientId: fields.clientId,
-		...(requestedScope ? { requestedScope } : {}),
-		expiresAtMs: Number(fields.expiresAtMs),
-		intervalSeconds: Number(fields.intervalSeconds),
-		status: fields.status,
-		...(fields.subject === undefined ? {} : { subject: fields.subject }),
-		...(grantedScope ? { grantedScope } : {}),
-	};
-};
+const toAuthorization = (fields: DeviceCodeRecordFields): DeviceAuthorization => ({
+	userCode: fields.userCode,
+	clientId: fields.clientId,
+	requestedScope: parseScope(fields.requestedScope),
+	expiresAtMs: Number(fields.expiresAtMs),
+	intervalSeconds: Number(fields.intervalSeconds),
+	status: fields.status,
+	subject: fields.subject,
+	grantedScope: parseScope(fields.grantedScope),
+});
 
 const decisionOutcome = (reply: DeviceCodeDecisionReply): DeviceDecisionOutcome => {
 	switch (reply.kind) {
@@ -170,7 +166,11 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 				expiresAtMs: String(input.expiresAtMs),
 				intervalSeconds: String(input.intervalSeconds),
 				status: "pending",
-				...(input.requestedScope ? { requestedScope: JSON.stringify(input.requestedScope) } : {}),
+				// Left out rather than `undefined`: these are the hash fields a client
+				// writes, and a hash has no `undefined` to hold.
+				...(input.requestedScope === undefined
+					? {}
+					: { requestedScope: JSON.stringify(input.requestedScope) }),
 			};
 			const created = await client.create(keys, {
 				deviceCode: input.deviceCode,

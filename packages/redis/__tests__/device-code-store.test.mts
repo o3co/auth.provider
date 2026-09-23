@@ -15,7 +15,7 @@
  * rests on, the TTL, and that `expired` is answered from the timestamp.
  */
 
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisDeviceCodeStore } from "#/device-code-store.mjs";
@@ -136,16 +136,16 @@ describe("createRedisDeviceCodeStore — what is Redis-specific (#433)", () => {
 	});
 
 	it("round-trips a record with no requestedScope and grants nothing on approval", async () => {
-		// The memory adapter's semantics for the optional field: absent stays
-		// absent on the way out, and an approval of a scopeless request grants
+		// The memory adapter's semantics for a request with no scope: it reads
+		// back as `requestedScope: undefined` — the key named, as every field of
+		// the record is (#626) — and an approval of a scopeless request grants
 		// the empty set rather than failing or inventing one.
 		const store = storeAt(freshPrefix());
-		const { requestedScope: _omitted, ...scopeless } = seed;
-		await store.create(scopeless);
+		await store.create({ ...seed, requestedScope: undefined });
 
 		const found = await store.findPendingByUserCode(seed.userCode, NOW);
 		expect(found).not.toBeNull();
-		expect(found).not.toHaveProperty("requestedScope");
+		expect(found).toHaveProperty("requestedScope", undefined);
 
 		const decided = await store.approve({
 			userCode: seed.userCode,

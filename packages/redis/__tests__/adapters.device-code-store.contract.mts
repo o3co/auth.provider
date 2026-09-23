@@ -119,6 +119,46 @@ export const runDeviceCodeStoreContract = (
 			});
 		});
 
+		it("hands back every field with its own value, through each read (#626)", async () => {
+			// The types make a store name every field; they cannot see two of the
+			// same type swapped — `requestedScope` and `grantedScope` are both
+			// scope lists. Granted is narrowed below requested here, so a swap
+			// shows, and the whole record is compared at each step.
+			await withStore(async (store) => {
+				await store.create(seed);
+				const pending = {
+					userCode: seed.userCode,
+					clientId: seed.clientId,
+					requestedScope: ["openid", "profile"],
+					expiresAtMs: seed.expiresAtMs,
+					intervalSeconds: seed.intervalSeconds,
+					status: "pending",
+					subject: undefined,
+					grantedScope: undefined,
+				};
+				expect(await store.findPendingByUserCode(seed.userCode, NOW)).toStrictEqual(pending);
+
+				const approved = {
+					...pending,
+					status: "approved",
+					subject: "user-1",
+					grantedScope: ["profile"],
+				};
+				expect(
+					await store.approve({
+						userCode: seed.userCode,
+						subject: "user-1",
+						grantedScope: ["profile"],
+						nowMs: NOW,
+					}),
+				).toStrictEqual({ status: "ok", authorization: approved });
+				expect(await store.poll(seed.deviceCode, NOW + 10 * 1000)).toStrictEqual({
+					status: "approved",
+					authorization: approved,
+				});
+			});
+		});
+
 		it("hands the approval to the first poll and nothing to the second", async () => {
 			// The single most important property in this file. A `find`-then-
 			// `delete` implementation passes every other test here and issues

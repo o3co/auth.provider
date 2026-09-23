@@ -225,7 +225,7 @@ export const createDeviceAuthorizationHandler = (
 					deviceCode,
 					userCode,
 					clientId: client.clientId,
-					...(scope.scope.length > 0 ? { requestedScope: scope.scope } : {}),
+					requestedScope: scope.scope.length > 0 ? scope.scope : undefined,
 					expiresAtMs,
 					intervalSeconds: settings.pollingIntervalSeconds,
 				});
