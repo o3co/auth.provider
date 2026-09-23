@@ -32,6 +32,8 @@
 		"src/assertions/__tests__/entry-fields.types.test.mts",
 		"src/assertions/__tests__/issuerRegistry.test.mts",
 		"src/assertions/__tests__/registryAssertionVerifier.test.mts",
+		// #645 follow-up: paired with the same entry in vitest.config.mts.
+		"src/federation-tokens/__tests__/record-fields.types.test.mts",
 		"src/federations/__tests__/delegated-authorization-types.test.mts",
 		// v0.13.0 audit: these three were in neither list (or only in vitest's),
 		// so their type contracts — `wiring.test.mts`'s `satisfies … as

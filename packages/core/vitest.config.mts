@@ -54,6 +54,9 @@ export default defineConfig({
 				// satisfy. Paired with tsconfig.test.json.
 				"src/assertions/__tests__/issuerRegistry.test.mts",
 				"src/assertions/__tests__/registryAssertionVerifier.test.mts",
+				// #645 follow-up: which `FederationTokens` fields a store must not
+				// drop. A conditional-type assertion proves nothing outside the checker.
+				"src/federation-tokens/__tests__/record-fields.types.test.mts",
 				// #626 P1: relocated from `packages/session`, where both were in its
 				// typecheck list. The `expectTypeOf` and `@ts-expect-error` here
 				// are the regression test for the adapter port, and they only fire

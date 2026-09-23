@@ -536,17 +536,34 @@ bounded by consent. A client that reads `scope` to decide whether to send the
 user back for consent should treat it as an upper bound rather than a
 guarantee.
 
-Third-party `FederationTokenStore` adapters carry an optional `grantedScope`
-alongside `scope`. An adapter that copies field by field and does not know the
-name drops it silently; the connection then falls back to its current scope as
-the bound, which under-reports rather than over-claims.
+Third-party `FederationTokenStore` adapters must carry `grantedScope` and
+`tokenType` through `attach`, `update` and `get`. Both are **required keys** on
+`FederationTokens` whose value may be `undefined`. Code that builds a
+`FederationTokens` value and forgets either key therefore fails to compile:
+a store's `get`, and any caller of `attach` or `update`, including app code
+seeding a store and test fixtures. That is a breaking type change for anyone
+who constructs one — a record literal has to name both, as `undefined` when
+there is nothing to record.
 
-`tokenType` is the one field where that pattern is not conservative. A
-third-party store that drops it returns a silent record, silence is read as a
-record written before #645, and a sender-constrained token is handed on as
-`Bearer` — the behaviour this endpoint no longer has, restored for that store
-alone. A store MUST round-trip `tokenType` through `attach`, `update` and `get`;
-both bundled stores do and are pinned on it.
+The type does not reach an adapter's own storage shape. An adapter that
+converts the record to a row or document of its own should declare the same
+required keys on that shape, as the bundled Redis store does for its envelope;
+otherwise the conversion can forget a field and still compile. Nor does it
+reach plain JavaScript, or code that steps around the checker (`as
+FederationTokens` on an incomplete literal, `JSON.parse(raw) as
+FederationTokens`, `Object.assign`).
+
+A store must also hand back an unset value as `undefined` or absent, never
+`null`. This endpoint refuses `null`, so a serialiser that writes `undefined`
+as `null` — MongoDB's driver does unless `ignoreUndefined` is set — turns every
+connection whose adapter names no type into a `502`.
+
+The two losses are not alike, which is why both are enforced rather than
+documented. Losing `grantedScope` is conservative: the connection falls back to
+its current scope as the bound, which under-reports. Losing `tokenType` fails
+**open**: the record comes back silent, silence is read as a record written
+before #645, and a sender-constrained token is handed on as `Bearer`. Both
+bundled stores meet the requirement and are pinned on it.
 
 ### Error responses
 

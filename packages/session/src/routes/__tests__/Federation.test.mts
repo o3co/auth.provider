@@ -743,7 +743,11 @@ describe("account linking across federations (#482)", () => {
 				Record<string, unknown>,
 			];
 			expect(attached.accessToken).toBe("at");
-			expect("tokenType" in attached).toBe(false);
+			// Named, and `undefined`. The key is written either way since the
+			// #645 follow-up made it required on `FederationTokens`: a store that
+			// copies the record field by field is made to carry it by the type.
+			expect("tokenType" in attached).toBe(true);
+			expect(attached.tokenType).toBeUndefined();
 		});
 
 		it("links an unknown identity to the signed-in account, attaches the federation to the live session, and mints no new one", async () => {

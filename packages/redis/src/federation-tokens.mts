@@ -163,10 +163,17 @@ interface Envelope {
 	 * from "unknown / missing field" on future schema migrations.
 	 */
 	expiresAtMs: number | null;
-	tokenType?: string;
+	/**
+	 * Required keys, like `FederationTokens`'s own: this envelope is the shape
+	 * the store writes, and a projection into it that forgot either field would
+	 * otherwise compile and drop it — `tokenType` failing open (#645). JSON drops
+	 * an `undefined` value, so on the wire the key is still absent when unset,
+	 * and `isEnvelope` reads it as optional.
+	 */
+	tokenType: string | undefined;
 	scope?: string;
-	/** #647 — the link-time ceiling; absent on a record written before it. */
-	grantedScope?: string;
+	/** #647 — the link-time ceiling; `undefined` on a record written before it. */
+	grantedScope: string | undefined;
 	rawParams?: Record<string, unknown>;
 }
 

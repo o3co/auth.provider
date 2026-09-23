@@ -163,6 +163,9 @@ describe("#293 — mode=required over a real Redis", () => {
 		expiresAt: new Date(1_900_000_000_000),
 		tokenType: "Bearer",
 		scope: "openid email",
+		// #647 — and the round-trip pins it, which it did not while this fixture
+		// claimed to be every field and left it out.
+		grantedScope: "openid email profile",
 		rawParams: {
 			access_token: "at-secret",
 			refresh_token: "rt-secret",
