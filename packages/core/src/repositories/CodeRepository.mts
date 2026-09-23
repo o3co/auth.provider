@@ -16,6 +16,20 @@
 
 import type { Code } from "./types.mjs";
 
+/**
+ * What `/authorize` hands {@link CodeRepository.createCode}: the record's own
+ * fields but the code, which the repository mints (#626).
+ *
+ * Tied to {@link Code} rather than declared again, so a field added to the
+ * record is one the writer has to name, and each is a required key for the
+ * reason the record's are — a writer that forgot `nonce` or `acr` would issue
+ * a code whose id_token lacks it. `expiresIn` alone may be left out: absent,
+ * the repository's configured default applies.
+ */
+export type CreateCodeInput = Omit<Code, "code" | "expiresIn"> & {
+	readonly expiresIn?: number | undefined;
+};
+
 export interface CodeRepository {
 	/**
 	 * Issue an authorization code and persist all associated data atomically.
@@ -23,20 +37,7 @@ export interface CodeRepository {
 	 * `redirect_uri` embedded in the record replace the session-based identity
 	 * binding removed in v0.5.1 (D-1 spec).
 	 */
-	createCode(params: {
-		client_id: string; // required (D-1)
-		redirect_uri: string; // required (D-1)
-		code_challenge?: string;
-		code_challenge_method?: string;
-		expiresIn?: number;
-		grantedScope?: readonly string[];
-		grantedAudience?: readonly string[];
-		// NEW (TODO-F-3): OIDC authorize → token round-trip state.
-		nonce?: string;
-		sid?: string;
-		// #481: the satisfied Authentication Context Class Reference.
-		acr?: string;
-	}): Promise<Code>;
+	createCode(params: CreateCodeInput): Promise<Code>;
 	/**
 	 * Retrieve a code record by the authorization code string. Returns
 	 * `null` when no record matches — the method is fail-soft on absence,

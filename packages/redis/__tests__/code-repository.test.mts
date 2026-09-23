@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -23,6 +23,7 @@ const KEY_PREFIX = "oauth:code:";
 // In-memory store simulating Redis
 const store = new Map<string, string>();
 
+import type { CreateCodeInput } from "@o3co/auth-provider-core";
 import type { CodeRepositoryClient } from "../src/clients.mjs";
 import { RedisCodeRepository } from "../src/code-repository.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
@@ -50,15 +51,23 @@ const createMockClient = (): CodeRepositoryClient => ({
 	}),
 });
 
+// Minimal valid params for v0.5.1+ (D-1: client_id and redirect_uri
+// required); every other field named, unset (#626).
+const minimalParams: CreateCodeInput = {
+	client_id: "test-client",
+	redirect_uri: "https://rp.example/cb",
+	code_challenge: undefined,
+	code_challenge_method: undefined,
+	nonce: undefined,
+	sid: undefined,
+	acr: undefined,
+	grantedScope: undefined,
+	grantedAudience: undefined,
+};
+
 describe("RedisCodeRepository", () => {
 	let repo: RedisCodeRepository;
 	let client: CodeRepositoryClient;
-
-	// Minimal valid params for v0.5.1+ (D-1: client_id and redirect_uri required).
-	const minimalParams = {
-		client_id: "test-client",
-		redirect_uri: "https://rp.example/cb",
-	};
 
 	beforeEach(() => {
 		store.clear();
@@ -301,6 +310,7 @@ describe("RedisCodeRepository", () => {
 	describe("D-1 extended fields round-trip", () => {
 		it("persists and returns client_id, redirect_uri via consumeByCode", async () => {
 			const result = await repo.createCode({
+				...minimalParams,
 				client_id: "client-abc",
 				redirect_uri: "https://rp.example/cb",
 			});
@@ -311,12 +321,14 @@ describe("RedisCodeRepository", () => {
 
 		it("persists and returns acr, and leaves it absent when none was recorded (#481)", async () => {
 			const withAcr = await repo.createCode({
+				...minimalParams,
 				client_id: "client-abc",
 				redirect_uri: "https://rp.example/cb",
 				acr: "urn:example:mfa",
 			});
 			expect((await repo.consumeByCode(withAcr.code))?.acr).toBe("urn:example:mfa");
 			const without = await repo.createCode({
+				...minimalParams,
 				client_id: "client-abc",
 				redirect_uri: "https://rp.example/cb",
 			});
@@ -325,6 +337,7 @@ describe("RedisCodeRepository", () => {
 
 		it("persists and returns sid, nonce, grantedScope, grantedAudience via consumeByCode", async () => {
 			const result = await repo.createCode({
+				...minimalParams,
 				client_id: "client-abc",
 				redirect_uri: "https://rp.example/cb",
 				sid: "sid-xyz",
@@ -341,6 +354,7 @@ describe("RedisCodeRepository", () => {
 
 		it("persists all fields in the Redis JSON payload (storage-level assertion)", async () => {
 			const result = await repo.createCode({
+				...minimalParams,
 				client_id: "client-abc",
 				redirect_uri: "https://rp.example/cb",
 				sid: "sid-xyz",
@@ -357,8 +371,33 @@ describe("RedisCodeRepository", () => {
 			expect(parsed.grantedScope).toEqual(["openid"]);
 		});
 
+		it("round-trips every field with its own value, through both reads (#626)", async () => {
+			// The types catch a field forgotten by a copy, not two fields of the
+			// same type swapped: `nonce`, `sid`, `acr` and the challenge are all
+			// strings. Every value is distinct here, and the whole record is
+			// compared.
+			const params: CreateCodeInput = {
+				client_id: "client-rt",
+				redirect_uri: "https://rp.example/rt",
+				code_challenge: "challenge-rt",
+				code_challenge_method: "S256",
+				nonce: "nonce-rt",
+				sid: "sid-rt",
+				acr: "urn:example:acr:mfa",
+				expiresIn: 90,
+				grantedScope: ["openid", "read"],
+				grantedAudience: ["https://api.example"],
+			};
+			const created = await repo.createCode(params);
+			const expected = { ...params, code: created.code };
+			expect(created).toEqual(expected);
+			expect(await repo.findByCode(created.code)).toEqual(expected);
+			expect(await repo.consumeByCode(created.code)).toEqual(expected);
+		});
+
 		it("findByCode also returns all extended fields", async () => {
 			const result = await repo.createCode({
+				...minimalParams,
 				client_id: "client-abc",
 				redirect_uri: "https://rp.example/cb",
 				sid: "sid-xyz",
@@ -406,6 +445,7 @@ describeWithRedis("RedisCodeRepository with real Redis", () => {
 		});
 
 		const created = await repo.createCode({
+			...minimalParams,
 			client_id: "test-client",
 			redirect_uri: "https://rp.example/cb",
 		});
@@ -424,6 +464,7 @@ describeWithRedis("RedisCodeRepository with real Redis", () => {
 		const repo = new RedisCodeRepository(codeRepositoryClient, { keyPrefix });
 
 		const created = await repo.createCode({
+			...minimalParams,
 			client_id: "client-real",
 			redirect_uri: "https://rp.example/callback",
 			sid: "sid-real",

@@ -34,6 +34,7 @@ import express, { type Router } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 const mockConfig = {
 	// `oauth.jwt.issuer` is required by createOAuthRouter (#266) — the router
@@ -76,11 +77,12 @@ const integrationClientRepo: ClientRepository = {
 };
 
 const integrationCodeRepo: CodeRepository = {
-	createCode: async () => ({
-		code: "code-x",
-		client_id: TEST_CLIENT_ID,
-		redirect_uri: "https://rp.example/cb",
-	}),
+	createCode: async () =>
+		codeRecord({
+			code: "code-x",
+			client_id: TEST_CLIENT_ID,
+			redirect_uri: "https://rp.example/cb",
+		}),
 	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},

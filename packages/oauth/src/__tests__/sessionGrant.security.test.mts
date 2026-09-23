@@ -18,6 +18,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 const SID = "browser-session";
 const SUB = "user-1";
@@ -33,7 +34,7 @@ const config = {
 } as unknown as AppConfig;
 const keyStore = createSymmetricKeyStore("session-security-test-secret-32-bytes");
 const codeRepository: CodeRepository = {
-	createCode: async () => ({ code: "unused", client_id: "app", redirect_uri: "" }),
+	createCode: async () => codeRecord({ code: "unused", client_id: "app", redirect_uri: "" }),
 	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},

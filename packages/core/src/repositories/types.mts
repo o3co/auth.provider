@@ -291,26 +291,33 @@ export interface User {
  * design rationale is the D-1 code-repository rewrite shipped in that release).
  *
  * Breaking change for custom CodeRepository implementations: `client_id` and
- * `redirect_uri` are now required. The compile-time guard
- * `Parameters<CodeRepository["createCode"]>[0]` makes any implementation that
- * misses either field fail typecheck at the destructure site.
+ * `redirect_uri` are now required, on the record and on `CreateCodeInput`, so
+ * a call to `createCode` that omits either fails typecheck.
+ *
+ * #626: every other field is a required key as well, holding `undefined`
+ * where `/authorize` recorded nothing. `/token` reads the record back without
+ * deciding anything again, and a repository copies it field by field; a copy
+ * that forgot `nonce`, `acr` or `sid` minted an id_token without it, with no
+ * error anywhere — the Redis path did exactly that before v0.5.1 (IH-2 /
+ * TS-1). Naming the key makes that copy a compile error — it surfaces at the
+ * object literal the copy builds, whichever step of it left the field out.
  */
 export interface CodeData {
 	readonly client_id: string; // required — replaces the session.code_client_id gate
 	readonly redirect_uri: string; // required — closes IH-4 vacuous-pass (RFC 6749 §4.1.3)
-	readonly code_challenge?: string;
-	readonly code_challenge_method?: string;
+	readonly code_challenge: string | undefined;
+	readonly code_challenge_method: string | undefined;
 	// NEW (TODO-F-3): OIDC authorize → token round-trip state.
 	// These fields are persisted at /authorize and read at /token.
-	readonly nonce?: string;
-	readonly sid?: string;
+	readonly nonce: string | undefined;
+	readonly sid: string | undefined;
 	/** #481: the acr `/authorize` satisfied for this request; the id_token's `acr`. */
-	readonly acr?: string;
+	readonly acr: string | undefined;
 }
 
 export interface Code extends CodeData {
 	readonly code: string;
-	readonly expiresIn?: number;
-	readonly grantedScope?: readonly string[];
-	readonly grantedAudience?: readonly string[];
+	readonly expiresIn: number | undefined;
+	readonly grantedScope: readonly string[] | undefined;
+	readonly grantedAudience: readonly string[] | undefined;
 }

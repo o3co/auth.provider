@@ -38,6 +38,7 @@ import { SignJWT } from "jose";
 import request from "supertest";
 import { beforeEach, describe, expect, it } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -73,11 +74,12 @@ const clientRepository: ClientRepository = {
 };
 
 const codeRepository: CodeRepository = {
-	createCode: async () => ({
-		code: "test-code",
-		client_id: CLIENT_ID,
-		redirect_uri: "https://rp.example/cb",
-	}),
+	createCode: async () =>
+		codeRecord({
+			code: "test-code",
+			client_id: CLIENT_ID,
+			redirect_uri: "https://rp.example/cb",
+		}),
 	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},

@@ -591,7 +591,7 @@ export type {
 // Repository interfaces
 export { isGrantTypeAllowed } from "./repositories/allowedGrantTypes.mjs";
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
-export type { CodeRepository } from "./repositories/CodeRepository.mjs";
+export type { CodeRepository, CreateCodeInput } from "./repositories/CodeRepository.mjs";
 export {
 	type ClientEntry,
 	ClientEntrySchema,

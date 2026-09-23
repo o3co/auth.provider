@@ -37,6 +37,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 const CLIENT_ID = "client-a";
 const CLIENT_SECRET = "secret-a";
@@ -102,7 +103,8 @@ const makeApp = async (
 			id === CLIENT_ID && secret === CLIENT_SECRET ? record : null,
 	};
 	const codeRepository: CodeRepository = {
-		createCode: async () => ({ code: "code-x", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }),
+		createCode: async () =>
+			codeRecord({ code: "code-x", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }),
 		findByCode: async () => null,
 		consumeByCode: async () => null,
 		removeByCode: async () => {},

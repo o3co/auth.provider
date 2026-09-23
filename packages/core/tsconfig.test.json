@@ -51,7 +51,9 @@
 		// #626 P2: paired with vitest.config.mts, as #343 requires.
 		"src/grants/__tests__/dependencies.types.test.mts",
 		// #626: paired with vitest.config.mts, as #343 requires.
-		"src/consents/**/*.mts"
+		"src/consents/**/*.mts",
+		"src/repositories/__tests__/code-fields.types.test.mts",
+		"src/repositories/__tests__/createRepositoryFactories.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }

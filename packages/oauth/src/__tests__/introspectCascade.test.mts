@@ -33,6 +33,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthModule } from "#/module.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -57,11 +58,12 @@ const mockClientRepository: ClientRepository = {
 
 const mockCodeRepository: CodeRepository = {
 	// D-1: Code requires client_id + redirect_uri.
-	createCode: async () => ({
-		code: "test-code",
-		client_id: "client1",
-		redirect_uri: "https://rp.example/cb",
-	}),
+	createCode: async () =>
+		codeRecord({
+			code: "test-code",
+			client_id: "client1",
+			redirect_uri: "https://rp.example/cb",
+		}),
 	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},

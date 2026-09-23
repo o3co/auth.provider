@@ -46,6 +46,7 @@ import { SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -112,7 +113,7 @@ const clientRepository: ClientRepository = {
 };
 
 const codeRepository: CodeRepository = {
-	createCode: async () => ({ code: "c", client_id: "x", redirect_uri: "" }),
+	createCode: async () => codeRecord({ code: "c", client_id: "x", redirect_uri: "" }),
 	findByCode: async () => null,
 	consumeByCode: async () => null,
 	removeByCode: async () => {},

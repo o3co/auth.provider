@@ -77,6 +77,11 @@ export default defineConfig({
 				// omitting a field the type now requires. Paired with
 				// tsconfig.test.json.
 				"src/consents/__tests__/**/*.test.mts",
+				// #626: which Code fields a repository must not drop, and a factory
+				// test that builds one — uncompiled, it went on omitting the keys.
+				// Paired with tsconfig.test.json.
+				"src/repositories/__tests__/code-fields.types.test.mts",
+				"src/repositories/__tests__/createRepositoryFactories.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
 			// itself, where 4 was content to let an imported helper register

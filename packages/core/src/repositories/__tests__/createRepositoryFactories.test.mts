@@ -121,6 +121,13 @@ describe("createRepositoryFactories", () => {
 			const code = await repo.createCode({
 				client_id: "test-client",
 				redirect_uri: "https://rp.example/cb",
+				code_challenge: undefined,
+				code_challenge_method: undefined,
+				nonce: undefined,
+				sid: undefined,
+				acr: undefined,
+				grantedScope: undefined,
+				grantedAudience: undefined,
 			});
 
 			expect(code.code).toBeDefined();

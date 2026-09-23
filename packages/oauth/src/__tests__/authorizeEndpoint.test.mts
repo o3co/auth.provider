@@ -1448,7 +1448,9 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 				createCode,
 			});
 			await authorize(app, baseQuery);
-			expect(createCode.mock.calls[0]?.[0]).not.toHaveProperty("acr");
+			// Named, holding `undefined` (#626): the code record says "no acr"
+			// rather than leaving the field out.
+			expect(createCode.mock.calls[0]?.[0]).toHaveProperty("acr", undefined);
 		});
 	});
 });

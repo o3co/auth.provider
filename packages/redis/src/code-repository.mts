@@ -19,6 +19,7 @@ import {
 	type AdapterBuilder,
 	type Code,
 	type CodeRepository,
+	type CreateCodeInput,
 	consoleLogger,
 	defineModule,
 	type Logger,
@@ -30,28 +31,18 @@ const DEFAULT_KEY_PREFIX = "oauth:code:";
 const DEFAULT_EXPIRES_IN_SECONDS = 600;
 
 /**
- * Shape persisted as JSON in Redis for each authorization code (D-1).
+ * Shape persisted as JSON in Redis for each authorization code (D-1): the
+ * record but the code, which is the key.
  *
- * Mirrors `Parameters<CodeRepository["createCode"]>[0]` plus a private
- * `expiresIn` echo so reads can reconstruct the original record. The
- * destructure of `createCode` MUST stay in sync with this shape — adding
- * a field to `CodeData` requires destructuring it AND extending this
- * interface, otherwise the Redis path silently drops it (which was the
- * IH-2 / TS-1 / TD-1 production bug v0.5.1 closes).
+ * Derived from `Code` rather than declared again (#626). Declared by hand, a
+ * field added to `CodeData` had to be destructured in `createCode`, added
+ * here and copied back in `parseCodeValue`, and missing any one of the three
+ * dropped it without an error — the IH-2 / TS-1 / TD-1 production bug v0.5.1
+ * closed. Every key is required now, so each of those steps fails to compile
+ * instead. `JSON.stringify` leaves out a key holding `undefined`, so what is
+ * stored is byte-for-byte what it was.
  */
-interface StoredCodePayload {
-	client_id: string;
-	redirect_uri: string;
-	code_challenge?: string;
-	code_challenge_method?: string;
-	nonce?: string;
-	sid?: string;
-	/** #481: the acr `/authorize` satisfied, for the id_token. */
-	acr?: string;
-	expiresIn?: number;
-	grantedScope?: string[];
-	grantedAudience?: string[];
-}
+type StoredCodePayload = Omit<Code, "code">;
 
 /**
  * Options accepted by the public `RedisCodeRepository` constructor.
@@ -106,7 +97,7 @@ export class RedisCodeRepository implements CodeRepository {
 		expiresIn = this.defaultExpiresIn,
 		grantedScope,
 		grantedAudience,
-	}: Parameters<CodeRepository["createCode"]>[0]): Promise<Code> {
+	}: CreateCodeInput): Promise<Code> {
 		const code = crypto.randomBytes(32).toString("base64url");
 		const payload: StoredCodePayload = {
 			client_id,
@@ -144,8 +135,11 @@ export class RedisCodeRepository implements CodeRepository {
 		try {
 			// The cast trusts the stored format — `StoredCodePayload` is a private
 			// internal type that exactly mirrors what `createCode` serializes; no
-			// external writer touches this key namespace.
-			const p = JSON.parse(value) as StoredCodePayload;
+			// external writer touches this key namespace. `Partial`, because the
+			// JSON has no key for a field that held `undefined` (#626): a spread
+			// of it into the record below would leave the key out, and fails to
+			// compile, where naming each field does not.
+			const p = JSON.parse(value) as Partial<StoredCodePayload>;
 			// Pre-v0.5.1 codes lack `client_id` / `redirect_uri` (the IH-2 / TS-1
 			// production drop bug). Treat them as corrupt — the strict identity
 			// gates in /token would reject them anyway, but failing here keeps the
