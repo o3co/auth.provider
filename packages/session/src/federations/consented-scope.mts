@@ -29,6 +29,13 @@
  *    may a third-party adapter, and reading that silence as "no scope" would
  *    leave the record with no ceiling at all (#647).
  *
+ * The two are separated by PRESENCE, not by usefulness. `scope: ""` and
+ * `scope: "   "` are answers — the upstream spoke and granted nothing this
+ * route can name — so they claim nothing rather than falling through to the
+ * request. `@o3co/auth-provider-federation-oidc`'s delegated exchange keeps an
+ * empty scope for the same reason, and an adapter that reports one must not
+ * flatten it into silence.
+ *
  * An adapter is a third-party extension point, so neither reading is believed
  * before it is checked (D5): a non-string, an empty string and a whitespace-only
  * string all name nothing. That check also protects the store — the Redis
@@ -56,8 +63,15 @@ export function consentedScope(
 	answered: unknown,
 	requested: readonly string[] | undefined,
 ): string | undefined {
-	const named = parse(answered);
-	if (named.length > 0) return named.join(" ");
+	// Present is not absent, whatever it says. An upstream that answered and
+	// named nothing usable has not been silent, and falling back to the request
+	// there would record every requested scope as consent on a response that
+	// granted none — fail-open, on the write that sets the ceiling for the life
+	// of the connection. Only a field that is not there at all reaches §3.3.
+	if (answered !== undefined) {
+		const named = parse(answered);
+		return named.length > 0 ? named.join(" ") : undefined;
+	}
 	// Parsed the same way, not merely filtered: an entry may itself be a
 	// space-delimited list, or whitespace, and a rule the answered branch keeps
 	// and this one does not is the same half-stated contract in a smaller place.

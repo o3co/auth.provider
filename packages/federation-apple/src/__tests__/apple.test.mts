@@ -305,6 +305,26 @@ describe("exchangeCode", () => {
 		nonce: "nonce-abc",
 	};
 
+	it.each([
+		["a granted scope", "name email", "name email"],
+		// Forwarded verbatim: what matters downstream is that the field is there.
+		["nothing usable, which is still an answer", "   ", "   "],
+		["no scope field at all", undefined, undefined],
+	])("forwards what Apple says about scope: %s (#647)", async (_label, answered, expected) => {
+		// Apple normally sends none, which the route reads as "as requested"
+		// (RFC 6749 section 3.3). A present answer that names nothing must not
+		// flatten into that, or a response granting none would be recorded as
+		// consent to everything requested.
+		const base = appleTokenResponse();
+		mockAuthorizationCodeGrant.mockResolvedValueOnce(
+			answered === undefined ? base : { ...base, scope: answered },
+		);
+		const p = createAppleProvider(baseConfig);
+		const profile = await p.exchangeCode(exchangeArgs);
+
+		expect(profile.scope).toBe(expected);
+	});
+
 	it("builds a FederationProfile from the id_token claims alone (Apple has no userinfo)", async () => {
 		mockAuthorizationCodeGrant.mockResolvedValueOnce(appleTokenResponse());
 		const p = createAppleProvider(baseConfig);

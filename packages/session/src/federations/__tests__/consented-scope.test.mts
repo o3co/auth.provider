@@ -37,11 +37,18 @@ describe("consentedScope (#647)", () => {
 		["a number", 42],
 		["null", null],
 		["an object", {}],
-	])("treats %s from the adapter as naming nothing, and falls back", (_label, answered) => {
-		// An adapter is a third-party extension point. A non-string sealed into
-		// the Redis envelope would only fail on the NEXT read, where it cannot be
-		// told from corruption and the record is dropped.
-		expect(consentedScope(answered, ["openid"])).toBe("openid");
+	])("claims nothing when the adapter answers %s, rather than falling back", (_label, answered) => {
+		// Present is not absent, whatever it says. The upstream spoke and named
+		// nothing this route can use, so reading it as silence would record every
+		// REQUESTED scope as consent on a response that granted none — fail-open,
+		// on the write that sets the ceiling for the life of the connection.
+		// `@o3co/auth-provider-federation-oidc` keeps an empty scope on its
+		// delegated exchange for the same reason.
+		expect(consentedScope(answered, ["openid"])).toBeUndefined();
+	});
+
+	it("falls back only when the field is not there at all", () => {
+		expect(consentedScope(undefined, ["openid"])).toBe("openid");
 	});
 
 	it("answers undefined when neither the upstream nor the provider names one", () => {

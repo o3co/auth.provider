@@ -72,7 +72,13 @@ export type GithubProvider = FederationProvider & SupportsLogout & SupportsClaim
  * know which upstream it is reading.
  */
 const githubScope = (value: unknown): string | undefined => {
-	if (typeof value !== "string") return undefined;
+	// `undefined` means GitHub named no scope at all, which the session route
+	// reads as "as requested" (RFC 6749 §3.3). An answer that is present and
+	// names nothing usable must NOT flatten into that: the upstream spoke, and
+	// reading its silence where there was none would record every requested
+	// scope as consent. Present-but-empty travels as the empty string.
+	if (value === undefined) return undefined;
+	if (typeof value !== "string") return "";
 	const named = [
 		...new Set(
 			value
@@ -81,7 +87,7 @@ const githubScope = (value: unknown): string | undefined => {
 				.filter((entry) => entry !== ""),
 		),
 	];
-	return named.length > 0 ? named.join(" ") : undefined;
+	return named.join(" ");
 };
 
 export function createGithubProvider(config: GithubProviderConfig): GithubProvider {

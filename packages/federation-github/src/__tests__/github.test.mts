@@ -112,10 +112,36 @@ describe("createGithubProvider on openid-client", () => {
 		},
 	);
 
-	it("answers no scope when GitHub names none (#647)", async () => {
-		// Silence is read as "as requested" by the route that stores it, so the
-		// adapter must not invent an empty string here.
-		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-at", scope: "  " });
+	it.each([
+		["whitespace only", "  ", ""],
+		["a lone comma", ",", ""],
+	])(
+		"keeps an answer that names nothing distinguishable from no answer: %s (#647)",
+		async (_label, answered) => {
+			// Normalised to the empty string rather than to `undefined`: the route
+			// reads an ABSENT scope as "as requested", so flattening a present
+			// answer into absence would record every requested scope as consent on
+			// a response that granted none.
+			mockAuthorizationCodeGrant.mockResolvedValueOnce({
+				access_token: "gh-at",
+				scope: answered,
+			});
+			mockFetchUserInfo.mockResolvedValueOnce({ id: 1, login: "alice" });
+			mockFetchProtectedResource.mockResolvedValueOnce({
+				json: async () => [{ email: "a@b.c", primary: true, verified: true }],
+			});
+			const p = createGithubProvider(baseConfig);
+			const profile = await p.exchangeCode({
+				code: "gh-code",
+				codeVerifier: "v",
+				redirectUri: baseConfig.callbackURL,
+			});
+			expect(profile.scope).toBe("");
+		},
+	);
+
+	it("answers undefined only when GitHub sends no scope field at all (#647)", async () => {
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-at" });
 		mockFetchUserInfo.mockResolvedValueOnce({ id: 1, login: "alice" });
 		mockFetchProtectedResource.mockResolvedValueOnce({
 			json: async () => [{ email: "a@b.c", primary: true, verified: true }],
