@@ -121,9 +121,10 @@ const parseScope = (json: string | undefined): readonly string[] | undefined => 
 };
 
 /**
- * The memory adapter's `toAuthorization`, from hash fields. A field the hash
- * does not hold is `undefined` in the result, and every field is named, so a
- * field this copy forgot is a compile error rather than a drop (#626).
+ * This adapter's `toAuthorization` — the Redis counterpart of the memory
+ * adapter's — built from hash fields. A field the hash does not hold is
+ * `undefined` in the result, and every field is named, so a field this copy
+ * forgot is a compile error rather than a drop (#626).
  */
 const toAuthorization = (fields: DeviceCodeRecordFields): DeviceAuthorization => ({
 	userCode: fields.userCode,
