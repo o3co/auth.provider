@@ -1562,6 +1562,7 @@ describe("createRefreshTokenGrant", () => {
 				createdAt: new Date(),
 				expiresAt: new Date(Date.now() + 3600_000),
 				claims: {},
+				amr: undefined,
 			}));
 			const deps: GrantDependencies = { ...mockDeps, userSessionStore: store };
 			const handler = createRefreshTokenGrant(deps);

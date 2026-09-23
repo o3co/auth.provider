@@ -45,8 +45,12 @@ interface Envelope {
 	createdAtMs: number;
 	expiresAtMs: number;
 	claims: Record<string, unknown>;
-	/** #481: RFC 8176 values recorded by the login path. */
-	amr?: string[];
+	/**
+	 * #481: RFC 8176 values recorded by the login path. A required key (#626),
+	 * `undefined` when there are none — `JSON.stringify` leaves it out, so
+	 * the stored bytes are what they were.
+	 */
+	amr: string[] | undefined;
 }
 
 /**
@@ -113,7 +117,7 @@ const toEnvelope = (input: CreateUserSessionInput, createdAtMs: number): Envelop
 	createdAtMs,
 	expiresAtMs: input.expiresAt.getTime(),
 	claims: { ...input.claims },
-	...(input.amr ? { amr: [...input.amr] } : {}),
+	amr: input.amr ? [...input.amr] : undefined,
 });
 
 const fromEnvelope = (e: Envelope): UserSession => ({
@@ -123,7 +127,7 @@ const fromEnvelope = (e: Envelope): UserSession => ({
 	createdAt: new Date(e.createdAtMs),
 	expiresAt: new Date(e.expiresAtMs),
 	claims: { ...e.claims } as UserSessionClaims,
-	...(e.amr ? { amr: [...e.amr] } : {}),
+	amr: e.amr ? [...e.amr] : undefined,
 });
 
 /**

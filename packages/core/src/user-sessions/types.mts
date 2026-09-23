@@ -71,10 +71,15 @@ export interface UserSession {
 	 * #481: how the user authenticated — RFC 8176 values (`pwd`, `hwk`,
 	 * `mfa`, `otp`, …) plus the deployment-defined `fed` for a federated
 	 * login. Surfaced as the id_token `amr` claim and consulted by
-	 * `/authorize` for `acr_values`. Absent when the login path recorded
+	 * `/authorize` for `acr_values`. `undefined` when the login path recorded
 	 * nothing (a session written before #481).
+	 *
+	 * A required key (#626): both stores copy the session field by field, and
+	 * a copy that forgot `amr` would hide the step-up the user performed —
+	 * every `acr_values` request asking them to sign in again — without an
+	 * error. On the input, it makes a login path say what it knows.
 	 */
-	readonly amr?: readonly string[];
+	readonly amr: readonly string[] | undefined;
 }
 
 /**
@@ -95,10 +100,15 @@ export interface CreateUserSessionInput {
 	 * #481: how the user authenticated — RFC 8176 values (`pwd`, `hwk`,
 	 * `mfa`, `otp`, …) plus the deployment-defined `fed` for a federated
 	 * login. Surfaced as the id_token `amr` claim and consulted by
-	 * `/authorize` for `acr_values`. Absent when the login path recorded
+	 * `/authorize` for `acr_values`. `undefined` when the login path recorded
 	 * nothing (a session written before #481).
+	 *
+	 * A required key (#626): both stores copy the session field by field, and
+	 * a copy that forgot `amr` would hide the step-up the user performed —
+	 * every `acr_values` request asking them to sign in again — without an
+	 * error. On the input, it makes a login path say what it knows.
 	 */
-	readonly amr?: readonly string[];
+	readonly amr: readonly string[] | undefined;
 }
 
 // ---------------------------------------------------------------------------

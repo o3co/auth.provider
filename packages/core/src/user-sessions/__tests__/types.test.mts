@@ -57,8 +57,8 @@ test("CreateUserSessionInput drops federations field (now in SessionFederationIn
 		readonly authTime: Date;
 		readonly expiresAt: Date;
 		readonly claims: UserSessionClaims;
-		// #481
-		readonly amr?: readonly string[];
+		// #481; a required key since #626
+		readonly amr: readonly string[] | undefined;
 	}>();
 });
 
@@ -70,8 +70,8 @@ test("UserSession value type has no activeRPs/familyIds/federations fields", () 
 		readonly createdAt: Date;
 		readonly expiresAt: Date;
 		readonly claims: UserSessionClaims;
-		// #481
-		readonly amr?: readonly string[];
+		// #481; a required key since #626
+		readonly amr: readonly string[] | undefined;
 	}>();
 });
 
