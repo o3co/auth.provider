@@ -159,6 +159,50 @@ export const runDeviceCodeStoreContract = (
 			});
 		});
 
+		it("names every key of a scopeless request, and of a denial (#626)", async () => {
+			// The fields that hold `undefined` here are the ones a store might
+			// leave out rather than name; `toStrictEqual` fails on a missing key
+			// where `toEqual` would pass.
+			await withStore(async (store) => {
+				await store.create({ ...seed, requestedScope: undefined });
+				const pending = {
+					userCode: seed.userCode,
+					clientId: seed.clientId,
+					requestedScope: undefined,
+					expiresAtMs: seed.expiresAtMs,
+					intervalSeconds: seed.intervalSeconds,
+					status: "pending",
+					subject: undefined,
+					grantedScope: undefined,
+				};
+				expect(await store.findPendingByUserCode(seed.userCode, NOW)).toStrictEqual(pending);
+				expect(await store.deny(seed.userCode, NOW)).toStrictEqual({
+					status: "ok",
+					authorization: { ...pending, status: "denied" },
+				});
+			});
+		});
+
+		it("reads an untyped caller's null requestedScope as no scope, and still approves", async () => {
+			// Before #626 both stores tested the field for truthiness, so `null`
+			// was a scopeless request. The Redis store's `=== undefined` would
+			// have stored the string "null", read back as `[]`, and failed the
+			// approval script on it.
+			await withStore(async (store) => {
+				await store.create({ ...seed, requestedScope: null as unknown as undefined });
+				expect(
+					(await store.findPendingByUserCode(seed.userCode, NOW))?.requestedScope,
+				).toBeUndefined();
+				const decided = await store.approve({
+					userCode: seed.userCode,
+					subject: "user-1",
+					nowMs: NOW,
+				});
+				expect(decided.status).toBe("ok");
+				if (decided.status === "ok") expect(decided.authorization.grantedScope).toEqual([]);
+			});
+		});
+
 		it("hands the approval to the first poll and nothing to the second", async () => {
 			// The single most important property in this file. A `find`-then-
 			// `delete` implementation passes every other test here and issues

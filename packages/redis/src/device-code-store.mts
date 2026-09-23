@@ -167,8 +167,14 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 				intervalSeconds: String(input.intervalSeconds),
 				status: "pending",
 				// Left out rather than `undefined`: these are the hash fields a client
-				// writes, and a hash has no `undefined` to hold.
-				...(input.requestedScope === undefined
+				// writes, and a hash has no `undefined` to hold — a third-party client
+				// may write every key it is handed. So this one write is held by the
+				// conformance suite rather than the compiler, unlike #654's consent
+				// client, whose `find` is a field-by-field copy; here the record is
+				// read back generically from `HGETALL`. `== null` rather than
+				// `=== undefined`: an untyped caller's `null` stays "no scope", as it
+				// was, instead of being stored as `"null"` and failing `approve`.
+				...(input.requestedScope == null
 					? {}
 					: { requestedScope: JSON.stringify(input.requestedScope) }),
 			};

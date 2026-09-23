@@ -24,6 +24,7 @@
 import type {
 	BootstrapMap,
 	ClientRepository,
+	DeviceCodeStore,
 	RateLimiter,
 	RateLimitSpec,
 } from "@o3co/auth-provider-core";
@@ -504,6 +505,7 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 				authorization: {
 					userCode: "BCDF-GHJK",
 					clientId: CONFIDENTIAL_ID,
+					requestedScope: ["openid"],
 					expiresAtMs: Date.now() + 600_000,
 					intervalSeconds: 5,
 					status: "approved" as const,
@@ -511,7 +513,7 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 					grantedScope: ["openid"],
 				},
 			}),
-		};
+		} satisfies DeviceCodeStore;
 		const base = makeValidCoreConfig();
 		const handler = factory({
 			config: {
