@@ -123,6 +123,20 @@ export function runUserSessionStoreContract(factory: UserSessionStoreContractFac
 			expect(s2?.createdAt.getTime()).not.toBe(0);
 		});
 
+		it("keeps its own copy of amr: neither the array written nor the one read changes what is stored (#626)", async () => {
+			// `amr` is what `/authorize` judges `acr_values` against; a store that
+			// kept the caller's array, or handed out its own, would let a later
+			// push on either one grant a step-up nobody performed.
+			const store = await factory();
+			const written = ["pwd"];
+			await store.create(INPUT({ sid: "amr-iso", amr: written }));
+			written.push("mfa");
+			const read = await store.get("amr-iso");
+			expect(read?.amr).toEqual(["pwd"]);
+			(read?.amr as string[] | undefined)?.push("hwk");
+			expect((await store.get("amr-iso"))?.amr).toEqual(["pwd"]);
+		});
+
 		it("readonly kind field present", async () => {
 			const store = await factory();
 			expect(typeof store.kind).toBe("string");
