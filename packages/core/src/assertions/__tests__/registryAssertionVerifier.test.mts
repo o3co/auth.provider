@@ -21,8 +21,10 @@ import { exportJWK, SignJWT } from "jose";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
 	type AssertionIssuerEntry,
+	type AssertionIssuerEntryInput,
 	type AssertionIssuerRegistry,
 	createMemoryAssertionIssuerRegistry,
+	toAssertionIssuerEntry,
 } from "#/assertions/issuerRegistry.mjs";
 import { createRegistryAssertionVerifier } from "#/assertions/registryAssertionVerifier.mjs";
 import { createMemoryReplaySeenSet } from "#/replay-seen-set/adapters/memory.mjs";
@@ -52,20 +54,23 @@ const mint = async (
 		.setExpirationTime(opts.expSec ?? Math.floor(Date.now() / 1000) + 300)
 		.sign(opts.key ?? authorityA.privateKey);
 
-const entryA = (over: Partial<AssertionIssuerEntry> = {}): AssertionIssuerEntry => ({
+const entryA = (over: Partial<AssertionIssuerEntryInput> = {}): AssertionIssuerEntryInput => ({
 	issuer: ISSUER_A,
 	keys: { type: "key", key: authorityA.publicKey },
 	algorithms: ["EdDSA"],
 	...over,
 });
-const entryB = (over: Partial<AssertionIssuerEntry> = {}): AssertionIssuerEntry => ({
+const entryB = (over: Partial<AssertionIssuerEntryInput> = {}): AssertionIssuerEntryInput => ({
 	issuer: ISSUER_B,
 	keys: { type: "key", key: authorityB.publicKey },
 	algorithms: ["EdDSA"],
 	...over,
 });
 
-const verifierOver = (entries: readonly AssertionIssuerEntry[], audience: string | string[] = AS) =>
+const verifierOver = (
+	entries: readonly AssertionIssuerEntryInput[],
+	audience: string | string[] = AS,
+) =>
 	createRegistryAssertionVerifier({
 		registry: createMemoryAssertionIssuerRegistry(entries),
 		audience,
@@ -159,7 +164,8 @@ describe("createRegistryAssertionVerifier — issuers and their keys (#525)", ()
 	});
 
 	it("refuses an assertion with no iss, and a string that is not a JWT, without consulting the registry", async () => {
-		const findIssuer = vi.fn(async () => entryA());
+		// A registry answers with the stored form, every ceiling named.
+		const findIssuer = vi.fn(async () => toAssertionIssuerEntry(entryA()));
 		const verifier = createRegistryAssertionVerifier({
 			registry: { kind: "spy", findIssuer },
 			audience: AS,
@@ -221,7 +227,7 @@ describe("createRegistryAssertionVerifier — a remote JWKS endpoint (#525)", ()
 		await jwks.close();
 	});
 
-	const remoteEntry = (): AssertionIssuerEntry =>
+	const remoteEntry = (): AssertionIssuerEntryInput =>
 		entryA({ keys: { type: "jwks_uri", uri: jwks.uri, cooldownMs: 0, cacheMaxAgeMs: 60_000 } });
 
 	it("fetches the key set on first use, and a rotation at the issuer is picked up without a restart", async () => {
@@ -249,8 +255,9 @@ describe("createRegistryAssertionVerifier — a remote JWKS endpoint (#525)", ()
 		// `createClientAssertionVerifier` took a fetch for a client's `jwksUri`;
 		// this verifier did not, so a deployment behind an egress proxy could
 		// verify `private_key_jwt` but not a trusted issuer's assertions.
+		// Typed as `fetch`, so the call it records can be read back below.
 		const fetchImpl = vi.fn(
-			async () =>
+			async (_input: Parameters<typeof fetch>[0], _init?: Parameters<typeof fetch>[1]) =>
 				new Response(
 					JSON.stringify({
 						keys: [{ ...(await exportJWK(authorityA.publicKey)), kid: "k1", alg: "EdDSA" }],
@@ -398,11 +405,30 @@ describe("an entry is data a store can hold (v0.13.0 audit)", () => {
 		const registry: AssertionIssuerRegistry = {
 			kind: "json-store",
 			async findIssuer(issuer) {
-				const rows = JSON.parse(stored) as Array<AssertionIssuerEntry & { expiresAt?: string }>;
+				// A row is what the store kept: JSON drops a ceiling left
+				// `undefined`, and revives `expiresAt` as a string. The read-back
+				// is an `AssertionIssuerEntry` LITERAL naming every field — the
+				// form the type checks, so a column forgotten here fails to
+				// compile. (`toAssertionIssuerEntry` would not: it takes the input
+				// type, where every ceiling is optional.)
+				const rows = JSON.parse(stored) as Array<
+					Omit<AssertionIssuerEntryInput, "expiresAt"> & { expiresAt?: string }
+				>;
 				const row = rows.find((r) => r.issuer === issuer);
-				return row === undefined
-					? null
-					: { ...row, ...(row.expiresAt ? { expiresAt: new Date(row.expiresAt) } : {}) };
+				if (row === undefined) return null;
+				const answer: AssertionIssuerEntry = {
+					issuer: row.issuer,
+					keys: row.keys,
+					algorithms: row.algorithms,
+					allowedSubjects: row.allowedSubjects,
+					allowedScopes: row.allowedScopes,
+					allowedAudiences: row.allowedAudiences,
+					allowedClients: row.allowedClients,
+					expiresAt: row.expiresAt === undefined ? undefined : new Date(row.expiresAt),
+					profile: row.profile,
+					clockToleranceSeconds: row.clockToleranceSeconds,
+				};
+				return answer;
 			},
 		};
 		const verifier = createRegistryAssertionVerifier({
@@ -443,7 +469,7 @@ describe("an entry is data a store can hold (v0.13.0 audit)", () => {
 			expect(
 				() =>
 					createMemoryAssertionIssuerRegistry([
-						{ ...entryA(), [field]: () => null } as unknown as AssertionIssuerEntry,
+						{ ...entryA(), [field]: () => null } as unknown as AssertionIssuerEntryInput,
 					]),
 				field,
 			).toThrow(new RegExp(`${field}.*readersFor`));
@@ -532,7 +558,9 @@ describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => 
 	const IDP = "https://idp.example";
 	const idp = generateKeyPairSync("ed25519");
 
-	const idJagEntry = (over: Partial<AssertionIssuerEntry> = {}): AssertionIssuerEntry => ({
+	const idJagEntry = (
+		over: Partial<AssertionIssuerEntryInput> = {},
+	): AssertionIssuerEntryInput => ({
 		issuer: IDP,
 		keys: { type: "key", key: idp.publicKey },
 		algorithms: ["EdDSA"],
@@ -566,7 +594,7 @@ describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => 
 	};
 
 	const make = (
-		entries: readonly AssertionIssuerEntry[] = [idJagEntry()],
+		entries: readonly AssertionIssuerEntryInput[] = [idJagEntry()],
 		over: Partial<Parameters<typeof createRegistryAssertionVerifier>[0]> = {},
 	) =>
 		createRegistryAssertionVerifier({

@@ -17,7 +17,7 @@
 import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-	type AssertionIssuerEntry,
+	type AssertionIssuerEntryInput,
 	checkAssertionIssuerEntry,
 	createMemoryAssertionIssuerRegistry,
 } from "#/assertions/issuerRegistry.mjs";
@@ -29,7 +29,7 @@ import {
  */
 
 const { publicKey } = generateKeyPairSync("ed25519");
-const entry = (over: Partial<AssertionIssuerEntry> = {}): AssertionIssuerEntry => ({
+const entry = (over: Partial<AssertionIssuerEntryInput> = {}): AssertionIssuerEntryInput => ({
 	issuer: "https://devices.example",
 	keys: { type: "key", key: publicKey },
 	algorithms: ["EdDSA"],
@@ -87,6 +87,69 @@ describe("createMemoryAssertionIssuerRegistry — the admin surface (#525)", () 
 		]);
 		expect(await registry.list()).toHaveLength(1);
 		expect(await registry.findIssuer("https://devices.example")).not.toBeNull();
+	});
+
+	it("answers with every field named, a ceiling the entry left out as undefined", async () => {
+		// What a registry answers with is the stored form: a registry over a
+		// store builds the same shape on read-back, where a key it forgot would
+		// be a ceiling silently dropped — failing open.
+		const registry = createMemoryAssertionIssuerRegistry([entry()]);
+		const found = await registry.findIssuer("https://devices.example");
+
+		expect(Object.keys(found ?? {}).sort()).toEqual(
+			[
+				"algorithms",
+				"allowedAudiences",
+				"allowedClients",
+				"allowedScopes",
+				"allowedSubjects",
+				"clockToleranceSeconds",
+				"expiresAt",
+				"issuer",
+				"keys",
+				"profile",
+			].sort(),
+		);
+		expect(found?.allowedClients).toBeUndefined();
+	});
+
+	it("round-trips list() into add() on another registry", async () => {
+		// The stored form is accepted back as input, so moving entries between
+		// registries loses nothing.
+		const from = createMemoryAssertionIssuerRegistry([
+			entry({ allowedClients: ["client-a"], profile: "id-jag", clockToleranceSeconds: 5 }),
+		]);
+		const to = createMemoryAssertionIssuerRegistry();
+		for (const listed of await from.list()) await to.add(listed);
+
+		expect(await to.findIssuer("https://devices.example")).toEqual(
+			await from.findIssuer("https://devices.example"),
+		);
+	});
+
+	it("refuses a reader function on the input, rather than normalising it away", async () => {
+		// The normaliser copies the entry's own fields and nothing else. If the
+		// check ran after it, a reader would be silently dropped instead of
+		// refused — and refusing it is the point: an ignored handle reader hands
+		// the Store a bare `sub` two issuers can share.
+		const withReader = {
+			...entry(),
+			readSubjectHandle: () => "x",
+		} as unknown as AssertionIssuerEntryInput;
+
+		expect(() => createMemoryAssertionIssuerRegistry([withReader])).toThrow(/readSubjectHandle/);
+		await expect(createMemoryAssertionIssuerRegistry().add(withReader)).rejects.toThrow(
+			/readSubjectHandle/,
+		);
+	});
+
+	it("clears expiresAt by value, and keeps the key", async () => {
+		const registry = createMemoryAssertionIssuerRegistry([entry({ expiresAt: new Date() })]);
+		await registry.setExpiresAt("https://devices.example", undefined);
+		const found = await registry.findIssuer("https://devices.example");
+
+		expect(found && "expiresAt" in found).toBe(true);
+		expect(found?.expiresAt).toBeUndefined();
 	});
 
 	it("reports its kind", () => {

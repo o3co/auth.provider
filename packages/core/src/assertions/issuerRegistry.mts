@@ -47,7 +47,15 @@ export type AssertionIssuerKeySource =
 
 /**
  * One issuer this deployment accepts RFC 7523 assertions from, and what it
- * accepts from them (#525).
+ * accepts from them (#525) — as a caller WRITES it: the composition's entry
+ * list, and `add`. A ceiling the entry does not name is left out, and absent
+ * means "no ceiling". What a registry answers with is
+ * {@link AssertionIssuerEntry}, the same fields with none of them optional.
+ *
+ * Each optional field also admits an explicit `undefined`, so that a stored
+ * entry is accepted back as input — `list()` into `add()` — for a consumer
+ * compiling with `exactOptionalPropertyTypes`, where `a?: T` alone refuses
+ * the `undefined` a stored entry carries.
  *
  * Every field beyond `issuer`, `keys` and `algorithms` is a ceiling: it can
  * only narrow what an assertion from this issuer may obtain, never widen the
@@ -63,7 +71,7 @@ export type AssertionIssuerKeySource =
  * audit trail of "what did we trust, and when" stays a list of adds and
  * removes.
  */
-export interface AssertionIssuerEntry {
+export interface AssertionIssuerEntryInput {
 	/** The exact `iss` value. Matched by string equality, never by prefix. */
 	readonly issuer: string;
 	readonly keys: AssertionIssuerKeySource;
@@ -76,32 +84,32 @@ export interface AssertionIssuerEntry {
 	 * `sub` values accepted from this issuer. Absent means any subject — the
 	 * Store still decides whom a handle resolves to (#301).
 	 */
-	readonly allowedSubjects?: readonly string[];
+	readonly allowedSubjects?: readonly string[] | undefined;
 	/**
 	 * Scopes an assertion from this issuer may obtain. The verification result
 	 * carries the intersection with the assertion's own `scope` claim (or this
 	 * list when the assertion names none) as its scope ceiling.
 	 */
-	readonly allowedScopes?: readonly string[];
+	readonly allowedScopes?: readonly string[] | undefined;
 	/**
 	 * Audiences a token minted from this issuer's assertions may name. A
 	 * ceiling on the issued `aud` whatever chose it, and — with no
 	 * authenticated client — the source the client registration would
 	 * otherwise be (#520).
 	 */
-	readonly allowedAudiences?: readonly string[];
+	readonly allowedAudiences?: readonly string[] | undefined;
 	/**
 	 * Client ids permitted to present this issuer's assertions. Absent means
 	 * any presenter, an unauthenticated one included (RFC 7523 §3 makes client
 	 * authentication optional). A list admits those clients only; an
 	 * unauthenticated presenter is refused.
 	 */
-	readonly allowedClients?: readonly string[];
+	readonly allowedClients?: readonly string[] | undefined;
 	/**
 	 * After this instant the entry is refused. The only mutable field. A
 	 * registry over a store hands it back as a `Date`.
 	 */
-	readonly expiresAt?: Date;
+	readonly expiresAt?: Date | undefined;
 	/**
 	 * Which assertion profile this issuer mints (#526).
 	 *
@@ -115,7 +123,7 @@ export interface AssertionIssuerEntry {
 	 *   carried as claims. Needs `issuerIdentifier` and `replaySeenSet` on the
 	 *   verifier.
 	 */
-	readonly profile?: "rfc7523" | "id-jag";
+	readonly profile?: "rfc7523" | "id-jag" | undefined;
 	/**
 	 * Clock skew for `exp` / `nbf`, in seconds. Default 60.
 	 *
@@ -123,7 +131,48 @@ export interface AssertionIssuerEntry {
 	 * verifies, but has no lifetime left for a token to inherit: the
 	 * jwt-bearer grant refuses it (auth.proxy#90).
 	 */
-	readonly clockToleranceSeconds?: number;
+	readonly clockToleranceSeconds?: number | undefined;
+}
+
+/**
+ * An issuer entry as a registry holds and answers with it: every field of
+ * {@link AssertionIssuerEntryInput}, and every one of them a REQUIRED key,
+ * `undefined` where the entry names no ceiling.
+ *
+ * Every field beyond `issuer`, `keys` and `algorithms` is a ceiling, so a
+ * registry that loses one WIDENS what the issuer's assertions may obtain — it
+ * fails open. `allowedClients` gone admits any presenter, an unauthenticated
+ * one included; `expiresAt` gone trusts the issuer for ever; `profile:
+ * "id-jag"` gone falls back to plain RFC 7523, and with it the `jti` replay
+ * check, the `typ` check and the exact-`aud` check. A registry over a store —
+ * this port's documented way to survive a restart — reads each row back into
+ * this shape. Built as an object literal of THIS type, naming every field, a
+ * read-back that forgets a key fails to compile rather than dropping the
+ * ceiling.
+ *
+ * The guarantee is the literal's, not any helper's. Mapping a row through
+ * {@link toAssertionIssuerEntry} does NOT carry it: that takes the input type,
+ * where every ceiling is optional, so a forgotten column compiles there. Nor
+ * does the type reach a registry in plain JavaScript, code that steps around
+ * the checker (`as AssertionIssuerEntry` on an incomplete object,
+ * `JSON.parse(row) as …`), or a store's own row type — declare that with every
+ * key required too, or the write into it can forget one. And it does not reach
+ * inside `keys`: a `jwks_uri` source's tuning (`cacheMaxAgeMs`, `cooldownMs`,
+ * `timeoutMs`) is optional there as well; losing `cacheMaxAgeMs` restores the
+ * ten-minute default, a bounded widening of how long a key withdrawn at the
+ * issuer is still accepted.
+ */
+export interface AssertionIssuerEntry {
+	readonly issuer: string;
+	readonly keys: AssertionIssuerKeySource;
+	readonly algorithms: readonly string[];
+	readonly allowedSubjects: readonly string[] | undefined;
+	readonly allowedScopes: readonly string[] | undefined;
+	readonly allowedAudiences: readonly string[] | undefined;
+	readonly allowedClients: readonly string[] | undefined;
+	readonly expiresAt: Date | undefined;
+	readonly profile: "rfc7523" | "id-jag" | undefined;
+	readonly clockToleranceSeconds: number | undefined;
 }
 
 /**
@@ -156,7 +205,7 @@ export interface AssertionIssuerRegistry {
  */
 export interface MutableAssertionIssuerRegistry extends AssertionIssuerRegistry {
 	/** Refuses a duplicate `issuer` and a malformed entry. */
-	add(entry: AssertionIssuerEntry): Promise<void>;
+	add(entry: AssertionIssuerEntryInput): Promise<void>;
 	list(): Promise<readonly AssertionIssuerEntry[]>;
 	/** @returns whether an entry was removed. */
 	remove(issuer: string): Promise<boolean>;
@@ -168,8 +217,13 @@ export interface MutableAssertionIssuerRegistry extends AssertionIssuerRegistry 
  * Validate an entry the way boot validates configuration: loudly, naming the
  * field. Shared by the memory registry and by anyone building an entry ahead
  * of registering it.
+ *
+ * Run on what the caller wrote, BEFORE {@link toAssertionIssuerEntry}: the
+ * normaliser copies the entry's own fields and nothing else, so a reader
+ * function left on an input would be silently stripped by it rather than
+ * refused here — and refusing it is the point (see `READER_FIELDS`).
  */
-export function checkAssertionIssuerEntry(entry: AssertionIssuerEntry): void {
+export function checkAssertionIssuerEntry(entry: AssertionIssuerEntryInput): void {
 	for (const field of READER_FIELDS) {
 		if ((entry as unknown as Record<string, unknown>)[field] !== undefined) {
 			throw new Error(
@@ -211,6 +265,36 @@ export function checkAssertionIssuerEntry(entry: AssertionIssuerEntry): void {
 }
 
 /**
+ * The stored form of an input: every field named, `undefined` where the input
+ * left a ceiling out. For normalising an entry a caller WROTE — what `add`
+ * receives, what the composition lists — before holding or persisting it.
+ *
+ * Not for reading a store's rows back. Its parameter is the input type, where
+ * every ceiling is optional, so a row mapped through it with a column forgotten
+ * compiles and drops that ceiling. A read-back builds an
+ * {@link AssertionIssuerEntry} literal naming every field instead; that is
+ * what the type checks.
+ *
+ * Copies the entry's own fields only. Validate the input first
+ * ({@link checkAssertionIssuerEntry}): anything else it carries is not copied,
+ * and a reader function is something to refuse, not to lose.
+ */
+export function toAssertionIssuerEntry(input: AssertionIssuerEntryInput): AssertionIssuerEntry {
+	return {
+		issuer: input.issuer,
+		keys: input.keys,
+		algorithms: input.algorithms,
+		allowedSubjects: input.allowedSubjects,
+		allowedScopes: input.allowedScopes,
+		allowedAudiences: input.allowedAudiences,
+		allowedClients: input.allowedClients,
+		expiresAt: input.expiresAt,
+		profile: input.profile,
+		clockToleranceSeconds: input.clockToleranceSeconds,
+	};
+}
+
+/**
  * The in-memory registry: entries supplied at composition, mutable through
  * the admin surface, gone at restart. A deployment that registers issuers at
  * runtime and needs them to survive a restart implements
@@ -228,10 +312,10 @@ export function checkAssertionIssuerEntry(entry: AssertionIssuerEntry): void {
  * changes the entry list by redeploying, or keeps it in a shared store.
  */
 export function createMemoryAssertionIssuerRegistry(
-	entries: readonly AssertionIssuerEntry[] = [],
+	entries: readonly AssertionIssuerEntryInput[] = [],
 ): MutableAssertionIssuerRegistry {
 	const byIssuer = new Map<string, AssertionIssuerEntry>();
-	const put = (entry: AssertionIssuerEntry): void => {
+	const put = (entry: AssertionIssuerEntryInput): void => {
 		checkAssertionIssuerEntry(entry);
 		if (byIssuer.has(entry.issuer)) {
 			throw new Error(
@@ -239,7 +323,7 @@ export function createMemoryAssertionIssuerRegistry(
 					"entries are immutable; remove it and add the new one.",
 			);
 		}
-		byIssuer.set(entry.issuer, entry);
+		byIssuer.set(entry.issuer, toAssertionIssuerEntry(entry));
 	};
 	for (const entry of entries) put(entry);
 
@@ -260,8 +344,8 @@ export function createMemoryAssertionIssuerRegistry(
 		async setExpiresAt(issuer, expiresAt) {
 			const current = byIssuer.get(issuer);
 			if (current === undefined) return false;
-			const { expiresAt: _dropped, ...rest } = current;
-			byIssuer.set(issuer, expiresAt === undefined ? rest : { ...rest, expiresAt });
+			// The key stays; only its value changes — `undefined` clears it.
+			byIssuer.set(issuer, { ...current, expiresAt });
 			return true;
 		},
 	};

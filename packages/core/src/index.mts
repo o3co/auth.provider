@@ -39,11 +39,13 @@ export { createApp } from "./app.mjs";
 // one-key `createJwtAssertionVerifier` is a one-entry registry.
 export {
 	type AssertionIssuerEntry,
+	type AssertionIssuerEntryInput,
 	type AssertionIssuerKeySource,
 	type AssertionIssuerRegistry,
 	checkAssertionIssuerEntry,
 	createMemoryAssertionIssuerRegistry,
 	type MutableAssertionIssuerRegistry,
+	toAssertionIssuerEntry,
 } from "./assertions/issuerRegistry.mjs";
 export type {
 	JwtAssertionVerifierOptions,
