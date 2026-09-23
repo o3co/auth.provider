@@ -1279,6 +1279,58 @@ describe("POST /oauth/federation/:name/token", () => {
 			});
 		});
 
+		it.each([
+			["a getter that throws", "throws"],
+			["a non-string", 42],
+			["whitespace only", "   "],
+		])(
+			"keeps the narrowed scope when the answer names one this route cannot use: %s",
+			async (_l, value) => {
+				// Named-but-unusable is not silence. The upstream said something about
+				// the scope and this route could not read it, so it learned nothing —
+				// and nothing is a reason to keep what is stored, never to widen it back
+				// to the grant.
+				const narrowed = {
+					...baseFedTokens,
+					expiresAt: new Date(Date.now() - 1000),
+					scope: "openid",
+					grantedScope: "openid email",
+				};
+				const answer =
+					value === "throws"
+						? {
+								accessToken: "new-at",
+								expiresIn: 3600,
+								get scope(): string {
+									throw new Error("hostile getter");
+								},
+							}
+						: { accessToken: "new-at", expiresIn: 3600, scope: value };
+				const refreshProvider = {
+					...federationBase("google"),
+					refreshToken: vi.fn().mockResolvedValue(answer),
+				} as unknown as FederationProvider;
+				const fedTokenStore = makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(narrowed),
+				});
+				const app = buildApp({
+					fedTokenStore,
+					getFederationProviders: () =>
+						new Map<string, FederationProvider>([["google", refreshProvider]]),
+				});
+
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(200);
+				expect(res.body.scope).toBe("openid");
+				expect(fedTokenStore.update).toHaveBeenCalledWith(
+					expect.any(String),
+					"google",
+					expect.objectContaining({ scope: "openid" }),
+				);
+			},
+		);
+
 		it("reads a refresh that names no scope as the grant, not as the last narrowing (#647)", async () => {
 			// `refreshToken(refreshToken)` sends no `scope` upstream, so RFC 6749
 			// section 6 makes the request one for the original grant, and section

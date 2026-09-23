@@ -191,6 +191,11 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				name: typeof userInfo.name === "string" ? userInfo.name : undefined,
 				picture: typeof ghAvatarUrl === "string" ? ghAvatarUrl : undefined,
 				accessToken: tokens.access_token,
+				// RFC 6749 §5.1: the upstream states its scope whenever it differs
+				// from the request, so what it says here is what it granted. GitHub
+				// always states it. Dropping it left the route to infer consent from
+				// the request instead (#647).
+				scope: typeof tokens.scope === "string" ? tokens.scope : undefined,
 				// GitHub OAuth Apps do not issue refresh tokens.
 				refreshToken: undefined,
 				// GitHub OAuth Apps classic tokens have no finite expiry; the new-style
