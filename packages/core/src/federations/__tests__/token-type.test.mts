@@ -35,6 +35,8 @@ describe("canonicalTokenType — RFC 6749 §A.13's `token-type`", () => {
 		["a network-path reference", "//host/p"],
 		["an IPv6 literal host", "https://[::1]/x"],
 		["an IPvFuture literal host", "https://[v1.fe]/"],
+		// RFC 5234 §2.3: an ABNF quoted literal is case-insensitive (#649 review).
+		["an IPvFuture literal with an uppercase version marker", "https://[V1.fe]/"],
 		["userinfo and a port", "https://u:p@h:8080/p"],
 		["one the registry does not hold", "mac"],
 	])("keeps %s exactly as it was given", (_label, value) => {

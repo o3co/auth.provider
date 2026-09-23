@@ -58,8 +58,12 @@ const URI = new RegExp(
 const RELATIVE_REF = new RegExp(
 	`^(?://${AUTHORITY}${PATH_ABEMPTY}|${PATH_ABSOLUTE}|${PATH_NOSCHEME}|)${QUERY_AND_FRAGMENT}$`,
 );
-/** `IPvFuture = "v" 1*HEXDIG "." 1*( unreserved / sub-delims / ":" )` */
-const IP_FUTURE = new RegExp(`^v[0-9A-Fa-f]+\\.[${UNRESERVED}${SUB_DELIMS}:]+$`);
+/**
+ * `IPvFuture = "v" 1*HEXDIG "." 1*( unreserved / sub-delims / ":" )`. The
+ * `"v"` is an ABNF quoted literal, and RFC 5234 §2.3 makes those
+ * case-insensitive — `[V1.fe]` is as valid as `[v1.fe]`.
+ */
+const IP_FUTURE = new RegExp(`^[vV][0-9A-Fa-f]+\\.[${UNRESERVED}${SUB_DELIMS}:]+$`);
 
 /**
  * Whether a value is a `token-type` in the sense of RFC 6749 §A.13:

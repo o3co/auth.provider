@@ -541,6 +541,13 @@ alongside `scope`. An adapter that copies field by field and does not know the
 name drops it silently; the connection then falls back to its current scope as
 the bound, which under-reports rather than over-claims.
 
+`tokenType` is the one field where that pattern is not conservative. A
+third-party store that drops it returns a silent record, silence is read as a
+record written before #645, and a sender-constrained token is handed on as
+`Bearer` — the behaviour this endpoint no longer has, restored for that store
+alone. A store MUST round-trip `tokenType` through `attach`, `update` and `get`;
+both bundled stores do and are pinned on it.
+
 ### Error responses
 
 | Status | Error | Meaning |

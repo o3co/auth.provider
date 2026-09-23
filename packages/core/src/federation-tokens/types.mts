@@ -33,6 +33,16 @@ export interface FederationTokens {
 	 * adapter that named something which is not a string is recorded as `""`,
 	 * which this field can hold and the consumer already refuses.
 	 *
+	 * A store MUST round-trip this field through `attach`, `update` and `get`.
+	 * One that copies the record field by field and forgets it fails OPEN: the
+	 * record comes back silent, silence is read as a record written before
+	 * #645, and a sender-constrained token is handed on as Bearer — the
+	 * behaviour #645 removed, restored for that store alone. Both bundled
+	 * stores round-trip it and are pinned on it (the in-memory store's
+	 * defensive copy is exactly that field-by-field pattern). No marker in the
+	 * record could detect a store that drops fields: it would drop the marker
+	 * too.
+	 *
 	 * ABSENT — and only absent — means the adapter named none: every bundled
 	 * adapter but `federation-oidc`, and every record written before #645. RFC
 	 * 6749 §5.1 makes `token_type` REQUIRED, so `POST /oauth/federation/:name/
