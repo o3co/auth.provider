@@ -14,17 +14,15 @@
  * limitations under the License.
  */
 
-import type {
-	ExchangeTokenValidationContext,
-	ExchangeTokenValidator,
-	ValidatedToken,
-} from "@o3co/auth-provider-core";
 import {
 	type AccessTokenDenylist,
+	type ExchangeTokenValidationContext,
+	type ExchangeTokenValidator,
 	type KeyStore,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
 	type SubjectRevocation,
+	type ValidatedToken,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 

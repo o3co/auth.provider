@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import type { FederationProvider } from "@o3co/auth-provider-core";
 /**
  * End-to-end boot integration test for `googleFederationModule` (Cl-M2).
  *
@@ -34,6 +33,7 @@ import type { FederationProvider } from "@o3co/auth-provider-core";
  *
  * Per A5 §10.1 + Cl-M2.
  */
+import type { FederationProvider } from "@o3co/auth-provider-core";
 import { createApp, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import type { FederationRedirectPolicy } from "@o3co/auth-provider-session";

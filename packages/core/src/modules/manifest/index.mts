@@ -19,6 +19,10 @@ export type { ComponentKey, ComponentMap } from "./component-map.mjs";
 export type {
 	AuditHook,
 	AuditHookFactory,
+	// The answer every contribution factory may give: the value, or a promise
+	// of it. Named here because a package declaring a contribution kind of its
+	// own needs it to say the same thing (#626 P1).
+	Contributed,
 	ContributesMap,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,

@@ -326,8 +326,11 @@ export interface DelegatedRefreshRequest {
  * answer the adapter's library refused to parse may still carry the rotated
  * refresh token, and that one must never be lost (#593, D5) — so `{ refreshToken }`
  * alone is a valid answer, and core treats an answer without a usable access
- * token as `malformed_token_response`. Structurally what core's
- * `DelegatedTokens` consumes; nothing in core imports this.
+ * token as `malformed_token_response`.
+ *
+ * One type, read by both ends: the capability answers with it and
+ * `../federation-grants/retrieve.mts` consumes it. Until #626 P1 the two ends
+ * were two identical declarations, and this one described the other.
  */
 export interface DelegatedTokens {
 	readonly accessToken?: string;
@@ -357,15 +360,6 @@ export interface DelegatedTokens {
 	readonly tokenType?: string;
 }
 
-/**
- * The capability behind federation grants (#593, D17): an adapter that can
- * send a user to authorize a delegation, exchange the code that comes back for
- * the grant's first tokens, and refresh them without a session. Detected by
- * ALL THREE methods being present; an adapter with some and not the others
- * does not have it — slice 6 added the exchange, and an adapter written
- * against the earlier pair is refused at boot by name rather than failing at a
- * callback with a user waiting.
- */
 /**
  * The authorization parameters a delegated adapter owns, and which an
  * operator's `authorizationParams` may therefore not set (#593, D17).
@@ -531,6 +525,15 @@ export interface DelegatedAuthorizationResult {
 	readonly tokens: DelegatedTokens;
 }
 
+/**
+ * The capability behind federation grants (#593, D17): an adapter that can
+ * send a user to authorize a delegation, exchange the code that comes back for
+ * the grant's first tokens, and refresh them without a session. Detected by
+ * ALL THREE methods being present; an adapter with some and not the others
+ * does not have it — slice 6 added the exchange, and an adapter written
+ * against the earlier pair is refused at boot by name rather than failing at a
+ * callback with a user waiting.
+ */
 export interface SupportsDelegatedAuthorization {
 	buildDelegatedAuthorizationUrl(params: DelegatedAuthorizationRequest): URL;
 	exchangeDelegatedCode(

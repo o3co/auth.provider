@@ -871,6 +871,170 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(stored.expiresAt).toBeNull();
 		});
 
+		// -------------------------------------------------------------------------
+		// What the adapter answers is unverified data (D5). An adapter is a
+		// third-party extension point, and `core/federation-grants/retrieve.mts`
+		// holds the same contract to the same bar — `retrieve.hostile.test.mts`
+		// pins it there. These pin it here.
+		// -------------------------------------------------------------------------
+
+		describe("refuses to believe an unusable reading from the adapter (#626 P1 review)", () => {
+			const refreshingApp = (answer: unknown, stored = baseFedTokens) => {
+				const expiredTokens = { ...stored, expiresAt: new Date(Date.now() - 1000) };
+				const refreshProvider = {
+					...federationBase("google"),
+					refreshToken: vi.fn().mockResolvedValue(answer),
+				} as unknown as FederationProvider;
+				const fedTokenStore = makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expiredTokens),
+				});
+				const app = buildApp({
+					fedTokenStore,
+					getFederationProviders: () =>
+						new Map<string, FederationProvider>([["google", refreshProvider]]),
+				});
+				return { app, fedTokenStore };
+			};
+			const storedExpiry = (fedTokenStore: ReturnType<typeof makeFedTokenStore>) =>
+				(
+					(fedTokenStore.update as ReturnType<typeof vi.fn>).mock.calls[0][2] as {
+						expiresAt: Date | null;
+					}
+				).expiresAt;
+
+			it.each([
+				["NaN", Number.NaN],
+				["a negative lifetime", -5],
+				["zero", 0],
+				["Infinity", Number.POSITIVE_INFINITY],
+			])(
+				"stores no expiry rather than an already-expired one for %s",
+				async (_label, expiresIn) => {
+					// An Invalid Date or a past instant would be stored, every later
+					// request would read it as expired, and the connection would refresh
+					// on every request forever. `null` says what is true: no lifetime
+					// this route can stand behind.
+					const { app, fedTokenStore } = refreshingApp({ accessToken: "new-at", expiresIn });
+					const res = await postFedToken(app, "google", await mintAccessToken());
+
+					expect(res.status).toBe(200);
+					expect("expires_in" in res.body).toBe(false);
+					expect(storedExpiry(fedTokenStore)).toBeNull();
+				},
+			);
+
+			it("stores no expiry for an Invalid Date", async () => {
+				const { app, fedTokenStore } = refreshingApp({
+					accessToken: "new-at",
+					expiresAt: new Date(Number.NaN),
+				});
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(200);
+				expect("expires_in" in res.body).toBe(false);
+				expect(storedExpiry(fedTokenStore)).toBeNull();
+			});
+
+			it("keeps `null` meaning the upstream named no lifetime, rather than falling back to expiresIn", async () => {
+				// `null` is a statement; `undefined` is silence. Only silence falls
+				// through to the next source.
+				const { app, fedTokenStore } = refreshingApp({
+					accessToken: "new-at",
+					expiresAt: null,
+					expiresIn: 3600,
+				});
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(200);
+				expect("expires_in" in res.body).toBe(false);
+				expect(storedExpiry(fedTokenStore)).toBeNull();
+			});
+
+			it("treats an empty access token as no access token", async () => {
+				// `access_token: ""` is not a credential, and answering 200 with one
+				// is a malformed RFC 6749 §5.1 response.
+				const { app } = refreshingApp({ accessToken: "" });
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(500);
+				expect(res.body.error).toBe("refresh_failed");
+			});
+
+			it("keeps the stored refresh token when the rotated one is empty", async () => {
+				// Overwriting a good refresh token with `""` strands the connection:
+				// the next request finds no usable token and answers 410, which is
+				// exactly what the rotation-preserving branch exists to prevent.
+				const { app, fedTokenStore } = refreshingApp(
+					{ refreshToken: "" },
+					{ ...baseFedTokens, refreshToken: "original-rt" },
+				);
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(500);
+				expect(fedTokenStore.update).not.toHaveBeenCalled();
+			});
+		});
+
+		it("narrows the stored and reported scope to what the refresh answered (RFC 6749 §6)", async () => {
+			// §6 lets a refresh return a narrower scope, and §5.1 makes the answer
+			// authoritative when it differs from the request. Keeping the old value
+			// would leave the record claiming access the upstream just withdrew.
+			const expiredTokens = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				scope: "openid email calendar.write",
+			};
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi
+					.fn()
+					.mockResolvedValue({ accessToken: "new-at", expiresIn: 3600, scope: "openid email" }),
+			} as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expiredTokens),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(res.body.scope).toBe("openid email");
+			expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect.any(String),
+				"google",
+				expect.objectContaining({ scope: "openid email" }),
+			);
+		});
+
+		it("keeps the stored scope when the refresh names none (absent means unchanged)", async () => {
+			const expiredTokens = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				scope: "openid email",
+			};
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({ accessToken: "new-at", expiresIn: 3600 }),
+			} as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expiredTokens),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(res.body.scope).toBe("openid email");
+		});
+
 		it("stores original refreshToken when provider returns no refreshToken", async () => {
 			const expiredTokens = {
 				...baseFedTokens,

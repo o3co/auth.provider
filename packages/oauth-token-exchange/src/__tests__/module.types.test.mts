@@ -14,7 +14,11 @@
  * limitations under the License.
  */
 
-import type { GrantPolicyHook, ProviderDeps } from "@o3co/auth-provider-core";
+import type {
+	ExchangeTokenValidator,
+	GrantPolicyHook,
+	ProviderDeps,
+} from "@o3co/auth-provider-core";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import type { createTokenExchangeGrant, TokenExchangeDependencies } from "#/grant.mjs";
 import { type TokenExchangeModuleDeps, tokenExchangeModule } from "#/module.mjs";
@@ -86,15 +90,14 @@ describe("createTokenExchangeGrant declares the slots it reads (#626 P2)", () =>
 		expect(true).toBe(true);
 	});
 
-	it("is satisfied by the module's deps on every slot but the validator resolver", () => {
-		// `tokenExchangeValidatorResolver` is the one slot the module cannot hand
-		// over as declared: core's `TokenExchangeValidatorResolver.get()` returns
-		// `unknown` (F1, `ExchangeTokenValidator` pending P1) where the grant
-		// needs the concrete validator. Until P1 lands the module bridges that
-		// one slot; everything else is the declaration itself.
-		expectTypeOf<Omit<TokenExchangeModuleDeps, "tokenExchangeValidatorResolver">>().toMatchTypeOf<
-			Omit<GrantDeps, "tokenExchangeValidatorResolver">
-		>();
+	it("is satisfied by the module's deps on every slot, the validator resolver included", () => {
+		// `tokenExchangeValidatorResolver` used to be carved out of both sides:
+		// core's `TokenExchangeValidatorResolver.get()` answered `unknown` where
+		// the grant needed the validator, so the module bridged that one slot and
+		// this assertion could not cover it. #626 P1 moved the contract into
+		// core, the bridge is gone, and the carve-out with it — every slot is the
+		// declaration itself now.
+		expectTypeOf<TokenExchangeModuleDeps>().toMatchTypeOf<GrantDeps>();
 		// And the grant reads only keys the module declares, optional ones
 		// included — assignability alone would let it read an undeclared
 		// optional slot and see `undefined` forever.
@@ -108,18 +111,34 @@ describe("createTokenExchangeGrant declares the slots it reads (#626 P2)", () =>
 });
 
 describe("#626 P1: the validator contract is core's", () => {
-	it("is not re-exported from this package", async () => {
-		// The same hard break as session's: one type, one path. These are
-		// type-only names, so the runtime surface is what can be asserted — an
-		// accidental `export type ... from` would not show here, which is why the
-		// type test above pins the identity as well.
-		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
-		for (const name of [
-			"ExchangeTokenValidator",
-			"ExchangeTokenValidationContext",
-			"ValidatedToken",
-		]) {
-			expect(name in mod).toBe(false);
+	// The same hard break as session's: one type, one path.
+	//
+	// A runtime check cannot pin this the way session's `index.test.mts` does.
+	// All three names are type-only, so `name in mod` is `false` whether or not
+	// the barrel re-exports them — the assertion would pass on the break and on
+	// its undoing alike. What can fail is an import, checked by `vitest`
+	// typecheck mode: this file is in both `typecheck.include` and
+	// `tsconfig.test.json`, so the `@ts-expect-error` below is a real gate and
+	// fails the moment the name comes back.
+	it("is not re-exported from this package", () => {
+		if (false as boolean) {
+			// @ts-expect-error — `ExchangeTokenValidator` is core's since #626 P1
+			type _V = import("#/index.mjs").ExchangeTokenValidator;
+			// @ts-expect-error — `ExchangeTokenValidationContext` is core's since #626 P1
+			type _C = import("#/index.mjs").ExchangeTokenValidationContext;
+			// @ts-expect-error — `ValidatedToken` is core's since #626 P1
+			type _T = import("#/index.mjs").ValidatedToken;
 		}
+		expect(true).toBe(true);
+	});
+
+	it("is what the grant's own resolver slot answers with", () => {
+		// The assertion the deferral denied: what `get` hands the grant is the
+		// contract, not `unknown`. Before #626 P1 this was `unknown | undefined`,
+		// which `toEqualTypeOf` reduces to `unknown` — so both lines below failed.
+		type Resolved = ReturnType<TokenExchangeDependencies["tokenExchangeValidatorResolver"]["get"]>;
+		expectTypeOf<Resolved>().toEqualTypeOf<ExchangeTokenValidator | undefined>();
+		expectTypeOf<Resolved>().not.toEqualTypeOf<unknown>();
+		expect(true).toBe(true);
 	});
 });

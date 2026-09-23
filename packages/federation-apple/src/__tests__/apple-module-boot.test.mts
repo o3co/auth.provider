@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import type { FederationProvider } from "@o3co/auth-provider-core";
 /**
  * End-to-end boot integration test for `appleFederationModule`, mirroring
  * `federation-google`'s.
@@ -30,6 +29,7 @@ import type { FederationProvider } from "@o3co/auth-provider-core";
  * provider reaches the route layer still declaring `responseMode:
  * "form_post"`, which is what mounts the POST callback for it.
  */
+import type { FederationProvider } from "@o3co/auth-provider-core";
 import { createApp, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import type { FederationRedirectPolicy } from "@o3co/auth-provider-session";

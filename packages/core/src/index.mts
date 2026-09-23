@@ -425,6 +425,7 @@ export type {
 	ComponentKey,
 	ComponentMap,
 	ConfigSchema,
+	Contributed,
 	ContributesMap,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,

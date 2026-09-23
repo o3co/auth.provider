@@ -203,7 +203,7 @@ const requireDelegatedCapability = (
 	deps: FederationGrantsModuleDeps,
 	connections: ReadonlyMap<string, FederationGrantConnection>,
 ): void => {
-	const providers = deps.federationProviders as ReadonlyMap<string, unknown> | undefined;
+	const providers = deps.federationProviders;
 	for (const connection of connections.values()) {
 		const provider = providers?.get(connection.federation);
 		if (provider === undefined) {
@@ -214,7 +214,7 @@ const requireDelegatedCapability = (
 					"it would be created and then fail every time it is spent.",
 			);
 		}
-		if (!supportsDelegatedAuthorization(provider as never)) {
+		if (!supportsDelegatedAuthorization(provider)) {
 			throw new Error(
 				`federationGrantsModule: the federation "${connection.federation}", named by ` +
 					`federationGrants.connections.${connection.name}, has no delegated ` +
@@ -229,7 +229,7 @@ const requireDelegatedCapability = (
 		// session, and a `form_post` callback arrives as a cross-site POST without
 		// the session cookie — check 3 of D7 could not run. No bundled adapter with
 		// the capability declares it; a custom one may.
-		if ((provider as { responseMode?: unknown }).responseMode === "form_post") {
+		if (provider.responseMode === "form_post") {
 			throw new Error(
 				`federationGrantsModule: the federation "${connection.federation}", named by ` +
 					`federationGrants.connections.${connection.name}, declares response_mode=form_post. ` +
@@ -268,10 +268,9 @@ const requireAuditDecision = (deps: FederationGrantsModuleDeps): void => {
 const authorizerFor =
 	(deps: FederationGrantsModuleDeps) =>
 	(federation: string): FederationGrantDelegatedAuthorizer | undefined => {
-		const providers = deps.federationProviders as ReadonlyMap<string, unknown> | undefined;
-		const provider = providers?.get(federation);
-		if (!supportsDelegatedAuthorization(provider as never)) return undefined;
-		return provider as FederationGrantDelegatedAuthorizer;
+		const provider = deps.federationProviders?.get(federation);
+		if (!supportsDelegatedAuthorization(provider)) return undefined;
+		return provider;
 	};
 
 /**
@@ -296,15 +295,9 @@ const requireUserSessionStore = (deps: FederationGrantsModuleDeps): UserSessionS
 const refresherFor =
 	(deps: FederationGrantsModuleDeps) =>
 	(connection: FederationGrantConnection): FederationGrantRefresher | undefined => {
-		const providers = deps.federationProviders as ReadonlyMap<string, unknown> | undefined;
-		const provider = providers?.get(connection.federation);
-		if (!supportsDelegatedAuthorization(provider as never)) return undefined;
-		return {
-			refreshDelegatedToken: (params) =>
-				(
-					provider as { refreshDelegatedToken: FederationGrantRefresher["refreshDelegatedToken"] }
-				).refreshDelegatedToken(params),
-		};
+		const provider = deps.federationProviders?.get(connection.federation);
+		if (!supportsDelegatedAuthorization(provider)) return undefined;
+		return { refreshDelegatedToken: (params) => provider.refreshDelegatedToken(params) };
 	};
 
 /**

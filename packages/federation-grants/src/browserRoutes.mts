@@ -59,7 +59,6 @@
  */
 
 import { randomBytes } from "node:crypto";
-import type { SupportsDelegatedAuthorization } from "@o3co/auth-provider-core";
 import {
 	type AuditSink,
 	type ClientRepository,
@@ -80,6 +79,7 @@ import {
 	type Logger,
 	type RateLimiter,
 	type RateLimitFailMode,
+	type SupportsDelegatedAuthorization,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";

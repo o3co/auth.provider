@@ -23,8 +23,13 @@ import type { MfaProvider } from "../../mfa/types.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import type { GrantPolicyHook } from "../../policy/types.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../../token-exchange/validator.mjs";
+import type { Contributed } from "./contributed.mjs";
 import type { ProviderDeps } from "./provider.mjs";
 import type { RouteContributionEntry } from "./route-contribution.mjs";
+
+// Re-exported so the vocabulary has one home and one path: a module author
+// reads `Contributed` from the same place as the factory types that use it.
+export type { Contributed };
 
 // Domain-type substitution status (AS-M1 / Phase F F9 PR6).
 //
@@ -98,25 +103,6 @@ export type AuditHook = AuditSink;
 export type GrantPolicyHookContribution = GrantPolicyHook;
 
 // Per-kind factory types — each follows `(deps: Deps) => Value` per A2-α §4.1.
-
-/**
- * What a contribution factory may answer with: the value, or a promise of it.
- *
- * `applyContributions` awaits every factory result (`value = await
- * factory(deps)`), and always has — a federation adapter that discovers its
- * issuer metadata at boot has no other shape available to it. The declared
- * types said synchronous only, which nothing checked while the two
- * cross-package kinds were `unknown`; substituting them (#626 P1) turned that
- * into a compile error against `federation-oidc`, whose factory is
- * legitimately `async`. The contract says what boot accepts.
- *
- * It does not widen what a consumer reads: the collector holds the awaited
- * value, so `federationProviders` is still a map of `FederationProvider`. Every
- * kind boot awaits says so — the three list-shaped ones below as well as the
- * six above — since a rule that held for six of nine would be the same
- * half-stated contract in a smaller place.
- */
-export type Contributed<T> = T | Promise<T>;
 
 export type GrantFactory<Deps> = (deps: Deps) => Contributed<GrantHandler>;
 export type FederationFactory<Deps> = (deps: Deps) => Contributed<FederationProvider>;

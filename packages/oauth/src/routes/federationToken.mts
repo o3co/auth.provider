@@ -43,6 +43,29 @@ type ExpressLike = {
 	urlencoded: (opts: { extended: boolean }) => RequestHandler;
 };
 
+/*
+ * What a refresh answers is unverified until it is checked (D5). Every field
+ * of `RefreshedTokens` is optional, and an adapter is a third-party extension
+ * point: `@o3co/auth-provider-core` holds the same contract to the same bar in
+ * `federation-grants/retrieve.mts`, and this route now reads the contract
+ * rather than a local copy that declared the fields required (#626 P1).
+ */
+
+/** A credential the client could actually present: present, a string, not empty. */
+const isNonEmptyString = (value: unknown): value is string =>
+	typeof value === "string" && value !== "";
+
+/** Alias at the call sites where the string is a token rather than a scope. */
+const isUsableToken = isNonEmptyString;
+
+/** Seconds a token has left: finite and in the future. `NaN` and `-5` are neither. */
+const isUsableLifetime = (value: unknown): value is number =>
+	typeof value === "number" && Number.isFinite(value) && value > 0;
+
+/** A `Date` that names an instant. `new Date(NaN)` does not. */
+const isUsableDate = (value: unknown): value is Date =>
+	value instanceof Date && !Number.isNaN(value.getTime());
+
 // `supportsRefresh` is core's, and so is the capability it narrows to: this
 // route carried a structural copy of both while the contract lived in
 // `@o3co/auth-provider-session`, which depends on core (#626 P1). It answers
@@ -575,20 +598,28 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// failing, which is what it is. Reachable only since #626 P1 made this
 			// route read the contract rather than a local copy that declared the
 			// field required.
-			if (refreshed.accessToken === undefined) {
+			//
+			// An empty string is refused with it. An adapter is a third-party
+			// extension point, so what it answers is unverified data until this
+			// route checks it (D5) — the same bar `core/federation-grants/
+			// retrieve.mts` holds the same contract to.
+			if (!isUsableToken(refreshed.accessToken)) {
 				// A rotated refresh token has to be kept even though the refresh
 				// failed: the upstream invalidates the one it replaced (RFC 6749
 				// §6), so discarding it here would leave the stored token dead and
 				// the connection unrecoverable without re-consent. Best effort —
 				// if the store is down the refresh is failing anyway.
 				if (
-					refreshed.refreshToken !== undefined &&
+					isUsableToken(refreshed.refreshToken) &&
 					refreshed.refreshToken !== currentTokens.refreshToken
 				) {
 					try {
 						await opts.federationTokenStore.update(sid, name, {
 							...currentTokens,
 							refreshToken: refreshed.refreshToken,
+							// Rotated alongside it, and worth the same: the stored
+							// `id_token` is what logout sends as `id_token_hint`.
+							idToken: isUsableToken(refreshed.idToken) ? refreshed.idToken : currentTokens.idToken,
 						});
 					} catch (error) {
 						logger.warn(
@@ -625,10 +656,17 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// lifetime nobody stated, which omits `expires_in` from the RFC 6749
 			// §5.1 response. Until #626 P1 the local copy of the contract declared
 			// the field required, so an answer without it threw on `.getTime()`.
-			const nextExpiresAt =
-				refreshed.expiresAt !== undefined
-					? refreshed.expiresAt
-					: typeof refreshed.expiresIn === "number"
+			// Each reading is checked before it is believed: `NaN`, a negative
+			// lifetime or an Invalid Date would be stored as an already-expired
+			// expiry, and every later request would refresh again — the loop this
+			// block exists to prevent, reached through the adapter instead of
+			// through the store. An unusable reading falls through to the next
+			// source, and to `null` when none of them is usable.
+			const nextExpiresAt = isUsableDate(refreshed.expiresAt)
+				? refreshed.expiresAt
+				: refreshed.expiresAt === null
+					? null
+					: isUsableLifetime(refreshed.expiresIn)
 						? new Date(Date.now() + refreshed.expiresIn * 1000)
 						: null;
 			const updatedTokens = {
@@ -638,8 +676,16 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				// Fall back to the stored id_token to preserve the id_token_hint for logout (F-5).
 				idToken: refreshed.idToken ?? currentTokens.idToken,
 				expiresAt: nextExpiresAt,
+				// `token_type` stays the stored one: this route hands the client the
+				// upstream's access token, and a change of type is a change of how
+				// the client must present it. Honouring a rotated one is a decision
+				// of its own, filed on #626, not a side effect of this move.
 				tokenType: currentTokens.tokenType,
-				scope: currentTokens.scope,
+				// RFC 6749 §6: a refresh may narrow the scope, and §5.1 makes the
+				// answer authoritative when it differs. Storing the old one would
+				// leave the record claiming access the upstream just withdrew.
+				// Absent means unchanged.
+				scope: isNonEmptyString(refreshed.scope) ? refreshed.scope : currentTokens.scope,
 				rawParams: currentTokens.rawParams,
 			};
 			try {
@@ -675,7 +721,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				access_token: refreshed.accessToken,
 				token_type: "Bearer",
 				...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
-				...(currentTokens.scope ? { scope: currentTokens.scope } : {}),
+				...(updatedTokens.scope ? { scope: updatedTokens.scope } : {}),
 			});
 		} finally {
 			// 11g: Release lock if acquired.

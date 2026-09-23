@@ -522,10 +522,7 @@ federations {
 カスタムフェデレーションは per-federation な `defineModule(...)` を書いて、`federations.<name>`（`FederationProvider`）と `federationRedirectPolicies.<name>`（redirect policy）の両方を contribute する。型付き ComponentMap config slot を伴う const-Module パターンが推奨形 — 実装例として [`@o3co/auth-provider-federation-google` の `google.mts`](../federation-google/src/google.mts) を参照。最小スケッチ:
 
 ```typescript
-import { defineModule } from "@o3co/auth-provider-core";
-import {
-  type FederationProvider,
-} from "@o3co/auth-provider-core";
+import { defineModule, type FederationProvider } from "@o3co/auth-provider-core";
 import {
   codeChallenge,
   createFederationRedirectPolicy,

@@ -101,6 +101,14 @@ describe("FederationProvider type guards", () => {
 		expect(supportsLogout(minimalProvider)).toBe(false);
 	});
 
+	it("supportsLogout returns false for an absent provider, so a Map.get() result goes straight in", () => {
+		// README invariant 1. The oauth logout route passes
+		// `getFederationProviders()?.get(name)` to this guard without checking it
+		// first; the federation named in a session may have been uninstalled.
+		expect(supportsLogout(null)).toBe(false);
+		expect(supportsLogout(undefined)).toBe(false);
+	});
+
 	it("supportsLogout narrows when endSession is a function", () => {
 		const p: FederationProvider & SupportsLogout = {
 			...minimalProvider,
@@ -111,6 +119,11 @@ describe("FederationProvider type guards", () => {
 
 	it("supportsClaimMapping returns false for a provider lacking mapClaims", () => {
 		expect(supportsClaimMapping(minimalProvider)).toBe(false);
+	});
+
+	it("supportsClaimMapping returns false for an absent provider", () => {
+		expect(supportsClaimMapping(null)).toBe(false);
+		expect(supportsClaimMapping(undefined)).toBe(false);
 	});
 
 	it("supportsClaimMapping narrows when mapClaims is a function", () => {
