@@ -38,8 +38,10 @@
  * converts it into its own failure taxonomy, and it must convert exactly that
  * and nothing else — which a `try` around the planner could not promise: the
  * planner also runs host-supplied code (the key store's algorithm, the
- * collector, a contribution's `providerRoot`, the router factory), and any of
- * it could throw an error that merely has the right type. Two review rounds on
+ * collector, a contribution's `providerRoot`), and any of it could throw an
+ * error that merely has the right type. The router factory is not among them:
+ * {@link discoveryRouteFor} runs it, after planning and outside any
+ * conversion. Two review rounds on
  * #650 found one such path each. Catching only around
  * {@link buildDiscoveryDocument} here and handing the error back as a value
  * makes provenance structural: the caller cannot mistake anything else for
