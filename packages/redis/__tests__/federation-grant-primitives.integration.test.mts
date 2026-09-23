@@ -22,7 +22,7 @@
 // adapters to the same answers; it cannot see a key TTL, a member's score, or
 // what happens when two writers interleave inside one millisecond.
 
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { FederationGrantStoreClient } from "../src/clients.mjs";
@@ -667,6 +667,8 @@ describe("noteRefreshFailure (#593, D12)", () => {
 			atMs: at(DAY),
 			kind: "unavailable",
 			rowMs: 300_000,
+			retryAfterSeconds: undefined,
+			upstreamCode: undefined,
 			...over,
 		});
 

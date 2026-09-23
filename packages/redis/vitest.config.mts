@@ -39,6 +39,17 @@ export default defineConfig({
 				// the contract copy is compiled through the file that runs it.
 				"__tests__/federation-grant-intent-store-codec.test.mts",
 				"__tests__/federation-grant-intent-store.integration.test.mts",
+				// #626: the federation grant store's tests build grants,
+				// authorizations, credentials and failure stamps, which name every
+				// key. `federation-grant-store.integration.test.mts` and the
+				// contract copy it runs are in tsconfig.test.json only: the file
+				// declares no suite of its own, which vitest 5's typecheck pass
+				// reports as "No test suite found" — and an error in a file in the
+				// program but not collected still fails the run.
+				"__tests__/federation-grant-store.order.test.mts",
+				"__tests__/federation-grant-store.faults.integration.test.mts",
+				"__tests__/federation-grant-primitives.integration.test.mts",
+				"__tests__/internal/federation-grant-codec.test.mts",
 			],
 		},
 	},

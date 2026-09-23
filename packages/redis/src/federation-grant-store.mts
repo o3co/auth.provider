@@ -29,6 +29,7 @@ import {
 	type FederationGrantStore,
 	type FederationGrantUsage,
 	type FederationGrantWrite,
+	type PendingFederationGrant,
 	type RevokedFederationGrant,
 	withinFederationGrantLifetimeCeiling,
 } from "@o3co/auth-provider-core";
@@ -261,11 +262,13 @@ function decode(
 			status === "pending"
 				? (intentExpiresAtMs ?? Number.NaN)
 				: (revokedAt as Date).getTime() + retentionMs;
-		const pending = {
-			...base,
-			version,
-			...(status === "pending" ? { status: "pending" as const } : revocation),
-		} as FederationGrant;
+		// Annotated rather than cast: a base field this read forgot is a compile
+		// error. `revocation` is defined exactly when the status is `revoked`,
+		// which the checks above established.
+		const pending: PendingFederationGrant | RevokedFederationGrant =
+			revocation === undefined
+				? { ...base, version, status: "pending" }
+				: { ...base, version, ...revocation };
 		return {
 			grant: pending,
 			horizonMs,

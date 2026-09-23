@@ -20,7 +20,7 @@ import type { AuthorizedFederationGrant } from "#/federation-grants/types.mjs";
 
 const AT = new Date("2026-09-22T00:00:00.000Z");
 
-const grant = {
+const grant: AuthorizedFederationGrant = {
 	id: "g-1",
 	status: "active",
 	subject: "u-1",
@@ -35,7 +35,11 @@ const grant = {
 	consent: { at: AT, sid: "sid-1", scopes: ["openid", "Files.Read"] },
 	authorizedAt: AT,
 	expiresAt: new Date(AT.getTime() + 86_400_000),
-} as unknown as AuthorizedFederationGrant;
+	resource: undefined,
+	lastUsedAt: undefined,
+	ineligible: undefined,
+	refreshFailure: undefined,
+};
 
 describe("federationGrantAuditMetadata (#593, D18)", () => {
 	it("carries the upstream identity as issuer and subject only, whatever else the record's object holds (#611)", () => {

@@ -30,7 +30,7 @@ import {
 	type FederationGrantStore,
 	hasFederationGrantAuthorization,
 } from "@o3co/auth-provider-core";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
@@ -111,6 +111,7 @@ const authorization = (
 	identityRevision: "identity-1",
 	authorizationRevision: "authorization-1",
 	upstream: { issuer: "https://dev-1.okta.test", subject: "00u-alice" },
+	resource: undefined,
 	scopes: [...SCOPES],
 	consent: { at: at(MIN), sid: "sid-1", scopes: [...SCOPES] },
 	authorizedAt: at(2 * MIN),

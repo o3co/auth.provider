@@ -94,13 +94,15 @@ export interface FederationGrantAuthorization {
  * What changes while a grant is in use, outside any activation and outside the
  * authenticated envelope: neither field decides what the grant allows.
  *
- * Each is a required key, `undefined` where there is none (#626). None
- * decides what the grant allows, but two decide how often the upstream is
- * asked: a copy that lost `ineligible` would take the lock and rotate the
- * refresh token on every request again (D5), and one that lost
- * `refreshFailure` would ask a failing upstream again at once (D12). Naming
- * the key makes that copy a compile error, and makes a write that clears one
- * say so.
+ * Each is a required key, `undefined` where there is none (#626). Two
+ * decide how often the upstream is asked: a copy that lost `ineligible` would
+ * take the lock and rotate the refresh token on every request again (D5), and
+ * one that lost `refreshFailure` would ask a failing upstream again at once
+ * (D12). Naming the key makes a copy built field by field that forgot one a
+ * compile error. A write that spreads the old record and clears one says so
+ * by convention (`refreshFailure: undefined`): the compiler cannot tell a
+ * clear left out from a value meant to be kept, so the contract suite is
+ * what holds those writes.
  */
 export interface FederationGrantUsage {
 	readonly lastUsedAt: Date | undefined;

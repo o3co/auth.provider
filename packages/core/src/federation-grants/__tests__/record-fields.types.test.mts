@@ -45,7 +45,10 @@
 import { describe, expectTypeOf, it } from "vitest";
 import type {
 	FederationGrantAuthorization,
+	FederationGrantBase,
+	FederationGrantConsent,
 	FederationGrantCredentials,
+	FederationGrantIneligibilityMarker,
 	FederationGrantRefreshFailure,
 	FederationGrantRefreshFailureInput,
 	FederationGrantUsage,
@@ -81,6 +84,14 @@ describe("what a grant store answers with", () => {
 		expectTypeOf<
 			IsRequiredKey<FederationGrantRefreshFailure, "upstreamCode">
 		>().toEqualTypeOf<true>();
+	});
+
+	it("has no optional key anywhere else in the record either", () => {
+		// None has one today; a `?:` added to any would be a field a copy could
+		// drop without a sound.
+		expectTypeOf<OptionalKeys<FederationGrantBase>>().toEqualTypeOf<never>();
+		expectTypeOf<OptionalKeys<FederationGrantConsent>>().toEqualTypeOf<never>();
+		expectTypeOf<OptionalKeys<FederationGrantIneligibilityMarker>>().toEqualTypeOf<never>();
 	});
 
 	it("names the access token, and every field of one", () => {
