@@ -16,17 +16,15 @@
 
 import {
 	type AccessTokenDenylist,
+	type ExchangeTokenValidationContext,
+	type ExchangeTokenValidator,
 	type KeyStore,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
 	type SubjectRevocation,
+	type ValidatedToken,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
-import type {
-	ExchangeTokenValidationContext,
-	ExchangeTokenValidator,
-	ValidatedToken,
-} from "./types.mjs";
 
 export const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 

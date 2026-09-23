@@ -46,6 +46,13 @@ export default defineConfig({
 				// test for the FederationGrant union — a revoked or pending grant
 				// with only some of the authorization fields must not compile.
 				"src/federation-grants/__tests__/types.test.mts",
+				// #626 P1: relocated from `packages/session`, where both were in its
+				// typecheck list. The `expectTypeOf` and `@ts-expect-error` here
+				// are the regression test for the adapter port, and they only fire
+				// under typecheck mode — moving the files without moving the
+				// entries would have left them transpiled and unchecked.
+				"src/federations/__tests__/federation-provider-slim.test.mts",
+				"src/federations/__tests__/delegated-authorization-types.test.mts",
 				// #626 P2: `GrantDependencies` is pinned to ComponentMap slot types.
 				// Paired with tsconfig.test.json, as #343 requires.
 				"src/grants/__tests__/dependencies.types.test.mts",

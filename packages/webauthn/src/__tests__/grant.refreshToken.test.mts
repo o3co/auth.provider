@@ -610,7 +610,9 @@ describe("webauthnModule — refresh-token family wiring (#480)", () => {
 		const grantFactory = webauthnModule.contributes?.grants?.[WEBAUTHN_GRANT_TYPE];
 		if (!grantFactory) throw new Error("webauthnModule contributes no webauthn grant");
 
-		const handler = grantFactory({
+		// Awaited, as the boot planner does: a contribution factory may answer
+		// with a promise (#626 P1 — the declared type says so now).
+		const handler = await grantFactory({
 			config: makeConfig(),
 			keyStore,
 			webauthnCredentialStore: credentialStore,

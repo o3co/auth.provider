@@ -153,7 +153,9 @@ function makeTokenExchangeValidatorResolver(
 }
 
 /**
- * Instantiate a stable `ReadonlyMap`-shaped view of a federation collector.
+ * Instantiate a stable `ReadonlyMap`-shaped view of a federation collector,
+ * in the collector's own value type — `unknown` used to be laundered through
+ * here into the `federationProviders` slot's declared type (#626 P1).
  * Reads through at call time via the collector's `entries()`. Backed by a
  * live `Map` snapshot taken on each access so that `ReadonlyMap` typed
  * return values (including iterator shapes) are satisfied correctly.
@@ -161,10 +163,8 @@ function makeTokenExchangeValidatorResolver(
  * Per A2-β §5.4 step 0: `federations → federationProviders` projection.
  * @internal
  */
-function makeFederationProviders(
-	collector: NameKeyedCollector<unknown>,
-): ReadonlyMap<string, unknown> {
-	function snapshot(): Map<string, unknown> {
+function makeFederationProviders<T>(collector: NameKeyedCollector<T>): ReadonlyMap<string, T> {
+	function snapshot(): Map<string, T> {
 		return new Map(collector.entries());
 	}
 	return {
@@ -174,7 +174,7 @@ function makeFederationProviders(
 		keys: () => snapshot().keys(),
 		values: () => snapshot().values(),
 		forEach: (
-			cb: (value: unknown, key: string, map: ReadonlyMap<string, unknown>) => void,
+			cb: (value: T, key: string, map: ReadonlyMap<string, T>) => void,
 			thisArg?: unknown,
 		) => {
 			snapshot().forEach((v, k) => {

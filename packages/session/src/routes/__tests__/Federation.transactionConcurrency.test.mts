@@ -41,12 +41,12 @@
  * enforces exactly that, because it is the real guarantee.
  */
 
+import type { FederationProvider } from "@o3co/auth-provider-core";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { codeChallenge } from "#/federations/pkce.mjs";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
-import type { FederationProvider } from "#/federations/types.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 import {
 	HARNESS_TRANSACTION_COOKIE_NAME,

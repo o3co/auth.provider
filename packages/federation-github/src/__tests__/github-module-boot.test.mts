@@ -33,9 +33,10 @@
  *
  * Per A5 §10.1 + Cl-M2.
  */
+import type { FederationProvider } from "@o3co/auth-provider-core";
 import { createApp, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
-import type { FederationProvider, FederationRedirectPolicy } from "@o3co/auth-provider-session";
+import type { FederationRedirectPolicy } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
 import { type GithubProviderConfig, githubFederationModule } from "../github.mjs";
 

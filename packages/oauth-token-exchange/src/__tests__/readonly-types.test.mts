@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
+import type { ExchangeTokenValidationContext, ValidatedToken } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
-import type { ExchangeTokenValidationContext, ValidatedToken } from "#/validator/types.mjs";
 
 // CC-5 readonly compile-time assertions.
 //

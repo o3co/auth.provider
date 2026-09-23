@@ -17,12 +17,19 @@
 import type { RequestHandler } from "express";
 import type { AuditSink } from "../../audit/types.mjs";
 import type { OidcDiscoveryContribution } from "../../discovery/types.mjs";
+import type { FederationProvider as ConcreteFederationProvider } from "../../federations/types.mjs";
 import type { GrantHandler as ConcreteGrantHandler } from "../../grants/types.mjs";
 import type { MfaProvider } from "../../mfa/types.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import type { GrantPolicyHook } from "../../policy/types.mjs";
+import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../../token-exchange/validator.mjs";
+import type { Contributed } from "./contributed.mjs";
 import type { ProviderDeps } from "./provider.mjs";
 import type { RouteContributionEntry } from "./route-contribution.mjs";
+
+// Re-exported so the vocabulary has one home and one path: a module author
+// reads `Contributed` from the same place as the factory types that use it.
+export type { Contributed };
 
 // Domain-type substitution status (AS-M1 / Phase F F9 PR6).
 //
@@ -39,8 +46,8 @@ import type { RouteContributionEntry } from "./route-contribution.mjs";
 //   AuditHook                   — AuditSink interface at packages/core/src/audit/types.mts (AS-M1)
 //   MfaFactor                   — MfaProvider interface at packages/core/src/mfa/types.mts (AS-M1)
 //   GrantPolicyHookContribution — GrantPolicyHook interface at packages/core/src/policy/types.mts (AS-M1, AS-7 collision rename)
-//   FederationProvider          — packages/session/src/federations/types.mts (Phase F deferred — circular import)
-//   ExchangeTokenValidator      — packages/oauth-token-exchange/src/validator/types.mts (Phase F deferred — circular import)
+//   FederationProvider          — packages/core/src/federations/types.mts (#626 P1)
+//   ExchangeTokenValidator      — packages/core/src/token-exchange/validator.mts (#626 P1)
 //
 // Canonical (no-suffix) interface names are used for the substitution
 // RHS. The v0.5.1-era `*Base` deprecation aliases were removed
@@ -54,20 +61,20 @@ import type { RouteContributionEntry } from "./route-contribution.mjs";
 export type GrantHandler = ConcreteGrantHandler;
 
 /**
- * Type produced by a `FederationFactory<Deps>` contribution. Still
- * `unknown` pending Phase F: substituting with `FederationProvider` from
- * `packages/session/src/federations/types.mts` requires resolving the
- * core ↔ session circular package import.
+ * Type produced by a `FederationFactory<Deps>` contribution: the adapter
+ * port itself (#626 P1). It was `unknown` while the contract lived in
+ * `packages/session`, which core may not import; the contract lives in
+ * `../../federations/types.mts` now, so registration and use share one type.
  */
-export type FederationProvider = unknown;
+export type FederationProvider = ConcreteFederationProvider;
 
 /**
- * Type produced by an `ExchangeTokenValidatorFactory<Deps>` contribution.
- * Still `unknown` pending Phase F: substituting with `ExchangeTokenValidator`
- * from `packages/oauth-token-exchange/src/validator/types.mts` requires
- * resolving the core ↔ oauth-token-exchange circular package import.
+ * Type produced by an `ExchangeTokenValidatorFactory<Deps>` contribution: the
+ * validator contract itself (#626 P1). It was `unknown` while the contract
+ * lived in `packages/oauth-token-exchange`, which core may not import; the
+ * contract lives in `../../token-exchange/validator.mts` now.
  */
-export type ExchangeTokenValidator = unknown;
+export type ExchangeTokenValidator = ConcreteExchangeTokenValidator;
 
 /**
  * Type produced by an `MfaFactorFactory<Deps>` contribution. Substituted
@@ -97,12 +104,14 @@ export type GrantPolicyHookContribution = GrantPolicyHook;
 
 // Per-kind factory types — each follows `(deps: Deps) => Value` per A2-α §4.1.
 
-export type GrantFactory<Deps> = (deps: Deps) => GrantHandler;
-export type FederationFactory<Deps> = (deps: Deps) => FederationProvider;
-export type ExchangeTokenValidatorFactory<Deps> = (deps: Deps) => ExchangeTokenValidator;
-export type MfaFactorFactory<Deps> = (deps: Deps) => MfaFactor;
-export type AuditHookFactory<Deps> = (deps: Deps) => AuditHook;
-export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHookContribution;
+export type GrantFactory<Deps> = (deps: Deps) => Contributed<GrantHandler>;
+export type FederationFactory<Deps> = (deps: Deps) => Contributed<FederationProvider>;
+export type ExchangeTokenValidatorFactory<Deps> = (
+	deps: Deps,
+) => Contributed<ExchangeTokenValidator>;
+export type MfaFactorFactory<Deps> = (deps: Deps) => Contributed<MfaFactor>;
+export type AuditHookFactory<Deps> = (deps: Deps) => Contributed<AuditHook>;
+export type GrantPolicyHookFactory<Deps> = (deps: Deps) => Contributed<GrantPolicyHookContribution>;
 
 /**
  * Factory type for the `discoveryMetadata` contribution kind.
@@ -113,7 +122,9 @@ export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHookContri
  * one document (issuer-gated). List-shaped: multiple modules contribute
  * (oauth its endpoints + capabilities, jwks its `jwks_uri`, …).
  */
-export type OidcDiscoveryContributionFactory<Deps> = (deps: Deps) => OidcDiscoveryContribution;
+export type OidcDiscoveryContributionFactory<Deps> = (
+	deps: Deps,
+) => Contributed<OidcDiscoveryContribution>;
 
 /**
  * Factory type for the `grantMiddleware` contribution kind.
@@ -126,7 +137,7 @@ export type OidcDiscoveryContributionFactory<Deps> = (deps: Deps) => OidcDiscove
  *
  * Per Wave 2 Token-binding Cluster spec §4.7 / Phase 2 DPoP spec §11.1.
  */
-export type GrantMiddlewareFactory<Deps> = (deps: Deps) => RequestHandler | null;
+export type GrantMiddlewareFactory<Deps> = (deps: Deps) => Contributed<RequestHandler | null>;
 
 /**
  * Factory type for the `tokenBindingMechanisms` contribution kind.
@@ -147,7 +158,9 @@ export type GrantMiddlewareFactory<Deps> = (deps: Deps) => RequestHandler | null
  * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
  * for the cross-mechanism design rationale.
  */
-export type TokenBindingMechanismFactory<Deps> = (deps: Deps) => TokenBindingMechanism | null;
+export type TokenBindingMechanismFactory<Deps> = (
+	deps: Deps,
+) => Contributed<TokenBindingMechanism | null>;
 
 /**
  * Declaration-merged map of contribution kinds.

@@ -28,6 +28,7 @@
  */
 
 import type {
+	FederationProvider,
 	FederationTokenStore,
 	SessionFederationIndex,
 	SubjectSessionIndex,
@@ -37,7 +38,6 @@ import type {
 import express from "express";
 import { vi } from "vitest";
 import { deriveFederationTransactionCookieName } from "#/federations/transaction.mjs";
-import type { FederationProvider } from "#/federations/types.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 
 export type SessionCookieAttributes = {

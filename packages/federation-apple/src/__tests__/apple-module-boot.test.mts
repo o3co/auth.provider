@@ -29,9 +29,10 @@
  * provider reaches the route layer still declaring `responseMode:
  * "form_post"`, which is what mounts the POST callback for it.
  */
+import type { FederationProvider } from "@o3co/auth-provider-core";
 import { createApp, defineModule } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
-import type { FederationProvider, FederationRedirectPolicy } from "@o3co/auth-provider-session";
+import type { FederationRedirectPolicy } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
 import { type AppleProviderConfig, appleFederationModule } from "../apple.mjs";
 

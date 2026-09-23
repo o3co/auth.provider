@@ -155,6 +155,17 @@ config slice.
 
 ---
 
+> **Where this contract lives.** `FederationProvider`, `FederationProfile`,
+> the optional capabilities (`SupportsLogout`, `SupportsClaimMapping`,
+> `SupportsRefresh`, `SupportsDelegatedAuthorization`), their guards and the
+> response-mode vocabulary are exported by **`@o3co/auth-provider-core`** since
+> #626 P1, and are no longer re-exported here: the type a federation is
+> registered with has to be the type `oauth` and `federation-grants` read, and
+> a second export path is what kept it `unknown`. The sections below describe
+> the contract this package drives; import the names from core. What stays
+> here is the router, the redirect policy, the transaction store and
+> `FederationResult`.
+
 ### `FederationProvider` (interface)
 
 ```typescript
@@ -329,7 +340,7 @@ import type {
   SupportsLogout,
   EndSessionRequest,
   EndSessionResult,
-} from "@o3co/auth-provider-session";
+} from "@o3co/auth-provider-core";
 
 function createMyIdPProvider(): FederationProvider & SupportsLogout {
   return {
@@ -351,7 +362,7 @@ function createMyIdPProvider(): FederationProvider & SupportsLogout {
 Consumers detect the capability at the call site:
 
 ```ts
-import { supportsLogout } from "@o3co/auth-provider-session";
+import { supportsLogout } from "@o3co/auth-provider-core";
 
 if (supportsLogout(provider)) {
   const { url } = await provider.endSession({ idTokenHint, postLogoutRedirectUri, state });
@@ -406,7 +417,7 @@ function supportsClaimMapping(
 Providers that implement `SupportsClaimMapping` translate a `FederationProfile` into OIDC-standard claim names. Custom providers can add it by exposing a `mapClaims` method:
 
 ```ts
-import { supportsClaimMapping } from "@o3co/auth-provider-session";
+import { supportsClaimMapping } from "@o3co/auth-provider-core";
 
 if (supportsClaimMapping(provider)) {
   const claims = provider.mapClaims(profile);
@@ -457,7 +468,7 @@ The merge is exported as `mergeFederatedClaims` for consumers that build a claim
 
 Optional capability for providers that can exchange a refresh token for a fresh access token.
 
-> **Note**: `SupportsRefresh`, `RefreshedTokens` and `supportsRefresh` are exported from `@o3co/auth-provider-session`, and are not a stable public API (subject to change before 1.0).
+> **Note**: `SupportsRefresh`, `RefreshedTokens` and `supportsRefresh` are exported from `@o3co/auth-provider-core` (#626 P1).
 
 The interface shape is:
 
@@ -798,11 +809,10 @@ pattern with a typed `ComponentMap` config slot is the recommended shape — see
 for the reference implementation. The minimal sketch:
 
 ```typescript
-import { defineModule } from "@o3co/auth-provider-core";
+import { defineModule, type FederationProvider } from "@o3co/auth-provider-core";
 import {
   codeChallenge,
   createFederationRedirectPolicy,
-  type FederationProvider,
 } from "@o3co/auth-provider-session";
 
 declare module "@o3co/auth-provider-core" {

@@ -14,22 +14,25 @@
  * limitations under the License.
  */
 
-import { defineModule, isLoopbackHostname } from "@o3co/auth-provider-core";
+import {
+	defineModule,
+	type EndSessionRequest,
+	type EndSessionResult,
+	type FederationProfile,
+	type FederationProvider,
+	isLoopbackHostname,
+	type MappedClaims,
+	type RefreshedTokens,
+	type SupportsClaimMapping,
+	type SupportsLogout,
+	type SupportsRefresh,
+} from "@o3co/auth-provider-core";
 import {
 	callbackUrlForExchange,
 	codeChallenge,
 	createFederationRedirectPolicy,
-	type EndSessionRequest,
-	type EndSessionResult,
 	type FederationClientSecret,
-	type FederationProfile,
-	type FederationProvider,
-	type MappedClaims,
-	type RefreshedTokens,
 	resolveClientSecret,
-	type SupportsClaimMapping,
-	type SupportsLogout,
-	type SupportsRefresh,
 } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 import { createAppleClientSecret } from "./client-secret.mjs";

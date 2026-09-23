@@ -14,10 +14,8 @@
  * limitations under the License.
  */
 
-import { defineModule } from "@o3co/auth-provider-core";
 import {
-	codeChallenge,
-	createFederationRedirectPolicy,
+	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProfile,
@@ -25,7 +23,8 @@ import {
 	type MappedClaims,
 	type SupportsClaimMapping,
 	type SupportsLogout,
-} from "@o3co/auth-provider-session";
+} from "@o3co/auth-provider-core";
+import { codeChallenge, createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 
 // ComponentMap slot declaration-merge: exposes githubFederationConfig as a typed

@@ -15,10 +15,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	type FederationGrantRefreshedToken,
-	retrieveFederationGrantToken,
-} from "#/federation-grants/retrieve.mjs";
+import { retrieveFederationGrantToken } from "#/federation-grants/retrieve.mjs";
+import type { DelegatedTokens } from "#/federations/types.mjs";
 import {
 	at,
 	type Harness,
@@ -91,7 +89,7 @@ describe("retrieveFederationGrantToken — what a failed refresh leaves the call
 		it("is answered when the caller stops waiting at the soft deadline, while the refresh goes on", async () => {
 			await h.seed();
 			setNow(HALF_SPENT);
-			let resolve!: (value: FederationGrantRefreshedToken) => void;
+			let resolve!: (value: DelegatedTokens) => void;
 			h.refresh.mockReturnValueOnce(
 				new Promise((res) => {
 					resolve = res;

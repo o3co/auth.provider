@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { ExchangeTokenValidator } from "./types.mjs";
+import type { ExchangeTokenValidator } from "@o3co/auth-provider-core";
 
 export type ExchangeTokenValidatorRegistryErrorReason = "duplicate" | "unknown" | "frozen";
 

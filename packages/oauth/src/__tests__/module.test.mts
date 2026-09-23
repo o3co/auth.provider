@@ -23,7 +23,7 @@ import {
 	createAsymmetricKeyStore,
 	createSymmetricKeyStore,
 	defineModule,
-	type FederationProviderHandle,
+	type FederationProvider,
 	type FederationTokenStore,
 	jwksModule,
 	memoryAccessTokenDenylistModule,
@@ -42,6 +42,24 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { oauthModule } from "#/module.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
+
+/**
+ * A federation that satisfies the contract, with whatever capability the case
+ * under test adds. Since #626 P1 `federationProviders` carries
+ * `FederationProvider` rather than a one-field stand-in, so a mock has to be
+ * one — which is the point: these routes read a provider the boot planner
+ * could actually have handed them.
+ */
+const federationBase = (name: string) => ({
+	name,
+	scope: ["openid"] as readonly string[],
+	buildAuthorizationUrl: () => new URL(`https://${name}.example/auth`),
+	exchangeCode: async () => ({
+		issuer: `https://${name}.example`,
+		sub: "sub-1",
+		expiresAt: null,
+	}),
+});
 
 // ---------------------------------------------------------------------------
 // Shared test-only stubs
@@ -693,10 +711,10 @@ describe("oauthModule — federation logout via typed deps", () => {
 		};
 
 		const endSessionUrl = new URL("https://accounts.google.com/logout?hint=id-token-hint");
-		const googleProvider: FederationProviderHandle & {
+		const googleProvider: FederationProvider & {
 			endSession: (req: unknown) => Promise<{ url: URL; method: "GET" }>;
 		} = {
-			name: "google",
+			...federationBase("google"),
 			endSession: vi.fn().mockResolvedValue({ url: endSessionUrl, method: "GET" }),
 		};
 

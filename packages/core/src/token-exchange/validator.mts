@@ -15,6 +15,16 @@
  */
 
 /**
+ * The token-exchange validator port (#626 P1).
+ *
+ * What `oauth-token-exchange` registers as an
+ * `exchangeTokenValidators` contribution and what the boot planner hands
+ * back are one type, which they could not be while the contract lived in
+ * that package: core may not import it. The grant that consumes a
+ * validator still lives there; only the contract is here.
+ */
+
+/**
  * Role of a token within a Token Exchange request.
  * - "subject": the token being exchanged (`subject_token`)
  * - "actor":   the token of the party performing the exchange (`actor_token`)

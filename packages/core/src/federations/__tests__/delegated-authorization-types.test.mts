@@ -14,17 +14,14 @@
  * limitations under the License.
  */
 
-import type {
-	FederationGrantRefreshedToken,
-	FederationGrantRefresher,
-} from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import type {
 	DelegatedTokens,
+	FederationGrantRefresher,
 	FederationProfile,
 	RefreshedTokens,
 	SupportsDelegatedAuthorization,
-} from "#/federations/types.mjs";
+} from "#/index.mjs";
 
 /**
  * Type-level: what the capability answers is what core's retrieval consumes
@@ -41,9 +38,10 @@ describe("delegated authorization types (#593, D17)", () => {
 			scope: "openid",
 			tokenType: "bearer",
 		};
-		const asCore: FederationGrantRefreshedToken = tokens;
 		const rotationOnly: DelegatedTokens = { refreshToken: "rt-2" };
-		const asCoreToo: FederationGrantRefreshedToken = rotationOnly;
+		// One type since #626 P1: what the capability answers with and what the
+		// retrieval consumes were two identical declarations, and the assertions
+		// that they agreed are now the identity itself.
 		const adapter: SupportsDelegatedAuthorization = {
 			buildDelegatedAuthorizationUrl: () => new URL("https://idp.test/authorize"),
 			exchangeDelegatedCode: async () => ({
@@ -53,8 +51,8 @@ describe("delegated authorization types (#593, D17)", () => {
 			refreshDelegatedToken: async () => tokens,
 		};
 		const refresher: FederationGrantRefresher = adapter;
-		expect(asCore.accessToken).toBe("at");
-		expect(asCoreToo.refreshToken).toBe("rt-2");
+		expect(tokens.accessToken).toBe("at");
+		expect(rotationOnly.refreshToken).toBe("rt-2");
 		expect(typeof refresher.refreshDelegatedToken).toBe("function");
 	});
 

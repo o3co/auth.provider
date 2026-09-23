@@ -24,6 +24,8 @@ import type {
 	GrantPolicyRequest,
 	ProviderDeps,
 	PublicClient,
+	TokenExchangeValidatorResolver,
+	ValidatedToken,
 } from "@o3co/auth-provider-core";
 import {
 	formatObject,
@@ -37,28 +39,15 @@ import {
 } from "@o3co/auth-provider-core";
 import { buildActClaim, countActorChainDepth, matchesMayAct, matchesMayActClient } from "./act.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
-import type { ExchangeTokenValidator, ValidatedToken } from "./validator/types.mjs";
 
 const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange";
 
 /**
- * Local resolver shape that narrows core's
- * `TokenExchangeValidatorResolver.get(): unknown | undefined` to the
- * concrete `ExchangeTokenValidator` type used internally. Core declares
- * the value as `unknown` to avoid a cross-package import cycle (per
- * contributes-map.mts placeholder pattern). This grant package owns the
- * concrete type, so the narrowed shape is local.
- */
-export interface ExchangeTokenValidatorResolver {
-	get(tokenType: string): ExchangeTokenValidator | undefined;
-}
-
-/**
  * What the exchange reads (#626 P2): the shared grant slots it uses, the
- * client repository, and the validator resolver narrowed to this package's
- * concrete validator type (see {@link ExchangeTokenValidatorResolver}). The
- * module's `ProviderDeps<R, O>` satisfies every slot but that resolver,
- * which it bridges until P1 makes core's own resolver concrete.
+ * client repository, and the validator resolver core hands back — whose
+ * `get` answers with the contract this grant consumes, since #626 P1 moved
+ * that contract into core. The module's `ProviderDeps<R, O>` satisfies every
+ * slot, with no cast left between them.
  */
 export interface TokenExchangeDependencies
 	extends Pick<
@@ -66,7 +55,7 @@ export interface TokenExchangeDependencies
 			"config" | "keyStore" | "logger" | "grantPolicy" | "refreshTokenFamilyRevocation"
 		>,
 		ProviderDeps<"clientRepository"> {
-	readonly tokenExchangeValidatorResolver: ExchangeTokenValidatorResolver;
+	readonly tokenExchangeValidatorResolver: Pick<TokenExchangeValidatorResolver, "get">;
 }
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {

@@ -257,9 +257,6 @@ importers:
       '@o3co/auth-provider-redis':
         specifier: workspace:*
         version: link:../redis
-      '@o3co/auth-provider-session':
-        specifier: workspace:*
-        version: link:../session
       '@types/express':
         specifier: ^5.0.6
         version: 5.0.6

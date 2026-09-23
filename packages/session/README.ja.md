@@ -75,6 +75,16 @@ function extractFederationSection(
 
 ---
 
+> **この契約の所在。** `FederationProvider`、`FederationProfile`、オプショナル
+> capability（`SupportsLogout`、`SupportsClaimMapping`、`SupportsRefresh`、
+> `SupportsDelegatedAuthorization`）とその型ガード、および response-mode の語彙は
+> #626 P1 以降 **`@o3co/auth-provider-core`** が公開しており、このパッケージからは
+> 再エクスポートしません。フェデレーションが登録される型と `oauth` /
+> `federation-grants` が読む型は同一である必要があり、エクスポート経路が二つあることが
+> その型を `unknown` に留めていた原因でした。以下の節はこのパッケージが駆動する契約の
+> 説明です。import は core から行ってください。ここに残るのはルーター、リダイレクト
+> ポリシー、トランザクションストアと `FederationResult` です。
+
 ### `FederationProvider` (interface)
 
 ```typescript
@@ -142,7 +152,7 @@ import type {
   SupportsLogout,
   EndSessionRequest,
   EndSessionResult,
-} from "@o3co/auth-provider-session";
+} from "@o3co/auth-provider-core";
 
 function createMyIdPProvider(): FederationProvider & SupportsLogout {
   return {
@@ -164,7 +174,7 @@ function createMyIdPProvider(): FederationProvider & SupportsLogout {
 Consumer 側は capability の有無を call site で判定する:
 
 ```ts
-import { supportsLogout } from "@o3co/auth-provider-session";
+import { supportsLogout } from "@o3co/auth-provider-core";
 
 if (supportsLogout(provider)) {
   const { url } = await provider.endSession({ idTokenHint, postLogoutRedirectUri, state });
@@ -218,7 +228,7 @@ function supportsClaimMapping(
 `SupportsClaimMapping` を実装した provider は、`FederationProfile` を OIDC 標準のクレーム名に変換する。カスタム provider は `mapClaims` メソッドを追加することで対応できる:
 
 ```ts
-import { supportsClaimMapping } from "@o3co/auth-provider-session";
+import { supportsClaimMapping } from "@o3co/auth-provider-core";
 
 if (supportsClaimMapping(provider)) {
   const claims = provider.mapClaims(profile);
@@ -363,7 +373,7 @@ function supportsDelegatedAuthorization(
 - `expiresIn` は送られてきた `expires_in` そのもの（数値か、数字だけの文字列）。それ以外なら access token を出さず refresh token だけ返す。`expiresAt` は応答が届いた時刻を起点にし、ライブラリの検証時間を含めない。`tokenType` はライブラリが報告するまま。
 
 ```ts
-import { supportsRefresh } from "@o3co/auth-provider-session";
+import { supportsRefresh } from "@o3co/auth-provider-core";
 
 if (supportsRefresh(provider)) {
   const refreshed = await provider.refreshToken(storedRefreshToken);
@@ -512,11 +522,10 @@ federations {
 カスタムフェデレーションは per-federation な `defineModule(...)` を書いて、`federations.<name>`（`FederationProvider`）と `federationRedirectPolicies.<name>`（redirect policy）の両方を contribute する。型付き ComponentMap config slot を伴う const-Module パターンが推奨形 — 実装例として [`@o3co/auth-provider-federation-google` の `google.mts`](../federation-google/src/google.mts) を参照。最小スケッチ:
 
 ```typescript
-import { defineModule } from "@o3co/auth-provider-core";
+import { defineModule, type FederationProvider } from "@o3co/auth-provider-core";
 import {
   codeChallenge,
   createFederationRedirectPolicy,
-  type FederationProvider,
 } from "@o3co/auth-provider-session";
 
 declare module "@o3co/auth-provider-core" {

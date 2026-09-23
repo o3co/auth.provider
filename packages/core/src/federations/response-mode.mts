@@ -34,7 +34,8 @@ import type { FederationProvider } from "./types.mjs";
  * giving the flow a cookie of its own rather than by changing the session's:
  * the ephemeral state moves into a federation transaction (an opaque id in a
  * short-lived, path-scoped, `SameSite=None; Secure; HttpOnly` cookie, with the
- * envelope in a store record keyed by it — `federations/transaction.mts`).
+ * envelope in a store record keyed by it — `federations/transaction.mts` in
+ * `@o3co/auth-provider-session`).
  *
  * The application session cookie keeps the attributes the deployment
  * configured, on every session, whether or not it ever started a `form_post`

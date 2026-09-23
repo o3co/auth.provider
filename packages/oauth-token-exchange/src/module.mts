@@ -22,11 +22,7 @@ import {
 	SUBJECT_REVOCATION_ABSENCE_POLICY,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
-import {
-	createTokenExchangeGrant,
-	type ExchangeTokenValidatorResolver,
-	TOKEN_EXCHANGE_GRANT_TYPE,
-} from "./grant.mjs";
+import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "./grant.mjs";
 import {
 	ACCESS_TOKEN_TYPE,
 	createSelfIssuedAccessTokenValidator,
@@ -144,13 +140,10 @@ export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 			[TOKEN_EXCHANGE_GRANT_TYPE]: (deps: TokenExchangeModuleDeps) =>
 				createTokenExchangeGrant({
 					...deps,
-					// #626 P1: core's `TokenExchangeValidatorResolver.get()` returns
-					// `unknown` — `ExchangeTokenValidator` is still a placeholder in
-					// contributes-map.mts (F1) — where the grant needs the concrete
-					// validator this package owns. The one bridge P2 leaves standing;
-					// P1 moves the contract to core and deletes it.
-					tokenExchangeValidatorResolver:
-						deps.tokenExchangeValidatorResolver as ExchangeTokenValidatorResolver,
+					// No cast since #626 P1: core's
+					// `TokenExchangeValidatorResolver.get()` returns the contract this
+					// grant reads, because the contract is core's.
+					tokenExchangeValidatorResolver: deps.tokenExchangeValidatorResolver,
 				}),
 		},
 		tokenExchangeValidators: {

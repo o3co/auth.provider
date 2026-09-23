@@ -19,7 +19,7 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	createSymmetricKeyStore,
-	type FederationProviderHandle,
+	type FederationProvider,
 	type FederationTokenStore,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
@@ -35,6 +35,24 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/logout.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+
+/**
+ * A federation that satisfies the contract, with whatever capability the case
+ * under test adds. Since #626 P1 `federationProviders` carries
+ * `FederationProvider` rather than a one-field stand-in, so a mock has to be
+ * one — which is the point: these routes read a provider the boot planner
+ * could actually have handed them.
+ */
+const federationBase = (name: string) => ({
+	name,
+	scope: ["openid"] as readonly string[],
+	buildAuthorizationUrl: () => new URL(`https://${name}.example/auth`),
+	exchangeCode: async () => ({
+		issuer: `https://${name}.example`,
+		sub: "sub-1",
+		expiresAt: null,
+	}),
+});
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -182,7 +200,7 @@ interface BuildAppOpts {
 	fedTokenStore?: FederationTokenStore;
 	clientRepo?: ClientRepository;
 	/** Getter for federation providers — evaluated at request time. */
-	getFederationProviders?: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
+	getFederationProviders?: () => ReadonlyMap<string, FederationProvider> | undefined;
 	/** Override fetch for broadcast testing. Defaults to a no-op stub. */
 	fetchImpl?: typeof fetch;
 	logger?: Logger;
@@ -639,15 +657,13 @@ describe("POST /oauth/logout", () => {
 			});
 
 			const mockEndSessionUrl = new URL("https://accounts.google.com/logout?id_token_hint=x");
-			const mockProvider: FederationProviderHandle & {
+			const mockProvider: FederationProvider & {
 				endSession: (req: unknown) => Promise<{ url: URL; method: "GET" }>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				endSession: vi.fn().mockResolvedValue({ url: mockEndSessionUrl, method: "GET" }),
 			};
-			const federationProviders = new Map<string, FederationProviderHandle>([
-				["google", mockProvider],
-			]);
+			const federationProviders = new Map<string, FederationProvider>([["google", mockProvider]]);
 
 			const app = buildApp({
 				sessionStore,
@@ -814,10 +830,10 @@ describe("POST /oauth/logout", () => {
 			const sessionFederationIndex = makeSessionFederationIndex({
 				listFederations: vi.fn(async () => ["google"]),
 			});
-			const throwingProvider: FederationProviderHandle & {
+			const throwingProvider: FederationProvider & {
 				endSession: () => Promise<never>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				endSession: vi.fn().mockRejectedValue(new Error("IdP down")),
 			};
 			const logger = createMockLogger();
@@ -826,7 +842,7 @@ describe("POST /oauth/logout", () => {
 				sessionStore,
 				sessionFederationIndex,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", throwingProvider]]),
+					new Map<string, FederationProvider>([["google", throwingProvider]]),
 				logger,
 			});
 			const token = await mintIdToken();
@@ -1161,15 +1177,15 @@ describe("POST /oauth/federation/:name/logout", () => {
 	describe("happy path WITH endSession capability", () => {
 		it("returns 303 redirect to provider end-session URL", async () => {
 			const endSessionUrl = new URL("https://accounts.google.com/o/oauth2/revoke?token=id-hint");
-			const mockProvider: FederationProviderHandle & {
+			const mockProvider: FederationProvider & {
 				endSession: (req: unknown) => Promise<{ url: URL; method: "GET" }>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				endSession: vi.fn().mockResolvedValue({ url: endSessionUrl, method: "GET" }),
 			};
 			const app = buildFedLogoutApp({
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", mockProvider]]),
+					new Map<string, FederationProvider>([["google", mockProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -1184,14 +1200,14 @@ describe("POST /oauth/federation/:name/logout", () => {
 
 	describe("happy path WITHOUT endSession capability", () => {
 		it("returns 200 JSON { disconnected: true } when provider has no endSession method", async () => {
-			const bareProvider: FederationProviderHandle = { name: "github" };
+			const bareProvider = federationBase("github");
 			const app = buildApp({
 				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) }),
 				sessionFederationIndex: makeSessionFederationIndex({
 					listFederations: vi.fn(async () => ["github"]),
 				}),
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["github", bareProvider]]),
+					new Map<string, FederationProvider>([["github", bareProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -1300,15 +1316,15 @@ describe("POST /oauth/federation/:name/logout", () => {
 
 	describe("provider.endSession throws (soft-fail)", () => {
 		it("returns 200 { disconnected: true } when endSession throws (local state already cleared)", async () => {
-			const throwingProvider: FederationProviderHandle & {
+			const throwingProvider: FederationProvider & {
 				endSession: () => Promise<never>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				endSession: vi.fn().mockRejectedValue(new Error("IdP unreachable")),
 			};
 			const app = buildFedLogoutApp({
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", throwingProvider]]),
+					new Map<string, FederationProvider>([["google", throwingProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -1439,14 +1455,14 @@ describe("audit events", () => {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
-			const throwingProvider: FederationProviderHandle & { endSession: () => Promise<never> } = {
-				name: "google",
+			const throwingProvider: FederationProvider & { endSession: () => Promise<never> } = {
+				...federationBase("google"),
 				endSession: vi.fn().mockRejectedValue(new Error("IdP down")),
 			};
 			const app = buildFedLogoutApp({
 				auditSink,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", throwingProvider]]),
+					new Map<string, FederationProvider>([["google", throwingProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -1469,16 +1485,16 @@ describe("audit events", () => {
 				record: vi.fn().mockResolvedValue(undefined),
 			};
 			const endSessionUrl = new URL("https://accounts.google.com/logout");
-			const mockProvider: FederationProviderHandle & {
+			const mockProvider: FederationProvider & {
 				endSession: (req: unknown) => Promise<{ url: URL; method: "GET" }>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				endSession: vi.fn().mockResolvedValue({ url: endSessionUrl, method: "GET" }),
 			};
 			const app = buildFedLogoutApp({
 				auditSink,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", mockProvider]]),
+					new Map<string, FederationProvider>([["google", mockProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -1498,7 +1514,7 @@ describe("audit events", () => {
 				kind: "mock",
 				record: vi.fn().mockResolvedValue(undefined),
 			};
-			const bareProvider: FederationProviderHandle = { name: "github" };
+			const bareProvider = federationBase("github");
 			const app = buildApp({
 				auditSink,
 				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) }),
@@ -1506,7 +1522,7 @@ describe("audit events", () => {
 					listFederations: vi.fn(async () => ["github"]),
 				}),
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["github", bareProvider]]),
+					new Map<string, FederationProvider>([["github", bareProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -1665,7 +1681,7 @@ describe("POST /oauth/logout — browser session (R1a)", () => {
 			endSession: vi
 				.fn()
 				.mockResolvedValue({ url: new URL("https://idp.example/end"), method: "GET" }),
-		} as unknown as FederationProviderHandle;
+		} as unknown as FederationProvider;
 		const sessionFederationIndex = makeSessionFederationIndex({
 			listFederations: vi.fn(async () => ["google"]),
 		});

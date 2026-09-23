@@ -15,12 +15,12 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { FederationProvider } from "#/index.mjs";
 import {
 	DEFAULT_FEDERATION_RESPONSE_MODE,
 	FEDERATION_RESPONSE_MODES,
 	resolveFederationResponseMode,
-} from "#/federations/response-mode.mjs";
-import type { FederationProvider } from "#/federations/types.mjs";
+} from "#/index.mjs";
 
 const makeProvider = (overrides: Partial<FederationProvider> = {}): FederationProvider =>
 	({

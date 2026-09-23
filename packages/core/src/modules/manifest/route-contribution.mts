@@ -15,6 +15,7 @@
  */
 
 import type { ErrorRequestHandler, RequestHandler, Router } from "express";
+import type { Contributed } from "./contributed.mjs";
 
 /**
  * Express-compatible route handler shape. Per A2-α §4.6 + A2-β §5.7
@@ -109,9 +110,7 @@ export interface RouteContribution {
  * Factory producing a RouteContribution from typed deps. Used when the
  * route handler must close over typed deps (per A2-α §4.6).
  */
-export type RouteContributionFactory<Deps> = (
-	deps: Deps,
-) => RouteContribution | Promise<RouteContribution>;
+export type RouteContributionFactory<Deps> = (deps: Deps) => Contributed<RouteContribution>;
 
 /**
  * Per-entry shape inside `contributes.routes`. Either a static

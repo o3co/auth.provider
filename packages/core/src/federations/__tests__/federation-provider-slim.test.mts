@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { expectTypeOf, test } from "vitest";
-import type { FederationProvider } from "../types.mjs";
+import type { FederationProvider } from "#/federations/types.mjs";
 
 test("FederationProvider has buildAuthorizationUrl", () => {
 	expectTypeOf<FederationProvider>().toHaveProperty("buildAuthorizationUrl");

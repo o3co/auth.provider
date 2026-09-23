@@ -54,56 +54,56 @@ function mtlsConfig(overrides: Record<string, unknown> = {}): unknown {
 	};
 }
 
-function contribution(config: unknown): OidcDiscoveryContribution {
+async function contribution(config: unknown): Promise<OidcDiscoveryContribution> {
 	const factory = mtlsModule.contributes?.discoveryMetadata?.[0];
 	if (factory === undefined) throw new Error("mtlsModule contributes no discoveryMetadata");
-	return factory({ config } as never);
+	return await factory({ config } as never);
 }
 
 describe("mtlsModule — discoveryMetadata contribution", () => {
-	it("advertises tls_client_certificate_bound_access_tokens when mTLS is enabled", () => {
-		const meta = contribution(mtlsConfig({ enabled: true }));
+	it("advertises tls_client_certificate_bound_access_tokens when mTLS is enabled", async () => {
+		const meta = await contribution(mtlsConfig({ enabled: true }));
 		expect(meta.metadata?.tls_client_certificate_bound_access_tokens).toBe(true);
 	});
 
-	it("advertises the binding regardless of where the certificate comes from", () => {
+	it("advertises the binding regardless of where the certificate comes from", async () => {
 		// #280 made `source` default to the TLS layer and put a trusted-proxy
 		// allowlist behind the header path. Either way the ISSUED TOKEN carries
 		// the same `cnf["x5t#S256"]`, and the RFC 8705 §3.3 flag describes the
 		// token, not the transport the certificate arrived over.
-		const meta = contribution(
+		const meta = await contribution(
 			mtlsConfig({ enabled: true, source: "header", "trusted-proxies": ["loopback"] }),
 		);
 		expect(meta.metadata?.tls_client_certificate_bound_access_tokens).toBe(true);
 	});
 
-	it("contributes nothing when mTLS is disabled (the secure default)", () => {
+	it("contributes nothing when mTLS is disabled (the secure default)", async () => {
 		// RFC 8705 §3.3: an omitted flag already means `false`. Contributing the
 		// field as `false` would make a disabled module indistinguishable from an
 		// uninstalled one only by accident; omission says the same thing and
 		// cannot collide with another contributor.
-		const meta = contribution(mtlsConfig());
+		const meta = await contribution(mtlsConfig());
 		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
 		expect(all).not.toHaveProperty("tls_client_certificate_bound_access_tokens");
 	});
 
-	it("contributes nothing when the oauth.mtls slice is absent entirely", () => {
-		const meta = contribution({ oauth: {} });
+	it("contributes nothing when the oauth.mtls slice is absent entirely", async () => {
+		const meta = await contribution({ oauth: {} });
 		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
 		expect(all).not.toHaveProperty("tls_client_certificate_bound_access_tokens");
 	});
 
-	it("never advertises the RFC 8705 §2 client-authentication methods", () => {
+	it("never advertises the RFC 8705 §2 client-authentication methods", async () => {
 		// This package implements token BINDING (§3), not mTLS client
 		// authentication (§2). Adding `tls_client_auth` /
 		// `self_signed_tls_client_auth` to `token_endpoint_auth_methods_supported`
 		// would advertise a credential the token endpoint does not accept.
-		const meta = contribution(mtlsConfig({ enabled: true }));
+		const meta = await contribution(mtlsConfig({ enabled: true }));
 		expect(meta.metadata).not.toHaveProperty("token_endpoint_auth_methods_supported");
 	});
 
-	it("stays an ancillary contributor — it never claims the provider root", () => {
-		expect(contribution(mtlsConfig({ enabled: true })).providerRoot).toBeUndefined();
+	it("stays an ancillary contributor — it never claims the provider root", async () => {
+		expect((await contribution(mtlsConfig({ enabled: true }))).providerRoot).toBeUndefined();
 	});
 });
 

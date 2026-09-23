@@ -31,7 +31,7 @@ import type { FederationGrantConnection } from "@o3co/auth-provider-core";
 import {
 	identityClaimsProblem,
 	RESERVED_DELEGATED_AUTHORIZATION_PARAMS,
-} from "@o3co/auth-provider-session";
+} from "@o3co/auth-provider-core";
 
 /** A connection name: what appears in a key, an audit event and an operator's head. */
 const NAME = /^[A-Za-z0-9_-]+$/;

@@ -18,13 +18,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	assertFederationGrantRetrievalLimits,
 	FEDERATION_GRANT_REFRESH_LOCK_MARGIN_MS,
-	type FederationGrantRefreshedToken,
 	retrieveFederationGrantToken,
 } from "#/federation-grants/retrieve.mjs";
 import {
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
 } from "#/federation-grants/revision.mjs";
+import type { DelegatedTokens } from "#/federations/types.mjs";
 import {
 	at,
 	CONSENTED,
@@ -100,7 +100,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 	const stamp = async () => (await h.store.find("g-1", now()))?.refreshFailure;
 
 	const pendingUpstream = () => {
-		const call = deferred<FederationGrantRefreshedToken>();
+		const call = deferred<DelegatedTokens>();
 		h.refresh.mockReturnValueOnce(call.promise);
 		return call;
 	};
@@ -282,7 +282,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 	});
 
 	describe("a fresh token that may not be disclosed (D5)", () => {
-		const cases: Array<[string, Partial<FederationGrantRefreshedToken>, string]> = [
+		const cases: Array<[string, Partial<DelegatedTokens>, string]> = [
 			[
 				"a lifetime over the maximum",
 				{ expiresIn: 7200, expiresAt: at(3 * HOUR) },

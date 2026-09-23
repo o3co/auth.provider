@@ -320,7 +320,19 @@ describe("integration — Scenario 2: spec §12 worked-example failure diagnosti
 			name: "google-federation",
 			contributes: {
 				federations: {
-					google: (_deps) => ({}),
+					// A federation, not a placeholder: the contribution type is the
+					// contract since #626 P1, and `{}` no longer compiles. What this
+					// scenario is about is the missing-slot diagnostic below.
+					google: (_deps) => ({
+						name: "google",
+						scope: ["openid"],
+						buildAuthorizationUrl: () => new URL("https://accounts.google.com/auth"),
+						exchangeCode: async () => ({
+							issuer: "https://accounts.google.com",
+							sub: "123",
+							expiresAt: null,
+						}),
+					}),
 				},
 			},
 		});

@@ -180,6 +180,45 @@ export type {
 	SupportsLock,
 } from "./federation-tokens/types.mjs";
 export { supportsLock } from "./federation-tokens/types.mjs";
+export type { FederationResponseMode } from "./federations/response-mode.mjs";
+export {
+	DEFAULT_FEDERATION_RESPONSE_MODE,
+	FEDERATION_RESPONSE_MODES,
+	resolveFederationResponseMode,
+} from "./federations/response-mode.mjs";
+// The federation adapter port (#626 P1). An adapter implements
+// `FederationProvider` and whichever capability interfaces it can honour; the
+// session router drives them, `oauth` reads them off `federationProviders`,
+// and `federation-grants` delegates through them. `FederationProvider` itself
+// is exported with the manifest types below, where it is also the
+// contribution value type. What stays in `@o3co/auth-provider-session` is
+// `FederationResult` and the redirect policy its router feeds.
+export type {
+	DelegatedAuthorizationRequest,
+	DelegatedAuthorizationResult,
+	DelegatedCodeExchangeRequest,
+	DelegatedRefreshRequest,
+	DelegatedTokens,
+	EndSessionRequest,
+	EndSessionResult,
+	FederationProfile,
+	MappedClaims,
+	RefreshedTokens,
+	SupportsClaimMapping,
+	SupportsDelegatedAuthorization,
+	SupportsLogout,
+	SupportsRefresh,
+} from "./federations/types.mjs";
+export {
+	identityClaimsProblem,
+	RESERVED_DELEGATED_AUTHORIZATION_PARAMS,
+	RESERVED_IDENTITY_CLAIMS,
+	selectIdentityClaims,
+	supportsClaimMapping,
+	supportsDelegatedAuthorization,
+	supportsLogout,
+	supportsRefresh,
+} from "./federations/types.mjs";
 // The authentication claims a token may carry (#481)
 export { wellFormedAcr, wellFormedAmr } from "./grants/authenticationClaims.mjs";
 export { filterClaimsByScope } from "./grants/claimFilter.mjs";
@@ -386,12 +425,12 @@ export type {
 	ComponentKey,
 	ComponentMap,
 	ConfigSchema,
+	Contributed,
 	ContributesMap,
 	ExchangeTokenValidator,
 	ExchangeTokenValidatorFactory,
 	FederationFactory,
 	FederationProvider,
-	FederationProviderHandle,
 	// GrantFactory, GrantHandler: excluded — names collide with legacy
 	// ./grants/types.mjs exports at this boundary. Import from
 	// @o3co/auth-provider-core/modules/manifest directly.
@@ -580,6 +619,12 @@ export {
 	createRouter as createReadinessRouter,
 	type ReadinessRouterOptions,
 } from "./routes/Readiness.mjs";
+// The token-exchange validator port (#626 P1). `ExchangeTokenValidator` is
+// exported with the manifest types below, as the contribution value type.
+export type {
+	ExchangeTokenValidationContext,
+	ValidatedToken,
+} from "./token-exchange/validator.mjs";
 export {
 	createSessionFamilyIndexFactory,
 	createSessionFederationIndexFactory,
@@ -868,7 +913,6 @@ export {
 	assertFederationGrantRetrievalLimits,
 	FEDERATION_GRANT_REFRESH_LOCK_MARGIN_MS,
 	type FederationGrantAuditEvent,
-	type FederationGrantRefreshedToken,
 	type FederationGrantRefresher,
 	type FederationGrantRetrievalFailure,
 	type FederationGrantRetrievalLimits,

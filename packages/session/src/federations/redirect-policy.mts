@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { ProviderDeps } from "@o3co/auth-provider-core";
+import type { Contributed, ProviderDeps } from "@o3co/auth-provider-core";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
 import type { RedirectConfig } from "./helpers.mjs";
 import { resolveCallbackRedirect } from "./helpers.mjs";
@@ -85,11 +85,17 @@ export interface FederationRedirectPolicy {
  * Per-contribution factory type for `federationRedirectPolicies` contributions.
  * Follows the A2-α §4.1 contribution-factory pattern.
  *
+ * `Contributed<T>` because `applyContributions` awaits this kind like every
+ * other, so a policy built from something a deployment has to read is
+ * legitimately `async`. This kind is declared here rather than in core, and a
+ * rule the core kinds keep and this one does not would be the same half-stated
+ * contract #626 P1 removed, in a smaller place.
+ *
  * Per A5 §5.3.
  */
 export type FederationRedirectPolicyFactory<Deps = ProviderDeps<never, never>> = (
 	deps: Deps,
-) => FederationRedirectPolicy;
+) => Contributed<FederationRedirectPolicy>;
 
 /**
  * Config slice consumed by the redirect policy.

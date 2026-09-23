@@ -19,7 +19,7 @@ import type {
 	EndSessionResult,
 	FederationProvider,
 	SupportsLogout,
-} from "../types.mjs";
+} from "@o3co/auth-provider-core";
 
 /**
  * Test fixture: a minimal provider that implements only the FederationProvider contract.

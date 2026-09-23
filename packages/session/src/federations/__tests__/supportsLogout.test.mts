@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-import { describe, expect, it } from "vitest";
 import {
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProvider,
 	type SupportsLogout,
 	supportsLogout,
-} from "#/federations/types.mjs";
+} from "@o3co/auth-provider-core";
+import { describe, expect, it } from "vitest";
 
 function makeBaseProvider(name: string): FederationProvider {
 	return {
@@ -46,36 +46,10 @@ function makeLogoutProvider(name: string, endpoint: string): FederationProvider 
 	};
 }
 
-describe("supportsLogout()", () => {
-	it("returns true for a provider implementing SupportsLogout", () => {
-		const p = makeLogoutProvider("myidp", "https://myidp.example/logout");
-		expect(supportsLogout(p)).toBe(true);
-	});
-
-	it("returns false for a provider without endSession", () => {
-		const p = makeBaseProvider("plain");
-		expect(supportsLogout(p)).toBe(false);
-	});
-
-	it("narrows the type so endSession is callable without cast", async () => {
-		const p: FederationProvider = makeLogoutProvider("myidp", "https://myidp.example/logout");
-		if (supportsLogout(p)) {
-			// Inside this branch, TypeScript narrows `p` to `FederationProviderBase & SupportsLogout`.
-			const result = await p.endSession({ idTokenHint: "abc" });
-			expect(result.method).toBe("GET");
-		} else {
-			throw new Error("expected supportsLogout to narrow to true");
-		}
-	});
-
-	it("returns false for undefined (no throw)", () => {
-		expect(supportsLogout(undefined)).toBe(false);
-	});
-
-	it("returns false for null (no throw)", () => {
-		expect(supportsLogout(null)).toBe(false);
-	});
-});
+// The guard itself is core's since #626 P1, and so are its tests
+// (`core/src/federations/__tests__/types.test.mts`), the absent-provider cases
+// included. What stays here is what this package owns: the fixtures its own
+// suites build providers from, and the reference logout URL they produce.
 
 describe("EndSessionResult URL construction (reference implementation behaviour)", () => {
 	it("encodes all three optional parameters when present", async () => {

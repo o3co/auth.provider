@@ -143,20 +143,22 @@ describe("jwksModule", () => {
 });
 
 describe("jwksModule — discoveryMetadata contribution (OIDC aggregator)", () => {
-	it("contributes the issuer-relative default jwks_uri so core advertises it in discovery", () => {
+	it("contributes the issuer-relative default jwks_uri so core advertises it in discovery", async () => {
 		const config = makeValidAppConfig();
 		const factory = jwksModule.contributes?.discoveryMetadata?.[0];
 		expect(factory).toBeDefined();
-		const meta = factory?.({ config } as never);
+		// Awaited as the boot planner does: a contribution factory may answer with
+		// a promise, and every kind's declared type says so since #626 P1.
+		const meta = await factory?.({ config } as never);
 		// jwks owns `jwks_uri`; the aggregator prefixes it with the issuer. The
 		// path must match the route the same module registers (single source of
 		// truth via resolveJwksPath) so discovery never advertises a dangling URI.
 		expect(meta?.endpoints?.jwks_uri).toBe("/.well-known/jwks.json");
 	});
 
-	it("reflects a configured oauth.jwt.jwksPath override in the contributed jwks_uri", () => {
+	it("reflects a configured oauth.jwt.jwksPath override in the contributed jwks_uri", async () => {
 		const config = withJwksPath("/keys/jwks.json");
-		const meta = jwksModule.contributes?.discoveryMetadata?.[0]?.({ config } as never);
+		const meta = await jwksModule.contributes?.discoveryMetadata?.[0]?.({ config } as never);
 		expect(meta?.endpoints?.jwks_uri).toBe("/keys/jwks.json");
 	});
 });

@@ -79,12 +79,6 @@ export {
 	MAX_REDIRECT_URL_LENGTH,
 } from "./federations/redirect-policy.mjs";
 // #479 — `response_mode=form_post` federations (Sign in with Apple).
-export type { FederationResponseMode } from "./federations/response-mode.mjs";
-export {
-	DEFAULT_FEDERATION_RESPONSE_MODE,
-	FEDERATION_RESPONSE_MODES,
-	resolveFederationResponseMode,
-} from "./federations/response-mode.mjs";
 // #494 — a form_post federation's ephemeral state lives in a transaction of
 // its own, addressed by a dedicated cookie, so the application session cookie
 // is never relaxed. Replaces `applyCrossSiteStateCookie`, which is removed —
@@ -102,34 +96,12 @@ export {
 	FEDERATION_TRANSACTION_KEY_PREFIX,
 	mintFederationTransactionId,
 } from "./federations/transaction.mjs";
-export type {
-	DelegatedAuthorizationRequest,
-	DelegatedAuthorizationResult,
-	DelegatedCodeExchangeRequest,
-	DelegatedRefreshRequest,
-	DelegatedTokens,
-	EndSessionRequest,
-	EndSessionResult,
-	FederationProfile,
-	FederationProvider,
-	FederationResult,
-	MappedClaims,
-	RefreshedTokens,
-	SupportsClaimMapping,
-	SupportsDelegatedAuthorization,
-	SupportsLogout,
-	SupportsRefresh,
-} from "./federations/types.mjs";
-export {
-	identityClaimsProblem,
-	RESERVED_DELEGATED_AUTHORIZATION_PARAMS,
-	RESERVED_IDENTITY_CLAIMS,
-	selectIdentityClaims,
-	supportsClaimMapping,
-	supportsDelegatedAuthorization,
-	supportsLogout,
-	supportsRefresh,
-} from "./federations/types.mjs";
+export type { FederationResult } from "./federations/types.mjs";
+// The federation adapter port — `FederationProvider`, `FederationProfile`,
+// the capability interfaces and their guards, and the response-mode
+// helpers — is exported by `@o3co/auth-provider-core` since #626 P1 and is
+// deliberately not re-exported here: one type, one path. `FederationResult`
+// above stays because only this router answers with one.
 export { sessionModule } from "./module.mjs";
 export {
 	type SessionStoreModuleConfig,

@@ -18,6 +18,7 @@ import {
 	classifyFederationRefreshError,
 	isKnownFederationRefreshErrorCode,
 } from "../federation-tokens/refresh-error.mjs";
+import type { DelegatedTokens } from "../federations/types.mjs";
 import { federationGrantAuditMetadata } from "./auditMetadata.mjs";
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
 import {
@@ -43,45 +44,13 @@ import {
 	hasFederationGrantAuthorization,
 } from "./types.mjs";
 
-/**
- * What a delegated refresh answers (#593, D17), as far as the retrieval needs
- * it. Structural, as the session-bound route's refresh shape is, so that core
- * does not depend on the package the adapters live in.
- *
- * Every field is optional, as the adapters' own token snapshot has them, and
- * none is trusted: the retrieval reads an answer field by field, keeps the
- * refresh token it came with whatever else is wrong, and treats an answer it
- * cannot use as `malformed_token_response`.
- */
-export interface FederationGrantRefreshedToken {
-	readonly accessToken?: string;
-	/** Absent when the upstream did not rotate it (RFC 6749 §6): the stored one is kept. */
-	readonly refreshToken?: string;
-	/**
-	 * Seconds, exactly as the upstream issued them; `null` when it named none.
-	 * This is what eligibility judges. It cannot be recovered from `expiresAt`:
-	 * one step of the clock between the adapter and here turns 3600 into 3601,
-	 * and starves every grant on a connection whose maximum is 3600.
-	 */
-	readonly expiresIn?: number | null;
-	/**
-	 * The adapter's own `now + expiresIn`. With `expiresIn` it anchors when the
-	 * token was obtained on the ADAPTER's reading of the clock; pairing
-	 * `expiresIn` with a later reading taken here would extend the expiry.
-	 */
-	readonly expiresAt?: Date | null;
-	/** Space-delimited, as in the token response. Absent means "as the grant's" (RFC 6749 §6). */
-	readonly scope?: string;
-	readonly tokenType?: string;
-}
-
 export interface FederationGrantRefresher {
 	refreshDelegatedToken(params: {
 		readonly refreshToken: string;
 		readonly scopes?: readonly string[];
 		readonly resource?: string;
 		readonly signal?: AbortSignal;
-	}): Promise<FederationGrantRefreshedToken>;
+	}): Promise<DelegatedTokens>;
 }
 
 /** Token-free, always: no event carries an access token, a refresh token, or any other secret (D18). */

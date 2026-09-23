@@ -53,15 +53,17 @@ function dpopConfig(overrides: Record<string, unknown> = {}): unknown {
 	};
 }
 
-function contribution(config: unknown): OidcDiscoveryContribution {
+async function contribution(config: unknown): Promise<OidcDiscoveryContribution> {
 	const factory = dpopModule.contributes?.discoveryMetadata?.[0];
 	if (factory === undefined) throw new Error("dpopModule contributes no discoveryMetadata");
-	return factory({ config } as never);
+	// Awaited, as the boot planner does: a contribution factory may answer with
+	// a promise, and every kind's declared type says so since #626 P1.
+	return await factory({ config } as never);
 }
 
 describe("dpopModule — discoveryMetadata contribution", () => {
-	it("advertises dpop_signing_alg_values_supported when DPoP is enabled", () => {
-		const meta = contribution(dpopConfig({ enabled: true }));
+	it("advertises dpop_signing_alg_values_supported when DPoP is enabled", async () => {
+		const meta = await contribution(dpopConfig({ enabled: true }));
 		expect(meta.metadata?.dpop_signing_alg_values_supported).toEqual([
 			"ES256",
 			"ES384",
@@ -70,31 +72,32 @@ describe("dpopModule — discoveryMetadata contribution", () => {
 		]);
 	});
 
-	it("advertises exactly the operator's alg-whitelist, not the shipped default", () => {
+	it("advertises exactly the operator's alg-whitelist, not the shipped default", async () => {
 		// The advertised list and the list the verifier enforces are the same
 		// read. A client that picks an algorithm off discovery must not then be
 		// rejected by the proof verifier.
-		const meta = contribution(dpopConfig({ enabled: true, "alg-whitelist": ["ES256"] }));
+		const meta = await contribution(dpopConfig({ enabled: true, "alg-whitelist": ["ES256"] }));
 		expect(meta.metadata?.dpop_signing_alg_values_supported).toEqual(["ES256"]);
 	});
 
-	it("contributes nothing when DPoP is disabled (the secure default)", () => {
-		const meta = contribution(dpopConfig());
+	it("contributes nothing when DPoP is disabled (the secure default)", async () => {
+		const meta = await contribution(dpopConfig());
 		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
 		expect(all).not.toHaveProperty("dpop_signing_alg_values_supported");
 	});
 
-	it("contributes nothing when the oauth.dpop slice is absent entirely", () => {
-		const meta = contribution({ oauth: {} });
+	it("contributes nothing when the oauth.dpop slice is absent entirely", async () => {
+		const meta = await contribution({ oauth: {} });
 		const all = { ...(meta.endpoints ?? {}), ...(meta.metadata ?? {}) };
 		expect(all).not.toHaveProperty("dpop_signing_alg_values_supported");
 	});
 
-	it("stays an ancillary contributor — it never claims the provider root", () => {
+	it("stays an ancillary contributor — it never claims the provider root", async () => {
 		// Only the module owning the authorization-server surface sets
 		// `providerRoot`; a DPoP-only composition must not cause core to
 		// synthesize a discovery document.
-		expect(contribution(dpopConfig({ enabled: true })).providerRoot).toBeUndefined();
+		const meta = await contribution(dpopConfig({ enabled: true }));
+		expect(meta.providerRoot).toBeUndefined();
 	});
 });
 
