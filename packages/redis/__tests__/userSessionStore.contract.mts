@@ -28,6 +28,7 @@ const INPUT = (overrides: Partial<CreateUserSessionInput> = {}): CreateUserSessi
 	authTime: overrides.authTime ?? new Date(),
 	expiresAt: overrides.expiresAt ?? FUTURE(),
 	claims: overrides.claims ?? { email: "user@example.com" },
+	amr: overrides.amr,
 });
 
 export function runUserSessionStoreContract(factory: UserSessionStoreContractFactory): void {
@@ -40,6 +41,16 @@ export function runUserSessionStoreContract(factory: UserSessionStoreContractFac
 			expect(s?.sid).toBe("sid-1");
 			expect(s?.sub).toBe("user-1");
 			expect(s?.claims.email).toBe("user@example.com");
+		});
+
+		it("round-trips amr (#481), and names it undefined when none was recorded (#626)", async () => {
+			const store = await factory();
+			await store.create(INPUT({ sid: "sid-amr", amr: ["pwd", "mfa"] }));
+			expect((await store.get("sid-amr"))?.amr).toEqual(["pwd", "mfa"]);
+			await store.create(INPUT({ sid: "sid-plain" }));
+			// Named, not left out: a store that dropped the key on its way back
+			// is the copy #626 makes a compile error; this holds it at runtime.
+			expect(await store.get("sid-plain")).toHaveProperty("amr", undefined);
 		});
 
 		it("create rejects duplicate sid", async () => {
@@ -110,6 +121,20 @@ export function runUserSessionStoreContract(factory: UserSessionStoreContractFac
 			expect(s2?.authTime.getTime()).not.toBe(0);
 			expect(s2?.expiresAt.getTime()).not.toBe(0);
 			expect(s2?.createdAt.getTime()).not.toBe(0);
+		});
+
+		it("keeps its own copy of amr: neither the array written nor the one read changes what is stored (#626)", async () => {
+			// `amr` is what `/authorize` judges `acr_values` against; a store that
+			// kept the caller's array, or handed out its own, would let a later
+			// push on either one grant a step-up nobody performed.
+			const store = await factory();
+			const written = ["pwd"];
+			await store.create(INPUT({ sid: "amr-iso", amr: written }));
+			written.push("mfa");
+			const read = await store.get("amr-iso");
+			expect(read?.amr).toEqual(["pwd"]);
+			(read?.amr as string[] | undefined)?.push("hwk");
+			expect((await store.get("amr-iso"))?.amr).toEqual(["pwd"]);
 		});
 
 		it("readonly kind field present", async () => {

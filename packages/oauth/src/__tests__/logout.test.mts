@@ -116,6 +116,7 @@ const baseSession: UserSession = {
 	createdAt: new Date(),
 	expiresAt: new Date(Date.now() + 3_600_000),
 	claims: { email: "alice@example.com" },
+	amr: undefined,
 };
 
 function makeSessionStore(override?: Partial<UserSessionStore>): UserSessionStore {

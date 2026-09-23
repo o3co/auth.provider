@@ -397,6 +397,7 @@ describe("account linking across federations (#482)", () => {
 		createdAt: new Date(),
 		expiresAt: new Date(Date.now() + 3_600_000),
 		claims: {},
+		amr: undefined,
 	};
 	/** The browser already holds an authenticated session for user-1. */
 	const seed = { sid: "s-1", isAuthenticated: true };

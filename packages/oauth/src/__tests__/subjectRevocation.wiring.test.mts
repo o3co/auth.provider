@@ -116,6 +116,7 @@ const session: UserSession = {
 	createdAt: new Date(),
 	expiresAt: new Date(Date.now() + 3_600_000),
 	claims: { email: "alice@example.com", emailVerified: true },
+	amr: undefined,
 };
 
 describe("#296 — the subject watermark reaches /oauth/introspect", () => {

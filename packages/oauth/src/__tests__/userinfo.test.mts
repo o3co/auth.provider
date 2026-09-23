@@ -97,6 +97,7 @@ const baseSession: UserSession = {
 		name: "Alice",
 		picture: "https://example.com/pic",
 	},
+	amr: undefined,
 };
 
 describe("GET /oauth/userinfo", () => {

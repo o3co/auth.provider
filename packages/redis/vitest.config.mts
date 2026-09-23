@@ -50,6 +50,10 @@ export default defineConfig({
 				"__tests__/federation-grant-store.faults.integration.test.mts",
 				"__tests__/federation-grant-primitives.integration.test.mts",
 				"__tests__/internal/federation-grant-codec.test.mts",
+				// #626: the session contract's parity test. The contract and the file
+				// that runs it are in tsconfig.test.json only: that file declares no
+				// suite of its own, which vitest 5 reports as "No test suite found".
+				"__tests__/user-session-contract-parity.test.mts",
 			],
 		},
 	},
