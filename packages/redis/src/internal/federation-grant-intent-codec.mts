@@ -128,7 +128,10 @@ export const federationGrantIntentPairText = (clientId: string, subject: string)
 	`${clientId.length}:${clientId}:${subject.length}:${subject}`;
 
 export function encodeFederationGrantIntent(record: FederationGrantIntent): string {
-	return JSON.stringify({
+	// Checked against the record's keys (#626): a field this encoding forgot, or
+	// one added to the record and not here, is a compile error — the decode
+	// half is held the same way by its return type.
+	const stored = {
 		handle: record.handle,
 		kind: record.kind,
 		grantId: record.grantId,
@@ -149,7 +152,8 @@ export function encodeFederationGrantIntent(record: FederationGrantIntent): stri
 		createdAt: record.createdAt.getTime(),
 		expiresAt: record.expiresAt.getTime(),
 		correlationId: record.correlationId,
-	});
+	} satisfies { readonly [K in keyof FederationGrantIntent]: unknown };
+	return JSON.stringify(stored);
 }
 
 export function decodeFederationGrantIntent(text: string): FederationGrantIntent {
@@ -170,11 +174,11 @@ export function decodeFederationGrantIntent(text: string): FederationGrantIntent
 		authorizationRevision: str(raw.authorizationRevision, "intent authorization revision"),
 		callbackUri: str(raw.callbackUri, "intent callback uri"),
 		scopes: strings(raw.scopes, "intent scopes"),
-		...(resource !== undefined ? { resource } : {}),
+		resource,
 		authorizationParams: params(raw.authorizationParams, "intent authorization params"),
 		redirectUri: str(raw.redirectUri, "intent redirect uri"),
 		clientState: str(raw.clientState, "intent client state"),
-		...(upstreamSubject !== undefined ? { upstreamSubject } : {}),
+		upstreamSubject,
 		lifetimeMs: num(raw.lifetimeMs, "intent lifetime"),
 		createdAt: date(raw.createdAt, "intent createdAt"),
 		expiresAt: date(raw.expiresAt, "intent expiresAt"),

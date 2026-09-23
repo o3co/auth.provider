@@ -121,11 +121,11 @@ function copyIntent(from: FederationGrantIntent): FederationGrantIntent {
 		authorizationRevision: from.authorizationRevision,
 		callbackUri: from.callbackUri,
 		scopes: [...from.scopes],
-		...(from.resource !== undefined ? { resource: from.resource } : {}),
+		resource: from.resource,
 		authorizationParams: { ...from.authorizationParams },
 		redirectUri: from.redirectUri,
 		clientState: from.clientState,
-		...(from.upstreamSubject !== undefined ? { upstreamSubject: from.upstreamSubject } : {}),
+		upstreamSubject: from.upstreamSubject,
 		lifetimeMs: from.lifetimeMs,
 		createdAt: new Date(from.createdAt),
 		expiresAt: new Date(from.expiresAt),
@@ -167,31 +167,34 @@ function copyTransaction(
 
 /** Whether two records are the same one, for the retry `putIntent` answers `unchanged`. */
 function sameIntent(a: FederationGrantIntent, b: FederationGrantIntent): boolean {
+	// Keyed by the record's own keys (#626): a field added to the record and not
+	// compared here is a compile error, rather than a retry that differs only
+	// in it answering `unchanged` and keeping the first record's value.
 	const asKey = (record: FederationGrantIntent): string =>
-		JSON.stringify([
-			record.handle,
-			record.kind,
-			record.grantId,
-			record.clientId,
-			record.subject,
-			record.connection,
-			record.federation,
-			record.identityRevision,
-			record.authorizationRevision,
-			record.callbackUri,
-			[...record.scopes],
-			record.resource ?? null,
-			Object.entries(record.authorizationParams).sort(([left], [right]) =>
+		JSON.stringify({
+			handle: record.handle,
+			kind: record.kind,
+			grantId: record.grantId,
+			clientId: record.clientId,
+			subject: record.subject,
+			connection: record.connection,
+			federation: record.federation,
+			identityRevision: record.identityRevision,
+			authorizationRevision: record.authorizationRevision,
+			callbackUri: record.callbackUri,
+			scopes: [...record.scopes],
+			resource: record.resource ?? null,
+			authorizationParams: Object.entries(record.authorizationParams).sort(([left], [right]) =>
 				left < right ? -1 : left > right ? 1 : 0,
 			),
-			record.redirectUri,
-			record.clientState,
-			record.upstreamSubject ?? null,
-			record.lifetimeMs,
-			record.createdAt.getTime(),
-			record.expiresAt.getTime(),
-			record.correlationId,
-		]);
+			redirectUri: record.redirectUri,
+			clientState: record.clientState,
+			upstreamSubject: record.upstreamSubject ?? null,
+			lifetimeMs: record.lifetimeMs,
+			createdAt: record.createdAt.getTime(),
+			expiresAt: record.expiresAt.getTime(),
+			correlationId: record.correlationId,
+		} satisfies { readonly [K in keyof FederationGrantIntent]: unknown });
 	return asKey(a) === asKey(b);
 }
 

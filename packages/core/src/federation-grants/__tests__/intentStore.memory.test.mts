@@ -66,6 +66,8 @@ const intent = (over: Partial<FederationGrantIntent> = {}): FederationGrantInten
 	createdAt: T0,
 	expiresAt: at(FEDERATION_GRANT_FLOW_BUDGET_MS),
 	correlationId: "corr-1",
+	resource: undefined,
+	upstreamSubject: undefined,
 	...over,
 });
 

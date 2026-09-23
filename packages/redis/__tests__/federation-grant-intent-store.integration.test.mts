@@ -26,7 +26,7 @@ import {
 	type FederationGrantIntent,
 	type FederationGrantIntentStore,
 } from "@o3co/auth-provider-core";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisFederationGrantIntentStore } from "../src/federation-grant-intent-store.mjs";
@@ -139,9 +139,11 @@ describe("the Redis intent store's layout", () => {
 				authorizationRevision: "authorization-1",
 				callbackUri: "https://provider.test/session/federation-grants/callback/okta-calendar",
 				scopes: ["openid", "offline_access"],
+				resource: undefined,
 				authorizationParams: {},
 				redirectUri: "https://client.test/connected",
 				clientState: "state-1",
+				upstreamSubject: undefined,
 				lifetimeMs: 86_400_000,
 				createdAt: now,
 				expiresAt,
@@ -197,9 +199,11 @@ const fixture = (over: Partial<FederationGrantIntent> = {}): FederationGrantInte
 		authorizationRevision: "authorization-1",
 		callbackUri: "https://provider.test/session/federation-grants/callback/okta-calendar",
 		scopes: ["openid", "offline_access"],
+		resource: undefined,
 		authorizationParams: {},
 		redirectUri: "https://client.test/connected",
 		clientState: "state-1",
+		upstreamSubject: undefined,
 		lifetimeMs: 86_400_000,
 		createdAt: now,
 		expiresAt: new Date(now.getTime() + 600_000),

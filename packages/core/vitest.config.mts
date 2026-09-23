@@ -46,6 +46,9 @@ export default defineConfig({
 				// test for the FederationGrant union — a revoked or pending grant
 				// with only some of the authorization fields must not compile.
 				"src/federation-grants/__tests__/types.test.mts",
+				// #626: which intent fields a store must not drop. Paired with
+				// tsconfig.test.json, which already covers the directory.
+				"src/federation-grants/__tests__/intent-fields.types.test.mts",
 				// Which AssertionIssuerEntry fields a registry must not drop. Paired
 				// with the same entry in tsconfig.test.json — both lists, or nothing.
 				"src/assertions/__tests__/entry-fields.types.test.mts",
