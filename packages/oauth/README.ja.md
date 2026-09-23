@@ -252,9 +252,36 @@ IdP end-session 呼び出しが失敗した場合、ローカル状態はすで�
   "access_token": "<upstream-IdP-access-token>",
   "token_type": "Bearer",
   "expires_in": 3600,
-  "scope": "<if-available>"
+  "scope": "<コネクションが現在保持しているスコープ>"
 }
 ```
+
+`token_type` は常に `Bearer` で、渡すのは bearer トークンだけである。IANA の
+Access Token Types レジストリにある他の名前は、sender-constrained（`PoP`
+(RFC 9200)、`DPoP` (RFC 9449) — 提示には鍵の所有証明が要り、値渡しで受け取った
+呼び出し元はその鍵を持たない）か、そもそも access token の型ではない（`N_A`,
+RFC 8693 §2.2.1）かのどちらかである。このエンドポイントはそれを渡さず
+`502 upstream_token_ineligible` を返す。offline delegation 側のルートで `core`
+が同じ契約に対して下している判断と同じである (#645)。以前は upstream が何と
+答えても `token_type: "Bearer"` を返しており、upstream が課した制約を落として
+いた。
+
+upstream 自身の綴りは保存レコードに残る — 監査イベントが報告するのもオペレーター
+が読むのもそれ — が、ワイヤー上ではそのまま返さない。非 bearer を拒否した後に
+残る値は一語の大文字小文字違いだけであり、RFC 6749 §5.1 が比較を大文字小文字
+非依存と定めている（"Value is case insensitive"）以上、綴りは呼び出し元が行動
+できる情報を運ばない。そのまま返せば、すべての `federation-oidc` コネクションが
+デプロイ後の最初の refresh で `Bearer` から `bearer` に変わるだけである。
+offline delegation 側のルートは意図してそのまま返している — そちらは決定時点で
+クライアントが存在しなかった。
+
+アダプターが型を名乗らないコネクションには `Bearer` を返す: §5.1 は
+`token_type` を REQUIRED としているため、沈黙は「Bearer 以外」ではなく
+`FederationProfile` がこのフィールドを持つ前に書かれたアダプター — 同梱
+アダプターでは `federation-oidc` 以外すべて — を意味する。したがって現状この
+拒否が実際に効くのは `federation-oidc` のコネクションだけである。
+`federation-google` / `-github` / `-apple` は型を転送せず、3 つとも bearer
+トークンを発行する。
 
 ### エラーレスポンス
 
@@ -266,6 +293,7 @@ IdP end-session 呼び出しが失敗した場合、ローカル状態はすで�
 | 410 | `refresh_token_absent` | 保存済みトークンに refresh_token がない（ログイン時に upstream が返さなかった） |
 | 410 | `re_authentication_required` | IdP が `invalid_grant` を返した — セッションのフェデレーションはクリアされる。ユーザーは IdP で再認証が必要 |
 | 500 | `refresh_failed` | IdP リフレッシュの汎用エラー |
+| 502 | `upstream_token_ineligible` | upstream のトークンがこのプロバイダーの渡せる型ではない。理由は `error_description` が名乗る（現状は `token_type_unsupported` のみ、#645）。`Retry-After: 300` を付ける |
 | 503 | `refresh_not_supported` | プロバイダーが `SupportsRefresh` を実装していない |
 | 503 | `lock_timeout` | 待機ウィンドウ内に advisory lock を取得できなかった |
 | 503 | `temporarily_unavailable` | ストア障害、または IdP の 5xx / temporarily_unavailable |
@@ -296,6 +324,7 @@ clients:
 - `federation.token.family_revoked` — family 失効による 401 発生時
 - `federation.token.refresh_failed` — `provider.refreshToken` が throw したとき（`invalid_grant` 以外）
 - `federation.token.reauthentication_required` — IdP から `invalid_grant` を受け取ったとき
+- `federation.token.upstream_ineligible` — 502 発生時。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま（token 型として不正な値もそのまま — それこそ見る価値がある。文字列ですらない場合は `null`）。どの upstream が別の型を返し始めたかをオペレーターが追える。呼び出し元には型を伝えない — 再試行以外にできることがないため
 
 ## v0.3.x → v0.4.0 マイグレーション
 

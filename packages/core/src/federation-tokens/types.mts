@@ -25,6 +25,19 @@ export interface FederationTokens {
 	 * for rationale.
 	 */
 	readonly expiresAt: Date | null;
+	/**
+	 * How the upstream said this token is presented, in the upstream's own
+	 * spelling (oauth4webapi lower-cases it). Written at link time and moved by
+	 * a refresh that names one; carried verbatim, so a value that is not a token
+	 * type reaches the consumer rather than being erased into silence.
+	 *
+	 * Absent means the adapter named none — every bundled adapter but
+	 * `federation-oidc`, and every record written before #645. RFC 6749 §5.1
+	 * makes `token_type` REQUIRED, so `POST /oauth/federation/:name/token` reads
+	 * absence as `Bearer` and refuses anything present that is not a bearer
+	 * spelling: a sender-constrained token cannot be handed to a caller that
+	 * holds no proof key.
+	 */
 	readonly tokenType?: string;
 	/**
 	 * What the token holds now, space-delimited (RFC 6749 §3.3). A refresh may

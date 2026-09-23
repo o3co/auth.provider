@@ -17,6 +17,7 @@
 import type {
 	AuditEvent,
 	AuditSink,
+	FederationProfile,
 	FederationProvider,
 	FederationTokenStore,
 	SessionFederationIndex,
@@ -644,6 +645,106 @@ describe("account linking across federations (#482)", () => {
 				"test",
 				expect.objectContaining({ scope: "openid email", grantedScope: "openid email" }),
 			);
+		});
+
+		it.each([
+			["the type the upstream named", "DPoP", "DPoP"],
+			["the spelling oauth4webapi reports", "bearer", "bearer"],
+			// Verbatim, including a value that is not a token type. Erasing one
+			// would leave the record silent, and the disclosure point reads
+			// silence as Bearer — which is the behaviour #645 exists to stop.
+			["a value that is not a token type", "DPoP ", "DPoP "],
+			["an empty string, which is not silence", "", ""],
+		])("records %s at link time (#645)", async (_label, named, expected) => {
+			// Recorded, not judged. A login does not need the upstream's access
+			// token, so a type this provider cannot hand on must not cost the user
+			// their sign-in — `POST /oauth/federation/:name/token` is where the
+			// disclosure happens and where the refusal belongs. Dropping it here
+			// is what made #645 unanswerable from the record.
+			const typed = makeFakeProvider({
+				exchangeCode: vi.fn(async () => ({
+					issuer: "https://idp.example.com",
+					sub: "external-42",
+					email: "u@example.com",
+					accessToken: "at",
+					refreshToken: "rt",
+					idToken: "it",
+					expiresAt: new Date(Date.now() + 3_600_000),
+					scope: "openid email",
+					tokenType: named,
+				})),
+			});
+			const fts = makeFederationTokenStore();
+			const { app } = buildCallbackApp({
+				providers: new Map([["test", typed]]),
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: linkableRepo({ current: null }),
+				userSessionStore: liveStore(),
+				sessionFederationIndex: makeSessionFederationIndex(),
+				federationTokenStore: fts,
+				auditSink: recorder().sink,
+			});
+			const agent = await plantAndGetAgent(app);
+			expect((await callback(agent)).status).toBe(302);
+
+			expect(fts.attach).toHaveBeenCalledWith(
+				"s-1",
+				"test",
+				expect.objectContaining({ tokenType: expected }),
+			);
+		});
+
+		it.each([
+			["names none — every bundled adapter but federation-oidc", undefined],
+			// The field holds a string. A non-string is nonsense rather than a
+			// sender constraint being dropped, so it is the one reading that
+			// falls back to silence.
+			["names something that is not a string", 7],
+		])("records no type when the adapter %s (#645)", async (_label, named) => {
+			// Absent is what the disclosure point reads as Bearer: RFC 6749 §5.1
+			// makes `token_type` REQUIRED, so silence is an adapter written before
+			// the field rather than an upstream meaning something else.
+			const untyped = makeFakeProvider({
+				// Cast because the port types `tokenType` as a string: a number
+				// reaches here only from an adapter that ignores the contract,
+				// which is the case under test (D5).
+				exchangeCode: vi.fn(
+					async () =>
+						({
+							issuer: "https://idp.example.com",
+							sub: "external-42",
+							email: "u@example.com",
+							accessToken: "at",
+							refreshToken: "rt",
+							idToken: "it",
+							expiresAt: new Date(Date.now() + 3_600_000),
+							scope: "openid email",
+							...(named === undefined ? {} : { tokenType: named }),
+						}) as unknown as FederationProfile,
+				),
+			});
+			const fts = makeFederationTokenStore();
+			const { app } = buildCallbackApp({
+				providers: new Map([["test", untyped]]),
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: linkableRepo({ current: null }),
+				userSessionStore: liveStore(),
+				sessionFederationIndex: makeSessionFederationIndex(),
+				federationTokenStore: fts,
+				auditSink: recorder().sink,
+			});
+			const agent = await plantAndGetAgent(app);
+			expect((await callback(agent)).status).toBe(302);
+
+			const [, , attached] = (fts.attach as ReturnType<typeof vi.fn>).mock.calls[0] as [
+				string,
+				string,
+				Record<string, unknown>,
+			];
+			expect(attached.accessToken).toBe("at");
+			expect("tokenType" in attached).toBe(false);
 		});
 
 		it("links an unknown identity to the signed-in account, attaches the federation to the live session, and mints no new one", async () => {
@@ -1321,6 +1422,39 @@ describe("Federation routes", () => {
 			// req.session.sid set on the session
 			const inspect = await agent.get("/_inspect");
 			expect(JSON.parse(inspect.text).sid).toBe(createArg.sid);
+		});
+
+		it("records the upstream's token type on the login path too (#645)", async () => {
+			// The two attach sites are the link path and this one. #647 found the
+			// same gap for `scope` and fixed both; this keeps them together.
+			const provider = makeFakeProvider({
+				exchangeCode: vi.fn(async () => ({
+					issuer: "https://idp.example.com",
+					sub: "external-42",
+					accessToken: "at",
+					expiresAt: new Date(Date.now() + 3_600_000),
+					scope: "openid email",
+					tokenType: "DPoP",
+				})),
+			});
+			const fts = makeFederationTokenStore();
+			const { app } = buildCallbackApp({
+				providers: new Map([["test", provider]]),
+				federation: { name: "test", state: "s1", codeVerifier: "v1" },
+				userRepository: makeUserRepository(),
+				userSessionStore: makeUserSessionStore(),
+				federationTokenStore: fts,
+			});
+			const agent = await plantAndGetAgent(app);
+
+			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+			expect(res.status).toBe(302);
+
+			expect(fts.attach).toHaveBeenCalledWith(
+				expect.any(String),
+				"test",
+				expect.objectContaining({ tokenType: "DPoP" }),
+			);
 		});
 
 		// Regression: route must propagate profile.expiresAt === null verbatim

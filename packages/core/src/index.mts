@@ -189,6 +189,13 @@ export {
 // RFC 6749 §3.3's scope grammar, in one place. Three packages had their own
 // copy before #647 and all three were wrong about whitespace in the same way.
 export { canonicalScope, isScopeToken, parseScopeTokens } from "./federations/scope.mjs";
+// RFC 6749's `token_type`, in one place: what an upstream token may be handed
+// on as, and the case-insensitive comparison (§5.1) that decides it (#645).
+export {
+	BEARER_TOKEN_TYPE,
+	canonicalTokenType,
+	isBearerTokenType,
+} from "./federations/token-type.mjs";
 // The federation adapter port (#626 P1). An adapter implements
 // `FederationProvider` and whichever capability interfaces it can honour; the
 // session router drives them, `oauth` reads them off `federationProviders`,

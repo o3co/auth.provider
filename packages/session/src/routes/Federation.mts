@@ -455,6 +455,7 @@ export const createRouter = (
 			await sessionFederationIndex.addFederation(currentSid, provider.name, current.expiresAt);
 			if (profile.accessToken) {
 				const consented = consentedScope(profile.scope, provider.scope);
+				const tokenType = typeof profile.tokenType === "string" ? profile.tokenType : undefined;
 				await federationTokenStore.attach(currentSid, provider.name, {
 					accessToken: profile.accessToken,
 					refreshToken: profile.refreshToken,
@@ -465,6 +466,18 @@ export const createRouter = (
 					// by (RFC 6749 §6) and never moves. They start equal.
 					scope: consented,
 					grantedScope: consented,
+					// #645 — how the upstream said this token is presented. Recorded
+					// rather than judged here: a login does not need the access token,
+					// so a type this provider cannot hand on must not cost the user
+					// their sign-in. The route that discloses it is where that is
+					// decided, and it refuses anything that is not a bearer spelling
+					// — including a value that is not a token type at all, which is
+					// why one is written down rather than dropped. Absent when the
+					// adapter named none, which is every bundled adapter but
+					// `federation-oidc`, and when it named something that is not a
+					// string: the field holds one, and a non-string is nonsense
+					// rather than a constraint being dropped.
+					...(tokenType === undefined ? {} : { tokenType }),
 				});
 			}
 		} catch (err) {
@@ -961,6 +974,7 @@ export const createRouter = (
 				// `null` propagates to the store and signals "do not refresh; reuse" —
 				// the route layer never invents a fallback expiry.
 				const consented = consentedScope(profile.scope, provider.scope);
+				const tokenType = typeof profile.tokenType === "string" ? profile.tokenType : undefined;
 				await federationTokenStore.attach(sid, provider.name, {
 					accessToken: profile.accessToken,
 					refreshToken: profile.refreshToken,
@@ -969,6 +983,9 @@ export const createRouter = (
 					// #647 — as above: the consented scope, and the ceiling it sets.
 					scope: consented,
 					grantedScope: consented,
+					// #645 — as above: what the upstream named, verbatim, recorded
+					// and not judged. The disclosure point owns that decision.
+					...(tokenType === undefined ? {} : { tokenType }),
 				});
 				attachedToFederation = true;
 			}

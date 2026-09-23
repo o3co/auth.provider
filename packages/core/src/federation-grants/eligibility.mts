@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { isBearerTokenType } from "../federations/token-type.mjs";
 import type {
 	FederationGrantConnection,
 	FederationGrantIneligibilityMarker,
@@ -68,11 +69,10 @@ export type UpstreamTokenJudgement =
  *   that accumulates consent answers a refresh with every scope the user has
  *   since granted to the same upstream client, and an upstream token cannot be
  *   narrowed after the fact.
- * - It must be a bearer token, however the upstream spells it (oauth4webapi
- *   lower-cases what it was sent). A sender-constrained token — DPoP, or any
- *   other — is bound to a key the client that receives it does not hold: the
- *   route has no proof key to present, and disclosing such a token as a
- *   bearer token would hand out something that cannot be used.
+ * - It must be a bearer token, however the upstream spells it. The comparison
+ *   and the reason for it live in `federations/token-type.mts`, next to the
+ *   port that declares the field, because `POST /oauth/federation/:name/token`
+ *   discloses an upstream token too and asks the same question (#645).
  *
  * A maximum that is not usable refuses every token. It is tested by name, and
  * not left to the comparison: a hand-built config that omits the key hands
@@ -103,7 +103,7 @@ export function judgeUpstreamAccessToken(token: {
 	if (!scopesWithin(token.scopes, token.consentedScopes)) {
 		return { eligible: false, reason: "scope_exceeded" };
 	}
-	if (typeof token.tokenType !== "string" || token.tokenType.toLowerCase() !== "bearer") {
+	if (!isBearerTokenType(token.tokenType)) {
 		return { eligible: false, reason: "token_type_unsupported" };
 	}
 	return { eligible: true };

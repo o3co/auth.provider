@@ -486,6 +486,34 @@ Each `Client` supports five optional fields for logout behavior:
 }
 ```
 
+`token_type` is always `Bearer`, and only a bearer token is handed on. Every
+other name in IANA's Access Token Types registry is either sender-constrained —
+`PoP` (RFC 9200), `DPoP` (RFC 9449), where presenting the token takes proof of
+possession of a key that a caller receiving it by value does not hold — or not
+an access token type at all (`N_A`, RFC 8693 §2.2.1). This endpoint answers
+`502 upstream_token_ineligible` for one instead of handing it out, which is the
+same judgement `core` makes of the same contract on the offline-delegation
+route (#645). Before that it answered `token_type: "Bearer"` whatever the
+upstream said, which dropped a constraint the upstream had imposed.
+
+The upstream's own spelling is kept in the stored record — it is what the audit
+event reports, and what an operator reads — but is not echoed on the wire. Once
+a non-bearer type is refused, the only values left are case-variants of one
+word, and RFC 6749 §5.1 makes the comparison case-insensitive ("Value is case
+insensitive"), so the spelling carries nothing a caller can act on; echoing it
+would have flipped every `federation-oidc` connection from `Bearer` to `bearer`
+on its first refresh after deploy, for no gain. The sibling
+offline-delegation route does echo it, deliberately — it had no clients when
+that was decided, and this one does.
+
+A connection whose adapter names no type at all is answered `Bearer`: §5.1
+makes the field REQUIRED, so silence is an adapter written before
+`FederationProfile` carried it — which is every bundled adapter but
+`federation-oidc` — rather than an upstream meaning something else. In practice
+the refusal therefore binds only on `federation-oidc` connections today;
+`federation-google`, `-github` and `-apple` forward no type, and all three
+issue bearer tokens.
+
 `scope` is what the stored connection holds, which since #647 is recorded when
 the federation is linked rather than left empty. It is bounded by what the user
 consented to at that moment, so a refresh can narrow it and can restore it to
@@ -513,7 +541,8 @@ the bound, which under-reports rather than over-claims.
 | 410 | `refresh_token_absent` | Stored tokens have no refresh_token (upstream didn't return one at login, or post-lock re-read found a record without one) |
 | 410 | `re_authentication_required` | IdP returned `invalid_grant` / `invalid_token` — session federation is cleared; user must re-authenticate with the IdP |
 | 429 | `rate_limited` | Upstream IdP rate limit exceeded (`status: 429` or `error: "too_many_requests"`); retry later |
-| 500 | `refresh_failed` | Generic / unclassified error from the IdP refresh path; SIEM should group on the `details.reason` audit field |
+| 500 | `refresh_failed` | Generic / unclassified error from the IdP refresh path, or an answer this route could not read; SIEM should group on the `details.reason` audit field |
+| 502 | `upstream_token_ineligible` | The upstream's token is one this provider may not hand on. `error_description` names the reason — `token_type_unsupported` is the only one today (#645) |
 | 503 | `refresh_not_supported` | Provider doesn't implement `SupportsRefresh` |
 | 503 | `lock_timeout` | Advisory lock could not be acquired within the wait window |
 | 503 | `temporarily_unavailable` | Store outage, IdP 5xx, or upstream network failure (ECONNREFUSED / ENOTFOUND / ETIMEDOUT — including codes wrapped on `error.cause.code` of a fetch TypeError) |
@@ -542,8 +571,9 @@ The following audit events fire on this endpoint:
 - `federation.token.success` — on token issuance (details include `refreshed: boolean` to distinguish cache hits from refresh path)
 - `federation.token.forbidden` — on 403 (client not opted in)
 - `federation.token.family_revoked` — on 401 via revoked family
-- `federation.token.refresh_failed` — on provider.refreshToken throwing with an unclassified error. SF-13 (v0.5.1): `details.reason` carries the classifier enum (`"invalid_grant" | "rate_limited" | "network" | "unknown"`); SIEM rules should group on this field. Pre-v0.5.1 the detail field was `details.error: <raw message>` — migrate dashboards.
+- `federation.token.refresh_failed` — on `provider.refreshToken` throwing with an unclassified error, and on an answer this route could not read. SF-13 (v0.5.1): `details.reason` carries the classifier enum for a thrown error (`"invalid_grant" | "rate_limited" | "network" | "unknown"`); an answer that came back but could not be used carries `"no_access_token"`, `"invalid_expiry"` or `"invalid_token_type"` instead. SIEM rules should group on this field — all seven values. Pre-v0.5.1 the detail field was `details.error: <raw message>` — migrate dashboards.
 - `federation.token.reauthentication_required` — on `invalid_grant` or `invalid_token` from IdP
+- `federation.token.upstream_ineligible` — on 502. `details.reason` is `"token_type_unsupported"` and `details.tokenType` is what the record held, reported as it was read — including a value that is not a token type, which is the one worth seeing; `null` means the record held something that is not a string. The response carries `Retry-After: 300`, matching `federationGrants.ineligibleRetryAfter`'s default, because the condition ends when an operator changes the upstream's registration and not before. The caller is not told which type it was; it can do nothing with that but retry
 
 ## Migrating from v0.3.x to v0.4.0
 
