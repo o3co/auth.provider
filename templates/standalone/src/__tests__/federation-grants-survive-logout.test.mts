@@ -389,9 +389,14 @@ describe("#593 AC8: a grant outlives the browser session at both logout endpoint
 		await federationTokenStore.attach(sid, "upstream", {
 			accessToken: "session-bound-upstream-token",
 			expiresAt: null,
-			// Required keys since the #645 follow-up; this record names neither.
+			// Every field is a required key since the #645 follow-up; this
+			// record carries only the access token.
+			refreshToken: undefined,
+			idToken: undefined,
 			tokenType: undefined,
+			scope: undefined,
 			grantedScope: undefined,
+			rawParams: undefined,
 		});
 		expect(await userSessionStore.get(sid)).not.toBeNull();
 		await expectGrantUntouched(app, federationGrantStore);
@@ -417,9 +422,14 @@ describe("#593 AC8: a grant outlives the browser session at both logout endpoint
 		await federationTokenStore.attach(sid, "upstream", {
 			accessToken: "session-bound-upstream-token",
 			expiresAt: null,
-			// Required keys since the #645 follow-up; this record names neither.
+			// Every field is a required key since the #645 follow-up; this
+			// record carries only the access token.
+			refreshToken: undefined,
+			idToken: undefined,
 			tokenType: undefined,
+			scope: undefined,
 			grantedScope: undefined,
+			rawParams: undefined,
 		});
 		expect(await userSessionStore.get(sid)).not.toBeNull();
 		await expectGrantUntouched(app, federationGrantStore);

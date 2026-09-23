@@ -15,26 +15,31 @@
  */
 
 /**
- * The `FederationTokens` fields a store must not lose silently.
+ * Every `FederationTokens` field is a required key.
  *
  * A `FederationTokenStore` often copies a record field by field — the bundled
- * in-memory store does. A field it forgets is dropped without a sound, and two
- * fields mean something when they are absent:
+ * in-memory store does. A field it forgets is dropped without a sound, and
+ * every field of this record changes what happens when it is gone:
  *
  * - `tokenType` (#645): absent is read as a record written before #645 and
- *   answered as Bearer, so losing it hands a sender-constrained token on as a
- *   bearer one — it fails OPEN.
- * - `grantedScope` (#647): absent falls back to the current scope as the
- *   ceiling — conservative, but still a silent loss of the consent record.
+ *   answered as Bearer — a sender-constrained token handed on as a bearer one.
+ *   Fails OPEN.
+ * - `refreshToken`: absent is `410 refresh_token_absent`; the connection
+ *   cannot be refreshed and the user has to sign in again.
+ * - `idToken`: absent loses the `id_token_hint` logout sends the upstream.
+ * - `scope` / `grantedScope` (#647): what the response reports, and the
+ *   ceiling a refresh is bounded by.
+ * - `rawParams`: carried forward on every refresh; lost for good once dropped.
+ * - `expiresAt` was already required (`Date | null`), for the same reason.
  *
  * No marker in the record can catch a store that drops fields: it would drop
- * the marker too. The type can. Both fields are REQUIRED keys whose value may
- * be `undefined`, so an object literal that leaves either out fails to compile
- * — which is exactly a projection that forgot it.
+ * the marker too. The type can. Every field is a REQUIRED key, its value
+ * `undefined` where there is nothing to record, so an object literal that
+ * leaves any of them out fails to compile.
  *
  * Asserted with a conditional type rather than `@ts-expect-error`, which any
  * error on its line would satisfy. This file only proves anything under the
- * TypeScript checker; it is on core's typecheck allowlist for that reason.
+ * TypeScript checker; it is on BOTH of core's typecheck lists for that reason.
  */
 
 import { describe, expectTypeOf, it } from "vitest";
@@ -43,20 +48,37 @@ import type { FederationTokens } from "#/federation-tokens/types.mjs";
 /** `true` when `K` must be present on `T` — not merely declared. */
 type IsRequiredKey<T, K extends keyof T> = Record<never, never> extends Pick<T, K> ? false : true;
 
-describe("FederationTokens — the fields a store must round-trip are required keys", () => {
-	it("tokenType is a required key that may be undefined (#645)", () => {
+/** The keys of `T` that may be left out of an object literal. */
+type OptionalKeys<T> = { [K in keyof T]-?: IsRequiredKey<T, K> extends true ? never : K }[keyof T];
+
+describe("FederationTokens — a store cannot forget a field", () => {
+	it("has no optional key", () => {
+		expectTypeOf<OptionalKeys<FederationTokens>>().toEqualTypeOf<never>();
+	});
+
+	it("names each field, so a failure says which one regressed", () => {
+		expectTypeOf<IsRequiredKey<FederationTokens, "accessToken">>().toEqualTypeOf<true>();
+		expectTypeOf<IsRequiredKey<FederationTokens, "refreshToken">>().toEqualTypeOf<true>();
+		expectTypeOf<IsRequiredKey<FederationTokens, "idToken">>().toEqualTypeOf<true>();
+		expectTypeOf<IsRequiredKey<FederationTokens, "expiresAt">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<FederationTokens, "tokenType">>().toEqualTypeOf<true>();
-		expectTypeOf<FederationTokens["tokenType"]>().toEqualTypeOf<string | undefined>();
-	});
-
-	it("grantedScope is a required key that may be undefined (#647)", () => {
+		expectTypeOf<IsRequiredKey<FederationTokens, "scope">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<FederationTokens, "grantedScope">>().toEqualTypeOf<true>();
-		expectTypeOf<FederationTokens["grantedScope"]>().toEqualTypeOf<string | undefined>();
+		expectTypeOf<IsRequiredKey<FederationTokens, "rawParams">>().toEqualTypeOf<true>();
 	});
 
-	it("a field that carries no such meaning stays optional", () => {
-		// The control: `IsRequiredKey` answers false for an optional key, so the
-		// two assertions above are not true of every field by construction.
-		expectTypeOf<IsRequiredKey<FederationTokens, "idToken">>().toEqualTypeOf<false>();
+	it("still lets a field hold undefined where there is nothing to record", () => {
+		expectTypeOf<FederationTokens["tokenType"]>().toEqualTypeOf<string | undefined>();
+		expectTypeOf<FederationTokens["grantedScope"]>().toEqualTypeOf<string | undefined>();
+		expectTypeOf<FederationTokens["refreshToken"]>().toEqualTypeOf<string | undefined>();
+	});
+
+	it("tells an optional key from a required one — the helper's control", () => {
+		// Without this, `IsRequiredKey` answering `true` for everything would
+		// pass every assertion above.
+		type Probe = { readonly a?: string; readonly b: string | undefined };
+		expectTypeOf<IsRequiredKey<Probe, "a">>().toEqualTypeOf<false>();
+		expectTypeOf<IsRequiredKey<Probe, "b">>().toEqualTypeOf<true>();
+		expectTypeOf<OptionalKeys<Probe>>().toEqualTypeOf<"a">();
 	});
 });

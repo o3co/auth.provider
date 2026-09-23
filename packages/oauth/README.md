@@ -536,14 +536,15 @@ bounded by consent. A client that reads `scope` to decide whether to send the
 user back for consent should treat it as an upper bound rather than a
 guarantee.
 
-Third-party `FederationTokenStore` adapters must carry `grantedScope` and
-`tokenType` through `attach`, `update` and `get`. Both are **required keys** on
-`FederationTokens` whose value may be `undefined`. Code that builds a
-`FederationTokens` value and forgets either key therefore fails to compile:
+Third-party `FederationTokenStore` adapters must carry every field of
+`FederationTokens` through `attach`, `update` and `get`. Every field is a
+**required key**, holding `undefined` where there is nothing to record. Code
+that builds a `FederationTokens` value and forgets any key therefore fails to
+compile:
 a store's `get`, and any caller of `attach` or `update`, including app code
 seeding a store and test fixtures. That is a breaking type change for anyone
-who constructs one — a record literal has to name both, as `undefined` when
-there is nothing to record.
+who constructs one — a record literal has to name every field, as `undefined`
+when there is nothing to record.
 
 The type does not reach an adapter's own storage shape. An adapter that
 converts the record to a row or document of its own should declare the same
@@ -558,12 +559,14 @@ A store must also hand back an unset value as `undefined` or absent, never
 as `null` — MongoDB's driver does unless `ignoreUndefined` is set — turns every
 connection whose adapter names no type into a `502`.
 
-The two losses are not alike, which is why both are enforced rather than
-documented. Losing `grantedScope` is conservative: the connection falls back to
-its current scope as the bound, which under-reports. Losing `tokenType` fails
-**open**: the record comes back silent, silence is read as a record written
-before #645, and a sender-constrained token is handed on as `Bearer`. Both
-bundled stores meet the requirement and are pinned on it.
+Every field costs something when it is lost, which is why all of them are
+enforced rather than documented. Losing `tokenType` fails **open**: the record
+comes back silent, silence is read as a record written before #645, and a
+sender-constrained token is handed on as `Bearer`. Losing `refreshToken` makes
+the connection unrefreshable (`410 refresh_token_absent`); losing `idToken`
+drops the upstream's `id_token_hint` at logout; losing `grantedScope` makes the
+current scope the refresh bound, which under-reports. Both bundled stores meet
+the requirement and are pinned on it.
 
 ### Error responses
 

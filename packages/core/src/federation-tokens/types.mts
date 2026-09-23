@@ -10,10 +10,31 @@
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 
+/**
+ * One upstream connection's tokens, as a `FederationTokenStore` holds them.
+ *
+ * Every field is a REQUIRED key; a field with nothing to record holds
+ * `undefined`. A store often copies this record field by field, and a field it
+ * forgets is dropped without a sound — while every field here changes what
+ * happens when it is gone (`record-fields.types.test.mts` lists what). No
+ * marker in the record could catch that, since a store that drops fields drops
+ * the marker too; a required key makes an object literal that forgets one fail
+ * to compile. `expiresAt` was the first field held to this, and for the same
+ * reason.
+ */
 export interface FederationTokens {
 	readonly accessToken: string;
-	readonly refreshToken?: string;
-	readonly idToken?: string;
+	/**
+	 * Absent means the connection cannot be refreshed: the token route answers
+	 * `410 refresh_token_absent` and the user has to sign in again. `undefined`
+	 * when the upstream issued none (GitHub OAuth App tokens).
+	 */
+	readonly refreshToken: string | undefined;
+	/**
+	 * What `POST /oauth/federation/:name/logout` sends the upstream as
+	 * `id_token_hint`. `undefined` when the upstream issued none.
+	 */
+	readonly idToken: string | undefined;
 	/**
 	 * Absolute expiry time of `accessToken`. `null` means the upstream provider
 	 * did not issue a finite expiry (e.g. GitHub OAuth Apps classic tokens).
@@ -71,9 +92,10 @@ export interface FederationTokens {
 	readonly tokenType: string | undefined;
 	/**
 	 * What the token holds now, space-delimited (RFC 6749 §3.3). A refresh may
-	 * narrow it, and this field moves with the token.
+	 * narrow it, and this field moves with the token. `undefined` when the
+	 * adapter named none and no requested list stood in for it.
 	 */
-	readonly scope?: string;
+	readonly scope: string | undefined;
 	/**
 	 * What the user consented to when the federation was linked: the ceiling a
 	 * refreshed scope is bounded by, per RFC 6749 §6 — "the scope of the access
@@ -95,7 +117,14 @@ export interface FederationTokens {
 	 * type is what can notice.
 	 */
 	readonly grantedScope: string | undefined;
-	readonly rawParams?: Readonly<Record<string, unknown>>;
+	/**
+	 * The upstream's raw token response. Carried forward by every refresh and
+	 * encrypted by the Redis store (#293) — but no producer in this repository
+	 * writes it: no adapter reports the raw response, and both link-time
+	 * `attach` sites record `undefined`. It has been that way since the field
+	 * was added (#74).
+	 */
+	readonly rawParams: Readonly<Record<string, unknown>> | undefined;
 }
 
 /**

@@ -154,8 +154,8 @@ const REMOVE_BATCH_SIZE = 100;
  */
 interface Envelope {
 	accessToken: string;
-	refreshToken?: string;
-	idToken?: string;
+	refreshToken: string | undefined;
+	idToken: string | undefined;
 	/**
 	 * `number` = absolute epoch-ms of access token expiry. `null` = upstream provider
 	 * issued no finite expiry (e.g. GitHub OAuth Apps classic). Stored as explicit
@@ -164,17 +164,18 @@ interface Envelope {
 	 */
 	expiresAtMs: number | null;
 	/**
-	 * Required keys, like `FederationTokens`'s own: this envelope is the shape
-	 * the store writes, and a projection into it that forgot either field would
-	 * otherwise compile and drop it — `tokenType` failing open (#645). JSON drops
-	 * an `undefined` value, so on the wire the key is still absent when unset,
-	 * and `isEnvelope` reads it as optional.
+	 * Every field is a required key, like `FederationTokens`'s own: this
+	 * envelope is the shape the store writes, and a projection into it that
+	 * forgot a field would otherwise compile and drop it — `tokenType` failing
+	 * open (#645), the others each costing something. JSON drops an `undefined`
+	 * value, so on the wire an unset key is still absent, and `isEnvelope`
+	 * reads it as optional.
 	 */
 	tokenType: string | undefined;
-	scope?: string;
+	scope: string | undefined;
 	/** #647 — the link-time ceiling; `undefined` on a record written before it. */
 	grantedScope: string | undefined;
-	rawParams?: Record<string, unknown>;
+	rawParams: Record<string, unknown> | undefined;
 }
 
 /**

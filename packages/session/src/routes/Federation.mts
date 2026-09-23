@@ -495,6 +495,9 @@ export const createRouter = (
 					// requires it: a store copying the record field by field cannot
 					// forget a field the type makes it name.
 					tokenType,
+					// Every field of the record is a required key. No adapter
+					// reports the raw token response, so there is none to record.
+					rawParams: undefined,
 				});
 			}
 		} catch (err) {
@@ -1003,6 +1006,7 @@ export const createRouter = (
 					// #645 — as above: what the upstream named, recorded and not
 					// judged. The disclosure point owns that decision.
 					tokenType,
+					rawParams: undefined,
 				});
 				attachedToFederation = true;
 			}
