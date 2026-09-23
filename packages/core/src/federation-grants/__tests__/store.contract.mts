@@ -1657,16 +1657,18 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			it("is on what listBySubject, inspect and open return", async () => {
 				const grant = await activated();
 				await note(grant.version);
-				const stamp = { at: at(DAY), kind: "unavailable", count: 1 };
-				expect((await store.listBySubject("u-1", at(DAY)))[0]).toHaveProperty(
-					"refreshFailure",
-					stamp,
-				);
-				expect((await store.inspect("g-1", at(DAY)))?.grant).toHaveProperty(
-					"refreshFailure",
-					stamp,
-				);
-				expect((await store.open("g-1", at(DAY)))?.grant).toHaveProperty("refreshFailure", stamp);
+				// Every field named, and compared strictly: a read that left out an
+				// `undefined` one would pass a looser comparison (#626).
+				const stamp = {
+					at: at(DAY),
+					kind: "unavailable",
+					count: 1,
+					retryAfterSeconds: undefined,
+					upstreamCode: undefined,
+				};
+				expect((await store.listBySubject("u-1", at(DAY)))[0]?.refreshFailure).toStrictEqual(stamp);
+				expect((await store.inspect("g-1", at(DAY)))?.grant.refreshFailure).toStrictEqual(stamp);
+				expect((await store.open("g-1", at(DAY)))?.grant?.refreshFailure).toStrictEqual(stamp);
 			});
 		});
 
