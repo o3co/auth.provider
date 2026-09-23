@@ -33,17 +33,18 @@
 import type {
 	AppConfig,
 	ClientRepository,
+	ExchangeTokenValidator,
 	GrantContext,
 	GrantPolicyHook,
 	PublicClient,
 	TokenBinding,
+	ValidatedToken,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
-import type { ExchangeTokenValidator, ValidatedToken } from "#/validator/types.mjs";
 import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
 
 const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";

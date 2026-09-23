@@ -17,6 +17,7 @@
 import type {
 	AuditEvent,
 	AuditSink,
+	FederationProvider,
 	FederationTokenStore,
 	SessionFederationIndex,
 	SubjectSessionIndex,
@@ -27,7 +28,6 @@ import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { codeChallenge } from "#/federations/pkce.mjs";
-import type { FederationProvider } from "#/federations/types.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 
 // ---------------------------------------------------------------------------

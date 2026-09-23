@@ -15,7 +15,8 @@
  */
 
 import { generateKeyPairSync } from "node:crypto";
-import { codeChallenge, supportsLogout, supportsRefresh } from "@o3co/auth-provider-session";
+import { supportsLogout, supportsRefresh } from "@o3co/auth-provider-core";
+import { codeChallenge } from "@o3co/auth-provider-session";
 import { jwtVerify } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createOidcProvider, DEFAULT_OIDC_SCOPES, type OidcProviderConfig } from "#/oidc.mjs";

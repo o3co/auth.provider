@@ -25,6 +25,7 @@
  * then replay would otherwise bypass the binding entirely.
  */
 
+import type { FederationProvider } from "@o3co/auth-provider-core";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
@@ -33,7 +34,6 @@ import {
 	deriveFederationTransactionCookieName,
 	FEDERATION_TRANSACTION_KEY_PREFIX,
 } from "#/federations/transaction.mjs";
-import type { FederationProvider } from "#/federations/types.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 import {
 	makeFederationTokenStore,

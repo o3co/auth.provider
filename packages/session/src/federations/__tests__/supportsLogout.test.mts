@@ -14,14 +14,14 @@
  * limitations under the License.
  */
 
-import { describe, expect, it } from "vitest";
 import {
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProvider,
 	type SupportsLogout,
 	supportsLogout,
-} from "#/federations/types.mjs";
+} from "@o3co/auth-provider-core";
+import { describe, expect, it } from "vitest";
 
 function makeBaseProvider(name: string): FederationProvider {
 	return {

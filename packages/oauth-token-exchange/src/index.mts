@@ -31,8 +31,8 @@ export {
 	type CreateSelfIssuedAccessTokenValidatorOptions,
 	createSelfIssuedAccessTokenValidator,
 } from "./validator/selfIssuedAccessToken.mjs";
-export type {
-	ExchangeTokenValidationContext,
-	ExchangeTokenValidator,
-	ValidatedToken,
-} from "./validator/types.mjs";
+// `ExchangeTokenValidationContext`, `ExchangeTokenValidator` and
+// `ValidatedToken` are not re-exported: the contract moved to
+// `@o3co/auth-provider-core` with #626 P1, and a second export path for one
+// type is the thing that made the contribution type `unknown` in the first
+// place. Import them from core.

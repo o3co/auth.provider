@@ -17,16 +17,26 @@
 import { describe, expect, it } from "vitest";
 
 describe("package public surface (@o3co/auth-provider-session)", () => {
-	it("exports supportsDelegatedAuthorization as a runtime helper (#593, D17)", async () => {
-		const mod = await import("#/index.mjs");
-		expect(
-			typeof (mod as { supportsDelegatedAuthorization?: unknown }).supportsDelegatedAuthorization,
-		).toBe("function");
-	});
-
-	it("exports supportsLogout as a runtime helper", async () => {
-		const mod = await import("#/index.mjs");
-		expect(typeof (mod as { supportsLogout?: unknown }).supportsLogout).toBe("function");
+	it("does not re-export the federation adapter port, which core owns (#626 P1)", async () => {
+		// The hard break: the contract a federation is registered with is the one
+		// `oauth` and `federation-grants` read, and it is reachable by one path.
+		// A second export here is what made the contribution type `unknown`.
+		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
+		for (const name of [
+			"supportsDelegatedAuthorization",
+			"supportsLogout",
+			"supportsRefresh",
+			"supportsClaimMapping",
+			"identityClaimsProblem",
+			"selectIdentityClaims",
+			"RESERVED_DELEGATED_AUTHORIZATION_PARAMS",
+			"RESERVED_IDENTITY_CLAIMS",
+			"resolveFederationResponseMode",
+			"FEDERATION_RESPONSE_MODES",
+			"DEFAULT_FEDERATION_RESPONSE_MODE",
+		]) {
+			expect(name in mod).toBe(false);
+		}
 	});
 
 	it("exports sessionModule as a const Module value (not a factory)", async () => {
@@ -82,20 +92,17 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect((mod as { MAX_REDIRECT_URL_LENGTH?: unknown }).MAX_REDIRECT_URL_LENGTH).toBe(2048);
 	});
 
-	it("exports the #479 response-mode and client-secret surface a federation package needs", async () => {
+	it("exports the transaction and client-secret surface a federation package needs", async () => {
 		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
 		// A federation package (federation-apple) declares `responseMode` and may
 		// hand the route layer a computed client secret; both need the shared
 		// vocabulary rather than a private copy per adapter.
-		expect(typeof mod.resolveFederationResponseMode).toBe("function");
 		expect(typeof mod.createFederationTransactionStore).toBe("function");
 		expect(typeof mod.deriveFederationTransactionCookieName).toBe("function");
 		expect(typeof mod.mintFederationTransactionId).toBe("function");
 		// #494: removed from the public surface with the defect it implemented.
 		expect("applyCrossSiteStateCookie" in mod).toBe(false);
 		expect(typeof mod.resolveClientSecret).toBe("function");
-		expect(mod.DEFAULT_FEDERATION_RESPONSE_MODE).toBe("query");
-		expect(mod.FEDERATION_RESPONSE_MODES).toEqual(["query", "form_post"]);
 		// #481: the amr marker a federated login records is part of the contract.
 		expect((mod as { FEDERATED_AMR?: unknown }).FEDERATED_AMR).toBe("fed");
 	});

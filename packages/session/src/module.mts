@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { FederationProvider } from "@o3co/auth-provider-core";
 import {
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
@@ -25,7 +26,6 @@ import {
 import express from "express";
 import { extractFederationSection } from "./federations/extract-federation-section.mjs";
 import { deriveFederationTransactionCookieName } from "./federations/transaction.mjs";
-import type { FederationProvider } from "./federations/types.mjs";
 import * as federationRoutes from "./routes/Federation.mjs";
 import * as sessionRoutes from "./routes/Session.mjs";
 

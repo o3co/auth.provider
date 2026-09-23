@@ -14,11 +14,8 @@
  * limitations under the License.
  */
 
-import { defineModule } from "@o3co/auth-provider-core";
 import {
-	callbackUrlForExchange,
-	codeChallenge,
-	createFederationRedirectPolicy,
+	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProfile,
@@ -28,6 +25,11 @@ import {
 	type SupportsClaimMapping,
 	type SupportsLogout,
 	type SupportsRefresh,
+} from "@o3co/auth-provider-core";
+import {
+	callbackUrlForExchange,
+	codeChallenge,
+	createFederationRedirectPolicy,
 } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 

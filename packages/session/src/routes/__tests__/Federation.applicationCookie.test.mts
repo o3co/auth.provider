@@ -37,13 +37,13 @@
  * may write there.
  */
 
+import type { FederationProvider } from "@o3co/auth-provider-core";
 import express from "express";
 import session from "express-session";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { codeChallenge } from "#/federations/pkce.mjs";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
-import type { FederationProvider } from "#/federations/types.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 import {
 	makeFederationTokenStore,

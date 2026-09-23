@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { ValidatedToken } from "./validator/types.mjs";
+import type { ValidatedToken } from "@o3co/auth-provider-core";
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);

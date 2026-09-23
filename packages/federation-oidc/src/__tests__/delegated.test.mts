@@ -14,7 +14,8 @@
  * limitations under the License.
  */
 
-import { codeChallenge, supportsDelegatedAuthorization } from "@o3co/auth-provider-session";
+import { supportsDelegatedAuthorization } from "@o3co/auth-provider-core";
+import { codeChallenge } from "@o3co/auth-provider-session";
 import { describe, expect, it } from "vitest";
 import { createOidcProvider, type OidcProviderConfig } from "#/oidc.mjs";
 import { createFakeIdp } from "./helpers.mjs";

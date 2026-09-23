@@ -14,12 +14,12 @@
  * limitations under the License.
  */
 
+import type { ExchangeTokenValidator } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import {
 	ExchangeTokenValidatorRegistry,
 	ExchangeTokenValidatorRegistryError,
 } from "#/validator/registry.mjs";
-import type { ExchangeTokenValidator } from "#/validator/types.mjs";
 
 const stubValidator = (): ExchangeTokenValidator => ({
 	async validate() {

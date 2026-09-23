@@ -20,10 +20,13 @@ import {
 	consoleLogger,
 	emitAuditEvent,
 	errorEnvelope,
+	type FederationProvider,
 	type FederationTokenStore,
 	type Logger,
+	resolveFederationResponseMode,
 	type SessionFederationIndex,
 	type SubjectSessionIndex,
+	supportsClaimMapping,
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
@@ -32,7 +35,6 @@ import { checkRequestOrigin } from "../csrf.mjs";
 import { mergeFederatedClaims } from "../federations/claim-precedence.mjs";
 import { generateCodeVerifier } from "../federations/pkce.mjs";
 import type { FederationRedirectPolicy } from "../federations/redirect-policy.mjs";
-import { resolveFederationResponseMode } from "../federations/response-mode.mjs";
 import {
 	createFederationTransactionStore,
 	DEFAULT_FEDERATION_TRANSACTION_TTL_MS,
@@ -42,7 +44,6 @@ import {
 	type FederationTransactionStore,
 	mintFederationTransactionId,
 } from "../federations/transaction.mjs";
-import { type FederationProvider, supportsClaimMapping } from "../federations/types.mjs";
 import { readCookie } from "../internal/cookies.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 

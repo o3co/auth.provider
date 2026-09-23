@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import type { FederationProvider } from "@o3co/auth-provider-core";
 import {
 	type AppConfig,
 	defineModule,
@@ -24,7 +25,6 @@ import {
 } from "@o3co/auth-provider-core";
 import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
-import type { FederationProvider } from "#/federations/types.mjs";
 import { sessionModule } from "#/module.mjs";
 
 // ---------------------------------------------------------------------------

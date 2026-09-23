@@ -14,9 +14,9 @@
  * limitations under the License.
  */
 
+import type { ValidatedToken } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import { buildActClaim, matchesMayActClient } from "#/act.mjs";
-import type { ValidatedToken } from "#/validator/types.mjs";
 
 const tok = (overrides: Partial<ValidatedToken> = {}): ValidatedToken => ({
 	sub: "user-1",

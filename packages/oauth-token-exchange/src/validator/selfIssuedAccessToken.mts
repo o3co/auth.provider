@@ -14,6 +14,11 @@
  * limitations under the License.
  */
 
+import type {
+	ExchangeTokenValidationContext,
+	ExchangeTokenValidator,
+	ValidatedToken,
+} from "@o3co/auth-provider-core";
 import {
 	type AccessTokenDenylist,
 	type KeyStore,
@@ -22,11 +27,6 @@ import {
 	type SubjectRevocation,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
-import type {
-	ExchangeTokenValidationContext,
-	ExchangeTokenValidator,
-	ValidatedToken,
-} from "./types.mjs";
 
 export const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
 

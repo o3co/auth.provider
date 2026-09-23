@@ -63,9 +63,9 @@ import {
 	resolveFederationGrantRetrievalLimits,
 	type SubjectRevocation,
 	type SupportsSessionsOnlyRevocation,
+	supportsDelegatedAuthorization,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { supportsDelegatedAuthorization } from "@o3co/auth-provider-session";
 import { z } from "zod";
 import {
 	requireFederationGrantIdentityLookup,
