@@ -879,7 +879,7 @@ describe("POST /oauth/federation/:name/token", () => {
 		// -------------------------------------------------------------------------
 
 		describe("refuses to believe an unusable reading from the adapter (#626 P1 review)", () => {
-			const refreshingApp = (answer: unknown, stored = baseFedTokens) => {
+			const refreshingApp = (answer: unknown, stored: Record<string, unknown> = baseFedTokens) => {
 				const expiredTokens = { ...stored, expiresAt: new Date(Date.now() - 1000) };
 				const refreshProvider = {
 					...federationBase("google"),
@@ -954,6 +954,68 @@ describe("POST /oauth/federation/:name/token", () => {
 				// `access_token: ""` is not a credential, and answering 200 with one
 				// is a malformed RFC 6749 §5.1 response.
 				const { app } = refreshingApp({ accessToken: "" });
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(500);
+				expect(res.body.error).toBe("refresh_failed");
+			});
+
+			it("keeps a rotated id_token alongside the rotated refresh token", async () => {
+				// The stored `id_token` is what logout sends as `id_token_hint`, so
+				// an upstream that rotated both should not leave the session holding
+				// the old one against the new refresh token.
+				const { app, fedTokenStore } = refreshingApp(
+					{ refreshToken: "rotated-rt", idToken: "rotated-idt" },
+					{ ...baseFedTokens, refreshToken: "original-rt", idToken: "original-idt" },
+				);
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(500);
+				expect(fedTokenStore.update).toHaveBeenCalledWith(
+					expect.any(String),
+					"google",
+					expect.objectContaining({ refreshToken: "rotated-rt", idToken: "rotated-idt" }),
+				);
+			});
+
+			it("keeps the stored id_token when the refusal carries no usable one", async () => {
+				const { app, fedTokenStore } = refreshingApp(
+					{ refreshToken: "rotated-rt", idToken: "" },
+					{ ...baseFedTokens, refreshToken: "original-rt", idToken: "original-idt" },
+				);
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(500);
+				expect(fedTokenStore.update).toHaveBeenCalledWith(
+					expect.any(String),
+					"google",
+					expect.objectContaining({ idToken: "original-idt" }),
+				);
+			});
+
+			it("still answers 500 when the best-effort write of the rotated token fails", async () => {
+				// Best effort means the refusal is unchanged: the refresh had already
+				// failed, and a store that cannot take the rotated token is one more
+				// thing wrong rather than a different answer.
+				const expiredTokens = {
+					...baseFedTokens,
+					expiresAt: new Date(Date.now() - 1000),
+					refreshToken: "original-rt",
+				};
+				const refreshProvider = {
+					...federationBase("google"),
+					refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" }),
+				} as unknown as FederationProvider;
+				const fedTokenStore = makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expiredTokens),
+					update: vi.fn().mockRejectedValue(new Error("store down")),
+				});
+				const app = buildApp({
+					fedTokenStore,
+					getFederationProviders: () =>
+						new Map<string, FederationProvider>([["google", refreshProvider]]),
+				});
+
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
 				expect(res.status).toBe(500);
