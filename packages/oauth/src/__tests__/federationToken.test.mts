@@ -1392,12 +1392,15 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(200);
 			expect(res.body.scope).toBe("openid");
-			expect(fedTokenStore.update).toHaveBeenCalledWith(
-				expect.any(String),
-				"google",
-				// The unusable ceiling is not written back as one.
-				expect.objectContaining({ grantedScope: undefined }),
-			);
+			// `objectContaining({ grantedScope: undefined })` would also pass if the
+			// key were never written, so the whole record is read instead.
+			const written = (fedTokenStore.update as ReturnType<typeof vi.fn>).mock.calls[0][2] as {
+				grantedScope?: string;
+				scope?: string;
+			};
+			expect("grantedScope" in written).toBe(true);
+			expect(written.grantedScope).toBeUndefined();
+			expect(written.scope).toBe("openid");
 		});
 
 		it("stores a repeated entry once (#647)", async () => {
@@ -1639,7 +1642,7 @@ describe("POST /oauth/federation/:name/token", () => {
 		it.each([
 			["whitespace only", "   "],
 			["an empty string", ""],
-		])("keeps the stored scope when the refresh answers %s", async (_l, scope) => {
+		])("keeps the stored scope when the refresh names one it cannot use: %s", async (_l, scope) => {
 			// RFC 6749 section 3.3 makes a scope a space-delimited list, so neither
 			// of these names one. Parsed, both are the empty list - which would
 			// satisfy the subset check vacuously and store the whitespace, leaving
@@ -1705,7 +1708,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(res.body.scope).toBe("openid email");
 		});
 
-		it("keeps the stored scope when the refresh names none (absent means unchanged)", async () => {
+		it("reads a refresh that names none as the stored scope when the record has no ceiling", async () => {
 			const expiredTokens = {
 				...baseFedTokens,
 				expiresAt: new Date(Date.now() - 1000),

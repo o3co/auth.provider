@@ -608,6 +608,44 @@ describe("account linking across federations (#482)", () => {
 	});
 
 	describe("the callback", () => {
+		it("records the requested scope as consent when the adapter names none (#647)", async () => {
+			// The fallback limb, through the route rather than through the helper
+			// alone: this is where the answered scope and the requested list are
+			// actually wired together. RFC 6749 section 3.3 makes the answer
+			// optional only when it matches the request, so silence is the request.
+			const silent = makeFakeProvider({
+				scope: ["openid", "email"],
+				exchangeCode: vi.fn(async () => ({
+					issuer: "https://idp.example.com",
+					sub: "external-42",
+					email: "u@example.com",
+					accessToken: "at",
+					refreshToken: "rt",
+					idToken: "it",
+					expiresAt: new Date(Date.now() + 3_600_000),
+				})),
+			});
+			const fts = makeFederationTokenStore();
+			const { app } = buildCallbackApp({
+				providers: new Map([["test", silent]]),
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: linkableRepo({ current: null }),
+				userSessionStore: liveStore(),
+				sessionFederationIndex: makeSessionFederationIndex(),
+				federationTokenStore: fts,
+				auditSink: recorder().sink,
+			});
+			const agent = await plantAndGetAgent(app);
+			expect((await callback(agent)).status).toBe(302);
+
+			expect(fts.attach).toHaveBeenCalledWith(
+				"s-1",
+				"test",
+				expect.objectContaining({ scope: "openid email", grantedScope: "openid email" }),
+			);
+		});
+
 		it("links an unknown identity to the signed-in account, attaches the federation to the live session, and mints no new one", async () => {
 			const repo = linkableRepo({ current: null });
 			const uss = liveStore();

@@ -133,6 +133,18 @@ const canonicalScope = (value: unknown): string | undefined => {
  * neither an upstream's spacing nor a repeated entry can become the value a
  * later refresh is judged against.
  *
+ * **Which way this errs.** Reading silence as the bound can over-report: an
+ * upstream that narrows and then says nothing on later refreshes leaves the
+ * record claiming more than the token holds. That is deliberate, and it is the
+ * opposite polarity from what this route used to choose. It is bounded by
+ * consent — `grantedScope` is never exceeded and no authorization decision in
+ * this provider reads the field, only the `scope` of the 200 does — so the
+ * cost is a client told its token can do something it cannot, against the
+ * alternative of a narrowing that could never be undone. A client that reads
+ * the field to decide whether to re-prompt for consent is the case to watch.
+ *
+ * The bound itself is only ever narrowed by consent, never by an answer.
+ *
  * The sibling of this rule for grants that outlive a session is
  * `scopesWithin` / `consentedScopes` in
  * `@o3co/auth-provider-core`'s `federation-grants/eligibility.mts`.
@@ -177,16 +189,20 @@ const narrowedScope = (
 	const bound = parseScope(granted);
 	const allowed = bound.length > 0 ? bound : parseScope(stored);
 	if (allowed.length === 0) return storedValue;
+	// Canonical on every limb, including the ones that keep what is stored: a
+	// record whose scope is ragged would otherwise keep that form forever, and
+	// a whitespace-only one is truthy enough to be emitted in a 200.
+	const keep = canonicalScope(stored);
 
 	// Named but unusable is not silence. The upstream said something about the
 	// scope and this route could not read it, so it learned nothing — and
 	// nothing is a reason to keep what is stored, never to widen it.
-	if (answered.kind === "unusable") return storedValue;
+	if (answered.kind === "unusable") return keep;
 	if (answered.kind === "omitted") return allowed.join(" ");
 
 	const asked = parseScope(answered.value);
 	const within = new Set(allowed);
-	return asked.every((entry) => within.has(entry)) ? asked.join(" ") : storedValue;
+	return asked.every((entry) => within.has(entry)) ? asked.join(" ") : keep;
 };
 
 // `supportsRefresh` is core's, and so is the capability it narrows to: this
@@ -908,13 +924,9 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				// the client must present it. Honouring a rotated one is a decision
 				// of its own, filed on #626, not a side effect of this move.
 				tokenType: currentTokens.tokenType,
-				// RFC 6749 §6: a refresh may NARROW the scope, and §5.1 makes the
-				// answer authoritative when it differs. Storing the old one would
-				// leave the record claiming access the upstream just withdrew.
-				// Absent means unchanged, and widening is refused rather than
-				// recorded: §6 forbids a refresh from granting a scope the user
-				// never consented to, so an answer that adds one is the adapter
-				// or the upstream misbehaving, not a grant.
+				// The three readings and the bound they are judged against are
+				// `narrowedScope`'s, next to its own reasoning. Nothing about the
+				// rule is restated here, so the two cannot drift apart.
 				scope: narrowedScope(
 					classifyAnsweredScope(answer, unreadable),
 					currentTokens.scope,

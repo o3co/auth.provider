@@ -54,7 +54,21 @@ describe("consentedScope (#647)", () => {
 		expect(consentedScope(undefined, ["openid", "email", "openid"])).toBe("openid email");
 	});
 
-	it("ignores a non-string entry in the requested list", () => {
+	it("ignores an entry the requested list should not contain", () => {
+		// The list is typed `readonly string[]`, but a provider is a third-party
+		// extension point and the type is not a runtime guarantee — which is what
+		// D5 is about. Both branches have to survive what the type forbids.
 		expect(consentedScope(undefined, ["openid", "", "email"])).toBe("openid email");
+		expect(consentedScope(undefined, ["openid", 42, null, {}] as unknown as string[])).toBe(
+			"openid",
+		);
+	});
+
+	it("parses the requested list rather than merely filtering it", () => {
+		// An entry may itself be a space-delimited list, or whitespace. A rule the
+		// answered branch keeps and this one drops would write a ceiling that only
+		// survives because the consumer re-parses it defensively.
+		expect(consentedScope(undefined, ["openid email", "openid"])).toBe("openid email");
+		expect(consentedScope(undefined, ["   "])).toBeUndefined();
 	});
 });

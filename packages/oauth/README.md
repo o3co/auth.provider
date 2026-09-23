@@ -482,9 +482,26 @@ Each `Client` supports five optional fields for logout behavior:
   "access_token": "<upstream-IdP-access-token>",
   "token_type": "Bearer",
   "expires_in": 3600,
-  "scope": "<if-available>"
+  "scope": "<what the connection holds>"
 }
 ```
+
+`scope` is what the stored connection holds, which since #647 is recorded when
+the federation is linked rather than left empty. It is bounded by what the user
+consented to at that moment, so a refresh can narrow it and can restore it to
+the grant, and can never take it past.
+
+One consequence worth stating: an upstream that narrows and then stays silent
+on later refreshes leaves this field claiming more than the token holds. That
+is deliberate — the alternative made the first narrowing permanent — and it is
+bounded by consent. A client that reads `scope` to decide whether to send the
+user back for consent should treat it as an upper bound rather than a
+guarantee.
+
+Third-party `FederationTokenStore` adapters carry an optional `grantedScope`
+alongside `scope`. An adapter that copies field by field and does not know the
+name drops it silently; the connection then falls back to its current scope as
+the bound, which under-reports rather than over-claims.
 
 ### Error responses
 
