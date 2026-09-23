@@ -23,6 +23,7 @@ import { federationGrantAuditMetadata } from "./auditMetadata.mjs";
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
 import {
 	federationGrantIneligibilityRetry,
+	federationGrantRefreshFailureStamp,
 	federationGrantRefreshFailureStands,
 	isFederationGrantInteractionCode,
 	isUsableMaxUpstreamAccessTokenLifetime,
@@ -1204,15 +1205,12 @@ async function refreshUnderLock(
 		const wouldStand =
 			count === undefined
 				? { stands: false as const }
-				: federationGrantRefreshFailureStands(
-						{ ...failure, count },
-						{
-							now: at,
-							allowanceMs: dateAllowanceMs(limits),
-							backoffMs: limits.refreshFailureBackoffMs,
-							ceilingMs: limits.ineligibleRetryAfterMs,
-						},
-					);
+				: federationGrantRefreshFailureStands(federationGrantRefreshFailureStamp(failure, count), {
+						now: at,
+						allowanceMs: dateAllowanceMs(limits),
+						backoffMs: limits.refreshFailureBackoffMs,
+						ceilingMs: limits.ineligibleRetryAfterMs,
+					});
 		if (
 			wouldStand.stands &&
 			(denial.code === "rate_limited" ||
@@ -1245,7 +1243,7 @@ async function refreshUnderLock(
 	// is judged again, against the maximum and the clock, at every disclosure.
 	let credentials: FederationGrantCredentials = {
 		refreshToken: response.refreshToken,
-		...(held.keep !== undefined ? { accessToken: held.keep } : {}),
+		accessToken: held.keep,
 	};
 	let ineligible: FederationGrantIneligibilityMarker | null = null;
 	const marker = (

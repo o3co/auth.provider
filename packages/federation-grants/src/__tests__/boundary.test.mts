@@ -215,6 +215,7 @@ const boot = async (boundaries: Boundaries = {}, spent = false) => {
 			consent: { at, sid: "sid", scopes: [...connection.scopes] },
 			authorizedAt: at,
 			expiresAt: new Date(at.getTime() + 30 * DAY),
+			resource: undefined,
 		},
 		credentials: {
 			refreshToken: "r",

@@ -246,7 +246,7 @@ describe("POST /oauth/federation-grants/:grantId/reauthorize — renewing a gran
 		const marked = await h.store.replaceCredentials({
 			grantId: GRANT_ID,
 			expectedVersion: grant?.version ?? -1,
-			credentials: { refreshToken: SECRET },
+			credentials: { refreshToken: SECRET, accessToken: undefined },
 			ineligible: {
 				reason: "scope_exceeded",
 				at: h.world.now,

@@ -83,6 +83,7 @@ const authorization = (
 	identityRevision: "identity-1",
 	authorizationRevision: "authorization-1",
 	upstream: { issuer: "https://dev-1.okta.test", subject: "00u-alice" },
+	resource: undefined,
 	scopes: [...SCOPES],
 	consent: { at: at(MIN), sid: "sid-1", scopes: [...SCOPES] },
 	authorizedAt: at(2 * MIN),
@@ -117,6 +118,47 @@ const renewal = (over: Partial<FederationGrantAuthorization> = {}) =>
 		expiresAt: at(60 * DAY),
 		...over,
 	});
+
+/**
+ * The usage fields of a grant with none recorded, named as a store hands them
+ * back (#626): an authorized grant carries each key, `undefined` or not.
+ */
+const noUsage = { lastUsedAt: undefined, ineligible: undefined, refreshFailure: undefined };
+
+/**
+ * A field's value on a record that has to be there, with the key held to the
+ * shape the port promises (#626): an authorized grant, and a failure stamp,
+ * NAME every field — `undefined` when there is none — and a grant never
+ * authorized has none of the authorization or usage keys at all. So a store
+ * that left a key out of an authorized grant fails here even when the value
+ * it would have held is `undefined`. A missing record is a failure, not a
+ * pass.
+ *
+ * Which shape applies is read from the status — `pending` never authorized,
+ * `active` and `reauthorization_required` authorized — and never from the
+ * fields under test: an authorized grant a store broke badly enough to lose
+ * `consent` must still be held to naming every key. A revoked grant can be
+ * either, so the caller, who made the fixture, says which.
+ */
+const fieldOf = (
+	record: object | null | undefined,
+	key: string,
+	revoked?: "was-authorized" | "never-authorized",
+): unknown => {
+	if (record === null || record === undefined) throw new Error(`no record to read ${key} from`);
+	const fields = record as Record<string, unknown>;
+	if (fields.status === "revoked" && revoked === undefined) {
+		throw new Error(`say whether the revoked grant read for ${key} was authorized`);
+	}
+	const neverAuthorized =
+		fields.status === "pending" || (fields.status === "revoked" && revoked === "never-authorized");
+	if (neverAuthorized) {
+		if (key in fields) throw new Error(`a grant never authorized names ${key}`);
+	} else if (!(key in fields)) {
+		throw new Error(`${key} is left out rather than named`);
+	}
+	return fields[key];
+};
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -194,7 +236,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			const written = await store.replaceCredentials({
 				grantId: id,
 				expectedVersion: grant.version,
-				credentials: { refreshToken: "rt-2" },
+				credentials: { refreshToken: "rt-2", accessToken: undefined },
 				ineligible: marker(),
 				now: at(4 * MIN),
 			});
@@ -475,7 +517,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					expect(await renew()).toEqual({ ok: false });
 					expect(await store.open("g-1", at(DAY + 3 * MIN))).toStrictEqual({
 						grant,
-						credentials: { state: "ok", value: { refreshToken: "rt-2" } },
+						credentials: { state: "ok", value: { refreshToken: "rt-2", accessToken: undefined } },
 					});
 				});
 
@@ -642,6 +684,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					createdAt: T0,
 					version: 2,
 					...authorization(),
+					...noUsage,
 				});
 				expect(await store.find("g-1", at(3 * MIN))).toStrictEqual(grant);
 				expect(await store.open("g-1", at(3 * MIN))).toStrictEqual({
@@ -839,10 +882,11 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 						createdAt: T0,
 						version: 3,
 						...renewal(),
+						...noUsage,
 					});
 					// The first authorization named a resource and the renewal names
 					// none: a merge would have kept it.
-					expect(grant).not.toHaveProperty("resource");
+					expect(fieldOf(grant, "resource")).toBeUndefined();
 					expect(await openedCredentials("g-1", at(DAY + 3 * MIN))).toStrictEqual({
 						state: "ok",
 						value: credentials("2"),
@@ -852,10 +896,10 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				it("replaces the credentials as a whole: a renewal that brings no access token leaves none", async () => {
 					await activated();
 					await nameRenewalIntent();
-					await renew({ credentials: { refreshToken: "rt-2" } });
+					await renew({ credentials: { refreshToken: "rt-2", accessToken: undefined } });
 					expect(await openedCredentials("g-1", at(DAY + 3 * MIN))).toStrictEqual({
 						state: "ok",
-						value: { refreshToken: "rt-2" },
+						value: { refreshToken: "rt-2", accessToken: undefined },
 					});
 				});
 
@@ -865,7 +909,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					await store.replaceCredentials({
 						grantId: "g-1",
 						expectedVersion: grant.version,
-						credentials: { refreshToken: "rt-starved" },
+						credentials: { refreshToken: "rt-starved", accessToken: undefined },
 						ineligible: marker(),
 						now: at(DAY - MIN),
 					});
@@ -873,7 +917,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					await nameRenewalIntent();
 					expect((await renew()).ok).toBe(true);
 					const renewed = await store.find("g-1", at(DAY + 3 * MIN));
-					expect(renewed).not.toHaveProperty("ineligible");
+					expect(fieldOf(renewed, "ineligible")).toBeUndefined();
 					expect(renewed).toHaveProperty("lastUsedAt", at(3 * MIN));
 				});
 
@@ -1005,12 +1049,15 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				await store.replaceCredentials({
 					grantId: "g-1",
 					expectedVersion: grant.version,
-					credentials: { refreshToken: "rt-2" },
+					credentials: { refreshToken: "rt-2", accessToken: undefined },
 					ineligible: marker(),
 					now: at(DAY),
 				});
 				const opened = await store.open("g-1", at(DAY));
-				expect(opened?.credentials).toStrictEqual({ state: "ok", value: { refreshToken: "rt-2" } });
+				expect(opened?.credentials).toStrictEqual({
+					state: "ok",
+					value: { refreshToken: "rt-2", accessToken: undefined },
+				});
 			});
 
 			it("sets the marker and clears it, in the same write as the credentials", async () => {
@@ -1018,7 +1065,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				const starved = await store.replaceCredentials({
 					grantId: "g-1",
 					expectedVersion: grant.version,
-					credentials: { refreshToken: "rt-2" },
+					credentials: { refreshToken: "rt-2", accessToken: undefined },
 					ineligible: marker(),
 					now: at(DAY),
 				});
@@ -1034,8 +1081,8 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					now: at(DAY + MIN),
 				});
 				if (!fed.ok) throw new Error("the second refresh was refused");
-				expect(fed.grant).not.toHaveProperty("ineligible");
-				expect(await store.find("g-1", at(DAY + MIN))).not.toHaveProperty("ineligible");
+				expect(fieldOf(fed.grant, "ineligible")).toBeUndefined();
+				expect(fieldOf(await store.find("g-1", at(DAY + MIN)), "ineligible")).toBeUndefined();
 			});
 
 			it("fails on a version that is not the stored one, and changes nothing", async () => {
@@ -1117,7 +1164,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				const starved = await store.replaceCredentials({
 					grantId: "g-1",
 					expectedVersion: grant.version,
-					credentials: { refreshToken: "rt-2" },
+					credentials: { refreshToken: "rt-2", accessToken: undefined },
 					ineligible: marker(),
 					now: at(4 * MIN),
 				});
@@ -1218,7 +1265,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				const starved = await store.replaceCredentials({
 					grantId: "g-1",
 					expectedVersion: grant.version,
-					credentials: { refreshToken: "rt-2" },
+					credentials: { refreshToken: "rt-2", accessToken: undefined },
 					ineligible: marker(),
 					now: at(4 * MIN),
 				});
@@ -1326,7 +1373,13 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				const expected = {
 					...grant,
 					lastUsedAt: at(DAY - MIN),
-					refreshFailure: { at: at(DAY), kind: "rate_limited", count: 1, retryAfterSeconds: 17 },
+					refreshFailure: {
+						at: at(DAY),
+						kind: "rate_limited",
+						count: 1,
+						retryAfterSeconds: 17,
+						upstreamCode: undefined,
+					},
 				};
 				expect(written).toStrictEqual({ ok: true, grant: expected });
 				expect(await store.find("g-1", at(DAY))).toStrictEqual(expected);
@@ -1380,6 +1433,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 							at: at(DAY),
 							kind: "rejected",
 							count: 1,
+							retryAfterSeconds: undefined,
 							upstreamCode: code,
 						});
 						expect(kept?.version).toBe(grant.version);
@@ -1415,7 +1469,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 						now: later,
 					});
 					expect(replaced).toMatchObject({ ok: true });
-					expect(await store.find("g-1", later)).not.toHaveProperty("refreshFailure");
+					expect(fieldOf(await store.find("g-1", later), "refreshFailure")).toBeUndefined();
 
 					const again = await note(
 						(await store.find("g-1", later))?.version ?? -1,
@@ -1433,7 +1487,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 						now: at(DAY + 2 * MIN),
 					});
 					expect(ended).toMatchObject({ ok: true });
-					expect(await store.find("g-1", at(DAY + 2 * MIN))).not.toHaveProperty("refreshFailure");
+					expect(
+						fieldOf(await store.find("g-1", at(DAY + 2 * MIN)), "refreshFailure"),
+					).toBeUndefined();
 				});
 			});
 
@@ -1455,9 +1511,12 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					ok: true,
 					grant: { refreshFailure: { kind: "rejected", count: 3 } },
 				});
-				expect((await store.find("g-1", at(DAY + 2 * MIN)))?.refreshFailure).not.toHaveProperty(
-					"retryAfterSeconds",
-				);
+				expect(
+					fieldOf(
+						(await store.find("g-1", at(DAY + 2 * MIN)))?.refreshFailure,
+						"retryAfterSeconds",
+					),
+				).toBeUndefined();
 			});
 
 			it("starts a new row when the stamp it replaces is older than the row window: a failure a day later is the first of its row again", async () => {
@@ -1481,10 +1540,11 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				const newer = await note(grant.version, { kind: "rate_limited", retryAfterSeconds: 120 });
 				expect(newer.ok).toBe(true);
 				expect(await note(grant.version, { at: at(DAY - 1) }, at(DAY))).toEqual({ ok: false });
-				expect((await store.find("g-1", at(DAY)))?.refreshFailure).toMatchObject({
+				expect((await store.find("g-1", at(DAY)))?.refreshFailure).toStrictEqual({
 					at: at(DAY),
 					kind: "rate_limited",
 					retryAfterSeconds: 120,
+					upstreamCode: undefined,
 					count: 1,
 				});
 				// The same instant is not before: a second stamp at the same date counts on.
@@ -1524,9 +1584,15 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 						id,
 					).toEqual({ ok: false });
 				}
-				expect(await store.find("g-pending", at(5 * MIN))).not.toHaveProperty("refreshFailure");
-				expect(await store.find("g-needs-user", at(DAY))).not.toHaveProperty("refreshFailure");
-				expect(await store.find("g-revoked", at(DAY))).not.toHaveProperty("refreshFailure");
+				expect(
+					fieldOf(await store.find("g-pending", at(5 * MIN)), "refreshFailure"),
+				).toBeUndefined();
+				expect(
+					fieldOf(await store.find("g-needs-user", at(DAY)), "refreshFailure"),
+				).toBeUndefined();
+				expect(
+					fieldOf(await store.find("g-revoked", at(DAY)), "refreshFailure", "was-authorized"),
+				).toBeUndefined();
 			});
 
 			it("is cleared by whatever replaces or ends the credentials: a refresh that wrote, a renewal, a mark, a revocation", async () => {
@@ -1535,18 +1601,20 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				const replaced = await store.replaceCredentials({
 					grantId: "g-1",
 					expectedVersion: grant.version,
-					credentials: { refreshToken: "rt-2" },
+					credentials: { refreshToken: "rt-2", accessToken: undefined },
 					ineligible: marker(),
 					now: at(DAY + MIN),
 				});
 				expect(replaced.ok).toBe(true);
-				expect(await store.find("g-1", at(DAY + MIN))).not.toHaveProperty("refreshFailure");
+				expect(fieldOf(await store.find("g-1", at(DAY + MIN)), "refreshFailure")).toBeUndefined();
 
 				// Stamped again, then renewed.
 				await note(grant.version + 1, { at: at(DAY + 2 * MIN) }, at(DAY + 2 * MIN));
 				await nameRenewalIntent();
 				expect((await renew()).ok).toBe(true);
-				expect(await store.find("g-1", at(DAY + 3 * MIN))).not.toHaveProperty("refreshFailure");
+				expect(
+					fieldOf(await store.find("g-1", at(DAY + 3 * MIN)), "refreshFailure"),
+				).toBeUndefined();
 
 				// Stamped again, then marked.
 				const renewed = await store.find("g-1", at(DAY + 3 * MIN));
@@ -1558,7 +1626,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					now: at(DAY + 4 * MIN),
 				});
 				expect(marked.ok).toBe(true);
-				expect(await store.find("g-1", at(DAY + 4 * MIN))).not.toHaveProperty("refreshFailure");
+				expect(
+					fieldOf(await store.find("g-1", at(DAY + 4 * MIN)), "refreshFailure"),
+				).toBeUndefined();
 
 				await activated("g-2");
 				const other = await store.find("g-2", at(DAY));
@@ -1571,7 +1641,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					now: at(DAY),
 				});
 				await store.revoke("g-2", "client", at(DAY + MIN));
-				expect(await store.find("g-2", at(DAY + MIN))).not.toHaveProperty("refreshFailure");
+				expect(
+					fieldOf(await store.find("g-2", at(DAY + MIN)), "refreshFailure", "was-authorized"),
+				).toBeUndefined();
 			});
 
 			it("copies what it is given and what it returns: neither the caller's date nor the returned record reaches the store", async () => {
@@ -1592,22 +1664,26 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					at: at(DAY),
 					kind: "unavailable",
 					count: 1,
+					retryAfterSeconds: undefined,
+					upstreamCode: undefined,
 				});
 			});
 
 			it("is on what listBySubject, inspect and open return", async () => {
 				const grant = await activated();
 				await note(grant.version);
-				const stamp = { at: at(DAY), kind: "unavailable", count: 1 };
-				expect((await store.listBySubject("u-1", at(DAY)))[0]).toHaveProperty(
-					"refreshFailure",
-					stamp,
-				);
-				expect((await store.inspect("g-1", at(DAY)))?.grant).toHaveProperty(
-					"refreshFailure",
-					stamp,
-				);
-				expect((await store.open("g-1", at(DAY)))?.grant).toHaveProperty("refreshFailure", stamp);
+				// Every field named, and compared strictly: a read that left out an
+				// `undefined` one would pass a looser comparison (#626).
+				const stamp = {
+					at: at(DAY),
+					kind: "unavailable",
+					count: 1,
+					retryAfterSeconds: undefined,
+					upstreamCode: undefined,
+				};
+				expect((await store.listBySubject("u-1", at(DAY)))[0]?.refreshFailure).toStrictEqual(stamp);
+				expect((await store.inspect("g-1", at(DAY)))?.grant.refreshFailure).toStrictEqual(stamp);
+				expect((await store.open("g-1", at(DAY)))?.grant?.refreshFailure).toStrictEqual(stamp);
 			});
 		});
 
@@ -1637,10 +1713,14 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				}
 				await expect(store.touch("g-active", INVALID)).resolves.toBeUndefined();
 
-				expect(await store.find("g-pending", at(5 * MIN))).not.toHaveProperty("lastUsedAt");
-				expect(await store.find("g-needs-user", at(5 * MIN))).not.toHaveProperty("lastUsedAt");
-				expect(await store.find("g-revoked", at(2 * DAY))).not.toHaveProperty("lastUsedAt");
-				expect(await store.find("g-active", at(5 * MIN))).not.toHaveProperty("lastUsedAt");
+				expect(fieldOf(await store.find("g-pending", at(5 * MIN)), "lastUsedAt")).toBeUndefined();
+				expect(
+					fieldOf(await store.find("g-needs-user", at(5 * MIN)), "lastUsedAt"),
+				).toBeUndefined();
+				expect(
+					fieldOf(await store.find("g-revoked", at(2 * DAY)), "lastUsedAt", "was-authorized"),
+				).toBeUndefined();
+				expect(fieldOf(await store.find("g-active", at(5 * MIN)), "lastUsedAt")).toBeUndefined();
 				expect(await store.find("g-unknown", at(5 * MIN))).toBeNull();
 			});
 		});
@@ -1862,6 +1942,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 						createdAt: T0,
 						version: 2,
 						...authorization(),
+						...noUsage,
 					},
 					credentials: { state: "ok", value: credentials("1") },
 				});
@@ -1901,6 +1982,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					createdAt: T0,
 					version: 2,
 					...authorization(),
+					...noUsage,
 				};
 				expect(await store.open("g-1", at(DAY))).toStrictEqual({
 					grant,
@@ -2260,7 +2342,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 							}),
 					);
 					expect(await store.find("g-1", at(DAY))).toMatchObject({ version: grant.version + 1 });
-					expect(await store.find("g-1", at(DAY))).not.toHaveProperty("refreshFailure");
+					expect(fieldOf(await store.find("g-1", at(DAY)), "refreshFailure")).toBeUndefined();
 					expect(await store.open("g-1", at(DAY))).toMatchObject({
 						credentials: { state: "ok", value: credentials("2") },
 					});
@@ -2280,7 +2362,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 						status: "active",
 						version: grant.version + 1,
 					});
-					expect(await store.find("g-1", at(DAY + 2 * MIN))).not.toHaveProperty("refreshFailure");
+					expect(
+						fieldOf(await store.find("g-1", at(DAY + 2 * MIN)), "refreshFailure"),
+					).toBeUndefined();
 				},
 			);
 
@@ -2300,7 +2384,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					expect(await store.find("g-1", at(DAY))).toMatchObject({
 						status: "reauthorization_required",
 					});
-					expect(await store.find("g-1", at(DAY))).not.toHaveProperty("refreshFailure");
+					expect(fieldOf(await store.find("g-1", at(DAY)), "refreshFailure")).toBeUndefined();
 				},
 			);
 
@@ -2313,7 +2397,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 						() => store.revoke("g-1", "client", at(DAY)),
 					);
 					expect(await store.find("g-1", at(DAY))).toMatchObject({ status: "revoked" });
-					expect(await store.find("g-1", at(DAY))).not.toHaveProperty("refreshFailure");
+					expect(
+						fieldOf(await store.find("g-1", at(DAY)), "refreshFailure", "was-authorized"),
+					).toBeUndefined();
 				},
 			);
 

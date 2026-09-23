@@ -189,6 +189,7 @@ const seed = async (store: FederationGrantStore, spent = false): Promise<void> =
 			consent: { at, sid: "sid", scopes: [...SCOPES] },
 			authorizedAt: at,
 			expiresAt: new Date(at.getTime() + 30 * DAY),
+			resource: undefined,
 		},
 		credentials: {
 			refreshToken: "upstream-refresh-token",

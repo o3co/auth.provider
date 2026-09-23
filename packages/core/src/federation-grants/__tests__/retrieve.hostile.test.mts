@@ -357,7 +357,10 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 					retryAfterSeconds: 300,
 				});
 				// Discarding the response would discard the only valid credential (D5).
-				expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-rotated` });
+				expect(await stored()).toStrictEqual({
+					refreshToken: `${SECRET}-rotated`,
+					accessToken: undefined,
+				});
 				// And the marker keeps a broken adapter from rotating on every request.
 				await retrieve();
 				expect(h.refresh).toHaveBeenCalledTimes(1);
@@ -377,7 +380,10 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				code: "upstream_token_ineligible",
 				reason: "malformed_token_response",
 			});
-			expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-rotated` });
+			expect(await stored()).toStrictEqual({
+				refreshToken: `${SECRET}-rotated`,
+				accessToken: undefined,
+			});
 			await Promise.all(h.background);
 			expect(await lockIsFree(h)).toBe(true);
 
@@ -389,7 +395,10 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				},
 			} as DelegatedTokens);
 			expect(await retrieve()).toMatchObject({ reason: "malformed_token_response" });
-			expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-rotated` });
+			expect(await stored()).toStrictEqual({
+				refreshToken: `${SECRET}-rotated`,
+				accessToken: undefined,
+			});
 		});
 
 		it("treats an answer that is not an object at all as malformed, and lets go of the lock", async () => {
@@ -872,7 +881,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				await real({
 					grantId: "g-1",
 					expectedVersion: grant.version,
-					credentials: { refreshToken: SECRET },
+					credentials: { refreshToken: SECRET, accessToken: undefined },
 					ineligible: {
 						reason: "malformed_token_response",
 						at: new Date(now().getTime() - 1_000),

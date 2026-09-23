@@ -49,6 +49,9 @@ export default defineConfig({
 				// #626: which intent fields a store must not drop. Paired with
 				// tsconfig.test.json, which already covers the directory.
 				"src/federation-grants/__tests__/intent-fields.types.test.mts",
+				// #626: which grant fields a store must not drop. Paired with
+				// tsconfig.test.json, which already covers the directory.
+				"src/federation-grants/__tests__/record-fields.types.test.mts",
 				// Which AssertionIssuerEntry fields a registry must not drop. Paired
 				// with the same entry in tsconfig.test.json — both lists, or nothing.
 				"src/assertions/__tests__/entry-fields.types.test.mts",

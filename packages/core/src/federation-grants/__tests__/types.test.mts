@@ -41,6 +41,7 @@ const authorization: FederationGrantAuthorization = {
 	consent: { at, sid: "sid-1", scopes: ["openid"] },
 	authorizedAt: at,
 	expiresAt: new Date(at.getTime() + 86_400_000),
+	resource: undefined,
 };
 
 describe("FederationGrant — the shapes the union admits (#593, D1)", () => {
@@ -57,6 +58,9 @@ describe("FederationGrant — the shapes the union admits (#593, D1)", () => {
 		const grant: FederationGrant = {
 			...base,
 			...authorization,
+			lastUsedAt: undefined,
+			ineligible: undefined,
+			refreshFailure: undefined,
 			status: "revoked",
 			revocation: { by: "client", at },
 		};

@@ -1007,7 +1007,7 @@ export function createFederationGrantBrowserRouter(
 							identityRevision: intent.identityRevision,
 							authorizationRevision: intent.authorizationRevision,
 							upstream: { issuer: exchanged.upstream.issuer, subject: exchanged.upstream.subject },
-							...(intent.resource === undefined ? {} : { resource: intent.resource }),
+							resource: intent.resource,
 							scopes: granted,
 							consent: {
 								at: transaction.consent.at,

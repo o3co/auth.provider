@@ -49,6 +49,7 @@ const authorization = (
 	identityRevision: "identity-1",
 	authorizationRevision: "authorization-1",
 	upstream: { issuer: "https://dev-1.okta.test", subject: "00u-alice" },
+	resource: undefined,
 	scopes: [...SCOPES],
 	consent: { at: at(60_000), sid: "sid-1", scopes: [...SCOPES] },
 	authorizedAt: at(120_000),
@@ -106,7 +107,8 @@ describe("the canonical authorization text (#593, D16)", () => {
 		const absent = canonicalAuthorization(authorization());
 		const empty = canonicalAuthorization(authorization({ resource: "" }));
 		expect(absent).not.toBe(empty);
-		expect(parseCanonicalAuthorization(absent)).not.toHaveProperty("resource");
+		// Named and `undefined` (#626), where the empty one holds "".
+		expect(parseCanonicalAuthorization(absent)).toHaveProperty("resource", undefined);
 		expect(parseCanonicalAuthorization(empty)?.resource).toBe("");
 	});
 
@@ -252,9 +254,9 @@ describe("the credential payload (#593, D16)", () => {
 	});
 
 	it("comes back as what went in, with the access token and without it", () => {
-		// Built without the key rather than with an undefined one: what the store
-		// hands back has no `accessToken` property at all when there is none.
-		const { accessToken: _none, ...refreshOnly } = credentials();
+		// With the key named and `undefined`: what the store hands back when
+		// there is no access token (#626).
+		const refreshOnly = credentials({ accessToken: undefined });
 		for (const input of [credentials(), refreshOnly]) {
 			const text = encodeCredentials(input);
 			expect(decodeCredentials(text)).toStrictEqual(input);

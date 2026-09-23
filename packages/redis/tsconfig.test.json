@@ -17,7 +17,13 @@
 		"__tests__/adapters.device-code-store.contract.mts",
 		"__tests__/federation-grant-intent-store-codec.test.mts",
 		"__tests__/federation-grant-intent-store.integration.test.mts",
-		"__tests__/adapters.federation-grant-intent-store.contract.mts"
+		"__tests__/adapters.federation-grant-intent-store.contract.mts",
+		"__tests__/federation-grant-store.order.test.mts",
+		"__tests__/federation-grant-store.faults.integration.test.mts",
+		"__tests__/federation-grant-primitives.integration.test.mts",
+		"__tests__/federation-grant-store.integration.test.mts",
+		"__tests__/adapters.federation-grant-store.contract.mts",
+		"__tests__/internal/federation-grant-codec.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }

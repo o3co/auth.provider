@@ -15,7 +15,10 @@
  */
 
 import { constantTimeStringEqual } from "../security/timingSafe.mjs";
-import { federationGrantInteractionCode } from "./eligibility.mjs";
+import {
+	federationGrantInteractionCode,
+	federationGrantRefreshFailureStamp,
+} from "./eligibility.mjs";
 import { withinFederationGrantLifetimeCeiling } from "./lifetime.mjs";
 import type {
 	FederationGrantCredentialState,
@@ -101,7 +104,7 @@ function copyAuthorization(from: FederationGrantAuthorization): FederationGrantA
 		identityRevision: from.identityRevision,
 		authorizationRevision: from.authorizationRevision,
 		upstream: { issuer: from.upstream.issuer, subject: from.upstream.subject },
-		...(from.resource !== undefined ? { resource: from.resource } : {}),
+		resource: from.resource,
 		scopes: [...from.scopes],
 		consent: {
 			at: new Date(from.consent.at),
@@ -121,17 +124,16 @@ function copyCredentials(from: FederationGrantCredentials): FederationGrantCrede
 	const token = from.accessToken;
 	return {
 		refreshToken: from.refreshToken,
-		...(token !== undefined
-			? {
-					accessToken: {
+		accessToken:
+			token === undefined
+				? undefined
+				: {
 						value: token.value,
 						tokenType: token.tokenType,
 						obtainedAt: new Date(token.obtainedAt),
 						issuedLifetime: token.issuedLifetime,
 						scopes: [...token.scopes],
 					},
-				}
-			: {}),
 	};
 }
 
@@ -439,7 +441,11 @@ export function createMemoryFederationGrantStore(
 				createdAt: grant.createdAt,
 				version: grant.version + 1,
 				...copyAuthorization(authorization),
-				...(grant.lastUsedAt !== undefined ? { lastUsedAt: grant.lastUsedAt } : {}),
+				lastUsedAt: grant.lastUsedAt,
+				// The authorization is replaced, so what was judged against the
+				// old one goes with it.
+				ineligible: undefined,
+				refreshFailure: undefined,
 			};
 			entry.intent = null;
 			entry.credentials = copyCredentials(input.credentials);
@@ -456,11 +462,11 @@ export function createMemoryFederationGrantStore(
 			if (!credentialDatesAreDates(input.credentials)) return failed();
 			if (input.ineligible !== null && !isDate(input.ineligible.at)) return failed();
 
-			const { ineligible: _cleared, refreshFailure: _forgotten, ...kept } = grant;
 			const next: AuthorizedFederationGrant = {
-				...kept,
+				...grant,
 				version: grant.version + 1,
-				...(input.ineligible !== null ? { ineligible: copyMarker(input.ineligible) } : {}),
+				ineligible: input.ineligible === null ? undefined : copyMarker(input.ineligible),
+				refreshFailure: undefined,
 			};
 			entry.credentials = copyCredentials(input.credentials);
 			return written(entry, next);
@@ -473,11 +479,11 @@ export function createMemoryFederationGrantStore(
 			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
 
 			entry.credentials = null;
-			const { refreshFailure: _forgotten, ...kept } = grant;
 			return written(entry, {
-				...kept,
+				...grant,
 				status: "reauthorization_required",
 				version: grant.version + 1,
+				refreshFailure: undefined,
 			});
 		},
 
@@ -491,13 +497,20 @@ export function createMemoryFederationGrantStore(
 
 			entry.intent = null;
 			entry.credentials = null;
-			const { refreshFailure: _forgotten, ...kept } = grant;
-			return written(entry, {
-				...kept,
-				status: "revoked",
+			const revocation = {
+				status: "revoked" as const,
 				version: grant.version + 1,
 				revocation: { by, at: new Date(atMs) },
-			});
+			};
+			// A grant never authorized has no usage fields to clear; one that was
+			// keeps them, the failure stamp cleared with the credentials it was
+			// about.
+			return written(
+				entry,
+				grant.status === "pending"
+					? { ...grant, ...revocation }
+					: { ...grant, refreshFailure: undefined, ...revocation },
+			);
 		},
 
 		async noteRefreshFailure(input) {
@@ -508,7 +521,6 @@ export function createMemoryFederationGrantStore(
 			if (grant.status !== "active" || grant.version !== input.expectedVersion) return failed();
 			if (!(nowMs < grant.expiresAt.getTime())) return failed();
 			if (!isDate(input.failure.at)) return failed();
-			const { retryAfterSeconds, upstreamCode } = input.failure;
 			const atMs = input.failure.at.getTime();
 			const previous = grant.refreshFailure;
 			// Never back: a stamp that outlived its caller's budget arrives after a
@@ -525,13 +537,10 @@ export function createMemoryFederationGrantStore(
 			// would lose to a touch, and a count to a second stamp.
 			const next: AuthorizedFederationGrant = {
 				...grant,
-				refreshFailure: {
-					at: new Date(atMs),
-					kind: input.failure.kind,
-					count: inRow ? previous.count + 1 : 1,
-					...(retryAfterSeconds !== undefined ? { retryAfterSeconds } : {}),
-					...(upstreamCode !== undefined ? { upstreamCode } : {}),
-				},
+				refreshFailure: federationGrantRefreshFailureStamp(
+					{ ...input.failure, at: new Date(atMs) },
+					inRow ? previous.count + 1 : 1,
+				),
 			};
 			return written(entry, next);
 		},

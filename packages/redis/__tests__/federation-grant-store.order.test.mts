@@ -39,6 +39,7 @@ const authorization = (): FederationGrantAuthorization => ({
 	identityRevision: "identity-1",
 	authorizationRevision: "authorization-1",
 	upstream: { issuer: "https://dev-1.okta.test", subject: "00u-alice" },
+	resource: undefined,
 	scopes: [...SCOPES],
 	consent: { at: at(MIN), sid: "sid-1", scopes: [...SCOPES] },
 	authorizedAt: at(2 * MIN),
@@ -182,7 +183,7 @@ describe("the order a write goes out in (#593, D16)", () => {
 			grantId: "g-1",
 			intentHandle: "h-g-1",
 			authorization: authorization(),
-			credentials: { refreshToken: "rt-1" },
+			credentials: { refreshToken: "rt-1", accessToken: undefined },
 			now: at(2 * MIN),
 		});
 		await Promise.resolve();

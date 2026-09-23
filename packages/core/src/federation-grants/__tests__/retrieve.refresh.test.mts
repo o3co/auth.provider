@@ -308,7 +308,10 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 					reason,
 					retryAfterSeconds: 300,
 				});
-				expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-1` });
+				expect(await stored()).toStrictEqual({
+					refreshToken: `${SECRET}-1`,
+					accessToken: undefined,
+				});
 				expect(await h.store.find("g-1", GONE)).toMatchObject({
 					status: "active",
 					ineligible: { reason, at: GONE, judgedAgainst: 3600 },
@@ -349,6 +352,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 						consent: { at: seededAt, sid: `sid-${id}`, scopes: [...scopes] },
 						authorizedAt: seededAt,
 						expiresAt: new Date(seededAt.getTime() + 30 * DAY),
+						resource: undefined,
 					},
 					credentials: {
 						refreshToken: `${SECRET}-${id}`,
@@ -375,14 +379,14 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 				code: "upstream_token_ineligible",
 				reason: "scope_exceeded",
 			});
-			expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-w` });
+			expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-w`, accessToken: undefined });
 			expect(await h.store.find("g-1", GONE)).toMatchObject({
 				status: "active",
 				ineligible: { reason: "scope_exceeded" },
 			});
 
 			expect(await retrieve({ grantId: "g-2" })).toMatchObject({ ok: true, accessToken: "at-w" });
-			expect(await h.store.find("g-2", now())).not.toHaveProperty("ineligible");
+			expect(await h.store.find("g-2", now())).toHaveProperty("ineligible", undefined);
 		});
 
 		it("asks the upstream once per retry interval, and not once per request", async () => {
@@ -402,7 +406,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-2" });
 			expect(h.refresh).toHaveBeenCalledTimes(2);
 			// An eligible refresh clears the marker.
-			expect(await h.store.find("g-1", now())).not.toHaveProperty("ineligible");
+			expect(await h.store.find("g-1", now())).toHaveProperty("ineligible", undefined);
 		});
 	});
 
@@ -470,6 +474,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 				identityRevision: federationGrantIdentityRevision(connection),
 				authorizationRevision: federationGrantAuthorizationRevision(connection),
 				upstream: { issuer: connection.upstreamIssuer, subject: "00u-alice" },
+				resource: undefined,
 				scopes: [...SCOPES],
 				consent: { at: now(), sid: "sid-re", scopes: [...CONSENTED] },
 				authorizedAt: now(),
@@ -541,7 +546,10 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 					code: "upstream_rejected",
 					reason: "unknown",
 				});
-				expect((await h.store.find("g-1", DUE))?.refreshFailure).not.toHaveProperty("upstreamCode");
+				expect((await h.store.find("g-1", DUE))?.refreshFailure).toHaveProperty(
+					"upstreamCode",
+					undefined,
+				);
 			});
 
 			it("asks the upstream once and never again while the stamp stands: a call a week on is answered from the record", async () => {
@@ -571,7 +579,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 					reason: "storage",
 				});
 				expect(await h.store.find("g-1", DUE)).toMatchObject({ status: "active" });
-				expect(await h.store.find("g-1", DUE)).not.toHaveProperty("refreshFailure");
+				expect(await h.store.find("g-1", DUE)).toHaveProperty("refreshFailure", undefined);
 				expect(await stored()).toMatchObject({ refreshToken: SECRET });
 				expect(await types()).toContain("federation.grant.refresh_failed mark_not_written");
 
@@ -622,7 +630,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 					return noted;
 				});
 				expect(await retrieve()).toMatchObject({ ok: true, accessToken: "at-re" });
-				expect(await h.store.find("g-1", now())).not.toHaveProperty("refreshFailure");
+				expect(await h.store.find("g-1", now())).toHaveProperty("refreshFailure", undefined);
 			});
 
 			it("answers concurrent_update, never the user, when the record was replaced under it by a token that does not serve", async () => {
@@ -795,12 +803,20 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			async (_, error, denial) => {
 				const grant = await h.seed();
 				setNow(GONE);
+				const before = await h.store.open("g-1", GONE);
 				h.refresh.mockRejectedValueOnce(error);
 				expect(await retrieve()).toStrictEqual({ ok: false, ...denial });
-				expect(await h.store.open("g-1", GONE)).toMatchObject({
+				const after = await h.store.open("g-1", GONE);
+				expect(after).toMatchObject({
 					grant: { status: "active", version: grant.version },
 					credentials: { state: "ok", value: { refreshToken: SECRET } },
 				});
+				// Nothing but the failure stamp: the credentials whole, and the grant
+				// whole apart from it — key for key (#626).
+				expect(after?.credentials).toStrictEqual(before?.credentials);
+				const { refreshFailure: _after, ...afterRest } = after?.grant ?? {};
+				const { refreshFailure: _before, ...beforeRest } = before?.grant ?? {};
+				expect(afterRest).toStrictEqual(beforeRest);
 				expect(
 					(await types()).filter((entry) => entry.startsWith("federation.grant.refresh_failed ")),
 				).toHaveLength(1);
@@ -845,6 +861,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 					consent: { at: moment, sid: "sid-2", scopes: [...SCOPES] },
 					authorizedAt: moment,
 					expiresAt: new Date(moment.getTime() + 30 * DAY),
+					resource: undefined,
 				},
 				credentials: {
 					refreshToken: `${SECRET}-renewed`,
@@ -891,6 +908,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 						consent: { at: moment, sid: "sid-2", scopes: [...SCOPES] },
 						authorizedAt: moment,
 						expiresAt: new Date(moment.getTime() + 30 * DAY),
+						resource: undefined,
 					},
 					credentials: {
 						refreshToken: `${SECRET}-renewed`,
@@ -937,6 +955,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 						consent: { at: moment, sid: "sid-2", scopes: [...SCOPES] },
 						authorizedAt: moment,
 						expiresAt: new Date(moment.getTime() + 30 * DAY),
+						resource: undefined,
 					},
 					credentials: {
 						refreshToken: `${SECRET}-renewed`,
@@ -1277,7 +1296,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			await h.store.replaceCredentials({
 				grantId: "g-1",
 				expectedVersion: grant.version,
-				credentials: { refreshToken: `${SECRET}-rotated-by-them` },
+				credentials: { refreshToken: `${SECRET}-rotated-by-them`, accessToken: undefined },
 				ineligible: null,
 				now: now(),
 			});
@@ -1346,6 +1365,7 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 					consent: { at: moment, sid: "sid-2", scopes: [...CONSENTED] },
 					authorizedAt: moment,
 					expiresAt: new Date(moment.getTime() + 30 * DAY),
+					resource: undefined,
 				},
 				credentials: {
 					refreshToken: `${SECRET}-renewed`,

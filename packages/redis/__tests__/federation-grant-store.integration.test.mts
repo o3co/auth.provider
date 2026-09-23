@@ -22,7 +22,7 @@
 // is what a deployment has, rather than two calls into one client.
 
 import type { FederationGrantStore } from "@o3co/auth-provider-core";
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll } from "vitest";
 import { createRedisFederationGrantStore } from "../src/federation-grant-store.mjs";

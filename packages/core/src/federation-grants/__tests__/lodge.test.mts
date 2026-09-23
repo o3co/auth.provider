@@ -432,6 +432,7 @@ const establish = async (
 			},
 			authorizedAt: new Date(consentAt.getTime() + 1000),
 			expiresAt: new Date(consentAt.getTime() + 30 * DAY),
+			resource: undefined,
 		},
 		credentials: {
 			refreshToken: "rt-1",
@@ -478,7 +479,7 @@ describe("lodging a reauthorization (D6, D13)", () => {
 			status: "active",
 		});
 		expect(await grants.isCurrentIntent("g-est", "id-1", at(3 * MIN))).toBe(true);
-		expect(await grants.find("g-est", at(3 * MIN))).toEqual(before);
+		expect(await grants.find("g-est", at(3 * MIN))).toStrictEqual(before);
 		expect((await intents.getIntent("id-1", at(3 * MIN)))?.kind).toBe("reauthorization");
 		// A renewal takes no place against the bound.
 		expect(intents.reservations("agent", "u-1")).toBe(0);
@@ -641,7 +642,7 @@ describe("lodging a reauthorization (D6, D13)", () => {
 		const marked = await grants.replaceCredentials({
 			grantId: "g-est",
 			expectedVersion: grant?.version ?? -1,
-			credentials: { refreshToken: "rt-1" },
+			credentials: { refreshToken: "rt-1", accessToken: undefined },
 			ineligible: { reason, at: clock, judgedAgainst: CONNECTION.maxAccessTokenLifetime },
 			now: clock,
 		});
