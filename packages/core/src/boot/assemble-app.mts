@@ -577,7 +577,9 @@ export function assembleApp(
 			const algorithm = frozen.components.keyStore?.algorithm;
 			return typeof algorithm === "string" ? [algorithm] : [];
 		},
-		metadata: collector === undefined ? [] : [...collector.values()],
+		// A reader, like the one above, so the collector is iterated only once
+		// an issuer has been found — not while this argument is being built.
+		readMetadata: () => (collector === undefined ? [] : [...collector.values()]),
 	});
 	if (planning.outcome === "invalid") {
 		// The taxonomy is this stage's, which is why the conversion is here and

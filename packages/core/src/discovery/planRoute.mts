@@ -79,7 +79,10 @@ export type DiscoveryDocumentPlanning =
 
 /**
  * Decide whether the core-synthesized OIDC discovery document is served, and
- * assemble it — or return `null` when it is not.
+ * assemble it. The answer is a {@link DiscoveryDocumentPlanning}:
+ * `"not-served"` when either activation condition below is unmet, `"planned"`
+ * with the document and its paths, or `"invalid"` with the error the builder
+ * raised.
  *
  * A document is served (at every path a client may look for it at — OIDC
  * Discovery's `/.well-known/openid-configuration` and RFC 8414's
@@ -127,10 +130,16 @@ export function planDiscoveryDocument(input: {
 	 * algorithm.
 	 */
 	readonly readSigningAlgs: () => readonly string[];
-	/** Every `discoveryMetadata` contribution, in registration order. */
-	readonly metadata: readonly OidcDiscoveryContribution[];
+	/**
+	 * Every `discoveryMetadata` contribution, in registration order. A reader
+	 * for the same reason as `readSigningAlgs`: the collector is host-supplied,
+	 * and before #626 F4 it was not iterated until an issuer had been found. As
+	 * a plain value it would be read by the caller while building the argument,
+	 * ahead of the issuer gate (#650 review).
+	 */
+	readonly readMetadata: () => readonly OidcDiscoveryContribution[];
 }): DiscoveryDocumentPlanning {
-	const { issuer, readSigningAlgs, metadata } = input;
+	const { issuer, readSigningAlgs, readMetadata } = input;
 
 	// #266 made `oauth.jwt.issuer` required at the schema boundary, so a config
 	// that passed the schema always has one. The guard is for a caller that
@@ -139,6 +148,10 @@ export function planDiscoveryDocument(input: {
 	// crosses.
 	if (typeof issuer !== "string" || issuer.length === 0) return { outcome: "not-served" };
 
+	// Host-supplied inputs are read here, in the order the planner needs them —
+	// the collector after the issuer gate, the algorithms after both — which is
+	// the order the planner read them in before #626 F4 made them inputs.
+	const metadata = readMetadata();
 	if (!metadata.some((item) => item.providerRoot === true)) return { outcome: "not-served" };
 
 	// Read before the builder runs, and outside its catch: the reader is

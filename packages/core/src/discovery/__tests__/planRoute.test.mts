@@ -63,12 +63,18 @@ const jwksOnly: OidcDiscoveryContribution = {
 
 type PlanInput = Parameters<typeof planDiscoveryDocument>[0];
 
+/**
+ * What a case sets: any planner input, and `metadata` as a plain list for the
+ * cases that only care what the contributions are, not when they are read.
+ */
+type CaseInput = Partial<PlanInput> & { readonly metadata?: readonly OidcDiscoveryContribution[] };
+
 /** The document step alone, with a default for whatever the case does not set. */
-const planDocument = (input: Partial<PlanInput> = {}) =>
+const planDocument = ({ metadata, ...input }: CaseInput = {}) =>
 	planDiscoveryDocument({
 		issuer: ISSUER,
 		readSigningAlgs: () => ["HS256"],
-		metadata: [providerRoot],
+		readMetadata: () => metadata ?? [providerRoot],
 		...input,
 	});
 
@@ -77,7 +83,7 @@ const planDocument = (input: Partial<PlanInput> = {}) =>
  * planned, `null` when none is served. A case that expects the document to
  * fail validation reads the planning result directly instead.
  */
-const plan = (input: Partial<PlanInput> = {}) => {
+const plan = (input: CaseInput = {}) => {
 	const planning = planDocument(input);
 	if (planning.outcome === "invalid")
 		throw new Error("unexpected invalid document in a plan() case");
@@ -141,6 +147,23 @@ describe("planDiscoveryDocument + discoveryRouteFor — the two activation condi
 		expect(read).toBe(false);
 	});
 
+	it("does not read the contributions when no issuer is configured (#650)", () => {
+		// The collector is host-supplied, and before #626 F4 it was iterated only
+		// once an issuer had been found. Reading it first would run host code
+		// on a deployment that serves no document — and could throw there.
+		let read = false;
+		const planning = planDocument({
+			issuer: undefined,
+			readMetadata: () => {
+				read = true;
+				return [providerRoot];
+			},
+		});
+
+		expect(planning).toEqual({ outcome: "not-served" });
+		expect(read).toBe(false);
+	});
+
 	it("declines when no contribution was made at all", () => {
 		expect(plan({ metadata: [] })).toBeNull();
 	});
@@ -178,7 +201,7 @@ describe("planDiscoveryDocument + discoveryRouteFor — what fails, and how", ()
 	it.each([
 		[
 			"the signing-algorithm reader",
-			(failure: Error): Partial<PlanInput> => ({
+			(failure: Error): CaseInput => ({
 				readSigningAlgs: () => {
 					throw failure;
 				},
@@ -186,7 +209,7 @@ describe("planDiscoveryDocument + discoveryRouteFor — what fails, and how", ()
 		],
 		[
 			"a contribution's providerRoot getter",
-			(failure: Error): Partial<PlanInput> => ({
+			(failure: Error): CaseInput => ({
 				metadata: [
 					{
 						get providerRoot(): boolean {

@@ -797,6 +797,37 @@ describe("assembleApp — 18. discovery: only the document's own error is conver
 		expect(thrown).not.toBeInstanceOf(BootError);
 	});
 
+	it("does not iterate the collector when no issuer is configured (#650)", () => {
+		// Before #626 F4 the planner returned before touching the collector
+		// when the issuer was missing. Building the collector into an argument
+		// would run it first — host code, on a deployment that serves no
+		// document — so the call site passes a reader, and this pins that it
+		// is not called.
+		let iterated = false;
+		const world: FrozenWorld = {
+			...makeFrozenWorld([], [], {
+				config: { oauth: { jwt: {} } },
+				keyStore: { algorithm: "HS256" },
+			}),
+			registries: new Map([
+				[
+					"discoveryMetadata",
+					{
+						values: () => {
+							iterated = true;
+							throw new Error("the collector must not be read without an issuer");
+						},
+					},
+				],
+			]) as FrozenWorld["registries"],
+		};
+
+		expect(() =>
+			assembleApp(world, { express: { Router: () => makeMockRouter() as never } }),
+		).not.toThrow();
+		expect(iterated).toBe(false);
+	});
+
 	it("re-raises a failure while planning the document that is not the document's own error", () => {
 		// A contribution is host data. One whose getter throws fails inside
 		// document planning, and that is not a document that failed to
