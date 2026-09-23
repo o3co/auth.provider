@@ -186,7 +186,8 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 				// The fields a copy is likeliest to drop are the two a default
 				// fixture leaves unset; both widen the flow when lost — the upstream
 				// asked without the connection's audience, or the callback linking
-				// an account the client did not expect. Set, and compared whole.
+				// an account the client did not expect. Here both are set, and the
+				// record is compared whole.
 				const record = await lodge({
 					resource: "https://api.example/calendar",
 					upstreamSubject: "00u-expected",
