@@ -776,6 +776,101 @@ describe("POST /oauth/federation/:name/token", () => {
 	// ---------------------------------------------------------------------------
 
 	describe("preserves refresh_token when IdP doesn't rotate it", () => {
+		it("answers 500 and keeps a rotated refresh token when the provider returns no access token (#626 P1)", async () => {
+			// `RefreshedTokens.accessToken` is optional. A refresh without one is a
+			// failed refresh — but a refresh token the upstream rotated is now the
+			// only usable one (RFC 6749 §6), so it is stored before the refusal.
+			const expiredTokens = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				refreshToken: "original-rt",
+			};
+			const refreshProvider: FederationProvider & {
+				refreshToken: (rt: string) => Promise<{ refreshToken: string }>;
+			} = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" }),
+			};
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expiredTokens),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(500);
+			expect(res.body.error).toBe("refresh_failed");
+			expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect.any(String),
+				"google",
+				expect.objectContaining({ refreshToken: "rotated-rt" }),
+			);
+		});
+
+		it("derives the new token's expiry from expiresIn when the provider names no expiresAt (#626 P1)", async () => {
+			// The stored expiry belongs to the token just replaced — expired, which
+			// is why this ran — so it is not carried forward.
+			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+			const refreshProvider: FederationProvider & {
+				refreshToken: (rt: string) => Promise<{ accessToken: string; expiresIn: number }>;
+			} = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({ accessToken: "new-at", expiresIn: 3600 }),
+			};
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expiredTokens),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(200);
+			expect(res.body.expires_in).toBeGreaterThan(3500);
+			const stored = (fedTokenStore.update as ReturnType<typeof vi.fn>).mock.calls[0][2] as {
+				expiresAt: Date | null;
+			};
+			expect(stored.expiresAt).not.toBeNull();
+			expect((stored.expiresAt as Date).getTime()).toBeGreaterThan(Date.now());
+		});
+
+		it("stores no expiry and omits expires_in when the provider names neither (#626 P1)", async () => {
+			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+			const refreshProvider: FederationProvider & {
+				refreshToken: (rt: string) => Promise<{ accessToken: string }>;
+			} = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({ accessToken: "new-at" }),
+			};
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expiredTokens),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, "google", token);
+
+			expect(res.status).toBe(200);
+			expect("expires_in" in res.body).toBe(false);
+			const stored = (fedTokenStore.update as ReturnType<typeof vi.fn>).mock.calls[0][2] as {
+				expiresAt: Date | null;
+			};
+			expect(stored.expiresAt).toBeNull();
+		});
+
 		it("stores original refreshToken when provider returns no refreshToken", async () => {
 			const expiredTokens = {
 				...baseFedTokens,

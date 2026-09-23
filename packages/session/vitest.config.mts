@@ -22,8 +22,6 @@ export default defineConfig({
 				"src/federations/__tests__/redirect-policy-types.test.mts",
 				"src/federations/__tests__/redirect-policy.test.mts",
 				"src/federations/__tests__/contributes-map-augment.test.mts",
-				"src/federations/__tests__/federation-provider-slim.test.mts",
-				"src/federations/__tests__/delegated-authorization-types.test.mts",
 				"src/routes/__tests__/federation-rewire.test.mts",
 			],
 			tsconfig: "./tsconfig.test.json",

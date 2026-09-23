@@ -582,6 +582,27 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// route read the contract rather than a local copy that declared the
 			// field required.
 			if (refreshed.accessToken === undefined) {
+				// A rotated refresh token has to be kept even though the refresh
+				// failed: the upstream invalidates the one it replaced (RFC 6749
+				// §6), so discarding it here would leave the stored token dead and
+				// the connection unrecoverable without re-consent. Best effort —
+				// if the store is down the refresh is failing anyway.
+				if (
+					refreshed.refreshToken !== undefined &&
+					refreshed.refreshToken !== currentTokens.refreshToken
+				) {
+					try {
+						await opts.federationTokenStore.update(sid, name, {
+							...currentTokens,
+							refreshToken: refreshed.refreshToken,
+						});
+					} catch (error) {
+						logger.warn(
+							`POST /oauth/federation/${name}/token: federationTokenStore.update failed while keeping a rotated refresh token:`,
+							error,
+						);
+					}
+				}
 				emitAuditEvent(opts.auditSink, {
 					timestamp: new Date(),
 					type: "federation.token.refresh_failed",
@@ -602,13 +623,20 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// `RefreshedTokens.expiresAt` is optional as well as nullable, and the
 			// two say different things: `null` is the provider committing to no
 			// finite lifetime, `undefined` is the provider saying nothing about it.
-			// Absent keeps what the store already had, as every other field here
-			// does; only an explicit `null` clears it. Until #626 P1 this route's
-			// local copy of the contract declared the field required, so a
-			// provider that omitted it stored `undefined` and then threw on
-			// `.getTime()` below — a 500 on a shape the contract allows.
+			// A token's expiry comes from that token: the stored one belongs to the
+			// token just replaced — expired, which is why this refresh ran — so
+			// copying it forward would answer `expires_in: 0` and refresh again on
+			// every request. Absent `expiresAt` falls back to the `expiresIn` the
+			// same answer carried, and to `null` when it carries neither: a
+			// lifetime nobody stated, which omits `expires_in` from the RFC 6749
+			// §5.1 response. Until #626 P1 the local copy of the contract declared
+			// the field required, so an answer without it threw on `.getTime()`.
 			const nextExpiresAt =
-				refreshed.expiresAt !== undefined ? refreshed.expiresAt : currentTokens.expiresAt;
+				refreshed.expiresAt !== undefined
+					? refreshed.expiresAt
+					: typeof refreshed.expiresIn === "number"
+						? new Date(Date.now() + refreshed.expiresIn * 1000)
+						: null;
 			const updatedTokens = {
 				accessToken: refreshed.accessToken,
 				refreshToken: refreshed.refreshToken ?? currentTokens.refreshToken,
