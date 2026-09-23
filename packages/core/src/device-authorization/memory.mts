@@ -255,9 +255,10 @@ export const createMemoryDeviceCodeStore = (
 				deviceCode: input.deviceCode,
 				userCode: input.userCode,
 				clientId: input.clientId,
-				// `?? undefined`: an untyped caller's `null` is "no scope", as the
-				// Redis store reads it, rather than a value every reader must guard.
-				requestedScope: input.requestedScope ?? undefined,
+				// Truthiness, as before #626: an untyped caller's `null`, `""` or
+				// `false` is "no scope", as the Redis store reads it, rather than a
+				// value every reader must guard. An array — empty included — is kept.
+				requestedScope: input.requestedScope ? input.requestedScope : undefined,
 				expiresAtMs: input.expiresAtMs,
 				intervalSeconds: input.intervalSeconds,
 				status: "pending",

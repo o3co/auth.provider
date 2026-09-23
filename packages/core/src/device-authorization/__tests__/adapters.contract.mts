@@ -177,23 +177,37 @@ export const runDeviceCodeStoreContract = (
 			});
 		});
 
-		it("reads an untyped caller's null requestedScope as no scope, and still approves", async () => {
-			// Before #626 both stores tested the field for truthiness, so `null`
-			// was a scopeless request. The Redis store's `=== undefined` would
-			// have stored the string "null", read back as `[]`, and failed the
-			// approval script on it.
-			await withStore(async (store) => {
-				await store.create({ ...seed, requestedScope: null as unknown as undefined });
-				expect(
-					(await store.findPendingByUserCode(seed.userCode, NOW))?.requestedScope,
-				).toBeUndefined();
-				const decided = await store.approve({
-					userCode: seed.userCode,
-					subject: "user-1",
-					nowMs: NOW,
+		it.each([
+			["null", null],
+			["an empty string", ""],
+			["false", false],
+			["zero", 0],
+		])(
+			"reads an untyped caller's %s requestedScope as no scope, and still approves",
+			async (_label, value) => {
+				// Before #626 both stores tested the field for truthiness, so a falsy
+				// value was a scopeless request. The Redis store would otherwise store
+				// its JSON, read it back as `[]`, and fail the approval script on it.
+				await withStore(async (store) => {
+					await store.create({ ...seed, requestedScope: value as unknown as undefined });
+					expect(
+						(await store.findPendingByUserCode(seed.userCode, NOW))?.requestedScope,
+					).toBeUndefined();
+					const decided = await store.approve({
+						userCode: seed.userCode,
+						subject: "user-1",
+						nowMs: NOW,
+					});
+					expect(decided.status).toBe("ok");
+					if (decided.status === "ok") expect(decided.authorization.grantedScope).toEqual([]);
 				});
-				expect(decided.status).toBe("ok");
-				if (decided.status === "ok") expect(decided.authorization.grantedScope).toEqual([]);
+			},
+		);
+
+		it("keeps an empty requestedScope as asked for — an array, not no scope", async () => {
+			await withStore(async (store) => {
+				await store.create({ ...seed, requestedScope: [] });
+				expect((await store.findPendingByUserCode(seed.userCode, NOW))?.requestedScope).toEqual([]);
 			});
 		});
 
