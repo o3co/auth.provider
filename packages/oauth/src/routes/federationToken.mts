@@ -708,12 +708,22 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// (`1e13` seconds puts it past the 8.64e15 ms maximum), and the Invalid
 			// Date that results serialises to `null` in the store — the "never
 			// expires" sentinel again, by a different route.
+			// One field naming a lifetime while the other denies there is one is
+			// the adapter contradicting itself, and the precedence below would
+			// quietly resolve it toward `null` — the never-refresh sentinel. There
+			// is no reading of the contract that makes both true, so neither is
+			// believed.
+			const contradictsItself =
+				(answer.expiresAt === null && isUsableLifetime(answer.expiresIn)) ||
+				(answer.expiresIn === null && isUsableDate(answer.expiresAt));
+
 			const lifetimeIsBroken =
 				// A lifetime field that would not be read is broken, not absent:
 				// absent stores `null`, which is this route's never-refresh
 				// sentinel, so the two must not collapse into one another.
 				unreadable.has("expiresIn") ||
 				unreadable.has("expiresAt") ||
+				contradictsItself ||
 				(statedLifetime && !isUsableLifetime(answer.expiresIn)) ||
 				(statedInstant && !isUsableDate(answer.expiresAt)) ||
 				((statedLifetime || statedInstant) &&
@@ -744,18 +754,26 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 						// write. Otherwise merge onto what is stored now rather than
 						// onto what was read before the call.
 						const latest = await opts.federationTokenStore.get(sid, name);
-						if (latest !== null && latest.refreshToken !== currentTokens.refreshToken) {
+						if (latest === null) {
+							// The record is gone — a concurrent logout unlinked this
+							// federation. Writing here would put credentials back
+							// after the user asked for them to be dropped, which is
+							// worse than losing a rotated token on a refresh that
+							// already failed.
+							logger.warn(
+								`POST /oauth/federation/${name}/token: the federation token record is gone; not recreating it with the failed refresh's token`,
+							);
+						} else if (latest.refreshToken !== currentTokens.refreshToken) {
 							logger.warn(
 								`POST /oauth/federation/${name}/token: a concurrent refresh rotated this connection; not overwriting it with the failed refresh's token`,
 							);
 						} else {
-							const base = latest ?? currentTokens;
 							await opts.federationTokenStore.update(sid, name, {
-								...base,
+								...latest,
 								refreshToken: answer.refreshToken,
 								// Rotated alongside it, and worth the same: the stored
 								// `id_token` is what logout sends as `id_token_hint`.
-								idToken: isUsableToken(answer.idToken) ? answer.idToken : base.idToken,
+								idToken: isUsableToken(answer.idToken) ? answer.idToken : latest.idToken,
 							});
 						}
 					} catch (error) {

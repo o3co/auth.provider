@@ -991,6 +991,55 @@ describe("POST /oauth/federation/:name/token", () => {
 				);
 			});
 
+			it.each([
+				["expiresAt: null beside a finite expiresIn", { expiresAt: null, expiresIn: 3600 }],
+				[
+					"expiresIn: null beside a finite expiresAt",
+					{ expiresIn: null, expiresAt: new Date(Date.now() + 3_600_000) },
+				],
+			])(
+				"refuses an adapter that contradicts itself about the lifetime (%s)",
+				async (_l, lifetime) => {
+					// One field naming a lifetime while the other denies there is one
+					// cannot both be true. The precedence would resolve it toward
+					// `null`, which is the never-refresh sentinel, so neither is
+					// believed.
+					const { app, fedTokenStore } = refreshingApp({ accessToken: "new-at", ...lifetime });
+					const res = await postFedToken(app, "google", await mintAccessToken());
+
+					expect(res.status).toBe(500);
+					expect(res.body.error).toBe("refresh_failed");
+					expect(fedTokenStore.update).not.toHaveBeenCalled();
+				},
+			);
+
+			it("does not recreate a record a concurrent logout deleted", async () => {
+				// Salvaging a rotated token must not put credentials back after the
+				// user asked for them to be dropped. Losing the token on a refresh
+				// that already failed is the lesser harm.
+				const expiredTokens = {
+					...baseFedTokens,
+					expiresAt: new Date(Date.now() - 1000),
+					refreshToken: "original-rt",
+				};
+				const get = vi.fn().mockResolvedValueOnce(expiredTokens).mockResolvedValue(null);
+				const refreshProvider = {
+					...federationBase("google"),
+					refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" }),
+				} as unknown as FederationProvider;
+				const fedTokenStore = makeFedTokenStore({ get });
+				const app = buildApp({
+					fedTokenStore,
+					getFederationProviders: () =>
+						new Map<string, FederationProvider>([["google", refreshProvider]]),
+				});
+
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(500);
+				expect(fedTokenStore.update).not.toHaveBeenCalled();
+			});
+
 			it("refuses rather than storing no-expiry when a lifetime getter throws", async () => {
 				// `readField` answers `undefined` for a field it cannot read, and
 				// `undefined` on a lifetime field otherwise means "the upstream
@@ -1127,13 +1176,14 @@ describe("POST /oauth/federation/:name/token", () => {
 				},
 			);
 
-			it("keeps `null` meaning the upstream named no lifetime, rather than falling back to expiresIn", async () => {
-				// `null` is a statement; `undefined` is silence. Only silence falls
-				// through to the next source.
+			it("keeps `null` meaning the upstream named no lifetime", async () => {
+				// `null` is a statement and `undefined` is silence. Stated alone it
+				// is believed, and the token is stored with no finite expiry. Paired
+				// with a finite `expiresIn` it would be a contradiction, which is
+				// refused instead - see the cases above.
 				const { app, fedTokenStore } = refreshingApp({
 					accessToken: "new-at",
 					expiresAt: null,
-					expiresIn: 3600,
 				});
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
