@@ -132,13 +132,16 @@ test("Factory aliases are AdapterFactory<T> over the 4 stores", () => {
 	>();
 });
 
-test("RegisteredRP exposes immutable fields with optional logout URIs", () => {
+test("RegisteredRP exposes immutable fields, every logout field a required key that may be undefined", () => {
+	// Required keys since #626: a registry that copies the record field by field
+	// and forgot one would drop the RP from the logout cascade without a sound.
+	// `registered-rp.types.test.mts` says why each one matters.
 	expectTypeOf<RegisteredRP>().toEqualTypeOf<{
 		readonly clientId: string;
-		readonly backchannelLogoutUri?: string;
-		readonly backchannelLogoutSessionRequired?: boolean;
-		readonly frontchannelLogoutUri?: string;
-		readonly frontchannelLogoutSessionRequired?: boolean;
+		readonly backchannelLogoutUri: string | undefined;
+		readonly backchannelLogoutSessionRequired: boolean | undefined;
+		readonly frontchannelLogoutUri: string | undefined;
+		readonly frontchannelLogoutSessionRequired: boolean | undefined;
 		readonly registeredAt: Date;
 	}>();
 });

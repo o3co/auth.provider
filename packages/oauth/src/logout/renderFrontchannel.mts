@@ -17,9 +17,9 @@ import type { Logger } from "@o3co/auth-provider-core";
 
 export interface FrontchannelRP {
 	readonly clientId: string;
-	readonly frontchannelLogoutUri?: string;
+	readonly frontchannelLogoutUri?: string | undefined;
 	/** Defaults to `true` — append sid so RPs can correlate sessions. */
-	readonly frontchannelLogoutSessionRequired?: boolean;
+	readonly frontchannelLogoutSessionRequired?: boolean | undefined;
 }
 
 export interface RenderFrontchannelLogoutHtmlOptions {

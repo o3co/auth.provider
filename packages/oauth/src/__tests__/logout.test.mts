@@ -478,6 +478,8 @@ describe("POST /oauth/logout", () => {
 					backchannelLogoutUri: "https://rp.example.com/back-logout",
 					backchannelLogoutSessionRequired: false,
 					registeredAt: new Date(),
+					frontchannelLogoutUri: undefined,
+					frontchannelLogoutSessionRequired: undefined,
 				},
 			];
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
@@ -510,6 +512,9 @@ describe("POST /oauth/logout", () => {
 					clientId: "rp-1",
 					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
 					registeredAt: new Date(),
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					frontchannelLogoutSessionRequired: undefined,
 				},
 			];
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
@@ -533,6 +538,9 @@ describe("POST /oauth/logout", () => {
 					clientId: "client-1",
 					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
 					registeredAt: new Date(),
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					frontchannelLogoutSessionRequired: undefined,
 				},
 			];
 			// Client does NOT include evil.example in postLogoutRedirectUris
@@ -570,6 +578,9 @@ describe("POST /oauth/logout", () => {
 					clientId: "client-1",
 					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
 					registeredAt: new Date(),
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					frontchannelLogoutSessionRequired: undefined,
 				},
 			];
 			const clientRepo = makeClientRepo({
@@ -765,6 +776,9 @@ describe("POST /oauth/logout", () => {
 					clientId: "rp-1",
 					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
 					registeredAt: new Date(),
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					frontchannelLogoutSessionRequired: undefined,
 				},
 			];
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
@@ -787,6 +801,9 @@ describe("POST /oauth/logout", () => {
 					clientId: "rp-1",
 					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
 					registeredAt: new Date(),
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					frontchannelLogoutSessionRequired: undefined,
 				},
 			];
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
@@ -810,6 +827,9 @@ describe("POST /oauth/logout", () => {
 					clientId: "rp-1",
 					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
 					registeredAt: new Date(),
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					frontchannelLogoutSessionRequired: undefined,
 				},
 			];
 			const sessionStore = makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) });
@@ -1661,6 +1681,9 @@ describe("POST /oauth/logout — browser session (R1a)", () => {
 					clientId: "client-1",
 					frontchannelLogoutUri: "https://rp1.example.com/fc-logout",
 					registeredAt: new Date(),
+					backchannelLogoutUri: undefined,
+					backchannelLogoutSessionRequired: undefined,
+					frontchannelLogoutSessionRequired: undefined,
 				},
 			]),
 		});

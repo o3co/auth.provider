@@ -104,6 +104,47 @@ describe("RedisSessionRPRegistry corrupt envelope handling", () => {
 		);
 	});
 
+	it.each([
+		[
+			'backchannelLogoutSessionRequired as the string "false"',
+			{ backchannelLogoutSessionRequired: "false" },
+		],
+		["frontchannelLogoutSessionRequired as a number", { frontchannelLogoutSessionRequired: 0 }],
+		["backchannelLogoutUri as a number", { backchannelLogoutUri: 42 }],
+		["frontchannelLogoutUri as null", { frontchannelLogoutUri: null }],
+	])("treats a logout field of the wrong type as corrupt — %s (#626)", async (_label, bad) => {
+		// Every field is checked, not only `clientId` and `registeredAtMs`. A
+		// `"false"` read back under the boolean type would be truthy, and the
+		// logout cascade would send `sid` to an RP that asked not to receive it.
+		const logger = createMockLogger();
+		const registry = createRedisSessionRPRegistry({
+			client: createMockClient([
+				JSON.stringify({ clientId: "rp-bad", registeredAtMs: 1_900_000_000_000, ...bad }),
+			]),
+			keyPrefix: "test:rp:",
+			logger,
+		});
+
+		expect(await registry.listRPs("sid-bad")).toHaveLength(0);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ sid: "sid-bad", reason: "shape_invalid" },
+			expect.stringContaining("session_rp_registry_corrupt_envelope"),
+		);
+	});
+
+	it("still reads a record whose logout fields are absent", async () => {
+		const registry = createRedisSessionRPRegistry({
+			client: createMockClient([
+				JSON.stringify({ clientId: "rp-plain", registeredAtMs: 1_900_000_000_000 }),
+			]),
+			keyPrefix: "test:rp:",
+		});
+
+		const [rp] = await registry.listRPs("sid-plain");
+		expect(rp?.clientId).toBe("rp-plain");
+		expect(rp?.backchannelLogoutUri).toBeUndefined();
+	});
+
 	it("emits structured corrupt-envelope warns with sid + reason + cause (no raw JSON)", async () => {
 		// Mirror the userSessionStore corrupt-envelope warn shape so operators
 		// see consistent fields across sibling adapters and the raw JSON

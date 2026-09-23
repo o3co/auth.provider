@@ -17,12 +17,12 @@ import { generateLogoutToken, type KeyStore, type Logger } from "@o3co/auth-prov
 
 export interface BroadcastRP {
 	readonly clientId: string;
-	readonly backchannelLogoutUri?: string;
+	readonly backchannelLogoutUri?: string | undefined;
 	/**
 	 * Whether the RP requires `sid` in the logout_token for session correlation.
 	 * Defaults to `true` — include sid unless explicitly set to `false`.
 	 */
-	readonly backchannelLogoutSessionRequired?: boolean;
+	readonly backchannelLogoutSessionRequired?: boolean | undefined;
 }
 
 export interface BroadcastBackchannelLogoutOptions {
