@@ -18,7 +18,7 @@ import type {
 	AuditSink,
 	ClientRepository,
 	EventLogger,
-	FederationProviderHandle,
+	FederationProvider,
 	FederationTokenStore,
 	KeyStore,
 	Logger,
@@ -26,9 +26,10 @@ import type {
 	SessionFamilyIndex,
 	SessionFederationIndex,
 	SessionRPRegistry,
+	SupportsLogout,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { emitAuditEvent, verifyJwt } from "@o3co/auth-provider-core";
+import { emitAuditEvent, supportsLogout, verifyJwt } from "@o3co/auth-provider-core";
 import accepts from "accepts";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
@@ -43,31 +44,14 @@ type ExpressLike = {
 };
 
 /**
- * Minimal structural capability interface for OIDC RP-Initiated Logout.
- *
- * `SupportsLogout` and `FederationProviderBase` live in `@o3co/auth-provider-session`,
- * which depends on core — importing them here would create a circular package dependency.
- * This local structural type captures only the end-session surface needed by the logout route.
- * The `supportsEndSession` type guard below performs the duck-type check at runtime.
+ * `supportsLogout` is core's, and so is the capability it narrows to: this
+ * route used to carry a structural copy of both because the contract lived in
+ * `@o3co/auth-provider-session`, which depends on core (#626 P1). It reads
+ * the same `Map.get()` result, and still answers `false` for a missing one.
  */
-interface SupportsEndSession {
-	endSession(req: {
-		idTokenHint?: string;
-		postLogoutRedirectUri?: string;
-		state?: string;
-	}): Promise<{ url: URL; method: "GET" }>;
-}
-
-/**
- * Duck-type guard: does `provider` expose an `endSession` method?
- * Returns `false` for null/undefined so callers can pass Map.get() results directly.
- */
-function supportsEndSession(
-	provider: FederationProviderHandle | undefined | null,
-): provider is FederationProviderHandle & SupportsEndSession {
-	if (provider == null) return false;
-	return typeof (provider as { endSession?: unknown }).endSession === "function";
-}
+const supportsEndSession = (
+	provider: FederationProvider | undefined | null,
+): provider is FederationProvider & SupportsLogout => provider != null && supportsLogout(provider);
 
 /**
  * The slice of the express-session bag this route touches. Every field is
@@ -238,7 +222,7 @@ export interface LogoutRouterOptions {
 	 * will pass `() => context.federationProviders` rather than a captured Map
 	 * reference. Returns undefined when federation is not configured.
 	 */
-	getFederationProviders: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
+	getFederationProviders: () => ReadonlyMap<string, FederationProvider> | undefined;
 	/** Override for unit tests. Defaults to the global `fetch`. */
 	fetchImpl?: typeof fetch;
 	/** Structured logger shared with broadcastBackchannelLogout and cascadeLogout. */

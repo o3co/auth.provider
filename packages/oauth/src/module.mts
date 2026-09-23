@@ -20,7 +20,7 @@ import {
 	AUDIT_SINK_ABSENCE_POLICY,
 	consoleLogger,
 	defineModule,
-	type FederationProviderHandle,
+	type FederationProvider,
 	type Module,
 	type ProviderDeps,
 	readAccessTokenRevocationMode,
@@ -197,14 +197,11 @@ export const oauthModule = (_params: { config: AppConfig }): Module => {
 						pendingConsentStore: deps.pendingConsentStore,
 						logger: deps.logger ?? consoleLogger,
 						// Theme E structural fix: typed deps replace the v0.4.x lazy
-						// () => ctx.federationProviders closure. The closure here only
-						// re-wraps the typed read so the legacy `getFederationProviders`
-						// param can be satisfied without changing routes.mts. The cast
-						// bridges core's placeholder `FederationProvider = unknown`
-						// (from contributes-map.mts) to routes.mts's structural
-						// `FederationProviderHandle` — same shape at runtime.
-						getFederationProviders: () =>
-							deps.federationProviders as ReadonlyMap<string, FederationProviderHandle> | undefined,
+						// () => ctx.federationProviders closure. The closure re-wraps the
+						// typed read so `getFederationProviders` is satisfied without
+						// changing routes.mts. No cast since #626 P1: the slot and the
+						// parameter are the same `FederationProvider`.
+						getFederationProviders: () => deps.federationProviders,
 					});
 					return { id: "oauth-endpoints", mountPath: "/oauth", handler: router };
 				},

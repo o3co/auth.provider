@@ -18,19 +18,21 @@ import type {
 	AccessTokenDenylist,
 	AuditSink,
 	ClientRepository,
-	FederationProviderHandle,
+	FederationProvider,
 	FederationTokenStore,
 	KeyStore,
 	Logger,
 	RefreshTokenFamilyRevocation,
 	SessionFederationIndex,
 	SubjectRevocation,
+	SupportsRefresh,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
 	classifyFederationRefreshError,
 	emitAuditEvent,
 	supportsLock,
+	supportsRefresh,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
@@ -43,36 +45,14 @@ type ExpressLike = {
 };
 
 /**
- * Structural narrowing of `FederationProviderHandle` for the refresh capability.
- * Local duck-type guard that mirrors `supportsRefresh` from @o3co/auth-provider-session,
- * defined here to keep the oauth package independent of session.
+ * `supportsRefresh` is core's, and so is the capability it narrows to: this
+ * route used to carry a structural copy of both because the contract lived in
+ * `@o3co/auth-provider-session`, which depends on core (#626 P1).
  */
-interface SupportsRefreshShape {
-	refreshToken(refreshToken: string): Promise<{
-		accessToken: string;
-		refreshToken?: string;
-		idToken?: string;
-		/**
-		 * Absolute expiry of refreshed `accessToken`. `null` means the upstream
-		 * provider issued a non-expiring replacement (rare, but legal under RFC 6749
-		 * §5.1 where `expires_in` is optional). Mirrors session's
-		 * `FederationProfile.expiresAt` contract so adapters stay consistent across
-		 * issue and refresh paths.
-		 */
-		expiresAt: Date | null;
-	}>;
-}
-
-/**
- * Duck-type guard: does `provider` expose a `refreshToken` method?
- * Returns `false` for null/undefined so callers can pass Map.get() results directly.
- */
-function supportsRefresh(
-	provider: FederationProviderHandle | undefined | null,
-): provider is FederationProviderHandle & SupportsRefreshShape {
-	if (provider == null) return false;
-	return typeof (provider as { refreshToken?: unknown }).refreshToken === "function";
-}
+const providerSupportsRefresh = (
+	provider: FederationProvider | undefined | null,
+): provider is FederationProvider & SupportsRefresh =>
+	provider != null && supportsRefresh(provider);
 
 export interface FederationTokenRouterOptions {
 	keyStore: KeyStore;
@@ -95,7 +75,7 @@ export interface FederationTokenRouterOptions {
 	 * router construction time) so module init order does not matter.
 	 * Returns undefined when federation is not configured.
 	 */
-	getFederationProviders: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
+	getFederationProviders: () => ReadonlyMap<string, FederationProvider> | undefined;
 	/** Audit sink for operator observability events. No-op when undefined. */
 	auditSink?: AuditSink;
 	/** Structured logger. Defaults to console when undefined. */
@@ -388,7 +368,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 
 		// 11a: Get provider and check supportsRefresh.
 		const provider = opts.getFederationProviders()?.get(name);
-		if (!supportsRefresh(provider)) {
+		if (!providerSupportsRefresh(provider)) {
 			logger.warn(
 				`POST /oauth/federation/${name}/token: provider does not support refresh or not found`,
 			);
@@ -594,16 +574,48 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				});
 			}
 
+			// `RefreshedTokens.accessToken` is optional, and a refresh that produced
+			// none is not a refresh: answering 200 without `access_token` would be
+			// a malformed RFC 6749 §5.1 response, and writing `undefined` to the
+			// store would lose the token still held. Treated as the refresh
+			// failing, which is what it is. Reachable only since #626 P1 made this
+			// route read the contract rather than a local copy that declared the
+			// field required.
+			if (refreshed.accessToken === undefined) {
+				emitAuditEvent(opts.auditSink, {
+					timestamp: new Date(),
+					type: "federation.token.refresh_failed",
+					subject: sub ?? undefined,
+					ip: req.ip,
+					userAgent: req.get("user-agent"),
+					details: { federation: name, reason: "no_access_token" },
+				});
+				return res.status(500).json({
+					error: "refresh_failed",
+					error_description: "federation token refresh failed",
+				});
+			}
+
 			// 11f: Update store — preserve refresh_token and id_token when IdP didn't rotate/return them.
 			// Use currentTokens (post-lock re-read) as the fallback source so we never
 			// revert to a stale pre-lock snapshot.
+			// `RefreshedTokens.expiresAt` is optional as well as nullable, and the
+			// two say different things: `null` is the provider committing to no
+			// finite lifetime, `undefined` is the provider saying nothing about it.
+			// Absent keeps what the store already had, as every other field here
+			// does; only an explicit `null` clears it. Until #626 P1 this route's
+			// local copy of the contract declared the field required, so a
+			// provider that omitted it stored `undefined` and then threw on
+			// `.getTime()` below — a 500 on a shape the contract allows.
+			const nextExpiresAt =
+				refreshed.expiresAt !== undefined ? refreshed.expiresAt : currentTokens.expiresAt;
 			const updatedTokens = {
 				accessToken: refreshed.accessToken,
 				refreshToken: refreshed.refreshToken ?? currentTokens.refreshToken,
 				// IdPs like Google/GitHub typically don't return a new id_token on refresh.
 				// Fall back to the stored id_token to preserve the id_token_hint for logout (F-5).
 				idToken: refreshed.idToken ?? currentTokens.idToken,
-				expiresAt: refreshed.expiresAt,
+				expiresAt: nextExpiresAt,
 				tokenType: currentTokens.tokenType,
 				scope: currentTokens.scope,
 				rawParams: currentTokens.rawParams,
@@ -626,9 +638,9 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// to commit to a finite lifetime; omit `expires_in` from the RFC 6749 §5.1
 			// response (the field is optional).
 			const expiresIn =
-				refreshed.expiresAt === null
+				nextExpiresAt === null
 					? undefined
-					: Math.max(0, Math.floor((refreshed.expiresAt.getTime() - Date.now()) / 1000));
+					: Math.max(0, Math.floor((nextExpiresAt.getTime() - Date.now()) / 1000));
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
 				type: "federation.token.success",

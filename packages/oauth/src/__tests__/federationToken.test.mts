@@ -19,7 +19,7 @@ import {
 	type AuditSink,
 	type ClientRepository,
 	createSymmetricKeyStore,
-	type FederationProviderHandle,
+	type FederationProvider,
 	type FederationTokenStore,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
@@ -33,6 +33,24 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/federationToken.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+
+/**
+ * A federation that satisfies the contract, with whatever capability the case
+ * under test adds. Since #626 P1 `federationProviders` carries
+ * `FederationProvider` rather than a one-field stand-in, so a mock has to be
+ * one — which is the point: these routes read a provider the boot planner
+ * could actually have handed them.
+ */
+const federationBase = (name: string) => ({
+	name,
+	scope: ["openid"] as readonly string[],
+	buildAuthorizationUrl: () => new URL(`https://${name}.example/auth`),
+	exchangeCode: async () => ({
+		issuer: `https://${name}.example`,
+		sub: "sub-1",
+		expiresAt: null,
+	}),
+});
 
 const SECRET = "test-secret-at-least-32-chars!!";
 const keyStore = createSymmetricKeyStore(SECRET);
@@ -140,7 +158,7 @@ interface BuildAppOpts {
 	refreshFamilyRevocation?: RefreshTokenFamilyRevocation;
 	fedTokenStore?: FederationTokenStore;
 	clientRepo?: ClientRepository;
-	getFederationProviders?: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
+	getFederationProviders?: () => ReadonlyMap<string, FederationProvider> | undefined;
 	logger?: Logger;
 	auditSink?: AuditSink;
 	refreshBufferMs?: number;
@@ -221,20 +239,20 @@ describe("POST /oauth/federation/:name/token", () => {
 			const fedTokenStore = makeFedTokenStore({
 				get: vi.fn().mockResolvedValue(expiredTokens),
 			});
-			const mockProvider: FederationProviderHandle & {
+			const mockProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{
 					accessToken: string;
 					refreshToken?: string;
 					expiresAt: Date;
 				}>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				refreshToken: refreshFn,
 			};
 			const app = buildApp({
 				fedTokenStore,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", mockProvider]]),
+					new Map<string, FederationProvider>([["google", mockProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -532,16 +550,16 @@ describe("POST /oauth/federation/:name/token", () => {
 				refreshToken: undefined,
 				expiresAt: new Date(Date.now() - 1000),
 			};
-			const refreshProvider: FederationProviderHandle & {
+			const refreshProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				refreshToken: vi.fn(),
 			};
 			const app = buildApp({
 				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredNoRt) }),
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -559,11 +577,11 @@ describe("POST /oauth/federation/:name/token", () => {
 				expiresAt: new Date(Date.now() - 1000),
 			};
 			// Provider without refreshToken method
-			const bareProvider: FederationProviderHandle = { name: "google" };
+			const bareProvider = federationBase("google");
 			const app = buildApp({
 				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", bareProvider]]),
+					new Map<string, FederationProvider>([["google", bareProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -589,10 +607,10 @@ describe("POST /oauth/federation/:name/token", () => {
 			const fedTokenStore = makeFedTokenStore({
 				get: vi.fn().mockResolvedValue(expiredTokens),
 			});
-			const failingProvider: FederationProviderHandle & {
+			const failingProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<never>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				refreshToken: vi.fn().mockRejectedValue(new Error("invalid_grant: token revoked")),
 			};
 			const app = buildApp({
@@ -600,7 +618,7 @@ describe("POST /oauth/federation/:name/token", () => {
 				fedTokenStore,
 				auditSink,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", failingProvider]]),
+					new Map<string, FederationProvider>([["google", failingProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -622,16 +640,16 @@ describe("POST /oauth/federation/:name/token", () => {
 	describe("refresh: provider throws 5xx-ish error", () => {
 		it("returns 503 temporarily_unavailable", async () => {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
-			const failingProvider: FederationProviderHandle & {
+			const failingProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<never>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				refreshToken: vi.fn().mockRejectedValue(new Error("temporarily_unavailable: provider 503")),
 			};
 			const app = buildApp({
 				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", failingProvider]]),
+					new Map<string, FederationProvider>([["google", failingProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -649,16 +667,16 @@ describe("POST /oauth/federation/:name/token", () => {
 				record: vi.fn().mockResolvedValue(undefined),
 			};
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
-			const failingProvider: FederationProviderHandle & {
+			const failingProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<never>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				refreshToken: vi.fn().mockRejectedValue(new Error("unexpected provider error")),
 			};
 			const app = buildApp({
 				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", failingProvider]]),
+					new Map<string, FederationProvider>([["google", failingProvider]]),
 				auditSink,
 			});
 			const token = await mintAccessToken();
@@ -694,16 +712,16 @@ describe("POST /oauth/federation/:name/token", () => {
 				...makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
 				acquireLock: vi.fn().mockResolvedValue({ acquired: false, reason: "timeout" }),
 			};
-			const refreshProvider: FederationProviderHandle & {
+			const refreshProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				refreshToken: vi.fn(),
 			};
 			const app = buildApp({
 				fedTokenStore: lockingStore,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -729,16 +747,16 @@ describe("POST /oauth/federation/:name/token", () => {
 				...makeFedTokenStore({ get: getFn }),
 				acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
 			};
-			const refreshProvider: FederationProviderHandle & {
+			const refreshProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				refreshToken: vi.fn(),
 			};
 			const app = buildApp({
 				fedTokenStore: lockingStore,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -765,10 +783,10 @@ describe("POST /oauth/federation/:name/token", () => {
 				refreshToken: "original-rt",
 			};
 			const newExpiresAt = new Date(Date.now() + 3_600_000);
-			const refreshProvider: FederationProviderHandle & {
+			const refreshProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				refreshToken: vi.fn().mockResolvedValue({
 					accessToken: "new-at",
 					// No refreshToken returned — IdP did NOT rotate
@@ -781,7 +799,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			const app = buildApp({
 				fedTokenStore,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -830,14 +848,14 @@ describe("POST /oauth/federation/:name/token", () => {
 				record: vi.fn().mockResolvedValue(undefined),
 			};
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
-			const refreshProvider: FederationProviderHandle & {
+			const refreshProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{
 					accessToken: string;
 					refreshToken?: string;
 					expiresAt: Date;
 				}>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				refreshToken: vi.fn().mockResolvedValue({
 					accessToken: "new-at",
 					expiresAt: new Date(Date.now() + 3_600_000),
@@ -846,7 +864,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			const app = buildApp({
 				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
 				auditSink,
 			});
 			const token = await mintAccessToken();
@@ -905,21 +923,21 @@ describe("POST /oauth/federation/:name/token", () => {
 				refreshToken: "brand-new-rt",
 				expiresAt: newExpiresAt,
 			});
-			const refreshProvider: FederationProviderHandle & {
+			const refreshProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{
 					accessToken: string;
 					refreshToken?: string;
 					expiresAt: Date;
 				}>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				refreshToken: refreshFn,
 			};
 
 			const app = buildApp({
 				fedTokenStore: lockingStore,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -946,14 +964,14 @@ describe("POST /oauth/federation/:name/token", () => {
 				idToken: storedIdToken,
 			};
 			const newExpiresAt = new Date(Date.now() + 3_600_000);
-			const refreshProvider: FederationProviderHandle & {
+			const refreshProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{
 					accessToken: string;
 					refreshToken?: string;
 					expiresAt: Date;
 				}>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				refreshToken: vi.fn().mockResolvedValue({
 					accessToken: "new-at",
 					refreshToken: "new-rt",
@@ -967,7 +985,7 @@ describe("POST /oauth/federation/:name/token", () => {
 			const app = buildApp({
 				fedTokenStore,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -1069,20 +1087,20 @@ describe("POST /oauth/federation/:name/token", () => {
 			});
 			// Mock provider exposes `refreshToken` per the published SupportsRefresh
 			// interface — exactly what `federation-google/src/google.mts` ships.
-			const realShapeProvider: FederationProviderHandle & {
+			const realShapeProvider: FederationProvider & {
 				refreshToken: (rt: string) => Promise<{
 					accessToken: string;
 					refreshToken?: string;
 					expiresAt: Date;
 				}>;
 			} = {
-				name: "google",
+				...federationBase("google"),
 				refreshToken: refreshFn,
 			};
 			const app = buildApp({
 				fedTokenStore,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", realShapeProvider]]),
+					new Map<string, FederationProvider>([["google", realShapeProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -1111,13 +1129,13 @@ describe("POST /oauth/federation/:name/token", () => {
 				refreshToken: "new-rt",
 				expiresAt: new Date(Date.now() + 3_600_000),
 			});
-			const refreshProvider: FederationProviderHandle & {
+			const refreshProvider: FederationProvider & {
 				refreshToken: typeof refreshFn;
-			} = { name: "google", refreshToken: refreshFn };
+			} = { ...federationBase("google"), refreshToken: refreshFn };
 			const app = buildApp({
 				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -1152,13 +1170,13 @@ describe("POST /oauth/federation/:name/token", () => {
 				acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
 			};
 			const refreshFn = vi.fn();
-			const refreshProvider: FederationProviderHandle & {
+			const refreshProvider: FederationProvider & {
 				refreshToken: typeof refreshFn;
-			} = { name: "google", refreshToken: refreshFn };
+			} = { ...federationBase("google"), refreshToken: refreshFn };
 			const app = buildApp({
 				fedTokenStore: lockingStore,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -1188,13 +1206,13 @@ describe("POST /oauth/federation/:name/token", () => {
 				acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
 			};
 			const refreshFn = vi.fn();
-			const refreshProvider: FederationProviderHandle & {
+			const refreshProvider: FederationProvider & {
 				refreshToken: typeof refreshFn;
-			} = { name: "google", refreshToken: refreshFn };
+			} = { ...federationBase("google"), refreshToken: refreshFn };
 			const app = buildApp({
 				fedTokenStore: lockingStore,
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
 			});
 			const token = await mintAccessToken();
 
@@ -1214,13 +1232,13 @@ describe("POST /oauth/federation/:name/token", () => {
 		function buildRefreshFailure(error: unknown, opts: { auditSink?: AuditSink } = {}) {
 			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
 			const refreshFn = vi.fn().mockRejectedValue(error);
-			const refreshProvider: FederationProviderHandle & {
+			const refreshProvider: FederationProvider & {
 				refreshToken: typeof refreshFn;
-			} = { name: "google", refreshToken: refreshFn };
+			} = { ...federationBase("google"), refreshToken: refreshFn };
 			return buildApp({
 				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
 				getFederationProviders: () =>
-					new Map<string, FederationProviderHandle>([["google", refreshProvider]]),
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
 				auditSink: opts.auditSink,
 			});
 		}

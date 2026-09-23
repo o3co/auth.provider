@@ -27,7 +27,7 @@ import {
 	describeIssuerRejection,
 	emitAuditEvent,
 	errorEnvelope,
-	type FederationProviderHandle,
+	type FederationProvider,
 	type FederationTokenStore,
 	formatObject,
 	type GrantHandlerResolver,
@@ -180,7 +180,7 @@ export const createOAuthRouter = async (
 		 * module init order does not affect resolution — pass `() => context.federationProviders`
 		 * from `module.mts`. Defaults to `() => undefined` when not provided.
 		 */
-		getFederationProviders?: () => ReadonlyMap<string, FederationProviderHandle> | undefined;
+		getFederationProviders?: () => ReadonlyMap<string, FederationProvider> | undefined;
 		logger?: Logger;
 	},
 ): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }> => {
