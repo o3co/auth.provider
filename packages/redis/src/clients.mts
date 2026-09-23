@@ -781,17 +781,20 @@ export interface DeviceCodeStoreClient {
  * The scopes are one JSON array rather than a Redis set, so a scope value is
  * stored byte-for-byte and the order they were first granted in survives —
  * and so the record and its `grantedAt` / `expiresAt` are one key that one
- * script rewrites whole. `expiresAt` is *absent* for a consent recorded until
- * revoked — a hash has no `undefined` to hold — and the adapter reads that
- * absence back as the port record's `expiresAt: undefined`.
+ * script rewrites whole. The hash has no `expiresAt` field for a consent
+ * recorded until revoked; a client reports that as `expiresAt: undefined`.
  */
 export interface ConsentRecordFields {
 	/** JSON array of the scopes agreed to. */
 	readonly scopes: string;
 	/** Epoch milliseconds. */
 	readonly grantedAt: string;
-	/** Epoch milliseconds. Absent: until revoked. */
-	readonly expiresAt?: string;
+	/**
+	 * Epoch milliseconds; `undefined` when the hash holds none — until revoked.
+	 * A required key (#626): a client that forgot to pass the field on would
+	 * turn every consent it read into one until revoked.
+	 */
+	readonly expiresAt: string | undefined;
 }
 
 export interface GrantConsentInput {

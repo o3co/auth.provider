@@ -1850,7 +1850,7 @@ export function makeIoredisClients(
 			const fields: ConsentRecordFields = {
 				scopes,
 				grantedAt,
-				...(expiresAt === null || expiresAt === undefined ? {} : { expiresAt }),
+				expiresAt: expiresAt ?? undefined,
 			};
 			return fields;
 		},
