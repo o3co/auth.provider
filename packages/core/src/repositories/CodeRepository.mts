@@ -21,9 +21,9 @@ import type { Code } from "./types.mjs";
  * fields but the code, which the repository mints (#626).
  *
  * Tied to {@link Code} rather than declared again, so a field added to the
- * record is one the writer has to name, and each is a required key for the
- * reason the record's are — a writer that forgot `nonce` or `acr` would issue
- * a code whose id_token lacks it. `expiresIn` alone may be left out: absent,
+ * record is one the writer has to name. Each is a required key for the same
+ * reason the record's own fields are: a writer that forgot `nonce` or `acr`
+ * would issue a code whose id_token lacks it. `expiresIn` alone may be left out: absent,
  * the repository's configured default applies.
  */
 export type CreateCodeInput = Omit<Code, "code" | "expiresIn"> & {
