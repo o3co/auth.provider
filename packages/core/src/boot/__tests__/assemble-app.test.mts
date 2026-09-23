@@ -684,3 +684,62 @@ describe("assembleApp — 17. listen() wraps router in Express app", () => {
 		}
 	});
 });
+
+// ---------------------------------------------------------------------------
+// 18. discovery: only the document's own error is converted (#626 F4)
+// ---------------------------------------------------------------------------
+
+describe("assembleApp — 18. discovery: only the document's own error is converted (#626 F4)", () => {
+	it("re-raises an error that is not a DiscoveryDocumentError as it is, not as a BootError", () => {
+		// The conversion into `reason: "discovery-document-invalid"` is for a
+		// document that did not assemble. Anything else the planner raises — here
+		// the router factory failing, the first thing it calls once both gates
+		// pass — is not a discovery misconfiguration, and relabelling it as one
+		// would send an operator looking at the wrong thing.
+		const routerFailure = new Error("router factory failed");
+		const frozen: FrozenWorld = {
+			...makeFrozenWorld([], [], {
+				config: { oauth: { jwt: { issuer: "https://auth.example.com" } } },
+				keyStore: { algorithm: "HS256" },
+			}),
+			registries: new Map([
+				[
+					"discoveryMetadata",
+					{
+						values: () =>
+							[
+								{
+									providerRoot: true,
+									endpoints: {
+										authorization_endpoint: "/oauth/authorize",
+										token_endpoint: "/oauth/token",
+										jwks_uri: "/.well-known/jwks.json",
+									},
+									metadata: {
+										response_types_supported: ["code"],
+										subject_types_supported: ["public"],
+									},
+								},
+							].values(),
+					},
+				],
+			]) as FrozenWorld["registries"],
+		};
+
+		let thrown: unknown;
+		try {
+			assembleApp(frozen, {
+				express: {
+					Router: () => {
+						throw routerFailure;
+					},
+				},
+			});
+		} catch (err) {
+			thrown = err;
+		}
+
+		expect(thrown).toBe(routerFailure);
+		expect(thrown).not.toBeInstanceOf(BootError);
+	});
+});
