@@ -68,6 +68,11 @@ export interface FederationGrantConsent {
  * (D16), so that rewriting one in storage makes the credential unreadable
  * instead of widening the grant. Keeping them in a type of their own is what
  * gives an adapter that list.
+ *
+ * Every field is a required key (#626): `resource` holds `undefined` where the
+ * connection names none, so a copy that forgot it — and asked the upstream
+ * for a token without the audience the connection narrows it to — is a
+ * compile error.
  */
 export interface FederationGrantAuthorization {
 	/** Fingerprint of the connection's upstream issuer and client at consent (D4). */
@@ -75,7 +80,8 @@ export interface FederationGrantAuthorization {
 	/** Fingerprint of what the connection asks for and where (D4). */
 	readonly authorizationRevision: string;
 	readonly upstream: { readonly issuer: string; readonly subject: string };
-	readonly resource?: string;
+	/** RFC 8707, from the connection; `undefined` when it names none. */
+	readonly resource: string | undefined;
 	/** Granted by the upstream at authorization, within `consent.scopes`. A refresh never changes it. */
 	readonly scopes: readonly string[];
 	readonly consent: FederationGrantConsent;
@@ -87,13 +93,21 @@ export interface FederationGrantAuthorization {
 /**
  * What changes while a grant is in use, outside any activation and outside the
  * authenticated envelope: neither field decides what the grant allows.
+ *
+ * Each is a required key, `undefined` where there is none (#626). None
+ * decides what the grant allows, but two decide how often the upstream is
+ * asked: a copy that lost `ineligible` would take the lock and rotate the
+ * refresh token on every request again (D5), and one that lost
+ * `refreshFailure` would ask a failing upstream again at once (D12). Naming
+ * the key makes that copy a compile error, and makes a write that clears one
+ * say so.
  */
 export interface FederationGrantUsage {
-	readonly lastUsedAt?: Date;
+	readonly lastUsedAt: Date | undefined;
 	/** Left by a refresh whose token could not be disclosed (D5). */
-	readonly ineligible?: FederationGrantIneligibilityMarker;
+	readonly ineligible: FederationGrantIneligibilityMarker | undefined;
 	/** Left by a refresh that failed (D12). Cleared by whatever replaces or ends the credentials. */
-	readonly refreshFailure?: FederationGrantRefreshFailure;
+	readonly refreshFailure: FederationGrantRefreshFailure | undefined;
 }
 
 /**
@@ -121,8 +135,18 @@ export interface FederationGrantRefreshFailureInput {
 /**
  * Non-secret, and outside the authenticated envelope (D16). Without it every
  * request that needs a refresh would ask a failing upstream again (D12).
+ *
+ * The report's fields, each a required key (#626) — a stamp that lost
+ * `retryAfterSeconds` would ask the upstream again before it said to — and
+ * the store's count.
  */
-export interface FederationGrantRefreshFailure extends FederationGrantRefreshFailureInput {
+export interface FederationGrantRefreshFailure {
+	readonly at: Date;
+	readonly kind: FederationGrantRefreshFailureKind;
+	/** The upstream's `Retry-After`, in seconds, as the classifier bounded it. */
+	readonly retryAfterSeconds: number | undefined;
+	/** For `rejected`: the error code, one this provider knows (D18). */
+	readonly upstreamCode: string | undefined;
 	/** Failures in a row, counted by the store: `1` for the first. */
 	readonly count: number;
 }
@@ -284,21 +308,27 @@ export type EffectiveFederationGrantStatus =
 
 /**
  * What the sealed credential record holds (D5, D16). The access token may be
- * absent: an ineligible one is withheld and never written. Its expiry is not
- * stored: it is `obtainedAt` plus `issuedLifetime`, and a second copy would be
- * a second thing that could disagree with what the eligibility rule judged.
+ * `undefined`: an ineligible one is withheld and never written. Its expiry is
+ * not stored: it is `obtainedAt` plus `issuedLifetime`, and a second copy
+ * would be a second thing that could disagree with what the eligibility rule
+ * judged.
+ *
+ * `accessToken` is a required key (#626): a copy that forgot it would read as
+ * a withheld token and send every request to the upstream for a refresh.
  */
 export interface FederationGrantCredentials {
 	readonly refreshToken: string;
-	readonly accessToken?: {
-		readonly value: string;
-		readonly tokenType: string;
-		readonly obtainedAt: Date;
-		/** Seconds, as the upstream issued it — not what remains of it. */
-		readonly issuedLifetime: number;
-		/** What this token carries. A refresh response that omits `scope` means the grant's scopes (RFC 6749 §6). */
-		readonly scopes: readonly string[];
-	};
+	readonly accessToken:
+		| {
+				readonly value: string;
+				readonly tokenType: string;
+				readonly obtainedAt: Date;
+				/** Seconds, as the upstream issued it — not what remains of it. */
+				readonly issuedLifetime: number;
+				/** What this token carries. A refresh response that omits `scope` means the grant's scopes (RFC 6749 §6). */
+				readonly scopes: readonly string[];
+		  }
+		| undefined;
 }
 
 // ---------------------------------------------------------------------------

@@ -1061,8 +1061,14 @@ export interface NoteFederationGrantRefreshFailureInput {
 	readonly atMs: number;
 	readonly kind: string;
 	readonly rowMs: number;
-	readonly retryAfterSeconds?: number;
-	readonly upstreamCode?: string;
+	/**
+	 * `undefined` when the upstream gave no `Retry-After`. Both are required keys
+	 * (#626): a store that forgot to pass one would stamp a backoff shorter
+	 * than the upstream asked for, or lose the code that says the user has to
+	 * come back. A client reads them exactly as before.
+	 */
+	readonly retryAfterSeconds: number | undefined;
+	readonly upstreamCode: string | undefined;
 }
 
 /** What one read returns: the record and its credential as they were at one instant. */

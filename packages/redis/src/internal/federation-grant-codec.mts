@@ -137,7 +137,7 @@ export function parseCanonicalAuthorization(
 		identityRevision,
 		authorizationRevision,
 		upstream: { issuer, subject },
-		...(resource.value === undefined ? {} : { resource: resource.value }),
+		resource: resource.value,
 		scopes,
 		consent: { at: consentAt, sid, scopes: consentScopes },
 		authorizedAt,
@@ -227,7 +227,7 @@ export function decodeCredentials(text: string): FederationGrantCredentials | un
 	const refreshToken = stringFrom(parsed[1]);
 	if (refreshToken === undefined || refreshToken.length === 0) return undefined;
 	if (!Array.isArray(parsed[2]) || parsed[2].length > 1) return undefined;
-	if (parsed[2].length === 0) return { refreshToken };
+	if (parsed[2].length === 0) return { refreshToken, accessToken: undefined };
 	const token: unknown = parsed[2][0];
 	if (!Array.isArray(token) || token.length !== 5) return undefined;
 	const value = stringFrom(token[0]);

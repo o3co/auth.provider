@@ -27,7 +27,9 @@ import {
 	type FederationGrantRefreshFailureKind,
 	type FederationGrantRevokedBy,
 	type FederationGrantStore,
+	type FederationGrantUsage,
 	type FederationGrantWrite,
+	type RevokedFederationGrant,
 	withinFederationGrantLifetimeCeiling,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
@@ -279,34 +281,39 @@ function decode(
 	if (status !== "active" && status !== "reauthorization_required" && status !== "revoked") {
 		return undefined;
 	}
-	const lastUsedAt = dateFrom(fields.lastUsedAt);
-	const marker = parseMarker(fields.ineligible);
 	const failureAt = dateFrom(fields.failureAt);
 	const failureCount = numberFrom(fields.failureCount);
 	const retryAfterSeconds = fields.failureRetryAfterSeconds;
-	const refreshFailure =
-		failureAt !== undefined && fields.failureKind !== undefined && failureCount !== undefined
+	// Typed literals, each field named (#626): a HASH field this read forgot is
+	// a compile error, where a spread of conditional parts and a cast of the
+	// whole to the grant type let one go without a sound.
+	const usage: FederationGrantUsage = {
+		lastUsedAt: dateFrom(fields.lastUsedAt),
+		ineligible: parseMarker(fields.ineligible),
+		refreshFailure:
+			failureAt !== undefined && fields.failureKind !== undefined && failureCount !== undefined
+				? {
+						at: failureAt,
+						kind: fields.failureKind as FederationGrantRefreshFailureKind,
+						retryAfterSeconds:
+							retryAfterSeconds !== undefined && Number.isFinite(Number(retryAfterSeconds))
+								? Number(retryAfterSeconds)
+								: undefined,
+						upstreamCode: fields.failureUpstreamCode,
+						count: failureCount,
+					}
+				: undefined,
+	};
+	const grant: AuthorizedFederationGrant | RevokedFederationGrant =
+		revocation === undefined
 			? {
-					at: failureAt,
-					kind: fields.failureKind as FederationGrantRefreshFailureKind,
-					count: failureCount,
-					...(retryAfterSeconds !== undefined && Number.isFinite(Number(retryAfterSeconds))
-						? { retryAfterSeconds: Number(retryAfterSeconds) }
-						: {}),
-					...(fields.failureUpstreamCode !== undefined
-						? { upstreamCode: fields.failureUpstreamCode }
-						: {}),
+					...base,
+					version,
+					...authorization,
+					...usage,
+					status: status as "active" | "reauthorization_required",
 				}
-			: undefined;
-	const grant = {
-		...base,
-		version,
-		...authorization,
-		...(lastUsedAt !== undefined ? { lastUsedAt } : {}),
-		...(marker !== undefined ? { ineligible: marker } : {}),
-		...(refreshFailure !== undefined ? { refreshFailure } : {}),
-		...(revocation ?? { status: status as "active" | "reauthorization_required" }),
-	} as AuthorizedFederationGrant;
+			: { ...base, version, ...authorization, ...usage, ...revocation };
 	return {
 		grant,
 		horizonMs: authorization.expiresAt.getTime() + retentionMs,
@@ -780,12 +787,8 @@ export function createRedisFederationGrantStore(
 					atMs: input.failure.at.getTime(),
 					kind: input.failure.kind,
 					rowMs: input.rowMs,
-					...(input.failure.retryAfterSeconds !== undefined
-						? { retryAfterSeconds: input.failure.retryAfterSeconds }
-						: {}),
-					...(input.failure.upstreamCode !== undefined
-						? { upstreamCode: input.failure.upstreamCode }
-						: {}),
+					retryAfterSeconds: input.failure.retryAfterSeconds,
+					upstreamCode: input.failure.upstreamCode,
 				}),
 				input.grantId,
 			);

@@ -208,8 +208,8 @@ export interface FederationGrantStore {
 	 * caller read, and `now` before `expiresAt`.
 	 *
 	 * The credentials are replaced as a whole, not merged: with `accessToken`
-	 * absent the record keeps the refresh token only, which is how an ineligible
-	 * access token is never written. The marker is set, or with `null` cleared,
+	 * `undefined` the record keeps the refresh token only, which is how an
+	 * ineligible access token is never written. The marker is set, or with `null` cleared,
 	 * in the same write. `version` is bumped, and the current intent is left
 	 * alone: a refresh in the background must not cost the user the
 	 * reauthorization they are in the middle of. A date that is not one refuses

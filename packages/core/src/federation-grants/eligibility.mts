@@ -20,8 +20,27 @@ import type {
 	FederationGrantIneligibilityMarker,
 	FederationGrantIneligibilityReason,
 	FederationGrantRefreshFailure,
+	FederationGrantRefreshFailureInput,
 	FederationGrantRefreshFailureKind,
 } from "./types.mjs";
+
+/**
+ * The stamp a report becomes once the store has counted it (#626): every
+ * field named, so that a field added to the report is one this has to carry
+ * and not one a spread might or might not.
+ */
+export function federationGrantRefreshFailureStamp(
+	report: FederationGrantRefreshFailureInput,
+	count: number,
+): FederationGrantRefreshFailure {
+	return {
+		at: report.at,
+		kind: report.kind,
+		retryAfterSeconds: report.retryAfterSeconds,
+		upstreamCode: report.upstreamCode,
+		count,
+	};
+}
 
 /**
  * Whether every name in `scopes` is in `within`. Exact, on the names the
