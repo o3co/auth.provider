@@ -111,11 +111,21 @@ const isUsableDate = (value: unknown): value is Date =>
  * does not have. Filed as #647 rather than approximated further.
  */
 const narrowedScope = (answered: unknown, stored: string | undefined): string | undefined => {
-	if (!isNonEmptyString(answered)) return stored;
-	if (!isNonEmptyString(stored)) return stored;
-	const granted = new Set(stored.split(" ").filter((entry) => entry !== ""));
+	if (typeof answered !== "string") return stored;
+	// Decide on the parsed lists, never on the raw strings. RFC 6749 §3.3 makes
+	// a scope a space-delimited list, so `"   "` names nothing — and an empty
+	// list satisfies `every` vacuously, which would store the spaces and leave
+	// every later answer failing the subset check against an empty set. Absent,
+	// empty and whitespace-only are one case: the upstream named no scope.
 	const asked = answered.split(" ").filter((entry) => entry !== "");
-	return asked.every((entry) => granted.has(entry)) ? answered : stored;
+	if (asked.length === 0) return stored;
+	const granted = typeof stored === "string" ? stored.split(" ").filter((e) => e !== "") : [];
+	// Nothing to bound the answer against, so nothing to accept it on.
+	if (granted.length === 0) return stored;
+	const allowed = new Set(granted);
+	// Re-joined rather than echoed, so what is stored is always the canonical
+	// form of what was accepted.
+	return asked.every((entry) => allowed.has(entry)) ? asked.join(" ") : stored;
 };
 
 // `supportsRefresh` is core's, and so is the capability it narrows to: this

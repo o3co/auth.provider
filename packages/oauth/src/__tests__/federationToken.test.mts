@@ -1386,6 +1386,75 @@ describe("POST /oauth/federation/:name/token", () => {
 			);
 		});
 
+		it.each([
+			["whitespace only", "   "],
+			["an empty string", ""],
+		])("keeps the stored scope when the refresh answers %s", async (_l, scope) => {
+			// RFC 6749 section 3.3 makes a scope a space-delimited list, so neither
+			// of these names one. Parsed, both are the empty list - which would
+			// satisfy the subset check vacuously and store the whitespace, leaving
+			// every later answer failing against an empty granted set. Absent,
+			// empty and whitespace-only are one case.
+			const expiredTokens = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				scope: "openid email",
+			};
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({ accessToken: "new-at", expiresIn: 3600, scope }),
+			} as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expiredTokens),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(res.body.scope).toBe("openid email");
+			expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect.any(String),
+				"google",
+				expect.objectContaining({ scope: "openid email" }),
+			);
+		});
+
+		it("stores the canonical form of an accepted narrowing", async () => {
+			// Re-joined from the parsed list, so a ragged answer does not become the
+			// stored value that later answers are judged against.
+			const expiredTokens = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				scope: "openid email calendar",
+			};
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({
+					accessToken: "new-at",
+					expiresIn: 3600,
+					scope: "  openid   email ",
+				}),
+			} as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expiredTokens),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(res.body.scope).toBe("openid email");
+		});
+
 		it("keeps the stored scope when the refresh names none (absent means unchanged)", async () => {
 			const expiredTokens = {
 				...baseFedTokens,
