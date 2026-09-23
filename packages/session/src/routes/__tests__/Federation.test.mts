@@ -157,6 +157,7 @@ function makeFakeProvider(overrides: Partial<FederationProvider> = {}): Federati
 			refreshToken: "rt",
 			idToken: "it",
 			expiresAt: new Date(Date.now() + 3_600_000),
+			scope: "openid email",
 		})),
 		...overrides,
 	};
@@ -639,6 +640,16 @@ describe("account linking across federations (#482)", () => {
 				"s-1",
 				"test",
 				expect.objectContaining({ accessToken: "at" }),
+			);
+			// #647: what the user consented to at link time. `scope` is what the
+			// token holds now and `grantedScope` is the ceiling a later refresh is
+			// bounded by (RFC 6749 §6) — the two start equal and only the first
+			// moves. Without the ceiling a narrowing is permanent, because the
+			// refresh route has nothing but the current value to judge against.
+			expect(fts.attach).toHaveBeenCalledWith(
+				"s-1",
+				"test",
+				expect.objectContaining({ scope: "openid email", grantedScope: "openid email" }),
 			);
 			// A link is not a login: no new UserSession, the express session keeps its sid.
 			expect(uss.create).not.toHaveBeenCalled();
