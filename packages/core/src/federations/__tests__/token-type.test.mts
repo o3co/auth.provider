@@ -15,7 +15,11 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { BEARER_TOKEN_TYPE, canonicalTokenType, isBearerTokenType } from "../token-type.mjs";
+import {
+	BEARER_TOKEN_TYPE,
+	canonicalTokenType,
+	isBearerTokenType,
+} from "#/federations/token-type.mjs";
 
 describe("canonicalTokenType — RFC 6749 §A.13's `token-type`", () => {
 	it.each([
@@ -27,6 +31,11 @@ describe("canonicalTokenType — RFC 6749 §A.13's `token-type`", () => {
 		["a URI, which §A.13 admits beside a type name", "urn:ietf:params:oauth:token-type:jwt"],
 		["an absolute URI with a query and a fragment", "https://example.com/tt?v=1#x"],
 		["a pct-encoded octet", "a%20b"],
+		["a relative reference", "foo/bar"],
+		["a network-path reference", "//host/p"],
+		["an IPv6 literal host", "https://[::1]/x"],
+		["an IPvFuture literal host", "https://[v1.fe]/"],
+		["userinfo and a port", "https://u:p@h:8080/p"],
 		["one the registry does not hold", "mac"],
 	])("keeps %s exactly as it was given", (_label, value) => {
 		expect(canonicalTokenType(value)).toBe(value);
@@ -53,6 +62,14 @@ describe("canonicalTokenType — RFC 6749 §A.13's `token-type`", () => {
 		["a `%` that does not begin a pct-encoded octet", "a%zz"],
 		["a truncated pct-encoding", "a%2"],
 		["a non-ASCII letter", "é"],
+		// Every character is one a URI may contain, and the reference is still
+		// malformed. A lexical check read these as type names (#649 review).
+		["an IP-literal that never closes", "https://["],
+		["an IP-literal that is not an IP address", "https://[zz]/"],
+		["a bracket outside an IP-literal", "a[b"],
+		["a bracket in a path", "http://h/p[1]"],
+		["a colon in a relative reference's first segment", ":foo"],
+		["a port that is not a number", "http://h:80x"],
 	])("names nothing for %s", (_label, value) => {
 		expect(canonicalTokenType(value)).toBeUndefined();
 	});

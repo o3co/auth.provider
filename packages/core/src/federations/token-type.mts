@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import { isIPv6 } from "node:net";
+
 /**
  * The one type an upstream access token may be handed on as, spelled as RFC
  * 6750 §2.1 spells the scheme. RFC 6749 §5.1 makes the comparison
@@ -23,14 +25,41 @@
  */
 export const BEARER_TOKEN_TYPE = "Bearer";
 
-/**
- * RFC 3986 §2: the characters a URI may contain outside a percent-encoding —
- * unreserved (`ALPHA DIGIT - . _ ~`), gen-delims (`: / ? # [ ] @`) and
- * sub-delims (`! $ & ' ( ) * + , ; =`). `%` is not here: it is only valid as
- * the start of a pct-encoded octet, which is checked on its own.
- */
-const URI_CHARACTER = /[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=]/;
-const PCT_ENCODED = /^%[0-9A-Fa-f]{2}/;
+// RFC 3986 Appendix A, as regular-expression source. Composed from the ABNF
+// rule by rule so each piece can be checked against the RFC by name.
+const UNRESERVED = "A-Za-z0-9\\-._~";
+const SUB_DELIMS = "!$&'()*+,;=";
+const PCT_ENCODED = "%[0-9A-Fa-f]{2}";
+const PCHAR = `(?:[${UNRESERVED}${SUB_DELIMS}:@]|${PCT_ENCODED})`;
+const SEGMENT = `${PCHAR}*`;
+const SEGMENT_NZ = `${PCHAR}+`;
+const SEGMENT_NZ_NC = `(?:[${UNRESERVED}${SUB_DELIMS}@]|${PCT_ENCODED})+`;
+const QUERY_OR_FRAGMENT = `(?:${PCHAR}|[/?])*`;
+const SCHEME = "[A-Za-z][A-Za-z0-9+\\-.]*";
+const USERINFO = `(?:[${UNRESERVED}${SUB_DELIMS}:]|${PCT_ENCODED})*`;
+const REG_NAME = `(?:[${UNRESERVED}${SUB_DELIMS}]|${PCT_ENCODED})*`;
+// The IP-literal's brackets only; what is between them is checked below,
+// because an IPv6 address is not a grammar a regular expression states well.
+const IP_LITERAL = "\\[[^\\[\\]]*\\]";
+// IPv4address needs no alternative of its own: lexically it is a reg-name,
+// and RFC 3986 §3.2.2 reads a host that is not a valid one as a reg-name.
+const AUTHORITY = `(?:${USERINFO}@)?(?:${IP_LITERAL}|${REG_NAME})(?::[0-9]*)?`;
+const PATH_ABEMPTY = `(?:/${SEGMENT})*`;
+const PATH_ABSOLUTE = `/(?:${SEGMENT_NZ}(?:/${SEGMENT})*)?`;
+const PATH_NOSCHEME = `${SEGMENT_NZ_NC}(?:/${SEGMENT})*`;
+const PATH_ROOTLESS = `${SEGMENT_NZ}(?:/${SEGMENT})*`;
+const QUERY_AND_FRAGMENT = `(?:\\?${QUERY_OR_FRAGMENT})?(?:#${QUERY_OR_FRAGMENT})?`;
+
+/** `URI = scheme ":" hier-part [ "?" query ] [ "#" fragment ]` */
+const URI = new RegExp(
+	`^${SCHEME}:(?://${AUTHORITY}${PATH_ABEMPTY}|${PATH_ABSOLUTE}|${PATH_ROOTLESS}|)${QUERY_AND_FRAGMENT}$`,
+);
+/** `relative-ref = relative-part [ "?" query ] [ "#" fragment ]` */
+const RELATIVE_REF = new RegExp(
+	`^(?://${AUTHORITY}${PATH_ABEMPTY}|${PATH_ABSOLUTE}|${PATH_NOSCHEME}|)${QUERY_AND_FRAGMENT}$`,
+);
+/** `IPvFuture = "v" 1*HEXDIG "." 1*( unreserved / sub-delims / ":" )` */
+const IP_FUTURE = new RegExp(`^v[0-9A-Fa-f]+\\.[${UNRESERVED}${SUB_DELIMS}:]+$`);
 
 /**
  * Whether a value is a `token-type` in the sense of RFC 6749 §A.13:
@@ -39,32 +68,27 @@ const PCT_ENCODED = /^%[0-9A-Fa-f]{2}/;
  *     type-name  = 1*name-char
  *     name-char  = "-" / "." / "_" / DIGIT / ALPHA
  *
- * Every `name-char` is an RFC 3986 unreserved character, so every
- * `type-name` is itself a valid (relative) URI reference and the union
- * reduces to one question: is this a URI reference? That is answered
- * lexically — every character is one RFC 3986 admits, and every `%` begins a
- * pct-encoded octet. The structural rules a full parse would add (`[` only in
- * an IP-literal host, no `:` in a relative reference's first segment) are not
- * checked; a value that breaks only those is a URI-shaped string nobody
- * issues as a token type, and reading it as a name changes only WHICH
- * refusal it gets, never whether it is refused.
+ * Every `name-char` is an RFC 3986 unreserved character, so every non-empty
+ * `type-name` is itself a valid relative reference and the union reduces to
+ * one question: is this a URI reference? That is answered by RFC 3986's own
+ * grammar — structure included, not only the character set. A lexical check
+ * let `https://[` through, an IP-literal that never closes, and read it as a
+ * type the upstream meant (#649 review).
  *
- * `"Bearer^"`, `"a{b}"`, `"DPoP "` and `""` are not token types: each has a
- * character no URI may contain, or none at all.
+ * `[` and `]` appear nowhere in RFC 3986 except around an IP-literal, so once
+ * the structure matched, any bracketed text IS the IP-literal, and it has to
+ * be an IPv6 address or an IPvFuture.
+ *
+ * The one deliberate departure: `""` is a URI reference (`path-empty` with no
+ * query or fragment) and is refused here. §5.1 makes `token_type` REQUIRED,
+ * and a value that names nothing does not meet that — it is an adapter
+ * answering something broken, not an upstream naming a type.
  */
 function isTokenType(value: string): boolean {
 	if (value.length === 0) return false;
-	let i = 0;
-	while (i < value.length) {
-		if (value[i] === "%") {
-			if (!PCT_ENCODED.test(value.slice(i))) return false;
-			i += 3;
-			continue;
-		}
-		if (!URI_CHARACTER.test(value[i] ?? "")) return false;
-		i += 1;
-	}
-	return true;
+	if (!URI.test(value) && !RELATIVE_REF.test(value)) return false;
+	const literal = /\[([^\]]*)\]/.exec(value);
+	return literal === null || isIPv6(literal[1] ?? "") || IP_FUTURE.test(literal[1] ?? "");
 }
 
 /**
