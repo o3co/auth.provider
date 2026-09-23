@@ -50,6 +50,13 @@ describe("canonicalTokenType — RFC 6749 §A.13's `token-type`", () => {
 		["a tab", "\t"],
 		["a leading space", " Bearer"],
 		["a trailing space", "Bearer "],
+		// JavaScript's `$` without the `m` flag is end of input, not "before a
+		// final newline" as in PCRE or Python — pinned so a flag or a port to
+		// another engine cannot quietly start admitting these (#649 review).
+		["a trailing newline", "Bearer\n"],
+		["a trailing CRLF", "Bearer\r\n"],
+		["a trailing carriage return", "Bearer\r"],
+		["a trailing line separator", "Bearer\u2028"],
 		["a double quote, which no URI may contain", '"'],
 		["a backslash, which no URI may contain", "\\"],
 		// Printable ASCII the old NQCHAR bound admitted and §A.13 does not:

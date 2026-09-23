@@ -330,7 +330,7 @@ clients:
 - `federation.token.success` — トークン発行時（詳細に `refreshed: boolean` が含まれ、キャッシュヒットかリフレッシュパスかを区別できる）
 - `federation.token.forbidden` — 403 発生時（クライアントが opt-in していない）
 - `federation.token.family_revoked` — family 失効による 401 発生時
-- `federation.token.refresh_failed` — `provider.refreshToken` が分類できないエラーで throw したとき、およびこのルートが読めない応答が返ったとき。SF-13 (v0.5.1): throw の場合 `details.reason` は分類器の値（`"invalid_grant" | "rate_limited" | "network" | "unknown"`）、応答は返ったが使えなかった場合は `"no_access_token"`・`"invalid_expiry"`・`"invalid_token_type"` のいずれか。SIEM ルールはこのフィールドでグルーピングすること — 全 7 値。v0.5.1 以前は `details.error: <raw message>` だった — ダッシュボードを移行すること
+- `federation.token.refresh_failed` — 500 `refresh_failed` のとき。ケースは 2 つ: `provider.refreshToken` が SF-13 (v0.5.1) の分類器で分類できないエラーを throw した場合（`details.reason` は `"unknown"`）、または応答は返ったがこのルートが使えない場合（`"no_access_token"`・`"invalid_expiry"`・`"invalid_token_type"`）。このイベントが持つ値はこの 4 つだけで、SIEM ルールはこれでグルーピングすること。分類器の残りの結果はこのイベントに**ならない**: `invalid_grant` は `federation.token.reauthentication_required`（410）、`rate_limited`（429）と `network`（503）は監査イベントを出さない。v0.5.1 以前は `details.error: <raw message>` だった — ダッシュボードを移行すること
 - `federation.token.reauthentication_required` — IdP から `invalid_grant` を受け取ったとき
 - `federation.token.upstream_ineligible` — 502 発生時。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま（token 型として不正な値もそのまま — それこそ見る価値がある。文字列ですらない場合は `null`）。どの upstream が別の型を返し始めたかをオペレーターが追える。レスポンスには `Retry-After: 300` を付ける — `federationGrants.ineligibleRetryAfter` の既定値と同じで、この状態はオペレーターが upstream の登録を戻すまで終わらないため。呼び出し元には型を伝えない — 再試行以外にできることがないため
 
