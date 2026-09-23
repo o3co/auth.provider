@@ -22,6 +22,7 @@ import type {
 	FederationTokenStore,
 	KeyStore,
 	Logger,
+	RefreshedTokens,
 	RefreshTokenFamilyRevocation,
 	SessionFederationIndex,
 	SubjectRevocation,
@@ -65,6 +66,24 @@ const isUsableLifetime = (value: unknown): value is number =>
 /** A `Date` that names an instant. `new Date(NaN)` does not. */
 const isUsableDate = (value: unknown): value is Date =>
 	value instanceof Date && !Number.isNaN(value.getTime());
+
+/**
+ * What a refresh may record as the token's scope.
+ *
+ * RFC 6749 §6 lets a refresh narrow the granted scope and forbids it widening
+ * one: "the scope of the access token … MUST NOT include any scope not
+ * originally granted". An answer that adds a scope is therefore not a grant,
+ * and recording it would leave the store claiming consent that was never
+ * given. Absent, empty, or widening all keep what is stored. Mirrors
+ * `scopesWithin` in `core/federation-grants/eligibility.mts`.
+ */
+const narrowedScope = (answered: unknown, stored: string | undefined): string | undefined => {
+	if (!isNonEmptyString(answered)) return stored;
+	if (!isNonEmptyString(stored)) return stored;
+	const granted = new Set(stored.split(" ").filter((entry) => entry !== ""));
+	const asked = answered.split(" ").filter((entry) => entry !== "");
+	return asked.every((entry) => granted.has(entry)) ? answered : stored;
+};
 
 // `supportsRefresh` is core's, and so is the capability it narrows to: this
 // route carried a structural copy of both while the contract lived in
@@ -602,24 +621,45 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// An empty string is refused with it. An adapter is a third-party
 			// extension point, so what it answers is unverified data until this
 			// route checks it (D5) — the same bar `core/federation-grants/
-			// retrieve.mts` holds the same contract to.
-			if (!isUsableToken(refreshed.accessToken)) {
+			// retrieve.mts` holds the same contract to, too.
+			//
+			// `answer` rather than `refreshed`: an adapter may resolve with no
+			// object at all, and reading a field off `null` would throw past the
+			// refusal below, losing both the structured answer and the rotated
+			// refresh token this branch exists to salvage.
+			const answer: Partial<RefreshedTokens> =
+				typeof refreshed === "object" && refreshed !== null ? refreshed : {};
+
+			// A lifetime the upstream stated and got wrong is not the same as one
+			// it never stated. `expiresAt: null` is stored as "no finite expiry",
+			// which this route reads as never refresh again (the fast path above),
+			// so letting `NaN`, a negative or zero lifetime, or an Invalid Date
+			// fall through to it would leave an access token in indefinite use and
+			// never checked. Core refuses the same readings —
+			// `federation-grants/eligibility.mts`, `no_finite_lifetime`.
+			const statedLifetime = answer.expiresIn !== undefined && answer.expiresIn !== null;
+			const statedInstant = answer.expiresAt !== undefined && answer.expiresAt !== null;
+			const lifetimeIsBroken =
+				(statedLifetime && !isUsableLifetime(answer.expiresIn)) ||
+				(statedInstant && !isUsableDate(answer.expiresAt));
+
+			if (!isUsableToken(answer.accessToken) || lifetimeIsBroken) {
 				// A rotated refresh token has to be kept even though the refresh
 				// failed: the upstream invalidates the one it replaced (RFC 6749
 				// §6), so discarding it here would leave the stored token dead and
 				// the connection unrecoverable without re-consent. Best effort —
 				// if the store is down the refresh is failing anyway.
 				if (
-					isUsableToken(refreshed.refreshToken) &&
-					refreshed.refreshToken !== currentTokens.refreshToken
+					isUsableToken(answer.refreshToken) &&
+					answer.refreshToken !== currentTokens.refreshToken
 				) {
 					try {
 						await opts.federationTokenStore.update(sid, name, {
 							...currentTokens,
-							refreshToken: refreshed.refreshToken,
+							refreshToken: answer.refreshToken,
 							// Rotated alongside it, and worth the same: the stored
 							// `id_token` is what logout sends as `id_token_hint`.
-							idToken: isUsableToken(refreshed.idToken) ? refreshed.idToken : currentTokens.idToken,
+							idToken: isUsableToken(answer.idToken) ? answer.idToken : currentTokens.idToken,
 						});
 					} catch (error) {
 						logger.warn(
@@ -634,7 +674,10 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					subject: sub ?? undefined,
 					ip: req.ip,
 					userAgent: req.get("user-agent"),
-					details: { federation: name, reason: "no_access_token" },
+					details: {
+						federation: name,
+						reason: lifetimeIsBroken ? "invalid_expiry" : "no_access_token",
+					},
 				});
 				return res.status(500).json({
 					error: "refresh_failed",
@@ -662,30 +705,37 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// block exists to prevent, reached through the adapter instead of
 			// through the store. An unusable reading falls through to the next
 			// source, and to `null` when none of them is usable.
-			const nextExpiresAt = isUsableDate(refreshed.expiresAt)
-				? refreshed.expiresAt
-				: refreshed.expiresAt === null
+			const nextExpiresAt = isUsableDate(answer.expiresAt)
+				? answer.expiresAt
+				: answer.expiresAt === null
 					? null
-					: isUsableLifetime(refreshed.expiresIn)
-						? new Date(Date.now() + refreshed.expiresIn * 1000)
+					: isUsableLifetime(answer.expiresIn)
+						? new Date(Date.now() + answer.expiresIn * 1000)
 						: null;
 			const updatedTokens = {
-				accessToken: refreshed.accessToken,
-				refreshToken: refreshed.refreshToken ?? currentTokens.refreshToken,
+				accessToken: answer.accessToken,
+				// `??` would let `""` through, and an empty string overwriting a
+				// usable stored token strands the connection at the next request.
+				refreshToken: isUsableToken(answer.refreshToken)
+					? answer.refreshToken
+					: currentTokens.refreshToken,
 				// IdPs like Google/GitHub typically don't return a new id_token on refresh.
 				// Fall back to the stored id_token to preserve the id_token_hint for logout (F-5).
-				idToken: refreshed.idToken ?? currentTokens.idToken,
+				idToken: isUsableToken(answer.idToken) ? answer.idToken : currentTokens.idToken,
 				expiresAt: nextExpiresAt,
 				// `token_type` stays the stored one: this route hands the client the
 				// upstream's access token, and a change of type is a change of how
 				// the client must present it. Honouring a rotated one is a decision
 				// of its own, filed on #626, not a side effect of this move.
 				tokenType: currentTokens.tokenType,
-				// RFC 6749 §6: a refresh may narrow the scope, and §5.1 makes the
+				// RFC 6749 §6: a refresh may NARROW the scope, and §5.1 makes the
 				// answer authoritative when it differs. Storing the old one would
 				// leave the record claiming access the upstream just withdrew.
-				// Absent means unchanged.
-				scope: isNonEmptyString(refreshed.scope) ? refreshed.scope : currentTokens.scope,
+				// Absent means unchanged, and widening is refused rather than
+				// recorded: §6 forbids a refresh from granting a scope the user
+				// never consented to, so an answer that adds one is the adapter
+				// or the upstream misbehaving, not a grant.
+				scope: narrowedScope(answer.scope, currentTokens.scope),
 				rawParams: currentTokens.rawParams,
 			};
 			try {

@@ -72,7 +72,8 @@ The package ships a built-in validator only for the `access_token` token type (t
 
 ```ts
 import { createApp, defineModule } from "@o3co/auth-provider-core";
-import type { ExchangeTokenValidator, ValidatedToken } from "@o3co/auth-provider-oauth-token-exchange";
+// The validator contract is core's since #626 P1, not this package's.
+import type { ExchangeTokenValidator, ValidatedToken } from "@o3co/auth-provider-core";
 import { tokenExchangeModule } from "@o3co/auth-provider-oauth-token-exchange";
 
 class ExternalJwtValidator implements ExchangeTokenValidator {

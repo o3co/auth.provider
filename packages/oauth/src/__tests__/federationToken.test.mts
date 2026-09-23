@@ -908,32 +908,68 @@ describe("POST /oauth/federation/:name/token", () => {
 				["zero", 0],
 				["Infinity", Number.POSITIVE_INFINITY],
 			])(
-				"stores no expiry rather than an already-expired one for %s",
+				"refuses the refresh for a stated but unusable lifetime: %s",
 				async (_label, expiresIn) => {
-					// An Invalid Date or a past instant would be stored, every later
-					// request would read it as expired, and the connection would refresh
-					// on every request forever. `null` says what is true: no lifetime
-					// this route can stand behind.
+					// Storing `null` here would be worse than storing a past instant.
+					// `expiresAt: null` is this route's "no finite expiry", and its fast
+					// path answers a stored token carrying one WITHOUT refreshing - so a
+					// lifetime the upstream stated and got wrong would put the access
+					// token into indefinite, unchecked use. A stated-and-broken lifetime
+					// is malformed data, and the refresh fails.
 					const { app, fedTokenStore } = refreshingApp({ accessToken: "new-at", expiresIn });
 					const res = await postFedToken(app, "google", await mintAccessToken());
 
-					expect(res.status).toBe(200);
-					expect("expires_in" in res.body).toBe(false);
-					expect(storedExpiry(fedTokenStore)).toBeNull();
+					expect(res.status).toBe(500);
+					expect(res.body.error).toBe("refresh_failed");
+					expect(fedTokenStore.update).not.toHaveBeenCalled();
 				},
 			);
 
-			it("stores no expiry for an Invalid Date", async () => {
+			it("refuses the refresh for an Invalid Date", async () => {
 				const { app, fedTokenStore } = refreshingApp({
 					accessToken: "new-at",
 					expiresAt: new Date(Number.NaN),
 				});
 				const res = await postFedToken(app, "google", await mintAccessToken());
 
-				expect(res.status).toBe(200);
-				expect("expires_in" in res.body).toBe(false);
-				expect(storedExpiry(fedTokenStore)).toBeNull();
+				expect(res.status).toBe(500);
+				expect(fedTokenStore.update).not.toHaveBeenCalled();
 			});
+
+			it("salvages a rotated refresh token from a refusal over a broken lifetime", async () => {
+				// The rotation rule does not care why the refresh failed: the old
+				// token is dead either way (RFC 6749 section 6).
+				const { app, fedTokenStore } = refreshingApp(
+					{ accessToken: "new-at", expiresIn: Number.NaN, refreshToken: "rotated-rt" },
+					{ ...baseFedTokens, refreshToken: "original-rt" },
+				);
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(500);
+				expect(fedTokenStore.update).toHaveBeenCalledWith(
+					expect.any(String),
+					"google",
+					expect.objectContaining({ refreshToken: "rotated-rt" }),
+				);
+			});
+
+			it.each([
+				["null", null],
+				["undefined", undefined],
+				["a string", "not an object"],
+			])(
+				"answers refresh_failed rather than throwing when the adapter resolves %s",
+				async (_l, answer) => {
+					// A third-party adapter may resolve with no object at all. Reading
+					// a field off it would throw past the refusal and lose both the
+					// structured answer and the rotated-token salvage.
+					const { app } = refreshingApp(answer);
+					const res = await postFedToken(app, "google", await mintAccessToken());
+
+					expect(res.status).toBe(500);
+					expect(res.body.error).toBe("refresh_failed");
+				},
+			);
 
 			it("keeps `null` meaning the upstream named no lifetime, rather than falling back to expiresIn", async () => {
 				// `null` is a statement; `undefined` is silence. Only silence falls
@@ -1035,6 +1071,78 @@ describe("POST /oauth/federation/:name/token", () => {
 				expect(res.status).toBe(500);
 				expect(fedTokenStore.update).not.toHaveBeenCalled();
 			});
+		});
+
+		it("refuses a refresh that widens the scope, keeping what was granted", async () => {
+			// RFC 6749 section 6: the refreshed token's scope "MUST NOT include any
+			// scope not originally granted". An answer that adds one is the upstream
+			// or the adapter misbehaving, and recording it would leave the store
+			// claiming a consent the user never gave.
+			const expiredTokens = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				scope: "openid email",
+			};
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({
+					accessToken: "new-at",
+					expiresIn: 3600,
+					scope: "openid email admin",
+				}),
+			} as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expiredTokens),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(res.body.scope).toBe("openid email");
+			expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect.any(String),
+				"google",
+				expect.objectContaining({ scope: "openid email" }),
+			);
+		});
+
+		it("keeps the stored refresh token when a successful refresh answers an empty one", async () => {
+			// The no-access-token branch refused an empty string already; the success
+			// path used `??`, which lets one through and strands the connection at
+			// the next request.
+			const expiredTokens = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				refreshToken: "original-rt",
+			};
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi
+					.fn()
+					.mockResolvedValue({ accessToken: "new-at", expiresIn: 3600, refreshToken: "" }),
+			} as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expiredTokens),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect.any(String),
+				"google",
+				expect.objectContaining({ refreshToken: "original-rt" }),
+			);
 		});
 
 		it("narrows the stored and reported scope to what the refresh answered (RFC 6749 §6)", async () => {
