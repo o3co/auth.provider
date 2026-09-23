@@ -29,8 +29,10 @@ import type {
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	canonicalScope,
 	classifyFederationRefreshError,
 	emitAuditEvent,
+	parseScopeTokens,
 	supportsLock,
 	supportsRefresh,
 	verifyJwt,
@@ -90,31 +92,6 @@ const readField = <T,>(source: object, key: string, unreadable: Set<string>): T 
 /** A `Date` that names an instant. `new Date(NaN)` does not. */
 const isUsableDate = (value: unknown): value is Date =>
 	value instanceof Date && !Number.isNaN(value.getTime());
-
-const SCOPE_TOKEN = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
-
-/**
- * The scope-tokens a value names, de-duplicated, or none.
- *
- * RFC 6749 §3.3 defines the grammar, and it is narrower than "split on a
- * space": `scope-token = 1*( %x21 / %x23-5B / %x5D-7E )` — printable ASCII
- * without the space, the double quote or the backslash. So splitting on a
- * single space alone reads `"\t"` as a scope named tab, and `"openid\temail"`
- * as one scope with a tab in the middle of its name. Both then travel as the
- * ceiling a connection is judged against for the rest of its life.
- *
- * Split on any whitespace, and keep only what the grammar admits.
- */
-const parseScope = (value: unknown): readonly string[] =>
-	typeof value === "string"
-		? [...new Set(value.split(/\s+/).filter((entry) => SCOPE_TOKEN.test(entry)))]
-		: [];
-
-/** The stored form of a scope: parsed and re-joined, or `undefined` for none. */
-const canonicalScope = (value: unknown): string | undefined => {
-	const named = parseScope(value);
-	return named.length > 0 ? named.join(" ") : undefined;
-};
 
 /**
  * What a refresh may record as the token's scope.
@@ -187,7 +164,7 @@ const classifyAnsweredScope = (
 ): AnsweredScope => {
 	if (unreadable.has("scope")) return { kind: "unusable" };
 	if (answer.scope === undefined) return { kind: "omitted" };
-	const named = parseScope(answer.scope);
+	const named = parseScopeTokens(answer.scope);
 	return named.length > 0 ? { kind: "named", value: named.join(" ") } : { kind: "unusable" };
 };
 
@@ -201,8 +178,8 @@ const narrowedScope = (
 	// parses to nothing names no scope, whatever its characters, so it falls
 	// through to the current scope rather than standing as an empty bound that
 	// refuses everything forever.
-	const bound = parseScope(granted);
-	const allowed = bound.length > 0 ? bound : parseScope(stored);
+	const bound = parseScopeTokens(granted);
+	const allowed = bound.length > 0 ? bound : parseScopeTokens(stored);
 	if (allowed.length === 0) return storedValue;
 	// Canonical on every limb, including the ones that keep what is stored: a
 	// record whose scope is ragged would otherwise keep that form forever, and
@@ -215,7 +192,7 @@ const narrowedScope = (
 	if (answered.kind === "unusable") return keep;
 	if (answered.kind === "omitted") return allowed.join(" ");
 
-	const asked = parseScope(answered.value);
+	const asked = parseScopeTokens(answered.value);
 	const within = new Set(allowed);
 	return asked.every((entry) => within.has(entry)) ? asked.join(" ") : keep;
 };

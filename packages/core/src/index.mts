@@ -186,6 +186,9 @@ export {
 	FEDERATION_RESPONSE_MODES,
 	resolveFederationResponseMode,
 } from "./federations/response-mode.mjs";
+// RFC 6749 §3.3's scope grammar, in one place. Three packages had their own
+// copy before #647 and all three were wrong about whitespace in the same way.
+export { canonicalScope, isScopeToken, parseScopeTokens } from "./federations/scope.mjs";
 // The federation adapter port (#626 P1). An adapter implements
 // `FederationProvider` and whichever capability interfaces it can honour; the
 // session router drives them, `oauth` reads them off `federationProviders`,
