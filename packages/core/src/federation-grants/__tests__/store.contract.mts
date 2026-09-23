@@ -137,7 +137,11 @@ const noUsage = { lastUsedAt: undefined, ineligible: undefined, refreshFailure: 
 const fieldOf = (record: object | null | undefined, key: string): unknown => {
 	if (record === null || record === undefined) throw new Error(`no record to read ${key} from`);
 	const fields = record as Record<string, unknown>;
-	const neverAuthorized = "status" in fields && fields.consent === undefined;
+	// By status, not by whether `consent` is there: an active grant a store
+	// broke badly enough to lose `consent` must still be held to naming every
+	// key. Only a revoked grant can be either, and its authorization says which.
+	const neverAuthorized =
+		fields.status === "pending" || (fields.status === "revoked" && fields.consent === undefined);
 	if (neverAuthorized) {
 		if (key in fields) throw new Error(`a grant never authorized names ${key}`);
 	} else if (!(key in fields)) {
