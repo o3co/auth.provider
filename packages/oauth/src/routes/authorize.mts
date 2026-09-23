@@ -464,7 +464,7 @@ const checkConsent = async (
 			grantedScopes: record === null ? [] : [...record.scopes],
 			authorizeUrl: resumeUrl(ctx),
 			redirectUri: ctx.redirectUri,
-			...(ctx.state === undefined ? {} : { state: ctx.state }),
+			state: ctx.state,
 			createdAt,
 			expiresAt: createdAt + PENDING_CONSENT_TTL_MS,
 		});

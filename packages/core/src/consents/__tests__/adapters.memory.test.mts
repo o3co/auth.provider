@@ -27,8 +27,20 @@ runConsentStoreContract("memory", { create: async () => createMemoryConsentStore
 describe("createMemoryConsentStore (#527)", () => {
 	it("is bounded by population: one record per subject and client, expired ones dropped on read", async () => {
 		const store = createMemoryConsentStore();
-		await store.grant({ sub: "u-1", clientId: "app", scopes: ["read"], grantedAt: 1 });
-		await store.grant({ sub: "u-1", clientId: "app", scopes: ["write"], grantedAt: 2 });
+		await store.grant({
+			sub: "u-1",
+			clientId: "app",
+			scopes: ["read"],
+			grantedAt: 1,
+			expiresAt: undefined,
+		});
+		await store.grant({
+			sub: "u-1",
+			clientId: "app",
+			scopes: ["write"],
+			grantedAt: 2,
+			expiresAt: undefined,
+		});
 		await store.grant({
 			sub: "u-1",
 			clientId: "other",
@@ -43,7 +55,13 @@ describe("createMemoryConsentStore (#527)", () => {
 
 	it("keys the pair unambiguously whatever characters the ids carry", async () => {
 		const store = createMemoryConsentStore();
-		await store.grant({ sub: "a|b", clientId: "c", scopes: ["read"], grantedAt: 1 });
+		await store.grant({
+			sub: "a|b",
+			clientId: "c",
+			scopes: ["read"],
+			grantedAt: 1,
+			expiresAt: undefined,
+		});
 		expect(await store.find("a", "b|c")).toBeNull();
 		expect(await store.find("a|b", "c")).not.toBeNull();
 	});
@@ -70,7 +88,13 @@ describe("consent store factory (#527)", () => {
 });
 
 describe("consentCovers (#527)", () => {
-	const record = { sub: "u", clientId: "c", scopes: ["read", "write"], grantedAt: 0 };
+	const record = {
+		sub: "u",
+		clientId: "c",
+		scopes: ["read", "write"],
+		grantedAt: 0,
+		expiresAt: undefined,
+	};
 
 	it("covers a subset, an equal set and an empty request; not a superset", () => {
 		expect(consentCovers(record, ["read"])).toBe(true);
@@ -91,8 +115,20 @@ describe("createMemoryConsentStore — grant unions (#527 review)", () => {
 		// Two browsers answering at once: the second write must not lose the
 		// consent the first one recorded.
 		const store = createMemoryConsentStore();
-		await store.grant({ sub: "u1", clientId: "c1", scopes: ["read"], grantedAt: Date.now() });
-		await store.grant({ sub: "u1", clientId: "c1", scopes: ["write"], grantedAt: Date.now() });
+		await store.grant({
+			sub: "u1",
+			clientId: "c1",
+			scopes: ["read"],
+			grantedAt: Date.now(),
+			expiresAt: undefined,
+		});
+		await store.grant({
+			sub: "u1",
+			clientId: "c1",
+			scopes: ["write"],
+			grantedAt: Date.now(),
+			expiresAt: undefined,
+		});
 		const record = await store.find("u1", "c1");
 		expect([...(record?.scopes ?? [])].sort()).toEqual(["read", "write"]);
 	});
@@ -106,7 +142,13 @@ describe("createMemoryConsentStore — grant unions (#527 review)", () => {
 			grantedAt: Date.now() - 10_000,
 			expiresAt: Date.now() - 1,
 		});
-		await store.grant({ sub: "u1", clientId: "c1", scopes: ["write"], grantedAt: Date.now() });
+		await store.grant({
+			sub: "u1",
+			clientId: "c1",
+			scopes: ["write"],
+			grantedAt: Date.now(),
+			expiresAt: undefined,
+		});
 		expect((await store.find("u1", "c1"))?.scopes).toEqual(["write"]);
 	});
 });

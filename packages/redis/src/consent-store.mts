@@ -179,7 +179,8 @@ const toConsentRecord = (
 	if (!isStringArray(scopes)) return null;
 	const grantedAt = storedNumber(fields.grantedAt);
 	if (grantedAt === null) return null;
-	if (fields.expiresAt === undefined) return { sub, clientId, scopes, grantedAt };
+	if (fields.expiresAt === undefined)
+		return { sub, clientId, scopes, grantedAt, expiresAt: undefined };
 	const expiresAt = isString(fields.expiresAt) ? storedNumber(fields.expiresAt) : null;
 	if (expiresAt === null) return null;
 	return { sub, clientId, scopes, grantedAt, expiresAt };
@@ -201,6 +202,7 @@ const toPendingRecord = (json: string, challenge: string): PendingConsentRecord 
 	// Bound to the key it was read from: a record naming another challenge
 	// would have the route consume a request other than the one it showed.
 	if (r.challenge !== challenge) return null;
+	const state = r.state;
 	if (
 		!isString(r.sessionId) ||
 		!isString(r.sub) ||
@@ -211,7 +213,7 @@ const toPendingRecord = (json: string, challenge: string): PendingConsentRecord 
 		!isString(r.redirectUri) ||
 		!isFiniteNumber(r.createdAt) ||
 		!isFiniteNumber(r.expiresAt) ||
-		(r.state !== undefined && !isString(r.state))
+		(state !== undefined && !isString(state))
 	) {
 		return null;
 	}
@@ -224,7 +226,7 @@ const toPendingRecord = (json: string, challenge: string): PendingConsentRecord 
 		grantedScopes: r.grantedScopes,
 		authorizeUrl: r.authorizeUrl,
 		redirectUri: r.redirectUri,
-		...(r.state === undefined ? {} : { state: r.state }),
+		state,
 		createdAt: r.createdAt,
 		expiresAt: r.expiresAt,
 	};
@@ -259,14 +261,13 @@ export function createRedisConsentStore(opts: RedisConsentStoreOptions): Consent
 				nowMs,
 				scopes: record.scopes,
 				grantedAt: record.grantedAt,
-				...(record.expiresAt === undefined
-					? {}
-					: {
-							expiry: {
+				expiry:
+					record.expiresAt === undefined
+						? undefined
+						: {
 								expiresAt: record.expiresAt,
 								ttlMs: safetyNetTtlMs(record.expiresAt, nowMs),
 							},
-						}),
 			});
 		},
 

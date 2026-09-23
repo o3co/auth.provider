@@ -66,6 +66,7 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 				clientId: "app",
 				scopes: ["read", "write"],
 				grantedAt: Date.now(),
+				expiresAt: undefined,
 			};
 			await store.grant(record);
 			expect(await store.find("u-1", "app")).toEqual(record);
@@ -80,8 +81,20 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 			// `[read, write]` — is a superset, which a replacing adapter passes
 			// too; so a later grant here is disjoint from the first, and
 			// replacing it is visible.
-			await store.grant({ sub: "u-1", clientId: "app", scopes: ["read", "write"], grantedAt: 1 });
-			await store.grant({ sub: "u-1", clientId: "app", scopes: ["admin"], grantedAt: 2 });
+			await store.grant({
+				sub: "u-1",
+				clientId: "app",
+				scopes: ["read", "write"],
+				grantedAt: 1,
+				expiresAt: undefined,
+			});
+			await store.grant({
+				sub: "u-1",
+				clientId: "app",
+				scopes: ["admin"],
+				grantedAt: 2,
+				expiresAt: undefined,
+			});
 			const record = await store.find("u-1", "app");
 			expect([...(record?.scopes ?? [])].sort()).toEqual(["admin", "read", "write"]);
 			// The later record's own fields are the ones kept.
@@ -89,8 +102,20 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 		});
 
 		it("does not count a scope twice when a later grant repeats one", async () => {
-			await store.grant({ sub: "u-1", clientId: "app", scopes: ["read"], grantedAt: 1 });
-			await store.grant({ sub: "u-1", clientId: "app", scopes: ["read", "write"], grantedAt: 2 });
+			await store.grant({
+				sub: "u-1",
+				clientId: "app",
+				scopes: ["read"],
+				grantedAt: 1,
+				expiresAt: undefined,
+			});
+			await store.grant({
+				sub: "u-1",
+				clientId: "app",
+				scopes: ["read", "write"],
+				grantedAt: 2,
+				expiresAt: undefined,
+			});
 			const scopes = (await store.find("u-1", "app"))?.scopes ?? [];
 			expect([...scopes].sort()).toEqual(["read", "write"]);
 		});
@@ -122,7 +147,13 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 				expiresAt,
 			});
 			vi.setSystemTime(new Date(expiresAt + 1));
-			await store.grant({ sub: "u-1", clientId: "app", scopes: ["write"], grantedAt: Date.now() });
+			await store.grant({
+				sub: "u-1",
+				clientId: "app",
+				scopes: ["write"],
+				grantedAt: Date.now(),
+				expiresAt: undefined,
+			});
 			expect((await store.find("u-1", "app"))?.scopes).toEqual(["write"]);
 		});
 
@@ -138,7 +169,13 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 				grantedAt: Date.now(),
 				expiresAt,
 			});
-			await store.grant({ sub: "u-1", clientId: "app", scopes: ["write"], grantedAt: Date.now() });
+			await store.grant({
+				sub: "u-1",
+				clientId: "app",
+				scopes: ["write"],
+				grantedAt: Date.now(),
+				expiresAt: undefined,
+			});
 			vi.setSystemTime(new Date(expiresAt + 1));
 			const record = await store.find("u-1", "app");
 			expect(record).not.toBeNull();
@@ -151,15 +188,33 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 			// read-modify-write across round trips passes the sequential case and
 			// loses one of these against a real server.
 			await Promise.all([
-				store.grant({ sub: "u-1", clientId: "app", scopes: ["read"], grantedAt: Date.now() }),
-				store.grant({ sub: "u-1", clientId: "app", scopes: ["write"], grantedAt: Date.now() }),
+				store.grant({
+					sub: "u-1",
+					clientId: "app",
+					scopes: ["read"],
+					grantedAt: Date.now(),
+					expiresAt: undefined,
+				}),
+				store.grant({
+					sub: "u-1",
+					clientId: "app",
+					scopes: ["write"],
+					grantedAt: Date.now(),
+					expiresAt: undefined,
+				}),
 			]);
 			const scopes = (await store.find("u-1", "app"))?.scopes ?? [];
 			expect([...scopes].sort()).toEqual(["read", "write"]);
 		});
 
 		it("revokes, and says whether there was anything to revoke", async () => {
-			await store.grant({ sub: "u-1", clientId: "app", scopes: ["read"], grantedAt: Date.now() });
+			await store.grant({
+				sub: "u-1",
+				clientId: "app",
+				scopes: ["read"],
+				grantedAt: Date.now(),
+				expiresAt: undefined,
+			});
 			expect(await store.revoke("u-1", "app")).toBe(true);
 			expect(await store.find("u-1", "app")).toBeNull();
 			expect(await store.revoke("u-1", "app")).toBe(false);
@@ -167,7 +222,13 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 
 		it("keeps a record the caller mutates afterwards intact", async () => {
 			const scopes = ["read"];
-			await store.grant({ sub: "u-1", clientId: "app", scopes, grantedAt: Date.now() });
+			await store.grant({
+				sub: "u-1",
+				clientId: "app",
+				scopes,
+				grantedAt: Date.now(),
+				expiresAt: undefined,
+			});
 			scopes.push("admin");
 			expect((await store.find("u-1", "app"))?.scopes).toEqual(["read"]);
 		});

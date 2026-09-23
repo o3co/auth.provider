@@ -9,10 +9,12 @@ import { describe, expectTypeOf, it } from "vitest";
 // between `index.mts` re-exports and `clients.mts` definitions fails here.
 import type {
 	ChallengeStoreClient,
+	ConsentRecordFields,
 	ConsentStoreClient,
 	DeviceCodeStoreClient,
 	DisposableRefreshTokenFamilyClient,
 	FederationTokenStoreClient,
+	GrantConsentInput,
 	PendingConsentStoreClient,
 	RateLimiterClient,
 	RefreshTokenFamilyClient,
@@ -221,5 +223,27 @@ describe("Per-purpose multi-client interfaces", () => {
 		expectTypeOf<SessionSidSortedSetMultiClient["pExpireGT"]>().toBeFunction();
 		expectTypeOf<SessionSidSortedSetMultiClient["zAdd"]>().toBeFunction();
 		expectTypeOf<SessionSidSortedSetMultiClient["exec"]>().toBeFunction();
+	});
+});
+
+/** `true` when `K` must be present on `T` — not merely declared. */
+type IsRequiredKey<T, K extends keyof T> = Record<never, never> extends Pick<T, K> ? false : true;
+
+describe("the consent client's expiry, as a required key (#626)", () => {
+	// `undefined` here means until revoked — the value that widens what a
+	// consent grants — so neither side of the client may arrive at it by
+	// leaving the field out: not the store's write, not a client's read.
+	it("GrantConsentInput names expiry", () => {
+		expectTypeOf<IsRequiredKey<GrantConsentInput, "expiry">>().toEqualTypeOf<true>();
+	});
+
+	it("ConsentRecordFields names expiresAt", () => {
+		expectTypeOf<IsRequiredKey<ConsentRecordFields, "expiresAt">>().toEqualTypeOf<true>();
+	});
+
+	it("tells an optional key from a required one — the control", () => {
+		type Probe = { readonly a?: string; readonly b: string | undefined };
+		expectTypeOf<IsRequiredKey<Probe, "a">>().toEqualTypeOf<false>();
+		expectTypeOf<IsRequiredKey<Probe, "b">>().toEqualTypeOf<true>();
 	});
 });

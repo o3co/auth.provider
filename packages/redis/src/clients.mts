@@ -781,16 +781,20 @@ export interface DeviceCodeStoreClient {
  * The scopes are one JSON array rather than a Redis set, so a scope value is
  * stored byte-for-byte and the order they were first granted in survives —
  * and so the record and its `grantedAt` / `expiresAt` are one key that one
- * script rewrites whole. `expiresAt` is *absent* for a consent recorded until
- * revoked, as it is on the port's record.
+ * script rewrites whole. The hash has no `expiresAt` field for a consent
+ * recorded until revoked; a client reports that as `expiresAt: undefined`.
  */
 export interface ConsentRecordFields {
 	/** JSON array of the scopes agreed to. */
 	readonly scopes: string;
 	/** Epoch milliseconds. */
 	readonly grantedAt: string;
-	/** Epoch milliseconds. Absent: until revoked. */
-	readonly expiresAt?: string;
+	/**
+	 * Epoch milliseconds; `undefined` when the hash holds none — until revoked.
+	 * A required key (#626): a client that forgot to pass the field on would
+	 * turn every consent it read into one until revoked.
+	 */
+	readonly expiresAt: string | undefined;
 }
 
 export interface GrantConsentInput {
@@ -800,19 +804,23 @@ export interface GrantConsentInput {
 	readonly scopes: readonly string[];
 	readonly grantedAt: number;
 	/**
-	 * The new record's expiry. Absent, the record is until revoked and the key
-	 * carries **no** TTL afterwards — whatever an earlier grant set is removed.
+	 * The new record's expiry. `undefined`, the record is until revoked and the
+	 * key carries **no** TTL afterwards — whatever an earlier grant set is
+	 * removed. A required key (#626): a store that forgot to pass it would
+	 * record every consent until revoked.
 	 */
-	readonly expiry?: {
-		/** Epoch milliseconds, stored as the record's `expiresAt`. */
-		readonly expiresAt: number;
-		/**
-		 * The key's TTL in milliseconds — a safety net for a record nobody reads
-		 * again, never what expiry is judged by. Not positive: the new record is
-		 * dead on arrival, so the key is removed and nothing is written.
-		 */
-		readonly ttlMs: number;
-	};
+	readonly expiry:
+		| {
+				/** Epoch milliseconds, stored as the record's `expiresAt`. */
+				readonly expiresAt: number;
+				/**
+				 * The key's TTL in milliseconds — a safety net for a record nobody reads
+				 * again, never what expiry is judged by. Not positive: the new record is
+				 * dead on arrival, so the key is removed and nothing is written.
+				 */
+				readonly ttlMs: number;
+		  }
+		| undefined;
 }
 
 /**

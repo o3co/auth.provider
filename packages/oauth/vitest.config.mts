@@ -17,7 +17,8 @@ export default defineConfig({
 			include: ["src/**/__tests__/**/*.test.mts"],
 			// Every file below carried pre-existing type errors in the test
 			// itself when typecheck was switched on (187 in 32 files, of 62;
-			// 16 files have since been cleared, see [R]). They are named here
+			// 17 files have since been cleared: 16 by [R], and `consent.test.mts`
+			// once #626 touched its fixtures). They are named here
 			// rather than hidden behind a narrower glob, as core does for
 			// `InMemoryClientRepository.test.mts`, with the count at exclusion
 			// and the cause. The same list is the `exclude` of
@@ -43,7 +44,6 @@ export default defineConfig({
 				"src/__tests__/authorizationCode.userinfo.integration.test.mts", // 2: S, F
 				"src/__tests__/authorizeEndpoint.test.mts", // 11: R, F
 				"src/__tests__/clientCredentials.integration.test.mts", // 3: R, F
-				"src/__tests__/consent.test.mts", // 13: R, F
 				"src/__tests__/dpop.clientCredentials.integration.test.mts", // 2: R, F
 				"src/__tests__/hooks.test.mts", // 16: R, S, F
 				"src/__tests__/jwtBearer.test.mts", // 31: F

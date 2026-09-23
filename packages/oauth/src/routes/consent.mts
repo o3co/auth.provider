@@ -357,7 +357,14 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		// silently withdraw the `read` consented to last month.
 		const scopes = [...new Set([...pending.grantedScopes, ...pending.scopes])];
 		try {
-			await consentStore.grant({ sub, clientId: pending.clientId, scopes, grantedAt: Date.now() });
+			await consentStore.grant({
+				sub,
+				clientId: pending.clientId,
+				scopes,
+				grantedAt: Date.now(),
+				// Until revoked: this route asks nothing about how long.
+				expiresAt: undefined,
+			});
 		} catch (err) {
 			logger.error({ err, clientId: pending.clientId }, "consent_store_unavailable");
 			return jsonError(res, 503, "temporarily_unavailable", "consent store unavailable");

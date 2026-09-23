@@ -49,7 +49,9 @@
 		// the FederationGrant union.
 		"src/federation-grants/**/*.mts",
 		// #626 P2: paired with vitest.config.mts, as #343 requires.
-		"src/grants/__tests__/dependencies.types.test.mts"
+		"src/grants/__tests__/dependencies.types.test.mts",
+		// #626: paired with vitest.config.mts, as #343 requires.
+		"src/consents/**/*.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }

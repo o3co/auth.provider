@@ -72,6 +72,11 @@ export default defineConfig({
 				// #626 P2: `GrantDependencies` is pinned to ComponentMap slot types.
 				// Paired with tsconfig.test.json, as #343 requires.
 				"src/grants/__tests__/dependencies.types.test.mts",
+				// #626: which consent-record fields a store must not drop, and the
+				// fixtures that build those records — uncompiled, they went on
+				// omitting a field the type now requires. Paired with
+				// tsconfig.test.json.
+				"src/consents/__tests__/**/*.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
 			// itself, where 4 was content to let an imported helper register
