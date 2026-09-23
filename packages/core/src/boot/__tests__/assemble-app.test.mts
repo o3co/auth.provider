@@ -15,8 +15,8 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { DiscoveryDocumentError } from "#/discovery/buildDocument.mjs";
 import { createLifecycleRegistrar } from "../../adapters/AdapterFactory.mjs";
-import { DiscoveryDocumentError } from "../../discovery/buildDocument.mjs";
 import { assembleApp } from "../assemble-app.mjs";
 import type { CleanupRecord, CollectedRouteContribution, FrozenWorld } from "../types.mjs";
 import { BootError } from "../types.mjs";
