@@ -49,6 +49,11 @@ export default defineConfig({
 				// Which AssertionIssuerEntry fields a registry must not drop. Paired
 				// with the same entry in tsconfig.test.json — both lists, or nothing.
 				"src/assertions/__tests__/entry-fields.types.test.mts",
+				// The registry's own tests and the verifier's — their fixtures build
+				// entries, and went uncompiled while claiming a type they did not
+				// satisfy. Paired with tsconfig.test.json.
+				"src/assertions/__tests__/issuerRegistry.test.mts",
+				"src/assertions/__tests__/registryAssertionVerifier.test.mts",
 				// #626 P1: relocated from `packages/session`, where both were in its
 				// typecheck list. The `expectTypeOf` and `@ts-expect-error` here
 				// are the regression test for the adapter port, and they only fire

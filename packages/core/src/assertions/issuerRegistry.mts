@@ -52,6 +52,11 @@ export type AssertionIssuerKeySource =
  * means "no ceiling". What a registry answers with is
  * {@link AssertionIssuerEntry}, the same fields with none of them optional.
  *
+ * Each optional field also admits an explicit `undefined`, so that a stored
+ * entry is accepted back as input — `list()` into `add()` — for a consumer
+ * compiling with `exactOptionalPropertyTypes`, where `a?: T` alone refuses
+ * the `undefined` a stored entry carries.
+ *
  * Every field beyond `issuer`, `keys` and `algorithms` is a ceiling: it can
  * only narrow what an assertion from this issuer may obtain, never widen the
  * request, the client registration or the policy.
@@ -79,32 +84,32 @@ export interface AssertionIssuerEntryInput {
 	 * `sub` values accepted from this issuer. Absent means any subject — the
 	 * Store still decides whom a handle resolves to (#301).
 	 */
-	readonly allowedSubjects?: readonly string[];
+	readonly allowedSubjects?: readonly string[] | undefined;
 	/**
 	 * Scopes an assertion from this issuer may obtain. The verification result
 	 * carries the intersection with the assertion's own `scope` claim (or this
 	 * list when the assertion names none) as its scope ceiling.
 	 */
-	readonly allowedScopes?: readonly string[];
+	readonly allowedScopes?: readonly string[] | undefined;
 	/**
 	 * Audiences a token minted from this issuer's assertions may name. A
 	 * ceiling on the issued `aud` whatever chose it, and — with no
 	 * authenticated client — the source the client registration would
 	 * otherwise be (#520).
 	 */
-	readonly allowedAudiences?: readonly string[];
+	readonly allowedAudiences?: readonly string[] | undefined;
 	/**
 	 * Client ids permitted to present this issuer's assertions. Absent means
 	 * any presenter, an unauthenticated one included (RFC 7523 §3 makes client
 	 * authentication optional). A list admits those clients only; an
 	 * unauthenticated presenter is refused.
 	 */
-	readonly allowedClients?: readonly string[];
+	readonly allowedClients?: readonly string[] | undefined;
 	/**
 	 * After this instant the entry is refused. The only mutable field. A
 	 * registry over a store hands it back as a `Date`.
 	 */
-	readonly expiresAt?: Date;
+	readonly expiresAt?: Date | undefined;
 	/**
 	 * Which assertion profile this issuer mints (#526).
 	 *
@@ -118,7 +123,7 @@ export interface AssertionIssuerEntryInput {
 	 *   carried as claims. Needs `issuerIdentifier` and `replaySeenSet` on the
 	 *   verifier.
 	 */
-	readonly profile?: "rfc7523" | "id-jag";
+	readonly profile?: "rfc7523" | "id-jag" | undefined;
 	/**
 	 * Clock skew for `exp` / `nbf`, in seconds. Default 60.
 	 *
@@ -126,7 +131,7 @@ export interface AssertionIssuerEntryInput {
 	 * verifies, but has no lifetime left for a token to inherit: the
 	 * jwt-bearer grant refuses it (auth.proxy#90).
 	 */
-	readonly clockToleranceSeconds?: number;
+	readonly clockToleranceSeconds?: number | undefined;
 }
 
 /**
