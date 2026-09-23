@@ -133,15 +133,25 @@ const noUsage = { lastUsedAt: undefined, ineligible: undefined, refreshFailure: 
  * that left a key out of an authorized grant fails here even when the value
  * it would have held is `undefined`. A missing record is a failure, not a
  * pass.
+ *
+ * Which shape applies is read from the status — `pending` never authorized,
+ * `active` and `reauthorization_required` authorized — and never from the
+ * fields under test: an authorized grant a store broke badly enough to lose
+ * `consent` must still be held to naming every key. A revoked grant can be
+ * either, so the caller, who made the fixture, says which.
  */
-const fieldOf = (record: object | null | undefined, key: string): unknown => {
+const fieldOf = (
+	record: object | null | undefined,
+	key: string,
+	revoked?: "was-authorized" | "never-authorized",
+): unknown => {
 	if (record === null || record === undefined) throw new Error(`no record to read ${key} from`);
 	const fields = record as Record<string, unknown>;
-	// By status, not by whether `consent` is there: an active grant a store
-	// broke badly enough to lose `consent` must still be held to naming every
-	// key. Only a revoked grant can be either, and its authorization says which.
+	if (fields.status === "revoked" && revoked === undefined) {
+		throw new Error(`say whether the revoked grant read for ${key} was authorized`);
+	}
 	const neverAuthorized =
-		fields.status === "pending" || (fields.status === "revoked" && fields.consent === undefined);
+		fields.status === "pending" || (fields.status === "revoked" && revoked === "never-authorized");
 	if (neverAuthorized) {
 		if (key in fields) throw new Error(`a grant never authorized names ${key}`);
 	} else if (!(key in fields)) {
@@ -1580,7 +1590,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				expect(
 					fieldOf(await store.find("g-needs-user", at(DAY)), "refreshFailure"),
 				).toBeUndefined();
-				expect(fieldOf(await store.find("g-revoked", at(DAY)), "refreshFailure")).toBeUndefined();
+				expect(
+					fieldOf(await store.find("g-revoked", at(DAY)), "refreshFailure", "was-authorized"),
+				).toBeUndefined();
 			});
 
 			it("is cleared by whatever replaces or ends the credentials: a refresh that wrote, a renewal, a mark, a revocation", async () => {
@@ -1629,7 +1641,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					now: at(DAY),
 				});
 				await store.revoke("g-2", "client", at(DAY + MIN));
-				expect(fieldOf(await store.find("g-2", at(DAY + MIN)), "refreshFailure")).toBeUndefined();
+				expect(
+					fieldOf(await store.find("g-2", at(DAY + MIN)), "refreshFailure", "was-authorized"),
+				).toBeUndefined();
 			});
 
 			it("copies what it is given and what it returns: neither the caller's date nor the returned record reaches the store", async () => {
@@ -1703,7 +1717,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				expect(
 					fieldOf(await store.find("g-needs-user", at(5 * MIN)), "lastUsedAt"),
 				).toBeUndefined();
-				expect(fieldOf(await store.find("g-revoked", at(2 * DAY)), "lastUsedAt")).toBeUndefined();
+				expect(
+					fieldOf(await store.find("g-revoked", at(2 * DAY)), "lastUsedAt", "was-authorized"),
+				).toBeUndefined();
 				expect(fieldOf(await store.find("g-active", at(5 * MIN)), "lastUsedAt")).toBeUndefined();
 				expect(await store.find("g-unknown", at(5 * MIN))).toBeNull();
 			});
@@ -2381,7 +2397,9 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 						() => store.revoke("g-1", "client", at(DAY)),
 					);
 					expect(await store.find("g-1", at(DAY))).toMatchObject({ status: "revoked" });
-					expect(fieldOf(await store.find("g-1", at(DAY)), "refreshFailure")).toBeUndefined();
+					expect(
+						fieldOf(await store.find("g-1", at(DAY)), "refreshFailure", "was-authorized"),
+					).toBeUndefined();
 				},
 			);
 
