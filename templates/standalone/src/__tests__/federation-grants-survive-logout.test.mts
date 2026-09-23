@@ -236,6 +236,7 @@ async function seedGrant(store: MemoryFederationGrantStore): Promise<void> {
 			consent: { at, sid: "sid-consent", scopes: [...SCOPES] },
 			authorizedAt: at,
 			expiresAt: new Date(at.getTime() + 30 * DAY),
+			resource: undefined,
 		},
 		credentials: {
 			refreshToken: REFRESH_TOKEN,

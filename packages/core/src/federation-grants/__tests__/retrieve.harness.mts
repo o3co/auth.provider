@@ -201,7 +201,7 @@ export function harness(): Harness {
 					identityRevision: federationGrantIdentityRevision(configured),
 					authorizationRevision: federationGrantAuthorizationRevision(configured),
 					upstream: { issuer: connection.upstreamIssuer, subject: "00u-alice" },
-					...(configured.resource !== undefined ? { resource: configured.resource } : {}),
+					resource: configured.resource,
 					scopes: [...SCOPES],
 					consent: { at: over.consentAt ?? seededAt, sid: "sid-1", scopes: [...CONSENTED] },
 					authorizedAt: seededAt,

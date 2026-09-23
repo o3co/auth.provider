@@ -227,7 +227,10 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 				accessToken: undefined,
 			} as DelegatedTokens);
 			expect(await retrieve()).toMatchObject({ ok: false, code: "upstream_token_ineligible" });
-			expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-rotated` });
+			expect(await stored()).toStrictEqual({
+				refreshToken: `${SECRET}-rotated`,
+				accessToken: undefined,
+			});
 		});
 	});
 
@@ -383,7 +386,10 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 			setNow(at(10 * MIN));
 			h.refresh.mockResolvedValue(garbage("rotated"));
 			expect(await retrieve()).toMatchObject({ ok: false, code: "upstream_token_ineligible" });
-			expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-rotated` });
+			expect(await stored()).toStrictEqual({
+				refreshToken: `${SECRET}-rotated`,
+				accessToken: undefined,
+			});
 		});
 
 		it("never carries over a token that has died", async () => {
@@ -391,7 +397,10 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 			setNow(at(HOUR));
 			h.refresh.mockResolvedValue(garbage("rotated"));
 			expect(await retrieve()).toMatchObject({ ok: false, code: "upstream_token_ineligible" });
-			expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-rotated` });
+			expect(await stored()).toStrictEqual({
+				refreshToken: `${SECRET}-rotated`,
+				accessToken: undefined,
+			});
 		});
 	});
 

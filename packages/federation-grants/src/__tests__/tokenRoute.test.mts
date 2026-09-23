@@ -538,7 +538,7 @@ describe("the token route — how a failure is carried", () => {
 	it("carries Retry-After from a denial that is not a throttle", async () => {
 		const h = harness();
 		await h.seed({
-			credentials: { refreshToken: SECRET },
+			credentials: { refreshToken: SECRET, accessToken: undefined },
 		});
 		// An upstream that answers with a token nobody may use: the marker
 		// carries the interval before it is worth asking again.
@@ -561,7 +561,7 @@ describe("the token route — how a failure is carried", () => {
 
 	it("never echoes what an upstream said back to the caller", async () => {
 		const h = harness();
-		await h.seed({ credentials: { refreshToken: SECRET } });
+		await h.seed({ credentials: { refreshToken: SECRET, accessToken: undefined } });
 		h.refresh.mockRejectedValue(new Error(`upstream said: ${SECRET}`));
 
 		const response = await request(h.app)
@@ -611,7 +611,7 @@ describe("the token route — correlation", () => {
 
 	it("correlates an event written after the answer with the request that started it", async () => {
 		const h = harness();
-		await h.seed({ credentials: { refreshToken: SECRET } });
+		await h.seed({ credentials: { refreshToken: SECRET, accessToken: undefined } });
 		h.refresh.mockResolvedValue({
 			accessToken: "fresh",
 			refreshToken: `${SECRET}-2`,

@@ -63,8 +63,9 @@ const activate = (store: MemoryFederationGrantStore, id: string) =>
 			consent: { at: at(MIN), sid: "sid-1", scopes: SCOPES },
 			authorizedAt: at(2 * MIN),
 			expiresAt: at(30 * DAY),
+			resource: undefined,
 		},
-		credentials: { refreshToken: "rt-1" },
+		credentials: { refreshToken: "rt-1", accessToken: undefined },
 		now: at(2 * MIN),
 	});
 
@@ -171,7 +172,8 @@ describe("createMemoryFederationGrantStore (#593, D16)", () => {
 
 		const still = await store.find("g-1", at(DAY));
 		expect(still).toMatchObject({ status: "active", version: 2 });
-		expect(still).not.toHaveProperty("lastUsedAt");
+		// Named, and never set (#626).
+		expect(still).toHaveProperty("lastUsedAt", undefined);
 		expect(await store.isCurrentIntent("g-1", "h-re", at(DAY))).toBe(true);
 	});
 

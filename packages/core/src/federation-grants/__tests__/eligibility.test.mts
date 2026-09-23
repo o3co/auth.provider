@@ -275,6 +275,8 @@ describe("upstream token eligibility (#593, D5)", () => {
 			at,
 			kind: "unavailable",
 			count: 1,
+			retryAfterSeconds: undefined,
+			upstreamCode: undefined,
 			...over,
 		});
 		const standing = (failure: FederationGrantRefreshFailure | undefined, now: Date) =>

@@ -432,6 +432,7 @@ const establish = async (
 			},
 			authorizedAt: new Date(consentAt.getTime() + 1000),
 			expiresAt: new Date(consentAt.getTime() + 30 * DAY),
+			resource: undefined,
 		},
 		credentials: {
 			refreshToken: "rt-1",
@@ -641,7 +642,7 @@ describe("lodging a reauthorization (D6, D13)", () => {
 		const marked = await grants.replaceCredentials({
 			grantId: "g-est",
 			expectedVersion: grant?.version ?? -1,
-			credentials: { refreshToken: "rt-1" },
+			credentials: { refreshToken: "rt-1", accessToken: undefined },
 			ineligible: { reason, at: clock, judgedAgainst: CONNECTION.maxAccessTokenLifetime },
 			now: clock,
 		});

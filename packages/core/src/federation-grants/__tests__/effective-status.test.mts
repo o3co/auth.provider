@@ -61,6 +61,10 @@ const active: AuthorizedFederationGrant = {
 	consent: { at: CONSENT, sid: "sid-1", scopes: connection.scopes },
 	authorizedAt: at(60_000),
 	expiresAt: at(30 * DAY),
+	resource: undefined,
+	lastUsedAt: undefined,
+	ineligible: undefined,
+	refreshFailure: undefined,
 };
 
 const needsUser: FederationGrant = { ...active, status: "reauthorization_required" };
@@ -268,6 +272,7 @@ describe("effectiveFederationGrantStatus (#593, D1)", () => {
 				at: at(DAY - 60_000),
 				kind: "rejected",
 				count: 1,
+				retryAfterSeconds: undefined,
 				upstreamCode: code,
 				...over,
 			},

@@ -372,7 +372,7 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 			const marked = await h.store.replaceCredentials({
 				grantId: "g-1",
 				expectedVersion: grant.version,
-				credentials: { refreshToken: SECRET },
+				credentials: { refreshToken: SECRET, accessToken: undefined },
 				ineligible: { reason: "scope_exceeded", at: now(), judgedAgainst: 3600 },
 				now: now(),
 			});
@@ -404,7 +404,7 @@ describe("retrieveFederationGrantToken — a failed refresh is remembered (#593,
 					await h.store.replaceCredentials({
 						grantId: "g-1",
 						expectedVersion: grant.version,
-						credentials: { refreshToken: SECRET },
+						credentials: { refreshToken: SECRET, accessToken: undefined },
 						ineligible: { reason: "scope_exceeded", at: ahead, judgedAgainst: 3600 },
 						now: now(),
 					});

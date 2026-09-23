@@ -637,6 +637,7 @@ describe("POST /session/federation-grants/consent — the answer", () => {
 				consent: { at: w.state.now, sid: "sid-x", scopes: [...CONNECTION.scopes] },
 				authorizedAt: w.state.now,
 				expiresAt: new Date(w.state.now.getTime() + 30 * DAY),
+				resource: undefined,
 			},
 			credentials: {
 				refreshToken: "rt",
@@ -1023,7 +1024,7 @@ describe("the callback for a renewal", () => {
 		const marked = await w.grants.replaceCredentials({
 			grantId,
 			expectedVersion: grant?.version ?? -1,
-			credentials: { refreshToken: "rt-starved" },
+			credentials: { refreshToken: "rt-starved", accessToken: undefined },
 			ineligible: {
 				reason: "scope_exceeded",
 				at: w.state.now,
@@ -1054,8 +1055,9 @@ describe("the callback for a renewal", () => {
 		returned(await callback(w, { state, code: "c2" }, "b-2"));
 		const after = await w.grants.find(grantId, w.state.now);
 		expect(after?.status).toBe("active");
-		expect(after).not.toHaveProperty("ineligible");
-		expect(after).not.toHaveProperty("refreshFailure");
+		// Cleared: named, and `undefined` (#626).
+		expect(after).toHaveProperty("ineligible", undefined);
+		expect(after).toHaveProperty("refreshFailure", undefined);
 	});
 
 	it("leaves both exactly as they were when the renewal is refused for another upstream account (#616)", async () => {

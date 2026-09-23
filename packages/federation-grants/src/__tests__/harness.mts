@@ -300,6 +300,7 @@ export function harness(options: HarnessOptions = {}): Harness {
 					consent: { at, sid: "sid-1", scopes: [...SCOPES] },
 					authorizedAt: at,
 					expiresAt: over.expiresAt ?? new Date(at.getTime() + 30 * DAY),
+					resource: undefined,
 				},
 				credentials: over.credentials ?? {
 					refreshToken: SECRET,
