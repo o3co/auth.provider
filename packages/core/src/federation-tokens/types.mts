@@ -25,6 +25,32 @@ export interface FederationTokens {
 	 * for rationale.
 	 */
 	readonly expiresAt: Date | null;
+	/**
+	 * How the upstream said this token is presented, in the upstream's own
+	 * spelling (oauth4webapi lower-cases it). Written at link time and moved by
+	 * a refresh that names one; carried verbatim, so a value that is not a token
+	 * type reaches the consumer rather than being erased into silence. An
+	 * adapter that named something which is not a string is recorded as `""`,
+	 * which this field can hold and the consumer already refuses.
+	 *
+	 * A store MUST round-trip this field through `attach`, `update` and `get`.
+	 * One that copies the record field by field and forgets it fails OPEN: the
+	 * record comes back silent, silence is read as a record written before
+	 * #645, and a sender-constrained token is handed on as Bearer — the
+	 * behaviour #645 removed, restored for that store alone. Both bundled
+	 * stores round-trip it and are pinned on it (the in-memory store's
+	 * defensive copy is exactly that field-by-field pattern). No marker in the
+	 * record could detect a store that drops fields: it would drop the marker
+	 * too.
+	 *
+	 * ABSENT — and only absent — means the adapter named none: every bundled
+	 * adapter but `federation-oidc`, and every record written before #645. RFC
+	 * 6749 §5.1 makes `token_type` REQUIRED, so `POST /oauth/federation/:name/
+	 * token` reads that as `Bearer` and refuses everything else that is not a
+	 * bearer spelling, `null` included: a sender-constrained token cannot be
+	 * handed to a caller that holds no proof key, and a malformed record is not
+	 * a second spelling of silence.
+	 */
 	readonly tokenType?: string;
 	/**
 	 * What the token holds now, space-delimited (RFC 6749 §3.3). A refresh may

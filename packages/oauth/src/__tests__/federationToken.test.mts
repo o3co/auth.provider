@@ -2408,4 +2408,364 @@ describe("POST /oauth/federation/:name/token", () => {
 			);
 		});
 	});
+
+	// ---------------------------------------------------------------------------
+	// #645 — what the upstream said its token is, and whether it may be handed on
+	// ---------------------------------------------------------------------------
+
+	describe("token_type: the upstream's, and only one kind of it (#645)", () => {
+		/** A record that is still valid, with whatever `tokenType` the case names. */
+		const storedApp = (stored: Record<string, unknown>) => {
+			const auditSink: AuditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue({ ...baseFedTokens, ...stored }),
+			});
+			return { app: buildApp({ fedTokenStore, auditSink }), fedTokenStore, auditSink };
+		};
+
+		/** An expired record whose refresh answers `answer`. */
+		const refreshingApp = (answer: unknown, stored: Record<string, unknown> = {}) => {
+			const auditSink: AuditSink = { kind: "mock", record: vi.fn().mockResolvedValue(undefined) };
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue({
+					...baseFedTokens,
+					...stored,
+					expiresAt: new Date(Date.now() - 1000),
+				}),
+			});
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue(answer),
+			} as unknown as FederationProvider;
+			const app = buildApp({
+				fedTokenStore,
+				auditSink,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+			return { app, fedTokenStore, auditSink };
+		};
+
+		const written = (fedTokenStore: FederationTokenStore) =>
+			(fedTokenStore.update as ReturnType<typeof vi.fn>).mock.calls[0][2] as Record<
+				string,
+				unknown
+			>;
+
+		it.each([
+			["a record written before #645", undefined],
+			["the spelling oauth4webapi reports", "bearer"],
+			["the spelling RFC 6750 §2.1 uses", "Bearer"],
+			["an upstream shouting it", "BEARER"],
+		])("answers Bearer for %s", async (_label, tokenType) => {
+			// Always `Bearer`, never the upstream's own spelling. Once a non-bearer
+			// type is refused, the only values left are case-variants of one word —
+			// RFC 6749 §5.1 makes the comparison case-insensitive, so the spelling
+			// carries nothing a caller can act on, and echoing it would have flipped
+			// every `federation-oidc` connection from `Bearer` to `bearer` on its
+			// first refresh after deploy for no gain.
+			//
+			// Silence is Bearer: §5.1 makes `token_type` REQUIRED, so a record that
+			// names none is an adapter written before `FederationProfile` carried
+			// the field — every bundled one but `federation-oidc` — and not an
+			// upstream meaning something else. This is what keeps every record
+			// written before #645 working.
+			const { app } = storedApp({ tokenType });
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(res.body.token_type).toBe("Bearer");
+		});
+
+		it.each([
+			["DPoP"],
+			["dpop"],
+			["PoP"],
+			["N_A"],
+			["mac"],
+			// Not a token type at all. Reading one of these as silence would
+			// answer `Bearer` for it — the behaviour #645 exists to stop, reached
+			// through a narrower door — so the record is read, not just parsed.
+			["DPoP "],
+			[" DPoP"],
+			["Bearer token"],
+			[""],
+		])("refuses to hand on a %s token", async (tokenType) => {
+			// Every type in IANA's registry other than Bearer is
+			// sender-constrained: presenting one takes proof of possession of a
+			// key, and a caller handed the token by value holds no such key. This
+			// route used to answer `Bearer` regardless, which dropped the
+			// constraint the upstream imposed and handed out a credential that
+			// only looked usable.
+			const { app } = storedApp({ tokenType });
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(502);
+			expect(res.body.error).toBe("upstream_token_ineligible");
+			expect(res.body.error_description).toBe("token_type_unsupported");
+			expect(res.body.access_token).toBeUndefined();
+			// Not transient: an operator has to change the upstream's
+			// registration back. Without this a client that retries a 5xx
+			// drives one upstream refresh per retry.
+			expect(res.headers["retry-after"]).toBe("300");
+		});
+
+		it.each([
+			["a number", 7],
+			["an array", ["DPoP"]],
+			["an object", { toString: () => "Bearer" }],
+			// Not a second spelling of absence: a JSON round-trip DROPS an
+			// undefined field rather than writing `null`, so a stored `null` is a
+			// store writing one on purpose — and the built-in Redis codec already
+			// refuses the record that holds it.
+			["null", null],
+		])("refuses to hand on a record whose type is %s", async (_label, tokenType) => {
+			// A store is another thing this route does not own (D5). A value that
+			// is not a string cannot be a bearer spelling, so it is refused rather
+			// than read as the silence that would answer `Bearer`.
+			const { app } = storedApp({ tokenType });
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(502);
+			expect(res.body.error).toBe("upstream_token_ineligible");
+		});
+
+		it("does not count a refused disclosure as a success", async () => {
+			// A dashboard grouping on `federation.token.success` would otherwise
+			// count a token that was never handed out.
+			const { app, auditSink } = storedApp({ tokenType: "DPoP" });
+
+			await postFedToken(app, "google", await mintAccessToken());
+
+			const types = (auditSink.record as ReturnType<typeof vi.fn>).mock.calls.map(
+				(call) => (call[0] as { type: string }).type,
+			);
+			expect(types).toEqual(["federation.token.upstream_ineligible"]);
+		});
+
+		it.each([
+			["a type name", "DPoP", "DPoP"],
+			["a value that is not a token type, so an operator can see that", "DPoP ", "DPoP "],
+			["null for a value that is not a string at all", 7, null],
+		])("tells the audit sink %s", async (_label, stored, reported) => {
+			// The caller can do nothing with it but retry; an operator needs to
+			// know which upstream started answering something else, and what.
+			const { app, auditSink } = storedApp({ tokenType: stored });
+
+			await postFedToken(app, "google", await mintAccessToken());
+
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "federation.token.upstream_ineligible",
+					details: expect.objectContaining({
+						federation: "google",
+						reason: "token_type_unsupported",
+						tokenType: reported,
+					}),
+				}),
+			);
+		});
+
+		it("judges the record a concurrent refresh wrote, on the post-lock re-read", async () => {
+			// The refresh that wrote this record is not this request, so its answer
+			// is no more trusted here than on the fast path.
+			const release = vi.fn().mockResolvedValue(undefined);
+			const lockingStore = {
+				...makeFedTokenStore({
+					get: vi
+						.fn()
+						.mockResolvedValueOnce({ ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) })
+						.mockResolvedValueOnce({ ...baseFedTokens, tokenType: "DPoP" }),
+				}),
+				acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
+			};
+			const refreshToken = vi.fn();
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken,
+			} as unknown as FederationProvider;
+			const app = buildApp({
+				fedTokenStore: lockingStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(502);
+			expect(res.body.error).toBe("upstream_token_ineligible");
+			expect(refreshToken).not.toHaveBeenCalled();
+			// The refusal is not a reason to hold the lock.
+			expect(release).toHaveBeenCalled();
+		});
+
+		it("carries a refreshed type into the record, and still answers Bearer", async () => {
+			// The record keeps the upstream's spelling — it is the evidence an
+			// operator reads — while the wire value stays the one constant a
+			// caller can rely on.
+			const { app, fedTokenStore } = refreshingApp({
+				accessToken: "new-at",
+				expiresIn: 3600,
+				tokenType: "bearer",
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(res.body.token_type).toBe("Bearer");
+			expect(written(fedTokenStore).tokenType).toBe("bearer");
+		});
+
+		it("leaves the stored type standing when the refresh names none", async () => {
+			// A refresh is not where a connection changes how its tokens are
+			// presented, and every bundled adapter but `federation-oidc` names none
+			// at all.
+			const { app, fedTokenStore } = refreshingApp(
+				{ accessToken: "new-at", expiresIn: 3600 },
+				{ tokenType: "bearer" },
+			);
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(written(fedTokenStore).tokenType).toBe("bearer");
+		});
+
+		it("refuses a stored type that is not a token type when the refresh names none", async () => {
+			// The stored value is carried verbatim rather than re-read through
+			// `canonicalTokenType`: doing that would turn it into `undefined`, and
+			// absence is what the disclosure check reads as Bearer. Nothing is
+			// written, so the evidence survives for the next request too.
+			const { app, fedTokenStore } = refreshingApp(
+				{ accessToken: "new-at", expiresIn: 3600 },
+				{ tokenType: "DPoP " },
+			);
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(502);
+			expect(res.body.error).toBe("upstream_token_ineligible");
+			expect(fedTokenStore.update).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			["an empty string", ""],
+			["a value with a space in it", "Bearer token"],
+			["something that is not a string", 7],
+			// Printable, and not a token type: no URI may contain `^`. The old
+			// NQCHAR bound read this as a type name and sent it down the 502
+			// meant for a real type the upstream issued (#649 review).
+			["a value with a character no URI may contain", "Bearer^"],
+			// Every character is legal and the reference is not: an IP-literal
+			// that never closes. The lexical check read it as a type name.
+			["a structurally malformed URI reference", "https://["],
+		])("refuses the refresh when the answered type is %s", async (_label, tokenType) => {
+			// Not a name at all: §A.13's `token-type` admits a `type-name` or a URI
+			// reference, and none of these is either. The
+			// adapter answered something broken, which is a failed refresh rather
+			// than an upstream this provider may not delegate for — and the record
+			// keeps the type it had.
+			const { app, fedTokenStore } = refreshingApp({
+				accessToken: "new-at",
+				expiresIn: 3600,
+				tokenType,
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(500);
+			expect(res.body.error).toBe("refresh_failed");
+			expect(fedTokenStore.update).not.toHaveBeenCalled();
+		});
+
+		it.each([
+			["invalid_token_type", { accessToken: "new-at", expiresIn: 3600, tokenType: "Bearer token" }],
+			["invalid_expiry", { accessToken: "new-at", expiresIn: Number.NaN }],
+			["no_access_token", { expiresIn: 3600 }],
+		])("audits a broken answer with reason %s", async (reason, answer) => {
+			// `packages/oauth/README.md` tells SIEM rules to group on
+			// `details.reason`, so the three readings this refusal can carry are
+			// pinned rather than left to the ternary.
+			const { app, auditSink } = refreshingApp(answer);
+
+			await postFedToken(app, "google", await mintAccessToken());
+
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "federation.token.refresh_failed",
+					details: expect.objectContaining({ federation: "google", reason }),
+				}),
+			);
+		});
+
+		it("refuses the refresh when the answered type cannot be read", async () => {
+			// An adapter is a third-party extension point, so the answer may be an
+			// object whose getters throw. Unreadable is not the same as absent:
+			// absent leaves the stored type standing, and collapsing the two would
+			// hand on a token under a type nobody could read.
+			const { app, fedTokenStore } = refreshingApp({
+				accessToken: "new-at",
+				expiresIn: 3600,
+				get tokenType(): string {
+					throw new Error("boom");
+				},
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(500);
+			expect(res.body.error).toBe("refresh_failed");
+			expect(fedTokenStore.update).not.toHaveBeenCalled();
+		});
+
+		it("refuses to hand on a refreshed token that is sender-constrained", async () => {
+			// The refresh itself worked. What it brought is a token the caller
+			// could not present, which is the upstream's doing and not a failure —
+			// so 502, and the record is not rewritten with a token nobody can use.
+			const { app, fedTokenStore, auditSink } = refreshingApp({
+				accessToken: "new-at",
+				expiresIn: 3600,
+				tokenType: "DPoP",
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(502);
+			expect(res.body.error).toBe("upstream_token_ineligible");
+			expect(res.body.error_description).toBe("token_type_unsupported");
+			expect(fedTokenStore.update).not.toHaveBeenCalled();
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "federation.token.upstream_ineligible",
+					details: expect.objectContaining({ tokenType: "DPoP" }),
+				}),
+			);
+		});
+
+		it("salvages a rotated refresh token from the refusal to hand one on", async () => {
+			// This matters more here than on a failed refresh: the connection is
+			// healthy, and an operator who fixes the upstream's configuration must
+			// not have to send the user back for consent. The upstream has already
+			// invalidated the token this one replaced (RFC 6749 §6).
+			const { app, fedTokenStore } = refreshingApp(
+				{
+					accessToken: "new-at",
+					expiresIn: 3600,
+					tokenType: "DPoP",
+					refreshToken: "rotated-rt",
+				},
+				{ refreshToken: "original-rt" },
+			);
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(502);
+			expect(written(fedTokenStore).refreshToken).toBe("rotated-rt");
+			// Only the credential was salvaged — not the token that cannot be used.
+			expect(written(fedTokenStore).accessToken).toBe(baseFedTokens.accessToken);
+		});
+	});
 });

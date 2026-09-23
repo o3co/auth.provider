@@ -29,9 +29,12 @@ import type {
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	BEARER_TOKEN_TYPE,
 	canonicalScope,
+	canonicalTokenType,
 	classifyFederationRefreshError,
 	emitAuditEvent,
+	isBearerTokenType,
 	parseScopeTokens,
 	supportsLock,
 	supportsRefresh,
@@ -60,6 +63,56 @@ const isNonEmptyString = (value: unknown): value is string =>
 
 /** Alias at the call sites where the string is a token rather than a scope. */
 const isUsableToken = isNonEmptyString;
+
+/**
+ * Seconds a caller is asked to wait before retrying a token this route may not
+ * hand on. The same interval `federationGrants.ineligibleRetryAfter` defaults
+ * to for the same condition on the offline-delegation route, which is where
+ * the number comes from; this route has no setting of its own.
+ *
+ * It is a hint against a hot loop rather than a promise. Nothing is persisted
+ * when the refusal happens on a refresh, so a caller that ignores it drives one
+ * upstream call per request until an operator changes the upstream's
+ * registration back — which is also the only thing that ends the condition.
+ */
+const UPSTREAM_INELIGIBLE_RETRY_AFTER_SECONDS = 300;
+
+/**
+ * Whether a stored upstream token may be handed to the caller (#645).
+ *
+ * The refusal is the same judgement core already makes of the same contract in
+ * `federation-grants/eligibility.mts`, and for the same reason: every other
+ * name in IANA's Access Token Types registry is either sender-constrained
+ * (`PoP`, `DPoP`) or not an access token type at all (`N_A`), and this route
+ * delegates the upstream's token BY VALUE to a caller that holds no proof key.
+ * Answering such a token as `Bearer` — which is what this route did before —
+ * drops a constraint the upstream imposed and hands out a credential that only
+ * looks usable.
+ *
+ * Only an ABSENT field is admitted without being read. RFC 6749 §5.1 makes
+ * `token_type` REQUIRED, so a record that names none was written from an
+ * adapter that predates `FederationProfile` carrying it — every bundled
+ * adapter but `federation-oidc` — rather than by an upstream meaning something
+ * else. Every record written before #645 is silent too, and this is what keeps
+ * them working.
+ *
+ * Everything else is READ, including a value that is not a token type at all.
+ * A store is another thing this route does not own (D5), and the two must not
+ * collapse: reading `"DPoP "`, `""` or a number as silence would answer
+ * `Bearer` for it, which is the behaviour this issue exists to stop, reached
+ * through a narrower door.
+ *
+ * `null` is one of those, not a second spelling of absence. Round-tripping a
+ * record through JSON drops an `undefined` field rather than turning it into
+ * `null`, so a stored `null` is a store writing one on purpose, and the
+ * built-in Redis codec already refuses the record that holds it
+ * (`isOptionalString`). Admitting it here would be the one reading that let a
+ * malformed record answer 200.
+ */
+const mayDiscloseTokenType = (stored: unknown): boolean => {
+	if (stored === undefined) return true;
+	return isBearerTokenType(stored);
+};
 
 /** Seconds a token has left: finite and in the future. `NaN` and `-5` are neither. */
 const isUsableLifetime = (value: unknown): value is number =>
@@ -322,6 +375,47 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		const azp = typeof payload.azp === "string" ? payload.azp : null;
 		const sub = typeof payload.sub === "string" ? payload.sub : null;
 
+		/**
+		 * Refuse to hand on a token whose type this route may not delegate (#645).
+		 *
+		 * 502 rather than 500: this provider reached the upstream and what came
+		 * back cannot be handed on — the caller did nothing wrong, and neither
+		 * did this provider. `federation-grants/serialize.mts` answers the same
+		 * code, with the same `error` and the same reason word, for the same
+		 * condition on the offline-delegation route.
+		 *
+		 * The type the record named goes to the audit sink and not to the caller:
+		 * an operator needs to know which upstream started answering something
+		 * else, and the caller can do nothing with it but retry. It is reported
+		 * as it was read, because a value that is not a token type is the thing
+		 * worth seeing; `null` is a value that is not a string at all, which
+		 * cannot be put in a field typed as one.
+		 *
+		 * `Retry-After` because the condition is not transient and a client that
+		 * retries a 5xx otherwise drives one upstream refresh per retry — the
+		 * offline-delegation route carries it on this same refusal for this same
+		 * reason.
+		 */
+		const refuseUndisclosableTokenType = (res: Response, named: unknown): Response => {
+			emitAuditEvent(opts.auditSink, {
+				timestamp: new Date(),
+				type: "federation.token.upstream_ineligible",
+				subject: sub ?? undefined,
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+				details: {
+					federation: name,
+					reason: "token_type_unsupported",
+					tokenType: typeof named === "string" ? named : null,
+				},
+			});
+			res.setHeader("Retry-After", String(UPSTREAM_INELIGIBLE_RETRY_AFTER_SECONDS));
+			return res.status(502).json({
+				error: "upstream_token_ineligible",
+				error_description: "token_type_unsupported",
+			});
+		};
+
 		if (!familyId) {
 			res.setHeader(
 				"WWW-Authenticate",
@@ -492,6 +586,12 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		// refresh" — reuse the stored accessToken indefinitely, and omit the
 		// `expires_in` field from the response (RFC 6749 §5.1 makes it optional).
 		if (tokens.expiresAt === null || tokens.expiresAt.getTime() > Date.now() + refreshBufferMs) {
+			// What it is presented as decides whether it may be handed on at all,
+			// so it is read before the token is — and before the success is
+			// audited, so a refused disclosure is not counted as one (#645).
+			if (!mayDiscloseTokenType(tokens.tokenType)) {
+				return refuseUndisclosableTokenType(res, tokens.tokenType);
+			}
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
 				type: "federation.token.success",
@@ -506,7 +606,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					: Math.max(0, Math.floor((tokens.expiresAt.getTime() - Date.now()) / 1000));
 			return res.status(200).json({
 				access_token: tokens.accessToken,
-				token_type: "Bearer",
+				token_type: BEARER_TOKEN_TYPE,
 				...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
 				...(tokens.scope ? { scope: tokens.scope } : {}),
 			});
@@ -589,6 +689,11 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					// Another caller already refreshed, OR the provider issues no finite
 					// expiry (expiresAt === null → never refresh): return the stored token
 					// without calling IdP.
+					// As on the fast path: the concurrent refresh that wrote this
+					// record is not this request, so its type is judged here too.
+					if (!mayDiscloseTokenType(freshTokens.tokenType)) {
+						return refuseUndisclosableTokenType(res, freshTokens.tokenType);
+					}
 					const expiresIn =
 						freshTokens.expiresAt === null
 							? undefined
@@ -603,7 +708,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					});
 					return res.status(200).json({
 						access_token: freshTokens.accessToken,
-						token_type: "Bearer",
+						token_type: BEARER_TOKEN_TYPE,
 						...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
 						...(freshTokens.scope ? { scope: freshTokens.scope } : {}),
 					});
@@ -809,12 +914,44 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					derivedExpiry !== null &&
 					!isUsableDate(derivedExpiry));
 
-			if (!isUsableToken(answer.accessToken) || lifetimeIsBroken) {
-				// A rotated refresh token has to be kept even though the refresh
-				// failed: the upstream invalidates the one it replaced (RFC 6749
-				// §6), so discarding it here would leave the stored token dead and
-				// the connection unrecoverable without re-consent. Best effort —
-				// if the store is down the refresh is failing anyway.
+			// How the refreshed token is to be presented (#645). Three readings,
+			// and they are three different things:
+			//
+			// - Unreadable, or a value that is not a type name at all (`""`, one
+			//   with a space in it, a number): the adapter answered something
+			//   broken, which joins the refusals below. `core/federation-grants/
+			//   retrieve.mts` drops the whole token on the same readings.
+			// - Absent: the answer said nothing about the type, which leaves the
+			//   one the record already carries. A refresh is not where a
+			//   connection changes how its tokens are presented, and every bundled
+			//   adapter but `federation-oidc` names none at all.
+			// - A type name: it is what the record will carry, and what decides
+			//   whether the token may be handed on.
+			const namedType = answer.tokenType !== undefined;
+			const answeredType = namedType ? canonicalTokenType(answer.tokenType) : undefined;
+			const tokenTypeIsBroken =
+				unreadable.has("tokenType") || (namedType && answeredType === undefined);
+			// The stored value is carried verbatim, not re-read through
+			// `canonicalTokenType`: that would turn a stored value which is not a
+			// token type into `undefined`, and the disclosure check reads absence
+			// as Bearer. The record keeps what it holds, and the check below is
+			// what refuses it.
+			const nextTokenType = answeredType ?? currentTokens.tokenType;
+
+			/**
+			 * Keep a rotated refresh token even though this refresh brought
+			 * nothing that can be handed on.
+			 *
+			 * A rotated refresh token has to be kept: the upstream invalidates the
+			 * one it replaced (RFC 6749 §6), so discarding it here would leave the
+			 * stored token dead and the connection unrecoverable without
+			 * re-consent. Best effort — if the store is down the refresh is
+			 * failing anyway.
+			 *
+			 * Shared by both refusals below, which differ in what they answer and
+			 * not in what they owe the connection (#645).
+			 */
+			const keepRotatedRefreshToken = async (): Promise<void> => {
 				if (
 					isUsableToken(answer.refreshToken) &&
 					answer.refreshToken !== currentTokens.refreshToken
@@ -862,6 +999,11 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 						);
 					}
 				}
+			};
+
+			// The adapter answered something this route cannot read as a token.
+			if (!isUsableToken(answer.accessToken) || lifetimeIsBroken || tokenTypeIsBroken) {
+				await keepRotatedRefreshToken();
 				emitAuditEvent(opts.auditSink, {
 					timestamp: new Date(),
 					type: "federation.token.refresh_failed",
@@ -870,13 +1012,28 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					userAgent: req.get("user-agent"),
 					details: {
 						federation: name,
-						reason: lifetimeIsBroken ? "invalid_expiry" : "no_access_token",
+						reason: lifetimeIsBroken
+							? "invalid_expiry"
+							: !isUsableToken(answer.accessToken)
+								? "no_access_token"
+								: "invalid_token_type",
 					},
 				});
 				return res.status(500).json({
 					error: "refresh_failed",
 					error_description: "federation token refresh failed",
 				});
+			}
+
+			// The adapter answered a token this route may not hand on (#645). Not
+			// a failed refresh — the refresh worked, and the token it brought is
+			// one the caller could not present. Keeping the rotated refresh token
+			// matters more here than on a failure: the connection is healthy, and
+			// an operator who fixes the upstream's configuration must not have to
+			// send the user back for consent.
+			if (!mayDiscloseTokenType(nextTokenType)) {
+				await keepRotatedRefreshToken();
+				return refuseUndisclosableTokenType(res, nextTokenType);
 			}
 
 			// 11f: Update store — preserve refresh_token and id_token when IdP didn't rotate/return them.
@@ -911,11 +1068,11 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				// Fall back to the stored id_token to preserve the id_token_hint for logout (F-5).
 				idToken: isUsableToken(answer.idToken) ? answer.idToken : currentTokens.idToken,
 				expiresAt: nextExpiresAt,
-				// `token_type` stays the stored one: this route hands the client the
-				// upstream's access token, and a change of type is a change of how
-				// the client must present it. Honouring a rotated one is a decision
-				// of its own, filed on #626, not a side effect of this move.
-				tokenType: currentTokens.tokenType,
+				// What the upstream last named, or what the record already carried
+				// when this answer named nothing. Judged above before it got here:
+				// the write and the response say the same thing because they read
+				// the same value (#645).
+				tokenType: nextTokenType,
 				// The three readings and the bound they are judged against are
 				// `narrowedScope`'s, next to its own reasoning. Nothing about the
 				// rule is restated here, so the two cannot drift apart.
@@ -965,7 +1122,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				// and a getter read a second time may answer differently from what was
 				// just written to the store.
 				access_token: updatedTokens.accessToken,
-				token_type: "Bearer",
+				token_type: BEARER_TOKEN_TYPE,
 				...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
 				...(updatedTokens.scope ? { scope: updatedTokens.scope } : {}),
 			});

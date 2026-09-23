@@ -100,6 +100,25 @@ const federatedAmr = (profile: Readonly<Record<string, unknown>>): readonly stri
 };
 
 /**
+ * What goes in the record's `tokenType` for what an adapter answered (#645).
+ *
+ * The upstream's own spelling, verbatim — including a value that is not a
+ * token type at all, because the route that discloses the token reads an
+ * ABSENT field as `Bearer` and refuses everything else. Erasing an unusable
+ * value would turn "the upstream said something this provider cannot hand on"
+ * into "the upstream said nothing", which is the one reading that answers 200.
+ *
+ * A value that is not a string is recorded as `""`: the field holds a string,
+ * so it cannot be kept as it was, and `""` is a value the disclosure point
+ * already refuses. It says the adapter named something unusable without
+ * inventing what. Only an adapter that named nothing is recorded as nothing.
+ */
+const recordedTokenType = (named: unknown): string | undefined => {
+	if (named === undefined) return undefined;
+	return typeof named === "string" ? named : "";
+};
+
+/**
  * The session cookie name assumed when the caller passes neither
  * `federationTransactionCookieName` nor a config carrying `session.name`.
  *
@@ -455,6 +474,7 @@ export const createRouter = (
 			await sessionFederationIndex.addFederation(currentSid, provider.name, current.expiresAt);
 			if (profile.accessToken) {
 				const consented = consentedScope(profile.scope, provider.scope);
+				const tokenType = recordedTokenType(profile.tokenType);
 				await federationTokenStore.attach(currentSid, provider.name, {
 					accessToken: profile.accessToken,
 					refreshToken: profile.refreshToken,
@@ -465,6 +485,13 @@ export const createRouter = (
 					// by (RFC 6749 §6) and never moves. They start equal.
 					scope: consented,
 					grantedScope: consented,
+					// #645 — how the upstream said this token is presented. Recorded
+					// rather than judged here: a login does not need the access token,
+					// so a type this provider cannot hand on must not cost the user
+					// their sign-in. The route that discloses it is where that is
+					// decided. Absent only when the adapter named nothing at all,
+					// which is every bundled adapter but `federation-oidc`.
+					...(tokenType === undefined ? {} : { tokenType }),
 				});
 			}
 		} catch (err) {
@@ -961,6 +988,7 @@ export const createRouter = (
 				// `null` propagates to the store and signals "do not refresh; reuse" —
 				// the route layer never invents a fallback expiry.
 				const consented = consentedScope(profile.scope, provider.scope);
+				const tokenType = recordedTokenType(profile.tokenType);
 				await federationTokenStore.attach(sid, provider.name, {
 					accessToken: profile.accessToken,
 					refreshToken: profile.refreshToken,
@@ -969,6 +997,9 @@ export const createRouter = (
 					// #647 — as above: the consented scope, and the ceiling it sets.
 					scope: consented,
 					grantedScope: consented,
+					// #645 — as above: what the upstream named, recorded and not
+					// judged. The disclosure point owns that decision.
+					...(tokenType === undefined ? {} : { tokenType }),
 				});
 				attachedToFederation = true;
 			}

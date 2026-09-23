@@ -71,6 +71,8 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"federation.token.reauthentication_required",
 	"federation.token.refresh_failed",
 	"federation.token.success",
+	// #645: an upstream token whose `token_type` this provider may not hand on.
+	"federation.token.upstream_ineligible",
 	"introspect.family_revoked",
 	"introspect.session_invalid",
 	"introspect.store_unavailable",
