@@ -30,33 +30,24 @@ export interface RedisSessionRPRegistryOptions {
 }
 
 /**
- * JSON envelope stored as a single HSET field value.
+ * JSON envelope stored as a single HSET field value: a `RegisteredRP` with
+ * `registeredAt` held as epoch milliseconds.
  *
- * Rationale for `registeredAtMs: number` (epochMs hardening):
- *   Storing Date as a JSON string is susceptible to timezone / precision
- *   drift on deserialize. Storing epochMs as a plain number is loss-free
- *   and unambiguous.
+ * Derived from `RegisteredRP` rather than written out, so every key the record
+ * requires the envelope requires too — a write into it that forgot a logout
+ * field fails to compile, where it would otherwise drop the RP from the logout
+ * cascade — and a field added to the record cannot be left out of what the
+ * store writes.
  *
- * Rationale for undefined-as-absent (not "null"):
- *   Optional RP fields MUST survive the JSON round-trip as `undefined`,
- *   not `""` or `null`. We achieve this by only writing keys that are
- *   actually defined, and by parsing absent keys as `undefined`.
+ * `registeredAtMs: number` (epochMs hardening): a Date stored as a JSON string
+ * is susceptible to timezone / precision drift on deserialize; epochMs is
+ * loss-free and unambiguous.
+ *
+ * An unset logout field is `undefined`, which `JSON.stringify` leaves out, so
+ * it is absent on the wire and read back as `undefined` — never `""` or
+ * `null`. `isValidRPEnvelope` checks every field's type, present or not.
  */
-/**
- * Every field a required key, like `RegisteredRP`'s own: this is the shape the
- * store writes, and a write into it that forgot a logout field would compile
- * and drop it — the RP never told the session ended. JSON drops an `undefined`
- * value, so an unset field is still absent on the wire; `isValidRPEnvelope`
- * reads it as optional.
- */
-interface RPEnvelope {
-	clientId: string;
-	registeredAtMs: number;
-	backchannelLogoutUri: string | undefined;
-	backchannelLogoutSessionRequired: boolean | undefined;
-	frontchannelLogoutUri: string | undefined;
-	frontchannelLogoutSessionRequired: boolean | undefined;
-}
+type RPEnvelope = Omit<RegisteredRP, "registeredAt"> & { readonly registeredAtMs: number };
 
 function serialize(rp: RegisteredRP): string {
 	// A literal naming every field, so forgetting one is a compile error rather
@@ -85,12 +76,26 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const isOptional = (value: unknown, type: "string" | "boolean"): boolean =>
+	value === undefined || typeof value === type;
+
+/**
+ * Every field, including the four logout ones: a stored record is data this
+ * store did not necessarily write (D5). `backchannelLogoutSessionRequired:
+ * "false"` would otherwise come back typed as a boolean and read as truthy —
+ * `sid` sent to an RP that asked not to receive it — so a field of the wrong
+ * type makes the whole record corrupt, as a bad `clientId` already does.
+ */
 function isValidRPEnvelope(env: unknown): env is RPEnvelope {
 	if (!isRecord(env)) return false;
 	return (
 		typeof env.clientId === "string" &&
 		typeof env.registeredAtMs === "number" &&
-		Number.isFinite(env.registeredAtMs)
+		Number.isFinite(env.registeredAtMs) &&
+		isOptional(env.backchannelLogoutUri, "string") &&
+		isOptional(env.backchannelLogoutSessionRequired, "boolean") &&
+		isOptional(env.frontchannelLogoutUri, "string") &&
+		isOptional(env.frontchannelLogoutSessionRequired, "boolean")
 	);
 }
 

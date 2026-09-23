@@ -40,6 +40,30 @@ export function runSessionRPRegistryContract(factory: SessionRPRegistryFactory):
 			expect(list[0]?.clientId).toBe("client-1");
 		});
 
+		it.each([
+			["both channels, sid wanted on neither", false, false],
+			["both channels, sid wanted on both", true, true],
+			["both channels, sid wanted on back-channel only", true, false],
+			["both channels, sid wanted on front-channel only", false, true],
+		])("round-trips every logout field with its own value — %s (#626)", async (_label, bc, fc) => {
+			// The types catch a field forgotten on the way through a registry, not
+			// two fields of the same type swapped: the back- and front-channel
+			// pairs are both string/boolean. Every value is distinct here, and
+			// `false` is asserted, not just a default that happens to agree.
+			const reg = await factory();
+			const rp = RP({
+				clientId: "client-rt",
+				backchannelLogoutUri: "https://rp.example/back",
+				backchannelLogoutSessionRequired: bc,
+				frontchannelLogoutUri: "https://rp.example/front",
+				frontchannelLogoutSessionRequired: fc,
+				registeredAt: new Date(1_900_000_000_000),
+			});
+			await reg.registerRP("sid-rt", rp, FUTURE());
+
+			expect((await reg.listRPs("sid-rt"))[0]).toEqual(rp);
+		});
+
 		it("same clientId upserts — replaces earlier registration", async () => {
 			const reg = await factory();
 			await reg.registerRP("sid-1", RP({ backchannelLogoutUri: "https://v1" }), FUTURE());

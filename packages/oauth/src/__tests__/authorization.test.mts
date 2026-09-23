@@ -1806,6 +1806,85 @@ describe("createAuthorizationGrant", () => {
 				expect(rpExpiresAt).toBe(sessionExpiresAt);
 			});
 
+			it.each([
+				["sid wanted on neither channel", false, false],
+				["sid wanted on the back-channel only", true, false],
+				["sid wanted on the front-channel only", false, true],
+			])(
+				"registers the RP with every logout field the client record carries — %s (#626)",
+				async (_label, backchannelSessionRequired, frontchannelSessionRequired) => {
+					// These four fields used to be read through `as Record<string, unknown>`
+					// and cast back: a misspelt name would have read `undefined` and dropped
+					// the RP from the logout cascade. They are read off the typed client now,
+					// and each is asserted with its own value — the types catch a field
+					// forgotten, not two same-typed fields swapped.
+					const registerRPSpy = vi.fn(async (_sid: string, _rp: unknown, _exp: Date) => {});
+					const clientRepository: ClientRepository = {
+						...mockClientRepository,
+						findById: vi.fn().mockResolvedValue({
+							clientId: "client1",
+							allowedRedirectUris: [RP_URI],
+							allowedScopes: ["read"],
+							backchannelLogoutUri: "https://rp.example/back",
+							backchannelLogoutSessionRequired: backchannelSessionRequired,
+							frontchannelLogoutUri: "https://rp.example/front",
+							frontchannelLogoutSessionRequired: frontchannelSessionRequired,
+						}),
+					};
+					const deps = {
+						...makeDeps(
+							vi.fn().mockResolvedValue({ code: "abc", sid: "session-xyz", ...validCode }),
+							clientRepository,
+						),
+						userSessionStore: {
+							kind: "spy",
+							async create() {},
+							async get() {
+								return {
+									sid: "session-xyz",
+									sub: "u1",
+									authTime: new Date(),
+									createdAt: new Date(),
+									expiresAt: new Date(Date.now() + 3600_000),
+									claims: {},
+								};
+							},
+							async delete() {},
+						},
+						sessionFamilyIndex: makeSessionFamilyIndex({ addFamilyId: vi.fn(async () => {}) }),
+						sessionRPRegistry: makeSessionRPRegistry({ registerRP: registerRPSpy }),
+					};
+					const handler = createAuthorizationGrant(deps);
+					const { result } = await handler.handle({
+						body: {
+							code: "abc",
+							client_id: "client1",
+							redirect_uri: RP_URI,
+							code_verifier: CODE_VERIFIER,
+						},
+						session: {
+							code: "abc",
+							code_client_id: "client1",
+							granted_scopes: ["read"],
+							user: { id: "u1" },
+						},
+						issuer: "localhost",
+						metadata: { ip: "127.0.0.1" },
+						authenticatedClient: DEFAULT_AUTH_CLIENT,
+					});
+
+					expect(result.status).toBe(200);
+					const [, rpData] = registerRPSpy.mock.calls[0] as [string, Record<string, unknown>, Date];
+					expect(rpData).toMatchObject({
+						clientId: "client1",
+						backchannelLogoutUri: "https://rp.example/back",
+						backchannelLogoutSessionRequired: backchannelSessionRequired,
+						frontchannelLogoutUri: "https://rp.example/front",
+						frontchannelLogoutSessionRequired: frontchannelSessionRequired,
+					});
+				},
+			);
+
 			it("backward compat: issues tokens without userSessionStore (F-3-4)", async () => {
 				// No userSessionStore in deps — grant must succeed without linkFamily/registerRP.
 				const deps = makeDeps(
