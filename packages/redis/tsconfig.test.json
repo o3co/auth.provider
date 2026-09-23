@@ -14,7 +14,10 @@
 		"__tests__/types.test.mts",
 		"__tests__/code-repository.test.mts",
 		"__tests__/device-code-store.test.mts",
-		"__tests__/adapters.device-code-store.contract.mts"
+		"__tests__/adapters.device-code-store.contract.mts",
+		"__tests__/federation-grant-intent-store-codec.test.mts",
+		"__tests__/federation-grant-intent-store.integration.test.mts",
+		"__tests__/adapters.federation-grant-intent-store.contract.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }

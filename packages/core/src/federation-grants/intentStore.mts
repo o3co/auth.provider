@@ -113,6 +113,13 @@ export const FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT = 16;
  * user was shown, not against configuration as it stands minutes later. The
  * connection's revisions are pinned here for that reason, and the callback
  * refuses when they have moved.
+ *
+ * Every field is a required key (#626): `resource` and `upstreamSubject` hold
+ * `undefined` where there is none. Both stores copy the intent field by
+ * field, and a copy that lost either widened the flow — the upstream asked
+ * without the audience the connection narrows it to, or the callback linking
+ * whichever upstream account signed in instead of the one the client said to
+ * expect. Naming the key makes that copy a compile error.
  */
 export interface FederationGrantIntent {
 	/** Opaque, single-use, 256 bits. Addresses this record and nothing else. */
@@ -139,8 +146,8 @@ export interface FederationGrantIntent {
 	readonly callbackUri: string;
 	/** Validated against the connection's ceiling at lodging (D6); what consent shows and the upstream is asked for. */
 	readonly scopes: readonly string[];
-	/** RFC 8707, from the connection. */
-	readonly resource?: string;
+	/** RFC 8707, from the connection; `undefined` when it names none. */
+	readonly resource: string | undefined;
 	/** The connection's extra authorization parameters. Never a client's. */
 	readonly authorizationParams: Readonly<Record<string, string>>;
 
@@ -148,8 +155,11 @@ export interface FederationGrantIntent {
 	readonly redirectUri: string;
 	/** The client's own state, echoed on every exit. Never the upstream's. */
 	readonly clientState: string;
-	/** What the client already expects the upstream account to be, checked at the callback (D6). */
-	readonly upstreamSubject?: string;
+	/**
+	 * What the client already expects the upstream account to be, checked at the
+	 * callback (D6); `undefined` when the client named none.
+	 */
+	readonly upstreamSubject: string | undefined;
 	/** The grant lifetime that applied, in milliseconds: clamped at lodging, shown at consent. */
 	readonly lifetimeMs: number;
 	readonly createdAt: Date;

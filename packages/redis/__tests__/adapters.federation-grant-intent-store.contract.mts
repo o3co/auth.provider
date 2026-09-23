@@ -97,6 +97,8 @@ const intent = (over: Partial<FederationGrantIntent> = {}): FederationGrantInten
 	createdAt: T0,
 	expiresAt: at(FEDERATION_GRANT_FLOW_BUDGET_MS),
 	correlationId: "corr-1",
+	resource: undefined,
+	upstreamSubject: undefined,
 	...over,
 });
 
@@ -186,6 +188,42 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 				expect(await store.getIntent(record.handle, at(MIN))).toEqual(intent());
 			});
 
+			it("hands back every field with its own value, and so does the transaction's snapshot (#626)", async () => {
+				// The fields a copy is likeliest to drop are the two a default
+				// fixture leaves unset; both widen the flow when lost — the upstream
+				// asked without the connection's audience, or the callback linking
+				// an account the client did not expect. Here both are set, and the
+				// record is compared whole.
+				const record = await lodge({
+					resource: "https://api.example/calendar",
+					upstreamSubject: "00u-expected",
+				});
+				expect(await store.getIntent(record.handle, at(MIN))).toStrictEqual(record);
+
+				await store.parkConsent({
+					handle: record.handle,
+					challenge: "challenge-rt",
+					binding: binding(),
+					now: at(MIN),
+				});
+				const answer = accept("rt");
+				const answered = await store.answerConsent({
+					challenge: "challenge-rt",
+					binding: binding(),
+					answer,
+					now: at(2 * MIN),
+				});
+				if (answered.outcome !== "accepted")
+					throw new Error("fixture: the answer was not accepted");
+				expect(answered.transaction.intent).toStrictEqual(record);
+				const consumed = await store.consumeTransaction({
+					state: answer.state,
+					connection: record.connection,
+					now: at(3 * MIN),
+				});
+				expect(consumed?.intent).toStrictEqual(record);
+			});
+
 			it("refuses a record whose deadline is not after the caller's now", async () => {
 				expect(await store.putIntent(intent({ expiresAt: at(MIN) }), at(MIN))).toEqual({
 					outcome: "refused",
@@ -235,6 +273,23 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 				expect(await store.getIntent("h-1", at(MIN))).toEqual(intent());
 				expect(await factory.reservations(store, "agent", "u-2")).toBe(0);
 			});
+
+			it.each([
+				["resource", { resource: "https://api.example/other" }],
+				["upstreamSubject", { upstreamSubject: "00u-other" }],
+			] as const)(
+				"refuses a record under a resident handle that differs only in its %s (#626)",
+				async (_field, over) => {
+					// The two fields a default fixture leaves unset: a retry that
+					// differs in one of them is a different record, not the same one.
+					await lodge();
+					expect(await store.putIntent(intent(over), at(MIN))).toEqual({
+						outcome: "refused",
+						reason: "collision",
+					});
+					expect(await store.getIntent("h-1", at(MIN))).toStrictEqual(intent());
+				},
+			);
 
 			it("refuses a collision the caller's clock cannot see", async () => {
 				await lodge();

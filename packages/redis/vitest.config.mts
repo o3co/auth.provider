@@ -35,6 +35,10 @@ export default defineConfig({
 				"__tests__/types.test.mts",
 				"__tests__/code-repository.test.mts",
 				"__tests__/device-code-store.test.mts",
+				// #626: the intent store's tests build intents, which name every key;
+				// the contract copy is compiled through the file that runs it.
+				"__tests__/federation-grant-intent-store-codec.test.mts",
+				"__tests__/federation-grant-intent-store.integration.test.mts",
 			],
 		},
 	},
