@@ -28,9 +28,9 @@
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { DiscoveryDocumentError } from "../buildDocument.mjs";
-import { planDiscoveryRoute } from "../planRoute.mjs";
-import type { OidcDiscoveryContribution } from "../types.mjs";
+import { DiscoveryDocumentError } from "#/discovery/buildDocument.mjs";
+import { planDiscoveryRoute } from "#/discovery/planRoute.mjs";
+import type { OidcDiscoveryContribution } from "#/discovery/types.mjs";
 
 const ISSUER = "https://auth.example.com";
 
