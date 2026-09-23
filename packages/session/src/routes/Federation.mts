@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 import { randomBytes, randomUUID } from "node:crypto";
 import {
 	type AppConfig,
@@ -33,6 +34,7 @@ import {
 import type { Request, RequestHandler, Response, Router } from "express";
 import { checkRequestOrigin } from "../csrf.mjs";
 import { mergeFederatedClaims } from "../federations/claim-precedence.mjs";
+import { consentedScope } from "../federations/consented-scope.mjs";
 import { generateCodeVerifier } from "../federations/pkce.mjs";
 import type { FederationRedirectPolicy } from "../federations/redirect-policy.mjs";
 import {
@@ -452,11 +454,17 @@ export const createRouter = (
 			);
 			await sessionFederationIndex.addFederation(currentSid, provider.name, current.expiresAt);
 			if (profile.accessToken) {
+				const consented = consentedScope(profile.scope, provider.scope);
 				await federationTokenStore.attach(currentSid, provider.name, {
 					accessToken: profile.accessToken,
 					refreshToken: profile.refreshToken,
 					idToken: profile.idToken,
 					expiresAt: profile.expiresAt,
+					// #647 — what the user just consented to. `scope` moves with the
+					// token, `grantedScope` is the ceiling a later refresh is bounded
+					// by (RFC 6749 §6) and never moves. They start equal.
+					scope: consented,
+					grantedScope: consented,
 				});
 			}
 		} catch (err) {
@@ -952,11 +960,15 @@ export const createRouter = (
 				// `profile.expiresAt` is `Date | null` (required on FederationProfile).
 				// `null` propagates to the store and signals "do not refresh; reuse" —
 				// the route layer never invents a fallback expiry.
+				const consented = consentedScope(profile.scope, provider.scope);
 				await federationTokenStore.attach(sid, provider.name, {
 					accessToken: profile.accessToken,
 					refreshToken: profile.refreshToken,
 					idToken: profile.idToken,
 					expiresAt: profile.expiresAt,
+					// #647 — as above: the consented scope, and the ceiling it sets.
+					scope: consented,
+					grantedScope: consented,
 				});
 				attachedToFederation = true;
 			}

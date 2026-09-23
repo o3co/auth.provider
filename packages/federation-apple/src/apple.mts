@@ -446,6 +446,18 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 				accessToken: tokens.access_token,
 				refreshToken: typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
 				idToken: typeof tokens.id_token === "string" ? tokens.id_token : undefined,
+				// RFC 6749 §5.1: the upstream states its scope whenever it differs
+				// from the request, so what it says here is what it granted. Dropping
+				// it left the route to infer consent from the request instead (#647).
+				// `undefined` only when the field is absent: an answer that names
+				// nothing usable is still an answer, and flattening it into silence
+				// would have the route fall back to the requested list (#647).
+				scope:
+					tokens.scope === undefined
+						? undefined
+						: typeof tokens.scope === "string"
+							? tokens.scope
+							: "",
 				expiresAt: new Date(Date.now() + expiresIn * 1000),
 			};
 
@@ -463,6 +475,18 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 				accessToken: tokens.access_token,
 				refreshToken: typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
 				idToken: typeof tokens.id_token === "string" ? tokens.id_token : undefined,
+				// RFC 6749 §5.1: the upstream states its scope whenever it differs
+				// from the request, so what it says here is what it granted. Dropping
+				// it left the route to infer consent from the request instead (#647).
+				// `undefined` only when the field is absent: an answer that names
+				// nothing usable is still an answer, and flattening it into silence
+				// would have the route fall back to the requested list (#647).
+				scope:
+					tokens.scope === undefined
+						? undefined
+						: typeof tokens.scope === "string"
+							? tokens.scope
+							: "",
 				expiresAt: new Date(Date.now() + expiresIn * 1000),
 				// sub / issuer intentionally absent — callers reuse stored identity.
 			};

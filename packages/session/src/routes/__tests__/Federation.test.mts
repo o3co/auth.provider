@@ -157,6 +157,7 @@ function makeFakeProvider(overrides: Partial<FederationProvider> = {}): Federati
 			refreshToken: "rt",
 			idToken: "it",
 			expiresAt: new Date(Date.now() + 3_600_000),
+			scope: "openid email",
 		})),
 		...overrides,
 	};
@@ -607,6 +608,44 @@ describe("account linking across federations (#482)", () => {
 	});
 
 	describe("the callback", () => {
+		it("records the requested scope as consent when the adapter names none (#647)", async () => {
+			// The fallback limb, through the route rather than through the helper
+			// alone: this is where the answered scope and the requested list are
+			// actually wired together. RFC 6749 section 3.3 makes the answer
+			// optional only when it matches the request, so silence is the request.
+			const silent = makeFakeProvider({
+				scope: ["openid", "email"],
+				exchangeCode: vi.fn(async () => ({
+					issuer: "https://idp.example.com",
+					sub: "external-42",
+					email: "u@example.com",
+					accessToken: "at",
+					refreshToken: "rt",
+					idToken: "it",
+					expiresAt: new Date(Date.now() + 3_600_000),
+				})),
+			});
+			const fts = makeFederationTokenStore();
+			const { app } = buildCallbackApp({
+				providers: new Map([["test", silent]]),
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: linkableRepo({ current: null }),
+				userSessionStore: liveStore(),
+				sessionFederationIndex: makeSessionFederationIndex(),
+				federationTokenStore: fts,
+				auditSink: recorder().sink,
+			});
+			const agent = await plantAndGetAgent(app);
+			expect((await callback(agent)).status).toBe(302);
+
+			expect(fts.attach).toHaveBeenCalledWith(
+				"s-1",
+				"test",
+				expect.objectContaining({ scope: "openid email", grantedScope: "openid email" }),
+			);
+		});
+
 		it("links an unknown identity to the signed-in account, attaches the federation to the live session, and mints no new one", async () => {
 			const repo = linkableRepo({ current: null });
 			const uss = liveStore();
@@ -639,6 +678,16 @@ describe("account linking across federations (#482)", () => {
 				"s-1",
 				"test",
 				expect.objectContaining({ accessToken: "at" }),
+			);
+			// #647: what the user consented to at link time. `scope` is what the
+			// token holds now and `grantedScope` is the ceiling a later refresh is
+			// bounded by (RFC 6749 §6) — the two start equal and only the first
+			// moves. Without the ceiling a narrowing is permanent, because the
+			// refresh route has nothing but the current value to judge against.
+			expect(fts.attach).toHaveBeenCalledWith(
+				"s-1",
+				"test",
+				expect.objectContaining({ scope: "openid email", grantedScope: "openid email" }),
 			);
 			// A link is not a login: no new UserSession, the express session keeps its sid.
 			expect(uss.create).not.toHaveBeenCalled();
@@ -1264,6 +1313,10 @@ describe("Federation routes", () => {
 			expect(attachTokens.idToken).toBe("it");
 			// profile.expiresAt is a Date → attached as-is, no 1h fallback re-invented
 			expect(attachTokens.expiresAt).toBeInstanceOf(Date);
+			// #647 — the login path records the consent too, not only the link path.
+			// This is the common path of the two, and it had no content assertion.
+			expect(attachTokens.scope).toBe("openid email");
+			expect(attachTokens.grantedScope).toBe("openid email");
 
 			// req.session.sid set on the session
 			const inspect = await agent.get("/_inspect");

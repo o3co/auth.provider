@@ -21,6 +21,7 @@ import {
 	type FederationProfile,
 	type FederationProvider,
 	type MappedClaims,
+	parseScopeTokens,
 	type SupportsClaimMapping,
 	type SupportsLogout,
 } from "@o3co/auth-provider-core";
@@ -61,6 +62,29 @@ export interface GithubProviderConfig {
 }
 
 export type GithubProvider = FederationProvider & SupportsLogout & SupportsClaimMapping;
+
+/**
+ * GitHub's granted scope, as the space-delimited list the rest of the system
+ * speaks (RFC 6749 §3.3).
+ *
+ * GitHub answers with a comma-delimited string. Every consumer here splits on
+ * spaces, so the translation belongs at the boundary where the difference is
+ * known — this adapter — rather than in a consumer that would then have to
+ * know which upstream it is reading.
+ */
+const githubScope = (value: unknown): string | undefined => {
+	// `undefined` means GitHub named no scope at all, which the session route
+	// reads as "as requested" (RFC 6749 §3.3). An answer that is present and
+	// names nothing usable must NOT flatten into that: the upstream spoke, and
+	// reading its silence where there was none would record every requested
+	// scope as consent. Present-but-empty travels as the empty string.
+	if (value === undefined) return undefined;
+	if (typeof value !== "string") return "";
+	// Commas to spaces first, then core's grammar. GitHub's delimiter is the
+	// only thing this adapter knows that core does not, so it is the only thing
+	// this function does.
+	return parseScopeTokens(value.replaceAll(",", " ")).join(" ");
+};
 
 export function createGithubProvider(config: GithubProviderConfig): GithubProvider {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
@@ -191,6 +215,16 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				name: typeof userInfo.name === "string" ? userInfo.name : undefined,
 				picture: typeof ghAvatarUrl === "string" ? ghAvatarUrl : undefined,
 				accessToken: tokens.access_token,
+				// RFC 6749 §5.1: the upstream states its scope whenever it differs
+				// from the request, so what it says here is what it granted. GitHub
+				// always states it. Dropping it left the route to infer consent from
+				// the request instead (#647).
+				//
+				// Comma-delimited, against §3.3's space-delimited list: GitHub
+				// answers `read:user,user:email`. Passed through as it arrives, the
+				// whole string reads as ONE scope everywhere downstream, and a
+				// client asking whether `user:email` was granted is told no.
+				scope: githubScope(tokens.scope),
 				// GitHub OAuth Apps do not issue refresh tokens.
 				refreshToken: undefined,
 				// GitHub OAuth Apps classic tokens have no finite expiry; the new-style

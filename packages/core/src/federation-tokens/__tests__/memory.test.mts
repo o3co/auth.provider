@@ -34,6 +34,14 @@ describe("in-memory FederationTokenStore", () => {
 		expect(await store.get("sid-1", "google")).toEqual(tokens);
 	});
 
+	it("keeps grantedScope through the defensive copy (#647)", async () => {
+		// The copy is field by field, so a field it forgets is silently dropped —
+		// and this one is the ceiling a refresh is bounded by.
+		const withCeiling = { ...tokens, scope: "openid", grantedScope: "openid email" };
+		await store.attach("sid-1", "google", withCeiling);
+		expect(await store.get("sid-1", "google")).toEqual(withCeiling);
+	});
+
 	it("get returns null for missing (sid, name)", async () => {
 		expect(await store.get("sid-1", "google")).toBeNull();
 		await store.attach("sid-1", "google", tokens);

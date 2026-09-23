@@ -29,8 +29,10 @@ import type {
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	canonicalScope,
 	classifyFederationRefreshError,
 	emitAuditEvent,
+	parseScopeTokens,
 	supportsLock,
 	supportsRefresh,
 	verifyJwt,
@@ -94,38 +96,105 @@ const isUsableDate = (value: unknown): value is Date =>
 /**
  * What a refresh may record as the token's scope.
  *
- * RFC 6749 §6 lets a refresh narrow the granted scope and forbids it widening
- * one: "the scope of the access token … MUST NOT include any scope not
- * originally granted". An answer that adds a scope is therefore not a grant,
- * and recording it would leave the store claiming consent that was never
- * given. Absent, empty, or widening all keep what is stored. Mirrors
- * `scopesWithin` in `core/federation-grants/eligibility.mts`.
+ * The bound is `granted`, what the user consented to when the federation was
+ * linked, because RFC 6749 §6 bounds a refresh by the original grant and not
+ * by the token it replaces. Judging against the current scope would make the
+ * first narrowing permanent (#647). A record written before that field
+ * existed has only its current scope to be judged against, which under-reports
+ * rather than over-claims.
  *
- * The ceiling here is the STORED scope, not the original grant's, because
- * `FederationTokens` keeps one `scope` field and no record of what was first
- * consented to. The two differ after a narrowing: an upstream that answers
- * `openid` once and `openid email` later is within the original grant, and
- * this reports the narrower value for both. That is the conservative error —
- * the store under-reports what the token can do rather than claiming access it
- * was never given — and the ceiling the RFC names needs a field the record
- * does not have. Filed as #647 rather than approximated further.
+ * Three readings of the answer:
+ *
+ * - **Narrower than the bound** — recorded. §6 lets a refresh narrow, and
+ *   keeping the old value would leave the record claiming access the upstream
+ *   has withdrawn.
+ * - **Named but unusable** — the stored value stands. The upstream said
+ *   something and this route could not read it, so it learned nothing, and
+ *   nothing is never a reason to widen.
+ * - **Nothing at all** — read as the bound itself. `SupportsRefresh.refreshToken`
+ *   sends no `scope` upstream, so §6 makes the request one for the original
+ *   grant, and §5.1 makes the answer's `scope` optional ONLY when it matches
+ *   the request. A conforming upstream that has narrowed therefore has to say
+ *   so every time; silence means the grant. Reading silence as "whatever the
+ *   last narrowing left" is the permanent narrowing again, one door over.
+ * - **Wider than the bound** — refused. §6 forbids a refresh granting a scope
+ *   that was never consented to, so an answer that adds one is the upstream or
+ *   the adapter misbehaving, not a grant.
+ *
+ * Everything is decided on the parsed lists and answered in canonical form, so
+ * neither an upstream's spacing nor a repeated entry can become the value a
+ * later refresh is judged against.
+ *
+ * **Which way this errs.** Reading silence as the bound can over-report: an
+ * upstream that narrows and then says nothing on later refreshes leaves the
+ * record claiming more than the token holds. That is deliberate, and it is the
+ * opposite polarity from what this route used to choose. It is bounded by
+ * consent — `grantedScope` is never exceeded and no authorization decision in
+ * this provider reads the field, only the `scope` of the 200 does — so the
+ * cost is a client told its token can do something it cannot, against the
+ * alternative of a narrowing that could never be undone. A client that reads
+ * the field to decide whether to re-prompt for consent is the case to watch.
+ *
+ * The bound itself is only ever narrowed by consent, never by an answer.
+ *
+ * The sibling of this rule for grants that outlive a session is
+ * `scopesWithin` / `consentedScopes` in
+ * `@o3co/auth-provider-core`'s `federation-grants/eligibility.mts`.
  */
-const narrowedScope = (answered: unknown, stored: string | undefined): string | undefined => {
-	if (typeof answered !== "string") return stored;
-	// Decide on the parsed lists, never on the raw strings. RFC 6749 §3.3 makes
-	// a scope a space-delimited list, so `"   "` names nothing — and an empty
-	// list satisfies `every` vacuously, which would store the spaces and leave
-	// every later answer failing the subset check against an empty set. Absent,
-	// empty and whitespace-only are one case: the upstream named no scope.
-	const asked = answered.split(" ").filter((entry) => entry !== "");
-	if (asked.length === 0) return stored;
-	const granted = typeof stored === "string" ? stored.split(" ").filter((e) => e !== "") : [];
-	// Nothing to bound the answer against, so nothing to accept it on.
-	if (granted.length === 0) return stored;
-	const allowed = new Set(granted);
-	// Re-joined rather than echoed, so what is stored is always the canonical
-	// form of what was accepted.
-	return asked.every((entry) => allowed.has(entry)) ? asked.join(" ") : stored;
+type AnsweredScope =
+	/** The upstream named no scope at all. */
+	| { readonly kind: "omitted" }
+	/** It named one, and it parses. */
+	| { readonly kind: "named"; readonly value: string }
+	/** It named something this route could not use: unreadable, or not a scope. */
+	| { readonly kind: "unusable" };
+
+/**
+ * Which of the three readings an answer is.
+ *
+ * `undefined` reaches here for two different reasons and they must not be
+ * confused — the same distinction the lifetime fields needed. `readField`
+ * answers `undefined` when a getter throws, and silence means the original
+ * grant, so collapsing the two would let an adapter widen the recorded scope
+ * by failing to be read.
+ */
+const classifyAnsweredScope = (
+	answer: Partial<RefreshedTokens>,
+	unreadable: ReadonlySet<string>,
+): AnsweredScope => {
+	if (unreadable.has("scope")) return { kind: "unusable" };
+	if (answer.scope === undefined) return { kind: "omitted" };
+	const named = parseScopeTokens(answer.scope);
+	return named.length > 0 ? { kind: "named", value: named.join(" ") } : { kind: "unusable" };
+};
+
+const narrowedScope = (
+	answered: AnsweredScope,
+	stored: string | undefined,
+	granted: string | undefined,
+): string | undefined => {
+	const storedValue = typeof stored === "string" ? stored : undefined;
+	// The ceiling has to satisfy the same rule as the answer: a `granted` that
+	// parses to nothing names no scope, whatever its characters, so it falls
+	// through to the current scope rather than standing as an empty bound that
+	// refuses everything forever.
+	const bound = parseScopeTokens(granted);
+	const allowed = bound.length > 0 ? bound : parseScopeTokens(stored);
+	if (allowed.length === 0) return storedValue;
+	// Canonical on every limb, including the ones that keep what is stored: a
+	// record whose scope is ragged would otherwise keep that form forever, and
+	// a whitespace-only one is truthy enough to be emitted in a 200.
+	const keep = canonicalScope(stored);
+
+	// Named but unusable is not silence. The upstream said something about the
+	// scope and this route could not read it, so it learned nothing — and
+	// nothing is a reason to keep what is stored, never to widen it.
+	if (answered.kind === "unusable") return keep;
+	if (answered.kind === "omitted") return allowed.join(" ");
+
+	const asked = parseScopeTokens(answered.value);
+	const within = new Set(allowed);
+	return asked.every((entry) => within.has(entry)) ? asked.join(" ") : keep;
 };
 
 // `supportsRefresh` is core's, and so is the capability it narrows to: this
@@ -847,14 +916,19 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				// the client must present it. Honouring a rotated one is a decision
 				// of its own, filed on #626, not a side effect of this move.
 				tokenType: currentTokens.tokenType,
-				// RFC 6749 §6: a refresh may NARROW the scope, and §5.1 makes the
-				// answer authoritative when it differs. Storing the old one would
-				// leave the record claiming access the upstream just withdrew.
-				// Absent means unchanged, and widening is refused rather than
-				// recorded: §6 forbids a refresh from granting a scope the user
-				// never consented to, so an answer that adds one is the adapter
-				// or the upstream misbehaving, not a grant.
-				scope: narrowedScope(answer.scope, currentTokens.scope),
+				// The three readings and the bound they are judged against are
+				// `narrowedScope`'s, next to its own reasoning. Nothing about the
+				// rule is restated here, so the two cannot drift apart.
+				scope: narrowedScope(
+					classifyAnsweredScope(answer, unreadable),
+					currentTokens.scope,
+					currentTokens.grantedScope,
+				),
+				// The ceiling itself never moves: a refresh is bounded by the grant,
+				// not by the token it replaces (RFC 6749 §6). Parsed on the way back
+				// out as well — it came from a store, and a store is another thing
+				// this route does not own.
+				grantedScope: canonicalScope(currentTokens.grantedScope),
 				rawParams: currentTokens.rawParams,
 			};
 			try {
