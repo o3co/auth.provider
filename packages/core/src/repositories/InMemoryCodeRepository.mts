@@ -15,17 +15,11 @@
  */
 
 import crypto from "node:crypto";
-import type { CodeRepository } from "./CodeRepository.mjs";
+import type { CodeRepository, CreateCodeInput } from "./CodeRepository.mjs";
 import type { Code } from "./types.mjs";
 
 interface StoredCode extends Code {
 	expiresAt: number;
-	grantedScope?: readonly string[];
-	grantedAudience?: readonly string[];
-	// NEW (TODO-F-3): OIDC authorize → token round-trip state.
-	nonce?: string;
-	sid?: string;
-	acr?: string;
 }
 
 export class InMemoryCodeRepository implements CodeRepository {
@@ -44,7 +38,7 @@ export class InMemoryCodeRepository implements CodeRepository {
 		}, 10_000);
 	}
 
-	async createCode(params: Parameters<CodeRepository["createCode"]>[0]): Promise<Code> {
+	async createCode(params: CreateCodeInput): Promise<Code> {
 		const code = crypto.randomBytes(32).toString("base64url");
 		const expiresIn = params.expiresIn ?? this.defaultExpiresIn;
 		const stored: StoredCode = {

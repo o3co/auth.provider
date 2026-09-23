@@ -40,6 +40,7 @@ import {
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -49,23 +50,25 @@ const RP_URI = "https://rp.example/cb";
 const CLIENT_ID = "mtls-ac-client";
 const PUBLIC_CLIENT_ID = "mtls-ac-public-client";
 
-const validCode = {
+const validCode = codeRecord({
+	code: "code-x",
 	client_id: CLIENT_ID,
 	redirect_uri: RP_URI,
 	// #273: PKCE is mandatory, so a redeemable code always carries an
 	// S256 challenge and the token request presents the matching verifier.
 	code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 	code_challenge_method: "S256",
-};
+});
 
-const validPublicCode = {
+const validPublicCode = codeRecord({
+	code: "code-x",
 	client_id: PUBLIC_CLIENT_ID,
 	redirect_uri: RP_URI,
 	// #273: PKCE is mandatory, so a redeemable code always carries an
 	// S256 challenge and the token request presents the matching verifier.
 	code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
 	code_challenge_method: "S256",
-};
+});
 
 const confidentialClient = {
 	clientId: CLIENT_ID,

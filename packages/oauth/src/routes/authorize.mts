@@ -1250,7 +1250,7 @@ const mintCode = async (
 		grantedScope: readonly string[] | undefined;
 		grantedAudience: readonly string[] | undefined;
 		/** #481 */
-		acr?: string | undefined;
+		acr: string | undefined;
 	},
 ): Promise<{ code: string } | null> => {
 	let issue: Awaited<ReturnType<CodeRepository["createCode"]>>;
@@ -1265,7 +1265,7 @@ const mintCode = async (
 			// NEW (TODO-F-3): OIDC round-trip state on the code record.
 			nonce: typeof ctx.params.nonce === "string" ? ctx.params.nonce : undefined,
 			sid: typeof ctx.req.session?.sid === "string" ? ctx.req.session.sid : undefined,
-			...(params.acr !== undefined ? { acr: params.acr } : {}),
+			acr: params.acr,
 		});
 	} catch {
 		redirectError(ctx, "server_error", "Failed to create authorization code");

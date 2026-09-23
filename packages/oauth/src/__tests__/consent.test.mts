@@ -31,6 +31,7 @@ import {
 	type ClientRepository,
 	type CodeRepository,
 	type ConsentStore,
+	type CreateCodeInput,
 	createMemoryConsentStore,
 	createMemoryPendingConsentStore,
 	createSymmetricKeyStore,
@@ -46,6 +47,7 @@ import { describe, expect, it, vi } from "vitest";
 import { withClientIdMetadataDocuments } from "#/clients/clientIdMetadataDocument.mjs";
 import { PENDING_CONSENT_TTL_MS } from "#/routes/consent.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const CLIENT_ID = "third-party-chat";
@@ -102,13 +104,11 @@ const makeApp = async (opts: {
 		findById: async (id) => (id === CLIENT_ID ? record : null),
 		authenticate: async () => null,
 	};
-	const createCode = vi.fn(async (_params: Parameters<CodeRepository["createCode"]>[0]) => ({
-		code: "code-x",
-		client_id: CLIENT_ID,
-		redirect_uri: REDIRECT_URI,
-	}));
+	const createCode = vi.fn(async (_params: CreateCodeInput) =>
+		codeRecord({ code: "code-x", client_id: CLIENT_ID, redirect_uri: REDIRECT_URI }),
+	);
 	const codeRepository: CodeRepository = {
-		createCode: async (params) => createCode(params) as ReturnType<CodeRepository["createCode"]>,
+		createCode: async (params) => createCode(params),
 		findByCode: async () => null,
 		consumeByCode: async () => null,
 		removeByCode: async () => {},

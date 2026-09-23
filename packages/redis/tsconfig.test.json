@@ -9,6 +9,6 @@
 	// assertions passed without ever being compiled. Paired with
 	// `typecheck.include` in vitest.config.mts: a file in only one of the two
 	// looks checked but is not.
-	"include": ["src/**/*.mts", "__tests__/types.test.mts"],
+	"include": ["src/**/*.mts", "__tests__/types.test.mts", "__tests__/code-repository.test.mts"],
 	"exclude": ["node_modules", "dist"]
 }

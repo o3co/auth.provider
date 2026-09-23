@@ -34,6 +34,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const CLIENT_URL = "https://client.example/oauth/client-metadata.json";
@@ -87,7 +88,8 @@ const makeApp = async (opts: {
 		authenticate: async () => null,
 	};
 	const codeRepository: CodeRepository = {
-		createCode: async () => ({ code: "code-x", client_id: CLIENT_URL, redirect_uri: REDIRECT_URI }),
+		createCode: async () =>
+			codeRecord({ code: "code-x", client_id: CLIENT_URL, redirect_uri: REDIRECT_URI }),
 		findByCode: async () => null,
 		consumeByCode: async () => null,
 		removeByCode: async () => {},

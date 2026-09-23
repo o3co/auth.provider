@@ -14,16 +14,24 @@
  * limitations under the License.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { CodeRepository } from "#/repositories/CodeRepository.mjs";
+import type { CodeRepository, CreateCodeInput } from "#/repositories/CodeRepository.mjs";
 import { InMemoryCodeRepository } from "#/repositories/InMemoryCodeRepository.mjs";
 
 describe("InMemoryCodeRepository", () => {
 	let repo: InMemoryCodeRepository;
 
-	// Minimal valid params for v0.5.1+ (D-1: client_id and redirect_uri required).
-	const minimalParams = {
+	// Minimal valid params for v0.5.1+ (D-1: client_id and redirect_uri
+	// required); every other field named, unset (#626).
+	const minimalParams: CreateCodeInput = {
 		client_id: "test-client",
 		redirect_uri: "https://rp.example/cb",
+		code_challenge: undefined,
+		code_challenge_method: undefined,
+		nonce: undefined,
+		sid: undefined,
+		acr: undefined,
+		grantedScope: undefined,
+		grantedAudience: undefined,
 	};
 
 	afterEach(() => {
@@ -197,36 +205,34 @@ describe("InMemoryCodeRepository", () => {
 	});
 
 	// D-1 / TS-1: client_id and redirect_uri are required fields on CodeData and
-	// must be required on CodeRepository.createCode params. The compile-time
-	// guard via Parameters<CodeRepository["createCode"]>[0] surfaces missing
-	// required fields at every call site (including consumer custom impls).
+	// must be required on CodeRepository.createCode params, so omitting either
+	// is a TS error at every call site (including consumer custom impls).
 	//
-	// Pre-fix: redirect_uri is optional and client_id is absent entirely from the
-	// interface, so the @ts-expect-error directives below are unused → typecheck
-	// fails. Post-fix: both fields are required, so omitting either produces a
-	// TS error that the directive consumes → typecheck passes.
+	// Each probe is the full input with that one field taken out. Since #626
+	// every other field is a required key too, so a probe that named only the
+	// other identity field would be refused for the keys it leaves out, and its
+	// directive consumed whether or not the field under test were required.
 	//
 	// Type-only assertions: the directives are attached to typed-variable
 	// declarations rather than runtime call sites, so vitest's typecheck pass
 	// validates the contract without storing invalid records in the repository.
 	describe("D-1 / TS-1: createCode requires client_id and redirect_uri at compile time", () => {
 		it("compile-time guard: omitting client_id is a type error", () => {
+			const { client_id: _omitted, ...withoutClientId } = minimalParams;
 			// @ts-expect-error client_id is required on CodeData (D-1)
-			const _params: Parameters<CodeRepository["createCode"]>[0] = {
-				redirect_uri: "https://rp.example/cb",
-			};
+			const _params: Parameters<CodeRepository["createCode"]>[0] = withoutClientId;
 		});
 
 		it("compile-time guard: omitting redirect_uri is a type error", () => {
+			const { redirect_uri: _omitted, ...withoutRedirectUri } = minimalParams;
 			// @ts-expect-error redirect_uri is required on CodeData (D-1)
-			const _params: Parameters<CodeRepository["createCode"]>[0] = {
-				client_id: "client-1",
-			};
+			const _params: Parameters<CodeRepository["createCode"]>[0] = withoutRedirectUri;
 		});
 
 		it("populated client_id and redirect_uri round-trip via findByCode", async () => {
 			const repo = new InMemoryCodeRepository();
 			const created = await repo.createCode({
+				...minimalParams,
 				client_id: "client-abc",
 				redirect_uri: "https://rp.example/cb",
 			});
@@ -267,6 +273,31 @@ describe("InMemoryCodeRepository", () => {
 			expect(first?.nonce).toBe("n-1");
 			const second = await repo.consumeByCode(code);
 			expect(second).toBeNull();
+		});
+
+		it("round-trips every field with its own value, through both reads (#626)", async () => {
+			// The types catch a field forgotten by a copy, not two fields of the
+			// same type swapped: `nonce`, `sid`, `acr` and the challenge are all
+			// strings. Every value is distinct here, and the whole record is
+			// compared.
+			repo = new InMemoryCodeRepository();
+			const params: CreateCodeInput = {
+				client_id: "client-rt",
+				redirect_uri: "https://rp.example/rt",
+				code_challenge: "challenge-rt",
+				code_challenge_method: "S256",
+				nonce: "nonce-rt",
+				sid: "sid-rt",
+				acr: "urn:example:acr:mfa",
+				expiresIn: 90,
+				grantedScope: ["openid", "read"],
+				grantedAudience: ["https://api.example"],
+			};
+			const created = await repo.createCode(params);
+			const expected = { ...params, code: created.code };
+			expect(created).toEqual(expected);
+			expect(await repo.findByCode(created.code)).toEqual(expected);
+			expect(await repo.consumeByCode(created.code)).toEqual(expected);
 		});
 
 		it("createCode without nonce/sid leaves them undefined (backward compat)", async () => {

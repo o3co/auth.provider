@@ -47,6 +47,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
+import { codeRecord } from "./_helpers/codeRecord.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared test setup
@@ -147,7 +148,11 @@ function makeAuthzDeps(
 		config: base as unknown as GrantDependencies["config"],
 		keyStore: createSymmetricKeyStore("test-secret"),
 		codeRepository: {
-			consumeByCode: vi.fn().mockResolvedValue({ client_id: CLIENT_ID, redirect_uri: RP_URI }),
+			consumeByCode: vi
+				.fn()
+				.mockResolvedValue(
+					codeRecord({ code: "code-x", client_id: CLIENT_ID, redirect_uri: RP_URI }),
+				),
 			createCode: vi.fn(),
 			findByCode: vi.fn(),
 			removeByCode: vi.fn(),
