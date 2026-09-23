@@ -47,7 +47,10 @@ export type AssertionIssuerKeySource =
 
 /**
  * One issuer this deployment accepts RFC 7523 assertions from, and what it
- * accepts from them (#525).
+ * accepts from them (#525) — as a caller WRITES it: the composition's entry
+ * list, and `add`. A ceiling the entry does not name is left out, and absent
+ * means "no ceiling". What a registry answers with is
+ * {@link AssertionIssuerEntry}, the same fields with none of them optional.
  *
  * Every field beyond `issuer`, `keys` and `algorithms` is a ceiling: it can
  * only narrow what an assertion from this issuer may obtain, never widen the
@@ -63,7 +66,7 @@ export type AssertionIssuerKeySource =
  * audit trail of "what did we trust, and when" stays a list of adds and
  * removes.
  */
-export interface AssertionIssuerEntry {
+export interface AssertionIssuerEntryInput {
 	/** The exact `iss` value. Matched by string equality, never by prefix. */
 	readonly issuer: string;
 	readonly keys: AssertionIssuerKeySource;
@@ -127,6 +130,39 @@ export interface AssertionIssuerEntry {
 }
 
 /**
+ * An issuer entry as a registry holds and answers with it: every field of
+ * {@link AssertionIssuerEntryInput}, and every one of them a REQUIRED key,
+ * `undefined` where the entry names no ceiling.
+ *
+ * Every field beyond `issuer`, `keys` and `algorithms` is a ceiling, so a
+ * registry that loses one WIDENS what the issuer's assertions may obtain — it
+ * fails open. `allowedClients` gone admits any presenter, an unauthenticated
+ * one included; `expiresAt` gone trusts the issuer for ever; `profile:
+ * "id-jag"` gone falls back to plain RFC 7523, and with it the `jti` replay
+ * check, the `typ` check and the exact-`aud` check. A registry over a store —
+ * this port's documented way to survive a restart — reads each row back into
+ * this shape, and a read-back that forgets a key fails to compile rather than
+ * dropping the ceiling. {@link toAssertionIssuerEntry} builds one from an
+ * input with every key named.
+ *
+ * What the type cannot reach: a registry in plain JavaScript, and code that
+ * steps around the checker (`as AssertionIssuerEntry` on an incomplete object,
+ * `JSON.parse(row) as …`). Those are held to the rule alone.
+ */
+export interface AssertionIssuerEntry {
+	readonly issuer: string;
+	readonly keys: AssertionIssuerKeySource;
+	readonly algorithms: readonly string[];
+	readonly allowedSubjects: readonly string[] | undefined;
+	readonly allowedScopes: readonly string[] | undefined;
+	readonly allowedAudiences: readonly string[] | undefined;
+	readonly allowedClients: readonly string[] | undefined;
+	readonly expiresAt: Date | undefined;
+	readonly profile: "rfc7523" | "id-jag" | undefined;
+	readonly clockToleranceSeconds: number | undefined;
+}
+
+/**
  * Entry fields that were code and are now the verifier's (`readersFor`). An
  * entry still carrying one is refused rather than ignored: ignoring a handle
  * reader would hand the Store a bare `sub` that two issuers can share.
@@ -156,7 +192,7 @@ export interface AssertionIssuerRegistry {
  */
 export interface MutableAssertionIssuerRegistry extends AssertionIssuerRegistry {
 	/** Refuses a duplicate `issuer` and a malformed entry. */
-	add(entry: AssertionIssuerEntry): Promise<void>;
+	add(entry: AssertionIssuerEntryInput): Promise<void>;
 	list(): Promise<readonly AssertionIssuerEntry[]>;
 	/** @returns whether an entry was removed. */
 	remove(issuer: string): Promise<boolean>;
@@ -168,8 +204,13 @@ export interface MutableAssertionIssuerRegistry extends AssertionIssuerRegistry 
  * Validate an entry the way boot validates configuration: loudly, naming the
  * field. Shared by the memory registry and by anyone building an entry ahead
  * of registering it.
+ *
+ * Run on what the caller wrote, BEFORE {@link toAssertionIssuerEntry}: the
+ * normaliser copies the entry's own fields and nothing else, so a reader
+ * function left on an input would be silently stripped by it rather than
+ * refused here — and refusing it is the point (see `READER_FIELDS`).
  */
-export function checkAssertionIssuerEntry(entry: AssertionIssuerEntry): void {
+export function checkAssertionIssuerEntry(entry: AssertionIssuerEntryInput): void {
 	for (const field of READER_FIELDS) {
 		if ((entry as unknown as Record<string, unknown>)[field] !== undefined) {
 			throw new Error(
@@ -211,6 +252,31 @@ export function checkAssertionIssuerEntry(entry: AssertionIssuerEntry): void {
 }
 
 /**
+ * The stored form of an input: every field named, `undefined` where the input
+ * left a ceiling out. The one place that lists them — a registry over a store
+ * that builds its read-back with this, or declares its own row the same way,
+ * cannot drop a ceiling without a compile error.
+ *
+ * Copies the entry's own fields only. Validate the input first
+ * ({@link checkAssertionIssuerEntry}): anything else it carries is not copied,
+ * and a reader function is something to refuse, not to lose.
+ */
+export function toAssertionIssuerEntry(input: AssertionIssuerEntryInput): AssertionIssuerEntry {
+	return {
+		issuer: input.issuer,
+		keys: input.keys,
+		algorithms: input.algorithms,
+		allowedSubjects: input.allowedSubjects,
+		allowedScopes: input.allowedScopes,
+		allowedAudiences: input.allowedAudiences,
+		allowedClients: input.allowedClients,
+		expiresAt: input.expiresAt,
+		profile: input.profile,
+		clockToleranceSeconds: input.clockToleranceSeconds,
+	};
+}
+
+/**
  * The in-memory registry: entries supplied at composition, mutable through
  * the admin surface, gone at restart. A deployment that registers issuers at
  * runtime and needs them to survive a restart implements
@@ -228,10 +294,10 @@ export function checkAssertionIssuerEntry(entry: AssertionIssuerEntry): void {
  * changes the entry list by redeploying, or keeps it in a shared store.
  */
 export function createMemoryAssertionIssuerRegistry(
-	entries: readonly AssertionIssuerEntry[] = [],
+	entries: readonly AssertionIssuerEntryInput[] = [],
 ): MutableAssertionIssuerRegistry {
 	const byIssuer = new Map<string, AssertionIssuerEntry>();
-	const put = (entry: AssertionIssuerEntry): void => {
+	const put = (entry: AssertionIssuerEntryInput): void => {
 		checkAssertionIssuerEntry(entry);
 		if (byIssuer.has(entry.issuer)) {
 			throw new Error(
@@ -239,7 +305,7 @@ export function createMemoryAssertionIssuerRegistry(
 					"entries are immutable; remove it and add the new one.",
 			);
 		}
-		byIssuer.set(entry.issuer, entry);
+		byIssuer.set(entry.issuer, toAssertionIssuerEntry(entry));
 	};
 	for (const entry of entries) put(entry);
 
@@ -260,8 +326,8 @@ export function createMemoryAssertionIssuerRegistry(
 		async setExpiresAt(issuer, expiresAt) {
 			const current = byIssuer.get(issuer);
 			if (current === undefined) return false;
-			const { expiresAt: _dropped, ...rest } = current;
-			byIssuer.set(issuer, expiresAt === undefined ? rest : { ...rest, expiresAt });
+			// The key stays; only its value changes — `undefined` clears it.
+			byIssuer.set(issuer, { ...current, expiresAt });
 			return true;
 		},
 	};

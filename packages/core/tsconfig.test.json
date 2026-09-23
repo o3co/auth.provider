@@ -28,6 +28,8 @@
 		// is what keeps the relocated port assertions checked rather than merely
 		// transpiled.
 		"src/federations/__tests__/federation-provider-slim.test.mts",
+		// Paired with the same entry in vitest.config.mts.
+		"src/assertions/__tests__/entry-fields.types.test.mts",
 		"src/federations/__tests__/delegated-authorization-types.test.mts",
 		// v0.13.0 audit: these three were in neither list (or only in vitest's),
 		// so their type contracts — `wiring.test.mts`'s `satisfies … as
