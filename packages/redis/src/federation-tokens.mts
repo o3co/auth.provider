@@ -16,14 +16,14 @@
  * ```
  *
  * The *whole* envelope — `accessToken`, `refreshToken`, `idToken`,
- * `expiresAtMs`, `tokenType`, `scope`, `rawParams` — is one ciphertext.
+ * `expiresAtMs`, `tokenType`, `scope`, `grantedScope` — is one ciphertext.
  * Earlier releases encrypted the three token fields individually and wrote
- * the rest beside them in clear, which left `rawParams` readable in Redis
- * (#293). `rawParams` is the upstream IdP's raw token response: unbounded,
- * provider-specific, and it can carry anything the IdP chose to include —
- * extra tokens, expiry hints, account hints, and routinely the very tokens
- * again under their wire names. Sanitising it instead would mean maintaining
- * an allowlist per federation forever. `tokenType` and `scope` are
+ * the rest beside them in clear (#293), which was made urgent by a field that
+ * was to hold the upstream IdP's raw token response, `rawParams`. That field
+ * is gone — nothing in this repository ever wrote it, and filled it would have
+ * been a second copy of the tokens (#645 follow-up). An envelope written by
+ * something that did fill it is still read; the field is ignored and not
+ * written back. `tokenType` and `scope` are
  * low-sensitivity, but nothing reads the stored record without decrypting
  * it — `get` → `fromEnvelope` is the only reader; the per-session index
  * under `${keyPrefix}idx:` is separate and carries only federation names.
@@ -175,7 +175,6 @@ interface Envelope {
 	scope: string | undefined;
 	/** #647 — the link-time ceiling; `undefined` on a record written before it. */
 	grantedScope: string | undefined;
-	rawParams: Record<string, unknown> | undefined;
 }
 
 /**
@@ -233,7 +232,9 @@ function isEnvelope(value: unknown): value is Envelope {
 	) {
 		return false;
 	}
-	return value.rawParams === undefined || isPlainObject(value.rawParams);
+	// `rawParams` is no longer a field. An envelope that carries one — written
+	// before it was removed — is read, and the field is ignored.
+	return true;
 }
 
 export function createRedisFederationTokenStore(
@@ -315,7 +316,6 @@ export function createRedisFederationTokenStore(
 		tokenType: t.tokenType,
 		scope: t.scope,
 		grantedScope: t.grantedScope,
-		rawParams: t.rawParams as Record<string, unknown> | undefined,
 	});
 
 	const fromEnvelope = (e: Envelope): FederationTokens => ({
@@ -326,7 +326,6 @@ export function createRedisFederationTokenStore(
 		tokenType: e.tokenType,
 		scope: e.scope,
 		grantedScope: e.grantedScope,
-		rawParams: e.rawParams,
 	});
 
 	/**

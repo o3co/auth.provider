@@ -117,14 +117,6 @@ export interface FederationTokens {
 	 * type is what can notice.
 	 */
 	readonly grantedScope: string | undefined;
-	/**
-	 * The upstream's raw token response. Carried forward by every refresh and
-	 * encrypted by the Redis store (#293) — but no producer in this repository
-	 * writes it: no adapter reports the raw response, and both link-time
-	 * `attach` sites record `undefined`. It has been that way since the field
-	 * was added (#74).
-	 */
-	readonly rawParams: Readonly<Record<string, unknown>> | undefined;
 }
 
 /**

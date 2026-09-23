@@ -29,7 +29,6 @@
  * - `idToken`: absent loses the `id_token_hint` logout sends the upstream.
  * - `scope` / `grantedScope` (#647): what the response reports, and the
  *   ceiling a refresh is bounded by.
- * - `rawParams`: carried forward on every refresh; lost for good once dropped.
  * - `expiresAt` was already required (`Date | null`), for the same reason.
  *
  * No marker in the record can catch a store that drops fields: it would drop
@@ -64,7 +63,6 @@ describe("FederationTokens — a store cannot forget a field", () => {
 		expectTypeOf<IsRequiredKey<FederationTokens, "tokenType">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<FederationTokens, "scope">>().toEqualTypeOf<true>();
 		expectTypeOf<IsRequiredKey<FederationTokens, "grantedScope">>().toEqualTypeOf<true>();
-		expectTypeOf<IsRequiredKey<FederationTokens, "rawParams">>().toEqualTypeOf<true>();
 	});
 
 	it("still lets a field hold undefined where there is nothing to record", () => {

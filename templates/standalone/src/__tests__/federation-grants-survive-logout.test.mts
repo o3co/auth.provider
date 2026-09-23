@@ -396,7 +396,6 @@ describe("#593 AC8: a grant outlives the browser session at both logout endpoint
 			tokenType: undefined,
 			scope: undefined,
 			grantedScope: undefined,
-			rawParams: undefined,
 		});
 		expect(await userSessionStore.get(sid)).not.toBeNull();
 		await expectGrantUntouched(app, federationGrantStore);
@@ -429,7 +428,6 @@ describe("#593 AC8: a grant outlives the browser session at both logout endpoint
 			tokenType: undefined,
 			scope: undefined,
 			grantedScope: undefined,
-			rawParams: undefined,
 		});
 		expect(await userSessionStore.get(sid)).not.toBeNull();
 		await expectGrantUntouched(app, federationGrantStore);

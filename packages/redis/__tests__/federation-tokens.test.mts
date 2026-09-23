@@ -700,16 +700,14 @@ describe("redisFederationTokenStoreBuilder structural validator", () => {
 //
 // Before this, `accessToken` / `refreshToken` / `idToken` were AES-256-GCM
 // ciphertext and everything around them — `tokenType`, `scope`, `expiresAtMs`
-// and above all `rawParams`, the upstream IdP's raw token response — sat in
-// Redis as plaintext JSON beside them. These pin the record shape that
+// and the since-removed `rawParams` — sat in Redis as plaintext JSON beside
+// them. These pin the record shape that
 // replaces it (`{ v: 2, c: <ciphertext of the JSON envelope> }`), the
 // drop-on-read of the legacy per-field shape, and the AAD binding of a
 // ciphertext to the key it was written under.
 // ---------------------------------------------------------------------------
 
-// Every field FederationTokens can carry, with `rawParams` shaped like a real
-// IdP token response: it repeats the tokens and adds whatever the IdP felt
-// like including — the unbounded, provider-specific part #293 is about.
+// Every field FederationTokens can carry.
 const fullTokens: FederationTokens = {
 	accessToken: "at-secret",
 	refreshToken: "rt-secret",
@@ -720,29 +718,12 @@ const fullTokens: FederationTokens = {
 	// #647 — and the round-trip pins it, which it did not while this fixture
 	// claimed to be every field and left it out.
 	grantedScope: "openid email profile",
-	rawParams: {
-		access_token: "at-secret",
-		refresh_token: "rt-secret",
-		id_token: "it-secret",
-		token_type: "Bearer",
-		scope: "openid email",
-		expires_in: 3599,
-		account_hint: "user@example.com",
-		nested: { hint: "nested-hint" },
-	},
 };
 
 // Values that used to reach Redis in clear (or, for the tokens, that must
 // still not). Each is long enough that a chance match inside base64url
 // ciphertext is not a realistic flake.
-const plaintextMarkers = [
-	"at-secret",
-	"rt-secret",
-	"it-secret",
-	"openid email",
-	"user@example.com",
-	"nested-hint",
-];
+const plaintextMarkers = ["at-secret", "rt-secret", "it-secret", "openid email"];
 
 describe("#293 — mode=required stores one ciphertext over the whole envelope", () => {
 	let redis: ReturnType<typeof createFakeRedis>;
@@ -766,7 +747,7 @@ describe("#293 — mode=required stores one ciphertext over the whole envelope",
 		expect(record.c).toMatch(/^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/);
 	});
 
-	it("round-trips every field, rawParams included", async () => {
+	it("round-trips every field", async () => {
 		const store = requiredStore();
 		await store.attach("sid-1", "google", fullTokens);
 		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
@@ -789,7 +770,7 @@ describe("#293 — mode=required stores one ciphertext over the whole envelope",
 		await store.attach("sid-gh", "github", { ...fullTokens, expiresAt: null });
 		const round = await store.get("sid-gh", "github");
 		expect(round?.expiresAt).toBeNull();
-		expect(round?.rawParams).toEqual(fullTokens.rawParams);
+		expect(round?.accessToken).toBe(fullTokens.accessToken);
 	});
 
 	it("drops a legacy per-field envelope on read: key gone, index member gone, null returned", async () => {
@@ -871,7 +852,7 @@ describe("#293 — mode=allow-plaintext keeps the envelope as plain JSON (develo
 	const plaintextStore = () =>
 		createRedisFederationTokenStore({ client: redis, encryption: { mode: "allow-plaintext" } });
 
-	it("round-trips every field, rawParams and expiresAt: null included", async () => {
+	it("round-trips every field, expiresAt: null included", async () => {
 		const store = plaintextStore();
 		await store.attach("sid-1", "google", fullTokens);
 		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
@@ -965,9 +946,6 @@ describe("#293 — a v2 record with a malformed inner envelope self-heals like c
 		["idToken not a string", '{"accessToken":"at","expiresAtMs":null,"idToken":{}}'],
 		["tokenType not a string", '{"accessToken":"at","expiresAtMs":null,"tokenType":1}'],
 		["scope not a string", '{"accessToken":"at","expiresAtMs":null,"scope":["openid"]}'],
-		["rawParams an array", '{"accessToken":"at","expiresAtMs":null,"rawParams":[]}'],
-		["rawParams a string", '{"accessToken":"at","expiresAtMs":null,"rawParams":"x"}'],
-		["rawParams null", '{"accessToken":"at","expiresAtMs":null,"rawParams":null}'],
 	];
 
 	for (const mode of ["required", "allow-plaintext"] as const) {
@@ -992,6 +970,30 @@ describe("#293 — a v2 record with a malformed inner envelope self-heals like c
 				});
 				expect(redis.data.has("ft:sid-1:google")).toBe(true);
 			});
+
+			it.each([
+				["a raw token response", '{"account_hint":"user@example.com"}'],
+				["an array", "[]"],
+				["null", "null"],
+			])(
+				"still reads an envelope that carries the removed rawParams (%s), and drops it (#645 follow-up)",
+				async (_label, rawParams) => {
+					// `rawParams` is no longer a field. An envelope written while it was
+					// — by anything that filled it — must not become unreadable, which
+					// would lose the connection's tokens; the field is ignored, and the
+					// next write does not carry it.
+					const store = storeFor(mode);
+					writeV2(
+						mode,
+						"ft:sid-1:google",
+						`{"accessToken":"at","expiresAtMs":null,"rawParams":${rawParams}}`,
+					);
+
+					const read = await store.get("sid-1", "google");
+					expect(read?.accessToken).toBe("at");
+					expect(read && "rawParams" in read).toBe(false);
+				},
+			);
 
 			it("still reads a finite expiresAtMs as a Date", async () => {
 				const store = storeFor(mode);
