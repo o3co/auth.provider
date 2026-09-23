@@ -28,7 +28,8 @@ interface Stored {
 	createdAt: Date;
 	expiresAt: Date;
 	claims: Record<string, unknown>;
-	amr?: readonly string[];
+	/** A required key, as on the session (#626): the copy into a record names it. */
+	amr: readonly string[] | undefined;
 }
 
 /**

@@ -57,6 +57,16 @@ describe("the UserSessionStore contract suite, in both copies", () => {
 		}
 	});
 
+	it("imports the port from the package rather than from core's source", () => {
+		const copy = readFileSync(COPY, "utf8");
+		expect(copy).toContain('from "@o3co/auth-provider-core"');
+		// Core's relative and `#/` paths do not resolve from this package; a copy
+		// that kept one would fail to load rather than drift.
+		const prologue = copy.slice(0, copy.indexOf(FIRST_EXPORT));
+		expect(prologue).not.toContain('"#/');
+		expect(prologue).not.toContain('"../types.mjs"');
+	});
+
 	it("has nothing but comments and imports above that line, in either copy", () => {
 		// A declaration there — a shadowed `it`, a rebound `expect` — would change
 		// what the suite runs while the bodies still compare equal.

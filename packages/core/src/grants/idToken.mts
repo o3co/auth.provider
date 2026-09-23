@@ -22,10 +22,15 @@ export interface GenerateIdTokenOptions {
 	readonly keyStore: KeyStore;
 	readonly issuer: string;
 	readonly expiresIn?: number; // default 3600 seconds
-	/** #481: RFC 8176 authentication methods the session recorded. Omitted when empty. */
-	readonly amr?: readonly string[];
-	/** #481: the Authentication Context Class Reference `/authorize` satisfied. */
-	readonly acr?: string;
+	/**
+	 * #481: RFC 8176 authentication methods the session recorded. Omitted when
+	 * empty. `?: … | undefined` (#626): a session and a code record name the
+	 * key and may hold `undefined`, which a caller compiling with
+	 * `exactOptionalPropertyTypes` must be able to pass on as it is.
+	 */
+	readonly amr?: readonly string[] | undefined;
+	/** #481: the Authentication Context Class Reference `/authorize` satisfied. See `amr` on `undefined`. */
+	readonly acr?: string | undefined;
 }
 
 /**
