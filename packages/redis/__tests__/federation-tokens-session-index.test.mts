@@ -106,6 +106,10 @@ const tokens: FederationTokens = {
 	accessToken: "at",
 	refreshToken: "rt-secret",
 	expiresAt: new Date(Date.now() + 3600_000),
+	idToken: undefined,
+	tokenType: undefined,
+	scope: undefined,
+	grantedScope: undefined,
 };
 
 const plaintext = { mode: "allow-plaintext" } as const;

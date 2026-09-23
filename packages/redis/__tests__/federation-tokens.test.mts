@@ -99,6 +99,9 @@ const tokens: FederationTokens = {
 	refreshToken: "rt-secret",
 	idToken: "it",
 	expiresAt: new Date(Date.now() + 3600_000),
+	tokenType: undefined,
+	scope: undefined,
+	grantedScope: undefined,
 };
 
 describe("redis FederationTokenStore (encryption = required)", () => {
@@ -365,6 +368,10 @@ describe("redis FederationTokenStore TTL is independent of access_token expiry",
 			accessToken: "at",
 			refreshToken: "rt",
 			expiresAt: new Date(Date.now() + 3600_000),
+			idToken: undefined,
+			tokenType: undefined,
+			scope: undefined,
+			grantedScope: undefined,
 		};
 		await store.attach("sid-1", "google", shortLivedAT);
 		const ttl = redis.ttls.get("ft:sid-1:google");

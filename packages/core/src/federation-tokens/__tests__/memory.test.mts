@@ -19,6 +19,9 @@ describe("in-memory FederationTokenStore", () => {
 		refreshToken: "rt",
 		idToken: "it",
 		expiresAt: new Date("2026-04-22"),
+		tokenType: undefined,
+		scope: undefined,
+		grantedScope: undefined,
 	};
 
 	beforeEach(() => {
@@ -69,6 +72,10 @@ describe("in-memory FederationTokenStore", () => {
 			accessToken: "at-new",
 			refreshToken: "rt-new",
 			expiresAt: new Date("2026-04-23"),
+			idToken: undefined,
+			tokenType: undefined,
+			scope: undefined,
+			grantedScope: undefined,
 		};
 		await store.update("sid-1", "google", next);
 		expect(await store.get("sid-1", "google")).toEqual(next);

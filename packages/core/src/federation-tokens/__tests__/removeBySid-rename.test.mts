@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from "vitest";
+import type { FederationTokens } from "#/federation-tokens/types.mjs";
 import { createInMemoryFederationTokenStore } from "../adapters/memory.mjs";
 
 describe("AS-3: FederationTokenStore.deleteBySession → removeBySid (BREAKING rename)", () => {
@@ -19,11 +20,14 @@ describe("AS-3: FederationTokenStore.deleteBySession → removeBySid (BREAKING r
 
 	it("removeBySid removes all federation entries for sid (functional parity with old deleteBySession)", async () => {
 		const store = createInMemoryFederationTokenStore();
-		const tokens = {
+		const tokens: FederationTokens = {
 			accessToken: "at",
 			refreshToken: "rt",
 			idToken: "it",
 			expiresAt: new Date("2026-04-22"),
+			tokenType: undefined,
+			scope: undefined,
+			grantedScope: undefined,
 		};
 		await store.attach("sid-1", "google", tokens);
 		await store.attach("sid-1", "github", tokens);

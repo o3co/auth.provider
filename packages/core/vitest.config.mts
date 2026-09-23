@@ -57,6 +57,11 @@ export default defineConfig({
 				// #645 follow-up: which `FederationTokens` fields a store must not
 				// drop. A conditional-type assertion proves nothing outside the checker.
 				"src/federation-tokens/__tests__/record-fields.types.test.mts",
+				// Their fixtures build `FederationTokens` records, and went
+				// uncompiled while missing keys the type requires. Paired with
+				// tsconfig.test.json.
+				"src/federation-tokens/__tests__/memory.test.mts",
+				"src/federation-tokens/__tests__/removeBySid-rename.test.mts",
 				// #626 P1: relocated from `packages/session`, where both were in its
 				// typecheck list. The `expectTypeOf` and `@ts-expect-error` here
 				// are the regression test for the adapter port, and they only fire
