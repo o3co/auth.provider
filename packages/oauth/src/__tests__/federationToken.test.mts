@@ -1279,6 +1279,105 @@ describe("POST /oauth/federation/:name/token", () => {
 			});
 		});
 
+		it("reads a refresh that names no scope as the grant, not as the last narrowing (#647)", async () => {
+			// `refreshToken(refreshToken)` sends no `scope` upstream, so RFC 6749
+			// section 6 makes the request one for the original grant, and section
+			// 5.1 makes the answer's scope optional ONLY when it matches the
+			// request. A conforming upstream that has narrowed must say so every
+			// time; silence therefore means the grant. Reading silence as "whatever
+			// the last narrowing left" is the permanent narrowing again.
+			const narrowed = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				scope: "openid",
+				grantedScope: "openid email",
+			};
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({ accessToken: "new-at", expiresIn: 3600 }),
+			} as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(narrowed),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(res.body.scope).toBe("openid email");
+		});
+
+		it("falls through to the current scope when the stored ceiling names nothing (#647)", async () => {
+			// A ceiling has to satisfy the same rule as an answer. Whitespace names
+			// no scope, and standing as an empty bound would refuse every answer
+			// forever.
+			const odd = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				scope: "openid email",
+				grantedScope: "   ",
+			};
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi
+					.fn()
+					.mockResolvedValue({ accessToken: "new-at", expiresIn: 3600, scope: "openid" }),
+			} as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(odd),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(res.body.scope).toBe("openid");
+			expect(fedTokenStore.update).toHaveBeenCalledWith(
+				expect.any(String),
+				"google",
+				// The unusable ceiling is not written back as one.
+				expect.objectContaining({ grantedScope: undefined }),
+			);
+		});
+
+		it("stores a repeated entry once (#647)", async () => {
+			const narrowed = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				scope: "openid",
+				grantedScope: "openid email",
+			};
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({
+					accessToken: "new-at",
+					expiresIn: 3600,
+					scope: "openid openid email",
+				}),
+			} as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(narrowed),
+			});
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(res.body.scope).toBe("openid email");
+		});
+
 		it("accepts a refresh back up to the granted scope after an earlier narrowing (#647)", async () => {
 			// RFC 6749 section 6 bounds a refresh by the ORIGINAL grant, not by the
 			// scope of the token it replaces. An upstream that narrowed once and

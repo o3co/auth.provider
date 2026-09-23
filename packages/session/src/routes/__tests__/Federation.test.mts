@@ -1275,6 +1275,10 @@ describe("Federation routes", () => {
 			expect(attachTokens.idToken).toBe("it");
 			// profile.expiresAt is a Date → attached as-is, no 1h fallback re-invented
 			expect(attachTokens.expiresAt).toBeInstanceOf(Date);
+			// #647 — the login path records the consent too, not only the link path.
+			// This is the common path of the two, and it had no content assertion.
+			expect(attachTokens.scope).toBe("openid email");
+			expect(attachTokens.grantedScope).toBe("openid email");
 
 			// req.session.sid set on the session
 			const inspect = await agent.get("/_inspect");
