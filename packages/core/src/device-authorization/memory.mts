@@ -90,24 +90,24 @@ interface Entry {
 	deviceCode: string;
 	userCode: string;
 	clientId: string;
-	requestedScope?: readonly string[];
+	requestedScope: readonly string[] | undefined;
 	expiresAtMs: number;
 	intervalSeconds: number;
 	status: "pending" | "approved" | "denied";
-	subject?: string;
-	grantedScope?: readonly string[];
+	subject: string | undefined;
+	grantedScope: readonly string[] | undefined;
 	lastPolledAtMs?: number;
 }
 
 const toAuthorization = (entry: Entry): DeviceAuthorization => ({
 	userCode: entry.userCode,
 	clientId: entry.clientId,
-	...(entry.requestedScope ? { requestedScope: entry.requestedScope } : {}),
+	requestedScope: entry.requestedScope,
 	expiresAtMs: entry.expiresAtMs,
 	intervalSeconds: entry.intervalSeconds,
 	status: entry.status,
-	...(entry.subject === undefined ? {} : { subject: entry.subject }),
-	...(entry.grantedScope ? { grantedScope: entry.grantedScope } : {}),
+	subject: entry.subject,
+	grantedScope: entry.grantedScope,
 });
 
 /**
@@ -255,10 +255,15 @@ export const createMemoryDeviceCodeStore = (
 				deviceCode: input.deviceCode,
 				userCode: input.userCode,
 				clientId: input.clientId,
-				...(input.requestedScope ? { requestedScope: input.requestedScope } : {}),
+				// Truthiness, as before #626: an untyped caller's `null`, `""` or
+				// `false` is "no scope", as the Redis store reads it, rather than a
+				// value every reader must guard. An array — empty included — is kept.
+				requestedScope: input.requestedScope ? input.requestedScope : undefined,
 				expiresAtMs: input.expiresAtMs,
 				intervalSeconds: input.intervalSeconds,
 				status: "pending",
+				subject: undefined,
+				grantedScope: undefined,
 			};
 			byDeviceCode.set(entry.deviceCode, entry);
 			byUserCode.set(entry.userCode, entry);

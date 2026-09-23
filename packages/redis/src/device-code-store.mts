@@ -121,24 +121,21 @@ const parseScope = (json: string | undefined): readonly string[] | undefined => 
 };
 
 /**
- * The memory adapter's `toAuthorization`, from hash fields: optional fields
- * absent in the record stay absent in the result rather than becoming
- * `undefined` properties.
+ * This adapter's `toAuthorization` — the Redis counterpart of the memory
+ * adapter's — built from hash fields. A field the hash does not hold is
+ * `undefined` in the result, and every field is named, so a field this copy
+ * forgot is a compile error rather than a drop (#626).
  */
-const toAuthorization = (fields: DeviceCodeRecordFields): DeviceAuthorization => {
-	const requestedScope = parseScope(fields.requestedScope);
-	const grantedScope = parseScope(fields.grantedScope);
-	return {
-		userCode: fields.userCode,
-		clientId: fields.clientId,
-		...(requestedScope ? { requestedScope } : {}),
-		expiresAtMs: Number(fields.expiresAtMs),
-		intervalSeconds: Number(fields.intervalSeconds),
-		status: fields.status,
-		...(fields.subject === undefined ? {} : { subject: fields.subject }),
-		...(grantedScope ? { grantedScope } : {}),
-	};
-};
+const toAuthorization = (fields: DeviceCodeRecordFields): DeviceAuthorization => ({
+	userCode: fields.userCode,
+	clientId: fields.clientId,
+	requestedScope: parseScope(fields.requestedScope),
+	expiresAtMs: Number(fields.expiresAtMs),
+	intervalSeconds: Number(fields.intervalSeconds),
+	status: fields.status,
+	subject: fields.subject,
+	grantedScope: parseScope(fields.grantedScope),
+});
 
 const decisionOutcome = (reply: DeviceCodeDecisionReply): DeviceDecisionOutcome => {
 	switch (reply.kind) {
@@ -170,6 +167,15 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 				expiresAtMs: String(input.expiresAtMs),
 				intervalSeconds: String(input.intervalSeconds),
 				status: "pending",
+				// Left out rather than `undefined`: these are the hash fields a client
+				// writes, and a hash has no `undefined` to hold — a third-party client
+				// may write every key it is handed. So this one write is held by the
+				// conformance suite rather than the compiler, unlike #654's consent
+				// client, whose `find` is a field-by-field copy; here the record is
+				// read back generically from `HGETALL`. Truthiness, as before #626,
+				// rather than `=== undefined`: an untyped caller's `null`, `""` or
+				// `false` stays "no scope", instead of being stored as `"null"` or
+				// `""` and failing `approve`. An array — empty included — is kept.
 				...(input.requestedScope ? { requestedScope: JSON.stringify(input.requestedScope) } : {}),
 			};
 			const created = await client.create(keys, {

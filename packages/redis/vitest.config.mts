@@ -26,12 +26,15 @@ export default defineConfig({
 			// `typecheck.include` REPLACES vitest's default pattern entirely, so
 			// re-include the default `*.test-d.*` glob in addition to the
 			// runtime+typecheck hybrid file.
-			// `code-repository.test.mts` (#626): its fixtures build `Code` inputs,
-			// which name every key; uncompiled, nothing would hold them to it.
+			// `code-repository.test.mts` and `device-code-store.test.mts` (#626):
+			// their fixtures — and the contract the latter runs — build `Code` and
+			// `DeviceAuthorization` inputs, which name every key; uncompiled,
+			// nothing would hold them to it.
 			include: [
 				"**/*.test-d.?(c|m)[jt]s?(x)",
 				"__tests__/types.test.mts",
 				"__tests__/code-repository.test.mts",
+				"__tests__/device-code-store.test.mts",
 			],
 		},
 	},

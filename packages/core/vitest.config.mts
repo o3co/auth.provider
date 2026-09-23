@@ -82,6 +82,9 @@ export default defineConfig({
 				// Paired with tsconfig.test.json.
 				"src/repositories/__tests__/code-fields.types.test.mts",
 				"src/repositories/__tests__/createRepositoryFactories.test.mts",
+				// #626: which DeviceAuthorization fields a store must not drop, and
+				// the fixtures that build them. Paired with tsconfig.test.json.
+				"src/device-authorization/__tests__/**/*.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
 			// itself, where 4 was content to let an imported helper register

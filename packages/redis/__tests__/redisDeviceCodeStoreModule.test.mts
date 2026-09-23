@@ -113,6 +113,7 @@ describe("redisDeviceCodeStoreModule wiring", () => {
 				clientId: "tv",
 				expiresAtMs: Date.now() + 60_000,
 				intervalSeconds: 5,
+				requestedScope: undefined,
 			});
 			expect((await raw.keys("wire:*")).length).toBe(2);
 		} finally {

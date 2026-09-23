@@ -170,6 +170,8 @@ The standalone template provides `deviceCodeStoreClient` from its shared ioredis
 
 Mounting the module without any store fails boot naming `oauth.deviceAuthorization.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363) — for a deployment that leaves the grant off; with `enabled = true` the module refuses to boot without a store whatever the declaration says (#626).
 
+Every field of the `DeviceAuthorization` an adapter hands back is a required key (#626): `requestedScope`, `subject` and `grantedScope` hold `undefined` where there is none, so a read-back that forgets one is a compile error rather than a dropped field; `create`'s `requestedScope` is a required key the same way. The conformance suite compares the whole record with `toStrictEqual`, which also catches the two scope lists swapped.
+
 ## License
 
 Apache-2.0
