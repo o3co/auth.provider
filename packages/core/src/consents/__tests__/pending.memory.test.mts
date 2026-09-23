@@ -38,6 +38,7 @@ const record = (challenge: string, expiresAt = Date.now() + 600_000): PendingCon
 	grantedScopes: [],
 	authorizeUrl: "https://issuer.example/oauth/authorize?client_id=app",
 	redirectUri: "https://app.example/cb",
+	state: undefined,
 	createdAt: Date.now(),
 	expiresAt,
 });

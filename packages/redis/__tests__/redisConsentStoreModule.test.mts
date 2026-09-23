@@ -114,7 +114,13 @@ describe("redisConsentStoreModule wiring", () => {
 			expect(pendingConsentStore.kind).toBe("redis");
 
 			// The configured prefix reached both adapters, not a default.
-			await consentStore.grant({ sub: "u", clientId: "c", scopes: ["read"], grantedAt: 1 });
+			await consentStore.grant({
+				sub: "u",
+				clientId: "c",
+				scopes: ["read"],
+				grantedAt: 1,
+				expiresAt: undefined,
+			});
 			await pendingConsentStore.set({
 				challenge: "ch",
 				sessionId: "sess",
@@ -126,6 +132,7 @@ describe("redisConsentStoreModule wiring", () => {
 				redirectUri: "https://c.example/cb",
 				createdAt: Date.now(),
 				expiresAt: Date.now() + 60_000,
+				state: undefined,
 			});
 			expect((await raw.keys("wire:*")).sort()).toEqual([
 				"wire:rec:1:u|1:c",

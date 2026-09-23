@@ -102,7 +102,7 @@ const makeApp = async (opts: {
 		findById: async (id) => (id === CLIENT_ID ? record : null),
 		authenticate: async () => null,
 	};
-	const createCode = vi.fn(async () => ({
+	const createCode = vi.fn(async (_params: Parameters<CodeRepository["createCode"]>[0]) => ({
 		code: "code-x",
 		client_id: CLIENT_ID,
 		redirect_uri: REDIRECT_URI,
@@ -113,7 +113,10 @@ const makeApp = async (opts: {
 		consumeByCode: async () => null,
 		removeByCode: async () => {},
 	};
-	const pending = opts.pendingConsentStore ?? createMemoryPendingConsentStore();
+	// `size` is the memory store's alone. Typed as possibly absent rather than
+	// cast: a test that reads it off a store without one fails, not passes.
+	const pending: PendingConsentStore & { readonly size?: number } =
+		opts.pendingConsentStore ?? createMemoryPendingConsentStore();
 	const { router } = await createOAuthRouter(express, {
 		registry: new GrantRegistry(),
 		config: makeConfig(opts.consentUrl),
@@ -256,14 +259,20 @@ describe("the page is told which host a URL-shaped client_id names (v0.13.0 audi
 });
 
 const granted = async (store: ConsentStore, scopes: readonly string[]) =>
-	store.grant({ sub: "user-1", clientId: CLIENT_ID, scopes, grantedAt: Date.now() });
+	store.grant({
+		sub: "user-1",
+		clientId: CLIENT_ID,
+		scopes,
+		grantedAt: Date.now(),
+		expiresAt: undefined,
+	});
 
 const collectingSink = (): { sink: AuditSink; events: AuditEvent[] } => {
 	const events: AuditEvent[] = [];
 	return {
 		sink: {
 			kind: "collect",
-			record: async (event) => {
+			record: async (event: AuditEvent) => {
 				events.push(event);
 			},
 		} as unknown as AuditSink,

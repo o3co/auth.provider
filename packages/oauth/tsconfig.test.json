@@ -21,7 +21,6 @@
 		"src/__tests__/authorizationCode.userinfo.integration.test.mts",
 		"src/__tests__/authorizeEndpoint.test.mts",
 		"src/__tests__/clientCredentials.integration.test.mts",
-		"src/__tests__/consent.test.mts",
 		"src/__tests__/dpop.clientCredentials.integration.test.mts",
 		"src/__tests__/hooks.test.mts",
 		"src/__tests__/jwtBearer.test.mts",

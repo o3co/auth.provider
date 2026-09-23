@@ -78,6 +78,7 @@ const parked = (overrides: Partial<PendingConsentRecord> = {}): PendingConsentRe
 	grantedScopes: [],
 	authorizeUrl: "https://issuer.example/oauth/authorize?client_id=app",
 	redirectUri: "https://app.example/cb",
+	state: undefined,
 	createdAt: Date.now(),
 	expiresAt: Date.now() + 600_000,
 	...overrides,
@@ -93,8 +94,20 @@ describe("createRedisConsentStore — what is Redis-specific (#561)", () => {
 		// length prefix the challenge and replay stores use cannot.
 		const prefix = freshPrefix();
 		const store = consentStoreAt(prefix);
-		await store.grant({ sub: "a|b", clientId: "c", scopes: ["read"], grantedAt: 1 });
-		await store.grant({ sub: "a", clientId: "b|c", scopes: ["write"], grantedAt: 2 });
+		await store.grant({
+			sub: "a|b",
+			clientId: "c",
+			scopes: ["read"],
+			grantedAt: 1,
+			expiresAt: undefined,
+		});
+		await store.grant({
+			sub: "a",
+			clientId: "b|c",
+			scopes: ["write"],
+			grantedAt: 2,
+			expiresAt: undefined,
+		});
 		expect((await raw.keys(`${prefix}*`)).sort()).toEqual([
 			`${prefix}rec:1:a|3:b|c`,
 			`${prefix}rec:3:a|b|1:c`,
@@ -118,7 +131,13 @@ describe("createRedisConsentStore — what is Redis-specific (#561)", () => {
 			expiresAt: Date.now() + 60_000,
 		});
 		expect(await raw.pttl(key)).toBeGreaterThan(0);
-		await store.grant({ sub: "u-1", clientId: "app", scopes: ["write"], grantedAt: Date.now() });
+		await store.grant({
+			sub: "u-1",
+			clientId: "app",
+			scopes: ["write"],
+			grantedAt: Date.now(),
+			expiresAt: undefined,
+		});
 		expect(await raw.pttl(key)).toBe(-1);
 	});
 
@@ -161,7 +180,13 @@ describe("createRedisConsentStore — what is Redis-specific (#561)", () => {
 		const scopes = Array.from({ length: 40 }, (_, i) => `scope-${i}`);
 		await Promise.all(
 			scopes.map((scope, i) =>
-				stores[i % 2]?.grant({ sub: "u-1", clientId: "app", scopes: [scope], grantedAt: i }),
+				stores[i % 2]?.grant({
+					sub: "u-1",
+					clientId: "app",
+					scopes: [scope],
+					grantedAt: i,
+					expiresAt: undefined,
+				}),
 			),
 		);
 		const found = await stores[0]?.find("u-1", "app");
@@ -381,7 +406,13 @@ describe("corrupt records read as absent, never as a throw or a half-typed recor
 		it(`find answers null for a consent record with ${name}`, async () => {
 			const prefix = freshPrefix();
 			const store = consentStoreAt(prefix);
-			await store.grant({ sub: "u-1", clientId: "app", scopes: ["read"], grantedAt: 1 });
+			await store.grant({
+				sub: "u-1",
+				clientId: "app",
+				scopes: ["read"],
+				grantedAt: 1,
+				expiresAt: undefined,
+			});
 			await raw.hset(`${prefix}rec:3:u-1|3:app`, fields);
 			await expect(store.find("u-1", "app")).resolves.toBeNull();
 		});
@@ -392,15 +423,28 @@ describe("corrupt records read as absent, never as a throw or a half-typed recor
 		// is asked again, and what they answer is the whole record.
 		const prefix = freshPrefix();
 		const store = consentStoreAt(prefix);
-		await store.grant({ sub: "u-1", clientId: "app", scopes: ["read"], grantedAt: 1 });
+		await store.grant({
+			sub: "u-1",
+			clientId: "app",
+			scopes: ["read"],
+			grantedAt: 1,
+			expiresAt: undefined,
+		});
 		await raw.hset(`${prefix}rec:3:u-1|3:app`, { scopes: '["admin",5]' });
 		expect(await store.find("u-1", "app")).toBeNull();
-		await store.grant({ sub: "u-1", clientId: "app", scopes: ["write"], grantedAt: 2 });
+		await store.grant({
+			sub: "u-1",
+			clientId: "app",
+			scopes: ["write"],
+			grantedAt: 2,
+			expiresAt: undefined,
+		});
 		expect(await store.find("u-1", "app")).toEqual({
 			sub: "u-1",
 			clientId: "app",
 			scopes: ["write"],
 			grantedAt: 2,
+			expiresAt: undefined,
 		});
 	});
 });

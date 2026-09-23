@@ -602,6 +602,7 @@ describe("makeIoredisClients consent clients — keys declared and the caller's 
 			nowMs: 3_000,
 			scopes: ["read"],
 			grantedAt: 3_000,
+			expiry: undefined,
 		});
 		expect(lastScriptCall(io).slice(1)).toEqual([
 			1,
