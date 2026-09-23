@@ -30,12 +30,18 @@ export interface ConsentRecord {
 	/** Epoch milliseconds. */
 	readonly grantedAt: number;
 	/**
-	 * Epoch milliseconds; absent means until revoked. `consentCovers` honours it.
-	 * Nothing in this library sets it — `POST /oauth/consent` records consent
-	 * until revoked — so it is for a deployment that writes records itself, or
-	 * an adapter that ages them out on its own policy.
+	 * Epoch milliseconds; `undefined` means until revoked. `consentCovers`
+	 * honours it. Nothing in this library sets one — `POST /oauth/consent`
+	 * records consent until revoked — so it is for a deployment that writes
+	 * records itself, or an adapter that ages them out on its own policy.
+	 *
+	 * A required key, `undefined` included (#626): "until revoked" is the one
+	 * value that widens what the record grants, so a store that forgot to copy
+	 * the field would make every consent it read back permanent. Spelling the
+	 * key out makes that copy a compile error, and makes a writer say "until
+	 * revoked" rather than arrive at it by leaving the field out.
 	 */
-	readonly expiresAt?: number;
+	readonly expiresAt: number | undefined;
 }
 
 /**
@@ -114,7 +120,13 @@ export interface PendingConsentRecord {
 	readonly authorizeUrl: string;
 	/** The validated `redirect_uri`, where a denial goes. */
 	readonly redirectUri: string;
-	readonly state?: string;
+	/**
+	 * The request's `state`, `undefined` when it carried none. A required key
+	 * (#626): a store that dropped it would send a denial back without `state`,
+	 * which RFC 6749 §4.1.2.1 requires there, and the client's CSRF check would
+	 * refuse the user's own "no".
+	 */
+	readonly state: string | undefined;
 	/** Epoch milliseconds. */
 	readonly createdAt: number;
 	/** Epoch milliseconds. */
