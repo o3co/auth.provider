@@ -40,10 +40,10 @@ export interface UserSessionClaims {
  */
 export interface RegisteredRP {
 	readonly clientId: string;
-	readonly backchannelLogoutUri?: string;
-	readonly backchannelLogoutSessionRequired?: boolean;
-	readonly frontchannelLogoutUri?: string;
-	readonly frontchannelLogoutSessionRequired?: boolean;
+	readonly backchannelLogoutUri: string | undefined;
+	readonly backchannelLogoutSessionRequired: boolean | undefined;
+	readonly frontchannelLogoutUri: string | undefined;
+	readonly frontchannelLogoutSessionRequired: boolean | undefined;
 	readonly registeredAt: Date;
 }
 

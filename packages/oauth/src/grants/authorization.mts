@@ -730,14 +730,14 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						{
 							// D-6: RP record carries the authenticated client id.
 							clientId: authenticatedClientId,
-							backchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
-								?.backchannelLogoutUri as string | undefined,
-							backchannelLogoutSessionRequired: (clientRecord as Record<string, unknown> | null)
-								?.backchannelLogoutSessionRequired as boolean | undefined,
-							frontchannelLogoutUri: (clientRecord as Record<string, unknown> | null)
-								?.frontchannelLogoutUri as string | undefined,
-							frontchannelLogoutSessionRequired: (clientRecord as Record<string, unknown> | null)
-								?.frontchannelLogoutSessionRequired as boolean | undefined,
+							// Read off the typed client record. These were each read
+							// through `as Record<string, unknown>` and cast back, so a
+							// misspelt field would have read `undefined` and dropped the
+							// RP from the logout cascade without a sound.
+							backchannelLogoutUri: clientRecord?.backchannelLogoutUri,
+							backchannelLogoutSessionRequired: clientRecord?.backchannelLogoutSessionRequired,
+							frontchannelLogoutUri: clientRecord?.frontchannelLogoutUri,
+							frontchannelLogoutSessionRequired: clientRecord?.frontchannelLogoutSessionRequired,
 							registeredAt: new Date(),
 						},
 						userSession.expiresAt,

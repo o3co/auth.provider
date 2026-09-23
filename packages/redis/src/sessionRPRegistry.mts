@@ -42,24 +42,35 @@ export interface RedisSessionRPRegistryOptions {
  *   not `""` or `null`. We achieve this by only writing keys that are
  *   actually defined, and by parsing absent keys as `undefined`.
  */
+/**
+ * Every field a required key, like `RegisteredRP`'s own: this is the shape the
+ * store writes, and a write into it that forgot a logout field would compile
+ * and drop it — the RP never told the session ended. JSON drops an `undefined`
+ * value, so an unset field is still absent on the wire; `isValidRPEnvelope`
+ * reads it as optional.
+ */
 interface RPEnvelope {
 	clientId: string;
 	registeredAtMs: number;
-	backchannelLogoutUri?: string;
-	backchannelLogoutSessionRequired?: boolean;
-	frontchannelLogoutUri?: string;
-	frontchannelLogoutSessionRequired?: boolean;
+	backchannelLogoutUri: string | undefined;
+	backchannelLogoutSessionRequired: boolean | undefined;
+	frontchannelLogoutUri: string | undefined;
+	frontchannelLogoutSessionRequired: boolean | undefined;
 }
 
 function serialize(rp: RegisteredRP): string {
-	const env: RPEnvelope = { clientId: rp.clientId, registeredAtMs: rp.registeredAt.getTime() };
-	// Only write defined optional fields to avoid "" / false coercion on round-trip.
-	if (rp.backchannelLogoutUri !== undefined) env.backchannelLogoutUri = rp.backchannelLogoutUri;
-	if (rp.backchannelLogoutSessionRequired !== undefined)
-		env.backchannelLogoutSessionRequired = rp.backchannelLogoutSessionRequired;
-	if (rp.frontchannelLogoutUri !== undefined) env.frontchannelLogoutUri = rp.frontchannelLogoutUri;
-	if (rp.frontchannelLogoutSessionRequired !== undefined)
-		env.frontchannelLogoutSessionRequired = rp.frontchannelLogoutSessionRequired;
+	// A literal naming every field, so forgetting one is a compile error rather
+	// than an RP silently dropped from the logout cascade. An unset field is
+	// `undefined`, which `JSON.stringify` leaves out — nothing is coerced to
+	// `""` or `false` on the way through.
+	const env: RPEnvelope = {
+		clientId: rp.clientId,
+		registeredAtMs: rp.registeredAt.getTime(),
+		backchannelLogoutUri: rp.backchannelLogoutUri,
+		backchannelLogoutSessionRequired: rp.backchannelLogoutSessionRequired,
+		frontchannelLogoutUri: rp.frontchannelLogoutUri,
+		frontchannelLogoutSessionRequired: rp.frontchannelLogoutSessionRequired,
+	};
 	return JSON.stringify(env);
 }
 
