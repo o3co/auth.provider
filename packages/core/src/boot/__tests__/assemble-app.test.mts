@@ -746,6 +746,57 @@ describe("assembleApp — 18. discovery: only the document's own error is conver
 		expect(thrown).not.toBeInstanceOf(BootError);
 	});
 
+	it.each([
+		[
+			"a key store whose algorithm getter throws",
+			(failure: Error): FrozenWorld => {
+				const base = worldWith(providerRoot);
+				return {
+					...base,
+					// Through `unknown`: a host's own object in the slot is not a
+					// `KeyStore`, which is the case under test.
+					components: Object.freeze({
+						...base.components,
+						keyStore: {
+							get algorithm(): never {
+								throw failure;
+							},
+						},
+					}) as unknown as FrozenWorld["components"],
+				};
+			},
+		],
+		[
+			"a collector whose values() throws",
+			(failure: Error): FrozenWorld => ({
+				...worldWith(providerRoot),
+				registries: new Map([
+					[
+						"discoveryMetadata",
+						{
+							values: () => {
+								throw failure;
+							},
+						},
+					],
+				]) as FrozenWorld["registries"],
+			}),
+		],
+	])("does not convert %s, even with a DiscoveryDocumentError (#650)", (_label, world) => {
+		// Host-supplied code outside the document builder. `assembleApp` has
+		// no `try` around the planner any more — only the builder's own error
+		// comes back as a value to convert — so what these throw arrives as
+		// itself whatever its type.
+		const failure = new DiscoveryDocumentError("thrown by host code, not by the builder");
+
+		const thrown = thrownBy(() =>
+			assembleApp(world(failure), { express: { Router: () => ({}) as never } }),
+		);
+
+		expect(thrown).toBe(failure);
+		expect(thrown).not.toBeInstanceOf(BootError);
+	});
+
 	it("re-raises a failure while planning the document that is not the document's own error", () => {
 		// A contribution is host data. One whose getter throws fails inside
 		// document planning, and that is not a document that failed to

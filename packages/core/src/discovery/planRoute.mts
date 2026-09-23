@@ -34,20 +34,24 @@
  * `unknown` to do it. Neither is needed: the caller already holds both values
  * typed, and the error taxonomy belongs to the stage that owns the taxonomy.
  *
- * It is two steps, not one, so that the caller can convert exactly the
- * failure it means to. {@link planDiscoveryDocument} decides whether a
- * document is served and assembles it — the only place a
- * `DiscoveryDocumentError` can come from. {@link discoveryRouteFor} builds the
- * route that serves it, calling the router factory, and raises no document
- * error. A single step that did both left the caller's `try` around the router
- * factory too, so a failure there that happened to be a
- * `DiscoveryDocumentError` would have been reported as a discovery
- * misconfiguration (#650 review).
+ * A document that failed to validate is RETURNED, not thrown. The caller
+ * converts it into its own failure taxonomy, and it must convert exactly that
+ * and nothing else — which a `try` around the planner could not promise: the
+ * planner also runs host-supplied code (the key store's algorithm, the
+ * contributions' getters, the collector, the router factory), and any of it
+ * could throw an error that merely has the right type. Two review rounds on
+ * #650 found one such path each. Catching only around
+ * {@link buildDiscoveryDocument} here and handing the error back as a value
+ * makes provenance structural: the caller cannot mistake anything else for
+ * it, because nothing else arrives as a value.
+ *
+ * {@link discoveryRouteFor} builds the route for a planned document,
+ * separately, because it calls the router factory.
  */
 
 import type { NextFunction, Request, Response, Router } from "express";
 import type { RouteContribution, RouteHandler } from "../modules/manifest/route-contribution.mjs";
-import { buildDiscoveryDocument } from "./buildDocument.mjs";
+import { buildDiscoveryDocument, DiscoveryDocumentError } from "./buildDocument.mjs";
 import type { OidcDiscoveryContribution } from "./types.mjs";
 import { discoveryPathsFor } from "./wellKnownPaths.mjs";
 
@@ -62,6 +66,16 @@ export interface DiscoveryDocumentPlan {
 	readonly document: Readonly<Record<string, unknown>>;
 	readonly paths: readonly string[];
 }
+
+/**
+ * What {@link planDiscoveryDocument} decided. `"invalid"` carries the error
+ * {@link buildDiscoveryDocument} raised, and only that: nothing else the
+ * planner runs can produce this outcome.
+ */
+export type DiscoveryDocumentPlanning =
+	| { readonly outcome: "not-served" }
+	| { readonly outcome: "planned"; readonly plan: DiscoveryDocumentPlan }
+	| { readonly outcome: "invalid"; readonly error: DiscoveryDocumentError };
 
 /**
  * Decide whether the core-synthesized OIDC discovery document is served, and
@@ -79,18 +93,22 @@ export interface DiscoveryDocumentPlan {
  *      provider that does not expose `authorization_endpoint` (CIBA, device
  *      flow) still activates discovery instead of silently serving nothing.
  *
- * The document is validated by {@link buildDiscoveryDocument}, whose
- * `DiscoveryDocumentError` (missing required field, reserved-field
- * contribution, conflicting values, …) is raised as it is. The caller turns it
- * into whatever its own failure taxonomy is — `boot/assemble-app.mts` wraps it
- * in a `BootError` with `reason: "discovery-document-invalid"`. Naming that
- * error here would mean importing the boot stage into the step it is a step of
- * (#626 F4).
+ * The document is validated by {@link buildDiscoveryDocument}. A
+ * `DiscoveryDocumentError` it raises (missing required field, reserved-field
+ * contribution, conflicting values, …) comes back as `outcome: "invalid"`, and
+ * the caller turns it into its own failure taxonomy — `boot/assemble-app.mts`
+ * into a `BootError` with `reason: "discovery-document-invalid"`. Naming that
+ * error here would mean importing the boot stage into the step it is a step
+ * of (#626 F4).
  *
- * Pure: it reads its inputs and nothing else, and builds no router.
+ * Anything else is thrown as it is, whatever its type. That includes a
+ * `DiscoveryDocumentError` from the host-supplied code this runs outside the
+ * builder — the signing-algorithm reader and a contribution's `providerRoot`
+ * getter: those are not a document that failed to validate. What runs INSIDE
+ * the builder is the builder's, which is the boundary the conversion had
+ * before #626 F4 moved it.
  *
- * @throws DiscoveryDocumentError when the contributions do not assemble into a
- * valid document.
+ * Builds no router.
  */
 export function planDiscoveryDocument(input: {
 	/**
@@ -111,7 +129,7 @@ export function planDiscoveryDocument(input: {
 	readonly readSigningAlgs: () => readonly string[];
 	/** Every `discoveryMetadata` contribution, in registration order. */
 	readonly metadata: readonly OidcDiscoveryContribution[];
-}): DiscoveryDocumentPlan | null {
+}): DiscoveryDocumentPlanning {
 	const { issuer, readSigningAlgs, metadata } = input;
 
 	// #266 made `oauth.jwt.issuer` required at the schema boundary, so a config
@@ -119,20 +137,28 @@ export function planDiscoveryDocument(input: {
 	// reaches here with one that did not — a hand-built `AppConfig` through
 	// `bootstrapComponents`, which is not type-checked at the boundary it
 	// crosses.
-	if (typeof issuer !== "string" || issuer.length === 0) return null;
+	if (typeof issuer !== "string" || issuer.length === 0) return { outcome: "not-served" };
 
-	if (!metadata.some((item) => item.providerRoot === true)) return null;
+	if (!metadata.some((item) => item.providerRoot === true)) return { outcome: "not-served" };
 
-	const document = buildDiscoveryDocument(metadata, {
-		issuer,
-		signingAlgs: readSigningAlgs(),
-	});
+	// Read before the builder runs, and outside its catch: the reader is
+	// host-supplied code, and what it throws is not a document that failed to
+	// validate.
+	const signingAlgs = readSigningAlgs();
+
+	let document: Record<string, unknown>;
+	try {
+		document = buildDiscoveryDocument(metadata, { issuer, signingAlgs });
+	} catch (err) {
+		if (err instanceof DiscoveryDocumentError) return { outcome: "invalid", error: err };
+		throw err;
+	}
 
 	// #528: one document, every path a client may look for it at — OIDC's
 	// appended form and RFC 8414's inserted form — through one handler, so
 	// the bodies and headers cannot differ between them.
 	const discovery = discoveryPathsFor(issuer);
-	return { document, paths: [...discovery.oidc, ...discovery.oauth] };
+	return { outcome: "planned", plan: { document, paths: [...discovery.oidc, ...discovery.oauth] } };
 }
 
 /**

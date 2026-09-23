@@ -29,7 +29,11 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { DiscoveryDocumentError } from "#/discovery/buildDocument.mjs";
-import { discoveryRouteFor, planDiscoveryDocument } from "#/discovery/planRoute.mjs";
+import {
+	type DiscoveryDocumentPlan,
+	discoveryRouteFor,
+	planDiscoveryDocument,
+} from "#/discovery/planRoute.mjs";
 import type { OidcDiscoveryContribution } from "#/discovery/types.mjs";
 
 const ISSUER = "https://auth.example.com";
@@ -68,10 +72,18 @@ const planDocument = (input: Partial<PlanInput> = {}) =>
 		...input,
 	});
 
-/** Both steps, as `assembleApp` runs them: the route when a document is planned. */
+/**
+ * Both steps, as `assembleApp` runs them: the route when a document is
+ * planned, `null` when none is served. A case that expects the document to
+ * fail validation reads the planning result directly instead.
+ */
 const plan = (input: Partial<PlanInput> = {}) => {
-	const planned = planDocument(input);
-	return planned === null ? null : discoveryRouteFor(planned, () => express.Router());
+	const planning = planDocument(input);
+	if (planning.outcome === "invalid")
+		throw new Error("unexpected invalid document in a plan() case");
+	return planning.outcome === "planned"
+		? discoveryRouteFor(planning.plan, () => express.Router())
+		: null;
 };
 
 describe("planDiscoveryDocument + discoveryRouteFor — the two activation conditions", () => {
@@ -125,7 +137,7 @@ describe("planDiscoveryDocument + discoveryRouteFor — the two activation condi
 			},
 		});
 
-		expect(planned).toBeNull();
+		expect(planned).toEqual({ outcome: "not-served" });
 		expect(read).toBe(false);
 	});
 
@@ -141,43 +153,74 @@ describe("planDiscoveryDocument + discoveryRouteFor — the two activation condi
 	});
 });
 
-describe("planDiscoveryDocument + discoveryRouteFor — what it raises", () => {
-	it("refuses to assemble a document that advertises no signing algorithm", () => {
-		// A provider root with no key store in the slot: the caller passes an
-		// empty list and the document cannot claim an algorithm it does not
-		// have. `assembleApp` turns this into a boot failure, which is the
-		// point — an OP that cannot name how it signs is a misconfiguration,
-		// not a document with a missing field.
-		expect(() => plan({ readSigningAlgs: () => [] })).toThrow(DiscoveryDocumentError);
+describe("planDiscoveryDocument + discoveryRouteFor — what fails, and how", () => {
+	it("returns a document that did not validate, rather than throwing it (#650)", () => {
+		// A provider root with no key store in the slot: the document cannot
+		// claim an algorithm it does not have. It comes back as a VALUE, so the
+		// caller can convert exactly this into its own taxonomy and never
+		// something else that merely has the same type.
+		const planning = planDocument({ readSigningAlgs: () => [] });
+
+		expect(planning.outcome).toBe("invalid");
+		expect((planning as { error: unknown }).error).toBeInstanceOf(DiscoveryDocumentError);
+	});
+
+	it("returns the builder's own error, not a boot one (#626 F4)", () => {
+		// The step names no boot type. `assembleApp` converts this into a
+		// `BootError` with `reason: "discovery-document-invalid"`, which is
+		// pinned where that conversion lives.
+		const planning = planDocument({ metadata: [{ providerRoot: true, metadata: {} }] });
+
+		expect(planning.outcome).toBe("invalid");
+		expect((planning as { error: unknown }).error).toBeInstanceOf(DiscoveryDocumentError);
+	});
+
+	it.each([
+		[
+			"the signing-algorithm reader",
+			(failure: Error): Partial<PlanInput> => ({
+				readSigningAlgs: () => {
+					throw failure;
+				},
+			}),
+		],
+		[
+			"a contribution's providerRoot getter",
+			(failure: Error): Partial<PlanInput> => ({
+				metadata: [
+					{
+						get providerRoot(): boolean {
+							throw failure;
+						},
+					},
+				],
+			}),
+		],
+	])("throws what %s throws as it is, even a DiscoveryDocumentError (#650)", (_label, input) => {
+		// Host-supplied code the planner runs OUTSIDE the builder. An error that
+		// merely has the document's type is still not a document that failed
+		// to validate, so it is thrown, not returned — the caller never sees it
+		// as `outcome: "invalid"`.
+		const failure = new DiscoveryDocumentError("not from the builder");
+
+		expect(() => planDocument(input(failure))).toThrow(failure);
 	});
 
 	it("builds no router while planning, so a router failure cannot surface as a document error", () => {
-		// The document step is pure. The router factory is the route step's
-		// alone, which is what lets `assembleApp` convert document errors
-		// without also converting whatever the router factory throws (#650).
+		// The router factory is the route step's alone.
 		let built = false;
-		const planned = planDocument();
-		expect(planned).not.toBeNull();
+		const planning = planDocument();
+		expect(planning.outcome).toBe("planned");
 		expect(built).toBe(false);
 
 		const failure = new DiscoveryDocumentError("not from the document");
 		expect(() =>
-			discoveryRouteFor(planned as NonNullable<typeof planned>, () => {
+			discoveryRouteFor((planning as { plan: DiscoveryDocumentPlan }).plan, () => {
 				built = true;
 				throw failure;
 			}),
 		).toThrow(failure);
 		expect(built).toBe(true);
-	});
-
-	it("raises the document's own error, not the boot stage's (#626 F4)", () => {
-		// The step names no boot type. `assembleApp` converts this into a
-		// `BootError` with `reason: "discovery-document-invalid"`, which is
-		// pinned where that conversion lives — naming it here would mean
-		// importing the stage into the step it is a step of.
-		expect(() => plan({ metadata: [{ providerRoot: true, metadata: {} }] })).toThrow(
-			DiscoveryDocumentError,
-		);
 	});
 });
 
