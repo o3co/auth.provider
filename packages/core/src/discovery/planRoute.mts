@@ -20,10 +20,11 @@
  * Keeps ALL OIDC-specific knowledge (provider activation, document
  * construction + validation, and the spec-fixed discovery paths) out of the
  * generic boot planner (`boot/assemble-app.mts`). The planner calls
- * {@link planDiscoveryRoute} and gets back either a normal route contribution
- * or `null`; from `assembleApp`'s perspective discovery is just another route
- * that flows through the standard collision-check + mount-order + mount
- * pipeline — no special-casing.
+ * {@link planDiscoveryDocument} and, when a document is planned,
+ * {@link discoveryRouteFor}, and gets back a normal route contribution; from
+ * `assembleApp`'s perspective discovery is just another route that flows
+ * through the standard collision-check + mount-order + mount pipeline — no
+ * special-casing.
  *
  * It takes VALUES, not the boot world (#626 F4). Until then it took
  * `assembleApp`'s own `Readonly<Partial<ComponentMap>>` widened to
@@ -32,6 +33,16 @@
  * boot step referenced each other, and a typed map was laundered through
  * `unknown` to do it. Neither is needed: the caller already holds both values
  * typed, and the error taxonomy belongs to the stage that owns the taxonomy.
+ *
+ * It is two steps, not one, so that the caller can convert exactly the
+ * failure it means to. {@link planDiscoveryDocument} decides whether a
+ * document is served and assembles it — the only place a
+ * `DiscoveryDocumentError` can come from. {@link discoveryRouteFor} builds the
+ * route that serves it, calling the router factory, and raises no document
+ * error. A single step that did both left the caller's `try` around the router
+ * factory too, so a failure there that happened to be a
+ * `DiscoveryDocumentError` would have been reported as a discovery
+ * misconfiguration (#650 review).
  */
 
 import type { NextFunction, Request, Response, Router } from "express";
@@ -44,13 +55,20 @@ import { discoveryPathsFor } from "./wellKnownPaths.mjs";
 const DISCOVERY_ROUTE_ID = "core:oidc-discovery";
 
 /**
- * Plan the core-synthesized OIDC discovery route from the aggregated
- * `discoveryMetadata` contributions, or return `null` when discovery should not
- * be served.
+ * A document that will be served, and every path it is served at. What
+ * {@link planDiscoveryDocument} decides and {@link discoveryRouteFor} serves.
+ */
+export interface DiscoveryDocumentPlan {
+	readonly document: Readonly<Record<string, unknown>>;
+	readonly paths: readonly string[];
+}
+
+/**
+ * Decide whether the core-synthesized OIDC discovery document is served, and
+ * assemble it — or return `null` when it is not.
  *
- * Returns a route contribution (mounted at "/", advertising `GET` on every
- * path the document is served at — OIDC Discovery's
- * `/.well-known/openid-configuration` and RFC 8414's
+ * A document is served (at every path a client may look for it at — OIDC
+ * Discovery's `/.well-known/openid-configuration` and RFC 8414's
  * `/.well-known/oauth-authorization-server`, formed per the issuer's path
  * component by {@link discoveryPathsFor}, #528) when BOTH:
  *   1. an issuer is configured (`config.oauth.jwt.issuer`), and
@@ -61,19 +79,20 @@ const DISCOVERY_ROUTE_ID = "core:oidc-discovery";
  *      provider that does not expose `authorization_endpoint` (CIBA, device
  *      flow) still activates discovery instead of silently serving nothing.
  *
- * The assembled document is validated by {@link buildDiscoveryDocument}, whose
+ * The document is validated by {@link buildDiscoveryDocument}, whose
  * `DiscoveryDocumentError` (missing required field, reserved-field
  * contribution, conflicting values, …) is raised as it is. The caller turns it
  * into whatever its own failure taxonomy is — `boot/assemble-app.mts` wraps it
- * in a `BootError` with `reason: "discovery-document-invalid"`, so discovery
- * misconfiguration still surfaces the way every other assembleApp error does.
- * Naming that error here would mean importing the boot stage into the step it
- * is a step of (#626 F4).
+ * in a `BootError` with `reason: "discovery-document-invalid"`. Naming that
+ * error here would mean importing the boot stage into the step it is a step of
+ * (#626 F4).
+ *
+ * Pure: it reads its inputs and nothing else, and builds no router.
  *
  * @throws DiscoveryDocumentError when the contributions do not assemble into a
  * valid document.
  */
-export function planDiscoveryRoute(input: {
+export function planDiscoveryDocument(input: {
 	/**
 	 * `config.oauth.jwt.issuer`. `undefined` when the deployment configured
 	 * none, which is the first of the two activation conditions above.
@@ -82,13 +101,18 @@ export function planDiscoveryRoute(input: {
 	/**
 	 * What the document advertises as `id_token_signing_alg_values_supported`;
 	 * empty when no key store named an algorithm.
+	 *
+	 * A reader rather than a value, so that it is only read once both
+	 * activation conditions have passed — as it was before #626 F4 moved it.
+	 * The key store is a slot a host may fill with an object of its own, and
+	 * a deployment that serves no discovery document has never touched its
+	 * algorithm.
 	 */
-	readonly signingAlgs: readonly string[];
+	readonly readSigningAlgs: () => readonly string[];
 	/** Every `discoveryMetadata` contribution, in registration order. */
 	readonly metadata: readonly OidcDiscoveryContribution[];
-	readonly routerFactory: () => Router;
-}): RouteContribution | null {
-	const { issuer, signingAlgs, metadata, routerFactory } = input;
+}): DiscoveryDocumentPlan | null {
+	const { issuer, readSigningAlgs, metadata } = input;
 
 	// #266 made `oauth.jwt.issuer` required at the schema boundary, so a config
 	// that passed the schema always has one. The guard is for a caller that
@@ -99,13 +123,31 @@ export function planDiscoveryRoute(input: {
 
 	if (!metadata.some((item) => item.providerRoot === true)) return null;
 
-	const doc: Record<string, unknown> = buildDiscoveryDocument(metadata, { issuer, signingAlgs });
+	const document = buildDiscoveryDocument(metadata, {
+		issuer,
+		signingAlgs: readSigningAlgs(),
+	});
 
 	// #528: one document, every path a client may look for it at — OIDC's
 	// appended form and RFC 8414's inserted form — through one handler, so
 	// the bodies and headers cannot differ between them.
 	const discovery = discoveryPathsFor(issuer);
-	const paths = [...discovery.oidc, ...discovery.oauth];
+	return { document, paths: [...discovery.oidc, ...discovery.oauth] };
+}
+
+/**
+ * The route that serves a planned document: an ordinary route contribution,
+ * mounted at "/", advertising `GET` on each of the plan's paths.
+ *
+ * Raises no document error — the document was assembled and validated by
+ * {@link planDiscoveryDocument} already. What it can raise is whatever the
+ * router factory raises, and that is not a discovery misconfiguration.
+ */
+export function discoveryRouteFor(
+	plan: DiscoveryDocumentPlan,
+	routerFactory: () => Router,
+): RouteContribution {
+	const { document: doc, paths } = plan;
 	const router = routerFactory();
 	// These paths are literals, not route patterns. An issuer is a URL and
 	// its path may hold characters Express 5's parser reads as syntax —

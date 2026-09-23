@@ -30,7 +30,11 @@ import { createRequire } from "node:module";
 import type { Express, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import { DiscoveryDocumentError } from "../discovery/buildDocument.mjs";
-import { planDiscoveryRoute } from "../discovery/planRoute.mjs";
+import {
+	type DiscoveryDocumentPlan,
+	discoveryRouteFor,
+	planDiscoveryDocument,
+} from "../discovery/planRoute.mjs";
 import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { browserFacingCorsRoutes, corsMw } from "../middleware/cors.mjs";
@@ -561,23 +565,31 @@ export function assembleApp(
 	const collector = frozen.registries.get("discoveryMetadata") as
 		| ListCollector<OidcDiscoveryContribution>
 		| undefined;
-	// `KeyStore.algorithm` is typed, but a host may put an object of its own in
-	// the slot through `bootstrapComponents` / `overrideComponents`, which is
-	// not checked at that boundary — so the reading is still guarded.
-	const algorithm = frozen.components.keyStore?.algorithm;
-	let discoveryRoute: ReturnType<typeof planDiscoveryRoute>;
+	let plan: DiscoveryDocumentPlan | null;
 	try {
-		discoveryRoute = planDiscoveryRoute({
+		plan = planDiscoveryDocument({
 			issuer: frozen.components.config?.oauth?.jwt?.issuer,
-			signingAlgs: typeof algorithm === "string" ? [algorithm] : [],
+			// `KeyStore.algorithm` is typed, but a host may put an object of its
+			// own in the slot through `bootstrapComponents` / `overrideComponents`,
+			// which is not checked at that boundary — so the reading is still
+			// guarded, and it is a reader so the step reads it only once both
+			// activation conditions have passed, as it did before.
+			readSigningAlgs: () => {
+				const algorithm = frozen.components.keyStore?.algorithm;
+				return typeof algorithm === "string" ? [algorithm] : [];
+			},
 			metadata: collector === undefined ? [] : [...collector.values()],
-			routerFactory: RouterCtor,
 		});
 	} catch (err) {
 		// The taxonomy is this stage's, which is why the conversion is here and
 		// not in the step: a discovery misconfiguration has to surface as a
 		// `BootError` like every other assembleApp failure, and the step would
 		// have to import the stage to say so.
+		//
+		// The `try` covers the document and nothing else. Building the route
+		// calls the router factory, and a failure there is not a discovery
+		// misconfiguration whatever type it has — so it runs below, outside the
+		// conversion (#650 review).
 		if (err instanceof DiscoveryDocumentError) {
 			throw new BootError({
 				message: `assembleApp: ${err.message}`,
@@ -589,6 +601,7 @@ export function assembleApp(
 		}
 		throw err;
 	}
+	const discoveryRoute = plan === null ? null : discoveryRouteFor(plan, RouterCtor);
 	const allRoutes: readonly CollectedRouteContribution[] =
 		discoveryRoute === null
 			? frozen.routes

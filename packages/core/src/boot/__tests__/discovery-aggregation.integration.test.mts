@@ -414,5 +414,15 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		expect((err as BootError).reason).toBe("discovery-document-invalid");
 		expect((err as BootError).cause).toBeInstanceOf(DiscoveryDocumentError);
 		expect(String((err as BootError).message)).toMatch(/jwks_uri/);
+		// The whole shape, not only the fields an operator reads first: #626 F4
+		// moved this conversion from the discovery step into `assembleApp` and
+		// claims every field came across unchanged, so every field is pinned.
+		const cause = (err as BootError).cause as DiscoveryDocumentError;
+		expect((err as BootError).message).toBe(`assembleApp: ${cause.message}`);
+		expect((err as BootError).stage).toBe("assembleApp");
+		expect((err as BootError).details).toEqual({
+			reason: "discovery-document-invalid",
+			detail: cause.message,
+		});
 	});
 });

@@ -20,7 +20,7 @@
  * It could not be tested this way before: it took `assembleApp`'s frozen world
  * and cast three readings out of it, so every case needed a boot fixture and
  * the two activation conditions were only ever exercised through a whole boot.
- * Now the same conditions are four values, and what `assembleApp` does with the
+ * Now the same conditions are three values, and what `assembleApp` does with the
  * result is the integration test's business:
  * [`boot/__tests__/discovery-aggregation.integration.test.mts`](../../boot/__tests__/discovery-aggregation.integration.test.mts).
  */
@@ -29,7 +29,7 @@ import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { DiscoveryDocumentError } from "#/discovery/buildDocument.mjs";
-import { planDiscoveryRoute } from "#/discovery/planRoute.mjs";
+import { discoveryRouteFor, planDiscoveryDocument } from "#/discovery/planRoute.mjs";
 import type { OidcDiscoveryContribution } from "#/discovery/types.mjs";
 
 const ISSUER = "https://auth.example.com";
@@ -57,16 +57,24 @@ const jwksOnly: OidcDiscoveryContribution = {
 	endpoints: { jwks_uri: "/.well-known/jwks.json" },
 };
 
-const plan = (input: Partial<Parameters<typeof planDiscoveryRoute>[0]> = {}) =>
-	planDiscoveryRoute({
+type PlanInput = Parameters<typeof planDiscoveryDocument>[0];
+
+/** The document step alone, with a default for whatever the case does not set. */
+const planDocument = (input: Partial<PlanInput> = {}) =>
+	planDiscoveryDocument({
 		issuer: ISSUER,
-		signingAlgs: ["HS256"],
+		readSigningAlgs: () => ["HS256"],
 		metadata: [providerRoot],
-		routerFactory: () => express.Router(),
 		...input,
 	});
 
-describe("planDiscoveryRoute — the two activation conditions", () => {
+/** Both steps, as `assembleApp` runs them: the route when a document is planned. */
+const plan = (input: Partial<PlanInput> = {}) => {
+	const planned = planDocument(input);
+	return planned === null ? null : discoveryRouteFor(planned, () => express.Router());
+};
+
+describe("planDiscoveryDocument + discoveryRouteFor — the two activation conditions", () => {
 	it("plans a route when an issuer is configured and something claims to be a provider", () => {
 		const route = plan();
 
@@ -100,6 +108,27 @@ describe("planDiscoveryRoute — the two activation conditions", () => {
 		expect(plan({ metadata: [jwksOnly] })).toBeNull();
 	});
 
+	it.each([
+		["no issuer is configured", { issuer: undefined }],
+		["nothing claims to be a provider", { metadata: [jwksOnly] }],
+	])("does not read the signing algorithms when %s", (_label, input) => {
+		// The key store is a slot a host may fill with an object of its own. A
+		// deployment that serves no discovery document never read its
+		// algorithm before #626 F4, and does not now: the reader is only called
+		// once both activation conditions have passed.
+		let read = false;
+		const planned = planDocument({
+			...input,
+			readSigningAlgs: () => {
+				read = true;
+				return ["HS256"];
+			},
+		});
+
+		expect(planned).toBeNull();
+		expect(read).toBe(false);
+	});
+
 	it("declines when no contribution was made at all", () => {
 		expect(plan({ metadata: [] })).toBeNull();
 	});
@@ -112,14 +141,33 @@ describe("planDiscoveryRoute — the two activation conditions", () => {
 	});
 });
 
-describe("planDiscoveryRoute — what it raises", () => {
+describe("planDiscoveryDocument + discoveryRouteFor — what it raises", () => {
 	it("refuses to assemble a document that advertises no signing algorithm", () => {
 		// A provider root with no key store in the slot: the caller passes an
 		// empty list and the document cannot claim an algorithm it does not
 		// have. `assembleApp` turns this into a boot failure, which is the
 		// point — an OP that cannot name how it signs is a misconfiguration,
 		// not a document with a missing field.
-		expect(() => plan({ signingAlgs: [] })).toThrow(DiscoveryDocumentError);
+		expect(() => plan({ readSigningAlgs: () => [] })).toThrow(DiscoveryDocumentError);
+	});
+
+	it("builds no router while planning, so a router failure cannot surface as a document error", () => {
+		// The document step is pure. The router factory is the route step's
+		// alone, which is what lets `assembleApp` convert document errors
+		// without also converting whatever the router factory throws (#650).
+		let built = false;
+		const planned = planDocument();
+		expect(planned).not.toBeNull();
+		expect(built).toBe(false);
+
+		const failure = new DiscoveryDocumentError("not from the document");
+		expect(() =>
+			discoveryRouteFor(planned as NonNullable<typeof planned>, () => {
+				built = true;
+				throw failure;
+			}),
+		).toThrow(failure);
+		expect(built).toBe(true);
 	});
 
 	it("raises the document's own error, not the boot stage's (#626 F4)", () => {
@@ -133,15 +181,15 @@ describe("planDiscoveryRoute — what it raises", () => {
 	});
 });
 
-describe("planDiscoveryRoute — what it puts in the document", () => {
-	const served = (route: ReturnType<typeof planDiscoveryRoute>) => {
+describe("planDiscoveryDocument + discoveryRouteFor — what it puts in the document", () => {
+	const served = (route: ReturnType<typeof plan>) => {
 		const app = express();
 		app.use(route?.handler as express.RequestHandler);
 		return app;
 	};
 
 	it("advertises the signing algorithms it was given", async () => {
-		const route = plan({ signingAlgs: ["ES256"] });
+		const route = plan({ readSigningAlgs: () => ["ES256"] });
 
 		const res = await request(served(route)).get("/.well-known/openid-configuration");
 

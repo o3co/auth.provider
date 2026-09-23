@@ -16,6 +16,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { createLifecycleRegistrar } from "../../adapters/AdapterFactory.mjs";
+import { DiscoveryDocumentError } from "../../discovery/buildDocument.mjs";
 import { assembleApp } from "../assemble-app.mjs";
 import type { CleanupRecord, CollectedRouteContribution, FrozenWorld } from "../types.mjs";
 import { BootError } from "../types.mjs";
@@ -690,56 +691,79 @@ describe("assembleApp — 17. listen() wraps router in Express app", () => {
 // ---------------------------------------------------------------------------
 
 describe("assembleApp — 18. discovery: only the document's own error is converted (#626 F4)", () => {
-	it("re-raises an error that is not a DiscoveryDocumentError as it is, not as a BootError", () => {
-		// The conversion into `reason: "discovery-document-invalid"` is for a
-		// document that did not assemble. Anything else the planner raises — here
-		// the router factory failing, the first thing it calls once both gates
-		// pass — is not a discovery misconfiguration, and relabelling it as one
-		// would send an operator looking at the wrong thing.
-		const routerFailure = new Error("router factory failed");
-		const frozen: FrozenWorld = {
-			...makeFrozenWorld([], [], {
-				config: { oauth: { jwt: { issuer: "https://auth.example.com" } } },
-				keyStore: { algorithm: "HS256" },
-			}),
-			registries: new Map([
-				[
-					"discoveryMetadata",
-					{
-						values: () =>
-							[
-								{
-									providerRoot: true,
-									endpoints: {
-										authorization_endpoint: "/oauth/authorize",
-										token_endpoint: "/oauth/token",
-										jwks_uri: "/.well-known/jwks.json",
-									},
-									metadata: {
-										response_types_supported: ["code"],
-										subject_types_supported: ["public"],
-									},
-								},
-							].values(),
-					},
-				],
-			]) as FrozenWorld["registries"],
-		};
+	/** A contribution that assembles into a valid document. */
+	const providerRoot = {
+		providerRoot: true,
+		endpoints: {
+			authorization_endpoint: "/oauth/authorize",
+			token_endpoint: "/oauth/token",
+			jwks_uri: "/.well-known/jwks.json",
+		},
+		metadata: {
+			response_types_supported: ["code"],
+			subject_types_supported: ["public"],
+		},
+	};
 
-		let thrown: unknown;
+	const worldWith = (contribution: object): FrozenWorld => ({
+		...makeFrozenWorld([], [], {
+			config: { oauth: { jwt: { issuer: "https://auth.example.com" } } },
+			keyStore: { algorithm: "HS256" },
+		}),
+		registries: new Map([
+			["discoveryMetadata", { values: () => [contribution].values() }],
+		]) as FrozenWorld["registries"],
+	});
+
+	const thrownBy = (run: () => unknown): unknown => {
 		try {
-			assembleApp(frozen, {
+			run();
+		} catch (err) {
+			return err;
+		}
+		return undefined;
+	};
+
+	it("does not convert a router-factory failure, even one that is a DiscoveryDocumentError (#650)", () => {
+		// The conversion into `reason: "discovery-document-invalid"` is for a
+		// document that did not assemble. The router factory is called after
+		// the document is planned and outside the conversion, so what it throws
+		// arrives as itself — including an error whose TYPE says "document",
+		// which a `try` around the whole planner call would have relabelled.
+		const routerFailure = new DiscoveryDocumentError("thrown by the router factory");
+
+		const thrown = thrownBy(() =>
+			assembleApp(worldWith(providerRoot), {
 				express: {
 					Router: () => {
 						throw routerFailure;
 					},
 				},
-			});
-		} catch (err) {
-			thrown = err;
-		}
+			}),
+		);
 
 		expect(thrown).toBe(routerFailure);
+		expect(thrown).not.toBeInstanceOf(BootError);
+	});
+
+	it("re-raises a failure while planning the document that is not the document's own error", () => {
+		// A contribution is host data. One whose getter throws fails inside
+		// document planning, and that is not a document that failed to
+		// validate — so it too arrives as itself rather than as a
+		// `discovery-document-invalid` boot error.
+		const readFailure = new TypeError("contribution getter failed");
+		const hostile = {
+			providerRoot: true,
+			get endpoints(): never {
+				throw readFailure;
+			},
+		};
+
+		const thrown = thrownBy(() =>
+			assembleApp(worldWith(hostile), { express: { Router: () => ({}) as never } }),
+		);
+
+		expect(thrown).toBe(readFailure);
 		expect(thrown).not.toBeInstanceOf(BootError);
 	});
 });

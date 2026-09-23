@@ -40,7 +40,7 @@ The ports, the record types, and the rules every implementation must satisfy. Th
 | `keys/` | `KeyStore`, the local asymmetric / symmetric stores, `createRemoteSigningKeyStore`, the factory, the secret-entropy floor. | Bundle a vendor SDK. |
 | `jwt/` | `verifyJwt`, the one verifier every surface uses (`typ` pinning, denylist, subject boundary). | — |
 | `issuer/` | Canonical validation of `oauth.jwt.issuer`. | Fall back to a request's `Host`. |
-| `discovery/` | `OidcDiscoveryContribution`, `buildDiscoveryDocument`, `discoveryPathsFor`, and `planDiscoveryRoute` — the hook `boot/assemble-app.mts` calls, as a function of four values rather than of the boot world (#626 F4). | Mount anything itself, or import from `boot/`. |
+| `discovery/` | `OidcDiscoveryContribution`, `buildDiscoveryDocument`, `discoveryPathsFor`, and the two hooks `boot/assemble-app.mts` calls — `planDiscoveryDocument` (pure: decides whether a document is served and assembles it) and `discoveryRouteFor` (builds the route that serves it) — as functions of values rather than of the boot world (#626 F4). | Mount anything itself, or import from `boot/`. |
 | `adapters/` | `AdapterFactory`, `BuilderContext`, `LifecycleRegistrar`. | — |
 | `logging/` | `Logger` (pino-compatible), `EventLogger`, `consoleLogger`. | — |
 | `errors/` | The RFC 6749 §5.2 error envelope. | — |

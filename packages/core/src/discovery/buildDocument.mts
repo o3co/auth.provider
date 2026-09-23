@@ -120,7 +120,7 @@ export function buildDiscoveryDocument(
 	opts: { readonly issuer: string; readonly signingAlgs: readonly string[] },
 ): Record<string, unknown> {
 	const issuer = opts.issuer.replace(/\/+$/, "");
-	// An all-slashes issuer (e.g. "/", "//") passes `planDiscoveryRoute`'s own
+	// An all-slashes issuer (e.g. "/", "//") passes `planDiscoveryDocument`'s own
 	// gate (`issuer.length > 0`, on the RAW value) but normalizes to "" here,
 	// which would emit `issuer: ""` and origin-less endpoint URLs. That is a
 	// misconfiguration, so fail the boot fast rather than advertising a
