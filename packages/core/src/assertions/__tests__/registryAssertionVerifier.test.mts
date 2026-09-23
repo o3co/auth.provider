@@ -20,6 +20,7 @@ import type { AddressInfo } from "node:net";
 import { exportJWK, SignJWT } from "jose";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import {
+	type AssertionIssuerEntry,
 	type AssertionIssuerEntryInput,
 	type AssertionIssuerRegistry,
 	createMemoryAssertionIssuerRegistry,
@@ -406,18 +407,28 @@ describe("an entry is data a store can hold (v0.13.0 audit)", () => {
 			async findIssuer(issuer) {
 				// A row is what the store kept: JSON drops a ceiling left
 				// `undefined`, and revives `expiresAt` as a string. The read-back
-				// goes through `toAssertionIssuerEntry`, which names every ceiling
-				// — the way a registry over a store is meant to build its answer.
+				// is an `AssertionIssuerEntry` LITERAL naming every field — the
+				// form the type checks, so a column forgotten here fails to
+				// compile. (`toAssertionIssuerEntry` would not: it takes the input
+				// type, where every ceiling is optional.)
 				const rows = JSON.parse(stored) as Array<
 					Omit<AssertionIssuerEntryInput, "expiresAt"> & { expiresAt?: string }
 				>;
 				const row = rows.find((r) => r.issuer === issuer);
-				return row === undefined
-					? null
-					: toAssertionIssuerEntry({
-							...row,
-							expiresAt: row.expiresAt === undefined ? undefined : new Date(row.expiresAt),
-						});
+				if (row === undefined) return null;
+				const answer: AssertionIssuerEntry = {
+					issuer: row.issuer,
+					keys: row.keys,
+					algorithms: row.algorithms,
+					allowedSubjects: row.allowedSubjects,
+					allowedScopes: row.allowedScopes,
+					allowedAudiences: row.allowedAudiences,
+					allowedClients: row.allowedClients,
+					expiresAt: row.expiresAt === undefined ? undefined : new Date(row.expiresAt),
+					profile: row.profile,
+					clockToleranceSeconds: row.clockToleranceSeconds,
+				};
+				return answer;
 			},
 		};
 		const verifier = createRegistryAssertionVerifier({

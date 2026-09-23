@@ -82,6 +82,6 @@ export const input: AssertionIssuerEntryInput = stored;
 type Plain = { readonly a?: string };
 export const p: Plain = { a: undefined };
 `);
-		expect(diagnostics.join("\n")).toMatch(/exactOptionalPropertyTypes|not assignable/);
+		expect(diagnostics.join("\n")).toMatch(/exactOptionalPropertyTypes/);
 	});
 });

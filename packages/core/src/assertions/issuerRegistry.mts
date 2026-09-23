@@ -146,13 +146,21 @@ export interface AssertionIssuerEntryInput {
  * "id-jag"` gone falls back to plain RFC 7523, and with it the `jti` replay
  * check, the `typ` check and the exact-`aud` check. A registry over a store —
  * this port's documented way to survive a restart — reads each row back into
- * this shape, and a read-back that forgets a key fails to compile rather than
- * dropping the ceiling. {@link toAssertionIssuerEntry} builds one from an
- * input with every key named.
+ * this shape. Built as an object literal of THIS type, naming every field, a
+ * read-back that forgets a key fails to compile rather than dropping the
+ * ceiling.
  *
- * What the type cannot reach: a registry in plain JavaScript, and code that
- * steps around the checker (`as AssertionIssuerEntry` on an incomplete object,
- * `JSON.parse(row) as …`). Those are held to the rule alone.
+ * The guarantee is the literal's, not any helper's. Mapping a row through
+ * {@link toAssertionIssuerEntry} does NOT carry it: that takes the input type,
+ * where every ceiling is optional, so a forgotten column compiles there. Nor
+ * does the type reach a registry in plain JavaScript, code that steps around
+ * the checker (`as AssertionIssuerEntry` on an incomplete object,
+ * `JSON.parse(row) as …`), or a store's own row type — declare that with every
+ * key required too, or the write into it can forget one. And it does not reach
+ * inside `keys`: a `jwks_uri` source's tuning (`cacheMaxAgeMs`, `cooldownMs`,
+ * `timeoutMs`) is optional there as well; losing `cacheMaxAgeMs` restores the
+ * ten-minute default, a bounded widening of how long a key withdrawn at the
+ * issuer is still accepted.
  */
 export interface AssertionIssuerEntry {
 	readonly issuer: string;
@@ -258,9 +266,14 @@ export function checkAssertionIssuerEntry(entry: AssertionIssuerEntryInput): voi
 
 /**
  * The stored form of an input: every field named, `undefined` where the input
- * left a ceiling out. The one place that lists them — a registry over a store
- * that builds its read-back with this, or declares its own row the same way,
- * cannot drop a ceiling without a compile error.
+ * left a ceiling out. For normalising an entry a caller WROTE — what `add`
+ * receives, what the composition lists — before holding or persisting it.
+ *
+ * Not for reading a store's rows back. Its parameter is the input type, where
+ * every ceiling is optional, so a row mapped through it with a column forgotten
+ * compiles and drops that ceiling. A read-back builds an
+ * {@link AssertionIssuerEntry} literal naming every field instead; that is
+ * what the type checks.
  *
  * Copies the entry's own fields only. Validate the input first
  * ({@link checkAssertionIssuerEntry}): anything else it carries is not copied,

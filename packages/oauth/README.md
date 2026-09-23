@@ -610,7 +610,7 @@ If you extend or replace the middleware for custom client-auth schemes, import `
 
 ## jwt-bearer: which issuers are trusted (#525)
 
-The RFC 7523 grant (`urn:ietf:params:oauth:grant-type:jwt-bearer`) accepts a signed assertion from an issuer this deployment trusts and hands the verified handle to the Store. Which issuers, on what keys, on what terms, is a **trust registry** of `AssertionIssuerEntry` records, and the bundled verifier is built over it:
+The RFC 7523 grant (`urn:ietf:params:oauth:grant-type:jwt-bearer`) accepts a signed assertion from an issuer this deployment trusts and hands the verified handle to the Store. Which issuers, on what keys, on what terms, is a **trust registry** of issuer entries — `AssertionIssuerEntryInput` as written, `AssertionIssuerEntry` as the registry answers with them — and the bundled verifier is built over it:
 
 ```ts
 import {
@@ -652,7 +652,12 @@ What an entry says, and what it means at `/oauth/token`:
 
 `createJwtAssertionVerifier({ key, issuer, audience, algorithms })` — the static one-key shape — is a one-entry registry and keeps working unchanged. A deployment that registers issuers at runtime and needs them to survive a restart implements `AssertionIssuerRegistry` (`findIssuer`) over its own store. **An entry is data** a store can hold: every field survives a JSON round trip (revive `expiresAt` as a `Date`), except `keys: { type: "key" }`, a live key object — a store-backed entry uses `jwks` (a one-key set is fine) or `jwks_uri`.
 
-A store-backed registry must hand back **every ceiling** it was given. Each field beyond `issuer`, `keys` and `algorithms` narrows what the issuer's assertions may obtain, so a read-back that forgets one fails **open**: `allowedClients` gone admits any presenter, `expiresAt` gone trusts the issuer for ever, `profile: "id-jag"` gone drops the `jti` replay, `typ` and exact-`aud` checks. So `findIssuer` answers with `AssertionIssuerEntry`, whose fields are all **required keys** (`undefined` where the entry names no ceiling) — a read-back that forgets one fails to compile. What callers write — the composition's list and `add` — stays `AssertionIssuerEntryInput`, where absent means "no ceiling". `toAssertionIssuerEntry(input)` builds the stored form with every key named; validate the input with `checkAssertionIssuerEntry` first, since the normaliser copies the entry's own fields only. The type does not reach a registry in plain JavaScript, or `as AssertionIssuerEntry` / `JSON.parse(row) as …` casts; those are held to the rule alone.
+A store-backed registry must hand back **every ceiling** it was given. Each field beyond `issuer`, `keys` and `algorithms` narrows what the issuer's assertions may obtain, so a read-back that forgets one fails **open**: `allowedClients` gone admits any presenter, `expiresAt` gone trusts the issuer for ever, `profile: "id-jag"` gone drops the `jti` replay, `typ` and exact-`aud` checks. So `findIssuer` answers with `AssertionIssuerEntry`, whose fields are all **required keys** (`undefined` where the entry names no ceiling). What callers write — the composition's list and `add` — stays `AssertionIssuerEntryInput`, where absent means "no ceiling". A store-backed registry:
+
+- **on write**, validates with `checkAssertionIssuerEntry`, normalises with `toAssertionIssuerEntry(input)`, and persists every field — declaring its own row type with every key required, or the write into it can forget one;
+- **on read**, builds an `AssertionIssuerEntry` object literal naming every field. That literal is what the type checks: forgetting a key fails to compile. Mapping a row through `toAssertionIssuerEntry` does *not* — it takes the input type, where every ceiling is optional.
+
+The type does not reach a registry in plain JavaScript, `as AssertionIssuerEntry` / `JSON.parse(row) as …` casts, or a `jwks_uri` key source's optional tuning (`cacheMaxAgeMs` lost restores the ten-minute default); those are held to the rule alone.
 
 How claims are read is code, so it is the verifier's, not the entry's. With several issuers, namespace the handle unless every issuer's `sub` values are known to be disjoint — the Store receives the handle alone:
 

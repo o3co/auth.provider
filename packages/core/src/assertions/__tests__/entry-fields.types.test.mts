@@ -89,6 +89,13 @@ describe("AssertionIssuerEntryInput — what a caller writes", () => {
 		>();
 	});
 
+	it("names exactly the same fields as the stored form", () => {
+		// A ceiling added to the input and not to the stored form would be
+		// copied by nothing — `toAssertionIssuerEntry` still compiles — and
+		// dropped by the memory registry itself: the fail-open, inside core.
+		expectTypeOf<keyof AssertionIssuerEntry>().toEqualTypeOf<keyof AssertionIssuerEntryInput>();
+	});
+
 	it("accepts a stored entry back as input, so list() → add() round-trips", () => {
 		expectTypeOf<AssertionIssuerEntry>().toExtend<AssertionIssuerEntryInput>();
 	});
