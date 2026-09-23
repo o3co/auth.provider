@@ -62,6 +62,28 @@ export interface GithubProviderConfig {
 
 export type GithubProvider = FederationProvider & SupportsLogout & SupportsClaimMapping;
 
+/**
+ * GitHub's granted scope, as the space-delimited list the rest of the system
+ * speaks (RFC 6749 §3.3).
+ *
+ * GitHub answers with a comma-delimited string. Every consumer here splits on
+ * spaces, so the translation belongs at the boundary where the difference is
+ * known — this adapter — rather than in a consumer that would then have to
+ * know which upstream it is reading.
+ */
+const githubScope = (value: unknown): string | undefined => {
+	if (typeof value !== "string") return undefined;
+	const named = [
+		...new Set(
+			value
+				.split(/[\s,]+/)
+				.map((entry) => entry.trim())
+				.filter((entry) => entry !== ""),
+		),
+	];
+	return named.length > 0 ? named.join(" ") : undefined;
+};
+
 export function createGithubProvider(config: GithubProviderConfig): GithubProvider {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
 		throw new Error(`GitHub federation "github" requires clientId, clientSecret, and callbackURL`);
@@ -195,7 +217,12 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				// from the request, so what it says here is what it granted. GitHub
 				// always states it. Dropping it left the route to infer consent from
 				// the request instead (#647).
-				scope: typeof tokens.scope === "string" ? tokens.scope : undefined,
+				//
+				// Comma-delimited, against §3.3's space-delimited list: GitHub
+				// answers `read:user,user:email`. Passed through as it arrives, the
+				// whole string reads as ONE scope everywhere downstream, and a
+				// client asking whether `user:email` was granted is told no.
+				scope: githubScope(tokens.scope),
 				// GitHub OAuth Apps do not issue refresh tokens.
 				refreshToken: undefined,
 				// GitHub OAuth Apps classic tokens have no finite expiry; the new-style

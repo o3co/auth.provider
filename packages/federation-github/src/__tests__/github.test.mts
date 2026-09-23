@@ -81,6 +81,54 @@ describe("createGithubProvider on openid-client", () => {
 		expect(params.scope).toBe("read:user user:email");
 	});
 
+	it.each([
+		["comma-delimited, as GitHub sends it", "read:user,user:email", "read:user user:email"],
+		["with spaces after the commas", "read:user, user:email", "read:user user:email"],
+		["a single scope", "read:user", "read:user"],
+		["repeated", "read:user,read:user", "read:user"],
+	])(
+		"answers a space-delimited granted scope when GitHub sends it %s (#647)",
+		async (_label, answered, expected) => {
+			// RFC 6749 section 3.3 makes a scope a SPACE-delimited list, and GitHub
+			// answers with commas. Passed through as it arrives, the whole string
+			// reads as one scope everywhere downstream, and a client asking whether
+			// `user:email` was granted is told no.
+			mockAuthorizationCodeGrant.mockResolvedValueOnce({
+				access_token: "gh-at",
+				expires_in: 28800,
+				scope: answered,
+			});
+			mockFetchUserInfo.mockResolvedValueOnce({ id: 1, login: "alice" });
+			mockFetchProtectedResource.mockResolvedValueOnce({
+				json: async () => [{ email: "a@b.c", primary: true, verified: true }],
+			});
+			const p = createGithubProvider(baseConfig);
+			const profile = await p.exchangeCode({
+				code: "gh-code",
+				codeVerifier: "v",
+				redirectUri: baseConfig.callbackURL,
+			});
+			expect(profile.scope).toBe(expected);
+		},
+	);
+
+	it("answers no scope when GitHub names none (#647)", async () => {
+		// Silence is read as "as requested" by the route that stores it, so the
+		// adapter must not invent an empty string here.
+		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-at", scope: "  " });
+		mockFetchUserInfo.mockResolvedValueOnce({ id: 1, login: "alice" });
+		mockFetchProtectedResource.mockResolvedValueOnce({
+			json: async () => [{ email: "a@b.c", primary: true, verified: true }],
+		});
+		const p = createGithubProvider(baseConfig);
+		const profile = await p.exchangeCode({
+			code: "gh-code",
+			codeVerifier: "v",
+			redirectUri: baseConfig.callbackURL,
+		});
+		expect(profile.scope).toBeUndefined();
+	});
+
 	it("exchangeCode composes authorizationCodeGrant + fetchUserInfo + /user/emails into a FederationProfile", async () => {
 		mockAuthorizationCodeGrant.mockResolvedValueOnce({
 			access_token: "gh-at",
