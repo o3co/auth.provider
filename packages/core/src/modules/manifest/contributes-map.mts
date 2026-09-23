@@ -17,10 +17,12 @@
 import type { RequestHandler } from "express";
 import type { AuditSink } from "../../audit/types.mjs";
 import type { OidcDiscoveryContribution } from "../../discovery/types.mjs";
+import type { FederationProvider as ConcreteFederationProvider } from "../../federations/types.mjs";
 import type { GrantHandler as ConcreteGrantHandler } from "../../grants/types.mjs";
 import type { MfaProvider } from "../../mfa/types.mjs";
 import type { TokenBindingMechanism } from "../../middleware/tokenBinding.mjs";
 import type { GrantPolicyHook } from "../../policy/types.mjs";
+import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../../token-exchange/validator.mjs";
 import type { ProviderDeps } from "./provider.mjs";
 import type { RouteContributionEntry } from "./route-contribution.mjs";
 
@@ -39,8 +41,8 @@ import type { RouteContributionEntry } from "./route-contribution.mjs";
 //   AuditHook                   — AuditSink interface at packages/core/src/audit/types.mts (AS-M1)
 //   MfaFactor                   — MfaProvider interface at packages/core/src/mfa/types.mts (AS-M1)
 //   GrantPolicyHookContribution — GrantPolicyHook interface at packages/core/src/policy/types.mts (AS-M1, AS-7 collision rename)
-//   FederationProvider          — packages/session/src/federations/types.mts (Phase F deferred — circular import)
-//   ExchangeTokenValidator      — packages/oauth-token-exchange/src/validator/types.mts (Phase F deferred — circular import)
+//   FederationProvider          — packages/core/src/federations/types.mts (#626 P1)
+//   ExchangeTokenValidator      — packages/core/src/token-exchange/validator.mts (#626 P1)
 //
 // Canonical (no-suffix) interface names are used for the substitution
 // RHS. The v0.5.1-era `*Base` deprecation aliases were removed
@@ -54,20 +56,20 @@ import type { RouteContributionEntry } from "./route-contribution.mjs";
 export type GrantHandler = ConcreteGrantHandler;
 
 /**
- * Type produced by a `FederationFactory<Deps>` contribution. Still
- * `unknown` pending Phase F: substituting with `FederationProvider` from
- * `packages/session/src/federations/types.mts` requires resolving the
- * core ↔ session circular package import.
+ * Type produced by a `FederationFactory<Deps>` contribution: the adapter
+ * port itself (#626 P1). It was `unknown` while the contract lived in
+ * `packages/session`, which core may not import; the contract lives in
+ * `../../federations/types.mts` now, so registration and use share one type.
  */
-export type FederationProvider = unknown;
+export type FederationProvider = ConcreteFederationProvider;
 
 /**
- * Type produced by an `ExchangeTokenValidatorFactory<Deps>` contribution.
- * Still `unknown` pending Phase F: substituting with `ExchangeTokenValidator`
- * from `packages/oauth-token-exchange/src/validator/types.mts` requires
- * resolving the core ↔ oauth-token-exchange circular package import.
+ * Type produced by an `ExchangeTokenValidatorFactory<Deps>` contribution: the
+ * validator contract itself (#626 P1). It was `unknown` while the contract
+ * lived in `packages/oauth-token-exchange`, which core may not import; the
+ * contract lives in `../../token-exchange/validator.mts` now.
  */
-export type ExchangeTokenValidator = unknown;
+export type ExchangeTokenValidator = ConcreteExchangeTokenValidator;
 
 /**
  * Type produced by an `MfaFactorFactory<Deps>` contribution. Substituted
@@ -97,12 +99,30 @@ export type GrantPolicyHookContribution = GrantPolicyHook;
 
 // Per-kind factory types — each follows `(deps: Deps) => Value` per A2-α §4.1.
 
-export type GrantFactory<Deps> = (deps: Deps) => GrantHandler;
-export type FederationFactory<Deps> = (deps: Deps) => FederationProvider;
-export type ExchangeTokenValidatorFactory<Deps> = (deps: Deps) => ExchangeTokenValidator;
-export type MfaFactorFactory<Deps> = (deps: Deps) => MfaFactor;
-export type AuditHookFactory<Deps> = (deps: Deps) => AuditHook;
-export type GrantPolicyHookFactory<Deps> = (deps: Deps) => GrantPolicyHookContribution;
+/**
+ * What a contribution factory may answer with: the value, or a promise of it.
+ *
+ * `applyContributions` awaits every factory result (`value = await
+ * factory(deps)`), and always has — a federation adapter that discovers its
+ * issuer metadata at boot has no other shape available to it. The declared
+ * types said synchronous only, which nothing checked while the two
+ * cross-package kinds were `unknown`; substituting them (#626 P1) turned that
+ * into a compile error against `federation-oidc`, whose factory is
+ * legitimately `async`. The contract says what boot accepts.
+ *
+ * It does not widen what a consumer reads: the collector holds the awaited
+ * value, so `federationProviders` is still a map of `FederationProvider`.
+ */
+export type Contributed<T> = T | Promise<T>;
+
+export type GrantFactory<Deps> = (deps: Deps) => Contributed<GrantHandler>;
+export type FederationFactory<Deps> = (deps: Deps) => Contributed<FederationProvider>;
+export type ExchangeTokenValidatorFactory<Deps> = (
+	deps: Deps,
+) => Contributed<ExchangeTokenValidator>;
+export type MfaFactorFactory<Deps> = (deps: Deps) => Contributed<MfaFactor>;
+export type AuditHookFactory<Deps> = (deps: Deps) => Contributed<AuditHook>;
+export type GrantPolicyHookFactory<Deps> = (deps: Deps) => Contributed<GrantPolicyHookContribution>;
 
 /**
  * Factory type for the `discoveryMetadata` contribution kind.

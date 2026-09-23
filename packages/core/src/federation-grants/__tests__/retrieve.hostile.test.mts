@@ -15,10 +15,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	type FederationGrantRefreshedToken,
-	retrieveFederationGrantToken,
-} from "#/federation-grants/retrieve.mjs";
+import { retrieveFederationGrantToken } from "#/federation-grants/retrieve.mjs";
+import type { DelegatedTokens } from "#/federations/types.mjs";
 import {
 	at,
 	connection,
@@ -332,17 +330,16 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 	});
 
 	describe("an upstream answer that is not what an adapter should report", () => {
-		const garbage: Array<[string, Partial<Record<keyof FederationGrantRefreshedToken, unknown>>]> =
-			[
-				["an expiry that is a number", { expiresAt: DUE.getTime() + HOUR }],
-				["an expiry that is a string", { expiresAt: "2026-09-18T01:59:45.000Z" }],
-				["scopes as an array", { scope: ["openid", "calendar.read"] }],
-				["no access token", { accessToken: undefined }],
-				["an empty access token", { accessToken: "" }],
-				["an access token that is not a string", { accessToken: 42 }],
-				["a lifetime that is a string", { expiresIn: "3600" }],
-				["a token type that is not a string", { tokenType: 7 }],
-			];
+		const garbage: Array<[string, Partial<Record<keyof DelegatedTokens, unknown>>]> = [
+			["an expiry that is a number", { expiresAt: DUE.getTime() + HOUR }],
+			["an expiry that is a string", { expiresAt: "2026-09-18T01:59:45.000Z" }],
+			["scopes as an array", { scope: ["openid", "calendar.read"] }],
+			["no access token", { accessToken: undefined }],
+			["an empty access token", { accessToken: "" }],
+			["an access token that is not a string", { accessToken: 42 }],
+			["a lifetime that is a string", { expiresIn: "3600" }],
+			["a token type that is not a string", { tokenType: 7 }],
+		];
 
 		for (const [what, over] of garbage) {
 			it(`${what}: the rotated refresh token is kept all the same, nothing is disclosed, and a marker is left`, async () => {
@@ -351,7 +348,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				h.refresh.mockResolvedValue({
 					...refreshed("rotated", GONE),
 					...over,
-				} as FederationGrantRefreshedToken);
+				} as DelegatedTokens);
 
 				expect(await retrieve()).toStrictEqual({
 					ok: false,
@@ -375,7 +372,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				get accessToken(): string {
 					throw new Error("a getter that throws");
 				},
-			} as FederationGrantRefreshedToken);
+			} as DelegatedTokens);
 			expect(await retrieve()).toMatchObject({
 				code: "upstream_token_ineligible",
 				reason: "malformed_token_response",
@@ -390,7 +387,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				get refreshToken(): string {
 					throw new Error("a getter that throws");
 				},
-			} as FederationGrantRefreshedToken);
+			} as DelegatedTokens);
 			expect(await retrieve()).toMatchObject({ reason: "malformed_token_response" });
 			expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-rotated` });
 		});
@@ -399,7 +396,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			await h.seed();
 			setNow(GONE);
 			for (const answer of [undefined, null, "at-1", 42]) {
-				h.refresh.mockResolvedValueOnce(answer as unknown as FederationGrantRefreshedToken);
+				h.refresh.mockResolvedValueOnce(answer as unknown as DelegatedTokens);
 				expect(await retrieve()).toMatchObject({
 					code: "upstream_token_ineligible",
 					reason: "malformed_token_response",
@@ -418,7 +415,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 				h.refresh.mockResolvedValueOnce({
 					...refreshed("1", now()),
 					refreshToken,
-				} as unknown as FederationGrantRefreshedToken);
+				} as unknown as DelegatedTokens);
 				expect((await retrieve()).ok).toBe(true);
 				expect((await stored())?.refreshToken).toBe(SECRET);
 				setNow(new Date(now().getTime() + HOUR));
@@ -438,7 +435,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		it("dates a token inside the call even when the adapter's expiry is in the past", async () => {
 			await h.seed();
 			setNow(DUE);
-			let resolve!: (value: FederationGrantRefreshedToken) => void;
+			let resolve!: (value: DelegatedTokens) => void;
 			h.refresh.mockReturnValueOnce(
 				new Promise((res) => {
 					resolve = res;
@@ -478,7 +475,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 		it("applies on the look under the lock too: a waiter does not rotate again right after the holder", async () => {
 			await h.seed();
 			setNow(at(40 * MIN));
-			let resolve!: (value: FederationGrantRefreshedToken) => void;
+			let resolve!: (value: DelegatedTokens) => void;
 			h.refresh.mockReturnValueOnce(
 				new Promise((res) => {
 					resolve = res;
@@ -500,7 +497,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			// took three to answer.
 			await h.seed();
 			setNow(DUE);
-			let resolve!: (value: FederationGrantRefreshedToken) => void;
+			let resolve!: (value: DelegatedTokens) => void;
 			h.refresh.mockReturnValueOnce(
 				new Promise((res) => {
 					resolve = res;
@@ -869,7 +866,7 @@ describe("retrieveFederationGrantToken — dependencies and upstreams that misbe
 			// this call tried to store includes its marker, and that one is dated.
 			const grant = await h.seed();
 			setNow(GONE);
-			h.refresh.mockResolvedValue({ refreshToken: SECRET } as FederationGrantRefreshedToken);
+			h.refresh.mockResolvedValue({ refreshToken: SECRET } as DelegatedTokens);
 			const real = h.store.replaceCredentials.bind(h.store);
 			vi.spyOn(h.store, "replaceCredentials").mockImplementationOnce(async () => {
 				await real({

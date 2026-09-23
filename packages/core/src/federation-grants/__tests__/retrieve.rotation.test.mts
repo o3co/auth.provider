@@ -15,10 +15,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	type FederationGrantRefreshedToken,
-	retrieveFederationGrantToken,
-} from "#/federation-grants/retrieve.mjs";
+import { retrieveFederationGrantToken } from "#/federation-grants/retrieve.mjs";
+import type { DelegatedTokens } from "#/federations/types.mjs";
 import {
 	at,
 	connection,
@@ -227,15 +225,15 @@ describe("retrieveFederationGrantToken — when a token is refreshed, and what a
 			h.refresh.mockResolvedValue({
 				...refreshed("rotated", now()),
 				accessToken: undefined,
-			} as FederationGrantRefreshedToken);
+			} as DelegatedTokens);
 			expect(await retrieve()).toMatchObject({ ok: false, code: "upstream_token_ineligible" });
 			expect(await stored()).toStrictEqual({ refreshToken: `${SECRET}-rotated` });
 		});
 	});
 
 	describe("a refresh that brought nothing usable", () => {
-		const garbage = (tag: string): FederationGrantRefreshedToken =>
-			({ ...refreshed(tag, now()), accessToken: undefined }) as FederationGrantRefreshedToken;
+		const garbage = (tag: string): DelegatedTokens =>
+			({ ...refreshed(tag, now()), accessToken: undefined }) as DelegatedTokens;
 
 		it("does not cost the grant the healthy token it had", async () => {
 			// Forty minutes in, a scope the token lacks is asked for: a refresh, and

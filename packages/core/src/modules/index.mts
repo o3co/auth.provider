@@ -17,8 +17,4 @@
 export * from "./manifest/index.mjs";
 
 // PathResolver remains — it is the type for `bootstrapComponents.pathResolver`.
-// FederationProviderHandle remains — it is the structural narrowing of the
-// `federationProviders` synthetic key for core-adjacent route consumers
-// (oauth/logout + oauth/federationToken). The legacy v0.4.x `LegacyModule` /
-// `ModuleContext` types were deleted in Phase 9 (A2-γ caller migration).
-export type { FederationProviderHandle, PathResolver } from "./types.mjs";
+export type { PathResolver } from "./types.mjs";

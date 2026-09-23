@@ -21,7 +21,6 @@ import {
 } from "#/federation-grants/memory.mjs";
 import type {
 	FederationGrantAuditEvent,
-	FederationGrantRefreshedToken,
 	FederationGrantRefresher,
 	RetrieveFederationGrantTokenDeps,
 	RetrieveFederationGrantTokenRequest,
@@ -35,6 +34,7 @@ import type {
 	FederationGrantConnection,
 	FederationGrantCredentials,
 } from "#/federation-grants/types.mjs";
+import type { DelegatedTokens } from "#/federations/types.mjs";
 
 export const MIN = 60_000;
 export const HOUR = 3_600_000;
@@ -106,8 +106,8 @@ export const request: RetrieveFederationGrantTokenRequest = {
 export const refreshed = (
 	tag: string,
 	obtained: Date,
-	over: Partial<FederationGrantRefreshedToken> = {},
-): FederationGrantRefreshedToken => ({
+	over: Partial<DelegatedTokens> = {},
+): DelegatedTokens => ({
 	accessToken: `at-${tag}`,
 	refreshToken: `${SECRET}-${tag}`,
 	expiresIn: 3600,
