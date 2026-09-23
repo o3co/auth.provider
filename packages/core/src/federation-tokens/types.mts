@@ -29,14 +29,17 @@ export interface FederationTokens {
 	 * How the upstream said this token is presented, in the upstream's own
 	 * spelling (oauth4webapi lower-cases it). Written at link time and moved by
 	 * a refresh that names one; carried verbatim, so a value that is not a token
-	 * type reaches the consumer rather than being erased into silence.
+	 * type reaches the consumer rather than being erased into silence. An
+	 * adapter that named something which is not a string is recorded as `""`,
+	 * which this field can hold and the consumer already refuses.
 	 *
-	 * Absent means the adapter named none — every bundled adapter but
-	 * `federation-oidc`, and every record written before #645. RFC 6749 §5.1
-	 * makes `token_type` REQUIRED, so `POST /oauth/federation/:name/token` reads
-	 * absence as `Bearer` and refuses anything present that is not a bearer
-	 * spelling: a sender-constrained token cannot be handed to a caller that
-	 * holds no proof key.
+	 * ABSENT — and only absent — means the adapter named none: every bundled
+	 * adapter but `federation-oidc`, and every record written before #645. RFC
+	 * 6749 §5.1 makes `token_type` REQUIRED, so `POST /oauth/federation/:name/
+	 * token` reads that as `Bearer` and refuses everything else that is not a
+	 * bearer spelling, `null` included: a sender-constrained token cannot be
+	 * handed to a caller that holds no proof key, and a malformed record is not
+	 * a second spelling of silence.
 	 */
 	readonly tokenType?: string;
 	/**

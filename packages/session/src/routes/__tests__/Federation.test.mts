@@ -655,6 +655,11 @@ describe("account linking across federations (#482)", () => {
 			// silence as Bearer — which is the behaviour #645 exists to stop.
 			["a value that is not a token type", "DPoP ", "DPoP "],
 			["an empty string, which is not silence", "", ""],
+			// The field holds a string, so a non-string cannot be kept as it was.
+			// `""` records that the adapter named something unusable without
+			// inventing what — and the disclosure point refuses `""` already.
+			// Erasing it would make the route read Bearer.
+			["a non-string, normalised to the empty string", 7, ""],
 		])("records %s at link time (#645)", async (_label, named, expected) => {
 			// Recorded, not judged. A login does not need the upstream's access
 			// token, so a type this provider cannot hand on must not cost the user
@@ -662,17 +667,23 @@ describe("account linking across federations (#482)", () => {
 			// disclosure happens and where the refusal belongs. Dropping it here
 			// is what made #645 unanswerable from the record.
 			const typed = makeFakeProvider({
-				exchangeCode: vi.fn(async () => ({
-					issuer: "https://idp.example.com",
-					sub: "external-42",
-					email: "u@example.com",
-					accessToken: "at",
-					refreshToken: "rt",
-					idToken: "it",
-					expiresAt: new Date(Date.now() + 3_600_000),
-					scope: "openid email",
-					tokenType: named,
-				})),
+				// Cast because the port types `tokenType` as a string: a number
+				// reaches here only from an adapter that ignores the contract,
+				// which is one of the cases under test (D5).
+				exchangeCode: vi.fn(
+					async () =>
+						({
+							issuer: "https://idp.example.com",
+							sub: "external-42",
+							email: "u@example.com",
+							accessToken: "at",
+							refreshToken: "rt",
+							idToken: "it",
+							expiresAt: new Date(Date.now() + 3_600_000),
+							scope: "openid email",
+							tokenType: named,
+						}) as unknown as FederationProfile,
+				),
 			});
 			const fts = makeFederationTokenStore();
 			const { app } = buildCallbackApp({
@@ -695,34 +706,22 @@ describe("account linking across federations (#482)", () => {
 			);
 		});
 
-		it.each([
-			["names none — every bundled adapter but federation-oidc", undefined],
-			// The field holds a string. A non-string is nonsense rather than a
-			// sender constraint being dropped, so it is the one reading that
-			// falls back to silence.
-			["names something that is not a string", 7],
-		])("records no type when the adapter %s (#645)", async (_label, named) => {
-			// Absent is what the disclosure point reads as Bearer: RFC 6749 §5.1
-			// makes `token_type` REQUIRED, so silence is an adapter written before
-			// the field rather than an upstream meaning something else.
+		it("records no type when the adapter names none (#645)", async () => {
+			// Absent is the ONLY reading the disclosure point takes as Bearer:
+			// RFC 6749 §5.1 makes `token_type` REQUIRED, so silence is an adapter
+			// written before the field rather than an upstream meaning something
+			// else. Every bundled adapter but `federation-oidc` is one of those.
 			const untyped = makeFakeProvider({
-				// Cast because the port types `tokenType` as a string: a number
-				// reaches here only from an adapter that ignores the contract,
-				// which is the case under test (D5).
-				exchangeCode: vi.fn(
-					async () =>
-						({
-							issuer: "https://idp.example.com",
-							sub: "external-42",
-							email: "u@example.com",
-							accessToken: "at",
-							refreshToken: "rt",
-							idToken: "it",
-							expiresAt: new Date(Date.now() + 3_600_000),
-							scope: "openid email",
-							...(named === undefined ? {} : { tokenType: named }),
-						}) as unknown as FederationProfile,
-				),
+				exchangeCode: vi.fn(async () => ({
+					issuer: "https://idp.example.com",
+					sub: "external-42",
+					email: "u@example.com",
+					accessToken: "at",
+					refreshToken: "rt",
+					idToken: "it",
+					expiresAt: new Date(Date.now() + 3_600_000),
+					scope: "openid email",
+				})),
 			});
 			const fts = makeFederationTokenStore();
 			const { app } = buildCallbackApp({

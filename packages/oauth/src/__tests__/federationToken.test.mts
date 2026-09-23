@@ -2454,7 +2454,6 @@ describe("POST /oauth/federation/:name/token", () => {
 
 		it.each([
 			["a record written before #645", undefined],
-			["a record whose store serialised silence as null", null],
 			["the spelling oauth4webapi reports", "bearer"],
 			["the spelling RFC 6750 §2.1 uses", "Bearer"],
 			["an upstream shouting it", "BEARER"],
@@ -2517,6 +2516,11 @@ describe("POST /oauth/federation/:name/token", () => {
 			["a number", 7],
 			["an array", ["DPoP"]],
 			["an object", { toString: () => "Bearer" }],
+			// Not a second spelling of absence: a JSON round-trip DROPS an
+			// undefined field rather than writing `null`, so a stored `null` is a
+			// store writing one on purpose — and the built-in Redis codec already
+			// refuses the record that holds it.
+			["null", null],
 		])("refuses to hand on a record whose type is %s", async (_label, tokenType) => {
 			// A store is another thing this route does not own (D5). A value that
 			// is not a string cannot be a bearer spelling, so it is refused rather

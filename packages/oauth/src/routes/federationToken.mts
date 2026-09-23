@@ -89,22 +89,28 @@ const UPSTREAM_INELIGIBLE_RETRY_AFTER_SECONDS = 300;
  * drops a constraint the upstream imposed and hands out a credential that only
  * looks usable.
  *
- * Only silence is admitted without being read. RFC 6749 §5.1 makes
+ * Only an ABSENT field is admitted without being read. RFC 6749 §5.1 makes
  * `token_type` REQUIRED, so a record that names none was written from an
  * adapter that predates `FederationProfile` carrying it — every bundled
  * adapter but `federation-oidc` — rather than by an upstream meaning something
  * else. Every record written before #645 is silent too, and this is what keeps
- * them working. `null` is the same silence arriving through a store that
- * serialises through JSON, which has no `undefined`.
+ * them working.
  *
  * Everything else is READ, including a value that is not a token type at all.
  * A store is another thing this route does not own (D5), and the two must not
  * collapse: reading `"DPoP "`, `""` or a number as silence would answer
  * `Bearer` for it, which is the behaviour this issue exists to stop, reached
  * through a narrower door.
+ *
+ * `null` is one of those, not a second spelling of absence. Round-tripping a
+ * record through JSON drops an `undefined` field rather than turning it into
+ * `null`, so a stored `null` is a store writing one on purpose, and the
+ * built-in Redis codec already refuses the record that holds it
+ * (`isOptionalString`). Admitting it here would be the one reading that let a
+ * malformed record answer 200.
  */
 const mayDiscloseTokenType = (stored: unknown): boolean => {
-	if (stored === undefined || stored === null) return true;
+	if (stored === undefined) return true;
 	return isBearerTokenType(stored);
 };
 

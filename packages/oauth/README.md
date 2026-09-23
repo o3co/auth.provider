@@ -506,13 +506,23 @@ on its first refresh after deploy, for no gain. The sibling
 offline-delegation route does echo it, deliberately — it had no clients when
 that was decided, and this one does.
 
-A connection whose adapter names no type at all is answered `Bearer`: §5.1
-makes the field REQUIRED, so silence is an adapter written before
+A connection whose adapter names no type **at all** is answered `Bearer`: §5.1
+makes the field REQUIRED, so an absent field is an adapter written before
 `FederationProfile` carried it — which is every bundled adapter but
 `federation-oidc` — rather than an upstream meaning something else. In practice
 the refusal therefore binds only on `federation-oidc` connections today;
 `federation-google`, `-github` and `-apple` forward no type, and all three
 issue bearer tokens.
+
+Absence is the only reading treated that way. A stored value that is not a
+bearer spelling is refused whatever it is — `"DPoP "`, `""`, `null`, a number —
+because a store is one more thing this route does not own, and reading a
+malformed record as silence would answer `Bearer` for it. A JSON round-trip
+drops an absent field rather than writing `null`, so a stored `null` is a store
+writing one deliberately; the built-in Redis codec refuses the record that
+holds it. At the other end, an adapter that names something which is not a
+string is recorded as `""` rather than dropped, so the refusal has something to
+refuse.
 
 `scope` is what the stored connection holds, which since #647 is recorded when
 the federation is linked rather than left empty. It is bounded by what the user
