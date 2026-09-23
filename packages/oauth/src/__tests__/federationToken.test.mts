@@ -1403,6 +1403,64 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(written.scope).toBe("openid");
 		});
 
+		it.each([
+			["a tab", "\t"],
+			["a newline", "\n"],
+			["three spaces", "   "],
+		])("reads %s as an answer it cannot use, not as a scope by that name", async (_l, scope) => {
+			// RFC 6749 section 3.3's scope-token excludes whitespace, so a tab is
+			// not a scope named tab. Read as one it would be stored as the token's
+			// scope and then fail every later comparison.
+			const narrowed = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				scope: "openid",
+				grantedScope: "openid email",
+			};
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({ accessToken: "new-at", expiresIn: 3600, scope }),
+			} as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({ get: vi.fn().mockResolvedValue(narrowed) });
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(res.body.scope).toBe("openid");
+		});
+
+		it("reads scopes separated by a tab as separate scopes (#647)", async () => {
+			const narrowed = {
+				...baseFedTokens,
+				expiresAt: new Date(Date.now() - 1000),
+				scope: "openid",
+				grantedScope: "openid email",
+			};
+			const refreshProvider = {
+				...federationBase("google"),
+				refreshToken: vi
+					.fn()
+					.mockResolvedValue({ accessToken: "new-at", expiresIn: 3600, scope: "openid\temail" }),
+			} as unknown as FederationProvider;
+			const fedTokenStore = makeFedTokenStore({ get: vi.fn().mockResolvedValue(narrowed) });
+			const app = buildApp({
+				fedTokenStore,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", refreshProvider]]),
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			// Two scopes, both within the grant — not one scope with a tab in its name.
+			expect(res.body.scope).toBe("openid email");
+		});
+
 		it("stores a repeated entry once (#647)", async () => {
 			const narrowed = {
 				...baseFedTokens,

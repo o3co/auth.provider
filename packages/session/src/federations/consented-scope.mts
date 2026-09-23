@@ -79,5 +79,21 @@ export function consentedScope(
 	return asked.length > 0 ? asked.join(" ") : undefined;
 }
 
+const SCOPE_TOKEN = /^[\x21\x23-\x5B\x5D-\x7E]+$/;
+
+/**
+ * The scope-tokens a value names, de-duplicated, or none.
+ *
+ * RFC 6749 §3.3 defines the grammar, and it is narrower than "split on a
+ * space": `scope-token = 1*( %x21 / %x23-5B / %x5D-7E )` — printable ASCII
+ * without the space, the double quote or the backslash. So splitting on a
+ * single space alone reads `"\t"` as a scope named tab, and `"openid\temail"`
+ * as one scope with a tab in the middle of its name. Both then travel as the
+ * ceiling a connection is judged against for the rest of its life.
+ *
+ * Split on any whitespace, and keep only what the grammar admits.
+ */
 const parse = (value: unknown): readonly string[] =>
-	typeof value === "string" ? [...new Set(value.split(" ").filter((entry) => entry !== ""))] : [];
+	typeof value === "string"
+		? [...new Set(value.split(/\s+/).filter((entry) => SCOPE_TOKEN.test(entry)))]
+		: [];

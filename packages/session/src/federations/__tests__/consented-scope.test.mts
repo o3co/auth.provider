@@ -47,6 +47,35 @@ describe("consentedScope (#647)", () => {
 		expect(consentedScope(answered, ["openid"])).toBeUndefined();
 	});
 
+	it.each([
+		["one space", " "],
+		["two spaces", "  "],
+		["three spaces", "   "],
+		["a tab", "\t"],
+		["a newline", "\n"],
+		["mixed whitespace", " \t\n "],
+		["a backslash, which the grammar excludes", "a\\b"],
+	])("names nothing for %s", (_label, answered) => {
+		// RFC 6749 section 3.3 is narrower than "split on a space":
+		// `scope-token = 1*( %x21 / %x23-5B / %x5D-7E )`, printable ASCII without
+		// the space, the double quote or the backslash. Splitting on a single
+		// space alone reads a tab as a scope NAMED tab, and that value then
+		// travels as the ceiling for the life of the connection.
+		expect(consentedScope(answered, [])).toBeUndefined();
+	});
+
+	it.each([
+		["a tab between them", "openid\temail"],
+		["a newline between them", "openid\nemail"],
+		["several spaces between them", "openid   email"],
+	])("reads two scopes separated by %s as two", (_label, answered) => {
+		expect(consentedScope(answered, [])).toBe("openid email");
+	});
+
+	it("drops a token the grammar excludes and keeps the rest", () => {
+		expect(consentedScope('openid "quoted"', [])).toBe("openid");
+	});
+
 	it("falls back only when the field is not there at all", () => {
 		expect(consentedScope(undefined, ["openid"])).toBe("openid");
 	});

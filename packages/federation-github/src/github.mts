@@ -79,13 +79,11 @@ const githubScope = (value: unknown): string | undefined => {
 	// scope as consent. Present-but-empty travels as the empty string.
 	if (value === undefined) return undefined;
 	if (typeof value !== "string") return "";
+	// Split on GitHub's comma as well as on whitespace, and keep only what
+	// RFC 6749 §3.3 admits as a scope-token: printable ASCII without the space,
+	// the double quote or the backslash. A tab is not a scope named tab.
 	const named = [
-		...new Set(
-			value
-				.split(/[\s,]+/)
-				.map((entry) => entry.trim())
-				.filter((entry) => entry !== ""),
-		),
+		...new Set(value.split(/[\s,]+/).filter((entry) => /^[\x21\x23-\x5B\x5D-\x7E]+$/.test(entry))),
 	];
 	return named.join(" ");
 };
