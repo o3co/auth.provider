@@ -126,13 +126,24 @@ const renewal = (over: Partial<FederationGrantAuthorization> = {}) =>
 const noUsage = { lastUsedAt: undefined, ineligible: undefined, refreshFailure: undefined };
 
 /**
- * A field's value on a grant that has to be there — `undefined` when it has
- * none, whether the key is named (an authorized grant, #626) or absent (one
- * never authorized). A missing grant is a failure, not a pass.
+ * A field's value on a record that has to be there, with the key held to the
+ * shape the port promises (#626): an authorized grant, and a failure stamp,
+ * NAME every field — `undefined` when there is none — and a grant never
+ * authorized has none of the authorization or usage keys at all. So a store
+ * that left a key out of an authorized grant fails here even when the value
+ * it would have held is `undefined`. A missing record is a failure, not a
+ * pass.
  */
-const fieldOf = (grant: object | null | undefined, key: string): unknown => {
-	if (grant === null || grant === undefined) throw new Error(`no grant to read ${key} from`);
-	return (grant as Record<string, unknown>)[key];
+const fieldOf = (record: object | null | undefined, key: string): unknown => {
+	if (record === null || record === undefined) throw new Error(`no record to read ${key} from`);
+	const fields = record as Record<string, unknown>;
+	const neverAuthorized = "status" in fields && fields.consent === undefined;
+	if (neverAuthorized) {
+		if (key in fields) throw new Error(`a grant never authorized names ${key}`);
+	} else if (!(key in fields)) {
+		throw new Error(`${key} is left out rather than named`);
+	}
+	return fields[key];
 };
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
