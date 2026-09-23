@@ -15,6 +15,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
+import { DiscoveryDocumentError } from "#/discovery/buildDocument.mjs";
 import { createLifecycleRegistrar } from "../../adapters/AdapterFactory.mjs";
 import { assembleApp } from "../assemble-app.mjs";
 import type { CleanupRecord, CollectedRouteContribution, FrozenWorld } from "../types.mjs";
@@ -682,5 +683,169 @@ describe("assembleApp — 17. listen() wraps router in Express app", () => {
 			});
 			await handle.dispose();
 		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 18. discovery: only the document's own error is converted (#626 F4)
+// ---------------------------------------------------------------------------
+
+describe("assembleApp — 18. discovery: only the document's own error is converted (#626 F4)", () => {
+	/** A contribution that assembles into a valid document. */
+	const providerRoot = {
+		providerRoot: true,
+		endpoints: {
+			authorization_endpoint: "/oauth/authorize",
+			token_endpoint: "/oauth/token",
+			jwks_uri: "/.well-known/jwks.json",
+		},
+		metadata: {
+			response_types_supported: ["code"],
+			subject_types_supported: ["public"],
+		},
+	};
+
+	const worldWith = (contribution: object): FrozenWorld => ({
+		...makeFrozenWorld([], [], {
+			config: { oauth: { jwt: { issuer: "https://auth.example.com" } } },
+			keyStore: { algorithm: "HS256" },
+		}),
+		registries: new Map([
+			["discoveryMetadata", { values: () => [contribution].values() }],
+		]) as FrozenWorld["registries"],
+	});
+
+	const thrownBy = (run: () => unknown): unknown => {
+		try {
+			run();
+		} catch (err) {
+			return err;
+		}
+		return undefined;
+	};
+
+	it("does not convert a router-factory failure, even one that is a DiscoveryDocumentError (#650)", () => {
+		// The conversion into `reason: "discovery-document-invalid"` is for a
+		// document that did not assemble. The router factory is called after
+		// the document is planned and outside the conversion, so what it throws
+		// arrives as itself — including an error whose TYPE says "document",
+		// which a `try` around the whole planner call would have relabelled.
+		const routerFailure = new DiscoveryDocumentError("thrown by the router factory");
+
+		const thrown = thrownBy(() =>
+			assembleApp(worldWith(providerRoot), {
+				express: {
+					Router: () => {
+						throw routerFailure;
+					},
+				},
+			}),
+		);
+
+		expect(thrown).toBe(routerFailure);
+		expect(thrown).not.toBeInstanceOf(BootError);
+	});
+
+	it.each([
+		[
+			"a key store whose algorithm getter throws",
+			(failure: Error): FrozenWorld => {
+				const base = worldWith(providerRoot);
+				return {
+					...base,
+					// Through `unknown`: a host's own object in the slot is not a
+					// `KeyStore`, which is the case under test.
+					components: Object.freeze({
+						...base.components,
+						keyStore: {
+							get algorithm(): never {
+								throw failure;
+							},
+						},
+					}) as unknown as FrozenWorld["components"],
+				};
+			},
+		],
+		[
+			"a collector whose values() throws",
+			(failure: Error): FrozenWorld => ({
+				...worldWith(providerRoot),
+				registries: new Map([
+					[
+						"discoveryMetadata",
+						{
+							values: () => {
+								throw failure;
+							},
+						},
+					],
+				]) as FrozenWorld["registries"],
+			}),
+		],
+	])("does not convert %s, even with a DiscoveryDocumentError (#650)", (_label, world) => {
+		// Host-supplied code outside the document builder. `assembleApp` has
+		// no `try` around the planner any more — only the builder's own error
+		// comes back as a value to convert — so what these throw arrives as
+		// itself whatever its type.
+		const failure = new DiscoveryDocumentError("thrown by host code, not by the builder");
+
+		const thrown = thrownBy(() =>
+			assembleApp(world(failure), { express: { Router: () => ({}) as never } }),
+		);
+
+		expect(thrown).toBe(failure);
+		expect(thrown).not.toBeInstanceOf(BootError);
+	});
+
+	it("does not iterate the collector when no issuer is configured (#650)", () => {
+		// Before #626 F4 the planner returned before touching the collector
+		// when the issuer was missing. Building the collector into an argument
+		// would run it first — host code, on a deployment that serves no
+		// document — so the call site passes a reader, and this pins that it
+		// is not called.
+		let iterated = false;
+		const world: FrozenWorld = {
+			...makeFrozenWorld([], [], {
+				config: { oauth: { jwt: {} } },
+				keyStore: { algorithm: "HS256" },
+			}),
+			registries: new Map([
+				[
+					"discoveryMetadata",
+					{
+						values: () => {
+							iterated = true;
+							throw new Error("the collector must not be read without an issuer");
+						},
+					},
+				],
+			]) as FrozenWorld["registries"],
+		};
+
+		expect(() =>
+			assembleApp(world, { express: { Router: () => makeMockRouter() as never } }),
+		).not.toThrow();
+		expect(iterated).toBe(false);
+	});
+
+	it("re-raises a failure while planning the document that is not the document's own error", () => {
+		// A contribution is host data. One whose getter throws fails inside
+		// document planning, and that is not a document that failed to
+		// validate — so it too arrives as itself rather than as a
+		// `discovery-document-invalid` boot error.
+		const readFailure = new TypeError("contribution getter failed");
+		const hostile = {
+			providerRoot: true,
+			get endpoints(): never {
+				throw readFailure;
+			},
+		};
+
+		const thrown = thrownBy(() =>
+			assembleApp(worldWith(hostile), { express: { Router: () => ({}) as never } }),
+		);
+
+		expect(thrown).toBe(readFailure);
+		expect(thrown).not.toBeInstanceOf(BootError);
 	});
 });

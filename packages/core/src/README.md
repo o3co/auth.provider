@@ -6,14 +6,14 @@ Rules that hold for the whole tree (checked by grep at the time of writing; `__t
 
 - No import statement in `src/` names a sibling `@o3co/auth-provider-*` package; the only `@o3co/auth-provider-core` mentions in code are the `declare module` augmentations of `ComponentMap` (plus three test files that import the package by its own name, in four import statements). A contract a sibling package needs lives here; core never reaches back into a sibling. `redis` / `ioredis` are never imported, and `express` is an optional peer used as a type; where a router is built it is loaded lazily — `await import("express")` in `boot/create-app.mts`, with `createRequire` as the fallback in `boot/assemble-app.mts` and the mechanism in `jwks/module.mts`.
 - Product code never imports `testing/`; only `__tests__/` and downstream test code do.
-- Outside `__tests__/`, nothing imports `boot/` except the barrel (`index.mts`, `app.mts`), `discovery/planRoute.mts` (F4 in #626) and `testing/`; elsewhere, three wiring tests boot a real app through it and three adapter tests read `replicaUnsafeReason` from it.
+- Outside `__tests__/`, nothing imports `boot/` except the barrel (`index.mts`, `app.mts`) and `testing/`; elsewhere, three wiring tests boot a real app through it and three adapter tests read `replicaUnsafeReason` from it. `discovery/planRoute.mts` was the one exception until #626 F4 took `BootError` out of it.
 - A directory that owns a port also owns its in-process adapter, its `AdapterFactory` builder and, where there is one, the bundled `memory…Module` that provides the slot and declares `replicaSafety` (`boot/__tests__/replica-safety.drift.test.mts`).
 
 Package-level documentation is [`../README.md`](../README.md). Directories with a README of their own are linked below; a small directory is described here by its parent rather than given one.
 
 ## Contracts and domain rules
 
-The ports, the record types, and the rules every implementation must satisfy. These directories import one another's types plus `adapters/`, `config/`, `logging/`, `net/` and `security/`; none imports `routes/` or `testing/`, and two cross the line drawn here: `modules/manifest/contributes-map.mts` takes the `TokenBindingMechanism` type from `middleware/tokenBinding.mts` (type-only), and `discovery/planRoute.mts` takes `BootError` from `boot/types.mts` (a value; F4 in #626).
+The ports, the record types, and the rules every implementation must satisfy. These directories import one another's types plus `adapters/`, `config/`, `logging/`, `net/` and `security/`; none imports `routes/` or `testing/`, and one crosses the line drawn here: `modules/manifest/contributes-map.mts` takes the `TokenBindingMechanism` type from `middleware/tokenBinding.mts` (type-only). `discovery/planRoute.mts` was the second and the only one that took a VALUE — `BootError`, to raise one — until #626 F4 gave it its inputs instead and left the conversion to the stage that owns the taxonomy.
 
 | Directory | Owns | Must not |
 | --- | --- | --- |
@@ -40,7 +40,7 @@ The ports, the record types, and the rules every implementation must satisfy. Th
 | `keys/` | `KeyStore`, the local asymmetric / symmetric stores, `createRemoteSigningKeyStore`, the factory, the secret-entropy floor. | Bundle a vendor SDK. |
 | `jwt/` | `verifyJwt`, the one verifier every surface uses (`typ` pinning, denylist, subject boundary). | — |
 | `issuer/` | Canonical validation of `oauth.jwt.issuer`. | Fall back to a request's `Host`. |
-| `discovery/` | `OidcDiscoveryContribution`, `buildDiscoveryDocument`, `discoveryPathsFor`, and `planDiscoveryRoute` — the hook `boot/assemble-app.mts` calls. | Mount anything itself. |
+| `discovery/` | `OidcDiscoveryContribution`, `buildDiscoveryDocument`, `discoveryPathsFor`, and the two hooks `boot/assemble-app.mts` calls — `planDiscoveryDocument` (decides whether a document is served and assembles it, returning a document that failed to validate as a value) and `discoveryRouteFor` (builds the route that serves it) — as functions of values rather than of the boot world (#626 F4). | Mount anything itself, or import from `boot/`. |
 | `adapters/` | `AdapterFactory`, `BuilderContext`, `LifecycleRegistrar`. | — |
 | `logging/` | `Logger` (pino-compatible), `EventLogger`, `consoleLogger`. | — |
 | `errors/` | The RFC 6749 §5.2 error envelope. | — |

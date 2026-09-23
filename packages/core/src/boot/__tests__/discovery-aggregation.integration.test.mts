@@ -28,16 +28,22 @@
  *      merged across modules.
  *   2. no `providerRoot` contribution → the discovery route is NOT mounted (no
  *      document is served). Since #266 an issuer is always configured, so the
- *      contribution is the only remaining gate at boot; the planner's own
- *      issuer guard is pinned directly.
+ *      contribution is the only remaining gate at boot.
+ *
+ * What the planner does with values it is given is
+ * [`discovery/__tests__/planRoute.test.mts`](../../discovery/__tests__/planRoute.test.mts):
+ * since #626 F4 it takes them instead of the boot world, so it no longer needs
+ * a boot fixture to be tested at all. What is pinned HERE is the wiring — that
+ * `assembleApp` reads the right values out of its own world and converts the
+ * planner's error into its own taxonomy.
  */
 
 import express from "express";
+import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { DiscoveryDocumentError } from "../../discovery/buildDocument.mjs";
-import { planDiscoveryRoute } from "../../discovery/planRoute.mjs";
-import { createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
+import { createAsymmetricKeyStore, createSymmetricKeyStore } from "../../keys/KeyStore.mjs";
 import { defineModule } from "../../modules/index.mjs";
 import { createTestApp } from "../../testing/create-test-app.mjs";
 import { makeValidAppConfig } from "../../testing/fixtures/valid-config.mjs";
@@ -48,6 +54,31 @@ const keyStoreModule = defineModule({
 	name: "test:key-store",
 	provides: {
 		keyStore: () => createSymmetricKeyStore("test-secret-for-discovery-agg!!!"),
+	},
+});
+
+/**
+ * The same slot filled with an ES256 store, so the algorithm the document
+ * advertises is one no fixture hard-codes.
+ *
+ * Every other discovery fixture in the tree is HS256, which left
+ * `assembleApp`'s derivation — `keyStore.algorithm` → `signingAlgs` — pinned
+ * only against a constant: replacing it with the literal `["HS256"]` passed
+ * the whole suite. That derivation is the one reading #626 F4 MOVED, from the
+ * planner to the caller, so it is the one that has to be pinned on this side.
+ */
+const es256KeyStoreModule = defineModule({
+	name: "test:key-store-es256",
+	provides: {
+		keyStore: async () => {
+			const { privateKey, publicKey } = await generateKeyPair("ES256", { extractable: true });
+			return createAsymmetricKeyStore({
+				algorithm: "ES256",
+				kid: "es256-discovery",
+				privateKeyPem: await exportPKCS8(privateKey),
+				publicKeyPem: await exportSPKI(publicKey),
+			});
+		},
 	},
 });
 
@@ -141,6 +172,30 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		// Literal metadata merged as-is.
 		expect(res.body.response_types_supported).toEqual(["code"]);
 		expect(res.body.subject_types_supported).toEqual(["public"]);
+
+		await handle.dispose();
+	});
+
+	it("advertises the algorithm the key store in the slot actually uses, not HS256 (#626 F4)", async () => {
+		// `assembleApp` derives `signingAlgs` from `keyStore.algorithm` and hands
+		// it to the planner. Every other fixture here is HS256, so that
+		// derivation was indistinguishable from a constant — the planner's own
+		// unit test covers the parameter, which is the side the reading moved
+		// FROM. This covers the side it moved to.
+		const handle = await createTestApp({
+			modules: [oauthLikeModule, jwksLikeModule, es256KeyStoreModule],
+			bootstrapComponents: {
+				config: withIssuer("https://auth.example.com"),
+				pathResolver: (s) => s,
+			},
+		});
+		const app = express();
+		app.use(handle.router);
+
+		const res = await request(app).get("/.well-known/openid-configuration");
+
+		expect(res.status).toBe(200);
+		expect(res.body.id_token_signing_alg_values_supported).toEqual(["ES256"]);
 
 		await handle.dispose();
 	});
@@ -331,21 +386,6 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		).rejects.toMatchObject({ name: "BootError" });
 	});
 
-	it("issuer absent → the planner declines to synthesize the route", () => {
-		// #266 made `oauth.jwt.issuer` required at the schema boundary, so this
-		// state is no longer reachable through boot — every createTestApp config
-		// carries one. The planner keeps its own guard for callers that reach it
-		// with a config that never passed the schema, so it is pinned here
-		// directly rather than through an unreachable boot fixture.
-		const route = planDiscoveryRoute({
-			components: { config: { oauth: { jwt: {} } } },
-			registries: new Map(),
-			routerFactory: () => express.Router(),
-		});
-
-		expect(route).toBeNull();
-	});
-
 	it("issuer + providerRoot contributed but jwks_uri missing → boot fails fast (BootError wrapping DiscoveryDocumentError)", async () => {
 		// The migration's headline behavioral contract, pinned at the level it
 		// actually executes. Once a contribution declares `providerRoot: true`,
@@ -374,5 +414,15 @@ describe("discoveryMetadata — core aggregation in assembleApp", () => {
 		expect((err as BootError).reason).toBe("discovery-document-invalid");
 		expect((err as BootError).cause).toBeInstanceOf(DiscoveryDocumentError);
 		expect(String((err as BootError).message)).toMatch(/jwks_uri/);
+		// The whole shape, not only the fields an operator reads first: #626 F4
+		// moved this conversion from the discovery step into `assembleApp` and
+		// claims every field came across unchanged, so every field is pinned.
+		const cause = (err as BootError).cause as DiscoveryDocumentError;
+		expect((err as BootError).message).toBe(`assembleApp: ${cause.message}`);
+		expect((err as BootError).stage).toBe("assembleApp");
+		expect((err as BootError).details).toEqual({
+			reason: "discovery-document-invalid",
+			detail: cause.message,
+		});
 	});
 });
