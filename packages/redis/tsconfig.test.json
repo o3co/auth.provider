@@ -23,7 +23,10 @@
 		"__tests__/federation-grant-primitives.integration.test.mts",
 		"__tests__/federation-grant-store.integration.test.mts",
 		"__tests__/adapters.federation-grant-store.contract.mts",
-		"__tests__/internal/federation-grant-codec.test.mts"
+		"__tests__/internal/federation-grant-codec.test.mts",
+		"__tests__/redis.userSessionStore.test.mts",
+		"__tests__/userSessionStore.contract.mts",
+		"__tests__/user-session-contract-parity.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }

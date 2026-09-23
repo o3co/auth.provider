@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import Redis from "ioredis";
+import { Redis } from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
