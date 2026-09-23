@@ -236,7 +236,7 @@ Repository interfaces define the data access contract. Built-in in-memory implem
 
 #### Interfaces and types
 
-The ports are [`src/repositories/ClientRepository.mts`](src/repositories/ClientRepository.mts) (`findById`, `authenticate`; `PublicClient` is `Client` without `clientSecret`), [`src/repositories/UserRepository.mts`](src/repositories/UserRepository.mts) (`authenticate`, `authenticateByToken`, and the optional federated-identity link and lookup methods of #482 / #611) and [`src/repositories/CodeRepository.mts`](src/repositories/CodeRepository.mts) (`createCode`, `findByCode`, `consumeByCode` — the atomic single-use gate — and `removeByCode`). The records — `Client`, `User`, `CodeData`, `Code`, `TokenEndpointAuthMethod` — are in [`src/repositories/types.mts`](src/repositories/types.mts), where a field's semantics are documented once, on the field — except the three logout URI fields, which carry no doc there: `postLogoutRedirectUris` takes the registered-redirect-URI grammar of `allowedRedirectUris`, custom schemes included (#498), while `backchannelLogoutUri` and `frontchannelLogoutUri` are http/https only; that note sits beside the schema in [`src/repositories/InMemoryClientRepository.mts`](src/repositories/InMemoryClientRepository.mts). Since v0.5.1 `createCode` requires `client_id` and `redirect_uri`, and `Client.tokenEndpointAuthMethod` is required. The directory's responsibility map is [`src/repositories/README.md`](src/repositories/README.md).
+The ports are [`src/repositories/ClientRepository.mts`](src/repositories/ClientRepository.mts) (`findById`, `authenticate`; `PublicClient` is `Client` without `clientSecret`), [`src/repositories/UserRepository.mts`](src/repositories/UserRepository.mts) (`authenticate`, `authenticateByToken`, and the optional federated-identity link and lookup methods of #482 / #611) and [`src/repositories/CodeRepository.mts`](src/repositories/CodeRepository.mts) (`createCode`, `findByCode`, `consumeByCode` — the atomic single-use gate — and `removeByCode`). The records — `Client`, `User`, `CodeData`, `Code`, `TokenEndpointAuthMethod` — are in [`src/repositories/types.mts`](src/repositories/types.mts), where a field's semantics are documented once, on the field — except the three logout URI fields, which carry no doc there: `postLogoutRedirectUris` takes the registered-redirect-URI grammar of `allowedRedirectUris`, custom schemes included (#498), while `backchannelLogoutUri` and `frontchannelLogoutUri` are http/https only; that note sits beside the schema in [`src/repositories/InMemoryClientRepository.mts`](src/repositories/InMemoryClientRepository.mts). Since v0.5.1 `createCode` requires `client_id` and `redirect_uri`, and `Client.tokenEndpointAuthMethod` is required. Every other `Code` field is a required key holding `undefined` where nothing was recorded, and `createCode` takes `CreateCodeInput`, in which only `expiresIn` may be left out (#626). The directory's responsibility map is [`src/repositories/README.md`](src/repositories/README.md).
 
 #### Built-in implementations
 
@@ -551,12 +551,12 @@ Two optional component slots for federation + OIDC support, provided by a module
 
 Both stores are consumed by cascading revocation (F-3), id_token + `/userinfo` (F-4), logout (F-5) and `POST /oauth/federation/:name/token` (F-6) in `@o3co/auth-provider-oauth`. See the exported type signatures in `@o3co/auth-provider-core` (`UserSessionStore`, `FederationTokenStore`) for the full interface; the redis adapter's encryption contract is documented inline at its construction site.
 
-**F-3 consumers activated.** `CodeData` now carries two optional fields wired by the login paths:
+**F-3 consumers activated.** `CodeData` carries two fields wired by the login paths, each a required key that holds `undefined` when there is nothing to carry (#626):
 
-- `nonce?` — OIDC nonce forwarded from the authorization request, persisted on the code record for later `id_token`/`userinfo` use.
-- `sid?` — Session ID (`UserSession.sid`) written by the login handler and used to bind minted tokens to the session.
+- `nonce` — OIDC nonce forwarded from the authorization request, persisted on the code record for later `id_token`/`userinfo` use.
+- `sid` — Session ID (`UserSession.sid`) written by the login handler and used to bind minted tokens to the session.
 
-The `CodeRepository.createCode` params and `InMemoryCodeRepository` accept `nonce`, `sid`, and `grantedScope` in the same call. Consumers (the `authorization_code` grant) read `codeData.grantedScope` (set by `GrantPolicyHook` at `/oauth/authorize`) as the authoritative scope for token minting instead of `session.granted_scopes`.
+`CodeRepository.createCode` (its `CreateCodeInput`) and `InMemoryCodeRepository` take `nonce`, `sid`, and `grantedScope` in the same call. Consumers (the `authorization_code` grant) read `codeData.grantedScope` (set by `GrantPolicyHook` at `/oauth/authorize`) as the authoritative scope for token minting instead of `session.granted_scopes`.
 
 ### OIDC id_token + claim filter (TODO-F-4)
 

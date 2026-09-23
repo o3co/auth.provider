@@ -174,61 +174,7 @@ floor が置かれているのは **builder と schema**（= config 境界）で
 
 #### インターフェースと型
 
-```typescript
-interface Client {
-  clientId: string;
-  clientSecret: string;
-  allowedRedirectUris: string[];
-  allowedScopes: string[];
-  // ログアウトメタデータ (TODO-F-5)。`postLogoutRedirectUris` は
-  // `allowedRedirectUris` と同じ登録リダイレクト URI 文法（カスタムスキーム可、
-  // #498）。他の 2 つは http/https のみ。
-  postLogoutRedirectUris?: string[];
-  backchannelLogoutUri?: string;
-  backchannelLogoutSessionRequired?: boolean; // デフォルト: true
-  frontchannelLogoutUri?: string;
-  frontchannelLogoutSessionRequired?: boolean; // デフォルト: true
-}
-
-type PublicClient = Omit<Client, "clientSecret">;
-
-interface User {
-  id: string;
-  username: string;
-  [key: string]: unknown;
-}
-
-interface CodeData {
-  code_challenge?: string;
-  code_challenge_method?: string;
-}
-
-interface Code extends CodeData {
-  code: string;
-  expiresIn?: number;
-}
-
-interface ClientRepository {
-  findById(clientId: string): Promise<PublicClient | null>;
-  authenticate(clientId: string, secret: string): Promise<PublicClient | null>;
-}
-
-interface UserRepository {
-  authenticate(username: string, password: string): Promise<User | null>;
-  authenticateByToken(token: string): Promise<User | null>;
-}
-
-interface CodeRepository {
-  createCode(params: {
-    code_challenge?: string;
-    code_challenge_method?: string;
-    expiresIn?: number;
-  }): Promise<Code>;
-  findByCode(code: string): Promise<Code | null>;
-  consumeByCode(code: string): Promise<Code | null>;
-  removeByCode(code: string): Promise<void>;
-}
-```
+ポートは [`src/repositories/ClientRepository.mts`](src/repositories/ClientRepository.mts)（`findById`、`authenticate`。`PublicClient` は `clientSecret` を除いた `Client`）、[`src/repositories/UserRepository.mts`](src/repositories/UserRepository.mts)（`authenticate`、`authenticateByToken`、および #482 / #611 の任意の federated-identity リンク・検索メソッド）、[`src/repositories/CodeRepository.mts`](src/repositories/CodeRepository.mts)（`createCode`、`findByCode`、アトミックな single-use ゲートである `consumeByCode`、`removeByCode`）です。レコード — `Client`、`User`、`CodeData`、`Code`、`TokenEndpointAuthMethod` — は [`src/repositories/types.mts`](src/repositories/types.mts) にあり、各フィールドの意味はそのフィールド上に一度だけ記述されています。ここには転記しません: 以前の転記は、v0.5.1 で必須になった `CodeData.client_id` / `redirect_uri` と `Client.tokenEndpointAuthMethod` を載せず、`clientSecret` を必須のまま載せ続けていました。例外はログアウト URI の 3 フィールドで、そこには記述がありません: `postLogoutRedirectUris` は `allowedRedirectUris` と同じ登録リダイレクト URI 文法（カスタムスキーム可、#498）、`backchannelLogoutUri` と `frontchannelLogoutUri` は http/https のみです。この注記は [`src/repositories/InMemoryClientRepository.mts`](src/repositories/InMemoryClientRepository.mts) のスキーマの横にあります。v0.5.1 以降 `createCode` は `client_id` と `redirect_uri` を必須とし、`Client.tokenEndpointAuthMethod` も必須です。`Code` のその他のフィールドはすべて必須キーで、記録がなければ `undefined` を保持します。`createCode` は `CreateCodeInput` を受け取り、省略できるのは `expiresIn`（省略時はリポジトリの既定値）だけです（#626）。ディレクトリの責務マップは [`src/repositories/README.md`](src/repositories/README.md) です。
 
 #### 組み込み実装
 
@@ -519,12 +465,12 @@ Federation + OIDC 対応のために `AppOptions` に追加された 2 つのオ
 
 両 store は TODO-F-3 (cascading revoke)、F-4 (id_token + /userinfo)、F-5 (logout)、F-6 (/oauth/federation/:name/token) で消費される。本 F-1 では plumbing のみを追加する。
 
-**F-3 での consumer 有効化。** `CodeData` にログインパスが書き込む 2 つのオプションフィールドが追加された:
+**F-3 での consumer 有効化。** `CodeData` にはログインパスが書き込む 2 つのフィールドがある。どちらも必須キーで、持ち越すものがないときは `undefined` を保持する（#626）:
 
-- `nonce?` — 認可リクエストから転送される OIDC nonce。コードレコードに保存され、後続の `id_token` / `/userinfo` 向け処理で参照できるように保持される。
-- `sid?` — ログインハンドラーが書き込むセッション ID（`UserSession.sid`）。発行したトークンをセッションに紐付けるために使用される。
+- `nonce` — 認可リクエストから転送される OIDC nonce。コードレコードに保存され、後続の `id_token` / `/userinfo` 向け処理で参照できるように保持される。
+- `sid` — ログインハンドラーが書き込むセッション ID（`UserSession.sid`）。発行したトークンをセッションに紐付けるために使用される。
 
-`CodeRepository.createCode` のパラメーターと `InMemoryCodeRepository` は同一の呼び出しで `nonce`、`sid`、`grantedScope` を受け付ける。consumer（`authorization_code` grant）は、`session.granted_scopes` の代わりに、`/oauth/authorize` 時に `GrantPolicyHook` が設定した `codeData.grantedScope` をトークン発行のスコープとして使用する。
+`CodeRepository.createCode`（その `CreateCodeInput`）と `InMemoryCodeRepository` は同一の呼び出しで `nonce`、`sid`、`grantedScope` を受け付ける。consumer（`authorization_code` grant）は、`session.granted_scopes` の代わりに、`/oauth/authorize` 時に `GrantPolicyHook` が設定した `codeData.grantedScope` をトークン発行のスコープとして使用する。
 
 ### OIDC id_token + クレームフィルター (TODO-F-4)
 
@@ -532,23 +478,7 @@ Federation + OIDC 対応のために `AppOptions` に追加された 2 つのオ
 
 #### `generateIdToken`
 
-```typescript
-interface GenerateIdTokenOptions {
-  readonly sub: string;
-  readonly aud: string;
-  readonly azp?: string;
-  readonly authTime: Date;
-  readonly nonce?: string;
-  readonly sid: string;
-  readonly scopes: ReadonlyArray<string>;
-  readonly userClaims: UserSessionClaims;
-  readonly keyStore: KeyStore;
-  readonly issuer: string;
-  readonly expiresIn?: number; // デフォルト 3600 秒
-}
-
-function generateIdToken(opts: GenerateIdTokenOptions): Promise<Token>;
-```
+`generateIdToken(opts)` は [`src/grants/idToken.mts`](src/grants/idToken.mts) にあり、`GenerateIdTokenOptions` がその隣にあります: `sub`、`aud`、`authTime`、`sid`、`scopes`、`userClaims`、`keyStore`、`issuer`、および任意の `azp`、`nonce`、`expiresIn`（デフォルト 3600 秒）、`amr`、`acr`（#481）。以前の転記は #481 で追加された `amr` / `acr` を載せていませんでした。
 
 OIDC id_token JWT（OIDC Core §2）に署名して返す。クレーム構成:
 
@@ -557,6 +487,7 @@ OIDC id_token JWT（OIDC Core §2）に署名して返す。クレーム構成:
 - `sid` — バックチャネルログアウト用セッション識別子（TODO-F-5）
 - `azp` — authorized party、指定された場合のみ付与
 - `nonce` — 認可リクエストから転送し、そのまま反映
+- `amr`、`acr` — セッションが記録している場合（#481）。空の `amr` は `[]` として出力せず省略する
 - `filterClaimsByScope` によるスコープフィルター済みユーザークレーム
 
 ヘッダーは `typ: "JWT"` を使用する(#394 — 標準綴り。RFC 9068 の `at+jwt` と意図的に排他で、id_token が access-token 面を通ることはない)。#394 以前に発行されたトークンは `id+jwt` を持つ。#394 はその綴りを `JWT` と併せて移行窓の間だけ受理していたが、#402 で窓を閉じたため、現在 `id+jwt` は通常の `typ` 不一致として拒否される。
