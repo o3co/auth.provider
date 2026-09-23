@@ -17,19 +17,26 @@
 /**
  * discovery/planRoute.mts — the OIDC discovery subsystem's boot-planner hook.
  *
- * Keeps ALL OIDC-specific knowledge (the issuer config path, the keyStore
- * signing algorithm, provider activation, document construction + validation,
- * and the spec-fixed discovery path) out of the generic boot planner
- * (`boot/assemble-app.mts`). The planner calls {@link planDiscoveryRoute} and
- * gets back either a normal route contribution or `null`; from `assembleApp`'s
- * perspective discovery is just another route that flows through the standard
- * collision-check + mount-order + mount pipeline — no special-casing.
+ * Keeps ALL OIDC-specific knowledge (provider activation, document
+ * construction + validation, and the spec-fixed discovery paths) out of the
+ * generic boot planner (`boot/assemble-app.mts`). The planner calls
+ * {@link planDiscoveryRoute} and gets back either a normal route contribution
+ * or `null`; from `assembleApp`'s perspective discovery is just another route
+ * that flows through the standard collision-check + mount-order + mount
+ * pipeline — no special-casing.
+ *
+ * It takes VALUES, not the boot world (#626 F4). Until then it took
+ * `assembleApp`'s own `Readonly<Partial<ComponentMap>>` widened to
+ * `Record<string, unknown>` and cast three readings back out of it, and it
+ * imported `BootError` from `boot/` to raise one — so the domain step and the
+ * boot step referenced each other, and a typed map was laundered through
+ * `unknown` to do it. Neither is needed: the caller already holds both values
+ * typed, and the error taxonomy belongs to the stage that owns the taxonomy.
  */
 
 import type { NextFunction, Request, Response, Router } from "express";
-import { BootError, type ListCollector } from "../boot/types.mjs";
 import type { RouteContribution, RouteHandler } from "../modules/manifest/route-contribution.mjs";
-import { buildDiscoveryDocument, DiscoveryDocumentError } from "./buildDocument.mjs";
+import { buildDiscoveryDocument } from "./buildDocument.mjs";
 import type { OidcDiscoveryContribution } from "./types.mjs";
 import { discoveryPathsFor } from "./wellKnownPaths.mjs";
 
@@ -54,48 +61,45 @@ const DISCOVERY_ROUTE_ID = "core:oidc-discovery";
  *      provider that does not expose `authorization_endpoint` (CIBA, device
  *      flow) still activates discovery instead of silently serving nothing.
  *
- * The assembled document is validated by {@link buildDiscoveryDocument}; a
+ * The assembled document is validated by {@link buildDiscoveryDocument}, whose
  * `DiscoveryDocumentError` (missing required field, reserved-field
- * contribution, conflicting values, …) is wrapped in a `BootError`
- * (`reason: "discovery-document-invalid"`) so discovery misconfiguration
- * surfaces through the same boot-failure taxonomy as every other assembleApp
- * error.
+ * contribution, conflicting values, …) is raised as it is. The caller turns it
+ * into whatever its own failure taxonomy is — `boot/assemble-app.mts` wraps it
+ * in a `BootError` with `reason: "discovery-document-invalid"`, so discovery
+ * misconfiguration still surfaces the way every other assembleApp error does.
+ * Naming that error here would mean importing the boot stage into the step it
+ * is a step of (#626 F4).
+ *
+ * @throws DiscoveryDocumentError when the contributions do not assemble into a
+ * valid document.
  */
 export function planDiscoveryRoute(input: {
-	readonly components: Record<string, unknown>;
-	readonly registries: ReadonlyMap<string, unknown>;
+	/**
+	 * `config.oauth.jwt.issuer`. `undefined` when the deployment configured
+	 * none, which is the first of the two activation conditions above.
+	 */
+	readonly issuer: string | undefined;
+	/**
+	 * What the document advertises as `id_token_signing_alg_values_supported`;
+	 * empty when no key store named an algorithm.
+	 */
+	readonly signingAlgs: readonly string[];
+	/** Every `discoveryMetadata` contribution, in registration order. */
+	readonly metadata: readonly OidcDiscoveryContribution[];
 	readonly routerFactory: () => Router;
 }): RouteContribution | null {
-	const { components, registries, routerFactory } = input;
+	const { issuer, signingAlgs, metadata, routerFactory } = input;
 
-	const config = components.config as { oauth?: { jwt?: { issuer?: unknown } } } | undefined;
-	const issuer = config?.oauth?.jwt?.issuer;
+	// #266 made `oauth.jwt.issuer` required at the schema boundary, so a config
+	// that passed the schema always has one. The guard is for a caller that
+	// reaches here with one that did not — a hand-built `AppConfig` through
+	// `bootstrapComponents`, which is not type-checked at the boundary it
+	// crosses.
 	if (typeof issuer !== "string" || issuer.length === 0) return null;
 
-	const collector = registries.get("discoveryMetadata") as
-		| ListCollector<OidcDiscoveryContribution>
-		| undefined;
-	const items = collector !== undefined ? [...collector.values()] : [];
-	if (!items.some((item) => item.providerRoot === true)) return null;
+	if (!metadata.some((item) => item.providerRoot === true)) return null;
 
-	const keyStore = components.keyStore as { algorithm?: unknown } | undefined;
-	const signingAlgs = typeof keyStore?.algorithm === "string" ? [keyStore.algorithm] : [];
-
-	let doc: Record<string, unknown>;
-	try {
-		doc = buildDiscoveryDocument(items, { issuer, signingAlgs });
-	} catch (err) {
-		if (err instanceof DiscoveryDocumentError) {
-			throw new BootError({
-				message: `assembleApp: ${err.message}`,
-				reason: "discovery-document-invalid",
-				stage: "assembleApp",
-				details: { reason: "discovery-document-invalid", detail: err.message },
-				cause: err,
-			});
-		}
-		throw err;
-	}
+	const doc: Record<string, unknown> = buildDiscoveryDocument(metadata, { issuer, signingAlgs });
 
 	// #528: one document, every path a client may look for it at — OIDC's
 	// appended form and RFC 8414's inserted form — through one handler, so

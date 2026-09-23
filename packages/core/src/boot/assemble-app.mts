@@ -29,7 +29,9 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { Express, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
+import { DiscoveryDocumentError } from "../discovery/buildDocument.mjs";
 import { planDiscoveryRoute } from "../discovery/planRoute.mjs";
+import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { browserFacingCorsRoutes, corsMw } from "../middleware/cors.mjs";
 import { protectedResourceBindingMw } from "../middleware/protectedResourceBinding.mjs";
@@ -548,11 +550,45 @@ export function assembleApp(
 	// the standard collision-check + mount-order + mount pipeline below, so a
 	// module contributing a colliding route fails the boot fast with no special-
 	// casing. `null` when no document is served.
-	const discoveryRoute = planDiscoveryRoute({
-		components: frozen.components as Record<string, unknown>,
-		registries: frozen.registries,
-		routerFactory: RouterCtor,
-	});
+	//
+	// Its inputs are read here rather than handed the world (#626 F4): the
+	// frozen components are already `Readonly<Partial<ComponentMap>>`, so
+	// `config` and `keyStore` arrive typed and the step needs no cast to read
+	// them. What is left is the collector, whose value type the registry map
+	// does not carry — that cast belongs on this side, because mapping a
+	// contribution kind to its collector is what assembly knows and the
+	// discovery step does not.
+	const collector = frozen.registries.get("discoveryMetadata") as
+		| ListCollector<OidcDiscoveryContribution>
+		| undefined;
+	// `KeyStore.algorithm` is typed, but a host may put an object of its own in
+	// the slot through `bootstrapComponents` / `overrideComponents`, which is
+	// not checked at that boundary — so the reading is still guarded.
+	const algorithm = frozen.components.keyStore?.algorithm;
+	let discoveryRoute: ReturnType<typeof planDiscoveryRoute>;
+	try {
+		discoveryRoute = planDiscoveryRoute({
+			issuer: frozen.components.config?.oauth?.jwt?.issuer,
+			signingAlgs: typeof algorithm === "string" ? [algorithm] : [],
+			metadata: collector === undefined ? [] : [...collector.values()],
+			routerFactory: RouterCtor,
+		});
+	} catch (err) {
+		// The taxonomy is this stage's, which is why the conversion is here and
+		// not in the step: a discovery misconfiguration has to surface as a
+		// `BootError` like every other assembleApp failure, and the step would
+		// have to import the stage to say so.
+		if (err instanceof DiscoveryDocumentError) {
+			throw new BootError({
+				message: `assembleApp: ${err.message}`,
+				reason: "discovery-document-invalid",
+				stage: "assembleApp",
+				details: { reason: "discovery-document-invalid", detail: err.message },
+				cause: err,
+			});
+		}
+		throw err;
+	}
 	const allRoutes: readonly CollectedRouteContribution[] =
 		discoveryRoute === null
 			? frozen.routes
