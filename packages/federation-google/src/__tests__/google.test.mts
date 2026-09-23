@@ -93,6 +93,7 @@ describe("createGoogleProvider on openid-client", () => {
 	it.each([
 		["a granted scope", "openid email", "openid email"],
 		// Forwarded verbatim: what matters downstream is that the field is there.
+		["an explicitly empty scope, which `optionalString` would drop", "", ""],
 		["nothing usable, which is still an answer", "  ", "  "],
 		["a non-string, which is still an answer", 42, ""],
 		["no scope field at all", undefined, undefined],
@@ -171,6 +172,29 @@ describe("createGoogleProvider on openid-client", () => {
 		expect(checks.pkceCodeVerifier).toBe("v");
 		expect(checks.expectedState).toBe(skipStateCheckSym);
 	});
+
+	it.each([
+		["a granted scope", "openid email", "openid email"],
+		// Present but naming nothing: the refresh route reads it as an answer it
+		// cannot use and keeps the stored scope, where absence would widen back
+		// to the grant. Dropping it here would erase that difference.
+		["an explicitly empty scope, which `optionalString` would drop", "", ""],
+		["nothing usable, which is still an answer", "  ", "  "],
+		["no scope field at all", undefined, undefined],
+	])(
+		"refreshToken forwards what Google says about scope: %s (#647)",
+		async (_l, answered, expected) => {
+			mockRefreshTokenGrant.mockResolvedValueOnce({
+				access_token: "at2",
+				refresh_token: "rt2",
+				expires_in: 3600,
+				...(answered === undefined ? {} : { scope: answered }),
+			});
+			const p = createGoogleProvider(baseConfig);
+			const refreshed = await p.refreshToken("old-refresh");
+			expect(refreshed.scope).toBe(expected);
+		},
+	);
 
 	it("refreshToken returns a RefreshedTokens snapshot without sub (caller preserves stored sub)", async () => {
 		mockRefreshTokenGrant.mockResolvedValueOnce({

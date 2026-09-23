@@ -308,6 +308,7 @@ describe("exchangeCode", () => {
 	it.each([
 		["a granted scope", "name email", "name email"],
 		// Forwarded verbatim: what matters downstream is that the field is there.
+		["an explicitly empty scope, which `optionalString` would drop", "", ""],
 		["nothing usable, which is still an answer", "   ", "   "],
 		["no scope field at all", undefined, undefined],
 	])("forwards what Apple says about scope: %s (#647)", async (_label, answered, expected) => {
@@ -634,6 +635,29 @@ describe("exchangeCode", () => {
 // ---------------------------------------------------------------------------
 
 describe("refreshToken", () => {
+	it.each([
+		["a granted scope", "openid email", "openid email"],
+		// Present but naming nothing: the refresh route reads it as an answer it
+		// cannot use and keeps the stored scope, where absence would widen back
+		// to the grant. Dropping it here would erase that difference.
+		["an explicitly empty scope, which `optionalString` would drop", "", ""],
+		["nothing usable, which is still an answer", "  ", "  "],
+		["no scope field at all", undefined, undefined],
+	])(
+		"refreshToken forwards what Apple says about scope: %s (#647)",
+		async (_l, answered, expected) => {
+			mockRefreshTokenGrant.mockResolvedValueOnce({
+				access_token: "at2",
+				refresh_token: "rt2",
+				expires_in: 3600,
+				...(answered === undefined ? {} : { scope: answered }),
+			});
+			const p = createAppleProvider(baseConfig);
+			const refreshed = await p.refreshToken("old-refresh");
+			expect(refreshed.scope).toBe(expected);
+		},
+	);
+
 	it("returns a RefreshedTokens snapshot without re-asserting identity", async () => {
 		mockRefreshTokenGrant.mockResolvedValueOnce({
 			access_token: "at2",

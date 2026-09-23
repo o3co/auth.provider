@@ -422,7 +422,14 @@ export async function createOidcProvider(
 			idToken: optionalString(tokens.id_token),
 			expiresAt: typeof expiresIn === "number" ? new Date(Date.now() + expiresIn * 1000) : null,
 			expiresIn: typeof issued === "number" ? issued : null,
-			...(optionalString(tokens.scope) !== undefined ? { scope: tokens.scope } : {}),
+			// Presence, not usefulness — `optionalString` would drop an explicit
+			// `scope: ""` and make it indistinguishable from a field that was never
+			// sent. The session route reads absence as "as requested" (RFC 6749
+			// §3.3) and would then record every requested scope as the consent for a
+			// response that granted none; the refresh route reads it as silence and
+			// would widen back to the grant. The delegated exchange has kept an empty
+			// scope for this reason since #593, and these two now agree with it.
+			...(typeof tokens.scope === "string" ? { scope: tokens.scope } : {}),
 			tokenType: tokens.token_type,
 		};
 	};
@@ -504,7 +511,14 @@ export async function createOidcProvider(
 			...(rotated !== undefined ? { refreshToken: rotated } : {}),
 			expiresIn: lifetime.seconds,
 			expiresAt: lifetime.seconds !== null ? new Date(obtainedAt + lifetime.seconds * 1000) : null,
-			...(optionalString(tokens.scope) !== undefined ? { scope: tokens.scope } : {}),
+			// Presence, not usefulness — `optionalString` would drop an explicit
+			// `scope: ""` and make it indistinguishable from a field that was never
+			// sent. The session route reads absence as "as requested" (RFC 6749
+			// §3.3) and would then record every requested scope as the consent for a
+			// response that granted none; the refresh route reads it as silence and
+			// would widen back to the grant. The delegated exchange has kept an empty
+			// scope for this reason since #593, and these two now agree with it.
+			...(typeof tokens.scope === "string" ? { scope: tokens.scope } : {}),
 			tokenType: tokens.token_type,
 		};
 	};
