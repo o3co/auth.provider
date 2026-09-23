@@ -103,7 +103,7 @@ describe("mtlsModule — discoveryMetadata contribution", () => {
 	});
 
 	it("stays an ancillary contributor — it never claims the provider root", async () => {
-		expect(await contribution(mtlsConfig({ enabled: true })).providerRoot).toBeUndefined();
+		expect((await contribution(mtlsConfig({ enabled: true }))).providerRoot).toBeUndefined();
 	});
 });
 
