@@ -29,9 +29,10 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const here = dirname(new URL(import.meta.url).pathname);
+const here = dirname(fileURLToPath(import.meta.url));
 const CORE = join(here, "../../core/src/federation-grants/__tests__/store.contract.mts");
 const COPY = join(here, "adapters.federation-grant-store.contract.mts");
 
@@ -115,7 +116,7 @@ describe("the FederationGrantStore contract suite, in both copies", () => {
 	});
 
 	it("is run by something: a copy nothing calls cannot fail", () => {
-		const here = dirname(new URL(import.meta.url).pathname);
+		const here = dirname(fileURLToPath(import.meta.url));
 		const callers = readdirSync(here).filter(
 			(name) =>
 				name.endsWith(".test.mts") &&

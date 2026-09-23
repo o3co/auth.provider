@@ -28,9 +28,10 @@
 
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const here = dirname(new URL(import.meta.url).pathname);
+const here = dirname(fileURLToPath(import.meta.url));
 const CORE = join(here, "../../core/src/user-sessions/__tests__/userSessionStore.contract.mts");
 const COPY = join(here, "userSessionStore.contract.mts");
 const FIRST_EXPORT = "export type UserSessionStoreContractFactory";
