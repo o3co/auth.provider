@@ -967,6 +967,118 @@ describe("POST /oauth/federation/:name/token", () => {
 				);
 			});
 
+			it("returns the token it stored, not a second read of the adapter's field", async () => {
+				// The answer is read once. A getter read again may answer
+				// differently, and handing the client a token the store does not
+				// hold leaves the two disagreeing about what was issued.
+				let reads = 0;
+				const drifting = {
+					get accessToken(): string {
+						reads += 1;
+						return reads === 1 ? "first-at" : "second-at";
+					},
+					expiresIn: 3600,
+				};
+				const { app, fedTokenStore } = refreshingApp(drifting);
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(200);
+				expect(res.body.access_token).toBe("first-at");
+				expect(fedTokenStore.update).toHaveBeenCalledWith(
+					expect.any(String),
+					"google",
+					expect.objectContaining({ accessToken: "first-at" }),
+				);
+			});
+
+			it("refuses rather than storing no-expiry when a lifetime getter throws", async () => {
+				// `readField` answers `undefined` for a field it cannot read, and
+				// `undefined` on a lifetime field otherwise means "the upstream
+				// stated nothing", which is stored as `null` and read as never
+				// refresh again. An unreadable lifetime must not collapse into that
+				// sentinel.
+				const hostile = {
+					accessToken: "new-at",
+					get expiresAt(): Date {
+						throw new Error("hostile getter");
+					},
+				};
+				const { app, fedTokenStore } = refreshingApp(hostile);
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(500);
+				expect(res.body.error).toBe("refresh_failed");
+				expect(fedTokenStore.update).not.toHaveBeenCalled();
+			});
+
+			it("does not overwrite a concurrent refresh when salvaging a rotated token", async () => {
+				// The lock TTL may expire during the upstream call, and this route
+				// allows another request to refresh in that window. Writing the
+				// pre-call snapshot back would replace that success with an expired
+				// access token.
+				const expiredTokens = {
+					...baseFedTokens,
+					expiresAt: new Date(Date.now() - 1000),
+					refreshToken: "original-rt",
+				};
+				const concurrent = {
+					...baseFedTokens,
+					accessToken: "concurrent-at",
+					expiresAt: new Date(Date.now() + 3_600_000),
+					refreshToken: "concurrent-rt",
+				};
+				// The first read is the route's own; the next is the salvage's
+				// re-read, by which point another request has rotated the chain.
+				const get = vi.fn().mockResolvedValueOnce(expiredTokens).mockResolvedValue(concurrent);
+				const refreshProvider = {
+					...federationBase("google"),
+					refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" }),
+				} as unknown as FederationProvider;
+				const fedTokenStore = makeFedTokenStore({ get });
+				const app = buildApp({
+					fedTokenStore,
+					getFederationProviders: () =>
+						new Map<string, FederationProvider>([["google", refreshProvider]]),
+				});
+
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(500);
+				expect(fedTokenStore.update).not.toHaveBeenCalled();
+			});
+
+			it("merges the rotated token onto the record as it stands now", async () => {
+				// No concurrent rotation, so the salvage still happens - but onto
+				// what the store holds at write time, not onto the pre-call snapshot.
+				const expiredTokens = {
+					...baseFedTokens,
+					expiresAt: new Date(Date.now() - 1000),
+					refreshToken: "original-rt",
+					idToken: "original-idt",
+				};
+				const refreshProvider = {
+					...federationBase("google"),
+					refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" }),
+				} as unknown as FederationProvider;
+				const fedTokenStore = makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expiredTokens),
+				});
+				const app = buildApp({
+					fedTokenStore,
+					getFederationProviders: () =>
+						new Map<string, FederationProvider>([["google", refreshProvider]]),
+				});
+
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(500);
+				expect(fedTokenStore.update).toHaveBeenCalledWith(
+					expect.any(String),
+					"google",
+					expect.objectContaining({ refreshToken: "rotated-rt", idToken: "original-idt" }),
+				);
+			});
+
 			it("answers refresh_failed when a field getter throws, and still salvages the rotated token", async () => {
 				// An object is not the same as a readable one. A getter that throws
 				// would escape the refusal and take the rotated refresh token with

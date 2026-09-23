@@ -69,13 +69,20 @@ const isUsableLifetime = (value: unknown): value is number =>
  * An adapter is a third-party extension point, so the answer may be an object
  * whose getters throw rather than a plain record. An exception raised while
  * reading it would escape the structured refusal and take the rotated refresh
- * token with it, so a field that will not be read is simply absent — which is
- * a reading this contract already has a meaning for.
+ * token with it, so an unreadable field yields `undefined` here.
+ *
+ * `unreadable` is how the caller tells that apart from a field the adapter
+ * simply did not set. The two must not be confused: on a lifetime field,
+ * "absent" means the upstream stated nothing and the token is stored with no
+ * finite expiry, which this route reads as never refresh again. Silently
+ * turning a getter that throws into that sentinel would put the access token
+ * into indefinite, unchecked use.
  */
-const readField = <T,>(source: object, key: string): T | undefined => {
+const readField = <T,>(source: object, key: string, unreadable: Set<string>): T | undefined => {
 	try {
 		return (source as Record<string, unknown>)[key] as T | undefined;
 	} catch {
+		unreadable.add(key);
 		return undefined;
 	}
 };
@@ -660,16 +667,17 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// `core/federation-grants/retrieve.mts` guards the same contract the
 			// same way, and reading field by field keeps a rotated `refreshToken`
 			// usable even when a different getter is the one that throws.
+			const unreadable = new Set<string>();
 			const answer: Partial<RefreshedTokens> =
 				typeof refreshed === "object" && refreshed !== null
 					? {
-							accessToken: readField<string>(refreshed, "accessToken"),
-							refreshToken: readField<string>(refreshed, "refreshToken"),
-							idToken: readField<string>(refreshed, "idToken"),
-							expiresIn: readField<number | null>(refreshed, "expiresIn"),
-							expiresAt: readField<Date | null>(refreshed, "expiresAt"),
-							scope: readField<string>(refreshed, "scope"),
-							tokenType: readField<string>(refreshed, "tokenType"),
+							accessToken: readField<string>(refreshed, "accessToken", unreadable),
+							refreshToken: readField<string>(refreshed, "refreshToken", unreadable),
+							idToken: readField<string>(refreshed, "idToken", unreadable),
+							expiresIn: readField<number | null>(refreshed, "expiresIn", unreadable),
+							expiresAt: readField<Date | null>(refreshed, "expiresAt", unreadable),
+							scope: readField<string>(refreshed, "scope", unreadable),
+							tokenType: readField<string>(refreshed, "tokenType", unreadable),
 						}
 					: {};
 
@@ -701,6 +709,11 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// Date that results serialises to `null` in the store — the "never
 			// expires" sentinel again, by a different route.
 			const lifetimeIsBroken =
+				// A lifetime field that would not be read is broken, not absent:
+				// absent stores `null`, which is this route's never-refresh
+				// sentinel, so the two must not collapse into one another.
+				unreadable.has("expiresIn") ||
+				unreadable.has("expiresAt") ||
 				(statedLifetime && !isUsableLifetime(answer.expiresIn)) ||
 				(statedInstant && !isUsableDate(answer.expiresAt)) ||
 				((statedLifetime || statedInstant) &&
@@ -718,13 +731,33 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					answer.refreshToken !== currentTokens.refreshToken
 				) {
 					try {
-						await opts.federationTokenStore.update(sid, name, {
-							...currentTokens,
-							refreshToken: answer.refreshToken,
-							// Rotated alongside it, and worth the same: the stored
-							// `id_token` is what logout sends as `id_token_hint`.
-							idToken: isUsableToken(answer.idToken) ? answer.idToken : currentTokens.idToken,
-						});
+						// `currentTokens` may be stale by now. The lock TTL can
+						// expire during the upstream call — this route says so, and
+						// allows another request to acquire the lock and refresh —
+						// so writing the pre-call snapshot back would overwrite a
+						// concurrent success with an expired access token.
+						//
+						// Re-read, and let the record decide. A stored refresh token
+						// that is no longer the one sent upstream means another
+						// request already rotated the chain: its record is both newer
+						// and complete, so the rotated token here is not worth a
+						// write. Otherwise merge onto what is stored now rather than
+						// onto what was read before the call.
+						const latest = await opts.federationTokenStore.get(sid, name);
+						if (latest !== null && latest.refreshToken !== currentTokens.refreshToken) {
+							logger.warn(
+								`POST /oauth/federation/${name}/token: a concurrent refresh rotated this connection; not overwriting it with the failed refresh's token`,
+							);
+						} else {
+							const base = latest ?? currentTokens;
+							await opts.federationTokenStore.update(sid, name, {
+								...base,
+								refreshToken: answer.refreshToken,
+								// Rotated alongside it, and worth the same: the stored
+								// `id_token` is what logout sends as `id_token_hint`.
+								idToken: isUsableToken(answer.idToken) ? answer.idToken : base.idToken,
+							});
+						}
 					} catch (error) {
 						logger.warn(
 							`POST /oauth/federation/${name}/token: federationTokenStore.update failed while keeping a rotated refresh token:`,
@@ -826,7 +859,10 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				details: { federation: name, refreshed: true },
 			});
 			return res.status(200).json({
-				access_token: refreshed.accessToken,
+				// `updatedTokens`, not the adapter's object: the answer was read once,
+				// and a getter read a second time may answer differently from what was
+				// just written to the store.
+				access_token: updatedTokens.accessToken,
 				token_type: "Bearer",
 				...(expiresIn !== undefined ? { expires_in: expiresIn } : {}),
 				...(updatedTokens.scope ? { scope: updatedTokens.scope } : {}),
