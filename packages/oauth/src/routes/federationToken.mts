@@ -63,6 +63,23 @@ const isUsableToken = isNonEmptyString;
 const isUsableLifetime = (value: unknown): value is number =>
 	typeof value === "number" && Number.isFinite(value) && value > 0;
 
+/**
+ * One field of an adapter's answer, or `undefined` if it cannot be read.
+ *
+ * An adapter is a third-party extension point, so the answer may be an object
+ * whose getters throw rather than a plain record. An exception raised while
+ * reading it would escape the structured refusal and take the rotated refresh
+ * token with it, so a field that will not be read is simply absent — which is
+ * a reading this contract already has a meaning for.
+ */
+const readField = <T,>(source: object, key: string): T | undefined => {
+	try {
+		return (source as Record<string, unknown>)[key] as T | undefined;
+	} catch {
+		return undefined;
+	}
+};
+
 /** A `Date` that names an instant. `new Date(NaN)` does not. */
 const isUsableDate = (value: unknown): value is Date =>
 	value instanceof Date && !Number.isNaN(value.getTime());
@@ -636,8 +653,25 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			// object at all, and reading a field off `null` would throw past the
 			// refusal below, losing both the structured answer and the rotated
 			// refresh token this branch exists to salvage.
+			//
+			// Each field is read once and behind a guard, because an object is not
+			// the same as a readable one: a getter may throw, and an exception
+			// escaping here costs the same salvage that a `null` answer would.
+			// `core/federation-grants/retrieve.mts` guards the same contract the
+			// same way, and reading field by field keeps a rotated `refreshToken`
+			// usable even when a different getter is the one that throws.
 			const answer: Partial<RefreshedTokens> =
-				typeof refreshed === "object" && refreshed !== null ? refreshed : {};
+				typeof refreshed === "object" && refreshed !== null
+					? {
+							accessToken: readField<string>(refreshed, "accessToken"),
+							refreshToken: readField<string>(refreshed, "refreshToken"),
+							idToken: readField<string>(refreshed, "idToken"),
+							expiresIn: readField<number | null>(refreshed, "expiresIn"),
+							expiresAt: readField<Date | null>(refreshed, "expiresAt"),
+							scope: readField<string>(refreshed, "scope"),
+							tokenType: readField<string>(refreshed, "tokenType"),
+						}
+					: {};
 
 			// A lifetime the upstream stated and got wrong is not the same as one
 			// it never stated. `expiresAt: null` is stored as "no finite expiry",

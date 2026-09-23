@@ -967,6 +967,36 @@ describe("POST /oauth/federation/:name/token", () => {
 				);
 			});
 
+			it("answers refresh_failed when a field getter throws, and still salvages the rotated token", async () => {
+				// An object is not the same as a readable one. A getter that throws
+				// would escape the refusal and take the rotated refresh token with
+				// it, so each field is read behind a guard and an unreadable one is
+				// simply absent.
+				const hostile = {
+					get accessToken(): string {
+						throw new Error("hostile getter");
+					},
+					refreshToken: "rotated-rt",
+					get expiresIn(): number {
+						throw new Error("hostile getter");
+					},
+				};
+				const { app, fedTokenStore } = refreshingApp(hostile, {
+					...baseFedTokens,
+					refreshToken: "original-rt",
+				});
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(500);
+				expect(res.body.error).toBe("refresh_failed");
+				// The readable field survives the unreadable ones beside it.
+				expect(fedTokenStore.update).toHaveBeenCalledWith(
+					expect.any(String),
+					"google",
+					expect.objectContaining({ refreshToken: "rotated-rt" }),
+				);
+			});
+
 			it.each([
 				["null", null],
 				["undefined", undefined],
