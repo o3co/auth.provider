@@ -489,9 +489,12 @@ export const createRouter = (
 					// rather than judged here: a login does not need the access token,
 					// so a type this provider cannot hand on must not cost the user
 					// their sign-in. The route that discloses it is where that is
-					// decided. Absent only when the adapter named nothing at all,
-					// which is every bundled adapter but `federation-oidc`.
-					...(tokenType === undefined ? {} : { tokenType }),
+					// decided. `undefined` only when the adapter named nothing at all,
+					// which is every bundled adapter but `federation-oidc` — and
+					// written as a key either way, because `FederationTokens`
+					// requires it: a store copying the record field by field cannot
+					// forget a field the type makes it name.
+					tokenType,
 				});
 			}
 		} catch (err) {
@@ -999,7 +1002,7 @@ export const createRouter = (
 					grantedScope: consented,
 					// #645 — as above: what the upstream named, recorded and not
 					// judged. The disclosure point owns that decision.
-					...(tokenType === undefined ? {} : { tokenType }),
+					tokenType,
 				});
 				attachedToFederation = true;
 			}

@@ -21,6 +21,7 @@ import {
 	createSymmetricKeyStore,
 	type FederationProvider,
 	type FederationTokenStore,
+	type FederationTokens,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
 	type SessionFederationIndex,
@@ -82,13 +83,15 @@ const baseSession: UserSession = {
 	claims: { email: "alice@example.com" },
 };
 
-// Base federation tokens — not expired
-const baseFedTokens = {
+// Base federation tokens — not expired. A stored record, so every key is named.
+const baseFedTokens: FederationTokens = {
 	accessToken: "upstream-at-xyz",
 	refreshToken: "upstream-rt-xyz",
+	idToken: undefined,
 	expiresAt: new Date(Date.now() + 3_600_000),
 	tokenType: "Bearer",
 	scope: "openid email",
+	grantedScope: undefined,
 };
 
 // Client with allowedAzpForFederationToken: true
@@ -879,7 +882,10 @@ describe("POST /oauth/federation/:name/token", () => {
 		// -------------------------------------------------------------------------
 
 		describe("refuses to believe an unusable reading from the adapter (#626 P1 review)", () => {
-			const refreshingApp = (answer: unknown, stored: Record<string, unknown> = baseFedTokens) => {
+			const refreshingApp = (
+				answer: unknown,
+				stored: Partial<FederationTokens> = baseFedTokens,
+			) => {
 				const expiredTokens = { ...stored, expiresAt: new Date(Date.now() - 1000) };
 				const refreshProvider = {
 					...federationBase("google"),

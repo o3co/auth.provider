@@ -32,8 +32,6 @@ const cloneTokens = (t: FederationTokens): FederationTokens => ({
 	tokenType: t.tokenType,
 	scope: t.scope,
 	grantedScope: t.grantedScope,
-	// Shallow-copy rawParams; sufficient since consumers treat it as read-only.
-	rawParams: t.rawParams ? { ...t.rawParams } : undefined,
 });
 
 export function createInMemoryFederationTokenStore(): FederationTokenStore & SupportsLock {

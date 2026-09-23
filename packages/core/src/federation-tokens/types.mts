@@ -10,10 +10,31 @@
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
 
+/**
+ * One upstream connection's tokens, as a `FederationTokenStore` holds them.
+ *
+ * Every field is a REQUIRED key; a field with nothing to record holds
+ * `undefined`. A store often copies this record field by field, and a field it
+ * forgets is dropped without a sound — while every field here changes what
+ * happens when it is gone (`record-fields.types.test.mts` lists what). No
+ * marker in the record could catch that, since a store that drops fields drops
+ * the marker too; a required key makes an object literal that forgets one fail
+ * to compile. `expiresAt` was the first field held to this, and for the same
+ * reason.
+ */
 export interface FederationTokens {
 	readonly accessToken: string;
-	readonly refreshToken?: string;
-	readonly idToken?: string;
+	/**
+	 * Absent means the connection cannot be refreshed: the token route answers
+	 * `410 refresh_token_absent` and the user has to sign in again. `undefined`
+	 * when the upstream issued none (GitHub OAuth App tokens).
+	 */
+	readonly refreshToken: string | undefined;
+	/**
+	 * What `POST /oauth/federation/:name/logout` sends the upstream as
+	 * `id_token_hint`. `undefined` when the upstream issued none.
+	 */
+	readonly idToken: string | undefined;
 	/**
 	 * Absolute expiry time of `accessToken`. `null` means the upstream provider
 	 * did not issue a finite expiry (e.g. GitHub OAuth Apps classic tokens).
@@ -40,10 +61,27 @@ export interface FederationTokens {
 	 * behaviour #645 removed, restored for that store alone. Both bundled
 	 * stores round-trip it and are pinned on it (the in-memory store's
 	 * defensive copy is exactly that field-by-field pattern). No marker in the
-	 * record could detect a store that drops fields: it would drop the marker
-	 * too.
+	 * record could detect a store that drops fields — it would drop the marker
+	 * too — so the TYPE does what it can: the key is required, and an object
+	 * literal of this type that leaves it out fails to compile
+	 * (`record-fields.types.test.mts`). That reaches code that BUILDS a
+	 * `FederationTokens`: a store's `get`, and every caller of `attach` and
+	 * `update`. It does not reach a store's own storage shape unless the
+	 * adapter declares the same required key there — the bundled Redis store's
+	 * envelope does, so a projection into it that forgets the field fails too.
+	 * Nor does it reach a store in plain JavaScript, or code that steps around
+	 * the checker: `as FederationTokens` on an incomplete literal,
+	 * `JSON.parse(raw) as FederationTokens`, `Object.assign`, or a spread that
+	 * overwrites the field with `undefined`. Those are held to the MUST alone.
 	 *
-	 * ABSENT — and only absent — means the adapter named none: every bundled
+	 * A store MUST also hand back an unset value as `undefined` or absent — never
+	 * `null`. The disclosure point refuses `null` (a store is not believed), so a
+	 * serialiser that writes `undefined` as `null` turns every connection whose
+	 * adapter named no type into a refused one: MongoDB's driver does this unless
+	 * `ignoreUndefined` is set. Records carry the key as `undefined` whenever the
+	 * adapter named none, both at link time and after a refresh.
+	 *
+	 * `undefined` — and only `undefined` — means the adapter named none: every bundled
 	 * adapter but `federation-oidc`, and every record written before #645. RFC
 	 * 6749 §5.1 makes `token_type` REQUIRED, so `POST /oauth/federation/:name/
 	 * token` reads that as `Bearer` and refuses everything else that is not a
@@ -51,12 +89,13 @@ export interface FederationTokens {
 	 * handed to a caller that holds no proof key, and a malformed record is not
 	 * a second spelling of silence.
 	 */
-	readonly tokenType?: string;
+	readonly tokenType: string | undefined;
 	/**
 	 * What the token holds now, space-delimited (RFC 6749 §3.3). A refresh may
-	 * narrow it, and this field moves with the token.
+	 * narrow it, and this field moves with the token. `undefined` when the
+	 * adapter named none and no requested list stood in for it.
 	 */
-	readonly scope?: string;
+	readonly scope: string | undefined;
 	/**
 	 * What the user consented to when the federation was linked: the ceiling a
 	 * refreshed scope is bounded by, per RFC 6749 §6 — "the scope of the access
@@ -68,12 +107,16 @@ export interface FederationTokens {
 	 * that narrows once and later answers with the full grant again is within
 	 * its rights, and the record could never be repaired (#647).
 	 *
-	 * Absent on a record written before #647, and on one whose adapter named no
-	 * scope. The consumer then has only `scope` to bound against, which is
-	 * conservative rather than wrong.
+	 * `undefined` on a record written before #647, and on one whose adapter
+	 * named no scope. The consumer then has only `scope` to bound against, which
+	 * is conservative rather than wrong.
+	 *
+	 * A required key for the same reason as `tokenType`, with the same reach
+	 * and the same gaps: a store that copies the record field by field and
+	 * forgets this one drops the consent it records without a sound, and the
+	 * type is what can notice.
 	 */
-	readonly grantedScope?: string;
-	readonly rawParams?: Readonly<Record<string, unknown>>;
+	readonly grantedScope: string | undefined;
 }
 
 /**

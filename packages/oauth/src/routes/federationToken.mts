@@ -1086,7 +1086,6 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				// out as well — it came from a store, and a store is another thing
 				// this route does not own.
 				grantedScope: canonicalScope(currentTokens.grantedScope),
-				rawParams: currentTokens.rawParams,
 			};
 			try {
 				await opts.federationTokenStore.update(sid, name, updatedTokens);

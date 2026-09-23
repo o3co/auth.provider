@@ -52,6 +52,10 @@ const tokens: FederationTokens = {
 	accessToken: "at",
 	refreshToken: "rt-secret",
 	expiresAt: new Date(Date.now() + 3600_000),
+	idToken: undefined,
+	tokenType: undefined,
+	scope: undefined,
+	grantedScope: undefined,
 };
 
 let suiteCounter = 0;
@@ -163,27 +167,18 @@ describe("#293 — mode=required over a real Redis", () => {
 		expiresAt: new Date(1_900_000_000_000),
 		tokenType: "Bearer",
 		scope: "openid email",
-		rawParams: {
-			access_token: "at-secret",
-			refresh_token: "rt-secret",
-			expires_in: 3599,
-			account_hint: "user@example.com",
-		},
+		// #647 — and the round-trip pins it, which it did not while this fixture
+		// claimed to be every field and left it out.
+		grantedScope: "openid email profile",
 	};
 	const makeEncrypted = () => makeStore(false, { mode: "required", key: encryptionKey });
 
-	it("stores one ciphertext — no token, no rawParams, no field name in clear", async () => {
+	it("stores one ciphertext — no token, no field name in clear", async () => {
 		const { keyPrefix, store } = makeEncrypted();
 		await store.attach("sid-1", "google", fullTokens);
 
 		const value = (await raw.get(`${keyPrefix}sid-1:google`)) as string;
-		for (const marker of [
-			"at-secret",
-			"rt-secret",
-			"it-secret",
-			"openid email",
-			"user@example.com",
-		]) {
+		for (const marker of ["at-secret", "rt-secret", "it-secret", "openid email"]) {
 			expect(value).not.toContain(marker);
 		}
 		const record = JSON.parse(value) as Record<string, unknown>;
@@ -191,7 +186,7 @@ describe("#293 — mode=required over a real Redis", () => {
 		expect(record.v).toBe(2);
 	});
 
-	it("round-trips every field, rawParams and a null expiry included", async () => {
+	it("round-trips every field, a null expiry included", async () => {
 		const { store } = makeEncrypted();
 		await store.attach("sid-1", "google", fullTokens);
 		await store.attach("sid-1", "github", { ...fullTokens, expiresAt: null });

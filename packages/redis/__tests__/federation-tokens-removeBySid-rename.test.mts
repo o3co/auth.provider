@@ -3,6 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 
+import type { FederationTokens } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import type { FederationTokenStoreClient } from "../src/clients.mjs";
 import { createRedisFederationTokenStore } from "../src/federation-tokens.mjs";
@@ -81,11 +82,14 @@ function createFakeRedis() {
 }
 
 const encryptionKey = Buffer.alloc(32, 7);
-const tokens = {
+const tokens: FederationTokens = {
 	accessToken: "at",
 	refreshToken: "rt-secret",
 	idToken: "it",
 	expiresAt: new Date(Date.now() + 3600_000),
+	tokenType: undefined,
+	scope: undefined,
+	grantedScope: undefined,
 };
 
 describe("AS-3: redis FederationTokenStore.deleteBySession → removeBySid (BREAKING rename)", () => {

@@ -291,6 +291,34 @@ offline delegation 側のルートは意図してそのまま返している —
 codec はそれを含むレコードを拒否する）。反対側では、アダプターが文字列でない
 値を名乗った場合は落とさず `""` として記録する — 拒否する対象を残すため。
 
+サードパーティの `FederationTokenStore` アダプターは、`FederationTokens` の全
+フィールドを `attach`・`update`・`get` を通して保持しなければならない。全フィールドが
+**必須キー**（記録するものがなければ値は `undefined`）なので、`FederationTokens` を
+組み立てるコードがどれかを書き忘れるとコンパイルエラーになる — store の `get`、`attach`/`update` の呼び出し元（store に投入するアプリ
+コードやテストの fixture を含む）すべて。`FederationTokens` を組み立てる側に
+とっては破壊的な型変更で、記録するものがなくても全キーを `undefined` として書く
+必要がある。
+
+型はアダプター独自の保存形式までは届かない。レコードを独自の行やドキュメントに
+変換するアダプターは、その形式にも同じ必須キーを宣言すること（同梱の Redis store
+は envelope でそうしている）。そうしないと変換がフィールドを落としたまま
+コンパイルが通る。素の JavaScript や、型チェックを迂回するコード（不完全な
+リテラルへの `as FederationTokens`、`JSON.parse(raw) as FederationTokens`、
+`Object.assign`）にも届かない。
+
+store は未設定の値を `undefined` か不在で返さなければならず、`null` で返しては
+ならない。このエンドポイントは `null` を拒否するので、`undefined` を `null` として
+書くシリアライザ（`ignoreUndefined` を設定しない MongoDB ドライバーなど）では、
+型を名乗らないアダプターのコネクションがすべて `502` になる。
+
+どのフィールドも失えば何かが壊れるので、すべてを文書ではなく型で強制する。
+`tokenType` を失うと**開いたまま**失敗する: レコードが沈黙して返り、沈黙は #645
+以前のレコードと読まれ、sender-constrained なトークンが `Bearer` として渡される。
+`refreshToken` を失うと refresh できなくなり（`410 refresh_token_absent`）、
+`idToken` を失うとログアウトで上流に `id_token_hint` を渡せなくなり、
+`grantedScope` を失うと現在の scope が refresh の上限になる（過小に報告する）。
+同梱の 2 つの store はこの要件を満たし、テストで固定されている。
+
 ### エラーレスポンス
 
 | ステータス | エラー | 意味 |

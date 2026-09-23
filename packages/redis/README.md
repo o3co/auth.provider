@@ -359,7 +359,7 @@ backend-agnostic; a public generic-lock API is on the roadmap for
 v0.6+.
 
 Since #293 the federation-token store seals the **whole** envelope —
-`rawParams`, `tokenType`, `scope` and the access-token expiry included, not
+`tokenType`, `scope`, `grantedScope` and the access-token expiry included, not
 just the three token fields — as one ciphertext, `{ "v": 2, "c": "…" }`, bound
 to its own Redis key as additional authenticated data (`allow-plaintext`,
 development only, writes `{ "v": 2, "p": { … } }`). A record without that
