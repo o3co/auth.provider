@@ -85,6 +85,19 @@ export function logGrantPolicyUnavailable(
 	);
 }
 
+/** The rest of {@link evaluateGrantPolicy}'s inputs. */
+export interface EvaluateGrantPolicyOptions {
+	/** A ceiling wider than `effectiveScopes` (the refresh grant's original grant). */
+	readonly scopeCeiling?: PolicyScopeCeiling;
+	/**
+	 * Where a policy that throws is logged (`grant_policy_unavailable`).
+	 * Required as a key, not as a value: a grant that has no logger passes
+	 * `undefined` and says so, and one that forgets fails to compile rather
+	 * than staying silent.
+	 */
+	readonly logger: Pick<Logger, "error"> | undefined;
+}
+
 /**
  * Evaluate `grantPolicy` for a token grant, fail-closed (CP-18), and apply
  * its scope decision to the grant's already-narrowed effective scope.
@@ -96,7 +109,8 @@ export function logGrantPolicyUnavailable(
  *   Policy is a security boundary; failing open would grant the pre-policy
  *   ceiling, which is exactly what the policy exists to prevent. The throw is
  *   logged at error level as `grant_policy_unavailable`
- *   ({@link logGrantPolicyUnavailable}) when the caller passes a `logger`.
+ *   ({@link logGrantPolicyUnavailable}) through `options.logger` — a required
+ *   key, so a caller has to say which logger, or `undefined` on purpose.
  * - **`deny` is `400` with the policy's own error** and description.
  * - **`grantedScope` may only narrow.** It is re-validated against
  *   `effectiveScopes` — the request as already narrowed to every ceiling the
@@ -109,7 +123,7 @@ export function logGrantPolicyUnavailable(
  * `grantedAudience` is left on `decision` for the caller to hand to
  * {@link boundPolicyAudience} together with the ceiling its grant applies.
  *
- * `scopeCeiling` is for a grant whose ceiling is wider than its default:
+ * `options.scopeCeiling` is for a grant whose ceiling is wider than its default:
  * `refresh_token`, where a silent policy leaves the scope the refresh asked
  * for and a `grantedScope` may reach anything in the original grant (RFC 6749
  * §6). Omitted, the ceiling is `effectiveScopes` itself.
@@ -119,9 +133,13 @@ export async function evaluateGrantPolicy(
 	request: GrantPolicyRequest,
 	context: GrantPolicyContext,
 	effectiveScopes: readonly string[],
-	scopeCeiling: PolicyScopeCeiling = { scopes: effectiveScopes, name: "requested scope" },
-	logger?: Logger,
+	options: EvaluateGrantPolicyOptions,
 ): Promise<GrantPolicyOutcome> {
+	const { logger } = options;
+	const scopeCeiling = options.scopeCeiling ?? {
+		scopes: effectiveScopes,
+		name: "requested scope",
+	};
 	let decision: GrantPolicyDecision;
 	try {
 		decision = await grantPolicy.evaluate(request, context);

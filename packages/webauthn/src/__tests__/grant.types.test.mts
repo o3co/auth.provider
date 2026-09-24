@@ -74,8 +74,9 @@ describe("the webauthn grant declares the slots it reads (#626 P2)", () => {
 		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("sessionFederationIndex");
 		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("subjectRevocation");
 		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("refreshTokenFamilyRevocation");
-		// Declared by the module for its rate-limited route, not read by the grant.
-		expectTypeOf<WebAuthnGrantDeps>().not.toHaveProperty("logger");
+		// The module's logger is read by the grant too, for the one line a
+		// policy that cannot answer writes (`grant_policy_unavailable`).
+		expectTypeOf<WebAuthnGrantDeps>().toHaveProperty("logger");
 		if (false as boolean) {
 			const deps = {} as WebAuthnGrantDeps;
 			// @ts-expect-error — the grant opens refresh-token families, it never revokes one

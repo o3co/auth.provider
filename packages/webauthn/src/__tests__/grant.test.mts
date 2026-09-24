@@ -652,6 +652,50 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 		expect(result.status).toBe(200);
 	});
 
+	it("logs a grant policy that cannot answer as grant_policy_unavailable, once, at error level", async () => {
+		// Every token grant logs it; this one used to evaluate the policy without
+		// its logger and stay silent.
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.registerCredential(makeCredential());
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+		const warn = vi.fn();
+		const error = vi.fn();
+		const handler = createWebAuthnGrant({
+			...makeBaseDeps(store),
+			grantPolicy: {
+				kind: "decision-service",
+				evaluate: vi
+					.fn()
+					.mockRejectedValue(
+						Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:8181"), {
+							code: "ECONNREFUSED",
+						}),
+					),
+			} as unknown as GrantDependencies["grantPolicy"],
+			logger: {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn,
+				error,
+				fatal: vi.fn(),
+				child: vi.fn(),
+			},
+		});
+		const { result } = await handler.handle(makeCtx({ assertion: makeAssertionResponse() }));
+		expect(result.status).toBe(503);
+		expect(warn).not.toHaveBeenCalled();
+		expect(error).toHaveBeenCalledTimes(1);
+		expect(error).toHaveBeenCalledWith(
+			{
+				grantType: WEBAUTHN_GRANT_TYPE,
+				policy: "decision-service",
+				err: expect.objectContaining({ name: "Error", code: "ECONNREFUSED" }),
+			},
+			"grant_policy_unavailable",
+		);
+	});
+
 	it("P1-R2: policy can deny when resourceIndicator.enabled is false (security regression)", async () => {
 		const store = createMemoryWebAuthnCredentialStore();
 		await store.registerCredential(makeCredential());

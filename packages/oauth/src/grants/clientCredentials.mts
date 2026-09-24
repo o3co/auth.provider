@@ -142,8 +142,7 @@ export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): 
 					},
 					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
 					effectiveScopes,
-					undefined,
-					deps.logger,
+					{ logger: deps.logger },
 				);
 				if (!policy.ok) return { result: policy.result };
 				effectiveScopes = policy.scopes;

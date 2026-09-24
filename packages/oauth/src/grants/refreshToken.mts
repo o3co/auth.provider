@@ -435,8 +435,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 					// CP-15: RFC 6749 §6 says the issued scope MUST NOT exceed the
 					// scope of the original grant — the ceiling here, wider than the
 					// scope this refresh asked for, which a silent policy leaves.
-					{ scopes: originalScopes, name: "original grant" },
-					logger,
+					{ scopeCeiling: { scopes: originalScopes, name: "original grant" }, logger },
 				);
 				if (!outcome.ok) return { result: outcome.result };
 				const { decision } = outcome;

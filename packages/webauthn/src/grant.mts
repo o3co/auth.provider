@@ -160,7 +160,7 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 export interface WebAuthnGrantDeps
 	extends Pick<
 			GrantDependencies,
-			"config" | "keyStore" | "grantPolicy" | "refreshTokenFamilyRotation"
+			"config" | "keyStore" | "grantPolicy" | "refreshTokenFamilyRotation" | "logger"
 		>,
 		ProviderDeps<"webauthnCredentialStore" | "challengeCeremony"> {
 	readonly webauthnConfig: {
@@ -377,6 +377,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					},
 					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
 					effectiveScopes,
+					{ logger: deps.logger },
 				);
 				if (!policy.ok) return { result: policy.result };
 				// CP-18 / CP-15: the scope came back re-validated against the

@@ -302,6 +302,7 @@ export { isEmailVerified } from "./grants/emailVerifiedGate.mjs";
 // path gives a policy that throws, denies, or exceeds its ceiling.
 export {
 	boundPolicyAudience,
+	type EvaluateGrantPolicyOptions,
 	evaluateGrantPolicy,
 	type GrantPolicyAllow,
 	type GrantPolicyOutcome,

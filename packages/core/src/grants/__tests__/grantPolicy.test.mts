@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	boundPolicyAudience,
 	evaluateGrantPolicy,
@@ -63,6 +63,7 @@ describe("policyOutOfBounds", () => {
 
 describe("evaluateGrantPolicy", () => {
 	it("answers 503 temporarily_unavailable when the policy throws — fail closed, never open", async () => {
+		const logger = { error: vi.fn() };
 		const outcome = await evaluateGrantPolicy(
 			hook(async () => {
 				throw new Error("policy service down");
@@ -70,6 +71,7 @@ describe("evaluateGrantPolicy", () => {
 			request,
 			context,
 			["read"],
+			{ logger },
 		);
 		expect(outcome).toEqual({
 			ok: false,
@@ -79,6 +81,15 @@ describe("evaluateGrantPolicy", () => {
 				errorDescription: "policy evaluation unavailable",
 			},
 		});
+		// Logged once through the logger the caller had to name.
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({
+				grantType: request.grantType,
+				err: expect.objectContaining({ name: "Error" }),
+			}),
+			"grant_policy_unavailable",
+		);
 	});
 
 	it("passes a deny through as 400 with the policy's own error", async () => {
@@ -91,6 +102,7 @@ describe("evaluateGrantPolicy", () => {
 			request,
 			context,
 			["read"],
+			{ logger: undefined },
 		);
 		expect(outcome).toEqual({
 			ok: false,
@@ -99,19 +111,26 @@ describe("evaluateGrantPolicy", () => {
 	});
 
 	it("leaves the effective scope alone when the policy says nothing about it", async () => {
-		const outcome = await evaluateGrantPolicy(allow(), request, context, ["read", "write"]);
+		const outcome = await evaluateGrantPolicy(allow(), request, context, ["read", "write"], {
+			logger: undefined,
+		});
 		expect(outcome).toMatchObject({ ok: true, scopes: ["read", "write"] });
 	});
 
 	it("narrows to what the policy grants, and honours an empty array as strip-all", async () => {
 		expect(
-			await evaluateGrantPolicy(allow({ grantedScope: ["read"] }), request, context, [
-				"read",
-				"write",
-			]),
+			await evaluateGrantPolicy(
+				allow({ grantedScope: ["read"] }),
+				request,
+				context,
+				["read", "write"],
+				{ logger: undefined },
+			),
 		).toMatchObject({ ok: true, scopes: ["read"] });
 		expect(
-			await evaluateGrantPolicy(allow({ grantedScope: [] }), request, context, ["read"]),
+			await evaluateGrantPolicy(allow({ grantedScope: [] }), request, context, ["read"], {
+				logger: undefined,
+			}),
 		).toMatchObject({ ok: true, scopes: [] });
 	});
 
@@ -121,6 +140,7 @@ describe("evaluateGrantPolicy", () => {
 			request,
 			context,
 			["read"],
+			{ logger: undefined },
 		);
 		expect(outcome).toEqual({
 			ok: false,
@@ -143,7 +163,7 @@ describe("evaluateGrantPolicy", () => {
 			request,
 			context,
 			["read"],
-			ceiling,
+			{ scopeCeiling: ceiling, logger: undefined },
 		);
 		expect(within).toMatchObject({ ok: true, scopes: ["read", "write"] });
 
@@ -152,7 +172,7 @@ describe("evaluateGrantPolicy", () => {
 			request,
 			context,
 			["read"],
-			ceiling,
+			{ scopeCeiling: ceiling, logger: undefined },
 		);
 		expect(beyond).toEqual({
 			ok: false,
@@ -164,7 +184,12 @@ describe("evaluateGrantPolicy", () => {
 		});
 
 		// Silent, the default stands — not the ceiling.
-		expect(await evaluateGrantPolicy(allow(), request, context, ["read"], ceiling)).toMatchObject({
+		expect(
+			await evaluateGrantPolicy(allow(), request, context, ["read"], {
+				scopeCeiling: ceiling,
+				logger: undefined,
+			}),
+		).toMatchObject({
 			ok: true,
 			scopes: ["read"],
 		});
@@ -176,6 +201,7 @@ describe("evaluateGrantPolicy", () => {
 			request,
 			context,
 			["read"],
+			{ logger: undefined },
 		);
 		expect(outcome.ok && outcome.decision.grantedAudience).toEqual(["https://api.example"]);
 	});
@@ -189,6 +215,7 @@ describe("evaluateGrantPolicy", () => {
 			request,
 			context,
 			["read"],
+			{ logger: undefined },
 		);
 		expect(outcome).toEqual({
 			ok: false,
