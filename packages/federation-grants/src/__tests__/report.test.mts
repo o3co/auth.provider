@@ -125,7 +125,7 @@ describe("createSanitizedReporter", () => {
 
 	it("names a Store that could not be reached, or answered unreadably, and nothing of its message", () => {
 		// The foundation adapter's StoreTransportError: a refused connection, a
-		// TLS failure, an answer that is not HTTP, a body that broke mid-read.
+		// TLS failure, a malformed or incomplete answer, a body that broke mid-read.
 		const { logger, warn } = spyLogger();
 		const failed = new Error(`request to https://store.test could not be reached ${SENTINEL}`);
 		failed.name = "StoreTransportError";

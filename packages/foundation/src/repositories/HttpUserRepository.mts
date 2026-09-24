@@ -659,7 +659,7 @@ export class HttpUserRepository implements UserRepository {
 				// quote what it was sending.
 				throw requestFailure(err, {
 					unreachable: `HttpUserRepository: identity lookup at ${url} could not be reached`,
-					notHttp: `HttpUserRepository: identity lookup at ${url} answered something that is not HTTP`,
+					malformed: `HttpUserRepository: identity lookup at ${url} answered with a malformed or incomplete HTTP response`,
 				});
 			}
 			if (!res.ok) {
@@ -755,7 +755,7 @@ export class HttpUserRepository implements UserRepository {
 				// sending — the credential, the password — or what came back.
 				throw requestFailure(err, {
 					unreachable: `HttpUserRepository: request to ${url} could not be reached`,
-					notHttp: `HttpUserRepository: the Store at ${url} answered something that is not HTTP`,
+					malformed: `HttpUserRepository: the Store at ${url} answered with a malformed or incomplete HTTP response`,
 				});
 			}
 

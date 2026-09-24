@@ -31,12 +31,13 @@
  * one without the challenge — or any when no token is configured — keeps the
  * meaning the wire contract gives it.
  *
- * A transport failure — a refused connection, an https URL on a plain-HTTP
- * port, a peer that reflects the request into a status line, header or body
- * the parser rejects — is a StoreTransportError: a fixed message naming the
- * endpoint and what failed (not reached, not HTTP, not readable) and at most
- * a transport code, never the transport's own error, which quotes the bytes
- * it choked on. A timeout, whichever half stalls, is a TimeoutError.
+ * A transport failure — a refused connection, a TLS handshake refused, an
+ * https URL on a plain-HTTP port, a peer that reflects the request into a
+ * status line, header or body the parser rejects, a head too large, a close
+ * after a 1xx — is a StoreTransportError: a fixed message naming the endpoint
+ * and what failed (not reached, a malformed response, not readable) and at
+ * most a transport code, never the transport's own error, which quotes the
+ * bytes it choked on. A timeout, whichever half stalls, is a TimeoutError.
  *
  * Without msw: what is asserted is the header that reaches the socket, and an
  * interceptor is one more thing between the two.
@@ -489,6 +490,9 @@ describe("a transport failure carries nothing the request carried", () => {
 	 */
 	const reflecting = async (answer: (authorization: string) => string): Promise<string> => {
 		const server = createNetServer((socket) => {
+			// The client gives up on some answers mid-write (a head over the
+			// size limit); the reset that follows is the point, not a failure.
+			socket.on("error", () => {});
 			let head = "";
 			socket.on("data", (chunk: Buffer) => {
 				head += chunk.toString("latin1");

@@ -57,10 +57,19 @@ export class StoreCredentialRefusedError extends Error {
 
 /** What went wrong with the exchange, when it was not the Store's answer. */
 export type StoreTransportFailure =
-	/** No connection, or none that became an exchange: refused, reset, DNS, TLS. */
+	/**
+	 * No answer began: refused, reset, DNS, TLS, or a connection closed
+	 * before the peer sent a byte. The network path, or TLS to the Store.
+	 */
 	| "unreachable"
-	/** Something answered, and what it answered is not HTTP the parser accepts. */
-	| "not_http"
+	/**
+	 * The Store (or whatever answers at the URL) sent bytes, and no usable
+	 * response head came of them: the parser refused the status line or a
+	 * header, the head outgrew the size limit, or the connection closed
+	 * after an interim `1xx` or mid-head. The Store's answer, or a proxy's —
+	 * not the network.
+	 */
+	| "malformed_response"
 	/** An HTTP answer arrived, and its body broke before it was read. */
 	| "unreadable";
 
@@ -122,13 +131,14 @@ const TRANSPORT_CODES: ReadonlySet<string> = new Set([
  * (`UND_ERR_SOCKET`, `UND_ERR_HEADERS_OVERFLOW`, …), llhttp's parser errors
  * (`HPE_INVALID_HEADER_TOKEN`, … — where the runtime sets them), and
  * OpenSSL's (`ERR_SSL_WRONG_VERSION_NUMBER` — an https URL on a port that
- * speaks plain HTTP). Bounded, so a value that merely starts like one is not
- * kept whole.
+ * speaks plain HTTP; `ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE` — OpenSSL 3's
+ * name for a TLS 1.2 handshake the Store refused, one slash in it). Bounded,
+ * so a value that merely starts like one is not kept whole.
  */
 const CODE_FAMILIES: readonly RegExp[] = [
 	/^UND_ERR_[A-Z_]{1,48}$/,
 	/^HPE_[A-Z_]{1,48}$/,
-	/^ERR_SSL_[A-Z0-9_]{1,64}$/,
+	/^ERR_SSL_[A-Z0-9_]{1,64}(?:\/[A-Z0-9_]{1,64})?$/,
 ];
 
 const MAX_CAUSE_DEPTH = 4;
@@ -161,16 +171,25 @@ export function transportCode(err: unknown): string | undefined {
 }
 
 /**
- * Whether the transport failed parsing what came back: the peer answered, and
- * not with HTTP. undici names the error `HTTPParserError`; where the runtime
- * gives it a code, it is an `HPE_*` one. Read by name and code only.
+ * Whether the peer sent bytes and no usable response head came of them — the
+ * `malformed_response` case. undici says so three ways: an `HTTPParserError`
+ * (an `HPE_*` code where the runtime sets one), `UND_ERR_HEADERS_OVERFLOW`,
+ * and `UND_ERR_SOCKET` — the other side closed — on a socket that had read
+ * bytes (after a `1xx`, or mid-head); on one that had read none, nothing
+ * answered. Read by name, code and that byte count only.
  */
-function isParserFailure(err: unknown): boolean {
+function isMalformedResponse(err: unknown): boolean {
 	for (const error of causes(err)) {
-		const { name, code } = error as { name?: unknown; code?: unknown };
-		if (name === "HTTPParserError" || (typeof code === "string" && code.startsWith("HPE_"))) {
-			return true;
-		}
+		const { name, code, socket } = error as {
+			name?: unknown;
+			code?: unknown;
+			socket?: { bytesRead?: unknown } | null;
+		};
+		if (name === "HTTPParserError") return true;
+		if (typeof code !== "string") continue;
+		if (code.startsWith("HPE_") || code === "UND_ERR_HEADERS_OVERFLOW") return true;
+		const bytesRead = socket?.bytesRead;
+		if (code === "UND_ERR_SOCKET" && typeof bytesRead === "number" && bytesRead > 0) return true;
 	}
 	return false;
 }
@@ -179,18 +198,19 @@ const withCode = (message: string, code: string | undefined): string =>
 	code === undefined ? message : `${message} (${code})`;
 
 /**
- * A request that failed before any answer could be taken: `messages.notHttp`
- * when something answered and the parser refused it — the Store was reached,
- * so "could not be reached" would send an operator to the network —
- * otherwise `messages.unreachable`. Either with the code, when there is one.
+ * A request that failed before a response could be taken:
+ * `messages.malformed` when the Store sent bytes and no usable head came of
+ * them — it was reached, so "could not be reached" would send an operator to
+ * the network — otherwise `messages.unreachable`. Either with the code, when
+ * there is one.
  */
 export function requestFailure(
 	err: unknown,
-	messages: { readonly unreachable: string; readonly notHttp: string },
+	messages: { readonly unreachable: string; readonly malformed: string },
 ): StoreTransportError {
 	const code = transportCode(err);
-	return isParserFailure(err)
-		? new StoreTransportError(withCode(messages.notHttp, code), "not_http", code)
+	return isMalformedResponse(err)
+		? new StoreTransportError(withCode(messages.malformed, code), "malformed_response", code)
 		: new StoreTransportError(withCode(messages.unreachable, code), "unreachable", code);
 }
 

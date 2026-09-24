@@ -84,11 +84,11 @@ const userRepo = await userFactory.create({
 
 | `reason` | いつ | メッセージ（照会では `identity lookup at <url> …`） |
 | --- | --- | --- |
-| `unreachable` | 接続の拒否、リセット、DNS、TLS | `HttpUserRepository: request to <url> could not be reached` |
-| `not_http` | Store は応答したが、HTTP パーサーがステータス行かヘッダーを拒否した | `HttpUserRepository: the Store at <url> answered something that is not HTTP` |
+| `unreachable` | 応答が始まらなかった: 接続の拒否、リセット、DNS、TLS、Store が 1 バイトも送る前に閉じられた接続 — ネットワークの経路か TLS | `HttpUserRepository: request to <url> could not be reached` |
+| `malformed_response` | Store はバイトを送ったが、使える応答ヘッドにならなかった: パーサーがステータス行かヘッダーを拒否した、ヘッドがサイズ上限を超えた、暫定の `1xx` の後やヘッドの途中で接続が閉じられた — Store の、またはプロキシの応答 | `HttpUserRepository: the Store at <url> answered with a malformed or incomplete HTTP response` |
 | `unreadable` | HTTP の応答のボディが読み取りの途中で壊れた | `HttpUserRepository: response from <url> could not be read` |
 
-どれも運ぶのはせいぜいオペレーターが対処できる通信のコード（メッセージの中と `code` として）だけ: `ECONNREFUSED`、`ENOTFOUND`、`ECONNRESET`、`EPROTO`、`UND_ERR_*` や `HPE_*`、`ERR_SSL_*`（`ERR_SSL_WRONG_VERSION_NUMBER` は平文の HTTP を話すポートを指す https の URL）、証明書のコード。通信自身のエラーや `cause` は決して運ばない: undici のパーサーのエラーは拒否したバイト列をそのまま引用し、リクエストを反射する相手 — 壊れたプロキシ、デバッグ用のエコー — はその中に `Authorization` ヘッダーやパスワードを置く。期限を超えたリクエストはこれではなく `TimeoutError` になる（コンストラクタでの検証を参照）。
+どれも運ぶのはせいぜいオペレーターが対処できる通信のコード（メッセージの中と `code` として）だけ: `ECONNREFUSED`、`ENOTFOUND`、`ECONNRESET`、`EPROTO`、`UND_ERR_*`（`UND_ERR_HEADERS_OVERFLOW`、`UND_ERR_SOCKET` など）、ランタイムが設定する場合の `HPE_*`（Node 26 の undici はパーサーのエラーにコードを設定しない）、`ERR_SSL_*`（`ERR_SSL_WRONG_VERSION_NUMBER` は平文の HTTP を話すポートを指す https の URL、`ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE` は Store が拒否した TLS 1.2 のハンドシェイク — クライアント証明書を求める相互 TLS、または共通の暗号スイートが無い）、証明書のコード。通信自身のエラーや `cause` は決して運ばない: undici のパーサーのエラーは拒否したバイト列をそのまま引用し、リクエストを反射する相手 — 壊れたプロキシ、デバッグ用のエコー — はその中に `Authorization` ヘッダーやパスワードを置く。期限を超えたリクエストはこれではなく `TimeoutError` になる（コンストラクタでの検証を参照）。
 
 **`linkFederatedIdentity`** は `linkFederatedIdentityUrl` に `{ userId, provider, sub, token, claims }` を送る: `2xx` の `User` は `{ ok: true, user }`、`401` / `403` は `{ ok: false, reason: "refused" }`、`409` は `{ ok: false, reason: "conflict" }`、それ以外は例外。拒否のボディは読まれないので、拒否が Store からの説明を運ぶことはない。`linkFederatedIdentityUrl` が設定されていなければこのメソッドは存在せず、フェデレーションのルートはそれで `?link=1` を最初から拒否すると分かる。`2xx` を返す前に Store が検査すべきこと — 未検証やリレーのアドレスでは決してリンクしない、メールアドレスだけで決してリンクしない — は [セッションパッケージの README](../session/README.ja.md#フェデレーション間のアカウントリンク482) にある。
 
@@ -132,7 +132,7 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 | jwt-bearer グラント（[`@o3co/auth-provider-oauth`](../oauth/README.ja.md)） | `503 temporarily_unavailable` | `jwt_bearer_user_repository_unavailable`（error、`err` 付き） |
 | federation-grants の接続コールバック — ID の照会（[`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)） | `error=temporarily_unavailable` 付きのリダイレクト | `federation_grant.failure`（warn）に `during: "callback_identity_lookup"` と `classification: "store_credential_refused"`（`StoreTransportError` なら `store_transport_failed`、`TimeoutError` なら `timeout`） — このレポーターは分類を出し、エラーのメッセージは決して出さない |
 
-`err` がログに出る場合、そのメッセージは Store の URL、ステータス、`CLIENT_USER_BEARER_TOKEN` を示し、トークンは決して示さない。
+`err` がログに出る場合、`StoreCredentialRefusedError` のメッセージは Store の URL、ステータス、`CLIENT_USER_BEARER_TOKEN` を示し、トークンは決して示さない。`StoreTransportError` のメッセージは URL、何が失敗したか、せいぜい通信のコードを示す。
 
 ## コンストラクタでの検証
 
@@ -167,7 +167,7 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 | --- | --- |
 | [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | 認証とその応答、`User` の形の検査、https の規則、タイムアウトとレスポンス上限、リンク、ID の照会の有無・probe・ワイヤ |
 | [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | 実際の HTTP サーバーに対して: ID の照会が拒否した応答の接続を解放すること、四つのリクエストそれぞれでリダイレクト — 別のオリジンへ、同じオリジンへ、`Location` 無し — が拒否され、リダイレクト先に何も送られないこと |
-| [`HttpUserRepository.credential.test.mts`](src/repositories/__tests__/HttpUserRepository.credential.test.mts) | 実際の HTTP サーバーに対して: `bearerToken` があれば四つのリクエストそれぞれに `Authorization: Bearer <token>` が付き、無ければ `Authorization` ヘッダーが付かないこと（直接構築でも `"http"` ビルダー経由でも）、弱い・形の誤った・空の・文字列でないトークンが構築時に拒否されること、どの失敗にもリポジトリのどの検査にもトークンが現れないこと、通信の失敗が何が失敗したかを示す `StoreTransportError` になること — 接続の拒否と平文の HTTP のポートを指す https の URL（届かない）、トークンを反射したステータス行やヘッダー（HTTP でない）や chunked ボディ（読めない） — コード付き、cause 無しで、タイムアウトはヘッダーとボディのどちらが止まっても `TimeoutError` になること、トークンを送ったときの `Bearer` チャレンジ付き `401` または `403` が四つそれぞれで `StoreCredentialRefusedError`（`storeStatus`、`status` 無し）になり、チャレンジの無いもの — またはトークンを送っていないとき — は従来どおり読まれること |
+| [`HttpUserRepository.credential.test.mts`](src/repositories/__tests__/HttpUserRepository.credential.test.mts) | 実際の HTTP サーバーに対して: `bearerToken` があれば四つのリクエストそれぞれに `Authorization: Bearer <token>` が付き、無ければ `Authorization` ヘッダーが付かないこと（直接構築でも `"http"` ビルダー経由でも）、弱い・形の誤った・空の・文字列でないトークンが構築時に拒否されること、どの失敗にもリポジトリのどの検査にもトークンが現れないこと、通信の失敗が何が失敗したかを示す `StoreTransportError` になること — 接続の拒否と平文の HTTP のポートを指す https の URL（届かない）、トークンを反射したステータス行やヘッダー、サイズ上限を超えるヘッド、`1xx` の後の切断（壊れた・不完全な応答）や chunked ボディ（読めない）、クライアントのハンドシェイクを拒否する TLS 1.2 サーバー（届かない、`ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE`） — コード付き、cause 無しで、タイムアウトはヘッダーとボディのどちらが止まっても `TimeoutError` になること、トークンを送ったときの `Bearer` チャレンジ付き `401` または `403` が四つそれぞれで `StoreCredentialRefusedError`（`storeStatus`、`status` 無し）になり、チャレンジの無いもの — またはトークンを送っていないとき — は従来どおり読まれること |
 | [`storeErrors.test.mts`](src/repositories/__tests__/storeErrors.test.mts) | どの通信のコードが残るか、二つの名前付きエラーの形 — `status` も cause も無い |
 | [`wwwAuthenticate.test.mts`](src/repositories/__tests__/wwwAuthenticate.test.mts) | どの `WWW-Authenticate` の値が `Bearer` チャレンジを持つか、敵対的な 64 KiB の値を一度の走査で読むこと |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | `"http"` のビルダー、そのデフォルトと文字列の変換、組み立て時に拒否される設定 |
