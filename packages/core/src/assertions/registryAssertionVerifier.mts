@@ -22,7 +22,12 @@ import type { Logger } from "../logging/Logger.mjs";
 import { isRecordableJti } from "../replay-seen-set/jti.mjs";
 import type { ReplaySeenSet } from "../replay-seen-set/types.mjs";
 import type { AssertionIssuerEntry, AssertionIssuerRegistry } from "./issuerRegistry.mjs";
-import { assertionLifetime, MAX_ASSERTION_LIFETIME_SECONDS } from "./lifetime.mjs";
+import {
+	assertionLifetime,
+	describeInvalidAssertionClockTolerance,
+	isValidAssertionClockTolerance,
+	MAX_ASSERTION_LIFETIME_SECONDS,
+} from "./lifetime.mjs";
 import type {
 	AssertionVerificationContext,
 	AssertionVerificationResult,
@@ -332,6 +337,15 @@ export function createRegistryAssertionVerifier(
 			}
 
 			const clockTolerance = entry.clockToleranceSeconds ?? 60;
+			// A store-backed registry's rows are not validated on the way out,
+			// and a tolerance of NaN, Infinity or a string switches jose's exp
+			// check and the lifetime ceiling off. A composition fault, not a
+			// refusal: thrown, so the grant answers 503 and logs it.
+			if (!isValidAssertionClockTolerance(clockTolerance)) {
+				throw new Error(
+					`createRegistryAssertionVerifier: entry ${entry.issuer}: ${describeInvalidAssertionClockTolerance(clockTolerance)}.`,
+				);
+			}
 			let claims: JWTPayload;
 			try {
 				({ payload: claims } = await jwtVerify(assertion, keyFor(entry) as never, {

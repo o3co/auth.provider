@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import {
 	createMemoryReplaySeenSet,
 	type Logger,
+	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
 	type PublicClient,
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
@@ -460,6 +461,23 @@ describe("createClientAssertionVerifier (#484)", () => {
 		const nowSeconds = Math.floor(fixedNowMs / 1000);
 		const at = (tolerance: number, logger: Logger = silent) =>
 			build({ now: () => fixedNowMs, clockToleranceSeconds: tolerance, logger });
+
+		// NaN and Infinity switch every comparison off, jose's `exp` check
+		// included; "30s" would concatenate onto the ceiling. Refused when the
+		// verifier is built, like an issuer entry's.
+		for (const [label, tolerance] of [
+			["NaN", Number.NaN],
+			["Infinity", Number.POSITIVE_INFINITY],
+			["negative", -1],
+			["past the bound", MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS + 1],
+			['the string "30s"', "30s"],
+		] as const) {
+			it(`refuses to be built with a clock tolerance that is ${label}`, () => {
+				expect(() => build({ clockToleranceSeconds: tolerance as number })).toThrow(
+					/clockToleranceSeconds/,
+				);
+			});
+		}
 
 		for (const tolerance of [30, 120]) {
 			it(`accepts exp up to the ceiling plus the tolerance (${tolerance} s)`, async () => {

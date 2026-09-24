@@ -39,13 +39,52 @@
  */
 export const MAX_ASSERTION_LIFETIME_SECONDS = 3600;
 
+/**
+ * The largest clock tolerance an assertion verifier may be given, in seconds:
+ * an issuer entry's `clockToleranceSeconds`, `private_key_jwt`'s
+ * `clockToleranceSeconds`. Five minutes — the tolerance `verifyJwt` gives this
+ * server's own tokens (`DEFAULT_CLOCK_SKEW_MS`). No peer's clock needs more
+ * slack than that, and the tolerance is added to the lifetime ceiling and to
+ * every `exp` check, so an unbounded one would switch both off.
+ */
+export const MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS = 300;
+
+/**
+ * Whether `value` is a usable assertion clock tolerance: a finite number of
+ * seconds from 0 to {@link MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS}. `NaN`,
+ * `Infinity` and a string are not — the first two switch every time check
+ * off, and a string concatenates onto the ceiling.
+ */
+export function isValidAssertionClockTolerance(value: unknown): value is number {
+	return (
+		typeof value === "number" &&
+		Number.isFinite(value) &&
+		value >= 0 &&
+		value <= MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS
+	);
+}
+
+/** The refusal {@link isValidAssertionClockTolerance} is reported with. */
+export function describeInvalidAssertionClockTolerance(value: unknown): string {
+	const got = typeof value === "number" ? String(value) : `a ${typeof value}`;
+	return (
+		`clockToleranceSeconds must be a finite number of seconds from 0 to ` +
+		`${MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS} (got ${got}): it is added to the lifetime ceiling ` +
+		"and to every exp check, and a value outside that range switches them off"
+	);
+}
+
 /** How far past now an assertion's `exp` runs, against the most it may. */
 export interface AssertionLifetime {
 	/** `exp − now`, in seconds. */
 	readonly lifetimeSeconds: number;
 	/** {@link MAX_ASSERTION_LIFETIME_SECONDS} plus the clock tolerance. */
 	readonly maxLifetimeSeconds: number;
-	/** Whether `lifetimeSeconds` is past `maxLifetimeSeconds` — refuse it. */
+	/**
+	 * Whether `lifetimeSeconds` is past `maxLifetimeSeconds` — refuse it. Also
+	 * true when the two cannot be compared (a tolerance of `NaN`, `Infinity`
+	 * or a string): the ceiling fails closed.
+	 */
 	readonly exceeded: boolean;
 }
 
@@ -67,5 +106,8 @@ export function assertionLifetime(
 ): AssertionLifetime {
 	const lifetimeSeconds = expSeconds - nowSeconds;
 	const maxLifetimeSeconds = MAX_ASSERTION_LIFETIME_SECONDS + clockToleranceSeconds;
-	return { lifetimeSeconds, maxLifetimeSeconds, exceeded: lifetimeSeconds > maxLifetimeSeconds };
+	// Written as "not within" so that anything uncomparable — NaN on either
+	// side, an infinite ceiling, a string that concatenated — is exceeded.
+	const within = Number.isFinite(maxLifetimeSeconds) && lifetimeSeconds <= maxLifetimeSeconds;
+	return { lifetimeSeconds, maxLifetimeSeconds, exceeded: !within };
 }

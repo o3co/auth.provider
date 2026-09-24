@@ -17,6 +17,10 @@
 import type { JSONWebKeySet } from "jose";
 import type { KeyLike } from "../keys/KeyStore.mjs";
 import { isLoopbackHostname } from "../net/loopback.mjs";
+import {
+	describeInvalidAssertionClockTolerance,
+	isValidAssertionClockTolerance,
+} from "./lifetime.mjs";
 
 /**
  * Where an issuer's signing keys come from (#525).
@@ -125,7 +129,11 @@ export interface AssertionIssuerEntryInput {
 	 */
 	readonly profile?: "rfc7523" | "id-jag" | undefined;
 	/**
-	 * Clock skew for `exp` / `nbf`, in seconds. Default 60.
+	 * Clock skew for `exp` / `nbf`, in seconds. Default 60. A finite number
+	 * from 0 to `MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS` (300): it is added to
+	 * the lifetime ceiling and to every time check, so `NaN`, `Infinity` or a
+	 * string would switch them off. Checked by {@link checkAssertionIssuerEntry}
+	 * and again when the verifier reads a stored entry.
 	 *
 	 * An assertion admitted past its `exp` inside this tolerance still
 	 * verifies, but has no lifetime left for a token to inherit: the
@@ -246,6 +254,14 @@ export function checkAssertionIssuerEntry(entry: AssertionIssuerEntryInput): voi
 		throw new Error(
 			`AssertionIssuerEntry(${entry.issuer}): algorithms must name at least one ` +
 				"algorithm — omitting it lets jose accept anything the key can verify.",
+		);
+	}
+	if (
+		entry.clockToleranceSeconds !== undefined &&
+		!isValidAssertionClockTolerance(entry.clockToleranceSeconds)
+	) {
+		throw new Error(
+			`AssertionIssuerEntry(${entry.issuer}): ${describeInvalidAssertionClockTolerance(entry.clockToleranceSeconds)}.`,
 		);
 	}
 	if (entry.keys.type === "jwks_uri") {

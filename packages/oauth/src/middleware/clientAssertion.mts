@@ -19,6 +19,8 @@ import {
 	auditErrorText,
 	consoleLogger,
 	createRemoteKeySetCache,
+	describeInvalidAssertionClockTolerance,
+	isValidAssertionClockTolerance,
 	isRecordableJti,
 	isWellFormedClientId,
 	type Logger,
@@ -143,6 +145,13 @@ export function createClientAssertionVerifier(
 ): ClientAssertionVerifier {
 	const logger = options.logger ?? consoleLogger;
 	const clockTolerance = options.clockToleranceSeconds ?? 30;
+	// NaN, Infinity or a string would switch jose's exp check and the
+	// lifetime ceiling off.
+	if (!isValidAssertionClockTolerance(clockTolerance)) {
+		throw new Error(
+			`createClientAssertionVerifier: ${describeInvalidAssertionClockTolerance(clockTolerance)}.`,
+		);
+	}
 	const now = options.now ?? Date.now;
 	const audiences = [options.issuer, options.tokenEndpoint].filter(
 		(value): value is string => typeof value === "string" && value.length > 0,

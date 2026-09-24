@@ -60,6 +60,9 @@ export { createJwtAssertionVerifier } from "./assertions/jwtAssertionVerifier.mj
 export {
 	type AssertionLifetime,
 	assertionLifetime,
+	describeInvalidAssertionClockTolerance,
+	isValidAssertionClockTolerance,
+	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
 	MAX_ASSERTION_LIFETIME_SECONDS,
 } from "./assertions/lifetime.mjs";
 export {
