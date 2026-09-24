@@ -72,7 +72,7 @@ Exported from [`src/index.mts`](./src/index.mts):
 
 - `tokenExchangeModule` — [`module.mts`](./src/module.mts). The module value to install.
 - `createTokenExchangeGrant`, `TokenExchangeDependencies`, `TOKEN_EXCHANGE_GRANT_TYPE`, `ACCESS_TOKEN_TYPE` — [`grant.mts`](./src/grant.mts). The handler itself, for a composition that dispatches it from its own route.
-- `createSelfIssuedAccessTokenValidator`, `CreateSelfIssuedAccessTokenValidatorOptions` — [`validator/selfIssuedAccessToken.mts`](./src/validator/selfIssuedAccessToken.mts). The built-in validator. `issuer` is required; the factory throws without a non-empty one, because without it an `at+jwt` signed by the same key store but naming another issuer could pass. It takes no `refreshTokenFamilyRevocation`, and throws if given one: the family check is the handler's (note 1), so a composition that dispatches `createTokenExchangeGrant` itself gives that slot to the handler. The validator does not check the family: a caller using it outside `createTokenExchangeGrant` must check `familyId` itself, and refuse the token when it has no family store.
+- `createSelfIssuedAccessTokenValidator`, `CreateSelfIssuedAccessTokenValidatorOptions` — [`validator/selfIssuedAccessToken.mts`](./src/validator/selfIssuedAccessToken.mts). The built-in validator. `issuer` is required; the factory throws without a non-empty one, because without it an `at+jwt` signed by the same key store but naming another issuer could pass. It takes no `refreshTokenFamilyRevocation`: the options type declares the key `never`, so a deps object spread into them does not compile, and the factory throws if the key is present, even as `undefined`. The family check is the handler's (note 1), so a composition that dispatches `createTokenExchangeGrant` itself gives that slot to the handler. The validator does not check the family: a caller using it outside `createTokenExchangeGrant` must check `familyId` itself, and refuse the token when it has no family store.
 
 The validator contract is not re-exported: import `ExchangeTokenValidator`, `ValidatedToken` and `ExchangeTokenValidationContext` from `@o3co/auth-provider-core`.
 
@@ -156,6 +156,8 @@ const handle = await createApp({
 
 Two modules contributing a validator for the same token type is refused at boot.
 
+**`familyId` is how a validator tells the handler about a refresh-token family.** A validator that accepts this provider's own family-bearing tokens — under any token type — must fill `ValidatedToken.familyId` from the token's `family_id`: the handler checks it against this provider's family store, refuses the token when none is wired, and copies it into the issued token so a later family revocation reaches that token too (Security notes 1 and 10). A family left only in `claims` is neither checked nor inherited. A validator of foreign tokens, whose families this provider's store does not hold, leaves `familyId` unset. An empty string counts as unset.
+
 ## Security notes
 
 1. **Wire `refreshTokenFamilyRevocation`, or this provider's family-bearing access tokens cannot be exchanged.** A self-issued access token carrying `family_id` — every token the `authorization_code` and `refresh_token` grants mint — is accepted as `subject_token` or as `actor_token` only when its family's revocation state can be read. The handler owns this check, for both tokens; the built-in validator does not read the slot. The answers (for the `actor_token`, each description is prefixed `actor_token `):
@@ -164,7 +166,7 @@ Two modules contributing a validator for the same token type is refused at boot.
    - **The family is revoked** (logout, refresh-token replay): `invalid_grant` / `family_revoked` (`actor_token family_revoked`) — the description the `refresh_token` grant gives a revoked family on the same endpoint. A client seeing it needs the user to authenticate again; retrying the exchange will not help.
    - **The store cannot answer:** `503 temporarily_unavailable` / `refresh token store unavailable`, logged as `token_exchange_family_store_unavailable` with the role.
 
-   The check keys on the family the validator reports (`ValidatedToken.familyId`), not on the token type: the built-in validator registered under another type, or a validator of your own that reports a family, is held to the same answers, because the issued token inherits the subject's `family_id` whichever validator produced it. A token without a family (a `client_credentials` token, say) has nothing to check. The answers depend only on the `refreshTokenFamilyRevocation` handed to the handler, so they hold as well for a composition that dispatches `createTokenExchangeGrant` itself.
+   The check keys on the family the validator reports (`ValidatedToken.familyId`), not on the token type: the built-in validator registered under another type, or a validator of your own that reports a family, is held to the same answers, because the issued token inherits the subject's `family_id` whichever validator produced it. A token without a family (a `client_credentials` token, say; an empty `familyId` counts as none) has nothing to check. The answers depend only on the `refreshTokenFamilyRevocation` handed to the handler, so they hold as well for a composition that dispatches `createTokenExchangeGrant` itself.
 
 2. **Scope is bounded by two ceilings, always.** `granted scope ⊆ subject_token.scope ∩ client.allowedScopes` is enforced unconditionally, and a `GrantPolicyHook` cannot bypass either **through the request parameter** (point 5 covers the policy-level override, which is re-checked against both). An explicitly requested scope outside either ceiling is refused with `invalid_scope` naming it; an omitted `scope` inherits the subject token's, clamped to the registration.
 
@@ -199,6 +201,8 @@ Two modules contributing a validator for the same token type is refused at boot.
 9. **Actor chains are bounded.** `oauth.tokenExchange.maxActorChainDepth` defaults to `3` and can be overridden with `OAUTH_TOKEN_EXCHANGE_MAX_ACTOR_CHAIN_DEPTH`. When an `actor_token` would add to an already-full nested `act` chain, the handler rejects the request with `actor_chain_too_deep`.
 
 10. **Family cascade.** Issued access_tokens inherit the subject's `family_id` claim. Revoking the subject's family (e.g. on logout) automatically invalidates every token exchanged from it. This is the same mechanism auth.provider's introspect and userinfo endpoints use.
+
+    The cascade follows the subject only. Revoking an **actor's** family refuses that actor_token in later exchanges (note 1), but does not reach tokens it already acted on: a delegated token carries the subject's `family_id` alone, and the actor appears only in its `act` claim, whose family nothing checks. When that token is exchanged again, the earlier actor becomes a nested `act`, which RFC 8693 §4.1 makes informational only.
 
 11. **Refresh / ID tokens are never issued.** Per RFC 8693 §4.2.2 the handler only returns an access_token. The response always carries `issued_token_type: "urn:ietf:params:oauth:token-type:access_token"`.
 
