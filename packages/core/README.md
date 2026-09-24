@@ -248,6 +248,8 @@ The two discovery rows are the same document: OIDC Discovery 1.0 appends its suf
 
 Entries are validated at boot by `checkSerializedOrigin` (`src/net/origin.mts`) and refused by index, because matching is exact string equality: a trailing slash, an explicit `:443`, an uppercase host, a path, or a wildcard is an allowlist that admits nobody with nothing anywhere to say so. `https` is required except for a loopback host, through the shared `isLoopbackHostname` home. `corsMw` re-applies the same check and warns on anything it drops, so a hand-built `AppConfig` that never passed the schema cannot install an entry the schema would have refused.
 
+The list takes two spellings: an array, or the comma-separated string an environment variable carries (`CORS_ALLOWED_ORIGINS`), each entry trimmed and empty entries dropped. `normalizeAllowedOrigins` in the same file reads both and is exported; the WebAuthn package reads `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN` with it, so every origin list set from the environment is spelled alike.
+
 ## Usage Example
 
 ```typescript

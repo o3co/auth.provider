@@ -107,6 +107,20 @@ webauthn {
 }
 ```
 
+**From the environment**, `WEBAUTHN_ORIGIN` (which `reference.conf` substitutes
+into `origin`) carries the same list comma-separated — the spelling
+`CORS_ALLOWED_ORIGINS` uses, read by the same function in core
+(`normalizeAllowedOrigins`): each entry is trimmed, empty entries are dropped,
+and every entry meets the rules in the table above exactly as it would in the
+list. A comma cannot occur inside an entry, so the split cannot cut one in two.
+
+```sh
+WEBAUTHN_ORIGIN=https://example.com,android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI
+```
+
+An empty `WEBAUTHN_ORIGIN` leaves the relying party with no origin, which the
+schema refuses at boot.
+
 ### Being framed: `topOrigin`
 
 `origin` is where the ceremony runs. `topOrigin` is the page it runs *inside*,
@@ -119,6 +133,9 @@ webauthn {
   topOrigin = ["https://partner.example"]
 }
 ```
+
+From the environment, `WEBAUTHN_TOP_ORIGIN` is comma-separated the same way,
+and an exported-but-empty one reads as unset.
 
 Absent, a reported cross-origin authentication is refused, which is the right
 answer for a deployment that never meant to be embedded — and the refusal is

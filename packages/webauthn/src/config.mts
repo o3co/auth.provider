@@ -47,19 +47,47 @@
  *                                       is throttled by default, not only
  *                                       when an operator remembers to.
  *
- * Every number and boolean an environment variable can reach through
- * reference.conf is coerced here, the way core's application schema coerces
- * its own (#288): a HOCON `${?VAR}` substitution is always a string. Numbers
- * go through `z.coerce.number()`; booleans through core's
+ * Every leaf an environment variable can reach through reference.conf is
+ * read here in the string form it arrives in, the way core's application
+ * schema reads its own (#288): a HOCON `${?VAR}` substitution is always a
+ * string. Numbers go through `z.coerce.number()`; booleans through core's
  * `coerceBooleanFromEnv`, so `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`
- * takes the same four spellings as every other switch and refuses the rest.
+ * takes the same four spellings as every other switch and refuses the rest;
+ * the two origin lists through core's `normalizeAllowedOrigins`, so
+ * `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN` are comma-separated like
+ * `CORS_ALLOWED_ORIGINS`.
  */
 import {
 	// biome-ignore lint/correctness/noUnusedImports: ComponentMap is used in the `declare module` augmentation below; biome does not track cross-module-declaration references.
 	type ComponentMap as _ComponentMap,
 	coerceBooleanFromEnv,
+	normalizeAllowedOrigins,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
+
+/**
+ * `origin` / `topOrigin` in both of their spellings: the list a config file
+ * carries, or the one string `${?WEBAUTHN_ORIGIN}` / `${?WEBAUTHN_TOP_ORIGIN}`
+ * delivers, comma-separated — an environment variable cannot carry a list any
+ * other way. The reader is core's `normalizeAllowedOrigins`, the one
+ * `CORS_ALLOWED_ORIGINS` goes through, so every origin list an operator sets
+ * from the environment is spelled alike: entries trimmed, empty ones dropped.
+ * It decides the shape only; each entry still meets the rules below.
+ */
+const readOriginList = (raw: unknown): unknown =>
+	raw === undefined ? raw : normalizeAllowedOrigins(raw);
+
+/**
+ * {@link readOriginList} for the optional `topOrigin`, where an exported-but-
+ * empty variable reads as unset — not framed — as an empty
+ * `CORS_ALLOWED_ORIGINS` reads as CORS off. An explicit empty list is still
+ * refused.
+ */
+const readTopOriginList = (raw: unknown): unknown => {
+	if (raw === undefined) return raw;
+	const list = normalizeAllowedOrigins(raw);
+	return typeof raw === "string" && list.length === 0 ? undefined : list;
+};
 
 /**
  * Android's Credential Manager presents the calling app as
@@ -120,57 +148,63 @@ export const webauthnConfigSchema = z.object({
 	 * `rpId` between the site and the app — see ANDROID_APK_KEY_HASH_ORIGIN
 	 * above for the shape and why it is checked on the raw string.
 	 *
+	 * From the environment, `WEBAUTHN_ORIGIN` is a comma-separated list — see
+	 * {@link readOriginList}.
+	 *
 	 * Cross-refs: Wave 1 post-merge audit M-1; #497.
 	 */
-	origin: z
-		.array(
-			z
-				.string()
-				.url()
-				.refine((u) => !u.includes("*"), {
-					message: "origin must not contain wildcards — SimpleWebAuthn does exact-match only",
-				})
-				.refine(
-					(u) => {
-						// The Android app form is not a URL with a host, so it is decided
-						// on its raw shape before the host-based reasoning below — see
-						// ANDROID_APK_KEY_HASH_ORIGIN. Every other refusal here is
-						// unchanged.
-						if (ANDROID_APK_KEY_HASH_ORIGIN.test(u)) return true;
-						// URL-parse-based check (not string-prefix) so attacker-prefix
-						// bypasses like `http://127.0.0.1.evil.com`, `http://127.0.0.1@evil.com`,
-						// `http://[::1]@evil.com` are rejected. The .url() validator above
-						// guarantees parseability.
-						let parsed: URL;
-						try {
-							parsed = new URL(u);
-						} catch {
+	origin: z.preprocess(
+		readOriginList,
+		z
+			.array(
+				z
+					.string()
+					.url()
+					.refine((u) => !u.includes("*"), {
+						message: "origin must not contain wildcards — SimpleWebAuthn does exact-match only",
+					})
+					.refine(
+						(u) => {
+							// The Android app form is not a URL with a host, so it is decided
+							// on its raw shape before the host-based reasoning below — see
+							// ANDROID_APK_KEY_HASH_ORIGIN. Every other refusal here is
+							// unchanged.
+							if (ANDROID_APK_KEY_HASH_ORIGIN.test(u)) return true;
+							// URL-parse-based check (not string-prefix) so attacker-prefix
+							// bypasses like `http://127.0.0.1.evil.com`, `http://127.0.0.1@evil.com`,
+							// `http://[::1]@evil.com` are rejected. The .url() validator above
+							// guarantees parseability.
+							let parsed: URL;
+							try {
+								parsed = new URL(u);
+							} catch {
+								return false;
+							}
+							// Reject userinfo (`user@host`) regardless of scheme — origins must
+							// not carry credentials.
+							if (parsed.username !== "" || parsed.password !== "") return false;
+							if (parsed.protocol === "https:") return true;
+							if (parsed.protocol === "http:") {
+								// W3C WebAuthn / browser secure-context policy allows http only
+								// for loopback. Hostname comparison is exact-match.
+								return (
+									parsed.hostname === "localhost" ||
+									parsed.hostname === "127.0.0.1" ||
+									parsed.hostname === "[::1]"
+								);
+							}
 							return false;
-						}
-						// Reject userinfo (`user@host`) regardless of scheme — origins must
-						// not carry credentials.
-						if (parsed.username !== "" || parsed.password !== "") return false;
-						if (parsed.protocol === "https:") return true;
-						if (parsed.protocol === "http:") {
-							// W3C WebAuthn / browser secure-context policy allows http only
-							// for loopback. Hostname comparison is exact-match.
-							return (
-								parsed.hostname === "localhost" ||
-								parsed.hostname === "127.0.0.1" ||
-								parsed.hostname === "[::1]"
-							);
-						}
-						return false;
-					},
-					{
-						message:
-							"origin must be https://, http:// loopback (localhost / 127.0.0.1 / [::1]) with no userinfo " +
-							"(W3C WebAuthn secure-origin policy), or an Android app origin " +
-							"(android:apk-key-hash:<base64url>, lowercase prefix, no trailing path/query/fragment)",
-					},
-				),
-		)
-		.min(1),
+						},
+						{
+							message:
+								"origin must be https://, http:// loopback (localhost / 127.0.0.1 / [::1]) with no userinfo " +
+								"(W3C WebAuthn secure-origin policy), or an Android app origin " +
+								"(android:apk-key-hash:<base64url>, lowercase prefix, no trailing path/query/fragment)",
+						},
+					),
+			)
+			.min(1),
+	),
 	/**
 	 * Origins this RP may be **framed by** — the `topOrigin` a browser reports
 	 * for a cross-origin (iframe) ceremony (#554 audit).
@@ -189,48 +223,57 @@ export const webauthnConfigSchema = z.object({
 	 *
 	 * Safari does not send `topOrigin` as of the 14.0.1 vendoring, so the
 	 * library only enforces this where the browser reports one.
+	 *
+	 * From the environment, `WEBAUTHN_TOP_ORIGIN` is a comma-separated list, and
+	 * an empty one is unset — see {@link readTopOriginList}.
 	 */
 	topOrigin: z
-		.array(
+		.preprocess(
+			readTopOriginList,
 			z
-				.string()
-				.url()
-				.refine((u) => !u.includes("*"), {
-					message: "topOrigin must not contain wildcards — SimpleWebAuthn does exact-match only",
-				})
-				.refine(
-					(u) => {
-						let parsed: URL;
-						try {
-							parsed = new URL(u);
-						} catch {
-							return false;
-						}
-						if (parsed.username !== "" || parsed.password !== "") return false;
-						// The literal-origin form, which is what a browser reports as
-						// `topOrigin` and what SimpleWebAuthn exact-matches. Compared
-						// against the raw string rather than `parsed.href`, which
-						// normalises a trailing slash in and would accept the one
-						// spelling that never matches.
-						if (u !== parsed.origin) return false;
-						if (parsed.protocol === "https:") return true;
-						if (parsed.protocol === "http:") {
-							return (
-								parsed.hostname === "localhost" ||
-								parsed.hostname === "127.0.0.1" ||
-								parsed.hostname === "[::1]"
-							);
-						}
-						return false;
-					},
-					{
-						message:
-							"topOrigin must be a literal https:// origin, or http:// loopback " +
-							"(localhost / 127.0.0.1 / [::1]), with no userinfo, path, query or fragment",
-					},
-				),
+				.array(
+					z
+						.string()
+						.url()
+						.refine((u) => !u.includes("*"), {
+							message:
+								"topOrigin must not contain wildcards — SimpleWebAuthn does exact-match only",
+						})
+						.refine(
+							(u) => {
+								let parsed: URL;
+								try {
+									parsed = new URL(u);
+								} catch {
+									return false;
+								}
+								if (parsed.username !== "" || parsed.password !== "") return false;
+								// The literal-origin form, which is what a browser reports as
+								// `topOrigin` and what SimpleWebAuthn exact-matches. Compared
+								// against the raw string rather than `parsed.href`, which
+								// normalises a trailing slash in and would accept the one
+								// spelling that never matches.
+								if (u !== parsed.origin) return false;
+								if (parsed.protocol === "https:") return true;
+								if (parsed.protocol === "http:") {
+									return (
+										parsed.hostname === "localhost" ||
+										parsed.hostname === "127.0.0.1" ||
+										parsed.hostname === "[::1]"
+									);
+								}
+								return false;
+							},
+							{
+								message:
+									"topOrigin must be a literal https:// origin, or http:// loopback " +
+									"(localhost / 127.0.0.1 / [::1]), with no userinfo, path, query or fragment",
+							},
+						),
+				)
+				.min(1)
+				.optional(),
 		)
-		.min(1)
 		.optional(),
 	/**
 	 * Challenge time-to-live in milliseconds.

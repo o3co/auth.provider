@@ -96,9 +96,9 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+withRemovedKeys\b/,
 	},
 	{
-		concept: "serialized origin (#500)",
+		concept: "serialized origin, and the spelling of a list of them (#500)",
 		home: "packages/core/src/net/origin.mts",
-		definition: /(?:function|const)\s+checkSerializedOrigin\b/,
+		definition: /(?:function|const)\s+(?:checkSerializedOrigin|normalizeAllowedOrigins)\b/,
 	},
 	{
 		concept: "device-verification budget shape (#448)",

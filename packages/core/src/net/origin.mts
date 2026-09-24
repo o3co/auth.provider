@@ -66,14 +66,19 @@ import { isLoopbackHostname } from "./loopback.mjs";
  */
 
 /**
- * Read `cors.allowedOrigins` from whatever shape it arrived in.
+ * Read a configured origin allowlist from whatever shape it arrived in:
+ * `cors.allowedOrigins` here, and the WebAuthn package's `webauthn.origin` /
+ * `webauthn.topOrigin` (`${?WEBAUTHN_ORIGIN}` / `${?WEBAUTHN_TOP_ORIGIN}`),
+ * which is why it is on the package barrel.
  *
  * Two shapes are legitimate and both have to work at every reader:
  *
  *   - an array, which is what `application.conf` and a hand-built `AppConfig`
  *     carry, and
  *   - a comma-separated string, which is the only shape an environment
- *     variable can carry a list in (`${?CORS_ALLOWED_ORIGINS}`).
+ *     variable can carry a list in (`${?CORS_ALLOWED_ORIGINS}`). Splitting on
+ *     the comma cannot cut an entry in two: a serialized origin has none, and
+ *     neither does the base64url body of an Android app origin.
  *
  * It lives here, beside {@link checkSerializedOrigin}, because the config
  * schema is not the only reader. `assembleApp` decides whether to mount the
@@ -86,10 +91,11 @@ import { isLoopbackHostname } from "./loopback.mjs";
  * no error and no log: precisely the silent no-op this key was wired up to
  * stop being.
  *
- * Only the shape is normalised here. Each entry is still checked with
- * {@link checkSerializedOrigin} by both the schema (which fails boot naming
- * the index) and the middleware (which drops it with a warning), so this
- * cannot widen an allowlist — it can only stop one being dropped whole.
+ * Only the shape is normalised here. Each entry is still checked — for CORS
+ * with {@link checkSerializedOrigin} by both the schema (which fails boot
+ * naming the index) and the middleware (which drops it with a warning), for
+ * WebAuthn by `webauthnConfigSchema`'s own origin rules — so this cannot
+ * widen an allowlist; it can only stop one being dropped whole.
  *
  * Anything that is neither an array nor a string yields no origins; the caller
  * decides whether that shape deserves a warning.

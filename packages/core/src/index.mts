@@ -496,10 +496,14 @@ export { isLoopbackHostname } from "./net/loopback.mjs";
 // The serialized-origin vocabulary (#500) — what `cors.allowedOrigins` may
 // carry. Enforced by the config schema at boot and re-applied by `corsMw`;
 // exported so a consumer assembling its own CORS policy holds origins to the
-// same rules and refuses in the same words.
+// same rules and refuses in the same words. `normalizeAllowedOrigins` reads an
+// origin list in both its spellings — an array, or the comma-separated string
+// an environment variable carries — for `cors.allowedOrigins` and the WebAuthn
+// package's `origin` / `topOrigin`.
 export {
 	checkSerializedOrigin,
 	describeSerializedOriginRejection,
+	normalizeAllowedOrigins,
 	type SerializedOriginRejection,
 } from "./net/origin.mjs";
 // The registered-redirect-URI shape vocabulary (#395) — enforced by
