@@ -8,7 +8,7 @@ import { afterAll, beforeAll } from "vitest";
 import { createRedisChallengeStore } from "../src/challenges.mjs";
 import type { ChallengeStoreClient } from "../src/clients.mjs";
 import { runChallengeStoreContract } from "./adapters.challenge-store.contract.mjs";
-import { testRedis } from "./support/redis.mjs";
+import { keysExpire, testRedis } from "./support/redis.mjs";
 
 let client: Redis;
 let keyCounter = 0;
@@ -32,4 +32,9 @@ runChallengeStoreContract("redis", {
 			keyPrefix: `chal:test-${keyCounter}:`,
 		});
 	},
+	// A relative PX: the challenge is gone when its key is.
+	expiry: keysExpire(
+		() => client,
+		() => `chal:test-${keyCounter}:`,
+	),
 });

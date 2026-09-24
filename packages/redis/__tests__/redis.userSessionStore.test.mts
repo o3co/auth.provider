@@ -18,7 +18,7 @@ import { Redis } from "ioredis";
 import { afterAll, beforeAll } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
-import { testRedis } from "./support/redis.mjs";
+import { keysExpire, testRedis } from "./support/redis.mjs";
 import { runUserSessionStoreContract } from "./userSessionStore.contract.mjs";
 
 let raw: Redis;
@@ -33,11 +33,18 @@ afterAll(async () => {
 });
 
 let suiteCounter = 0;
-runUserSessionStoreContract(async () => {
-	suiteCounter += 1;
-	const { userSessionStoreClient } = makeIoredisClients(raw);
-	return createRedisUserSessionStore({
-		client: userSessionStoreClient,
-		keyPrefix: `t14:${suiteCounter}:`,
-	});
-});
+runUserSessionStoreContract(
+	async () => {
+		suiteCounter += 1;
+		const { userSessionStoreClient } = makeIoredisClients(raw);
+		return createRedisUserSessionStore({
+			client: userSessionStoreClient,
+			keyPrefix: `t14:${suiteCounter}:`,
+		});
+	},
+	// A relative PX: the session is gone when its key is.
+	keysExpire(
+		() => raw,
+		() => `t14:${suiteCounter}:`,
+	),
+);

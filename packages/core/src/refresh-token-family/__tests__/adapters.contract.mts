@@ -27,6 +27,41 @@ export type RefreshTokenFamilyStoreContractFactory = () => Promise<RefreshTokenF
 const FUTURE = (): number => Date.now() + 60_000;
 const PAST = (): number => Date.now() - 1;
 
+/**
+ * How a test reaches an entry's expiry on the store's own terms.
+ *
+ * An in-process store judges expiry on this process's clock. A Redis key
+ * expires on the server's, which sits to either side of the host's, and a
+ * relative `PX` runs from when the command reached the server; a loaded run
+ * also reaches its next line late. A fixed sleep after a short expiry therefore
+ * either read an entry the store had already dropped, or checked one it had
+ * not dropped yet. The default is this process's clock; a Redis runner passes
+ * one that reads the server's `TIME`, or waits for the keys to be gone.
+ */
+export interface ExpiryClock {
+	/** Epoch milliseconds on the clock the store expires entries by. */
+	now(): Promise<number>;
+	/** Resolves once the store has let everything expiring at `at` go. */
+	passed(at: Date): Promise<void>;
+}
+
+const hostExpiry: ExpiryClock = {
+	now: async () => Date.now(),
+	passed: async (at) => {
+		while (Date.now() <= at.getTime()) {
+			await new Promise((r) => setTimeout(r, at.getTime() - Date.now() + 1));
+		}
+	},
+};
+
+/**
+ * An expiry a second ahead of whichever clock is later — the host's, which a
+ * write checks it against, and the store's, which expires it — so a read that
+ * follows the write lands well inside it however loaded the run is.
+ */
+const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
+	new Date(Math.max(Date.now(), await clock.now()) + 1_000);
+
 const FAMILY = (overrides: Partial<RefreshTokenFamily> = {}): RefreshTokenFamily => ({
 	familyId: overrides.familyId ?? "fam-1",
 	activeJti: overrides.activeJti ?? "jti-initial",
@@ -36,6 +71,7 @@ const FAMILY = (overrides: Partial<RefreshTokenFamily> = {}): RefreshTokenFamily
 
 export function runRefreshTokenFamilyStoreContract(
 	factory: RefreshTokenFamilyStoreContractFactory,
+	expiry: ExpiryClock = hostExpiry,
 ): void {
 	describe("RefreshTokenFamilyStore contract", () => {
 		it("registerFamily then findFamily returns the family", async () => {
@@ -225,18 +261,24 @@ export function runRefreshTokenFamilyStoreContract(
 		});
 
 		it("findFamily returns null for expired family (lazy GC)", async () => {
+			// Dated from, and waited out on, the store's own clock (see
+			// `ExpiryClock`), not a 50 ms expiry and a 100 ms sleep.
 			const store = await factory();
-			const fam = FAMILY({ expiresAtMs: Date.now() + 50 });
+			const expiresAt = await aheadOf(expiry);
+			const fam = FAMILY({ expiresAtMs: expiresAt.getTime() });
 			await store.registerFamily(fam);
-			await new Promise((r) => setTimeout(r, 100));
+			expect(await store.findFamily(fam.familyId)).not.toBeNull();
+			await expiry.passed(expiresAt);
 			expect(await store.findFamily(fam.familyId)).toBeNull();
 		});
 
 		it("updateFamily returns not-found for expired family", async () => {
 			const store = await factory();
-			const fam = FAMILY({ expiresAtMs: Date.now() + 50 });
+			const expiresAt = await aheadOf(expiry);
+			const fam = FAMILY({ expiresAtMs: expiresAt.getTime() });
 			await store.registerFamily(fam);
-			await new Promise((r) => setTimeout(r, 100));
+			expect(await store.findFamily(fam.familyId)).not.toBeNull();
+			await expiry.passed(expiresAt);
 			const result = await store.updateFamily(fam.familyId, (cur) => ({
 				action: "commit",
 				family: cur,

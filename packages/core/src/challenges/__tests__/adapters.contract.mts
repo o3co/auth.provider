@@ -11,7 +11,44 @@ export interface ChallengeStoreContractFactory {
 	create(): Promise<ChallengeStore> | ChallengeStore;
 	/** Optional: tear down (close client, flushdb, etc.) after each test. */
 	teardown?(store: ChallengeStore): Promise<void> | void;
+	/** The clock the store expires challenges by. Default: this process's. */
+	readonly expiry?: ExpiryClock;
 }
+
+/**
+ * How a test reaches an entry's expiry on the store's own terms.
+ *
+ * An in-process store judges expiry on this process's clock. A Redis key
+ * expires on the server's, which sits to either side of the host's, and a
+ * relative `PX` runs from when the command reached the server; a loaded run
+ * also reaches its next line late. A fixed sleep after a short expiry therefore
+ * either read an entry the store had already dropped, or checked one it had
+ * not dropped yet. The default is this process's clock; a Redis runner passes
+ * one that reads the server's `TIME`, or waits for the keys to be gone.
+ */
+export interface ExpiryClock {
+	/** Epoch milliseconds on the clock the store expires entries by. */
+	now(): Promise<number>;
+	/** Resolves once the store has let everything expiring at `at` go. */
+	passed(at: Date): Promise<void>;
+}
+
+const hostExpiry: ExpiryClock = {
+	now: async () => Date.now(),
+	passed: async (at) => {
+		while (Date.now() <= at.getTime()) {
+			await new Promise((r) => setTimeout(r, at.getTime() - Date.now() + 1));
+		}
+	},
+};
+
+/**
+ * An expiry a second ahead of whichever clock is later — the host's, which a
+ * write checks it against, and the store's, which expires it — so a read that
+ * follows the write lands well inside it however loaded the run is.
+ */
+const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
+	new Date(Math.max(Date.now(), await clock.now()) + 1_000);
 
 /**
  * Adapter contract suite for ChallengeStore. Memory + Redis adapters both
@@ -114,10 +151,14 @@ export function runChallengeStoreContract(
 		});
 
 		it("expired entries are treated as nonexistent (find=null, consume=false)", async () => {
+			// Dated from, and waited out on, the store's own clock (see
+			// `ExpiryClock`), not a 50 ms expiry and a 100 ms sleep.
+			const expiry = factory.expiry ?? hostExpiry;
 			await withStore(async (store) => {
-				const soon = Date.now() + 50;
-				await store.issue("scope-A", "ttl", soon);
-				await new Promise((r) => setTimeout(r, 100));
+				const soon = await aheadOf(expiry);
+				await store.issue("scope-A", "ttl", soon.getTime());
+				expect(await store.find("scope-A", "ttl")).not.toBeNull();
+				await expiry.passed(soon);
 				expect(await store.find("scope-A", "ttl")).toBeNull();
 				expect(await store.consume("scope-A", "ttl")).toBe(false);
 			});

@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSessionFamilyIndex } from "../src/sessionFamilyIndex.mjs";
 import { runSessionFamilyIndexContract } from "./sessionFamilyIndex.contract.mjs";
-import { serverClock, testRedis } from "./support/redis.mjs";
+import { serverDeadlines, testRedis } from "./support/redis.mjs";
 
 let raw: Redis;
 
@@ -42,7 +42,7 @@ runSessionFamilyIndexContract(
 			keyPrefix: `t16:${suiteCounter}:`,
 		});
 	},
-	serverClock(() => raw),
+	serverDeadlines(() => raw),
 );
 
 // ---------------------------------------------------------------------------

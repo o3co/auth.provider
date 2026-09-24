@@ -27,7 +27,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { RedisSidSetClient } from "../src/internal/redisSidSet.mjs";
 import { createRedisSidSet } from "../src/internal/redisSidSet.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
-import { testRedis } from "./support/redis.mjs";
+import { relativeDeadline, serverPasses, testRedis } from "./support/redis.mjs";
 
 let raw: Redis;
 let client: RedisSidSetClient;
@@ -98,10 +98,18 @@ describe("createRedisSidSet", () => {
 	});
 
 	it("the key expires on its own once the TTL elapses", async () => {
+		// A relative PX runs from when the command reached the server, so the
+		// wait is to the latest instant the key can live to on the server's
+		// clock — not a 300 ms host sleep after a 200 ms TTL, which a command
+		// queued behind a loaded run outlasts.
 		const s = createRedisSidSet({ client, keyPrefix: prefix("ttl-expire") });
-		await s.add("sid-1", "google", 200);
+		const end = await relativeDeadline(
+			() => raw,
+			() => s.add("sid-1", "google", 1_000),
+			() => 1_000,
+		);
 		expect(await collect(s.members("sid-1"))).toEqual(["google"]);
-		await new Promise((r) => setTimeout(r, 300));
+		await serverPasses(() => raw)(end);
 		expect(await collect(s.members("sid-1"))).toEqual([]);
 	});
 

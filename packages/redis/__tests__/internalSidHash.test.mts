@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SessionRPRegistryClient } from "../src/clients.mjs";
 import { createRedisSidHash } from "../src/internal/redisSidHash.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
-import { testRedis } from "./support/redis.mjs";
+import { aheadOfServer, serverPasses, testRedis } from "./support/redis.mjs";
 
 let raw: Redis;
 let client: SessionRPRegistryClient;
@@ -70,11 +70,14 @@ describe("createRedisSidHash", () => {
 	});
 
 	it("PEXPIREAT applied: key disappears after expiresAt", async () => {
+		// Dated from, and waited out on, the server's clock — the one a
+		// PEXPIREAT deadline is judged by — not a 200 ms expiry and a 250 ms
+		// host sleep, which a loaded run or a lagging server clock defeats.
 		const h = createRedisSidHash({ client, keyPrefix: prefix("ttl") });
-		const soon = new Date(Date.now() + 200);
+		const soon = await aheadOfServer(() => raw)();
 		await h.setField("sid-1", "id-a", JSON.stringify({ x: 1 }), soon);
 		expect(await h.listValues("sid-1")).toHaveLength(1);
-		await new Promise((r) => setTimeout(r, 250));
+		await serverPasses(() => raw)(soon.getTime());
 		expect(await h.listValues("sid-1")).toEqual([]);
 	});
 
@@ -83,17 +86,18 @@ describe("createRedisSidHash", () => {
 	// write from clobbering a longer existing TTL with a shorter incoming one.
 	it("does NOT truncate the key TTL on a stale-shorter-expiresAt write (CR-3)", async () => {
 		const h = createRedisSidHash({ client, keyPrefix: prefix("ttl-trunc") });
-		const longExpiry = new Date(Date.now() + 5000); // 5s — first writer
-		const stale = new Date(longExpiry.getTime() - 4500); // 0.5s — stale view
+		const longExpiry = FUTURE(); // first writer
+		const stale = await aheadOfServer(() => raw)(); // a second out — stale view
 		await h.setField("sid-1", "id-a", JSON.stringify({ x: 1 }), longExpiry);
 		expect(await h.listValues("sid-1")).toHaveLength(1);
-		// Stale write — must NOT truncate the existing 5s TTL.
+		// Stale write — must NOT truncate the existing TTL. The deadline is read
+		// back exactly: it is still the first writer's.
 		await h.setField("sid-1", "id-b", JSON.stringify({ y: 2 }), stale);
 		expect(await h.listValues("sid-1")).toHaveLength(2);
-		// Wait past the stale TTL window. With bare-PEXPIREAT (no GT) the key
-		// would have been truncated to 0.5s and expired by now; with the GT
-		// guard the key still has ~4s of TTL remaining.
-		await new Promise((r) => setTimeout(r, 700));
+		expect(await raw.pexpiretime(`${prefix("ttl-trunc")}sid-1`)).toBe(longExpiry.getTime());
+		// Wait past the stale deadline on the server's clock. With bare-PEXPIREAT
+		// (no GT) the key would have been truncated to it and expired by now.
+		await serverPasses(() => raw)(stale.getTime());
 		expect(await h.listValues("sid-1")).toHaveLength(2);
 	});
 

@@ -19,7 +19,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSessionRPRegistry } from "../src/sessionRPRegistry.mjs";
 import { runSessionRPRegistryContract } from "./sessionRPRegistry.contract.mjs";
-import { serverClock, testRedis } from "./support/redis.mjs";
+import { serverDeadlines, testRedis } from "./support/redis.mjs";
 
 let raw: Redis;
 
@@ -42,7 +42,7 @@ runSessionRPRegistryContract(
 			keyPrefix: `t15:${suiteCounter}:`,
 		});
 	},
-	serverClock(() => raw),
+	serverDeadlines(() => raw),
 );
 
 // ---------------------------------------------------------------------------

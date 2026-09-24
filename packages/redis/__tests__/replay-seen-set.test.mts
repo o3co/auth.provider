@@ -8,7 +8,7 @@ import { afterAll, beforeAll } from "vitest";
 import type { ReplaySeenSetClient } from "../src/clients.mjs";
 import { createRedisReplaySeenSet } from "../src/replay-seen-set.mjs";
 import { runReplaySeenSetContract } from "./adapters.replay-seen-set.contract.mjs";
-import { testRedis } from "./support/redis.mjs";
+import { keysExpire, testRedis } from "./support/redis.mjs";
 
 let client: Redis;
 let keyCounter = 0;
@@ -30,4 +30,9 @@ runReplaySeenSetContract("redis", {
 			keyPrefix: `replay:test-${keyCounter}:`,
 		});
 	},
+	// A relative PX: the record is gone when its key is.
+	expiry: keysExpire(
+		() => client,
+		() => `replay:test-${keyCounter}:`,
+	),
 });

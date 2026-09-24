@@ -9,7 +9,7 @@ import { makeIoredisClients } from "#/ioredis.mjs";
 import { createRedisRefreshTokenFamilyStore } from "#/refresh-token-family.mjs";
 import { runRefreshTokenFamilyStoreContract } from "./adapters.refresh-token-family.contract.mjs";
 import { runRefreshTokenFamilyClientDuplicateContract } from "./adapters.refresh-token-family-client.contract.mjs";
-import { testRedis } from "./support/redis.mjs";
+import { keysExpire, testRedis } from "./support/redis.mjs";
 
 let client: Redis;
 let keyCounter = 0;
@@ -34,14 +34,21 @@ afterAll(async () => {
 	await client?.quit();
 });
 
-runRefreshTokenFamilyStoreContract(async () => {
-	keyCounter++;
-	return createRedisRefreshTokenFamilyStore({
-		client: real(client),
-		keyPrefix: `rtfam:test-${keyCounter}:`,
-		casRetryLimit: 50, // generous limit for the concurrency property test
-	});
-});
+runRefreshTokenFamilyStoreContract(
+	async () => {
+		keyCounter++;
+		return createRedisRefreshTokenFamilyStore({
+			client: real(client),
+			keyPrefix: `rtfam:test-${keyCounter}:`,
+			casRetryLimit: 50, // generous limit for the concurrency property test
+		});
+	},
+	// A relative PX: the family is gone when its key is.
+	keysExpire(
+		() => client,
+		() => `rtfam:test-${keyCounter}:`,
+	),
+);
 
 // T4 hardening (Claude review I1): RefreshTokenFamilyClient.duplicate() NORMATIVE contract
 // suite, against the shipped client, so a refactor of `makeIoredisClients`
