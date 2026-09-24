@@ -18,23 +18,74 @@ import { ChallengeStorageError } from "../../challenges/errors.mjs";
 import type { ReplaySeenSet } from "../types.mjs";
 
 /**
+ * How many writing `markSeen` calls pass between amortized sweeps.
+ *
+ * A sweep is O(size), so one per write would make every accepted assertion
+ * or proof linear in the set. Every 1000th write keeps the amortized cost
+ * constant while bounding the resident set at "live records, plus at most
+ * one interval of expired ones" — the access-token denylist's trade (#293
+ * item 6), for the same kind of store.
+ */
+export const DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL = 1_000;
+
+export interface MemoryReplaySeenSetOptions {
+	/**
+	 * Writing `markSeen` calls between sweeps. Lower trades work for memory.
+	 * A non-integer or non-positive value falls back to the default rather
+	 * than disabling the sweep.
+	 */
+	readonly sweepInterval?: number;
+}
+
+/** In-process seen-set, with the record count exposed for observability. */
+export interface MemoryReplaySeenSet extends ReplaySeenSet {
+	/** Records currently resident, expired-but-unswept included. */
+	readonly size: number;
+}
+
+/**
  * In-process Map-backed ReplaySeenSet. Same atomicity argument as the
  * memory ChallengeStore: Node.js single-event-loop + no awaits inside the
  * critical section between Map.get/check and Map.set/delete.
  *
- * GC is lazy (per-operation cleanup of expired entries). No background sweep.
+ * ## Why the sweep exists
+ *
+ * A record is looked up again only when its value is presented again, and
+ * what every consumer records — a client assertion's `jti`, an ID-JAG's
+ * `jti`, a DPoP proof's `jti`, a consumed WebAuthn challenge — is exactly
+ * the value that stops being presented once it has been honoured. Dropping
+ * expired records only on lookup therefore reclaimed almost nothing: one
+ * permanent entry per accepted credential, and with DPoP one per request at
+ * every protected resource. The set is keyed by single-use values, so
+ * nothing bounds it but time, and the sweep has to be its own step.
+ *
+ * Amortized on the writing `markSeen` rather than on a timer, as the
+ * access-token denylist's is: a background interval would need lifecycle
+ * registration to avoid holding the process open, and a write is the only
+ * operation that grows the map. A replay is refused without writing and
+ * pays nothing. The guarantee is bounded growth, not zero-lag reclamation:
+ * an expired record is dropped within an interval, and `markSeen` /
+ * `contains` keep answering correctly for one that has not been swept yet.
  *
  * The `getLive` helper is deliberately duplicated rather than shared with
  * the memory ChallengeStore — three similar lines is preferable to a
  * premature abstraction here, since the two stores have semantically
  * distinct contracts (`issue` throws on duplicate; `markSeen` returns false
- * on duplicate). A shared helper would either branch on that distinction
- * (defeating the purpose) or share trivial Map+TTL plumbing only.
+ * on duplicate).
  *
  * Per A1 §7.1.
  */
-export function createMemoryReplaySeenSet(): ReplaySeenSet {
+export function createMemoryReplaySeenSet(
+	options: MemoryReplaySeenSetOptions = {},
+): MemoryReplaySeenSet {
 	const map = new Map<string, { expiresAtMs: number }>();
+	const sweepInterval =
+		typeof options.sweepInterval === "number" &&
+		Number.isInteger(options.sweepInterval) &&
+		options.sweepInterval > 0
+			? options.sweepInterval
+			: DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL;
+	let writesSinceSweep = 0;
 
 	function getLive(key: string, nowMs: number): { expiresAtMs: number } | undefined {
 		const entry = map.get(key);
@@ -46,8 +97,18 @@ export function createMemoryReplaySeenSet(): ReplaySeenSet {
 		return entry;
 	}
 
+	function sweep(nowMs: number): void {
+		for (const [key, entry] of map) {
+			if (entry.expiresAtMs <= nowMs) map.delete(key);
+		}
+	}
+
 	return {
 		kind: "memory",
+
+		get size() {
+			return map.size;
+		},
 
 		async markSeen(scope, key, expiresAtMs) {
 			const nowMs = Date.now();
@@ -59,6 +120,11 @@ export function createMemoryReplaySeenSet(): ReplaySeenSet {
 				return false;
 			}
 			map.set(k, { expiresAtMs });
+			writesSinceSweep += 1;
+			if (writesSinceSweep >= sweepInterval) {
+				writesSinceSweep = 0;
+				sweep(nowMs);
+			}
 			return true;
 		},
 
