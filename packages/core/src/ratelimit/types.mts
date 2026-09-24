@@ -27,6 +27,11 @@ export interface RateLimitDecision {
 	readonly allowed: boolean;
 	readonly remaining?: number;
 	readonly resetAt?: Date;
+	/**
+	 * Why a refusal was made, for a person: the guard sends it as the 429's
+	 * `error_description`, within RFC 6749's characters (`?` for any other),
+	 * and sends `Rate limit exceeded` when it is absent, empty or not a string.
+	 */
 	readonly reason?: string;
 	/**
 	 * The limit the adapter actually applied to this key.

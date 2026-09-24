@@ -259,18 +259,17 @@ export const createRateLimitGuard = ({
 			}
 			// AS-2: rate-limit body migrated from `{error, reason}` to RFC 6749 §5.2
 			// `{error, error_description}` so all auth-product error responses share
-			// a single shape. `decision.reason` is the operator-visible cause string.
-			// `||` (not `??`) so that `decision.reason: ""` from a custom rate
-			// limiter also falls back — the envelope helper would otherwise drop
-			// the empty string and produce a 429 response with no `error_description`.
-			res
-				.status(429)
-				.json(
-					errorEnvelope(
-						"rate_limited",
-						deniedDescription ?? (decision.reason || "Rate limit exceeded"),
-					),
-				);
+			// a single shape. `decision.reason` is the operator-visible cause string,
+			// sent as the envelope sends every description: within RFC 6749's
+			// characters. A reason that is empty or not a string — a custom
+			// adapter can put anything there — falls back to the default, which
+			// the envelope would otherwise drop and leave the 429 without an
+			// `error_description`.
+			const reason =
+				typeof decision.reason === "string" && decision.reason !== ""
+					? decision.reason
+					: "Rate limit exceeded";
+			res.status(429).json(errorEnvelope("rate_limited", deniedDescription ?? reason));
 			return;
 		}
 		next();

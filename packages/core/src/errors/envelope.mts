@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import { consoleLogger } from "../logging/consoleLogger.mjs";
+
 /**
  * The characters RFC 6749 allows in error text. Appendix A.7 and A.8 define
  * `error` and `error_description` alike as `1*NQSCHAR`, with
@@ -31,8 +33,9 @@ const EVERY_OUTSIDE_NQSCHAR = new RegExp(OUTSIDE_NQSCHAR.source, "gu");
  * For text a response carries that its author does not fully control: a
  * description quoting what the client sent (a grant type, a scope, an
  * audience, a token type), a configured value, or a description a grant
- * policy returned. `errorEnvelope` does not apply it; the callers that write
- * such text do.
+ * policy returned. {@link errorEnvelope} applies it to every description it
+ * builds; a writer that builds its body itself — a redirect's query, a literal
+ * `{ error, error_description }` — applies it to the text it echoes.
  *
  * A value that is not a string — a JavaScript policy can return anything —
  * answers `undefined` rather than being coerced, so the caller falls back to
@@ -74,6 +77,15 @@ export function isWellFormedErrorCode(value: unknown): value is string {
 }
 
 /**
+ * The code {@link errorEnvelope} sends in place of a malformed one. The code
+ * came from server-side code — a caller, a contributed mechanism, a module —
+ * never from the client, so the fault is the server's; and the envelope does
+ * not know the status its caller answers with, so it sends the one code that
+ * is true whatever that status is.
+ */
+const MALFORMED_CODE_FALLBACK = "server_error";
+
+/**
  * RFC 6749 §5.2 error response envelope. Used across `/oauth/*` and the
  * session router so consumer code can parse error responses with a single
  * shape regardless of which surface produced them.
@@ -97,6 +109,22 @@ export interface ErrorEnvelope {
  * present-but-empty value. Callers that need an explicit empty string
  * should construct the envelope literal directly.
  *
+ * The text keeps to RFC 6749's characters (Appendix A.7, A.8), so every
+ * writer that goes through here conforms whatever it was handed — a
+ * mechanism's retry instruction, a limiter adapter's reason, a configured
+ * name:
+ *
+ * - `description` is sanitised ({@link sanitizeErrorText}): a character
+ *   outside `1*NQSCHAR` is sent as `?`. One that is not a string — a
+ *   JavaScript caller can pass anything — is dropped like an empty one,
+ *   never coerced.
+ * - `error` must be well-formed ({@link isWellFormedErrorCode}). A malformed
+ *   code is sent as `server_error` and logged through `consoleLogger` as
+ *   `error_envelope_code_malformed`, sanitised and capped. A caller that
+ *   builds a code from something it does not control, and knows its answer
+ *   is a refusal of the client's request, checks the code itself and falls
+ *   back to a client-error code (the token-binding middleware does).
+ *
  * Contract scope: the three RFC 6749 §5.2 stock fields only (`error`,
  * `error_description`, `error_uri`). Extension fields (e.g. namespaced
  * sub-codes, rate-limit details) are not added here — pass through a
@@ -107,9 +135,20 @@ export interface ErrorEnvelope {
  * @param uri         Optional reference URL. Empty string is dropped.
  */
 export function errorEnvelope(error: string, description?: string, uri?: string): ErrorEnvelope {
+	const text = sanitizeErrorText(description);
 	return {
-		error,
-		...(description !== undefined && description !== "" ? { error_description: description } : {}),
+		error: wellFormedCodeOrFallback(error),
+		...(text !== undefined && text !== "" ? { error_description: text } : {}),
 		...(uri !== undefined && uri !== "" ? { error_uri: uri } : {}),
 	};
+}
+
+/** `error` when it is a well-formed RFC 6749 code, otherwise the logged fallback. */
+function wellFormedCodeOrFallback(error: unknown): string {
+	if (isWellFormedErrorCode(error)) return error;
+	consoleLogger.warn(
+		{ error: auditErrorText(error) ?? `(${typeof error})` },
+		"error_envelope_code_malformed",
+	);
+	return MALFORMED_CODE_FALLBACK;
 }
