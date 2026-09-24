@@ -571,19 +571,15 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 						return disabledRoute("device-authorization", "/oauth/device_authorization");
 					}
 					const router = express.Router();
-					// Router-level body parsing, matching `oauthModule` and the
-					// WebAuthn routes: `createApp` installs no global parser. A
-					// declared oversized body is refused before it is read.
-					router.use(withinBodyLimit);
-					router.use(express.json({ limit: BODY_LIMIT }));
-					router.use(express.urlencoded({ extended: false, limit: BODY_LIMIT }));
 					// Throttled like every other public entry point (#325), and
 					// AHEAD of client authentication — the token endpoint's D-6
 					// ordering — so repeated unauthenticated hits are bounded before
 					// they reach a repository lookup, and so a public client cannot
 					// fill the device-code store by asking. Keyed
 					// `device_authorization:ip:<ip>`; the adapter resolves the spec
-					// by that prefix and falls back to its default.
+					// by that prefix and falls back to its default. Ahead of the
+					// size check too, as federation-grants places it: an oversized
+					// request spends an attempt like any other.
 					router.use(
 						createRateLimitGuard({
 							limiter: requireRateLimiter(deps),
@@ -593,6 +589,12 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							auditSink: deps.auditSink,
 						}),
 					);
+					// Router-level body parsing, matching `oauthModule` and the
+					// WebAuthn routes: `createApp` installs no global parser. A
+					// declared oversized body is refused before it is read.
+					router.use(withinBodyLimit);
+					router.use(express.json({ limit: BODY_LIMIT }));
+					router.use(express.urlencoded({ extended: false, limit: BODY_LIMIT }));
 					// RFC 8628 §3.1 applies RFC 6749 §3.2.1's client-authentication
 					// requirements to this endpoint, and §5.6 expects device clients
 					// to be public. `allowPublicClients: true` is exactly that pair:
