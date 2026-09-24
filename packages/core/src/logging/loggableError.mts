@@ -38,15 +38,16 @@
  *   space-delimited word that holds its first run of twenty or more
  *   characters from `[A-Za-z0-9._~+/=-]`, and trimmed; omitted when nothing
  *   is left; capped at 256.
- * - `stack`: the frames, never the header. A non-empty message is found in
- *   the stack and everything up to the end of it dropped (an empty one: the
- *   first line); a message not found — rewritten after V8 formatted the
- *   stack — gives no stack; after the rest of the line the cut fell on, the
- *   unbroken run of lines starting with four spaces and `at ` is kept (it
- *   ends at the first line that is not one); the first ten, joined by
- *   `\n`, then cut at 2048 characters. Absent when no frame is left or
- *   `stack` cannot be read. See `framesOf` for what can still pass for a
- *   frame.
+ * - `stack`: the frames, never the header. The stack must start with the
+ *   whole header V8 writes — `name: message`, Node's `name [code]:
+ *   message`, and for an empty message also `name` or `name [code]` — ending its
+ *   line, and the header is dropped; a stack that does not (a message
+ *   rewritten after V8 formatted it, a message that is not a string) gives
+ *   no stack. After it, the unbroken run of lines starting with four spaces
+ *   and `at ` is kept (it ends at the first line that is not one); the
+ *   first ten, joined by `\n`, then cut at 2048 characters. Absent when no
+ *   frame is left or `stack` cannot be read. See `framesOf` for what can
+ *   still pass for a frame.
  * - Also kept: `name`; a string or numeric `code`; an integer `status`; a
  *   string `type`; an `error` within §5.2's set; `response: { status,
  *   contentType }` for a Response on the cause or on `response`; and the
@@ -99,8 +100,8 @@ export interface LoggableError {
 	 * The stack's frames and nothing of its header: at most
 	 * {@link LOGGED_STACK_MAX_FRAMES} `    at …` lines, joined by `\n` and cut
 	 * at {@link LOGGED_STACK_MAX_LENGTH} characters. Absent when there are
-	 * none, when `stack` cannot be read, or when its header no longer carries
-	 * the message.
+	 * none, when `stack` cannot be read, or when it does not start with the
+	 * header V8 writes for the error's name, code and message.
 	 */
 	readonly stack?: string;
 	readonly cause?: LoggableError;
@@ -207,21 +208,43 @@ const isError = (value: unknown): value is object => {
 };
 
 /**
+ * Where the header written for `name`, a string `code` and `message` ends in
+ * `stack` — `name: message` or `name [code]: message`, and for an empty
+ * message also `name` or `name [code]` — when the stack starts with it and it
+ * ends its line; `-1` otherwise. V8 and Node write an empty message's header
+ * as the name alone; a source-map formatter (source-map-support, vitest's)
+ * writes `name: ` — both are the header.
+ */
+const headerEnd = (stack: string, name: string, code: unknown, message: string): number => {
+	const names = typeof code === "string" ? [name, `${name} [${code}]`] : [name];
+	for (const named of names) {
+		for (const header of message === "" ? [`${named}: `, named] : [`${named}: ${message}`]) {
+			const next = stack.charAt(header.length);
+			if (stack.startsWith(header) && (next === "" || next === "\n")) return header.length;
+		}
+	}
+	return -1;
+};
+
+/**
  * The frames of an error's `stack`, and nothing of the header ahead of them
  * — the rule device-grant's copy shares, pinned by the shared vectors in
  * `__tests__/loggableError.test.mts`:
  *
- * 1. `stack` not a string (or its read threw): no stack.
- * 2. The header is `name: message`, and the message is the untrusted part.
- *    A non-empty `message` is found in the stack and everything up to the
- *    end of its first occurrence is dropped — never counted in lines, so a
- *    message line shaped like a frame goes with it; a message not found
- *    (rewritten after V8 formatted the stack, which it does on the first
- *    read of `stack`) means no stack, because the header can no longer be
- *    told from the frames. An empty or absent message: the cut is at the
- *    start of the stack.
- * 3. The rest of the line the cut fell on (the header's last line) is never
- *    a frame. After it, the unbroken run of `    at ` lines starting at the
+ * 1. `stack` or `message` not a string (or its read threw): no stack.
+ * 2. The header is what V8 writes from the error's `name` (a non-string one
+ *    compares as `"Error"`), a string `code` and `message`: `name:
+ *    message`, or Node's `name [code]: message`; for an empty message, also
+ *    `name` or `name [code]`. The stack must start with one of them, and
+ *    the header must end its line (a line break or the end of the stack
+ *    follows it). The message is the untrusted part: matched whole, from
+ *    the start, a message line shaped like a frame goes with the header —
+ *    never counted in lines. A stack that starts otherwise (the message
+ *    rewritten after V8 formatted the stack, which it does on the first
+ *    read of `stack`, to text found inside the name, part-way along the
+ *    header's line, or nowhere in it) means no stack, because the header can
+ *    no longer be told from the frames.
+ * 3. After the header, the unbroken run of `    at ` lines starting at the
  *    first such line is kept, and it ends at the first line that is not one
  *    — so a section appended after the frames ("Caused by: …") is not kept,
  *    frame-shaped lines in it included.
@@ -231,24 +254,23 @@ const isError = (value: unknown): value is object => {
  *
  * What the text cannot show, and so could still pass for frames:
  * - a message rewritten, after the stack was formatted, to a leading part
- *   of the one the header carries: the rest of the old message follows the
- *   cut, and its `    at `-shaped lines, if any, read as frames;
+ *   of itself that ends at one of its own line breaks: the header V8 would
+ *   write for the new message, and the old message's later lines follow it
+ *   — its `    at `-shaped lines, if any, read as frames;
  * - a `stack` assigned by hand with a frame-shaped line that carries data:
- *   it is a frame by every test this can make;
- * - a `message` that is not a string: the cut falls back to the first line,
- *   so a header formatted from an earlier, multi-line message leaves its
- *   later lines behind, and a frame-shaped one reads as a frame.
+ *   it is a frame by every test this can make.
  */
-const framesOf = (stack: unknown, message: unknown): string | undefined => {
-	if (typeof stack !== "string") return undefined;
-	let rest = stack;
-	if (typeof message === "string" && message !== "") {
-		const at = stack.indexOf(message);
-		if (at < 0) return undefined;
-		rest = stack.slice(at + message.length);
-	}
-	// The rest of the line the cut fell on is the header's, never a frame.
-	const lines = rest.split("\n").slice(1);
+const framesOf = (
+	stack: unknown,
+	name: unknown,
+	code: unknown,
+	message: unknown,
+): string | undefined => {
+	if (typeof stack !== "string" || typeof message !== "string") return undefined;
+	const end = headerEnd(stack, typeof name === "string" ? name : "Error", code, message);
+	if (end < 0) return undefined;
+	// The header ends its line: the frames are on the lines after it.
+	const lines = stack.slice(end).split("\n").slice(1);
 	const first = lines.findIndex((line) => FRAME.test(line));
 	if (first < 0) return undefined;
 	const frames: string[] = [];
@@ -310,7 +332,7 @@ function project(err: unknown, depth: number): LoggableError {
 	const errorDescription = descriptionOf(read(err, "error_description"));
 	const cause = read(err, "cause");
 	const response = responseFields(cause) ?? responseFields(read(err, "response"));
-	const stack = framesOf(read(err, "stack"), rawMessage);
+	const stack = framesOf(read(err, "stack"), rawName, code, rawMessage);
 
 	let message: string | undefined;
 	let position: number | undefined;

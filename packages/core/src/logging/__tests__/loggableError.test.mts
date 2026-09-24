@@ -439,22 +439,16 @@ describe("loggableError — what a log line may carry of an error", () => {
 			return rewritten;
 		};
 
-		it.each([
-			"E",
-			"r",
-			"Err",
-			": orig",
-			"rig",
-			"o",
-			"Error: orig",
-			"",
-		])("a message rewritten to %j, which the header holds but is not: no stack", (message) => {
-			// Found anywhere in the stack — inside the name, part-way along the
-			// header's line — a message would cut the header short and let the
-			// frame-shaped line after it through. Only the whole header, `name:
-			// message` ending its line, is accepted.
-			expect(stackOf(rewrittenTo(message))).toBeUndefined();
-		});
+		it.each(["E", "r", "Err", ": orig", "rig", "o", "Error: orig", ""])(
+			"a message rewritten to %j, which the header holds but is not: no stack",
+			(message) => {
+				// Found anywhere in the stack — inside the name, part-way along the
+				// header's line — a message would cut the header short and let the
+				// frame-shaped line after it through. Only the whole header, `name:
+				// message` ending its line, is accepted.
+				expect(stackOf(rewrittenTo(message))).toBeUndefined();
+			},
+		);
 
 		it("a message rewritten to a leading part of itself that ends mid-line: no stack", () => {
 			expect(
@@ -495,6 +489,17 @@ describe("loggableError — what a log line may carry of an error", () => {
 			expect(stack).toMatch(/^ {4}at /);
 			expect(stack).not.toContain("ERR_OUT_OF_RANGE");
 			expect(stack).not.toContain("out of range");
+		});
+
+		it.each([
+			["V8's", "Error"],
+			["a source-map formatter's", "Error: "],
+		])("an empty message under %s header: its frames", (_label, header) => {
+			// V8 and Node write an empty message's header as the name alone;
+			// source-map-support and vitest's formatter write `name: `.
+			const empty = new Error("");
+			empty.stack = `${header}\n    at a`;
+			expect(stackOf(empty)).toBe("    at a");
 		});
 
 		it("a coded header with an empty message, `name [code]`: its frames", () => {
