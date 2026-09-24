@@ -635,11 +635,23 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.headers["content-type"]).toMatch(/^application\/json/);
 		expect(res.headers["cache-control"]).toBe("no-store");
 		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		// This package's own code failed on the data: the frames are what an
+		// operator finds it by — and the header line, which repeats the
+		// message, is not among them.
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { name: "TypeError", message: expect.any(String) } },
+			{
+				err: {
+					name: "TypeError",
+					message: expect.any(String),
+					stack: expect.stringMatching(/^ {4}at /),
+				},
+			},
 			"device_route_unexpected_error",
 		);
-		for (const line of lines) expect(line).not.toContain(CONFIDENTIAL_SECRET);
+		for (const line of lines) {
+			expect(line).not.toContain(CONFIDENTIAL_SECRET);
+			expect(line).not.toContain("TypeError:");
+		}
 	});
 
 	/** The verification route, signed in, with a store whose lookup throws `thrown`. */

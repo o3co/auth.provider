@@ -25,7 +25,12 @@
  */
 
 import { afterEach, describe, expect, it } from "vitest";
-import { LOGGED_STRING_MAX_LENGTH, loggableError } from "#/loggableError.mjs";
+import {
+	LOGGED_STACK_MAX_FRAMES,
+	LOGGED_STACK_MAX_LENGTH,
+	LOGGED_STRING_MAX_LENGTH,
+	loggableError,
+} from "#/loggableError.mjs";
 
 /** Redis's own reply to an unknown command, which quotes the command's first arguments. */
 const REDIS_UNKNOWN_COMMAND =
@@ -47,6 +52,24 @@ const parseErrorOf = (input: string): Error => {
 	}
 	throw new Error("parsed");
 };
+
+/** What `fn` threw. */
+const thrownBy = (fn: () => unknown): unknown => {
+	try {
+		fn();
+	} catch (error) {
+		return error;
+	}
+	throw new Error("expected a throw");
+};
+
+function readsAField(record: unknown): number {
+	return (record as { field: { value: number } }).field.value;
+}
+
+function refusesTheRecord(): never {
+	throw new TypeError("record for gho_STACKSECRET has no field");
+}
 
 describe("loggableError", () => {
 	it("keeps name, message, type, code and status of an Error — nothing else, nothing nested", () => {
@@ -136,6 +159,75 @@ describe("loggableError", () => {
 		expect(loggableError(42)).toEqual({ thrown: "number" });
 		expect(loggableError(null)).toEqual({ thrown: "object" });
 		expect(loggableError({ message: "m s3cret", code: "E" })).toEqual({ thrown: "object" });
+	});
+
+	describe("stack: the frames, never the header line that carries the message", () => {
+		it("keeps a real TypeError's frames, and not its message line — a token in the message included", () => {
+			// A failure in this package's own code: without the frames an
+			// operator has nothing to find it by.
+			const natural = loggableError(thrownBy(() => readsAField(undefined)));
+			expect(natural.stack).toMatch(/^ {4}at readsAField /);
+			expect(natural.stack).not.toContain("Cannot read properties");
+
+			const worded = loggableError(thrownBy(refusesTheRecord));
+			expect(worded.stack).toMatch(/^ {4}at refusesTheRecord /);
+			expect(worded.stack).not.toContain("STACKSECRET");
+			expect(worded.stack).not.toContain("TypeError");
+		});
+
+		it("drops a message line that looks like a frame: a caller cannot write a frame into the stack", () => {
+			const injected = loggableError(
+				thrownBy(() => {
+					throw new Error("refused\n    at gho_INJECTED (upstream.js:1:1)");
+				}),
+			);
+			expect(injected.stack).not.toContain("INJECTED");
+			expect(injected.stack).toMatch(/^ {4}at /);
+		});
+
+		it("keeps no stack whose header no longer carries the message, as it cannot tell header from frames", () => {
+			// The message was rewritten after the stack was captured: the text
+			// the header does carry is unknown, and may be shaped like a frame.
+			const rewritten = new Error("refused\n    at gho_INJECTED (upstream.js:1:1)");
+			rewritten.message = "refused";
+			expect("stack" in loggableError(rewritten)).toBe(false);
+		});
+
+		it("keeps at most ten frames and 2048 characters, whichever comes first", () => {
+			expect(LOGGED_STACK_MAX_FRAMES).toBe(10);
+			expect(LOGGED_STACK_MAX_LENGTH).toBe(2048);
+			const limit = Error.stackTraceLimit;
+			Error.stackTraceLimit = 50;
+			try {
+				const recurse = (n: number): never => (n === 0 ? refusesTheRecord() : recurse(n - 1));
+				const deep = loggableError(thrownBy(() => recurse(30)));
+				expect(String(deep.stack).split("\n")).toHaveLength(10);
+			} finally {
+				Error.stackTraceLimit = limit;
+			}
+			const wide = new Error("wide");
+			wide.stack = `Error: wide\n${Array.from(
+				{ length: 10 },
+				(_, i) => `    at frame${i} (/${"p".repeat(400)}.js:1:1)`,
+			).join("\n")}`;
+			expect(loggableError(wide).stack).toHaveLength(2048);
+		});
+
+		it("keeps no stack that has no frames", () => {
+			const bare = new Error("bare");
+			bare.stack = "Error: bare";
+			expect("stack" in loggableError(bare)).toBe(false);
+		});
+
+		it("keeps no stack whose read throws, and never throws itself", () => {
+			const error = new Error("m");
+			Object.defineProperty(error, "stack", {
+				get() {
+					throw new Error("getter");
+				},
+			});
+			expect(loggableError(error)).toEqual({ name: "Error", message: "m" });
+		});
 	});
 
 	describe("where Error.isError is missing, as on Node 22", () => {
