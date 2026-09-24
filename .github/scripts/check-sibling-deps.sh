@@ -32,6 +32,9 @@
 # workspaces (the standalone template, the tools) are applications, not
 # libraries: they install siblings as dependencies, as a deployment does.
 #
+# It reads manifests only, so CI runs it in the required build-and-test job
+# right after install, before anything is built.
+#
 # Fails closed: a list pnpm cannot produce, or a manifest that cannot be read,
 # stops the check. Never a clean scan.
 #

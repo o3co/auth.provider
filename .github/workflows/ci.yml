@@ -43,6 +43,16 @@ jobs:
           restore-keys: pnpm-store-
 
       - run: pnpm install --frozen-lockfile
+      - name: Assert every sibling is a workspace:^ peer, never a dependency
+        # Read on the source manifests, so it needs no build: a sibling
+        # @o3co/auth-provider-* package is a `workspace:^` peer with a
+        # `workspace:*` devDependency, and never a `dependencies` entry (a second
+        # copy of core is one that `declare module` augmentation does not
+        # reach). The script says why each rule holds. It runs here, in the
+        # required build-and-test job, so a manifest that breaks the rule cannot
+        # merge; publish-readiness's packed-manifest step asserts what pnpm
+        # rewrote.
+        run: .github/scripts/check-sibling-deps.sh
       - run: pnpm run lint
       - run: pnpm run build
       - name: Vendor leak guard
@@ -368,14 +378,6 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
-
-      - name: Assert every sibling is a workspace:^ peer, never a dependency
-        # Read on the source manifests: a sibling @o3co/auth-provider-* package
-        # is a `workspace:^` peer with a `workspace:*` devDependency, and never a
-        # `dependencies` entry (a second copy of core is one that `declare module`
-        # augmentation does not reach). The script says why each rule holds; the
-        # packed-manifest step below asserts what pnpm rewrote.
-        run: .github/scripts/check-sibling-deps.sh
 
       - name: Pack every package the release publishes
         run: |
