@@ -358,17 +358,19 @@ export function createRedisFederationGrantStore(
 	// scripts write a record or its subject-index entry and set the key's
 	// deadline last, so a deadline Redis refuses leaves what was written with no
 	// TTL; and a retention past 2^53 is written into a record that then does
-	// not read back, so every lodging fails and leaves its record behind.
+	// not read back, so every lodging fails and leaves its record behind. A
+	// RangeError, as the in-process store and the shared expiry rule refuse
+	// a lifetime.
 	const retentionMs =
 		options.tombstoneRetentionMs ?? DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS;
 	if (!isStorableLifetime(retentionMs, { allowZero: true })) {
-		throw new Error(
+		throw new RangeError(
 			"federation grant store: tombstoneRetentionMs must be a non-negative number of milliseconds that ends within the Date range",
 		);
 	}
 	const allowanceMs = options.listingAllowanceMs ?? DEFAULT_FEDERATION_GRANT_LISTING_ALLOWANCE_MS;
 	if (!isStorableLifetime(allowanceMs, { allowZero: true })) {
-		throw new Error(
+		throw new RangeError(
 			"federation grant store: listingAllowanceMs must be a non-negative number of milliseconds that ends within the Date range",
 		);
 	}
