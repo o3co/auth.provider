@@ -56,6 +56,13 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
 	 */
 	legacyTypAccept?: boolean;
 	logger?: Logger;
+	/**
+	 * Not an option: the grant checks the refresh-token family (see the
+	 * factory's JSDoc). Typed `never` so a deps object spread into these
+	 * options fails to compile; present at runtime, even as `undefined`, it
+	 * makes the factory throw.
+	 */
+	refreshTokenFamilyRevocation?: never;
 }
 
 /**

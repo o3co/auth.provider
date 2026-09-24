@@ -1008,7 +1008,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 
 			const accessToken = await generateToken(
 				formatObject({
-					family_id: subjectValidated.familyId,
+					family_id: reportedFamily(subjectValidated),
 					act,
 				}),
 				{
@@ -1097,6 +1097,16 @@ function getMaxActorChainDepth(deps: TokenExchangeDependencies): number {
 }
 
 /**
+ * The family a validator reports, or `undefined` when it reports none. An
+ * empty `familyId` names no family, so it is read as absent — by the family
+ * rule and by issuance alike: nothing to check, and no `family_id: ""` for the
+ * issued token to inherit that no revocation could ever reach.
+ */
+function reportedFamily(validated: ValidatedToken): string | undefined {
+	return validated.familyId ? validated.familyId : undefined;
+}
+
+/**
  * The refresh-token family rule for a token presented as `subject_token` or
  * `actor_token`: the refusal to return, or `null` when the token passes.
  *
@@ -1130,8 +1140,8 @@ async function familyRefusal(
 	role: "subject" | "actor",
 	validated: ValidatedToken,
 ): Promise<GrantHandlerResult | null> {
-	const { familyId } = validated;
-	if (!familyId) return null;
+	const familyId = reportedFamily(validated);
+	if (familyId === undefined) return null;
 	const forRole = (description: string) =>
 		role === "actor" ? `actor_token ${description}` : description;
 	const revocation = deps.refreshTokenFamilyRevocation;
