@@ -223,6 +223,17 @@ describe("loggableError — what a log line may carry of an error", () => {
 		expect(shape(null)).toEqual({ name: "NonError", thrown: "null" });
 	});
 
+	it("marks a cause the depth limit leaves out, as it marks one the budget does", () => {
+		let chain: Error = new Error("c5");
+		for (let level = 4; level >= 0; level--) chain = new Error(`c${level}`, { cause: chain });
+		let last: LoggableError | undefined = loggableError(chain);
+		for (let level = 0; level < 3; level++) last = last?.cause;
+		// c0, and three causes below it: c3 is the last, and it says it had one.
+		expect(last?.detail).toBe("c3");
+		expect(last?.cause).toBeUndefined();
+		expect(last?.causeOmitted).toBe(true);
+	});
+
 	it("stops following causes after a few, so a cycle cannot recurse forever", () => {
 		const a = new Error("a");
 		const b = new Error("b", { cause: a });
@@ -324,6 +335,18 @@ describe("loggableError — what a log line may carry of an error", () => {
 				projected === undefined ? 0 : 1 + depthOf(projected.aggregateErrors?.[0]);
 			// The error and three levels below it, as with causes.
 			expect(depthOf(loggableError(nested))).toBe(4);
+		});
+
+		it("says what the depth limit left out: the last level's members in `aggregateErrorsOmitted`", () => {
+			let nested: Error = new Error("innermost");
+			for (let level = 4; level >= 0; level--) {
+				nested = new AggregateError([nested, new Error(`sibling ${level}`)], `level ${level}`);
+			}
+			let last: LoggableError | undefined = loggableError(nested);
+			for (let level = 0; level < 3; level++) last = last?.aggregateErrors?.[0];
+			expect(last?.detail).toBe("level 3");
+			expect(last?.aggregateErrors).toBeUndefined();
+			expect(last?.aggregateErrorsOmitted).toBe(2);
 		});
 
 		it("never throws on an `errors` that cannot be read", () => {
