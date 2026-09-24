@@ -435,10 +435,11 @@ describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () =>
 	);
 
 	it.each(orders)(
-		"refuses a chunked body over 16 KiB at both routes (%s)",
+		"refuses a chunked body over 16 KiB at both routes with the same 413 body_too_large (%s)",
 		async (_label, ordered) => {
 			// No `Content-Length`, so only a parser can find the size — and
-			// the parser that runs first is the one that decides. Nothing is
+			// its refusal has to read like the declared-length one, not like
+			// whatever error handler the host app happens to run. Nothing is
 			// signed in: the size is refused before anything else is asked.
 			const config = makeConfig(ENABLED);
 			const { handle, app } = await bootWith(config, [
@@ -450,6 +451,8 @@ describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () =>
 				for (const path of ["/oauth/device_authorization", "/oauth/device/verification"]) {
 					const res = await postChunked(app, path, body);
 					expect(res.status, path).toBe(413);
+					expect(res.contentType, path).toMatch(/^application\/json/);
+					expect(JSON.parse(res.text), path).toEqual(TOO_LARGE);
 				}
 			} finally {
 				await handle.dispose();
