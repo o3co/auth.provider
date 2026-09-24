@@ -112,7 +112,7 @@ assertion's subject handle from `oauth`'s jwt-bearer grant. For both:
 - any other status throws.
 
 The body of a non-`2xx` answer is discarded unread, for these and for linking.
-No request follows a redirect, the identity lookup's included: a `3xx` is one
+No request follows a redirect, including the identity lookup: a `3xx` is one
 more status that throws, and its `Location` is never contacted.
 
 **`linkFederatedIdentity`** posts `{ userId, provider, sub, token, claims }` to
