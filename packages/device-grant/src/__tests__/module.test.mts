@@ -602,6 +602,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 				err: {
 					name: "ReplyError",
 					detail: "READONLY You can't write against a read only replica.",
+					command: { name: "evalsha" },
 					stack: FRAMES,
 				},
 			},
@@ -771,7 +772,12 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 					name: "Error",
 					detail: "device code lookup failed",
 					stack: FRAMES,
-					cause: { name: "ReplyError", detail: "ERR unknown command 'evalsha'", stack: FRAMES },
+					cause: {
+						name: "ReplyError",
+						detail: "ERR unknown command 'evalsha'",
+						command: { name: "evalsha" },
+						stack: FRAMES,
+					},
 				},
 			},
 			"device_route_unexpected_error",

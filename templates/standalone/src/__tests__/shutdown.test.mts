@@ -310,6 +310,7 @@ describe("installGracefulShutdown (#290)", () => {
 						{
 							name: "ReplyError",
 							detail: "READONLY You can't write against a read only replica.",
+							command: { name: "set" },
 							stack: FRAMES,
 						},
 					]),

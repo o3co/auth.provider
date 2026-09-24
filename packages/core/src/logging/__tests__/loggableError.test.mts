@@ -262,7 +262,11 @@ describe("loggableError — what a log line may carry of an error", () => {
 						detail: "invalid response encountered",
 						code: "OAUTH_INVALID_RESPONSE",
 					},
-					{ name: "ReplyError", detail: "ERR unknown command 'evalsha'" },
+					{
+						name: "ReplyError",
+						detail: "ERR unknown command 'evalsha'",
+						command: { name: "evalsha" },
+					},
 				],
 			});
 			const projected = loggableError(failed);
@@ -398,6 +402,45 @@ describe("loggableError — what a log line may carry of an error", () => {
 			expect(last?.causeOmitted).toBe(true);
 			expect(last?.aggregateErrors).toBeUndefined();
 			expect(last?.aggregateErrorsOmitted).toBe(5);
+		});
+	});
+
+	describe("the command a store's error answered", () => {
+		it("keeps the name of ioredis's `command`, and never its arguments", () => {
+			const refused = Object.assign(new Error("WRONGPASS invalid username-password pair"), {
+				name: "ReplyError",
+				command: { name: "hello", args: ["3", "AUTH", "default", "pw-S3CRET"] },
+			});
+			expect(shape(refused)).toEqual({
+				name: "ReplyError",
+				detail: "WRONGPASS invalid username-password pair",
+				command: { name: "hello" },
+			});
+			expect(JSON.stringify(loggableError(refused))).not.toContain("S3CRET");
+		});
+
+		it.each([
+			["a shell command line, as execa carries it", "git push https://token-S3CRET@example.com"],
+			["a name with a space", { name: "set key-S3CRET" }],
+			["an over-long name", { name: "x".repeat(33) }],
+			["a name that is not a string", { name: 42 }],
+			["no name", { args: ["S3CRET"] }],
+		])("drops a `command` that is %s", (_label, command) => {
+			const projected = loggableError(Object.assign(new Error("m"), { command }));
+			expect(projected).not.toHaveProperty("command");
+			expect(JSON.stringify(projected)).not.toContain("S3CRET");
+		});
+
+		it("never throws on a `command` whose name cannot be read", () => {
+			const command = Object.defineProperty({}, "name", {
+				get() {
+					throw new Error("getter");
+				},
+			});
+			expect(shape(Object.assign(new Error("m"), { command }))).toEqual({
+				name: "Error",
+				detail: "m",
+			});
 		});
 	});
 

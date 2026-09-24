@@ -852,6 +852,7 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 				err: {
 					name: "ReplyError",
 					detail: "READONLY You can't write against a read only replica.",
+					command: { name: "set" },
 					stack: FRAMES,
 				},
 				jti,
