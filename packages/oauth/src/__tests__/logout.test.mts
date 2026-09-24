@@ -779,6 +779,36 @@ describe("POST /oauth/logout", () => {
 		}
 	});
 
+	describe("both reverse-index reads fail", () => {
+		it("logs one error line naming the registry, the federation index's failure carried beside it", async () => {
+			const logger = createMockLogger();
+			const federationIndexDown = Object.assign(new Error("connect ECONNREFUSED 10.0.0.8:6379"), {
+				code: "ECONNREFUSED",
+			});
+			const app = buildApp({
+				sessionRPRegistry: makeSessionRPRegistry({
+					listRPs: vi.fn().mockRejectedValue(storeReplyError()),
+				}),
+				sessionFederationIndex: makeSessionFederationIndex({
+					listFederations: vi.fn().mockRejectedValue(federationIndexDown),
+				}),
+				logger,
+			});
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+			expect(res.status).toBe(503);
+			const line = expectOutageLine(logger, "logout_store_unavailable", {
+				store: "session_rp_registry",
+				step: "list",
+			});
+			// Not dropped: the second store's failure, projected, on the same line.
+			expect(line.alsoUnavailable).toEqual({
+				store: "session_federation_index",
+				err: expect.objectContaining({ name: "Error", code: "ECONNREFUSED" }),
+			});
+			expect((line.alsoUnavailable as { err: unknown }).err).not.toBeInstanceOf(Error);
+		});
+	});
+
 	describe("the logout cascade fails (fail-closed)", () => {
 		for (const [label, override, cascadeStep] of [
 			[

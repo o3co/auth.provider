@@ -285,8 +285,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		store: "user_session" | "session_rp_registry" | "session_federation_index",
 		step: "get" | "list",
 		error: unknown,
+		/** A second store that failed in the same read, already projected. */
+		also: { readonly alsoUnavailable?: { readonly store: string; readonly err: unknown } } = {},
 	): void => {
-		logger.error({ store, step, err: loggableError(error) }, "logout_store_unavailable");
+		logger.error({ store, step, err: loggableError(error), ...also }, "logout_store_unavailable");
 	};
 
 	// POST /federation/:name/logout — mounted under /oauth → POST /oauth/federation/:name/logout
@@ -702,8 +704,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		//   - rps: needed by broadcastBackchannelLogout (best-effort, before cascade)
 		//   - federations: needed for IdP endSession redirect (route handler step 5)
 		// familyIds is read internally by cascadeLogout per §6.2 Step 1.
-		// Both read together; the first that failed is the one logged, so the
-		// line names a store rather than "one of the two".
+		// Both read together, and one line for the outage: `store` names the
+		// relying-party registry when it failed, else the federation index.
+		// When both failed, the federation index's failure rides on the same
+		// line as `alsoUnavailable` — one outage, one line, nothing dropped.
 		const [rpsRead, federationsRead] = await Promise.allSettled([
 			opts.sessionRPRegistry.listRPs(sid),
 			opts.sessionFederationIndex.listFederations(sid),
@@ -715,6 +719,14 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					"session_rp_registry",
 					"list",
 					rpsRead.reason,
+					federationsRead.status === "rejected"
+						? {
+								alsoUnavailable: {
+									store: "session_federation_index",
+									err: loggableError(federationsRead.reason),
+								},
+							}
+						: {},
 				);
 			} else if (federationsRead.status === "rejected") {
 				logoutStoreUnavailable(
