@@ -15,12 +15,11 @@
  */
 
 import {
-	auditErrorText,
 	type ClientRepository,
 	consoleLogger,
 	isWellFormedClientId,
 	type Logger,
-	loggableError,
+	logClientRepositoryUnavailable,
 	type PublicClient,
 	type ReplaySeenSet,
 	sanitizeErrorText,
@@ -201,7 +200,8 @@ function parseBasicAuthHeader(authHeader: string | undefined): BasicParseResult 
  * able to make one throw: a SQL driver refusing a NUL byte would otherwise
  * turn `client_id=%00` into the server's `503`. The id a
  * `client_repository_unavailable` line records is the client's input, so it
- * goes through `auditErrorText` (sanitised, capped).
+ * goes through `auditErrorText` (sanitised, capped), in core's
+ * `logClientRepositoryUnavailable` — the one line every client lookup writes.
  */
 export function createClientAuthMiddleware(
 	clientRepository: ClientRepository,
@@ -265,10 +265,7 @@ export function createClientAuthMiddleware(
 		clientId: string,
 		cause: unknown,
 	): void {
-		logger.error(
-			{ step, clientId: auditErrorText(clientId), err: loggableError(cause) },
-			"client_repository_unavailable",
-		);
+		logClientRepositoryUnavailable(logger, { step, clientId }, cause);
 		rejectAs(res, 503, "temporarily_unavailable", "client repository unavailable");
 	}
 

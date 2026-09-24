@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import type { Logger } from "../logging/Logger.mjs";
+import { loggableError } from "../logging/loggableError.mjs";
 import type {
 	GrantPolicyContext,
 	GrantPolicyDecision,
@@ -60,6 +62,30 @@ export function policyOutOfBounds(errorDescription: string): GrantError {
 }
 
 /**
+ * Logs a grant policy that threw — it could not answer, and the request is
+ * refused `503 temporarily_unavailable` — as `grant_policy_unavailable` at
+ * error level, with the grant type, the policy's `kind`, the caller's `site`
+ * when it is not a token grant, and the error's projection. A policy that
+ * calls out to a decision service fails the way a store does, and is answered
+ * and logged the same way.
+ */
+export function logGrantPolicyUnavailable(
+	logger: Logger | undefined,
+	context: { readonly grantType: string; readonly policy: string; readonly site?: string },
+	cause: unknown,
+): void {
+	logger?.error(
+		{
+			...(context.site !== undefined ? { site: context.site } : {}),
+			grantType: context.grantType,
+			policy: context.policy,
+			err: loggableError(cause),
+		},
+		"grant_policy_unavailable",
+	);
+}
+
+/**
  * Evaluate `grantPolicy` for a token grant, fail-closed (CP-18), and apply
  * its scope decision to the grant's already-narrowed effective scope.
  *
@@ -68,7 +94,9 @@ export function policyOutOfBounds(errorDescription: string): GrantError {
  *
  * - **A policy that throws is `503 temporarily_unavailable`**, never allow.
  *   Policy is a security boundary; failing open would grant the pre-policy
- *   ceiling, which is exactly what the policy exists to prevent.
+ *   ceiling, which is exactly what the policy exists to prevent. The throw is
+ *   logged at error level as `grant_policy_unavailable`
+ *   ({@link logGrantPolicyUnavailable}) when the caller passes a `logger`.
  * - **`deny` is `400` with the policy's own error** and description.
  * - **`grantedScope` may only narrow.** It is re-validated against
  *   `effectiveScopes` — the request as already narrowed to every ceiling the
@@ -92,11 +120,17 @@ export async function evaluateGrantPolicy(
 	context: GrantPolicyContext,
 	effectiveScopes: readonly string[],
 	scopeCeiling: PolicyScopeCeiling = { scopes: effectiveScopes, name: "requested scope" },
+	logger?: Logger,
 ): Promise<GrantPolicyOutcome> {
 	let decision: GrantPolicyDecision;
 	try {
 		decision = await grantPolicy.evaluate(request, context);
-	} catch {
+	} catch (err) {
+		logGrantPolicyUnavailable(
+			logger,
+			{ grantType: request.grantType, policy: grantPolicy.kind },
+			err,
+		);
 		return {
 			ok: false,
 			result: {

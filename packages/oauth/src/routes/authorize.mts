@@ -32,6 +32,7 @@ import {
 	isWellFormedClientId,
 	isWellFormedErrorCode,
 	type Logger,
+	logClientRepositoryUnavailable,
 	loggableError,
 	matchesRegisteredRedirectUri,
 	type PendingConsentStore,
@@ -255,14 +256,10 @@ const resolveClientAndRedirectUri = async (
 		client = await opts.clientRepository.findById(client_id);
 	} catch (err) {
 		// The client's id is its own input: recorded sanitised and capped.
-		opts.logger.error(
-			{
-				site: "authorize",
-				step: "find",
-				clientId: auditErrorText(client_id),
-				err: loggableError(err),
-			},
-			"client_repository_unavailable",
+		logClientRepositoryUnavailable(
+			opts.logger,
+			{ site: "authorize", step: "find", clientId: client_id },
+			err,
 		);
 		res.status(503).json({
 			error: "temporarily_unavailable",

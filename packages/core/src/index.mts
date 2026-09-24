@@ -305,6 +305,7 @@ export {
 	evaluateGrantPolicy,
 	type GrantPolicyAllow,
 	type GrantPolicyOutcome,
+	logGrantPolicyUnavailable,
 	type PolicyAudienceOutcome,
 	type PolicyScopeCeiling,
 	policyOutOfBounds,
@@ -700,6 +701,10 @@ export {
 	isWellFormedClientId,
 	MAX_CLIENT_ID_LENGTH,
 } from "./repositories/clientId.mjs";
+export {
+	type ClientRepositoryOutage,
+	logClientRepositoryUnavailable,
+} from "./repositories/clientRepositoryUnavailable.mjs";
 export {
 	type ClientEntry,
 	ClientEntrySchema,

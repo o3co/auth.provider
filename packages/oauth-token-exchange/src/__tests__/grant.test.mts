@@ -21,11 +21,12 @@ import {
 	type GrantPolicyContext,
 	type GrantPolicyHook,
 	type GrantPolicyRequest,
+	type Logger,
 	MAX_CLIENT_ID_LENGTH,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
@@ -69,6 +70,7 @@ function buildGrant(
 		refreshTokenFamilyRevocation?: ReturnType<typeof makeFamilyRevocation> | null;
 		config?: AppConfig;
 		grantPolicy?: GrantPolicyHook;
+		logger?: Logger;
 	} = {},
 ) {
 	// null = explicitly absent; undefined = use default
@@ -88,8 +90,52 @@ function buildGrant(
 		tokenExchangeValidatorResolver: validators,
 		clientRepository: overrides.clientRepository ?? mockClientRepository(),
 		...(overrides.grantPolicy ? { grantPolicy: overrides.grantPolicy } : {}),
+		...(overrides.logger ? { logger: overrides.logger } : {}),
 	});
 }
+
+/** A logger whose every level is a spy. */
+const spyLogger = () => {
+	const logger = {
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: () => logger,
+	};
+	return logger;
+};
+
+/**
+ * What a Redis-backed store rejects with: a ReplyError whose command carries
+ * the key it refused — which must never reach a log.
+ */
+const storeReplyError = (): Error =>
+	Object.assign(new Error("READONLY You can't write against a read only replica."), {
+		name: "ReplyError",
+		command: { name: "get", args: ["client:client-a", "refused-command-marker"] },
+	});
+
+/**
+ * The branch logged exactly one line, at error level, as `event`, carrying
+ * `fields` and the error's projection — and nothing at warn.
+ */
+const expectOutageLine = (
+	logger: ReturnType<typeof spyLogger>,
+	event: string,
+	fields: Record<string, unknown>,
+) => {
+	expect(logger.warn).not.toHaveBeenCalled();
+	expect(logger.error).toHaveBeenCalledTimes(1);
+	const [line, name] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+	expect(name).toBe(event);
+	expect(line).toMatchObject(fields);
+	expect(line.err).not.toBeInstanceOf(Error);
+	expect(JSON.stringify(logger.error.mock.calls)).not.toContain("refused-command-marker");
+	return line;
+};
 
 /**
  * Default test context. The standalone-wiring path (no `clientAuthMw`) is
@@ -283,6 +329,108 @@ describe("createTokenExchangeGrant — request errors", () => {
 		expect(result.status).toBe(503);
 		if (!("error" in result)) expect.fail("Expected error in result");
 		expect(result.error).toBe("temporarily_unavailable");
+	});
+
+	describe("a client repository that cannot answer is logged, not only answered 503", () => {
+		it("on the authenticated path: findById, as client_repository_unavailable", async () => {
+			const logger = spyLogger();
+			const failing: ClientRepository = {
+				findById: async () => {
+					throw storeReplyError();
+				},
+				authenticate: async () => null,
+			};
+			const g = buildGrant({ clientRepository: failing, logger });
+			const { result } = await g.handle(
+				ctx(
+					{
+						subject_token: await signSelfIssuedAccessToken({}),
+						subject_token_type: ACCESS_TOKEN_TYPE,
+					},
+					{ authenticatedClient: publicClient({ tokenEndpointAuthMethod: "client_secret_basic" }) },
+				),
+			);
+			expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+			expectOutageLine(logger, "client_repository_unavailable", {
+				site: "token_exchange",
+				step: "find",
+				clientId: "client-a",
+				err: { name: "ReplyError" },
+			});
+		});
+
+		it("on the standalone path: authenticate, as client_repository_unavailable", async () => {
+			const logger = spyLogger();
+			const failing: ClientRepository = {
+				findById: async () => null,
+				authenticate: async () => {
+					throw storeReplyError();
+				},
+			};
+			const g = buildGrant({ clientRepository: failing, logger });
+			const { result } = await g.handle(
+				ctx({
+					client_id: "client-a",
+					client_secret: "any",
+					subject_token: await signSelfIssuedAccessToken({}),
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				}),
+			);
+			expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+			expectOutageLine(logger, "client_repository_unavailable", {
+				site: "token_exchange",
+				step: "authenticate",
+				clientId: "client-a",
+				err: { name: "ReplyError" },
+			});
+		});
+
+		it("records the client's id capped at 200 characters", async () => {
+			const logger = spyLogger();
+			const failing: ClientRepository = {
+				findById: async () => null,
+				authenticate: async () => {
+					throw storeReplyError();
+				},
+			};
+			const clientId = "c".repeat(MAX_CLIENT_ID_LENGTH);
+			await buildGrant({ clientRepository: failing, logger }).handle(
+				ctx({
+					client_id: clientId,
+					client_secret: "any",
+					subject_token: await signSelfIssuedAccessToken({}),
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				}),
+			);
+			const line = expectOutageLine(logger, "client_repository_unavailable", {
+				step: "authenticate",
+			});
+			expect(String(line.clientId).length).toBeLessThanOrEqual(200);
+		});
+	});
+
+	it("logs a grant policy that cannot answer as grant_policy_unavailable, at error level", async () => {
+		const logger = spyLogger();
+		const throwing: GrantPolicyHook = {
+			kind: "throw",
+			async evaluate() {
+				throw storeReplyError();
+			},
+		};
+		const { result } = await buildGrant({ grantPolicy: throwing, logger }).handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-1" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+		expectOutageLine(logger, "grant_policy_unavailable", {
+			grantType: TOKEN_EXCHANGE_GRANT_TYPE,
+			policy: "throw",
+			err: { name: "ReplyError" },
+		});
 	});
 
 	it.each([

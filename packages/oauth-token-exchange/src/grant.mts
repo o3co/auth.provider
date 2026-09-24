@@ -35,6 +35,8 @@ import {
 	isGrantTypeAllowed,
 	isWellFormedClientId,
 	isWellFormedErrorCode,
+	logClientRepositoryUnavailable,
+	logGrantPolicyUnavailable,
 	loggableError,
 	matchConfirmation,
 	ownedConfirmation,
@@ -189,7 +191,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 				try {
 					client = await clientRepository.findById(ctx.authenticatedClient.clientId);
-				} catch {
+				} catch (err) {
+					logClientRepositoryUnavailable(
+						deps.logger,
+						{ site: "token_exchange", step: "find", clientId: ctx.authenticatedClient.clientId },
+						err,
+					);
 					return {
 						result: {
 							status: 503,
@@ -228,7 +235,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 				try {
 					client = await clientRepository.authenticate(clientId, clientSecret);
-				} catch {
+				} catch (err) {
+					logClientRepositoryUnavailable(
+						deps.logger,
+						{ site: "token_exchange", step: "authenticate", clientId },
+						err,
+					);
 					return {
 						result: {
 							status: 503,
@@ -803,7 +815,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				let decision: GrantPolicyDecision;
 				try {
 					decision = await deps.grantPolicy.evaluate(policyRequest, policyContext);
-				} catch {
+				} catch (err) {
+					logGrantPolicyUnavailable(
+						deps.logger,
+						{ grantType: GRANT_TYPE, policy: deps.grantPolicy.kind },
+						err,
+					);
 					return {
 						result: {
 							status: 503,
