@@ -129,11 +129,14 @@ declare module "express-session" {
  * Every route here gets exactly what it got before: JSON and urlencoded
  * (`extended: false`), Express's default limits, ahead of anything else.
  * `bodyParsing.test.mts` discovers the router's routes with every surface
- * mounted and with none, and checks both directions — each mounted route is
- * parsed, each unmounted one is not — so a route added without its path
- * here, or a path left here without its route, fails there.
+ * mounted and with none, asserts this list equals them, and checks both
+ * directions — each mounted route is parsed, each unmounted one is not — so
+ * a route added without its path here, or a path left here without its
+ * route, fails there.
+ *
+ * @internal Exported for that test only; not part of the package's API.
  */
-const oauthRoutePaths = (mounted: {
+export const oauthRoutePaths = (mounted: {
 	readonly logout: boolean;
 	readonly federationToken: boolean;
 	readonly consent: boolean;
@@ -396,8 +399,10 @@ export const createOAuthRouter = async (
 		!!refreshTokenFamilyRevocation;
 
 	// #527 / #552: mounted below only with both consent stores; one without
-	// the other is refused there.
-	const consentMounted = consentStore !== undefined && pendingConsentStore !== undefined;
+	// the other is refused there. Decided once, here, for the parsers and the
+	// mount alike — and by truthiness, so a JS caller's `null` is no store
+	// rather than a parser scoped to a route that is never mounted.
+	const consentMounted = !!consentStore && !!pendingConsentStore;
 
 	router
 		.use(
@@ -1119,7 +1124,7 @@ export const createOAuthRouter = async (
 	// direction — is refused here, where the operator can read why, rather
 	// than at the first third-party `/authorize`. The bundled memory module
 	// provides both.
-	if ((consentStore === undefined) !== (pendingConsentStore === undefined)) {
+	if (!consentStore !== !pendingConsentStore) {
 		const [wired, missing] = consentStore
 			? ["consentStore", "pendingConsentStore"]
 			: ["pendingConsentStore", "consentStore"];
@@ -1127,7 +1132,7 @@ export const createOAuthRouter = async (
 			`createOAuthRouter: ${wired} is wired but ${missing} is not — the consent step records consent in consentStore and parks each request under a challenge in pendingConsentStore, and cannot run with one of them; wire both (the bundled memory consent module provides both) or neither`,
 		);
 	}
-	if (consentStore && pendingConsentStore) {
+	if (consentMounted) {
 		router.use(
 			createConsentRouter(express, {
 				consentStore,
