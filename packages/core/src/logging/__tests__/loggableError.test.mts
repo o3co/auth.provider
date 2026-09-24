@@ -16,6 +16,7 @@
 
 import { runInNewContext } from "node:vm";
 import express from "express";
+import pino from "pino";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { loggableError } from "../loggableError.mjs";
@@ -282,6 +283,96 @@ describe("loggableError — what a log line may carry of an error", () => {
 		} finally {
 			if (brand) Object.defineProperty(Error, "isError", brand);
 		}
+	});
+
+	describe("stack: the frames, never the header line that carries the message", () => {
+		/** What the function under inspection threw. */
+		const thrownBy = (fn: () => unknown): unknown => {
+			try {
+				fn();
+			} catch (err) {
+				return err;
+			}
+			throw new Error("expected a throw");
+		};
+
+		function readsAField(record: unknown): number {
+			return (record as { field: { value: number } }).field.value;
+		}
+		function refusesTheRecord(): never {
+			throw new TypeError("record for gho_STACKSECRET has no field");
+		}
+
+		it("keeps a real TypeError's frames, and not its message line — a token in the message included", () => {
+			// A failure in this codebase's own code: without the frames an
+			// operator has nothing to find it by.
+			const natural = loggableError(thrownBy(() => readsAField(undefined)));
+			expect(natural.stack).toMatch(/^ {4}at readsAField /);
+			expect(natural.stack).not.toContain("Cannot read properties");
+
+			const worded = loggableError(thrownBy(refusesTheRecord));
+			expect(worded.stack).toMatch(/^ {4}at refusesTheRecord /);
+			expect(worded.stack).not.toContain("STACKSECRET");
+			expect(worded.stack).not.toContain("TypeError");
+		});
+
+		it("drops a message line that looks like a frame: a peer cannot write a frame into the stack", () => {
+			const injected = loggableError(
+				thrownBy(() => {
+					throw new Error("refused\n    at gho_INJECTED (upstream.js:1:1)");
+				}),
+			);
+			expect(injected.stack).not.toContain("INJECTED");
+			expect(injected.stack).toMatch(/^ {4}at /);
+		});
+
+		it("keeps at most ten frames and 2048 characters, whichever comes first", () => {
+			const limit = Error.stackTraceLimit;
+			Error.stackTraceLimit = 50;
+			try {
+				const recurse = (n: number): never => (n === 0 ? refusesTheRecord() : recurse(n - 1));
+				const deep = loggableError(thrownBy(() => recurse(30)));
+				expect(deep.stack?.split("\n")).toHaveLength(10);
+			} finally {
+				Error.stackTraceLimit = limit;
+			}
+			const wide = new Error("wide");
+			wide.stack = `Error: wide\n${Array.from(
+				{ length: 10 },
+				(_, i) => `    at frame${i} (/${"p".repeat(400)}.js:1:1)`,
+			).join("\n")}`;
+			expect(loggableError(wide).stack).toHaveLength(2048);
+		});
+
+		it("keeps no stack that has no frames", () => {
+			const bare = new Error("bare");
+			bare.stack = "Error: bare";
+			expect("stack" in loggableError(bare)).toBe(false);
+		});
+
+		it("applies the same rule at every cause", () => {
+			const inner = thrownBy(refusesTheRecord);
+			const outer = loggableError(new Error("wrapped", { cause: inner }));
+			expect(outer.cause?.stack).toMatch(/^ {4}at refusesTheRecord /);
+			expect(outer.cause?.stack).not.toContain("STACKSECRET");
+		});
+
+		it("reaches pino as the error's name for `type` and its frames for `stack`", () => {
+			const lines: string[] = [];
+			const log = pino(
+				{ base: null, timestamp: false },
+				{
+					write(line: string) {
+						lines.push(line);
+					},
+				},
+			);
+			log.error({ err: loggableError(thrownBy(refusesTheRecord)) }, "failed");
+			const { err } = JSON.parse(lines[0] ?? "{}") as { err: Record<string, unknown> };
+			expect(err.type).toBe("TypeError");
+			expect(err.stack).toMatch(/^ {4}at refusesTheRecord /);
+			expect(JSON.stringify(err)).not.toContain("STACKSECRET");
+		});
 	});
 
 	it("counts an error from another realm as an error", () => {
