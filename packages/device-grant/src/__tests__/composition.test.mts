@@ -531,25 +531,31 @@ describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () =>
 	);
 });
 
+/**
+ * A route of some other module, with no parser of its own: it reads the
+ * request stream itself and reports what it found — and whether anything
+ * had parsed the body before it ran.
+ */
+const readsItsOwnBody: RequestHandler = (req, res) => {
+	const parsedBefore = (req as { body?: unknown }).body ?? null;
+	if (req.readableEnded) {
+		res.json({ raw: null, parsedBefore });
+		return;
+	}
+	let raw = "";
+	req.setEncoding("utf8");
+	req.on("data", (chunk: string) => {
+		raw += chunk;
+	});
+	req.on("end", () => {
+		res.json({ raw, parsedBefore });
+	});
+};
+
 describe("a route of another module under /oauth, listed after oauthModule", () => {
 	// What enabling this grant must not change. The route has no parser of
 	// its own and reads the request stream itself: whatever oauthModule's
 	// router or this package's routes do, the body has to reach it unread.
-	const readsItsOwnBody: RequestHandler = (req, res) => {
-		const parsedBefore = (req as { body?: unknown }).body ?? null;
-		if (req.readableEnded) {
-			res.json({ raw: null, parsedBefore });
-			return;
-		}
-		let raw = "";
-		req.setEncoding("utf8");
-		req.on("data", (chunk: string) => {
-			raw += chunk;
-		});
-		req.on("end", () => {
-			res.json({ raw, parsedBefore });
-		});
-	};
 
 	const elsewhereModule = defineModule({
 		name: "test:elsewhere-under-oauth",
@@ -592,6 +598,60 @@ describe("a route of another module under /oauth, listed after oauthModule", () 
 				expect(form.body).toEqual({ raw: "a=1", parsedBefore: null });
 
 				const json = await request(app).post("/oauth/elsewhere").type("json").send('{"a":1}');
+				expect(json.status).toBe(200);
+				expect(json.body).toEqual({ raw: '{"a":1}', parsedBefore: null });
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
+});
+
+describe("a route of another module beneath the device routes' paths", () => {
+	// The device routes' middleware — no-store, the throttle, the size check,
+	// the parsers, client authentication — is theirs alone. A module listed
+	// after the grant that serves a path beneath one of them gets none of it.
+	const beneathModule = defineModule({
+		name: "test:beneath-the-device-routes",
+		contributes: {
+			routes: [
+				() => {
+					const router = express.Router();
+					router.post("/device_authorization/custom", readsItsOwnBody);
+					router.post("/device/verification/custom", readsItsOwnBody);
+					return { id: "beneath", mountPath: "/oauth", handler: router };
+				},
+			],
+		},
+	});
+
+	const cases = [
+		["enabled", ENABLED],
+		["disabled", { enabled: false }],
+	].flatMap(([state, deviceAuthorization]) =>
+		["/oauth/device_authorization/custom", "/oauth/device/verification/custom"].map(
+			(path) => [path, `the grant ${state}`, deviceAuthorization] as const,
+		),
+	);
+
+	it.each(cases)(
+		"%s receives its body unread and none of the device routes' answers, with %s",
+		async (path, _state, deviceAuthorization) => {
+			const config = makeConfig(deviceAuthorization as Record<string, unknown>);
+			const [first, second] = orders[0][1](config);
+			const { handle, app } = await bootWith(config, [
+				sessionStoreModuleFor(config),
+				first,
+				second,
+				beneathModule,
+			]);
+			try {
+				const form = await request(app).post(path).type("form").send("a=1");
+				expect(form.status).toBe(200);
+				expect(form.body).toEqual({ raw: "a=1", parsedBefore: null });
+				expect(form.headers["cache-control"]).toBeUndefined();
+
+				const json = await request(app).post(path).type("json").send('{"a":1}');
 				expect(json.status).toBe(200);
 				expect(json.body).toEqual({ raw: '{"a":1}', parsedBefore: null });
 			} finally {
