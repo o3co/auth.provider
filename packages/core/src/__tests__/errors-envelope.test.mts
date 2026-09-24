@@ -148,6 +148,12 @@ describe("AS-1/AS-2 errorEnvelope helper (RFC 6749 §5.2)", () => {
 			// first segment has no colon.
 			["a bracket outside a host", "a[b"],
 			["a colon in a relative path's first segment", "::"],
+			// A link to a web page names no user: `https://example.com@evil.example/`
+			// reads as example.com and goes to evil.example, and RFC 3986 §3.2.1
+			// deprecates `user:password`.
+			["a userinfo that disguises the host", "https://example.com@evil.example/"],
+			["a user and password", "https://user:pw@docs.example.com/errors"],
+			["a userinfo on a network-path reference", "//user@docs.example.com/errors"],
 		])("drops a uri with %s, and logs it", (_label, uri) => {
 			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 			const e = errorEnvelope("invalid_grant", "expired", uri);

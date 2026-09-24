@@ -236,6 +236,31 @@ describe("createSanitizedLogger", () => {
 		expect(JSON.stringify(recorded)).not.toContain(SENTINEL);
 	});
 
+	it.each([
+		["a name carrying CRLF", { name: "Error\r\nX-Injected: 1" }],
+		["a code carrying a double quote", { name: "Error", code: 'E"CODE' }],
+		["a nested cause carrying non-ASCII", { name: "Error", cause: { name: "Erreur\u00e9" } }],
+	])("redacts a cause with %s, which auditedError never writes", (_label, cause) => {
+		// `auditedError` sanitises every name and code; a value outside those
+		// characters did not come from it, so it is not carried.
+		const recorded: unknown[] = [];
+		const sanitized = createSanitizedAuditSink({
+			kind: "test",
+			record: async (event) => {
+				recorded.push(event);
+			},
+		});
+		void sanitized.record({
+			timestamp: new Date(),
+			type: "rate_limit.unavailable",
+			details: { tag: "federation_grants", cause: cause as never },
+		});
+		expect((recorded[0] as { details: Record<string, unknown> }).details).toEqual({
+			tag: "federation_grants",
+			cause: "[redacted]",
+		});
+	});
+
 	it("applies the same allowlist to an audit event's details", () => {
 		// `rate_limit.unavailable` carries the same stringified exception the
 		// log line does, on a channel the logger facade never sees.
