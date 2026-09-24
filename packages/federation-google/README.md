@@ -38,6 +38,16 @@ URL, where the generic adapter offers logout only when an end-session endpoint
 is discovered or configured. The generic adapter already verifies what this one
 verifies.
 
+Nor is this adapter a preset built on the generic one. That was weighed and
+declined: it would make this package depend on `federation-oidc`; the generic
+provider is built asynchronously (discovery, key import) while
+`createGoogleProvider` is synchronous, so it would have to be split; it would
+need four new options for the four differences above; and it would change how
+this adapter authenticates to Google (`client_secret_post` today, the generic
+adapter's `client_secret_basic`). What the two did share — the PKCE
+challenge, the code-exchange URL, the reading of the token response — is
+core's toolkit, used by both, so little duplication is left to remove.
+
 ## Install
 
 ```sh
