@@ -170,6 +170,11 @@ export function createRedisSessionRPRegistry(
 	return {
 		kind: "redis",
 		async registerRP(sid, rp, expiresAt) {
+			// NaN serialises as JSON `null`, which the reader refuses — the RP
+			// would be written and then skipped by every logout fan-out.
+			if (!Number.isFinite(rp.registeredAt.getTime())) {
+				throw new RangeError("SessionRPRegistry.registerRP: registeredAt must be a valid date");
+			}
 			await hash.setField(sid, rp.clientId, serialize(rp), expiresAt);
 		},
 		async listRPs(sid) {

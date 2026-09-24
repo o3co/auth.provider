@@ -45,6 +45,11 @@ export function createInMemorySessionRPRegistry(): SessionRPRegistry {
 	return {
 		kind: "memory",
 		async registerRP(sid: string, rp: RegisteredRP, expiresAt: Date): Promise<void> {
+			// An Invalid Date would be handed back as one; the Redis registry
+			// cannot store it at all. Refused, as there.
+			if (!Number.isFinite(rp.registeredAt.getTime())) {
+				throw new RangeError("SessionRPRegistry.registerRP: registeredAt must be a valid date");
+			}
 			hash.setField(sid, cloneRP(rp), expiresAt);
 		},
 		async listRPs(sid: string): Promise<ReadonlyArray<RegisteredRP>> {

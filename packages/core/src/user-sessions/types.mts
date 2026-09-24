@@ -133,7 +133,8 @@ export interface UserSessionStore {
 	/**
 	 * Record a new session. Rejects when `sid` already has one, when
 	 * `expiresAt` is already past, and — with a `RangeError`, recording
-	 * nothing — when `expiresAt` is an Invalid Date.
+	 * nothing — when `expiresAt` is an Invalid Date or `authTime` is an
+	 * Invalid Date or before the epoch.
 	 */
 	create(input: CreateUserSessionInput): Promise<void>;
 	get(sid: string): Promise<UserSession | null>;
@@ -151,7 +152,8 @@ export interface UserSessionStore {
  *
  * TTL contract: every `registerRP` MUST be called with the session's
  * `expiresAt`; the adapter writes the storage entry with TTL synced to
- * `expiresAt`. An Invalid Date is a `RangeError`, and nothing is recorded.
+ * `expiresAt`. An Invalid Date — as `expiresAt` or as the RP's
+ * `registeredAt` — is a `RangeError`, and nothing is recorded.
  */
 export interface SessionRPRegistry {
 	readonly kind: string;

@@ -161,6 +161,16 @@ export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions):
 			if (!Number.isFinite(expiresAtMs)) {
 				throw new RangeError(`UserSession ${input.sid}: expiresAt must be a valid date`);
 			}
+			// `isValidEnvelope` reads back a non-negative timestamp only, so an
+			// Invalid Date (stored as JSON `null`) or a pre-epoch authTime was
+			// written and then read as corrupt: the session vanished on its first
+			// read. Refused before Redis is asked.
+			const authTimeMs = input.authTime.getTime();
+			if (!Number.isFinite(authTimeMs) || authTimeMs < 0) {
+				throw new RangeError(
+					`UserSession ${input.sid}: authTime must be a valid date at or after the epoch`,
+				);
+			}
 			const ttlMs = expiresAtMs - Date.now();
 			if (ttlMs <= 0) {
 				throw new Error(`UserSession ${input.sid}: expiresAt is in the past`);
