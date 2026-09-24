@@ -15,7 +15,7 @@
  */
 
 import { createPrivateKey, type KeyObject } from "node:crypto";
-import { type FederationClientSecret, resolveClientSecret } from "@o3co/auth-provider-session";
+import { type FederationClientSecret, resolveClientSecret } from "@o3co/auth-provider-core";
 import { importPKCS8 } from "jose";
 import * as oidc from "openid-client";
 

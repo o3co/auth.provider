@@ -16,6 +16,8 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
+	callbackUrlForExchange,
+	codeChallenge,
 	type DelegatedAuthorizationRequest,
 	type DelegatedAuthorizationResult,
 	type DelegatedCodeExchangeRequest,
@@ -23,8 +25,10 @@ import {
 	type DelegatedTokens,
 	type EndSessionRequest,
 	type EndSessionResult,
+	type FederationClientSecret,
 	type FederationProfile,
 	type FederationProvider,
+	federationTokenSnapshot,
 	identityClaimsProblem,
 	isLoopbackHostname,
 	type MappedClaims,
@@ -36,11 +40,6 @@ import {
 	type SupportsRefresh,
 	selectIdentityClaims,
 } from "@o3co/auth-provider-core";
-import {
-	callbackUrlForExchange,
-	codeChallenge,
-	type FederationClientSecret,
-} from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 import { verifyAtHash } from "./at-hash.mjs";
 import { clientAuthFor, type OidcPrivateKey } from "./client-auth.mjs";
@@ -395,36 +394,6 @@ export async function createOidcProvider(
 		return nonce;
 	};
 
-	const snapshot = (
-		tokens: oidc.TokenEndpointResponse & oidc.TokenEndpointResponseHelpers,
-	): Pick<
-		FederationProfile,
-		"accessToken" | "refreshToken" | "idToken" | "expiresAt" | "expiresIn" | "scope" | "tokenType"
-	> => {
-		// `expiresIn()` counts down from when the response arrived; the login
-		// flow's expiry has always been derived from it, and stays so. The raw
-		// `expires_in` beside it is what a rule that judges the issued lifetime
-		// reads (#593, D5).
-		const expiresIn = tokens.expiresIn();
-		const issued = tokens.expires_in;
-		return {
-			accessToken: tokens.access_token,
-			refreshToken: optionalString(tokens.refresh_token),
-			idToken: optionalString(tokens.id_token),
-			expiresAt: typeof expiresIn === "number" ? new Date(Date.now() + expiresIn * 1000) : null,
-			expiresIn: typeof issued === "number" ? issued : null,
-			// Presence, not usefulness — `optionalString` would drop an explicit
-			// `scope: ""` and make it indistinguishable from a field that was never
-			// sent. The session route reads absence as "as requested" (RFC 6749
-			// §3.3) and would then record every requested scope as the consent for a
-			// response that granted none; the refresh route reads it as silence and
-			// would widen back to the grant. The delegated exchange has kept an empty
-			// scope for this reason since #593, and these two now agree with it.
-			...(typeof tokens.scope === "string" ? { scope: tokens.scope } : {}),
-			tokenType: tokens.token_type,
-		};
-	};
-
 	const delegatedAuthorizationUrl = (params: DelegatedAuthorizationRequest): URL => {
 		const nonce = requireNonce(params.nonce);
 		const scopes = params.scopes;
@@ -655,6 +624,10 @@ export async function createOidcProvider(
 				expectedNonce: nonce,
 				idTokenExpected: true,
 			});
+			// The token's lifetime is dated from when the library handed the answer
+			// over — after it verified the id_token — and not after UserInfo. The
+			// delegated paths date theirs at arrival, from the raw answer.
+			const obtainedAt = Date.now();
 			const claims = tokens.claims();
 			if (!claims) throw new Error(`${label}: the token response carried no id_token`);
 			const sub = claims.sub;
@@ -680,13 +653,17 @@ export async function createOidcProvider(
 				emailVerified: optionalBoolean(pick("email_verified")),
 				name: optionalString(pick("name")),
 				picture: optionalString(pick("picture")),
-				...snapshot(tokens),
+				// Core's one reading of the token response: the lifetime as sent
+				// or none, the scope as sent (an empty one kept, #647), the type.
+				...federationTokenSnapshot(tokens, obtainedAt),
 				...(groups ? { groups } : {}),
 			};
 		},
 
 		async refreshToken(refreshTokenValue: string): Promise<RefreshedTokens> {
-			return snapshot(await oidc.refreshTokenGrant(configuration, refreshTokenValue));
+			return federationTokenSnapshot(
+				await oidc.refreshTokenGrant(configuration, refreshTokenValue),
+			);
 		},
 
 		buildDelegatedAuthorizationUrl: delegatedAuthorizationUrl,

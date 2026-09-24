@@ -15,6 +15,7 @@
  */
 
 import type { Logger } from "../logging/Logger.mjs";
+import { loggableError } from "../logging/loggableError.mjs";
 import type { ReadinessRegistrar } from "../readiness/types.mjs";
 
 /**
@@ -80,7 +81,7 @@ export interface BuilderContext {
 	 * `logger` ComponentMap slot. Builders that attach an `error` listener to
 	 * a connection they open report through it:
 	 *
-	 *     client.on("error", (err) => ctx.logger?.error({ err }, "…_error"))
+	 *     client.on("error", (err) => ctx.logger?.error({ err: loggableError(err) }, "…_error"))
 	 *
 	 * Same channel as `lifecycle` and `readiness` on purpose: a builder that
 	 * opens a connection owns its cleanup, its probe, and its error listener,
@@ -125,7 +126,11 @@ export function createLifecycleRegistrar(): InternalLifecycleRegistrar {
 				try {
 					await cleanup();
 				} catch (err) {
-					logger.error({ msg: "lifecycle cleanup failed", cleanupIndex: i, error: err });
+					logger.error({
+						msg: "lifecycle cleanup failed",
+						cleanupIndex: i,
+						error: loggableError(err),
+					});
 					errors.push(err);
 				}
 			}

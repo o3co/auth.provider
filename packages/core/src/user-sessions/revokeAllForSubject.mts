@@ -23,6 +23,7 @@ import {
 import type { FederationGrantStore } from "../federation-grants/store.mjs";
 import type { FederationGrant } from "../federation-grants/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { loggableError } from "../logging/loggableError.mjs";
 import { cascadeSubjectSessions, type SubjectSessionCascade } from "./cascadeSubjectSessions.mjs";
 import type { SubjectRevocation, SubjectSessionIndex } from "./types.mjs";
 
@@ -223,7 +224,10 @@ export async function revokeAllForSubject(
 			// that could not be written does not make the subject's sessions any
 			// less worth killing, and returning here would revoke nothing at all.
 			failures.push({ capability: "subjectRevocation", operation: "revokeBefore", error });
-			opts.logger?.error({ err: error, subject: opts.subject }, "revoke_all_watermark_failed");
+			opts.logger?.error(
+				{ err: loggableError(error), subject: opts.subject },
+				"revoke_all_watermark_failed",
+			);
 		}
 	}
 
@@ -268,7 +272,10 @@ export async function revokeAllForSubject(
 			// reported: a listing outage that read as an empty subject would
 			// return a clean, complete result having revoked nothing.
 			failures.push({ capability: "federationGrantStore", operation: "listBySubject", error });
-			opts.logger?.error({ err: error, subject: opts.subject }, "revoke_all_list_grants_failed");
+			opts.logger?.error(
+				{ err: loggableError(error), subject: opts.subject },
+				"revoke_all_list_grants_failed",
+			);
 		}
 		for (const grant of grants) {
 			try {
@@ -289,7 +296,7 @@ export async function revokeAllForSubject(
 					error,
 				});
 				opts.logger?.error(
-					{ err: error, subject: opts.subject, grantId: grant.id },
+					{ err: loggableError(error), subject: opts.subject, grantId: grant.id },
 					"revoke_all_revoke_grant_failed",
 				);
 			}

@@ -196,8 +196,8 @@ runs on every token exchange.
 
 If you already produce the secret elsewhere, pass `clientSecret` instead —
 either a string or a resolver (`() => string | Promise<string>`), the
-`FederationClientSecret` form, which this adapter resolves with the session
-package's `resolveClientSecret` on every token request. Supply **one** of the two: both is ambiguous and neither is
+`FederationClientSecret` form, which this adapter resolves with core's
+`resolveClientSecret` on every token request. Supply **one** of the two: both is ambiguous and neither is
 unconfigured, and either fails at boot.
 
 ```ts
@@ -291,20 +291,22 @@ What `exchangeCode` returns:
 | `emailVerified` | normalised as above |
 | `name` | from the POST body's `user`, first authorization only |
 | `isPrivateEmail` | normalised as above; absent when neither the marker nor an address says |
-| `accessToken`, `idToken`, `refreshToken` | as Apple issued them; `refreshToken` only when Apple sent one |
+| `accessToken`, `idToken`, `refreshToken` | as Apple issued them; `idToken` and `refreshToken` only when non-empty strings |
 | `scope` | Apple's `scope` as sent; absent when Apple sent none (the session router then records the requested scope). A `scope` that is not a string is refused by `openid-client` before the adapter sees it, and the login answers `502 exchange_failed` |
-| `expiresAt` | now + `expires_in`; **3600 seconds is assumed when Apple sends no `expires_in`** |
-| `expiresIn`, `tokenType` | not returned — the session router records no token type, which `oauth` answers as `Bearer` |
+| `expiresAt` | when `openid-client` handed the answer over (after it verified the id_token, a JWKS fetch included) + `expiresIn`; **`null` when Apple sent no `expires_in`** (Apple documents it on every token response), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
+| `expiresIn` | `expires_in` as `openid-client` read it — it applies `parseFloat`, so `"1000seconds"` is 1000 — or `null` when Apple sent none |
+| `tokenType` | `token_type` as `openid-client` reports it (lower-cased `bearer`), recorded by the session router verbatim |
 
 `mapClaims` maps `email`, `emailVerified`, `name` and `isPrivateEmail`.
 
 ## Refresh and logout
 
 - **`refreshToken()`** (`SupportsRefresh`) runs the `refresh_token` grant with a
-  freshly resolved client secret and returns `accessToken`, `refreshToken` when
-  rotated, `idToken`, `scope` (same parsing rule as above; a non-string `scope` fails the refresh) and `expiresAt` (same
-  3600-second assumption). It returns no `issuer` or `sub` — the caller keeps the
-  stored identity — and no `expiresIn` or `tokenType`.
+  freshly resolved client secret and returns the token fields of the table
+  above by the same rules — `accessToken`, `refreshToken` when rotated,
+  `idToken`, `scope`, `expiresAt`, `expiresIn` and `tokenType` (a non-string
+  `scope` fails the refresh). It returns no `issuer` or `sub` — the caller
+  keeps the stored identity.
 - **`endSession()`** (`SupportsLogout`): Apple publishes no
   `end_session_endpoint`, and unlike Google there is no Apple logout URL to fall
   back to. With `endSessionEndpoint` configured, that URL with `id_token_hint`,
@@ -339,6 +341,7 @@ Defined in [`src/apple.mts`](src/apple.mts) and
 | [`apple.test.mts`](src/__tests__/apple.test.mts) | construction and its boot refusals, the return-URL rules, the authorization request, the exchange and the profile, refresh, `mapClaims`, `endSession` and `isPrivateRelayEmail` |
 | [`client-secret.test.mts`](src/__tests__/client-secret.test.mts) | the JWT Apple documents, and its caching and rotation |
 | [`apple.signature.test.mts`](src/__tests__/apple.signature.test.mts) | that the id_token's signature is verified against the JWKS |
+| [`apple.token-snapshot.test.mts`](src/__tests__/apple.token-snapshot.test.mts) | the lifetime, `expiresIn` and `tokenType` a login and a refresh report, with and without `expires_in`, and that a non-string `scope` is refused by the library |
 | [`apple.issuer-parameter.test.mts`](src/__tests__/apple.issuer-parameter.test.mts) | the RFC 9207 `iss` check |
 | [`claim-precedence.test.mts`](src/__tests__/claim-precedence.test.mts) | Apple's claims under the session package's precedence rules |
 | [`apple-module.test.mts`](src/__tests__/apple-module.test.mts), [`apple-module-boot.test.mts`](src/__tests__/apple-module-boot.test.mts) | the module's contributions and boot with the session module |

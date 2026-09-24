@@ -586,10 +586,10 @@ it, deliberately.
 
 A connection whose adapter names no type **at all** is answered `Bearer`: §5.1
 makes the field REQUIRED, so an absent field is an adapter that does not report
-it — every bundled adapter but `federation-oidc` — rather than an upstream
-meaning something else. In practice the refusal therefore binds only on
-`federation-oidc` connections; `federation-google`, `-github` and `-apple`
-forward no type, and all three issue bearer tokens.
+it — a third-party adapter written before the field, or a record linked before
+the bundled adapters reported one — rather than an upstream meaning something
+else. Every bundled adapter reports the type its upstream sent, through core's
+`federationTokenSnapshot`.
 
 Absence is the only reading treated that way. A stored value that is not a
 bearer spelling is refused whatever it is — `"DPoP "`, `""`, `null`, a number —
@@ -637,6 +637,8 @@ Both bundled stores meet these and are pinned on them.
 | 503 | `temporarily_unavailable` | Store outage, IdP 5xx, or upstream network failure (ECONNREFUSED / ENOTFOUND / ETIMEDOUT — including codes wrapped on `error.cause.code` of a fetch TypeError) |
 
 All error responses set `Cache-Control: no-store` and `Pragma: no-cache`. 401 responses include `WWW-Authenticate: Bearer error="invalid_token"` per RFC 6750.
+
+Every failure this route logs carries core's `loggableError(err)`, never the error — the `refreshToken failed (reason: …)` warning included. The adapter's library puts the refresh answer it refused, rotated refresh token included, on the error's cause chain, and a Redis store's error carries the refused command's arguments (the token record, under `allow-plaintext`); the projection drops those, keeps what tells the failures apart — the library's code, the HTTP status and content type, the upstream's OAuth `error`, and its `error_description` under the rule core states for it (the first line, cut at the start of the word holding a token-shaped run) — and removes the two known shapes in which a message quotes a peer (a JSON parser's input, Redis's echoed arguments). Other text a peer wrote into a message is kept; core's README says exactly what is. The rest of this package's logs follow the same rule.
 
 ### Opt-in: `allowedAzpForFederationToken`
 

@@ -65,6 +65,7 @@ import {
 	type ConsentStore,
 	emitAuditEvent,
 	type Logger,
+	loggableError,
 	type PendingConsentRecord,
 	type PendingConsentStore,
 	type UserSessionStore,
@@ -181,7 +182,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		try {
 			pending = await pendingConsentStore.get(challenge);
 		} catch (err) {
-			logger.error({ err }, "pending_consent_store_unavailable");
+			logger.error({ err: loggableError(err) }, "pending_consent_store_unavailable");
 			jsonError(res, 503, "temporarily_unavailable", "consent store unavailable");
 			return null;
 		}
@@ -221,7 +222,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		try {
 			return (await userSessionStore.get(sid)) != null;
 		} catch (err) {
-			logger.warn({ err, sid }, "consent_session_liveness_unavailable");
+			logger.warn({ err: loggableError(err), sid }, "consent_session_liveness_unavailable");
 			return false;
 		}
 	};
@@ -236,7 +237,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 			await pendingConsentStore.consume(challenge);
 			return true;
 		} catch (err) {
-			logger.error({ err }, "pending_consent_store_unavailable");
+			logger.error({ err: loggableError(err) }, "pending_consent_store_unavailable");
 			return false;
 		}
 	};
@@ -256,7 +257,10 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		try {
 			client = await clientRepository.findById(pending.clientId);
 		} catch (err) {
-			logger.error({ err, clientId: pending.clientId }, "consent_client_repository_unavailable");
+			logger.error(
+				{ err: loggableError(err), clientId: pending.clientId },
+				"consent_client_repository_unavailable",
+			);
 			jsonError(res, 503, "temporarily_unavailable", "client registry unavailable");
 			return null;
 		}
@@ -333,7 +337,10 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		try {
 			pending = await pendingConsentStore.consume(peeked.challenge);
 		} catch (err) {
-			logger.error({ err, clientId: peeked.clientId }, "pending_consent_store_unavailable");
+			logger.error(
+				{ err: loggableError(err), clientId: peeked.clientId },
+				"pending_consent_store_unavailable",
+			);
 			return jsonError(res, 503, "temporarily_unavailable", "consent store unavailable");
 		}
 		if (pending === null) {
@@ -370,7 +377,10 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 				expiresAt: undefined,
 			});
 		} catch (err) {
-			logger.error({ err, clientId: pending.clientId }, "consent_store_unavailable");
+			logger.error(
+				{ err: loggableError(err), clientId: pending.clientId },
+				"consent_store_unavailable",
+			);
 			return jsonError(res, 503, "temporarily_unavailable", "consent store unavailable");
 		}
 		await emitAuditEvent(auditSink, {

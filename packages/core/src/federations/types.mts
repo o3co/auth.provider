@@ -27,7 +27,11 @@
  *
  * What stays in `@o3co/auth-provider-session` is what only its router uses:
  * `FederationResult`, the redirect policy it feeds, and the routes
- * themselves.
+ * themselves. The pure helpers an adapter builds its requests with and reads
+ * its token response through — the PKCE challenge, the code-exchange URL,
+ * the client-secret resolver, `federationTokenSnapshot` — are beside this
+ * contract, in `pkce.mts`, `callback-url.mts`, `client-secret.mts` and
+ * `token-snapshot.mts`.
  */
 
 import type { FederationResponseMode } from "./response-mode.mjs";
@@ -67,12 +71,13 @@ export interface FederationProfile {
 	 */
 	readonly expiresAt: Date | null;
 	/**
-	 * `expires_in` exactly as the token response carried it, in seconds; `null`
-	 * when it carried none. `expiresAt` above is derived from it on the
-	 * adapter's clock, and one step of that clock is enough to turn 3600 into
-	 * 3601 — so a rule that judges the lifetime a token was ISSUED with reads
-	 * this, not the difference of two dates (#593, D5). Optional: adapters
-	 * written before it may omit it.
+	 * `expires_in` from the token response, in seconds, as the adapter's
+	 * library read it (openid-client applies `parseFloat` to one that is not a
+	 * number); `null` when it carried none. `expiresAt` above is derived from
+	 * it on the adapter's clock, and one step of that clock is enough to turn
+	 * 3600 into 3601 — so a rule that judges the lifetime a token was ISSUED
+	 * with reads this, not the difference of two dates (#593, D5). Optional:
+	 * adapters written before it may omit it.
 	 */
 	readonly expiresIn?: number | null;
 	/** `scope` as the token response carried it, space-delimited (RFC 6749 §5.1). Absent when it carried none. */
@@ -131,7 +136,7 @@ export interface FederationProvider {
 	 *
 	 * `codeVerifier` MUST be a cryptographically strong URL-safe random string; the route
 	 * layer generates and stores it in the session before calling. Adapters compute
-	 * `code_challenge` via the shared `pkce` helper (`codeChallenge(codeVerifier)`); do
+	 * `code_challenge` with this package's `codeChallenge(codeVerifier)` (`pkce.mts`); do
 	 * not accept a pre-computed challenge to avoid mismatches between transform methods.
 	 *
 	 * `nonce` is optional — OIDC providers MUST forward it as the upstream `nonce`
@@ -182,9 +187,9 @@ export interface FederationProvider {
 		 *
 		 * Protocol response parameters travel here as well. An adapter forwards
 		 * `iss` (RFC 9207) from this bag to its library's issuer check — through
-		 * `callbackUrlForExchange`, so that the rule lives in one place (#595,
-		 * #597) — and narrowing the bag to identity data would silently switch
-		 * that check off.
+		 * this package's `callbackUrlForExchange` (`callback-url.mts`), so that
+		 * the rule lives in one place (#595, #597) — and narrowing the bag to
+		 * identity data would silently switch that check off.
 		 *
 		 * **These values are relayed through the user agent and are not signed.**
 		 * The `state` check binds them to this session, which is all it binds:

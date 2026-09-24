@@ -24,6 +24,7 @@ import {
 	type FederationProvider,
 	type FederationTokenStore,
 	type Logger,
+	loggableError,
 	resolveFederationResponseMode,
 	type SessionFederationIndex,
 	type SubjectSessionIndex,
@@ -386,7 +387,7 @@ export const createRouter = (
 		try {
 			current = await userSessionStore.get(currentSid);
 		} catch (err) {
-			log.warn({ err }, "federation link: user session lookup failed");
+			log.warn({ err: loggableError(err) }, "federation link: user session lookup failed");
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "Session store unavailable",
@@ -435,7 +436,7 @@ export const createRouter = (
 					claims: { ...(mapped as Record<string, unknown>) },
 				});
 			} catch (err) {
-				log.warn({ err }, "federation link: user repository failed");
+				log.warn({ err: loggableError(err) }, "federation link: user repository failed");
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "User directory temporarily unavailable",
@@ -489,16 +490,19 @@ export const createRouter = (
 					// rather than judged here: a login does not need the access token,
 					// so a type this provider cannot hand on must not cost the user
 					// their sign-in. The route that discloses it is where that is
-					// decided. `undefined` only when the adapter named nothing at all,
-					// which is every bundled adapter but `federation-oidc` — and
-					// written as a key either way, because `FederationTokens`
+					// decided. `undefined` only when the adapter named nothing at all
+					// — an adapter written before the field; every bundled one names
+					// it — and written as a key either way, because `FederationTokens`
 					// requires it: a store copying the record field by field cannot
 					// forget a field the type makes it name.
 					tokenType,
 				});
 			}
 		} catch (err) {
-			log.warn({ err }, "federation link: attaching to the live session failed");
+			log.warn(
+				{ err: loggableError(err) },
+				"federation link: attaching to the live session failed",
+			);
 			// Best-effort rollback, as the login path does. The transaction is
 			// consumed and the Store's link stands — the identity is the
 			// account's, and the next login through this federation lands on it —
@@ -605,7 +609,7 @@ export const createRouter = (
 			try {
 				fed = (await transactions.get(transactionId)) ?? undefined;
 			} catch (err) {
-				log.warn({ err }, "federation transaction lookup failed");
+				log.warn({ err: loggableError(err) }, "federation transaction lookup failed");
 				await consumeTransaction();
 				return res.status(500).json({
 					error: "server_error",
@@ -733,7 +737,7 @@ export const createRouter = (
 		if (responseMode === "form_post") {
 			const consumeErr = await consumeTransaction();
 			if (consumeErr) {
-				log.warn({ err: consumeErr }, "federation transaction delete failed");
+				log.warn({ err: loggableError(consumeErr) }, "federation transaction delete failed");
 				return res.status(500).json({
 					error: "server_error",
 					error_description: "Session store unavailable",
@@ -745,7 +749,7 @@ export const createRouter = (
 				req.session.save((err) => resolve(err ?? null));
 			});
 			if (reusePrevSaveErr) {
-				log.warn({ err: reusePrevSaveErr }, "reuse-prevention session save failed");
+				log.warn({ err: loggableError(reusePrevSaveErr) }, "reuse-prevention session save failed");
 				return res.status(500).json({
 					error: "server_error",
 					error_description: "Session store unavailable",
@@ -800,7 +804,10 @@ export const createRouter = (
 				callbackParams: adapterCallbackParams,
 			});
 		} catch (err) {
-			log.warn({ err }, "federation token exchange failed");
+			// The adapter's library puts the token response it refused on the
+			// error's cause chain — the access and refresh tokens included — so
+			// the log gets the projection, never the error.
+			log.warn({ err: loggableError(err) }, "federation token exchange failed");
 			return res.status(502).json({
 				error: "exchange_failed",
 				error_description: "Token exchange with upstream IdP failed",
@@ -819,7 +826,7 @@ export const createRouter = (
 		try {
 			user = await userRepository.authenticateByToken(identityToken);
 		} catch (err) {
-			log.warn({ err }, "user repository lookup failed");
+			log.warn({ err: loggableError(err) }, "user repository lookup failed");
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "User directory temporarily unavailable",
@@ -874,7 +881,7 @@ export const createRouter = (
 				amr: federatedAmr(profile),
 			});
 		} catch (err) {
-			log.warn({ err }, "userSession create failed");
+			log.warn({ err: loggableError(err) }, "userSession create failed");
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "Session store unavailable",
@@ -896,7 +903,7 @@ export const createRouter = (
 			try {
 				await subjectSessionIndex.addSid(user.id, sid, expiresAt);
 			} catch (err) {
-				log.error({ err, sub: user.id }, "subject_session_index_write_failed");
+				log.error({ err: loggableError(err), sub: user.id }, "subject_session_index_write_failed");
 			}
 		}
 
@@ -932,7 +939,7 @@ export const createRouter = (
 			}
 			// #296: the session is gone, so its subject-index entry must go too.
 			await rollbackSubjectIndex();
-			log.warn({ err }, "sessionFederationIndex.addFederation failed");
+			log.warn({ err: loggableError(err) }, "sessionFederationIndex.addFederation failed");
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "Session store unavailable",
@@ -972,7 +979,7 @@ export const createRouter = (
 			// #296: the session is gone, so its subject-index entry must go too.
 			await rollbackSubjectIndex();
 			log.error(
-				{ err: regenerateErr },
+				{ err: loggableError(regenerateErr) },
 				"session regeneration failed after userSessionStore.create",
 			);
 			return res.status(500).json({
@@ -1063,7 +1070,7 @@ export const createRouter = (
 			await new Promise<void>((resolve) => {
 				req.session.destroy(() => resolve());
 			});
-			log.error({ err }, "session post-create failed");
+			log.error({ err: loggableError(err) }, "session post-create failed");
 			return res.status(500).json({
 				error: "session_create_failed",
 				error_description: "Internal error: session could not be persisted",
@@ -1310,7 +1317,10 @@ export const createRouter = (
 				try {
 					await transactions.set(transactionId, envelope, federationTransactionTtlMs);
 				} catch (err) {
-					logger.warn({ err, provider: provider.name }, "federation transaction save failed");
+					logger.warn(
+						{ err: loggableError(err), provider: provider.name },
+						"federation transaction save failed",
+					);
 					return res.status(500).json({
 						error: "server_error",
 						error_description: "Session store unavailable",
@@ -1336,7 +1346,7 @@ export const createRouter = (
 				});
 				if (startSaveErr) {
 					logger.warn(
-						{ err: startSaveErr, provider: provider.name },
+						{ err: loggableError(startSaveErr), provider: provider.name },
 						"federation start session save failed",
 					);
 					return res.status(500).json({

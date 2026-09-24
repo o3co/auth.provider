@@ -14,14 +14,16 @@
  * limitations under the License.
  */
 
-import { createHash, randomBytes } from "node:crypto";
+/*
+ * The PKCE code verifier the federation start route mints and stores for a
+ * transaction (RFC 7636 §4.1). The challenge an adapter derives from it is
+ * core's `codeChallenge`, because computing it is the adapter's job and not
+ * this router's.
+ */
+
+import { randomBytes } from "node:crypto";
 
 /** RFC 7636 §4.1: high-entropy URL-safe random string, 43 chars from 32 bytes base64url. */
 export function generateCodeVerifier(): string {
 	return randomBytes(32).toString("base64url");
-}
-
-/** RFC 7636 §4.2: S256 transform — BASE64URL(SHA256(verifier)). */
-export function codeChallenge(verifier: string): string {
-	return createHash("sha256").update(verifier).digest("base64url");
 }

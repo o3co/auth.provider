@@ -28,7 +28,7 @@ import type {
 	SessionRPRegistry,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { emitAuditEvent, supportsLogout, verifyJwt } from "@o3co/auth-provider-core";
+import { emitAuditEvent, loggableError, supportsLogout, verifyJwt } from "@o3co/auth-provider-core";
 import accepts from "accepts";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
@@ -112,14 +112,14 @@ async function endBrowserSession(req: Request, sid: string, logger: EventLogger)
 		try {
 			destroy.call(session, (err?: unknown) => {
 				if (err) {
-					logger.warn({ err, sid }, "logout_browser_session_destroy_failed");
+					logger.warn({ err: loggableError(err), sid }, "logout_browser_session_destroy_failed");
 				}
 				resolve();
 			});
 		} catch (err) {
 			// A store adapter that throws synchronously never reaches its own
 			// callback, so resolve here or the request would hang.
-			logger.warn({ err, sid }, "logout_browser_session_destroy_failed");
+			logger.warn({ err: loggableError(err), sid }, "logout_browser_session_destroy_failed");
 			resolve();
 		}
 	});
@@ -308,10 +308,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			} catch (error) {
 				// Log the reason at warn level — keep minimal (don't log the token itself,
 				// since this path can be attacker-driven).
-				logger.warn(
-					`/oauth/federation/${name}/logout: jwtVerify failed:`,
-					error instanceof Error ? error.message : String(error),
-				);
+				logger.warn(`/oauth/federation/${name}/logout: jwtVerify failed:`, loggableError(error));
 				res.setHeader(
 					"WWW-Authenticate",
 					'Bearer error="invalid_token", error_description="invalid token"',
@@ -335,7 +332,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				} catch (error) {
 					logger.warn(
 						`/oauth/federation/${name}/logout: isFamilyRevoked failed (refresh store outage):`,
-						error,
+						loggableError(error),
 					);
 					return res.status(401).json({
 						error: "invalid_token",
@@ -379,7 +376,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			try {
 				session = await opts.userSessionStore.get(sid);
 			} catch (error) {
-				logger.warn(`/oauth/federation/${name}/logout: userSessionStore.get failed:`, error);
+				logger.warn(
+					`/oauth/federation/${name}/logout: userSessionStore.get failed:`,
+					loggableError(error),
+				);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "session store unavailable",
@@ -404,7 +404,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			} catch (error) {
 				logger.warn(
 					`/oauth/federation/${name}/logout: sessionFederationIndex.listFederations failed:`,
-					error,
+					loggableError(error),
 				);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
@@ -424,7 +424,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			try {
 				fedTokens = await opts.federationTokenStore.get(sid, name);
 			} catch (error) {
-				logger.warn(`/oauth/federation/${name}/logout: federationTokenStore.get failed:`, error);
+				logger.warn(
+					`/oauth/federation/${name}/logout: federationTokenStore.get failed:`,
+					loggableError(error),
+				);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "federation token store unavailable",
@@ -435,7 +438,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			try {
 				await opts.federationTokenStore.delete(sid, name);
 			} catch (error) {
-				logger.warn(`/oauth/federation/${name}/logout: federationTokenStore.delete failed:`, error);
+				logger.warn(
+					`/oauth/federation/${name}/logout: federationTokenStore.delete failed:`,
+					loggableError(error),
+				);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "federation token store unavailable",
@@ -448,7 +454,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			} catch (error) {
 				logger.warn(
 					`/oauth/federation/${name}/logout: sessionFederationIndex.removeFederation failed:`,
-					error,
+					loggableError(error),
 				);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
@@ -488,7 +494,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					// Log at warn — "orphan IdP session" case, critical for operators.
 					logger.warn(
 						`/oauth/federation/${name}/logout: provider.endSession failed (orphan IdP session):`,
-						error,
+						loggableError(error),
 					);
 					emitAuditEvent(opts.auditSink, {
 						timestamp: new Date(),
@@ -622,7 +628,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			session = await opts.userSessionStore.get(sid);
 		} catch (err) {
 			const logger = opts.logger ?? console;
-			logger.warn(`${req.method} /oauth/logout: userSessionStore.get failed`, err);
+			logger.warn(`${req.method} /oauth/logout: userSessionStore.get failed`, loggableError(err));
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "session store unavailable",
@@ -650,7 +656,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			]);
 		} catch (err) {
 			const logger = opts.logger ?? console;
-			logger.warn(`${req.method} /oauth/logout: reverse-index read failed`, err);
+			logger.warn(`${req.method} /oauth/logout: reverse-index read failed`, loggableError(err));
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "session store unavailable",
@@ -698,7 +704,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					const logger = opts.logger ?? console;
 					logger.warn(
 						`${req.method} /oauth/logout: federation ${firstFederation} endSession failed`,
-						err,
+						loggableError(err),
 					);
 				}
 			}

@@ -51,6 +51,7 @@ import { errorEnvelope } from "../errors/envelope.mjs";
 import { BINDING_PROFILES, matchConfirmation } from "../grants/confirmationMatch.mjs";
 import type { TokenBinding } from "../grants/tokenBinding.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { loggableError } from "../logging/loggableError.mjs";
 import type { TokenBindingMechanism } from "./tokenBinding.mjs";
 
 import "./express.mjs"; // ensure ambient Express.Request augmentation is loaded
@@ -168,14 +169,14 @@ export const protectedResourceBindingMw = ({
 					// token endpoint. RFC 6750 §3.1's codes describe request and
 					// token faults; a server that cannot answer says 503.
 					logger?.warn(
-						{ mechanism: mechanism.kind, code, err },
+						{ mechanism: mechanism.kind, code, err: loggableError(err) },
 						"protected_resource_binding_unavailable",
 					);
 					res.status(503).json(errorEnvelope(code, unavailable));
 					return;
 				}
 				logger?.warn(
-					{ mechanism: mechanism.kind, err },
+					{ mechanism: mechanism.kind, err: loggableError(err) },
 					"protected_resource_binding_proof_invalid",
 				);
 				const retryInstruction = retryInstructionOf(err);

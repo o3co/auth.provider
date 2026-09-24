@@ -15,25 +15,24 @@
  */
 
 import {
+	callbackUrlForExchange,
+	codeChallenge,
 	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
+	type FederationClientSecret,
 	type FederationProfile,
 	type FederationProvider,
+	federationTokenSnapshot,
 	isLoopbackHostname,
 	type MappedClaims,
 	type RefreshedTokens,
+	resolveClientSecret,
 	type SupportsClaimMapping,
 	type SupportsLogout,
 	type SupportsRefresh,
 } from "@o3co/auth-provider-core";
-import {
-	callbackUrlForExchange,
-	codeChallenge,
-	createFederationRedirectPolicy,
-	type FederationClientSecret,
-	resolveClientSecret,
-} from "@o3co/auth-provider-session";
+import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 import { createAppleClientSecret } from "./client-secret.mjs";
 
@@ -416,6 +415,9 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 				expectedState: oidc.skipStateCheck,
 				expectedNonce: nonce,
 			});
+			// The token's lifetime is dated from when the library handed the answer
+			// over, after it verified the id_token.
+			const obtainedAt = Date.now();
 
 			// Apple publishes no userinfo endpoint: the verified id_token is the
 			// only source of identity, so there is no UserInfo/id_token binding to
@@ -433,8 +435,6 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 				normalizeBooleanClaim(claims?.is_private_email) ??
 				(email !== undefined ? isPrivateRelayEmail(email) : undefined);
 
-			const expiresIn = typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
-
 			const profile: FederationProfile = {
 				issuer: APPLE_ISSUER,
 				sub,
@@ -443,22 +443,10 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 				// The name exists in the first authorization's POST body and nowhere
 				// else — never in the id_token, and never again on a later login.
 				name: parseUserName(params.callbackParams?.user),
-				accessToken: tokens.access_token,
-				refreshToken: typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
-				idToken: typeof tokens.id_token === "string" ? tokens.id_token : undefined,
-				// RFC 6749 §5.1: the upstream states its scope whenever it differs
-				// from the request, so what it says here is what it granted. Dropping
-				// it left the route to infer consent from the request instead (#647).
-				// `undefined` only when the field is absent: an answer that names
-				// nothing usable is still an answer, and flattening it into silence
-				// would have the route fall back to the requested list (#647).
-				scope:
-					tokens.scope === undefined
-						? undefined
-						: typeof tokens.scope === "string"
-							? tokens.scope
-							: "",
-				expiresAt: new Date(Date.now() + expiresIn * 1000),
+				// The tokens as Apple stated them: the lifetime as sent or none,
+				// the scope as sent (what it granted, RFC 6749 §5.1, #647), and the
+				// token type — core's one reading for every adapter.
+				...federationTokenSnapshot(tokens, obtainedAt),
 			};
 
 			if (isPrivateEmail !== undefined) {
@@ -469,27 +457,10 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 		},
 
 		async refreshToken(refreshTokenValue: string): Promise<RefreshedTokens> {
-			const tokens = await oidc.refreshTokenGrant(await tokenConfiguration(), refreshTokenValue);
-			const expiresIn = typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
-			return {
-				accessToken: tokens.access_token,
-				refreshToken: typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
-				idToken: typeof tokens.id_token === "string" ? tokens.id_token : undefined,
-				// RFC 6749 §5.1: the upstream states its scope whenever it differs
-				// from the request, so what it says here is what it granted. Dropping
-				// it left the route to infer consent from the request instead (#647).
-				// `undefined` only when the field is absent: an answer that names
-				// nothing usable is still an answer, and flattening it into silence
-				// would have the route fall back to the requested list (#647).
-				scope:
-					tokens.scope === undefined
-						? undefined
-						: typeof tokens.scope === "string"
-							? tokens.scope
-							: "",
-				expiresAt: new Date(Date.now() + expiresIn * 1000),
-				// sub / issuer intentionally absent — callers reuse stored identity.
-			};
+			// sub / issuer intentionally absent — callers reuse stored identity.
+			return federationTokenSnapshot(
+				await oidc.refreshTokenGrant(await tokenConfiguration(), refreshTokenValue),
+			);
 		},
 
 		async endSession(req: EndSessionRequest): Promise<EndSessionResult> {

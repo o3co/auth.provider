@@ -17,12 +17,11 @@
 /**
  * A fake GitHub behind a `fetch` implementation.
  *
- * The adapter configures openid-client with no `customFetch`, so every request
- * the library makes — the token exchange, `/user`, `/user/emails` — goes
- * through the global `fetch`. A test installs `github.fetch` there
- * (`vi.stubGlobal("fetch", github.fetch)`) and the real library runs against
- * it: nothing touches the network, and every request is recorded for the test
- * to inspect.
+ * A test hands `github.fetch` to the adapter as `config.fetch`, which the
+ * adapter sets as openid-client's `customFetch`, so every request the library
+ * makes — the token exchange, `/user`, `/user/emails` — reaches it and the real
+ * library runs against it: nothing touches the network, and every request is
+ * recorded for the test to inspect.
  *
  * The bodies are GitHub's, not an OpenID Provider's: the token response is
  * `token_type: "bearer"` with a comma-delimited `scope` and no id_token, and

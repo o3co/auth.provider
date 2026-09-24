@@ -20,15 +20,16 @@ import type {
 	FederationProfile,
 	FederationProvider,
 	FederationTokenStore,
+	Logger,
 	SessionFederationIndex,
 	SubjectSessionIndex,
 	UserRepository,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { codeChallenge } from "@o3co/auth-provider-core";
 import express, { type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { codeChallenge } from "#/federations/pkce.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 
 // ---------------------------------------------------------------------------
@@ -320,6 +321,7 @@ function buildCallbackApp({
 	sessionSeed,
 	auditSink,
 	config,
+	logger,
 }: {
 	providers: ReadonlyMap<string, FederationProvider>;
 	providerCallbackUrls?: ReadonlyMap<string, string>;
@@ -337,6 +339,7 @@ function buildCallbackApp({
 	auditSink?: AuditSink;
 	/** A partial `AppConfig`; absent is `{}`, as most tests need none. */
 	config?: Record<string, unknown>;
+	logger?: Logger;
 }): { app: express.Express; store: SessionStore } {
 	const store: SessionStore = new Map();
 	const app = makeSessionApp(store);
@@ -362,6 +365,7 @@ function buildCallbackApp({
 			...(subjectSessionIndex ? { subjectSessionIndex } : {}),
 			federationTokenStore: federationTokenStore ?? makeFederationTokenStore(),
 			...(auditSink ? { auditSink } : {}),
+			...(logger ? { logger } : {}),
 		}),
 	);
 
@@ -376,6 +380,68 @@ function buildCallbackApp({
 }
 
 /** Plant the session and return the agent with the sid cookie set. */
+/**
+ * A logger that serialises every own property of what it is handed, `cause`
+ * and non-enumerable fields included — a deployment is free to install one.
+ * What it recorded is `lines`.
+ */
+function serialiseEverythingLogger(): { logger: Logger; lines: string[] } {
+	const lines: string[] = [];
+	const walk = (value: unknown, seen = new WeakSet<object>()): unknown => {
+		if (typeof value !== "object" || value === null) return value;
+		if (seen.has(value)) return "[circular]";
+		seen.add(value);
+		const out: Record<string, unknown> = {};
+		for (const key of Object.getOwnPropertyNames(value)) {
+			out[key] = walk((value as Record<string, unknown>)[key], seen);
+		}
+		return out;
+	};
+	const record =
+		(level: string) =>
+		(...args: unknown[]): void => {
+			lines.push(JSON.stringify({ level, args: walk(args) }));
+		};
+	const logger: Logger = {
+		trace: record("trace"),
+		debug: record("debug"),
+		info: record("info"),
+		warn: record("warn"),
+		error: record("error"),
+		fatal: record("fatal"),
+		child: () => logger,
+	};
+	return { logger, lines };
+}
+
+/**
+ * What ioredis rejects a store write with: a ReplyError carrying the command
+ * it refused as `command: { name, args }`. Under `encryption.mode =
+ * "allow-plaintext"` a SET's arguments are the token record itself.
+ */
+const storeWriteError = (): Error =>
+	Object.assign(new Error("OOM command not allowed when used memory > 'maxmemory'."), {
+		name: "ReplyError",
+		command: {
+			name: "set",
+			args: [
+				"federation-token:s-1:test",
+				JSON.stringify({
+					accessToken: "at-must-never-reach-a-log",
+					refreshToken: "rt-must-never-reach-a-log",
+				}),
+			],
+		},
+	});
+
+const expectNoTokenIn = (lines: readonly string[]): void => {
+	expect(lines.length).toBeGreaterThan(0);
+	for (const line of lines) {
+		expect(line).not.toContain("at-must-never-reach-a-log");
+		expect(line).not.toContain("rt-must-never-reach-a-log");
+	}
+};
+
 async function plantAndGetAgent(app: express.Express): Promise<ReturnType<typeof request.agent>> {
 	const agent = request.agent(app);
 	// Use the /_plant route to set the cookie
@@ -711,7 +777,7 @@ describe("account linking across federations (#482)", () => {
 			// Absent is the ONLY reading the disclosure point takes as Bearer:
 			// RFC 6749 §5.1 makes `token_type` REQUIRED, so silence is an adapter
 			// written before the field rather than an upstream meaning something
-			// else. Every bundled adapter but `federation-oidc` is one of those.
+			// else. Every bundled adapter names one; a third-party adapter may not.
 			const untyped = makeFakeProvider({
 				exchangeCode: vi.fn(async () => ({
 					issuer: "https://idp.example.com",
@@ -841,6 +907,28 @@ describe("account linking across federations (#482)", () => {
 			expect(res.status).toBe(503);
 			expect(sfi.removeFederation).toHaveBeenCalledWith("s-1", "test");
 			expect(fts.delete).toHaveBeenCalledWith("s-1", "test");
+		});
+
+		it("logs a failed attach without the store's command, which carries the token record", async () => {
+			const repo = linkableRepo({ current: null });
+			const fts = makeFederationTokenStore();
+			fts.attach.mockRejectedValueOnce(storeWriteError());
+			const { logger, lines } = serialiseEverythingLogger();
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: liveStore(),
+				federationTokenStore: fts,
+				logger,
+			});
+			const agent = await plantAndGetAgent(app);
+			const res = await callback(agent);
+			expect(res.status).toBe(503);
+			const failure = lines.find((line) => line.includes("attaching to the live session failed"));
+			expect(failure).toContain("ReplyError");
+			expectNoTokenIn(lines);
 		});
 
 		it("leaves a federation the session already carried in place when a re-link fails to attach", async () => {
@@ -2101,6 +2189,24 @@ describe("Federation routes", () => {
 				const deleteSessionOrder = (uss.delete as ReturnType<typeof vi.fn>).mock
 					.invocationCallOrder[0];
 				expect(removeFedOrder).toBeLessThan(deleteSessionOrder);
+			});
+
+			it("logs a failed token attach after the session was created without the store's command", async () => {
+				const fts = makeFederationTokenStore();
+				fts.attach.mockRejectedValueOnce(storeWriteError());
+				const { logger, lines } = serialiseEverythingLogger();
+				const { app } = buildCallbackApp({
+					providers: new Map([["test", makeFakeProvider()]]),
+					federation: { name: "test", state: "s1", codeVerifier: "v1" },
+					federationTokenStore: fts,
+					logger,
+				});
+				const agent = await plantAndGetAgent(app);
+				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+				expect(res.status).toBe(500);
+				const failure = lines.find((line) => line.includes("session post-create failed"));
+				expect(failure).toContain("ReplyError");
+				expectNoTokenIn(lines);
 			});
 
 			// A4-4: post-regenerate failure unwinds federation index before session (REVERSE order)

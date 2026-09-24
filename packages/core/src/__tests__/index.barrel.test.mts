@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import * as core from "../index.mjs";
+import * as core from "#/index.mjs";
 
 describe("core barrel — Wave 1 AccessTokenDenylist exports", () => {
 	it("re-exports createMemoryAccessTokenDenylist", () => {
@@ -126,5 +126,16 @@ describe("core barrel — #593 federation grant domain rules", () => {
 		for (const name of generic) {
 			expect((core as Record<string, unknown>)[name], name).toBeUndefined();
 		}
+	});
+});
+
+describe("core barrel — the federation adapter toolkit", () => {
+	it("re-exports the pure helpers every adapter builds its requests with", () => {
+		// They were `@o3co/auth-provider-session`'s, which is a router; an
+		// adapter needs none of it, and core's contract already told adapters
+		// to use two of them.
+		expect(typeof core.codeChallenge).toBe("function");
+		expect(typeof core.callbackUrlForExchange).toBe("function");
+		expect(typeof core.resolveClientSecret).toBe("function");
 	});
 });

@@ -446,6 +446,7 @@ all — no headers, no `Vary`, nothing changed.
 | `FEDERATIONS_GOOGLE_CLIENT_ID` | — | Google OAuth client ID |
 | `FEDERATIONS_GOOGLE_CLIENT_SECRET` | — | Google OAuth client secret |
 | `FEDERATIONS_GOOGLE_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/google/callback` | Google OAuth callback URL |
+| `FEDERATIONS_GOOGLE_ACCESS_TYPE` | unset (`offline`) | `offline`: every sign-in shows Google's consent screen and every session gets a refresh token. `online`: consent on the first sign-in only, and no refresh token at all. See [federation-google](../../packages/federation-google/README.md#refresh-tokens-and-the-consent-screen) |
 
 ### OIDC Federation (any OpenID Connect provider)
 

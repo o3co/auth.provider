@@ -338,7 +338,9 @@ describe("createRateLimitGuard — limiter outage (OR-5 failMode policy)", () =>
 		expect(events.map((e) => e.type)).toContain("rate_limit.unavailable");
 	});
 
-	it("stringifies a non-Error throw into the log and audit payloads", async () => {
+	it("reports a non-Error throw by kind in the log and audit payloads, never by content", async () => {
+		// What a limiter throws is a store's to write, and a thrown value that
+		// is not an Error is not read: `loggableError` names it `NonError`.
 		const logger = makeLogger();
 		const { sink, events } = spyAuditSink();
 		const limiter: RateLimiter = {
@@ -354,10 +356,10 @@ describe("createRateLimitGuard — limiter outage (OR-5 failMode policy)", () =>
 		);
 		await settleAudit();
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ error: "socket hangup" }),
+			expect.objectContaining({ error: "NonError" }),
 			"rate_limiter_failed_open",
 		);
-		expect(events[0]?.details).toEqual({ tag: "token", error: "socket hangup" });
+		expect(events[0]?.details).toEqual({ tag: "token", error: "NonError" });
 	});
 
 	it("survives an outage with no audit sink wired", async () => {

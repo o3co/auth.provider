@@ -36,7 +36,8 @@ installs only the IdPs it uses, and `openid-client` only with an adapter.
 The Google, GitHub and Apple packages implement the same contract for one IdP
 each, for what a generic OpenID Connect client cannot express: GitHub is not
 OpenID Connect, Apple's scopes, client secret and callback are not standard, and
-Google's adapter sends `access_type=offline` and carries the `hd` claim — each
+Google's adapter sends `access_type=offline` with `prompt=consent` by default
+(neither under `accessType: "online"`) and carries the `hd` claim — each
 package's README says which. This package has no setting for a login-time
 authorization parameter or an extension claim.
 
@@ -210,9 +211,12 @@ What `exchangeCode` returns:
 | `accessToken` | as the issuer sent it |
 | `idToken`, `refreshToken` | as the issuer sent them, when non-empty strings |
 | `scope` | the token response's `scope`, an empty one included; absent when the response carried none (the session router then records the requested scope). A `scope` that is not a string is refused by `openid-client` before the adapter sees it, and the login answers `502 exchange_failed` |
-| `expiresAt` | now + `expires_in`; **`null` when the response carried no `expires_in`**, which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
-| `expiresIn` | the `expires_in` the response carried, `null` when none |
+| `expiresAt` | when `openid-client` handed the answer over (after it verified the id_token, a JWKS fetch included) + `expiresIn`; **`null` when the response carried no `expires_in`**, which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
+| `expiresIn` | `expires_in` as `openid-client` read it — it applies `parseFloat`, so `"1000seconds"` is 1000 — or `null` when none. The delegated capability below reads the raw answer instead and refuses such a lifetime: a grant's eligibility judges the lifetime a token was issued with, where a login's expiry only says when a refresh is due |
 | `tokenType` | `token_type` as `openid-client` reports it (lower-cased), recorded by the session router verbatim |
+
+The token fields are core's `federationTokenSnapshot`, the one reading every
+bundled adapter gives a token response.
 
 ### Optional capabilities
 
@@ -286,10 +290,16 @@ linked:
 
 ## Tests
 
+The tests run the real `openid-client` against core's shared fake OpenID
+Provider (`createFakeIdp` from `@o3co/auth-provider-core/testing`), set up in
+[`helpers.mts`](src/__tests__/helpers.mts) as an issuer that is discovered:
+it serves the discovery document, signs real RS256 id_tokens under a key it
+publishes, and records every request.
+
 | Test file | Pins |
 | --- | --- |
 | [`oidc.test.mts`](src/__tests__/oidc.test.mts) | discovery and its refusals, client authentication, the login steps above, the profile, refresh, logout and `mapClaims` |
 | [`at-hash.test.mts`](src/__tests__/at-hash.test.mts) | the `at_hash` check |
 | [`delegated.test.mts`](src/__tests__/delegated.test.mts) | `SupportsDelegatedAuthorization` |
 | [`oidc-module.test.mts`](src/__tests__/oidc-module.test.mts), [`oidc-module-boot.test.mts`](src/__tests__/oidc-module-boot.test.mts) | reading `type = "oidc"` sections, the module per instance, and boot |
-| [`session-routes.e2e.test.mts`](src/__tests__/session-routes.e2e.test.mts) | a login through the session routes, end to end |
+| [`session-routes.e2e.test.mts`](src/__tests__/session-routes.e2e.test.mts) | a login through the session routes, end to end, and that a failed exchange is logged without the token response the library carries on the error |

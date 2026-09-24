@@ -35,6 +35,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/logout.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { expectProjectedWarn, storeReplyError } from "./_helpers/projectedLog.mjs";
 
 /**
  * A federation that satisfies the contract, with whatever capability the case
@@ -1439,6 +1440,100 @@ describe("POST /oauth/federation/:name/logout", () => {
 			expect(res.status).toBe(503);
 			expect(res.headers["cache-control"]).toBe("no-store");
 			expect(res.headers.pragma).toBe("no-cache");
+		});
+	});
+
+	describe("every store failure it logs reaches the logger as a projection, never as the error", () => {
+		it("the family revocation check", async () => {
+			const logger = createMockLogger();
+			const refreshFamilyRevocation = makeFamilyRevocation({
+				isFamilyRevoked: vi.fn().mockRejectedValue(storeReplyError()),
+			});
+			const res = await postFedLogout(
+				buildFedLogoutApp({ refreshFamilyRevocation, logger }),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(401);
+			expect(res.body.error_description).toBe("revocation check unavailable");
+			expectProjectedWarn(logger, /isFamilyRevoked failed/);
+		});
+
+		it("the session read", async () => {
+			const logger = createMockLogger();
+			const res = await postFedLogout(
+				buildFedLogoutApp({
+					sessionStore: makeSessionStore({ get: vi.fn().mockRejectedValue(storeReplyError()) }),
+					logger,
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expectProjectedWarn(logger, /userSessionStore\.get failed/);
+		});
+
+		it("the federation index read", async () => {
+			const logger = createMockLogger();
+			const res = await postFedLogout(
+				buildFedLogoutApp({
+					sessionFederationIndex: makeSessionFederationIndex({
+						listFederations: vi.fn().mockRejectedValue(storeReplyError()),
+					}),
+					logger,
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expectProjectedWarn(logger, /listFederations failed/);
+		});
+
+		it("the token store's read", async () => {
+			const logger = createMockLogger();
+			const res = await postFedLogout(
+				buildFedLogoutApp({
+					fedTokenStore: makeFedTokenStore({ get: vi.fn().mockRejectedValue(storeReplyError()) }),
+					logger,
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expectProjectedWarn(logger, /federationTokenStore\.get failed/);
+		});
+
+		it("the token store's delete", async () => {
+			const logger = createMockLogger();
+			const res = await postFedLogout(
+				buildFedLogoutApp({
+					fedTokenStore: makeFedTokenStore({
+						delete: vi.fn().mockRejectedValue(storeReplyError()),
+					}),
+					logger,
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expectProjectedWarn(logger, /federationTokenStore\.delete failed/);
+		});
+
+		it("the federation link's removal", async () => {
+			const logger = createMockLogger();
+			const res = await postFedLogout(
+				buildFedLogoutApp({
+					sessionFederationIndex: makeSessionFederationIndex({
+						listFederations: vi.fn(async () => googleFederations),
+						removeFederation: vi.fn().mockRejectedValue(storeReplyError()),
+					}),
+					logger,
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expectProjectedWarn(logger, /removeFederation failed/);
 		});
 	});
 

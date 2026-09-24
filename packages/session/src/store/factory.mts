@@ -18,6 +18,7 @@ import {
 	type BuilderContext,
 	consoleLogger,
 	createAdapterFactory,
+	loggableError,
 } from "@o3co/auth-provider-core";
 import type session from "express-session";
 
@@ -91,7 +92,7 @@ export function registerBuiltinSessionStores(factory: SessionStoreFactory): void
 		// fatal, and to leave a trace an operator can correlate with.
 		const logger = ctx.logger ?? consoleLogger;
 		client.on("error", (err: unknown) => {
-			logger.error({ err }, "session_store_redis_error");
+			logger.error({ err: loggableError(err) }, "session_store_redis_error");
 		});
 
 		await client.connect();

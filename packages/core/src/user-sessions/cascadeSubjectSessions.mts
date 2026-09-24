@@ -25,6 +25,7 @@
  */
 
 import type { Logger } from "../logging/Logger.mjs";
+import { loggableError } from "../logging/loggableError.mjs";
 import type { CascadeSession, RevokeAllForSubjectFailure } from "./revokeAllForSubject.mjs";
 import type { SubjectSessionIndex } from "./types.mjs";
 
@@ -60,7 +61,7 @@ export async function cascadeSubjectSessions(input: {
 		// caller stamped first may already be in force — which is why this is a
 		// reported partial result rather than a thrown one.
 		failures.push({ capability: "subjectSessionIndex", operation: "listSids", error });
-		logger?.error({ err: error, subject }, "revoke_all_list_sids_failed");
+		logger?.error({ err: loggableError(error), subject }, "revoke_all_list_sids_failed");
 	}
 
 	for (const sid of sids) {
@@ -72,7 +73,7 @@ export async function cascadeSubjectSessions(input: {
 		try {
 			ok = (await cascadeSession(sid)).ok;
 		} catch (err) {
-			logger?.error({ err, subject, sid }, "revoke_all_cascade_failed");
+			logger?.error({ err: loggableError(err), subject, sid }, "revoke_all_cascade_failed");
 			ok = false;
 		}
 		if (!ok) {
@@ -91,7 +92,7 @@ export async function cascadeSubjectSessions(input: {
 			// which is idempotent — whereas aborting here would leave the
 			// subject's remaining sessions live.
 			failures.push({ capability: "subjectSessionIndex", operation: "removeSid", sid, error });
-			logger?.error({ err: error, subject, sid }, "revoke_all_remove_sid_failed");
+			logger?.error({ err: loggableError(error), subject, sid }, "revoke_all_remove_sid_failed");
 		}
 	}
 

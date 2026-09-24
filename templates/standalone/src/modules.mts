@@ -775,6 +775,20 @@ function optionalBoolean(
 }
 
 /**
+ * `accessType` from the `federations.google` slice: `"offline"` or `"online"`,
+ * exactly, or absent. `federation-google` refuses any other value too; this
+ * refuses it first, naming the key, as the fields above do.
+ */
+function optionalAccessType(
+	slice: Record<string, unknown>,
+): { accessType: "offline" | "online" } | Record<string, never> {
+	const value = slice.accessType;
+	if (value === undefined || value === null) return {};
+	if (value === "offline" || value === "online") return { accessType: value };
+	throw new Error('federations.google.accessType must be "offline" or "online" when present');
+}
+
+/**
  * Google federation config bridge — supplies the typed `googleFederationConfig`
  * ComponentMap slot from the `config.federations.google` slice.
  *
@@ -842,6 +856,9 @@ export const googleFederationConfigModule: Module = defineModule({
 				...optionalString(slice, "clientUrl"),
 				// #597: absent means the provider's default, which is to require it.
 				...optionalBoolean(slice, "requireAuthorizationResponseIss"),
+				// Absent means the provider's default, "offline": consent on every
+				// sign-in, and a refresh token for every session.
+				...optionalAccessType(slice),
 			};
 		},
 	},

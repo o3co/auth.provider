@@ -21,7 +21,7 @@
 
 import { createHash } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createGithubProvider } from "../github.mjs";
+import { createGithubProvider } from "#/github.mjs";
 import {
 	ACCESS_TOKEN,
 	createFakeGithub,
@@ -38,11 +38,20 @@ const baseConfig = {
 };
 const VERIFIER = "verifier-0123456789-abcdef-0123456789-abcdef-0123456789abcdef";
 
+/**
+ * The fake reaches the adapter through `config.fetch`. The global fetch is a
+ * tripwire, so a case that forgot to inject fails here instead of calling
+ * GitHub.
+ */
+const refuseNetwork = async (): Promise<Response> => {
+	throw new Error("the global fetch must not be reached — inject the fake through config.fetch");
+};
+
 let github: FakeGithub;
 
 beforeEach(() => {
 	github = createFakeGithub();
-	vi.stubGlobal("fetch", github.fetch);
+	vi.stubGlobal("fetch", refuseNetwork);
 });
 
 afterEach(() => {
@@ -50,7 +59,7 @@ afterEach(() => {
 });
 
 const exchange = (extra: Record<string, unknown> = {}) => {
-	const p = createGithubProvider(baseConfig);
+	const p = createGithubProvider({ ...baseConfig, fetch: github.fetch });
 	return p.exchangeCode({
 		code: "gh-code",
 		codeVerifier: VERIFIER,
@@ -161,6 +170,46 @@ describe("createGithubProvider", () => {
 		// then reuses the token instead of refreshing it.
 		const profile = await exchange();
 		expect(profile.expiresAt).toBeNull();
+	});
+
+	it("reports GitHub's token type, and no lifetime for an OAuth App token", async () => {
+		// The same reading every bundled adapter gives through core's
+		// federationTokenSnapshot: the lifetime as sent, `null` when none was.
+		const profile = await exchange();
+		expect(profile.tokenType).toBe("bearer");
+		expect(profile.expiresIn).toBeNull();
+	});
+
+	it("reports the lifetime GitHub sent for an expiring user token", async () => {
+		github.token.body = { ...githubTokenResponse(), expires_in: 28800 };
+		const profile = await exchange();
+		expect(profile.expiresIn).toBe(28800);
+		expect(profile.tokenType).toBe("bearer");
+	});
+
+	it("never carries an id_token: GitHub is plain OAuth 2.0 and issues none, so one in its answer was put there by something else", async () => {
+		// A proxy or an interceptor between this server and GitHub can add one.
+		// Its claims are shaped to pass the library's claim checks — GitHub's
+		// issuer, this client — and its signature is nobody's: nothing verifies
+		// it, and a stored one would later be handed to an end-session endpoint
+		// as `id_token_hint`, as if it were GitHub's.
+		const segment = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+		const now = Math.floor(Date.now() / 1000);
+		const forged = [
+			segment({ alg: "RS256", typ: "JWT" }),
+			segment({
+				iss: "https://github.com",
+				aud: baseConfig.clientId,
+				sub: "12345",
+				iat: now,
+				exp: now + 600,
+			}),
+			"not-a-signature",
+		].join(".");
+		github.token.body = { ...githubTokenResponse(), id_token: forged };
+		const profile = await exchange();
+		expect(profile.sub).toBe("12345");
+		expect(profile).not.toHaveProperty("idToken");
 	});
 
 	it("returns expiresAt from expires_in, and still no refresh token, for an expiring user token", async () => {
@@ -354,5 +403,30 @@ describe("createGithubProvider", () => {
 		const { url, method } = await p.endSession({});
 		expect(method).toBe("GET");
 		expect(url.href).toContain("https://github.com/logout");
+	});
+});
+
+describe("config.fetch — a proxy, or a test seam", () => {
+	it("sends the token request, /user and /user/emails through the configured fetch, never the global one", async () => {
+		// A deployment behind an egress proxy hands the adapter the fetch that
+		// reaches GitHub; the Google, Apple and OIDC adapters already take one.
+		const refused: string[] = [];
+		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+			refused.push(String(input instanceof Request ? input.url : input));
+			throw new Error("the global fetch must not be reached");
+		});
+		const own = createFakeGithub();
+		const profile = await createGithubProvider({ ...baseConfig, fetch: own.fetch }).exchangeCode({
+			code: "gh-code",
+			codeVerifier: VERIFIER,
+			redirectUri: baseConfig.callbackURL,
+		});
+		expect(profile.sub).toBe("12345");
+		expect(refused).toEqual([]);
+		expect(own.requests.map((r) => r.url.pathname)).toEqual([
+			"/login/oauth/access_token",
+			"/user",
+			"/user/emails",
+		]);
 	});
 });

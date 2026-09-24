@@ -42,10 +42,10 @@
  */
 
 import type { FederationProvider } from "@o3co/auth-provider-core";
+import { codeChallenge } from "@o3co/auth-provider-core";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { codeChallenge } from "#/federations/pkce.mjs";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
 import { createRouter } from "#/routes/Federation.mjs";
 import {

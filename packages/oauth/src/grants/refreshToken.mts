@@ -27,6 +27,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isRevocationUnavailable,
+	loggableError,
 	matchConfirmation,
 	resolveAccessTokenLifetime,
 	unrepresentedResources,
@@ -34,7 +35,6 @@ import {
 	wellFormedAcr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
-
 import type { JWTPayload } from "jose";
 
 /**
@@ -140,7 +140,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				// genuinely revoked token — is still the client's problem and
 				// still `invalid_grant`.
 				if (isRevocationUnavailable(err)) {
-					logger?.error({ err }, "refresh_token_revocation_store_unavailable");
+					logger?.error({ err: loggableError(err) }, "refresh_token_revocation_store_unavailable");
 					return {
 						result: {
 							status: 503,
@@ -854,7 +854,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 					throw err;
 				}
 				logger?.error(
-					{ err, familyId: newFamilyId, previousJti, newRefreshJti },
+					{ err: loggableError(err), familyId: newFamilyId, previousJti, newRefreshJti },
 					"refresh_token_rotation_orphaned",
 				);
 				return {

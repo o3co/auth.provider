@@ -45,6 +45,7 @@ import {
 import type { FederationGrantStore } from "../federation-grants/store.mjs";
 import { hasFederationGrantAuthorization } from "../federation-grants/types.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { loggableError } from "../logging/loggableError.mjs";
 import { cascadeSubjectSessions, type SubjectSessionCascade } from "./cascadeSubjectSessions.mjs";
 import {
 	type CascadeSession,
@@ -274,7 +275,7 @@ async function keep(
 			operation: "revokeSessionsBefore",
 			error,
 		});
-		deps.logger?.error({ err: error, subject }, "revoke_all_watermark_failed");
+		deps.logger?.error({ err: loggableError(error), subject }, "revoke_all_watermark_failed");
 	}
 
 	let sessions: SubjectSessionCascade = { revoked: [], failed: [], failures: [] };
@@ -307,7 +308,7 @@ async function keep(
 			grants = await store.listBySubject(subject, new Date(now()));
 		} catch (error) {
 			failures.push({ capability: "federationGrantStore", operation: "listBySubject", error });
-			deps.logger?.error({ err: error, subject }, "revoke_all_list_grants_failed");
+			deps.logger?.error({ err: loggableError(error), subject }, "revoke_all_list_grants_failed");
 		}
 		for (const grant of grants) {
 			if (grant.status === "revoked") continue;
@@ -347,7 +348,7 @@ async function keep(
 					error,
 				});
 				deps.logger?.error(
-					{ err: error, subject, grantId: grant.id },
+					{ err: loggableError(error), subject, grantId: grant.id },
 					end ? "revoke_all_revoke_grant_failed" : "revoke_all_retire_intent_failed",
 				);
 			}

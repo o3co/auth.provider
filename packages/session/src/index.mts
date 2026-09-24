@@ -38,9 +38,6 @@ export {
 	DEFAULT_CSRF_TTL_SECONDS,
 	MAX_CSRF_TTL_SECONDS,
 } from "./csrf.mjs";
-// #597 — the URL a provider hands its OAuth library for the code exchange:
-// the code, the RFC 9207 `iss` when the callback carried one, nothing else.
-export { callbackUrlForExchange } from "./federations/callback-url.mjs";
 // #279 — federated claims never outrank local ones; see claim-precedence.mts.
 export type { FederatedClaimsNamespace } from "./federations/claim-precedence.mjs";
 export {
@@ -48,14 +45,9 @@ export {
 	mergeFederatedClaims,
 	PROMOTABLE_FEDERATED_CLAIMS,
 } from "./federations/claim-precedence.mjs";
-// #479 — a federation may compute its `client_secret` per token exchange
-// (Apple's ES256 JWT) instead of holding a fixed string.
-export type { FederationClientSecret } from "./federations/client-secret.mjs";
-export { resolveClientSecret } from "./federations/client-secret.mjs";
 export { extractFederationSection } from "./federations/extract-federation-section.mjs";
 export type { RedirectConfig } from "./federations/helpers.mjs";
 export { resolveCallbackRedirect } from "./federations/helpers.mjs";
-export { codeChallenge } from "./federations/pkce.mjs";
 // A5 redirect-policy split (per A5 §5.2/§5.3/§9)
 export type {
 	FederationRedirectPolicy,
@@ -100,8 +92,9 @@ export type { FederationResult } from "./federations/types.mjs";
 // The federation adapter port — `FederationProvider`, `FederationProfile`,
 // the capability interfaces and their guards, and the response-mode
 // helpers — is exported by `@o3co/auth-provider-core` since #626 P1 and is
-// deliberately not re-exported here: one type, one path. `FederationResult`
-// above stays because only this router answers with one.
+// deliberately not re-exported here: one type, one path. So is the adapter
+// toolkit (`codeChallenge`, `callbackUrlForExchange`, `resolveClientSecret`).
+// `FederationResult` above stays because only this router answers with one.
 export { sessionModule } from "./module.mjs";
 export {
 	type SessionStoreModuleConfig,

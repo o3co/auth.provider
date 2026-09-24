@@ -429,4 +429,113 @@ describe("createClientAssertionVerifier (#484)", () => {
 			});
 		});
 	});
+
+	describe("what a refusal logs: a caught error's projection, never the error", () => {
+		/**
+		 * A logger that serialises every own property of what it is handed,
+		 * `cause` and non-enumerable fields included — a deployment is free to
+		 * install one. What it recorded is `lines`.
+		 */
+		const recordingLogger = (): { logger: Logger; lines: string[] } => {
+			const lines: string[] = [];
+			const walk = (value: unknown, seen = new WeakSet<object>()): unknown => {
+				if (typeof value !== "object" || value === null) return value;
+				if (seen.has(value)) return "[circular]";
+				seen.add(value);
+				const out: Record<string, unknown> = {};
+				for (const key of Object.getOwnPropertyNames(value)) {
+					out[key] = walk((value as Record<string, unknown>)[key], seen);
+				}
+				return out;
+			};
+			const record =
+				(level: string) =>
+				(...args: unknown[]): void => {
+					lines.push(JSON.stringify({ level, args: walk(args) }));
+				};
+			const logger: Logger = {
+				trace: record("trace"),
+				debug: record("debug"),
+				info: record("info"),
+				warn: record("warn"),
+				error: record("error"),
+				fatal: record("fatal"),
+				child: () => logger,
+			};
+			return { logger, lines };
+		};
+
+		it("a replay store's ioredis error: its name, never the command it refused", async () => {
+			// What ioredis rejects a write with: a ReplyError carrying the
+			// command it refused, arguments and all, as `command.args`.
+			const broken: ReplaySeenSet = {
+				kind: "broken",
+				markSeen: async () => {
+					throw Object.assign(
+						new Error("OOM command not allowed when used memory > 'maxmemory'."),
+						{
+							name: "ReplyError",
+							command: {
+								name: "set",
+								args: ["client-assertion:rp-1:jti", "args-must-never-reach-a-log"],
+							},
+						},
+					);
+				},
+				contains: async () => false,
+			};
+			const { logger, lines } = recordingLogger();
+			const outcome = await build({ replaySeenSet: broken, logger }).verify(
+				body(await mint()),
+				findClient(),
+			);
+			expect(refused(outcome)).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+			expect(lines).toHaveLength(1);
+			expect(lines[0]).toContain("replay_store_unavailable");
+			expect(lines[0]).toContain('"name":"ReplyError"');
+			expect(lines[0]).not.toContain("args-must-never-reach-a-log");
+		});
+
+		it("a client lookup's error: its name, never the fields its library put on it", async () => {
+			const lookup = vi.fn(async (): Promise<PublicClient | null> => {
+				throw Object.assign(new Error("lookup failed"), {
+					body: "body-must-never-reach-a-log",
+				});
+			});
+			const { logger, lines } = recordingLogger();
+			const outcome = await build({ logger }).verify(body(await mint()), lookup);
+			expect(refused(outcome)).toMatchObject({ status: 401, error: "invalid_client" });
+			expect(lines).toHaveLength(1);
+			expect(lines[0]).toContain("lookup_failed");
+			expect(lines[0]).not.toContain("body-must-never-reach-a-log");
+		});
+
+		it("a registration's unusable keys: logged at error as the projection, refused as server_error", async () => {
+			// jose refuses a key set that is not one while building the
+			// verifier; the registration, not the client, is at fault.
+			const { logger, lines } = recordingLogger();
+			const malformed = client({ jwks: { keys: 42 } as unknown as PublicClient["jwks"] });
+			const outcome = await build({ logger }).verify(body(await mint()), findClient(malformed));
+			expect(refused(outcome)).toMatchObject({ status: 500, error: "server_error" });
+			const invalid = lines.find((line) => line.includes("client_assertion_jwks_uri_invalid"));
+			expect(invalid).toBeDefined();
+			expect(invalid).toContain('"level":"error"');
+			expect(invalid).toContain('"code":"ERR_JWKS_INVALID"');
+			// The projection's frames, never the header V8 wrote the message into.
+			expect(invalid).not.toContain("JWKSInvalid: ");
+		});
+
+		it("a verification error: its code, never the claims jose puts on it as `payload`", async () => {
+			const expired = await mint({
+				exp: Math.floor(Date.now() / 1000) - 3600,
+				note: "claims-must-never-reach-a-log",
+			});
+			const { logger, lines } = recordingLogger();
+			const outcome = await build({ logger }).verify(body(expired), findClient());
+			expect(refused(outcome)).toMatchObject({ status: 401, error: "invalid_client" });
+			expect(lines).toHaveLength(1);
+			expect(lines[0]).toContain("ERR_JWT_EXPIRED");
+			expect(lines[0]).not.toContain("claims-must-never-reach-a-log");
+		});
+	});
 });

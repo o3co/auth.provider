@@ -25,6 +25,7 @@ import {
 	errorEnvelope,
 	type FederationTokenStore,
 	type Logger,
+	loggableError,
 	type RateLimiter,
 	type SessionFederationIndex,
 	type SubjectSessionIndex,
@@ -318,28 +319,34 @@ export const createRouter = (
 			try {
 				await userSessionStore.delete(sid);
 			} catch (err) {
-				logger.error({ err, sid }, "logout_user_session_delete_failed");
+				logger.error({ err: loggableError(err), sid }, "logout_user_session_delete_failed");
 			}
 		}
 		if (subjectSessionIndex && sub) {
 			try {
 				await subjectSessionIndex.removeSid(sub, sid);
 			} catch (err) {
-				logger.error({ err, sub, sid }, "logout_subject_session_index_remove_failed");
+				logger.error(
+					{ err: loggableError(err), sub, sid },
+					"logout_subject_session_index_remove_failed",
+				);
 			}
 		}
 		if (federationTokenStore) {
 			try {
 				await federationTokenStore.removeBySid(sid);
 			} catch (err) {
-				logger.error({ err, sid }, "logout_federation_token_remove_failed");
+				logger.error({ err: loggableError(err), sid }, "logout_federation_token_remove_failed");
 			}
 		}
 		if (sessionFederationIndex) {
 			try {
 				await sessionFederationIndex.removeBySid(sid);
 			} catch (err) {
-				logger.error({ err, sid }, "logout_session_federation_index_remove_failed");
+				logger.error(
+					{ err: loggableError(err), sid },
+					"logout_session_federation_index_remove_failed",
+				);
 			}
 		}
 	};
@@ -384,7 +391,7 @@ export const createRouter = (
 				try {
 					user = await userRepository.authenticate(username, password);
 				} catch (err) {
-					logger.warn({ err }, "local login authenticate failed");
+					logger.warn({ err: loggableError(err) }, "local login authenticate failed");
 					return res.status(503).json({
 						error: "temporarily_unavailable",
 						error_description: "User directory temporarily unavailable",
@@ -433,7 +440,10 @@ export const createRouter = (
 							try {
 								await subjectSessionIndex.addSid(user.id, sid, expiresAt);
 							} catch (err) {
-								logger.error({ err, sub: user.id, sid }, "subject_session_index_write_failed");
+								logger.error(
+									{ err: loggableError(err), sub: user.id, sid },
+									"subject_session_index_write_failed",
+								);
 							}
 						}
 					} catch {

@@ -81,8 +81,9 @@ export interface FederationTokens {
 	 * `ignoreUndefined` is set. Records carry the key as `undefined` whenever the
 	 * adapter named none, both at link time and after a refresh.
 	 *
-	 * `undefined` — and only `undefined` — means the adapter named none: every bundled
-	 * adapter but `federation-oidc`, and every record written before #645. RFC
+	 * `undefined` — and only `undefined` — means the adapter named none: an
+	 * adapter written before the field (every bundled one names it, through
+	 * core's `federationTokenSnapshot`), and every record written before #645. RFC
 	 * 6749 §5.1 makes `token_type` REQUIRED, so `POST /oauth/federation/:name/
 	 * token` reads that as `Bearer` and refuses everything else that is not a
 	 * bearer spelling, `null` included: a sender-constrained token cannot be

@@ -584,10 +584,10 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 
 アダプターが型を**まったく**名乗らないコネクションには `Bearer` を返す: §5.1 は
 このフィールドを REQUIRED としているので、フィールドの不在は上流が別の意味を
-込めたのではなく、それを報告しないアダプター — 同梱アダプターでは
-`federation-oidc` 以外すべて — を意味する。したがって実際にこの拒否が効くのは
-`federation-oidc` のコネクションだけである。`federation-google` / `-github` /
-`-apple` は型を転送せず、3 つとも bearer トークンを発行する。
+込めたのではなく、それを報告しないアダプター — このフィールド以前に書かれた
+サードパーティのアダプター、または同梱アダプターが型を報告するようになる前に
+リンクされたレコード — を意味する。同梱アダプターはすべて、core の
+`federationTokenSnapshot` を通じて上流が送った型を報告する。
 
 そう扱うのは「不在」だけである。保存値が bearer の綴りでなければ、それが
 `"DPoP "` でも `""` でも `null` でも数値でも拒否する — ストアもこのルートが所有
@@ -632,6 +632,8 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 | 503 | `temporarily_unavailable` | ストア障害、IdP の 5xx、または上流のネットワーク障害（ECONNREFUSED / ENOTFOUND / ETIMEDOUT — fetch の TypeError の `error.cause.code` に包まれたコードを含む） |
 
 すべてのエラーレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける。401 レスポンスには RFC 6750 に従い `WWW-Authenticate: Bearer error="invalid_token"` を含める。
+
+このルートがログに書く失敗はすべて core の `loggableError(err)` を運び、エラーそのものは運ばない — 警告 `refreshToken failed (reason: …)` も含めて。アダプターのライブラリは拒否したリフレッシュ応答を、ローテーションされたリフレッシュトークンを含めてエラーの cause の連鎖に載せ、Redis ストアのエラーは拒否されたコマンドの引数（`allow-plaintext` ならトークンレコード）を運ぶ。射影はそれらを捨て、失敗を見分けるもの — ライブラリのコード、HTTP ステータスと content type、上流の OAuth `error`、そして core がそのために定める規則（最初の行、トークンの形の連なりを含む語の頭で切る）の下での `error_description` — を残し、メッセージが相手側を引用する既知の二つの形（JSON パーサーの入力、Redis が反復する引数）を取り除く。相手側がメッセージに書いたそれ以外のテキストは残る。何が残るかは core の README が正確に述べる。このパッケージの他のログも同じ規則に従う。
 
 ### Opt-in: `allowedAzpForFederationToken`
 

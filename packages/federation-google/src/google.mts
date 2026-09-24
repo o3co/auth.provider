@@ -15,22 +15,21 @@
  */
 
 import {
+	callbackUrlForExchange,
+	codeChallenge,
 	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProfile,
 	type FederationProvider,
+	federationTokenSnapshot,
 	type MappedClaims,
 	type RefreshedTokens,
 	type SupportsClaimMapping,
 	type SupportsLogout,
 	type SupportsRefresh,
 } from "@o3co/auth-provider-core";
-import {
-	callbackUrlForExchange,
-	codeChallenge,
-	createFederationRedirectPolicy,
-} from "@o3co/auth-provider-session";
+import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 
 // ComponentMap slot declaration-merge: exposes googleFederationConfig as a typed
@@ -79,6 +78,22 @@ export interface GoogleProviderConfig {
 	 */
 	requireAuthorizationResponseIss?: boolean;
 	/**
+	 * Whether sign-in asks Google for a refresh token. Default `"offline"`
+	 * when omitted; any other value, `null` included, is refused at
+	 * construction.
+	 *
+	 * Google issues a refresh token only when the user is shown the consent
+	 * screen, and without `prompt` it shows that screen only the first time.
+	 * Upstream tokens are kept per session, so `"offline"` sends
+	 * `access_type=offline` **and** `prompt=consent`: every sign-in shows
+	 * Google's consent screen and every session gets a refresh token that
+	 * `POST /oauth/federation/google/token` can use. `"online"` sends neither:
+	 * no consent screen after the first sign-in and no refresh token at all,
+	 * for a deployment that uses Google to sign in and never refreshes
+	 * Google's access token.
+	 */
+	accessType?: "offline" | "online";
+	/**
 	 * The fetch every request to Google goes through — JWKS, token, userinfo.
 	 * A proxy, or a test seam. Default: the global `fetch`.
 	 */
@@ -106,6 +121,33 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			'Google federation "google": requireAuthorizationResponseIss must be a boolean — coerce an environment string before passing it',
 		);
 	}
+
+	// Only an omitted field means the default: an explicit `null` from a JS
+	// caller is a value, and refused like any other that is not one of the two.
+	const accessType = config.accessType === undefined ? "offline" : config.accessType;
+	if (accessType !== "offline" && accessType !== "online") {
+		// A string is quoted (escaped, so it cannot break the line); a number,
+		// a boolean or null is printed as itself; anything else is named by
+		// its type — JSON.stringify throws on a bigint and prints nothing for a
+		// symbol or a function.
+		const got =
+			typeof accessType === "string"
+				? JSON.stringify(accessType)
+				: accessType === null || typeof accessType === "number" || typeof accessType === "boolean"
+					? String(accessType)
+					: typeof accessType;
+		throw new Error(
+			`Google federation "google": accessType must be "offline" or "online", got ${got}`,
+		);
+	}
+	// Google issues a refresh token only on a consent screen, and shows one
+	// unprompted only the first time. Asked for offline access, every sign-in
+	// asks for the screen too: the tokens are kept per session, so a session
+	// opened without one could never be refreshed. An earlier session's
+	// refresh token is not reachable from a new one — keeping one per
+	// `google:<sub>` would be a store that outlives sessions.
+	const offlineAccess: Readonly<Record<string, string>> =
+		accessType === "offline" ? { access_type: "offline", prompt: "consent" } : {};
 
 	// ServerMetadata constructed locally — no discovery call. Google's endpoints are stable.
 	// Local variable type (oidc.ServerMetadata) does not survive to the .d.mts.
@@ -162,7 +204,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				state: params.state,
 				code_challenge: codeChallenge(params.codeVerifier),
 				code_challenge_method: "S256",
-				access_type: "offline",
+				...offlineAccess,
 				nonce: params.nonce,
 			});
 		},
@@ -201,6 +243,9 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				expectedState: oidc.skipStateCheck,
 				expectedNonce: params.nonce,
 			});
+			// The token's lifetime is dated from when the library handed the answer
+			// over — after it verified the id_token — and not after UserInfo.
+			const obtainedAt = Date.now();
 
 			// PB-5: bind UserInfo response sub against the verified id_token sub (OIDC §5.3.2).
 			// Google id_tokens always carry a non-empty string sub. If the claim is absent,
@@ -214,8 +259,6 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			}
 			const userInfo = await oidc.fetchUserInfo(oidcConfig, tokens.access_token, idTokenSub);
 
-			const expiresIn = typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
-
 			// Extension claims: anything beyond first-class fields lands on the profile
 			// via the index signature — no `raw` wrapper needed.
 			const profile: FederationProfile = {
@@ -226,22 +269,10 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 					typeof userInfo.email_verified === "boolean" ? userInfo.email_verified : undefined,
 				name: typeof userInfo.name === "string" ? userInfo.name : undefined,
 				picture: typeof userInfo.picture === "string" ? userInfo.picture : undefined,
-				accessToken: tokens.access_token,
-				refreshToken: typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
-				idToken: typeof tokens.id_token === "string" ? tokens.id_token : undefined,
-				// RFC 6749 §5.1: the upstream states its scope whenever it differs
-				// from the request, so what it says here is what it granted. Dropping
-				// it left the route to infer consent from the request instead (#647).
-				// `undefined` only when the field is absent: an answer that names
-				// nothing usable is still an answer, and flattening it into silence
-				// would have the route fall back to the requested list (#647).
-				scope:
-					tokens.scope === undefined
-						? undefined
-						: typeof tokens.scope === "string"
-							? tokens.scope
-							: "",
-				expiresAt: new Date(Date.now() + expiresIn * 1000),
+				// The tokens as Google stated them: the lifetime as sent or none,
+				// the scope as sent (what it granted, RFC 6749 §5.1, #647), and the
+				// token type — core's one reading for every adapter.
+				...federationTokenSnapshot(tokens, obtainedAt),
 			};
 
 			// Carry through known extension claims (e.g. Google hd).
@@ -253,27 +284,8 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 		},
 
 		async refreshToken(refreshTokenValue: string): Promise<RefreshedTokens> {
-			const tokens = await oidc.refreshTokenGrant(oidcConfig, refreshTokenValue);
-			const expiresIn = typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
-			return {
-				accessToken: tokens.access_token,
-				refreshToken: typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
-				idToken: typeof tokens.id_token === "string" ? tokens.id_token : undefined,
-				// RFC 6749 §5.1: the upstream states its scope whenever it differs
-				// from the request, so what it says here is what it granted. Dropping
-				// it left the route to infer consent from the request instead (#647).
-				// `undefined` only when the field is absent: an answer that names
-				// nothing usable is still an answer, and flattening it into silence
-				// would have the route fall back to the requested list (#647).
-				scope:
-					tokens.scope === undefined
-						? undefined
-						: typeof tokens.scope === "string"
-							? tokens.scope
-							: "",
-				expiresAt: new Date(Date.now() + expiresIn * 1000),
-				// sub / issuer intentionally absent — callers reuse stored identity.
-			};
+			// sub / issuer intentionally absent — callers reuse stored identity.
+			return federationTokenSnapshot(await oidc.refreshTokenGrant(oidcConfig, refreshTokenValue));
 		},
 
 		async endSession(req: EndSessionRequest): Promise<EndSessionResult> {

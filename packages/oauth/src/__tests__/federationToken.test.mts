@@ -34,6 +34,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/federationToken.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { expectProjectedWarn, storeReplyError } from "./_helpers/projectedLog.mjs";
 
 /**
  * A federation that satisfies the contract, with whatever capability the case
@@ -702,6 +703,205 @@ describe("POST /oauth/federation/:name/token", () => {
 					}),
 				}),
 			);
+		});
+	});
+
+	describe("refresh: the token store refuses to write the refreshed record", () => {
+		/**
+		 * What ioredis rejects a store write with: a ReplyError carrying the
+		 * command it refused as `command: { name, args }`. Under
+		 * `encryption.mode = "allow-plaintext"` the SET's arguments are the
+		 * refreshed token record.
+		 */
+		const storeWriteError = (): Error =>
+			Object.assign(new Error("OOM command not allowed when used memory > 'maxmemory'."), {
+				name: "ReplyError",
+				command: {
+					name: "set",
+					args: [
+						"federation-token:sid-1:google",
+						JSON.stringify({
+							accessToken: "at-must-never-reach-a-log",
+							refreshToken: "rt-must-never-reach-a-log",
+						}),
+					],
+				},
+			});
+
+		const recordingLogger = () => {
+			const lines: string[] = [];
+			const walk = (value: unknown, seen = new WeakSet<object>()): unknown => {
+				if (typeof value !== "object" || value === null) return value;
+				if (seen.has(value)) return "[circular]";
+				seen.add(value);
+				const out: Record<string, unknown> = {};
+				for (const key of Object.getOwnPropertyNames(value)) {
+					out[key] = walk((value as Record<string, unknown>)[key], seen);
+				}
+				return out;
+			};
+			const record =
+				(level: string) =>
+				(...args: unknown[]): void => {
+					lines.push(JSON.stringify({ level, args: walk(args) }));
+				};
+			const logger: Logger = {
+				trace: record("trace"),
+				debug: record("debug"),
+				info: record("info"),
+				warn: record("warn"),
+				error: record("error"),
+				fatal: record("fatal"),
+				child: () => logger,
+			};
+			return { logger, lines };
+		};
+
+		const expired = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+
+		it("logs a failed update of a refreshed record without the store's command", async () => {
+			const { logger, lines } = recordingLogger();
+			const provider: FederationProvider & {
+				refreshToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
+			} = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({
+					accessToken: "at-must-never-reach-a-log",
+					refreshToken: "rt-must-never-reach-a-log",
+					expiresAt: new Date(Date.now() + 3_600_000),
+				}),
+			};
+			const app = buildApp({
+				fedTokenStore: makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expired),
+					update: vi.fn().mockRejectedValue(storeWriteError()),
+				}),
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+				logger,
+			});
+			const res = await postFedToken(app, "google", await mintAccessToken());
+			expect(res.status).toBe(503);
+			const failure = lines.find((line) => line.includes("federationTokenStore.update failed"));
+			expect(failure).toContain("ReplyError");
+			for (const line of lines) {
+				expect(line).not.toContain("at-must-never-reach-a-log");
+				expect(line).not.toContain("rt-must-never-reach-a-log");
+			}
+		});
+
+		it("logs a failed update that was keeping a rotated refresh token without the store's command", async () => {
+			const { logger, lines } = recordingLogger();
+			// A refresh that answers no usable access token but rotates the
+			// refresh token: the route keeps the rotated one, and that write fails.
+			const provider: FederationProvider & {
+				refreshToken: (rt: string) => Promise<{ refreshToken: string }>;
+			} = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rt-must-never-reach-a-log" }),
+			};
+			const app = buildApp({
+				fedTokenStore: makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expired),
+					update: vi.fn().mockRejectedValue(storeWriteError()),
+				}),
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+				logger,
+			});
+			await postFedToken(app, "google", await mintAccessToken());
+			const failure = lines.find((line) =>
+				line.includes("federationTokenStore.update failed while keeping a rotated refresh token"),
+			);
+			expect(failure).toContain("ReplyError");
+			for (const line of lines) {
+				expect(line).not.toContain("at-must-never-reach-a-log");
+				expect(line).not.toContain("rt-must-never-reach-a-log");
+			}
+		});
+	});
+
+	describe("refresh: the adapter's library refuses the refresh answer", () => {
+		it("logs the failure without the refresh answer the library carries on the error", async () => {
+			// What openid-client 6 throws for a token response it cannot parse:
+			// a ClientError ("invalid response encountered") whose cause is
+			// oauth4webapi's OperationProcessingError, whose own cause is
+			// `{ body }` — the refresh answer itself, rotated refresh token
+			// included (openid-client's `errorHandler`, oauth4webapi's
+			// `processGenericAccessTokenResponse`). Built by hand because this
+			// package does not depend on the library; the adapters' tests drive
+			// the real one to the same shape.
+			const body = {
+				access_token: "at-must-never-reach-a-log",
+				refresh_token: "rt-must-never-reach-a-log",
+				token_type: "bearer",
+				scope: 42,
+			};
+			const refused = Object.assign(
+				new Error("invalid response encountered", {
+					cause: Object.assign(
+						new Error('"response" body "scope" property must be a string', {
+							cause: { body },
+						}),
+						{ name: "OperationProcessingError", code: "OAUTH_INVALID_RESPONSE" },
+					),
+				}),
+				{ name: "ClientError", code: "OAUTH_INVALID_RESPONSE" },
+			);
+
+			// A logger that serialises every own property, `cause` included — a
+			// deployment is free to install one.
+			const lines: string[] = [];
+			const serialiseEverything = (value: unknown, seen = new WeakSet<object>()): unknown => {
+				if (typeof value !== "object" || value === null) return value;
+				if (seen.has(value)) return "[circular]";
+				seen.add(value);
+				const out: Record<string, unknown> = {};
+				for (const key of Object.getOwnPropertyNames(value)) {
+					out[key] = serialiseEverything((value as Record<string, unknown>)[key], seen);
+				}
+				return out;
+			};
+			const record =
+				(level: string) =>
+				(...args: unknown[]): void => {
+					lines.push(JSON.stringify({ level, args: serialiseEverything(args) }));
+				};
+			const logger: Logger = {
+				trace: record("trace"),
+				debug: record("debug"),
+				info: record("info"),
+				warn: record("warn"),
+				error: record("error"),
+				fatal: record("fatal"),
+				child: () => logger,
+			};
+
+			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+			const failingProvider: FederationProvider & {
+				refreshToken: (rt: string) => Promise<never>;
+			} = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockRejectedValue(refused),
+			};
+			const app = buildApp({
+				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", failingProvider]]),
+				logger,
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(500);
+			expect(res.body.error).toBe("refresh_failed");
+			const failure = lines.find((line) => line.includes("refreshToken failed"));
+			expect(failure).toBeDefined();
+			// What an operator needs is still there: the library's code and reason.
+			expect(failure).toContain("OAUTH_INVALID_RESPONSE");
+			expect(failure).toContain('\\"scope\\" property must be a string');
+			for (const line of lines) {
+				expect(line).not.toContain("at-must-never-reach-a-log");
+				expect(line).not.toContain("rt-must-never-reach-a-log");
+			}
 		});
 	});
 
@@ -2030,6 +2230,156 @@ describe("POST /oauth/federation/:name/token", () => {
 	// Logger routing
 	// ---------------------------------------------------------------------------
 
+	describe("every store failure it logs reaches the logger as a projection, never as the error", () => {
+		const expired = (): FederationTokens => ({
+			...baseFedTokens,
+			expiresAt: new Date(Date.now() - 1000),
+		});
+
+		/** Providers with google refreshing through `refreshToken`. */
+		const refreshingGoogle =
+			(refreshToken: (rt: string) => Promise<unknown>) =>
+			(): ReadonlyMap<string, FederationProvider> =>
+				new Map<string, FederationProvider>([
+					["google", { ...federationBase("google"), refreshToken } as FederationProvider],
+				]);
+
+		it("the client lookup", async () => {
+			const logger = createMockLogger();
+			const clientRepo = makeClientRepo({ findById: vi.fn().mockRejectedValue(storeReplyError()) });
+			const res = await postFedToken(
+				buildApp({ clientRepo, logger }),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expect(res.body.error_description).toBe("client repository unavailable");
+			expectProjectedWarn(logger, /clientRepository\.findById failed/);
+		});
+
+		it("the token store's read", async () => {
+			const logger = createMockLogger();
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockRejectedValue(storeReplyError()),
+			});
+			const res = await postFedToken(
+				buildApp({ fedTokenStore, logger }),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expectProjectedWarn(logger, /federationTokenStore\.get failed/);
+		});
+
+		it("the dangling link's self-heal", async () => {
+			const logger = createMockLogger();
+			const fedTokenStore = makeFedTokenStore({ get: vi.fn().mockResolvedValue(null) });
+			const sessionFederationIndex = makeSessionFederationIndex({
+				removeFederation: vi.fn().mockRejectedValue(storeReplyError()),
+			});
+			const res = await postFedToken(
+				buildApp({ fedTokenStore, sessionFederationIndex, logger }),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(404);
+			expectProjectedWarn(logger, /removeFederation self-heal failed/);
+		});
+
+		it("the refresh lock", async () => {
+			const logger = createMockLogger();
+			const fedTokenStore = {
+				...makeFedTokenStore({ get: vi.fn().mockResolvedValue(expired()) }),
+				acquireLock: vi.fn().mockRejectedValue(storeReplyError()),
+			};
+			const res = await postFedToken(
+				buildApp({
+					fedTokenStore,
+					logger,
+					getFederationProviders: refreshingGoogle(vi.fn()),
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expectProjectedWarn(logger, /acquireLock failed/);
+		});
+
+		it("the read after the lock", async () => {
+			const logger = createMockLogger();
+			const release = vi.fn().mockResolvedValue(undefined);
+			const fedTokenStore = {
+				...makeFedTokenStore({
+					get: vi.fn().mockResolvedValueOnce(expired()).mockRejectedValueOnce(storeReplyError()),
+				}),
+				acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
+			};
+			const res = await postFedToken(
+				buildApp({
+					fedTokenStore,
+					logger,
+					getFederationProviders: refreshingGoogle(vi.fn()),
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expect(release).toHaveBeenCalled();
+			expectProjectedWarn(logger, /post-lock re-read\) failed/);
+		});
+
+		it("both cleanups after invalid_grant", async () => {
+			const logger = createMockLogger();
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expired()),
+				delete: vi.fn().mockRejectedValue(storeReplyError()),
+			});
+			const sessionFederationIndex = makeSessionFederationIndex({
+				removeFederation: vi.fn().mockRejectedValue(storeReplyError()),
+			});
+			const res = await postFedToken(
+				buildApp({
+					fedTokenStore,
+					sessionFederationIndex,
+					logger,
+					getFederationProviders: refreshingGoogle(
+						vi.fn().mockRejectedValue(new Error("invalid_grant: token revoked")),
+					),
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(410);
+			expectProjectedWarn(logger, /federationTokenStore\.delete cleanup failed/);
+			expectProjectedWarn(logger, /removeFederation cleanup failed/);
+		});
+
+		it("the lock's release", async () => {
+			const logger = createMockLogger();
+			const fresh = { ...baseFedTokens, expiresAt: new Date(Date.now() + 3_600_000) };
+			const fedTokenStore = {
+				...makeFedTokenStore({
+					get: vi.fn().mockResolvedValueOnce(expired()).mockResolvedValueOnce(fresh),
+				}),
+				acquireLock: vi.fn().mockResolvedValue({
+					acquired: true,
+					release: vi.fn().mockRejectedValue(storeReplyError()),
+				}),
+			};
+			const res = await postFedToken(
+				buildApp({
+					fedTokenStore,
+					logger,
+					getFederationProviders: refreshingGoogle(vi.fn()),
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(200);
+			expectProjectedWarn(logger, /lock release failed/);
+		});
+	});
+
 	describe("logger routing", () => {
 		it("routes failures to opts.logger, not console", async () => {
 			const logger = createMockLogger();
@@ -2468,14 +2818,14 @@ describe("POST /oauth/federation/:name/token", () => {
 			// Always `Bearer`, never the upstream's own spelling. Once a non-bearer
 			// type is refused, the only values left are case-variants of one word —
 			// RFC 6749 §5.1 makes the comparison case-insensitive, so the spelling
-			// carries nothing a caller can act on, and echoing it would have flipped
-			// every `federation-oidc` connection from `Bearer` to `bearer` on its
-			// first refresh after deploy for no gain.
+			// carries nothing a caller can act on, and echoing it would flip every
+			// connection whose upstream spells it `bearer` — every bundled adapter
+			// reports oauth4webapi's lower-cased spelling — for no gain.
 			//
 			// Silence is Bearer: §5.1 makes `token_type` REQUIRED, so a record that
 			// names none is an adapter written before `FederationProfile` carried
-			// the field — every bundled one but `federation-oidc` — and not an
-			// upstream meaning something else. This is what keeps every record
+			// the field — a third-party one, or a record linked before the bundled
+			// adapters reported it — and not an upstream meaning something else. This is what keeps every record
 			// written before #645 working.
 			const { app } = storedApp({ tokenType });
 
@@ -2628,8 +2978,8 @@ describe("POST /oauth/federation/:name/token", () => {
 
 		it("leaves the stored type standing when the refresh names none", async () => {
 			// A refresh is not where a connection changes how its tokens are
-			// presented, and every bundled adapter but `federation-oidc` names none
-			// at all.
+			// presented. Every bundled adapter names one; a third-party adapter may
+			// not, and that is the case pinned here.
 			const { app, fedTokenStore } = refreshingApp(
 				{ accessToken: "new-at", expiresIn: 3600 },
 				{ tokenType: "bearer" },

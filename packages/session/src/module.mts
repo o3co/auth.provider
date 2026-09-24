@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 
-import type { FederationProvider } from "@o3co/auth-provider-core";
 import {
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
@@ -177,21 +176,12 @@ export const sessionModule = defineModule<
 			},
 			(deps) => {
 				const config = deps.config as AppConfig;
-				// This cast is a no-op: core types the `federationProviders` slot
-				// as `ReadonlyMap<string, FederationProvider>` with the same
-				// `FederationProvider` this file imports (core's
-				// `modules/manifest/synthetic-keys.mts`), so there is nothing to
-				// bridge, and the code type-checks without it.
-				const federationProviders = deps.federationProviders as ReadonlyMap<
-					string,
-					FederationProvider
-				>;
 				return {
 					id: "federation-routes",
 					mountPath: "/session",
 					handler: federationRoutes.createRouter(express, {
 						config,
-						federationProviders,
+						federationProviders: deps.federationProviders,
 						federationRedirectPolicyResolver: deps.federationRedirectPolicyResolver,
 						providerCallbackUrls: deriveProviderCallbackUrls(config.federations),
 						userRepository: deps.userRepository,

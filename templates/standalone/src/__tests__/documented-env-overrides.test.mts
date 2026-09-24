@@ -52,6 +52,7 @@ import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPa
 const standaloneDir = fileURLToPath(new URL("../..", import.meta.url));
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 const readmePath = fileURLToPath(new URL("../../README.md", import.meta.url));
+const readmeJaPath = fileURLToPath(new URL("../../README.ja.md", import.meta.url));
 
 /**
  * Every environment variable the shipped artifact documents, with a value in
@@ -194,6 +195,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	FEDERATIONS_GOOGLE_CLIENT_ID: "google-client-id",
 	FEDERATIONS_GOOGLE_CLIENT_SECRET: "google-client-secret",
 	FEDERATIONS_GOOGLE_CALLBACK_URL: "https://auth.test/session/oauth/federation/google/callback",
+	FEDERATIONS_GOOGLE_ACCESS_TYPE: "online",
 	// #524: the generic OIDC federation the template ships disabled.
 	FEDERATIONS_OIDC_ENABLED: "true",
 	FEDERATIONS_OIDC_ISSUER: "https://idp.test",
@@ -308,11 +310,9 @@ function substitutionsIn(path: string): Set<string> {
  * The underscore is what separates an environment variable from the HTTP
  * methods in the endpoint table, which share the shouting-case shape.
  */
-function documentedInReadme(): Set<string> {
+function documentedInReadme(path: string = readmePath): Set<string> {
 	const found = new Set<string>();
-	for (const match of readFileSync(readmePath, "utf8").matchAll(
-		/^\|\s*`([A-Z][A-Z0-9_]*)`\s*\|/gm,
-	)) {
+	for (const match of readFileSync(path, "utf8").matchAll(/^\|\s*`([A-Z][A-Z0-9_]*)`\s*\|/gm)) {
 		const name = match[1] as string;
 		if (name.includes("_")) found.add(name);
 	}
@@ -353,6 +353,7 @@ describe("#288: the shipped config boots with every documented override supplied
 		expect(config.http.port).toBe(3000);
 		expect(config.http.readinessTimeoutMs).toBe(1500);
 		expect(config.http.trustProxy).toEqual(["10.0.0.0/8", "loopback"]);
+		expect(config.federations.google?.accessType).toBe("online");
 		// The new default wins over the deprecated variable, and the parsed
 		// config mirrors it onto the old key for readers that predate the split.
 		expect(resolveAccessTokenLifetime(config)).toEqual({
@@ -524,10 +525,21 @@ describe("#288: the shipped config boots with every documented override supplied
 		});
 
 		it("covers every environment variable the README documents", () => {
-			const uncovered = [...documentedInReadme()].filter(
+			const uncovered = [...documentedInReadme(), ...documentedInReadme(readmeJaPath)].filter(
 				(name) => !(name in DOCUMENTED_ENV) && !(name in DELIBERATELY_UNSET),
 			);
 			expect(uncovered).toEqual([]);
+		});
+
+		it("documents the same variables in README.md and README.ja.md", () => {
+			// The Japanese README carries the same facts (AGENTS.md): a row added
+			// to one and not the other is a variable one audience never hears of.
+			const en = documentedInReadme();
+			const ja = documentedInReadme(readmeJaPath);
+			expect({
+				onlyInEnglish: [...en].filter((name) => !ja.has(name)).sort(),
+				onlyInJapanese: [...ja].filter((name) => !en.has(name)).sort(),
+			}).toEqual({ onlyInEnglish: [], onlyInJapanese: [] });
 		});
 
 		it("exercises no variable the config layers no longer substitute", () => {

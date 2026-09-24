@@ -169,3 +169,31 @@ describe("googleFederationConfigModule — requireAuthorizationResponseIss (#597
 		}
 	});
 });
+
+describe("googleFederationConfigModule — accessType", () => {
+	// federation-google asks every sign-in for consent with offline access, so
+	// every session gets a refresh token; "online" is the operator's way to
+	// keep Google's consent screen to the first sign-in, at the price of no
+	// refresh token at all. A bridge that drops the field leaves the operator
+	// without that choice.
+	it("is absent by default, so the provider's own default (offline) applies", () => {
+		expect("accessType" in buildConfig(credentials)).toBe(false);
+	});
+
+	it("leaves a null accessType absent, never forwarded as null, which the provider refuses", () => {
+		expect("accessType" in buildConfig({ ...credentials, accessType: null })).toBe(false);
+	});
+
+	it("forwards offline and online", () => {
+		expect(buildConfig({ ...credentials, accessType: "online" }).accessType).toBe("online");
+		expect(buildConfig({ ...credentials, accessType: "offline" }).accessType).toBe("offline");
+	});
+
+	it("refuses anything else at boot, naming the key", () => {
+		for (const bad of ["", "offine", "Online", "true", false, 1]) {
+			expect(() => buildConfig({ ...credentials, accessType: bad })).toThrow(
+				/federations\.google\.accessType/,
+			);
+		}
+	});
+});

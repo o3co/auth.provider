@@ -15,17 +15,19 @@
  */
 
 import {
+	codeChallenge,
 	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
 	type FederationProfile,
 	type FederationProvider,
+	federationTokenSnapshot,
 	type MappedClaims,
 	parseScopeTokens,
 	type SupportsClaimMapping,
 	type SupportsLogout,
 } from "@o3co/auth-provider-core";
-import { codeChallenge, createFederationRedirectPolicy } from "@o3co/auth-provider-session";
+import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 
 // ComponentMap slot declaration-merge: exposes githubFederationConfig as a typed
@@ -72,6 +74,12 @@ export interface GithubProviderConfig {
 	/** Override GitHub's end-session endpoint. When omitted, the provider redirects directly
 	 *  to postLogoutRedirectUri. */
 	endSessionEndpoint?: string;
+	/**
+	 * The fetch every request to GitHub goes through — the token exchange,
+	 * `/user` and `/user/emails`. A proxy, or a test seam. Default: the global
+	 * `fetch`.
+	 */
+	fetch?: typeof fetch;
 }
 
 export type GithubProvider = FederationProvider & SupportsLogout & SupportsClaimMapping;
@@ -85,14 +93,14 @@ export type GithubProvider = FederationProvider & SupportsLogout & SupportsClaim
  * known — this adapter — rather than in a consumer that would then have to
  * know which upstream it is reading.
  */
-const githubScope = (value: unknown): string | undefined => {
+const githubScope = (value: string | undefined): string | undefined => {
 	// `undefined` means GitHub named no scope at all, which the session route
 	// reads as "as requested" (RFC 6749 §3.3). An answer that is present and
 	// names nothing usable must NOT flatten into that: the upstream spoke, and
 	// reading its silence where there was none would record every requested
-	// scope as consent. Present-but-empty travels as the empty string.
+	// scope as consent. Present-but-empty travels as the empty string. A scope
+	// that is not a string never gets here: openid-client refuses the answer.
 	if (value === undefined) return undefined;
-	if (typeof value !== "string") return "";
 	// Commas to spaces first, then core's grammar. GitHub's delimiter is the
 	// only thing this adapter knows that core does not, so it is the only thing
 	// this function does.
@@ -178,6 +186,9 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 	};
 
 	const oidcConfig = new oidc.Configuration(serverMetadata, config.clientId, config.clientSecret);
+	// `fetchProtectedResource` goes through the same configuration, so /user
+	// and /user/emails take this fetch as the token request does.
+	if (config.fetch) oidcConfig[oidc.customFetch] = config.fetch as unknown as oidc.CustomFetch;
 
 	return {
 		name: "github",
@@ -220,6 +231,9 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				pkceCodeVerifier: params.codeVerifier,
 				expectedState: oidc.skipStateCheck,
 			});
+			// The token's lifetime is dated from when the library handed the answer
+			// over, not after the REST reads.
+			const obtainedAt = Date.now();
 
 			// The user is GitHub's REST `GET /user`, which is not an OpenID Connect
 			// UserInfo endpoint: it answers a numeric `id` and no `sub`. It is
@@ -270,7 +284,24 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				// Transient /user/emails failure treated as "no email available" — never kills login.
 			}
 
-			const expiresIn = typeof tokens.expires_in === "number" ? tokens.expires_in : undefined;
+			// Core's one reading of the token response, less three things GitHub
+			// needs differently: the scope is comma-delimited (below); a refresh
+			// token is not kept — this adapter has no refresh, so one that a
+			// GitHub App's expiring user token comes with would never be used;
+			// and an id_token is never carried. GitHub is plain OAuth 2.0 and
+			// issues none, so one in its answer was put there by something
+			// between this server and GitHub, and nothing here verifies it: kept,
+			// it would be stored and later handed to an end-session endpoint as
+			// `id_token_hint`, as if it were GitHub's. `expiresAt` is `null` for
+			// an OAuth App token, which states no lifetime:
+			// `/oauth/federation/:name/token` then reuses the token rather than
+			// refreshing it (FederationProfile.expiresAt).
+			const {
+				refreshToken: _notKept,
+				idToken: _notIssuedByGithub,
+				scope: _commaDelimited,
+				...snapshot
+			} = federationTokenSnapshot(tokens, obtainedAt);
 
 			return {
 				issuer: GITHUB_ISSUER,
@@ -280,7 +311,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				name: typeof user.name === "string" ? user.name : undefined,
 				// GitHub's /user returns `avatar_url` (not the OIDC `picture` field).
 				picture: typeof user.avatar_url === "string" ? user.avatar_url : undefined,
-				accessToken: tokens.access_token,
+				...snapshot,
 				// RFC 6749 §5.1: the upstream states its scope whenever it differs
 				// from the request, so what it says here is what it granted. GitHub
 				// always states it. Dropping it left the route to infer consent from
@@ -291,12 +322,6 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				// whole string reads as ONE scope everywhere downstream, and a
 				// client asking whether `user:email` was granted is told no.
 				scope: githubScope(tokens.scope),
-				// GitHub OAuth Apps do not issue refresh tokens.
-				refreshToken: undefined,
-				// GitHub OAuth Apps classic tokens have no finite expiry; the new-style
-				// user-to-server tokens (`expires_in`-bearing) do. `null` signals "reuse,
-				// do not attempt refresh" — see FederationProfile.expiresAt contract.
-				expiresAt: expiresIn !== undefined ? new Date(Date.now() + expiresIn * 1000) : null,
 			};
 		},
 

@@ -3,9 +3,9 @@
 Last updated: 2026-09-24
 
 Browser login, logout and upstream-IdP federation routes for
-[auth.provider](../../README.md), the helpers every federation adapter package
-builds on, and the express-session store those routes — and every other route
-that reads `req.session` — run over.
+[auth.provider](../../README.md), the redirect policy every federation adapter
+package contributes beside its provider, and the express-session store those
+routes — and every other route that reads `req.session` — run over.
 
 ## Responsibility
 
@@ -19,11 +19,12 @@ responsibilities:
    token route, and the federation start and callback routes. They turn a
    password check or an upstream IdP's answer into a `UserSession` record and an
    authenticated express session, and undo it at logout.
-2. **The federation-adapter toolkit** — what an adapter package imports so that
-   every adapter follows one rule: `codeChallenge` (PKCE S256),
-   `callbackUrlForExchange` (the RFC 9207 `iss` rule), `FederationClientSecret` /
-   `resolveClientSecret`, `createFederationRedirectPolicy` and the allowlist
-   rules it is built from, and `extractFederationSection`.
+2. **The federation-adapter toolkit** — what an adapter package imports from
+   the router it plugs into: `createFederationRedirectPolicy` and the allowlist
+   rules it is built from, and `extractFederationSection`. The helpers an
+   adapter builds its upstream requests with — `codeChallenge`,
+   `callbackUrlForExchange`, `FederationClientSecret` / `resolveClientSecret` —
+   are core's.
 3. **The browser session store** — `sessionStoreModule` / `sessionStoreModuleFor`
    and `createSessionStoreFactory` / `registerBuiltinSessionStores`: the
    express-session middleware, its cookie and its store (memory, or Redis through
@@ -48,8 +49,9 @@ responsibilities:
 **Does not own:**
 
 - the federation adapter contract — `FederationProvider`, `FederationProfile`
-  and the capabilities — which is core's
-  ([`core/src/federations`](../core/src/federations/README.md));
+  and the capabilities — and the pure helpers adapters build their requests
+  with (`codeChallenge`, `callbackUrlForExchange`, `resolveClientSecret`), which
+  are core's ([`core/src/federations`](../core/src/federations/README.md));
 - any adapter: [`federation-google`](../federation-google/README.md),
   [`federation-github`](../federation-github/README.md),
   [`federation-apple`](../federation-apple/README.md),
@@ -79,11 +81,10 @@ package's store module. What the split costs is stated in
 
 - The toolkit: the redirect policy is a contribution kind this package declares
   and its router consumes, and `extractFederationSection` reads the config shape
-  the router reads callback URLs from. The pure helpers — `codeChallenge`,
-  `callbackUrlForExchange`, the client-secret resolver — depend on nothing in
-  this package, and core's contract already tells adapters to use two of them;
-  they are here because the router and the adapters share them, and it is the
-  reason every adapter package takes this package as a peer dependency.
+  the router reads callback URLs from. Both are the router's, which is why
+  every adapter package takes this package as a peer dependency. The pure
+  request helpers are not here: the router uses none of them, so they live in
+  core beside the contract that tells adapters to use them.
 - The store: it is what `req.session` is, and the routes here are what write it;
   the federation router also keeps `form_post` transactions in it. It is a
   module of its own, apart from `sessionModule`, because other packages read
@@ -411,11 +412,18 @@ URL is exactly what the adapter returned.
 1. **The adapter sees `callbackParams`** — the callback's string parameters
    minus `code` and `state`, which the router has already bound. They are
    relayed through the user agent and unsigned; an adapter forwards the RFC 9207
-   `iss` from them through `callbackUrlForExchange`.
+   `iss` from them through core's `callbackUrlForExchange`.
 2. **`exchangeCode` throwing is `502 exchange_failed`.** Every refusal inside an
    adapter — a wrong `iss`, a bad id_token, a UserInfo mismatch — surfaces this
    way and never reaches the Store. A profile without `sub` is
-   `400 invalid_profile`.
+   `400 invalid_profile`. The `federation token exchange failed` warning
+   carries core's `loggableError(err)`, never the error itself: an OAuth
+   library puts the token response it refused, access and refresh token
+   included, on the error's cause chain, and a logger that serialises the
+   whole error would write them out. Every other failure these routes log —
+   a store's, a repository's, express-session's — is projected the same way
+   (a Redis store's error carries the refused command's arguments; under
+   `allow-plaintext`, a token record).
 3. **The Store resolves the identity.** `<name>:<sub>` goes to
    `UserRepository.authenticateByToken`; a throw is `503 temporarily_unavailable`,
    `null` is `401 unknown_user` (unless the start asked to link).
@@ -830,10 +838,10 @@ export const exampleFederationModule = defineModule({
 
 The contract's own rules are in [core's README](../core/src/federations/README.md)
 and the doc comments of [`types.mts`](../core/src/federations/types.mts). What
-the toolkit gives the provider half:
+core gives the provider half, exported from `@o3co/auth-provider-core`:
 
 - `codeChallenge(codeVerifier)` — the S256 challenge for the verifier the router
-  minted ([`src/federations/pkce.mts`](src/federations/pkce.mts)).
+  minted ([`pkce.mts`](../core/src/federations/pkce.mts)).
 - `callbackUrlForExchange({ redirectUri, code, callbackParams })` — the URL to
   hand an OAuth library for the code exchange: `code`, the RFC 9207 `iss` when
   the callback carried one, and nothing else from the bag. Rebuilding the URL
@@ -841,13 +849,18 @@ the toolkit gives the provider half:
   fails against an issuer that advertises
   `authorization_response_iss_parameter_supported`. Configure the library with
   the issuer the IdP actually publishes, or the comparison refuses every login
-  ([`src/federations/callback-url.mts`](src/federations/callback-url.mts)).
+  ([`callback-url.mts`](../core/src/federations/callback-url.mts)).
 - `FederationClientSecret` / `resolveClientSecret` — a `client_secret` that is a
   string or a resolver (`() => string | Promise<string>`). The adapter calls
   `resolveClientSecret` on every token request, and it caches nothing, so an
   adapter whose secret rotates (Apple's ES256 JWT) owns its caching. An empty or non-string result is refused
   locally rather than posted upstream
-  ([`src/federations/client-secret.mts`](src/federations/client-secret.mts)).
+  ([`client-secret.mts`](../core/src/federations/client-secret.mts)).
+- `federationTokenSnapshot(tokens, obtainedAt)` — the one reading of a token
+  response for a profile or a refresh: `expiresIn` as the library read it and
+  `expiresAt` from it, `null` on both when no lifetime was sent, `tokenType`,
+  `scope` present exactly when sent
+  ([`token-snapshot.mts`](../core/src/federations/token-snapshot.mts)).
 
 The bundled adapters are the worked examples — for instance
 [`google.mts`](../federation-google/src/google.mts) in `federation-google`.
@@ -863,7 +876,7 @@ The bundled adapters are the worked examples — for instance
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, and the login rate-limit guard |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, `amr` |
 | [`Federation.formPost.test.mts`](src/routes/__tests__/Federation.formPost.test.mts), [`Federation.applicationCookie.test.mts`](src/routes/__tests__/Federation.applicationCookie.test.mts), [`Federation.transactionFailures.test.mts`](src/routes/__tests__/Federation.transactionFailures.test.mts), [`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) | response modes, the transaction cookie, the untouched session cookie, the transaction's failure paths and what single use guarantees |
-| [`src/federations/__tests__/`](src/federations/__tests__/) | the toolkit and the router's federation parts |
+| [`src/federations/__tests__/`](src/federations/__tests__/) | the toolkit and the router's federation parts; the request helpers are pinned in core ([`core/src/federations/__tests__/`](../core/src/federations/__tests__/)) |
 
 ## See also
 
