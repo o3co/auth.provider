@@ -93,7 +93,8 @@ describe("loggableError — what a log line may carry of an error", () => {
 				code: "OAUTH_RESPONSE_BODY_ERROR",
 				status: 400,
 				error: "invalid_grant",
-				cause: { error: "invalid_grant" },
+				error_description: "Bad Request",
+				cause: { error: "invalid_grant", error_description: "Bad Request" },
 			},
 		);
 		expect(shape(refused)).toEqual({
@@ -102,10 +103,11 @@ describe("loggableError — what a log line may carry of an error", () => {
 			code: "OAUTH_RESPONSE_BODY_ERROR",
 			status: 400,
 			error: "invalid_grant",
+			error_description: "Bad Request",
 		});
 	});
 
-	it("keeps an error_description written in RFC 6749's character set, and nothing outside it", () => {
+	it("keeps the first line of an error_description written in RFC 6749's character set, and nothing outside it", () => {
 		const described = (error_description: unknown) =>
 			loggableError(
 				Object.assign(new Error("server responded with an error in the response body"), {
@@ -118,10 +120,37 @@ describe("loggableError — what a log line may carry of an error", () => {
 			"Token has been expired or revoked.",
 		);
 		expect(described('a "quoted" value')).toBeUndefined();
-		expect(described("line\nbreak")).toBeUndefined();
 		expect(described("non-ascii é")).toBeUndefined();
 		expect(described(42)).toBeUndefined();
-		expect(described("x".repeat(1000))).toHaveLength(256);
+		expect(described("word ".repeat(200))).toHaveLength(256);
+		// Only the first line is judged and kept: Azure AD separates a Trace
+		// ID, a Correlation ID and a timestamp with CRLF after the AADSTS line.
+		expect(described("line\nbreak")).toBe("line");
+		expect(
+			described(
+				"AADSTS70008: The provided authorization code or refresh token has expired due to inactivity.\r\nTrace ID: 0b1c2d3e-4f5a-6b7c-8d9e-0f1a2b3c4d5e\r\nCorrelation ID: 5e4d3c2b-1a0f-9e8d-7c6b-5a4f3e2d1c0b\r\nTimestamp: 2026-09-24 00:00:00Z",
+			),
+		).toBe(
+			"AADSTS70008: The provided authorization code or refresh token has expired due to inactivity.",
+		);
+	});
+
+	it("drops an error_description that carries a run of twenty token characters — an echoed credential", () => {
+		// Legacy Spring Security echoes what it refused: "Invalid refresh
+		// token: <the token>". A description is the rule's one peer-written
+		// string, so one that looks like it carries a credential is not kept.
+		const described = (error_description: string) =>
+			loggableError(
+				Object.assign(new Error("refused"), { error: "invalid_grant", error_description }),
+			).error_description;
+		expect(described("Invalid refresh token: 3f2a9c1e7b4d4c0a9e8f7a6b5c4d3e2f")).toBeUndefined();
+		expect(described("Invalid access token: eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0")).toBeUndefined();
+		expect(described("Bad credentials for client a1b2c3d4e5f6g7h8i9j0k")).toBeUndefined();
+		// Nineteen is not a run of twenty; words and punctuation are not either.
+		expect(described("code abcdefghijklmnopqrs expired")).toBe("code abcdefghijklmnopqrs expired");
+		expect(described("Token has been expired or revoked.")).toBe(
+			"Token has been expired or revoked.",
+		);
 	});
 
 	it("drops a field of the wrong shape rather than coercing it", () => {
