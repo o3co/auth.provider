@@ -24,6 +24,9 @@ package name it is not a base layer: no other package imports it at runtime
 - the transport rules on the Store's URLs — `https`, or `http` to a loopback
   host only ([`src/endpointUrl.mts`](src/endpointUrl.mts)) — and that no
   request follows a redirect away from them;
+- the credential it presents to the Store (`bearerToken`), the floor that
+  credential is held to, and how the Store's refusal of it reads;
+- that nothing a transport reports — which may quote the request — is thrown;
 - the request deadline and the response-size cap;
 - the coverage declaration the identity lookup is judged by at boot.
 
@@ -90,13 +93,15 @@ block; defaults are in [`reference.conf`](../core/config/reference.conf):
 | `linkFederatedIdentityUrl` | `CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` | Optional. Enables account linking. |
 | `findSubjectByFederatedIdentityUrl` | `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | Optional. The identity lookup. |
 | `federatedIdentityLookupCoverage` | — (a list; HOCON only) | What the lookup covers. Default `[]`. |
+| `bearerToken` | `CLIENT_USER_BEARER_TOKEN` | Optional. Sent on every request as `Authorization: Bearer <token>`; at least 32 bytes of key material. Unset, no `Authorization` header is sent. See [who may call the Store](#what-the-store-must-enforce-itself). |
 | `timeout` | `CLIENT_USER_TIMEOUT` | Milliseconds. Default 5000. |
 | `maxResponseBytes` | `CLIENT_USER_MAX_RESPONSE_BYTES` | Default 1048576. |
 
 ## The wire contract
 
-Every request is a `POST` with a JSON body. The user a Store answers with is
-core's [`User`](../core/src/repositories/types.mts).
+Every request is a `POST` with a JSON body, and — when `bearerToken` is
+configured — an `Authorization: Bearer <token>` header. The user a Store
+answers with is core's [`User`](../core/src/repositories/types.mts).
 
 **`authenticate`** posts `{ email, password }` to `authenticateUrl` (the
 username arrives as `email`); **`authenticateByToken`** posts `{ token }` to
@@ -115,12 +120,56 @@ The body of a non-`2xx` answer is discarded unread, for these and for linking.
 No request follows a redirect, including the identity lookup: a `3xx` is one
 more status that throws, and its `Location` is never contacted.
 
+**A `401` or `403` with a `Bearer` challenge is a refused credential.** When
+`bearerToken` is configured, a `401` or `403` carrying
+`WWW-Authenticate: Bearer …` (RFC 6750 §3 — `invalid_token`,
+`insufficient_scope`) from any of the four endpoints throws a
+`StoreCredentialRefusedError`, `HttpUserRepository: the Store at <url> refused
+this deployment's credential (HTTP <status> with a Bearer challenge) — …`,
+instead of the reading this section otherwise gives that status: not "no such
+user", not a refused link, not the lookup's `answered HTTP <status>`. What each
+caller then answers and logs is in
+[What the Store must enforce itself](#what-the-store-must-enforce-itself). The
+challenge is found in any case, among other challenges or on a header line of
+its own, and never inside a quoted string; a quoted string left unterminated
+runs to the end of the value and hides whatever follows it, which then reads
+as no challenge. Nothing the Store wrote after the scheme is repeated. A `401`
+or `403` without a `Bearer` challenge, and any `401` or `403` when no token is
+configured, keeps the meaning this section gives it, so a Store that does not
+check the token is unaffected.
+
+**A transport failure carries nothing of the exchange.** When a request cannot
+be made or its answer cannot be read, the error is a `StoreTransportError`
+whose `reason` and message say which:
+
+| `reason` | When | Message (the lookup: `identity lookup at <url> …`) |
+| --- | --- | --- |
+| `unreachable` | no connection to exchange on: a refused connection, DNS, TLS, a route or host the network cannot reach — the network path, or TLS | `HttpUserRepository: request to <url> could not be reached` |
+| `connection_closed` | a connection closed or reset before a complete response arrived: before any byte, after an interim `1xx`, mid-head, or a pooled keep-alive connection the Store, a proxy or an idle timeout closed between two requests — the transport cannot tell which | `HttpUserRepository: the connection to <url> closed before a complete response arrived` (the lookup: `identity lookup at <url>: the connection closed …`) |
+| `malformed_response` | the Store sent a response head the transport cannot take: the parser refused the status line or a header, or the head outgrew the size limit — the Store's answer, or a proxy's | `HttpUserRepository: the Store at <url> answered with a malformed HTTP response` |
+| `unreadable` | an HTTP answer whose body broke mid-read | `HttpUserRepository: response from <url> could not be read` |
+
+Each carries at most a transport code an operator can act on, in the message
+and as `code`: `ECONNREFUSED`, `ENOTFOUND`, `ECONNRESET`, `EPROTO`, an
+`UND_ERR_*` (`UND_ERR_HEADERS_OVERFLOW`, `UND_ERR_SOCKET`, …), an `HPE_*` where
+the runtime sets one (Node 26's undici sets no code on its parser errors), an
+`ERR_SSL_*` (`ERR_SSL_WRONG_VERSION_NUMBER` is an https URL on a port that
+speaks plain HTTP; `ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE` is a TLS 1.2
+handshake the Store refused — mutual TLS it expects a client certificate for,
+or no shared cipher), a certificate code. It never
+carries the transport's own error or a `cause`: undici's parser errors quote
+the bytes they rejected, and a peer that reflects the request — a broken
+proxy, a debugging echo — puts the `Authorization` header, or a password,
+among them. A request that outlives the deadline is a `TimeoutError` instead
+(see Constructor validation).
+
 **`linkFederatedIdentity`** posts `{ userId, provider, sub, token, claims }` to
 `linkFederatedIdentityUrl`: a `2xx` `User` is `{ ok: true, user }`; `401` / `403`
 is `{ ok: false, reason: "refused" }`; `409` is
 `{ ok: false, reason: "conflict" }`; anything else throws. Because the body of a
-refusal is not read, a refusal carries no description from the Store. The method is absent
-when `linkFederatedIdentityUrl` is not configured, which is how the federation
+refusal is not read, a refusal carries no description from the Store. The
+method is absent when `linkFederatedIdentityUrl` is not configured, which is
+how the federation
 routes know to refuse `?link=1` up front. What a Store checks before answering
 `2xx` — never on an unverified or relay address, never by e-mail alone — is in
 the
@@ -203,18 +252,39 @@ deployment that then has a connection under `"required"` is refused at boot.
 
 ## What the Store must enforce itself
 
-- **Who may call it.** `HttpUserRepository` sends no credential of its own: each
-  request carries only `Content-Type: application/json`, there is no option to
-  add a header, and a URL carrying `user:password@` is refused. Nor is what
-  `authenticateByToken` and linking carry a secret — the federation callback's `<provider>:<sub>` is an
-  identifier. So anyone who can reach `authenticateByTokenUrl` can resolve a
-  known identity to its user, and anyone who can reach an open
-  `linkFederatedIdentityUrl` can bind any identity to any `userId`. Accept these
-  calls only from auth.provider: a network policy or a private network, or
-  mutual TLS provided by the platform in front of the Store.
+- **Who may call it.** What `authenticateByToken` and linking carry is not a
+  secret — the federation callback's `<provider>:<sub>` is an identifier — so a
+  Store that answers any caller lets anyone who can reach
+  `authenticateByTokenUrl` resolve a known identity to its user, and anyone who
+  can reach an open `linkFederatedIdentityUrl` bind any identity to any
+  `userId`. Configure `bearerToken` (`CLIENT_USER_BEARER_TOKEN`, from
+  `openssl rand -hex 32`) and have the Store refuse every request on all four
+  endpoints whose `Authorization` is not exactly `Bearer <that token>`,
+  compared in constant time, and never log the header. One token goes to all
+  four URLs, so they must be one trust domain: whoever runs any of those
+  endpoints holds a credential the others accept. Refuse with `401` and
+  `WWW-Authenticate: Bearer error="invalid_token"` (RFC 6750 §3), or `403` and
+  `error="insufficient_scope"` for a token that is valid but not enough. With
+  that challenge, a token the Store does not accept — a typo, a half-finished
+  rotation — is an outage on every call, which each caller reports as the
+  table below shows. Without the challenge the `401` or `403` keeps its wire
+  meaning, "no such user" or a refused link, and a mismatch shows only as
+  every login failing. For the same reason, never send a `Bearer` challenge
+  with a user's wrong password, an unknown identity or a link your policy
+  refuses: that answer would read as the Store refusing auth.provider, and the
+  user's failed login or link as an outage. To rotate, have the Store accept the old token and the new, move
+  auth.provider to the new, then retire the old.
+  Without `bearerToken` no request carries an `Authorization` header, and the
+  Store must admit only auth.provider some other way — a network policy or a
+  private network, or mutual TLS provided by the platform in front of the
+  Store (a sidecar on a loopback address, which the `http` carve-out admits).
+  This adapter offers no client certificate of its own: Node's `fetch` takes
+  one only through an `undici` dispatcher, a dependency this package does not
+  carry. A URL carrying `user:password@` is refused.
 - **No secret in the URL.** A query-string token would not stay secret: the
   errors this adapter throws name the full URL, and the session routes log
-  them.
+  them. The caller's credential belongs in `bearerToken`, which nothing this
+  adapter throws carries.
 - **Answer without redirecting.** No request follows a redirect, so a
   password, a token, a link request or an identity goes only to the configured
   URL — the one the `https` rule below checks — and no answer from anywhere
@@ -225,6 +295,22 @@ deployment that then has a connection under `"required"` is refused at boot.
   redirects — a host alias redirecting to the canonical host, an added
   trailing slash, a moved path — fails every call. Configure each URL as the
   endpoint that answers, not one that redirects.
+
+**What a refused token looks like, per caller.** Each caller answers a
+`StoreCredentialRefusedError` as it answers any Store failure — a
+`StoreTransportError` or a `TimeoutError` too; what differs is what it logs:
+
+| Caller | Answers | Logs |
+| --- | --- | --- |
+| Password login, `POST /session/login` ([`@o3co/auth-provider-session`](../session/README.md)) | `503 temporarily_unavailable` | `local login authenticate failed` (warn), with `err` |
+| Federation login and `?link=1` callbacks (session) | `503 temporarily_unavailable` | `user repository lookup failed` or `federation link: user repository failed` (warn), with `err` |
+| The jwt-bearer grant ([`@o3co/auth-provider-oauth`](../oauth/README.md)) | `503 temporarily_unavailable` | `jwt_bearer_user_repository_unavailable` (error), with `err` |
+| The federation-grants connect callback — the identity lookup ([`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)) | redirect with `error=temporarily_unavailable` | `federation_grant.failure` (warn) with `during: "callback_identity_lookup"` and `classification: "store_credential_refused"` (`store_transport_failed` for a `StoreTransportError`, `timeout` for a `TimeoutError`) — that reporter logs a classification, never an error's message |
+
+Where `err` is logged, a `StoreCredentialRefusedError`'s message names the
+Store URL, the status and `CLIENT_USER_BEARER_TOKEN` — never the token; a
+`StoreTransportError`'s names the URL, what failed and at most a transport
+code.
 
 ## Constructor validation
 
@@ -263,12 +349,32 @@ against it rather than relying on the abort signal, because aborting a request
 does not reliably interrupt a read already in flight. That is the slow-loris
 shape — headers arrive promptly, then the body dribbles or stops — and without
 the race it hangs forever. A request that outlives the deadline rejects with a
-`timed out after <n>ms` error naming the endpoint.
+`timed out after <n>ms` error naming the endpoint, named `TimeoutError` on all
+four requests, so a reporter that classifies by name reads it as a timeout.
 
 **`maxResponseBytes` must be a positive integer**, defaulting to
 `DEFAULT_MAX_RESPONSE_BYTES` (1 MiB). The cap is enforced against
 `Content-Length` *and* while streaming, so a Store that omits the header — or
 lies in it — is still cut off rather than allowed to exhaust memory.
+
+**`bearerToken`, when set, must be a bare RFC 6750 token of at least 32 bytes
+of key material.** Unset (absent) sends no `Authorization` header. Set, it is
+refused unless it is a string, not blank (a blank environment override is a
+boot failure, not "no token"), made only of letters, digits, `-._~+/` and
+trailing `=` padding — no whitespace, no line break, and no `Bearer ` prefix,
+which the adapter adds — and it clears core's shared-secret floor
+(`MIN_SECRET_ENTROPY_BYTES`, the one `SESSION_SECRET` and `OAUTH_JWT_SECRET`
+clear), measured on the decoded length of a hex or base64 value, so
+`openssl rand -hex 16` is 16 bytes however long it looks. Whoever holds the
+token speaks to the Store as auth.provider. The shape is checked here because
+a header value `fetch` refuses is one it quotes in the error it throws. No
+refusal quotes the value, no error from a request carries it — a transport
+failure is thrown without the transport's error (see the wire contract) — and
+it is held in an ECMAScript private field, so it is absent from `inspect()`
+and `JSON.stringify` of the repository. These checks run when the repository
+is built, which a deployment does under `repositories.user.type = "http"`
+(the standalone template's default); under core's `reference.conf` default,
+`yaml`, the `http` block — and a token in it — is not read at all.
 
 ## Public API
 
@@ -277,6 +383,14 @@ Exported from [`src/index.mts`](src/index.mts):
 - `registerBuiltinAdapters({ userFactory })` — registers the `"http"` type.
 - `HttpUserRepository` — the repository
   ([`src/repositories/HttpUserRepository.mts`](src/repositories/HttpUserRepository.mts)).
+- `StoreCredentialRefusedError` — what a refused credential throws; its
+  `name` and `storeStatus` (`401` or `403`) are part of the contract. Not
+  `status`: Express, http-errors and the standalone's terminal handler read
+  that as the status to answer with.
+- `StoreTransportError`, `StoreTransportFailure` — what a transport failure
+  throws; its `name`, `reason` and `code` are part of the contract, and it has
+  no `status` either
+  ([`src/repositories/storeErrors.mts`](src/repositories/storeErrors.mts)).
 - `DEFAULT_MAX_RESPONSE_BYTES` — the default response cap.
 - `FederatedIdentityLookupCoverage` — the type of one coverage entry.
 
@@ -286,6 +400,9 @@ Exported from [`src/index.mts`](src/index.mts):
 | --- | --- |
 | [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | authentication and its answers, the `User` shape check, the https rule, the timeout and the response cap, linking, and the identity lookup's presence, probe and wire |
 | [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | against real HTTP servers: the identity lookup releasing a refused answer's connection, and a redirect refused on each of the four requests — to another origin, to the same origin, or with no `Location` — with nothing sent to a redirect target |
+| [`HttpUserRepository.credential.test.mts`](src/repositories/__tests__/HttpUserRepository.credential.test.mts) | against real HTTP servers: `Authorization: Bearer <token>` on each of the four requests when `bearerToken` is set and no `Authorization` header when it is not, by hand and through the `"http"` builder; a weak, malformed, blank or non-string token refused at construction; the token in no failure and no inspection of the repository; a transport failure a `StoreTransportError` that says what failed — a refused connection and an https URL on a plain-HTTP port (not reached), a peer that reflects the token into a status line or header, a head over the size limit (malformed response), a close after a `1xx`, mid-head, before any byte, or of a pooled keep-alive connection between two requests (connection closed), a chunked body (not read), a TLS 1.2 server that refuses the handshake (not reached, `ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE`) — with its code and no cause; a timeout a `TimeoutError` whether the headers or the body stall; with a token sent, a `401` or `403` with a `Bearer` challenge a `StoreCredentialRefusedError` (`storeStatus`, no `status`) on each of the four, and one without — or with no token sent — read as before |
+| [`storeErrors.test.mts`](src/repositories/__tests__/storeErrors.test.mts) | which transport codes are kept, and the two named errors' shape — no `status`, no cause |
+| [`wwwAuthenticate.test.mts`](src/repositories/__tests__/wwwAuthenticate.test.mts) | which `WWW-Authenticate` values carry a `Bearer` challenge, and a hostile 64 KiB value read in one pass |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | the `"http"` builder, its defaults and string coercion, and configuration refused at build time |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | the https-or-loopback rule |
 

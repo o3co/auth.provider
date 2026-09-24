@@ -214,6 +214,8 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 		"https://users.example.com/find-subject-by-federated-identity",
 	CLIENT_USER_TIMEOUT: "5000",
 	CLIENT_USER_MAX_RESPONSE_BYTES: "1048576",
+	// The credential the http user adapter presents to the Store; >= 32 bytes.
+	CLIENT_USER_BEARER_TOKEN: "0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a",
 	CLIENT_CODE_TYPE: "redis",
 	CLIENT_CODE_DEFAULT_EXPIRES_IN: "600",
 	CLIENT_CODE_ENDPOINT_URI: "redis://redis:6379",

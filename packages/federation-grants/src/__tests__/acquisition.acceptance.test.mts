@@ -28,12 +28,15 @@
  * each rule; this tests that they are the same deployment.
  */
 
+import { createServer as createNetServer } from "node:net";
+import { inspect } from "node:util";
 import type {
 	BootstrapMap,
 	ClientRepository,
 	FederatedIdentityLookup,
 	FederatedIdentityLookupResult,
 	FederatedIdentityRegistration,
+	Logger,
 	SubjectRevocation,
 	UserRepository,
 	UserSession,
@@ -211,6 +214,7 @@ const boot = async (
 		grants: createMemoryFederationGrantStore(),
 		intents: createMemoryFederationGrantIntentStore(),
 	},
+	logger?: Logger,
 ) => {
 	const full = makeValidFullSections();
 	const handle = await createApp({
@@ -255,6 +259,7 @@ const boot = async (
 				},
 			},
 			pathResolver: (s: string) => s,
+			...(logger === undefined ? {} : { logger }),
 			clientRepository,
 			userRepository,
 			userSessionStore: { get: async (sid: string) => durable.get(sid) ?? null },
@@ -486,8 +491,14 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 	const STORE = "http://localhost:18081";
 	const LOOKUP = `${STORE}/identity/lookup`;
 	const server = setupServer();
-	/** What the Store answers, and what it was asked. */
-	const store = { status: 200, body: { kind: "unlinked" } as unknown, asked: [] as unknown[] };
+	/** What the Store answers, and what it was asked — and with which Authorization. */
+	const store = {
+		status: 200,
+		headers: {} as Record<string, string>,
+		body: { kind: "unlinked" } as unknown,
+		asked: [] as unknown[],
+		authorization: [] as (string | null)[],
+	};
 	beforeAll(() => {
 		// Only the Store is mocked: supertest's own requests to the composed app
 		// pass through, and anything else aimed at the Store's origin is an error.
@@ -499,22 +510,27 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 		server.use(
 			http.post(LOOKUP, async ({ request: req }) => {
 				store.asked.push(await req.json());
+				store.authorization.push(req.headers.get("authorization"));
+				const init = { status: store.status, headers: store.headers };
 				return store.body === undefined
-					? new HttpResponse(null, { status: store.status })
-					: HttpResponse.json(store.body as never, { status: store.status });
+					? new HttpResponse(null, init)
+					: HttpResponse.json(store.body as never, init);
 			}),
 		);
 	});
 	afterEach(() => {
 		store.status = 200;
+		store.headers = {};
 		store.body = { kind: "unlinked" };
 		store.asked = [];
+		store.authorization = [];
 		exchangeUpstream = { issuer: "https://issuer.example", subject: "00u-alice" };
 	});
 	afterAll(() => server.close());
 
-	const httpRepository = () =>
+	const httpRepository = (credential: { bearerToken?: string } = {}) =>
 		new HttpUserRepository({
+			...credential,
 			authenticateUrl: `${STORE}/authenticate`,
 			authenticateByTokenUrl: `${STORE}/authenticate/token`,
 			findSubjectByFederatedIdentityUrl: LOOKUP,
@@ -640,6 +656,126 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 			store.status = 200;
 			store.body = { found: false };
 			expect((await connectAs(app, "b-http-5")).get("error")).toBe("temporarily_unavailable");
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("reports a Store that refuses this deployment's token as store_credential_refused — never the token — and answers temporarily_unavailable", async () => {
+		// The lookup's only caller reports through the sanitized reporter,
+		// which logs a classification and never the error: without one of its
+		// own, a refused token would read as "unknown" here.
+		const TOKEN = "0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a";
+		const lines: unknown[][] = [];
+		const record =
+			(level: string) =>
+			(...args: unknown[]): void => {
+				lines.push([level, ...args]);
+			};
+		const logger = {
+			trace: record("trace"),
+			debug: record("debug"),
+			info: record("info"),
+			warn: record("warn"),
+			error: record("error"),
+			fatal: record("fatal"),
+			child: () => logger,
+		} as Logger;
+		exchangeUpstream = { ...exchangeUpstream, claims: { oid: "O-ALICE", tid: "T-1" } };
+		const { handle, app } = await boot(
+			undefined,
+			httpRepository({ bearerToken: TOKEN }),
+			connections(),
+			undefined,
+			logger,
+		);
+		try {
+			store.status = 401;
+			store.headers = { "WWW-Authenticate": 'Bearer error="invalid_token"' };
+			store.body = { error: "invalid_token" };
+			expect((await connectAs(app, "b-http-6")).get("error")).toBe("temporarily_unavailable");
+			expect(store.authorization).toEqual([`Bearer ${TOKEN}`]);
+			const reports = lines.filter(
+				([, first]) =>
+					(first as { event?: unknown } | undefined)?.event === "federation_grant.failure",
+			);
+			expect(reports).toEqual([
+				[
+					"warn",
+					expect.objectContaining({
+						during: "callback_identity_lookup",
+						classification: "store_credential_refused",
+					}),
+					"federation grant operation failed",
+				],
+			]);
+			expect(
+				lines.filter((line) =>
+					inspect(line, { depth: Number.POSITIVE_INFINITY, showHidden: true }).includes(TOKEN),
+				),
+			).toEqual([]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("reports a Store it cannot reach as store_transport_failed, and answers temporarily_unavailable", async () => {
+		const lines: unknown[][] = [];
+		const record =
+			(level: string) =>
+			(...args: unknown[]): void => {
+				lines.push([level, ...args]);
+			};
+		const logger = {
+			trace: record("trace"),
+			debug: record("debug"),
+			info: record("info"),
+			warn: record("warn"),
+			error: record("error"),
+			fatal: record("fatal"),
+			child: () => logger,
+		} as Logger;
+		// A loopback port nothing listens on — outside the mocked Store origin,
+		// so the connection is really refused.
+		const closed = await new Promise<number>((resolve) => {
+			const probe = createNetServer();
+			probe.listen(0, "127.0.0.1", () => {
+				const { port } = probe.address() as { port: number };
+				probe.close(() => resolve(port));
+			});
+		});
+		const unreachable = new HttpUserRepository({
+			authenticateUrl: `${STORE}/authenticate`,
+			authenticateByTokenUrl: `${STORE}/authenticate/token`,
+			findSubjectByFederatedIdentityUrl: `http://127.0.0.1:${closed}/identity/lookup`,
+			federatedIdentityLookupCoverage: [
+				{
+					provider: "upstream",
+					issuer: "https://issuer.example",
+					clientId: "provider-client",
+					requiredClaims: ["tid", "oid"],
+				},
+			],
+			timeout: 5000,
+		});
+		exchangeUpstream = { ...exchangeUpstream, claims: { oid: "O-ALICE", tid: "T-1" } };
+		const { handle, app } = await boot(undefined, unreachable, connections(), undefined, logger);
+		try {
+			expect((await connectAs(app, "b-http-7")).get("error")).toBe("temporarily_unavailable");
+			const reports = lines.filter(
+				([, first]) =>
+					(first as { event?: unknown } | undefined)?.event === "federation_grant.failure",
+			);
+			expect(reports).toEqual([
+				[
+					"warn",
+					expect.objectContaining({
+						during: "callback_identity_lookup",
+						classification: "store_transport_failed",
+					}),
+					"federation grant operation failed",
+				],
+			]);
 		} finally {
 			await handle.dispose();
 		}

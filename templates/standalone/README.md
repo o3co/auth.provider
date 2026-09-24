@@ -503,6 +503,7 @@ is documented in [its README](../../packages/federation-oidc/README.md).
 | `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | — | URL for token-based user authentication. **https required** (see below) |
 | `CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` | — | Optional. URL the Store links a federated identity at (#482); enables `?link=1` on the federation start route. **https required** |
 | `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | — | Optional. URL the Store answers who holds an upstream identity at (#613, federation grants' check 5). With it, declare what the Store covers in `repositories.user.http.federatedIdentityLookupCoverage` (HOCON). **https required** |
+| `CLIENT_USER_BEARER_TOKEN` | — | Optional. The credential this server presents to the Store: every Store request carries `Authorization: Bearer <token>`. A bare token (no `Bearer ` prefix) of at least 32 bytes — `openssl rand -hex 32`. Unset, no `Authorization` header is sent (see below) |
 | `CLIENT_USER_TIMEOUT` | `5000` | HTTP request timeout in milliseconds. Positive integer ≤ `2147483647` |
 | `CLIENT_USER_MAX_RESPONSE_BYTES` | `1048576` | Largest upstream response body accepted, in bytes |
 
@@ -518,6 +519,33 @@ or the response cap is unusable, rather than at the first login attempt.
 Each URL must be the endpoint that answers, not one that redirects: no request
 follows a `3xx`, so a URL that redirects fails every call — see
 [What the Store must enforce itself](../../packages/foundation/README.md#what-the-store-must-enforce-itself).
+
+**Who may call the Store.** What the token-based login and account linking
+send is an identifier, not a secret, so a Store that answers any caller
+resolves a known identity to its user — or links one to any account — for
+anyone who can reach it. Set `CLIENT_USER_BEARER_TOKEN` and have the Store
+answer every request whose `Authorization` is not exactly `Bearer <that token>`
+with `401` and `WWW-Authenticate: Bearer error="invalid_token"` (or `403` and
+`error="insufficient_scope"`). The one token goes to every Store URL above, so
+those endpoints must be one trust domain. With `CLIENT_USER_TYPE=http` — this
+template's default — boot fails if the token is weaker than 32 bytes
+(measured like `SESSION_SECRET`), malformed, or exported but empty; it appears
+in no error this server throws. With that challenge, a token the Store does not
+accept is an outage on every Store call: logins answer
+`503 temporarily_unavailable` and log an error naming the refused credential,
+not the token; federation-grants connects log
+`classification: "store_credential_refused"`. A `401` or `403` without the
+challenge keeps its old meaning — at login "no such user", at a `?link=1`
+link a refusal, and at the federation-grants identity lookup an outage like
+any other non-`2xx` — so a mismatch then shows only as every login failing
+and every link refused; and a Store must not put a `Bearer` challenge on a
+user's wrong password or a link it refuses. A Store that cannot be reached,
+closes the connection before a complete response, or answers with a malformed
+HTTP response is logged as such, with at most a transport code
+(`ECONNREFUSED`, `UND_ERR_SOCKET`, `ERR_SSL_WRONG_VERSION_NUMBER`, …), and
+never with what the transport quoted. Without the token, admit only this server to the Store
+by network policy or platform mutual TLS. Rotation, what each caller logs, and
+what the Store checks are in the same foundation README section.
 
 ### Code Repository
 

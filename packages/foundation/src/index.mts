@@ -79,6 +79,11 @@ export const registerBuiltinAdapters = (factories: {
 							config.federatedIdentityLookupCoverage as readonly FederatedIdentityLookupCoverage[],
 					}
 				: {}),
+			// Optional, and forwarded whenever SET for the lookup URL's reason: a
+			// token that vanished would be a deployment that believes its Store
+			// calls authenticated and sends them bare. The constructor refuses
+			// what is not a string, and what is blank, malformed or too weak.
+			...(config.bearerToken !== undefined ? { bearerToken: config.bearerToken as string } : {}),
 			timeout: toNumber(config.timeout, DEFAULT_TIMEOUT_MS),
 			maxResponseBytes: toNumber(config.maxResponseBytes, DEFAULT_MAX_RESPONSE_BYTES),
 		});
@@ -90,3 +95,8 @@ export {
 	type FederatedIdentityLookupCoverage,
 	HttpUserRepository,
 } from "./repositories/HttpUserRepository.mjs";
+export {
+	StoreCredentialRefusedError,
+	StoreTransportError,
+	type StoreTransportFailure,
+} from "./repositories/storeErrors.mjs";

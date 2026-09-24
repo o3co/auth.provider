@@ -106,6 +106,39 @@ describe("createSanitizedReporter", () => {
 		expect(JSON.stringify(warn.mock.calls[2])).not.toContain(SENTINEL);
 	});
 
+	it("names the Store refusing this deployment's credential, and nothing of its message", () => {
+		// The foundation adapter's refusal — a Store's 401 or 403 with a Bearer
+		// challenge (StoreCredentialRefusedError). Recognised by name, as every
+		// classification is: this package does not depend on the adapter.
+		const { logger, warn } = spyLogger();
+		const refused = new Error(`the Store at https://store.test refused ${SENTINEL}`);
+		refused.name = "StoreCredentialRefusedError";
+		createSanitizedReporter(logger)({
+			during: "callback_identity_lookup",
+			error: refused,
+			grantId: "g",
+			correlationId: "c",
+		});
+		expect(warn.mock.calls[0]?.[0]).toMatchObject({ classification: "store_credential_refused" });
+		expect(JSON.stringify(warn.mock.calls[0])).not.toContain(SENTINEL);
+	});
+
+	it("names a Store that could not be reached, or answered unreadably, and nothing of its message", () => {
+		// The foundation adapter's StoreTransportError: a refused connection, a
+		// TLS failure, a connection closed first, a malformed answer, a body that broke mid-read.
+		const { logger, warn } = spyLogger();
+		const failed = new Error(`request to https://store.test could not be reached ${SENTINEL}`);
+		failed.name = "StoreTransportError";
+		createSanitizedReporter(logger)({
+			during: "callback_identity_lookup",
+			error: failed,
+			grantId: "g",
+			correlationId: "c",
+		});
+		expect(warn.mock.calls[0]?.[0]).toMatchObject({ classification: "store_transport_failed" });
+		expect(JSON.stringify(warn.mock.calls[0])).not.toContain(SENTINEL);
+	});
+
 	it("survives a failure that is not an error at all", () => {
 		const { logger, warn } = spyLogger();
 		createSanitizedReporter(logger)({

@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import type { Logger } from "@o3co/auth-provider-core";
+import { StoreCredentialRefusedError, StoreTransportError } from "@o3co/auth-provider-foundation";
 import express from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
@@ -92,5 +93,44 @@ describe("terminal error handler (#293 item 8)", () => {
 			expect.objectContaining({ endpoint: "/boom" }),
 			"unhandled_request_error",
 		);
+	});
+
+	it("answers a Store failure a route did not catch as 500 and logs it — the Store's own status is not the client's", async () => {
+		// The user repository's named errors reach here only if a route lets
+		// one through. Their Store status must not be read as the answer: an
+		// error carrying a numeric 4xx `status` is taken for a body-parser
+		// rejection, answered with that status and not logged — so a Store that
+		// refused this deployment's token would reach the browser as its own
+		// 401 "malformed request body", with nothing in the log.
+		for (const make of [
+			() => new StoreCredentialRefusedError("https://store.test/authenticate", 401),
+			() => new StoreCredentialRefusedError("https://store.test/authenticate", 403),
+			() =>
+				new StoreTransportError(
+					"HttpUserRepository: request to https://store.test/authenticate could not be reached",
+					"unreachable",
+					"ECONNREFUSED",
+				),
+		]) {
+			const thrown = make();
+			const { logger, error } = makeLogger();
+			const app = express();
+			app.get("/login", () => {
+				throw thrown;
+			});
+			app.use(createTerminalErrorHandler(logger));
+
+			const res = await request(app).get("/login");
+
+			expect(res.status, thrown.message).toBe(500);
+			expect(res.body).toEqual({
+				error: "server_error",
+				error_description: "Internal server error",
+			});
+			expect(error).toHaveBeenCalledWith(
+				expect.objectContaining({ err: thrown, endpoint: "/login" }),
+				"unhandled_request_error",
+			);
+		}
 	});
 });

@@ -14,16 +14,21 @@
  * limitations under the License.
  */
 
-import type {
-	FederatedIdentityLink,
-	FederatedIdentityLookup,
-	FederatedIdentityLookupResult,
-	FederatedIdentityRegistration,
-	LinkFederatedIdentityResult,
-	User,
-	UserRepository,
+import {
+	describeWeakSecret,
+	type FederatedIdentityLink,
+	type FederatedIdentityLookup,
+	type FederatedIdentityLookupResult,
+	type FederatedIdentityRegistration,
+	type LinkFederatedIdentityResult,
+	MIN_SECRET_ENTROPY_BYTES,
+	measureSecretEntropyBytes,
+	type User,
+	type UserRepository,
 } from "@o3co/auth-provider-core";
 import { assertSecureEndpoint } from "../endpointUrl.mjs";
+import { readFailure, requestFailure, StoreCredentialRefusedError } from "./storeErrors.mjs";
+import { hasBearerChallenge } from "./wwwAuthenticate.mjs";
 
 /** The Store answered 409 to a link request: the identity is already someone else's (#482). */
 const CONFLICT = Symbol("conflict");
@@ -199,6 +204,58 @@ function lookupAnswer(value: unknown): FederatedIdentityLookupResult | undefined
 	}
 }
 
+/**
+ * RFC 6750 §2.1 `b64token` — the characters a bearer credential may carry.
+ * Nothing in it is whitespace or a control character, so a token that
+ * matches cannot break the header it rides in.
+ */
+const B64TOKEN = /^[A-Za-z0-9\-._~+/]+=*$/;
+
+const BEARER_TOKEN_FIELD = "bearerToken";
+
+/**
+ * The credential presented to the Store, checked (#285's rule: at
+ * construction, so a deployment that would send an unusable one fails at
+ * boot) and turned into the `Authorization` value; `undefined` when none is
+ * configured, which sends no `Authorization` header at all.
+ *
+ * The shape is refused here and not left to `fetch`: a header value `fetch`
+ * refuses is one it QUOTES in the `TypeError` it throws, on the request path,
+ * where the session routes log what is thrown. The strength is core's
+ * shared-secret floor (`MIN_SECRET_ENTROPY_BYTES`, measured on the decoded
+ * length as `SESSION_SECRET` is): whoever holds this token speaks to the Store
+ * as auth.provider — resolves an identity to its user, links one to any user.
+ * No message quotes the value.
+ */
+function bearerAuthorization(value: unknown): string | undefined {
+	if (value === undefined) return undefined;
+	const refuse = (problem: string): Error =>
+		new Error(`HttpUserRepository: "${BEARER_TOKEN_FIELD}" ${problem}`);
+	if (typeof value !== "string") throw refuse("must be a string");
+	if (value === "") {
+		throw refuse(
+			'must not be empty — HOCON substitutes an exported-but-empty variable as ""; ' +
+				"leave it unset to send no Authorization header",
+		);
+	}
+	if (!B64TOKEN.test(value)) {
+		throw refuse(
+			"must be a bare RFC 6750 token: letters, digits and - . _ ~ + /, then optional = padding — " +
+				'no whitespace, no line break, and no "Bearer " prefix (the scheme is added)',
+		);
+	}
+	const actualBytes = measureSecretEntropyBytes(value);
+	if (actualBytes < MIN_SECRET_ENTROPY_BYTES) {
+		throw new Error(
+			`HttpUserRepository: ${describeWeakSecret(actualBytes, {
+				configKey: "repositories.user.http.bearerToken",
+				envVar: "CLIENT_USER_BEARER_TOKEN",
+			})}`,
+		);
+	}
+	return `Bearer ${value}`;
+}
+
 /** Whether `value` is a positive integer that fits `bound`. */
 function isPositiveIntegerWithin(value: unknown, bound: number): value is number {
 	return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= bound;
@@ -231,12 +288,17 @@ function discardBody(res: Response): void {
  * before a byte of it is read, but the streaming count is the load-bearing
  * half: a hostile Store simply omits the header (or lies), and chunked transfer
  * encoding has none to omit.
+ *
+ * Everything it throws is the adapter's own: the cap, the deadline's
+ * rejection, or — for a stream that broke mid-read — what `unreadable` makes
+ * of the transport's error, which is never passed on as it is.
  */
 async function readBodyCapped(
 	res: Response,
 	limit: number,
 	url: string,
 	deadline: Promise<never>,
+	unreadable: (err: unknown) => Error,
 ): Promise<string> {
 	const declared = Number(res.headers.get("content-length"));
 	if (Number.isFinite(declared) && declared > limit) {
@@ -260,7 +322,12 @@ async function readBodyCapped(
 			// in flight, which is exactly the slow-loris shape — headers arrive
 			// promptly, then the body dribbles or stops. One absolute deadline
 			// for the whole exchange, not a fresh one per chunk.
-			const { done, value } = await Promise.race([reader.read(), deadline]);
+			const { done, value } = await Promise.race([
+				reader.read().catch((err: unknown) => {
+					throw unreadable(err);
+				}),
+				deadline,
+			]);
 			if (done) break;
 			read += value.byteLength;
 			if (read > limit) {
@@ -286,8 +353,9 @@ async function readBodyCapped(
  * A deliberately shallow check. An aborted `fetch` rejects with the
  * `AbortError` directly; the wrapping that `fetch` does apply is for network
  * failures, which are not aborts. If some runtime did wrap one, the request
- * still fails — it would simply surface the runtime's message instead of ours,
- * which is a cosmetic difference and not worth an untestable `cause` walk.
+ * still fails — as a `StoreTransportError` ("could not be reached") instead of
+ * a `TimeoutError`, a misnamed failure rather than a missed one, and not worth
+ * an untestable `cause` walk.
  * A stalled *body* is not covered here at all: that is the deadline race in
  * `readBodyCapped`, which does not depend on abort semantics.
  */
@@ -313,8 +381,31 @@ function isAbortError(err: unknown): boolean {
  * place its body is ever sent and the only one whose answer is taken: a `3xx`
  * from the Store is an upstream failure, thrown like any other unexpected
  * status, and its `Location` is never contacted.
+ *
+ * With `bearerToken` configured, every request — authentication, linking and
+ * the identity lookup alike — carries `Authorization: Bearer <token>`, so the
+ * Store can refuse a caller that is not this deployment; without it, no
+ * request carries an `Authorization` header. The Store says it refused THIS
+ * deployment by answering `401` or `403` with a `Bearer` challenge (RFC 6750
+ * §3), and that answer, while a token was sent, throws a
+ * {@link StoreCredentialRefusedError} on every request — never "no such user"
+ * or a refused link, which is what either status without the challenge still
+ * means.
+ *
+ * A transport's own error is never thrown: undici's parser errors quote the
+ * bytes they rejected, and a peer that reflects the request puts the
+ * `Authorization` header — or a password — there. A request that cannot be
+ * made, or an answer that cannot be read, throws a `StoreTransportError`
+ * (`src/repositories/storeErrors.mts`): a fixed message naming the endpoint
+ * and what failed, at most an allowlisted transport code, no cause.
  */
 export class HttpUserRepository implements UserRepository {
+	/**
+	 * `Bearer <token>`, or `undefined` for none. An ECMAScript private field
+	 * rather than a TypeScript `private` one: `inspect()` and `JSON.stringify`
+	 * see every other field of a repository handed to a logger, and not this.
+	 */
+	readonly #authorization: string | undefined;
 	private authenticateUrl: string;
 	private authenticateByTokenUrl: string;
 	private timeout: number;
@@ -353,6 +444,7 @@ export class HttpUserRepository implements UserRepository {
 		linkFederatedIdentityUrl,
 		findSubjectByFederatedIdentityUrl,
 		federatedIdentityLookupCoverage,
+		bearerToken,
 		timeout,
 		maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
 	}: {
@@ -364,6 +456,12 @@ export class HttpUserRepository implements UserRepository {
 		findSubjectByFederatedIdentityUrl?: string;
 		/** #613: which registrations the Store's lookup covers. Needs the URL; `[]` covers none. */
 		federatedIdentityLookupCoverage?: readonly FederatedIdentityLookupCoverage[];
+		/**
+		 * Optional; sent to the Store on every request as `Authorization: Bearer
+		 * <token>`. A bare RFC 6750 token (no scheme) of at least
+		 * `MIN_SECRET_ENTROPY_BYTES` of key material — `openssl rand -hex 32`.
+		 */
+		bearerToken?: string;
 		timeout: number;
 		maxResponseBytes?: number;
 	}) {
@@ -372,6 +470,7 @@ export class HttpUserRepository implements UserRepository {
 			authenticateByTokenUrl,
 			"authenticateByTokenUrl",
 		);
+		this.#authorization = bearerAuthorization(bearerToken);
 		if (linkFederatedIdentityUrl !== undefined) {
 			this.linkFederatedIdentityUrl = assertSecureEndpoint(
 				linkFederatedIdentityUrl,
@@ -414,6 +513,33 @@ export class HttpUserRepository implements UserRepository {
 			throw new Error('HttpUserRepository: "maxResponseBytes" must be a positive integer');
 		}
 		this.maxResponseBytes = maxResponseBytes;
+	}
+
+	/** What every request carries: the body's type and, when configured, the credential. */
+	private headers(): Record<string, string> {
+		return this.#authorization === undefined
+			? { "Content-Type": "application/json" }
+			: { "Content-Type": "application/json", Authorization: this.#authorization };
+	}
+
+	/**
+	 * Throws {@link StoreCredentialRefusedError} when a non-`2xx` answer is the
+	 * Store refusing this deployment's credential: a `401` or `403` with a
+	 * `Bearer` challenge, to a request that carried the token. Read before any
+	 * other reading of the status — without it a token the Store does not
+	 * accept is every login "no such user" and every link "refused", with
+	 * nothing logged. Without a token sent, a challenge is not about one, and a
+	 * Store whose stack challenges every refusal keeps the wire meaning it has
+	 * always had.
+	 */
+	private assertCredentialAccepted(res: Response, url: string): void {
+		if (
+			this.#authorization !== undefined &&
+			(res.status === 401 || res.status === 403) &&
+			hasBearerChallenge(res.headers.get("www-authenticate"))
+		) {
+			throw new StoreCredentialRefusedError(url, res.status);
+		}
 	}
 
 	async authenticate(username: string, password: string): Promise<User | null> {
@@ -490,9 +616,11 @@ export class HttpUserRepository implements UserRepository {
 	 * {@link post}'s readings, though. A `401`/`403` is not "nobody", a `409` is
 	 * not a conflict, a `404` is not an absence: only a `2xx` carrying one of the
 	 * three answers is an answer, and everything else throws — as an outage,
-	 * which is what a lookup that could not be made is. What is thrown names the
-	 * endpoint — and, for an answer with a status, the status — and never the
-	 * body, the identity, a status text or an underlying cause.
+	 * which is what a lookup that could not be made is — a `401` or `403` with a
+	 * `Bearer` challenge, to a request that carried the token, as the refused
+	 * credential it is. What is thrown names the endpoint — and, for an answer
+	 * with a status, the status; for a transport failure, at most its code — and
+	 * never the body, the identity, a status text or an underlying cause.
 	 */
 	private async postLookup(url: string, body: unknown): Promise<FederatedIdentityLookupResult> {
 		const controller = new AbortController();
@@ -520,7 +648,7 @@ export class HttpUserRepository implements UserRepository {
 			try {
 				res = await fetch(url, {
 					method: "POST",
-					headers: { "Content-Type": "application/json" },
+					headers: this.headers(),
 					body: JSON.stringify(body),
 					signal: controller.signal,
 					redirect: "manual",
@@ -529,21 +657,27 @@ export class HttpUserRepository implements UserRepository {
 				if (timedOut && isAbortError(err)) throw timeoutError();
 				// A fixed message, without the cause: what a transport reports may
 				// quote what it was sending.
-				throw new Error(`HttpUserRepository: identity lookup at ${url} could not be reached`);
+				throw requestFailure(err, {
+					unreachable: `HttpUserRepository: identity lookup at ${url} could not be reached`,
+					closed: `HttpUserRepository: identity lookup at ${url}: the connection closed before a complete response arrived`,
+					malformed: `HttpUserRepository: identity lookup at ${url} answered with a malformed HTTP response`,
+				});
 			}
 			if (!res.ok) {
 				discardBody(res);
+				this.assertCredentialAccepted(res, url);
 				throw new Error(
 					`HttpUserRepository: identity lookup at ${url} answered HTTP ${res.status}`,
 				);
 			}
 			let raw: string;
 			try {
-				raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline);
+				raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline, (err) =>
+					readFailure(err, `HttpUserRepository: identity lookup at ${url} could not be read`),
+				);
 			} catch (err) {
 				if (timedOut) throw timeoutError();
-				if (err instanceof Error && err.message.startsWith("HttpUserRepository:")) throw err;
-				throw new Error(`HttpUserRepository: identity lookup at ${url} could not be read`);
+				throw err;
 			}
 			let parsed: unknown;
 			try {
@@ -577,12 +711,19 @@ export class HttpUserRepository implements UserRepository {
 		// raced against. `.catch` is attached up front so an exchange that
 		// finishes first — the overwhelmingly common case, where the timer is
 		// cleared and this never rejects — cannot leave an unhandled rejection.
+		// Named as the lookup's is: a reporter that classifies by `name` —
+		// federation-grants' reads `TimeoutError` as `timeout` — sees one kind
+		// of timeout whichever request it came from.
+		const timeoutError = (): Error => {
+			const error = new Error(
+				`HttpUserRepository: request to ${url} timed out after ${this.timeout}ms`,
+			);
+			error.name = "TimeoutError";
+			return error;
+		};
 		let fireDeadline: () => void = () => {};
 		const deadline = new Promise<never>((_resolve, reject) => {
-			fireDeadline = () =>
-				reject(
-					new Error(`HttpUserRepository: request to ${url} timed out after ${this.timeout}ms`),
-				);
+			fireDeadline = () => reject(timeoutError());
 		});
 		deadline.catch(() => {});
 
@@ -593,23 +734,45 @@ export class HttpUserRepository implements UserRepository {
 		}, this.timeout);
 
 		try {
-			const res = await fetch(url, {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify(body),
-				signal: controller.signal,
-				// Never followed: a 307 or 308 would re-send the body — a password,
-				// a token, a link request — to a `Location` the https rule never
-				// checked, and after any redirect the answer from there would be
-				// taken as the user. Node's fetch hands the 3xx back as it is (a
-				// browser-spec runtime would hand back an opaque redirect, status
-				// 0); either way it is not a 2xx, 401, 403 or 409, so it throws
-				// below as an unexpected status.
-				redirect: "manual",
-			});
+			let res: Response;
+			try {
+				res = await fetch(url, {
+					method: "POST",
+					headers: this.headers(),
+					body: JSON.stringify(body),
+					signal: controller.signal,
+					// Never followed: a 307 or 308 would re-send the body — a
+					// password, a token, a link request — to a `Location` the https
+					// rule never checked, and after any redirect the answer from
+					// there would be taken as the user. Node's fetch hands the 3xx
+					// back as it is (a browser-spec runtime would hand back an opaque
+					// redirect, status 0); either way it is not a 2xx, 401, 403 or
+					// 409, so it throws below as an unexpected status.
+					redirect: "manual",
+				});
+			} catch (err) {
+				if (timedOut && isAbortError(err)) throw timeoutError();
+				// Never the transport's own error: it may quote what it was
+				// sending — the credential, the password — or what came back.
+				throw requestFailure(err, {
+					unreachable: `HttpUserRepository: request to ${url} could not be reached`,
+					closed: `HttpUserRepository: the connection to ${url} closed before a complete response arrived`,
+					malformed: `HttpUserRepository: the Store at ${url} answered with a malformed HTTP response`,
+				});
+			}
 
 			if (res.ok) {
-				const raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline);
+				let raw: string;
+				try {
+					raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline, (err) =>
+						readFailure(err, `HttpUserRepository: response from ${url} could not be read`),
+					);
+				} catch (err) {
+					// Whatever the deadline interrupted is a timeout; everything
+					// else readBodyCapped throws is already the adapter's own.
+					if (timedOut) throw timeoutError();
+					throw err;
+				}
 				let parsed: unknown;
 				try {
 					parsed = JSON.parse(raw);
@@ -630,6 +793,7 @@ export class HttpUserRepository implements UserRepository {
 			}
 
 			discardBody(res);
+			this.assertCredentialAccepted(res, url);
 
 			if (options.acceptConflict && res.status === 409) {
 				return CONFLICT;
@@ -639,11 +803,6 @@ export class HttpUserRepository implements UserRepository {
 			}
 
 			throw new Error(`Unexpected HTTP status ${res.status} from ${url}`);
-		} catch (err) {
-			if (timedOut && isAbortError(err)) {
-				throw new Error(`HttpUserRepository: request to ${url} timed out after ${this.timeout}ms`);
-			}
-			throw err;
 		} finally {
 			clearTimeout(timer);
 		}
