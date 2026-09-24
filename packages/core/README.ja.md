@@ -92,7 +92,7 @@ RFC 6749 付録 A.7 と A.8 は `error` と `error_description` を `1*NQSCHAR`�
 
 `generateToken(data, options)`、`generateTokenResponse(tokens, options?)`、`formatObject` は [`src/grants/token.mts`](src/grants/token.mts) にあり、`Token`、`TokenResponse`、`GenerateTokenOptions` がその隣にあります。
 
-`generateToken` は `options.keyStore` の現在の署名鍵で JWT に署名します。`alg` と `kid` はキーストアのもの、`typ` は `options.tokenType`、`cnf` は `options.confirmation` が与えられたときだけ出力され、`jti` / `issuedAt` は呼び出し側が先に予約していなければここで発行されます（#449）。`generateTokenResponse` はアクセストークン、任意のリフレッシュトークン、任意の id_token を OAuth 2.0 トークンエンドポイントのレスポンス形式にまとめ、`DPoP` を要求されない限り `token_type` は `Bearer` です。`formatObject` はオブジェクトから `undefined` と `null` の値を除去します。
+`generateToken` は `options.keyStore` の現在の署名鍵で JWT に署名します。`alg` と `kid` はキーストアのもの、`typ` は `options.tokenType`、`cnf` は `options.confirmation` が与えられたときだけ出力され、`jti` / `issuedAt` は呼び出し側が先に予約していなければここで発行されます（#449）。`exp` は `iat + options.expiresIn` なので、`expiresIn` は正の整数秒でなければなりません。小数、`NaN`、`Infinity`、0 以下は何かに署名する前に `RangeError` になります（設定スキーマは `oauth.accessToken.*` と `oauth.refreshToken.expiresIn` について同じ値を拒否します）。`generateTokenResponse` はアクセストークン、任意のリフレッシュトークン、任意の id_token を OAuth 2.0 トークンエンドポイントのレスポンス形式にまとめ、`DPoP` を要求されない限り `token_type` は `Bearer` です。`formatObject` はオブジェクトから `undefined` と `null` の値を除去します。
 
 ### キーストア
 

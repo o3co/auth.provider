@@ -224,6 +224,22 @@ describe("token lifetimes are positive and bounded", () => {
 		expect(issuePaths(result)).toContain("oauth.refreshToken.expiresIn");
 	});
 
+	// `exp` is `iat + expiresIn`, which `generateToken` requires to be whole
+	// seconds; the schema is where a loaded configuration meets that rule.
+	for (const expiresIn of [1.5, Number.NaN, Number.POSITIVE_INFINITY, "1.5"]) {
+		it(`rejects refreshToken.expiresIn = ${String(expiresIn)}: not a whole number of seconds`, () => {
+			const result = parseWithOauth((base) => ({
+				...base,
+				oauth: {
+					...base.oauth,
+					refreshToken: { ...base.oauth.refreshToken, expiresIn },
+				},
+			}));
+			expect(result.success).toBe(false);
+			expect(issuePaths(result)).toContain("oauth.refreshToken.expiresIn");
+		});
+	}
+
 	it("accepts the shipped defaults (3600s access, 86400s refresh)", () => {
 		expect(AppConfigSchema.safeParse(makeValidAppConfig()).success).toBe(true);
 	});

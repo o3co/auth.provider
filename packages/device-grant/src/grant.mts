@@ -75,6 +75,15 @@ const error = (status: number, code: string, description: string): GrantHandlerR
 
 export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHandler => {
 	const now = options.now ?? Date.now;
+	// The one lifetime this grant mints with. `generateToken` would refuse a
+	// bad one too, but only on the first poll after a user approved a device;
+	// a composition fault is refused where the composition is assembled.
+	const { accessTokenExpiresIn } = options;
+	if (!(Number.isSafeInteger(accessTokenExpiresIn) && accessTokenExpiresIn > 0)) {
+		throw new RangeError(
+			`createDeviceCodeGrant: accessTokenExpiresIn must be a positive whole number of seconds (got ${String(accessTokenExpiresIn)})`,
+		);
+	}
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -163,7 +172,7 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 							{},
 							{
 								keyStore: options.keyStore,
-								expiresIn: options.accessTokenExpiresIn,
+								expiresIn: accessTokenExpiresIn,
 								...(ctx.issuer === undefined ? {} : { issuer: ctx.issuer }),
 								audience,
 								subject: authorization.subject,

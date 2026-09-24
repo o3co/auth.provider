@@ -82,6 +82,12 @@ export const generateTokenResponse = (
 };
 
 export interface GenerateTokenOptions {
+	/**
+	 * Seconds from `iat` to `exp`: a positive whole number, or absent for a
+	 * token with no `exp`. Anything else — a fraction, NaN, Infinity, zero or
+	 * less, or past `Number.MAX_SAFE_INTEGER` — is a `RangeError` before
+	 * anything is signed.
+	 */
 	expiresIn?: number;
 	keyStore: KeyStore;
 	issuer?: string | null;
@@ -135,6 +141,16 @@ export const generateToken = async (
 	if (jti.length === 0) throw new Error("generateToken: jti must not be empty");
 	if (issuedAt !== undefined && !(Number.isSafeInteger(issuedAt) && issuedAt >= 0)) {
 		throw new Error("generateToken: issuedAt must be a non-negative whole number of epoch seconds");
+	}
+	// `exp` is `iat + expiresIn`, so the lifetime has to be whole seconds too:
+	// a fraction signs a fractional `exp` each verifier rounds its own way,
+	// NaN and Infinity serialise as `"exp": null`, and zero or less signs a
+	// token that is dead on arrival. The configuration schema refuses all of
+	// these; a caller that computes or hand-builds its lifetime meets this.
+	if (expiresIn !== undefined && !(Number.isSafeInteger(expiresIn) && expiresIn > 0)) {
+		throw new RangeError(
+			`generateToken: expiresIn must be a positive whole number of seconds (got ${String(expiresIn)})`,
+		);
 	}
 	const now = issuedAt ?? Math.floor(Date.now() / 1000);
 	const claims: JWTPayload = {

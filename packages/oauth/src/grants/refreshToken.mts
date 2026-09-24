@@ -568,6 +568,14 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			// store has spent the presented token, not after.
 			const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
 			const requestedRefreshExpiresIn = config.oauth.refreshToken.expiresIn;
+			// The schema refuses anything but a positive whole number of seconds;
+			// a configuration built by hand never met it, and `generateToken`
+			// refuses it only after the rotation below has spent the token.
+			if (!(Number.isSafeInteger(requestedRefreshExpiresIn) && requestedRefreshExpiresIn > 0)) {
+				throw new RangeError(
+					`oauth.refreshToken.expiresIn must be a positive whole number of seconds (got ${String(requestedRefreshExpiresIn)})`,
+				);
+			}
 			const newRefreshExp = issuedAt + requestedRefreshExpiresIn;
 			// What the rotation actually committed, once it has: IH-13 sets a
 			// family's TTL once at creation and never extends it, so a rotation
