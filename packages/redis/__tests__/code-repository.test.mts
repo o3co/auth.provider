@@ -16,7 +16,7 @@
 
 import { Redis } from "ioredis";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { testRedis } from "./support/redis.mjs";
+import { relativeDeadline, serverPasses, testRedis } from "./support/redis.mjs";
 
 const KEY_PREFIX = "oauth:code:";
 
@@ -435,9 +435,9 @@ describe("RedisCodeRepository", () => {
 	});
 });
 
-const describeWithRedis = process.env.REDIS_TESTCONTAINERS === "true" ? describe : describe.skip;
-
-describeWithRedis("RedisCodeRepository with real Redis", () => {
+// On the run's shared Redis (`support/redis.mts`), in every run: it used to be
+// gated on an environment variable nothing set, so it never ran in CI.
+describe("RedisCodeRepository with real Redis", () => {
 	let raw: Redis | undefined;
 
 	beforeAll(async () => {
@@ -462,16 +462,28 @@ describeWithRedis("RedisCodeRepository with real Redis", () => {
 			defaultExpiresIn: 1,
 		});
 
-		const created = await repo.createCode({
-			...minimalParams,
-			client_id: "test-client",
-			redirect_uri: "https://rp.example/cb",
-		});
+		let created: Awaited<ReturnType<typeof repo.createCode>> | undefined;
+		// The code's PX runs from when the SET reached the server: waited out
+		// to the latest instant it can live to on the server's clock, not
+		// slept on the host's.
+		const end = await relativeDeadline(
+			() => raw as Redis,
+			async () => {
+				created = await repo.createCode({
+					...minimalParams,
+					client_id: "test-client",
+					redirect_uri: "https://rp.example/cb",
+				});
+			},
+			() => 1_000,
+		);
+		if (!created) throw new Error("no code was created");
 		const ttl = await raw.pttl(`${keyPrefix}${created.code}`);
 		expect(ttl).toBeGreaterThan(0);
 		expect(ttl).toBeLessThanOrEqual(1000);
+		expect(await repo.findByCode(created.code)).not.toBeNull();
 
-		await new Promise((resolve) => setTimeout(resolve, 1100));
+		await serverPasses(() => raw as Redis)(end);
 		expect(await repo.findByCode(created.code)).toBeNull();
 	});
 
