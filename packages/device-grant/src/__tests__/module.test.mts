@@ -736,12 +736,93 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		}
 	});
 
-	it("caps the logged message", async () => {
-		const { lines } = await lookupThrowing(new Error(`failure ${"x".repeat(1000)}`));
+	it("caps the logged message at its first 256 characters", async () => {
+		const message = `failure ${"x".repeat(1000)}`;
+		const { lines } = await lookupThrowing(new Error(message));
 		const logged = JSON.parse(lines[0]?.split(" ").slice(2).join(" ") ?? "{}") as {
 			err?: { message?: string };
 		};
-		expect(logged.err?.message?.length).toBeLessThanOrEqual(256);
+		expect(logged.err?.message).toBe(message.slice(0, 256));
+	});
+
+	it("logs a store error's Error causes the same way, and nothing of what they carry", async () => {
+		// A store that wraps the Redis reply it got: the cause says what
+		// failed, so it is logged — projected like the error itself, with
+		// Redis's echo of the command cut and the command's arguments and a
+		// non-Error cause's body left out.
+		const reply = Object.assign(
+			new Error(
+				"ERR unknown command 'evalsha', with args beginning with: 'sha' '1' 'devauth:user:BCDFGHJK' 'user-1'",
+				{ cause: { body: "client_secret=s3cret-value" } },
+			),
+			{
+				name: "ReplyError",
+				command: { name: "evalsha", args: ["devauth:{devauth}:user:BCDFGHJK", "user-1"] },
+			},
+		);
+		const { res, lines, logger } = await lookupThrowing(
+			new Error("device code lookup failed", { cause: reply }),
+		);
+
+		expect(res.status).toBe(500);
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				err: {
+					name: "Error",
+					message: "device code lookup failed",
+					stack: FRAMES,
+					cause: { name: "ReplyError", message: "ERR unknown command 'evalsha'", stack: FRAMES },
+				},
+			},
+			"device_route_unexpected_error",
+		);
+		for (const line of lines) {
+			expect(line).not.toContain("BCDFGHJK");
+			expect(line).not.toContain("user-1");
+			expect(line).not.toContain("s3cret-value");
+		}
+	});
+
+	it.each([
+		["a string status", { status: "503" }, {}],
+		["a fractional status", { status: 503.5 }, {}],
+		["a non-finite code", { code: Number.NaN }, {}],
+		["a numeric code", { code: 42 }, { code: 42 }],
+		[
+			"an upstream's OAuth error and description",
+			{ error: "invalid_grant", error_description: "Token has been expired or revoked." },
+			{ error: "invalid_grant", error_description: "Token has been expired or revoked." },
+		],
+	] as const)("logs %s as core's projection keeps it", async (_label, fields, kept) => {
+		const { logger } = await lookupThrowing(Object.assign(new Error("store failed"), fields));
+
+		expect(logger.error).toHaveBeenCalledWith(
+			{ err: { name: "Error", message: "store failed", stack: FRAMES, ...kept } },
+			"device_route_unexpected_error",
+		);
+	});
+
+	it("logs an error whose name is not a string as an Error", async () => {
+		const { lines, logger } = await lookupThrowing(
+			Object.assign(new Error("store failed"), { name: { toString: () => "s3cret-name" } }),
+		);
+
+		expect(logger.error).toHaveBeenCalledWith(
+			{ err: expect.objectContaining({ name: "Error", message: "store failed" }) },
+			"device_route_unexpected_error",
+		);
+		for (const line of lines) expect(line).not.toContain("s3cret-name");
+	});
+
+	it("logs a thrown value that is not an Error as a NonError of its type, and nothing of it", async () => {
+		const { res, lines, logger } = await lookupThrowing("device code s3cret-value");
+
+		expect(res.status).toBe(500);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ err: { name: "NonError", thrown: "string" } },
+			"device_route_unexpected_error",
+		);
+		for (const line of lines) expect(line).not.toContain("s3cret-value");
 	});
 
 	it("logs a device-code store failure on device_authorization through the same projection", async () => {
@@ -909,7 +990,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { thrown: "object" } },
+			{ err: { name: "NonError", thrown: "object" } },
 			"device_route_unexpected_error",
 		);
 	});
