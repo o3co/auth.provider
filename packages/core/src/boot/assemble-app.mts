@@ -702,14 +702,18 @@ export function assembleApp(
 	const TOKEN_ENDPOINT_PATH = "/oauth/token";
 	const SENDER_CONSTRAINT_EXEMPT_PATHS = [TOKEN_ENDPOINT_PATH] as const;
 
-	// Prefix-segment, case-insensitive match — the same semantics an Express
-	// `router.use(path, ...)` mount applies (Express routers are
-	// case-insensitive by default), so exempting a path exempts exactly the
-	// sub-tree a literal mount on it would cover.
+	// Exact, case-insensitive match with one optional trailing slash — the
+	// paths an Express route on `path` answers (non-strict, case-insensitive
+	// routing, the default), which is how the token-endpoint middleware below
+	// is mounted. So the exemption covers exactly what that middleware
+	// covers. Not the sub-tree beneath it: a later module's
+	// `/oauth/token/custom` gets no token-endpoint profile, so exempting it
+	// here would leave it guarded by neither, and a DPoP-bound token replayed
+	// there as a plain Bearer would be admitted.
 	const isSenderConstraintExempt = (path: string): boolean => {
 		const lowered = path.toLowerCase();
 		return SENDER_CONSTRAINT_EXEMPT_PATHS.some(
-			(exempt) => lowered === exempt || lowered.startsWith(`${exempt}/`),
+			(exempt) => lowered === exempt || lowered === `${exempt}/`,
 		);
 	};
 
