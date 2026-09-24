@@ -230,10 +230,10 @@ const startDevice = async (app: express.Express): Promise<string> => {
 };
 
 /**
- * Both orders of the two modules that share `/oauth`. `oauthModule`'s router
- * parses JSON and form bodies — Express's defaults, 100 KiB — for every
- * request beneath the prefix; the enabled device routes declare `before` it,
- * so every case below has to come out the same in either list order.
+ * Both orders of the two modules that share `/oauth`. Each parses its own
+ * body — `oauthModule`'s router only for its own routes — so every case
+ * below has to come out the same in either list order; before that, the
+ * OAuth router listed first parsed every body under the prefix.
  */
 const orders = [
 	[
@@ -309,11 +309,11 @@ describe("deviceGrantModule beside oauthModule — installed but disabled", () =
 
 describe("deviceGrantModule beside oauthModule — POST /oauth/device/verification is JSON-only", () => {
 	// A form body is a CORS "simple" request: a browser sends it cross-site,
-	// with the victim's session cookie and no preflight. `oauthModule`'s router
-	// parses form bodies for every request under `/oauth`, so a rule that
-	// rested on this package mounting no form parser held only when this
-	// package was listed first. The CSRF token is valid here on purpose: the
-	// media type is the first defence, and it must not depend on the second.
+	// with the victim's session cookie and no preflight. When `oauthModule`'s
+	// router parsed every body under `/oauth`, a rule that rested on this
+	// package mounting no form parser held only when this package was listed
+	// first. The CSRF token is valid here on purpose: the media type is the
+	// first defence, and it must not depend on the second.
 	it.each(orders)(
 		"refuses a form-encoded approval carrying a valid CSRF token (%s)",
 		async (_label, ordered) => {
@@ -390,9 +390,9 @@ describe("deviceGrantModule beside oauthModule — POST /oauth/device/verificati
 
 describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () => {
 	// Both routes parse with a 16 KiB limit, and `body-parser` does not parse a
-	// body twice — so the bound holds only if these routes read the body
-	// before `oauthModule`'s 100 KiB parsers do. Declared or chunked, just
-	// over the bound or over `oauthModule`'s own limit, the answer is one
+	// body twice — so the bound holds only if no other parser (such as
+	// `oauthModule`'s 100 KiB ones) reads the body first. Declared or chunked,
+	// just over the bound or over `oauthModule`'s own limit, the answer is one
 	// JSON 413 in either order.
 	const TOO_LARGE = { error: "invalid_request", error_description: "body_too_large" };
 
