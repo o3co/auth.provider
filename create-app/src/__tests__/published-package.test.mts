@@ -33,7 +33,10 @@ describe("published-package install context (e2e)", () => {
 		// workspace, but `npm pack` itself touches the cache regardless.
 		const npmCache = join(workspace, "npm-cache");
 		// `npm pack` runs the `prepack` script (rimraf dist + copy-templates + tsc),
-		// so this exercises the same artifact npm publishes to the registry.
+		// as the release's `pnpm publish` does, so the `dist` and `templates` this
+		// test installs are the ones that ship. The tarball is not the published
+		// one byte for byte: pnpm also packs the repository's root LICENSE, which
+		// npm leaves out — and nothing here reads it.
 		const stdout = execFileSync("npm", ["pack", "--pack-destination", workspace, "--json"], {
 			cwd: CREATE_APP_DIR,
 			encoding: "utf-8",
