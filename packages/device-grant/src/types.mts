@@ -61,7 +61,8 @@ export interface DeviceGrantDependencies {
 	readonly settings: DeviceAuthorizationSettings;
 	readonly rateLimiter?: RateLimiter;
 	/**
-	 * Where `device.approved` / `device.denied` / `device.rate_limited` go.
+	 * Where `device.approved` / `device.denied` / `device.rate_limited` /
+	 * `device.decision_outcome_unknown` go.
 	 * Optional to wire; the module attaches `AUDIT_SINK_ABSENCE_POLICY`, so a
 	 * composition with no sink has to say `audit.sink.type = "none"` (#363).
 	 */

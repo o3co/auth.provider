@@ -72,7 +72,11 @@
  * A device-code **store** outage is the other outage here, and gets the
  * product's answer for one (`storeOutage.mts`): `503 temporarily_unavailable`,
  * logged at error as `device_verification_store_unavailable` — not a `500`
- * through the terminal handler, and not an answer about the code.
+ * through the terminal handler, and not an answer about the code. A 503 on an
+ * approval or a denial does not say nothing was decided: the store's script
+ * may have run before its reply was lost, and a retry then answers
+ * `409 already_decided`. Such an outcome is audited as
+ * `device.decision_outcome_unknown`.
  *
  * ### The decision is an audit event
  *
@@ -342,6 +346,19 @@ export const createDeviceVerificationHandler = (
 						await options.store.approve({ userCode, subject, nowMs })
 					: await options.store.deny(userCode, nowMs);
 		} catch (err) {
+			// The store may have recorded the decision before its reply was lost
+			// — a timeout or a reset after the command was sent — and the device's
+			// poll can then be handed tokens that no `device.approved` accounts
+			// for. So an outcome nobody knows is audited as one, naming the
+			// action. Not the subject, and not the client: the record could not
+			// be read.
+			emitAuditEvent(options.auditSink, {
+				timestamp: new Date(),
+				type: "device.decision_outcome_unknown",
+				ip: req.ip,
+				userAgent: req.get("user-agent"),
+				details: { action },
+			});
 			storeUnavailable(err);
 			return;
 		}

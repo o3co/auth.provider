@@ -56,7 +56,10 @@
  * temporarily_unavailable`, logged at error as
  * `device_code_grant_store_unavailable` (`storeOutage.mts`). None of RFC
  * 8628's four codes would be true of it, and a thrown error reached the host
- * app's error handler as a `500`.
+ * app's error handler as a `500`. It does not say the approval is still
+ * waiting: `poll` consumes an approval in the same script that reads it, and
+ * one whose reply was lost is gone — the device's retry is then answered
+ * `invalid_grant`, and the device starts again.
  */
 
 import type {
