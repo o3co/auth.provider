@@ -76,7 +76,8 @@
  * approval or a denial does not say nothing was decided: the store's script
  * may have run before its reply was lost, and a retry then answers
  * `409 already_decided`. Such an outcome is audited as
- * `device.decision_outcome_unknown`.
+ * `device.decision_outcome_unknown`, with the subject, as the decision itself
+ * would have been.
  *
  * ### The decision is an audit event
  *
@@ -349,12 +350,15 @@ export const createDeviceVerificationHandler = (
 			// The store may have recorded the decision before its reply was lost
 			// — a timeout or a reset after the command was sent — and the device's
 			// poll can then be handed tokens that no `device.approved` accounts
-			// for. So an outcome nobody knows is audited as one, naming the
-			// action. It names no client, since the record could not be read,
-			// and no subject, as the outage's log line names none.
+			// for. So an outcome nobody knows is audited as one, attributed as
+			// the decision would have been: the subject, the action, the
+			// request's address. It names no client, since the record could not
+			// be read. (The log line names no subject; an audit event is where a
+			// decision is attributed.)
 			emitAuditEvent(options.auditSink, {
 				timestamp: new Date(),
 				type: "device.decision_outcome_unknown",
+				subject,
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
 				details: { action },
