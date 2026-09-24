@@ -174,7 +174,7 @@ const handle = await createApp({
 1. ブラウザが既にセッションを持っている（`isAuthenticated`、生きている `UserSession`）。
 2. `?link=1` 付きでフェデレーションを開始する: `GET /session/oauth/federation/<name>?link=1` を **デプロイ自身のページ上のリンクまたはフォームから**。開始は GET でセッション cookie は `SameSite=Lax` なので、検査が無ければどのページでもサインイン中のユーザーをそこへ送れ、IdP 側のログイン CSRF と組み合わせれば攻撃者の ID が被害者のアカウントにリンクされてしまう。そのため開始には積極的な証拠が要る: `Sec-Fetch-Site: same-origin`、または `none`（入力された URL やブックマーク）。`cross-site` は拒否。`same-site` はそれだけでは足りない — 登録可能ドメイン上のすべてのホスト、ユーザーが管理する `blog.example.com` も含む — ので、それと `Sec-Fetch-Site` の無いリクエスト（古いブラウザ）は `Referer` にこのオリジンか `session.csrf.trustedOrigins` 上のオリジンを示さなければならない。`Referer` が無ければ拒否する。遷移元のページが自分でリファラーポリシーを選ぶからである。したがって兄弟ホスト上のアカウントページは `session.csrf.trustedOrigins` に載せ、`Referrer-Policy: no-referrer` を送ってはならない。拒否は `403 link_requires_trusted_origin`。認証済みセッションが無ければ `401 login_required`、Store のリポジトリが `linkFederatedIdentity` を実装していなければ `400 link_unsupported` — いずれもブラウザをどこかへ送る前に返る。
 3. コールバックでは、`state`・PKCE・`nonce` をログインとまったく同じく検査したあと、ID を解決する:
-   - **誰でもない** → `userRepository.linkFederatedIdentity(currentUserId, { provider, sub, token, claims })`。`ok` ならリンクされ、Store の `refused` は `403 link_refused`、`conflict` は `409 identity_conflict`。
+   - **誰でもない** → `userRepository.linkFederatedIdentity(currentUserId, { provider, sub, token, claims })`。`ok` ならリンクされ、Store の `refused` は `403 link_refused`、`conflict` は `409 identity_conflict`。Store が `description` を返せば、RFC 6749 の文字の範囲で（範囲外の文字は `?` として）それを説明に載せる。
    - **別のアカウント** → `409 identity_conflict`。Store には問い合わせない。リンクでアカウントがマージされることはない。
    - **このアカウント** → リンクするものは無く、コールバックはそのまま進む。
 4. フェデレーションは **生きている** セッション — 現在の `sid` の下の `sessionFederationIndex` と `federationTokenStore` — に紐づけられ、ブラウザはログイン後と同じようにリダイレクトされる。新しい `UserSession` は作られず、express session も再生成されない: リンクはログインではなく、セッションのクレームエンベロープは変わらない（新しいプロバイダー経由の次のログインが通常どおりに作る）。
@@ -384,7 +384,7 @@ federations {
 
 `authCallbackUrl` と `clientUrl` は許可リストではなく `resolveCallbackRedirect` が読む: 前者は `redirect_to` を受け渡すブリッジページ、後者は開始時に `redirect_to` が無かったコールバックの戻り先。どちらかが必要なのに未設定のコールバックは、セッションを保存したあとで `500 misconfiguration` を返す。したがって、すべての開始が `redirect_to` を持つのでない限りどのフェデレーションにも `clientUrl` が必要で、`redirect_to` を持つ開始には `authCallbackUrl` が必要になる。
 
-`FederationRedirectPolicy`（[`src/federations/redirect-policy.mts`](src/federations/redirect-policy.mts)）が差し替え点である: モジュールはフェデレーションに独自のポリシーを contribute でき、そのポリシーは fail closed でなければならない。`createFederationRedirectPolicy` がデフォルトで、`checkRedirectShape`、`createRedirectAllowlistValidator`、`describeRedirectRejection`、`isLoopbackHostname` は独自のポリシーが同じ規則と拒否の語彙を再利用できるよう export されている。ポリシーのメソッドは [`FederationResult`](src/federations/types.mts) で答える: 値を持つ `ok`、またはそのまま返すステータス・OAuth エラーコード・説明。
+`FederationRedirectPolicy`（[`src/federations/redirect-policy.mts`](src/federations/redirect-policy.mts)）が差し替え点である: モジュールはフェデレーションに独自のポリシーを contribute でき、そのポリシーは fail closed でなければならない。`createFederationRedirectPolicy` がデフォルトで、`checkRedirectShape`、`createRedirectAllowlistValidator`、`describeRedirectRejection`、`isLoopbackHostname` は独自のポリシーが同じ規則と拒否の語彙を再利用できるよう export されている。ポリシーのメソッドは [`FederationResult`](src/federations/types.mts) で答える: 値を持つ `ok`、または返すステータス・OAuth エラーコード・説明。ルートはステータスをそのまま返し、コードと説明は core の `errorEnvelope` を通して送る。そこが RFC 6749 の文字（`"` と `\` を除く印字可能な ASCII）に収めるので、範囲外の説明の文字は `?`、形式に合わないコードは `server_error` として出る。`describeRedirectRejection` のテキストは最初から範囲内である。
 
 ### アダプターの書き方
 

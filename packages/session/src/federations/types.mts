@@ -29,6 +29,8 @@ export type FederationResult<T> =
 	| {
 			readonly ok: false;
 			readonly status: number;
+			/** The OAuth `error`; one outside RFC 6749's `1*NQSCHAR` is sent as `server_error`. */
 			readonly error: string;
+			/** The `error_description`; a character outside RFC 6749's set is sent as `?`. */
 			readonly errorDescription: string;
 	  };

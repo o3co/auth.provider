@@ -79,7 +79,14 @@ A grant that honours `resource` reads it with `extractResourceParam`, derives th
 
 ### Error text (RFC 6749)
 
-`errorEnvelope(error, description?, uri?)` builds the RFC 6749 §5.2 error body and does not check its text. RFC 6749 Appendix A.7 and A.8 limit `error` and `error_description` to `1*NQSCHAR`: printable ASCII without `"` and `\`. `sanitizeErrorText` replaces every other character with `?`, and answers `undefined` for a value that is not a string, so the caller falls back to its own default. `auditErrorText` does the same and caps the text at 200 characters, for a log line or an audit event. `isWellFormedErrorCode` checks an `error` code, such as a grant policy's deny, before it goes out. All three are in [`src/errors/envelope.mts`](src/errors/envelope.mts).
+RFC 6749 Appendix A.7 and A.8 limit `error` and `error_description` to `1*NQSCHAR`: printable ASCII without `"` and `\`. The rule is in [`src/errors/envelope.mts`](src/errors/envelope.mts):
+
+- `errorEnvelope(error, description?, uri?)` builds the RFC 6749 §5.2 error body and applies the rule itself, so every writer that goes through it conforms whatever it was handed: core's token-binding middleware (a mechanism's `retryInstruction` or `unavailable` text, the kinds a dispatch conflict names), the protected-resource binding, the rate limiter (a limiter adapter's `reason`), the session routes and a contributed module's own routes. A description character outside the set is sent as `?`; a description that is not a string is dropped like an empty one. A malformed `error` code is sent as `server_error` and logged as `error_envelope_code_malformed` through `consoleLogger`: the code came from server-side code, and the envelope does not know the status its caller answers with. `error_uri` is sent as given.
+- `sanitizeErrorText` replaces every character outside the set with `?`, and answers `undefined` for a value that is not a string, so the caller falls back to its own default. A writer that builds its body itself — a redirect's query, a literal `{ error, error_description }` — sends what it echoes through it.
+- `auditErrorText` does the same and caps the text at 200 characters, for a log line or an audit event.
+- `isWellFormedErrorCode` checks an `error` code before it goes out. A caller that builds a code from something it does not control and knows its answer is a refusal of the client's request falls back to a client-error code itself: the token-binding middleware answers a refusal whose `invalid_<kind>_proof` would be malformed as `invalid_request`, and `/oauth/token` and `/oauth/authorize` do the same for a grant policy's deny (below).
+
+Text written in this repository's own words is held to the set where it is written by [`__tests__/errorText.drift.test.mts`](src/__tests__/errorText.drift.test.mts): quote a value with `'`, write "section" for the section sign, and use no em dash.
 
 ### Token Utilities
 
@@ -399,7 +406,7 @@ Five optional extension points: a slot or contribution kind a composition root f
 
 - `RateLimiter.check(key, ctx)` atomic check + increment
 - Factory: `createRateLimiterFactory()`; `registerBuiltinRateLimiters()` registers `"memory"` only. The `"redis"` backend is `@o3co/auth-provider-redis` (`redisRateLimiterBuilder`, or the declarative `redisRateLimiterModule`); `ratelimit/__tests__/factory.test.mts` asserts it is not registered here
-- 429 + `Retry-After` emitted by core on denial
+- 429 + `Retry-After` emitted by core on denial; the decision's `reason` is the `error_description`, within RFC 6749's characters, and `Rate limit exceeded` when it is absent, empty or not a string
 
 #### Refresh-token families (RFC 6819 §5.2.2.3 replay detection)
 

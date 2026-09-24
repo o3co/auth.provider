@@ -369,7 +369,7 @@ An account gains a second identity through an explicit, authenticated action:
 1. The browser already holds a session (`isAuthenticated`, a live `UserSession`).
 2. It starts the federation with `?link=1`: `GET /session/oauth/federation/<name>?link=1`, **from a link or a form on the deployment's own pages**. The start is a GET and the session cookie is `SameSite=Lax`, so without a check any page could send a signed-in user there, and paired with a login CSRF at the IdP the attacker's identity would be linked to the victim's account. The start therefore needs positive evidence: `Sec-Fetch-Site: same-origin`, or `none` (a typed URL or bookmark). `cross-site` is refused. `same-site` is not enough on its own — it covers every host on the registrable domain, including a user-controlled `blog.example.com` — so it, and a request with no `Sec-Fetch-Site` (an older browser), must name this origin or one on `session.csrf.trustedOrigins` in its `Referer`; a missing `Referer` is refused, because the navigating page picks its own referrer policy. An account page on a sibling host is therefore listed in `session.csrf.trustedOrigins`, and must not send `Referrer-Policy: no-referrer`. A refusal is `403 link_requires_trusted_origin`. Without an authenticated session it is `401 login_required`; when the Store's repository does not implement `linkFederatedIdentity`, `400 link_unsupported` — all before the browser is sent anywhere.
 3. On the callback, after `state`, PKCE and `nonce` are checked exactly as for a login, the identity is resolved:
-   - **nobody** → `userRepository.linkFederatedIdentity(currentUserId, { provider, sub, token, claims })`. `ok` links it; the Store's `refused` is `403 link_refused`, its `conflict` is `409 identity_conflict`.
+   - **nobody** → `userRepository.linkFederatedIdentity(currentUserId, { provider, sub, token, claims })`. `ok` links it; the Store's `refused` is `403 link_refused`, its `conflict` is `409 identity_conflict`, each with the Store's `description` when it gives one, sent within RFC 6749's characters (`?` for any other).
    - **another account** → `409 identity_conflict`; the Store is not asked. Linking never merges accounts.
    - **this account** → nothing to link; the callback proceeds.
 4. The federation is attached to the **live** session — `sessionFederationIndex` and `federationTokenStore` under the current `sid` — and the browser is redirected as after a login. No new `UserSession` is minted and the express session is not regenerated: a link is not a login, and the session's claims envelope is unchanged (the next login through the new provider builds one the usual way).
@@ -811,7 +811,11 @@ default; `checkRedirectShape`, `createRedirectAllowlistValidator`,
 `describeRedirectRejection` and `isLoopbackHostname` are exported so a custom
 policy reuses the same rules and rejection vocabulary. The policy's methods
 answer with a [`FederationResult`](src/federations/types.mts): `ok` with a value,
-or a status, an OAuth error code and a description to send as they are.
+or a status, an OAuth error code and a description to send. The route sends the
+status as given and the code and description through core's `errorEnvelope`,
+which holds them to RFC 6749's characters (printable ASCII without `"` and `\`):
+a description character outside them goes out as `?`, and a malformed code as
+`server_error`. `describeRedirectRejection`'s text is already inside them.
 
 ### Writing an adapter
 
