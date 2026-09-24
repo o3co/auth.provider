@@ -373,7 +373,7 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 		);
 		expect(result).toMatchObject({
 			status: 400,
-			error: "invalid_grant",
+			error: "invalid_request",
 			errorDescription: expect.stringMatching(/expire/i),
 		});
 	});
@@ -391,7 +391,7 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 				subject_token_type: STUB_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(result).toMatchObject({ status: 400, error: "invalid_request" });
 	});
 
 	describe("when the clock moves between the cap and the mint", () => {

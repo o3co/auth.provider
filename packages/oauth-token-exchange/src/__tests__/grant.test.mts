@@ -329,7 +329,7 @@ describe("createTokenExchangeGrant — request errors", () => {
 });
 
 describe("createTokenExchangeGrant — token validation", () => {
-	it("returns invalid_grant when subject_token signature is invalid", async () => {
+	it("returns invalid_request when subject_token signature is invalid (RFC 8693 §2.2.2)", async () => {
 		const g = buildGrant();
 		const token = `${(await signSelfIssuedAccessToken({})).slice(0, -4)}AAAA`;
 		const { result } = await g.handle(
@@ -340,10 +340,10 @@ describe("createTokenExchangeGrant — token validation", () => {
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(result).toMatchObject({ status: 400, error: "invalid_request" });
 	});
 
-	it("returns invalid_grant/family_revoked when subject family is revoked", async () => {
+	it("returns invalid_request/family_revoked when subject family is revoked", async () => {
 		const store = makeFamilyRevocation({
 			isFamilyRevoked: async (id) => id === "fam-bad",
 		});
@@ -361,12 +361,12 @@ describe("createTokenExchangeGrant — token validation", () => {
 		);
 		expect(result).toMatchObject({
 			status: 400,
-			error: "invalid_grant",
+			error: "invalid_request",
 			errorDescription: "family_revoked",
 		});
 	});
 
-	it("returns invalid_grant when refreshTokenFamilyRevocation is not wired (fail-closed)", async () => {
+	it("returns invalid_request when refreshTokenFamilyRevocation is not wired (fail-closed)", async () => {
 		// refreshTokenFamilyRevocation: null → deps.refreshTokenFamilyRevocation is undefined (absent).
 		// The grant's fail-closed check fires: familyId present + no store → 400.
 		const g = buildGrant({ refreshTokenFamilyRevocation: null });
@@ -379,7 +379,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(result).toMatchObject({ status: 400, error: "invalid_request" });
 	});
 
 	it("returns temporarily_unavailable (503) when the family store throws (runtime store failure)", async () => {
@@ -428,7 +428,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 		});
 	});
 
-	it("returns invalid_grant when actor_token fails validation", async () => {
+	it("returns invalid_request when actor_token fails validation (RFC 8693 §2.2.2)", async () => {
 		const g = buildGrant();
 		const subject = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const badActor = `${(await signSelfIssuedAccessToken({ sub: "svc-a" })).slice(0, -4)}AAAA`;
@@ -442,7 +442,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 				actor_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(result).toMatchObject({ status: 400, error: "invalid_request" });
 	});
 });
 

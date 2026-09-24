@@ -26,6 +26,7 @@ import {
 	memoryRefreshTokenFamilyStoreModule,
 	type PublicClient,
 	type RefreshTokenFamilyRevocation,
+	type TokenBinding,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
@@ -166,7 +167,7 @@ describe("token_exchange — integration", () => {
 		);
 		expect(denied.result).toMatchObject({
 			status: 400,
-			error: "invalid_grant",
+			error: "invalid_request",
 			errorDescription: "family_revoked",
 		});
 	});
@@ -342,8 +343,19 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		return { grant, components: handle.components };
 	}
 
-	const exchange = (grant: GrantHandler, body: Record<string, unknown>) =>
-		grant.handle({ body, session: {}, issuer: ISSUER, metadata: {}, authenticatedClient });
+	const exchange = (
+		grant: GrantHandler,
+		body: Record<string, unknown>,
+		tokenBinding?: TokenBinding,
+	) =>
+		grant.handle({
+			body,
+			session: {},
+			issuer: ISSUER,
+			metadata: {},
+			authenticatedClient,
+			...(tokenBinding ? { tokenBinding } : {}),
+		});
 
 	async function liveFamily(components: AppHandle["components"], familyId: string): Promise<void> {
 		const store = components.refreshTokenFamilyStore;
@@ -362,7 +374,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		await revocation.revokeFamily(familyId);
 	}
 
-	it("answers invalid_grant / family_revoked for a subject_token whose family was revoked", async () => {
+	it("answers invalid_request / family_revoked for a subject_token whose family was revoked", async () => {
 		const { grant, components } = await boot([
 			memoryRefreshTokenFamilyStoreModule,
 			defaultRefreshTokenFamilyRevocationModule,
@@ -380,12 +392,12 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		await revoke(components, "fam-subject");
 		expect((await exchange(grant, body)).result).toMatchObject({
 			status: 400,
-			error: "invalid_grant",
+			error: "invalid_request",
 			errorDescription: "family_revoked",
 		});
 	});
 
-	it("answers invalid_grant / actor_token family_revoked for an actor_token whose family was revoked", async () => {
+	it("answers invalid_request / actor_token family_revoked for an actor_token whose family was revoked", async () => {
 		const { grant, components } = await boot([
 			memoryRefreshTokenFamilyStoreModule,
 			defaultRefreshTokenFamilyRevocationModule,
@@ -406,7 +418,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		await revoke(components, "fam-actor");
 		expect((await exchange(grant, body)).result).toMatchObject({
 			status: 400,
-			error: "invalid_grant",
+			error: "invalid_request",
 			errorDescription: "actor_token family_revoked",
 		});
 	});
@@ -419,7 +431,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 		expect(result).toMatchObject({
 			status: 400,
-			error: "invalid_grant",
+			error: "invalid_request",
 			errorDescription:
 				"refresh token family revocation not configured (revocation cannot be verified)",
 		});
@@ -437,7 +449,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 		expect(result).toMatchObject({
 			status: 400,
-			error: "invalid_grant",
+			error: "invalid_request",
 			errorDescription:
 				"actor_token refresh token family revocation not configured (revocation cannot be verified)",
 		});
@@ -461,7 +473,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			},
 		});
 
-		it("answers invalid_grant / family_revoked once the family is revoked", async () => {
+		it("answers invalid_request / family_revoked once the family is revoked", async () => {
 			const { grant, components } = await boot([
 				memoryRefreshTokenFamilyStoreModule,
 				defaultRefreshTokenFamilyRevocationModule,
@@ -477,7 +489,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			await revoke(components, "fam-jwt");
 			expect((await exchange(grant, body)).result).toMatchObject({
 				status: 400,
-				error: "invalid_grant",
+				error: "invalid_request",
 				errorDescription: "family_revoked",
 			});
 		});
@@ -490,7 +502,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			});
 			expect(result).toMatchObject({
 				status: 400,
-				error: "invalid_grant",
+				error: "invalid_request",
 				errorDescription:
 					"refresh token family revocation not configured (revocation cannot be verified)",
 			});
@@ -517,7 +529,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			await revoke(components, "fam-actor-jwt");
 			expect((await exchange(grant, body)).result).toMatchObject({
 				status: 400,
-				error: "invalid_grant",
+				error: "invalid_request",
 				errorDescription: "actor_token family_revoked",
 			});
 		});
@@ -532,7 +544,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			});
 			expect(result).toMatchObject({
 				status: 400,
-				error: "invalid_grant",
+				error: "invalid_request",
 				errorDescription:
 					"actor_token refresh token family revocation not configured (revocation cannot be verified)",
 			});
@@ -569,13 +581,167 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 	});
 
+	// RFC 8693 §2.2.2: "If the request itself is not valid or if either the
+	// subject_token or actor_token are invalid for any reason, or are
+	// unacceptable based on policy, the authorization server MUST construct an
+	// error response [...] The value of the error parameter MUST be the
+	// invalid_request error code." Every refusal of a presented token is
+	// therefore `invalid_request`, whichever check made it; the description is
+	// what tells a client which check that was, so each one is pinned exactly.
+	// The family refusals of note 1 are pinned by the tests above, the
+	// denylisted token by the store-outage suite below.
+	describe("RFC 8693 §2.2.2: a refused subject_token or actor_token is invalid_request", () => {
+		const JKT = "L0AXB6c64d2QW3rhCLLADhOMLf_7u2eTGH-q9ZGja24";
+		const OTHER_JKT = "ZmFrZS1qa3QtdGhhdC1pcy1ub3QtdGhlLXNhbWUtdmFsdWU";
+		const X5T = "bwcK0esc3ACC3DB2Y5_lESsXE8o9ltc05O89jdN-dg2";
+		const OTHER_X5T = "ZmFrZS10aHVtYnByaW50LXRoYXQtaXMtbm90LXRoZS1zYW1l";
+		const dpop = (jkt: string): TokenBinding => ({ kind: "dpop", confirmation: { jkt } });
+		const mtls = (x5t: string): TokenBinding => ({
+			kind: "mtls",
+			confirmation: { "x5t#S256": x5t },
+		});
+		const tampered = async (claims: Record<string, unknown>) =>
+			`${(await signSelfIssuedAccessToken(claims)).slice(0, -4)}AAAA`;
+
+		// A validator of the deployment's own that accepts a token with no
+		// lifetime left: the built-in validator never does (jose refuses an
+		// expired token first), so the grant's own expiry check is reached
+		// only through one.
+		const EXPIRED_TOKEN_TYPE = "urn:example:params:oauth:token-type:expired";
+		const expiredValidatorModule = defineModule({
+			name: "test:expired-token-validator",
+			contributes: {
+				tokenExchangeValidators: {
+					[EXPIRED_TOKEN_TYPE]: () => ({
+						validate: async () => ({
+							sub: "user-1",
+							claims: { sub: "user-1", exp: Math.floor(Date.now() / 1000) - 30 },
+						}),
+					}),
+				},
+			},
+		});
+
+		const subject = async (claims: Record<string, unknown> = {}) => ({
+			subject_token: await signSelfIssuedAccessToken(claims),
+			subject_token_type: ACCESS_TOKEN_TYPE,
+		});
+		const withActor = async (actorToken: string) => ({
+			...(await subject()),
+			actor_token: actorToken,
+			actor_token_type: ACCESS_TOKEN_TYPE,
+		});
+		const actor = (claims: Record<string, unknown>) =>
+			signSelfIssuedAccessToken({ sub: "svc-a", ...claims });
+
+		const cases: ReadonlyArray<
+			readonly [
+				label: string,
+				body: () => Promise<Record<string, unknown>>,
+				tokenBinding: TokenBinding | undefined,
+				errorDescription: string,
+			]
+		> = [
+			[
+				"a subject_token whose signature does not verify",
+				async () => ({
+					subject_token: await tampered({}),
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				}),
+				undefined,
+				"subject_token validation failed",
+			],
+			[
+				"a DPoP-bound subject_token with no proof",
+				() => subject({ cnf: { jkt: JKT } }),
+				undefined,
+				"subject_token requires a DPoP proof",
+			],
+			[
+				"a DPoP-bound subject_token with a proof from another key",
+				() => subject({ cnf: { jkt: JKT } }),
+				dpop(OTHER_JKT),
+				"DPoP proof does not match subject_token binding",
+			],
+			[
+				"a certificate-bound subject_token with no certificate",
+				() => subject({ cnf: { "x5t#S256": X5T } }),
+				undefined,
+				"subject_token requires a client certificate",
+			],
+			[
+				"a certificate-bound subject_token with another certificate",
+				() => subject({ cnf: { "x5t#S256": X5T } }),
+				mtls(OTHER_X5T),
+				"client certificate does not match subject_token binding",
+			],
+			[
+				"a subject_token carrying a compound cnf",
+				() => subject({ cnf: { jkt: JKT, "x5t#S256": X5T } }),
+				dpop(JKT),
+				"subject_token has compound cnf binding which is not supported (Stage 1)",
+			],
+			[
+				"a subject_token with no lifetime left",
+				async () => ({ subject_token: "opaque", subject_token_type: EXPIRED_TOKEN_TYPE }),
+				undefined,
+				"subject_token has expired",
+			],
+			[
+				"an actor_token whose signature does not verify",
+				async () => withActor(await tampered({ sub: "svc-a" })),
+				undefined,
+				"actor_token validation failed",
+			],
+			[
+				"a DPoP-bound actor_token with no proof",
+				async () => withActor(await actor({ cnf: { jkt: JKT } })),
+				undefined,
+				"actor_token requires a DPoP proof",
+			],
+			[
+				"a DPoP-bound actor_token with a proof from another key",
+				async () => withActor(await actor({ cnf: { jkt: JKT } })),
+				dpop(OTHER_JKT),
+				"DPoP proof does not match actor_token binding",
+			],
+			[
+				"a certificate-bound actor_token with no certificate",
+				async () => withActor(await actor({ cnf: { "x5t#S256": X5T } })),
+				undefined,
+				"actor_token requires a client certificate",
+			],
+			[
+				"a certificate-bound actor_token with another certificate",
+				async () => withActor(await actor({ cnf: { "x5t#S256": X5T } })),
+				mtls(OTHER_X5T),
+				"client certificate does not match actor_token binding",
+			],
+			[
+				"an actor_token carrying a compound cnf",
+				async () => withActor(await actor({ cnf: { jkt: JKT, "x5t#S256": X5T } })),
+				dpop(JKT),
+				"actor_token has compound cnf binding which is not supported (Stage 1)",
+			],
+		];
+
+		it.each(cases)(
+			"refuses %s with invalid_request",
+			async (_label, body, tokenBinding, errorDescription) => {
+				const { grant } = await boot([expiredValidatorModule]);
+				const { result } = await exchange(grant, await body(), tokenBinding);
+				expect(result).toEqual({ status: 400, error: "invalid_request", errorDescription });
+			},
+		);
+	});
+
 	// Core's ExchangeTokenValidator contract: `null` means the token is not
-	// acceptable (the grant answers `invalid_grant`), a throw means the answer
-	// is not knowable (`503 temporarily_unavailable`). A revocation store that
-	// cannot be read is the second: the token is still refused — the verifier
-	// fails closed — but a client told `invalid_grant` discards a credential
-	// that may be perfectly good, so an outage must not be reported as a
-	// finding. The refresh grant makes the same split for the same reason.
+	// acceptable (the grant answers `invalid_request`, RFC 8693 §2.2.2), a
+	// throw means the answer is not knowable (`503 temporarily_unavailable`).
+	// A revocation store that cannot be read is the second: the token is still
+	// refused — the verifier fails closed — but a client told its token is
+	// unacceptable discards a credential that may be perfectly good, so an
+	// outage must not be reported as a finding. The refresh grant makes the same split for the same reason.
 	describe("a revocation store that cannot answer", () => {
 		const unreachableDenylist = (failFor: (jti: string) => boolean, revoked = new Set<string>()) =>
 			defineModule({
@@ -653,7 +819,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			});
 		});
 
-		it("still answers invalid_grant for a subject_token the denylist does hold", async () => {
+		it("still answers invalid_request for a subject_token the denylist does hold", async () => {
 			// The other half of the split: a store that answers "revoked" is a
 			// finding about the token, not an outage.
 			const { grant } = await boot(
@@ -666,7 +832,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			});
 			expect(result).toMatchObject({
 				status: 400,
-				error: "invalid_grant",
+				error: "invalid_request",
 				errorDescription: "subject_token validation failed",
 			});
 		});
