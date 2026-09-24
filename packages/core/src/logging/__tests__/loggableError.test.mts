@@ -494,6 +494,15 @@ describe("loggableError — what a log line may carry of an error", () => {
 		expect(guardedRead(hostile, "field")).toBeNull();
 	});
 
+	it("is compared with toEqual, not toStrictEqual: the constructor pino reads is hidden, not absent", () => {
+		// The trap is kept visible here: a strict comparison of a projection
+		// with the same fields fails on the non-enumerable `constructor`.
+		const projected = loggableError(new Error("kept"));
+		const sameFields = { ...projected };
+		expect(projected).toEqual(sameFields);
+		expect(projected).not.toStrictEqual(sameFields);
+	});
+
 	it("reaches pino as the error's name for `type` and its frames for `stack`", () => {
 		const lines: string[] = [];
 		const log = pino(

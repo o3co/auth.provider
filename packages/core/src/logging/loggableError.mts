@@ -60,7 +60,16 @@
  * No state.
  */
 
-/** The fields of an error a log line carries, and its Error causes the same way. */
+/**
+ * The fields of an error a log line carries, and its Error causes the same
+ * way.
+ *
+ * Every projection also has a non-enumerable own `constructor` of
+ * `undefined`, so that pino's err serializer types it by `name`. It is
+ * invisible to JSON, for-in and `util.inspect`, but not to a strict
+ * comparison: compare a projection with `toEqual`, not `toStrictEqual`,
+ * which fails on the hidden constructor.
+ */
 export interface LoggableError {
 	/** The error's `name`; `"NonError"` for a thrown value that is not an Error. */
 	readonly name: string;
