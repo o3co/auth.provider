@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-oidc
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 Generic OpenID Connect federation provider for `auth.provider`: any
 OIDC-compliant identity provider — Okta, Entra ID, Auth0, Keycloak, a
@@ -44,11 +44,12 @@ authorization parameter or an extension claim.
 ## Install
 
 ```sh
-npm install @o3co/auth-provider-federation-oidc
+npm install @o3co/auth-provider-federation-oidc @o3co/auth-provider-core @o3co/auth-provider-session
 ```
 
 Peer dependencies: `@o3co/auth-provider-core` and
-`@o3co/auth-provider-session`. Its dependencies are `openid-client` and `jose`.
+`@o3co/auth-provider-session`. The package depends on `jose` and
+`openid-client`.
 
 ## Usage
 

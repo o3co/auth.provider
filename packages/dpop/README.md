@@ -1,6 +1,6 @@
 # @o3co/auth-provider-dpop
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 DPoP ([RFC 9449](https://www.rfc-editor.org/rfc/rfc9449)) sender-constrained
 tokens for [`auth.provider`](../../README.md): a token issued against a DPoP
@@ -61,6 +61,16 @@ exactly when they share that set, and core's replica-safety check answers for
 the memory one (see [Operator requirements](#operator-requirements)). Not
 implemented: the `dpop_jkt` authorization-request parameter at `/authorize`
 (RFC 9449 §10).
+
+## Install
+
+```sh
+npm install @o3co/auth-provider-dpop @o3co/auth-provider-core
+```
+
+Peer dependency: `@o3co/auth-provider-core`. Optional peer dependency:
+`express@^5.0.0`, whose types alone the package imports. The package depends
+on `jose` and `zod`.
 
 ## Quick start
 

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-foundation
 
-最終更新: 2026-09-24
+最終更新: 2026-09-25
 
 auth.provider のための「the Store」 — デプロイ自身のユーザーサービス — の HTTP クライアント。`HttpUserRepository` は core の `UserRepository` ポートを HTTPS で実装する: ユーザーを認証し、フェデレーション ID をリンクし、federation grants が求める ID の照会に答える。`registerBuiltinAdapters` はそれを `"http"` ユーザーアダプターとして登録する。
 
@@ -27,7 +27,7 @@ auth.provider のための「the Store」 — デプロイ自身のユーザー�
 npm install @o3co/auth-provider-foundation @o3co/auth-provider-core
 ```
 
-`@o3co/auth-provider-core` は peer dependency。
+peer dependency: `@o3co/auth-provider-core`。このパッケージ自身の dependencies は無い。
 
 ## 使い方
 

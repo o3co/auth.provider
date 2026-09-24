@@ -1,6 +1,6 @@
 # auth.provider
 
-最終更新: 2026-09-24
+最終更新: 2026-09-25
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -89,7 +89,10 @@ pnpm install
 ## アーキテクチャ
 
 `packages/` 配下のすべてのパッケージは `core` に依存し、`core` はそのいずれにも
-依存しない。依存の向き:
+依存しない。パッケージは依存する兄弟パッケージをすべて peer dependency として宣言し、
+自分専用の dependency にはしない。そのためデプロイメントはそれぞれを 1 つだけ
+インストールする（[リリース手順書](docs/release-runbook.md#pnpm-version-rewrites-only-version)）。
+依存の向き:
 
 ```text
 core                          contracts, module system, config, tokens, keys
@@ -99,7 +102,7 @@ core                          contracts, module system, config, tokens, keys
 ├── session                   /session/*
 │   └── federation-*          one package per upstream identity provider
 ├── dpop · mtls · webauthn · oauth-token-exchange
-├── redis                     (dpop is an optional peer)
+├── redis                     (ioredis is an optional peer)
 └── foundation
 templates/standalone          composes the packages above; create-app copies it
 ```

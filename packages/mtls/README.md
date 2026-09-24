@@ -1,6 +1,6 @@
 # @o3co/auth-provider-mtls
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 mTLS ([RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)) sender-constrained tokens for [`auth.provider`](../../README.md): a token issued to a client that presented a certificate is bound to that certificate, and is refused from anyone presenting another.
 
@@ -24,6 +24,16 @@ mTLS ([RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)) sender-constrained tok
 - the TLS listener and the proxy: terminating TLS with `requestCert`, and a proxy that strips inbound certificate headers, are the deployment's (see [Trusted-Proxy Security Guidance](#trusted-proxy-security-guidance)).
 
 **Why a separate package.** Sender-constraint mechanisms are plug-ins to one core slot, not part of core: a deployment chooses mTLS by installing it. This one also carries X.509 path validation on `pkijs` / `asn1js` and a component that fetches URLs named inside certificates; a deployment without mTLS installs neither. It is off by default even when installed (`oauth.mtls.enabled = false`).
+
+## Install
+
+```sh
+npm install @o3co/auth-provider-mtls @o3co/auth-provider-core
+```
+
+Peer dependency: `@o3co/auth-provider-core`. Optional peer dependency:
+`express@^5.0.0`, whose types alone the package imports. The package depends
+on `asn1js`, `pkijs` and `zod`.
 
 ## Quick start
 

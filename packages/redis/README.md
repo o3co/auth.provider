@@ -1,6 +1,6 @@
 # @o3co/auth-provider-redis
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 Redis-backed implementations of the store ports `@o3co/auth-provider-core`
 declares, a `defineModule` manifest for each, and the wrappers that turn one
@@ -48,6 +48,18 @@ stays backend-agnostic, and a composition root of your own that runs on one
 replica can leave Redis out entirely. The standalone template cannot: it keeps
 its refresh-token families in Redis in every deployment. An adapter for another
 backend is a package of its own beside this one, implementing the same ports.
+
+## Install
+
+```sh
+npm install @o3co/auth-provider-redis @o3co/auth-provider-core
+# and, for makeIoredisClients and the other wrappers on the /ioredis entry:
+npm install ioredis@^6.0.0
+```
+
+Peer dependency: `@o3co/auth-provider-core`. Optional peer dependency:
+`ioredis@^6.0.0`, which only the `@o3co/auth-provider-redis/ioredis` entry
+imports (see [Entry points](#entry-points)). The package depends on `zod`.
 
 ## Requirements
 

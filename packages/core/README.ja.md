@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-最終更新: 2026-09-24
+最終更新: 2026-09-25
 
 ## 責務と役割
 
@@ -14,9 +14,12 @@
 
 ```sh
 npm install @o3co/auth-provider-core
+# createApp を使うなら、さらに:
+npm install express@^5.0.0
 ```
 
-Peer dependency: `express@^5.0.0`（任意 — `createApp` を使う場合のみ必要）
+optional peer dependency: `express@^5.0.0` — `createApp` を使う場合にのみ必要。
+このパッケージは `bcrypt`、`jose`、`js-yaml`、`zod` に依存する。
 
 ## パブリック API
 

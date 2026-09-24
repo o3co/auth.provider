@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-最終更新: 2026-09-24
+最終更新: 2026-09-25
 
 [auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージがプロバイダーと並べて contribute するリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
@@ -41,10 +41,15 @@
 
 ```sh
 npm install @o3co/auth-provider-session @o3co/auth-provider-core express express-session
+# session.storage.type = "redis"（core の reference.conf のデフォルト）なら、さらに:
+npm install redis@^6.2.1 connect-redis@^10.0.0
 ```
 
-- peer dependencies: `express@^5.0.0` と `express-session@^1.17.0`。
-- 一緒にインストールされるもの: `@o3co/auth-provider-core`、および Redis セッションストア用の `connect-redis` と `redis`。この二つは常にインストールされ、`session.storage.type = "redis"` のときにだけロードされる。
+peer dependencies: `@o3co/auth-provider-core`、`express@^5.0.0`、`express-session@^1.17.0`。
+optional peer dependencies: Redis セッションストアのライブラリである `redis@^6.2.1` と `connect-redis@^10.0.0`。
+このパッケージ自身の dependencies は無い。
+
+core が peer なのは、このパッケージが core を拡張する（`federationRedirectPolicies` の contribution 種別とそのスロット）からで、拡張は自分が解決した core にしか届かない。peer であれば、それは構成が持つ唯一の core になる。`session.storage.type = "memory"` のデプロイは Redis のライブラリをどちらもインストールしない。Redis ストアを組み立てるまで何もそれらを import しない。`"redis"`（デフォルト）なら両方をインストールする: どちらかが無ければ、無いパッケージとインストールコマンドを示して起動に失敗する。
 
 ## 組み立て
 
@@ -76,7 +81,7 @@ const handle = await createApp({
 - **マウント順はリスト順。ただしこのルートを名指しするルートは別。** このルートは `before` / `after` を宣言しない。デプロイが含まないかもしれないルート（`oauth` だけのデプロイには `sessionModule` が無い）を名指しすると `route-order-target-missing` で起動に失敗するからである。したがって **`req.session` を読むすべてのモジュールより前に** 並べる。これより前に並べたモジュールはセッションを読めず、起動時にそれを検査するものは無い。standalone テンプレートはこれを先頭に置いている。例外は逆向きの宣言である: federation grants が有効なとき、そのブラウザ向けルートは `after: ["session-middleware"]` を宣言するので、どちらがどこに並んでいてもこのルートの後にマウントされ、その id のルートが無い組み立ては `route-order-target-missing` で起動に失敗する。
 - **`__Host-` の cookie 名には `session.secure = true` と `session.domain = null` が必要** で、満たさなければ起動に失敗する。デフォルト名は `__Host-auth.session`。
 - **`memory` は `deployment.mode = "multi"` で拒否される。** express-session の `MemoryStore` はレプリカごとに分岐する: あるレプリカが処理したログインは他のレプリカに知られず、ログアウトは到達したレプリカ上しか消さず、再起動ですべてのセッションが失われる。`sessionStoreModuleFor(config)` はストレージ種別を読み、`memory` ならモジュールを replica-unsafe と宣言する。そのため core の replica-safety ガードが起動時に他の違反と並べて名指しで拒否し、`deployment.mode` が未設定なら警告し、`"single"` なら何も言わない。静的な `sessionStoreModule` は種別を知り得ないので、ガードは名指しできない。そのルートファクトリーが実行時に同じ組み合わせを拒否し（`replica-unsafe-adapter`）、警告は出さない。設定が手元にあるなら `sessionStoreModuleFor` を使う。
-- **Redis ストアは自前の接続を開く。** `session.storage.redis.url`（設定されていれば `password` も）への `redis`（node-redis）クライアントを `connect-redis` の `RedisStore` の下に置く。readiness registrar が配線されていれば probe `session-store`（`PING`）を登録し、Redis を失ったレプリカはトラフィックを受けなくなる。lifecycle registrar が配線されていれば `AppHandle.dispose()` がクライアントを quit する。クライアントの `error` イベントはプロセスを落とさず `session_store_redis_error` としてログに出る。再接続は node-redis の仕事。`url` が無ければ起動に失敗する。
+- **Redis ストアは自前の接続を開く。** `session.storage.redis.url`（設定されていれば `password` も）への `redis`（node-redis）クライアントを `connect-redis` の `RedisStore` の下に置く。readiness registrar が配線されていれば probe `session-store`（`PING`）を登録し、Redis を失ったレプリカはトラフィックを受けなくなる。lifecycle registrar が配線されていれば `AppHandle.dispose()` がクライアントを quit する。クライアントの `error` イベントはプロセスを落とさず `session_store_redis_error` としてログに出る。再接続は node-redis の仕事。`url` が無ければ起動に失敗し、`redis` か `connect-redis` のパッケージが無くても起動に失敗する（[インストール](#インストール) を参照）。
 - **フェデレーショントランザクションは同じストアを共有する。** キーの接頭辞は `fedtx:` — [トランザクション cookie](#トランザクション-cookie) を参照。
 
 **`@o3co/auth-provider-redis` とは別物。** あちらの `UserSessionStore` は `sid` の背後にある `UserSession` レコード — introspection・`/userinfo`・`/authorize` が解決するもの — を持ち、他のアダプターは他の core ポートを、あちらのモジュールが作るクライアント越しに持つ。このストアが持つのは express-session 自身のレコード: このパッケージのルートがセッションに置くもの（`isAuthenticated`、`user`、`sid`、ログインの `redirectTo`、`query` フェデレーションの進行中のエンベロープ）、他のパッケージがそこに置くもの（`oauth` は `client` と `code` を宣言している）、そして `fedtx:` のフェデレーショントランザクション。レコードも接続も別で、設定も別々に行う。

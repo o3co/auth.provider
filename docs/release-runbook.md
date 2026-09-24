@@ -254,7 +254,7 @@ Dependabot PRs landing between the audit and the tag invalidate the audit's diff
 
 Step 2 of `release.yml` sets every package's `version` from the tag and nothing else. A sibling range written as a literal (`"@o3co/auth-provider-core": "^0.0.0"`) is published verbatim — and `^0.0.0` means `<0.0.1`, which no released sibling satisfies: pnpm warns on install, npm 7+ fails `ERESOLVE`. `v0.10.0` shipped that way — `npm view @o3co/auth-provider-dpop@0.10.0 peerDependencies` still answers `^0.0.0`.
 
-Sibling peers are therefore declared as `workspace:^`, which `pnpm pack` / `pnpm publish` rewrite to `^<sibling version>` at pack time, so the range tracks the tag with no second rewrite step. The matching `devDependencies` stay `workspace:*` — that is what satisfies the peer inside the workspace and in the runtime image. The `publish-readiness` CI job asserts both the source spec and the packed manifest, so a package that copies a literal range fails on the PR rather than on the registry. To see what a tag would publish, run the version step locally and inspect a tarball, then restore:
+Sibling peers are therefore declared as `workspace:^`, which `pnpm pack` / `pnpm publish` rewrite to `^<sibling version>` at pack time, so the range tracks the tag with no second rewrite step. The matching `devDependencies` stay `workspace:*` — that is what satisfies the peer inside the workspace and in the runtime image. CI asserts both the source spec (in `build-and-test`, the required check) and the packed manifest (in `publish-readiness`), so a package that copies a literal range fails on the PR rather than on the registry. To see what a tag would publish, run the version step locally and inspect a tarball, then restore:
 
 ```bash
 pnpm -r exec pnpm version 0.0.0-check --no-git-tag-version --no-commit-hooks
@@ -262,3 +262,5 @@ pnpm -r exec pnpm version 0.0.0-check --no-git-tag-version --no-commit-hooks
 tar -xzOf /tmp/tarballs/o3co-auth-provider-dpop-0.0.0-check.tgz package/package.json | jq .peerDependencies
 git checkout -- ':(glob)**/package.json'
 ```
+
+A sibling is always a peer, never a `dependencies` entry — core included. A dependency is the dependent's own copy, which the package manager installs a second time whenever its range and the deployment's differ; a `declare module "@o3co/auth-provider-core"` augmentation, or an `instanceof` against one of core's error classes, then reaches only one of the two copies. The source-spec half of the check is [`.github/scripts/check-sibling-deps.sh`](../.github/scripts/check-sibling-deps.sh): it fails on a sibling in `dependencies` or `optionalDependencies`, a sibling peer range other than `workspace:^`, and a sibling peer without its `workspace:*` devDependency.

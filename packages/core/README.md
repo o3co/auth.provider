@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 ## Responsibility
 
@@ -14,9 +14,12 @@ Vocabulary: **the Store** is auth.provider's term for the consumer's upstream us
 
 ```sh
 npm install @o3co/auth-provider-core
+# and, for createApp:
+npm install express@^5.0.0
 ```
 
-Peer dependencies: `express@^5.0.0` (optional — required only when using `createApp`)
+Optional peer dependency: `express@^5.0.0`, needed only for `createApp`. The
+package depends on `bcrypt`, `jose`, `js-yaml` and `zod`.
 
 ## Public API
 

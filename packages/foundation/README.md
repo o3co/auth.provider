@@ -1,6 +1,6 @@
 # @o3co/auth-provider-foundation
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 The HTTP client of "the Store" — the deployment's own user service — for
 auth.provider. `HttpUserRepository` implements core's `UserRepository` port over
@@ -51,7 +51,8 @@ nothing but core (the global `fetch`, no other dependency).
 npm install @o3co/auth-provider-foundation @o3co/auth-provider-core
 ```
 
-`@o3co/auth-provider-core` is a peer dependency.
+Peer dependency: `@o3co/auth-provider-core`. The package has no dependencies
+of its own.
 
 ## Usage
 

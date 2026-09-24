@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 Browser login, logout and upstream-IdP federation routes for
 [auth.provider](../../README.md), the redirect policy every federation adapter
@@ -106,12 +106,22 @@ comment.
 
 ```sh
 npm install @o3co/auth-provider-session @o3co/auth-provider-core express express-session
+# and, for session.storage.type = "redis" (the default in core's reference.conf):
+npm install redis@^6.2.1 connect-redis@^10.0.0
 ```
 
-- Peer dependencies: `express@^5.0.0` and `express-session@^1.17.0`.
-- Installed with it: `@o3co/auth-provider-core`, and `connect-redis` and `redis`
-  for the Redis session store. Those two are always installed and loaded only
-  when `session.storage.type = "redis"`.
+Peer dependencies: `@o3co/auth-provider-core`, `express@^5.0.0` and
+`express-session@^1.17.0`. Optional peer dependencies: `redis@^6.2.1` and
+`connect-redis@^10.0.0`, the Redis session store's libraries. The package has
+no dependencies of its own.
+
+Core is a peer because this package augments it (the
+`federationRedirectPolicies` contribution kind and its slot), and an
+augmentation reaches only the copy of core it resolves: as a peer, that is
+your composition's one copy. A deployment on `session.storage.type = "memory"`
+installs neither Redis library; nothing imports them until the Redis store is
+built. On `"redis"` — the default — install both: with either missing, boot
+fails naming it and the install command.
 
 ## Composition
 
@@ -180,7 +190,8 @@ What holds:
   traffic; with a lifecycle registrar wired, `AppHandle.dispose()` quits the
   client. Client `error` events are logged as `session_store_redis_error`
   rather than crashing the process; reconnecting is node-redis's job. A missing
-  `url` fails boot.
+  `url` fails boot, and so does a missing `redis` or `connect-redis` package
+  (see [Install](#install)).
 - **Federation transactions share the store**, under the `fedtx:` key prefix —
   see [the transaction cookie](#the-transaction-cookie).
 

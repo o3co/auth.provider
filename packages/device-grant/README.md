@@ -1,6 +1,6 @@
 # @o3co/auth-provider-device-grant
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) for [`auth.provider`](https://github.com/o3co/auth.provider) — the device-code flow for input-constrained clients: TV apps, CLIs, IoT.
 
@@ -51,6 +51,16 @@ Neither sibling imports this package. Both are peer dependencies, installed whet
     │◄── authorization_pending / slow_down / access_denied …        │
     │◄── access_token (once approved)                               │
 ```
+
+## Install
+
+```sh
+npm install @o3co/auth-provider-device-grant @o3co/auth-provider-core @o3co/auth-provider-oauth @o3co/auth-provider-session express
+```
+
+Peer dependencies: `@o3co/auth-provider-core`, `@o3co/auth-provider-oauth`,
+`@o3co/auth-provider-session` and `express@^5.0.0`. The package depends on
+`zod`.
 
 ## Quick start
 

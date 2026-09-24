@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-grants
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
@@ -31,6 +31,19 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 **Why a separate package.** What these routes disclose is an *upstream* access token, held on a user's standing consent, for a backend the user is not present at. Behind `/oauth/token` it would inherit grant dispatch, `token.issued`, this provider's token minting and a sender-constraint policy that cannot bind a credential another issuer minted; inside the oauth package it would make an optional feature part of every deployment's routing surface, so enabling ordinary OAuth would acquire this lifecycle by accident. The domain and the store ports are core's so that a store adapter depends on core and never on these routes.
 
 **Why it depends on `@o3co/auth-provider-oauth`.** For one thing, `createClientAuthMiddleware`: the five client routes authenticate a confidential client exactly as `/oauth/token` does, `private_key_jwt` included, and their client-authentication `401`s carry that middleware's wording ([below](#post-oauthfederation-grantsgrantidtoken)). It is a required peer, so the package is installed even by a deployment that mounts no `oauthModule` — which is an ordinary thing to do ([below](#beside-oauthmodule)). Nothing in oauth imports this package.
+
+## Install
+
+```sh
+npm install @o3co/auth-provider-federation-grants @o3co/auth-provider-core @o3co/auth-provider-oauth express
+```
+
+Peer dependencies: `@o3co/auth-provider-core`, `@o3co/auth-provider-oauth` and
+`express@^5.0.0`. The package depends on `zod`.
+
+Delegation also needs
+[`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md), the one
+adapter that can delegate; the package does not import it.
 
 ## Install both modules
 

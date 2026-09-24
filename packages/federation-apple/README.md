@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-apple
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 Sign in with Apple federation provider for `auth.provider` — Apple's **web**
 flow, in a browser, back to this server.
@@ -55,11 +55,12 @@ things the generic adapter does not do:
 ## Install
 
 ```sh
-npm install @o3co/auth-provider-federation-apple
+npm install @o3co/auth-provider-federation-apple @o3co/auth-provider-core @o3co/auth-provider-session
 ```
 
 Peer dependencies: `@o3co/auth-provider-core` and
-`@o3co/auth-provider-session`. Its dependencies are `openid-client` and `jose`.
+`@o3co/auth-provider-session`. The package depends on `jose` and
+`openid-client`.
 
 ## Usage
 

@@ -1,6 +1,6 @@
 {
 	"name": "@o3co/auth-provider-redis",
-	"description": "Redis-backed adapters (ChallengeStore, ReplaySeenSet) for @o3co/auth-provider-core",
+	"description": "Redis-backed adapters for the store ports of @o3co/auth-provider-core, a module for each, and ioredis wrappers for the clients they call",
 	"version": "0.0.0",
 	"license": "Apache-2.0",
 	"engines": {
@@ -19,8 +19,7 @@
 	},
 	"files": [
 		"dist",
-		"README.md",
-		"LICENSE"
+		"README.md"
 	],
 	"repository": {
 		"type": "git",
@@ -45,14 +44,10 @@
 	},
 	"peerDependencies": {
 		"@o3co/auth-provider-core": "workspace:^",
-		"ioredis": "^6.0.0",
-		"redis": "^6.2.1"
+		"ioredis": "^6.0.0"
 	},
 	"peerDependenciesMeta": {
 		"ioredis": {
-			"optional": true
-		},
-		"redis": {
 			"optional": true
 		}
 	},
@@ -60,7 +55,6 @@
 		"@o3co/auth-provider-core": "workspace:*",
 		"@vitest/coverage-v8": "^5.0.0",
 		"ioredis": "^6.0.0",
-		"redis": "^6.2.1",
 		"testcontainers": "^12.1.0",
 		"typescript": "^6.0.3",
 		"vitest": "^5.0.0"

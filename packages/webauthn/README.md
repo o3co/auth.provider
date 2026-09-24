@@ -1,6 +1,6 @@
 # @o3co/auth-provider-webauthn
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 Passkey (WebAuthn) credential registration and an authentication grant for [`auth.provider`](../../README.md): a user enrolls a passkey from an authenticated session, and later exchanges a passkey assertion for tokens at `/oauth/token`.
 
@@ -27,10 +27,15 @@ Passkey (WebAuthn) credential registration and an authentication grant for [`aut
 ## Install
 
 ```sh
-pnpm add @o3co/auth-provider-webauthn @o3co/auth-provider-core
+npm install @o3co/auth-provider-webauthn @o3co/auth-provider-core express
 ```
 
-The package declares `@o3co/auth-provider-core` as a dependency rather than a peer, pinned to the exact core release it was published with, and augments core's `ComponentMap` with the `webauthnConfig` slot. Install that same core version in your composition so that there is one copy of core; with two, the augmentation lands on the copy your app does not import.
+Peer dependencies: `@o3co/auth-provider-core` and `express@^5.0.0`. The
+package depends on `@simplewebauthn/server` and `zod`.
+
+Core is a peer because the package augments core's `ComponentMap` with the
+`webauthnConfig` slot: the augmentation reaches only the copy of core it
+resolves, and as a peer that is your composition's one copy.
 
 ## Bootstrap
 

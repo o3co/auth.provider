@@ -21,6 +21,7 @@ import {
 	loggableError,
 } from "@o3co/auth-provider-core";
 import type session from "express-session";
+import { loadRedisStoreLibraries } from "./redisStoreLibraries.mjs";
 
 /**
  * Factory for session stores. Builders may return `undefined` for adapters that
@@ -46,11 +47,11 @@ export function createSessionStoreFactory(ctx?: BuilderContext): SessionStoreFac
  * - `"memory"` — returns `undefined`; express-session falls back to its default
  *   in-memory store.
  * - `"redis"` — constructs a `connect-redis` RedisStore backed by a `redis` client
- *   (URL + optional password). The builder uses dynamic `import(...)`, so a
- *   process on the memory adapter never loads the two modules. It does not
- *   save installing them: `connect-redis` and `redis` are hard `dependencies`
- *   of this package, so every install of it pulls both — including one made
- *   only because a federation adapter names this package as a peer.
+ *   (URL + optional password). The two libraries are optional peer
+ *   dependencies of this package: the builder loads them when it runs
+ *   (`redisStoreLibraries.mts`), so a deployment on the memory adapter need
+ *   not install them, and one on this adapter that did not fails with an
+ *   error naming the missing package and the install command.
  *
  * The redis builder forwards the BuilderContext supplied at adapter-create time
  * (via `createSessionStoreFactory(ctx)`) so it can register `client.quit()` on
@@ -69,10 +70,7 @@ export function registerBuiltinSessionStores(factory: SessionStoreFactory): void
 		if (typeof url !== "string" || url.length === 0) {
 			throw new Error('redis session store requires "url" in config');
 		}
-		const [{ createClient }, { RedisStore }] = await Promise.all([
-			import("redis"),
-			import("connect-redis"),
-		]);
+		const { createClient, RedisStore } = await loadRedisStoreLibraries();
 		const client = createClient({
 			url,
 			password: typeof password === "string" ? password : undefined,

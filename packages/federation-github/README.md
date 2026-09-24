@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-github
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 GitHub federation provider for `auth.provider`: sign-in with a GitHub account
 through a GitHub OAuth App, with upstream logout and claim mapping.
@@ -31,11 +31,11 @@ requires `openid` and an id_token, cannot stand in for it.
 ## Install
 
 ```sh
-npm install @o3co/auth-provider-federation-github
+npm install @o3co/auth-provider-federation-github @o3co/auth-provider-core @o3co/auth-provider-session
 ```
 
 Peer dependencies: `@o3co/auth-provider-core` and
-`@o3co/auth-provider-session`. `openid-client` is installed with it.
+`@o3co/auth-provider-session`. The package depends on `openid-client`.
 
 ## Usage
 

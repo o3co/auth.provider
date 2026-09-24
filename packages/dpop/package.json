@@ -19,8 +19,7 @@
 	"files": [
 		"dist",
 		"src/reference.conf",
-		"README.md",
-		"LICENSE"
+		"README.md"
 	],
 	"repository": {
 		"type": "git",
