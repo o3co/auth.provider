@@ -11,6 +11,10 @@
 # `dist/licenseKey.mjs`, and either leaves the root file out. So no package
 # keeps a LICENSE of its own, and no packed path may be named like one. (npm
 # adds no root LICENSE at all: `npm pack` in a package directory ships none.)
+# Nor does a package's `files` name `LICENSE`: the packer includes a
+# package-root LICENSE whatever `files` says, and the root file arrives through
+# pnpm, not through `files` — so the entry changed nothing in any tarball, and
+# only suggested a file of the package's own.
 #
 # This reads the packed tarballs, which is what a consumer downloads:
 #   - each must hold `package/LICENSE`, byte for byte the root file; when one

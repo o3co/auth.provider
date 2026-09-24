@@ -31,8 +31,7 @@
 	"files": [
 		"dist",
 		"config",
-		"README.md",
-		"LICENSE"
+		"README.md"
 	],
 	"repository": {
 		"type": "git",
