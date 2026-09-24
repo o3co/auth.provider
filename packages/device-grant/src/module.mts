@@ -113,7 +113,7 @@ import {
 	createCsrfProtectionFromConfig,
 	type SessionCsrfConfigSlice,
 } from "@o3co/auth-provider-session";
-import express from "express";
+import express, { type RequestHandler } from "express";
 import { z } from "zod";
 import { createDeviceAuthorizationHandler } from "./deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "./grant.mjs";
@@ -286,6 +286,39 @@ const requireVerificationUri = (slice: DeviceAuthorizationConfigSlice): string =
 		);
 	}
 	return uri;
+};
+
+/** Both routes' body bound: the parsers' `limit`, and the check ahead of them. */
+const BODY_LIMIT = "16kb";
+const BODY_LIMIT_BYTES = 16 * 1024;
+
+/**
+ * The body limit, restated ahead of the parsers — federation-grants'
+ * `withinBodyLimit`, with its status and body, for the same reason.
+ *
+ * Both routes live under `/oauth`, where `oauthModule` mounts a router whose
+ * first middlewares are `express.json()` and `express.urlencoded()` with
+ * Express's 100 KiB default. Listed ahead of this module, those parsers have
+ * read the body before these routes run, and `body-parser` does not parse a
+ * body twice — so the `limit` on the parsers below is skipped. A declared
+ * `Content-Length` over the bound is refused here, before anything else, so
+ * the answer is the same `413` in either order.
+ *
+ * A body with no `Content-Length` (chunked) is left to the parsers, as
+ * federation-grants leaves it: this module's own bound it when they run
+ * first, `oauthModule`'s 100 KiB default when that router does.
+ */
+const withinBodyLimit: RequestHandler = (req, res, next) => {
+	const declared = Number(req.headers["content-length"]);
+	if (Number.isFinite(declared) && declared > BODY_LIMIT_BYTES) {
+		res
+			.status(413)
+			.set("Cache-Control", "no-store")
+			.set("Pragma", "no-cache")
+			.json({ error: "invalid_request", error_description: "body_too_large" });
+		return;
+	}
+	next();
 };
 
 /**
@@ -498,9 +531,12 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					}
 					const router = express.Router();
 					// Router-level body parsing, matching `oauthModule` and the
-					// WebAuthn routes: `createApp` installs no global parser.
-					router.use(express.json({ limit: "16kb" }));
-					router.use(express.urlencoded({ extended: false, limit: "16kb" }));
+					// WebAuthn routes: `createApp` installs no global parser. The
+					// bound is checked first, from `Content-Length`, so it holds
+					// when `oauthModule`'s parsers have already read the body.
+					router.use(withinBodyLimit);
+					router.use(express.json({ limit: BODY_LIMIT }));
+					router.use(express.urlencoded({ extended: false, limit: BODY_LIMIT }));
 					// Throttled like every other public entry point (#325), and
 					// AHEAD of client authentication — the token endpoint's D-6
 					// ordering — so repeated unauthenticated hits are bounded before
@@ -570,8 +606,11 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// `oauthModule`'s router parses form bodies for every request
 					// under `/oauth`, and when it is listed first it has done so
 					// before this router runs. The handler checks the media type
-					// itself and answers anything else `415`.
-					router.use(express.json({ limit: "16kb" }));
+					// itself and answers anything else `415`. The body bound is
+					// checked from `Content-Length` ahead of the parser, for the
+					// same reason: see `withinBodyLimit`.
+					router.use(withinBodyLimit);
+					router.use(express.json({ limit: BODY_LIMIT }));
 					// The session guard, verbatim: foreign origin refused, same
 					// origin or `session.csrf.trustedOrigins` accepted, no origin
 					// signal → the signed double-submit token `GET /session/csrf`
