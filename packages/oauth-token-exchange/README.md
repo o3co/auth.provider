@@ -222,6 +222,8 @@ Two modules contributing a validator for the same token type is refused at boot.
 
 19. **`oauth.accessToken.maxExpiresIn` bounds the offline-revocation window of an exchanged token.** Revoking the subject's family (note 10) stops an exchanged token wherever the family is consulted — introspection, userinfo, a verifier that checks revocation. A resource server that validates the JWT offline, by signature and `exp` alone, cannot observe that and keeps accepting the token until it expires. The longest that can be is the issued lifetime, and the longest a token-exchange request can make the issued lifetime is `maxExpiresIn`. Unset, it equals `defaultExpiresIn`, so the window is the default lifetime. Raise it only as far as you accept an exchanged token outliving its revocation at such a resource server.
 
+20. **A revoked access token cannot be exchanged, and a revocation store that cannot answer is `503`, not a refusal of the token.** The built-in validator consults the access-token denylist (by `jti`) and the subject watermark for the `subject_token` and the `actor_token`, as userinfo and introspection do, so revoking an access token also stops it being exchanged: a denylisted or watermarked token is `invalid_grant` / `subject_token validation failed` (`actor_token validation failed` for the actor). When either store cannot be read, the token is still refused, but the answer is `503 temporarily_unavailable` / `subject_token validation store unavailable` (`actor_token …` for the actor): an outage says nothing about the token, and `invalid_grant` would tell the client to discard a credential that may be perfectly good. The validator follows core's `ExchangeTokenValidator` contract — `null` for a token that is not acceptable, a throw for an answer that is not knowable — and tells the two apart with core's `isRevocationUnavailable`, as the `refresh_token` grant does. The family store's answers are note 1's.
+
 ## What it does not do
 
 - `saml1` / `saml2` subject token types.
@@ -232,7 +234,7 @@ Sender-constrained exchange is supported: the handler enforces the DPoP and mTLS
 
 ## Tests
 
-[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest and the family answers of note 1, with `tokenExchangeModule` and core's refresh-token family modules booted through `createApp`. [`published-files.test.mts`](./src/__tests__/published-files.test.mts) holds that every source file the build publishes is reached from the entry point.
+[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest, the family answers of note 1 and the store-outage answers of note 20, with `tokenExchangeModule` booted through `createApp`. [`published-files.test.mts`](./src/__tests__/published-files.test.mts) holds that every source file the build publishes is reached from the entry point.
 
 ## RFC references
 

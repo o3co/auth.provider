@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { isRevocationUnavailable } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
@@ -181,5 +182,28 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		};
 		const v = validator({ subjectRevocation });
 		expect(await v.validate(token, { role: "subject" })).toBeNull();
+	});
+
+	it("throws, rather than returning null, when a revocation store cannot be read", async () => {
+		// Core's contract: null is a verdict on the token (→ invalid_grant), a
+		// throw is an answer that is not knowable (→ 503). An outage is the
+		// second — the verifier's `revocation_unavailable` — for either store.
+		const token = await signSelfIssuedAccessToken({ jti: "at-1" });
+		const unreachable = async () => {
+			throw new Error("backend unreachable");
+		};
+		const denylist = { kind: "stub", add: async () => {}, has: unreachable };
+		await expect(
+			validator({ accessTokenDenylist: denylist }).validate(token, { role: "subject" }),
+		).rejects.toSatisfy(isRevocationUnavailable);
+
+		const subjectRevocation = {
+			kind: "stub",
+			revokeBefore: async () => {},
+			revokedBefore: unreachable,
+		};
+		await expect(
+			validator({ subjectRevocation }).validate(token, { role: "actor" }),
+		).rejects.toSatisfy(isRevocationUnavailable);
 	});
 });

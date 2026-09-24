@@ -18,6 +18,7 @@ import {
 	type AccessTokenDenylist,
 	type ExchangeTokenValidationContext,
 	type ExchangeTokenValidator,
+	isRevocationUnavailable,
 	type KeyStore,
 	type Logger,
 	type SubjectRevocation,
@@ -81,10 +82,13 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  * claim could be accepted — exactly the token-type-confusion gap Copilot
  * flagged on PR #100.
  *
- * `validate` returns null on every failure — bad signature, wrong typ,
+ * `validate` follows core's ExchangeTokenValidator contract. It returns
+ * null when the token is not acceptable — bad signature, wrong typ,
  * missing/empty sub, expired, issuer mismatch, a denylisted or watermarked
- * token, and a revocation store the central verifier could not consult (the
- * verifier fails closed by throwing, which is caught with the rest).
+ * token — and the grant answers `invalid_grant`. It throws when the answer is
+ * not knowable: a revocation store the central verifier could not consult
+ * (`isRevocationUnavailable`), which the grant answers with
+ * `503 temporarily_unavailable`. The token is refused either way.
  */
 export function createSelfIssuedAccessTokenValidator(
 	options: CreateSelfIssuedAccessTokenValidatorOptions,
@@ -122,7 +126,13 @@ export function createSelfIssuedAccessTokenValidator(
 					logger,
 				});
 				payload = verified.payload as Record<string, unknown>;
-			} catch {
+			} catch (err) {
+				// An unreachable denylist or subject watermark is an outage, not a
+				// finding about the token: rethrown, so the grant answers 503 rather
+				// than an `invalid_grant` that tells the client to discard a
+				// credential that may be perfectly good. The refresh grant makes the
+				// same split. Every other verification failure is the token's.
+				if (isRevocationUnavailable(err)) throw err;
 				return null;
 			}
 
