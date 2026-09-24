@@ -178,12 +178,15 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 			"https://app.example.com:8443",
 			"http://localhost",
 			"http://localhost:3000",
+		];
+		const rejects = [
+			// An IP-literal host is loopback, and still no ceremony runs on it:
+			// WebAuthn §5.1.3 requires the origin's effective domain to be a
+			// valid domain. See the IP-literal test below.
 			"http://127.0.0.1",
 			"http://127.0.0.1:8080",
 			"http://[::1]",
 			"http://[::1]:9000",
-		];
-		const rejects = [
 			"http://example.com", // non-loopback http
 			"file:///etc/passwd",
 			"javascript:alert(1)",
@@ -243,12 +246,34 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 			expect(result.error?.issues[0]?.message).toContain('"https://app.example.com"');
 		});
 
-		it("accepts http for the whole 127.0.0.0/8 loopback block, as core's vocabulary names it", () => {
+		it("refuses an IP-literal host in both lists: no browser runs a ceremony on one", () => {
+			// WebAuthn §5.1.3 / §5.1.4.1: "If effective domain is not a valid
+			// domain, then return a DOMException whose name is SecurityError" —
+			// an IPv4 or IPv6 host is not one, loopback or not. Core's rule
+			// accepts these for CORS; WebAuthn cannot use them.
+			for (const entry of [
+				"http://127.0.0.1:3000",
+				"http://127.0.0.53:3000",
+				"http://[::1]:3000",
+				"https://192.168.1.10",
+				"https://[2001:db8::1]",
+			]) {
+				for (const key of ["origin", "topOrigin"] as const) {
+					const result = webauthnConfigSchema.safeParse({ ...VALID, [key]: [entry] });
+					expect(result.success, `${key}: ${entry}`).toBe(false);
+					expect(result.error?.issues[0]?.message, `${key}: ${entry}`).toContain(
+						"WebAuthn needs a domain",
+					);
+				}
+			}
+		});
+
+		it("accepts localhost over http in both lists", () => {
 			expect(
-				webauthnConfigSchema.safeParse({ ...okBase, origin: ["http://127.0.0.53:3000"] }).success,
+				webauthnConfigSchema.safeParse({ ...okBase, origin: ["http://localhost:3000"] }).success,
 			).toBe(true);
 			expect(
-				webauthnConfigSchema.safeParse({ ...VALID, topOrigin: ["http://127.0.0.53:3000"] }).success,
+				webauthnConfigSchema.safeParse({ ...VALID, topOrigin: ["http://localhost:3000"] }).success,
 			).toBe(true);
 		});
 	});
@@ -267,13 +292,24 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 
 		const accepts = [
 			androidOrigin,
-			// Padded base64url is still base64url; some tooling emits it.
-			"android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOU=",
-			// The `-` and `_` of the URL-safe alphabet.
-			"android:apk-key-hash:-_ab12",
+			// The `-` and `_` of the URL-safe alphabet, at the one length a
+			// SHA-256 has.
+			`android:apk-key-hash:-_${"a".repeat(40)}A`,
 		];
 
 		const rejects = [
+			// Only the unpadded 43-character form is what Credential Manager
+			// sends: 256 bits are 42 whole base64 characters and a 43rd holding
+			// the last 4 bits, its low 2 bits zero.
+			`${androidOrigin}=`, // padded
+			"android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOU=", // padded and short
+			"android:apk-key-hash:-_ab12", // short
+			androidOrigin.slice(0, -1), // 42 characters
+			`${androidOrigin}A`, // 44 characters
+			`${androidOrigin.slice(0, -1)}J`, // a 43rd character a SHA-256 cannot end in
+			// The common mistake: keytool's hex SHA-256 fingerprint with the
+			// colons stripped — 64 characters, every one of them base64url.
+			`android:apk-key-hash:${"9A".repeat(32)}`,
 			// Empty body — the prefix on its own names no app.
 			"android:apk-key-hash:",
 			// Standard base64's `+` and `/` are not the URL-safe alphabet, and an
@@ -315,6 +351,16 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 			});
 			expect(parsed.origin).toEqual(["https://example.com", androidOrigin]);
 		});
+
+		it("tells a malformed Android origin what the hash must be", () => {
+			const result = webauthnConfigSchema.safeParse({
+				...okBase,
+				origin: [`android:apk-key-hash:${"9a".repeat(32)}`],
+			});
+			expect(result.error?.issues[0]?.message).toContain(
+				"the unpadded base64url SHA-256 of the signing certificate (43 characters), not the hex fingerprint",
+			);
+		});
 	});
 });
 
@@ -346,15 +392,18 @@ describe("topOrigin — the origins this RP may be framed by (#554 audit)", () =
 		}
 	});
 
-	it("refuses an Android app origin: a top origin is a browsing context", () => {
+	it("refuses an Android app origin, saying why: a top origin is a browsing context", () => {
 		// `android:apk-key-hash:` is what Credential Manager sends *as* the
-		// origin; there is no frame above it, so it is not a top origin.
-		expect(() =>
-			webauthnConfigSchema.parse({
-				...base,
-				topOrigin: ["android:apk-key-hash:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"],
-			}),
-		).toThrow();
+		// origin; there is no frame above it, so it is not a top origin. The
+		// refusal says so, rather than core's CORS wording about opaque origins.
+		const result = webauthnConfigSchema.safeParse({
+			...base,
+			topOrigin: ["android:apk-key-hash:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"],
+		});
+		expect(result.success).toBe(false);
+		expect(result.error?.issues[0]?.message).toContain(
+			"an Android app origin is never a top origin",
+		);
 	});
 });
 
