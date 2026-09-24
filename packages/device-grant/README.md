@@ -84,7 +84,7 @@ const handle = await createApp({
     // request `401 login_required`.
     sessionStoreModuleFor(config),
     // Built from the config createApp boots with. Its place in the list is free:
-    // enabled, its routes mount ahead of oauthModule's router on their own.
+    // each module under /oauth parses its own body.
     deviceGrantModule({ config }),
     oauthModule({ config }), // POST /oauth/token, where the device polls
     // Core's createApp serves the discovery document that advertises
@@ -115,13 +115,14 @@ The verification route's CSRF guard is built from the `session.*` config slice �
 
 ### Beside `oauthModule`
 
-`oauthModule` mounts its router at `/oauth`, and that router parses JSON and form bodies — with Express's default 100 KiB limit — for every request under `/oauth`, whichever route it is for, and a body is not parsed twice. So with the grant enabled both device routes declare `before: ["oauth-endpoints"]`, the id of that router's route, and core mounts them ahead of it whatever order the modules are listed in. Their own middleware is the first to read a body, so nothing about what they accept depends on the list:
+Both routes live under `/oauth`, where `oauthModule` mounts its router. That router parses the bodies of its own routes only, so each module under `/oauth` parses its own body and the order the modules are listed in does not matter. What these routes accept is decided by their own middleware:
 
-- **The 16 KiB body limit.** Both routes answer a body over 16 KiB with `413 invalid_request` (`body_too_large`), whether it declares a `Content-Length` (checked before any of it is read, as federation grants check theirs) or arrives chunked (found by the parsers); exactly 16 KiB is accepted. On `/oauth/device_authorization` the per-IP throttle runs first, so an oversized request spends an attempt like any other.
+- **The 16 KiB body limit.** A body that declares a `Content-Length` over 16 KiB is `413 invalid_request` (`body_too_large`) before any of it is read — the check federation grants use. A chunked body gets the same `413` once the route's parser has read past the bound: JSON on either route, a form on `/oauth/device_authorization`. A chunked body the route does not parse — `text/plain`, or a form sent to the verification route — is never read, so it is answered by the checks that follow (`401`, `403` or `415`), not `413`. Exactly 16 KiB is accepted.
+- **A body the parser cannot read, or a failure.** Malformed JSON is `400 invalid_request` (`malformed_body`); an unexpected failure is `500 server_error` (`unexpected_error`), with the error itself logged as `device_route_unexpected_error`. Both are JSON, never the host's error page — RFC 8628 §3.2 gives `/oauth/device_authorization` RFC 6749 §5.2's error response.
 - **The media type.** The verification route parses JSON only, and its handler answers anything but `application/json` with `415 invalid_request` ([below](#post-oauthdeviceverification)).
 - **Where a CSRF token may come from.** A header, or a JSON body; a form carrying the token in a body field has none, so the guard refuses it.
 
-The edge has one consequence: an enabled grant needs `oauthModule` in the same composition, and boot fails with `route-order-target-missing` without it — there would be no `/oauth/token` to poll. A disabled grant declares no edge and boots without `oauthModule`.
+`POST /oauth/device_authorization` checks in this order: the per-IP throttle (`429` — an oversized request spends an attempt like any other), the declared size (`413`), the parsers (`413` for a chunked body over the bound, `400` for malformed JSON), client authentication (`401 invalid_client`), then the request itself. The verification route's order is [below](#post-oauthdeviceverification).
 
 ## Public API
 
@@ -149,7 +150,7 @@ Requires an authenticated end-user session. Body: `{ action, user_code }`.
 | `approve` | `{ status: "approved", client_id }` | |
 | `deny` | `{ status: "denied", client_id }` | |
 
-Errors: `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `413 invalid_request` (`body_too_large`: a body over 16 KiB), `415 invalid_request` (a body that is not `application/json`), `429 slow_down`, `503 service_unavailable` (the limiter backend is down and `rateLimit.failMode = "closed"`).
+Errors: `400 invalid_request` (`malformed_body` for JSON the parser cannot read; otherwise a missing or unknown `action`), `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `413 invalid_request` (`body_too_large`: a JSON body over 16 KiB), `415 invalid_request` (a body that is not `application/json`), `429 slow_down`, `500 server_error` (`unexpected_error`, logged as `device_route_unexpected_error`), `503 service_unavailable` (the limiter backend is down and `rateLimit.failMode = "closed"`).
 
 **JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the endpoint accepts `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not): any other media type is `415 invalid_request`. The handler checks the media type itself rather than relying on no form parser having run, so the rule is the endpoint's wherever it is mounted ([Beside `oauthModule`](#beside-oauthmodule)). And the route runs the same `createCsrfGuard` as `POST /session/login`:
 
@@ -159,7 +160,7 @@ Errors: `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code
 
 The guard is built from the `session.*` config slice, so enabling the grant without one fails at boot. This is why the package depends on `@o3co/auth-provider-session`: one CSRF policy for the product, not a second origin check that can drift from it.
 
-**The checks run in this order:** the body size (`413`), the CSRF guard (`403 access_denied`), then, in the handler, the media type (`415`) and the session (`401 login_required`). So RFC 8628 §5.4's cross-site form is refused by the guard with `403` before its media type is looked at. `415` is what a request the guard lets through gets for a body that is not JSON — a same-origin form, or a POST with no body at all — and it comes before `401`: a non-JSON request with no session is `415`.
+**The checks run in this order:** the declared body size (`413`), the JSON parser (`413` for a chunked body over the bound, `400 malformed_body` for one it cannot read), the CSRF guard (`403 access_denied`), then, in the handler, the media type (`415`) and the session (`401 login_required`). So RFC 8628 §5.4's cross-site form is refused by the guard with `403` before its media type is looked at. `415` is what a request the guard lets through gets for a body that is not JSON — a same-origin form, or a POST with no body at all — and it comes before `401`: a non-JSON request with no session is `415`.
 
 The route reads the end user from the express-session (`isAuthenticated`, `user.id`), so `sessionStoreModule` must be mounted ahead of it and something must sign the user in; with no authenticated session every action is `401 login_required`.
 
@@ -257,7 +258,7 @@ Every field of the `DeviceAuthorization` an adapter hands back is a required key
 
 ## Tests
 
-[`flow.test.mts`](./src/__tests__/flow.test.mts) runs the ceremony end to end, [`composition.test.mts`](./src/__tests__/composition.test.mts) boots the module beside `oauthModule` as the Quick start does — the discovery document, the disabled grant, and the JSON-only rule and the body limit in both mount orders — [`verificationCsrf.test.mts`](./src/__tests__/verificationCsrf.test.mts) pins the CSRF guard, [`configRateLimit.test.mts`](./src/__tests__/configRateLimit.test.mts) the verification budget, and [`module.test.mts`](./src/__tests__/module.test.mts) the boot refusals and the disabled routes. The store's atomicity is core's conformance suite, run against both adapters.
+[`flow.test.mts`](./src/__tests__/flow.test.mts) runs the ceremony end to end, [`composition.test.mts`](./src/__tests__/composition.test.mts) boots the module beside `oauthModule` as the Quick start does — the discovery document, the disabled grant, the JSON-only rule, the body limit and the JSON error answers in both list orders, and that a route of another module under `/oauth` still receives its body unread — [`verificationCsrf.test.mts`](./src/__tests__/verificationCsrf.test.mts) pins the CSRF guard, [`configRateLimit.test.mts`](./src/__tests__/configRateLimit.test.mts) the verification budget, and [`module.test.mts`](./src/__tests__/module.test.mts) the boot refusals and the disabled routes. The store's atomicity is core's conformance suite, run against both adapters.
 
 ## License
 

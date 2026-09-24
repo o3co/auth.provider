@@ -89,7 +89,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - `oauthModule` は `config`、`clientRepository`、`codeRepository`、`keyStore` と、空でない `endpoints.login.url` を要求する — `/authorize` は未認証のブラウザーをそこへ送るので、無ければ boot が拒否する。
 - `subjectRevocation`、`auditSink`、`accessTokenDenylist` は配線は任意だが決定は任意ではない: 埋めないスロットは不在を宣言すること — `oauth.revocation.subject = "unsupported"`、`audit.sink.type = "none"`、`oauth.revocation.accessToken = "unsupported"` — さもなければ boot が拒否する。
 - `oauth.jwt.issuer` が正規の issuer URL でなければルーターの構築が失敗する: `iss` はデプロイの属性であり、リクエストから読むものではない。
-- `oauthModule` のルーターは、どのルート宛てかに関係なく `/oauth` 配下のすべてのリクエストで JSON とフォームのボディをパースし、ルートはモジュールを並べた順にマウントされる。そのため、それより後に `/oauth` 配下へマウントされるモジュールには、このルーターが既定の上限でパースし終えたボディが届く。federation grants は独自のボディ処理を持って `/oauth` 配下にマウントするので、それより前に並べる。後に並べると何を失うかはそのパッケージの README にある。有効な device グラントはこのルーターのルート ID に対して `before: ["oauth-endpoints"]` を宣言するので、並べる順に関係なくそれより前にマウントされる。
+- `/oauth` 配下の各モジュールは自分のボディを自分でパースし、モジュールを並べる順は関係しない。`oauthModule` のルーターが JSON とフォームのボディを（Express の既定の上限で）パースするのは [エンドポイント](#エンドポイント) の表にあるルート — [`routes.mts`](src/routes.mts) の `OAUTH_ROUTE_PATHS` — だけで、`/oauth` 配下のそれ以外のパス — device グラント、federation grants、WebAuthn、デプロイ独自のもの — へのリクエストは、ボディを読まれないままそのルートに届く。そこにルートをマウントして `req.body` を読むモジュールは、自分のパーサーをマウントする。
 
 ## エンドポイント
 
