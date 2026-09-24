@@ -134,4 +134,19 @@ describe("Google refresh tokens for returning users", () => {
 			}),
 		).toThrow(/accessType must be "offline" or "online"/);
 	});
+
+	it.each([
+		["a bigint", 1n, "bigint"],
+		["a symbol", Symbol("offline"), "symbol"],
+		["a function", () => "offline", "function"],
+	])("names the type of a non-string accessType it refuses: %s", (_l, value, type) => {
+		expect(() =>
+			createGoogleProvider({
+				clientId: "client-id",
+				clientSecret: "client-secret",
+				callbackURL: CALLBACK,
+				accessType: value as unknown as GoogleProviderConfig["accessType"],
+			}),
+		).toThrow(`accessType must be "offline" or "online", got ${type}`);
+	});
 });
