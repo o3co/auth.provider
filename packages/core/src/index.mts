@@ -795,6 +795,7 @@ export {
 	type ReplaySeenSetFactory,
 	registerBuiltinReplaySeenSets,
 } from "./replay-seen-set/factory.mjs";
+export { isRecordableJti, MAX_JTI_LENGTH } from "./replay-seen-set/jti.mjs";
 export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
 export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
 

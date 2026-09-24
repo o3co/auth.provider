@@ -17,8 +17,10 @@
 import {
 	consoleLogger,
 	createRemoteKeySetCache,
+	isRecordableJti,
 	type Logger,
 	loggableError,
+	MAX_JTI_LENGTH,
 	type PublicClient,
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
@@ -340,12 +342,14 @@ export function createClientAssertionVerifier(
 					);
 				}
 			}
+			// Bounded (`MAX_JTI_LENGTH`) as well as present: the jti is a seen-set
+			// key kept until the assertion expires, and the client chooses it.
 			const jti = payload.jti;
-			if (typeof jti !== "string" || jti.length === 0) {
+			if (!isRecordableJti(jti)) {
 				return refuse(
 					401,
 					"invalid_client",
-					"client assertion jti must be a non-empty string",
+					`client assertion jti must be a non-empty string of at most ${MAX_JTI_LENGTH} characters`,
 					"jti_shape",
 					{ clientId: iss },
 				);

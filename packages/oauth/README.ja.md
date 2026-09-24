@@ -282,9 +282,9 @@ oauth.authorize.acrValues {
 
 **リクエスト。** フォームボディに `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer` と `client_assertion=<JWT>`、そして認証に関わるものは他に何も付けない: Basic ヘッダーやボディの `client_secret` と並んだアサーションは、どちらも調べる前に拒否される（RFC 6749 §2.3、1 リクエストに 1 方式）。ボディの `client_id` があれば、アサーションと一致しなければならない。
 
-**アサーション。** `iss` と `sub` はどちらも `client_id` と等しい。`aud` は issuer かトークンエンドポイントの URL を名指す（RFC 7523 §3 — どちらの形でもよいので、どちらを使うクライアントライブラリでも動く）。`exp` は必須で、最大 1 時間先まで（`MAX_CLIENT_ASSERTION_LIFETIME_SECONDS`）。`jti` は必須かつ 1 回限りで、アサーションが期限切れになるまで構成の `replaySeenSet` に `client-assertion:<client_id>` として記録される。署名は非対称アルゴリズム（`RS*`、`PS*`、`ES*`、`EdDSA` — `token_endpoint_auth_signing_alg_values_supported` が列挙する。`HS*` と `none` は JWKS に対して決して受け入れない）。`nbf` はあれば検証し、`iat` はあればサーバー時計より 30 秒の許容を超えて未来であってはならず、有効期間の上限より古くてもならない。
+**アサーション。** `iss` と `sub` はどちらも `client_id` と等しい。`aud` は issuer かトークンエンドポイントの URL を名指す（RFC 7523 §3 — どちらの形でもよいので、どちらを使うクライアントライブラリでも動く）。`exp` は必須で、最大 1 時間先まで（`MAX_CLIENT_ASSERTION_LIFETIME_SECONDS`）。`jti` は必須で、seen-set のキーとして保持されるので 256 文字以内（core の `MAX_JTI_LENGTH`）、かつ 1 回限りで、アサーションが期限切れになるまで構成の `replaySeenSet` に `client-assertion:<client_id>` として記録される。署名は非対称アルゴリズム（`RS*`、`PS*`、`ES*`、`EdDSA` — `token_endpoint_auth_signing_alg_values_supported` が列挙する。`HS*` と `none` は JWKS に対して決して受け入れない）。`nbf` はあれば検証し、`iat` はあればサーバー時計より 30 秒の許容を超えて未来であってはならず、有効期間の上限より古くてもならない。
 
-**拒否**は `401 invalid_client` — リプレイされた `jti`、誤った `aud`、期限切れまたは長すぎるアサーション、JWKS に無い鍵での署名、公開されていない `kid`、別の方式で登録されたクライアント、未知のクライアント、取得できない `jwks_uri`（フェイルクローズ、理由付きで `client_assertion_refused` としてログ出力）。`replaySeenSet` を配線していない構成での `private_key_jwt` リクエストは `500 server_error`: 記録できない `jti` はリプレイされ得るものなので、未検査で認証するのではなく拒否する。standalone テンプレートはそれを配線する（`REPLAY_SEEN_SET_ADAPTER`、既定は Redis。メモリーアダプターは `DEPLOYMENT_MODE=multi` では拒否される。捕獲されたアサーションがレプリカごとに 1 回ずつリプレイできてしまうからである）。
+**拒否**は `401 invalid_client` — リプレイされた、空の、または長すぎる `jti`、誤った `aud`、期限切れまたは長すぎるアサーション、JWKS に無い鍵での署名、公開されていない `kid`、別の方式で登録されたクライアント、未知のクライアント、取得できない `jwks_uri`（フェイルクローズ、理由付きで `client_assertion_refused` としてログ出力）。`replaySeenSet` を配線していない構成での `private_key_jwt` リクエストは `500 server_error`: 記録できない `jti` はリプレイされ得るものなので、未検査で認証するのではなく拒否する。standalone テンプレートはそれを配線する（`REPLAY_SEEN_SET_ADAPTER`、既定は Redis。メモリーアダプターは `DEPLOYMENT_MODE=multi` では拒否される。捕獲されたアサーションがレプリカごとに 1 回ずつリプレイできてしまうからである）。
 
 **提供しないもの: `client_secret_jwt`。** これにはリポジトリのインターフェースが生の秘密を HMAC 鍵としてミドルウェアに渡す必要がある — `authenticate(clientId, secret)` は比較するだけで明かさない — し、テンプレートが推奨する bcrypt でハッシュした `clientSecret` はそもそも鍵になり得ない。そのケースはデプロイが既に持つ秘密ベースの方式で足り、非対称の方式こそがこの機能の目的である。
 
@@ -764,7 +764,7 @@ const assertionVerifier = createRegistryAssertionVerifier({
 });
 ```
 
-レジストリのチェックに加えて、ID-JAG は `typ: oauth-id-jag+jwt`、このサーバーの issuer 識別子とちょうど等しい `aud`（トークンエンドポイントの URL は別名にならない）、認証済みクライアントを名指す `client_id`（未認証の提示者は拒否）、そして `jti`、`iat`、`sub` を持たなければならない — `iat` は `private_key_jwt` と同じく 1 時間以内。各 `jti` はアサーションの有効期間中に 1 回だけ受け付ける。`scope` と `resource` はクレームとして運ばれる: スコープの上限はクレーム ∩ `allowedScopes`、audience の上限は `resource` ∩ `allowedAudiences`（エントリーが認めないリソースは拒否）で、グラントはさらにその両方をクライアントの登録で抑える。Store に渡すハンドルは `<iss>#<sub>`（または `<iss>#<tenant>#<sub>`） — `sub` は発行者の中でしか一意でない — で、Store が紐付けていない ID はそこで拒否される。リフレッシュトークンは発行しない: アサーションがリフレッシュの仕組みであり、アクセストークンはそれより長く生きない（下記）。
+レジストリのチェックに加えて、ID-JAG は `typ: oauth-id-jag+jwt`、このサーバーの issuer 識別子とちょうど等しい `aud`（トークンエンドポイントの URL は別名にならない）、認証済みクライアントを名指す `client_id`（未認証の提示者は拒否）、そして `jti`、`iat`、`sub` を持たなければならない — `iat` は `private_key_jwt` と同じく 1 時間以内。各 `jti` はアサーションの有効期間中に 1 回だけ受け付け、256 文字（`MAX_JTI_LENGTH`）を超えるものは記録する前に拒否する。`scope` と `resource` はクレームとして運ばれる: スコープの上限はクレーム ∩ `allowedScopes`、audience の上限は `resource` ∩ `allowedAudiences`（エントリーが認めないリソースは拒否）で、グラントはさらにその両方をクライアントの登録で抑える。Store に渡すハンドルは `<iss>#<sub>`（または `<iss>#<tenant>#<sub>`） — `sub` は発行者の中でしか一意でない — で、Store が紐付けていない ID はそこで拒否される。リフレッシュトークンは発行しない: アサーションがリフレッシュの仕組みであり、アクセストークンはそれより長く生きない（下記）。
 
 ### 発行するトークンはアサーションより長く生きない
 
