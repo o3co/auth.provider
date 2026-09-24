@@ -232,6 +232,29 @@ describe("deviceGrantModule — boot", () => {
 		).rejects.toThrow(/the same config/);
 	});
 
+	it("names the disagreement, not a missing store, when the booted config declares the store absent", async () => {
+		// The grant is contributed before the routes are, and it needs a
+		// store. Built enabled and booted off with `store = "unsupported"`
+		// and no store wired, the first refusal has to be the one that says
+		// what is actually wrong — the two configs — rather than the store
+		// the booted config correctly says it does not need.
+		const bootstrapComponents = makeBoot({
+			deviceAuthorization: { enabled: false, store: "unsupported" },
+			withStore: false,
+		});
+		const config = bootstrapComponents.config as AppConfig;
+		const handedToFactory = {
+			...config,
+			oauth: { ...config.oauth, deviceAuthorization: ENABLED },
+		} as AppConfig;
+		await expect(
+			createApp({
+				modules: [deviceGrantModule({ config: handedToFactory })],
+				bootstrapComponents,
+			}),
+		).rejects.toThrow(/the same config/);
+	});
+
 	it('refuses to boot with no audit sink unless audit.sink.type = "none" says so', async () => {
 		// #363's rule, applied to the decision that turns a code into a token:
 		// `auditSink` is optional to wire, not optional to decide. A composition
