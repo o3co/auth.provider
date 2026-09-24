@@ -25,21 +25,27 @@
  * It mirrors the rule core's `loggableError` (`logging/loggableError.mts`)
  * follows, so that once both are merged this file becomes an import:
  *
- *   - a thrown value that is not an `Error` is `{ thrown: typeof value }`;
+ *   - a thrown value that is not an `Error` is `{ thrown: typeof value }` —
+ *     and so is one whose `Error`-ness cannot even be asked (a Proxy whose
+ *     `getPrototypeOf` trap throws, where `Error.isError` is missing);
  *   - of an `Error`: `name`, `message`, `code` and `status` when they are
  *     strings or numbers, and `type` when it is a string (body-parser's and
  *     http-errors' codes);
  *   - a `SyntaxError` keeps no `message` — V8 quotes its input there, and
  *     body-parser's `entity.parse.failed` is one quoting the request body —
- *     only the `position` its message names, as a number;
- *   - a Redis `ReplyError` loses `, with args beginning with:` and everything
- *     after it — the command's first arguments;
+ *     only the `position` its message names, as a number of at most ten
+ *     digits;
+ *   - every other message loses `, with args beginning with:` and everything
+ *     after it. The phrase is Redis's own — its reply to an unknown command
+ *     quotes the command's first arguments — so the cut is keyed on the
+ *     phrase, not on a client library's class: ioredis's `ReplyError` names
+ *     itself, node-redis's `ErrorReply` does not;
  *   - every string kept is capped at {@link LOGGED_STRING_MAX_LENGTH};
  *   - a field whose read throws (a getter) is left out, so the projection
  *     itself never throws.
  *
  * What a kept message may still contain: the error's own wording — for a
- * `ReplyError`, Redis's text before the arguments (`ERR unknown command
+ * Redis reply, its text before the arguments (`ERR unknown command
  * 'evalsha'`) — and, from an error no rule here anticipates, up to that many
  * characters of whatever it says.
  *
@@ -56,8 +62,14 @@
 export const LOGGED_STRING_MAX_LENGTH = 256;
 
 export const loggableError = (error: unknown): Record<string, string | number> => {
-	const isError =
-		(Error as { isError?: (value: unknown) => boolean }).isError?.(error) ?? error instanceof Error;
+	let isError: boolean;
+	try {
+		isError =
+			(Error as { isError?: (value: unknown) => boolean }).isError?.(error) ??
+			error instanceof Error;
+	} catch {
+		isError = false;
+	}
 	if (!isError) return { thrown: typeof error };
 	const read = (key: string): unknown => {
 		try {
@@ -77,14 +89,10 @@ export const loggableError = (error: unknown): Record<string, string | number> =
 	const message = read("message");
 	if (typeof message === "string") {
 		if (name === "SyntaxError") {
-			const position = / at position (\d+)/.exec(message)?.[1];
+			const position = / at position (\d{1,10})(?!\d)/.exec(message)?.[1];
 			if (position !== undefined) out.position = Number(position);
 		} else {
-			out.message = cap(
-				name === "ReplyError"
-					? message.replace(/, with args beginning with:[\s\S]*$/, "")
-					: message,
-			);
+			out.message = cap(message.replace(/, with args beginning with:[\s\S]*$/, ""));
 		}
 	}
 	const type = read("type");
