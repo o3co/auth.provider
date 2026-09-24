@@ -28,6 +28,20 @@ import type { ReplaySeenSet } from "../types.mjs";
  */
 export const DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL = 1_000;
 
+/**
+ * The least time, in milliseconds, between two sweeps, whatever the write
+ * rate.
+ *
+ * The write interval alone does not bound how often the O(size) scan runs:
+ * DPoP writes a record per request at every protected resource, so at 1000
+ * requests a second a 1000-write interval is a full scan every second — of
+ * roughly 300,000 records at the default 300-second replay TTL. With a
+ * ten-second floor the scans are at most one per ten seconds, and the
+ * resident set grows by at most the records that expire inside those ten
+ * seconds (about 3% of the live set in that example).
+ */
+export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS = 10_000;
+
 export interface MemoryReplaySeenSetOptions {
 	/**
 	 * Writing `markSeen` calls between sweeps. Lower trades work for memory.
@@ -35,6 +49,12 @@ export interface MemoryReplaySeenSetOptions {
 	 * than disabling the sweep.
 	 */
 	readonly sweepInterval?: number;
+	/**
+	 * The least time between two sweeps, in milliseconds. `0` sweeps on the
+	 * write interval alone. A negative or non-integer value falls back to
+	 * the default rather than being read as no floor.
+	 */
+	readonly minSweepIntervalMs?: number;
 }
 
 /** In-process seen-set, with the record count exposed for observability. */
@@ -63,9 +83,13 @@ export interface MemoryReplaySeenSet extends ReplaySeenSet {
  * access-token denylist's is: a background interval would need lifecycle
  * registration to avoid holding the process open, and a write is the only
  * operation that grows the map. A replay is refused without writing and
- * pays nothing. The guarantee is bounded growth, not zero-lag reclamation:
- * an expired record is dropped within an interval, and `markSeen` /
- * `contains` keep answering correctly for one that has not been swept yet.
+ * pays nothing. A sweep runs once `sweepInterval` writes have accumulated
+ * and at least `minSweepIntervalMs` has passed since the last one — the
+ * count bounds the work per write, the floor bounds the scans per second.
+ * Writes keep counting through the floor, so the first write after it
+ * sweeps. The guarantee is bounded growth, not zero-lag reclamation: an
+ * expired record is dropped within an interval, and `markSeen` / `contains`
+ * keep answering correctly for one that has not been swept yet.
  *
  * The `getLive` helper is deliberately duplicated rather than shared with
  * the memory ChallengeStore — three similar lines is preferable to a
@@ -85,7 +109,14 @@ export function createMemoryReplaySeenSet(
 		options.sweepInterval > 0
 			? options.sweepInterval
 			: DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL;
+	const minSweepIntervalMs =
+		typeof options.minSweepIntervalMs === "number" &&
+		Number.isInteger(options.minSweepIntervalMs) &&
+		options.minSweepIntervalMs >= 0
+			? options.minSweepIntervalMs
+			: DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS;
 	let writesSinceSweep = 0;
+	let lastSweepAtMs = Number.NEGATIVE_INFINITY;
 
 	function getLive(key: string, nowMs: number): { expiresAtMs: number } | undefined {
 		const entry = map.get(key);
@@ -128,8 +159,9 @@ export function createMemoryReplaySeenSet(
 			}
 			map.set(k, { expiresAtMs });
 			writesSinceSweep += 1;
-			if (writesSinceSweep >= sweepInterval) {
+			if (writesSinceSweep >= sweepInterval && nowMs - lastSweepAtMs >= minSweepIntervalMs) {
 				writesSinceSweep = 0;
+				lastSweepAtMs = nowMs;
 				sweep(nowMs);
 			}
 			return true;
