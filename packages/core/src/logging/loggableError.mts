@@ -34,9 +34,10 @@
  * - `error_description`: the one peer-written string kept on purpose — an
  *   operator needs "Token has been expired or revoked." — and only its first
  *   line (split on CRLF or LF), when that line is within RFC 6749 §5.2's
- *   character set (`%x20-21 / %x23-5B / %x5D-7E`), cut before its first run
- *   of twenty or more characters from `[A-Za-z0-9._~+/=-]` and trimmed;
- *   omitted when nothing is left; capped at 256.
+ *   character set (`%x20-21 / %x23-5B / %x5D-7E`), cut at the start of the
+ *   space-delimited word that holds its first run of twenty or more
+ *   characters from `[A-Za-z0-9._~+/=-]`, and trimmed; omitted when nothing
+ *   is left; capped at 256.
  * - `stack`: the frames, never the header. A non-empty message is found in
  *   the stack and everything up to the end of it dropped (an empty one: the
  *   first line); a message not found — rewritten after V8 formatted the
@@ -87,9 +88,9 @@ export interface LoggableError {
 	readonly error?: string;
 	/**
 	 * The upstream's `error_description`: its first line, when that line is
-	 * within RFC 6749 §5.2's character set, cut before its first run of
-	 * twenty token characters and trimmed. The one peer-written string kept
-	 * on purpose.
+	 * within RFC 6749 §5.2's character set, cut at the start of the word that
+	 * holds its first run of twenty token characters, and trimmed. The one
+	 * peer-written string kept on purpose.
 	 */
 	readonly error_description?: string;
 	/** A Response the library put on the error — its cause, or its own `response`. */
@@ -128,18 +129,22 @@ const TOKEN_RUN = /[A-Za-z0-9._~+/=-]{20,}/;
  * An upstream's `error_description`: its first line — Azure AD puts a Trace
  * ID, a Correlation ID and a timestamp on CRLF-separated lines after the
  * AADSTS one — when that line is within RFC 6749 §5.2's character set, cut
- * at its first token-shaped run and trimmed: "Invalid refresh token: <the
- * token>" keeps "Invalid refresh token:", AADSTS700016 keeps the text up to
- * the application id. Omitted when nothing is left. The one peer-written
- * string the projection keeps, because an operator needs it to tell a
- * revoked grant from a broken client.
+ * at the start of the word that holds its first token-shaped run, and
+ * trimmed. The word goes whole, so no part of the token and no fragment of
+ * the word is left: "Invalid refresh token: <the token>" (or "…: abc:<the
+ * token>") keeps "Invalid refresh token:", AADSTS700016 keeps "Application
+ * with identifier", a redirect URI named by Azure AD or Okta goes with its
+ * `https:`. §5.2's set has no tab, so a word ends at a space. Omitted when
+ * nothing is left. The one peer-written string the projection keeps,
+ * because an operator needs it to tell a revoked grant from a broken client.
  */
 const descriptionOf = (value: unknown): string | undefined => {
 	if (typeof value !== "string") return undefined;
 	const firstLine = value.split(/\r?\n/, 1)[0] ?? "";
 	if (!OAUTH_ERROR_TEXT.test(firstLine)) return undefined;
 	const run = TOKEN_RUN.exec(firstLine);
-	const kept = (run === null ? firstLine : firstLine.slice(0, run.index)).trim();
+	const wordStart = run === null ? firstLine.length : firstLine.lastIndexOf(" ", run.index) + 1;
+	const kept = firstLine.slice(0, wordStart).trim();
 	return kept === "" ? undefined : capped(kept);
 };
 
