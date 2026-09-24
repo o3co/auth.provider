@@ -340,6 +340,58 @@ describe("createOAuthRouter", () => {
 			expect(failEvent?.clientId).toBe(TEST_CLIENT_ID);
 		});
 
+		// A grant's `error` alone cannot tell its refusals apart — token
+		// exchange answers a malformed request and a stolen bound token alike
+		// with `invalid_request` (RFC 8693 §2.2.2) — so the audited `reason` is
+		// the handler's own `error_description`, the way the route's refusals
+		// carry theirs. The description can echo client input, so it is capped.
+		describe("audits a grant handler's refusal with its description as the reason", () => {
+			const refusing = async (errorDescription: string | undefined) => {
+				const events: AuditEvent[] = [];
+				const auditSink: AuditSink = {
+					kind: "spy",
+					record: async (e) => {
+						events.push(e);
+					},
+				};
+				const stubGrant: GrantHandler = {
+					handle: async () => ({
+						result: {
+							status: 400,
+							error: "invalid_request",
+							...(errorDescription === undefined ? {} : { errorDescription }),
+						},
+					}),
+				};
+				const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", auditSink });
+				await request(app)
+					.post("/oauth/token")
+					.set("Authorization", TEST_BASIC_AUTH)
+					.type("form")
+					.send({ grant_type: "stub" });
+				await new Promise((r) => setImmediate(r));
+				return events.find((e) => e.type === "token.issued.failure")?.details;
+			};
+
+			it("carries the description", async () => {
+				expect(await refusing("subject_token requires a DPoP proof")).toEqual({
+					grant_type: "stub",
+					error: "invalid_request",
+					reason: "subject_token requires a DPoP proof",
+				});
+			});
+
+			it("caps a long description at 200 characters, marking the cut", async () => {
+				const details = await refusing(`scope "${"x".repeat(1000)}" is not allowed`);
+				expect(details?.reason).toBe(`scope "${"x".repeat(190)}...`);
+				expect(String(details?.reason)).toHaveLength(200);
+			});
+
+			it("falls back to the error code when the handler gives no description", async () => {
+				expect((await refusing(undefined))?.reason).toBe("invalid_request");
+			});
+		});
+
 		// #293 item 10: a missing required parameter is `invalid_request`
 		// (RFC 6749 §5.2); `unsupported_grant_type` is for a value the server
 		// does not support.

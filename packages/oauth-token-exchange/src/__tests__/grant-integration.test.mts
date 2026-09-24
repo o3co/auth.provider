@@ -22,6 +22,7 @@ import {
 	defineModule,
 	type GrantContext,
 	type GrantHandler,
+	type GrantPolicyRequest,
 	type Module,
 	memoryRefreshTokenFamilyStoreModule,
 	type PublicClient,
@@ -723,6 +724,36 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				dpop(JKT),
 				"actor_token has compound cnf binding which is not supported (Stage 1)",
 			],
+			[
+				"a subject_token whose may_act does not name the actor_token's subject",
+				async () => ({
+					subject_token: await signSelfIssuedAccessToken({ may_act: { sub: "svc-b" } }),
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					actor_token: await actor({}),
+					actor_token_type: ACCESS_TOKEN_TYPE,
+				}),
+				undefined,
+				"may_act_violation: actor not authorized by subject token",
+			],
+			[
+				"a subject_token whose may_act does not name the calling client",
+				() => subject({ may_act: { sub: "svc-b" } }),
+				undefined,
+				"may_act_violation: client not authorized by subject token",
+			],
+			[
+				"an actor_token that would extend a full actor chain",
+				async () => ({
+					subject_token: await signSelfIssuedAccessToken({
+						act: { sub: "svc-1", act: { sub: "svc-2", act: { sub: "svc-3" } } },
+					}),
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					actor_token: await actor({}),
+					actor_token_type: ACCESS_TOKEN_TYPE,
+				}),
+				undefined,
+				"actor_chain_too_deep: actor chain depth limit exceeded",
+			],
 		];
 
 		it.each(cases)(
@@ -778,26 +809,66 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 	});
 
-	// Who asked for the wider scope decides the answer. The request's own
-	// `scope` past the subject token is the caller's mistake, `invalid_scope`
-	// (RFC 6749 §5.2); a policy decision past it is the deployment's, answered
-	// as every other grant answers it, core's `policyOutOfBounds`. An audience
-	// the subject token does not carry is RFC 8693 §2.2.2's `invalid_target`.
-	describe("scope and audience past the subject token", () => {
-		const policyModule = (decision: {
-			readonly grantedScope?: readonly string[];
-			readonly grantedAudience?: readonly string[];
-		}) =>
+	// Who asked for more decides the answer. The request's own `scope` past
+	// the subject token is the caller's mistake, `invalid_scope` (RFC 6749
+	// §5.2), and its own `audience` past it is RFC 8693 §2.2.2's
+	// `invalid_target`; both are refused before the policy runs, so no policy
+	// decision can turn them into anything else. A policy decision past the
+	// exchange's ceilings is the deployment's, answered as every other grant
+	// answers it: core's `policyOutOfBounds`. The client "client-a" is
+	// registered for `allowedAudiences: ["billing"]` and
+	// `allowedScopes: ["read", "write"]`.
+	describe("scope and audience past the ceilings", () => {
+		const policyModule = (
+			evaluate: (request: GrantPolicyRequest) => Promise<{
+				outcome: "allow";
+				grantedScope?: readonly string[];
+				grantedAudience?: readonly string[];
+			}>,
+		) =>
 			defineModule({
 				name: "test:grant-policy",
-				provides: {
-					grantPolicy: () => ({
-						kind: "test",
-						evaluate: async () => ({ outcome: "allow" as const, ...decision }),
-					}),
-				},
+				provides: { grantPolicy: () => ({ kind: "test", evaluate }) },
 			});
-		const wideningPolicy = policyModule({ grantedScope: ["read", "write"] });
+		const deciding = (decision: {
+			readonly grantedScope?: readonly string[];
+			readonly grantedAudience?: readonly string[];
+		}) => policyModule(async () => ({ outcome: "allow", ...decision }));
+		// A policy that hands the request back unchanged — the shape a
+		// pass-through or logging policy has.
+		const echoing = policyModule(async (request) => ({
+			outcome: "allow",
+			grantedScope: request.requestedScope,
+			grantedAudience: request.requestedAudience,
+		}));
+
+		const logged = () => {
+			const logger = {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				fatal: vi.fn(),
+				child: () => logger,
+			};
+			return {
+				logger,
+				module: defineModule({ name: "test:logger", provides: { logger: () => logger } }),
+				// This grant's own events; the central verifier logs its own
+				// (`jwt_verify_aud_skipped`) on every exchange.
+				events: () =>
+					logger.warn.mock.calls
+						.map((call) => call[1])
+						.filter((event) => String(event).startsWith("token_exchange_")),
+			};
+		};
+
+		const audienceWidening = {
+			status: 400,
+			error: "invalid_target",
+			errorDescription: "audience_widening_not_allowed: billing",
+		};
 
 		it("answers invalid_scope when the request asks for a scope the subject_token does not carry", async () => {
 			const { grant } = await boot([]);
@@ -813,8 +884,9 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			});
 		});
 
-		it("answers 500 server_error when the policy grants a scope the subject_token does not carry", async () => {
-			const { grant } = await boot([wideningPolicy]);
+		it("answers 500 server_error, and logs the policy's refusal, when the policy grants a scope the subject_token does not carry", async () => {
+			const log = logged();
+			const { grant } = await boot([deciding({ grantedScope: ["read", "write"] }), log.module]);
 			const { result } = await exchange(grant, {
 				subject_token: await signSelfIssuedAccessToken({ scope: "read" }),
 				subject_token_type: ACCESS_TOKEN_TYPE,
@@ -822,29 +894,53 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			expect(result).toEqual({
 				status: 500,
 				error: "server_error",
-				errorDescription: "scope_widening_not_allowed: write",
+				errorDescription:
+					"policy returned scopes exceeding the subject_token scope or client allowedScopes: write",
 			});
+			expect(log.events()).toEqual(["token_exchange_policy_scope_refused"]);
 		});
 
-		it("answers invalid_target when the request names an audience the subject_token does not carry", async () => {
-			const { grant } = await boot([]);
+		it("answers invalid_target, and logs the request's refusal, when the request names an audience the subject_token does not carry", async () => {
+			const log = logged();
+			const { grant } = await boot([log.module]);
 			const { result } = await exchange(grant, {
 				subject_token: await signSelfIssuedAccessToken({ aud: "client-a" }),
 				subject_token_type: ACCESS_TOKEN_TYPE,
 				audience: "billing",
 			});
-			expect(result).toEqual({
-				status: 400,
-				error: "invalid_target",
-				errorDescription: "audience_widening_not_allowed: billing",
-			});
+			expect(result).toEqual(audienceWidening);
+			expect(log.events()).toEqual(["token_exchange_audience_widening_rejected"]);
 		});
 
-		// Who named the audience decides the answer, as it does for scope. The
-		// policy's `grantedAudience` is held to the subject token's audience
-		// (README notes 3 and 5) before it replaces the request's.
-		it("answers 500 server_error when the policy grants an audience the subject_token does not carry", async () => {
-			const { grant } = await boot([policyModule({ grantedAudience: ["billing"] })]);
+		// The request's audience is held to the subject token before the policy
+		// runs, so what the policy then does with it cannot change the answer:
+		// echoing it back (P1), replacing it with an audience the subject token
+		// does carry (P4), or widening the scope as well (P5).
+		it.each([
+			["a policy that echoes the request back", echoing],
+			[
+				"a policy that replaces it with the subject_token's audience",
+				deciding({ grantedAudience: ["client-a"] }),
+			],
+			["a policy that also widens the scope", deciding({ grantedScope: ["read", "admin"] })],
+			["a policy that names no audience", deciding({})],
+		])("still answers the request's invalid_target under %s", async (_label, policy) => {
+			const { grant } = await boot([policy]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ aud: "client-a", scope: "read" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: "billing",
+			});
+			expect(result).toEqual(audienceWidening);
+		});
+
+		// A policy's `grantedAudience` is held to what the subject token carries
+		// AND what the client is registered for — `allowedAudiences` plus its
+		// own client id — before it replaces the request's. The request's
+		// audience meets both bounds too; the policy does not get a wider one.
+		it("answers 500 server_error, and logs the policy's refusal, when the policy grants an audience the subject_token does not carry", async () => {
+			const log = logged();
+			const { grant } = await boot([deciding({ grantedAudience: ["billing"] }), log.module]);
 			const { result } = await exchange(grant, {
 				subject_token: await signSelfIssuedAccessToken({ aud: "client-a" }),
 				subject_token_type: ACCESS_TOKEN_TYPE,
@@ -852,29 +948,46 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			expect(result).toEqual({
 				status: 500,
 				error: "server_error",
-				errorDescription: "policy returned audiences outside the subject_token audience: billing",
+				errorDescription:
+					"policy returned audiences outside the subject_token audience or client allowedAudiences: billing",
 			});
+			expect(log.events()).toEqual(["token_exchange_policy_audience_refused"]);
 		});
 
-		it("still answers invalid_target for the request's own audience when a policy is installed but names none", async () => {
-			const { grant } = await boot([policyModule({})]);
+		it("answers 500 server_error when the policy grants an audience the subject_token carries but the client is not registered for", async () => {
+			const { grant } = await boot([deciding({ grantedAudience: ["payments"] })]);
 			const { result } = await exchange(grant, {
-				subject_token: await signSelfIssuedAccessToken({ aud: "client-a" }),
+				subject_token: await signSelfIssuedAccessToken({ aud: ["payments", "client-a"] }),
 				subject_token_type: ACCESS_TOKEN_TYPE,
-				audience: "billing",
 			});
 			expect(result).toEqual({
-				status: 400,
-				error: "invalid_target",
-				errorDescription: "audience_widening_not_allowed: billing",
+				status: 500,
+				error: "server_error",
+				errorDescription:
+					"policy returned audiences outside the subject_token audience or client allowedAudiences: payments",
 			});
 		});
 
-		it("mints for an audience the policy narrows to within the subject_token's", async () => {
-			const { grant } = await boot([policyModule({ grantedAudience: ["billing"] })]);
+		it("mints for an audience the policy narrows to within both bounds", async () => {
+			const { grant } = await boot([deciding({ grantedAudience: ["billing"] })]);
 			const { result } = await exchange(grant, {
 				subject_token: await signSelfIssuedAccessToken({ aud: ["billing", "client-a"] }),
 				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) return;
+			expect(decodeJwt(result.tokens.access_token).aud).toBe("billing");
+		});
+
+		// An empty `grantedAudience` is no decision, as core's
+		// `boundPolicyAudience` reads it for every other grant: the request's
+		// audience stands.
+		it("keeps the request's audience when the policy returns an empty grantedAudience", async () => {
+			const { grant } = await boot([deciding({ grantedAudience: [] })]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ aud: ["billing", "client-a"] }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: "billing",
 			});
 			expect(result.status).toBe(200);
 			if (!("tokens" in result)) return;
@@ -888,7 +1001,8 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 	// A revocation store that cannot be read is the second: the token is still
 	// refused — the verifier fails closed — but a client told its token is
 	// unacceptable discards a credential that may be perfectly good, so an
-	// outage must not be reported as a finding. The refresh grant makes the same split for the same reason.
+	// outage must not be reported as a finding. The refresh grant makes the
+	// same split for the same reason.
 	describe("a revocation store that cannot answer", () => {
 		const unreachableDenylist = (failFor: (jti: string) => boolean, revoked = new Set<string>()) =>
 			defineModule({

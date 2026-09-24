@@ -661,14 +661,16 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 		expect(result).toEqual({
 			status: 500,
 			error: "server_error",
-			errorDescription: "scope_widening_not_allowed: write",
+			errorDescription:
+				"policy returned scopes exceeding the subject_token scope or client allowedScopes: write",
 		});
 	});
 
-	// The policy's audience is checked against the subject token's before it
-	// replaces the request's, so a widening here is the policy's alone and
-	// gets `policyOutOfBounds`, as `boundPolicyAudience` answers for every
-	// other grant. The request's own audience past the subject token stays
+	// The policy's audience is checked before it replaces the request's, so a
+	// widening here is the policy's alone and gets `policyOutOfBounds`, as
+	// `boundPolicyAudience` answers for every other grant. The client is
+	// registered for both audiences, so the bound this crosses is the subject
+	// token's. The request's own audience past the subject token stays
 	// `invalid_target` (RFC 8693 §2.2.2) — see the case above.
 	it("answers server_error when the policy hook widens audience beyond subject aud", async () => {
 		const wideningPolicy: GrantPolicyHook = {
@@ -680,7 +682,12 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 				};
 			},
 		};
-		const g = buildGrant({ grantPolicy: wideningPolicy });
+		const g = buildGrant({
+			grantPolicy: wideningPolicy,
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["billing", "inventory"] }),
+			),
+		});
 		const token = await signSelfIssuedAccessToken({
 			aud: "billing",
 			family_id: "fam-1",
@@ -696,7 +703,8 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 		expect(result).toEqual({
 			status: 500,
 			error: "server_error",
-			errorDescription: "policy returned audiences outside the subject_token audience: inventory",
+			errorDescription:
+				"policy returned audiences outside the subject_token audience or client allowedAudiences: inventory",
 		});
 	});
 });
@@ -1231,7 +1239,12 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				return { outcome: "allow", grantedAudience: ["https://api.example.com"] };
 			},
 		};
-		const g = buildGrant({ grantPolicy: capturing });
+		const g = buildGrant({
+			grantPolicy: capturing,
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["https://api.example.com"] }),
+			),
+		});
 		const token = await signSelfIssuedAccessToken({
 			aud: ["https://api.example.com"],
 			family_id: "fam-1",
@@ -1256,7 +1269,12 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				return { outcome: "allow", grantedAudience: ["https://other.example.com"] };
 			},
 		};
-		const g = buildGrant({ grantPolicy: policy });
+		const g = buildGrant({
+			grantPolicy: policy,
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["https://other.example.com"] }),
+			),
+		});
 		const token = await signSelfIssuedAccessToken({
 			aud: ["https://api.example.com", "https://other.example.com"],
 			family_id: "fam-1",
@@ -1287,7 +1305,14 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				};
 			},
 		};
-		const g = buildGrant({ grantPolicy: policy });
+		const g = buildGrant({
+			grantPolicy: policy,
+			clientRepository: mockClientRepository(
+				publicClient({
+					allowedAudiences: ["https://api.example.com/users", "https://api.example.com/orders"],
+				}),
+			),
+		});
 		const token = await signSelfIssuedAccessToken({
 			aud: ["https://api.example.com/users", "https://api.example.com/orders"],
 			family_id: "fam-1",
@@ -1318,7 +1343,12 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				};
 			},
 		};
-		const g = buildGrant({ grantPolicy: policy });
+		const g = buildGrant({
+			grantPolicy: policy,
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["https://api.example.com/users"] }),
+			),
+		});
 		const token = await signSelfIssuedAccessToken({
 			aud: ["https://api.example.com/users"],
 			family_id: "fam-1",

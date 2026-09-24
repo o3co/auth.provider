@@ -202,7 +202,8 @@ describe("token exchange — client allowedScopes ceiling", () => {
 		expect(result).toEqual({
 			status: 500,
 			error: "server_error",
-			errorDescription: "scope_widening_not_allowed: admin",
+			errorDescription:
+				"policy returned scopes exceeding the subject_token scope or client allowedScopes: admin",
 		});
 	});
 
