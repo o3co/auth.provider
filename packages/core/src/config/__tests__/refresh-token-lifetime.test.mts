@@ -76,3 +76,20 @@ describe("resolveRefreshTokenLifetime", () => {
 		}
 	});
 });
+
+describe("isLifetimeSeconds — the rule both lifetime resolvers apply", () => {
+	it("is exported, for a lifetime handed over as a number rather than as configuration", () => {
+		expect(typeof core.isLifetimeSeconds).toBe("function");
+	});
+
+	it("admits a whole number of seconds from 1 to a year, and nothing else", () => {
+		for (const good of [1, 60, 86_400, 31_536_000]) {
+			expect(core.isLifetimeSeconds(good), String(good)).toBe(true);
+			expect(resolveRefreshTokenLifetime(withRefreshToken({ expiresIn: good }))).toBe(good);
+		}
+		for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 31_536_001, "60", null]) {
+			expect(core.isLifetimeSeconds(bad), String(bad)).toBe(false);
+			expect(() => resolveRefreshTokenLifetime(withRefreshToken({ expiresIn: bad }))).toThrow();
+		}
+	});
+});

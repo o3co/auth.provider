@@ -948,6 +948,56 @@ describe("the access-token lifetime it is built with", () => {
 			).toThrow(RangeError);
 		}
 	});
+
+	it("holds it to the rule core's resolvers hold a configured lifetime to: at most a year", () => {
+		// `oauth.accessToken.*` is a whole number of seconds from 1 to a year,
+		// in the schema and in `resolveAccessTokenLifetime`. The grant built by
+		// hand accepted anything positive up to 2^53, so the two ways of
+		// building it disagreed about the same number.
+		const build = (accessTokenExpiresIn: number) =>
+			createDeviceCodeGrant({
+				store: createMemoryDeviceCodeStore(),
+				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
+				accessTokenExpiresIn,
+			});
+		expect(() => build(31_536_001)).toThrow(RangeError);
+		expect(() => build(31_536_000)).not.toThrow();
+		expect(() => build(1)).not.toThrow();
+	});
+});
+
+describe("the device-code settings it is built with", () => {
+	// The module's schema holds `code-lifetime-seconds` to a whole number from
+	// 30 to 3600 and `polling-interval-seconds` to one from 1 to 60, at boot.
+	// `createDeviceAuthorizationHandler` is public and takes the settings as
+	// numbers, so a hand-built value reached `expiresAtMs` arithmetic and the
+	// wire's `expires_in` / `interval` on every request. It is refused where
+	// the handler is built instead.
+	const handler = (over: Partial<typeof settings>) =>
+		createDeviceAuthorizationHandler({
+			store: createMemoryDeviceCodeStore(),
+			settings: { ...settings, ...over },
+		});
+
+	it("refuses a code lifetime outside the schema's rule", () => {
+		for (const codeLifetimeSeconds of [1.5, Number.NaN, 0, 29, 3601, Number.POSITIVE_INFINITY]) {
+			expect(() => handler({ codeLifetimeSeconds }), String(codeLifetimeSeconds)).toThrow(
+				RangeError,
+			);
+		}
+		expect(() => handler({ codeLifetimeSeconds: 30 })).not.toThrow();
+		expect(() => handler({ codeLifetimeSeconds: 3600 })).not.toThrow();
+	});
+
+	it("refuses a polling interval outside the schema's rule", () => {
+		for (const pollingIntervalSeconds of [1.5, Number.NaN, 0, 61, -5]) {
+			expect(() => handler({ pollingIntervalSeconds }), String(pollingIntervalSeconds)).toThrow(
+				RangeError,
+			);
+		}
+		expect(() => handler({ pollingIntervalSeconds: 1 })).not.toThrow();
+		expect(() => handler({ pollingIntervalSeconds: 60 })).not.toThrow();
+	});
 });
 
 describe("code generation", () => {
