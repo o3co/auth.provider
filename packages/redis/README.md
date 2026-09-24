@@ -101,7 +101,12 @@ Each one implements a port core declares; the slot name is in parentheses.
   token revoked on one replica keeps working on the others; core refuses that
   one under `deployment.mode = "multi"` (#277).
 - `RefreshTokenFamilyStore` (`refreshTokenFamilyStore`) — the store only.
-  Rotation and revocation are core's processes over it.
+  Rotation and revocation are core's processes over it. A family's key lives
+  until the `expiresAtMs` last committed to it: the family's lifetime while
+  it is live, and — once core revokes it — until the last access token the
+  family could have minted stops being accepted (up to
+  `oauth.accessToken.maxExpiresIn` plus about five minutes past the
+  revocation), so revoked families' keys outlive their refresh tokens.
 - `UserSessionStore`, `SessionRPRegistry`, `SessionFamilyIndex`,
   `SessionFederationIndex`, `SubjectSessionIndex`, `SubjectRevocation` — the
   six user-session and subject-revocation stores, installed together by

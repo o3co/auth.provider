@@ -22,7 +22,10 @@ contributes the DPoP mechanism to both.
 
 - verifying a DPoP proof — structure, the `alg` allowlist, the signature over
   the embedded key, `htm` / `htu`, the `iat` window, `jti` replay — and the
-  proof's `ath` when it accompanies an access token;
+  proof's `ath` when it accompanies an access token. `iat`, and an `exp` or
+  `nbf` the proof carries, must be a NumericDate (core's `isNumericDate`:
+  finite and within the Date range, a fraction allowed); JSON's `1e400` is a
+  `malformed_proof`, not a clock outside the window;
 - the key thumbprint that becomes the token's `cnf.jkt`;
 - server-provided nonces (`use_dpop_nonce`, `DPoP-Nonce`);
 - what a proof's replay record is: its `jti`, under a seen-set scope of its

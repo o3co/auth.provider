@@ -96,7 +96,7 @@ RFC 6749 付録 A.7 と A.8 は `error` と `error_description` を `1*NQSCHAR`�
 
 ### キーストア
 
-`KeyStore` インターフェースは、対称鍵（HS256）と非対称鍵（RS256、ES256、EdDSA）の署名鍵を、鍵のローテーションを含めて抽象化します。ローテーションは形が鍵種別で異なり、非対称アルゴリズムは `previousKeys`（kid + 公開鍵 + 有効期限）、HS256 は `previousSecrets`（kid + secret + 有効期限）を使います。`getVerificationKey(kid)` は kid で鍵を解決し — キーストアは一致する鍵を直接返し、複数の鍵で試し検証することはありません — 持っていない kid には `UnknownKidError`、`expiresAt` を過ぎた kid には `ExpiredKidError` を throw するので、呼び出し側は捏造された kid と退役した kid を区別できます。`sign(options)` は compact JWT を返します。protected header の `alg` / `kid` は KeyStore が自動注入するため、呼び出し側は上書きできません。この契約により、remote-sign アダプター（KMS/HSM）は private key を露出せずに `sign()` を実装できます。`getSigningKidFallback()` は、`kid` header を欠く legacy/malformed トークンの検証用に現在の署名 kid を返す軽量なアクセサーです。rotation-safe な lookup には使わないでください。
+`KeyStore` インターフェースは、対称鍵（HS256）と非対称鍵（RS256、ES256、EdDSA）の署名鍵を、鍵のローテーションを含めて抽象化します。ローテーションは形が鍵種別で異なり、非対称アルゴリズムは `previousKeys`（kid + 公開鍵 + 有効期限）、HS256 は `previousSecrets`（kid + secret + 有効期限）を使います。`getVerificationKey(kid)` は kid で鍵を解決し — キーストアは一致する鍵を直接返し、複数の鍵で試し検証することはありません — 持っていない kid には `UnknownKidError`、`expiresAt` を過ぎた kid には `ExpiredKidError` を throw するので、呼び出し側は捏造された kid と退役した kid を区別できます。それ以外の throw（タイムアウトしたリモートの鍵サービスなど）はキーストアが答えられなかったということで、トークンについての判定ではありません。`verifyJwt` はそれを `kid_unknown` ではなく `key_unavailable` として報告し、すべてのルートが `503 temporarily_unavailable` で答えます（[トークン検証](#トークン検証)を参照）。`sign(options)` は compact JWT を返します。protected header の `alg` / `kid` は KeyStore が自動注入するため、呼び出し側は上書きできません。この契約により、remote-sign アダプター（KMS/HSM）は private key を露出せずに `sign()` を実装できます。`getSigningKidFallback()` は、`kid` header を欠く legacy/malformed トークンの検証用に現在の署名 kid を返す軽量なアクセサーです。rotation-safe な lookup には使わないでください。
 
 定義 — `KeyStore`、`SignJwtOptions`、`JWTPayload`、`ManagedKey`、`KeyLike`、2 つのエラー、`AsymmetricKeyStoreOptions`、`SymmetricPreviousSecret`、`createAsymmetricKeyStore`、`createSymmetricKeyStore` — は [`src/keys/KeyStore.mts`](src/keys/KeyStore.mts) にあります。
 
@@ -175,6 +175,14 @@ floor が置かれているのは **builder と schema**（= config 境界）で
 新しい `secret` もすべての `previousSecrets[].secret` も 32 バイトの floor を満たす必要がある — 退役した secret も重複期間のあいだは生きた検証鍵であり、現行の secret と同じ偽造リスクを持つ。
 
 スキーマは非対称の `previousKeys` 形を HS256 と混ぜることを拒否し、builder は逆（RS256/ES256/EdDSA での `previousSecrets`）を拒否する — 非対称アルゴリズムの運用者は `previousKeys` フィールドを使う。
+
+### トークン検証
+
+`verifyJwt`（[`src/jwt/verify.mts`](src/jwt/verify.mts)）はこのプロバイダーが発行したトークンを検証し、`JwtVerificationError` を throw します。その `reason` は、トークンについての判定（署名不正、誰も持たない kid の `kid_unknown`、退役した kid の `kid_expired`、期限切れ、失効の `revoked`）か、障害（キーストアが答えられない `key_unavailable`、jti の denylist か subject watermark が読めない `revocation_unavailable`）のどちらかです。`isVerificationUnavailable(err)` が両者を区別し、`VERIFICATION_UNAVAILABLE_DESCRIPTION` がワイヤーに載せる依存先の名前を与えます。このリポジトリのすべての面は障害を `503 temporarily_unavailable` で答え、判定（`401 invalid_token`、`400 invalid_grant`、`active: false`、失効の `200`）では答えません。どれもトークンを記述し、まったく問題ないかもしれない資格情報の取り替えをクライアントに促すからです。トークンはどちらの場合も拒否されます。
+
+`REVOCATION_RETENTION_ALLOWANCE_MS` は、トークンを失効させた記録をその `exp` からどれだけ長く保持しなければならないかです。検証器のクロック許容、レプリカ間の余裕、丸めの 1 秒からなります。`/oauth/revoke` は denylist に入れた `jti` を `exp` からこの分だけ長く保持し、失効したリフレッシュトークンファミリーも同じ規則で保持されます（[リフレッシュトークンファミリー](#リフレッシュトークンファミリーrfc-6819-5223-の-replay-検出)）。
+
+JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるときだけ NumericDate（RFC 7519 §2）です。`isNumericDate` と `malformedNumericDateClaim`（[`src/jwt/numericDate.mts`](src/jwt/numericDate.mts)）がその規則を述べ、jwt-bearer のレジストリ検証器、`private_key_jwt`、DPoP はこれを破るアサーションや proof を、そこから期限を計算する前に拒否します。jose はこうしたクレームが数値であることしか確かめず、JSON の `1e400` は Infinity にパースされます。小数は許されます。
 
 ### リポジトリ
 
@@ -438,6 +446,8 @@ const userRepo = new InMemoryUserRepository(users);
 - ポートは [`src/refresh-token-family/types.mts`](src/refresh-token-family/types.mts) の `RefreshTokenFamilyRotation` / `RefreshTokenFamilyRevocation`
 - すべての `rt+jwt` は `family_id` claim を持つ
 - `refreshTokenFamilyRotation` / `refreshTokenFamilyRevocation` スロット（`memoryRefreshTokenFamilyStoreModule`、または Redis アダプター）を提供すると replay 検出と family revocation が有効になる
+- 失効したファミリーは、それが発行し得た最後のアクセストークンが受け入れられなくなるまで記憶される。失効させる書き込み（revocation、またはファミリーを失効させる replay）は、ファミリー自身の期限と「現在 + `oauth.accessToken.maxExpiresIn`」の遅い方に `REVOCATION_RETENTION_ALLOWANCE_MS` を足した時刻まで記録を保持する（[`src/refresh-token-family/retention.mts`](src/refresh-token-family/retention.mts)）。記録がすでに期限切れのファミリーも失効として記録される。`createRefreshTokenFamilyRevocation` と `createRefreshTokenFamilyRotation` はこの horizon を `accessTokenHorizonMs`（`resolveFamilyAccessTokenHorizonMs(config)`）として受け取り、デフォルトのモジュールは `config` から読む
+- memory ストアは再起動で失効済みを含むすべてのファミリーを忘れるので、再起動前に失効したファミリーのアクセストークンは、再起動後は期限まで family チェックを通過する。単一レプリカ・開発用に限る
 
 #### GrantPolicyHook（scope / audience / token exchange のポリシー）
 

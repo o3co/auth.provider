@@ -162,7 +162,7 @@ Each directory under `src/` has one kind of responsibility; what a single file d
 
 | Directory | Responsibility |
 |---|---|
-| `src/` (root) | Assembly: `oauthModule`, `oauthAuthorizationModule` and `oauthSessionModule` (the fourth, `subjectRevocationServiceModule`, is in `logout/` beside the cascade it wires), `createOAuthRouter` (which composes every route below), option resolution, and a re-export of core's access-token header parser. |
+| `src/` (root) | Assembly: `oauthModule`, `oauthAuthorizationModule` and `oauthSessionModule` (the fourth, `subjectRevocationServiceModule`, is in `logout/` beside the cascade it wires), `createOAuthRouter` (which composes every route below), option resolution, a re-export of core's access-token header parser, and the one answer every route gives a token it could not verify because a dependency was down (`verificationUnavailable.mts`). |
 | [`routes/`](./src/routes) | One router or handler per endpoint family — authorize, consent, logout, federation token, revoke, userinfo. Routes may use `grants/`, `logout/`, `middleware/` and `clients/`; none of those imports a route. `routes/authorize.mts` also reads one grant helper, the per-client PKCE method rules, because `/authorize` validates PKCE the way `/token` does. The RFC 8707 `resource` rules both read are core's ([`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)), shared with the WebAuthn grant. |
 | [`grants/`](./src/grants) | The grant handlers: pure request-to-token decisions over core's grant contract, with no HTTP. |
 | [`middleware/`](./src/middleware) | Client authentication, reused by sibling packages. |
@@ -212,6 +212,7 @@ Without a `userSessionStore`, the subject is the user of the browser session tha
 - **The rotation is reserved before anything is signed.** The new refresh token's `jti` and the instant its lifetime is measured from are chosen first, committed to the family store by `RefreshTokenFamilyRotation.rotate`, and signed only once that commit holds. A lost race — a replay, a revoked family, an unknown family under `reject` — therefore returns having produced no signature, which matters under a KMS-backed `SigningKeyProvider` where each signature is a billable remote call. The issued token carries exactly the `jti` that was reserved and an `exp` no later than the ceiling the store committed — `RefreshTokenFamilyRotationOutcome.cappedExpiresAtMs`, less a one-second margin for the forward drift its contract documents, floored to the second — so a refresh token never outlives the family record that catches its replay. A ceiling that leaves no lifetime is `400 invalid_grant` ("refresh token family has reached its lifetime"), not a `200` carrying an already-expired refresh token.
 - **What that ordering costs.** Once `rotate` commits, the presented token is spent. A signer that fails after it — a KMS outage — leaves a rotation nobody holds a token for: the grant answers `503 temporarily_unavailable` and logs `refresh_token_rotation_orphaned` with the family id, the spent `jti` and the reserved one — only when the store actually committed the rotation, so a composition with no rotation wired, or an unknown family accepted under `unknownFamilyPolicy`, keeps the ordinary signer behaviour. The client's retry presents the old token, which now reads as a replay, so the family is revoked and the user re-authenticates.
 - **A replay revokes the family** (RFC 6819 §5.2.2), which is why the module reads `refreshTokenFamilyRevocation` beside the rotation; and a refresh token whose `iat` is at or before the subject's revocation watermark is `invalid_grant`.
+- **A token the grant could not verify because a dependency was down is `503 temporarily_unavailable`, not `invalid_grant`** — the keystore ("verification key unavailable") or the subject watermark ("revocation store unavailable"), logged as `token_verification_unavailable` with `site: "refresh_token"`. RFC 6749 §5.2's `invalid_grant` makes a client discard its refresh token, so answering an outage with it would log out everyone who refreshed during it. A kid the keystore does not hold is still `invalid_grant`.
 
 ### `session`
 
@@ -294,7 +295,7 @@ Every client-authenticated endpoint here — `/oauth/token`, `/oauth/introspect`
 
 **The assertion.** `iss` and `sub` both equal to the `client_id`; `aud` naming the issuer or the token endpoint URL (RFC 7523 §3 — either form, so a client library that uses one or the other works); `exp` required and at most one hour ahead (`MAX_CLIENT_ASSERTION_LIFETIME_SECONDS`); `jti` required, at most 256 characters (core's `MAX_JTI_LENGTH`, since it is kept as a seen-set key) and single-use, recorded in the composition's `replaySeenSet` under `client-assertion:<client_id>` until the assertion expires; signed with an asymmetric algorithm (`RS*`, `PS*`, `ES*`, `EdDSA` — `token_endpoint_auth_signing_alg_values_supported` lists them; `HS*` and `none` are never accepted against a JWKS). `nbf` is validated when present, and `iat` when present must be neither ahead of the server's clock beyond the 30 s tolerance nor older than the lifetime ceiling.
 
-**Refusals** are `401 invalid_client` — a replayed, empty or over-long `jti`, a wrong `aud`, an expired or over-long assertion, a signature under a key the JWKS does not hold, a `kid` it does not publish, a client registered for another method, an unknown client, or a `jwks_uri` that cannot be fetched (fail closed, logged as `client_assertion_refused` with the reason). A `private_key_jwt` request in a composition that wired no `replaySeenSet` is `500 server_error`: a `jti` that cannot be recorded is one that could be replayed, so the path refuses rather than authenticating unchecked. The standalone template wires one (`REPLAY_SEEN_SET_ADAPTER`, Redis by default; the memory adapter is refused under `DEPLOYMENT_MODE=multi` because a captured assertion would replay once per replica).
+**Refusals** are `401 invalid_client` — a replayed, empty or over-long `jti`, a wrong `aud`, an expired or over-long assertion, an `exp`, `iat` or `nbf` that is not a NumericDate (non-finite, such as JSON's `1e400`, or past the Date range; a fraction is fine — logged as `numeric_date`), a signature under a key the JWKS does not hold, a `kid` it does not publish, a client registered for another method, an unknown client, or a `jwks_uri` that cannot be fetched (fail closed, logged as `client_assertion_refused` with the reason). A `private_key_jwt` request in a composition that wired no `replaySeenSet` is `500 server_error`: a `jti` that cannot be recorded is one that could be replayed, so the path refuses rather than authenticating unchecked. The standalone template wires one (`REPLAY_SEEN_SET_ADAPTER`, Redis by default; the memory adapter is refused under `DEPLOYMENT_MODE=multi` because a captured assertion would replay once per replica).
 
 **Not shipped: `client_secret_jwt`.** It would need the repository interface to hand the middleware the raw secret as an HMAC key — `authenticate(clientId, secret)` compares, it does not reveal — and a bcrypt-hashed `clientSecret`, which is what the template recommends storing, cannot serve as one at all. The secret-based methods a deployment already has cover that case; the asymmetric one is the point of this feature.
 
@@ -384,7 +385,7 @@ The rule matters the moment RFC 8707 resource indicators are in use. Every acces
 }
 ```
 
-An audience outside that set, an unknown or expired token, one revoked through the jti denylist or the subject watermark, and one from another issuer all answer `active: false`. The **bearer self-introspection** path — `Authorization: Bearer <token>` where the body `token` is that same value — establishes no calling-client identity, so there is no set to pin against; the verifier records the gap as `jwt_verify_aud_skipped` rather than inventing one.
+An audience outside that set, an unknown or expired token, one revoked through the jti denylist or the subject watermark, and one from another issuer all answer `active: false`. A token that could not be judged — the keystore, the denylist or the watermark did not answer — is `503 temporarily_unavailable` instead, on both paths: `active: false` says the token is not active, and a resource server told so refuses its client with `invalid_token`, which sends it to replace a token that may be perfectly good. The 503 vouches for nothing and is still fail-closed; it is audited as `introspect.store_unavailable` and logged as `token_verification_unavailable`. The **bearer self-introspection** path — `Authorization: Bearer <token>` where the body `token` is that same value — establishes no calling-client identity, so there is no set to pin against; the verifier records the gap as `jwt_verify_aud_skipped` rather than inventing one.
 
 ### A `client_id` with reserved characters must be percent-encoded in HTTP Basic
 
@@ -402,8 +403,8 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 
 ### Revoked families and ended sessions
 
-- **Refresh-token family.** A token carrying `family_id` is checked with `refreshTokenFamilyRevocation.isFamilyRevoked` when that slot is wired: a revoked family answers `active: false` and emits `introspect.family_revoked`; a store that cannot answer also answers `active: false` (emitting `introspect.store_unavailable`), because RFC 7662 defines no `temporarily_unavailable` for this endpoint and inactive is the only fail-closed answer. A token without `family_id` is verified by signature and the revocation stores alone.
-- **Session liveness.** A token carrying a `sid` claim is checked against the `UserSessionStore` — the same read `/oauth/userinfo` performs. A session that has been logged out, has expired, or was deleted out of band answers `active: false` and emits `introspect.session_invalid`; a store outage answers `active: false` and emits `introspect.store_unavailable`. A token with no `sid` (client credentials, jwt-bearer) does not pay for the read, and neither does a composition that wires no `userSessionStore`.
+- **Refresh-token family.** A token carrying `family_id` is checked with `refreshTokenFamilyRevocation.isFamilyRevoked` when that slot is wired: a revoked family answers `active: false` and emits `introspect.family_revoked`; a store that cannot answer is `503 temporarily_unavailable` ("refresh token store unavailable"), audited as `introspect.store_unavailable` and logged as `introspect_store_unavailable` — an outage, for the reason above. A token without `family_id` is verified by signature and the revocation stores alone. A revoked family is remembered until the last access token it could have minted stops being accepted, so the answer does not revert once the family's own refresh tokens expire (core's `refresh-token-family/retention.mts`).
+- **Session liveness.** A token carrying a `sid` claim is checked against the `UserSessionStore` — the same read `/oauth/userinfo` performs. A session that has been logged out, has expired, or was deleted out of band answers `active: false` and emits `introspect.session_invalid`; a store outage is `503 temporarily_unavailable` ("session store unavailable"), audited and logged as the family store's is. A token with no `sid` (client credentials, jwt-bearer) does not pay for the read, and neither does a composition that wires no `userSessionStore`.
 
 These bind only callers that ask: a resource server validating the JWT offline, by signature and `exp`, sees no revocation and accepts the token until it expires.
 
@@ -414,7 +415,8 @@ These bind only callers that ask: a resource server validating the JWT offline, 
 A revocation the server could not record is not a `200`. When the caller's own token verified and the store that records its revocation — the `accessTokenDenylist` or the refresh-token family store — fails, the answer is `503 temporarily_unavailable` (§2.2.1: the client should assume the token still exists and retry), logged at error level as `revoke_store_unavailable` with `store` naming which one and `clientId` the client whose revocation was lost. A token that does not verify, is not one this server can revoke, or belongs to another client never reaches a store, so it stays `200` during an outage too.
 
 - **A refresh token** revokes its family through `refreshTokenFamilyRevocation`; without that slot the request is a no-op `200`.
-- **An access token** is added to the `accessTokenDenylist` when `oauth.revocation.accessToken` is `"denylist"`, denied until its `exp` plus the five-minute clock tolerance verification allows (`DEFAULT_CLOCK_SKEW_MS`) — for as long as it could still verify. A token past even that no longer verifies at this provider, so revoking it asks no store and answers `200`. A resource server of your own that calls `verifyJwt` with this denylist and a `clockSkewMs` above the default would accept a revoked token for the difference, so keep the default there. Under `"unsupported"`, `token_type_hint=access_token` is `400 unsupported_token_type` rather than a `200` that revokes nothing, and an unhinted token takes the refresh-token path only.
+- **An access token** is added to the `accessTokenDenylist` when `oauth.revocation.accessToken` is `"denylist"`, denied until its `exp` plus core's `REVOCATION_RETENTION_ALLOWANCE_MS` — the five-minute clock tolerance verification allows (`DEFAULT_CLOCK_SKEW_MS`), a replica allowance and a rounding second — for as long as it could still verify. A token past even that no longer verifies at this provider, so revoking it asks no store and answers `200`. A resource server of your own that calls `verifyJwt` with this denylist and a `clockSkewMs` above the default would accept a revoked token for the difference, so keep the default there. Under `"unsupported"`, `token_type_hint=access_token` is `400 unsupported_token_type` rather than a `200` that revokes nothing, and an unhinted token takes the refresh-token path only.
+- **A token that cannot be verified because the keystore did not answer** is `503 temporarily_unavailable` — RFC 7009 §2.2.1's answer for a server that cannot process the request, after which the client assumes the token still exists and retries — logged as `token_verification_unavailable`. A `200` there would say a token was revoked that nothing touched. A kid the keystore does not hold is still the silent `200`.
 
 Discovery advertises `revocation_endpoint` only when at least one of the two can revoke something. The endpoint's full behaviour is in the doc comment of [`routes/revoke.mts`](./src/routes/revoke.mts).
 
@@ -432,11 +434,13 @@ OIDC Core §5.3, on `GET` and `POST`. Returns scope-filtered claims sourced from
 | Missing / invalid Bearer token | `401` with `WWW-Authenticate: Bearer realm="userinfo"` |
 | Invalid JWT signature | `401 invalid_token` |
 | The token's `family_id` is revoked | `401 invalid_token` |
-| Session not found or store error | `401 invalid_token` (fail-closed) |
+| Session not found | `401 invalid_token` |
+| The keystore, the jti denylist or the subject watermark cannot answer | `503 temporarily_unavailable` ("verification key unavailable" / "revocation store unavailable"), no challenge; logged as `token_verification_unavailable` |
+| The refresh-token family store or the session store cannot answer | `503 temporarily_unavailable` ("refresh token store unavailable" / "session store unavailable"), no challenge; logged as `userinfo_store_unavailable` |
 | No `userSessionStore` wired or no `sid` claim | `200 { sub }` (sub only, no durable claims) |
 | Session active | `200 { sub, ...scope-filtered claims }` |
 
-All responses set `Cache-Control: no-store` and `Pragma: no-cache` (RFC 6750 §5.3).
+All responses set `Cache-Control: no-store` and `Pragma: no-cache` (RFC 6750 §5.3). An outage is refused — no claims are served — but not as `invalid_token`, which RFC 6750 §3.1 defines as a statement about the token ("expired, revoked, malformed, or invalid") and which sends the client to replace it.
 
 Scope-to-claim mapping (OIDC Core §5.4 standard scopes), shared with the id_token:
 
@@ -497,7 +501,7 @@ OIDC RP-Initiated Logout 1.0 `end_session_endpoint`. Parameters (`application/x-
 - `post_logout_redirect_uri` (optional) — must match one of `client.postLogoutRedirectUris` **exactly**, byte for byte. A reverse-domain custom scheme is a legal entry, and gets no relaxation for being one.
 - `state` (optional) — round-tripped when redirecting to `post_logout_redirect_uri`
 
-A `GET` whose `id_token_hint` was issued more than 24 hours ago is answered with a confirmation page instead of logging out; its form posts the hint and `state` back to this endpoint, and `post_logout_redirect_uri` only when it is on the client's allowlist.
+An `id_token_hint` that cannot be verified is `400 invalid_token`; one that cannot be verified because the keystore did not answer is `503 temporarily_unavailable`, on `GET` as on `POST`. A `GET` whose `id_token_hint` was issued more than 24 hours ago is answered with a confirmation page instead of logging out; its form posts the hint and `state` back to this endpoint, and `post_logout_redirect_uri` only when it is on the client's allowlist.
 
 Flow: verifies `id_token_hint` → loads the session → broadcasts an OIDC Back-Channel Logout 1.0 `logout_token` to every RP with a `backchannelLogoutUri` (best-effort; a failed POST does not stop the logout) → runs the store cascade → answers with one of:
 
@@ -525,7 +529,7 @@ Flow: verifies the access token → checks its family is not revoked → loads t
 
 If the IdP end-session call throws, local state is already cleared; the response is `200 {"disconnected": true}` and an audit event `federation.logout.idp_unreachable` is emitted for operator visibility.
 
-Returns `404 {"error": "federation_not_linked"}` when the named federation is not in the session.
+Returns `404 {"error": "federation_not_linked"}` when the named federation is not in the session. A keystore or a store that cannot answer — the family check included — is `503 temporarily_unavailable`, never `401 invalid_token`.
 
 ### Discovery metadata
 
@@ -649,7 +653,7 @@ Both bundled stores meet these and are pinned on them.
 | 502 | `upstream_token_ineligible` | The upstream's token is one this provider may not hand on. `error_description` names the reason — `token_type_unsupported` is the only one. Carries `Retry-After: 300` |
 | 503 | `refresh_not_supported` | Provider doesn't implement `SupportsRefresh` |
 | 503 | `lock_timeout` | Advisory lock could not be acquired within the wait window |
-| 503 | `temporarily_unavailable` | Store outage, IdP 5xx, or upstream network failure (ECONNREFUSED / ENOTFOUND / ETIMEDOUT — including codes wrapped on `error.cause.code` of a fetch TypeError) |
+| 503 | `temporarily_unavailable` | Store outage — the refresh-token family check included — a keystore or revocation store that cannot answer while the access token is verified, IdP 5xx, or upstream network failure (ECONNREFUSED / ENOTFOUND / ETIMEDOUT — including codes wrapped on `error.cause.code` of a fetch TypeError) |
 
 All error responses set `Cache-Control: no-store` and `Pragma: no-cache`. 401 responses include `WWW-Authenticate: Bearer error="invalid_token"` per RFC 6750.
 
@@ -719,6 +723,7 @@ const assertionVerifier = createRegistryAssertionVerifier({
 What an entry says, and what it means at `/oauth/token`:
 
 - **Keys** come from one public key (`type: "key"`), a static JWK set (`type: "jwks"`), or a JWKS endpoint (`type: "jwks_uri"`, `https` required outside loopback). A remote set is fetched on first use and cached (10 minutes by default; `cacheMaxAgeMs`, `cooldownMs`, `timeoutMs` on the entry tune it); an unknown `kid` triggers a refetch, so a rotation at the issuer is picked up without a restart. The fetch is the verifier's `fetch` option when given — an egress proxy — as it is for a `private_key_jwt` client's `jwksUri`; both are core's `createRemoteKeySetCache`. An endpoint that is down is an outage: the grant answers `503`, not `invalid_grant`.
+- **`exp`, `iat` and `nbf` must be NumericDates** (core's `isNumericDate`): an assertion carrying `1e400` (Infinity in JSON) or a value past the Date range is `invalid_grant`, refused before an ID-JAG's `jti` is recorded — it used to reach the replay seen-set and come back as a `503`. A fraction is fine.
 - **An unregistered `iss` is refused before any signature work.** No key is fetched and no signature is checked for an issuer nobody registered; "signed by A, claiming to be B" fails on B's keys.
 - **`allowedClients`** restricts who may present the issuer's assertions; a list refuses an unauthenticated presenter. Absent, anyone may.
 - **`allowedScopes`** is intersected with the assertion's own `scope` claim (or stands alone when the assertion names none) and becomes the scope ceiling the request and the client registration are further bounded by.
