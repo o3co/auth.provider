@@ -90,7 +90,6 @@ const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*$/;
 const PATH = new RegExp(`^(?:[${UNRESERVED_SUB_DELIMS}:@/]|${PCT})*$`);
 /** `*( pchar / "/" / "?" )`, what a query and a fragment are written in. */
 const QUERY_OR_FRAGMENT = new RegExp(`^(?:[${UNRESERVED_SUB_DELIMS}:@/?]|${PCT})*$`);
-const USERINFO = new RegExp(`^(?:[${UNRESERVED_SUB_DELIMS}:]|${PCT})*$`);
 /** A host: an IP literal in brackets (IPv6, or IPv4 inside it), or a reg-name. */
 const HOST = new RegExp(`^(?:\\[[0-9A-Fa-f:.]+\\]|(?:[${UNRESERVED_SUB_DELIMS}]|${PCT})*)$`);
 const PORT = /^[0-9]*$/;
@@ -101,25 +100,28 @@ const WEB_SCHEMES: ReadonlySet<string> = new Set(["http", "https"]);
 /** Resolves a relative reference so the WHATWG parser can judge the whole. */
 const URI_REFERENCE_BASE = "https://error-uri.invalid/";
 
-/** Whether `authority` is `[ userinfo "@" ] host [ ":" port ]` (RFC 3986 §3.2). */
+/**
+ * Whether `authority` is `host [ ":" port ]` (RFC 3986 §3.2) — with no
+ * userinfo. A link to a web page names no user, and a userinfo is how a
+ * reference disguises its host (`https://example.com@evil.example/` goes to
+ * evil.example); §3.2.1 deprecates `user:password` besides.
+ */
 function isAuthority(authority: string): boolean {
-	const at = authority.lastIndexOf("@");
-	const userinfo = at === -1 ? "" : authority.slice(0, at);
-	const hostPort = at === -1 ? authority : authority.slice(at + 1);
-	const portAt = hostPort.startsWith("[")
-		? hostPort.indexOf(":", hostPort.indexOf("]"))
-		: hostPort.lastIndexOf(":");
-	const host = portAt === -1 ? hostPort : hostPort.slice(0, portAt);
-	const port = portAt === -1 ? "" : hostPort.slice(portAt + 1);
-	return USERINFO.test(userinfo) && HOST.test(host) && PORT.test(port);
+	if (authority.includes("@")) return false;
+	const portAt = authority.startsWith("[")
+		? authority.indexOf(":", authority.indexOf("]"))
+		: authority.lastIndexOf(":");
+	const host = portAt === -1 ? authority : authority.slice(0, portAt);
+	const port = portAt === -1 ? "" : authority.slice(portAt + 1);
+	return HOST.test(host) && PORT.test(port);
 }
 
 /**
  * Whether `value` is an `error_uri` RFC 6749 allows (§5.2, Appendix A.9):
  *
  * - a URI-reference by RFC 3986's grammar — each component in its own
- *   characters, brackets only around an IP-literal host, at most one
- *   fragment, and a relative path whose first segment has no colon;
+ *   characters, brackets only around an IP-literal host, no userinfo, at
+ *   most one fragment, and a relative path whose first segment has no colon;
  * - absolute only as `http:` or `https:` — §5.2's "human-readable web page",
  *   so no `javascript:`, `data:`, `vbscript:` or `file:`;
  * - and one the WHATWG URL parser resolves, which refuses what the grammar
