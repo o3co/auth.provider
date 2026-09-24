@@ -186,7 +186,7 @@ describe("token exchange — client allowedScopes ceiling", () => {
 		});
 	});
 
-	it("refuses a policy hook that grants a subject scope outside the registration", async () => {
+	it("answers server_error for a policy hook that grants a subject scope outside the registration", async () => {
 		const policy: GrantPolicyHook = {
 			kind: "grants-admin",
 			async evaluate() {
@@ -199,10 +199,10 @@ describe("token exchange — client allowedScopes ceiling", () => {
 		});
 		const token = await signSelfIssuedAccessToken({ scope: "read admin", family_id: "fam-1" });
 		const { result } = await g.handle(ctx(exchangeBody(token)));
-		expect(result).toMatchObject({
-			status: 400,
-			error: "invalid_target",
-			errorDescription: expect.stringMatching(/scope_widening_not_allowed/),
+		expect(result).toEqual({
+			status: 500,
+			error: "server_error",
+			errorDescription: "scope_widening_not_allowed: admin",
 		});
 	});
 

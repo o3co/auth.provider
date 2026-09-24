@@ -146,7 +146,10 @@ describe("createTokenExchangeGrant — request errors", () => {
 		expect(result).toMatchObject({ status: 401, error: "invalid_client" });
 	});
 
-	it("returns unsupported_token_type when subject_token_type is not registered", async () => {
+	// RFC 6749 §5.2 `invalid_request`: "an unsupported parameter value (other
+	// than grant type)". `unsupported_token_type` is RFC 7009's code for the
+	// revocation endpoint; RFC 8693 defines no token-type error of its own.
+	it("returns invalid_request when subject_token_type is not registered", async () => {
 		const g = buildGrant();
 		const token = await signSelfIssuedAccessToken({});
 		const { result } = await g.handle(
@@ -157,10 +160,15 @@ describe("createTokenExchangeGrant — request errors", () => {
 				subject_token_type: "urn:ietf:params:oauth:token-type:saml2",
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "unsupported_token_type" });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription:
+				'subject_token_type "urn:ietf:params:oauth:token-type:saml2" is not supported',
+		});
 	});
 
-	it("returns unsupported_token_type when requested_token_type is not access_token", async () => {
+	it("returns invalid_request when requested_token_type is not access_token", async () => {
 		const g = buildGrant();
 		const token = await signSelfIssuedAccessToken({});
 		const { result } = await g.handle(
@@ -172,10 +180,15 @@ describe("createTokenExchangeGrant — request errors", () => {
 				requested_token_type: "urn:ietf:params:oauth:token-type:id_token",
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "unsupported_token_type" });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription:
+				'requested_token_type "urn:ietf:params:oauth:token-type:id_token" is not supported',
+		});
 	});
 
-	it("returns unsupported_token_type when actor_token_type is not registered", async () => {
+	it("returns invalid_request when actor_token_type is not registered", async () => {
 		const g = buildGrant();
 		const token = await signSelfIssuedAccessToken({});
 		const { result } = await g.handle(
@@ -188,7 +201,12 @@ describe("createTokenExchangeGrant — request errors", () => {
 				actor_token_type: "urn:ietf:params:oauth:token-type:saml2",
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "unsupported_token_type" });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription:
+				'actor_token_type "urn:ietf:params:oauth:token-type:saml2" is not supported',
+		});
 	});
 
 	it("mints a token for the minimal happy-path input (was Task 6 stub guard)", async () => {
@@ -616,7 +634,11 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 });
 
 describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
-	it("rejects when policy hook widens scope beyond subject scope by default", async () => {
+	// The request's own `scope` never reaches this check — a scope outside
+	// either ceiling is `invalid_scope` before the policy runs — so a widening
+	// here is the policy's fault, answered as every other grant answers a
+	// decision past its ceiling: core's `policyOutOfBounds`, 500 server_error.
+	it("answers server_error when the policy hook widens scope beyond subject scope", async () => {
 		const wideningPolicy: GrantPolicyHook = {
 			kind: "scope-widening",
 			async evaluate() {
@@ -636,10 +658,10 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({
-			status: 400,
-			error: "invalid_target",
-			errorDescription: expect.stringMatching(/scope_widening_not_allowed/),
+		expect(result).toEqual({
+			status: 500,
+			error: "server_error",
+			errorDescription: "scope_widening_not_allowed: write",
 		});
 	});
 

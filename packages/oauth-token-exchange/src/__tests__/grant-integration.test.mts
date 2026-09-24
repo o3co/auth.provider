@@ -735,6 +735,107 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		);
 	});
 
+	// The request's other refusals, through the same boot. A token type the
+	// deployment has no validator for, or a `requested_token_type` it cannot
+	// issue, is RFC 6749 §5.2's `invalid_request` ("an unsupported parameter
+	// value"): `unsupported_token_type` is RFC 7009's code for the revocation
+	// endpoint, and RFC 8693 defines no token-type error of its own.
+	describe("unsupported token types are invalid_request (RFC 6749 §5.2)", () => {
+		const SAML2 = "urn:ietf:params:oauth:token-type:saml2";
+		const cases: ReadonlyArray<
+			readonly [label: string, body: () => Promise<Record<string, unknown>>, description: string]
+		> = [
+			[
+				"a subject_token_type no validator is registered for",
+				async () => ({ subject_token: "opaque", subject_token_type: SAML2 }),
+				`subject_token_type "${SAML2}" is not supported`,
+			],
+			[
+				"an actor_token_type no validator is registered for",
+				async () => ({
+					subject_token: await signSelfIssuedAccessToken({}),
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					actor_token: "opaque",
+					actor_token_type: SAML2,
+				}),
+				`actor_token_type "${SAML2}" is not supported`,
+			],
+			[
+				"a requested_token_type other than access_token",
+				async () => ({
+					subject_token: await signSelfIssuedAccessToken({}),
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					requested_token_type: "urn:ietf:params:oauth:token-type:refresh_token",
+				}),
+				'requested_token_type "urn:ietf:params:oauth:token-type:refresh_token" is not supported',
+			],
+		];
+
+		it.each(cases)("refuses %s with invalid_request", async (_label, body, errorDescription) => {
+			const { grant } = await boot([]);
+			const { result } = await exchange(grant, await body());
+			expect(result).toEqual({ status: 400, error: "invalid_request", errorDescription });
+		});
+	});
+
+	// Who asked for the wider scope decides the answer. The request's own
+	// `scope` past the subject token is the caller's mistake, `invalid_scope`
+	// (RFC 6749 §5.2); a policy decision past it is the deployment's, answered
+	// as every other grant answers it, core's `policyOutOfBounds`. An audience
+	// the subject token does not carry is RFC 8693 §2.2.2's `invalid_target`.
+	describe("scope and audience past the subject token", () => {
+		const wideningPolicy = defineModule({
+			name: "test:widening-grant-policy",
+			provides: {
+				grantPolicy: () => ({
+					kind: "test",
+					evaluate: async () => ({ outcome: "allow" as const, grantedScope: ["read", "write"] }),
+				}),
+			},
+		});
+
+		it("answers invalid_scope when the request asks for a scope the subject_token does not carry", async () => {
+			const { grant } = await boot([]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ scope: "read" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				scope: "read write",
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_scope",
+				errorDescription: 'scope "write" is not in subject_token scope',
+			});
+		});
+
+		it("answers 500 server_error when the policy grants a scope the subject_token does not carry", async () => {
+			const { grant } = await boot([wideningPolicy]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ scope: "read" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toEqual({
+				status: 500,
+				error: "server_error",
+				errorDescription: "scope_widening_not_allowed: write",
+			});
+		});
+
+		it("answers invalid_target when the request names an audience the subject_token does not carry", async () => {
+			const { grant } = await boot([]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ aud: "client-a" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: "billing",
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_target",
+				errorDescription: "audience_widening_not_allowed: billing",
+			});
+		});
+	});
+
 	// Core's ExchangeTokenValidator contract: `null` means the token is not
 	// acceptable (the grant answers `invalid_request`, RFC 8693 §2.2.2), a
 	// throw means the answer is not knowable (`503 temporarily_unavailable`).
