@@ -403,6 +403,30 @@ const userRepo = new InMemoryUserRepository(users);
 - イベントが報告するエラーは `details.cause` に `auditedError(err)`（[`src/audit/auditedError.mts`](src/audit/auditedError.mts)）として載せる: `{ name, code?, cause?: { name, code? } }`。`loggableError` が読む name と code、およびその cause を 1 段だけ、サニタイズして切り詰めたもので、メッセージは運ばない。シンクは他のシステムが読む記録であり、ストアや IdP のメッセージは相手側の文字列だからである（Redis の応答が引用する引数、JSON のパースエラーが引用する入力、上流の説明）。`rate_limit.unavailable`、`introspect.store_unavailable`、`federation.logout.idp_unreachable` がこれを運ぶ
 - `details` の各キーはどのイベントでも型を 1 つに保つ。フィールドの型を最初に見たもので固定するシンク（Elasticsearch の dynamic mapping、BigQuery のスキーマ、Datadog のファセット）は食い違うイベントを落とすからである: `details.error` は現れるところではどこでも文字列（OAuth のコード、理由）で、`details.cause` の code も文字列。[`AuditEventDetails`](src/audit/types.mts) が両方のキーを型付けし、[`auditEventInventory.drift.test.mts`](src/audit/__tests__/auditEventInventory.drift.test.mts) がすべての発行箇所を読んで確かめる
 
+##### details の契約: `AuditEventDetails` と `AuditedError`
+
+`AuditEvent.details` は [`AuditEventDetails`](src/audit/types.mts) である。開いたレコードだが、2 つのキーはどのイベントも別の型を与えられないよう型付けされている:
+
+| キー | 型 | 中身 |
+| --- | --- | --- |
+| `details.error` | `string` | OAuth のエラーコードか拒否の理由。エラーオブジェクトやエラーのメッセージは入れない |
+| `details.cause` | [`AuditedError`](src/audit/auditedError.mts) | イベントが報告するエラー: `{ name: string, code?: string, cause?: { name: string, code?: string } }` |
+
+ほかのキーは開いているが、それを運ぶイベントの間で型を 1 つに保つことが期待される。
+
+- **独自の発行者**（`emitAuditEvent` を呼ぶモジュール、イベントを組み立てるシンクのラッパー）:
+  - 報告するエラーは `details.cause` に、`auditedError(err)` で作ったものだけを載せる;
+  - エラーオブジェクト、そのメッセージ、スタックを `details` のどこにも書かない;
+  - `details.error` には文字列だけを書く。
+
+  オブジェクトリテラルで書いたイベントは、この 2 つのキーについてコンパイラーが検査する。先に `Record<string, unknown>` として組み立てた `details` は検査されないので、それを組み立てる発行者は自分でこの規則を守る。
+- **独自のシンク**（`AuditSink` の実装、イベントを中継するラッパー）:
+  - `details.error` は文字列、`details.cause` は `AuditedError` であることを前提にしてよい;
+  - details を変換・秘匿するときもその型を保つ: 運ばない `cause` は `AuditedError` に置き換える（federation-grants のサニタイズ済みシンクは `{ name: "[redacted]" }` を使う）。文字列やメッセージには置き換えない;
+  - キーを落としてもよいが、型を変えてはいけない。
+
+  `AuditedError` の name と code はすべて、`"` と `\` を除く印字可能な ASCII に収められ、200 文字で切り詰め済みである。
+
 #### レートリミッター
 
 - `RateLimiter.check(key, ctx)` で atomic check + increment

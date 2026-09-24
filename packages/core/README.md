@@ -404,6 +404,30 @@ Five optional extension points: a slot or contribution kind a composition root f
 - An event carries an error it reports as `details.cause`, `auditedError(err)` ([`src/audit/auditedError.mts`](src/audit/auditedError.mts)): `{ name, code?, cause?: { name, code? } }` — the name and code `loggableError` reads, and one level of its cause, sanitised and capped, and never a message. A sink is a record other systems read, and a store's or an IdP's message is theirs: the arguments a Redis reply quotes, the input a JSON parse error quotes, an upstream's description. `rate_limit.unavailable`, `introspect.store_unavailable` and `federation.logout.idp_unreachable` carry it
 - Each `details` key keeps one type in every event, because a sink that fixes a field's type on first sight (Elasticsearch dynamic mapping, a BigQuery schema, a Datadog facet) drops the events that disagree: `details.error` is a string wherever it appears (an OAuth code, a reason), and a code in `details.cause` is a string. [`AuditEventDetails`](src/audit/types.mts) types both keys, and [`auditEventInventory.drift.test.mts`](src/audit/__tests__/auditEventInventory.drift.test.mts) reads every emission for them
 
+##### The details contract: `AuditEventDetails` and `AuditedError`
+
+`AuditEvent.details` is [`AuditEventDetails`](src/audit/types.mts): an open record, with two keys typed so that no event can give them a second type:
+
+| Key | Type | What it holds |
+| --- | --- | --- |
+| `details.error` | `string` | An OAuth error code or a refusal's reason — never an error object and never an error's message |
+| `details.cause` | [`AuditedError`](src/audit/auditedError.mts) | The error the event reports: `{ name: string, code?: string, cause?: { name: string, code?: string } }` |
+
+Every other key is open, and is still expected to keep one type across the events that carry it.
+
+- **A custom emitter** (a module calling `emitAuditEvent`, or a sink wrapper that builds events):
+  - puts an error it reports under `details.cause`, built with `auditedError(err)` and nothing else;
+  - never writes an error object, its message or its stack anywhere in `details`;
+  - writes `details.error` only as a string.
+
+  An event written as an object literal is held to the two keys by the compiler. A `details` built first as a `Record<string, unknown>` is not, so an emitter that assembles one owns the rule itself.
+- **A custom sink** (an `AuditSink` implementation, or a wrapper that relays events):
+  - may rely on `details.error` being a string and `details.cause` an `AuditedError` wherever they appear;
+  - if it transforms or redacts details, keeps those types: a `cause` it will not carry is replaced with an `AuditedError` (federation-grants' sanitised sink uses `{ name: "[redacted]" }`), never with a string or a message;
+  - may drop a key, but should not change its type.
+
+  Every name and code in an `AuditedError` is already held to printable ASCII without `"` and `\` and capped at 200 characters.
+
 #### Rate limiter
 
 - `RateLimiter.check(key, ctx)` atomic check + increment
