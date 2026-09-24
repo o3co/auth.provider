@@ -439,6 +439,19 @@ describe("loggableError — what a log line may carry of an error", () => {
 			expect(loggableError(hostile).message).toBe("kept");
 		});
 
+		it("a non-frame line between frames: only the unbroken run before it", () => {
+			const broken = new Error("m");
+			broken.stack = "Error: m\n    at a\nnot a frame\n    at b";
+			expect(stackOf(broken)).toBe("    at a");
+		});
+
+		it("a section appended after the frames: not kept, frames in it included", () => {
+			const appended = new Error("m");
+			appended.stack =
+				"Error: m\n    at a\n    at b\nCaused by: Error: inner\n    at gho_SECRET_FRAME (x:1:1)";
+			expect(stackOf(appended)).toBe("    at a\n    at b");
+		});
+
 		it("no frames: no stack", () => {
 			const bare = new Error("bare");
 			bare.stack = "Error: bare";
