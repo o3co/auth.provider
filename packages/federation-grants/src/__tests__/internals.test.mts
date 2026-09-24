@@ -223,6 +223,14 @@ describe("what the body parsers reject", () => {
 		expect(state.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
 	});
 
+	it("answers 500 for an exposed 4xx that is not a parser's — a store's 403 has failed", () => {
+		// The last error handler sees every error the router passes on, not
+		// only the parsers'. An `http-errors` 403 from a store is a failure.
+		const { state } = run(Object.assign(new Error("forbidden"), { expose: true, status: 403 }));
+		expect(state.status).toBe(500);
+		expect(state.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+	});
+
 	it("answers 500 with a fixed description for anything else", () => {
 		const { state } = run(new Error("something SENTINEL happened"));
 		expect(state.status).toBe(500);

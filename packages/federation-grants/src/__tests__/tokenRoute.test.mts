@@ -398,6 +398,29 @@ describe("the token route — what it refuses before core", () => {
 		},
 	);
 
+	it.each([
+		["/oauth/federation-grants/%E0%A4%A/token", "token"],
+		["/oauth/federation-grants/%/status", "status"],
+		["/oauth/federation-grants/%zz/revoke", "revoke"],
+	])("refuses a grant id Express cannot percent-decode as 400 (%s)", async (url) => {
+		// Express 5 raises a URIError with `status = 400`, and no `expose`,
+		// for a path parameter it cannot decode: the request's own mistake,
+		// whichever layer matched it first.
+		const h = harness();
+		const response = await request(h.app)
+			.post(url)
+			.set("Authorization", basic())
+			.set("x-request-id", "job-42")
+			.send({ sub: SUBJECT });
+		expect(response.status).toBe(400);
+		expect(response.body).toEqual({
+			error: "invalid_request",
+			error_description: "malformed_path",
+		});
+		expect(response.headers["cache-control"]).toBe("no-store");
+		expect(response.headers["x-request-id"]).toBe("job-42");
+	});
+
 	it("refuses an unsupported content type as 415", async () => {
 		const h = harness();
 		const response = await request(h.app)
