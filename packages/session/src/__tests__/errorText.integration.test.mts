@@ -25,7 +25,6 @@
 import type {
 	AppConfig,
 	FederationProvider,
-	FederationRedirectPolicy,
 	FederationTokenStore,
 	RateLimitDecision,
 	RateLimiter,
@@ -38,6 +37,7 @@ import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/test
 import express from "express";
 import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
+import type { FederationRedirectPolicy } from "#/federations/redirect-policy.mjs";
 import { sessionModule } from "#/module.mjs";
 import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
 
