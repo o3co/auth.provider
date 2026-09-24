@@ -60,8 +60,15 @@ const MAX_CAUSE_DEPTH = 3;
 /** RFC 6749 §5.2: `error` and `error_description` are `%x20-21 / %x23-5B / %x5D-7E`. */
 const OAUTH_ERROR_TEXT = /^[\x20\x21\x23-\x5B\x5D-\x7E]+$/;
 
-/** Redis quotes the leading arguments of a command it refused after this. */
-const REDIS_ECHOED_ARGS = ", with args beginning with:";
+/**
+ * Redis quotes the leading arguments of a command it refused after this, in
+ * the server's own text — so whichever client carries it: redis-errors'
+ * ReplyError (ioredis), node-redis's ErrorReply (named plain "Error").
+ */
+const REDIS_ECHOED_ARGS = /, with args beginning with:[\s\S]*$/;
+
+/** A SyntaxError's offset, and nothing else of its message. */
+const SYNTAX_POSITION = / at position (\d{1,10})/;
 
 const capped = (value: string): string => value.slice(0, MAX_STRING);
 
@@ -74,16 +81,25 @@ const read = (target: object, key: string): unknown => {
 	}
 };
 
-/** An Error from this realm or another (`node:vm`, a worker's structured clone). */
+/**
+ * An Error from this realm or another (`node:vm`, a worker's structured
+ * clone). `Error.isError` where the runtime has it (Node 24+); on Node 22 the
+ * fallback asks the value for its prototype and its tag, which a Proxy may
+ * answer by throwing — any throw reads as "not an Error".
+ */
 const isError = (value: unknown): value is object => {
-	const brand = (Error as { isError?: (candidate: unknown) => boolean }).isError;
-	if (typeof brand === "function") return brand(value);
-	return (
-		value instanceof Error ||
-		(typeof value === "object" &&
-			value !== null &&
-			Object.prototype.toString.call(value) === "[object Error]")
-	);
+	try {
+		const brand = (Error as { isError?: (candidate: unknown) => boolean }).isError;
+		if (typeof brand === "function") return brand(value);
+		return (
+			value instanceof Error ||
+			(typeof value === "object" &&
+				value !== null &&
+				Object.prototype.toString.call(value) === "[object Error]")
+		);
+	} catch {
+		return false;
+	}
 };
 
 /** A fetch `Response`, read structurally so that one from another realm counts too. */
@@ -153,11 +169,10 @@ function project(err: unknown, depth: number): LoggableError {
 	let position: number | undefined;
 	if (typeof rawMessage === "string") {
 		if (name === "SyntaxError") {
-			const at = /\bposition (\d{1,9})\b/.exec(rawMessage);
+			const at = SYNTAX_POSITION.exec(rawMessage);
 			position = at ? Number(at[1]) : undefined;
 		} else {
-			const echo = rawMessage.indexOf(REDIS_ECHOED_ARGS);
-			message = capped(echo === -1 ? rawMessage : rawMessage.slice(0, echo));
+			message = capped(rawMessage.replace(REDIS_ECHOED_ARGS, ""));
 		}
 	}
 
