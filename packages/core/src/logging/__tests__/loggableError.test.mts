@@ -141,11 +141,13 @@ describe("loggableError — what a log line may carry of an error", () => {
 		);
 	});
 
-	it("cuts an error_description at its first run of twenty token characters — an echoed credential or identifier", () => {
+	it("cuts an error_description at the start of the word holding its first run of twenty token characters — an echoed credential or identifier", () => {
 		// Legacy Spring Security echoes what it refused ("Invalid refresh
-		// token: <the token>"); Azure AD names the client or redirect it
-		// refused. A description is the rule's one peer-written string: the
-		// text before the run is what says what went wrong, and is kept.
+		// token: <the token>"); Azure AD and Okta name the client or redirect
+		// they refused. A description is the rule's one peer-written string:
+		// the words before the one holding the run say what went wrong, and
+		// are kept; that word goes whole, so no part of a token and no
+		// fragment of it ("https:", "abc:", "'") is left behind.
 		const described = (error_description: string) =>
 			loggableError(
 				Object.assign(new Error("refused"), { error: "invalid_grant", error_description }),
@@ -154,15 +156,29 @@ describe("loggableError — what a log line may carry of an error", () => {
 			described(
 				"AADSTS700016: Application with identifier 'f1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d' was not found in the directory 'Contoso'.",
 			),
-		).toBe("AADSTS700016: Application with identifier '");
+		).toBe("AADSTS700016: Application with identifier");
 		expect(
 			described(
 				"AADSTS7000215: Invalid client secret provided. Ensure the secret being sent in the request is the client secret value, not the client secret ID, for a secret added to app 'f1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'.",
 			),
 		).toBe(
-			"AADSTS7000215: Invalid client secret provided. Ensure the secret being sent in the request is the client secret value, not the client secret ID, for a secret added to app '",
+			"AADSTS7000215: Invalid client secret provided. Ensure the secret being sent in the request is the client secret value, not the client secret ID, for a secret added to app",
 		);
+		expect(
+			described(
+				"AADSTS50011: The redirect URI 'https://app.example.com/auth/callback' specified in the request does not match the redirect URIs configured for the application 'f1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'.",
+			),
+		).toBe("AADSTS50011: The redirect URI");
+		expect(
+			described(
+				"The 'redirect_uri' parameter must be a Login redirect URI in the client app settings: https://dev-123456-admin.okta.com/admin/app/oidc_client/instance/0oa1b2c3d4e5f6g7h8i9#tab-general",
+			),
+		).toBe("The 'redirect_uri' parameter must be a Login redirect URI in the client app settings:");
 		expect(described("Invalid refresh token: 3f2a9c1e-7b4d-4c0a-9e8f-7a6b5c4d3e2f")).toBe(
+			"Invalid refresh token:",
+		);
+		// The run starts mid-word: the word goes whole, not just the run.
+		expect(described("Invalid refresh token: abc:0gAbCdEfGhIjKlMnOpQrStUv")).toBe(
 			"Invalid refresh token:",
 		);
 		expect(described("Invalid access token: eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0")).toBe(
@@ -171,6 +187,8 @@ describe("loggableError — what a log line may carry of an error", () => {
 		// A description that is nothing but a token is omitted.
 		expect(described("eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0")).toBeUndefined();
 		expect(described("  3f2a9c1e7b4d4c0a9e8f7a6b5c4d3e2f")).toBeUndefined();
+		// So is one whose first word holds the run, whatever follows it.
+		expect(described("eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0 is not valid")).toBeUndefined();
 		// Google's and Okta's plain descriptions, and a run of nineteen, are kept whole.
 		expect(described("Token has been expired or revoked.")).toBe(
 			"Token has been expired or revoked.",
