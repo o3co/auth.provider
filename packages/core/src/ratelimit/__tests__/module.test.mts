@@ -100,6 +100,38 @@ describe("memoryRateLimiterModule", () => {
 		expect((await limiter.check(key, { ip: "1.2.3.4" })).allowed).toBe(false);
 	});
 
+	it("refuses a seeded budget that is present but unusable, naming the config key and not the limiter", () => {
+		// A configuration someone wrote, never passed through a schema: it
+		// used to be skipped, and the prefix ran on the 60 per 60 s default.
+		const provide = (extra: Record<string, unknown>) => () =>
+			memoryRateLimiterModule.provides?.rateLimiter?.({
+				config: {
+					memoryRateLimiter: {
+						limits: {},
+						defaultLimit: { limit: 60, windowSeconds: 60 },
+						maxBuckets: 10_000,
+					},
+					...extra,
+				},
+			} as never);
+		const cases: [Record<string, unknown>, RegExp][] = [
+			[{ rateLimit: { login: { windowMs: 900_000, limit: 0 } } }, /rateLimit\.login must be/],
+			[
+				{ oauth: { deviceAuthorization: { rateLimit: { limit: 5, windowSeconds: 0 } } } },
+				/oauth\.deviceAuthorization\.rateLimit must be/,
+			],
+			[
+				{ webauthn: { rateLimit: { authenticationOptions: { limit: "30", windowSeconds: 60 } } } },
+				/webauthn\.rateLimit\.authenticationOptions must be/,
+			],
+		];
+		for (const [extra, key] of cases) {
+			expect(provide(extra), JSON.stringify(extra)).toThrow(RangeError);
+			expect(provide(extra), JSON.stringify(extra)).toThrow(key);
+			expect(provide(extra), JSON.stringify(extra)).not.toThrow(/createMemoryRateLimiter/);
+		}
+	});
+
 	it("bounds bucket growth with memoryRateLimiter.maxBuckets", async () => {
 		vi.useFakeTimers();
 		try {

@@ -69,14 +69,23 @@ describe("resolveWebAuthnAuthenticationOptionsLimitSpec", () => {
 		expect(input).toEqual({ token: { limit: 100, windowSeconds: 60 } });
 	});
 
-	it("does not seed when the config carries no usable spec, as the other seeds do not", () => {
+	it("does not seed when the config does not give the budget at all", () => {
+		// Absent: no `webauthn` section, or none of its rate limits — the
+		// WebAuthn package not loaded. The adapter's default applies.
+		for (const config of [{}, { webauthn: {} }, { webauthn: { rateLimit: {} } }]) {
+			expect(
+				resolveWebAuthnAuthenticationOptionsLimitSpec({}, config)[
+					WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX
+				],
+				JSON.stringify(config),
+			).toBeUndefined();
+		}
+	});
+
+	it("refuses a budget that is given but unusable, naming the key", () => {
 		// The WebAuthn schema refuses these at the config boundary; a hand-built
-		// config that never passed it is judged by the one predicate.
-		expect(
-			resolveWebAuthnAuthenticationOptionsLimitSpec({}, {})[
-				WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX
-			],
-		).toBeUndefined();
+		// config that never passed it is judged by the one predicate, and
+		// refused under its own name rather than skipped.
 		for (const [limit, windowSeconds] of [
 			[0, 60],
 			[30, 0],
@@ -85,11 +94,9 @@ describe("resolveWebAuthnAuthenticationOptionsLimitSpec", () => {
 			[30, 1e13],
 		]) {
 			expect(
-				resolveWebAuthnAuthenticationOptionsLimitSpec({}, configured(limit, windowSeconds))[
-					WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX
-				],
+				() => resolveWebAuthnAuthenticationOptionsLimitSpec({}, configured(limit, windowSeconds)),
 				`limit=${String(limit)} windowSeconds=${String(windowSeconds)}`,
-			).toBeUndefined();
+			).toThrow(/^webauthn\.rateLimit\.authenticationOptions must be/);
 		}
 	});
 });

@@ -56,32 +56,34 @@ describe("resolveLoginLimitSpec", () => {
 		expect(limits.login).toEqual({ limit: 3, windowSeconds: 1 });
 	});
 
-	it("does not seed when the config carries no usable login spec", () => {
-		// A hand-built config that never passed the schema: better to leave the
-		// adapter's own default in place than to invent a limit.
+	it("does not seed when the config does not give rateLimit.login at all", () => {
+		// Absent: a config without the section, or without the key. The
+		// adapter's own default applies, as #270 intends.
 		expect(resolveLoginLimitSpec({}, {}).login).toBeUndefined();
-		expect(
-			resolveLoginLimitSpec({}, { rateLimit: { login: { windowMs: 0, limit: 20 } } }).login,
-		).toBeUndefined();
-		expect(
-			resolveLoginLimitSpec({}, { rateLimit: { login: { windowMs: 900_000, limit: 0 } } }).login,
-		).toBeUndefined();
+		expect(resolveLoginLimitSpec({}, { rateLimit: {} }).login).toBeUndefined();
+		expect(resolveLoginLimitSpec({}, { rateLimit: { failMode: "open" } }).login).toBeUndefined();
 	});
 
-	it("judges what it would seed by the one predicate every limiter uses", () => {
-		// Its own inline check let a window past the Date range through, which
-		// the limiter then refused at construction under its own name
-		// (`limits.login`) rather than this key's.
+	it("refuses a rateLimit.login that is given but unusable, naming the key", () => {
+		// A hand-built config that never passed the schema is still a
+		// configuration someone wrote. Skipped, the route ran on the adapter's
+		// 60 per 60 s default instead of it; judged by the one predicate every
+		// limiter uses, it is refused under its own name.
 		for (const login of [
+			{ windowMs: 0, limit: 20 },
+			{ windowMs: 900_000, limit: 0 },
 			{ windowMs: 1e19, limit: 20 },
 			{ windowMs: 900_000, limit: 1.5 },
 			{ windowMs: Number.NaN, limit: 20 },
 			{ windowMs: -900_000, limit: 20 },
+			{ windowMs: 900_000, limit: "20" },
+			null,
+			"20/900000",
 		]) {
 			expect(
-				resolveLoginLimitSpec({}, { rateLimit: { login } }).login,
+				() => resolveLoginLimitSpec({}, { rateLimit: { login } }),
 				JSON.stringify(login),
-			).toBeUndefined();
+			).toThrow(/^rateLimit\.login must be/);
 		}
 	});
 });

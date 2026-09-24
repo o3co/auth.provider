@@ -71,13 +71,23 @@ describe("resolveDeviceVerificationLimitSpec", () => {
 		expect(limits.device_verification).toEqual({ limit: 5, windowSeconds: 300 });
 	});
 
-	it("does not seed when the config carries no usable spec", () => {
-		// A hand-built config that never passed the schema: better to leave
-		// the adapter's own default in place than to invent a limit.
+	it("does not seed when the config does not give the budget at all", () => {
+		// Absent: a config without the section, or without the key — the
+		// device-grant package not loaded. The adapter's default applies.
 		expect(resolveDeviceVerificationLimitSpec({}, {}).device_verification).toBeUndefined();
 		expect(
 			resolveDeviceVerificationLimitSpec({}, { oauth: {} }).device_verification,
 		).toBeUndefined();
+		expect(
+			resolveDeviceVerificationLimitSpec({}, { oauth: { deviceAuthorization: {} } })
+				.device_verification,
+		).toBeUndefined();
+	});
+
+	it("refuses a budget that is given but unusable, naming the key", () => {
+		// A hand-built config that never passed the schema is still a
+		// configuration someone wrote; skipped, the route ran on the adapter's
+		// 60 per 60 s default instead of it.
 		for (const [limit, windowSeconds] of [
 			[0, 300],
 			[5, 0],
@@ -89,11 +99,16 @@ describe("resolveDeviceVerificationLimitSpec", () => {
 			[5, 1e13],
 		]) {
 			expect(
-				resolveDeviceVerificationLimitSpec({}, configured(limit, windowSeconds))
-					.device_verification,
+				() => resolveDeviceVerificationLimitSpec({}, configured(limit, windowSeconds)),
 				`limit=${String(limit)} windowSeconds=${String(windowSeconds)}`,
-			).toBeUndefined();
+			).toThrow(/^oauth\.deviceAuthorization\.rateLimit must be/);
 		}
+		expect(() =>
+			resolveDeviceVerificationLimitSpec(
+				{},
+				{ oauth: { deviceAuthorization: { rateLimit: null } } },
+			),
+		).toThrow(/^oauth\.deviceAuthorization\.rateLimit must be/);
 	});
 
 	it("does not mutate the limits it was handed", () => {

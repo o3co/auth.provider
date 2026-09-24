@@ -74,6 +74,32 @@ describe("redisRateLimiterModule", () => {
 		expect((await limiter.check(key, { ip: "1.2.3.4" })).allowed).toBe(false);
 	});
 
+	it("refuses a seeded budget that is present but unusable, naming the config key and not the limiter", () => {
+		const provide = (extra: Record<string, unknown>) => () =>
+			redisRateLimiterModule.provides?.rateLimiter?.({
+				config: {
+					redisRateLimiter: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } },
+					...extra,
+				},
+				rateLimiterClient: { incrementWithTtl: async () => 1 },
+			} as never);
+		const cases: [Record<string, unknown>, RegExp][] = [
+			[{ rateLimit: { login: { windowMs: 1e19, limit: 20 } } }, /rateLimit\.login must be/],
+			[
+				{ oauth: { deviceAuthorization: { rateLimit: { limit: 5, windowSeconds: 1e13 } } } },
+				/oauth\.deviceAuthorization\.rateLimit must be/,
+			],
+			[
+				{ webauthn: { rateLimit: { authenticationOptions: { limit: 0, windowSeconds: 60 } } } },
+				/webauthn\.rateLimit\.authenticationOptions must be/,
+			],
+		];
+		for (const [extra, key] of cases) {
+			expect(provide(extra), JSON.stringify(extra)).toThrow(key);
+			expect(provide(extra), JSON.stringify(extra)).not.toThrow(/createRedisRateLimiter/);
+		}
+	});
+
 	it("refuses a window longer than a year in its own schema", () => {
 		const schema = redisRateLimiterModule.configSchema;
 		for (const redisRateLimiter of [
