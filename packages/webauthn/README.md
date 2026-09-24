@@ -34,7 +34,7 @@ The package declares `@o3co/auth-provider-core` as a dependency rather than a pe
 
 ## Bootstrap
 
-The WebAuthn settings live in your HOCON configuration under `webauthn`, beside everything else the composition root loads. Layer this package's [`config/reference.conf`](config/reference.conf) between your `application.conf` and core's own `reference.conf`: it carries the package's defaults and the `WEBAUTHN_*` environment variables that override them. Core's `AppConfigSchema` keeps the `webauthn` section as it found it ([#496](https://github.com/o3co/auth.provider/issues/496)), and a small module hands that section to `webauthnConfigSchema`, which owns the rules:
+The WebAuthn settings live in your HOCON configuration under `webauthn`, beside everything else the composition root loads. Layer this package's [`config/reference.conf`](config/reference.conf) between your `application.conf` and core's own `reference.conf`: it carries the package's defaults and the `WEBAUTHN_*` environment variables that override them. Core's `AppConfigSchema` passes through the `webauthn` keys it names — every key `webauthnConfigSchema` reads, which `config.test.mts` pins ([#496](https://github.com/o3co/auth.provider/issues/496)) — checking little more than their types, and a small module hands that section to `webauthnConfigSchema`, which owns the rules:
 
 ```hocon
 # config/application.conf — what has no default
@@ -95,7 +95,7 @@ const app = await createApp({
 });
 ```
 
-A module that hard-codes the settings instead (`webauthnConfigSchema.parse({ rpId: …, … })`) works too, but then none of the `WEBAUTHN_*` variables below reaches the schema.
+A module that hard-codes the settings instead (`webauthnConfigSchema.parse({ rpId: …, … })`) works only if it supplies every field, the ones `reference.conf` defaults included — the schema has no defaults of its own — and then none of the `WEBAUTHN_*` variables below reaches the schema.
 
 ## Multi-origin: one RP for the site and the Android app
 
@@ -128,10 +128,12 @@ into `origin`) carries the same list comma-separated — the spelling
 `CORS_ALLOWED_ORIGINS` uses, read by the same function in core
 (`normalizeAllowedOrigins`): each entry is trimmed, empty entries are dropped,
 and every entry meets the rules in the table above exactly as it would in the
-list. Every entry the split yields is one you wrote, and each is validated, so
-the environment spelling cannot admit an origin the list would refuse. (A
-comma inside a host is legal URL syntax, and the environment spelling cannot
-express one: it splits there, and the halves are refused.)
+list. The split yields only pieces of what you wrote, each checked as a list
+entry would be, so the environment spelling cannot admit an origin the list
+would refuse. (A comma inside a host is legal URL syntax, and the environment
+spelling cannot express one: `https://a,b.example` splits into `https://a`,
+which is a valid origin, and `b.example`, which has no scheme — so the whole
+list is refused.)
 
 ```sh
 WEBAUTHN_ORIGIN=https://example.com,android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI

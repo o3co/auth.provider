@@ -563,7 +563,7 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 
 	it("boots with both origins and the top origin the variables name", async () => {
 		const config = AppConfigSchema.parse({ ...coreConfig, webauthn: hoconWebauthn });
-		// The composition root hands the section on as it found it.
+		// AppConfigSchema passes the origin list on as the one string it is.
 		expect(config.webauthn?.origin).toBe(`https://example.com,${ANDROID}`);
 
 		const handle = await createApp({
