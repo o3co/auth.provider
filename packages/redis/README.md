@@ -65,8 +65,9 @@ backend is a package of its own beside this one, implementing the same ports.
 - **Redis Lua scripting** (`EVAL` / `EVALSHA`). The clients this package
   builds run their indivisible operations as scripts: the rate limiter's
   increment-with-TTL, the federation-token lock release, the subject session
-  index and revocation watermarks, and every operation of the device-code,
-  consent and federation-grant stores. Lua is enabled by default on Redis
+  index and revocation watermarks, and the indivisible operations of the
+  device-code, consent, pending-consent, federation-grant and
+  federation-grant intent stores. Lua is enabled by default on Redis
   standalone and Sentinel. **Redis Cluster with Lua scripting disabled is not
   supported by the bundled clients** — enable scripting, or implement the
   per-purpose client interfaces ([Backing-client contract](#backing-client-contract))

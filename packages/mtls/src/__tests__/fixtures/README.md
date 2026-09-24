@@ -16,7 +16,7 @@ the mechanism, module and DPoP + mTLS tests
 because each shape is a regression someone had to reason about, and a fixed
 file keeps that shape byte-identical from run to run.
 
-The `full-pki` validator's own tests do not use them: they need name
+The `full-pki` validator's own tests — every test under `fullPki/` except `module.test.mts`, which uses `root.pem` for the certificate a request presents — do not use them: they need name
 constraints, path lengths, CRLs and many more shapes, and mint certificates in
 process ([`fullPki/pkiFactory.mts`](../fullPki/pkiFactory.mts)) so that no
 test starts failing on a calendar date. PEM files carry no header comment, so

@@ -65,7 +65,7 @@ OAuth 2.0 / OpenID Connect プロバイダー。ユーザーをサインイン�
 ## 特徴
 
 - **モジュラー構成** — 必要なモジュールだけを選択。API のみのデプロイではセッション、フェデレーション、認可コードを丸ごとスキップ可能。
-- **JWT アルゴリズム選択** — EdDSA（デフォルト）, ES256, RS256, HS256。デフォルトが非対称なので JWKS エンドポイント (`/.well-known/jwks.json`) が実際の検証鍵を公開し、RP がトークンを**発行**できる鍵を持つことがない。HS256 も選択可能だが JWKS は公開されない。
+- **JWT アルゴリズム選択** — EdDSA（デフォルト）, ES256, RS256, HS256。デフォルトが非対称なので JWKS エンドポイント (`/.well-known/jwks.json`) が実際の検証鍵を公開し、RP がトークンを**発行**できる鍵を持つことがない。HS256 も選択可能だが JWKS は公開されない: ルートは `404 jwks_not_published` を返す。
 - **OAuth 2.0 準拠** — PKCE 必須の認可コードフロー（RFC 7636。クライアント登録が `plain` を許可しない限り `S256`）、トークンイントロスペクション (RFC 7662)、失効 (RFC 7009)、ローテーションとリプレイ検知付きのリフレッシュトークン
 - **セッション認証** — ユーザーサービスに対するローカルのユーザー名/パスワードログインと、`federation-*` パッケージによるフェデレーションログイン（[パッケージ構成](#パッケージ構成)を参照）
 - **レート制限** — エンドポイント毎に設定可能
@@ -149,7 +149,7 @@ standalone テンプレートのような構成での主なエンドポイント
 | `GET`, `POST /oauth/userinfo` | oauth | OpenID Connect の userinfo |
 | `GET`, `POST /oauth/logout` | oauth | RP 起点のログアウトと、バックチャネルログアウトのカスケード |
 | `GET /.well-known/openid-configuration` | core | ディスカバリー。`oauthModule` が組み込まれているときに提供される |
-| `GET /.well-known/jwks.json` | core | 検証鍵（`oauth.jwt.jwksPath` で移動できる）。HS256 では公開されない |
+| `GET /.well-known/jwks.json` | core | 検証鍵（`oauth.jwt.jwksPath` で移動できる）。HS256 では `404 jwks_not_published` を返す |
 | `GET /session/csrf` | session | double-submit CSRF トークンの発行 |
 | `POST /session/login` | session | ローカル認証 |
 | `POST /session/logout` | session | ブラウザセッションの終了 |

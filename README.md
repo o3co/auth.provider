@@ -70,7 +70,7 @@ each layer is scaled, deployed and audited on its own.
 ## Features
 
 - **Modular composition** — Pick only the modules you need. Skip session, federation, or authorization code for API-only deployments.
-- **JWT algorithm selection** — EdDSA (default), ES256, RS256, HS256. The default is asymmetric, so the JWKS endpoint (`/.well-known/jwks.json`) publishes a real verification key and relying parties never hold one that can also mint tokens. HS256 stays selectable and publishes no JWKS.
+- **JWT algorithm selection** — EdDSA (default), ES256, RS256, HS256. The default is asymmetric, so the JWKS endpoint (`/.well-known/jwks.json`) publishes a real verification key and relying parties never hold one that can also mint tokens. HS256 stays selectable and publishes no JWKS: the route answers `404 jwks_not_published`.
 - **OAuth 2.0 compliance** — Authorization code flow with mandatory PKCE (RFC 7636; `S256` unless a client's registration allows `plain`), token introspection (RFC 7662), revocation (RFC 7009), refresh tokens with rotation and replay detection
 - **Session authentication** — Local username/password login against your user service, and federated login through the `federation-*` packages (see [Packages](#packages))
 - **Rate limiting** — Per-endpoint configurable limits
@@ -155,7 +155,7 @@ grants); each package's README lists its routes.
 | `GET`, `POST /oauth/userinfo` | oauth | OpenID Connect userinfo |
 | `GET`, `POST /oauth/logout` | oauth | RP-initiated logout, with the back-channel logout cascade |
 | `GET /.well-known/openid-configuration` | core | Discovery, served when `oauthModule` is installed |
-| `GET /.well-known/jwks.json` | core | Verification keys (`oauth.jwt.jwksPath` moves it); not published under HS256 |
+| `GET /.well-known/jwks.json` | core | Verification keys (`oauth.jwt.jwksPath` moves it); under HS256 it answers `404 jwks_not_published` |
 | `GET /session/csrf` | session | Issue a double-submit CSRF token |
 | `POST /session/login` | session | Local authentication |
 | `POST /session/logout` | session | End the browser session |
