@@ -458,6 +458,17 @@ describe("/authorize — response_type validation", () => {
 		expect(params.get("state")).toBe("xyz");
 		expect(params.get("code")).toBeNull();
 	});
+
+	// RFC 6749 §4.1.2.1 holds `error_description` to %x20-21 / %x23-5B /
+	// %x5D-7E. The refusal names the value that arrived, so the redirect
+	// replaces every other character with `?`.
+	it("names the refused response_type within RFC 6749's character set", async () => {
+		const { app } = await makeApp({});
+		const res = await authorize(app, { ...baseQuery, response_type: 'a"b\\c\u0007d\u00e9' });
+		expect(redirectParams(res).get("error_description")).toBe(
+			"response_type 'a?b?c?d?' is not supported",
+		);
+	});
 });
 
 describe("/authorize — PKCE required (#273)", () => {
@@ -505,7 +516,7 @@ describe("/authorize — code_challenge_method resolution (#273)", () => {
 		const params = redirectParams(res);
 		expect(params.get("error")).toBe("invalid_request");
 		expect(params.get("error_description")).toBe(
-			'code_challenge_method is required and must be "S256"',
+			"code_challenge_method is required and must be 'S256'",
 		);
 	});
 
@@ -528,7 +539,7 @@ describe("/authorize — code_challenge_method resolution (#273)", () => {
 		const res = await authorize(app, { ...baseQuery, code_challenge_method: "S512" });
 		const params = redirectParams(res);
 		expect(params.get("error")).toBe("invalid_request");
-		expect(params.get("error_description")).toBe('code_challenge_method "S512" is not supported');
+		expect(params.get("error_description")).toBe("code_challenge_method 'S512' is not supported");
 	});
 
 	it("persists the resolved method on the code", async () => {
@@ -794,6 +805,14 @@ describe("/authorize — prompt=none (#284)", () => {
 			"select_account:invalid_request:names=true",
 			"login:invalid_request:names=true",
 		]);
+	});
+
+	it("describes an unsupported prompt value in plain ASCII (RFC 6749 §4.1.2.1)", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(await authorize(app, { ...baseQuery, prompt: "select_account" }));
+		expect(params.get("error_description")).toBe(
+			"prompt values not supported: select_account; this authorization server has no account picker",
+		);
 	});
 
 	it("honours prompt=consent since #527 — a no-op for a first-party client, which has nothing to consent to", async () => {

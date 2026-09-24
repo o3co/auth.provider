@@ -346,7 +346,9 @@ describe("createOAuthRouter", () => {
 		// the handler's own `error_description`, the way the route's refusals
 		// carry theirs. The description can echo client input, so it is capped.
 		describe("audits a grant handler's refusal with its description as the reason", () => {
-			const refusing = async (errorDescription: string | undefined) => {
+			const refusing = async (errorDescription: string | undefined) =>
+				(await refusal(errorDescription)).details;
+			const refusal = async (errorDescription: string | undefined) => {
 				const events: AuditEvent[] = [];
 				const auditSink: AuditSink = {
 					kind: "spy",
@@ -364,13 +366,16 @@ describe("createOAuthRouter", () => {
 					}),
 				};
 				const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", auditSink });
-				await request(app)
+				const res = await request(app)
 					.post("/oauth/token")
 					.set("Authorization", TEST_BASIC_AUTH)
 					.type("form")
 					.send({ grant_type: "stub" });
 				await new Promise((r) => setImmediate(r));
-				return events.find((e) => e.type === "token.issued.failure")?.details;
+				return {
+					body: res.body as Record<string, unknown>,
+					details: events.find((e) => e.type === "token.issued.failure")?.details,
+				};
 			};
 
 			it("carries the description", async () => {
@@ -382,13 +387,47 @@ describe("createOAuthRouter", () => {
 			});
 
 			it("caps a long description at 200 characters, marking the cut", async () => {
-				const details = await refusing(`scope "${"x".repeat(1000)}" is not allowed`);
-				expect(details?.reason).toBe(`scope "${"x".repeat(190)}...`);
+				const details = await refusing(`scope '${"x".repeat(1000)}' is not allowed`);
+				expect(details?.reason).toBe(`scope '${"x".repeat(190)}...`);
 				expect(String(details?.reason)).toHaveLength(200);
 			});
 
 			it("falls back to the error code when the handler gives no description", async () => {
 				expect((await refusing(undefined))?.reason).toBe("invalid_request");
+			});
+
+			// RFC 6749 §5.2: `error_description` is limited to %x20-21 / %x23-5B /
+			// %x5D-7E. Grant descriptions quote client input — a requested scope,
+			// audience or token type — so the route replaces every other
+			// character with `?` before anything is sent or audited.
+			it("replaces a double quote, a backslash, a control character and non-ASCII with '?'", async () => {
+				const { body, details } = await refusal(
+					"scope 'a\"b\\c\u0007d\u00e9e\u{1F600}f' is not in subject_token scope",
+				);
+				expect(body).toEqual({
+					error: "invalid_request",
+					error_description: "scope 'a?b?c?d?e?f' is not in subject_token scope",
+				});
+				expect(details?.reason).toBe("scope 'a?b?c?d?e?f' is not in subject_token scope");
+			});
+		});
+
+		it("sanitises the client's grant_type it echoes in unsupported_grant_type", async () => {
+			const stubGrant: GrantHandler = {
+				handle: async () => ({
+					result: { status: 200, tokens: { access_token: "x", token_type: "Bearer" } },
+				}),
+			};
+			const app = await buildApp({ grantHandler: stubGrant, grantType: "stub" });
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({ grant_type: 'x"y\\z\u0001\u00fc' });
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({
+				error: "unsupported_grant_type",
+				error_description: "grant_type 'x?y?z??' is not supported",
 			});
 		});
 

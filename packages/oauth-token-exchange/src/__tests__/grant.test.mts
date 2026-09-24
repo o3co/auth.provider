@@ -164,7 +164,7 @@ describe("createTokenExchangeGrant — request errors", () => {
 			status: 400,
 			error: "invalid_request",
 			errorDescription:
-				'subject_token_type "urn:ietf:params:oauth:token-type:saml2" is not supported',
+				"subject_token_type 'urn:ietf:params:oauth:token-type:saml2' is not supported",
 		});
 	});
 
@@ -184,7 +184,7 @@ describe("createTokenExchangeGrant — request errors", () => {
 			status: 400,
 			error: "invalid_request",
 			errorDescription:
-				'requested_token_type "urn:ietf:params:oauth:token-type:id_token" is not supported',
+				"requested_token_type 'urn:ietf:params:oauth:token-type:id_token' is not supported",
 		});
 	});
 
@@ -205,7 +205,7 @@ describe("createTokenExchangeGrant — request errors", () => {
 			status: 400,
 			error: "invalid_request",
 			errorDescription:
-				'actor_token_type "urn:ietf:params:oauth:token-type:saml2" is not supported',
+				"actor_token_type 'urn:ietf:params:oauth:token-type:saml2' is not supported",
 		});
 	});
 

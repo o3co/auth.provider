@@ -779,7 +779,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			[
 				"a subject_token_type no validator is registered for",
 				async () => ({ subject_token: "opaque", subject_token_type: SAML2 }),
-				`subject_token_type "${SAML2}" is not supported`,
+				`subject_token_type '${SAML2}' is not supported`,
 			],
 			[
 				"an actor_token_type no validator is registered for",
@@ -789,7 +789,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					actor_token: "opaque",
 					actor_token_type: SAML2,
 				}),
-				`actor_token_type "${SAML2}" is not supported`,
+				`actor_token_type '${SAML2}' is not supported`,
 			],
 			[
 				"a requested_token_type other than access_token",
@@ -798,7 +798,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					subject_token_type: ACCESS_TOKEN_TYPE,
 					requested_token_type: "urn:ietf:params:oauth:token-type:refresh_token",
 				}),
-				'requested_token_type "urn:ietf:params:oauth:token-type:refresh_token" is not supported',
+				"requested_token_type 'urn:ietf:params:oauth:token-type:refresh_token' is not supported",
 			],
 		];
 
@@ -880,7 +880,38 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			expect(result).toEqual({
 				status: 400,
 				error: "invalid_scope",
-				errorDescription: 'scope "write" is not in subject_token scope',
+				errorDescription: "scope 'write' is not in subject_token scope",
+			});
+		});
+
+		// The request's scope and audience past the client's registration.
+		// Descriptions quote the value with `'`: RFC 6749 §5.2 does not allow
+		// `"` in an error_description.
+		it("answers invalid_scope when the request asks for a scope the client is not registered for", async () => {
+			const { grant } = await boot([]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ scope: "read admin" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				scope: "admin",
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_scope",
+				errorDescription: "scope 'admin' is not allowed for this client",
+			});
+		});
+
+		it("answers invalid_target when the request names an audience the client is not registered for", async () => {
+			const { grant } = await boot([]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ aud: ["payments", "client-a"] }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: "payments",
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_target",
+				errorDescription: "audience 'payments' is not allowed for this client",
 			});
 		});
 

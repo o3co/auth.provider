@@ -241,7 +241,7 @@ describe("#273 /authorize — S256 only, plain behind a per-client opt-in", () =
 			}),
 		);
 		expect(params.get("error")).toBe("invalid_request");
-		expect(params.get("error_description")).toBe('code_challenge_method "plain" is not supported');
+		expect(params.get("error_description")).toBe("code_challenge_method 'plain' is not supported");
 	});
 
 	it("refuses an OMITTED method — RFC 7636 §4.3 makes that `plain`", async () => {
@@ -251,7 +251,7 @@ describe("#273 /authorize — S256 only, plain behind a per-client opt-in", () =
 		);
 		expect(params.get("error")).toBe("invalid_request");
 		expect(params.get("error_description")).toBe(
-			'code_challenge_method is required and must be "S256"',
+			"code_challenge_method is required and must be 'S256'",
 		);
 	});
 
@@ -433,7 +433,7 @@ describe("#273 /token — the same policy object decides redemption", () => {
 		const res = await redeem(app, { code_verifier: VERIFIER });
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("invalid_request");
-		expect(res.body.error_description).toBe('code_challenge_method "plain" is not supported');
+		expect(res.body.error_description).toBe("code_challenge_method 'plain' is not supported");
 	});
 
 	it("honours a plain code for a client registered with allowPlainPkce: true", async () => {
