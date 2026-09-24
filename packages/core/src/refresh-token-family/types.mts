@@ -336,8 +336,8 @@ export interface RefreshTokenFamilyRotation {
 }
 
 /**
- * Family revocation wrapper. Distinct from rotation per Theme B
- * (per `feedback_split_interface_unless_responsibility_intersects`):
+ * Family revocation wrapper. Distinct from rotation per Theme B (an
+ * interface is split unless the responsibilities intersect):
  * different triggers (admin operation / logout cascade vs. normal
  * authentication flow), different callers, different expected outcomes.
  *
