@@ -428,8 +428,8 @@ export {
 } from "./middleware/tokenBinding.mjs";
 // Module system — v0.5.0 manifest types. The v0.4.x `LegacyModule` /
 // `ModuleContext` interfaces were deleted in Phase 9 (A2-γ caller migration);
-// authoring code uses `Module` and `defineModule()` from
-// `@o3co/auth-provider-core/modules/manifest`.
+// authoring code uses `Module` and `defineModule()` from here (the same
+// vocabulary is also the `@o3co/auth-provider-core/modules/manifest` subpath).
 export type {
 	AbsencePolicy,
 	AuditHook,
