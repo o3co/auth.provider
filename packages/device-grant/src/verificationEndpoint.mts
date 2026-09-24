@@ -350,8 +350,8 @@ export const createDeviceVerificationHandler = (
 			// — a timeout or a reset after the command was sent — and the device's
 			// poll can then be handed tokens that no `device.approved` accounts
 			// for. So an outcome nobody knows is audited as one, naming the
-			// action. Not the subject, and not the client: the record could not
-			// be read.
+			// action. It names no client, since the record could not be read,
+			// and no subject, as the outage's log line names none.
 			emitAuditEvent(options.auditSink, {
 				timestamp: new Date(),
 				type: "device.decision_outcome_unknown",
