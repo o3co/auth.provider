@@ -208,6 +208,20 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			});
 		});
 
+		it("reads the scope the upstream answered by RFC 6749 §3.3's grammar: whitespace separates, blank means the grant's", async () => {
+			// An upstream's answer is read tolerantly (parseScopeTokens, as the
+			// session-bound refresh route reads one): a tab is not part of a
+			// scope's name, so it cannot make a consented scope look foreign.
+			await h.seed();
+			setNow(DUE);
+			h.refresh.mockResolvedValue(refreshed("1", DUE, { scope: "openid\tcalendar.read\n" }));
+			expect(await retrieve()).toMatchObject({ ok: true, scopes: ["openid", "calendar.read"] });
+
+			setNow(new Date(DUE.getTime() + HOUR));
+			h.refresh.mockResolvedValue(refreshed("2", now(), { scope: " \t " }));
+			expect(await retrieve()).toMatchObject({ ok: true, scopes: [...SCOPES] });
+		});
+
 		it("judges the lifetime the upstream ISSUED, which a skewed expiry cannot change", async () => {
 			// 3600 s issued, and an adapter whose clock stepped forward by a second
 			// and a half while it computed the expiry. Recovered from `expiresAt`
@@ -291,6 +305,9 @@ describe("retrieveFederationGrantToken — the refresh (#593, D5, D10, D12)", ()
 			["no lifetime at all", { expiresIn: null, expiresAt: null }, "no_finite_lifetime"],
 			["a lifetime without the adapter's anchor", { expiresAt: null }, "no_finite_lifetime"],
 			["scopes beyond the consent", { scope: "openid files.readwrite" }, "scope_exceeded"],
+			// Named, but naming no scope-token, is not silence: it must not read as
+			// "the grant's scopes" and so be disclosed as if it were.
+			["a scope that names no scope-token", { scope: '"openid"' }, "malformed_token_response"],
 			// oauth4webapi lower-cases what the upstream sent; a route with no proof
 			// key cannot present a sender-constrained token.
 			["a token that is not a bearer token", { tokenType: "dpop" }, "token_type_unsupported"],

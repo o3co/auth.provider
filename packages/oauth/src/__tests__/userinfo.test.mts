@@ -208,6 +208,30 @@ describe("GET /oauth/userinfo", () => {
 		expect(res.body).not.toHaveProperty("email");
 	});
 
+	it("reads the token's scope claim by RFC 6749 §3.3's grammar: a tab separates, it does not join", async () => {
+		// The claim is this server's own record, read tolerantly
+		// (parseScopeTokens); split on a single space, "openid\temail" named no
+		// scope at all and the claims it granted were withheld.
+		const token = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid\temail" });
+
+		const res = await callUserinfo({
+			token,
+			userSessionStore: {
+				kind: "memory",
+				get: vi.fn().mockResolvedValue(baseSession),
+				create: vi.fn(),
+				delete: vi.fn(),
+			},
+			refreshTokenFamilyRevocation: {
+				isFamilyRevoked: vi.fn().mockResolvedValue(false),
+				revokeFamily: vi.fn(),
+			},
+		});
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ sub: "u-1", email: "alice@example.com", email_verified: true });
+	});
+
 	it("missing Authorization header returns 401 with WWW-Authenticate Bearer", async () => {
 		const res = await callUserinfo({
 			token: null,

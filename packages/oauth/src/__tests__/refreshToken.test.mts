@@ -361,6 +361,51 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
+		it("refuses a requested scope that is not RFC 6749 §3.3's space-delimited list as malformed", async () => {
+			const token = await makeRefreshToken();
+			const handler = createRefreshTokenGrant(mockDeps);
+			for (const scope of ["read\twrite", 'read "write"', "\t"]) {
+				const { result } = await handler.handle({
+					body: { refresh_token: token, scope },
+					session: {},
+					issuer: "localhost",
+					metadata: {},
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
+				});
+				expect(result.status, JSON.stringify(scope)).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_scope");
+				expect("errorDescription" in result && result.errorDescription).toBe(
+					"scope is not a space-delimited list of scope-tokens",
+				);
+			}
+		});
+
+		it("reads the scope the refresh token carries by the grammar, and carries it on canonical", async () => {
+			// The token's own claim is this server's record, read tolerantly
+			// (parseScopeTokens): a tab in it is a delimiter, not part of a scope
+			// a narrowing request then fails to find, and a ragged claim is not
+			// passed on to the next pair of tokens as it is.
+			const token = await makeRefreshToken({ scope: "read\twrite" });
+			const handler = createRefreshTokenGrant(mockDeps);
+			const ctx = (body: Record<string, unknown>): GrantContext => ({
+				body: { refresh_token: token, ...body },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+
+			const narrowed = (await handler.handle(ctx({ scope: "read" }))).result;
+			expect(narrowed.status).toBe(200);
+			if (!("tokens" in narrowed)) expect.fail("expected tokens");
+			expect(narrowed.tokens.scope).toBe("read");
+
+			const carried = (await handler.handle(ctx({}))).result;
+			if (!("tokens" in carried)) expect.fail("expected tokens");
+			expect(carried.tokens.scope).toBe("read write");
+			expect(decodeJwt(carried.tokens.refresh_token as string).scope).toBe("read write");
+		});
+
 		it("treats empty scope string as no scope change", async () => {
 			const token = await makeRefreshToken({ scope: "read write" });
 			const handler = createRefreshTokenGrant(mockDeps);

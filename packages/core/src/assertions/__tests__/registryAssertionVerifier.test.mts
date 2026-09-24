@@ -357,6 +357,24 @@ describe("createRegistryAssertionVerifier — the terms of an entry (#525)", () 
 		expect((await open.verify(await mint({ sub: "d" })))?.scope).toBeUndefined();
 	});
 
+	it("reads the scope claim by RFC 6749 §3.3's grammar, tolerantly, as an upstream's answer is read", async () => {
+		// The claim is a third party's, signed: split on any whitespace and keep
+		// the scope-tokens (parseScopeTokens). A tab is not part of a scope's
+		// name, and a quote cannot be.
+		const verifier = verifierOver([entryA({ allowedScopes: ["read", "write"] })]);
+		expect((await verifier.verify(await mint({ sub: "d", scope: "read\twrite" })))?.scope).toEqual([
+			"read",
+			"write",
+		]);
+		const open = verifierOver([entryA()]);
+		expect(
+			(await open.verify(await mint({ sub: "d", scope: 'read\t"admin"  write' })))?.scope,
+		).toEqual(["read", "write"]);
+		// Named, but naming no scope-token, is not silence: the ceiling is empty,
+		// never the entry's whole allowedScopes.
+		expect((await verifier.verify(await mint({ sub: "d", scope: '\t"x"' })))?.scope).toEqual([]);
+	});
+
 	it("carries allowedAudiences through as the audience ceiling", async () => {
 		const verifier = verifierOver([entryA({ allowedAudiences: ["https://api.example"] })]);
 		expect((await verifier.verify(await mint({ sub: "d" })))?.audience).toEqual([

@@ -244,6 +244,24 @@ describe("createSessionGrant", () => {
 			}
 		});
 
+		it("refuses a scope that is not RFC 6749 §3.3's space-delimited list as malformed", async () => {
+			const handler = createSessionGrant(makeDeps());
+			for (const scope of ["read\twrite", 'read "write"', "\t"]) {
+				const { result } = await handler.handle({
+					body: { scope },
+					session: { isAuthenticated: true, user: { id: "u1" } },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: AUTH_CLIENT,
+				});
+				expect(result.status, JSON.stringify(scope)).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_scope");
+				expect("errorDescription" in result && result.errorDescription).toBe(
+					"scope is not a space-delimited list of scope-tokens",
+				);
+			}
+		});
+
 		it("grants the requested scope when it is within the allowlist", async () => {
 			const handler = createSessionGrant(makeDeps());
 			const ctx: GrantContext = {

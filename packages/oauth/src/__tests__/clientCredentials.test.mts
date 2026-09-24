@@ -192,6 +192,24 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		expect("errorDescription" in result && result.errorDescription).toContain("admin:all");
 	});
 
+	it("returns 400 invalid_scope for a scope that is not RFC 6749 §3.3's space-delimited list", async () => {
+		// Refused because it is malformed, not because a scope named
+		// "read:foo\twrite:foo" happens to be missing from the allowlist — and a
+		// tab alone is not an omitted scope that draws on defaultScopes.
+		const handler = createClientCredentialsGrant(baseDeps);
+		const client = makeClient({ allowedScopes: ["read:foo", "write:foo"] });
+		for (const scope of ["read:foo\twrite:foo", 'read:foo "write:foo"', "\t"]) {
+			const { result } = await handler.handle(
+				makeCtx(client, { grant_type: "client_credentials", scope }),
+			);
+			expect(result.status, JSON.stringify(scope)).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_scope");
+			expect("errorDescription" in result && result.errorDescription).toBe(
+				"scope is not a space-delimited list of scope-tokens",
+			);
+		}
+	});
+
 	it("returns 400 invalid_request when scope is a non-string value (Codex review #1)", async () => {
 		// Express urlencoded body-parser materializes repeated `scope=a&scope=b`
 		// form parameters into arrays. RFC 6749 §3.3 requires a single space-

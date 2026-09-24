@@ -402,6 +402,21 @@ describe("jwt-bearer grant — scope is a ceiling, never a grant (#301)", () => 
 		const { result } = await build({}).handle(ctx({ scope: ["read"] }));
 		expect("error" in result && result.error).toBe("invalid_request");
 	});
+
+	it("refuses a scope that is not RFC 6749 §3.3's space-delimited list as malformed", async () => {
+		// A client's request is read strictly: a tab is not a delimiter, and a
+		// scope-token cannot hold a quote. invalid_scope (§5.2: "malformed"),
+		// saying so, rather than a verdict on a scope named "read\twrite".
+		const verifier = verifierFor({ subjectHandle: "d", scope: ["read", "write"] });
+		for (const scope of ["read\twrite", 'read "write"', "\t"]) {
+			const { result } = await build({ verifier }).handle(ctx({ scope }));
+			expect(result.status, JSON.stringify(scope)).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_scope");
+			expect("errorDescription" in result && result.errorDescription).toBe(
+				"scope is not a space-delimited list of scope-tokens",
+			);
+		}
+	});
 });
 
 describe("jwt-bearer grant — an omitted scope draws on defaultScopes, never the allowlist (#396)", () => {

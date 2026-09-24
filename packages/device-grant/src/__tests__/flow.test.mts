@@ -357,6 +357,21 @@ describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 		expect(res.body.error_description).toContain("admin");
 	});
 
+	it("refuses a scope that is not RFC 6749 §3.3's space-delimited list as malformed", async () => {
+		// Read strictly, as every token-endpoint grant reads a request: a tab is
+		// not a delimiter, and a tab alone is not an omitted scope that draws on
+		// defaultScopes.
+		const { app } = makeHarness();
+		for (const scope of ["openid\tprofile", 'openid "profile"', "\t"]) {
+			const res = await startDevice(app, { scope });
+			expect(res.status, JSON.stringify(scope)).toBe(400);
+			expect(res.body).toEqual({
+				error: "invalid_scope",
+				error_description: "scope is not a space-delimited list of scope-tokens",
+			});
+		}
+	});
+
 	it("draws an omitted scope from defaultScopes, never the whole allowlist", async () => {
 		// #396's rule, applied here: "forgot to send scope" must not be the
 		// maximum grant. The client allows openid+profile and defaults to

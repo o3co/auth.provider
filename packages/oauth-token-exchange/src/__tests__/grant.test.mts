@@ -633,6 +633,55 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 	});
 });
 
+describe("createTokenExchangeGrant — the scope grammar (RFC 6749 §3.3)", () => {
+	it("refuses a requested scope that is not a space-delimited list of scope-tokens as malformed", async () => {
+		// The request is read strictly: a tab is not a delimiter, and a tab
+		// alone is not an omitted scope that inherits the subject's.
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ scope: "read write", family_id: "fam-1" });
+		for (const scope of ["read\twrite", 'read "write"', "\t"]) {
+			const { result } = await g.handle(
+				ctx({
+					client_id: "client-a",
+					client_secret: "any",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					scope,
+				}),
+			);
+			expect(result, JSON.stringify(scope)).toEqual({
+				status: 400,
+				error: "invalid_scope",
+				errorDescription: "scope is not a space-delimited list of scope-tokens",
+			});
+		}
+	});
+
+	it("reads the subject token's scope claim tolerantly: a tab in it separates, it does not join", async () => {
+		// The subject's claim is a validated token's record, read as #647 reads
+		// a recorded scope (parseScopeTokens), so a narrowing request can find
+		// a scope it names and an inheriting one gets it back canonical.
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ scope: "read\twrite", family_id: "fam-1" });
+		const exchange = (scope?: string) =>
+			g.handle(
+				ctx({
+					client_id: "client-a",
+					client_secret: "any",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					...(scope === undefined ? {} : { scope }),
+				}),
+			);
+		const narrowed = (await exchange("read")).result;
+		expect(narrowed.status).toBe(200);
+		if (narrowed.status === 200) expect(narrowed.tokens.scope).toBe("read");
+		const inherited = (await exchange()).result;
+		expect(inherited.status).toBe(200);
+		if (inherited.status === 200) expect(inherited.tokens.scope).toBe("read write");
+	});
+});
+
 describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 	// The request's own `scope` never reaches this check — a scope outside
 	// either ceiling is `invalid_scope` before the policy runs — so a widening

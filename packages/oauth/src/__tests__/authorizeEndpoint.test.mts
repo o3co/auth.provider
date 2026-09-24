@@ -414,6 +414,22 @@ describe("/authorize — scope semantics (#396)", () => {
 		expect(params.get("error_description")).toContain("defaultScopes");
 	});
 
+	it("redirects invalid_scope for a scope that is not RFC 6749 §3.3's space-delimited list, rather than narrowing it", async () => {
+		// Narrowing is for a scope this client may not have (§3.3). A malformed
+		// one is a different answer (§4.1.2.1 invalid_scope: "malformed"):
+		// "read\tbogus" is not the scope "read" with a typo beside it, and
+		// narrowing it to nothing issued a code for a request nobody made.
+		const { app, createCode } = await makeApp({});
+		for (const scope of ["read\tbogus", 'read "x"', "\t"]) {
+			const params = redirectParams(await authorize(app, { ...baseQuery, scope }));
+			expect(params.get("error"), JSON.stringify(scope)).toBe("invalid_scope");
+			expect(params.get("error_description")).toBe(
+				"scope is not a space-delimited list of scope-tokens",
+			);
+		}
+		expect(createCode).not.toHaveBeenCalled();
+	});
+
 	it("keeps the empty grant for a scope-less client (empty allowlist, no defaults)", async () => {
 		// The carve-out: nothing to over-grant, so scope-less deployments work.
 		const { app, createCode } = await makeApp({
@@ -907,6 +923,15 @@ describe("/authorize — prompt=none (#284)", () => {
 		const params = redirectParams(await authorize(app, { ...baseQuery, prompt: "consent" }));
 		expect(params.get("error")).toBeNull();
 		expect(params.get("code")).toBe("code-x");
+	});
+
+	it("refuses a prompt that is not a space-delimited list, saying so rather than naming a value", async () => {
+		// OIDC Core §3.1.2.1: space-delimited. `none\tlogin` is not the value
+		// "none<TAB>login" this server happens not to support; it is malformed.
+		const { app } = await makeApp({});
+		const params = redirectParams(await authorize(app, { ...baseQuery, prompt: "none\tlogin" }));
+		expect(params.get("error")).toBe("invalid_request");
+		expect(params.get("error_description")).toBe("prompt is not a space-delimited list of values");
 	});
 
 	it("refuses a repeated prompt parameter instead of picking one", async () => {
@@ -1543,6 +1568,27 @@ describe("/authorize — step-up and re-authentication (#481)", () => {
 			// simply not an entry.
 			expect(params.get("code")).toBe("code-x");
 			expect(createCode).toHaveBeenCalledWith(expect.objectContaining({ acr: "urn:example:pwd" }));
+		});
+
+		it("refuses acr_values that are not a space-delimited list as invalid_request", async () => {
+			// Malformed is the request's fault, not the session's: it is not an
+			// acr the deployment lacks, which is what
+			// unmet_authentication_requirements tells an RP.
+			const createCode = mintingCode();
+			const { app } = await makeApp({
+				session,
+				oauth: { authorize: { acrValues } },
+				userSessionStore: storeWith(minutesAgo(1), ["pwd", "mfa"]),
+				createCode,
+			});
+			const params = redirectParams(
+				await authorize(app, { ...baseQuery, acr_values: "urn:example:pwd\turn:example:mfa" }),
+			);
+			expect(params.get("error")).toBe("invalid_request");
+			expect(params.get("error_description")).toBe(
+				"acr_values is not a space-delimited list of values",
+			);
+			expect(createCode).not.toHaveBeenCalled();
 		});
 
 		it("records no acr when none was requested", async () => {

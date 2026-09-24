@@ -762,6 +762,28 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 		const payload = decodeJwtPayload(result.tokens.access_token) as Record<string, unknown>;
 		expect(payload.scope).toBe("admin");
 	});
+
+	it("refuses a scope that is not RFC 6749 §3.3's space-delimited list, which it would otherwise mint as-is", async () => {
+		// With no allowlist and no policy, nothing downstream would catch
+		// "admin\tread": it went into the token's scope claim verbatim, where a
+		// resource server splitting on the space reads one scope and one
+		// splitting on whitespace reads two. The request is refused instead.
+		const store = createMemoryWebAuthnCredentialStore();
+		await store.registerCredential(makeCredential());
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+
+		const handler = createWebAuthnGrant(makeBaseDeps(store));
+		for (const scope of ["admin\tread", 'admin "read"', "\t"]) {
+			const { result } = await handler.handle(
+				makeCtx({ assertion: makeAssertionResponse(), scope }),
+			);
+			expect(result, JSON.stringify(scope)).toEqual({
+				status: 400,
+				error: "invalid_scope",
+				errorDescription: "scope is not a space-delimited list of scope-tokens",
+			});
+		}
+	});
 });
 
 // ---------------------------------------------------------------------------

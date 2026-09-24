@@ -169,6 +169,15 @@ describe("createFakeIdp", () => {
 			expect(() => elsewhere.authorize(request())).toThrow(/authorization endpoint/);
 		});
 
+		it("reads prompt as the space-delimited list OIDC Core §3.1.2.1 makes it, and refuses one that is not", async () => {
+			// A fake that split on a single space read `select_account\tconsent`
+			// as one unknown value and showed no consent screen; an adapter that
+			// sent it would pass against the fake and fail against a real IdP.
+			const idp = await createFakeIdp(ENDPOINTS);
+			idp.authorize(request());
+			expect(() => idp.authorize(request({ prompt: "select_account\tconsent" }))).toThrow(/prompt/);
+		});
+
 		it("holds the exchange to the request: one use, its redirect URI, a verifier matching its challenge", async () => {
 			const idp = await createFakeIdp(ENDPOINTS);
 			const { code } = idp.authorize(request());
