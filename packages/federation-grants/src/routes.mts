@@ -59,6 +59,8 @@ import {
 import {
 	createSanitizedAuditSink,
 	createSanitizedLogger,
+	isInstance,
+	readField,
 	unexpectedErrorFields,
 } from "./report.mjs";
 import { createRequestIdMiddleware } from "./requestId.mjs";
@@ -173,7 +175,7 @@ const supportedContentType: RequestHandler = (req, res, next) => {
  * `revoke`, the route itself for `status`. The request's own mistake.
  */
 export const undecodablePath = (error: unknown): boolean =>
-	error instanceof URIError && (error as { status?: unknown }).status === 400;
+	isInstance(error, URIError) && readField(error, "status") === 400;
 
 /**
  * A refusal that is the caller's mistake, as the answer it gets.
@@ -193,8 +195,11 @@ export const parserRefusal = (
 	error: unknown,
 ): { readonly status: 400 | 413 | 415; readonly description: string } | null => {
 	if (undecodablePath(error)) return { status: 400, description: "malformed_path" };
-	if (error === null || typeof error !== "object") return null;
-	const { expose, status, type } = error as { expose?: unknown; status?: unknown; type?: unknown };
+	// Every read guarded (`readField`): a getter that throws here would make
+	// the error handler itself throw.
+	const expose = readField(error, "expose");
+	const status = readField(error, "status");
+	const type = readField(error, "type");
 	if (expose !== true || typeof status !== "number" || status < 400 || status >= 500) return null;
 	if (type === "entity.too.large" || type === "parameters.too.many") {
 		return { status: 413, description: "body_too_large" };
