@@ -39,25 +39,20 @@ import {
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { redisRefreshTokenFamilyStoreModule } from "../src/index.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let client: Redis;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	client = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	// This file's own database on the run's shared container.
+	client = new Redis(await testRedis());
+});
 
 afterAll(async () => {
 	await client?.quit();
-	await container?.stop();
 });
 
 /** Two hours: the longest access token this composition can mint. */
