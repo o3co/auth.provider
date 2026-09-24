@@ -8,77 +8,156 @@
  *     http://www.apache.org/licenses/LICENSE-2.0
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+/**
+ * `createGithubProvider` against the real openid-client and a fake GitHub
+ * (`fake-github.mts`): the authorization request, the code exchange, the
+ * e-mail choice, the scope translation, `expiresAt`, logout and `mapClaims`.
+ * How `/user` becomes the profile's `sub` is `github.user.test.mts`.
+ *
+ * Nothing here mocks the library. A stubbed openid-client once let every case
+ * pass while no real GitHub login could: the stub handed back a `/user` body
+ * the real library refuses.
+ */
 
-const hoisted = vi.hoisted(() => ({
-	mockBuildAuthorizationUrl: vi.fn(),
-	mockAuthorizationCodeGrant: vi.fn(),
-	mockFetchUserInfo: vi.fn(),
-	mockFetchProtectedResource: vi.fn(),
-	skipStateCheckSym: Symbol("skipStateCheck"),
-	skipSubjectCheckSym: Symbol("skipSubjectCheck"),
-}));
-const {
-	mockBuildAuthorizationUrl,
-	mockAuthorizationCodeGrant,
-	mockFetchUserInfo,
-	mockFetchProtectedResource,
-	skipStateCheckSym,
-} = hoisted;
-
-vi.mock("openid-client", () => ({
-	Configuration: class MockConfiguration {
-		constructor(
-			public serverMetadata: unknown,
-			public clientId: string,
-			public clientSecret?: string,
-		) {}
-	},
-	buildAuthorizationUrl: (...args: unknown[]) => hoisted.mockBuildAuthorizationUrl(...args),
-	authorizationCodeGrant: (...args: unknown[]) => hoisted.mockAuthorizationCodeGrant(...args),
-	fetchUserInfo: (...args: unknown[]) => hoisted.mockFetchUserInfo(...args),
-	fetchProtectedResource: (...args: unknown[]) => hoisted.mockFetchProtectedResource(...args),
-	skipStateCheck: hoisted.skipStateCheckSym,
-	skipSubjectCheck: hoisted.skipSubjectCheckSym,
-}));
-
+import { createHash } from "node:crypto";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createGithubProvider } from "../github.mjs";
+import {
+	ACCESS_TOKEN,
+	createFakeGithub,
+	type FakeGithub,
+	GITHUB,
+	githubTokenResponse,
+	githubUser,
+} from "./fake-github.mjs";
 
-describe("createGithubProvider on openid-client", () => {
-	const baseConfig = {
-		clientId: "client-id",
-		clientSecret: "client-secret",
-		callbackURL: "https://app.example.com/session/oauth/federation/github/callback",
-	};
+const baseConfig = {
+	clientId: "client-id",
+	clientSecret: "client-secret",
+	callbackURL: "https://app.example.com/session/oauth/federation/github/callback",
+};
+const VERIFIER = "verifier-0123456789-abcdef-0123456789-abcdef-0123456789abcdef";
 
-	beforeEach(() => {
-		vi.resetAllMocks();
-	});
+let github: FakeGithub;
 
+beforeEach(() => {
+	github = createFakeGithub();
+	vi.stubGlobal("fetch", github.fetch);
+});
+
+afterEach(() => {
+	vi.unstubAllGlobals();
+});
+
+const exchange = (extra: Record<string, unknown> = {}) => {
+	const p = createGithubProvider(baseConfig);
+	return p.exchangeCode({
+		code: "gh-code",
+		codeVerifier: VERIFIER,
+		redirectUri: baseConfig.callbackURL,
+		...extra,
+	} as Parameters<typeof p.exchangeCode>[0]);
+};
+
+describe("createGithubProvider", () => {
 	it("advertises name and GitHub scopes", () => {
 		const p = createGithubProvider(baseConfig);
 		expect(p.name).toBe("github");
 		expect([...p.scope]).toEqual(["read:user", "user:email"]);
 	});
 
-	it("buildAuthorizationUrl forwards redirect_uri/state/code_challenge to openid-client with GitHub authorize URL", () => {
-		mockBuildAuthorizationUrl.mockReturnValueOnce(
-			new URL("https://github.com/login/oauth/authorize?stub=1"),
-		);
+	it("builds GitHub's authorization request with the requested scope and a PKCE S256 challenge", () => {
 		const p = createGithubProvider(baseConfig);
-		const verifier = "verifier-0123456789-abcdef-0123456789-abcdef-0123456789abcdef";
 		const url = p.buildAuthorizationUrl({
 			redirectUri: baseConfig.callbackURL,
 			state: "abc",
-			codeVerifier: verifier,
+			codeVerifier: VERIFIER,
 		});
-		expect(url.hostname).toBe("github.com");
-		const [, params] = mockBuildAuthorizationUrl.mock.calls[0] as [unknown, Record<string, string>];
-		expect(params.redirect_uri).toBe(baseConfig.callbackURL);
-		expect(params.state).toBe("abc");
-		expect(params.code_challenge_method).toBe("S256");
-		expect(params.code_challenge).toMatch(/^[A-Za-z0-9_-]+$/);
-		expect(params.scope).toBe("read:user user:email");
+		expect(`${url.origin}${url.pathname}`).toBe(GITHUB.authorizationEndpoint);
+		expect(url.searchParams.get("client_id")).toBe("client-id");
+		expect(url.searchParams.get("response_type")).toBe("code");
+		expect(url.searchParams.get("redirect_uri")).toBe(baseConfig.callbackURL);
+		expect(url.searchParams.get("state")).toBe("abc");
+		expect(url.searchParams.get("scope")).toBe("read:user user:email");
+		expect(url.searchParams.get("code_challenge_method")).toBe("S256");
+		expect(url.searchParams.get("code_challenge")).toBe(
+			createHash("sha256").update(VERIFIER).digest("base64url"),
+		);
+		// GitHub issues no id_token for a nonce to bind to.
+		expect(url.searchParams.has("nonce")).toBe(false);
+	});
+
+	it("exchanges the code at GitHub's token endpoint with the PKCE verifier and the secret in the body", async () => {
+		await exchange();
+		const [tokenRequest] = github.requestsTo(GITHUB.tokenEndpoint);
+		expect(tokenRequest?.method).toBe("POST");
+		const body = tokenRequest?.body;
+		expect(body?.get("grant_type")).toBe("authorization_code");
+		expect(body?.get("code")).toBe("gh-code");
+		expect(body?.get("code_verifier")).toBe(VERIFIER);
+		expect(body?.get("redirect_uri")).toBe(baseConfig.callbackURL);
+		// client_secret_post, openid-client's default for a client with a secret.
+		expect(body?.get("client_id")).toBe("client-id");
+		expect(body?.get("client_secret")).toBe("client-secret");
+		expect(tokenRequest?.headers.has("authorization")).toBe(false);
+	});
+
+	it("#597: signs in when the callback carries GitHub's iss — the exchange URL is built from the code alone (#598)", async () => {
+		// GitHub names its issuer "https://github.com/login/oauth"; the library
+		// is configured with the profile label "https://github.com". Forwarded,
+		// the library would compare the two and refuse the login.
+		const profile = await exchange({ callbackParams: { iss: "https://github.com/login/oauth" } });
+		expect(profile.sub).toBe("12345");
+	});
+
+	it("fails the exchange when GitHub refuses the code, which it answers with HTTP 200 and an error body", async () => {
+		github.token.body = {
+			error: "bad_verification_code",
+			error_description: "The code passed is incorrect or expired.",
+			error_uri: "https://docs.github.com/apps/troubleshooting",
+		};
+		await expect(exchange()).rejects.toThrow();
+		expect(github.requestsTo(GITHUB.user)).toHaveLength(0);
+	});
+
+	it("composes the token response, /user and /user/emails into a FederationProfile", async () => {
+		const profile = await exchange();
+		expect(profile.issuer).toBe("https://github.com");
+		expect(profile.sub).toBe("12345");
+		expect(profile.email).toBe("octocat@github.com");
+		expect(profile.emailVerified).toBe(true);
+		expect(profile.name).toBe("The Octocat");
+		// GitHub returns avatar_url, not picture.
+		expect(profile.picture).toBe("https://avatars.githubusercontent.com/u/12345?v=4");
+		expect(profile.accessToken).toBe(ACCESS_TOKEN);
+		expect(profile.refreshToken).toBeUndefined();
+		expect(profile.scope).toBe("read:user user:email");
+		const [emailsRequest] = github.requestsTo(GITHUB.emails);
+		expect(emailsRequest?.headers.get("authorization")).toBe(`Bearer ${ACCESS_TOKEN}`);
+	});
+
+	it("returns expiresAt=null when GitHub omits expires_in (OAuth App tokens)", async () => {
+		// `null`, not `undefined`: the FederationTokenStore envelope must tell
+		// "no expiry" from a missing field, and /oauth/federation/:name/token
+		// then reuses the token instead of refreshing it.
+		const profile = await exchange();
+		expect(profile.expiresAt).toBeNull();
+	});
+
+	it("returns expiresAt from expires_in, and still no refresh token, for an expiring user token", async () => {
+		github.token.body = {
+			...githubTokenResponse(),
+			expires_in: 28800,
+			refresh_token: "ghr_1B4a2e77838347a7E420ce178F2E7c6912E1692",
+			refresh_token_expires_in: 15811200,
+		};
+		const before = Date.now();
+		const profile = await exchange();
+		expect(profile.expiresAt).toBeInstanceOf(Date);
+		const at = (profile.expiresAt as Date).getTime();
+		expect(at).toBeGreaterThanOrEqual(before + 28800 * 1000);
+		expect(at).toBeLessThanOrEqual(Date.now() + 28800 * 1000);
+		expect(profile.refreshToken).toBeUndefined();
 	});
 
 	it.each([
@@ -93,28 +172,14 @@ describe("createGithubProvider on openid-client", () => {
 			// answers with commas. Passed through as it arrives, the whole string
 			// reads as one scope everywhere downstream, and a client asking whether
 			// `user:email` was granted is told no.
-			mockAuthorizationCodeGrant.mockResolvedValueOnce({
-				access_token: "gh-at",
-				expires_in: 28800,
-				scope: answered,
-			});
-			mockFetchUserInfo.mockResolvedValueOnce({ id: 1, login: "alice" });
-			mockFetchProtectedResource.mockResolvedValueOnce({
-				json: async () => [{ email: "a@b.c", primary: true, verified: true }],
-			});
-			const p = createGithubProvider(baseConfig);
-			const profile = await p.exchangeCode({
-				code: "gh-code",
-				codeVerifier: "v",
-				redirectUri: baseConfig.callbackURL,
-			});
-			expect(profile.scope).toBe(expected);
+			github.token.body = { ...githubTokenResponse(), scope: answered };
+			expect((await exchange()).scope).toBe(expected);
 		},
 	);
 
 	it.each([
-		["whitespace only", "  ", ""],
-		["a lone comma", ",", ""],
+		["whitespace only", "  "],
+		["a lone comma", ","],
 	])(
 		"keeps an answer that names nothing distinguishable from no answer: %s (#647)",
 		async (_label, answered) => {
@@ -122,184 +187,55 @@ describe("createGithubProvider on openid-client", () => {
 			// reads an ABSENT scope as "as requested", so flattening a present
 			// answer into absence would record every requested scope as consent on
 			// a response that granted none.
-			mockAuthorizationCodeGrant.mockResolvedValueOnce({
-				access_token: "gh-at",
-				scope: answered,
-			});
-			mockFetchUserInfo.mockResolvedValueOnce({ id: 1, login: "alice" });
-			mockFetchProtectedResource.mockResolvedValueOnce({
-				json: async () => [{ email: "a@b.c", primary: true, verified: true }],
-			});
-			const p = createGithubProvider(baseConfig);
-			const profile = await p.exchangeCode({
-				code: "gh-code",
-				codeVerifier: "v",
-				redirectUri: baseConfig.callbackURL,
-			});
-			expect(profile.scope).toBe("");
+			github.token.body = { ...githubTokenResponse(), scope: answered };
+			expect((await exchange()).scope).toBe("");
 		},
 	);
 
 	it("answers undefined only when GitHub sends no scope field at all (#647)", async () => {
-		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-at" });
-		mockFetchUserInfo.mockResolvedValueOnce({ id: 1, login: "alice" });
-		mockFetchProtectedResource.mockResolvedValueOnce({
-			json: async () => [{ email: "a@b.c", primary: true, verified: true }],
-		});
-		const p = createGithubProvider(baseConfig);
-		const profile = await p.exchangeCode({
-			code: "gh-code",
-			codeVerifier: "v",
-			redirectUri: baseConfig.callbackURL,
-		});
-		expect(profile.scope).toBeUndefined();
+		const { scope: _scope, ...withoutScope } = githubTokenResponse();
+		github.token.body = withoutScope;
+		expect((await exchange()).scope).toBeUndefined();
 	});
 
-	it("exchangeCode composes authorizationCodeGrant + fetchUserInfo + /user/emails into a FederationProfile", async () => {
-		mockAuthorizationCodeGrant.mockResolvedValueOnce({
-			access_token: "gh-at",
-			expires_in: 28800,
-		});
-		// GitHub's /user returns `id: number`, not `sub` — real shape, no fiction.
-		mockFetchUserInfo.mockResolvedValueOnce({
-			id: 12345678,
-			login: "alice",
-			name: "Alice",
-			avatar_url: "https://github.com/alice.png",
-		});
-		// /user/emails response: primary+verified email
-		mockFetchProtectedResource.mockResolvedValueOnce({
-			json: async () => [
-				{ email: "alice@work.com", primary: true, verified: true },
-				{ email: "alice@personal.com", primary: false, verified: true },
-			],
-		});
-		const p = createGithubProvider(baseConfig);
-		const profile = await p.exchangeCode({
-			code: "gh-code",
-			codeVerifier: "v",
-			redirectUri: baseConfig.callbackURL,
-		});
-		expect(profile.issuer).toBe("https://github.com");
-		// Adapter must coerce numeric id → string sub.
-		expect(profile.sub).toBe("12345678");
-		expect(profile.email).toBe("alice@work.com");
-		expect(profile.emailVerified).toBe(true);
-		expect(profile.name).toBe("Alice");
-		// GitHub returns avatar_url, not picture — adapter maps avatar_url → picture.
-		expect(profile.picture).toBe("https://github.com/alice.png");
-		expect(profile.accessToken).toBe("gh-at");
-		// GitHub OAuth Apps do not issue refresh tokens
-		expect(profile.refreshToken).toBeUndefined();
-		// expires_in: 28800 → expiresAt is a Date ~8h in the future
-		expect(profile.expiresAt).toBeInstanceOf(Date);
-		const [, , checks] = mockAuthorizationCodeGrant.mock.calls[0] as [
-			unknown,
-			unknown,
-			{ pkceCodeVerifier: string; expectedState: symbol },
+	it("fails the exchange when GitHub's scope is not a string — openid-client refuses it", async () => {
+		github.token.body = { ...githubTokenResponse(), scope: ["read:user", "user:email"] };
+		await expect(exchange()).rejects.toThrow();
+	});
+
+	it("falls back to the first verified e-mail when the primary one is unverified", async () => {
+		github.emails.body = [
+			{ email: "unverified@example.com", primary: true, verified: false },
+			{ email: "verified@example.com", primary: false, verified: true },
 		];
-		expect(checks.pkceCodeVerifier).toBe("v");
-		expect(checks.expectedState).toBe(skipStateCheckSym);
-	});
-
-	it("#597: hands the library the code alone — GitHub's iss is not yet compared, because the library is configured with the profile label and not GitHub's issuer (#598)", async () => {
-		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-at" });
-		mockFetchUserInfo.mockResolvedValueOnce({ id: 1, login: "alice" });
-		mockFetchProtectedResource.mockResolvedValueOnce({ json: async () => [] });
-		const p = createGithubProvider(baseConfig);
-		// The route hands every adapter the rest of the callback as
-		// `callbackParams`; this provider's signature does not take it.
-		await p.exchangeCode({
-			code: "gh-code",
-			codeVerifier: "v",
-			redirectUri: baseConfig.callbackURL,
-			callbackParams: { iss: "https://github.com/login/oauth" },
-		} as Parameters<typeof p.exchangeCode>[0]);
-		const url = mockAuthorizationCodeGrant.mock.calls.at(-1)?.[1] as URL;
-		expect([...url.searchParams.keys()]).toEqual(["code"]);
-	});
-
-	it("exchangeCode coerces numeric GitHub id to string sub (C-1 regression guard)", async () => {
-		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-tok" });
-		// Real GitHub shape: id is a number, no sub field at all.
-		mockFetchUserInfo.mockResolvedValueOnce({ id: 99, login: "bob" });
-		mockFetchProtectedResource.mockResolvedValueOnce({
-			json: async () => [],
-		});
-		const p = createGithubProvider(baseConfig);
-		const profile = await p.exchangeCode({
-			code: "c",
-			codeVerifier: "v",
-			redirectUri: baseConfig.callbackURL,
-		});
-		expect(profile.sub).toBe("99");
-		expect(typeof profile.sub).toBe("string");
-	});
-
-	it("exchangeCode returns expiresAt=null when GitHub omits expires_in (OAuth Apps classic)", async () => {
-		// GitHub OAuth Apps classic tokens have no finite expiry; the token response
-		// omits expires_in entirely. Adapter MUST return `null` (not `undefined`) so
-		// the FederationTokenStore envelope can distinguish "no expiry" from a missing
-		// field, and /oauth/federation/:name/token refuses to refresh.
-		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-classic" });
-		mockFetchUserInfo.mockResolvedValueOnce({ id: 7, login: "carol" });
-		mockFetchProtectedResource.mockResolvedValueOnce({ json: async () => [] });
-		const p = createGithubProvider(baseConfig);
-		const profile = await p.exchangeCode({
-			code: "c",
-			codeVerifier: "v",
-			redirectUri: baseConfig.callbackURL,
-		});
-		expect(profile.expiresAt).toBeNull();
-	});
-
-	it("exchangeCode throws a descriptive error when userinfo has neither id nor sub", async () => {
-		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-tok2" });
-		// No id, no sub — should never happen in production but must be caught.
-		mockFetchUserInfo.mockResolvedValueOnce({ login: "nosub" });
-		mockFetchProtectedResource.mockResolvedValueOnce({
-			json: async () => [],
-		});
-		const p = createGithubProvider(baseConfig);
-		await expect(
-			p.exchangeCode({ code: "c", codeVerifier: "v", redirectUri: baseConfig.callbackURL }),
-		).rejects.toThrow(/without id\/sub/i);
-	});
-
-	it("exchangeCode falls back to first-verified email when primary email is unverified", async () => {
-		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-at2" });
-		mockFetchUserInfo.mockResolvedValueOnce({ id: 99, login: "bob" });
-		mockFetchProtectedResource.mockResolvedValueOnce({
-			json: async () => [
-				{ email: "unverified@example.com", primary: true, verified: false },
-				{ email: "verified@example.com", primary: false, verified: true },
-			],
-		});
-		const p = createGithubProvider(baseConfig);
-		const profile = await p.exchangeCode({
-			code: "c",
-			codeVerifier: "v",
-			redirectUri: baseConfig.callbackURL,
-		});
+		const profile = await exchange();
 		expect(profile.email).toBe("verified@example.com");
 		expect(profile.emailVerified).toBe(true);
 	});
 
-	it("exchangeCode sets email=undefined when no verified email exists", async () => {
-		mockAuthorizationCodeGrant.mockResolvedValueOnce({ access_token: "gh-at3" });
-		mockFetchUserInfo.mockResolvedValueOnce({ id: 77, login: "charlie" });
-		mockFetchProtectedResource.mockResolvedValueOnce({
-			json: async () => [{ email: "nope@example.com", primary: true, verified: false }],
-		});
-		const p = createGithubProvider(baseConfig);
-		const profile = await p.exchangeCode({
-			code: "c",
-			codeVerifier: "v",
-			redirectUri: baseConfig.callbackURL,
-		});
+	it("leaves the e-mail absent when no address is verified — and never takes /user's", async () => {
+		github.user.body = { ...githubUser(), email: "public@example.com" };
+		github.emails.body = [{ email: "nope@example.com", primary: true, verified: false }];
+		const profile = await exchange();
 		expect(profile.email).toBeUndefined();
 		expect(profile.emailVerified).toBeUndefined();
 	});
+
+	it.each([
+		["answers HTTP 403", { status: 403, body: { message: "Resource not accessible" } }],
+		["answers HTTP 500", { status: 500, body: { message: "Server Error" } }],
+		["is not JSON", { status: 200, raw: "<html></html>", contentType: "text/html" }],
+		["is not an array", { status: 200, body: { message: "unexpected" } }],
+	])(
+		"signs in without an e-mail when /user/emails %s",
+		async (_label, answer: Partial<FakeGithub["emails"]>) => {
+			Object.assign(github.emails, answer);
+			const profile = await exchange();
+			expect(profile.sub).toBe("12345");
+			expect(profile.email).toBeUndefined();
+			expect(profile.emailVerified).toBeUndefined();
+		},
+	);
 
 	it("does NOT implement SupportsRefresh (GitHub OAuth Apps do not issue refresh tokens)", () => {
 		const p = createGithubProvider(baseConfig);

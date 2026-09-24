@@ -39,6 +39,7 @@ declare module "@o3co/auth-provider-core" {
 
 const GITHUB_ISSUER = "https://github.com";
 const SCOPES = ["read:user", "user:email"] as const;
+const GITHUB_USER_URL = "https://api.github.com/user";
 const GITHUB_EMAILS_URL = "https://api.github.com/user/emails";
 
 export interface GithubProviderConfig {
@@ -86,6 +87,44 @@ const githubScope = (value: unknown): string | undefined => {
 	return parseScopeTokens(value.replaceAll(",", " ")).join(" ");
 };
 
+const isJsonObject = (value: unknown): value is Record<string, unknown> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * GET a GitHub REST resource with the user's access token and answer its JSON
+ * body. Throws when GitHub answers a non-2xx status or a body that is not JSON.
+ *
+ * These are GitHub's REST API, not OpenID Connect endpoints, so the library is
+ * asked only to carry the request; reading the answer is this adapter's job.
+ */
+const getGithubJson = async (
+	oidcConfig: oidc.Configuration,
+	accessToken: string,
+	url: string,
+): Promise<unknown> => {
+	const res = await oidc.fetchProtectedResource(oidcConfig, accessToken, new URL(url), "GET");
+	if (!res.ok) {
+		throw new Error(`GitHub federation "github": GET ${url} answered HTTP ${res.status}`);
+	}
+	try {
+		return await res.json();
+	} catch {
+		throw new Error(`GitHub federation "github": GET ${url} answered a body that is not JSON`);
+	}
+};
+
+/**
+ * The profile `sub` for GitHub's user object: a non-empty string `sub` when it
+ * carries one, otherwise its `id` — GitHub's numeric user id as a string, or a
+ * non-empty string as it is. `undefined` when neither is usable.
+ */
+const githubSub = (user: Record<string, unknown>): string | undefined => {
+	if (typeof user.sub === "string" && user.sub !== "") return user.sub;
+	if (typeof user.id === "number") return String(user.id);
+	if (typeof user.id === "string" && user.id !== "") return user.id;
+	return undefined;
+};
+
 export function createGithubProvider(config: GithubProviderConfig): GithubProvider {
 	if (!config.clientId || !config.clientSecret || !config.callbackURL) {
 		throw new Error(`GitHub federation "github" requires clientId, clientSecret, and callbackURL`);
@@ -93,11 +132,12 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 
 	// GitHub does not expose an OIDC discovery document, so we construct ServerMetadata manually.
 	// Local variable type (oidc.ServerMetadata) does not survive to the .d.mts.
+	// No `userinfo_endpoint`: GitHub has none. `/user` is read as a protected
+	// resource in exchangeCode.
 	const serverMetadata: oidc.ServerMetadata = {
 		issuer: GITHUB_ISSUER,
 		authorization_endpoint: "https://github.com/login/oauth/authorize",
 		token_endpoint: "https://github.com/login/oauth/access_token",
-		userinfo_endpoint: "https://api.github.com/user",
 	};
 
 	const oidcConfig = new oidc.Configuration(serverMetadata, config.clientId, config.clientSecret);
@@ -144,30 +184,22 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				expectedState: oidc.skipStateCheck,
 			});
 
-			// PB-5 N/A for GitHub: GitHub OAuth Apps do not issue OIDC id_tokens, so there is no
-			// id_token sub to bind UserInfo against. `skipSubjectCheck` is intentional and correct
-			// per OIDC §5.3.2 (the section only applies when an id_token is in scope). Do NOT
-			// blindly mirror the Google PB-5 fix here — there is no claim to bind to.
-			const userInfo = await oidc.fetchUserInfo(
-				oidcConfig,
-				tokens.access_token,
-				oidc.skipSubjectCheck,
-			);
-
-			// GitHub's /user endpoint returns `id: number`, not the OIDC `sub` field.
-			// openid-client passes the raw JSON through without remapping id → sub.
-			// Coerce to string so every profile has a stable, non-empty sub.
-			const ghId = (userInfo as { id?: unknown }).id;
-			const sub =
-				typeof userInfo.sub === "string" && userInfo.sub !== ""
-					? userInfo.sub
-					: typeof ghId === "number"
-						? String(ghId)
-						: typeof ghId === "string" && ghId !== ""
-							? ghId
-							: "";
-			if (!sub) {
-				throw new Error(`GitHub federation "github" received userinfo without id/sub`);
+			// The user is GitHub's REST `GET /user`, which is not an OpenID Connect
+			// UserInfo endpoint: it answers a numeric `id` and no `sub`. It is
+			// fetched as a protected resource and read here, not through
+			// `oidc.fetchUserInfo`: the library requires a string `sub` in a
+			// UserInfo body, and checks it before it looks at `skipSubjectCheck`,
+			// so it refused every real GitHub user.
+			//
+			// PB-5 N/A for GitHub: GitHub OAuth Apps issue no id_token, so there is
+			// no id_token `sub` to bind the user to (OIDC §5.3.2 applies only when
+			// an id_token is in scope). Do NOT mirror the Google PB-5 fix here.
+			const body = await getGithubJson(oidcConfig, tokens.access_token, GITHUB_USER_URL);
+			// An answer that is not a JSON object carries no user, so no id/sub.
+			const user: Record<string, unknown> = isJsonObject(body) ? body : {};
+			const sub = githubSub(user);
+			if (sub === undefined) {
+				throw new Error(`GitHub federation "github" received a /user without id/sub`);
 			}
 
 			// Fetch primary+verified email from /user/emails.
@@ -179,13 +211,11 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			let email: string | undefined;
 			let emailVerified: boolean | undefined;
 			try {
-				const emailsRes = await oidc.fetchProtectedResource(
+				const rows = (await getGithubJson(
 					oidcConfig,
 					tokens.access_token,
-					new URL(GITHUB_EMAILS_URL),
-					"GET",
-				);
-				const rows = (await emailsRes.json()) as Array<{
+					GITHUB_EMAILS_URL,
+				)) as Array<{
 					email?: unknown;
 					primary?: unknown;
 					verified?: unknown;
@@ -205,15 +235,14 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 
 			const expiresIn = typeof tokens.expires_in === "number" ? tokens.expires_in : undefined;
 
-			// GitHub's /user returns `avatar_url` (not the OIDC `picture` field).
-			const ghAvatarUrl = (userInfo as { avatar_url?: unknown }).avatar_url;
 			return {
 				issuer: GITHUB_ISSUER,
 				sub,
 				email,
 				emailVerified,
-				name: typeof userInfo.name === "string" ? userInfo.name : undefined,
-				picture: typeof ghAvatarUrl === "string" ? ghAvatarUrl : undefined,
+				name: typeof user.name === "string" ? user.name : undefined,
+				// GitHub's /user returns `avatar_url` (not the OIDC `picture` field).
+				picture: typeof user.avatar_url === "string" ? user.avatar_url : undefined,
 				accessToken: tokens.access_token,
 				// RFC 6749 §5.1: the upstream states its scope whenever it differs
 				// from the request, so what it says here is what it granted. GitHub
