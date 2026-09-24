@@ -20,6 +20,7 @@ import { DEFAULT_JWKS_CACHE_MAX_AGE } from "../jwks/cache.mjs";
 import { DEFAULT_JWKS_PATH, isValidJwksPath } from "../jwks/path.mjs";
 import type { KeyStore, ManagedKey } from "../keys/KeyStore.mjs";
 import type { EventLogger } from "../logging/Logger.mjs";
+import { loggableError } from "../logging/loggableError.mjs";
 
 /**
  * JWK members that carry PRIVATE or SYMMETRIC key material and must never
@@ -173,6 +174,18 @@ export const createRouter = (
 		);
 	};
 
+	// The one `503` this route answers — no key to publish, or a keystore that
+	// could not say — never cached, so the next request re-asks the keystore.
+	const refuseUnavailable = (res: Response): Response => {
+		res.setHeader("Cache-Control", "no-store");
+		return res.status(503).json({
+			error: "jwks_unavailable",
+			error_description:
+				"No public verification keys are currently available to publish. The signing " +
+				"keystore returned no exportable public key material.",
+		});
+	};
+
 	router.get(path, async (req: Request, res: Response) => {
 		if (keyStore.algorithm === "HS256") {
 			// #282: this used to answer `200 { keys: [] }`. An empty key set is
@@ -194,7 +207,20 @@ export const createRouter = (
 					"RS256) via oauth.jwt.signingKey.local.algorithm to publish a verifiable JWKS.",
 			});
 		}
-		const managedKeys = await keyStore.getVerificationKeys();
+		let managedKeys: ManagedKey[];
+		try {
+			managedKeys = await keyStore.getVerificationKeys();
+		} catch (err) {
+			// A keystore that cannot answer — a remote key service timing out —
+			// is the same outage as one with no key to publish: `503`, which a
+			// relying party retries, rather than the terminal handler's `500`,
+			// which reads as a broken server. Logged once, with the projection.
+			opts.logger?.error(
+				{ algorithm: keyStore.algorithm, err: loggableError(err) },
+				"jwks_unavailable",
+			);
+			return refuseUnavailable(res);
+		}
 		if (cached === null || !sameKeySet(managedKeys, cached.keyRefs)) {
 			const exported = await Promise.all(
 				managedKeys.map(async (mk) => {
@@ -216,13 +242,7 @@ export const createRouter = (
 					{ algorithm: keyStore.algorithm, keys: managedKeys.length },
 					"jwks_unavailable",
 				);
-				res.setHeader("Cache-Control", "no-store");
-				return res.status(503).json({
-					error: "jwks_unavailable",
-					error_description:
-						"No public verification keys are currently available to publish. The signing " +
-						"keystore returned no exportable public key material.",
-				});
+				return refuseUnavailable(res);
 			}
 			const body = JSON.stringify({ keys });
 			cached = {
