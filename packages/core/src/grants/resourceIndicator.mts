@@ -15,18 +15,17 @@
  */
 
 /**
- * RFC 8707 resource indicators — the one reading of the `resource` parameter,
+ * RFC 8707 resource indicators — the shared reading of the `resource` parameter,
  * the audience a request derives from it, and the check that an issued
  * audience represents it.
  *
- * Every minting path that honours `resource` reads it here: the oauth
- * package's `client_credentials`, `refresh_token`, `authorization_code` and
- * jwt-bearer grants and `/authorize`, and the WebAuthn grant, which forwards it
- * to `grantPolicy`. Those packages do not depend on one another, so the rule
- * lives in core; before it did, the WebAuthn grant carried a copy that kept
- * the empty entries of a repeated parameter and handed the policy a blank
- * resource. The home is mapped in `docs/design-vocabulary.md` and guarded by
- * `designVocabulary.drift.test.mts`.
+ * Read by the oauth package's `client_credentials`, `refresh_token`,
+ * `authorization_code` and jwt-bearer grants and `/authorize`, and by the
+ * WebAuthn grant, which forwards `resource` to `grantPolicy`. Those packages
+ * do not depend on one another, so the rule lives in core rather than in a
+ * copy per package. The home is mapped in `docs/design-vocabulary.md` and
+ * guarded by `designVocabulary.drift.test.mts`; the one grant that still reads
+ * `resource` its own way, token exchange, is named there.
  *
  * Pure functions over a parsed parameter bag: no HTTP, no Express.
  *
