@@ -70,6 +70,10 @@ A module declares its grants in `contributes.grants`, keyed by grant type. Wheth
 
 A `GrantHandler.cleanup?()` is never called. `AppHandle.dispose()` runs each provided component's `lifecycle[K].cleanup` in reverse-topological order, then `Symbol.asyncDispose` on module-provided values that declared none, then the `LifecycleRegistrar` drain — and never touches the registry. A module that holds a resource on a handler's behalf releases it through its own `lifecycle[K].cleanup`; see [`src/grants/README.md`](src/grants/README.md).
 
+#### Resource indicators (RFC 8707)
+
+A grant that honours `resource` reads it with `extractResourceParam`, derives the audience it names with `deriveAudienceFromResources`, and refuses an issued `aud` that does not represent it with `unrepresentedResources` — [`src/grants/resourceIndicator.mts`](src/grants/resourceIndicator.mts). Each value is kept whole (a URI may contain a comma), the empty entries of a repeated parameter are dropped, and an all-empty parameter means none was requested. The oauth grants, `/authorize` and the WebAuthn grant all read it there, so a custom grant that does the same gives the same answer.
+
 ### Token Utilities
 
 `generateToken(data, options)`, `generateTokenResponse(tokens, options?)` and `formatObject` are in [`src/grants/token.mts`](src/grants/token.mts), with `Token`, `TokenResponse` and `GenerateTokenOptions` beside them.

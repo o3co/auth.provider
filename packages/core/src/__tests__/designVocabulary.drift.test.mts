@@ -129,6 +129,12 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isSpecialUseAddress\b/,
 	},
 	{
+		concept: "RFC 8707 resource indicator (#172, #173)",
+		home: "packages/core/src/grants/resourceIndicator.mts",
+		definition:
+			/(?:function|const)\s+(?:extractResourceParam|deriveAudienceFromResources|unrepresentedResources)\b/,
+	},
+	{
 		concept: "WebAuthn algorithm pin (#516)",
 		home: "packages/webauthn/src/internal/options.mts",
 		definition: /(?:function|const)\s+WEBAUTHN_ALGORITHM_IDS\b|supportedAlgorithmIDs\s*:\s*\[\s*-/,

@@ -17,7 +17,9 @@
 import { randomUUID } from "node:crypto";
 import {
 	boundPolicyAudience,
+	deriveAudienceFromResources,
 	evaluateGrantPolicy,
+	extractResourceParam,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -27,17 +29,13 @@ import {
 	isRevocationUnavailable,
 	matchConfirmation,
 	resolveAccessTokenLifetime,
+	unrepresentedResources,
 	verifyJwt,
 	wellFormedAcr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 
 import type { JWTPayload } from "jose";
-import {
-	deriveAudienceFromResources,
-	extractResourceParam,
-	unrepresentedResources,
-} from "./_resourceIndicator.mjs";
 
 /**
  * Taken off the family ceiling a rotation reports before the refresh token's

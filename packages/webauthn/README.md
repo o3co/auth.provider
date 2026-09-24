@@ -271,7 +271,7 @@ Implemented:
 - Primary-login passkeys
 - Registration + authentication ceremonies
 - Multi-origin support (`config.origin: string[]`), web and Android — see [Multi-origin](#multi-origin-one-rp-for-the-site-and-the-android-app)
-- RFC 8707 `resource` forwarded to `grantPolicy` when `oauth.resourceIndicator.enabled` is set
+- RFC 8707 `resource` forwarded to `grantPolicy` when `oauth.resourceIndicator.enabled` is set, read by core's `extractResourceParam` exactly as the oauth grants read it: each value whole, the empty entries of a repeated parameter dropped (`resource=&resource=https://x` reaches the policy as `["https://x"]`), and an all-empty parameter as no resource
 - Refresh-token issuance for allowed clients ([#480](https://github.com/o3co/auth.provider/issues/480))
 
 Not implemented:
@@ -285,7 +285,7 @@ Not implemented:
 - [`src/module.mts`](src/module.mts) — the assembly: the manifest, its required and optional slots, the three routes and the grant, the rate-limit guard and its replica-safety refusal.
 - [`src/grant.mts`](src/grant.mts) — the grant: assertion verification, the sign-count update, the policy call, and token minting.
 - `src/routes/` — the three ceremony handlers, one per endpoint.
-- `src/internal/` — the SimpleWebAuthn boundary (options generation and response verification, and the mapping of library failures onto this package's error codes), plus two helpers copied from `@o3co/auth-provider-oauth`'s grants rather than imported, because this package does not depend on oauth. The copies are not checked against the originals, and one differs: the `resource` extractor here keeps the empty entries of a repeated `resource` parameter (`resource=&resource=https://x` reaches `grantPolicy` as `["", "https://x"]`), where oauth's drops them.
+- `src/internal/` — the SimpleWebAuthn boundary (options generation and response verification, and the mapping of library failures onto this package's error codes), plus one helper copied from `@o3co/auth-provider-oauth`'s grants rather than imported, because this package does not depend on oauth: the unverified payload decode the grant reads its own freshly minted refresh token with, to register its family. The copy is not checked against the original.
 - [`src/config.mts`](src/config.mts) — the config schema and the `webauthnConfig` slot; [`src/request.mts`](src/request.mts) — the `req.webauthnSubject` augmentation.
 
 The ports these depend on (`WebAuthnCredentialStore`, `ChallengeCeremony`, `ChallengeStore`) are core's.

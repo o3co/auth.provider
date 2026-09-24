@@ -87,14 +87,13 @@
  *
  * RFC 8707 (Wave 1 §5.3):
  *   - resource forwarded to grantPolicy when resourceIndicator.enabled === true
+ *   - read by core's `extractResourceParam`, the reading the oauth grants and
+ *     /authorize use: each value kept whole, empty entries of a repeated
+ *     parameter dropped, and an all-empty parameter read as none requested.
  *   - No audience is derived from `resource` here. #173 landed that for
  *     client_credentials, refresh_token and /authorize and did not cover this
  *     grant; a policy that wants to honour `resource` narrows within
  *     `allowedAudiences`.
- *
- * extractResourceParam: duplicated from packages/oauth/src/grants/_resourceIndicator.mts
- * because the webauthn package does not depend on @o3co/auth-provider-oauth and that
- * helper is explicitly NOT barrel-exported. Consolidation candidate for Wave 2.
  *
  * Cross-refs: Plan T30 / spec §2.4 / PR #172 W1P3 patterns / Codex Round 3 P1
  */
@@ -105,6 +104,7 @@ import {
 	boundPolicyAudience,
 	type ChallengeCeremony,
 	evaluateGrantPolicy,
+	extractResourceParam,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -118,7 +118,6 @@ import {
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { decodeJwtPayload } from "./internal/_jwtPayload.mjs";
-import { extractResourceParam } from "./internal/_resourceIndicator.mjs";
 import { verifyWebAuthnAssertion } from "./internal/verification.mjs";
 
 // ---------------------------------------------------------------------------

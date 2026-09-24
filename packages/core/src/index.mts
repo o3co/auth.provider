@@ -269,6 +269,14 @@ export {
 	type GenerateLogoutTokenOptions,
 	generateLogoutToken,
 } from "./grants/logoutToken.mjs";
+// RFC 8707 resource indicators (#172, #173): the one reading of `resource`,
+// the audience derived from it, and the `invalid_target` check — shared by the
+// oauth grants, `/authorize` and the WebAuthn grant.
+export {
+	deriveAudienceFromResources,
+	extractResourceParam,
+	unrepresentedResources,
+} from "./grants/resourceIndicator.mjs";
 export type { SenderConstraint } from "./grants/senderConstraint.mjs";
 // Grant types and interfaces.
 //

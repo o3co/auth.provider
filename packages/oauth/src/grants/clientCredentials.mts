@@ -17,7 +17,9 @@
 import {
 	type AuthenticatedClient,
 	boundPolicyAudience,
+	deriveAudienceFromResources,
 	evaluateGrantPolicy,
+	extractResourceParam,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -25,12 +27,8 @@ import {
 	generateToken,
 	generateTokenResponse,
 	resolveAccessTokenLifetime,
-} from "@o3co/auth-provider-core";
-import {
-	deriveAudienceFromResources,
-	extractResourceParam,
 	unrepresentedResources,
-} from "./_resourceIndicator.mjs";
+} from "@o3co/auth-provider-core";
 
 const GRANT_TYPE = "client_credentials";
 

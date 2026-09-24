@@ -27,7 +27,9 @@ remaining grants.
 ### D1 — Enforcement is a shared check applied after the audience is final
 
 `unrepresentedResources(resources, audience)` (in
-`packages/oauth/src/grants/_resourceIndicator.mts`) returns the requested
+`packages/core/src/grants/resourceIndicator.mts`; it was written in
+`packages/oauth/src/grants/_resourceIndicator.mts` and moved to core so the
+WebAuthn grant could share the `resource` reader) returns the requested
 resources the audience does not represent. Each grant calls it once, *after*
 its audience is fully derived, and returns `400 invalid_target` when the result
 is non-empty.

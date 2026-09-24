@@ -19,7 +19,7 @@ import {
 	deriveAudienceFromResources,
 	extractResourceParam,
 	unrepresentedResources,
-} from "#/grants/_resourceIndicator.mjs";
+} from "#/grants/resourceIndicator.mjs";
 
 describe("extractResourceParam", () => {
 	it("returns null when resource is absent", () => {
