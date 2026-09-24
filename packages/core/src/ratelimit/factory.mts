@@ -29,19 +29,8 @@ interface MemoryRateLimiterConfig {
 	maxBuckets?: number;
 }
 
-function normalizeLimits(raw: unknown): Record<string, RateLimitSpec> {
-	if (raw == null || typeof raw !== "object") return {};
-	const result: Record<string, RateLimitSpec> = {};
-	for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-		if (v && typeof v === "object" && "limit" in v && "windowSeconds" in v) {
-			const spec = v as { limit: unknown; windowSeconds: unknown };
-			if (typeof spec.limit === "number" && typeof spec.windowSeconds === "number") {
-				result[k] = { limit: spec.limit, windowSeconds: spec.windowSeconds };
-			}
-		}
-	}
-	return result;
-}
+/** The built-in default, for a configuration that gives none. */
+const DEFAULT_LIMIT: RateLimitSpec = { limit: 60, windowSeconds: 60 };
 
 /**
  * Registers the built-in in-memory RateLimiter. The "redis" backend was
@@ -55,23 +44,14 @@ function normalizeLimits(raw: unknown): Record<string, RateLimitSpec> {
 export function registerBuiltinRateLimiters(factory: RateLimiterFactory): void {
 	factory.register("memory", (rawConfig) => {
 		const config = rawConfig as unknown as MemoryRateLimiterConfig;
-		const limits = normalizeLimits(config.limits);
-		const defaultLimit: RateLimitSpec = (() => {
-			const raw = config.defaultLimit;
-			if (
-				raw &&
-				typeof raw === "object" &&
-				typeof raw.limit === "number" &&
-				typeof raw.windowSeconds === "number"
-			) {
-				return raw;
-			}
-			return { limit: 60, windowSeconds: 60 };
-		})();
-
+		// What was configured, as it was: `createMemoryRateLimiter` refuses a
+		// spec it cannot apply as written. This used to drop such a spec, or put
+		// its own default in for a malformed one — a looser budget than the
+		// operator wrote, and a different one from the Redis adapter's answer.
+		// Only a default nobody gave is the built-in 60 per 60 s.
 		return createMemoryRateLimiter({
-			limits,
-			defaultLimit,
+			limits: (config.limits ?? {}) as Record<string, RateLimitSpec>,
+			defaultLimit: config.defaultLimit === undefined ? DEFAULT_LIMIT : config.defaultLimit,
 			maxBuckets:
 				typeof config.maxBuckets === "number"
 					? config.maxBuckets

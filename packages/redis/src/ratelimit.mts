@@ -5,7 +5,7 @@
 
 import {
 	type AdapterBuilder,
-	assertRateLimitWindowsInRange,
+	assertUsableRateLimitSpecs,
 	defineModule,
 	MAX_DURATION_SECONDS,
 	type RateLimiter,
@@ -22,38 +22,8 @@ interface RedisRateLimiterConfig {
 	client?: RateLimiterClient;
 }
 
-/**
- * Whether a value is usable as a `limit` or `windowSeconds`.
- *
- * Both must be positive integers, and the check lives here rather than only in
- * `rateLimitSpecSchema` because `redisRateLimiterBuilder` accepts a config
- * object that never passed the schema. A `windowSeconds` of 0 would reach
- * `EXPIRE key 0`, which *deletes* the key — every request would then see a
- * count of 1 and the limiter would silently never limit anything. A
- * non-positive `limit` denies every request instead. Neither can be what the
- * operator meant, so a spec carrying one is dropped and the caller falls back
- * to `defaultLimit`.
- */
-const isPositiveInteger = (value: unknown): value is number =>
-	typeof value === "number" && Number.isInteger(value) && value > 0;
-
-/** Whether an arbitrary value is a usable {@link RateLimitSpec}. */
-const isRateLimitSpec = (value: unknown): value is RateLimitSpec =>
-	typeof value === "object" &&
-	value !== null &&
-	isPositiveInteger((value as { limit?: unknown }).limit) &&
-	isPositiveInteger((value as { windowSeconds?: unknown }).windowSeconds);
-
-function normalizeLimits(raw: unknown): Record<string, RateLimitSpec> {
-	if (raw == null || typeof raw !== "object") return {};
-	const result: Record<string, RateLimitSpec> = {};
-	for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
-		if (isRateLimitSpec(v)) {
-			result[k] = { limit: v.limit, windowSeconds: v.windowSeconds };
-		}
-	}
-	return result;
-}
+/** The built-in default, for a configuration that gives none. */
+const DEFAULT_LIMIT: RateLimitSpec = { limit: 60, windowSeconds: 60 };
 
 function keyPrefix(key: string): string {
 	const colon = key.indexOf(":");
@@ -83,25 +53,23 @@ interface CreateRedisRateLimiterOptions {
  * other redis users.
  */
 export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): RateLimiter {
-	// A whole but enormous `windowSeconds` is an `EXPIRE` Redis refuses after
-	// the script's `INCR` has run, which leaves a counter with no TTL (#269's
-	// shape). It is refused here, not dropped: the default applying in its
-	// place would be a looser budget than the operator wrote. Checked before
-	// the screening below, which drops what is not a positive integer at all.
-	assertRateLimitWindowsInRange("createRedisRateLimiter", opts);
-	const limits = normalizeLimits(opts.limits);
-	// `defaultLimit` gets the same screening as the per-prefix specs: it is the
-	// fallback every unmatched key lands on, so a bad one is worse, not better.
-	//
-	// Screened as an unknown, not as a `RateLimitSpec`: `redisRateLimiterBuilder`
-	// accepts a config object that never passed the zod schema, so this can
-	// arrive as `null` or as a non-object. Reading `.limit` off it first would
-	// throw at construction — in the one component whose job is to keep working
-	// while other things go wrong.
-	const providedDefault = opts.defaultLimit as unknown;
-	const defaultLimit: RateLimitSpec = isRateLimitSpec(providedDefault)
-		? providedDefault
-		: { limit: 60, windowSeconds: 60 };
+	// Every spec it was given, `defaultLimit` included, must be one it can
+	// apply as written — core's predicate, which the in-process limiter uses
+	// too. `redisRateLimiterBuilder` accepts a config object that never passed
+	// the zod schema, so this is where a zero window (`EXPIRE key 0` deletes
+	// the counter), a limit of zero or less, NaN, a fraction, or a window past
+	// the Date range (an `EXPIRE` Redis refuses after the `INCR`, #269's shape)
+	// is refused. It used to drop such a spec and serve the default in its
+	// place: a looser budget than the operator wrote. Only a default nobody
+	// gave is the built-in 60 per 60 s.
+	assertUsableRateLimitSpecs("createRedisRateLimiter", opts);
+	const limits: Record<string, RateLimitSpec> = Object.fromEntries(
+		Object.entries(opts.limits ?? {}).map(([prefix, spec]) => [
+			prefix,
+			{ limit: spec.limit, windowSeconds: spec.windowSeconds },
+		]),
+	);
+	const defaultLimit: RateLimitSpec = opts.defaultLimit ?? DEFAULT_LIMIT;
 	const client = opts.client;
 
 	return {

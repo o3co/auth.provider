@@ -15,7 +15,7 @@
  */
 
 import type { RateLimiter, RateLimitSpec } from "./types.mjs";
-import { assertRateLimitWindowsInRange } from "./window.mjs";
+import { assertUsableRateLimitSpecs } from "./usableSpec.mjs";
 
 export const DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS = 10_000;
 
@@ -56,6 +56,7 @@ function evictEarliestResetBucket(buckets: Map<string, BucketState>): void {
 		// the caller's `while (size >= max)` loop is guaranteed to make
 		// progress and cannot pin the event loop. Without this, NaN < x
 		// returns false for every comparison and evictKey stays undefined.
+		// Construction now refuses such a window, so this is a second line.
 		if (!Number.isFinite(bucket.resetAt)) {
 			buckets.delete(key);
 			return;
@@ -78,9 +79,14 @@ function evictEarliestResetBucket(buckets: Map<string, BucketState>): void {
 }
 
 export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): RateLimiter {
-	// A window no clock reaches the end of is refused here, as the Redis
-	// adapter refuses it: its bucket would reset at an Invalid Date.
-	assertRateLimitWindowsInRange("createMemoryRateLimiter", options);
+	// A spec this limiter cannot apply as written is refused here, by the
+	// predicate the Redis adapter refuses it by: kept, a zero window reset on
+	// every check and never limited anything, and a NaN one reset at an
+	// Invalid Date. The default is not optional here.
+	if (options.defaultLimit === undefined) {
+		throw new RangeError("createMemoryRateLimiter: defaultLimit is required");
+	}
+	assertUsableRateLimitSpecs("createMemoryRateLimiter", options);
 	const buckets = new Map<string, BucketState>();
 	const maxBuckets = normalizeMaxBuckets(options.maxBuckets);
 

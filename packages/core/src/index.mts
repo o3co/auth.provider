@@ -649,7 +649,7 @@ export type {
 	RateLimiterFactory,
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";
-export { assertRateLimitWindowsInRange } from "./ratelimit/window.mjs";
+export { assertUsableRateLimitSpecs, isUsableRateLimitSpec } from "./ratelimit/usableSpec.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
 export type {
 	ProbeResult,
