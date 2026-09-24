@@ -172,6 +172,23 @@ const startDevice = async (app: express.Express): Promise<string> => {
 	return res.body.user_code as string;
 };
 
+/**
+ * Both orders of the two modules that share `/oauth`. `oauthModule`'s router
+ * parses JSON and form bodies — Express's defaults, 100 KiB — for every
+ * request beneath the prefix, so whatever this package enforces about a body
+ * has to hold when that router has already read it.
+ */
+const orders = [
+	[
+		"oauthModule listed first",
+		(config: AppConfig) => [oauthModule({ config }), deviceGrantModule({ config })],
+	],
+	[
+		"deviceGrantModule listed first",
+		(config: AppConfig) => [deviceGrantModule({ config }), oauthModule({ config })],
+	],
+] as const;
+
 describe("deviceGrantModule beside oauthModule — discovery (RFC 8628 §4)", () => {
 	it("boots enabled and advertises device_authorization_endpoint under the issuer", async () => {
 		// `oauthModule` always activates discovery, and core's builder refuses
@@ -236,17 +253,6 @@ describe("deviceGrantModule beside oauthModule — POST /oauth/device/verificati
 	// rested on this package mounting no form parser held only when this
 	// package was listed first. The CSRF token is valid here on purpose: the
 	// media type is the first defence, and it must not depend on the second.
-	const orders = [
-		[
-			"oauthModule listed first",
-			(config: AppConfig) => [oauthModule({ config }), deviceGrantModule({ config })],
-		],
-		[
-			"deviceGrantModule listed first",
-			(config: AppConfig) => [deviceGrantModule({ config }), oauthModule({ config })],
-		],
-	] as const;
-
 	it.each(orders)(
 		"refuses a form-encoded approval carrying a valid CSRF token (%s)",
 		async (_label, ordered) => {
@@ -280,6 +286,74 @@ describe("deviceGrantModule beside oauthModule — POST /oauth/device/verificati
 					.send({ action: "approve", user_code: userCode });
 				expect(json.status).toBe(200);
 				expect(json.body.status).toBe("approved");
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
+});
+
+describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () => {
+	// Both routes parse with a 16 KiB limit, but `body-parser` does not parse a
+	// body twice: listed after `oauthModule`, they received whatever its
+	// 100 KiB parsers had already read. The bound has to hold in either order,
+	// with one answer.
+	const TOO_LARGE = { error: "invalid_request", error_description: "body_too_large" };
+
+	it.each(orders)(
+		"refuses a 40 KB JSON body at both routes with 413 body_too_large (%s)",
+		async (_label, ordered) => {
+			const config = makeConfig(ENABLED);
+			const { handle, app } = await bootWith(config, [
+				sessionStoreModuleFor(config),
+				...ordered(config),
+			]);
+			try {
+				const userCode = await startDevice(app);
+				const agent = request.agent(app);
+				await signIn(agent);
+				const { header, token } = await csrfToken(agent);
+				const padding = "x".repeat(40_000);
+
+				// Signed in and carrying a valid token, so nothing but the size
+				// stands between this lookup and the handler.
+				const verification = await agent
+					.post("/oauth/device/verification")
+					.set(header, token)
+					.send({ action: "lookup", user_code: userCode, padding });
+				expect(verification.status).toBe(413);
+				expect(verification.body).toEqual(TOO_LARGE);
+
+				const authorization = await request(app)
+					.post("/oauth/device_authorization")
+					.send({ client_id: CLIENT_ID, padding });
+				expect(authorization.status).toBe(413);
+				expect(authorization.body).toEqual(TOO_LARGE);
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
+
+	it.each(orders)(
+		"accepts a body of exactly 16 KiB, as the parsers it stands in for do (%s)",
+		async (_label, ordered) => {
+			// `express.json({ limit: "16kb" })` accepts exactly 16384 bytes. A
+			// restated bound that disagreed with the parser would accept or
+			// refuse the same request depending on the module order.
+			const config = makeConfig(ENABLED);
+			const { handle, app } = await bootWith(config, [
+				sessionStoreModuleFor(config),
+				...ordered(config),
+			]);
+			try {
+				const body = { client_id: CLIENT_ID, padding: "" };
+				body.padding = "x".repeat(16_384 - Buffer.byteLength(JSON.stringify(body)));
+				expect(Buffer.byteLength(JSON.stringify(body))).toBe(16_384);
+
+				const res = await request(app).post("/oauth/device_authorization").send(body);
+				expect(res.status).toBe(200);
+				expect(typeof res.body.device_code).toBe("string");
 			} finally {
 				await handle.dispose();
 			}
