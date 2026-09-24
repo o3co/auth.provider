@@ -75,6 +75,11 @@
  *   writes a raw AggregateError's members under, so one query finds both —
  *   and how many members are not among them, as `aggregateErrorsOmitted`.
  *   Neither field when none of those five is an Error.
+ * - The command a store's error answered, by name alone: `command: { name }`
+ *   from ioredis's `command: { name, args }` when the name is a token of at
+ *   most 32 letters, digits and `_` — which Redis command failed, and never
+ *   its arguments. Kept at ioredis's own path, so a query on
+ *   `err.command.name` reads a raw and a projected line alike.
  * - A budget for the line: at most {@link LOGGED_MAX_PROJECTIONS}
  *   projections, the error and its causes and members together, taken
  *   nearest first (breadth first: the error's own cause and members before
@@ -82,7 +87,7 @@
  *   `aggregateErrorsOmitted`; a cause it leaves out leaves
  *   `causeOmitted: true`.
  * - Never kept: a cause or a member that is not an Error, any other field
- *   (`command`, `body`, `buffer`), and anything of a thrown value that is
+ *   (a command's `args`, `body`, `buffer`), and anything of a thrown value that is
  *   not an Error but its `typeof`, as `thrown`.
  * - It never throws: an error from another realm counts; a throwing getter
  *   drops its field; a value the Error check cannot inspect reads as a
@@ -141,6 +146,12 @@ export interface LoggableError {
 	 */
 	readonly reason?: string;
 	/**
+	 * The command a store's error answered, by name alone — ioredis's
+	 * `command.name` (`set`, `evalsha`, `hello`) when it is a bounded token —
+	 * never its `args`.
+	 */
+	readonly command?: { readonly name: string };
+	/**
 	 * An AggregateError's members: of its first
 	 * {@link LOGGED_AGGREGATE_MAX_ERRORS}, the Errors, projected the same way.
 	 */
@@ -189,6 +200,9 @@ const STATUS_FIELD = /^[a-z][A-Za-z]{0,31}Status$/;
 
 /** The most `<word>Status` fields the projection keeps. */
 const MAX_STATUS_FIELDS = 4;
+
+/** A command's name — `set`, `evalsha`, `hello` — and nothing that could be an argument. */
+const COMMAND_NAME = /^[a-z][a-z0-9_]{0,31}$/i;
 
 /** RFC 6749 §5.2: `error` and `error_description` are `%x20-21 / %x23-5B / %x5D-7E`. */
 const OAUTH_ERROR_TEXT = /^[\x20\x21\x23-\x5B\x5D-\x7E]+$/;
@@ -353,6 +367,19 @@ const framesOf = (
 		frames.push(line);
 	}
 	return frames.join("\n").slice(0, LOGGED_STACK_MAX_LENGTH);
+};
+
+/**
+ * `{ name }` of the command a store's error answered — ioredis's `command:
+ * { name, args }` — when `command` is an object whose `name` is a bounded
+ * token; never its `args`. A `command` that is a string (execa's shell line)
+ * or whose name could hold anything else gives nothing.
+ */
+const commandOf = (err: object): { readonly name: string } | undefined => {
+	const command = read(err, "command");
+	if (typeof command !== "object" || command === null) return undefined;
+	const name = read(command, "name");
+	return typeof name === "string" && COMMAND_NAME.test(name) ? { name } : undefined;
 };
 
 /** An own `reason` that is a code; `undefined` for anything else, or when asking throws. */
@@ -521,6 +548,7 @@ function fieldsOf(err: unknown): Draft {
 	const response = responseFields(cause) ?? responseFields(read(err, "response"));
 	const stack = framesOf(read(err, "stack"), rawName, code, rawMessage);
 	const reason = reasonOf(err);
+	const command = commandOf(err);
 
 	let detail: string | undefined;
 	let position: number | undefined;
@@ -545,6 +573,7 @@ function fieldsOf(err: unknown): Draft {
 		...(typeof status === "number" && Number.isInteger(status) ? { status } : {}),
 		...statusFieldsOf(err),
 		...(reason !== undefined ? { reason } : {}),
+		...(command !== undefined ? { command } : {}),
 		...(typeof type === "string" ? { type: capped(type) } : {}),
 		...(typeof error === "string" && OAUTH_ERROR_TEXT.test(error) ? { error: capped(error) } : {}),
 		...(errorDescription !== undefined ? { error_description: errorDescription } : {}),

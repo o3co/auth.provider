@@ -192,7 +192,9 @@ projection of an error, never the error. ioredis puts the command a reply
 answered on the error, arguments included: when the server refuses the
 configured password, that is the handshake — `AUTH` and the password — on
 `command.args`, and a logger that serialises the error writes it out. The
-connections `makeIoredisClients` opens for refresh rotation log
+projection keeps the command's name alone (`command: { name: "hello" }`), so
+the line still says which command failed. The connections
+`makeIoredisClients` opens for refresh rotation log
 `redis_duplicate_connection_error` through the projection, and a stored
 authorization code, user session or RP record that does not parse is logged as
 the parser error's name and position (`RedisCodeRepository: corrupted data for

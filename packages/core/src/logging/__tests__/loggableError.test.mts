@@ -561,7 +561,9 @@ describe("loggableError — what a log line may carry of an error", () => {
 			expect(shape(reply)).toEqual({
 				name: "ReplyError",
 				detail: "ERR unknown command 'evalsha'",
+				command: { name: "evalsha" },
 			});
+			expect(JSON.stringify(loggableError(reply))).not.toContain("user-1");
 		});
 
 		it("cuts Redis's echo from any message, whichever client's class carries it", () => {
