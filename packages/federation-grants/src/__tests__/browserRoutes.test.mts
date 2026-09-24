@@ -556,7 +556,10 @@ describe("GET /session/federation-grants/consent — what the page reads", () =>
 		w.signIn("b-2");
 		const foreign = await w.page(challenge, "b-2");
 		expect(foreign.status).toBe(400);
-		expect(foreign.body.error_description).toMatch(/no pending consent/);
+		// RFC 6749 Appendix A.8: printable ASCII only, so no em dash.
+		expect(foreign.body.error_description).toBe(
+			"no pending consent for this challenge: it was answered, has expired, or was not issued to this session; start again",
+		);
 		expect((await w.page("no-such-challenge", "b-1")).body).toEqual(foreign.body);
 	});
 
@@ -673,7 +676,10 @@ describe("POST /session/federation-grants/consent — the answer", () => {
 		const { handle } = await w.lodge();
 		w.signIn("b-1");
 		const challenge = await w.challengeFor(handle, "b-1");
-		expect((await w.answer({ challenge, decision: "maybe" }, "b-1")).status).toBe(400);
+		const unknown = await w.answer({ challenge, decision: "maybe" }, "b-1");
+		expect(unknown.status).toBe(400);
+		// Appendix A.8 allows no `"`: the values are quoted with `'`.
+		expect(unknown.body.error_description).toBe("decision must be 'accept' or 'deny'");
 		const crossSite = await w.answer({ challenge, decision: "accept" }, "b-1", {
 			"Sec-Fetch-Site": "cross-site",
 		});

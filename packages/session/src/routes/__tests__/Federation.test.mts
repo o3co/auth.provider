@@ -1050,6 +1050,31 @@ describe("account linking across federations (#482)", () => {
 				error: "invalid_redirect",
 				error_description: "redirect target not allowed",
 			});
+
+			// A contributed policy's words, held to RFC 6749 Appendix A.8.
+			const refusingInOtherWords = {
+				...makePermissivePolicy(),
+				resolveCallbackRedirect: () => ({
+					ok: false as const,
+					status: 400,
+					error: "invalid_redirect",
+					errorDescription: 'cible "interdite" \u2014 voir \u00a73',
+				}),
+			} as unknown as ReturnType<typeof makePermissivePolicy>;
+			const refusedInOtherWords = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: linkableRepo({ current: null }),
+				userSessionStore: liveStore(),
+				federationRedirectPolicyResolver: new Map([["test", refusingInOtherWords]]),
+			});
+			const other = await callback(await plantAndGetAgent(refusedInOtherWords.app));
+			expect(other.status).toBe(400);
+			expect(other.body).toEqual({
+				error: "invalid_redirect",
+				error_description: "cible ?interdite? ? voir ?3",
+			});
 		});
 
 		it("refuses without an authenticated session, and never asks the Store", async () => {
@@ -1141,6 +1166,26 @@ describe("account linking across federations (#482)", () => {
 			expect(resA.body).toEqual({
 				error: "link_refused",
 				error_description: "address not verified",
+			});
+
+			// The Store's words are an adapter's: RFC 6749 Appendix A.8 holds them
+			// to printable ASCII without `"` and `\`, any other character sent as `?`.
+			const refusedInOtherWords = linkableRepo({
+				current: null,
+				outcome: { ok: false, reason: "refused", description: 'adresse "non" v\u00e9rifi\u00e9e' },
+			});
+			const c = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: refusedInOtherWords,
+				userSessionStore: liveStore(),
+			});
+			const resC = await callback(await plantAndGetAgent(c.app));
+			expect(resC.status).toBe(403);
+			expect(resC.body).toEqual({
+				error: "link_refused",
+				error_description: "adresse ?non? v?rifi?e",
 			});
 
 			const conflict = linkableRepo({ current: null, outcome: { ok: false, reason: "conflict" } });

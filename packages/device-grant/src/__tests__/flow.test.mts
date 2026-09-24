@@ -408,6 +408,23 @@ describe("verification endpoint", () => {
 
 		expect(malformed.status).toBe(unknown.status);
 		expect(malformed.body).toEqual(unknown.body);
+		// RFC 6749 Appendix A.8: printable ASCII only, so no em dash.
+		expect(unknown.body).toEqual({
+			error: "invalid_user_code",
+			error_description: "that code is not valid; check it and try again",
+		});
+	});
+
+	it("answers an approval of an expired code in RFC 6749's characters", async () => {
+		const { app, clock } = makeHarness();
+		const started = await startDevice(app);
+		clock.advance(601 * 1000);
+		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+		expect(res.status).toBe(410);
+		expect(res.body).toEqual({
+			error: "expired_token",
+			error_description: "that code has expired; start again on the device",
+		});
 	});
 
 	it("refuses an action it does not implement", async () => {

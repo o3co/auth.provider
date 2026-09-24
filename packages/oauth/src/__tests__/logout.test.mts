@@ -1317,6 +1317,21 @@ describe("POST /oauth/federation/:name/logout", () => {
 
 			expect(res.status).toBe(404);
 			expect(res.body.error).toBe("federation_not_linked");
+			expect(res.body.error_description).toBe("federation 'github' is not linked to this session");
+		});
+
+		it("quotes the requested name within RFC 6749's characters", async () => {
+			// The name is the client's path segment: `'` for the quotes, `?` for
+			// any character Appendix A.8 does not allow.
+			const app = buildFedLogoutApp();
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, encodeURIComponent('git"h\\ub\u00e9'), token);
+
+			expect(res.status).toBe(404);
+			expect(res.body.error_description).toBe(
+				"federation 'git?h?ub?' is not linked to this session",
+			);
 		});
 	});
 

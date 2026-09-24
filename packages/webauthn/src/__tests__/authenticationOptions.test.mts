@@ -329,7 +329,12 @@ describe("POST /oauth/webauthn/authentication/options — userId bounds (#281)",
 		const res = await post(app, { userId: "" });
 
 		expect(res.status).toBe(400);
-		expect(res.body).toMatchObject({ error: "invalid_request" });
+		// RFC 6749 Appendix A.8: printable ASCII only, so "section", not the sign.
+		expect(res.body).toEqual({
+			error: "invalid_request",
+			error_description:
+				"userId must be an opaque handle of 1-64 UTF-8 bytes with no control characters (WebAuthn section 5.4.3)",
+		});
 	});
 
 	it("rejects a userId carrying control characters", async () => {

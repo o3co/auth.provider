@@ -112,6 +112,21 @@ describe("POST /oauth/webauthn/registration/options (spec §2.4)", () => {
 		expect(res.body).toMatchObject({ error: "unauthorized" });
 	});
 
+	it("500 for a subject whose userId is not a 1-64 byte handle, in RFC 6749's characters", async () => {
+		// A consumer bug, answered as one. Appendix A.8 allows printable ASCII
+		// only, so the description says "section", not the section sign.
+		const { app } = buildApp({ userId: "" });
+
+		const res = await supertest(app).post("/oauth/webauthn/registration/options").send({});
+
+		expect(res.status).toBe(500);
+		expect(res.body).toEqual({
+			error: "server_error",
+			error_description:
+				"webauthnSubject.userId must be 1-64 bytes per WebAuthn section 5.4.3 (opaque user-handle)",
+		});
+	});
+
 	it("200 returns PublicKeyCredentialCreationOptions; challenge stored under webauthn:registration:<userId>", async () => {
 		const challengeStore = createMemoryChallengeStore();
 		const issueSpy = vi.spyOn(challengeStore, "issue");

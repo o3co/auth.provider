@@ -378,7 +378,13 @@ describe("createMtlsMechanism — trusted-proxy allowlist for the header source 
 		});
 		await expect(
 			mech.extract(makeReq({ "x-forwarded-client-cert": LEAF_PEM }, "203.0.113.9") as Request),
-		).rejects.toMatchObject({ reason: "untrusted_proxy" });
+		).rejects.toMatchObject({
+			reason: "untrusted_proxy",
+			// The configured header name, quoted with `'` like the error text
+			// RFC 6749 Appendix A.8 governs, which allows no `"`.
+			message:
+				"forwarded client certificate header 'x-forwarded-client-cert' arrived from a peer that is not in the trusted-proxy allowlist",
+		});
 	});
 
 	it("rejects rather than ignoring — a forged header must not silently downgrade to unbound", async () => {
