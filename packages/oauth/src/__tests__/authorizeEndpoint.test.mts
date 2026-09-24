@@ -865,6 +865,24 @@ describe("/authorize — prompt=none (#284)", () => {
 		expect(params.get("error")).toBe("login_required");
 	});
 
+	it("answers a malformed prompt naming none at the redirect_uri, not with the login page", async () => {
+		// The gate that lets a silent request past the login redirect reads
+		// `prompt` tolerantly: a hidden iframe that sent `none` with a stray tab
+		// is still a silent context, and a login page would hang it. Its
+		// `invalid_request` belongs at the RP's redirect_uri, which the strict
+		// reading in `resolvePrompt` delivers once that URI is validated.
+		const { app } = await makeApp({ session: { isAuthenticated: false } });
+		for (const prompt of ["none\t", "none\tlogin", "\tnone"]) {
+			const res = await authorize(app, { ...baseQuery, prompt });
+			expect(res.headers.location, JSON.stringify(prompt)).not.toMatch(/^\/login/);
+			const params = redirectParams(res);
+			expect(params.get("error"), JSON.stringify(prompt)).toBe("invalid_request");
+			expect(params.get("error_description")).toBe(
+				"prompt is not a space-delimited list of values",
+			);
+		}
+	});
+
 	it("proceeds silently when a session is present", async () => {
 		const { app } = await makeApp({});
 		const res = await authorize(app, { ...baseQuery, prompt: "none" });
