@@ -34,6 +34,7 @@ import {
 	generateTokenResponse,
 	isGrantTypeAllowed,
 	isWellFormedErrorCode,
+	loggableError,
 	matchConfirmation,
 	ownedConfirmation,
 	policyOutOfBounds,
@@ -1100,8 +1101,9 @@ function reportedFamily(validated: ValidatedToken): string | undefined {
  *   issued token's `act` claim on a credential whose revocation cannot be
  *   checked.
  * - The store throws: `503 temporarily_unavailable`, logged as
- *   `token_exchange_family_store_unavailable`, so an outage is never reported
- *   as a revoked token.
+ *   `token_exchange_family_store_unavailable` with the role and core's
+ *   `loggableError` projection of the store's error, so an outage is never
+ *   reported as a revoked token.
  * - The family is revoked: `family_revoked`.
  *
  * Both refusals are {@link invalidRequest}s: an unverifiable or revoked family
@@ -1130,7 +1132,12 @@ async function familyRefusal(
 	try {
 		revoked = await revocation.isFamilyRevoked(familyId);
 	} catch (err) {
-		deps.logger?.error({ err, role }, "token_exchange_family_store_unavailable");
+		// The projection: a store error carries what it sent — an ioredis
+		// reply error the command, the family's key included.
+		deps.logger?.error(
+			{ err: loggableError(err), role },
+			"token_exchange_family_store_unavailable",
+		);
 		return {
 			result: {
 				status: 503,
