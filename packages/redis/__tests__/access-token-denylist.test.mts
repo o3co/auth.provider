@@ -95,6 +95,27 @@ describe("createRedisAccessTokenDenylist", () => {
 		expect(await store.has("j-expired")).toBe(false);
 	});
 
+	// The next two mirror core's contract cases, which this adapter cannot run
+	// (its expiry is Redis's own key TTL, not the suite's fake clock).
+	it("refuses an expiry that is not a finite number, and writes nothing", async () => {
+		const store = freshStore();
+		for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+			await expect(store.add("j-bad", bad)).rejects.toThrow(RangeError);
+			expect(await store.has("j-bad")).toBe(false);
+		}
+	});
+
+	it("accepts a fractional expiry — a non-integer JWT exp — rounding the key's life up", async () => {
+		// `PX` takes whole milliseconds; a fractional value is a Redis error
+		// (`ERR value is not an integer or out of range`), which the revoke
+		// route would swallow — leaving the token unrevoked.
+		const store = freshStore();
+		await store.add("j-frac", Date.now() + 60_000.5);
+		expect(await store.has("j-frac")).toBe(true);
+		const pttl = await client.pttl(`atdeny:test-${keyCounter}:j-frac`);
+		expect(pttl).toBeGreaterThan(59_000);
+	});
+
 	it("namespaces keys by keyPrefix so two deployments do not share revocations", async () => {
 		const a = createRedisAccessTokenDenylist({
 			client: client as unknown as AccessTokenDenylistClient,

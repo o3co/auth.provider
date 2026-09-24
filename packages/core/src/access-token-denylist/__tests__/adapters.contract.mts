@@ -55,6 +55,27 @@ export function runAccessTokenDenylistContract(
 			expect(await store.has("j2")).toBe(false);
 		});
 
+		it("add refuses an expiry that is not a finite number, and records nothing", async () => {
+			// NaN is never `<= now`: the memory adapter kept such a jti denied
+			// forever, beyond the reach of its own sweep, and Redis was sent
+			// `PX NaN`. A non-finite expiry is a caller fault.
+			for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+				await expect(store.add("j-bad", bad)).rejects.toThrow(RangeError);
+				expect(await store.has("j-bad")).toBe(false);
+			}
+		});
+
+		it("add accepts a fractional expiry, and denies the jti until it", async () => {
+			// A JWT NumericDate may be non-integer (RFC 7519 §2), so `exp * 1000`
+			// can be fractional. Redis's PX takes whole milliseconds, so an
+			// adapter rounds the entry's life up, never down.
+			const exp = Date.now() + 1_000.5;
+			await store.add("j-frac", exp);
+			expect(await store.has("j-frac")).toBe(true);
+			vi.setSystemTime(new Date(Math.ceil(exp) + 1));
+			expect(await store.has("j-frac")).toBe(false);
+		});
+
 		it("add overwrites expiresAtMs (last-write wins)", async () => {
 			const t0 = Date.now();
 			await store.add("j3", t0 + 1000);
