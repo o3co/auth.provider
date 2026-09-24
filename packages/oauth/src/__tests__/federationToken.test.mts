@@ -34,6 +34,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/federationToken.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { expectProjectedWarn, storeReplyError } from "./_helpers/projectedLog.mjs";
 
 /**
  * A federation that satisfies the contract, with whatever capability the case
@@ -2228,6 +2229,156 @@ describe("POST /oauth/federation/:name/token", () => {
 	// ---------------------------------------------------------------------------
 	// Logger routing
 	// ---------------------------------------------------------------------------
+
+	describe("every store failure it logs reaches the logger as a projection, never as the error", () => {
+		const expired = (): FederationTokens => ({
+			...baseFedTokens,
+			expiresAt: new Date(Date.now() - 1000),
+		});
+
+		/** Providers with google refreshing through `refreshToken`. */
+		const refreshingGoogle =
+			(refreshToken: (rt: string) => Promise<unknown>) =>
+			(): ReadonlyMap<string, FederationProvider> =>
+				new Map<string, FederationProvider>([
+					["google", { ...federationBase("google"), refreshToken } as FederationProvider],
+				]);
+
+		it("the client lookup", async () => {
+			const logger = createMockLogger();
+			const clientRepo = makeClientRepo({ findById: vi.fn().mockRejectedValue(storeReplyError()) });
+			const res = await postFedToken(
+				buildApp({ clientRepo, logger }),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expect(res.body.error_description).toBe("client repository unavailable");
+			expectProjectedWarn(logger, /clientRepository\.findById failed/);
+		});
+
+		it("the token store's read", async () => {
+			const logger = createMockLogger();
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockRejectedValue(storeReplyError()),
+			});
+			const res = await postFedToken(
+				buildApp({ fedTokenStore, logger }),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expectProjectedWarn(logger, /federationTokenStore\.get failed/);
+		});
+
+		it("the dangling link's self-heal", async () => {
+			const logger = createMockLogger();
+			const fedTokenStore = makeFedTokenStore({ get: vi.fn().mockResolvedValue(null) });
+			const sessionFederationIndex = makeSessionFederationIndex({
+				removeFederation: vi.fn().mockRejectedValue(storeReplyError()),
+			});
+			const res = await postFedToken(
+				buildApp({ fedTokenStore, sessionFederationIndex, logger }),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(404);
+			expectProjectedWarn(logger, /removeFederation self-heal failed/);
+		});
+
+		it("the refresh lock", async () => {
+			const logger = createMockLogger();
+			const fedTokenStore = {
+				...makeFedTokenStore({ get: vi.fn().mockResolvedValue(expired()) }),
+				acquireLock: vi.fn().mockRejectedValue(storeReplyError()),
+			};
+			const res = await postFedToken(
+				buildApp({
+					fedTokenStore,
+					logger,
+					getFederationProviders: refreshingGoogle(vi.fn()),
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expectProjectedWarn(logger, /acquireLock failed/);
+		});
+
+		it("the read after the lock", async () => {
+			const logger = createMockLogger();
+			const release = vi.fn().mockResolvedValue(undefined);
+			const fedTokenStore = {
+				...makeFedTokenStore({
+					get: vi.fn().mockResolvedValueOnce(expired()).mockRejectedValueOnce(storeReplyError()),
+				}),
+				acquireLock: vi.fn().mockResolvedValue({ acquired: true, release }),
+			};
+			const res = await postFedToken(
+				buildApp({
+					fedTokenStore,
+					logger,
+					getFederationProviders: refreshingGoogle(vi.fn()),
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expect(release).toHaveBeenCalled();
+			expectProjectedWarn(logger, /post-lock re-read\) failed/);
+		});
+
+		it("both cleanups after invalid_grant", async () => {
+			const logger = createMockLogger();
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expired()),
+				delete: vi.fn().mockRejectedValue(storeReplyError()),
+			});
+			const sessionFederationIndex = makeSessionFederationIndex({
+				removeFederation: vi.fn().mockRejectedValue(storeReplyError()),
+			});
+			const res = await postFedToken(
+				buildApp({
+					fedTokenStore,
+					sessionFederationIndex,
+					logger,
+					getFederationProviders: refreshingGoogle(
+						vi.fn().mockRejectedValue(new Error("invalid_grant: token revoked")),
+					),
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(410);
+			expectProjectedWarn(logger, /federationTokenStore\.delete cleanup failed/);
+			expectProjectedWarn(logger, /removeFederation cleanup failed/);
+		});
+
+		it("the lock's release", async () => {
+			const logger = createMockLogger();
+			const fresh = { ...baseFedTokens, expiresAt: new Date(Date.now() + 3_600_000) };
+			const fedTokenStore = {
+				...makeFedTokenStore({
+					get: vi.fn().mockResolvedValueOnce(expired()).mockResolvedValueOnce(fresh),
+				}),
+				acquireLock: vi.fn().mockResolvedValue({
+					acquired: true,
+					release: vi.fn().mockRejectedValue(storeReplyError()),
+				}),
+			};
+			const res = await postFedToken(
+				buildApp({
+					fedTokenStore,
+					logger,
+					getFederationProviders: refreshingGoogle(vi.fn()),
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(200);
+			expectProjectedWarn(logger, /lock release failed/);
+		});
+	});
 
 	describe("logger routing", () => {
 		it("routes failures to opts.logger, not console", async () => {

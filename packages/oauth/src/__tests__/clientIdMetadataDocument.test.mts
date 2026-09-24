@@ -291,6 +291,26 @@ describe("createClientIdMetadataDocumentResolver — the fetch (#529)", () => {
 		expect(warn).toHaveBeenCalledWith(expect.anything(), "cimd_document_fetch_failed");
 	});
 
+	it("logs a thrown value that is not an Error by its kind, never its content", async () => {
+		// A projection with no message — a thrown non-Error, a SyntaxError —
+		// gives its name as the reason.
+		const { resolve, warn } = resolver({}, [
+			() => {
+				throw "socket hang up: thrown-text-must-never-reach-a-log";
+			},
+		]);
+		expect(await resolve()).toBeNull();
+		expect(warn).toHaveBeenCalledWith(
+			{
+				clientId: CLIENT_URL,
+				reason: "NonError",
+				err: { name: "NonError", thrown: "string" },
+			},
+			"cimd_document_fetch_failed",
+		);
+		expect(JSON.stringify(warn.mock.calls)).not.toContain("thrown-text-must-never-reach-a-log");
+	});
+
 	it("logs a fetch failure's cause code beside its reason, through the projection", async () => {
 		// undici's "fetch failed" says nothing on its own; the code on its
 		// cause (ECONNREFUSED, ENOTFOUND, a TLS failure) is what an operator

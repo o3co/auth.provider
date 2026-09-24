@@ -510,6 +510,21 @@ describe("createClientAssertionVerifier (#484)", () => {
 			expect(lines[0]).not.toContain("body-must-never-reach-a-log");
 		});
 
+		it("a registration's unusable keys: logged at error as the projection, refused as server_error", async () => {
+			// jose refuses a key set that is not one while building the
+			// verifier; the registration, not the client, is at fault.
+			const { logger, lines } = recordingLogger();
+			const malformed = client({ jwks: { keys: 42 } as unknown as PublicClient["jwks"] });
+			const outcome = await build({ logger }).verify(body(await mint()), findClient(malformed));
+			expect(refused(outcome)).toMatchObject({ status: 500, error: "server_error" });
+			const invalid = lines.find((line) => line.includes("client_assertion_jwks_uri_invalid"));
+			expect(invalid).toBeDefined();
+			expect(invalid).toContain('"level":"error"');
+			expect(invalid).toContain('"code":"ERR_JWKS_INVALID"');
+			// The projection's frames, never the header V8 wrote the message into.
+			expect(invalid).not.toContain("JWKSInvalid: ");
+		});
+
 		it("a verification error: its code, never the claims jose puts on it as `payload`", async () => {
 			const expired = await mint({
 				exp: Math.floor(Date.now() / 1000) - 3600,

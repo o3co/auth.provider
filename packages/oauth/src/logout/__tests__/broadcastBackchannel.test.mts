@@ -16,8 +16,9 @@
 import { createSymmetricKeyStore } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
-import { createMockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
-import { broadcastBackchannelLogout } from "../broadcastBackchannel.mjs";
+import { createMockLogger } from "#/__tests__/_helpers/mockLogger.mjs";
+import { expectProjectedWarn, storeReplyError } from "#/__tests__/_helpers/projectedLog.mjs";
+import { broadcastBackchannelLogout } from "#/logout/broadcastBackchannel.mjs";
 
 const keyStore = createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxx");
 
@@ -219,5 +220,26 @@ describe("broadcastBackchannelLogout", () => {
 			}),
 		).resolves.toBeUndefined();
 		expect(logger.warn).toHaveBeenCalledTimes(2);
+	});
+
+	it("logs a logout token it could not sign as the error's projection, and skips that RP's POST", async () => {
+		// A key store backed by a store of its own can reject with that
+		// store's error — the refused command's arguments and all.
+		const failingKeyStore = Object.create(keyStore, {
+			sign: { value: vi.fn().mockRejectedValue(storeReplyError()) },
+		}) as typeof keyStore;
+		const fetchMock = vi.fn(async () => ({ ok: true, status: 204, statusText: "" }));
+		const logger = createMockLogger();
+		await broadcastBackchannelLogout({
+			rps: [{ clientId: "rp1", backchannelLogoutUri: "https://rp.example/bc" }],
+			issuer: "iss",
+			sub: "u",
+			sid: "sid",
+			keyStore: failingKeyStore,
+			fetchImpl: fetchMock as unknown as typeof fetch,
+			logger,
+		});
+		expect(fetchMock).not.toHaveBeenCalled();
+		expectProjectedWarn(logger, /RP rp1 broadcast failed/);
 	});
 });
