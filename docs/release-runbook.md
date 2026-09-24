@@ -132,8 +132,9 @@ git push origin "vX.Y.Z"
 1. Checks out the tagged commit
 2. Sets the version across all workspace packages via `pnpm -r exec pnpm version "${GITHUB_REF#refs/tags/v}" --no-git-tag-version`
 3. Builds + typechecks
-4. Publishes each non-private package with provenance attestation — under npm dist-tag `latest` for a final release, `next` when the tag carries a prerelease identifier (`v1.0.0-rc1`), so an RC never becomes what `npm install` resolves to; the GitHub Release is marked *prerelease* in the same case. It publishes with `pnpm publish`, which packs the repository's root `LICENSE` into every tarball: no package keeps a copy of its own, and CI's `publish-readiness` job checks each packed tarball against the root file. `npm publish` would ship the package with no `LICENSE`, so a manual publish (Patterns A and B below) uses pnpm too
-5. Creates the GitHub Release with auto-generated notes
+4. Packs every package it is about to publish and **refuses the release** — before the draft GitHub Release is created or anything is published — if a package it publishes was not packed, or a tarball's `LICENSE` is missing or is not the root file ([`.github/scripts/check-tarball-license.sh`](../.github/scripts/check-tarball-license.sh), the same check CI's `publish-readiness` job runs on every PR)
+5. Publishes each non-private package with provenance attestation — under npm dist-tag `latest` for a final release, `next` when the tag carries a prerelease identifier (`v1.0.0-rc1`), so an RC never becomes what `npm install` resolves to; the GitHub Release is marked *prerelease* in the same case. It publishes with `pnpm publish`, which packs the repository's root `LICENSE` into every tarball — no package keeps a copy of its own. `npm publish` would ship the package with no `LICENSE`, so a manual publish (Patterns A and B below) uses pnpm too
+6. Creates the GitHub Release with auto-generated notes
 
 Watch the workflow:
 

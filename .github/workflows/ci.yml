@@ -473,7 +473,8 @@ jobs:
       - name: Assert every package the release publishes was packed and ships the root LICENSE
         # The root LICENSE is the only copy, and pnpm packs it only when nothing
         # else it packs looks like a licence file (the script says what counts).
-        # Read on the tarballs, which is what a consumer downloads.
+        # Read on the tarballs, which is what a consumer downloads; release.yml
+        # runs the same script on the tag's tarballs before it publishes.
         run: .github/scripts/check-tarball-license.sh /tmp/tarballs LICENSE
 
       - name: Assert packed manifests carry ^<version> sibling peer ranges
