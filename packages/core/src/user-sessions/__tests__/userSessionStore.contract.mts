@@ -135,6 +135,24 @@ export function runUserSessionStoreContract(
 			expect(await store.get("sid-invalid")).not.toBeNull();
 		});
 
+		it("create refuses an authTime that is not a valid date, or is before 1970, and records nothing", async () => {
+			// The memory store kept either and handed it back — an Invalid Date as
+			// the id_token's `auth_time`. The Redis store wrote either (NaN as JSON
+			// `null`) and then read the session back as corrupt: the user was
+			// logged out by their own login. Neither is a login time, so neither
+			// is a session.
+			const store = await factory();
+			for (const authTime of [new Date(Number.NaN), new Date(-1)]) {
+				await expect(store.create(INPUT({ sid: "sid-bad-auth", authTime }))).rejects.toThrow(
+					RangeError,
+				);
+				expect(await store.get("sid-bad-auth")).toBeNull();
+			}
+			// The epoch itself is a valid instant, and round-trips.
+			await store.create(INPUT({ sid: "sid-bad-auth", authTime: new Date(0) }));
+			expect((await store.get("sid-bad-auth"))?.authTime.getTime()).toBe(0);
+		});
+
 		it("get returns null for unknown sid", async () => {
 			const store = await factory();
 			expect(await store.get("ghost")).toBeNull();

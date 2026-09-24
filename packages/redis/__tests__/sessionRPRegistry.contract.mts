@@ -144,6 +144,18 @@ export function runSessionRPRegistryContract(
 			expect(await reg.listRPs("sid-1")).toEqual([]);
 		});
 
+		it("registerRP refuses a registeredAt that is not a valid date, and records nothing", async () => {
+			// The memory registry kept it and handed back an Invalid Date. The
+			// Redis registry wrote NaN as JSON `null` and then read the RP back as
+			// corrupt and skipped it — an RP silently dropped from the logout
+			// fan-out. A caller fault, refused before anything is written.
+			const reg = await factory();
+			await expect(
+				reg.registerRP("sid-1", RP({ registeredAt: new Date(Number.NaN) }), FUTURE()),
+			).rejects.toThrow(RangeError);
+			expect(await reg.listRPs("sid-1")).toEqual([]);
+		});
+
 		it("listRPs returns empty after expiresAt elapsed", async () => {
 			// Dated from, and waited out on, the store's own clock (see
 			// `ExpiryClock`): a fixed 50 ms expiry and a 100 ms sleep on the host
