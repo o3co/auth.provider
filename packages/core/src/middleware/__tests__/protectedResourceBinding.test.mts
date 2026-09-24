@@ -334,6 +334,65 @@ describe("protectedResourceBindingMw — compound cnf", () => {
 	});
 });
 
+describe("protectedResourceBindingMw — a server-side outage", () => {
+	// The mechanism could not reach a verdict: the credential is not at fault,
+	// so the resource does not challenge it. `401 invalid_token` would tell the
+	// client to replace a token that is fine — it would refresh, and meet the
+	// same outage at the token endpoint. RFC 6750 §3.1's codes describe request
+	// and token faults; a server that cannot answer says 503.
+	it("answers 503 with the refusal's code and description, and no challenge", async () => {
+		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT } });
+		const err = Object.assign(new Error("ECONNREFUSED"), {
+			code: "temporarily_unavailable",
+			unavailable: "the replay store cannot be read; retry later",
+		});
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child() {
+				return this;
+			},
+		};
+		const { next, res } = await run(
+			protectedResourceBindingMw({
+				mechanisms: [throwingMechanism("dpop", err)],
+				logger: logger as never,
+			}),
+			`DPoP ${token}`,
+		);
+		expect(next).not.toHaveBeenCalled();
+		expect(res.statusCode).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "the replay store cannot be read; retry later",
+		});
+		expect(res.headers["WWW-Authenticate"]).toBeUndefined();
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ mechanism: "dpop" }),
+			"protected_resource_binding_unavailable",
+		);
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
+			"protected_resource_binding_proof_invalid",
+		);
+	});
+
+	it("reads a bare code as a failed proof: only the mechanism can say it was an outage", async () => {
+		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT } });
+		const bare = Object.assign(new Error("down"), { code: "temporarily_unavailable" });
+		const { res } = await run(
+			protectedResourceBindingMw({ mechanisms: [throwingMechanism("dpop", bare)] }),
+			`DPoP ${token}`,
+		);
+		expect(res.statusCode).toBe(401);
+		expect(res.body).toMatchObject({ error: "invalid_token" });
+	});
+});
+
 describe("protectedResourceBindingMw — the nonce challenge (#530, RFC 9449 §9)", () => {
 	it("answers 401 use_dpop_nonce with the challenge naming it and the DPoP-Nonce header", async () => {
 		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT } });

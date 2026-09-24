@@ -26,7 +26,11 @@
  */
 
 import type { Server } from "node:http";
-import { createMemoryReplaySeenSet, protectedResourceBindingMw } from "@o3co/auth-provider-core";
+import {
+	createMemoryReplaySeenSet,
+	protectedResourceBindingMw,
+	type ReplaySeenSet,
+} from "@o3co/auth-provider-core";
 import express from "express";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
@@ -230,5 +234,73 @@ describe("DPoP at a protected resource — server-provided nonce (#530)", () => 
 		expect(second.body.binding).toMatchObject({ kind: "dpop", confirmation: { jkt: key.jkt } });
 		// The successful answer keeps the client current.
 		expect(issuer.verify(second.headers["dpop-nonce"])).toBe(true);
+	});
+});
+
+describe("DPoP at a protected resource — a replay store that cannot be read", () => {
+	// The proof may be perfectly good; the resource cannot tell whether it is a
+	// replay. It is refused all the same (fail closed), but as the server's
+	// fault: 503 with no challenge. `401 invalid_token` would tell the client to
+	// replace an access token that is fine, and the refresh it triggers meets
+	// the same outage at the token endpoint.
+	let server: Server;
+	let key: ClientKey;
+	let accessToken: string;
+	let htu: string;
+	const errors: string[] = [];
+
+	beforeEach(async () => {
+		key = await makeClientKey();
+		accessToken = await mintBoundAccessToken(key.jkt);
+		errors.length = 0;
+		const app = express();
+		server = await new Promise<Server>((resolve) => {
+			const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+		});
+		const address = server.address();
+		const port = typeof address === "object" && address !== null ? address.port : 0;
+		htu = `http://127.0.0.1:${port}${RESOURCE_PATH}`;
+		const down: ReplaySeenSet = {
+			kind: "down",
+			markSeen: async () => {
+				throw new Error("ECONNREFUSED 127.0.0.1:6379");
+			},
+			contains: async () => false,
+		};
+		const mechanism = createDPoPMechanism({
+			issuer: `http://127.0.0.1:${port}`,
+			replaySeenSet: down,
+			iatWindowSeconds: 60,
+			logger: {
+				trace: () => {},
+				debug: () => {},
+				info: () => {},
+				warn: () => {},
+				error: (_obj: unknown, msg?: string) => errors.push(String(msg)),
+				fatal: () => {},
+				child() {
+					return this;
+				},
+			} as never,
+		});
+		app.use(protectedResourceBindingMw({ mechanisms: [mechanism] }));
+		app.get(RESOURCE_PATH, (req, res) => {
+			res.status(200).json({ binding: req.tokenBinding ?? null });
+		});
+	});
+
+	afterEach(async () => {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("refuses a valid proof with 503 temporarily_unavailable and no challenge, and logs the outage", async () => {
+		const proof = await mintProof(key, { htu, ath: await computeAth(accessToken) });
+		const res = await request(server)
+			.get(RESOURCE_PATH)
+			.set({ Authorization: `DPoP ${accessToken}`, DPoP: proof });
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(res.headers["www-authenticate"]).toBeUndefined();
+		expect(errors).toEqual(["dpop_replay_store_unavailable"]);
 	});
 });

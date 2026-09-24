@@ -590,7 +590,10 @@ describe("dpopModule — server-provided nonce from config (#530)", () => {
 // replica fail.
 // ---------------------------------------------------------------------------
 
-const spyLogger = (): Logger & { warn: ReturnType<typeof vi.fn> } => {
+const spyLogger = (): Logger & {
+	warn: ReturnType<typeof vi.fn>;
+	error: ReturnType<typeof vi.fn>;
+} => {
 	const logger = {
 		trace: vi.fn(),
 		debug: vi.fn(),
@@ -600,7 +603,10 @@ const spyLogger = (): Logger & { warn: ReturnType<typeof vi.fn> } => {
 		fatal: vi.fn(),
 		child: () => logger,
 	};
-	return logger as unknown as Logger & { warn: ReturnType<typeof vi.fn> };
+	return logger as unknown as Logger & {
+		warn: ReturnType<typeof vi.fn>;
+		error: ReturnType<typeof vi.fn>;
+	};
 };
 
 /** The event core's replica-safety guard logs when the mode is unset. */
@@ -768,6 +774,36 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 
 		await replicaA.handle.dispose();
 		await replicaB.handle.dispose();
+	});
+
+	it("answers 503 temporarily_unavailable at the token endpoint when the seen-set cannot be read, and logs it", async () => {
+		// The client did nothing wrong: its proof may be perfectly good, and it
+		// will be accepted once the store answers again. `400 invalid_dpop_proof`
+		// said the proof was invalid (RFC 9449 §5), which a client can read as
+		// final. The token endpoint answers store outages elsewhere in this
+		// repository with 503 temporarily_unavailable too (private_key_jwt's
+		// replay record, the refresh-token family, the revocation stores).
+		const logger = spyLogger();
+		const down: ReplaySeenSet = {
+			kind: "down",
+			markSeen: async () => {
+				throw new Error("ECONNREFUSED 127.0.0.1:6379");
+			},
+			contains: async () => false,
+		};
+		const { handle, app } = await bootReplica({ mode: "single", seenSet: down, logger });
+
+		const { proof } = await mintProof();
+		const res = await request(app).post("/oauth/token").set("DPoP", proof).send({});
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(res.headers["www-authenticate"]).toBeUndefined();
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ err: expect.any(Error) }),
+			"dpop_replay_store_unavailable",
+		);
+
+		await handle.dispose();
 	});
 
 	it("reports a replay TTL below 2W + 1 on the console when no logger is wired", async () => {

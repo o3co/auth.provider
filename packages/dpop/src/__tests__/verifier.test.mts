@@ -587,8 +587,11 @@ describe("createDPoPMechanism", () => {
 	// I-2: pin that seen-set transport faults surface as the dedicated
 	// `replay_store_unavailable` audit signal — not a raw Error that would
 	// otherwise propagate up to `tokenBindingMw` and lose operator triage.
-	// Fail closed: the proof is refused, never accepted unchecked.
-	it("wraps seen-set transport errors as replay_store_unavailable (audit signal distinct from client-garbage)", async () => {
+	// Fail closed: the proof is refused, never accepted unchecked. The refusal
+	// is an outage, not a verdict on the proof: it carries
+	// `temporarily_unavailable` and the `unavailable` description core's
+	// dispatchers answer 503 with, never `invalid_dpop_proof`.
+	it("wraps seen-set transport errors as replay_store_unavailable, stated as an outage rather than a bad proof", async () => {
 		const errors: { obj: unknown; msg?: string }[] = [];
 		const failing = {
 			kind: "failing",
@@ -614,8 +617,10 @@ describe("createDPoPMechanism", () => {
 		});
 		const { proof } = await mintProof();
 		await expect(failingMechanism.extract(makeReq(proof) as Request)).rejects.toMatchObject({
+			name: "DPoPError",
 			reason: "replay_store_unavailable",
-			code: "invalid_dpop_proof",
+			code: "temporarily_unavailable",
+			unavailable: expect.stringMatching(/retry/),
 		});
 		expect(errors.map((e) => e.msg)).toEqual(["dpop_replay_store_unavailable"]);
 	});
