@@ -79,22 +79,22 @@ const DAY = 86_400_000;
  * past. The record would then be reclaimed by the store's own clock partway
  * through the suite, which reads as a failure of whatever test looked next.
  *
- * Not set until the first test starts, and `at` refuses to read it before
- * then: a date taken while the suite is collected — in a `describe` body
- * rather than a test — is dated from the import, not from the test that uses
- * it, and next to that test's own dates it is off by however long the suite
- * took to get there. A stamp "a minute later" would then be dated before the
- * one it follows, and be refused as stale, only on a slow enough run.
+ * Not set until the first test starts, and read only through `T0()` — `at`
+ * included — which refuses to read it before then: a date taken while the
+ * suite is collected — in a `describe` body rather than a test — is dated
+ * from the import, not from the test that uses it, and next to that test's
+ * own dates it is off by however long the suite took to get there. A stamp
+ * "a minute later" would then be dated before the one it follows, and be
+ * refused as stale, only on a slow enough run.
  */
-let T0 = new Date(Number.NaN);
-const at = (ms: number): Date => {
-	if (Number.isNaN(T0.getTime())) {
-		throw new Error(
-			"at() is dated from the test's clock: call it inside a test, not a describe body",
-		);
+let testClock = new Date(Number.NaN);
+const T0 = (): Date => {
+	if (Number.isNaN(testClock.getTime())) {
+		throw new Error("T0 is the test's clock: read it, or at(), inside a test, not a describe body");
 	}
-	return new Date(T0.getTime() + ms);
+	return testClock;
 };
+const at = (ms: number): Date => new Date(T0().getTime() + ms);
 const INVALID = new Date(Number.NaN);
 
 /** Never handed out by reference: a fixture that shares it would hide a store that does too. */
@@ -106,7 +106,7 @@ const pendingInput = (id = "g-1", handle = "h-1") => ({
 	clientId: "agent",
 	connection: "okta-calendar",
 	intent: { handle, expiresAt: at(10 * MIN) },
-	now: T0,
+	now: T0(),
 });
 
 const authorization = (
@@ -218,7 +218,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			store = await factory.create();
 			// After the store is up: whatever creating it cost is not spent out of
 			// the fixtures' ten minutes.
-			T0 = new Date(Math.floor(Date.now() / 1000) * 1000 + 137);
+			testClock = new Date(Math.floor(Date.now() / 1000) * 1000 + 137);
 		});
 
 		afterEach(async () => {
@@ -316,11 +316,11 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					clientId: "agent",
 					connection: "okta-calendar",
 					status: "pending",
-					createdAt: T0,
+					createdAt: T0(),
 					version: 1,
 				};
 				expect(written).toStrictEqual({ ok: true, grant: expected });
-				expect(await store.find("g-1", T0)).toStrictEqual(expected);
+				expect(await store.find("g-1", T0())).toStrictEqual(expected);
 				expect(await resident("g-1")).toBe(false);
 			});
 
@@ -377,12 +377,12 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 
 			it("creates nothing for an intent that has already lapsed, or whose expiry is not a date", async () => {
-				for (const expiresAt of [T0, at(-1), INVALID]) {
+				for (const expiresAt of [T0(), at(-1), INVALID]) {
 					expect(
 						await store.createPending({ ...pendingInput(), intent: { handle: "h-1", expiresAt } }),
 					).toEqual({ ok: false });
 				}
-				expect(await store.find("g-1", T0)).toBeNull();
+				expect(await store.find("g-1", T0())).toBeNull();
 			});
 		});
 
@@ -390,10 +390,10 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			describe("isCurrentIntent", () => {
 				it("is true for the current handle until it lapses, and for nothing else", async () => {
 					await store.createPending(pendingInput());
-					expect(await store.isCurrentIntent("g-1", "h-1", T0)).toBe(true);
-					expect(await store.isCurrentIntent("g-1", "h-other", T0)).toBe(false);
-					expect(await store.isCurrentIntent("g-1", "", T0)).toBe(false);
-					expect(await store.isCurrentIntent("g-unknown", "h-1", T0)).toBe(false);
+					expect(await store.isCurrentIntent("g-1", "h-1", T0())).toBe(true);
+					expect(await store.isCurrentIntent("g-1", "h-other", T0())).toBe(false);
+					expect(await store.isCurrentIntent("g-1", "", T0())).toBe(false);
+					expect(await store.isCurrentIntent("g-unknown", "h-1", T0())).toBe(false);
 					expect(await store.isCurrentIntent("g-1", "h-1", at(10 * MIN - 1))).toBe(true);
 					expect(await store.isCurrentIntent("g-1", "h-1", at(10 * MIN))).toBe(false);
 				});
@@ -690,11 +690,11 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					ended,
 					await store.find("g-pending", at(DAY)),
 					await store.find("g-1", at(DAY)),
-					await store.inspect("g-pending", T0),
+					await store.inspect("g-pending", T0()),
 					await store.inspect("g-1", at(DAY)),
-					await store.open("g-pending", T0),
+					await store.open("g-pending", T0()),
 					await store.open("g-1", at(DAY)),
-					await store.listBySubject("u-1", T0),
+					await store.listBySubject("u-1", T0()),
 					await store.listBySubject("u-1", at(DAY)),
 					await store.retireIntent({ grantId: "g-1", now: at(DAY + MIN) }),
 				]);
@@ -713,7 +713,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					clientId: "agent",
 					connection: "okta-calendar",
 					status: "active",
-					createdAt: T0,
+					createdAt: T0(),
 					version: 2,
 					...authorization(),
 					...noUsage,
@@ -911,7 +911,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 						clientId: "agent",
 						connection: "okta-calendar",
 						status: "active",
-						createdAt: T0,
+						createdAt: T0(),
 						version: 3,
 						...renewal(),
 						...noUsage,
@@ -1337,7 +1337,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					clientId: "agent",
 					connection: "okta-calendar",
 					status: "revoked",
-					createdAt: T0,
+					createdAt: T0(),
 					version: 2,
 					revocation: { by: "client", at: at(MIN) },
 				};
@@ -1811,15 +1811,15 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 
 			it("answers null for a grant it does not know", async () => {
-				expect(await store.find("g-unknown", T0)).toBeNull();
-				expect(await store.inspect("g-unknown", T0)).toBeNull();
-				expect(await store.open("g-unknown", T0)).toBeNull();
+				expect(await store.find("g-unknown", T0())).toBeNull();
+				expect(await store.inspect("g-unknown", T0())).toBeNull();
+				expect(await store.open("g-unknown", T0())).toBeNull();
 			});
 
 			it("reports a pending grant's credentials as absent", async () => {
 				await store.createPending(pendingInput());
-				expect((await store.inspect("g-1", T0))?.credentials).toBe("absent");
-				expect((await store.open("g-1", T0))?.credentials).toEqual({ state: "absent" });
+				expect((await store.inspect("g-1", T0()))?.credentials).toBe("absent");
+				expect((await store.open("g-1", T0()))?.credentials).toEqual({ state: "absent" });
 			});
 
 			it("still returns an authorized grant past its expiry, and never its credentials", async () => {
@@ -1973,7 +1973,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 						clientId: "agent",
 						connection: "okta-calendar",
 						status: "active",
-						createdAt: T0,
+						createdAt: T0(),
 						version: 2,
 						...authorization(),
 						...noUsage,
@@ -2013,7 +2013,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					clientId: "agent",
 					connection: "okta-calendar",
 					status: "active",
-					createdAt: T0,
+					createdAt: T0(),
 					version: 2,
 					...authorization(),
 					...noUsage,
@@ -2578,7 +2578,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				);
 				const winners = subjects.filter((_, index) => results[index]?.ok === true);
 				expect(winners).toHaveLength(1);
-				expect((await store.find("g-1", T0))?.subject).toBe(winners[0]);
+				expect((await store.find("g-1", T0()))?.subject).toBe(winners[0]);
 			});
 		});
 
@@ -2633,7 +2633,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 
 			it("needs no grant record: the lock is keyed by ID alone", async () => {
-				expect(await store.find("g-none", T0)).toBeNull();
+				expect(await store.find("g-none", T0())).toBeNull();
 				const lock = await store.acquireRefreshLock("g-none", HELD);
 				expect(lock.acquired).toBe(true);
 				if (lock.acquired) await lock.release();
