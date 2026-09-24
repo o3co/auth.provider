@@ -59,6 +59,8 @@
  * - a logger reached some other way (a destructured `warn`, `logger[level]`,
  *   a bound `const log = logger.warn.bind(logger)`), and an audit sink or a
  *   deployment's callback (`report`), which are not loggers;
+ * - an Express error handler whose parameter types hold a comma or a
+ *   parenthesis (`Request<P, B>`): its first parameter is not bound;
  * - bindings are per file, not per scope: a variable elsewhere in the file
  *   that shares a caught error's name is flagged too (rename it).
  *
@@ -322,12 +324,12 @@ describe("a caught error reaches a logger only through loggableError", () => {
 	});
 
 	it("has no stale entry in OTHER_PROJECTIONS", () => {
-		for (const { file, projection } of OTHER_PROJECTIONS) {
+		for (const { file, projection, why } of OTHER_PROJECTIONS) {
 			const source = withoutComments(readFileSync(join(repoRoot, file), "utf8"));
 			const used = loggerCalls(source).some(({ args }) =>
 				new RegExp(String.raw`\b${projection}\(`).test(literalsBlanked(args)),
 			);
-			expect(used, `${file} hands a logger ${projection}(...)`).toBe(true);
+			expect(used, `${file} hands a logger ${projection}(...) — ${why}`).toBe(true);
 		}
 	});
 
