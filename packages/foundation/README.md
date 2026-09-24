@@ -22,7 +22,8 @@ package name it is not a base layer: no other package imports it at runtime
 - the wire contract a Store implements: the requests `HttpUserRepository` sends
   and what each answer means (below);
 - the transport rules on the Store's URLs — `https`, or `http` to a loopback
-  host only ([`src/endpointUrl.mts`](src/endpointUrl.mts));
+  host only ([`src/endpointUrl.mts`](src/endpointUrl.mts)) — and that no
+  request follows a redirect away from them;
 - the request deadline and the response-size cap;
 - the coverage declaration the identity lookup is judged by at boot.
 
@@ -111,6 +112,8 @@ assertion's subject handle from `oauth`'s jwt-bearer grant. For both:
 - any other status throws.
 
 The body of a non-`2xx` answer is discarded unread, for these and for linking.
+No request follows a redirect, including the identity lookup: a `3xx` is one
+more status that throws, and its `Location` is never contacted.
 
 **`linkFederatedIdentity`** posts `{ userId, provider, sub, token, claims }` to
 `linkFederatedIdentityUrl`: a `2xx` `User` is `{ ok: true, user }`; `401` / `403`
@@ -212,11 +215,16 @@ deployment that then has a connection under `"required"` is refused at boot.
 - **No secret in the URL.** A query-string token would not stay secret: the
   errors this adapter throws name the full URL, and the session routes log
   them.
-- **Answer without redirecting.** The identity lookup never follows a redirect.
-  The other three requests follow one (`fetch`'s default), and a `307` or `308`
-  re-sends the body — the password included — to the `Location`, which the
-  `https` rule below does not check. Configure each URL as the endpoint that
-  answers, not one that redirects.
+- **Answer without redirecting.** No request follows a redirect, so a
+  password, a token, a link request or an identity goes only to the configured
+  URL — the one the `https` rule below checks — and no answer from anywhere
+  else is taken as the user, the link or the lookup's answer. A `3xx` from any
+  of the four endpoints throws like any other unexpected status (the session
+  routes and the jwt-bearer grant answer `503 temporarily_unavailable`, the
+  grants callback `temporarily_unavailable`), so a Store behind a URL that
+  redirects — a host alias redirecting to the canonical host, an added
+  trailing slash, a moved path — fails every call. Configure each URL as the
+  endpoint that answers, not one that redirects.
 
 ## Constructor validation
 
@@ -227,7 +235,9 @@ fails at boot rather than at the first login attempt.
 password on `authenticateUrl`, a token on `authenticateByTokenUrl`, a verified
 upstream identity on `findSubjectByFederatedIdentityUrl` — so an
 `http://` URL does not merely weaken the connection, it publishes the credential
-to every hop on the path.
+to every hop on the path. The URL checked here is the only place a request goes
+and the only one whose answer is taken: no request follows a redirect, so a
+`307` or `308` cannot re-send the body to, and no `301`, `302` or `303` can fetch an answer from, a `Location` this rule never saw.
 
 **The one carve-out is loopback:** `http://` is accepted when the host is
 `localhost`, an address in `127.0.0.0/8`, or `[::1]`. That traffic never leaves
@@ -275,7 +285,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | Test file | Pins |
 | --- | --- |
 | [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | authentication and its answers, the `User` shape check, the https rule, the timeout and the response cap, linking, and the identity lookup's presence, probe and wire |
-| [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | the identity lookup against a real HTTP server |
+| [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | against real HTTP servers: the identity lookup releasing a refused answer's connection, and a redirect refused on each of the four requests — to another origin, to the same origin, or with no `Location` — with nothing sent to a redirect target |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | the `"http"` builder, its defaults and string coercion, and configuration refused at build time |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | the https-or-loopback rule |
 

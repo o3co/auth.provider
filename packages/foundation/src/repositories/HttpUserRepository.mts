@@ -303,11 +303,16 @@ function isAbortError(err: unknown): boolean {
  * `UserRepository` backed by "the Store" — the upstream user service defined
  * on core's `User` doc (`@o3co/auth-provider-core`, `src/repositories/types.mts`).
  *
- * Both endpoints receive plaintext user credentials, so both are validated at
- * **construction**: a deployment configured with an `http://` Store URL fails
- * at boot rather than leaking the first user's password (#285). `http://` is
- * accepted for loopback hosts only — see `src/endpointUrl.mts` for the
- * carve-out and its rationale.
+ * Every endpoint receives a plaintext credential or a verified identity, so
+ * each is validated at **construction**: a deployment configured with an
+ * `http://` Store URL fails at boot rather than leaking the first user's
+ * password (#285). `http://` is accepted for loopback hosts only — see
+ * `src/endpointUrl.mts` for the carve-out and its rationale.
+ *
+ * No request follows a redirect, so a URL that passed that check is the only
+ * place its body is ever sent and the only one whose answer is taken: a `3xx`
+ * from the Store is an upstream failure, thrown like any other unexpected
+ * status, and its `Location` is never contacted.
  */
 export class HttpUserRepository implements UserRepository {
 	private authenticateUrl: string;
@@ -480,14 +485,14 @@ export class HttpUserRepository implements UserRepository {
 
 	/**
 	 * The lookup's transport: the same deadline, cap and abort as {@link post},
-	 * and none of its readings. A `401`/`403` is not "nobody", a `409` is not a
-	 * conflict, a `404` is not an absence: only a `2xx` carrying one of the
+	 * and like it never follows a redirect — the body carries a verified
+	 * identity, and a `Location` is not a configured endpoint. None of
+	 * {@link post}'s readings, though. A `401`/`403` is not "nobody", a `409` is
+	 * not a conflict, a `404` is not an absence: only a `2xx` carrying one of the
 	 * three answers is an answer, and everything else throws — as an outage,
-	 * which is what a lookup that could not be made is. Redirects are never
-	 * followed: the body carries a verified identity, and a `Location` is not a
-	 * configured endpoint. What is thrown names the endpoint — and, for an
-	 * answer with a status, the status — and never the body, the identity, a
-	 * status text or an underlying cause.
+	 * which is what a lookup that could not be made is. What is thrown names the
+	 * endpoint — and, for an answer with a status, the status — and never the
+	 * body, the identity, a status text or an underlying cause.
 	 */
 	private async postLookup(url: string, body: unknown): Promise<FederatedIdentityLookupResult> {
 		const controller = new AbortController();
@@ -593,6 +598,14 @@ export class HttpUserRepository implements UserRepository {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(body),
 				signal: controller.signal,
+				// Never followed: a 307 or 308 would re-send the body — a password,
+				// a token, a link request — to a `Location` the https rule never
+				// checked, and after any redirect the answer from there would be
+				// taken as the user. Node's fetch hands the 3xx back as it is (a
+				// browser-spec runtime would hand back an opaque redirect, status
+				// 0); either way it is not a 2xx, 401, 403 or 409, so it throws
+				// below as an unexpected status.
+				redirect: "manual",
 			});
 
 			if (res.ok) {
