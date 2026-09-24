@@ -416,6 +416,9 @@ export type { EventLogger, Logger, LogLevel } from "./logging/Logger.mjs";
 // What a log line may carry of a library's error: never the response on its cause chain.
 export {
 	guardedRead,
+	LOGGED_AGGREGATE_MAX_ERRORS,
+	LOGGED_MAX_PROJECTIONS,
+	LOGGED_PRINT_DEPTH,
 	LOGGED_STACK_MAX_FRAMES,
 	LOGGED_STACK_MAX_LENGTH,
 	LOGGED_STRING_MAX_LENGTH,

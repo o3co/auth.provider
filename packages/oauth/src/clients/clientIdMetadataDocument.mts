@@ -552,7 +552,7 @@ export function createClientIdMetadataDocumentResolver(
 			// what `reason` cannot — a fetch failure's cause code.
 			const projected = loggableError(err);
 			logger?.warn(
-				{ clientId, reason: projected.message ?? projected.name, err: projected },
+				{ clientId, reason: projected.detail ?? projected.name, err: projected },
 				rejected ? "cimd_document_rejected" : "cimd_document_fetch_failed",
 			);
 			if (rejected) {

@@ -142,7 +142,7 @@ export const checkWithFailMode = async (
 		// loggableError, and a thrown non-Error says what kind it was, not what
 		// it held.
 		const projected = loggableError(cause);
-		const reported = projected.message ?? projected.name;
+		const reported = projected.detail ?? projected.name;
 		const ip = ctx.ip ?? "unknown";
 		logger.error(
 			{ error: reported, mode: failMode, tag, ip },

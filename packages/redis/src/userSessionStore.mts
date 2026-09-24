@@ -14,13 +14,14 @@
  * limitations under the License.
  */
 
-import type {
-	AdapterBuilder,
-	CreateUserSessionInput,
-	Logger,
-	UserSession,
-	UserSessionClaims,
-	UserSessionStore,
+import {
+	type AdapterBuilder,
+	type CreateUserSessionInput,
+	type Logger,
+	loggableError,
+	type UserSession,
+	type UserSessionClaims,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import type { UserSessionStoreClient } from "./clients.mjs";
 
@@ -187,9 +188,11 @@ export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions):
 				// Object-first call shape per the D-4 Logger interface — keeps
 				// `sid` / `reason` reliably emitted as structured fields across
 				// `Logger` implementations (pino, console, custom). Per Copilot
-				// review on PR #123.
+				// review on PR #123. The cause is projected: a SyntaxError's
+				// message quotes the envelope — the session's claims — around
+				// the point the parse failed.
 				opts.logger?.warn(
-					{ sid, reason: "json_parse", cause },
+					{ sid, reason: "json_parse", cause: loggableError(cause) },
 					"user_session_corrupt_envelope: JSON.parse failed",
 				);
 				return null;

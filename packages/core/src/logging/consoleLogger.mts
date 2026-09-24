@@ -62,6 +62,11 @@ export interface ConsoleLoggerOptions {
  *
  * Per-call obj wins over child bindings on key collision (pino-compatible
  * last-write-wins).
+ *
+ * The console prints every object at its default depth. A `loggableError`
+ * projection prints whole — its cause chain and AggregateError members
+ * included — because the projection carries its own `util.inspect.custom`
+ * (see `loggableError`); nothing here widens any other object.
  */
 function emit(
 	method: "debug" | "info" | "warn" | "error",

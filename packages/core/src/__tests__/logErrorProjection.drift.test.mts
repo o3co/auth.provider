@@ -15,7 +15,7 @@
  */
 
 /**
- * logErrorProjection.drift.test.mts — no log line in the listed packages
+ * logErrorProjection.drift.test.mts — no log line in the workspace's source
  * hands a logger a caught error as it is.
  *
  * A store's or a library's error carries whatever the system it talked to
@@ -31,13 +31,18 @@
  * `.catch((x) => …)` / `.catch(x => …)` / `.catch(function (x) …)`,
  * `.on("error", (x) => …)` / `.once(…)`, the error-named first parameter of
  * a callback passed as an argument (node-style: `save((err) => …)`,
- * `get(key, function (err, value) …)`), and an error-named value awaited
- * from a helper (`const consumeErr = await …`) — used anywhere in the arguments of
- * a logger call (`log.`, `logger.`, `….logger.` with a level or `child`;
+ * `get(key, function (err, value) …)`), the first parameter of an Express
+ * error handler (`(err, req, res, next)`, whatever the names but the last's
+ * `next`, typed or not — `Request<P, B>`, `(err?: unknown) => void` — and
+ * followed by an arrow or a body, so a call's arguments are not one), and an
+ * error-named value awaited from a helper
+ * (`const consumeErr = await …`) — used anywhere in the arguments of a
+ * logger call (`log.`, `logger.`, `….logger.` with a level or `child`;
  * `console.`) other than as an object key, as the argument of
- * `loggableError(...)`, or as another object's field (`result.err`); inside
- * a template literal's `${…}` too. A name that merely looks like an error —
- * a policy's `error` code — is not flagged.
+ * `loggableError(...)` (or of a projection `OTHER_PROJECTIONS` accepts in
+ * that file), or as another object's field (`result.err`); inside a template
+ * literal's `${…}` too. A name that merely looks like an error — a policy's
+ * `error` code — is not flagged.
  *
  * What it does not see (known holes, left to review):
  * - an error that reaches a log call under a name none of those bound in
@@ -56,26 +61,69 @@
  * - a logger reached some other way (a destructured `warn`, `logger[level]`,
  *   a bound `const log = logger.warn.bind(logger)`), and an audit sink or a
  *   deployment's callback (`report`), which are not loggers;
+ * - an Express error handler whose parameter list runs past 400
+ *   characters, or whose default values hold what the bracket scan reads
+ *   as a bracket: a string, template or regex literal with a bracket or a
+ *   comma in it, a `<` comparison (it opens a bracket no `>` closes) or a
+ *   `>` comparison (it closes one early). Its first parameter is not
+ *   bound; a return type longer than 200 characters hides it too;
  * - bindings are per file, not per scope: a variable elsewhere in the file
  *   that shares a caught error's name is flagged too (rename it).
  *
- * The packages are `PACKAGES` below. redis, device-grant, dpop,
- * oauth-token-exchange and the standalone template still log six raw errors
- * between them; the follow-up that converts those sites adds them here.
+ * Where it looks is `SOURCE_ROOTS` below: every workspace package's `src`
+ * and the standalone template's, tests (`__tests__`) left out. A package
+ * added under `packages/` or `templates/` fails "names every workspace
+ * source tree" until it is listed. `create-app` and `tools/` are not held to
+ * it: they depend on none of these packages, and what they print is for the
+ * person running them.
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = fileURLToPath(new URL("../../../..", import.meta.url));
+/** The source trees held to the rule, from the repository root: all of them. */
+const SOURCE_ROOTS: readonly string[] = [
+	"packages/core/src",
+	"packages/device-grant/src",
+	"packages/dpop/src",
+	"packages/federation-apple/src",
+	"packages/federation-github/src",
+	"packages/federation-google/src",
+	"packages/federation-grants/src",
+	"packages/federation-oidc/src",
+	"packages/foundation/src",
+	"packages/mtls/src",
+	"packages/oauth/src",
+	"packages/oauth-token-exchange/src",
+	"packages/redis/src",
+	"packages/session/src",
+	"packages/webauthn/src",
+	"templates/standalone/src",
+];
+
 /**
- * The packages held to the rule — a path under `packages/`. Widen it with the
- * follow-up: `redis`, `device-grant`, `dpop`, `oauth-token-exchange`, and the
- * standalone template (under `templates/`, not `packages/`).
+ * A projection other than `loggableError` that one file hands a caught error
+ * to inside a logger call, accepted there as `loggableError(...)` is — each
+ * at least as strict, and why. An entry whose file no longer calls it in a
+ * logger call fails "has no stale entry".
  */
-const PACKAGES: readonly string[] = ["core", "session", "oauth"];
+const OTHER_PROJECTIONS: ReadonlyArray<{
+	readonly file: string;
+	readonly projection: string;
+	readonly why: string;
+}> = [
+	{
+		file: "packages/federation-grants/src/routes.mts",
+		projection: "unexpectedErrorFields",
+		why:
+			"federation-grants' own allowlist (report.mts): a classification from a closed set of " +
+			"error names and a numeric status — nothing of the error's text, which is stricter than " +
+			"loggableError",
+	},
+];
 
 /** A logger call: a level (or `child`) on `log`, `logger` or `….logger`, and `console`'s. */
 const LOGGER_CALL =
@@ -96,7 +144,8 @@ const ERROR_NAME = "(?:err|error|[a-z][A-Za-z]*Err|[a-z][A-Za-z]*Error)";
  * as an argument — node-style, `save((err) => …)`, `get(key, function (err,
  * value) …)`, `save(err => …)`; and an error-named value awaited from a
  * helper — `const consumeErr = await …`, which is also what a promise
- * wrapping a node-style callback resolves.
+ * wrapping a node-style callback resolves. An Express error handler's first
+ * parameter is bound by {@link errorHandlerNames}.
  */
 const CATCH_BINDINGS = [
 	new RegExp(String.raw`\bcatch\s*\(\s*(?:async\s*)?\(?\s*(${IDENTIFIER})\s*[):,=]`, "g"),
@@ -116,9 +165,77 @@ const CATCH_BINDINGS = [
 	/\b(?:const|let)\s+([a-z][\w$]*(?:Err|Error))\s*(?::[^=]*)?=\s*await\b/g,
 ];
 
+/** How far a parameter list is read before it is taken for something else. */
+const MAX_PARAMETER_LIST = 400;
+
+/**
+ * The top-level entries of the list that opens at `open`, split on the
+ * commas outside every bracket — `()`, `[]`, `{}` and a type's `<>`, an
+ * arrow's `=>` not closing one — so a parameter typed `Request<P, B>` or
+ * `(err?: unknown) => void` stays whole, and where the list closes. `null`
+ * when it does not close within {@link MAX_PARAMETER_LIST} characters: a
+ * comparison's `<` leaves it open, and it is not a parameter list.
+ */
+function parametersFrom(
+	source: string,
+	open: number,
+): { readonly parameters: string[]; readonly close: number } | null {
+	const parameters: string[] = [];
+	let depth = 0;
+	let start = open + 1;
+	const end = Math.min(source.length, open + MAX_PARAMETER_LIST);
+	for (let i = open; i < end; i++) {
+		const c = source[i];
+		if (c === "(" || c === "[" || c === "{" || c === "<") depth++;
+		else if (c === ")" || c === "]" || c === "}" || (c === ">" && source[i - 1] !== "=")) {
+			if (--depth === 0) {
+				parameters.push(source.slice(start, i));
+				return { parameters, close: i };
+			}
+		} else if (c === "," && depth === 1) {
+			parameters.push(source.slice(start, i));
+			start = i + 1;
+		}
+	}
+	return null;
+}
+
+/** The name a parameter binds — `err` of `err: unknown` or `err = x` — when it is a plain one. */
+const parameterName = (parameter: string): string | undefined =>
+	new RegExp(String.raw`^\s*(${IDENTIFIER})\s*(?:[?:=]|$)`).exec(parameter)?.[1];
+
+/**
+ * What follows a parameter list: an arrow, or a function or method body,
+ * maybe after a return type (`: void`, `: Promise<void>`). A call's
+ * arguments are followed by anything else.
+ */
+const FUNCTION_AFTER_PARAMETERS = /^\s*(?::[^;{}=]*)?(?:=>|\{)/;
+
+/**
+ * An Express error handler's first parameter, whatever it is called: a list
+ * of four parameters whose last is `next` or `_next`, each maybe typed, that
+ * is a function's (an arrow or a body follows it, not a call's `;` or `)`) —
+ * read by {@link parametersFrom}, because the types hold commas and
+ * parentheses a regex over the list cannot tell from its own.
+ */
+function errorHandlerNames(source: string): string[] {
+	const names: string[] = [];
+	for (let open = source.indexOf("("); open >= 0; open = source.indexOf("(", open + 1)) {
+		const list = parametersFrom(source, open);
+		if (list === null) continue;
+		if (!FUNCTION_AFTER_PARAMETERS.test(source.slice(list.close + 1, list.close + 201))) continue;
+		const { parameters } = list;
+		if (parameters.length !== 4) continue;
+		if (!/^_?next$/.test(parameterName(parameters[3] ?? "") ?? "")) continue;
+		const first = parameterName(parameters[0] ?? "");
+		if (first !== undefined) names.push(first);
+	}
+	return names;
+}
+
 /** Every name the file binds as a caught error. */
 function caughtNames(source: string): ReadonlySet<string> {
-	const names = new Set<string>();
+	const names = new Set<string>(errorHandlerNames(source));
 	for (const binding of CATCH_BINDINGS) {
 		for (const match of source.matchAll(binding)) {
 			const name = match[1];
@@ -181,35 +298,51 @@ function templateExpressions(text: string): string[] {
 
 /**
  * Whether `text` uses `name` other than as an object key, as the argument of
- * `loggableError(...)`, or as another object's field.
+ * one of `projections` — `loggableError` and what `OTHER_PROJECTIONS`
+ * accepts in the file — or as another object's field.
  */
-function usesRaw(text: string, name: string): boolean {
+function usesRaw(text: string, name: string, projections: readonly string[]): boolean {
 	const occurrence = new RegExp(String.raw`(?<![\w$.])${name.replace(/\$/g, "\\$")}(?![\w$])`, "g");
+	const projected = new RegExp(String.raw`\b(?:${projections.join("|")})\(\s*$`);
 	for (const match of text.matchAll(occurrence)) {
 		const at = match.index ?? 0;
 		const before = text.slice(0, at);
 		const after = text.slice(at + name.length);
-		if (/loggableError\(\s*$/.test(before) && /^\s*\)/.test(after)) continue;
+		if (projected.test(before) && /^\s*\)/.test(after)) continue;
 		if (/[{,]\s*$/.test(before) && /^\s*:/.test(after)) continue;
 		return true;
 	}
 	return false;
 }
 
-/** The line of every logger call in `original` that passes a caught error as it is. */
-function sitesIn(original: string): number[] {
+/** Every logger call in `source` (comments blanked): its line and the text between its parentheses. */
+function loggerCalls(source: string): Array<{ readonly line: number; readonly args: string }> {
+	return [...source.matchAll(LOGGER_CALL)].map((call) => ({
+		line: source.slice(0, call.index).split("\n").length,
+		args: argumentsFrom(source, (call.index ?? 0) + call[0].length - 1),
+	}));
+}
+
+/**
+ * The line of every logger call in `original` that passes a caught error as
+ * it is; `projections` beside `loggableError` are what the file may hand one
+ * to instead.
+ */
+function sitesIn(original: string, projections: readonly string[] = []): number[] {
 	const source = withoutComments(original);
 	const names = caughtNames(source);
+	const accepted = ["loggableError", ...projections];
 	const lines: number[] = [];
 	if (names.size === 0) return lines;
-	for (const call of source.matchAll(LOGGER_CALL)) {
-		const open = (call.index ?? 0) + call[0].length - 1;
-		const raw = argumentsFrom(source, open);
-		const code = literalsBlanked(raw);
-		const templates = templateExpressions(raw);
+	for (const { line, args } of loggerCalls(source)) {
+		const code = literalsBlanked(args);
+		const templates = templateExpressions(args);
 		for (const name of names) {
-			if (usesRaw(code, name) || templates.some((expression) => usesRaw(expression, name))) {
-				lines.push(source.slice(0, call.index).split("\n").length);
+			if (
+				usesRaw(code, name, accepted) ||
+				templates.some((expression) => usesRaw(expression, name, accepted))
+			) {
+				lines.push(line);
 				break;
 			}
 		}
@@ -217,21 +350,54 @@ function sitesIn(original: string): number[] {
 	return lines;
 }
 
+/** What `OTHER_PROJECTIONS` accepts in `file` (a path from the repository root). */
+const projectionsFor = (file: string): string[] =>
+	OTHER_PROJECTIONS.filter((entry) => entry.file === file).map((entry) => entry.projection);
+
 function rawErrorLogSites(): string[] {
 	const sites: string[] = [];
-	for (const pkg of PACKAGES) {
-		for (const file of sourceFiles(join(repoRoot, "packages", pkg, "src"))) {
-			for (const line of sitesIn(readFileSync(file, "utf8"))) {
-				sites.push(`${relative(repoRoot, file)}:${line}`);
+	for (const root of SOURCE_ROOTS) {
+		for (const file of sourceFiles(join(repoRoot, root))) {
+			const path = relative(repoRoot, file);
+			for (const line of sitesIn(readFileSync(file, "utf8"), projectionsFor(path))) {
+				sites.push(`${path}:${line}`);
 			}
 		}
 	}
 	return sites;
 }
 
+/** Every `packages/*` and `templates/*` directory with a `package.json` and a `src`. */
+function workspaceSourceTrees(): string[] {
+	const trees: string[] = [];
+	for (const parent of ["packages", "templates"]) {
+		for (const entry of readdirSync(join(repoRoot, parent))) {
+			const dir = join(repoRoot, parent, entry);
+			if (existsSync(join(dir, "package.json")) && existsSync(join(dir, "src"))) {
+				trees.push(`${parent}/${entry}/src`);
+			}
+		}
+	}
+	return trees;
+}
+
 describe("a caught error reaches a logger only through loggableError", () => {
-	it(`in ${PACKAGES.join(", ")}`, () => {
+	it(`in ${SOURCE_ROOTS.join(", ")}`, () => {
 		expect(rawErrorLogSites()).toEqual([]);
+	});
+
+	it("names every workspace source tree", () => {
+		expect([...SOURCE_ROOTS].sort()).toEqual(workspaceSourceTrees().sort());
+	});
+
+	it("has no stale entry in OTHER_PROJECTIONS", () => {
+		for (const { file, projection, why } of OTHER_PROJECTIONS) {
+			const source = withoutComments(readFileSync(join(repoRoot, file), "utf8"));
+			const used = loggerCalls(source).some(({ args }) =>
+				new RegExp(String.raw`\b${projection}\(`).test(literalsBlanked(args)),
+			);
+			expect(used, `${file} hands a logger ${projection}(...) — ${why}`).toBe(true);
+		}
 	});
 
 	describe("the guard sees the shapes it exists for, and no others", () => {
@@ -285,6 +451,38 @@ describe("a caught error reaches a logger only through loggableError", () => {
 				"an error a callback resolved a promise with",
 				`const saveErr = await new Promise((resolve) => { req.session.save((err) => resolve(err ?? null)); }); if (saveErr) log.warn({ err: saveErr }, "save failed");`,
 			],
+			[
+				"an Express error handler's error, returned from a factory",
+				`const handler = (logger) => { return (err, req, res, next) => { logger.error({ err, endpoint: req.path }, "unhandled"); }; };`,
+			],
+			[
+				"an Express error handler's error under any name, typed",
+				`app.use((failure: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => { console.error(failure); });`,
+			],
+			[
+				"an Express error handler written as a function",
+				`function onError(error, req, res, next) { log.error({ error }, "unhandled"); }`,
+			],
+			[
+				"an Express error handler whose request type has generic arguments",
+				`const handler = (logger) => { return (failure: unknown, req: Request<P, B>, res: Response, next: NextFunction) => { logger.error({ err: failure }, "unhandled"); }; };`,
+			],
+			[
+				"an Express error handler whose parameter types hold parentheses and nested generics",
+				`app.use((failure: unknown, _req: Request<{ id: string }, unknown>, res: Response<unknown, Record<string, unknown>>, next: (err?: unknown) => void) => { console.error(failure); });`,
+			],
+			[
+				"an Express error handler with a return type",
+				`app.use((failure, req, res, next): void => { logger.error({ err: failure }, "unhandled"); });`,
+			],
+			[
+				"an Express error handler written as a method",
+				`class Handler { handle(failure: unknown, req: Request, res: Response, next: NextFunction) { logger.error({ err: failure }, "unhandled"); } }`,
+			],
+			[
+				"a projection accepted in another file",
+				`try { x() } catch (err) { log.error(unexpectedErrorFields(err), "unexpected"); }`,
+			],
 		])("flags %s", (_label, source) => {
 			expect(flags(source)).toBe(true);
 		});
@@ -331,8 +529,34 @@ describe("a caught error reaches a logger only through loggableError", () => {
 				"a node-style callback's error, projected",
 				`req.session.save((err) => { if (err) log.warn({ err: loggableError(err) }, "save failed"); });`,
 			],
+			[
+				"an Express error handler's error, projected",
+				`return (err, req, res, next) => { logger.error({ err: loggableError(err), endpoint: req.path }, "unhandled"); };`,
+			],
+			[
+				"an Express error handler with generic parameter types, projected",
+				`app.use((err: unknown, req: Request<P, B>, res: Response, next: NextFunction) => { logger.error({ err: loggableError(err) }, "unhandled"); });`,
+			],
+			[
+				"a four-argument call whose last argument is `next`, which binds nothing",
+				`const chain = compose(first, second, third, next); logger.info({ first }, "composed");`,
+			],
+			[
+				"a four-argument call with a type argument, which binds nothing",
+				`const chain = compose<Request, Response>(first, second, third, next); logger.info({ first }, "composed");`,
+			],
+			[
+				"a middleware's request, which is not an error",
+				`app.use((req, res, next) => { logger.info({ path: req.path, req }, "request"); next(); });`,
+			],
 		])("does not flag %s", (_label, source) => {
 			expect(flags(source)).toBe(false);
+		});
+
+		it("accepts a projection OTHER_PROJECTIONS names only where it names it", () => {
+			const source = `try { x() } catch (err) { log.error(unexpectedErrorFields(err), "unexpected"); }`;
+			expect(sitesIn(source, ["unexpectedErrorFields"])).toEqual([]);
+			expect(sitesIn(source)).toEqual([1]);
 		});
 	});
 });

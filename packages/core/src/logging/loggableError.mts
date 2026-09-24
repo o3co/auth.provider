@@ -24,8 +24,18 @@
  * command's arguments — a token record, for a store write under
  * `allow-plaintext` — on the error. What the projection does, exactly:
  *
- * - `message`: kept, capped at 256 characters, with the two known quoting
- *   shapes removed. A SyntaxError's message is dropped (V8's JSON.parse and
+ * - It is plain data, and what a logger is handed is what the line carries.
+ *   It has no `message`: a serializer takes a value with a string `message`
+ *   for an Error and rewrites it — pino's err serializer folds each `cause`
+ *   into one message and stack and writes none of the cause's fields, and
+ *   writes the name over `type`. Every such serializer (pino's `err` and
+ *   `errWithCause` among them) hands anything else through untouched, so
+ *   under pino's defaults, the standalone template's logger, `consoleLogger`
+ *   or any other, every field below reaches the line, at every level.
+ * - `detail`: the error's message, capped at 256 characters, with the two
+ *   known quoting shapes removed — `detail` (RFC 7807's name for an
+ *   occurrence's human-readable explanation) rather than `message`, for the
+ *   reason above. A SyntaxError's message is dropped (V8's JSON.parse and
  *   body-parser quote the input); only ` at position N` survives, as
  *   `position`, N at most ten digits and none from a longer number. Redis's
  *   `, with args beginning with: …` is cut from any message. Other text a
@@ -52,9 +62,41 @@
  *   string `type`; an `error` within §5.2's set; `response: { status,
  *   contentType }` for a Response on the cause or on `response`; and the
  *   Error causes, the same way, three deep. Every string is capped at 256.
- * - Never kept: a cause that is not an Error, any other field (`command`,
- *   `body`, `buffer`), and anything of a thrown value that is not an Error
- *   but its `typeof`, as `thrown`.
+ * - Closed-set fields a store's or a client's error records, kept because
+ *   their shape cannot hold free text: an own `reason` that is a code —
+ *   lowercase words joined by `_` or `-`, at most 64 characters
+ *   (`unreachable`, `expired-at-issue`) — and an own `<word>Status` field
+ *   holding an HTTP status, 100–599, at most four of them (`storeStatus`: an
+ *   upstream's answer an error records beside its own `status`, which
+ *   Express reads as this server's).
+ * - An AggregateError's members (any error's `errors` array): of its first
+ *   {@link LOGGED_AGGREGATE_MAX_ERRORS}, the Errors, projected as causes are
+ *   and within the same three levels, as `aggregateErrors` — the name pino
+ *   writes a raw AggregateError's members under, so one query finds both —
+ *   and how many members are not among them, as `aggregateErrorsOmitted`.
+ *   Neither field when none of those five is an Error.
+ * - The command a store's error answered, by name alone: `command: { name }`
+ *   from ioredis's `command: { name, args }` when the name is a token of at
+ *   most 32 letters, digits and `_`, or two joined by one `.` (a module's
+ *   `JSON.SET`) — which Redis command failed, and never
+ *   its arguments. Kept at ioredis's own path, so a query on
+ *   `err.command.name` reads a raw and a projected line alike.
+ * - A budget for the line: at most {@link LOGGED_MAX_PROJECTIONS}
+ *   projections, the error and its causes and members together, taken
+ *   nearest first (breadth first: the error's own cause and members before
+ *   any of theirs). Every cut shows, whether the budget or the depth limit
+ *   made it: a member left out counts in `aggregateErrorsOmitted`, and a
+ *   cause left out leaves `causeOmitted: true`.
+ * - Never kept: a cause or a member that is not an Error, any other field
+ *   (a command's `args`, `body`, `buffer`), and anything of a thrown value that is
+ *   not an Error but its `typeof`, as `thrown`.
+ * - Printed whole: each projection carries a non-enumerable
+ *   `util.inspect.custom` that prints it {@link LOGGED_PRINT_DEPTH} levels
+ *   deep rather than Node's default two, so `consoleLogger` (and anything
+ *   else that inspects it) shows its causes and members instead of
+ *   `[Object]`. Only a projection is printed so — any other object a caller
+ *   logs keeps Node's default depth. The hook is a symbol, so JSON, pino and
+ *   a spy never see it, and the projection is still not error-like.
  * - It never throws: an error from another realm counts; a throwing getter
  *   drops its field; a value the Error check cannot inspect reads as a
  *   non-Error.
@@ -62,21 +104,22 @@
  * No state.
  */
 
+import { type InspectOptions, inspect } from "node:util";
+
 /**
  * The fields of an error a log line carries, and its Error causes the same
- * way.
- *
- * Every projection also has a non-enumerable own `constructor` of
- * `undefined`, so that pino's err serializer types it by `name`. It is
- * invisible to JSON, for-in and `util.inspect`, but not to a strict
- * comparison: compare a projection with `toEqual`, not `toStrictEqual`,
- * which fails on the hidden constructor.
+ * way: a plain object, with no `message`, so that no serializer takes it for
+ * an Error and rewrites it — the line carries exactly these fields.
  */
 export interface LoggableError {
 	/** The error's `name`; `"NonError"` for a thrown value that is not an Error. */
 	readonly name: string;
-	/** Absent for a SyntaxError, which quotes its input; a Redis reply's echoed arguments are cut. */
-	readonly message?: string;
+	/**
+	 * The error's message. Absent for a SyntaxError, which quotes its input; a
+	 * Redis reply's echoed arguments are cut. Not `message`, which would make
+	 * a serializer take the projection for an Error.
+	 */
+	readonly detail?: string;
 	/** A SyntaxError's `position N`, read out of its message. */
 	readonly position?: number;
 	/** A library's error code, e.g. openid-client's `OAUTH_INVALID_RESPONSE`. */
@@ -105,15 +148,108 @@ export interface LoggableError {
 	 */
 	readonly stack?: string;
 	readonly cause?: LoggableError;
+	/**
+	 * `true` when the error has an Error cause the projection left out: past
+	 * the depth limit, or past {@link LOGGED_MAX_PROJECTIONS}.
+	 */
+	readonly causeOmitted?: true;
+	/**
+	 * An own `reason` that is a code — lowercase words joined by `_` or `-`,
+	 * at most 64 characters — e.g. a Store transport failure's `unreachable`.
+	 */
+	readonly reason?: string;
+	/**
+	 * The command a store's error answered, by name alone — ioredis's
+	 * `command.name` (`set`, `evalsha`, `hello`) when it is a bounded token —
+	 * never its `args`.
+	 */
+	readonly command?: { readonly name: string };
+	/**
+	 * An AggregateError's members: of its first
+	 * {@link LOGGED_AGGREGATE_MAX_ERRORS}, the Errors, projected the same way.
+	 */
+	readonly aggregateErrors?: readonly LoggableError[];
+	/**
+	 * How many of the members are not in `aggregateErrors`: past the first
+	 * five, not an Error, past the depth limit, or left out by
+	 * {@link LOGGED_MAX_PROJECTIONS}.
+	 */
+	readonly aggregateErrorsOmitted?: number;
 	/** For a thrown value that is not an Error: its `typeof`, and nothing of its content. */
 	readonly thrown?: string;
+	/**
+	 * An own `<word>Status` field holding an HTTP status (100–599), at most
+	 * four: an upstream's answer an error records beside its own `status`,
+	 * e.g. a Store refusal's `storeStatus`.
+	 */
+	readonly [statusField: `${string}Status`]: number | undefined;
 }
 
 /** The longest string any field keeps. */
 export const LOGGED_STRING_MAX_LENGTH = 256;
 
-/** How many causes deep the projection follows; a cycle ends here too. */
+/** How many causes (or AggregateError members) deep the projection follows; a cycle ends here too. */
 const MAX_CAUSE_DEPTH = 3;
+
+/** The most AggregateError members the projection looks at, at each level. */
+export const LOGGED_AGGREGATE_MAX_ERRORS = 5;
+
+/**
+ * How many levels deep `util.inspect` prints a projection: past the deepest
+ * it nests — three levels of causes or AggregateError members (a member is
+ * two, the array and its element) and a `response` or `command` in the last.
+ */
+export const LOGGED_PRINT_DEPTH = 8;
+
+/**
+ * The projection's own `util.inspect.custom`: print it
+ * {@link LOGGED_PRINT_DEPTH} levels deep. A copy of its fields is printed, so
+ * the hook does not call itself.
+ */
+function printWhole(
+	this: object,
+	_depth: number,
+	options: InspectOptions,
+	print: typeof inspect,
+): string {
+	return print({ ...this }, { ...options, depth: LOGGED_PRINT_DEPTH });
+}
+
+/**
+ * `draft`, branded: a non-enumerable `util.inspect.custom` that prints it
+ * whole. Invisible to `JSON.stringify`, to pino and to `Object.keys`, and it
+ * adds no `message`, so no serializer takes the projection for an Error.
+ */
+const printedWhole = <T extends object>(draft: T): T =>
+	Object.defineProperty(draft, inspect.custom, { value: printWhole, enumerable: false });
+
+/**
+ * The most projections one line holds: the error, its causes and its
+ * members, all levels together. Each is capped — every string at 256
+ * characters, the stack at 2048 — so a line stays under about 64 KB.
+ */
+export const LOGGED_MAX_PROJECTIONS = 16;
+
+/**
+ * A `reason` that is a code: lowercase words joined by `_` or `-`. No space,
+ * capital or digit, so no sentence, number or token fits; at most
+ * {@link REASON_MAX_LENGTH} characters.
+ */
+const REASON_CODE = /^[a-z]+(?:[_-][a-z]+)*$/;
+const REASON_MAX_LENGTH = 64;
+
+/** A field that records an HTTP status beside `status`: `storeStatus`, `upstreamStatus`. */
+const STATUS_FIELD = /^[a-z][A-Za-z]{0,31}Status$/;
+
+/** The most `<word>Status` fields the projection keeps. */
+const MAX_STATUS_FIELDS = 4;
+
+/**
+ * A command's name — `set`, `evalsha`, `hello`, or a module's `JSON.SET`,
+ * `FT.SEARCH`: a token, and at most one more after a dot — and nothing that
+ * could be an argument.
+ */
+const COMMAND_NAME = /^[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31})?$/i;
 
 /** RFC 6749 §5.2: `error` and `error_description` are `%x20-21 / %x23-5B / %x5D-7E`. */
 const OAUTH_ERROR_TEXT = /^[\x20\x21\x23-\x5B\x5D-\x7E]+$/;
@@ -228,8 +364,7 @@ const headerEnd = (stack: string, name: string, code: unknown, message: string):
 
 /**
  * The frames of an error's `stack`, and nothing of the header ahead of them
- * — the rule device-grant's copy shares, pinned by the shared vectors in
- * `__tests__/loggableError.test.mts`:
+ * — pinned by the `stack` vectors in `__tests__/loggableError.test.mts`:
  *
  * 1. `stack` or `message` not a string (or its read threw): no stack.
  * 2. The header is what V8 writes from the error's `name` (a non-string one
@@ -281,6 +416,86 @@ const framesOf = (
 	return frames.join("\n").slice(0, LOGGED_STACK_MAX_LENGTH);
 };
 
+/**
+ * `{ name }` of the command a store's error answered — ioredis's `command:
+ * { name, args }` — when `command` is an object whose `name` is a bounded
+ * token; never its `args`. A `command` that is a string (execa's shell line)
+ * or whose name could hold anything else gives nothing.
+ */
+const commandOf = (err: object): { readonly name: string } | undefined => {
+	const command = read(err, "command");
+	if (typeof command !== "object" || command === null) return undefined;
+	const name = read(command, "name");
+	return typeof name === "string" && COMMAND_NAME.test(name) ? { name } : undefined;
+};
+
+/** An own `reason` that is a code; `undefined` for anything else, or when asking throws. */
+const reasonOf = (err: object): string | undefined => {
+	try {
+		if (!Object.hasOwn(err, "reason")) return undefined;
+	} catch {
+		return undefined;
+	}
+	const reason = read(err, "reason");
+	return typeof reason === "string" &&
+		reason.length <= REASON_MAX_LENGTH &&
+		REASON_CODE.test(reason)
+		? reason
+		: undefined;
+};
+
+/**
+ * The error's own `<word>Status` fields that hold an HTTP status, in key
+ * order, at most {@link MAX_STATUS_FIELDS}. Nothing when the keys cannot be
+ * listed (a Proxy's trap).
+ */
+const statusFieldsOf = (err: object): Record<string, number> => {
+	let keys: string[];
+	try {
+		keys = Object.keys(err);
+	} catch {
+		return {};
+	}
+	const kept: Record<string, number> = {};
+	let count = 0;
+	for (const key of keys) {
+		if (count === MAX_STATUS_FIELDS) break;
+		if (!STATUS_FIELD.test(key)) continue;
+		const value = read(err, key);
+		if (typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599) {
+			kept[key] = value;
+			count++;
+		}
+	}
+	return kept;
+};
+
+/**
+ * An AggregateError's member candidates: of its first
+ * {@link LOGGED_AGGREGATE_MAX_ERRORS} members, the Errors, and how many
+ * members it has. `null` for an `errors` that is not an array or cannot be
+ * read (a revoked Proxy throws even to `Array.isArray`), and when none of
+ * those members is an Error — a validation library's `errors` of plain issue
+ * objects.
+ */
+const membersOf = (err: object): { readonly errors: object[]; readonly total: number } | null => {
+	const errors = read(err, "errors");
+	let total: unknown;
+	try {
+		if (!Array.isArray(errors)) return null;
+		total = errors.length;
+	} catch {
+		return null;
+	}
+	if (typeof total !== "number" || !Number.isInteger(total) || total < 0) return null;
+	const candidates: object[] = [];
+	for (let index = 0; index < Math.min(total, LOGGED_AGGREGATE_MAX_ERRORS); index++) {
+		const member = read(errors as object, String(index));
+		if (isError(member)) candidates.push(member);
+	}
+	return candidates.length === 0 ? null : { errors: candidates, total };
+};
+
 /** A fetch `Response`, read structurally so that one from another realm counts too. */
 const responseFields = (value: unknown): LoggableError["response"] | undefined => {
 	if (typeof value !== "object" || value === null) return undefined;
@@ -312,13 +527,66 @@ const responseFields = (value: unknown): LoggableError["response"] | undefined =
  * ioredis's `command.args` included — and `consoleLogger` hands the error to
  * `console.*`, whose inspection prints them. A deployment chooses its logger,
  * so a call site that logs a library's or a store's error hands the logger
- * this instead of the error. It never throws.
+ * this instead of the error, and every logger writes it as it is. It never
+ * throws.
  */
 export function loggableError(err: unknown): LoggableError {
-	return project(err, 0);
+	const root = fieldsOf(err);
+	// Breadth first, so the budget goes to the error's own cause and members
+	// before any of theirs. Each entry is an Error already projected, whose
+	// cause and members are still to be attached.
+	const pending: Array<{ readonly err: unknown; readonly depth: number; readonly into: Draft }> = [
+		{ err, depth: 0, into: root },
+	];
+	let left = LOGGED_MAX_PROJECTIONS - 1;
+	for (let next = 0; next < pending.length; next++) {
+		const { err: node, depth, into } = pending[next] as (typeof pending)[number];
+		if (!isError(node)) continue;
+		// Past the depth limit a child is cut as one past the budget is — and
+		// marked the same way, so every cut shows.
+		const room = depth < MAX_CAUSE_DEPTH;
+		const cause = read(node, "cause");
+		if (isError(cause)) {
+			if (room && left > 0) {
+				left--;
+				into.cause = fieldsOf(cause);
+				pending.push({ err: cause, depth: depth + 1, into: into.cause });
+			} else {
+				into.causeOmitted = true;
+			}
+		}
+		const members = membersOf(node);
+		if (members !== null) {
+			const kept: Draft[] = [];
+			for (const member of members.errors) {
+				if (!room || left === 0) break;
+				left--;
+				const projected = fieldsOf(member);
+				kept.push(projected);
+				pending.push({ err: member, depth: depth + 1, into: projected });
+			}
+			if (kept.length > 0) into.aggregateErrors = kept;
+			if (members.total > kept.length) into.aggregateErrorsOmitted = members.total - kept.length;
+		}
+	}
+	return root;
 }
 
-function project(err: unknown, depth: number): LoggableError {
+/** A projection under construction: its cause and members are attached after its own fields. */
+type Draft = {
+	-readonly [K in keyof LoggableError]: K extends "cause"
+		? Draft | undefined
+		: K extends "aggregateErrors"
+			? Draft[] | undefined
+			: LoggableError[K];
+};
+
+/** The error's own fields — everything but its cause and members, which `loggableError` attaches. */
+function fieldsOf(err: unknown): Draft {
+	return printedWhole(ownFieldsOf(err));
+}
+
+function ownFieldsOf(err: unknown): Draft {
 	if (!isError(err)) {
 		return { name: "NonError", thrown: err === null ? "null" : typeof err };
 	}
@@ -333,21 +601,23 @@ function project(err: unknown, depth: number): LoggableError {
 	const cause = read(err, "cause");
 	const response = responseFields(cause) ?? responseFields(read(err, "response"));
 	const stack = framesOf(read(err, "stack"), rawName, code, rawMessage);
+	const reason = reasonOf(err);
+	const command = commandOf(err);
 
-	let message: string | undefined;
+	let detail: string | undefined;
 	let position: number | undefined;
 	if (typeof rawMessage === "string") {
 		if (name === "SyntaxError") {
 			const at = SYNTAX_POSITION.exec(rawMessage);
 			position = at ? Number(at[1]) : undefined;
 		} else {
-			message = capped(rawMessage.replace(REDIS_ECHOED_ARGS, ""));
+			detail = capped(rawMessage.replace(REDIS_ECHOED_ARGS, ""));
 		}
 	}
 
-	const projected: LoggableError = {
+	return {
 		name,
-		...(message !== undefined ? { message } : {}),
+		...(detail !== undefined ? { detail } : {}),
 		...(position !== undefined ? { position } : {}),
 		...(typeof code === "string"
 			? { code: capped(code) }
@@ -355,18 +625,13 @@ function project(err: unknown, depth: number): LoggableError {
 				? { code }
 				: {}),
 		...(typeof status === "number" && Number.isInteger(status) ? { status } : {}),
+		...statusFieldsOf(err),
+		...(reason !== undefined ? { reason } : {}),
+		...(command !== undefined ? { command } : {}),
 		...(typeof type === "string" ? { type: capped(type) } : {}),
 		...(typeof error === "string" && OAUTH_ERROR_TEXT.test(error) ? { error: capped(error) } : {}),
 		...(errorDescription !== undefined ? { error_description: errorDescription } : {}),
 		...(response !== undefined ? { response } : {}),
 		...(stack !== undefined ? { stack } : {}),
-		...(isError(cause) && depth < MAX_CAUSE_DEPTH ? { cause: project(cause, depth + 1) } : {}),
 	};
-	// pino's err serializer names `type` after `constructor.name` when that is
-	// a function — "Object" for a plain object — and after `name` otherwise.
-	// A non-enumerable own `constructor` of `undefined` makes it read `name`
-	// ("TypeError"), with no serializer of the deployment's to configure; it is
-	// invisible to JSON, to for-in and to `util.inspect`.
-	Object.defineProperty(projected, "constructor", { value: undefined, enumerable: false });
-	return projected;
 }

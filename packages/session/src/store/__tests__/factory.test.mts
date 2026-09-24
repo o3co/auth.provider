@@ -208,7 +208,7 @@ describe("redis session client error handling", () => {
 		// and what it carries (a refused command's arguments) is not logged.
 		expect((payload as { err?: unknown }).err).toMatchObject({
 			name: "Error",
-			message: "ECONNRESET",
+			detail: "ECONNRESET",
 			stack: expect.stringMatching(/^ {4}at /),
 		});
 	});

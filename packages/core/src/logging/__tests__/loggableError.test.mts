@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { inspect } from "node:util";
 import { runInNewContext } from "node:vm";
 import express from "express";
 import pino from "pino";
@@ -21,6 +22,9 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import {
 	guardedRead,
+	LOGGED_AGGREGATE_MAX_ERRORS,
+	LOGGED_MAX_PROJECTIONS,
+	LOGGED_PRINT_DEPTH,
 	LOGGED_STACK_MAX_FRAMES,
 	LOGGED_STACK_MAX_LENGTH,
 	type LoggableError,
@@ -64,21 +68,25 @@ const bodyParserError = async (
 /** The projection without `stack`, whose frames are pinned by cases of their own. */
 const shape = (err: unknown): unknown => {
 	const walk = (projected: LoggableError): Record<string, unknown> => {
-		const { stack: _frames, cause, ...fields } = projected;
-		return cause === undefined ? fields : { ...fields, cause: walk(cause) };
+		const { stack: _frames, cause, aggregateErrors, ...fields } = projected;
+		return {
+			...fields,
+			...(cause === undefined ? {} : { cause: walk(cause) }),
+			...(aggregateErrors === undefined ? {} : { aggregateErrors: aggregateErrors.map(walk) }),
+		};
 	};
 	return walk(loggableError(err));
 };
 
 describe("loggableError — what a log line may carry of an error", () => {
-	it("keeps name, message and code, and the chain of Error causes", () => {
+	it("keeps name, message (as `detail`) and code, and the chain of Error causes", () => {
 		expect(shape(libraryError())).toEqual({
 			name: "ClientError",
-			message: "invalid response encountered",
+			detail: "invalid response encountered",
 			code: "OAUTH_INVALID_RESPONSE",
 			cause: {
 				name: "OperationProcessingError",
-				message: '"response" body "scope" property must be a string',
+				detail: '"response" body "scope" property must be a string',
 				code: "OAUTH_INVALID_RESPONSE",
 			},
 		});
@@ -105,7 +113,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 		);
 		expect(shape(refused)).toEqual({
 			name: "ResponseBodyError",
-			message: "server responded with an error in the response body",
+			detail: "server responded with an error in the response body",
 			code: "OAUTH_RESPONSE_BODY_ERROR",
 			status: 400,
 			error: "invalid_grant",
@@ -205,7 +213,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 			status: "400",
 			error: 'not an error code, it has spaces and a "quote"',
 		});
-		expect(shape(odd)).toEqual({ name: "Error", message: "odd" });
+		expect(shape(odd)).toEqual({ name: "Error", detail: "odd" });
 	});
 
 	it("says only what kind of value was thrown when it is not an Error — in `thrown`", () => {
@@ -217,12 +225,382 @@ describe("loggableError — what a log line may carry of an error", () => {
 		expect(shape(null)).toEqual({ name: "NonError", thrown: "null" });
 	});
 
+	it("marks a cause the depth limit leaves out, as it marks one the budget does", () => {
+		let chain: Error = new Error("c5");
+		for (let level = 4; level >= 0; level--) chain = new Error(`c${level}`, { cause: chain });
+		let last: LoggableError | undefined = loggableError(chain);
+		for (let level = 0; level < 3; level++) last = last?.cause;
+		// c0, and three causes below it: c3 is the last, and it says it had one.
+		expect(last?.detail).toBe("c3");
+		expect(last?.cause).toBeUndefined();
+		expect(last?.causeOmitted).toBe(true);
+	});
+
 	it("stops following causes after a few, so a cycle cannot recurse forever", () => {
 		const a = new Error("a");
 		const b = new Error("b", { cause: a });
 		(a as { cause?: unknown }).cause = b;
 		const projected = JSON.stringify(loggableError(a));
-		expect(projected.match(/"message"/g)?.length).toBeLessThanOrEqual(4);
+		expect(projected.match(/"detail"/g)?.length).toBeLessThanOrEqual(4);
+	});
+
+	describe("an AggregateError's members", () => {
+		/** What an OAuth library throws for a refresh answer it refused: the answer on a non-Error cause. */
+		const refusedRefresh = (): Error =>
+			Object.assign(
+				new Error("invalid response encountered", {
+					cause: { body: { refresh_token: "rt-MEMBER-S3CRET" } },
+				}),
+				{ name: "ClientError", code: "OAUTH_INVALID_RESPONSE" },
+			);
+
+		it("keeps its Error members, each projected as a cause is — names and codes, never what they carry", () => {
+			const reply = Object.assign(
+				new Error(
+					"ERR unknown command 'evalsha', with args beginning with: 'sha' '1' 'fg:grant:rt-ARG-S3CRET'",
+				),
+				{ name: "ReplyError", command: { name: "evalsha", args: ["fg:grant:rt-ARG-S3CRET"] } },
+			);
+			const failed = new AggregateError(
+				[refusedRefresh(), reply],
+				"AppHandle.dispose: 2 cleanup errors",
+			);
+
+			expect(shape(failed)).toEqual({
+				name: "AggregateError",
+				detail: "AppHandle.dispose: 2 cleanup errors",
+				aggregateErrors: [
+					{
+						name: "ClientError",
+						detail: "invalid response encountered",
+						code: "OAUTH_INVALID_RESPONSE",
+					},
+					{
+						name: "ReplyError",
+						detail: "ERR unknown command 'evalsha'",
+						command: { name: "evalsha" },
+					},
+				],
+			});
+			const projected = loggableError(failed);
+			expect(projected.aggregateErrors?.[0]?.stack).toMatch(/^ {4}at /);
+			const serialised = JSON.stringify(projected);
+			expect(serialised).not.toContain("S3CRET");
+			expect(serialised).not.toContain("refresh_token");
+		});
+
+		it(`keeps at most the first ${LOGGED_AGGREGATE_MAX_ERRORS}, and says how many it left out`, () => {
+			expect(LOGGED_AGGREGATE_MAX_ERRORS).toBe(5);
+			const many = new AggregateError(
+				Array.from({ length: 7 }, (_, i) => Object.assign(new Error(`m${i}`), { name: `E${i}` })),
+				"all failed",
+			);
+			const projected = loggableError(many);
+			expect(projected.aggregateErrors?.map((member) => member.name)).toEqual([
+				"E0",
+				"E1",
+				"E2",
+				"E3",
+				"E4",
+			]);
+			expect(projected.aggregateErrorsOmitted).toBe(2);
+		});
+
+		it("leaves out a member that is not an Error, as it does a cause, and counts it", () => {
+			const mixed = new AggregateError(
+				["rt-STRING-S3CRET", { access_token: "at-OBJECT-S3CRET" }, new TypeError("kept")],
+				"mixed",
+			);
+			expect(shape(mixed)).toEqual({
+				name: "AggregateError",
+				detail: "mixed",
+				aggregateErrors: [{ name: "TypeError", detail: "kept" }],
+				aggregateErrorsOmitted: 2,
+			});
+			expect(JSON.stringify(loggableError(mixed))).not.toContain("S3CRET");
+		});
+
+		it("keeps no members field when none of them is an Error — a validation library's issues", () => {
+			const issues = Object.assign(new Error("invalid input"), {
+				name: "ZodError",
+				errors: [{ path: ["client_secret"], message: "s3cret-value is too short" }],
+			});
+			expect(shape(issues)).toEqual({ name: "ZodError", detail: "invalid input" });
+		});
+
+		it("follows members as deep as causes, and no deeper", () => {
+			let nested: Error = new Error("innermost");
+			for (let level = 4; level >= 0; level--) {
+				nested = new AggregateError([nested], `level ${level}`);
+			}
+			const depthOf = (projected: LoggableError | undefined): number =>
+				projected === undefined ? 0 : 1 + depthOf(projected.aggregateErrors?.[0]);
+			// The error and three levels below it, as with causes.
+			expect(depthOf(loggableError(nested))).toBe(4);
+		});
+
+		it("says what the depth limit left out: the last level's members in `aggregateErrorsOmitted`", () => {
+			let nested: Error = new Error("innermost");
+			for (let level = 4; level >= 0; level--) {
+				nested = new AggregateError([nested, new Error(`sibling ${level}`)], `level ${level}`);
+			}
+			let last: LoggableError | undefined = loggableError(nested);
+			for (let level = 0; level < 3; level++) last = last?.aggregateErrors?.[0];
+			expect(last?.detail).toBe("level 3");
+			expect(last?.aggregateErrors).toBeUndefined();
+			expect(last?.aggregateErrorsOmitted).toBe(2);
+		});
+
+		it("never throws on an `errors` that cannot be read", () => {
+			const unreadable = Object.defineProperty(new AggregateError([], "outer"), "errors", {
+				get() {
+					throw new Error("getter");
+				},
+			});
+			expect(shape(unreadable)).toEqual({ name: "AggregateError", detail: "outer" });
+			const trap = () => {
+				throw new Error("trap");
+			};
+			const hostile = Object.assign(new Error("outer"), {
+				errors: new Proxy([new Error("m")], { get: trap, getPrototypeOf: trap }),
+			});
+			expect(() => loggableError(hostile)).not.toThrow();
+			const revocable = Proxy.revocable([new Error("m")], {});
+			revocable.revoke();
+			const revoked = Object.assign(new Error("outer"), { errors: revocable.proxy });
+			expect(shape(revoked)).toEqual({ name: "Error", detail: "outer" });
+		});
+
+		it.each([
+			["a string", "1"],
+			["a fraction", 1.5],
+			["a negative count", -1],
+			["NaN", Number.NaN],
+		])("keeps no members of an `errors` array whose `length` reads as %s", (_label, length) => {
+			// Array.isArray says yes to a Proxy over an array, whose `length`
+			// can then answer anything; only a count is one.
+			const lying = new Proxy([new Error("member")], {
+				get: (target, key) => (key === "length" ? length : Reflect.get(target, key)),
+			});
+			const outer = Object.assign(new Error("outer"), { errors: lying });
+			expect(shape(outer)).toEqual({ name: "Error", detail: "outer" });
+		});
+	});
+
+	describe("a budget for one line", () => {
+		/**
+		 * An error `levels` deep whose every level has five Error members and
+		 * an Error cause, each with a long message: past the depth limit, 259
+		 * projections without a budget.
+		 */
+		const tree = (levels: number, label = "root"): Error => {
+			const long = `${label} ${"x".repeat(1000)}`;
+			if (levels === 0) return new Error(long);
+			return new AggregateError(
+				Array.from({ length: 5 }, (_, i) => tree(levels - 1, `${label}.${i}`)),
+				long,
+				{ cause: tree(levels - 1, `${label}.cause`) },
+			);
+		};
+		/** How many projections a line holds: the error, and its causes and members, all the way down. */
+		const count = (projected: LoggableError | undefined): number =>
+			projected === undefined
+				? 0
+				: 1 +
+					count(projected.cause) +
+					(projected.aggregateErrors ?? []).reduce((sum, member) => sum + count(member), 0);
+		const labelOf = (projected: LoggableError | undefined): string | undefined =>
+			projected?.detail?.split(" ")[0];
+
+		it(`keeps at most ${LOGGED_MAX_PROJECTIONS} projections in one line, the nearest first`, () => {
+			expect(LOGGED_MAX_PROJECTIONS).toBe(16);
+			const projected = loggableError(tree(4));
+			expect(count(projected)).toBe(LOGGED_MAX_PROJECTIONS);
+			// Sixteen, each capped: a line a log shipper takes whole.
+			expect(JSON.stringify(projected).length).toBeLessThan(LOGGED_MAX_PROJECTIONS * 4096);
+			// The error's own cause and all five of its members come before
+			// anything of theirs.
+			expect(labelOf(projected.cause)).toBe("root.cause");
+			expect(projected.aggregateErrors?.map(labelOf)).toEqual([
+				"root.0",
+				"root.1",
+				"root.2",
+				"root.3",
+				"root.4",
+			]);
+			expect(projected.aggregateErrorsOmitted).toBeUndefined();
+		});
+
+		it("says what the budget left out: a member in `aggregateErrorsOmitted`, a cause as `causeOmitted`", () => {
+			const projected = loggableError(tree(4));
+			const first = projected.aggregateErrors?.[0];
+			expect(labelOf(first?.cause)).toBe("root.0.cause");
+			expect(first?.aggregateErrors?.map(labelOf)).toEqual(["root.0.0", "root.0.1"]);
+			expect(first?.aggregateErrorsOmitted).toBe(3);
+			const last = projected.aggregateErrors?.[4];
+			expect(last?.cause).toBeUndefined();
+			expect(last?.causeOmitted).toBe(true);
+			expect(last?.aggregateErrors).toBeUndefined();
+			expect(last?.aggregateErrorsOmitted).toBe(5);
+		});
+	});
+
+	describe("the command a store's error answered", () => {
+		it("keeps the name of ioredis's `command`, and never its arguments", () => {
+			const refused = Object.assign(new Error("WRONGPASS invalid username-password pair"), {
+				name: "ReplyError",
+				command: { name: "hello", args: ["3", "AUTH", "default", "pw-S3CRET"] },
+			});
+			expect(shape(refused)).toEqual({
+				name: "ReplyError",
+				detail: "WRONGPASS invalid username-password pair",
+				command: { name: "hello" },
+			});
+			expect(JSON.stringify(loggableError(refused))).not.toContain("S3CRET");
+		});
+
+		it.each([["JSON.SET"], ["FT.SEARCH"], ["json.get"]])(
+			"keeps a Redis module command's dotted name: %s",
+			(name) => {
+				const refused = Object.assign(new Error("ERR could not perform this operation"), {
+					name: "ReplyError",
+					command: { name, args: ["doc:S3CRET", "$", "{}"] },
+				});
+				expect(loggableError(refused).command).toEqual({ name });
+				expect(JSON.stringify(loggableError(refused))).not.toContain("S3CRET");
+			},
+		);
+
+		it.each([
+			["a shell command line, as execa carries it", "git push https://token-S3CRET@example.com"],
+			["a name with a space", { name: "set key-S3CRET" }],
+			["a name with two dots", { name: "a.b.c" }],
+			["a dotted name with a space", { name: "JSON.SET key-S3CRET" }],
+			["a name that ends in a dot", { name: "JSON." }],
+			["an over-long name", { name: "x".repeat(33) }],
+			["a name that is not a string", { name: 42 }],
+			["no name", { args: ["S3CRET"] }],
+		])("drops a `command` that is %s", (_label, command) => {
+			const projected = loggableError(Object.assign(new Error("m"), { command }));
+			expect(projected).not.toHaveProperty("command");
+			expect(JSON.stringify(projected)).not.toContain("S3CRET");
+		});
+
+		it("never throws on a `command` whose name cannot be read", () => {
+			const command = Object.defineProperty({}, "name", {
+				get() {
+					throw new Error("getter");
+				},
+			});
+			expect(shape(Object.assign(new Error("m"), { command }))).toEqual({
+				name: "Error",
+				detail: "m",
+			});
+		});
+	});
+
+	describe("a closed-set field a store's error records", () => {
+		it.each([["unreachable"], ["connection_closed"], ["malformed_response"], ["expired-at-issue"]])(
+			"keeps an own `reason` that is a code: %j",
+			(reason) => {
+				expect(shape(Object.assign(new Error("m"), { reason }))).toEqual({
+					name: "Error",
+					detail: "m",
+					reason,
+				});
+			},
+		);
+
+		it.each([
+			["free text", "Token has been expired or revoked."],
+			["a camel-cased word", "keyCompromise"],
+			["a lowercase hex token", "a3f9c0e1d2b4a6f8c0e1d2b4a6f8c0e1"],
+			["a UUID", "f47ac10b-58cc-4372-a567-0e02b2c3d479"],
+			["an over-long code", `${"a_".repeat(40)}b`],
+			["a number", 42],
+		])("drops a `reason` that is %s", (_label, reason) => {
+			expect(shape(Object.assign(new Error("m"), { reason }))).toEqual({
+				name: "Error",
+				detail: "m",
+			});
+		});
+
+		it("drops a `reason` the error inherits rather than owns", () => {
+			class Inherited extends Error {}
+			Object.defineProperty(Inherited.prototype, "reason", { value: "unreachable" });
+			expect(shape(new Inherited("m"))).toEqual({ name: "Error", detail: "m" });
+		});
+
+		it("keeps an own `…Status` field that holds an HTTP status — an upstream's answer beside the error's own `status`", () => {
+			const refused = Object.assign(new Error("the Store refused this deployment's credential"), {
+				name: "StoreCredentialRefusedError",
+				storeStatus: 401,
+				upstreamStatus: 503,
+			});
+			expect(shape(refused)).toEqual({
+				name: "StoreCredentialRefusedError",
+				detail: "the Store refused this deployment's credential",
+				storeStatus: 401,
+				upstreamStatus: 503,
+			});
+		});
+
+		it.each([
+			["below the HTTP range", { storeStatus: 99 }],
+			["above it", { storeStatus: 600 }],
+			["fractional", { storeStatus: 401.5 }],
+			["a string", { storeStatus: "401" }],
+			[
+				"under a name that is not `<word>Status`",
+				{ store_status: 401, Status: 401, storestatus: 401 },
+			],
+		])("drops a status field %s", (_label, fields) => {
+			expect(shape(Object.assign(new Error("m"), fields))).toEqual({ name: "Error", detail: "m" });
+		});
+
+		it("keeps at most four `…Status` fields", () => {
+			const many = Object.assign(new Error("m"), {
+				aStatus: 401,
+				bStatus: 402,
+				cStatus: 403,
+				dStatus: 404,
+				eStatus: 405,
+			});
+			expect(Object.keys(loggableError(many)).filter((key) => key.endsWith("Status"))).toEqual([
+				"aStatus",
+				"bStatus",
+				"cStatus",
+				"dStatus",
+			]);
+		});
+
+		it("never throws on an error whose own keys cannot be listed, and keeps what it can read", () => {
+			// A Proxy over an Error whose own-key traps throw: `reason`'s
+			// own-ness and the `<word>Status` fields' listing both ask them.
+			// Where the runtime has Error.isError (Node 24+) a Proxy is not an
+			// Error and projects as a NonError; on Node 22, the engines floor,
+			// the fallback's `instanceof` counts it, and the projection reaches
+			// those questions.
+			const trap = () => {
+				throw new Error("trap");
+			};
+			const hostile = () =>
+				new Proxy(Object.assign(new Error("m"), { reason: "unreachable", storeStatus: 503 }), {
+					ownKeys: trap,
+					getOwnPropertyDescriptor: trap,
+				});
+			expect(() => loggableError(hostile())).not.toThrow();
+			const brand = Object.getOwnPropertyDescriptor(Error, "isError");
+			delete (Error as { isError?: unknown }).isError;
+			try {
+				const projected = loggableError(hostile());
+				expect(projected).toMatchObject({ name: "Error", detail: "m" });
+				expect(projected).not.toHaveProperty("reason");
+				expect(projected).not.toHaveProperty("storeStatus");
+			} finally {
+				if (brand) Object.defineProperty(Error, "isError", brand);
+			}
+		});
 	});
 
 	describe("the known shapes in which a message quotes a peer are removed", () => {
@@ -257,8 +635,10 @@ describe("loggableError — what a log line may carry of an error", () => {
 			);
 			expect(shape(reply)).toEqual({
 				name: "ReplyError",
-				message: "ERR unknown command 'evalsha'",
+				detail: "ERR unknown command 'evalsha'",
+				command: { name: "evalsha" },
 			});
+			expect(JSON.stringify(loggableError(reply))).not.toContain("user-1");
 		});
 
 		it("cuts Redis's echo from any message, whichever client's class carries it", () => {
@@ -271,7 +651,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 			for (const reply of [new Error(text), new ErrorReply(text), new SimpleError(text)]) {
 				expect(shape(reply)).toEqual({
 					name: "Error",
-					message: "ERR unknown command 'evalsha'",
+					detail: "ERR unknown command 'evalsha'",
 				});
 			}
 		});
@@ -318,7 +698,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 		);
 		expect(shape(onCause)).toEqual({
 			name: "ClientError",
-			message: "unexpected HTTP response status code",
+			detail: "unexpected HTTP response status code",
 			code: "OAUTH_RESPONSE_IS_NOT_CONFORM",
 			response: { status: 503, contentType: "text/html; charset=utf-8" },
 		});
@@ -360,7 +740,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 			type: "t".repeat(1000),
 		});
 		const projected = loggableError(long);
-		expect(projected.message).toHaveLength(256);
+		expect(projected.detail).toHaveLength(256);
 		expect(projected.name).toHaveLength(256);
 		expect(projected.code).toHaveLength(256);
 		expect(projected.type).toHaveLength(256);
@@ -386,10 +766,10 @@ describe("loggableError — what a log line may carry of an error", () => {
 			expect(shape(hostile)).toEqual({ name: "NonError", thrown: "object" });
 			// And the fallback still counts a real error, one from another realm
 			// by its tag, and neither null nor an object tagged otherwise.
-			expect(shape(new Error("kept"))).toEqual({ name: "Error", message: "kept" });
+			expect(shape(new Error("kept"))).toEqual({ name: "Error", detail: "kept" });
 			expect(shape(runInNewContext('new TypeError("other realm")'))).toEqual({
 				name: "TypeError",
-				message: "other realm",
+				detail: "other realm",
 			});
 			expect(shape(null)).toEqual({ name: "NonError", thrown: "null" });
 			expect(shape({ name: "Error", message: "shaped like one" })).toEqual({
@@ -402,13 +782,11 @@ describe("loggableError — what a log line may carry of an error", () => {
 	});
 
 	/*
-	 * The shared `stack` vectors. device-grant's copy of this rule
-	 * (`packages/device-grant/src/loggableError.mts`) passes the same list;
-	 * keep the two in step, so that replacing that copy by this one stays an
-	 * import swap. Each vector needs only `loggableError`, the helpers inside
+	 * The `stack` vectors, against errors Node and V8 really throw and stacks
+	 * assigned by hand. Each needs only `loggableError`, the helpers inside
 	 * this block and Node's own globals and built-ins.
 	 */
-	describe("stack — the shared vectors", () => {
+	describe("stack — the vectors", () => {
 		const stackOf = (thrown: unknown): string | undefined =>
 			(loggableError(thrown) as { stack?: string }).stack;
 		/** What the function under inspection threw. */
@@ -575,6 +953,28 @@ describe("loggableError — what a log line may carry of an error", () => {
 			expect(stack).not.toContain(header);
 		});
 
+		it("AbortSignal.timeout's TimeoutError: its frames, and not its header", async () => {
+			const signal = AbortSignal.timeout(0);
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			expect(signal.aborted).toBe(true);
+			const stack = stackOf(signal.reason);
+			expect(stack).toMatch(/^ {4}at /);
+			expect(stack).not.toContain("TimeoutError");
+		});
+
+		it("a subclass that names itself: its frames, and not its header", () => {
+			class MyError extends Error {
+				override name = "MyError";
+			}
+			const stack = stackOf(
+				thrownBy(() => {
+					throw new MyError("boom");
+				}),
+			);
+			expect(stack).toMatch(/^ {4}at /);
+			expect(stack).not.toContain("MyError");
+		});
+
 		it("an fs ENOENT: its frames, and not its header", async () => {
 			const { readFileSync } = await import("node:fs");
 			const stack = stackOf(thrownBy(() => readFileSync("/nonexistent/loggable-error-vector")));
@@ -628,7 +1028,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 				},
 			});
 			expect(stackOf(hostile)).toBeUndefined();
-			expect(loggableError(hostile).message).toBe("kept");
+			expect(loggableError(hostile).detail).toBe("kept");
 		});
 
 		it("a non-frame line between frames: only the unbroken run before it", () => {
@@ -652,6 +1052,9 @@ describe("loggableError — what a log line may carry of an error", () => {
 	});
 
 	it("exports the limits and the guarded read the rule is built from", () => {
+		expect(LOGGED_PRINT_DEPTH).toBe(8);
+		expect(LOGGED_AGGREGATE_MAX_ERRORS).toBe(5);
+		expect(LOGGED_MAX_PROJECTIONS).toBe(16);
 		expect(LOGGED_STACK_MAX_FRAMES).toBe(10);
 		expect(LOGGED_STACK_MAX_LENGTH).toBe(2048);
 		expect(guardedRead({ field: 1 }, "field")).toEqual({ value: 1 });
@@ -664,16 +1067,102 @@ describe("loggableError — what a log line may carry of an error", () => {
 		expect(guardedRead(hostile, "field")).toBeNull();
 	});
 
-	it("is compared with toEqual, not toStrictEqual: the constructor pino reads is hidden, not absent", () => {
-		// The trap is kept visible here: a strict comparison of a projection
-		// with the same fields fails on the non-enumerable `constructor`.
-		const projected = loggableError(new Error("kept"));
-		const sameFields = { ...projected };
-		expect(projected).toEqual(sameFields);
-		expect(projected).not.toStrictEqual(sameFields);
+	it("carries its deep printing as a brand nothing but `util.inspect` sees", () => {
+		const projected = loggableError(
+			new AggregateError([new Error("member")], "outer", { cause: new Error("inner") }),
+		);
+		for (const level of [projected, projected.cause, projected.aggregateErrors?.[0]]) {
+			const brand = Object.getOwnPropertyDescriptor(level, inspect.custom);
+			expect(typeof brand?.value).toBe("function");
+			expect(brand?.enumerable).toBe(false);
+		}
+		expect(Object.keys(projected)).not.toContain(String(inspect.custom));
+		expect(JSON.stringify(projected)).toBe(JSON.stringify(JSON.parse(JSON.stringify(projected))));
+		expect(JSON.stringify(projected)).not.toMatch(/inspect|nodejs\.util/);
+		expect(inspect({ at: { depth: { two: projected } } })).toContain("inner");
 	});
 
-	it("reaches pino as the error's name for `type` and its frames for `stack`", () => {
+	it("is plain data with no `message`, which a serializer would take for an Error's", () => {
+		const projected = loggableError(new Error("kept", { cause: new Error("inner") }));
+		expect(Object.getPrototypeOf(projected)).toBe(Object.prototype);
+		expect(projected).toStrictEqual(JSON.parse(JSON.stringify(projected)));
+		expect(projected).not.toHaveProperty("message");
+		expect(projected.cause).not.toHaveProperty("message");
+	});
+
+	describe("under pino, the line is the projection — every field, every level", () => {
+		/**
+		 * A request failure caused by a Store failure caused by a parse
+		 * failure: the fields at each level that pino's err serializer drops
+		 * when it takes the projection for an Error — it folds a `cause` into
+		 * the outer message and stack and writes none of its fields, and it
+		 * writes the error's name over the projection's own `type`.
+		 */
+		const layered = (): Error => {
+			let parse: unknown;
+			try {
+				JSON.parse('{"a":1,');
+			} catch (err) {
+				parse = err;
+			}
+			const store = Object.assign(new Error("the Store could not be read", { cause: parse }), {
+				name: "StoreTransportError",
+				code: "ECONNREFUSED",
+				reason: "unreachable",
+				storeStatus: 503,
+			});
+			return Object.assign(new Error("request failed", { cause: store }), {
+				type: "upstream.failed",
+				status: 502,
+			});
+		};
+
+		/** The `err` of the one line pino wrote for `{ err: projected }`, parsed. */
+		const loggedBy = (options: pino.LoggerOptions, projected: LoggableError): unknown => {
+			const lines: string[] = [];
+			const log = pino(
+				{ base: null, timestamp: false, ...options },
+				{
+					write(line: string) {
+						lines.push(line);
+					},
+				},
+			);
+			log.error({ err: projected }, "failed");
+			return (JSON.parse(lines[0] ?? "{}") as { err: unknown }).err;
+		};
+
+		it.each([
+			["pino's default serializers", {}],
+			[
+				"an explicit `err: stdSerializers.err`, as the standalone template sets it",
+				{
+					serializers: { err: pino.stdSerializers.err },
+				},
+			],
+			["`errWithCause`", { serializers: { err: pino.stdSerializers.errWithCause } }],
+		] as const)("with %s", (_label, options) => {
+			const projected = loggableError(layered());
+			const err = loggedBy(options, projected);
+			// Exactly the projection's own JSON: nothing dropped, nothing added —
+			// the inspect brand included, which pino never writes.
+			expect(err).toEqual(JSON.parse(JSON.stringify(projected)));
+			expect(JSON.stringify(err)).not.toMatch(/inspect|nodejs\.util/);
+			expect(err).toMatchObject({
+				type: "upstream.failed",
+				status: 502,
+				cause: {
+					name: "StoreTransportError",
+					code: "ECONNREFUSED",
+					reason: "unreachable",
+					storeStatus: 503,
+					cause: { name: "SyntaxError", position: 7 },
+				},
+			});
+		});
+	});
+
+	it("reaches pino as it is: its `name`, its frames for `stack`, and no `type` of pino's", () => {
 		const lines: string[] = [];
 		const log = pino(
 			{ base: null, timestamp: false },
@@ -691,17 +1180,41 @@ describe("loggableError — what a log line may carry of an error", () => {
 		}
 		log.error({ err: loggableError(thrown) }, "failed");
 		const { err } = JSON.parse(lines[0] ?? "{}") as { err: Record<string, unknown> };
-		expect(err.type).toBe("TypeError");
+		expect(err.name).toBe("TypeError");
+		expect(err).not.toHaveProperty("type");
 		expect(err.stack).toMatch(/^ {4}at /);
 		// The message is this process's own text here, and kept; the stack
 		// carries none of it.
 		expect(err.stack).not.toContain("STACKSECRET");
 	});
 
+	it("reaches pino with an AggregateError's members once, as `aggregateErrors`", () => {
+		// `aggregateErrors` is the name pino writes a raw AggregateError's
+		// members under; the projection's pass through as they are, once.
+		const lines: string[] = [];
+		const log = pino(
+			{ base: null, timestamp: false },
+			{
+				write(line: string) {
+					lines.push(line);
+				},
+			},
+		);
+		log.error(
+			{ err: loggableError(new AggregateError([new TypeError("kept")], "all failed")) },
+			"failed",
+		);
+		const { err } = JSON.parse(lines[0] ?? "{}") as { err: Record<string, unknown> };
+		expect(err.aggregateErrors).toEqual([
+			expect.objectContaining({ name: "TypeError", detail: "kept" }),
+		]);
+		expect(err).not.toHaveProperty("errors");
+	});
+
 	it("counts an error from another realm as an error", () => {
 		const foreign = runInNewContext('Object.assign(new Error("from a vm"), { code: "E_VM" })');
 		expect(foreign instanceof Error).toBe(false);
-		expect(shape(foreign)).toEqual({ name: "Error", message: "from a vm", code: "E_VM" });
+		expect(shape(foreign)).toEqual({ name: "Error", detail: "from a vm", code: "E_VM" });
 	});
 
 	it("does not throw when a field's getter does, and leaves that field out", () => {
@@ -713,6 +1226,6 @@ describe("loggableError — what a log line may carry of an error", () => {
 				},
 			});
 		}
-		expect(shape(hostile)).toEqual({ name: "Error", message: "kept" });
+		expect(shape(hostile)).toEqual({ name: "Error", detail: "kept" });
 	});
 });

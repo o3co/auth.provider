@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import type { Logger } from "@o3co/auth-provider-core";
+import { type Logger, loggableError } from "@o3co/auth-provider-core";
 import { StoreCredentialRefusedError, StoreTransportError } from "@o3co/auth-provider-foundation";
 import express from "express";
 import request from "supertest";
@@ -29,6 +29,39 @@ const makeLogger = () => {
 		debug: vi.fn(),
 	} as unknown as Logger;
 	return { logger, error };
+};
+
+/**
+ * A logger that serialises every own property of what it is handed, `cause`
+ * and non-enumerable fields included — a deployment is free to install one.
+ * `lines` is what it wrote; its levels are spies.
+ */
+const serialiseEverythingLogger = () => {
+	const lines: string[] = [];
+	const walk = (value: unknown, seen = new WeakSet<object>()): unknown => {
+		if (typeof value !== "object" || value === null) return value;
+		if (seen.has(value)) return "[circular]";
+		seen.add(value);
+		const out: Record<string, unknown> = {};
+		for (const key of Object.getOwnPropertyNames(value)) {
+			out[key] = walk((value as Record<string, unknown>)[key], seen);
+		}
+		return out;
+	};
+	const record = (level: string) =>
+		vi.fn((...args: unknown[]): void => {
+			lines.push(JSON.stringify({ level, args: walk(args) }));
+		});
+	const logger = {
+		trace: record("trace"),
+		debug: record("debug"),
+		info: record("info"),
+		warn: record("warn"),
+		error: record("error"),
+		fatal: record("fatal"),
+		child: () => logger,
+	};
+	return { logger: logger as typeof logger & Logger, lines };
 };
 
 const makeApp = (logger: Logger) => {
@@ -128,9 +161,100 @@ describe("terminal error handler (#293 item 8)", () => {
 				error_description: "Internal server error",
 			});
 			expect(error).toHaveBeenCalledWith(
-				expect.objectContaining({ err: thrown, endpoint: "/login" }),
+				{ err: loggableError(thrown), endpoint: "/login" },
 				"unhandled_request_error",
 			);
 		}
+	});
+
+	it("logs a Store failure with the closed-set fields an operator triages it by", async () => {
+		// The Store's own status (`storeStatus`: 401 or 403, named apart from
+		// `status`, which would read here as the client's) says whether the
+		// deployment's token was refused or forbidden; a transport failure's
+		// `reason` and `code` say what broke. Neither can carry free text.
+		const cases = [
+			{
+				thrown: new StoreCredentialRefusedError("https://store.test/authenticate", 403),
+				kept: { name: "StoreCredentialRefusedError", storeStatus: 403 },
+			},
+			{
+				thrown: new StoreTransportError(
+					"HttpUserRepository: request to https://store.test/authenticate could not be reached",
+					"unreachable",
+					"ECONNREFUSED",
+				),
+				kept: { name: "StoreTransportError", reason: "unreachable", code: "ECONNREFUSED" },
+			},
+			{
+				thrown: new StoreTransportError(
+					"HttpUserRepository: the Store closed the connection before answering",
+					"connection_closed",
+				),
+				kept: { name: "StoreTransportError", reason: "connection_closed" },
+			},
+		];
+		for (const { thrown, kept } of cases) {
+			const { logger } = serialiseEverythingLogger();
+			const app = express();
+			app.get("/login", () => {
+				throw thrown;
+			});
+			app.use(createTerminalErrorHandler(logger));
+
+			await request(app).get("/login");
+
+			expect(logger.error, thrown.name).toHaveBeenCalledWith(
+				{ err: expect.objectContaining(kept), endpoint: "/login" },
+				"unhandled_request_error",
+			);
+		}
+	});
+
+	it("logs an unhandled error as loggableError's projection, never what an upstream put on it", async () => {
+		// An OAuth library that refuses a token answer puts the answer — the
+		// tokens included — on its error's cause chain, and a route that lets
+		// the error through hands it here. The frames and the name locate the
+		// failure; the answer is the upstream's, and never the log's.
+		const answer = { access_token: "at-UPSTREAM-S3CRET", refresh_token: "rt-UPSTREAM-S3CRET" };
+		const refused = Object.assign(
+			new Error("invalid response encountered", {
+				cause: Object.assign(
+					new Error('"response" body "scope" property must be a string', {
+						cause: { body: answer },
+					}),
+					{ name: "OperationProcessingError", code: "OAUTH_INVALID_RESPONSE" },
+				),
+			}),
+			{ name: "ClientError", code: "OAUTH_INVALID_RESPONSE" },
+		);
+		const { logger, lines } = serialiseEverythingLogger();
+		const app = express();
+		app.get("/federation/callback", () => {
+			throw refused;
+		});
+		app.use(createTerminalErrorHandler(logger));
+
+		const res = await request(app).get("/federation/callback");
+
+		expect(res.status).toBe(500);
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				err: {
+					name: "ClientError",
+					detail: "invalid response encountered",
+					code: "OAUTH_INVALID_RESPONSE",
+					stack: expect.stringMatching(/^ {4}at /),
+					cause: {
+						name: "OperationProcessingError",
+						detail: '"response" body "scope" property must be a string',
+						code: "OAUTH_INVALID_RESPONSE",
+						stack: expect.stringMatching(/^ {4}at /),
+					},
+				},
+				endpoint: "/federation/callback",
+			},
+			"unhandled_request_error",
+		);
+		for (const line of lines) expect(line).not.toContain("UPSTREAM-S3CRET");
 	});
 });

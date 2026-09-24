@@ -3,7 +3,9 @@
  * Licensed under the Apache License, Version 2.0 (the "License").
  */
 
+import { format } from "node:util";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { loggableError } from "#/logging/loggableError.mjs";
 import { consoleLogger, createConsoleLogger } from "../consoleLogger.mjs";
 
 describe("consoleLogger level routing", () => {
@@ -212,5 +214,80 @@ describe("createConsoleLogger level threshold", () => {
 		createConsoleLogger({ svc: "auth" }, { level: "debug" }).debug({ a: 1 }, "msg");
 
 		expect(s.debug).toHaveBeenCalledWith({ svc: "auth", a: 1 }, "msg");
+	});
+});
+
+describe("consoleLogger prints a projected error to its last level", () => {
+	afterEach(() => vi.restoreAllMocks());
+
+	/**
+	 * What Node's console writes for these arguments to a stream that is not
+	 * a terminal: `util.format`, which inspects an object two levels deep by
+	 * default and prints anything deeper as `[Object]`.
+	 */
+	const printed = (args: readonly unknown[]): string => format(...args);
+
+	it("prints a three-deep cause chain and an AggregateError member, every code included", () => {
+		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const third = Object.assign(new Error("third"), { code: "DEEPEST_CAUSE_CODE" });
+		const second = Object.assign(new Error("second", { cause: third }), { code: "SECOND_CODE" });
+		const first = Object.assign(new Error("first", { cause: second }), { code: "FIRST_CODE" });
+		const member = Object.assign(
+			new Error("a cleanup failed", {
+				cause: Object.assign(new Error("its store"), { code: "MEMBER_CAUSE_CODE" }),
+			}),
+			{ name: "CleanupError", code: "MEMBER_CODE" },
+		);
+
+		consoleLogger.error(
+			{ err: loggableError(new AggregateError([member], "dispose failed", { cause: first })) },
+			"graceful shutdown: cleanup failed",
+		);
+
+		const line = printed(spy.mock.calls[0] ?? []);
+		expect(line).toContain("DEEPEST_CAUSE_CODE");
+		expect(line).toContain("CleanupError");
+		expect(line).toContain("MEMBER_CODE");
+		expect(line).toContain("MEMBER_CAUSE_CODE");
+		expect(line).not.toContain("[Object]");
+		expect(line).toContain("graceful shutdown: cleanup failed");
+	});
+
+	it("prints an ordinary object as Node always has: collapsed past two levels", () => {
+		// Only a projection is printed deep. A request, a config or a store
+		// record a caller logs keeps Node's default depth, so a field three
+		// levels down stays folded into `[Object]`, as it was before.
+		const spy = vi.spyOn(console, "info").mockImplementation(() => {});
+		consoleLogger.info(
+			{ req: { headers: { authorization: { token: "S3CRET-THREE-LEVELS-DOWN" } } } },
+			"request",
+		);
+		const line = printed(spy.mock.calls[0] ?? []);
+		expect(line).toContain("[Object]");
+		expect(line).not.toContain("S3CRET-THREE-LEVELS-DOWN");
+	});
+
+	it("still prints a projection whole beside an ordinary object that collapses", () => {
+		const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const third = Object.assign(new Error("third"), { code: "DEEPEST_CAUSE_CODE" });
+		const first = new Error("first", { cause: new Error("second", { cause: third }) });
+		consoleLogger.error(
+			{ err: loggableError(first), req: { headers: { authorization: { token: "S3CRET" } } } },
+			"failed",
+		);
+		const line = printed(spy.mock.calls[0] ?? []);
+		expect(line).toContain("DEEPEST_CAUSE_CODE");
+		expect(line).not.toContain("S3CRET");
+	});
+
+	it("still hands the console the object it was given, and nothing it can see besides", () => {
+		const spy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const projected = loggableError(new Error("kept"));
+		consoleLogger.warn({ err: projected, sid: "s-1" }, "failed");
+		const [handed, msg] = spy.mock.calls[0] ?? [];
+		expect(handed).toStrictEqual({ err: projected, sid: "s-1" });
+		expect(Object.keys(handed as object)).toEqual(["err", "sid"]);
+		expect(JSON.stringify(handed)).toBe(JSON.stringify({ err: projected, sid: "s-1" }));
+		expect(msg).toBe("failed");
 	});
 });
