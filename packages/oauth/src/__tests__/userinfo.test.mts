@@ -208,6 +208,34 @@ describe("GET /oauth/userinfo", () => {
 		expect(res.body).not.toHaveProperty("email");
 	});
 
+	it("never reads a scope claim wider than it was minted: a tab joins nothing, and runs of spaces are harmless", async () => {
+		// A token minted before requests were read strictly can carry
+		// `openid\temail` as one entry, which named no scope and released no
+		// claim. Split on the tab it would disclose the email claims to a token
+		// that was never granted them, so the entry is dropped instead.
+		const store = (): Omit<CallOptions, "token"> => ({
+			userSessionStore: {
+				kind: "memory",
+				get: vi.fn().mockResolvedValue(baseSession),
+				create: vi.fn(),
+				delete: vi.fn(),
+			},
+			refreshTokenFamilyRevocation: {
+				isFamilyRevoked: vi.fn().mockResolvedValue(false),
+				revokeFamily: vi.fn(),
+			},
+		});
+
+		const legacy = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid\temail" });
+		const joined = await callUserinfo({ token: legacy, ...store() });
+		expect(joined.status).toBe(200);
+		expect(joined.body).toEqual({ sub: "u-1" });
+
+		const spaced = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid  email" });
+		const res = await callUserinfo({ token: spaced, ...store() });
+		expect(res.body).toEqual({ sub: "u-1", email: "alice@example.com", email_verified: true });
+	});
+
 	it("missing Authorization header returns 401 with WWW-Authenticate Bearer", async () => {
 		const res = await callUserinfo({
 			token: null,

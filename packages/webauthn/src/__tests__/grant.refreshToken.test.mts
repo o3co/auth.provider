@@ -49,7 +49,10 @@
 import {
 	type ChallengeCeremony,
 	type ChallengeCeremonyOutcome,
+	createChallengeCeremony,
+	createMemoryChallengeStore,
 	createMemoryRefreshTokenFamilyStore,
+	createMemoryReplaySeenSet,
 	createMemoryWebAuthnCredentialStore,
 	createRefreshTokenFamilyRotation,
 	createSymmetricKeyStore,
@@ -232,6 +235,56 @@ function decodePayload(token: string): Record<string, unknown> {
 beforeEach(() => {
 	vi.clearAllMocks();
 	mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+});
+
+// ---------------------------------------------------------------------------
+// The lifetimes it mints with, read when it is built
+// ---------------------------------------------------------------------------
+
+describe("createWebAuthnGrant — the lifetimes it mints with", () => {
+	// A configuration built by hand never met the schema. Read when a request
+	// is answered, a bad lifetime was refused only after the ceremony had
+	// consumed the challenge: a 500, and a passkey assertion that can never be
+	// presented again. Read when the grant is built, it never reaches one.
+	const broken: Array<[string, Record<string, unknown>]> = [
+		["oauth.refreshToken.expiresIn = 1.5", { refreshToken: { expiresIn: 1.5 } }],
+		["oauth.refreshToken.expiresIn = NaN", { refreshToken: { expiresIn: Number.NaN } }],
+		["oauth.refreshToken.expiresIn = 0", { refreshToken: { expiresIn: 0 } }],
+		["no oauth.refreshToken.expiresIn", { refreshToken: {} }],
+		["oauth.accessToken.expiresIn = 1.5", { accessToken: { expiresIn: 1.5 } }],
+	];
+	for (const [label, over] of broken) {
+		it(`is refused when it is built with ${label}, and no challenge is consumed`, async () => {
+			const challengeStore = createMemoryChallengeStore();
+			const challengeCeremony = createChallengeCeremony({
+				challengeStore,
+				replaySeenSet: createMemoryReplaySeenSet(),
+			});
+			const challenge = "lifetime-challenge";
+			await challengeStore.issue("webauthn:authentication", challenge, Date.now() + 60_000);
+			const base = makeConfig() as unknown as { oauth: Record<string, unknown> };
+			const deps = await makeDeps({
+				challengeCeremony,
+				config: { oauth: { ...base.oauth, ...over } } as unknown as GrantDependencies["config"],
+			});
+
+			let refused: unknown;
+			let handler: ReturnType<typeof createWebAuthnGrant> | undefined;
+			try {
+				handler = createWebAuthnGrant(deps);
+			} catch (err) {
+				refused = err;
+			}
+			// Were it built, this is the request that would consume the challenge.
+			await handler
+				?.handle(makeCtx(makeClient(), { body: { assertion: makeAssertionResponse(challenge) } }))
+				.catch(() => undefined);
+
+			expect(await challengeStore.find("webauthn:authentication", challenge)).not.toBeNull();
+			expect(refused).toBeInstanceOf(RangeError);
+			expect((refused as Error).message).toMatch(/oauth\.(refreshToken|accessToken)\.expiresIn/);
+		});
+	}
 });
 
 // ---------------------------------------------------------------------------
@@ -503,11 +556,12 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 		expect(register).not.toHaveBeenCalled();
 	});
 
-	it("answers 503 when oauth.refreshToken.expiresIn is unset, so the token has no exp", async () => {
-		// The same guard reached without touching the decoder: no configured TTL
-		// means `generateToken` emits no `exp` claim, so the family would have no
-		// expiry to register under. A misconfiguration must not degrade into an
-		// unregistered refresh token.
+	it("is never built when oauth.refreshToken.expiresIn is unset, so no token without exp is minted", async () => {
+		// This used to reach the guard above at request time: no configured TTL
+		// meant `generateToken` emitted no `exp`, and the family had no expiry
+		// to register under, so the grant answered 503 — after the ceremony had
+		// consumed the challenge. The lifetime is now read when the grant is
+		// built, and a missing one refuses the composition instead.
 		const noTtlConfig = {
 			oauth: {
 				jwt: { issuer: ISSUER },
@@ -515,19 +569,17 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 				refreshToken: {},
 			},
 		} as unknown as GrantDependencies["config"];
+		const register = vi.fn(async () => {});
+		const deps = await makeDeps({
+			config: noTtlConfig,
+			refreshTokenFamilyRotation: {
+				register,
+				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
+			},
+		});
 
-		const { result } = await createWebAuthnGrant(
-			await makeDeps({
-				config: noTtlConfig,
-				refreshTokenFamilyRotation: {
-					register: vi.fn(async () => {}),
-					rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
-				},
-			}),
-		).handle(makeCtx(makeClient()));
-
-		expect(result.status).toBe(503);
-		expect("tokens" in result).toBe(false);
+		expect(() => createWebAuthnGrant(deps)).toThrow(/oauth\.refreshToken\.expiresIn/);
+		expect(register).not.toHaveBeenCalled();
 	});
 
 	it("still issues when no rotation component is wired", async () => {

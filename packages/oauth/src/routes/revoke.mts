@@ -18,8 +18,10 @@ import {
 	type AccessTokenDenylist,
 	type AccessTokenRevocationMode,
 	type ClientRepository,
+	DEFAULT_CLOCK_SKEW_MS,
 	type KeyStore,
 	type Logger,
+	loggableError,
 	type RefreshTokenFamilyRevocation,
 	type ReplaySeenSet,
 	verifyJwt,
@@ -79,8 +81,15 @@ export interface RevokeRouterOptions {
  *   but not a recognized value — and, under
  *   `accessTokenRevocation: "unsupported"`, for `token_type_hint =
  *   access_token` as well (see the access-token paths below).
- * - Returns 200 for every other outcome (RFC 7009 §2.2 no-info-leak),
- *   whether or not the token existed or belonged to the caller.
+ * - Returns 503 `temporarily_unavailable` when the store a revocation writes
+ *   to — the access-token denylist or the refresh-token family store —
+ *   fails (RFC 7009 §2.2.1), logged at error level as
+ *   `revoke_store_unavailable` with the store and the client. The client is
+ *   told to assume the token still exists and retry, never that it was
+ *   revoked.
+ * - Returns 200 for every other outcome (RFC 7009 §2.2 no-info-leak):
+ *   the token was revoked, or it did not verify, was not one this server
+ *   could use, or belonged to another client. None of those reaches a store.
  *
  * Refresh-token path:
  * - Verifies the RT signature / type / issuer via `verifyJwt` with
@@ -88,7 +97,8 @@ export interface RevokeRouterOptions {
  *   per RFC 7009 §2.1).
  * - Extracts `family_id` claim; if absent or verification fails → silent 200.
  * - Verifies client ownership via `azp` (falls back to `aud`).
- * - Calls `refreshTokenFamilyRevocation.revokeFamily(familyId)`.
+ * - Calls `refreshTokenFamilyRevocation.revokeFamily(familyId)`; a rejection
+ *   is the 503 above.
  * - When `refreshTokenFamilyRevocation` slot is unwired → silent 200.
  *
  * Access-token path (`accessTokenRevocation: "denylist"`):
@@ -100,7 +110,10 @@ export interface RevokeRouterOptions {
  * (see `.github/workflows/ci.yml` step `Restrict ignoreExpiration use-site`).
  * - Extracts `jti`, `exp`, `client_id` (or `azp` fallback) from payload.
  * - Verifies client ownership; mismatch → silent 200.
- * - Calls `denylist.add(jti, exp * 1000)`.
+ * - Calls `denylist.add(jti, exp * 1000 + DEFAULT_CLOCK_SKEW_MS)` — denied for
+ *   as long as the token can still verify — or, when even that has passed,
+ *   asks no store and answers 200: there is nothing left to deny. A
+ *   rejection from the store is the 503 above.
  *
  * Access-token path (`accessTokenRevocation: "unsupported"`):
  * - `token_type_hint = access_token` → 400 `unsupported_token_type`
@@ -118,7 +131,11 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 	// combination that cannot be honoured.
 	const accessTokenRevocation: AccessTokenRevocationMode =
 		opts.accessTokenRevocation ?? (opts.accessTokenDenylist ? "denylist" : "unsupported");
-	if (accessTokenRevocation === "denylist" && !opts.accessTokenDenylist) {
+	// What the access-token path writes to: present exactly when the mode is
+	// "denylist", which the refusal below guarantees. Resolved here, once, so
+	// the path takes it as a value rather than re-reading an optional slot.
+	const denylist = accessTokenRevocation === "denylist" ? opts.accessTokenDenylist : undefined;
+	if (accessTokenRevocation === "denylist" && !denylist) {
 		throw new Error(
 			'createRevokeRouter: accessTokenRevocation is "denylist" but no `accessTokenDenylist` was ' +
 				"supplied. RFC 7009 requires POST /oauth/revoke to answer 200, so without a denylist an " +
@@ -183,44 +200,48 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 		//   search to the other type (§2.1: "If the server is unable to locate the
 		//   token using the given hint, it MUST extend its search across all of its
 		//   supported token types.").
-		// "Fails to locate" = tryRevoke* returns false (wrong type / unverifiable).
-		// RFC 7009 §2.2: always 200 regardless of outcome.
-		if (accessTokenRevocation === "unsupported") {
+		// "Fails to locate" = an attempt answers `not_located` (wrong type,
+		// unverifiable, not this client's). A store that fails is not that: it
+		// ends the search as `unavailable`, answered 503 below.
+		let outcome: RevocationAttempt;
+		if (denylist === undefined) {
 			// #277: the capability is declared absent. An explicit AT hint gets the
 			// RFC 7009 §2.2.1 answer for exactly this situation rather than a 200
 			// that means nothing. An unhinted request is still a legitimate
 			// cross-type search — the RT half of it works — so it runs and answers
-			// 200 either way, per §2.2's no-info-leak rule.
+			// 200 whether or not the token was an RT, per §2.2's no-info-leak rule.
 			if (token_type_hint === "access_token") {
 				res.status(400).json({ error: "unsupported_token_type" });
 				return;
 			}
-			await tryRevokeRefreshToken(token, client.clientId, opts);
-			res.status(200).end();
-			return;
-		}
-
-		if (token_type_hint === "access_token") {
-			// Hint says AT — try AT first; if not found, fall back to RT.
-			await tryRevokeAccessToken(token, client.clientId, opts);
-			// AT path always resolves (never returns a "found" bool); unconditional
-			// cross-type fallback would double-revoke on success. Per spec the AT
-			// path is self-contained — if `jti` was added to the denylist that IS
-			// the revocation. But if the token didn't parse as an AT, we should try RT.
-			// tryRevokeAccessToken swallows all errors, so we always fall through here;
-			// attempting RT is harmless (silent 200 on mismatch). This covers the case
-			// where the caller passed hint=access_token with an actual RT.
-			await tryRevokeRefreshToken(token, client.clientId, opts);
+			outcome = await tryRevokeRefreshToken(token, client.clientId, opts);
+		} else if (token_type_hint === "access_token") {
+			// Hint says AT — try AT first; if it is not one, fall back to RT. This
+			// covers the caller that passed hint=access_token with an actual RT.
+			outcome = await tryRevokeAccessToken(token, client.clientId, denylist, opts);
+			if (outcome === "not_located") {
+				outcome = await tryRevokeRefreshToken(token, client.clientId, opts);
+			}
 		} else {
-			// hint=refresh_token or no hint — try RT first.
-			const revoked = await tryRevokeRefreshToken(token, client.clientId, opts);
-			if (!revoked) {
-				// RT path failed to locate/revoke — extend search to AT per §2.1.
-				await tryRevokeAccessToken(token, client.clientId, opts);
+			// hint=refresh_token or no hint — try RT first, then extend to AT.
+			outcome = await tryRevokeRefreshToken(token, client.clientId, opts);
+			if (outcome === "not_located") {
+				outcome = await tryRevokeAccessToken(token, client.clientId, denylist, opts);
 			}
 		}
 
-		// RFC 7009 §2.2: always 200 regardless of whether the token existed.
+		if (outcome === "unavailable") {
+			// RFC 7009 §2.2.1: the client "should assume the token still exists".
+			// A 200 here would tell it the opposite while the token keeps
+			// verifying until it expires.
+			res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "token revocation is temporarily unavailable; retry the request",
+			});
+			return;
+		}
+
+		// RFC 7009 §2.2: 200 whether the token was revoked or not located.
 		res.status(200).end();
 	});
 
@@ -228,20 +249,56 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 }
 
 /**
- * Attempt to revoke a refresh token.
+ * What one revocation attempt came to.
  *
- * Returns `true` if revocation was performed (the RT was valid and belonged to
- * the requesting client). Returns `false` for any other outcome — caller
- * should then try the access-token path or return 200 silently.
+ * - `revoked` — the token was this client's and its store recorded it.
+ * - `not_located` — the token is not one this attempt can revoke: it does
+ *   not verify as this type, carries no revocable identity, belongs to
+ *   another client, or is past even the default verification tolerance, so
+ *   there is nothing left to deny. RFC 7009 §2.2 answers it 200, and the caller extends the
+ *   search to the other type.
+ * - `unavailable` — the token was this client's, and the store that records
+ *   the revocation failed. Already logged; the caller answers 503.
+ */
+type RevocationAttempt = "revoked" | "not_located" | "unavailable";
+
+/**
+ * Records a revocation in its store, or reports the store's failure. Only a
+ * token that verified and belongs to the requesting client reaches here, so
+ * the failure is the server's, never a verdict on the token. The log names
+ * the store and the client whose revocation was lost — never the token.
+ */
+async function recordRevocation(
+	store: "accessTokenDenylist" | "refreshTokenFamilyRevocation",
+	write: () => Promise<void>,
+	clientId: string,
+	opts: RevokeRouterOptions,
+): Promise<RevocationAttempt> {
+	try {
+		await write();
+		return "revoked";
+	} catch (err) {
+		opts.logger.error({ err: loggableError(err), store, clientId }, "revoke_store_unavailable");
+		return "unavailable";
+	}
+}
+
+/**
+ * Attempt to revoke a refresh token by revoking its family.
+ *
+ * `not_located` sends the caller to the access-token path, or to a silent
+ * 200; `unavailable` means the family store failed.
  */
 async function tryRevokeRefreshToken(
 	token: string,
 	requestingClientId: string,
 	opts: RevokeRouterOptions,
-): Promise<boolean> {
-	if (!opts.refreshTokenFamilyRevocation) {
-		return false;
+): Promise<RevocationAttempt> {
+	const revocation = opts.refreshTokenFamilyRevocation;
+	if (!revocation) {
+		return "not_located";
 	}
+	let familyId: string;
 	try {
 		const verified = await verifyJwt(token, opts.keyStore, {
 			type: "refresh_token",
@@ -261,11 +318,11 @@ async function tryRevokeRefreshToken(
 
 		// Extract family_id — present on tokens minted by v0.5.x+.
 		const familyIdRaw = claims.family_id;
-		const familyId = typeof familyIdRaw === "string" && familyIdRaw.length > 0 ? familyIdRaw : null;
-		if (!familyId) {
+		if (typeof familyIdRaw !== "string" || familyIdRaw.length === 0) {
 			// No family_id → legacy token; cannot revoke by family.
-			return false;
+			return "not_located";
 		}
+		familyId = familyIdRaw;
 
 		// Verify client ownership: azp takes precedence (D-6 PB-2); fall back to aud.
 		const tokenAud = Array.isArray(verified.payload.aud)
@@ -275,46 +332,50 @@ async function tryRevokeRefreshToken(
 			typeof claims.azp === "string" && claims.azp.length > 0 ? claims.azp : tokenAud;
 		if (tokenAzp !== requestingClientId) {
 			// Wrong owner — silent 200 (RFC 7009 §2.2 no-info-leak).
-			return false;
+			return "not_located";
 		}
-
-		await opts.refreshTokenFamilyRevocation.revokeFamily(familyId);
-		return true;
 	} catch {
-		// Invalid signature / wrong type / wrong issuer → silent 200.
+		// Invalid signature / wrong type / wrong issuer → silent 200. With
+		// `revocation: "none"`, `verifyJwt` throws only its own verification
+		// errors, so nothing caught here is a store outage.
 		opts.logger?.debug?.(
 			{ scope: "oauth.revoke.refresh" },
 			"refresh token revoke skipped (verification failed)",
 		);
-		return false;
+		return "not_located";
 	}
+
+	return recordRevocation(
+		"refreshTokenFamilyRevocation",
+		() => revocation.revokeFamily(familyId),
+		requestingClientId,
+		opts,
+	);
 }
 
 /**
  * Attempt to revoke an access token by adding its jti to the denylist.
  *
  * Only reached when `accessTokenRevocation` is `"denylist"`, which
- * `createRevokeRouter` refuses to enter without a denylist (#277) — hence
- * `denylist` below is a guaranteed value, not an optional one. The unwired
- * branch this function used to carry was the silent no-op the issue was filed
- * about; it is gone rather than moved, because there is no request-time
- * recovery from it.
+ * `createRevokeRouter` refuses to enter without a denylist (#277) — so the
+ * router hands the denylist over as a value, and there is no unwired branch
+ * here. The one this function used to carry was the silent no-op the issue
+ * was filed about; it is gone rather than moved, because there is no
+ * request-time recovery from it.
  *
- * Always resolves (never throws) — failures are logged and swallowed.
+ * Always resolves (never throws): a token that cannot be revoked is
+ * `not_located`, and a denylist that fails is `unavailable`, logged.
  * `ignoreExpiration: true` is intentional and is the ONLY legitimate call site
  * for this option in production code (CI guardrail T7 enforces this).
  */
 async function tryRevokeAccessToken(
 	token: string,
 	requestingClientId: string,
+	denylist: AccessTokenDenylist,
 	opts: RevokeRouterOptions,
-): Promise<void> {
-	const denylist = opts.accessTokenDenylist;
-	if (!denylist) {
-		// Unreachable via createRevokeRouter, which refuses this composition at
-		// construction. Kept as a typed narrowing, not as a fallback behaviour.
-		return;
-	}
+): Promise<RevocationAttempt> {
+	let jti: string;
+	let exp: number;
 	try {
 		// ignoreExpiration: true — §4.5 / S9. Revoking an already-expired AT is
 		// harmless and semantically correct: the client may not know the AT has
@@ -329,14 +390,16 @@ async function tryRevokeAccessToken(
 		});
 		const claims = verified.payload as Record<string, unknown>;
 
-		const jti = typeof verified.payload.jti === "string" ? verified.payload.jti : undefined;
-		const exp = typeof verified.payload.exp === "number" ? verified.payload.exp : undefined;
+		const claimedJti = typeof verified.payload.jti === "string" ? verified.payload.jti : undefined;
+		const claimedExp = typeof verified.payload.exp === "number" ? verified.payload.exp : undefined;
 
-		if (!jti || !exp) {
+		if (!claimedJti || !claimedExp) {
 			// Malformed AT (no jti or exp) — cannot denylist; silent 200.
 			opts.logger.debug({ scope: "oauth.revoke.access" }, "AT revoke skipped: missing jti or exp");
-			return;
+			return "not_located";
 		}
+		jti = claimedJti;
+		exp = claimedExp;
 
 		// Verify client ownership: client_id claim (RFC 9068) or azp fallback.
 		const tokenAud = Array.isArray(verified.payload.aud)
@@ -364,12 +427,33 @@ async function tryRevokeAccessToken(
 				},
 				"AT revoke skipped: client_id mismatch or missing",
 			);
-			return;
+			return "not_located";
 		}
-
-		await denylist.add(jti, exp * 1000);
 	} catch {
-		// Invalid signature / wrong type / wrong issuer → silent 200.
+		// Invalid signature / wrong type / wrong issuer → silent 200. Nothing
+		// caught here is a store outage: see the refresh-token path.
 		opts.logger.debug({ scope: "oauth.revoke.access" }, "AT revoke skipped (verification failed)");
+		return "not_located";
 	}
+
+	// Denied for as long as the token can still verify: `verifyJwt` accepts
+	// one up to DEFAULT_CLOCK_SKEW_MS past its `exp` (the default; no verifier in
+	// this provider passes another), so an entry that lapsed at `exp` would let a revoked
+	// token verify again for that long — the same extension the
+	// subject-revocation horizon applies. Once even that has passed there is
+	// nothing left to deny, and the store is not asked: a store holding a TTL
+	// may refuse an expiry already past, which must not turn RFC 7009 §2.1's
+	// legal revocation of an expired token into a 503.
+	const deniedUntilMs = exp * 1000 + DEFAULT_CLOCK_SKEW_MS;
+	if (deniedUntilMs <= Date.now()) {
+		opts.logger.debug({ scope: "oauth.revoke.access" }, "AT revoke skipped: already expired");
+		return "not_located";
+	}
+
+	return recordRevocation(
+		"accessTokenDenylist",
+		() => denylist.add(jti, deniedUntilMs),
+		requestingClientId,
+		opts,
+	);
 }

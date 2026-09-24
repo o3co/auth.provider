@@ -26,6 +26,7 @@ import {
 	type GrantHandlerResult,
 	generateToken,
 	generateTokenResponse,
+	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
@@ -53,6 +54,12 @@ export type ClientCredentialsGrantDeps = Pick<
 
 export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): GrantHandler => {
 	const { config, keyStore } = deps;
+	// The lifetime it mints with, read once, when the grant is built: a
+	// configuration built by hand that the resolver refuses is a composition
+	// fault, refused before any request — read per request, it was refused
+	// only after client authentication had spent whatever it spends, with
+	// a 500.
+	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
 
 	return {
 		// §3.4.1: machine-to-machine access is never acquired by omission — a
@@ -197,7 +204,7 @@ export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): 
 					client_id: client.clientId,
 				},
 				{
-					expiresIn: resolveAccessTokenLifetime(config).defaultExpiresIn,
+					expiresIn: accessTokenExpiresIn,
 					keyStore,
 					issuer,
 					audience,
@@ -251,7 +258,9 @@ function resolveScope(
 		};
 	};
 	const requestedRaw = ctx.body.scope;
-	if (requestedRaw === undefined) {
+	// RFC 6749 §3.2: a parameter sent without a value is treated as omitted —
+	// `scope=""` in a form body, `"scope": null` in a JSON one.
+	if (requestedRaw === undefined || requestedRaw === null) {
 		return omittedScopeGrant();
 	}
 	// RFC 6749 §3.3: `scope` MUST be a single space-delimited string when
@@ -266,15 +275,22 @@ function resolveScope(
 			errorDescription: "scope must be a space-delimited string",
 		};
 	}
-	if (requestedRaw.trim() === "") {
+	// RFC 6749 §3.3, read strictly (`readSpaceDelimitedParameter`): the space
+	// is the one delimiter, so a tab- or newline-delimited value from a
+	// non-conformant client is refused as malformed — neither re-tokenized nor
+	// left to fail the subset check under a scope named with a tab. Spaces
+	// alone name nothing, which is an omitted scope.
+	const requested = readSpaceDelimitedParameter(requestedRaw);
+	if (requested === null) {
+		return {
+			status: 400,
+			error: "invalid_scope",
+			errorDescription: "scope is not a space-delimited list of scope-tokens",
+		};
+	}
+	if (requested.length === 0) {
 		return omittedScopeGrant();
 	}
-	// RFC 6749 §3.3 ABNF: scope-token delimiter is a single SP (0x20).
-	// Match sibling grants (`refreshToken.mts`, `routes.mts`) on the literal
-	// `" "` split rather than `\s+` so tab/newline-delimited scope strings
-	// from non-conformant clients fail the subset check loudly instead of
-	// being silently re-tokenized.
-	const requested = requestedRaw.split(" ").filter(Boolean);
 	const disallowed = requested.filter((s) => !allowed.includes(s));
 	if (disallowed.length > 0) {
 		return {

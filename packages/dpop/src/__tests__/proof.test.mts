@@ -252,6 +252,35 @@ describe("parseProof — structural validation only (no signature check)", () =>
 		await expect(parseProof(crafted)).rejects.toMatchObject({ reason: "malformed_proof" });
 	});
 
+	// The jti becomes a seen-set key kept for `replay-store-ttl-seconds`, and a
+	// proof reaches the token endpoint before client authentication: the
+	// presenter chooses it, so it is bounded — 256 characters, far past a UUID
+	// (36) or RFC 9449 §4.2's 96 random bits (16 in base64url).
+	it.each([
+		{ label: "257 characters", jti: "j".repeat(257) },
+		{ label: "the empty string", jti: "" },
+	])("throws malformed_proof, as invalid_dpop_proof, for a jti of $label", async ({ jti }) => {
+		const { privateKey, publicKey } = await generateKeyPair("ES256");
+		const jwk = await exportJWK(publicKey);
+		const jwt = await new SignJWT({ htm: "POST", htu: "https://as/token", iat: 1, jti })
+			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
+			.sign(privateKey);
+		await expect(parseProof(jwt)).rejects.toMatchObject({
+			reason: "malformed_proof",
+			code: "invalid_dpop_proof",
+		});
+	});
+
+	it("accepts a jti of exactly 256 characters", async () => {
+		const { privateKey, publicKey } = await generateKeyPair("ES256");
+		const jwk = await exportJWK(publicKey);
+		const jti = "j".repeat(256);
+		const jwt = await new SignJWT({ htm: "POST", htu: "https://as/token", iat: 1, jti })
+			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
+			.sign(privateKey);
+		expect((await parseProof(jwt)).claims.jti).toBe(jti);
+	});
+
 	it("code is always invalid_dpop_proof for all thrown DPoPErrors", async () => {
 		await expect(parseProof("a.b.c.d")).rejects.toMatchObject({
 			code: "invalid_dpop_proof",

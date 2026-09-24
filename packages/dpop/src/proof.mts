@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { isRecordableJti, MAX_JTI_LENGTH } from "@o3co/auth-provider-core";
 import { decodeJwt, decodeProtectedHeader, type JWK } from "jose";
 import { DPoPError } from "./errors.mjs";
 import { computeJkt } from "./thumbprint.mjs";
@@ -72,6 +73,7 @@ export interface DPoPProof {
  *   Step 6: jwk present in header
  *   Step 7: jwk is public-only (no private material — name-screened)
  *   Step 9: required claims present + correct types       ← runs BEFORE step 8
+ *           (and a `jti` of at most `MAX_JTI_LENGTH` characters)
  *   Step 8: jkt computed via RFC 7638 SHA-256 thumbprint  ← runs LAST
  *
  * Step 8 is moved AFTER step 9 because `computeJkt` is the only cryptographic
@@ -146,6 +148,20 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 		typeof claims.jti !== "string"
 	) {
 		throw new DPoPError("malformed_proof", "invalid claim types");
+	}
+
+	// The jti is the key the verifier records in the seen-set for
+	// `replay-store-ttl-seconds`, and this runs before the signature is checked
+	// and, at the token endpoint, before the client is authenticated: whoever
+	// sends the proof chooses it. Non-empty and at most `MAX_JTI_LENGTH` (256)
+	// characters — RFC 9449 §4.2 asks only for uniqueness, which a UUID (36)
+	// or 96 random bits (16 in base64url) already give — so an over-long one
+	// is malformed here and never reaches the store.
+	if (!isRecordableJti(claims.jti)) {
+		throw new DPoPError(
+			"malformed_proof",
+			`jti must be a non-empty string of at most ${MAX_JTI_LENGTH} characters`,
+		);
 	}
 
 	// `ath` is optional at this layer but must not be silently dropped when

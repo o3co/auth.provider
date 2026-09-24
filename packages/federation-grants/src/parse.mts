@@ -27,8 +27,12 @@
  * larger than the connection permits, is core's decision and comes back as
  * `invalid_request/min_ttl_out_of_range`: one answer to one question, rather
  * than two layers each carrying their own idea of a bound only one of them
- * can see.
+ * can see. It does read `scope` by RFC 6749 §3.3's grammar, strictly: a value
+ * that is not a space-delimited list of scope-tokens is not an assertion core
+ * could check, and is refused here as `invalid_scope`.
  */
+
+import { readSpaceDelimitedParameter } from "@o3co/auth-provider-core";
 
 /** What the parse produces, in the shape `RetrieveFederationGrantTokenRequest` wants it. */
 export interface FederationGrantTokenRequestBody {
@@ -134,10 +138,13 @@ export function parseFederationGrantTokenRequest(body: unknown): ParsedFederatio
 	const scopeText = scopeRead.value;
 	let scope: readonly string[] | undefined;
 	if (scopeText !== undefined) {
-		// RFC 6749 §3.3: space-delimited. Split without sorting, widening or
-		// supplying defaults — the set is exactly what the caller asked for.
-		const tokens = scopeText.split(" ").filter((token) => token !== "");
-		if (tokens.length === 0) return refuse("invalid_scope");
+		// RFC 6749 §3.3, read strictly: the caller's assertion, so a value that
+		// is not a space-delimited list of scope-tokens is refused rather than
+		// asserting a scope named with a tab. Split without sorting, widening
+		// or supplying defaults — the set is exactly what the caller asked for,
+		// without repeats.
+		const tokens = readSpaceDelimitedParameter(scopeText);
+		if (tokens === null || tokens.length === 0) return refuse("invalid_scope");
 		scope = tokens;
 	}
 
@@ -332,10 +339,12 @@ function parseLodging(
 	if (!scope.ok) return lodgingRefuse(scope.description);
 	let scopes: readonly string[] | undefined;
 	if (scope.value !== undefined) {
-		const tokens = scope.value.split(" ").filter((token) => token !== "");
-		// Present and empty is not "the connection's full set" — that is what
-		// leaving it out says, and the two must not be confused.
-		if (tokens.length === 0) return lodgingRefuse("invalid_scope");
+		// Read strictly, as the token route reads its scope: malformed is
+		// refused, not re-split or dropped. Present and empty is not "the
+		// connection's full set" — that is what leaving it out says, and the
+		// two must not be confused.
+		const tokens = readSpaceDelimitedParameter(scope.value);
+		if (tokens === null || tokens.length === 0) return lodgingRefuse("invalid_scope");
 		scopes = tokens;
 	}
 

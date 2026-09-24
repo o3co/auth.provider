@@ -134,6 +134,22 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 		expect(payload.aud).toBe("https://api.example");
 	});
 
+	it("answers a malformed scope 400 invalid_scope on the wire, and a tab alone is not an omitted scope", async () => {
+		const app = await buildApp(clientRepoWith({ allowedGrantTypes: ["client_credentials"] }));
+		for (const scope of ["read\twrite", "\t"]) {
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({ grant_type: "client_credentials", scope });
+			expect(res.status, JSON.stringify(scope)).toBe(400);
+			expect(res.body).toEqual({
+				error: "invalid_scope",
+				error_description: "scope is not a space-delimited list of scope-tokens",
+			});
+		}
+	});
+
 	it("returns 400 invalid_request when grant_type is missing (RFC 6749 §5.2, #293 item 10)", async () => {
 		// A missing required parameter is `invalid_request`; the server answers
 		// `unsupported_grant_type` only for a VALUE it does not support.

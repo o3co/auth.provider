@@ -15,7 +15,14 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { canonicalScope, isScopeToken, parseScopeTokens } from "../scope.mjs";
+import {
+	canonicalScope,
+	isScopeToken,
+	parseScopeTokens,
+	readIssuedScope,
+	readSpaceDelimitedParameter,
+} from "#/federations/scope.mjs";
+import * as core from "#/index.mjs";
 
 describe("isScopeToken — RFC 6749 §3.3's grammar", () => {
 	it.each(["openid", "user:email", "read:user", "a", "~", "!"])("admits %s", (entry) => {
@@ -91,5 +98,81 @@ describe("canonicalScope", () => {
 	it("answers undefined when nothing is named", () => {
 		expect(canonicalScope("   ")).toBeUndefined();
 		expect(canonicalScope(undefined)).toBeUndefined();
+	});
+});
+
+describe("readSpaceDelimitedParameter — a request parameter, read strictly", () => {
+	it("is exported from the package root", () => {
+		expect(typeof core.readSpaceDelimitedParameter).toBe("function");
+		expect(core.readSpaceDelimitedParameter).toBe(readSpaceDelimitedParameter);
+	});
+
+	it.each([
+		["one scope", "openid", ["openid"]],
+		["two, one space apart", "openid email", ["openid", "email"]],
+		[
+			"runs of spaces, which cannot merge or invent a token",
+			"  openid   email ",
+			["openid", "email"],
+		],
+		["a repeat, kept once at its first place", "email openid email", ["email", "openid"]],
+		["the empty string", "", []],
+		["spaces alone", "   ", []],
+	])("reads %s", (_label, value, expected) => {
+		expect(readSpaceDelimitedParameter(value)).toEqual(expected);
+	});
+
+	it.each([
+		["a tab between two scopes", "openid\temail"],
+		["a newline between two scopes", "openid\nemail"],
+		["a tab alone", "\t"],
+		["a scope with a double quote", 'openid "email"'],
+		["a scope with a backslash", "openid a\\b"],
+		["a control character", "openid \x01"],
+		["a non-ASCII character", "openid é"],
+	])("refuses %s as malformed rather than dropping or re-splitting it", (_label, value) => {
+		// RFC 6749 §3.3 delimits with the space alone. A client that sent a tab
+		// or a character the grammar excludes sent a malformed request (§5.2,
+		// §4.1.2.1 `invalid_scope`); reading it tolerantly would answer a
+		// request other than the one it made.
+		expect(readSpaceDelimitedParameter(value)).toBeNull();
+	});
+});
+
+describe("readIssuedScope — a scope a token already carries, read so it never widens", () => {
+	it("is exported from the package root", () => {
+		expect(typeof core.readIssuedScope).toBe("function");
+		expect(core.readIssuedScope).toBe(readIssuedScope);
+	});
+
+	it.each([
+		["one scope", "openid", ["openid"]],
+		["two, one space apart", "openid email", ["openid", "email"]],
+		["runs of spaces", "  openid   email ", ["openid", "email"]],
+		["a repeat, kept once", "email openid email", ["email", "openid"]],
+	])("reads %s as the tokens it was minted with", (_label, value, expected) => {
+		expect(readIssuedScope(value)).toEqual(expected);
+	});
+
+	it.each([
+		["a tab between two names", "openid\temail", []],
+		["a newline between two names", "openid\nemail", []],
+		["a tab beside a good scope", "profile openid\temail", ["profile"]],
+		["a quote", 'openid "email"', ["openid"]],
+	])("drops %s rather than splitting it into scopes it never named", (_label, value, expected) => {
+		// A token minted before the request reader was strict can carry
+		// `openid\temail` as one entry — inert, because nothing matched it.
+		// Splitting it on the tab would read `email` into a token that was
+		// never granted it; dropping it can only narrow what the token names.
+		expect(readIssuedScope(value)).toEqual(expected);
+	});
+
+	it.each([
+		["a number", 42],
+		["null", null],
+		["undefined", undefined],
+		["an array", ["openid"]],
+	])("names nothing for %s", (_label, value) => {
+		expect(readIssuedScope(value)).toEqual([]);
 	});
 });

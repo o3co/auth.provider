@@ -190,6 +190,11 @@ export interface JwtVerifyOptions {
 	/**
 	 * Clock skew tolerance in milliseconds applied to `exp`/`nbf`/`iat`
 	 * checks. Default: 300_000 (5 min) per RFC 8725 §3.10 guidance.
+	 *
+	 * An access-token denylist entry (`/oauth/revoke`) is kept until `exp` plus
+	 * the default only. A larger value here would accept a revoked token for
+	 * the difference once its entry lapses, so keep the default wherever the
+	 * denylist is consulted.
 	 */
 	readonly clockSkewMs?: number;
 	/**

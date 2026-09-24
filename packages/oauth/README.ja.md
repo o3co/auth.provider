@@ -114,6 +114,8 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 **エラー説明とエラーコード。** RFC 6749 がエラーのテキストに許すのは、`"` と `\` を除く印字可能な ASCII だけである（§5.2、§4.1.2.1）。このパッケージはその範囲に次をすべて収める: `/oauth/token` が書く `error_description`（どのグラントが作ったものでも）、`/oauth/authorize` がエラーリダイレクトに載せる `error_description`、クライアント認証が `/oauth/token`、`/oauth/introspect`、`/oauth/revoke`（後の 2 つもエラーは同じ形式。RFC 7662 §2.3、RFC 7009 §2.2.1）で書く `error_description`。それ以外の文字は `?` に置き換える（core の `sanitizeErrorText`、[`errors/envelope.mts`](../core/src/errors/envelope.mts)）。説明が引用するクライアント送信の値（グラントタイプ、スコープ、audience、トークンタイプ、`response_type` など）や設定値（クライアントの `tokenEndpointAuthMethod`、トークンバインディングの kind など）に含まれる文字も同じである。説明は値を `'` で引用する。`error` コード自体は `1*NQSCHAR`（同じ文字で、空でないこと）でなければならない。グラントポリシーの deny はポリシー自身のコードを運ぶので、範囲外のコードは `/oauth/token` では `invalid_request`、`/oauth/authorize` のリダイレクトでは `access_denied` として返し、サニタイズしてログに残す（`token_error_code_malformed`、`authorize_policy_deny_error_malformed`）。空の説明や文字列でない説明（JavaScript のポリシーは何でも返せる）は送らない。`/oauth/token` は省き、`/oauth/authorize` のリダイレクトは `policy denied` を載せる。クライアントの `state` は送られたとおりに返す。ほかのルートも同じ範囲に収める: `/oauth/federation/:name/token` と `/oauth/federation/:name/logout` はパスのフェデレーション名を `'` で引用し、そこに含まれる範囲外の文字を `?` として送る（`federation '<name>' is not linked to this session`）。`/oauth/consent` は `decision must be 'accept' or 'deny'` と答える。これらのエンドポイントで応答する core のミドルウェア（トークンバインディングのミドルウェア、レートリミッター、保護リソースのバインディング）は core の `errorEnvelope` を通して書き、そこが規則を自身で適用する（core の [README](../core/README.ja.md#エラーのテキストrfc-6749)）。
 
+**空白区切りの値。** クライアントが送る `scope`、`prompt`、`acr_values` は RFC 6749 §3.3 の文法で厳密に読む（core の `readSpaceDelimitedParameter`）: 区切りは空白だけで、scope-token でない要素 — タブ、改行、引用符、バックスラッシュ、印字可能な ASCII 以外 — があれば値全体が不正な形式になる。不正な形式の `scope` は、ここのすべてのグラントの `/oauth/token` と `/oauth/authorize` で `invalid_scope`（`scope is not a space-delimited list of scope-tokens`）になり、絞り込まれることも、スコープを名指しているかのように許可リストと照合されることもない。空白だけの値は空の値と同じく省略されたスコープだが、タブだけの値は不正な形式である。不正な形式の `prompt` と `acr_values` は `invalid_request`。繰り返された `scope` — および文字列でない値すべて — は `invalid_request` になる。一方、JSON ボディの `"scope": null` は、フォームボディの `scope=` と同じく省略されたスコープである（RFC 6749 §3.2）。このパッケージ自身のアクセストークンとリフレッシュトークンの `scope` クレーム（`/oauth/userinfo` とリフレッシュで）は、広がらないように読む（`readIssuedScope`）: 空白だけで分け、scope-token でない要素は捨てる — リクエストを厳密に読む前に発行されたトークンは `openid<TAB>email` を 1 つの要素として持ちうるが、それは発行時にどのスコープも名指さず、今もどのクレームも開示しない。リフレッシュはトークンのスコープを正規形で引き継ぐ。第三者が書いた値 — クライアントメタデータドキュメントの `scope`、上流の応答 — は寛容に読む（`parseScopeTokens`）: 任意の空白で分けて scope-token だけを残す。
+
 `/token`、`/introspect`、`/authorize`、`/revoke` は、構成が `rateLimiter` を配線していればクライアント認証より前でスロットリングされ、プロダクトの `rateLimit.failMode` に従う。配線されていなければスロットリングされない。
 
 `consentStore` が `pendingConsentStore` 無しで配線されたとき（またはその逆）、および `oauth.revocation.accessToken = "denylist"` を宣言して `accessTokenDenylist` が無いとき、ルーターは構築を拒否する — `createApp` 経由では boot の失敗になる。
@@ -182,6 +184,8 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 `userRepository` か `assertionVerifier` の無い状態で jwt-bearer を有効にすると boot が失敗する — [jwt-bearer](#jwt-bearer-信頼する発行者-525) を参照。
 
+**トークンの有効期間はグラントの構築時に読む。** ここのすべてのグラントは `oauth.accessToken` を core の `resolveAccessTokenLifetime` で、`authorization_code` と `refresh_token` は `oauth.refreshToken.expiresIn` を `resolveRefreshTokenLifetime` で、ファクトリーの中で一度だけ読む。それらのリゾルバーが拒否する config — スキーマが同じ値を起動時に拒否するので、手組みのものでしかあり得ない — ではファクトリーがキーを名指しした `RangeError` を投げ、グラントは登録されない。リクエストがそれに出会うことはない: 応答を発行できない config のために、認可コードも ID-JAG の `jti` もリフレッシュトークンも消費されない。一度だけ読むことの裏返しとして、グラントは構築時の有効期間で発行するので、起動後に config オブジェクトの `oauth.accessToken.*` や `oauth.refreshToken.expiresIn` を変えても、グラントを作り直すまで効果は無い — 他の設定変更と同じく再起動する。
+
 ### `authorization_code`: セッション、`sid`、`family_id` と id_token
 
 `authorization_code` と `refresh_token` グラントが発行するアクセストークンとリフレッシュトークンは `family_id` — リフレッシュトークンファミリー。[イントロスペクション](#イントロスペクション-呼び出し元が問い合わせられるトークン)、[userinfo](#userinfo)、[ログアウト](#ログアウト)、federation token ルートが失効の確認に使う — と、コードレコードにあればセッション ID の `sid` を持つ。`sid` はログイン経路（ローカルログインかフェデレーションコールバック）が `/authorize` でコードに書き込む。
@@ -228,7 +232,7 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 
 **PKCE は必須で、方式は `S256`。** `plain` は登録に `allowPlainPkce: true` を持つクライアントにだけ許されるので、ディスカバリーは `S256` だけを載せる。
 
-**`prompt=none` に対応する。** セッションが無ければクライアントの `redirect_uri` で `login_required` を返す — 非表示の更新用 iframe はログインページを操作できないので、それが目的どおりである。セッションがあれば黙って進む。
+**`prompt=none` に対応する。** セッションが無ければクライアントの `redirect_uri` で `login_required` を返す — 非表示の更新用 iframe はログインページを操作できないので、それが目的どおりである。セッションがあれば黙って進む。`none` を名指すが不正な形式の `prompt`（`none<TAB>`）や、`none` を他の値と組み合わせた `prompt` も無音のコンテキストから来るので、同じく `redirect_uri` で `invalid_request` を返し、ログインページには送らない。
 
 **`prompt=login` は再認証させる** — 下の[ステップアップと再認証](#ステップアップと再認証-481)を参照。
 
@@ -282,9 +286,9 @@ oauth.authorize.acrValues {
 
 **リクエスト。** フォームボディに `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer` と `client_assertion=<JWT>`、そして認証に関わるものは他に何も付けない: Basic ヘッダーやボディの `client_secret` と並んだアサーションは、どちらも調べる前に拒否される（RFC 6749 §2.3、1 リクエストに 1 方式）。ボディの `client_id` があれば、アサーションと一致しなければならない。
 
-**アサーション。** `iss` と `sub` はどちらも `client_id` と等しい。`aud` は issuer かトークンエンドポイントの URL を名指す（RFC 7523 §3 — どちらの形でもよいので、どちらを使うクライアントライブラリでも動く）。`exp` は必須で、最大 1 時間先まで（`MAX_CLIENT_ASSERTION_LIFETIME_SECONDS`）。`jti` は必須かつ 1 回限りで、アサーションが期限切れになるまで構成の `replaySeenSet` に `client-assertion:<client_id>` として記録される。署名は非対称アルゴリズム（`RS*`、`PS*`、`ES*`、`EdDSA` — `token_endpoint_auth_signing_alg_values_supported` が列挙する。`HS*` と `none` は JWKS に対して決して受け入れない）。`nbf` はあれば検証し、`iat` はあればサーバー時計より 30 秒の許容を超えて未来であってはならず、有効期間の上限より古くてもならない。
+**アサーション。** `iss` と `sub` はどちらも `client_id` と等しい。`aud` は issuer かトークンエンドポイントの URL を名指す（RFC 7523 §3 — どちらの形でもよいので、どちらを使うクライアントライブラリでも動く）。`exp` は必須で、最大 1 時間先まで（`MAX_CLIENT_ASSERTION_LIFETIME_SECONDS`）。`jti` は必須で、seen-set のキーとして保持されるので 256 文字以内（core の `MAX_JTI_LENGTH`）、かつ 1 回限りで、アサーションが期限切れになるまで構成の `replaySeenSet` に `client-assertion:<client_id>` として記録される。署名は非対称アルゴリズム（`RS*`、`PS*`、`ES*`、`EdDSA` — `token_endpoint_auth_signing_alg_values_supported` が列挙する。`HS*` と `none` は JWKS に対して決して受け入れない）。`nbf` はあれば検証し、`iat` はあればサーバー時計より 30 秒の許容を超えて未来であってはならず、有効期間の上限より古くてもならない。
 
-**拒否**は `401 invalid_client` — リプレイされた `jti`、誤った `aud`、期限切れまたは長すぎるアサーション、JWKS に無い鍵での署名、公開されていない `kid`、別の方式で登録されたクライアント、未知のクライアント、取得できない `jwks_uri`（フェイルクローズ、理由付きで `client_assertion_refused` としてログ出力）。`replaySeenSet` を配線していない構成での `private_key_jwt` リクエストは `500 server_error`: 記録できない `jti` はリプレイされ得るものなので、未検査で認証するのではなく拒否する。standalone テンプレートはそれを配線する（`REPLAY_SEEN_SET_ADAPTER`、既定は Redis。メモリーアダプターは `DEPLOYMENT_MODE=multi` では拒否される。捕獲されたアサーションがレプリカごとに 1 回ずつリプレイできてしまうからである）。
+**拒否**は `401 invalid_client` — リプレイされた、空の、または長すぎる `jti`、誤った `aud`、期限切れまたは長すぎるアサーション、JWKS に無い鍵での署名、公開されていない `kid`、別の方式で登録されたクライアント、未知のクライアント、取得できない `jwks_uri`（フェイルクローズ、理由付きで `client_assertion_refused` としてログ出力）。`replaySeenSet` を配線していない構成での `private_key_jwt` リクエストは `500 server_error`: 記録できない `jti` はリプレイされ得るものなので、未検査で認証するのではなく拒否する。standalone テンプレートはそれを配線する（`REPLAY_SEEN_SET_ADAPTER`、既定は Redis。メモリーアダプターは `DEPLOYMENT_MODE=multi` では拒否される。捕獲されたアサーションがレプリカごとに 1 回ずつリプレイできてしまうからである）。
 
 **提供しないもの: `client_secret_jwt`。** これにはリポジトリのインターフェースが生の秘密を HMAC 鍵としてミドルウェアに渡す必要がある — `authenticate(clientId, secret)` は比較するだけで明かさない — し、テンプレートが推奨する bcrypt でハッシュした `clientSecret` はそもそも鍵になり得ない。そのケースはデプロイが既に持つ秘密ベースの方式で足り、非対称の方式こそがこの機能の目的である。
 
@@ -401,8 +405,10 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 
 `POST /oauth/revoke` は RFC 7009。`/oauth/token` と同じく呼び出し元を認証し — public クライアントは自分のトークンを失効させてよいので（§2.1）それも含む — `token` が無ければ `400 invalid_request`、認識できない `token_type_hint` には `400 unsupported_token_type`、それ以外はトークンが存在したか・呼び出し元のものだったかに関係なく `200` を返す（§2.2）。トークンは発行先のクライアントに対してだけ失効される。
 
+サーバーが記録できなかった失効は `200` ではない。呼び出し元自身のトークンが検証を通り、その失効を記録するストア — `accessTokenDenylist` またはリフレッシュトークンのファミリーストア — が失敗したときは `503 temporarily_unavailable` を返し（§2.2.1: クライアントはトークンがまだ存在するとみなして再試行する）、`revoke_store_unavailable` を error レベルで、どちらのストアかを `store` に、失効を記録できなかったクライアントを `clientId` に入れてログに残す。検証を通らないトークン、このサーバーが失効できないトークン、他のクライアントのトークンはストアに届かないので、障害中も `200` のままである。
+
 - **リフレッシュトークン**は `refreshTokenFamilyRevocation` でそのファミリーを失効させる。そのスロットが無ければリクエストは何もしない `200`。
-- **アクセストークン**は、`oauth.revocation.accessToken` が `"denylist"` のとき `accessTokenDenylist` に追加される。`"unsupported"` のときは、`token_type_hint=access_token` に対して何も失効しない `200` ではなく `400 unsupported_token_type` を返し、ヒントの無いトークンはリフレッシュトークンの経路だけを通る。
+- **アクセストークン**は、`oauth.revocation.accessToken` が `"denylist"` のとき `accessTokenDenylist` に追加され、`exp` に検証が許す 5 分の時計の許容（`DEFAULT_CLOCK_SKEW_MS`）を足した時刻まで — まだ検証を通りうる間 — 拒否される。それすら過ぎたトークンはこのプロバイダーでは検証を通らないので、失効させてもストアには問い合わせず `200` を返す。この denylist を使って `verifyJwt` を呼ぶ独自のリソースサーバーが既定より大きい `clockSkewMs` を渡すと、失効したトークンをその差の分だけ受け入れるので、そこでは既定値のままにすること。`"unsupported"` のときは、`token_type_hint=access_token` に対して何も失効しない `200` ではなく `400 unsupported_token_type` を返し、ヒントの無いトークンはリフレッシュトークンの経路だけを通る。
 
 ディスカバリーは、2 つのうち少なくとも一方が何かを失効できるときだけ `revocation_endpoint` を広告する。エンドポイントの完全な振る舞いは [`routes/revoke.mts`](./src/routes/revoke.mts) の doc コメントにある。
 
@@ -762,7 +768,7 @@ const assertionVerifier = createRegistryAssertionVerifier({
 });
 ```
 
-レジストリのチェックに加えて、ID-JAG は `typ: oauth-id-jag+jwt`、このサーバーの issuer 識別子とちょうど等しい `aud`（トークンエンドポイントの URL は別名にならない）、認証済みクライアントを名指す `client_id`（未認証の提示者は拒否）、そして `jti`、`iat`、`sub` を持たなければならない — `iat` は `private_key_jwt` と同じく 1 時間以内。各 `jti` はアサーションの有効期間中に 1 回だけ受け付ける。`scope` と `resource` はクレームとして運ばれる: スコープの上限はクレーム ∩ `allowedScopes`、audience の上限は `resource` ∩ `allowedAudiences`（エントリーが認めないリソースは拒否）で、グラントはさらにその両方をクライアントの登録で抑える。Store に渡すハンドルは `<iss>#<sub>`（または `<iss>#<tenant>#<sub>`） — `sub` は発行者の中でしか一意でない — で、Store が紐付けていない ID はそこで拒否される。リフレッシュトークンは発行しない: アサーションがリフレッシュの仕組みであり、アクセストークンはそれより長く生きない（下記）。
+レジストリのチェックに加えて、ID-JAG は `typ: oauth-id-jag+jwt`、このサーバーの issuer 識別子とちょうど等しい `aud`（トークンエンドポイントの URL は別名にならない）、認証済みクライアントを名指す `client_id`（未認証の提示者は拒否）、そして `jti`、`iat`、`sub` を持たなければならない — `iat` は `private_key_jwt` と同じく 1 時間以内。各 `jti` はアサーションの有効期間中に 1 回だけ受け付け、256 文字（`MAX_JTI_LENGTH`）を超えるものは記録する前に拒否する。`scope` と `resource` はクレームとして運ばれる: スコープの上限はクレーム ∩ `allowedScopes`、audience の上限は `resource` ∩ `allowedAudiences`（エントリーが認めないリソースは拒否）で、グラントはさらにその両方をクライアントの登録で抑える。Store に渡すハンドルは `<iss>#<sub>`（または `<iss>#<tenant>#<sub>`） — `sub` は発行者の中でしか一意でない — で、Store が紐付けていない ID はそこで拒否される。リフレッシュトークンは発行しない: アサーションがリフレッシュの仕組みであり、アクセストークンはそれより長く生きない（下記）。
 
 ### 発行するトークンはアサーションより長く生きない
 

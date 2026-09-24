@@ -38,6 +38,8 @@ import {
 	matchConfirmation,
 	ownedConfirmation,
 	policyOutOfBounds,
+	readIssuedScope,
+	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { buildActClaim, countActorChainDepth, matchesMayAct, matchesMayActClient } from "./act.mjs";
@@ -63,6 +65,12 @@ export interface TokenExchangeDependencies
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
 	const { tokenExchangeValidatorResolver, clientRepository } = deps;
+	// The lifetimes it mints with, read once, when the grant is built: a
+	// configuration built by hand that the resolver refuses is a composition
+	// fault, refused before any request — read per request, it answered every
+	// exchange with a 500, after client authentication had spent whatever it
+	// spends.
+	const { defaultExpiresIn, maxExpiresIn } = resolveAccessTokenLifetime(deps.config);
 
 	return {
 		// #326 deny-by-absence, the shape `client_credentials` and the WebAuthn
@@ -556,16 +564,36 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// DEFAULT is where they part company — they read `defaultScopes`,
 			// this grant inherits the subject token's scope. See the note at
 			// the `grantedScope` assignment below.
-			const subjectScope = subjectValidated.scope?.split(" ").filter(Boolean) ?? [];
+			//
+			// RFC 6749 §3.3, two readings. The subject's scope is a validated
+			// token's record, read so it never widens (`readIssuedScope`): a legacy
+			// `read<TAB>write` entry named no scope and must not supply `write`
+			// to a request or to an inheriting exchange now. The request's
+			// is the client's, read strictly: a value that is not a space-delimited
+			// list of scope-tokens is refused as malformed, and a repeated
+			// parameter (an array) is refused rather than read as omitted, which
+			// would inherit the subject's whole scope.
+			const subjectScope = readIssuedScope(subjectValidated.scope);
 			const subjectScopeSet = new Set(subjectScope);
 			const clientScopeSet = new Set(client.allowedScopes ?? []);
-			const requestedScopeStr = typeof body.scope === "string" ? body.scope : null;
-			const requestedScopeRaw = requestedScopeStr?.split(" ").filter(Boolean) ?? null;
-			// Normalize empty arrays to null — `scope=""` and `scope=" "` behave the
-			// same as scope omitted (inherit subject scope), per the same rationale
-			// that drives normalizeArrayParam for audience/resource.
-			const requestedScope =
-				requestedScopeRaw !== null && requestedScopeRaw.length === 0 ? null : requestedScopeRaw;
+			if (body.scope !== undefined && body.scope !== null && typeof body.scope !== "string") {
+				return invalidRequest("scope must be a space-delimited string");
+			}
+			const requestedScopeRaw =
+				typeof body.scope === "string" ? readSpaceDelimitedParameter(body.scope) : [];
+			if (requestedScopeRaw === null) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_scope",
+						errorDescription: "scope is not a space-delimited list of scope-tokens",
+					},
+				};
+			}
+			// Normalize empty to null — `scope=""` and `scope=" "` behave the same
+			// as scope omitted (inherit subject scope), per the same rationale that
+			// drives normalizeArrayParam for audience/resource.
+			const requestedScope = requestedScopeRaw.length === 0 ? null : requestedScopeRaw;
 			if (requestedScope) {
 				for (const s of requestedScope) {
 					if (!subjectScopeSet.has(s)) {
@@ -897,7 +925,6 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			//    the longest a resource server validating this token offline
 			//    can keep accepting it after its family is revoked.
 			// 3. Capped at the subject token's remaining lifetime, below.
-			const { defaultExpiresIn, maxExpiresIn } = resolveAccessTokenLifetime(deps.config);
 			let expiresIn = Math.min(requestedExpiresIn ?? defaultExpiresIn, maxExpiresIn);
 
 			// RFC 8693 §2.2.1: the issued token's lifetime SHOULD NOT exceed the

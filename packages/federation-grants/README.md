@@ -201,7 +201,7 @@ keep `offline_access` where the connection lists it.
 | Body is not an object | 400 | `invalid_request` | `invalid_body` |
 | A required field missing or empty | 400 | `invalid_request` | `sub_required` / `connection_required` / `redirect_uri_required` / `state_required` |
 | A field repeated, or not a string | 400 | `invalid_request` | `duplicate_<field>` / `invalid_<field>` |
-| `scope` present and empty | 400 | `invalid_request` | `invalid_scope` |
+| `scope` present and empty, or not a space-delimited list of scope-tokens (RFC 6749 §3.3: a tab, a quote) | 400 | `invalid_request` | `invalid_scope` |
 | `expires_in` not a whole positive number of seconds | 400 | `invalid_request` | `invalid_expires_in` |
 | Any other body parameter (`resource`, `expires_at`, …) | 400 | `invalid_request` | `unexpected_parameter` |
 | `redirect_uri` not registered, registered but not a valid redirect URI, or carrying a result parameter | 400 | `invalid_request` | `redirect_uri_not_registered` / `redirect_uri_invalid` / `redirect_uri_reserved_parameter` |
@@ -257,6 +257,10 @@ a backstop it wrote emits `federation.grant.revoked` with `outcome: "backstop"`.
 `sub` is required and compared exactly. The rest are *assertions*: things the
 caller claims about the grant, which are checked and never widen anything —
 asking for a scope the grant does not carry is a refusal, not a request.
+`scope` is read strictly by RFC 6749 §3.3's grammar (core's
+`readSpaceDelimitedParameter`): spaces delimit, and a value holding anything
+that is not a scope-token — a tab, a quote — is `invalid_scope` before core is
+asked, as is one that names nothing.
 `min_ttl` asks for a refresh; it does not turn a short token into an error.
 
 A success is an ordinary OAuth token response carrying the **upstream's**
@@ -626,9 +630,12 @@ It checks, in this order:
 6. **Eligibility**: a refresh token, and an access token with a finite lifetime
    within `maxAccessTokenLifetime`, of a type a route without a proof key can
    present.
-7. **Scope containment**: nothing beyond what the user was shown. An omitted
-   `scope` means as requested; an upstream that granted more is refused,
-   because a token cannot be narrowed after the fact.
+7. **Scope containment**: nothing beyond what the user was shown. The
+   upstream's `scope` is read tolerantly by RFC 6749 §3.3's grammar (core's
+   `parseScopeTokens`, as every upstream answer is): whitespace separates, and
+   only scope-tokens count. An omitted `scope` means as requested; one that
+   names no scope-token is not an answer; an upstream that granted more is
+   refused, because a token cannot be narrowed after the fact.
 8. **Activation**, immediately after re-reading the session, the sessions
    boundary, the current-intent pointer and the grants boundary. It replaces
    the authorization and the credentials together, and clears with them the

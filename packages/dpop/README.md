@@ -166,6 +166,15 @@ So of two requests carrying one proof, exactly one is accepted.
   cannot collide with another consumer's (`client-assertion:<client_id>`,
   `webauthn:*`, or `jwt-bearer:id-jag:<issuer>` where a composition hands the
   jwt-bearer verifier the same set).
+- **How long a `jti` may be.** At most 256 characters, and not empty (core's
+  `MAX_JTI_LENGTH` / `isRecordableJti`, the bound `private_key_jwt` and ID-JAG
+  apply too). The proof is checked before the client is authenticated, so
+  whoever sends it chooses the key the seen-set keeps for
+  `replay-store-ttl-seconds`; RFC 9449 §4.2 asks only that a `jti` be unique,
+  which a UUID (36 characters) or 96 random bits (16 in base64url) already is.
+  A longer one is `invalid_dpop_proof` (reason `malformed_proof`), refused in
+  `parseProof` before the signature is checked and before the seen-set is
+  consulted.
 - **How long.** `replay-store-ttl-seconds` from the moment the proof is first
   accepted, which must be at least `2 × iat-window-seconds + 1` to outlive the
   proof's acceptance window; below that the mechanism logs

@@ -357,6 +357,24 @@ describe("createRegistryAssertionVerifier — the terms of an entry (#525)", () 
 		expect((await open.verify(await mint({ sub: "d" })))?.scope).toBeUndefined();
 	});
 
+	it("reads the scope claim by RFC 6749 §3.3's grammar, tolerantly, as an upstream's answer is read", async () => {
+		// The claim is a third party's, signed: split on any whitespace and keep
+		// the scope-tokens (parseScopeTokens). A tab is not part of a scope's
+		// name, and a quote cannot be.
+		const verifier = verifierOver([entryA({ allowedScopes: ["read", "write"] })]);
+		expect((await verifier.verify(await mint({ sub: "d", scope: "read\twrite" })))?.scope).toEqual([
+			"read",
+			"write",
+		]);
+		const open = verifierOver([entryA()]);
+		expect(
+			(await open.verify(await mint({ sub: "d", scope: 'read\t"admin"  write' })))?.scope,
+		).toEqual(["read", "write"]);
+		// Named, but naming no scope-token, is not silence: the ceiling is empty,
+		// never the entry's whole allowedScopes.
+		expect((await verifier.verify(await mint({ sub: "d", scope: '\t"x"' })))?.scope).toEqual([]);
+	});
+
 	it("carries allowedAudiences through as the audience ceiling", async () => {
 		const verifier = verifierOver([entryA({ allowedAudiences: ["https://api.example"] })]);
 		expect((await verifier.verify(await mint({ sub: "d" })))?.audience).toEqual([
@@ -683,6 +701,31 @@ describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => 
 		expect(await make().verify(await idJag({ jti: "" }), asApp)).toBeNull();
 		expect(await make().verify(await idJag({}, { iat: false }), asApp)).toBeNull();
 		expect(await make().verify(await idJag({ sub: undefined }), asApp)).toBeNull();
+	});
+
+	it("refuses a jti longer than 256 characters without recording it", async () => {
+		// The jti is a seen-set key kept until the assertion expires. Bounded as
+		// DPoP proofs and client assertions are, so an issuer's claim cannot
+		// decide how large each record is.
+		const recorded: string[] = [];
+		const backing = createMemoryReplaySeenSet();
+		const verifier = make([idJagEntry()], {
+			replaySeenSet: {
+				kind: "spy",
+				markSeen: async (scope, key, expiresAtMs) => {
+					recorded.push(key);
+					return backing.markSeen(scope, key, expiresAtMs);
+				},
+				contains: (scope, key) => backing.contains(scope, key),
+			},
+		});
+
+		expect(await verifier.verify(await idJag({ jti: "j".repeat(257) }), asApp)).toBeNull();
+		expect(recorded).toEqual([]);
+
+		const atTheBound = "j".repeat(256);
+		expect(await verifier.verify(await idJag({ jti: atTheBound }), asApp)).not.toBeNull();
+		expect(recorded).toEqual([atTheBound]);
 	});
 
 	it("accepts each jti once — a replay within its lifetime is refused, per issuer", async () => {

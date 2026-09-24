@@ -392,6 +392,26 @@ describe("createClientAssertionVerifier (#484)", () => {
 			expect(await verifier.verify(body(await mint()), findClient())).toMatchObject({ kind: "ok" });
 		});
 
+		it("refuses a jti longer than 256 characters without recording it", async () => {
+			// The jti is a seen-set key kept until the assertion expires; bounded
+			// like a DPoP proof's, so a client cannot choose how large it is.
+			const store = createMemoryReplaySeenSet();
+			const markSeen = vi.spyOn(store, "markSeen");
+			const verifier = build({ replaySeenSet: store });
+
+			const long = refused(
+				await verifier.verify(body(await mint({ jti: "j".repeat(257) })), findClient()),
+			);
+			expect(long).toMatchObject({ status: 401, error: "invalid_client" });
+			expect(long.description).toMatch(/jti/);
+			expect(markSeen).not.toHaveBeenCalled();
+
+			expect(
+				await verifier.verify(body(await mint({ jti: "j".repeat(256) })), findClient()),
+			).toMatchObject({ kind: "ok" });
+			expect(markSeen).toHaveBeenCalledTimes(1);
+		});
+
 		it("scopes the jti record to the client, and keeps it until the assertion expires", async () => {
 			const store = createMemoryReplaySeenSet();
 			const markSeen = vi.spyOn(store, "markSeen");

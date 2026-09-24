@@ -534,21 +534,38 @@ describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () =>
 describe("deviceGrantModule beside oauthModule — error text (RFC 6749 Appendix A.8)", () => {
 	// `error_description` is 1*NQSCHAR: printable ASCII without `"` and `\`.
 	it("sends a refused scope the client asked for within that set", async () => {
-		// The refused values are the client's own; each character outside the
-		// set is sent as `?`.
+		// The refused values are the client's own. A scope is read strictly by
+		// RFC 6749 §3.3's grammar, so a value holding a character outside the
+		// set — a quote, a non-ASCII letter — is malformed before any entry is
+		// refused, and is answered with a description of the server's own; a
+		// well-formed refused entry is a scope-token, which the set admits, and
+		// is echoed as sent. The sanitiser still stands behind the echo.
 		const config = makeConfig(ENABLED);
 		const [oauth, device] = orders[0][1](config);
 		const { handle, app } = await bootWith(config, [sessionStoreModuleFor(config), oauth, device]);
+		const NQSCHAR = /^[\x20-\x21\x23-\x5B\x5D-\x7E]+$/;
 		try {
-			const res = await request(app)
+			const malformed = await request(app)
 				.post("/oauth/device_authorization")
 				.type("form")
 				.send({ client_id: CLIENT_ID, scope: 'openid ad"min caf\u00e9' });
-			expect(res.status).toBe(400);
-			expect(res.body).toEqual({
+			expect(malformed.status).toBe(400);
+			expect(malformed.body).toEqual({
 				error: "invalid_scope",
-				error_description: "scope not permitted for this client: ad?min caf?",
+				error_description: "scope is not a space-delimited list of scope-tokens",
 			});
+			expect(malformed.body.error_description).toMatch(NQSCHAR);
+
+			const refused = await request(app)
+				.post("/oauth/device_authorization")
+				.type("form")
+				.send({ client_id: CLIENT_ID, scope: "openid admin cafe~1" });
+			expect(refused.status).toBe(400);
+			expect(refused.body).toEqual({
+				error: "invalid_scope",
+				error_description: "scope not permitted for this client: admin cafe~1",
+			});
+			expect(refused.body.error_description).toMatch(NQSCHAR);
 		} finally {
 			await handle.dispose();
 		}

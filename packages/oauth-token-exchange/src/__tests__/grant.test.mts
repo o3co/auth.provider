@@ -107,6 +107,23 @@ const ctx = (
 	...overrides,
 });
 
+describe("createTokenExchangeGrant — the lifetime it mints with, read when it is built", () => {
+	it("is refused when it is built with an access-token lifetime the resolver refuses", () => {
+		// Read per request, a hand-built lifetime failed every exchange with a
+		// 500, after client authentication had spent whatever it spends.
+		const base = mockConfig as unknown as { oauth: Record<string, unknown> };
+		for (const accessToken of [
+			{ expiresIn: 1.5 },
+			{ expiresIn: 0 },
+			{ defaultExpiresIn: 600, maxExpiresIn: 60 },
+			{},
+		]) {
+			const config = { oauth: { ...base.oauth, accessToken } } as unknown as AppConfig;
+			expect(() => buildGrant({ config }), JSON.stringify(accessToken)).toThrow(RangeError);
+		}
+	});
+});
+
 describe("createTokenExchangeGrant — request errors", () => {
 	it("returns invalid_request when subject_token is missing", async () => {
 		const g = buildGrant();
@@ -630,6 +647,115 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		expect(result.status).toBe(200);
 		if (result.status !== 200) return;
 		expect(result.tokens.scope).toBe("read write");
+	});
+});
+
+describe("createTokenExchangeGrant — the scope grammar (RFC 6749 §3.3)", () => {
+	it("refuses a requested scope that is not a space-delimited list of scope-tokens as malformed", async () => {
+		// The request is read strictly: a tab is not a delimiter, and a tab
+		// alone is not an omitted scope that inherits the subject's.
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ scope: "read write", family_id: "fam-1" });
+		for (const scope of ["read\twrite", 'read "write"', "\t"]) {
+			const { result } = await g.handle(
+				ctx({
+					client_id: "client-a",
+					client_secret: "any",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					scope,
+				}),
+			);
+			expect(result, JSON.stringify(scope)).toEqual({
+				status: 400,
+				error: "invalid_scope",
+				errorDescription: "scope is not a space-delimited list of scope-tokens",
+			});
+		}
+	});
+
+	it("reads scope: null as an omitted scope, and refuses any other value that is not a string", async () => {
+		// RFC 6749 §3.2: a parameter sent without a value is treated as
+		// omitted. A JSON body's `null` is that, as `scope=""` is for a form
+		// body — the same reading token exchange gives `expires_in: null`. Any
+		// other value that is not a string is `invalid_request`.
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ scope: "read write", family_id: "fam-1" });
+		const exchange = (scope: unknown) =>
+			g.handle(
+				ctx({
+					client_id: "client-a",
+					client_secret: "any",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					scope,
+				}),
+			);
+		const nulled = (await exchange(null)).result;
+		if (nulled.status === 200) expect(nulled.tokens.scope).toBe("read write");
+		else expect.fail(`expected 200, got ${nulled.status}`);
+
+		for (const scope of [42, {}, true]) {
+			expect((await exchange(scope)).result, JSON.stringify(scope)).toMatchObject({
+				status: 400,
+				error: "invalid_request",
+			});
+		}
+	});
+
+	it("refuses a repeated scope parameter rather than reading it as omitted", async () => {
+		// `scope=a&scope=b` arrives as an array. Read as no scope, it inherited
+		// the subject's whole scope — a wider answer than either value asked for.
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ scope: "read write", family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				scope: ["read", "write"],
+			}),
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "scope must be a space-delimited string",
+		});
+	});
+
+	it("never reads a subject's scope wider than it was minted: a tab joins nothing", async () => {
+		// A subject token minted before requests were read strictly can carry
+		// `read\twrite` as one entry, which named no scope. Split on the tab,
+		// an exchange could ask for `write` — or inherit it — from a subject
+		// that was never granted it, so the entry is dropped.
+		const g = buildGrant();
+		const exchange = (subject: string, scope?: string) =>
+			g.handle(
+				ctx({
+					client_id: "client-a",
+					client_secret: "any",
+					subject_token: subject,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					...(scope === undefined ? {} : { scope }),
+				}),
+			);
+		const legacy = await signSelfIssuedAccessToken({ scope: "read\twrite", family_id: "fam-1" });
+
+		const asked = (await exchange(legacy, "write")).result;
+		expect(asked).toEqual({
+			status: 400,
+			error: "invalid_scope",
+			errorDescription: "scope 'write' is not in subject_token scope",
+		});
+		const inherited = (await exchange(legacy)).result;
+		expect(inherited.status).toBe(200);
+		if (inherited.status === 200) expect(inherited.tokens.scope).toBeUndefined();
+
+		const spaced = await signSelfIssuedAccessToken({ scope: "read  write", family_id: "fam-1" });
+		const canonical = (await exchange(spaced)).result;
+		if (canonical.status === 200) expect(canonical.tokens.scope).toBe("read write");
+		else expect.fail(`expected 200, got ${canonical.status}`);
 	});
 });
 

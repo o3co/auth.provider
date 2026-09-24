@@ -83,6 +83,7 @@ import {
 	type Logger,
 	loggableError,
 	type PublicClient,
+	parseScopeTokens,
 } from "@o3co/auth-provider-core";
 
 export interface ClientIdMetadataDocumentOptions {
@@ -340,11 +341,16 @@ function toClient(
 			throw new DocumentRejected("client_uri must be an https URL");
 		}
 	}
+	// RFC 7591 §2 `scope`, by RFC 6749 §3.3's grammar. A third party's
+	// document is read tolerantly (`parseScopeTokens`), as an upstream's answer
+	// is: what it names is intersected with the operator's ceiling below, so a
+	// scope it names but spells with a tab is not lost, and one that names no
+	// scope-token claims nothing rather than reading as absent.
 	const claimedScopes =
 		doc.scope === undefined
 			? undefined
 			: typeof doc.scope === "string"
-				? doc.scope.split(" ").filter((s) => s.length > 0)
+				? parseScopeTokens(doc.scope)
 				: (() => {
 						throw new DocumentRejected("scope must be a space-delimited string");
 					})();

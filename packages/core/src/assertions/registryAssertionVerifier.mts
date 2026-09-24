@@ -15,7 +15,9 @@
  */
 
 import { createLocalJWKSet, decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
+import { parseScopeTokens } from "../federations/scope.mjs";
 import { createRemoteKeySetCache } from "../jwks/remoteKeySet.mjs";
+import { isRecordableJti } from "../replay-seen-set/jti.mjs";
 import type { ReplaySeenSet } from "../replay-seen-set/types.mjs";
 import type { AssertionIssuerEntry, AssertionIssuerRegistry } from "./issuerRegistry.mjs";
 import type {
@@ -105,9 +107,16 @@ const idJagSubjectHandle =
 		return tenant === null ? `${issuer}#${claims.sub}` : `${issuer}#${tenant}#${claims.sub}`;
 	};
 
+/**
+ * The `scope` claim, by RFC 6749 §3.3's grammar. The claim is the issuer's,
+ * so it is read tolerantly — split on any whitespace, keeping the
+ * scope-tokens (`parseScopeTokens`) — and a claim that is present but names
+ * none is an empty ceiling, never `undefined`, which would read as "no claim"
+ * and hand the entry's whole `allowedScopes` over instead.
+ */
 const defaultReadScope = (claims: JWTPayload): readonly string[] | undefined =>
 	typeof claims.scope === "string" && claims.scope.length > 0
-		? claims.scope.split(" ").filter((s) => s.length > 0)
+		? parseScopeTokens(claims.scope)
 		: undefined;
 
 /** `resource` as an ID-JAG carries it: one string or a list, or nothing. */
@@ -182,7 +191,8 @@ const isRefusal = (err: unknown): boolean =>
  *   endpoint; an unauthenticated presenter is refused — client
  *   authentication is required for this grant;
  * - `jti`, `iat` and `sub` are required, and each `jti` is accepted **once**
- *   for the assertion's lifetime, recorded in `replaySeenSet` per issuer;
+ *   for the assertion's lifetime, recorded in `replaySeenSet` per issuer; a
+ *   `jti` longer than `MAX_JTI_LENGTH` (256) is refused before it is recorded;
  * - `scope` and `resource` travel as claims, not request parameters: the
  *   scope ceiling is the claim intersected with `allowedScopes`, and the
  *   audience ceiling is the `resource` claim intersected with
@@ -314,8 +324,10 @@ export function createRegistryAssertionVerifier(
 				// value; the profile does not.
 				if (Array.isArray(claims.aud) && claims.aud.length !== 1) return null;
 				if (claims.client_id !== context.clientId) return null;
+				// Non-empty and bounded (`MAX_JTI_LENGTH`): it is a seen-set key
+				// kept until `exp`, so the issuer's claim does not decide its size.
 				const jti = claims.jti;
-				if (typeof jti !== "string" || jti.length === 0) return null;
+				if (!isRecordableJti(jti)) return null;
 				// Accepted once for its lifetime. `exp` verified above; the floor
 				// keeps a within-tolerance assertion from reading as expired at
 				// issue in the store.

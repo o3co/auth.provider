@@ -154,8 +154,11 @@ export {
 	coerceBooleanFromEnv,
 	composeConfigSchema,
 	fullSectionsSchema,
+	isLifetimeSeconds,
+	type RefreshTokenLifetimeSource,
 	readAccessTokenRevocationMode,
 	resolveAccessTokenLifetime,
+	resolveRefreshTokenLifetime,
 } from "./config/application.schema.mjs";
 // OIDC discovery aggregation — modules contribute `discoveryMetadata`
 // (OidcDiscoveryContributionFactory above) and core synthesizes the
@@ -213,7 +216,13 @@ export {
 } from "./federations/response-mode.mjs";
 // RFC 6749 §3.3's scope grammar, in one place. Three packages had their own
 // copy before #647 and all three were wrong about whitespace in the same way.
-export { canonicalScope, isScopeToken, parseScopeTokens } from "./federations/scope.mjs";
+export {
+	canonicalScope,
+	isScopeToken,
+	parseScopeTokens,
+	readIssuedScope,
+	readSpaceDelimitedParameter,
+} from "./federations/scope.mjs";
 export type {
 	FederationTokenResponse,
 	FederationTokenSnapshot,
@@ -795,6 +804,7 @@ export {
 	type ReplaySeenSetFactory,
 	registerBuiltinReplaySeenSets,
 } from "./replay-seen-set/factory.mjs";
+export { isRecordableJti, MAX_JTI_LENGTH } from "./replay-seen-set/jti.mjs";
 export { memoryReplaySeenSetModule } from "./replay-seen-set/module.mjs";
 export type { ReplaySeenSet } from "./replay-seen-set/types.mjs";
 

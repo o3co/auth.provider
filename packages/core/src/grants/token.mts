@@ -82,6 +82,13 @@ export const generateTokenResponse = (
 };
 
 export interface GenerateTokenOptions {
+	/**
+	 * Seconds from `iat` to `exp`: a positive whole number, or absent for a
+	 * token with no `exp`. Anything else — a fraction, NaN, Infinity, zero or
+	 * less, or past `Number.MAX_SAFE_INTEGER` — is a `RangeError` before
+	 * anything is signed, and so is a lifetime whose `exp` (`iat + expiresIn`)
+	 * would pass `Number.MAX_SAFE_INTEGER`.
+	 */
 	expiresIn?: number;
 	keyStore: KeyStore;
 	issuer?: string | null;
@@ -136,7 +143,26 @@ export const generateToken = async (
 	if (issuedAt !== undefined && !(Number.isSafeInteger(issuedAt) && issuedAt >= 0)) {
 		throw new Error("generateToken: issuedAt must be a non-negative whole number of epoch seconds");
 	}
+	// `exp` is `iat + expiresIn`, so the lifetime has to be whole seconds too:
+	// a fraction signs a fractional `exp` each verifier rounds its own way,
+	// NaN and Infinity serialise as `"exp": null`, and zero or less signs a
+	// token that is dead on arrival. The configuration schema refuses all of
+	// these; a caller that computes or hand-builds its lifetime meets this.
+	if (expiresIn !== undefined && !(Number.isSafeInteger(expiresIn) && expiresIn > 0)) {
+		throw new RangeError(
+			`generateToken: expiresIn must be a positive whole number of seconds (got ${String(expiresIn)})`,
+		);
+	}
 	const now = issuedAt ?? Math.floor(Date.now() / 1000);
+	// Both operands are safe integers now; their sum need not be. Past 2^53
+	// `iat + expiresIn` is rounded to a neighbouring integer, so two lifetimes
+	// would sign the same `exp`. The configuration caps a lifetime at a year,
+	// far below this; a caller that computes one does not have that cap.
+	if (expiresIn !== undefined && !Number.isSafeInteger(now + expiresIn)) {
+		throw new RangeError(
+			`generateToken: exp (iat ${now} + expiresIn ${expiresIn}) is past Number.MAX_SAFE_INTEGER`,
+		);
+	}
 	const claims: JWTPayload = {
 		...(data as Record<string, unknown>),
 		...(authorizedParty ? { azp: authorizedParty } : {}),

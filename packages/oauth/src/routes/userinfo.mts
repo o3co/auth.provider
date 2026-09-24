@@ -20,6 +20,7 @@ import {
 	type KeyStore,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
+	readIssuedScope,
 	type SubjectRevocation,
 	type UserSessionStore,
 	verifyJwt,
@@ -177,9 +178,11 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 			return res.status(401).json({ error: "invalid_token", error_description: "session_invalid" });
 		}
 
-		// Return sub + scope-filtered claims per OIDC Core §5.4
-		const scopes =
-			typeof payload.scope === "string" ? payload.scope.split(" ").filter(Boolean) : [];
+		// Return sub + scope-filtered claims per OIDC Core §5.4. The claim is
+		// this server's own record, read so it never widens (`readIssuedScope`):
+		// a legacy entry such as `openid<TAB>email` named no scope when it was
+		// minted, and must not release the email claims now.
+		const scopes = readIssuedScope(payload.scope);
 		const filtered = filterClaimsByScope(session.claims, scopes);
 		return res.status(200).json({ sub, ...filtered });
 	};

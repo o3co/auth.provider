@@ -398,9 +398,51 @@ describe("jwt-bearer grant — scope is a ceiling, never a grant (#301)", () => 
 		expect(result.status).toBe(200);
 	});
 
+	it("reads scope: null as an omitted scope, and refuses any other value that is not a string", async () => {
+		// RFC 6749 §3.2: a parameter sent without a value is treated as
+		// omitted. A JSON body's `null` is that, as `scope=""` is for a form
+		// body — the same reading token exchange gives `expires_in: null`. Any
+		// other value that is not a string is `invalid_request`.
+		const client = {
+			authenticatedClient: {
+				clientId: "c1",
+				allowedScopes: ["read", "write"],
+				defaultScopes: ["read"],
+			},
+		} as never;
+		const grant = build({
+			verifier: verifierFor({ subjectHandle: "d", scope: ["read", "write"] }),
+		});
+		const omitted = (await grant.handle(ctx({}, client))).result;
+		const nulled = (await grant.handle(ctx({ scope: null }, client))).result;
+		if (!("tokens" in omitted) || !("tokens" in nulled)) expect.fail("expected tokens");
+		expect(decodeJwt(nulled.tokens.access_token as string).scope).toBe("read");
+		expect(decodeJwt(omitted.tokens.access_token as string).scope).toBe("read");
+
+		for (const scope of [42, {}, true]) {
+			const { result } = await grant.handle(ctx({ scope }, client));
+			expect("error" in result && result.error, JSON.stringify(scope)).toBe("invalid_request");
+		}
+	});
+
 	it("rejects a non-string scope", async () => {
 		const { result } = await build({}).handle(ctx({ scope: ["read"] }));
 		expect("error" in result && result.error).toBe("invalid_request");
+	});
+
+	it("refuses a scope that is not RFC 6749 §3.3's space-delimited list as malformed", async () => {
+		// A client's request is read strictly: a tab is not a delimiter, and a
+		// scope-token cannot hold a quote. invalid_scope (§5.2: "malformed"),
+		// saying so, rather than a verdict on a scope named "read\twrite".
+		const verifier = verifierFor({ subjectHandle: "d", scope: ["read", "write"] });
+		for (const scope of ["read\twrite", 'read "write"', "\t"]) {
+			const { result } = await build({ verifier }).handle(ctx({ scope }));
+			expect(result.status, JSON.stringify(scope)).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_scope");
+			expect("errorDescription" in result && result.errorDescription).toBe(
+				"scope is not a space-delimited list of scope-tokens",
+			);
+		}
 	});
 });
 
@@ -1230,6 +1272,72 @@ describe("jwt-bearer grant — the token never outlives the assertion (auth.prox
 		const { expiresIn, claims } = tokensOf(result);
 		expect(expiresIn).toBe(90);
 		expect(claims.exp).toBe(NOW + 90);
+	});
+});
+
+describe("jwt-bearer grant — the lifetime it mints with, read when it is built", () => {
+	it("is refused when it is built with a bad access-token lifetime, and no ID-JAG jti is spent", async () => {
+		// Read when a request was answered, a hand-built lifetime the resolver
+		// refuses failed only after the verifier had recorded the assertion's
+		// jti: a 500, and an ID-JAG that can never be presented again.
+		const idp = generateKeyPairSync("ed25519");
+		const seen = createMemoryReplaySeenSet();
+		const verifier = createRegistryAssertionVerifier({
+			registry: createMemoryAssertionIssuerRegistry([
+				{
+					issuer: "https://idp.example",
+					keys: { type: "key", key: idp.publicKey },
+					algorithms: ["EdDSA"],
+					profile: "id-jag",
+				},
+			]),
+			audience: "https://auth.example",
+			issuerIdentifier: "https://auth.example",
+			replaySeenSet: seen,
+		});
+		const assertion = await new SignJWT({ client_id: "mcp-client", jti: "jti-lifetime" })
+			.setProtectedHeader({ alg: "EdDSA", typ: "oauth-id-jag+jwt" })
+			.setIssuer("https://idp.example")
+			.setSubject("user-1")
+			.setAudience("https://auth.example")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(idp.privateKey);
+
+		for (const accessToken of [{ expiresIn: 1.5 }, { expiresIn: 0 }, {}]) {
+			let refused: unknown;
+			let grant: ReturnType<typeof build> | undefined;
+			try {
+				grant = build({
+					verifier,
+					config: {
+						oauth: { jwt: { issuer: "https://auth.example" }, accessToken },
+					} as unknown as AppConfig,
+				});
+			} catch (err) {
+				refused = err;
+			}
+			await grant
+				?.handle(
+					ctx(
+						{ assertion },
+						{
+							authenticatedClient: {
+								clientId: "mcp-client",
+								tokenEndpointAuthMethod: "client_secret_basic",
+								allowedScopes: [],
+							},
+						},
+					),
+				)
+				.catch(() => undefined);
+
+			expect(await seen.contains("jwt-bearer:id-jag:https://idp.example", "jti-lifetime")).toBe(
+				false,
+			);
+			expect(refused, JSON.stringify(accessToken)).toBeInstanceOf(RangeError);
+			expect((refused as Error).message).toMatch(/oauth\.accessToken/);
+		}
 	});
 });
 

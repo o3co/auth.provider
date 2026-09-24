@@ -1,6 +1,6 @@
 # grants
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 ## Responsibility
 
@@ -34,7 +34,7 @@ It is separate because every grant package — `oauth`, `device-grant`, `oauth-t
 
 ## Invariants
 
-- `generateToken` refuses an empty `jti` and a non-integer `issuedAt`, signs exactly the identity it was given, emits `cnf` only from `confirmation` and echoes it on the `Token`; `generateTokenResponse` answers `Bearer` unless asked for `DPoP` and adds `id_token` only when given — [`token.test.mts`](./__tests__/token.test.mts).
+- `generateToken` refuses an empty `jti`, a non-integer `issuedAt` and an `expiresIn` that is not a positive whole number of seconds or would put `exp` past `Number.MAX_SAFE_INTEGER` (a `RangeError`, before signing), signs exactly the identity it was given, emits `cnf` only from `confirmation` and echoes it on the `Token`; `generateTokenResponse` answers `Bearer` unless asked for `DPoP` and adds `id_token` only when given — [`token.test.mts`](./__tests__/token.test.mts).
 - id_token: `typ: JWT` (disjoint from `at+jwt`), the OIDC claims, `nonce` reflected verbatim, `amr` / `acr` only when recorded, 3600 s default — [`idToken.test.mts`](./__tests__/idToken.test.mts); `email_verified: false` is not absence and a non-boolean is dropped — [`emailVerifiedClaim.test.mts`](./__tests__/emailVerifiedClaim.test.mts).
 - logout_token: `typ: logout+jwt`, the `events` claim, never `nonce`, `sid` by default, 300 s — [`logoutToken.test.mts`](./__tests__/logoutToken.test.mts).
 - `filterClaimsByScope` is a strict allowlist; provider-specific claims never pass; non-string `groups` members are dropped — [`claimFilter.test.mts`](./__tests__/claimFilter.test.mts).

@@ -57,7 +57,7 @@ import type {
 	GrantHandlerResult,
 	KeyStore,
 } from "@o3co/auth-provider-core";
-import { generateToken, generateTokenResponse } from "@o3co/auth-provider-core";
+import { generateToken, generateTokenResponse, isLifetimeSeconds } from "@o3co/auth-provider-core";
 
 export interface DeviceCodeGrantOptions {
 	readonly store: DeviceCodeStore;
@@ -75,6 +75,18 @@ const error = (status: number, code: string, description: string): GrantHandlerR
 
 export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHandler => {
 	const now = options.now ?? Date.now;
+	// The one lifetime this grant mints with, held to the rule core's
+	// resolvers hold `oauth.accessToken.*` to (`isLifetimeSeconds`: a whole
+	// number of seconds from 1 to a year), so building the grant by hand and
+	// through `deviceGrantModule` accept the same values. `generateToken` would
+	// refuse a bad one too, but only on the first poll after a user approved a
+	// device; a composition fault is refused where the composition is assembled.
+	const { accessTokenExpiresIn } = options;
+	if (!isLifetimeSeconds(accessTokenExpiresIn)) {
+		throw new RangeError(
+			`createDeviceCodeGrant: accessTokenExpiresIn must be a whole number of seconds from 1 to a year (got ${String(accessTokenExpiresIn)})`,
+		);
+	}
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -163,7 +175,7 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 							{},
 							{
 								keyStore: options.keyStore,
-								expiresIn: options.accessTokenExpiresIn,
+								expiresIn: accessTokenExpiresIn,
 								...(ctx.issuer === undefined ? {} : { issuer: ctx.issuer }),
 								audience,
 								subject: authorization.subject,

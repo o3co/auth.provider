@@ -65,6 +65,28 @@ function makeCtx(
 	};
 }
 
+describe("createClientCredentialsGrant — the lifetime it mints with, read when it is built", () => {
+	it("is refused when it is built with an access-token lifetime the resolver refuses", () => {
+		// Read per request, a hand-built lifetime failed every token request
+		// with a 500, after client authentication had spent whatever it spends.
+		const base = baseDeps.config as unknown as { oauth: Record<string, unknown> };
+		for (const accessToken of [
+			{ expiresIn: 1.5 },
+			{ expiresIn: 0 },
+			{ defaultExpiresIn: 600, maxExpiresIn: 60 },
+			{},
+		]) {
+			const config = {
+				oauth: { ...base.oauth, accessToken },
+			} as unknown as GrantDependencies["config"];
+			expect(
+				() => createClientCredentialsGrant({ ...baseDeps, config }),
+				JSON.stringify(accessToken),
+			).toThrow(RangeError);
+		}
+	});
+});
+
 describe("createClientCredentialsGrant — gates", () => {
 	it("returns 401 invalid_client when no authenticated client", async () => {
 		const handler = createClientCredentialsGrant(baseDeps);
@@ -190,6 +212,50 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		expect(result.status).toBe(400);
 		expect("error" in result && result.error).toBe("invalid_scope");
 		expect("errorDescription" in result && result.errorDescription).toContain("admin:all");
+	});
+
+	it("returns 400 invalid_scope for a scope that is not RFC 6749 §3.3's space-delimited list", async () => {
+		// Refused because it is malformed, not because a scope named
+		// "read:foo\twrite:foo" happens to be missing from the allowlist — and a
+		// tab alone is not an omitted scope that draws on defaultScopes.
+		const handler = createClientCredentialsGrant(baseDeps);
+		const client = makeClient({ allowedScopes: ["read:foo", "write:foo"] });
+		for (const scope of ["read:foo\twrite:foo", 'read:foo "write:foo"', "\t"]) {
+			const { result } = await handler.handle(
+				makeCtx(client, { grant_type: "client_credentials", scope }),
+			);
+			expect(result.status, JSON.stringify(scope)).toBe(400);
+			expect("error" in result && result.error).toBe("invalid_scope");
+			expect("errorDescription" in result && result.errorDescription).toBe(
+				"scope is not a space-delimited list of scope-tokens",
+			);
+		}
+	});
+
+	it("reads scope: null as an omitted scope, and refuses any other value that is not a string", async () => {
+		// RFC 6749 §3.2: a parameter sent without a value is treated as
+		// omitted. A JSON body's `null` is that, as `scope=""` is for a form
+		// body — the same reading token exchange gives `expires_in: null`. Any
+		// other value that is not a string is `invalid_request`.
+		const handler = createClientCredentialsGrant(baseDeps);
+		const omitted = (await handler.handle(makeCtx(makeClient()))).result;
+		const nulled = (
+			await handler.handle(makeCtx(makeClient(), { grant_type: "client_credentials", scope: null }))
+		).result;
+		expect(omitted.status).toBe(200);
+		expect(nulled.status).toBe(200);
+		if (!("tokens" in omitted) || !("tokens" in nulled)) throw new Error("expected tokens");
+		expect(nulled.tokens.scope).toBe(omitted.tokens.scope);
+
+		for (const scope of [42, {}, true]) {
+			const { result } = await handler.handle(
+				makeCtx(makeClient(), { grant_type: "client_credentials", scope }),
+			);
+			expect(result, JSON.stringify(scope)).toMatchObject({
+				status: 400,
+				error: "invalid_request",
+			});
+		}
 	});
 
 	it("returns 400 invalid_request when scope is a non-string value (Codex review #1)", async () => {

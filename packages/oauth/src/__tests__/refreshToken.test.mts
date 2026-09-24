@@ -15,6 +15,9 @@
  */
 import { createSecretKey } from "node:crypto";
 import {
+	createMemoryRefreshTokenFamilyStore,
+	createRefreshTokenFamilyRevocation,
+	createRefreshTokenFamilyRotation,
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
@@ -358,6 +361,103 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
+		it("refuses a requested scope that is not RFC 6749 §3.3's space-delimited list as malformed", async () => {
+			const token = await makeRefreshToken();
+			const handler = createRefreshTokenGrant(mockDeps);
+			for (const scope of ["read\twrite", 'read "write"', "\t"]) {
+				const { result } = await handler.handle({
+					body: { refresh_token: token, scope },
+					session: {},
+					issuer: "localhost",
+					metadata: {},
+					authenticatedClient: DEFAULT_AUTH_CLIENT,
+				});
+				expect(result.status, JSON.stringify(scope)).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_scope");
+				expect("errorDescription" in result && result.errorDescription).toBe(
+					"scope is not a space-delimited list of scope-tokens",
+				);
+			}
+		});
+
+		it("reads scope: null as no change of scope, and refuses any other value that is not a string", async () => {
+			// RFC 6749 §3.2: a parameter sent without a value is treated as
+			// omitted. A JSON body's `null` is that, as `scope=""` is for a form
+			// body — the same reading token exchange gives `expires_in: null`. Any
+			// other value that is not a string is `invalid_request`.
+			const handler = createRefreshTokenGrant(mockDeps);
+			const token = await makeRefreshToken({ scope: "read write" });
+			const ctx = (body: Record<string, unknown>): GrantContext => ({
+				body: { refresh_token: token, ...body },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+			const nulled = (await handler.handle(ctx({ scope: null }))).result;
+			if (!("tokens" in nulled)) expect.fail("expected tokens");
+			expect(nulled.tokens.scope).toBe("read write");
+
+			for (const scope of [42, {}, true]) {
+				const { result } = await handler.handle(ctx({ scope }));
+				expect(result, JSON.stringify(scope)).toMatchObject({
+					status: 400,
+					error: "invalid_request",
+				});
+			}
+		});
+
+		it("refuses a repeated scope parameter as invalid_request rather than throwing", async () => {
+			// Express reads `scope=a&scope=b` as an array; the grant called
+			// `.split` on it and the request became a 500.
+			const { result } = await createRefreshTokenGrant(mockDeps).handle({
+				body: { refresh_token: await makeRefreshToken(), scope: ["read", "write"] },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "scope must be a space-delimited string",
+			});
+		});
+
+		it("never carries a scope wider than the refresh token was minted with, and carries it on canonical", async () => {
+			// A token minted before requests were read strictly can carry
+			// `openid\temail` as one entry, which named no scope. Split on the tab
+			// it would put `email` into the next pair of tokens, so the entry is
+			// dropped: a narrowing request cannot find `email` in it, and the
+			// refreshed tokens carry no scope at all.
+			const ctx = (token: string, body: Record<string, unknown> = {}): GrantContext => ({
+				body: { refresh_token: token, ...body },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+			const handler = createRefreshTokenGrant(mockDeps);
+			const legacy = await makeRefreshToken({ scope: "openid\temail" });
+
+			const narrowed = (await handler.handle(ctx(legacy, { scope: "email" }))).result;
+			expect(narrowed.status).toBe(400);
+			expect("error" in narrowed && narrowed.error).toBe("invalid_scope");
+
+			const carried = (await handler.handle(ctx(legacy))).result;
+			if (!("tokens" in carried)) expect.fail("expected tokens");
+			expect(carried.tokens.scope).toBeUndefined();
+			expect(decodeJwt(carried.tokens.refresh_token as string).scope).toBeUndefined();
+			expect(decodeJwt(carried.tokens.access_token).scope).toBeUndefined();
+
+			// Runs of spaces name the same scopes, carried on in canonical form.
+			const spaced = await makeRefreshToken({ scope: "read  write" });
+			const canonical = (await handler.handle(ctx(spaced))).result;
+			if (!("tokens" in canonical)) expect.fail("expected tokens");
+			expect(canonical.tokens.scope).toBe("read write");
+			expect(decodeJwt(canonical.tokens.refresh_token as string).scope).toBe("read write");
+		});
+
 		it("treats empty scope string as no scope change", async () => {
 			const token = await makeRefreshToken({ scope: "read write" });
 			const handler = createRefreshTokenGrant(mockDeps);
@@ -640,6 +740,67 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.status).toBe(503);
 			if (!("error" in result)) expect.fail("Expected error in result");
 			expect(result.error).toBe("temporarily_unavailable");
+		});
+
+		it("is refused when it is built with a lifetime that is not a positive whole number of seconds, and no token is spent", async () => {
+			// The schema refuses such a value at boot; a configuration built by
+			// hand never meets it. `generateToken` refuses it too, but only after
+			// the rotation has committed — the presented token spent and no token
+			// issued in its place (#449) — and read per request, even a check
+			// ahead of the rotation answers every request with a 500. The grant
+			// reads both lifetimes when it is built instead.
+			const refreshTokenFamilyStore = createMemoryRefreshTokenFamilyStore();
+			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore });
+			const revocation = createRefreshTokenFamilyRevocation({ refreshTokenFamilyStore });
+			await rotation.register("prev-jti-lifetime", "fam-lifetime", Date.now() + 86_400_000);
+			const token = await new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-lifetime" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuedAt()
+				.setIssuer("localhost")
+				.setAudience(DEFAULT_CLIENT_ID)
+				.setExpirationTime("24h")
+				.setJti("prev-jti-lifetime")
+				.sign(secretKey);
+			const ctx: GrantContext = {
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			};
+			const withOAuth = (over: Record<string, unknown>): GrantDependencies => ({
+				...mockDeps,
+				config: {
+					...mockConfig,
+					oauth: { ...mockConfig.oauth, ...over },
+				} as GrantDependencies["config"],
+				refreshTokenFamilyRotation: rotation,
+				refreshTokenFamilyRevocation: revocation,
+			});
+
+			const broken: Record<string, unknown>[] = [
+				{ refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn: 1.5 } },
+				{ refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn: Number.NaN } },
+				{ refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn: 0 } },
+				{ accessToken: { expiresIn: 1.5 } },
+			];
+			for (const over of broken) {
+				let refused: unknown;
+				let handler: ReturnType<typeof createRefreshTokenGrant> | undefined;
+				try {
+					handler = createRefreshTokenGrant(withOAuth(over));
+				} catch (err) {
+					refused = err;
+				}
+				await handler?.handle(ctx).catch(() => undefined);
+				expect(refused, JSON.stringify(over)).toBeInstanceOf(RangeError);
+				expect((refused as Error).message).toMatch(/oauth\.(refreshToken|accessToken)\.expiresIn/);
+			}
+
+			// Nothing was spent: the same token still refreshes under a sound
+			// configuration, rather than reading as a replay.
+			const { result } = await createRefreshTokenGrant(withOAuth({})).handle(ctx);
+			expect(result.status).toBe(200);
 		});
 
 		it("returns invalid_grant/family_revoked when the rotation reports 'revoked'", async () => {

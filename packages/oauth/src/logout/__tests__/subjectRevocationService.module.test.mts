@@ -335,6 +335,20 @@ describe("subjectRevocationServiceModule", () => {
 		expect(logged).toContain("federation_grant_audit_failed");
 	});
 
+	it("refuses a lifetime the resolvers refuse when it is built — at boot, never on a revocation", () => {
+		// The horizon is resolved once, in this eager provider, so a
+		// hand-built configuration the lifetime resolvers refuse stops the
+		// composition. Nothing on the revocation path reads a lifetime again, so
+		// such a value can never surface as a 500 mid-revocation.
+		for (const oauth of [
+			{ accessToken: { expiresIn: 300 }, refreshToken: { expiresIn: 1.5 } },
+			{ accessToken: { expiresIn: 300 }, refreshToken: {} },
+			{ accessToken: { expiresIn: 0 }, refreshToken: { expiresIn: 86_400 } },
+		]) {
+			expect(() => build({ config: config({ oauth }) }), JSON.stringify(oauth)).toThrow(RangeError);
+		}
+	});
+
 	it("sizes the boundary from the lifetimes this deployment is configured with", async () => {
 		// The service takes the number and cannot derive it: a boundary that
 		// expires before the credentials it covers is not a backstop, and what

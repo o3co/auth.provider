@@ -94,6 +94,15 @@ describe("parseFederationGrantTokenRequest", () => {
 		expect(rejected({ sub: "u", scope: "   " })).toMatch(/scope/);
 	});
 
+	it("refuses a scope that is not RFC 6749 §3.3's space-delimited list, rather than asserting a scope named with a tab", () => {
+		// The caller's assertion is read strictly: a tab is not a delimiter,
+		// and a scope-token holds no quote. Refused as invalid_scope, the same
+		// identifier an empty one gets, before core is asked about it.
+		for (const scope of ["openid\tprofile", 'openid "profile"', "\t"]) {
+			expect(rejected({ sub: "u", scope }), JSON.stringify(scope)).toBe("invalid_scope");
+		}
+	});
+
 	it("takes min_ttl as a number or as the string a form body carries", () => {
 		expect(ok({ sub: "u", min_ttl: 60 }).minTtlSeconds).toBe(60);
 		expect(ok({ sub: "u", min_ttl: "60" }).minTtlSeconds).toBe(60);
@@ -226,6 +235,22 @@ describe("the lodging routes' bodies (slice 6)", () => {
 		["create", parseFederationGrantCreateRequest],
 		["reauthorize", parseFederationGrantReauthorizeRequest],
 	] as const) {
+		it(`${name} refuses a scope that is not RFC 6749 §3.3's space-delimited list`, () => {
+			const lodging = {
+				sub: "u",
+				connection: "graph",
+				redirect_uri: "https://agent.example/cb",
+				state: "s-1",
+			};
+			const good = parse({ ...lodging, scope: "openid  Files.Read" });
+			expect(good.ok && good.value.scope).toEqual(["openid", "Files.Read"]);
+			for (const scope of ["openid\tFiles.Read", 'openid "Files.Read"', "\t"]) {
+				const parsed = parse({ ...lodging, scope });
+				expect(parsed.ok, JSON.stringify(scope)).toBe(false);
+				expect(!parsed.ok && parsed.description).toBe("invalid_scope");
+			}
+		});
+
 		it(`${name} refuses a body that is not an object`, () => {
 			for (const body of [undefined, null, "sub=u", 42, []]) {
 				const parsed = parse(body);

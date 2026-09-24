@@ -126,7 +126,11 @@ import {
 } from "@o3co/auth-provider-session";
 import express, { type ErrorRequestHandler, type RequestHandler, type Response } from "express";
 import { z } from "zod";
-import { createDeviceAuthorizationHandler } from "./deviceAuthorizationEndpoint.mjs";
+import {
+	createDeviceAuthorizationHandler,
+	DEVICE_CODE_LIFETIME_SECONDS,
+	DEVICE_POLLING_INTERVAL_SECONDS,
+} from "./deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "./grant.mjs";
 import { DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX, DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
@@ -174,9 +178,19 @@ export const deviceGrantConfigSchema = z.object({
 				 * §5.4: "long enough lifetime to be useable ... but sufficiently
 				 * short to limit the usability of a code obtained for phishing".
 				 */
-				"code-lifetime-seconds": z.number().int().min(30).max(3600).default(600),
+				"code-lifetime-seconds": z
+					.number()
+					.int()
+					.min(DEVICE_CODE_LIFETIME_SECONDS.min)
+					.max(DEVICE_CODE_LIFETIME_SECONDS.max)
+					.default(600),
 				/** Advertised as `interval`; also what the store enforces. */
-				"polling-interval-seconds": z.number().int().min(1).max(60).default(5),
+				"polling-interval-seconds": z
+					.number()
+					.int()
+					.min(DEVICE_POLLING_INTERVAL_SECONDS.min)
+					.max(DEVICE_POLLING_INTERVAL_SECONDS.max)
+					.default(5),
 				/**
 				 * The verification endpoint's budget per authenticated subject,
 				 * seeded into whichever rate-limiter adapter is wired under the

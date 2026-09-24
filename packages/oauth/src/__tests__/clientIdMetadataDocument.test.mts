@@ -157,6 +157,17 @@ describe("createClientIdMetadataDocumentResolver — what a document becomes (#5
 		expect(client?.allowedGrantTypes).toEqual(["authorization_code"]);
 	});
 
+	it("reads the document's scope by RFC 6749 §3.3's grammar, tolerantly, and never widens on one it cannot read", async () => {
+		// A third party's document: split on any whitespace and keep the
+		// scope-tokens, as an upstream's answer is read (parseScopeTokens). A
+		// scope named, but naming no scope-token, is not an absent one: it is
+		// not the operator's whole ceiling.
+		const tab = resolver({}, [() => json(document({ scope: "read\twrite\tadmin" }))]);
+		expect((await tab.resolve())?.allowedScopes).toEqual(["read", "write"]);
+		const unreadable = resolver({}, [() => json(document({ scope: '\t"read"' }))]);
+		expect((await unreadable.resolve())?.allowedScopes).toEqual([]);
+	});
+
 	it("is not a client at all when the id is not a document URL, without fetching", async () => {
 		const { resolve, calls } = resolver();
 		expect(await resolve("mobile-app")).toBeNull();

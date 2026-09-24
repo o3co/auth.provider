@@ -32,6 +32,7 @@ import {
 	generateTokenResponse,
 	isEmailVerified,
 	loggableError,
+	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
@@ -159,6 +160,12 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 	// #297: deployment config, resolved once at construction like the session
 	// grant does — `resolveOAuthOptions` owns the defensive read.
 	const { requireEmailVerified } = resolveOAuthOptions(config);
+	// The lifetime it mints with, read once, when the grant is built: a
+	// configuration built by hand that the resolver refuses is a composition
+	// fault, refused before any request — read per request, it was refused
+	// only after the verifier had recorded an ID-JAG's `jti`, and after client
+	// authentication had spent whatever it spends.
+	const { defaultExpiresIn } = resolveAccessTokenLifetime(config);
 
 	return {
 		// #326: a device credential is a standing capability of a registration,
@@ -434,7 +441,7 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 			// token, so the expiry the issuing authority set stopped bounding
 			// anything once exchanged. Taken here, at minting, rather than at
 			// verification: the Store and the policy run in between.
-			let expiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
+			let expiresIn = defaultExpiresIn;
 			// One issuance instant for both the cap and the token. Read twice,
 			// a second boundary between the reads would stamp `exp` a second
 			// past the assertion's; `iat` is this instant's whole second, so
@@ -533,12 +540,26 @@ function resolveScope(
 ):
 	| { scopes: readonly string[] }
 	| { status: 400; error: "invalid_scope" | "invalid_request"; errorDescription: string } {
-	const raw = ctx.body.scope;
+	// RFC 6749 §3.2: a parameter sent without a value is treated as omitted —
+	// `scope=""` in a form body, `"scope": null` in a JSON one.
+	const raw = ctx.body.scope ?? undefined;
 	if (raw !== undefined && typeof raw !== "string") {
 		return {
 			status: 400,
 			error: "invalid_request",
 			errorDescription: "scope must be a space-delimited string",
+		};
+	}
+	// RFC 6749 §3.3, read strictly: a client's request, so a value that is not
+	// a space-delimited list of scope-tokens is malformed, not a scope with a
+	// tab in its name that no ceiling holds. Spaces alone name nothing, which
+	// is an omitted scope.
+	const requested = raw === undefined ? [] : readSpaceDelimitedParameter(raw);
+	if (requested === null) {
+		return {
+			status: 400,
+			error: "invalid_scope",
+			errorDescription: "scope is not a space-delimited list of scope-tokens",
 		};
 	}
 	const client = ctx.authenticatedClient;
@@ -547,7 +568,7 @@ function resolveScope(
 	);
 	const within = (s: string): boolean => ceilings.every((c) => c.includes(s));
 
-	if (raw === undefined || raw.trim().length === 0) {
+	if (requested.length === 0) {
 		if (client) {
 			// #396, mirrored from `client_credentials`: an omitted scope draws
 			// on the client's DECLARED default, never on the whole allowlist —
@@ -591,7 +612,6 @@ function resolveScope(
 		};
 	}
 
-	const requested = raw.split(" ").filter((s) => s.length > 0);
 	const refused = requested.filter((s) => !within(s));
 	if (refused.length > 0) {
 		return {

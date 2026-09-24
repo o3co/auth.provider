@@ -16,6 +16,7 @@
 
 import { createHash } from "node:crypto";
 import { type CryptoKey, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
+import { readSpaceDelimitedParameter } from "../federations/scope.mjs";
 
 /**
  * A fake OpenID Provider behind a `fetch` implementation (#542).
@@ -285,7 +286,15 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 			if (params.get("client_id") !== clientId) {
 				throw new Error(`fake IdP: unknown client_id ${String(params.get("client_id"))}`);
 			}
-			const prompts = (params.get("prompt") ?? "").split(" ");
+			// OIDC Core §3.1.2.1: space-delimited. Read as a real IdP reads it, and
+			// refused when it is not, so an adapter that sent a malformed prompt
+			// fails here rather than only against a real IdP.
+			const prompts = readSpaceDelimitedParameter(params.get("prompt") ?? "");
+			if (prompts === null) {
+				throw new Error(
+					`fake IdP: prompt ${JSON.stringify(params.get("prompt"))} is not a space-delimited list`,
+				);
+			}
 			const consentShown = !consentGranted || prompts.includes("consent");
 			consentGranted = true;
 			codesIssued += 1;

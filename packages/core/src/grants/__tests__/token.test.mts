@@ -38,6 +38,78 @@ describe("generateToken — a caller-supplied identity (v0.13.0 audit)", () => {
 		}
 	});
 
+	it("refuses an expiresIn that is not a positive whole number of seconds, before signing", async () => {
+		// `exp` is `iat + expiresIn`. A fraction signs a fractional `exp` that
+		// verifiers round their own way, NaN signs `"exp": null`, Infinity an
+		// expiry that JSON writes as null too, and zero or less a token that is
+		// dead on arrival. None of them should cost a signature.
+		let signed = 0;
+		const counting = {
+			...keyStore,
+			sign: (input: Parameters<typeof keyStore.sign>[0]) => {
+				signed += 1;
+				return keyStore.sign(input);
+			},
+		};
+		for (const expiresIn of [
+			1.5,
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			0,
+			-60,
+			Number.MAX_SAFE_INTEGER + 1,
+		]) {
+			await expect(
+				generateToken({}, { keyStore: counting, expiresIn }),
+				String(expiresIn),
+			).rejects.toThrow(RangeError);
+			await expect(generateToken({}, { keyStore: counting, expiresIn })).rejects.toThrow(
+				/expiresIn/,
+			);
+		}
+		expect(signed).toBe(0);
+	});
+
+	it("refuses an expiry past Number.MAX_SAFE_INTEGER, where iat + expiresIn stops being exact, before signing", async () => {
+		// Each operand is a safe integer; their sum is not. Past 2^53 the `exp`
+		// that is signed is a rounded neighbour of the one computed — the same
+		// value for different lifetimes — so it is refused rather than signed.
+		let signed = 0;
+		const counting = {
+			...keyStore,
+			sign: (input: Parameters<typeof keyStore.sign>[0]) => {
+				signed += 1;
+				return keyStore.sign(input);
+			},
+		};
+		const cases: Array<{ issuedAt?: number; expiresIn: number }> = [
+			{ issuedAt: Number.MAX_SAFE_INTEGER - 10, expiresIn: 60 },
+			{ issuedAt: Number.MAX_SAFE_INTEGER, expiresIn: 1 },
+			// The clock's own iat, and the largest lifetime the check above admits.
+			{ expiresIn: Number.MAX_SAFE_INTEGER },
+		];
+		for (const { issuedAt, expiresIn } of cases) {
+			const options = {
+				keyStore: counting,
+				expiresIn,
+				...(issuedAt === undefined ? {} : { issuedAt }),
+			};
+			await expect(
+				generateToken({}, options),
+				JSON.stringify({ issuedAt, expiresIn }),
+			).rejects.toThrow(RangeError);
+			await expect(generateToken({}, options)).rejects.toThrow(/exp/);
+		}
+		expect(signed).toBe(0);
+
+		// The largest exact expiry is still signed.
+		const edge = await generateToken(
+			{},
+			{ keyStore, issuedAt: Number.MAX_SAFE_INTEGER - 60, expiresIn: 60 },
+		);
+		expect(decodeJwt(edge.token).exp).toBe(Number.MAX_SAFE_INTEGER);
+	});
+
 	it("signs exactly the jti and issuedAt it is given", async () => {
 		const token = await generateToken(
 			{},

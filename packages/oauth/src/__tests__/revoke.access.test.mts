@@ -120,10 +120,9 @@ describe("POST /oauth/revoke — access token path", () => {
 
 	it("accepts already-expired AT (ignoreExpiration), responds 200", async () => {
 		// offsetSeconds = -3600 → expired 1 hour ago (beyond default 5-min clock skew).
-		// The jti is added to the denylist with the token's (past) exp; denylist.has()
-		// will GC-evict it immediately since the exp is already past. The contract being
-		// tested is that the revoke endpoint does NOT return an error for an expired token —
-		// it accepts the revocation attempt and returns 200 silently.
+		// It can no longer verify anywhere, so there is nothing to deny and no
+		// store is asked. The contract being tested is that the revoke endpoint
+		// does NOT return an error for an expired token — it answers 200.
 		const at = await mintAccessToken({ jti: "j-2", clientId: CLIENT_ID, offsetSeconds: -3600 });
 		await request(app)
 			.post("/oauth/revoke")
@@ -131,9 +130,7 @@ describe("POST /oauth/revoke — access token path", () => {
 			.type("form")
 			.send({ token: at })
 			.expect(200);
-		// The jti was added to the denylist; denylist.has() returns false only because
-		// the stored expiresAtMs is already past (lazy GC). This is expected behavior.
-		// The important guarantee is that no 4xx/5xx was returned.
+		expect(await denylist.has("j-2")).toBe(false);
 	});
 
 	it("silently 200 when client_id mismatch", async () => {

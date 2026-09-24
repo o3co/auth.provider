@@ -916,6 +916,9 @@ describe("GET /session/federation-grants/callback/:connection — activating the
 			[{ accessToken: undefined }, "upstream_token_ineligible"],
 			[{ scope: "openid offline_access calendar.read admin" }, "scope_exceeded"],
 			[{ scope: "" }, "upstream_token_ineligible"],
+			// Named, but naming no scope-token: not an answer, and not "as
+			// requested" either.
+			[{ scope: '\t"openid"' }, "upstream_token_ineligible"],
 		];
 		for (const [over, code] of cases) {
 			const w = world();
@@ -940,6 +943,24 @@ describe("GET /session/federation-grants/callback/:connection — activating the
 		};
 		returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
 		expect(await w.grants.find(a.grantId, w.state.now)).toMatchObject({
+			scopes: ["openid", "offline_access"],
+		});
+	});
+
+	it("reads the upstream's scope by RFC 6749 §3.3's grammar: a tab separates, it does not join", async () => {
+		// The upstream's answer is read tolerantly (parseScopeTokens, as every
+		// upstream answer is): split on a single space, "openid\toffline_access"
+		// read as one scope the user was never shown, and the grant was refused
+		// as scope_exceeded.
+		const w = world();
+		const a = await approved(w, "b-1");
+		w.state.exchange = {
+			...w.state.exchange,
+			tokens: { ...w.state.exchange.tokens, scope: "openid\toffline_access" },
+		};
+		returned(await callback(w, { state: a.state, code: "c" }, "b-1"));
+		expect(await w.grants.find(a.grantId, w.state.now)).toMatchObject({
+			status: "active",
 			scopes: ["openid", "offline_access"],
 		});
 	});

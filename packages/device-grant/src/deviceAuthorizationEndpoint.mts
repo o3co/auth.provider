@@ -71,6 +71,7 @@ import {
 	isGrantTypeAllowed,
 	loggableError,
 	normaliseUserCode,
+	readSpaceDelimitedParameter,
 	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
@@ -104,7 +105,31 @@ const resolveScope = (
 	| { readonly ok: false; readonly error: string; readonly description: string } => {
 	const allowed = client.allowedScopes ?? [];
 
-	if (raw === undefined || (typeof raw === "string" && raw.trim() === "")) {
+	// RFC 6749 §3.3: a single space-delimited string. Express turns repeated
+	// `scope=` form keys into an array; defaulting that to the client's whole
+	// allowlist would grant more than was asked for. RFC 6749 §3.2: a
+	// parameter sent without a value is treated as omitted — `scope=""` in a
+	// form body, `"scope": null` in a JSON one.
+	if (raw !== undefined && raw !== null && typeof raw !== "string") {
+		return {
+			ok: false,
+			error: "invalid_request",
+			description: "scope must be a space-delimited string",
+		};
+	}
+	// Read strictly, as every token-endpoint grant reads a request: the space
+	// is the one delimiter, and an entry that is not a scope-token makes the
+	// value malformed. Spaces alone name nothing, which is an omitted scope.
+	const requested = typeof raw === "string" ? readSpaceDelimitedParameter(raw) : [];
+	if (requested === null) {
+		return {
+			ok: false,
+			error: "invalid_scope",
+			description: "scope is not a space-delimited list of scope-tokens",
+		};
+	}
+
+	if (requested.length === 0) {
 		if (client.defaultScopes !== undefined) {
 			return {
 				ok: true,
@@ -119,18 +144,6 @@ const resolveScope = (
 		};
 	}
 
-	// RFC 6749 §3.3: a single space-delimited string. Express turns repeated
-	// `scope=` form keys into an array; defaulting that to the client's whole
-	// allowlist would grant more than was asked for.
-	if (typeof raw !== "string") {
-		return {
-			ok: false,
-			error: "invalid_request",
-			description: "scope must be a space-delimited string",
-		};
-	}
-
-	const requested = raw.split(" ").filter((s) => s.length > 0);
 	const refused = requested.filter((s) => !allowed.includes(s));
 	if (refused.length > 0) {
 		return {
@@ -149,11 +162,47 @@ export interface DeviceAuthorizationEndpointOptions extends DeviceGrantDependenc
 /** How many times to re-draw when a generated code collides with a live one. */
 const CODE_COLLISION_RETRIES = 5;
 
+/**
+ * The bounds on the two device-code settings, in whole seconds: what
+ * `deviceGrantModule`'s schema holds `oauth.deviceAuthorization.*` to, and
+ * what this handler holds settings handed over as numbers to. RFC 8628 §5.4
+ * wants a code "long enough … to be useable" and "sufficiently short to limit
+ * the usability of a code obtained for phishing"; the interval is advertised
+ * and enforced by the store.
+ */
+export const DEVICE_CODE_LIFETIME_SECONDS = { min: 30, max: 3600 } as const;
+export const DEVICE_POLLING_INTERVAL_SECONDS = { min: 1, max: 60 } as const;
+
+const requireWholeSeconds = (
+	name: string,
+	value: number,
+	bounds: { readonly min: number; readonly max: number },
+): void => {
+	if (!(Number.isInteger(value) && value >= bounds.min && value <= bounds.max)) {
+		throw new RangeError(
+			`createDeviceAuthorizationHandler: ${name} must be a whole number of seconds from ${bounds.min} to ${bounds.max} (got ${String(value)})`,
+		);
+	}
+};
+
 export const createDeviceAuthorizationHandler = (
 	options: DeviceAuthorizationEndpointOptions,
 ): RequestHandler => {
 	const now = options.now ?? Date.now;
 	const { settings } = options;
+	// Refused where the handler is built: read per request, a hand-built value
+	// reached `expiresAtMs` arithmetic and the wire's `expires_in` / `interval`
+	// on every request instead of failing the composition once.
+	requireWholeSeconds(
+		"settings.codeLifetimeSeconds",
+		settings.codeLifetimeSeconds,
+		DEVICE_CODE_LIFETIME_SECONDS,
+	);
+	requireWholeSeconds(
+		"settings.pollingIntervalSeconds",
+		settings.pollingIntervalSeconds,
+		DEVICE_POLLING_INTERVAL_SECONDS,
+	);
 
 	return async (req: Request, res: Response): Promise<void> => {
 		const body = (req.body ?? {}) as Record<string, unknown>;

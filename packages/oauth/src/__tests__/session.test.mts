@@ -54,6 +54,26 @@ const AUTH_CLIENT = {
 	allowedScopes: ["read", "write"],
 };
 
+describe("createSessionGrant — the lifetime it mints with, read when it is built", () => {
+	it("is refused when it is built with an access-token lifetime the resolver refuses", () => {
+		// Read per request, a hand-built lifetime failed every token request
+		// with a 500, after client authentication had spent whatever it spends.
+		for (const accessToken of [
+			{ expiresIn: 1.5 },
+			{ expiresIn: 0 },
+			{ defaultExpiresIn: 600, maxExpiresIn: 60 },
+			{},
+		]) {
+			const config = {
+				oauth: { ...mockConfig.oauth, accessToken },
+			} as unknown as GrantDependencies["config"];
+			expect(() => createSessionGrant(makeDeps({ config })), JSON.stringify(accessToken)).toThrow(
+				RangeError,
+			);
+		}
+	});
+});
+
 describe("createSessionGrant", () => {
 	describe("handle", () => {
 		it("returns 401 when session is not authenticated", async () => {
@@ -242,6 +262,68 @@ describe("createSessionGrant", () => {
 				expect(decoded.aud).toBe("my-app");
 				expect(decoded.azp).toBe("my-app");
 			}
+		});
+
+		it("refuses a scope that is not RFC 6749 §3.3's space-delimited list as malformed", async () => {
+			const handler = createSessionGrant(makeDeps());
+			for (const scope of ["read\twrite", 'read "write"', "\t"]) {
+				const { result } = await handler.handle({
+					body: { scope },
+					session: { isAuthenticated: true, user: { id: "u1" } },
+					issuer: "localhost",
+					metadata: { ip: "127.0.0.1" },
+					authenticatedClient: AUTH_CLIENT,
+				});
+				expect(result.status, JSON.stringify(scope)).toBe(400);
+				expect("error" in result && result.error).toBe("invalid_scope");
+				expect("errorDescription" in result && result.errorDescription).toBe(
+					"scope is not a space-delimited list of scope-tokens",
+				);
+			}
+		});
+
+		it("reads scope: null as an omitted scope, and refuses any other value that is not a string", async () => {
+			// RFC 6749 §3.2: a parameter sent without a value is treated as
+			// omitted. A JSON body's `null` is that, as `scope=""` is for a form
+			// body — the same reading token exchange gives `expires_in: null`. Any
+			// other value that is not a string is `invalid_request`.
+			const handler = createSessionGrant(makeDeps());
+			const ctx = (body: Record<string, unknown>): GrantContext => ({
+				body,
+				session: { isAuthenticated: true, user: { id: "u1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
+			});
+			const nulled = (await handler.handle(ctx({ scope: null }))).result;
+			expect(nulled.status).toBe(200);
+			if ("tokens" in nulled) expect(nulled.tokens.scope).toBeUndefined();
+
+			for (const scope of [42, {}, true]) {
+				const { result } = await handler.handle(ctx({ scope }));
+				expect(result, JSON.stringify(scope)).toMatchObject({
+					status: 400,
+					error: "invalid_request",
+				});
+			}
+		});
+
+		it("refuses a repeated scope parameter as invalid_request rather than throwing", async () => {
+			// Express reads `scope=a&scope=b` as an array; the grant called
+			// `.split` on it and the request became a 500.
+			const handler = createSessionGrant(makeDeps());
+			const { result } = await handler.handle({
+				body: { scope: ["read", "write"] },
+				session: { isAuthenticated: true, user: { id: "u1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "scope must be a space-delimited string",
+			});
 		});
 
 		it("grants the requested scope when it is within the allowlist", async () => {

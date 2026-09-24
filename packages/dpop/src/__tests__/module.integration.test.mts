@@ -103,11 +103,10 @@ const ISSUER_ORIGIN = "https://auth.test";
  * is configuration. `normalizeHtu` strips query/fragment and lowercases
  * scheme + host on both sides before comparing.
  */
-const mintProof = async () => {
+const mintProof = async (jti: string = crypto.randomUUID()) => {
 	const { publicKey, privateKey } = await generateKeyPair("ES256");
 	const jwk = await exportJWK(publicKey);
 	const jkt = await computeJkt(jwk);
-	const jti = crypto.randomUUID();
 	const proof = await new SignJWT({
 		htm: "POST",
 		htu: `${ISSUER_ORIGIN}/oauth/token`,
@@ -352,6 +351,57 @@ describe("dpopModule — integration via createApp", () => {
 		const replay = await request(app).post("/oauth/token").set("DPoP", proof).send({});
 		expect(replay.status).toBe(400);
 		expect(replay.body).toMatchObject({ error: "invalid_dpop_proof" });
+
+		await handle.dispose();
+	});
+
+	it("when enabled: refuses a proof whose jti is longer than 256 characters, before it reaches the seen-set", async () => {
+		// The token endpoint checks the proof before it authenticates the client,
+		// and every accepted jti is a seen-set key for replay-store-ttl-seconds:
+		// unbounded, an anonymous caller chose how large each record was.
+		const recorded: string[] = [];
+		const backing = createMemoryReplaySeenSet();
+		const spy: ReplaySeenSet = {
+			kind: "spy",
+			markSeen: async (scope, key, expiresAtMs) => {
+				recorded.push(key);
+				return backing.markSeen(scope, key, expiresAtMs);
+			},
+			contains: (scope, key) => backing.contains(scope, key),
+		};
+		const observerModule = defineModule({
+			name: "observer",
+			requires: [],
+			optional: [],
+			contributes: {
+				routes: [
+					() => {
+						const router = Router();
+						router.post("/token", (_req, res) => {
+							res.status(200).json({ ok: true });
+						});
+						return { id: "test-token", mountPath: "/oauth", handler: router };
+					},
+				],
+			},
+		});
+		const handle = await createApp({
+			modules: [dpopModule, observerModule],
+			bootstrapComponents: { ...makeBoot(true), replaySeenSet: spy } satisfies BootstrapMap,
+		});
+		const app = express();
+		app.use(handle.router);
+
+		const long = await mintProof("j".repeat(257));
+		const refused = await request(app).post("/oauth/token").set("DPoP", long.proof).send({});
+		expect(refused.status).toBe(400);
+		expect(refused.body).toMatchObject({ error: "invalid_dpop_proof" });
+		expect(recorded).toEqual([]);
+
+		const atTheBound = await mintProof("j".repeat(256));
+		const accepted = await request(app).post("/oauth/token").set("DPoP", atTheBound.proof).send({});
+		expect(accepted.status).toBe(200);
+		expect(recorded).toEqual([atTheBound.jti]);
 
 		await handle.dispose();
 	});
