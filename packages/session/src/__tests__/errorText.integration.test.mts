@@ -36,7 +36,7 @@ import { defineModule } from "@o3co/auth-provider-core";
 import { createTestApp, makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import request from "supertest";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FederationRedirectPolicy } from "#/federations/redirect-policy.mjs";
 import { sessionModule } from "#/module.mjs";
 import { sessionStoreModuleFor } from "#/modules/sessionStoreModule.mjs";
@@ -140,6 +140,7 @@ const config = (): AppConfig => {
 
 const handles: { dispose(): Promise<void> }[] = [];
 afterEach(async () => {
+	vi.restoreAllMocks();
 	await Promise.all(handles.splice(0).map((handle) => handle.dispose()));
 });
 
@@ -225,6 +226,35 @@ describe("/session/oauth/federation/:name", () => {
 			error_description: "Federation provider not registered: st?ub??",
 		});
 	});
+
+	it.each([
+		[400, "invalid_request"],
+		[503, "server_error"],
+	] as const)(
+		"answers a %i refusal whose code RFC 6749 does not allow as %s",
+		async (status, error) => {
+			// A client-error status stays a client error: `400 server_error` would
+			// tell the client two contradictory things. A server status the
+			// envelope's own fallback already fits.
+			vi.spyOn(console, "warn").mockImplementation(() => {});
+			const app = await boot({
+				policy: {
+					...permissivePolicy,
+					validateRedirect: () => ({
+						ok: false as const,
+						status,
+						error: 'refus\u00e9 "here"',
+						errorDescription: "redirect target not allowed",
+					}),
+				},
+			});
+			const res = await request(app)
+				.get("/session/oauth/federation/stub")
+				.query({ redirect_to: "https://app.example/" });
+			expect(res.status).toBe(status);
+			expect(res.body).toEqual({ error, error_description: "redirect target not allowed" });
+		},
+	);
 
 	it("sends a contributed redirect policy's refusal inside RFC 6749's set", async () => {
 		const app = await boot({

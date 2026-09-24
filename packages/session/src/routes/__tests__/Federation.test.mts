@@ -1075,6 +1075,33 @@ describe("account linking across federations (#482)", () => {
 				error: "invalid_redirect",
 				error_description: "cible ?interdite? ? voir ?3",
 			});
+
+			// A refusal is the client's to hear as one: a 4xx the policy chose
+			// with a code RFC 6749 does not allow is `invalid_request`, never
+			// the contradictory `400 server_error`.
+			const refusingWithABadCode = {
+				...makePermissivePolicy(),
+				resolveCallbackRedirect: () => ({
+					ok: false as const,
+					status: 400,
+					error: 'not "allowed"',
+					errorDescription: "redirect target not allowed",
+				}),
+			} as unknown as ReturnType<typeof makePermissivePolicy>;
+			const refusedWithABadCode = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: linkableRepo({ current: null }),
+				userSessionStore: liveStore(),
+				federationRedirectPolicyResolver: new Map([["test", refusingWithABadCode]]),
+			});
+			const badCode = await callback(await plantAndGetAgent(refusedWithABadCode.app));
+			expect(badCode.status).toBe(400);
+			expect(badCode.body).toEqual({
+				error: "invalid_request",
+				error_description: "redirect target not allowed",
+			});
 		});
 
 		it("refuses without an authenticated session, and never asks the Store", async () => {
