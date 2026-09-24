@@ -336,6 +336,85 @@ async function readBodyCapped(
 }
 
 /**
+ * The Store refused the credential this deployment presented: a `401` or a
+ * `403` carrying a `Bearer` challenge (RFC 6750 §3 — `invalid_token`,
+ * `insufficient_scope`) to a request that sent `bearerToken`. An outage, not
+ * an answer about the user: thrown, so every caller answers it as it answers
+ * any Store failure.
+ *
+ * `name` is part of the contract. A caller that does not depend on this
+ * package recognises the refusal by it — federation-grants' sanitized
+ * reporter classifies it `store_credential_refused`. The message names the
+ * endpoint, the status and the option to check; never the token, and nothing
+ * the Store wrote.
+ */
+export class StoreCredentialRefusedError extends Error {
+	readonly status: 401 | 403;
+
+	constructor(url: string, status: 401 | 403) {
+		super(
+			`HttpUserRepository: the Store at ${url} refused this deployment's credential ` +
+				`(HTTP ${status} with a Bearer challenge) — bearerToken (CLIENT_USER_BEARER_TOKEN) is ` +
+				"not a token the Store accepts",
+		);
+		this.name = "StoreCredentialRefusedError";
+		this.status = status;
+	}
+}
+
+/**
+ * Transport codes an operator can act on. A transport's error is never passed
+ * on: undici's parser errors carry the bytes they choked on as `data`, and a
+ * peer that reflects the request — a broken proxy, a debugging echo — puts the
+ * `Authorization` header there. A code from this list, found on the error or
+ * its causes, is all that is kept of one.
+ */
+const TRANSPORT_CODES: ReadonlySet<string> = new Set([
+	"ECONNREFUSED",
+	"ECONNRESET",
+	"ECONNABORTED",
+	"ENOTFOUND",
+	"EAI_AGAIN",
+	"ETIMEDOUT",
+	"EHOSTUNREACH",
+	"ENETUNREACH",
+	"EPIPE",
+	"CERT_HAS_EXPIRED",
+	"DEPTH_ZERO_SELF_SIGNED_CERT",
+	"SELF_SIGNED_CERT_IN_CHAIN",
+	"UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+	"UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+	"ERR_TLS_CERT_ALTNAME_INVALID",
+]);
+
+/** undici's own codes (`UND_ERR_SOCKET`, `UND_ERR_CONNECT_TIMEOUT`, …): a closed vocabulary. */
+const UNDICI_CODE = /^UND_ERR_[A-Z_]{1,48}$/;
+
+/** The first allowlisted `code` on `err` or its causes, a few levels deep. */
+function transportCode(err: unknown): string | undefined {
+	let current = err;
+	for (let depth = 0; depth < 4 && typeof current === "object" && current !== null; depth++) {
+		const code = (current as { code?: unknown }).code;
+		if (typeof code === "string" && (TRANSPORT_CODES.has(code) || UNDICI_CODE.test(code))) {
+			return code;
+		}
+		current = (current as { cause?: unknown }).cause;
+	}
+	return undefined;
+}
+
+/**
+ * The error thrown for a transport failure: `HttpUserRepository: <what>`, and
+ * the allowlisted code in the message and as `code` when there is one — no
+ * cause, and nothing else of `err`.
+ */
+function transportFailure(what: string, err: unknown): Error {
+	const code = transportCode(err);
+	if (code === undefined) return new Error(`HttpUserRepository: ${what}`);
+	return Object.assign(new Error(`HttpUserRepository: ${what} (${code})`), { code });
+}
+
+/**
  * Whether `err` is the abort our own deadline raised on the `fetch` itself —
  * the case where the response headers never arrive.
  *
@@ -374,10 +453,17 @@ function isAbortError(err: unknown): boolean {
  * the identity lookup alike — carries `Authorization: Bearer <token>`, so the
  * Store can refuse a caller that is not this deployment; without it, no
  * request carries an `Authorization` header. The Store says it refused THIS
- * deployment by answering `401` with a `Bearer` challenge (RFC 6750 §3), and
- * that answer, while a token was sent, throws on every request as an outage
- * naming the refused credential — never as "no such user" or a refused link,
- * which is what a `401` without the challenge still means.
+ * deployment by answering `401` or `403` with a `Bearer` challenge (RFC 6750
+ * §3), and that answer, while a token was sent, throws a
+ * {@link StoreCredentialRefusedError} on every request — never "no such user"
+ * or a refused link, which is what either status without the challenge still
+ * means.
+ *
+ * A transport's own error is never thrown: undici's parser errors quote the
+ * bytes they rejected, and a peer that reflects the request puts the
+ * `Authorization` header — or a password — there. A request that cannot be
+ * made, or an answer that cannot be read, throws a fixed message naming the
+ * endpoint and at most an allowlisted transport code, with no cause.
  */
 export class HttpUserRepository implements UserRepository {
 	/**
@@ -503,26 +589,22 @@ export class HttpUserRepository implements UserRepository {
 	}
 
 	/**
-	 * Throws when a non-`2xx` answer is the Store refusing this deployment's
-	 * credential: a `401` with a `Bearer` challenge, to a request that carried
-	 * the token. Read before any other reading of the status — without it a
-	 * token the Store does not accept is every login "no such user" and every
-	 * link "refused", with nothing logged. Without a token sent, a challenge is
-	 * not about one, and a Store whose stack challenges every `401` keeps the
-	 * wire meaning it has always had. The message names the endpoint and the
-	 * option to check — never the token, and nothing the Store wrote.
+	 * Throws {@link StoreCredentialRefusedError} when a non-`2xx` answer is the
+	 * Store refusing this deployment's credential: a `401` or `403` with a
+	 * `Bearer` challenge, to a request that carried the token. Read before any
+	 * other reading of the status — without it a token the Store does not
+	 * accept is every login "no such user" and every link "refused", with
+	 * nothing logged. Without a token sent, a challenge is not about one, and a
+	 * Store whose stack challenges every refusal keeps the wire meaning it has
+	 * always had.
 	 */
 	private assertCredentialAccepted(res: Response, url: string): void {
 		if (
 			this.#authorization !== undefined &&
-			res.status === 401 &&
+			(res.status === 401 || res.status === 403) &&
 			hasBearerChallenge(res.headers.get("www-authenticate"))
 		) {
-			throw new Error(
-				`HttpUserRepository: the Store at ${url} refused this deployment's credential ` +
-					"(HTTP 401 with a Bearer challenge) — bearerToken (CLIENT_USER_BEARER_TOKEN) is not " +
-					"a token the Store accepts",
-			);
+			throw new StoreCredentialRefusedError(url, res.status);
 		}
 	}
 
@@ -600,11 +682,11 @@ export class HttpUserRepository implements UserRepository {
 	 * {@link post}'s readings, though. A `401`/`403` is not "nobody", a `409` is
 	 * not a conflict, a `404` is not an absence: only a `2xx` carrying one of the
 	 * three answers is an answer, and everything else throws — as an outage,
-	 * which is what a lookup that could not be made is — a `401` with a `Bearer`
-	 * challenge, to a request that carried the token, as the refused credential
-	 * it is. What is thrown names the endpoint — and, for an answer with a
-	 * status, the status — and never the body, the identity, a status text or an
-	 * underlying cause.
+	 * which is what a lookup that could not be made is — a `401` or `403` with a
+	 * `Bearer` challenge, to a request that carried the token, as the refused
+	 * credential it is. What is thrown names the endpoint — and, for an answer
+	 * with a status, the status; for a transport failure, at most its code — and
+	 * never the body, the identity, a status text or an underlying cause.
 	 */
 	private async postLookup(url: string, body: unknown): Promise<FederatedIdentityLookupResult> {
 		const controller = new AbortController();
@@ -641,7 +723,7 @@ export class HttpUserRepository implements UserRepository {
 				if (timedOut && isAbortError(err)) throw timeoutError();
 				// A fixed message, without the cause: what a transport reports may
 				// quote what it was sending.
-				throw new Error(`HttpUserRepository: identity lookup at ${url} could not be reached`);
+				throw transportFailure(`identity lookup at ${url} could not be reached`, err);
 			}
 			if (!res.ok) {
 				discardBody(res);
@@ -656,7 +738,7 @@ export class HttpUserRepository implements UserRepository {
 			} catch (err) {
 				if (timedOut) throw timeoutError();
 				if (err instanceof Error && err.message.startsWith("HttpUserRepository:")) throw err;
-				throw new Error(`HttpUserRepository: identity lookup at ${url} could not be read`);
+				throw transportFailure(`identity lookup at ${url} could not be read`, err);
 			}
 			let parsed: unknown;
 			try {
@@ -690,12 +772,11 @@ export class HttpUserRepository implements UserRepository {
 		// raced against. `.catch` is attached up front so an exchange that
 		// finishes first — the overwhelmingly common case, where the timer is
 		// cleared and this never rejects — cannot leave an unhandled rejection.
+		const timeoutError = (): Error =>
+			new Error(`HttpUserRepository: request to ${url} timed out after ${this.timeout}ms`);
 		let fireDeadline: () => void = () => {};
 		const deadline = new Promise<never>((_resolve, reject) => {
-			fireDeadline = () =>
-				reject(
-					new Error(`HttpUserRepository: request to ${url} timed out after ${this.timeout}ms`),
-				);
+			fireDeadline = () => reject(timeoutError());
 		});
 		deadline.catch(() => {});
 
@@ -706,23 +787,40 @@ export class HttpUserRepository implements UserRepository {
 		}, this.timeout);
 
 		try {
-			const res = await fetch(url, {
-				method: "POST",
-				headers: this.headers(),
-				body: JSON.stringify(body),
-				signal: controller.signal,
-				// Never followed: a 307 or 308 would re-send the body — a password,
-				// a token, a link request — to a `Location` the https rule never
-				// checked, and after any redirect the answer from there would be
-				// taken as the user. Node's fetch hands the 3xx back as it is (a
-				// browser-spec runtime would hand back an opaque redirect, status
-				// 0); either way it is not a 2xx, 401, 403 or 409, so it throws
-				// below as an unexpected status.
-				redirect: "manual",
-			});
+			let res: Response;
+			try {
+				res = await fetch(url, {
+					method: "POST",
+					headers: this.headers(),
+					body: JSON.stringify(body),
+					signal: controller.signal,
+					// Never followed: a 307 or 308 would re-send the body — a
+					// password, a token, a link request — to a `Location` the https
+					// rule never checked, and after any redirect the answer from
+					// there would be taken as the user. Node's fetch hands the 3xx
+					// back as it is (a browser-spec runtime would hand back an opaque
+					// redirect, status 0); either way it is not a 2xx, 401, 403 or
+					// 409, so it throws below as an unexpected status.
+					redirect: "manual",
+				});
+			} catch (err) {
+				if (timedOut && isAbortError(err)) throw timeoutError();
+				// Never the transport's own error: it may quote what it was
+				// sending — the credential, the password — or what came back.
+				throw transportFailure(`request to ${url} could not be reached`, err);
+			}
 
 			if (res.ok) {
-				const raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline);
+				let raw: string;
+				try {
+					raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline);
+				} catch (err) {
+					if (timedOut) throw timeoutError();
+					// Our own failures (the cap) as they are; a stream that broke
+					// mid-read, as the fixed message the transport rule requires.
+					if (err instanceof Error && err.message.startsWith("HttpUserRepository:")) throw err;
+					throw transportFailure(`response from ${url} could not be read`, err);
+				}
 				let parsed: unknown;
 				try {
 					parsed = JSON.parse(raw);
@@ -753,11 +851,6 @@ export class HttpUserRepository implements UserRepository {
 			}
 
 			throw new Error(`Unexpected HTTP status ${res.status} from ${url}`);
-		} catch (err) {
-			if (timedOut && isAbortError(err)) {
-				throw new Error(`HttpUserRepository: request to ${url} timed out after ${this.timeout}ms`);
-			}
-			throw err;
 		} finally {
 			clearTimeout(timer);
 		}

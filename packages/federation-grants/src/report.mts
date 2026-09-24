@@ -47,6 +47,12 @@ const CLASSIFICATIONS: ReadonlyMap<string, string> = new Map([
 	["TypeError", "type_error"],
 	["RangeError", "range_error"],
 	["SyntaxError", "syntax_error"],
+	// The Store refused the credential the deployment presents it (a 401 or
+	// 403 with a Bearer challenge; `@o3co/auth-provider-foundation`'s
+	// `StoreCredentialRefusedError`). Named because the fix is the operator's —
+	// the configured token — and "unknown" would send them to the Store's
+	// uptime. Matched by name: this package does not depend on the adapter.
+	["StoreCredentialRefusedError", "store_credential_refused"],
 ]);
 
 const classify = (error: unknown): string => {

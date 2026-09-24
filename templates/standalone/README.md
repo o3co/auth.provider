@@ -525,17 +525,21 @@ send is an identifier, not a secret, so a Store that answers any caller
 resolves a known identity to its user — or links one to any account — for
 anyone who can reach it. Set `CLIENT_USER_BEARER_TOKEN` and have the Store
 answer every request whose `Authorization` is not exactly `Bearer <that token>`
-with `401` and `WWW-Authenticate: Bearer error="invalid_token"`. Boot fails if
-the token is weaker than 32 bytes (measured like `SESSION_SECRET`), malformed,
-or exported but empty; it appears in no error this server throws. With that
-challenge, a token the Store does not accept is an outage on every Store call:
-logins answer `503 temporarily_unavailable`, and the log names the refused
-credential, not the token. A `401` without the challenge still reads as "no
-such user", so a mismatch then shows only as every login failing — and a
-Store must not put a `Bearer` challenge on a user's wrong password. Without
-the token, admit only this server to the Store by network policy or platform
-mutual TLS. Rotation, and what the Store checks, are in the same foundation
-README section.
+with `401` and `WWW-Authenticate: Bearer error="invalid_token"` (or `403` and
+`error="insufficient_scope"`). The one token goes to every Store URL above, so
+those endpoints must be one trust domain. With `CLIENT_USER_TYPE=http` — this
+template's default — boot fails if the token is weaker than 32 bytes
+(measured like `SESSION_SECRET`), malformed, or exported but empty; it appears
+in no error this server throws. With that challenge, a token the Store does not
+accept is an outage on every Store call: logins answer
+`503 temporarily_unavailable` and log an error naming the refused credential,
+not the token; federation-grants connects log
+`classification: "store_credential_refused"`. A `401` or `403` without the
+challenge still reads as "no such user", so a mismatch then shows only as
+every login failing — and a Store must not put a `Bearer` challenge on a
+user's wrong password. Without the token, admit only this server to the Store
+by network policy or platform mutual TLS. Rotation, what each caller logs, and
+what the Store checks are in the same foundation README section.
 
 ### Code Repository
 
