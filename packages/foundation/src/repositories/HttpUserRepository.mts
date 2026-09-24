@@ -27,6 +27,7 @@ import {
 	type UserRepository,
 } from "@o3co/auth-provider-core";
 import { assertSecureEndpoint } from "../endpointUrl.mjs";
+import { hasBearerChallenge } from "./wwwAuthenticate.mjs";
 
 /** The Store answered 409 to a link request: the identity is already someone else's (#482). */
 const CONFLICT = Symbol("conflict");
@@ -252,28 +253,6 @@ function bearerAuthorization(value: unknown): string | undefined {
 		);
 	}
 	return `Bearer ${value}`;
-}
-
-/** A quoted-string (RFC 9110 §5.6.4), escapes included. */
-const QUOTED_STRING = /"(?:[^"\\]|\\.)*"/g;
-
-/**
- * An auth-scheme `Bearer`, case-insensitive (RFC 9110 §11.1), where a
- * challenge begins — the value's start or after a comma — and followed by the
- * value's end, a comma, or whitespace that does not lead to `=` (which would
- * make `bearer` a parameter's name, not a scheme).
- */
-const BEARER_CHALLENGE = /(?:^|,)[ \t]*bearer(?:[ \t]*(?:,|$)|[ \t]+(?!=))/i;
-
-/**
- * Whether a `WWW-Authenticate` value carries a `Bearer` challenge (RFC 6750
- * §3). Quoted strings are blanked first, so `realm="… Bearer …"` is not one;
- * several header lines arrive joined by `, `, which this reads as the
- * challenge list it is. Only the scheme is read — nothing the Store wrote
- * after it reaches anything this adapter throws.
- */
-function hasBearerChallenge(value: string | null): boolean {
-	return value !== null && BEARER_CHALLENGE.test(value.replace(QUOTED_STRING, '""'));
 }
 
 /** Whether `value` is a positive integer that fits `bound`. */
