@@ -14,18 +14,21 @@
  * limitations under the License.
  */
 
-import { createHash } from "node:crypto";
-import { type CryptoKey, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
+import {
+	createFakeIdp as createSharedFakeIdp,
+	type FakeIdp,
+} from "@o3co/auth-provider-core/testing";
+
+export type { FakeIdp };
 
 /**
- * A fake OpenID Provider behind a `fetch` implementation (#524).
- *
- * The provider under test is handed `idp.fetch` through its `fetch` option,
- * which openid-client uses for every request it makes — discovery, JWKS,
- * token, userinfo — so nothing here touches the network and every request
- * is recorded for the tests to inspect. The IdP signs real RS256 id_tokens
- * under a key it publishes at `jwks_uri`; the knobs below let a test make
- * it misbehave in exactly one way at a time.
+ * The fake OpenID Provider these tests run the real library against (#524):
+ * core's shared one (`@o3co/auth-provider-core/testing`), set up as an issuer
+ * a generic OIDC client discovers — the discovery document served at
+ * `<issuer>/.well-known/openid-configuration`, every endpoint a path under
+ * the issuer, UserInfo published unless `userinfo: false`, an end-session
+ * endpoint only with `endSession: true`, and no id_token on a refresh unless
+ * a test turns `refreshWithIdToken` on.
  */
 export interface FakeIdpOptions {
 	readonly issuer: string;
@@ -37,232 +40,16 @@ export interface FakeIdpOptions {
 	readonly userinfo?: boolean;
 }
 
-export interface RecordedRequest {
-	readonly url: URL;
-	readonly method: string;
-	readonly headers: Headers;
-	readonly body: URLSearchParams | undefined;
-}
-
-export interface FakeIdp {
-	readonly issuer: string;
-	readonly clientId: string;
-	readonly sub: string;
-	readonly requests: RecordedRequest[];
-	readonly fetch: typeof fetch;
-	/** The discovery document. Mutable, so a test can corrupt one field. */
-	readonly metadata: Record<string, unknown>;
-	/** Claims laid over the id_token defaults. */
-	idTokenClaims: Record<string, unknown>;
-	/** The nonce the next id_token echoes; absent when undefined. */
-	nonce: string | undefined;
-	/** Sign under the current key but claim this `kid` in the header. */
-	signingKid: string | undefined;
-	/** Leave the id_token out of the token response. */
-	omitIdToken: boolean;
-	/** Whether the id_token carries `at_hash`, and whether it is right. */
-	atHash: "none" | "valid" | "wrong";
-	/** Claims laid over the userinfo defaults. */
-	userinfoClaims: Record<string, unknown>;
-	discoveryStatus: number;
-	tokenStatus: number;
-	accessToken: string;
-	/**
-	 * Laid over the refresh answer's defaults; a value of `undefined` removes
-	 * the field. Lets a test make the answer carry a `scope`, an id_token, or
-	 * a field of the wrong shape.
-	 */
-	refreshAnswer: Record<string, unknown>;
-	/** Mint an id_token into the refresh answer (an IdP that re-issues one on refresh). */
-	refreshWithIdToken: boolean;
-	/**
-	 * Laid over the authorization-code answer's defaults; a value of `undefined`
-	 * removes the field. What the delegated exchange's tests shape (#593, D17).
-	 */
-	codeAnswer: Record<string, unknown>;
-	/** The body of a token endpoint refusal (when `tokenStatus` is not 200). */
-	refusal: Record<string, unknown>;
-	/** How long the JWKS takes to answer, in real milliseconds. */
-	jwksDelayMs: number;
-	/** Replace the signing key; the JWKS then holds only the new one. */
-	rotateKey(): Promise<string>;
-	currentKid(): string;
-	requestsTo(path: string): RecordedRequest[];
-	lastTokenRequest(): RecordedRequest | undefined;
-}
-
-function json(body: unknown, status = 200): Response {
-	return new Response(JSON.stringify(body), {
-		status,
-		headers: { "content-type": "application/json" },
-	});
-}
-
-/** OIDC Core §3.3.2.11 for an RS256 id_token: SHA-256, left half, base64url. */
-export function sha256LeftHalf(value: string): string {
-	const digest = createHash("sha256").update(value).digest();
-	return digest.subarray(0, digest.length / 2).toString("base64url");
-}
-
 export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 	const issuer = options.issuer.replace(/\/$/, "");
-	const clientId = options.clientId ?? "client-under-test";
-	const sub = options.sub ?? "user-0001";
-
-	let keyIndex = 0;
-	let signer: { kid: string; key: CryptoKey } = { kid: "", key: undefined as unknown as CryptoKey };
-	const jwks: { keys: JWK[] } = { keys: [] };
-	const newKey = async (): Promise<string> => {
-		const { publicKey, privateKey } = await generateKeyPair("RS256");
-		keyIndex += 1;
-		const kid = `kid-${keyIndex}`;
-		jwks.keys = [{ ...(await exportJWK(publicKey)), kid, use: "sig", alg: "RS256" }];
-		signer = { kid, key: privateKey };
-		return kid;
-	};
-	await newKey();
-
-	const metadata: Record<string, unknown> = {
+	const idp = await createSharedFakeIdp({
 		issuer,
-		authorization_endpoint: `${issuer}/authorize`,
-		token_endpoint: `${issuer}/token`,
-		jwks_uri: `${issuer}/jwks`,
-		...(options.userinfo === false ? {} : { userinfo_endpoint: `${issuer}/userinfo` }),
-		...(options.endSession ? { end_session_endpoint: `${issuer}/logout` } : {}),
-		response_types_supported: ["code"],
-		subject_types_supported: ["public"],
-		id_token_signing_alg_values_supported: ["RS256"],
-		token_endpoint_auth_methods_supported: ["client_secret_basic", "private_key_jwt"],
-		code_challenge_methods_supported: ["S256"],
-	};
-
-	const requests: RecordedRequest[] = [];
-
-	const idp: FakeIdp = {
-		issuer,
-		clientId,
-		sub,
-		requests,
-		metadata,
-		idTokenClaims: {},
-		nonce: undefined,
-		signingKid: undefined,
-		omitIdToken: false,
-		atHash: "none",
-		userinfoClaims: {},
-		codeAnswer: {},
-		discoveryStatus: 200,
-		tokenStatus: 200,
-		accessToken: "at-1",
-		refreshAnswer: {},
-		refreshWithIdToken: false,
-		refusal: { error: "invalid_client" },
-		jwksDelayMs: 0,
-		fetch: undefined as unknown as typeof fetch,
-		rotateKey: newKey,
-		currentKid: () => signer.kid,
-		requestsTo: (path) => requests.filter((r) => r.url.href === `${issuer}${path}`),
-		lastTokenRequest: () => requests.filter((r) => r.url.href === `${issuer}/token`).at(-1),
-	};
-
-	const mintIdToken = async (): Promise<string> => {
-		const now = Math.floor(Date.now() / 1000);
-		const claims: Record<string, unknown> = {
-			iss: issuer,
-			aud: clientId,
-			sub,
-			iat: now,
-			exp: now + 300,
-			email: "alice@example.test",
-			email_verified: true,
-			name: "Alice Example",
-			...(idp.nonce === undefined ? {} : { nonce: idp.nonce }),
-			...(idp.atHash === "none"
-				? {}
-				: {
-						at_hash:
-							idp.atHash === "valid" ? sha256LeftHalf(idp.accessToken) : "AAAAAAAAAAAAAAAAAAAAAA",
-					}),
-			...idp.idTokenClaims,
-		};
-		return new SignJWT(claims)
-			.setProtectedHeader({ alg: "RS256", kid: idp.signingKid ?? signer.kid })
-			.sign(signer.key);
-	};
-
-	const fetchImpl = async (
-		input: string | URL | Request,
-		init?: RequestInit,
-	): Promise<Response> => {
-		const url = new URL(
-			typeof input === "string" ? input : input instanceof URL ? input.href : input.url,
-		);
-		const method = (
-			init?.method ?? (input instanceof Request ? input.method : "GET")
-		).toUpperCase();
-		const headers = new Headers(
-			(init?.headers ??
-				(input instanceof Request ? input.headers : undefined)) as ConstructorParameters<
-				typeof Headers
-			>[0],
-		);
-		const raw = init?.body;
-		const body =
-			raw === undefined || raw === null
-				? undefined
-				: new URLSearchParams(raw instanceof URLSearchParams ? raw : String(raw));
-		requests.push({ url, method, headers, body });
-
-		// One server, however its host is spelled: DNS resolves `idp.test.` and
-		// `idp.test` to the same address, so a request that carries the root dot
-		// reaches this IdP too, and the routing below must not turn it into a 404.
-		const routed = new URL(url.href);
-		routed.hostname = routed.hostname.replace(/\.$/, "");
-		const path = routed.href.startsWith(`${issuer}/`)
-			? routed.href.slice(issuer.length)
-			: routed.href;
-		if (path === "/.well-known/openid-configuration") return json(metadata, idp.discoveryStatus);
-		if (path === "/jwks") {
-			if (idp.jwksDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, idp.jwksDelayMs));
-			return json(jwks);
-		}
-		if (path === "/token" && method === "POST") {
-			if (idp.tokenStatus !== 200) return json(idp.refusal, idp.tokenStatus);
-			if (body?.get("grant_type") === "refresh_token") {
-				const answer: Record<string, unknown> = {
-					access_token: "at-refreshed",
-					token_type: "Bearer",
-					expires_in: 1800,
-					refresh_token: "rt-2",
-					...(idp.refreshWithIdToken ? { id_token: await mintIdToken() } : {}),
-					...idp.refreshAnswer,
-				};
-				for (const key of Object.keys(answer)) if (answer[key] === undefined) delete answer[key];
-				return json(answer);
-			}
-			const answer: Record<string, unknown> = {
-				access_token: idp.accessToken,
-				token_type: "Bearer",
-				expires_in: 3600,
-				refresh_token: "rt-1",
-				...(idp.omitIdToken ? {} : { id_token: await mintIdToken() }),
-				...idp.codeAnswer,
-			};
-			for (const key of Object.keys(answer)) if (answer[key] === undefined) delete answer[key];
-			return json(answer);
-		}
-		if (path === "/userinfo") {
-			return json({
-				sub,
-				email: "alice@example.test",
-				email_verified: true,
-				name: "Alice Example",
-				picture: `${issuer}/alice.png`,
-				...idp.userinfoClaims,
-			});
-		}
-		return new Response("not found", { status: 404 });
-	};
-	(idp as { fetch: typeof fetch }).fetch = fetchImpl as typeof fetch;
+		discovery: true,
+		...(options.userinfo === false ? {} : { userinfoEndpoint: `${issuer}/userinfo` }),
+		...(options.endSession ? { endSessionEndpoint: `${issuer}/logout` } : {}),
+		...(options.clientId !== undefined ? { clientId: options.clientId } : {}),
+		...(options.sub !== undefined ? { sub: options.sub } : {}),
+	});
+	idp.refreshWithIdToken = false;
 	return idp;
 }
