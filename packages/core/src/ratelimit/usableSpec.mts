@@ -45,12 +45,25 @@ export const isUsableRateLimitSpec = (value: unknown): value is RateLimitSpec =>
 
 /**
  * A value as a refusal shows it, with its type: a string quoted, a number as
- * it prints (`NaN` included), anything else as JSON. `String()` showed the
- * string "20" as 20, which read as a refusal of a usable number.
+ * it prints (`NaN` included), a BigInt with its `n`, a function as
+ * `[function]` (never its source), anything else as JSON. `String()` showed
+ * the string "20" as 20, which read as a refusal of a usable number. What
+ * JSON cannot write — a circular object, one whose `toJSON` answers nothing,
+ * a Symbol — falls back to `String()`, so the refusal is still given.
  */
 export const shownConfigValue = (value: unknown): string => {
-	if (typeof value === "number" || value === undefined) return String(value);
-	if (typeof value === "string") return JSON.stringify(value);
+	switch (typeof value) {
+		case "number":
+		case "undefined":
+		case "symbol":
+			return String(value);
+		case "string":
+			return JSON.stringify(value);
+		case "bigint":
+			return `${value}n`;
+		case "function":
+			return "[function]";
+	}
 	try {
 		return JSON.stringify(value) ?? String(value);
 	} catch {
