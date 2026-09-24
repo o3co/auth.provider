@@ -275,9 +275,11 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 	// Before the throttle and before authentication, because what it watches
 	// for is a response those two write themselves: the handler is not the only
 	// thing that can refuse a token request, and until this existed it was the
-	// only thing auditing one.
+	// only thing auditing one. Each a route (`router.all`) on its own path, not
+	// `router.use`, which would match every path beneath it too and audit a
+	// 404 at `/:grantId/token/extra` as a token denial.
 	for (const operation of ["token", "revoke"] as const) {
-		router.use(
+		router.all(
 			`/:grantId/${operation}`,
 			createRouteDenialAudit({
 				...(options.auditSink === undefined ? {} : { sink: options.auditSink }),
@@ -294,10 +296,11 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 			now: options.now ?? (() => new Date()),
 			background: options.background,
 		});
-		// `all` on the exact collection path, not `use`: `use("/")` would match
-		// every path under the mount and count a token refusal as a lodging one.
+		// `all` on the exact paths, not `use`: `use("/")` would match every path
+		// under the mount and count a token refusal as a lodging one, and
+		// `use("/:grantId/reauthorize")` every path beneath the reauthorize route.
 		router.all("/", requestDenials);
-		router.use("/:grantId/reauthorize", requestDenials);
+		router.all("/:grantId/reauthorize", requestDenials);
 	}
 	// Ahead of client authentication, as the token endpoint orders it: repeated
 	// unauthenticated hits are bounded before they reach a repository lookup.
