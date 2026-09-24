@@ -15,13 +15,16 @@
  */
 
 /**
- * mTLS module manifest — wires `createMtlsMechanism` into the grant
- * middleware contribution slot (Wave 2 Token-binding Cluster spec §4.7 /
+ * mTLS module manifest — contributes `createMtlsMechanism` to core's
+ * `tokenBindingMechanisms` slot (Wave 2 Token-binding Cluster spec §4.7 /
  * Phase 3 spec §11.1).
  *
  * Contributions:
- *   - `grantMiddleware[0]` — `tokenBindingMw` wrapping the mTLS mechanism.
- *     Returns `null` (skip) when `config.oauth.mtls.enabled === false`.
+ *   - `tokenBindingMechanisms[0]` — the mTLS mechanism, which core composes
+ *     into its single `tokenBindingMw` and its protected-resource check.
+ *     Returns `null` (skip) when `config.oauth.mtls.enabled !== true`.
+ *   - `discoveryMetadata[0]` — `tls_client_certificate_bound_access_tokens`
+ *     while enabled; an empty contribution otherwise.
  *
  * DI requires: `config` (reads `config.oauth.mtls` + `config.oauth.tokenBinding`).
  * DI optional: `logger` (forwarded to `tokenBindingMw` + `createMtlsMechanism`).
@@ -36,7 +39,7 @@
  * source additionally requires an explicit `oauth.mtls.trusted-proxies`
  * allowlist.
  *
- * Per Wave 2 Phase 3 spec §10 (config) + §11 (module) + feedback_secure_default_opt_in.md.
+ * Per Wave 2 Phase 3 spec §10 (config) + §11 (module).
  */
 
 import { defineModule } from "@o3co/auth-provider-core";

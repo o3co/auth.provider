@@ -1,3 +1,22 @@
+/*
+ * Copyright 2026 1o1 Co. Ltd.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ */
+
+// Bundles the template into this package (`prebuild` / `prepack`): copies
+// `templates/standalone` to `create-app/templates/standalone`, stages its
+// `.gitignore` under a name npm will publish, and writes
+// `create-app/templates/versions.json` — the version of every published
+// sibling package, which `scaffold()` substitutes for `workspace:*`. The
+// published tarball carries no monorepo, so this copy is what a scaffold is
+// made from. `check-versions-json.mjs` keeps the version list below in step
+// with `packages/`.
+
 import { cpSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";

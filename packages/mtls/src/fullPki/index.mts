@@ -14,7 +14,13 @@
  * limitations under the License.
  */
 
-/** Public surface of the `full-pki` arm (issue #341). */
+/**
+ * Barrel of the `full-pki` arm (issue #341). Internal: it is not in the
+ * package's `exports`, and nothing imports it — `../extractor.mts` and
+ * `../module.mts` import `validate.mts`, `defaults.mts` and `algorithms.mts`
+ * directly. The package's public surface is `../index.mts`, which exports only
+ * the signature-algorithm vocabulary from this directory.
+ */
 export {
 	type AlgorithmCheck,
 	type AlgorithmPolicy,

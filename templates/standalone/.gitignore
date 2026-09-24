@@ -1,6 +1,7 @@
 # #407: without this file, the first `git add .` in a scaffolded project
-# commits the two things the README's own setup steps tell you to create right
-# here — the `.env` holding SESSION_SECRET, and the signing key pair.
+# commits the two things a local setup creates right here — the signing key
+# pair the README's Usage generates, and the `.env` (holding SESSION_SECRET)
+# the compose files read.
 
 # Secrets and per-machine configuration
 .env

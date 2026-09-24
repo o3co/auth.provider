@@ -1,23 +1,48 @@
 # live-check — a real IdP login against this checkout
 
+Last updated: 2026-09-24
+
 A hand-run check: boot the standalone template from the working tree with its
 **default** configuration, sign in at a real identity provider in a browser,
 and get a record of what the callback carried and what the provider did with
 it — the record an issue like [#600](https://github.com/o3co/auth.provider/issues/600)
 asks for before a release.
 
-Nothing in the automated suites reaches a real IdP. They prove the provider's
-handling of a callback the test wrote; this proves what the IdP actually sends
-— which parameters, which `iss`, which shape of `code` — against the code that
-will be tagged. Run it when a release touches a federation adapter, the
-session's federation routes, the callback handling, or the RFC 9207 `iss`
-rule, for every provider the template ships that the change concerns.
+## Responsibility
+
+**Role.** Step 0 of the [release runbook](../../docs/release-runbook.md) for a
+release that touches a federation: evidence, from a real IdP, that the code
+about to be tagged completes a login. Run it when a release touches a
+federation adapter, the session's federation routes, the callback handling, or
+the RFC 9207 `iss` rule, for every provider the template ships that the change
+concerns.
+
+**Owns.** The rig (`live-check.sh`): starting the template from this checkout
+with a profile's client, a loopback front (`proxy.mjs`) that relays and
+records the callback, a stand-in user Store, the Redis the template needs, and
+the report. The profiles in `profiles/`.
+
+**Does not own.** The provider it checks — that is the template at this
+checkout, run as shipped — and the automated suites. Nothing in those reaches
+a real IdP: they prove the provider's handling of a callback the test wrote;
+this proves what the IdP actually sends — which parameters, which `iss`, which
+shape of `code`.
+
+**Why a separate tool.** A real IdP login needs a person, a browser and
+credentials, so it cannot run in CI; it lives beside the code it checks, as a
+private workspace package that is never published. What can be automated is:
+`proxy.mjs` — the relay, the recording and the masking — is tested by
+[`src/__tests__/proxy.test.mts`](src/__tests__/proxy.test.mts), which the
+workspace `test` run (and so CI) executes. The IdP round trip and
+`live-check.sh` itself run only by hand.
 
 ## What you need
 
 - This repository installed and built (`pnpm install`, `pnpm run build`);
   `start` does both when it has to, and rebuilds a package whose `src` is
-  newer than its `dist`.
+  newer than its `dist`. The tool declares no runtime dependencies of its own:
+  it runs the provider with the template's `tsx`, and clears a found Redis
+  with the template's `ioredis`.
 - Node 22+, `curl`, `lsof`; Docker for the Redis the template's stores need,
   unless a Redis already listens on `localhost:6379` (used as is) or
   `LIVE_CHECK_REDIS_URL` names one.

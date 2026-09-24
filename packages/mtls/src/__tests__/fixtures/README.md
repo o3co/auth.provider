@@ -1,6 +1,26 @@
 # mTLS PKI Test Fixtures
 
-P-256 ECDSA certificate chain for `pki.test.mts` chain-walk regression coverage.
+Last updated: 2026-09-24
+
+## Responsibility
+
+Committed P-256 ECDSA certificates — three small chains, one per root (`root`,
+`attacker-root`, `ext-root`) — for the tests that
+need a real certificate rather than one they build: the narrow-mode chain walk
+([`pki.test.mts`](../pki.test.mts)), and the certificate a request presents in
+the mechanism, module and DPoP + mTLS tests
+([`extractor.test.mts`](../extractor.test.mts),
+[`module.integration.test.mts`](../module.integration.test.mts),
+[`dual-mechanism.integration.test.mts`](../dual-mechanism.integration.test.mts),
+[`fullPki/module.test.mts`](../fullPki/module.test.mts)). They are fixtures
+because each shape is a regression someone had to reason about, and a fixed
+file keeps that shape byte-identical from run to run.
+
+The `full-pki` validator's own tests do not use them: they need name
+constraints, path lengths, CRLs and many more shapes, and mint certificates in
+process ([`fullPki/pkiFactory.mts`](../fullPki/pkiFactory.mts)) so that no
+test starts failing on a calendar date. PEM files carry no header comment, so
+this README is where what each one is for is written down.
 
 ## Files
 
@@ -24,9 +44,9 @@ P-256 ECDSA certificate chain for `pki.test.mts` chain-walk regression coverage.
 
 ### Leaf-profile chain (`ext-*`, issue #280)
 
-A second, independent single-hop chain whose leaves differ **only** in
+The third chain: independent and single-hop, its leaves differ **only** in
 `basicConstraints` / `extendedKeyUsage`, so a rejection cannot be caused by
-anything else. Separate from the chain above so those fixtures — and the
+anything else. Separate from the chains above so those fixtures — and the
 AKID-serial nuance `pki.test.mts` documents — stay byte-identical.
 
 Minted with a 10-year window, and the tests using them read the real clock

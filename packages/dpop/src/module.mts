@@ -15,13 +15,16 @@
  */
 
 /**
- * DPoP module manifest — wires `createDPoPMechanism` into the grant
- * middleware contribution slot (Wave 2 Token-binding Cluster spec §4.7 /
+ * DPoP module manifest — contributes `createDPoPMechanism` to core's
+ * `tokenBindingMechanisms` slot (Wave 2 Token-binding Cluster spec §4.7 /
  * Phase 2 DPoP spec §11.2).
  *
  * Contributions:
- *   - `grantMiddleware[0]` — `tokenBindingMw` wrapping the DPoP mechanism.
- *     Returns `null` (skip) when `config.oauth.dpop.enabled === false`.
+ *   - `tokenBindingMechanisms[0]` — the DPoP mechanism, which core composes
+ *     into its single `tokenBindingMw` and its protected-resource check.
+ *     Returns `null` (skip) when `config.oauth.dpop.enabled !== true`.
+ *   - `discoveryMetadata[0]` — `dpop_signing_alg_values_supported` while
+ *     enabled; an empty contribution otherwise.
  *
  * DI requires:
  *   - `config` — reads `config.oauth.dpop` + `config.oauth.tokenBinding`, and
@@ -40,7 +43,7 @@
  * Secure-default-opt-in: `oauth.dpop.enabled = false` in reference.conf.
  * Operators must explicitly set `enabled = true` to activate DPoP.
  *
- * Per Wave 2 Phase 2 spec §10 (config) + §11.2 (module) + feedback_secure_default_opt_in.md.
+ * Per Wave 2 Phase 2 spec §10 (config) + §11.2 (module).
  */
 
 // biome-ignore lint/correctness/noUnusedImports: ComponentMap is used in the `declare module` augmentation below
@@ -63,8 +66,13 @@ import { createDPoPMechanism, type DPoPMechanismOptions } from "./verifier.mjs";
  *
  * ```ts
  * import { createRedisDPoPReplayStore } from "@o3co/auth-provider-redis/dpop";
- * // ... in your composition module's `provides`:
- * dpopReplayStore: (deps) => createRedisDPoPReplayStore(deps.redisClient)
+ * const store = createRedisDPoPReplayStore({
+ *     client: { set: (k, v, _px, ttlMs, _nx) => io.set(k, v, "PX", ttlMs, "NX") as Promise<"OK" | null> },
+ * });
+ * // either in a composition module's `provides` (a factory):
+ * dpopReplayStore: () => store,
+ * // or in `createApp`'s `bootstrapComponents` (the value itself):
+ * bootstrapComponents: { config, pathResolver, dpopReplayStore: store },
  * ```
  *
  * Pattern mirrors `webauthnCredentialStore` in core + `accessTokenDenylist`.

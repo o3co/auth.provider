@@ -1,83 +1,146 @@
 # @o3co/auth-provider-redis
 
-Redis-backed adapters and `defineModule` manifests for `@o3co/auth-provider-core`.
+Last updated: 2026-09-24
+
+Redis-backed implementations of the store ports `@o3co/auth-provider-core`
+declares, a `defineModule` manifest for each, and the wrappers that turn one
+ioredis connection into every client they need.
+
+## Responsibility
+
+**Role.** The shared-state backend of a scaled deployment. Core declares each
+store port (`ChallengeStore`, `UserSessionStore`, `FederationGrantStore`, …)
+and ships an in-process implementation that is correct on one replica; those
+whose state must be shared declare themselves replica-unsafe and are refused
+under `deployment.mode = "multi"`. This package supplies the implementation
+every replica shares, and the manifest that puts it in the port's slot.
+
+**Owns:**
+
+- one adapter per Redis-backed port (listed under [Adapters](#adapters)): its
+  key layout, its Lua scripts, its TTL rules;
+- the per-purpose backing-client interfaces those adapters call
+  ([`src/clients.mts`](src/clients.mts)) — the Redis-command vocabulary lives
+  here, not in core;
+- `makeIoredisClients` and the per-store ioredis wrappers, on the `/ioredis`
+  subpath;
+- sealing the federation-token and federation-grant records at rest, and the
+  guard that refuses `allow-plaintext` in a production or staging environment
+  and under `deployment.mode = "multi"`.
+
+**Does not own:**
+
+- the ports and what they promise — core declares them, and core's
+  conformance suites hold these adapters to them ([Contract tests](#contract-tests));
+- the flows built on the stores: refresh-token rotation and revocation
+  (`RefreshTokenFamilyRotation` / `RefreshTokenFamilyRevocation`) are core's,
+  over whichever `RefreshTokenFamilyStore` is wired; the logout cascade and
+  subject-wide revocation belong to core and the route packages;
+- the connection: the composition root opens the ioredis `Redis` instance,
+  chooses its options and attaches its `error` listener;
+- the `express-session` store behind the browser cookie. That is
+  `@o3co/auth-provider-session`'s, over connect-redis and a node-redis client
+  of its own.
+
+**Why a separate package.** It keeps a database driver and its vocabulary out
+of core — CI refuses an `ioredis` or `redis` import in core's source — so core
+stays backend-agnostic, and a composition root of your own that runs on one
+replica can leave Redis out entirely. The standalone template cannot: it keeps
+its refresh-token families in Redis in every deployment. An adapter for another
+backend is a package of its own beside this one, implementing the same ports.
 
 ## Requirements
 
 - **Node.js** `>=22.0.0`
 - **Redis server** `>=7.2 LTS` — the session adapters issue a
-  `PEXPIREAT … NX` + `PEXPIREAT … GT` pair for safe concurrent TTL writes
-  (D-10). NX sets the TTL on first write because a bare `… GT` silently
-  no-ops on a key with no existing TTL; GT then prevents truncation under
-  stale-`expiresAt` concurrent writes. Both flags require Redis 7.0+; we
-  pin to 7.2 LTS. Redis 6.x is not supported. Tested against:
+  `PEXPIREAT … NX` + `PEXPIREAT … GT` pair for safe concurrent TTL writes.
+  NX sets the TTL on first write because a bare `… GT` silently no-ops on a
+  key with no existing TTL; GT then prevents truncation under
+  stale-`expiresAt` concurrent writes. Both flags require Redis 7.0+; the
+  tested floor is 7.2 LTS. Redis 6.x is not supported. Tested against:
   - AWS ElastiCache for Redis 7.2
   - Upstash Redis (7.2 compatible)
   - Redis Cloud 7.2
   - Self-managed `redis:7.2-alpine`
-- **Redis Lua scripting** (`EVAL` / `EVALSHA`) — the federation-token
-  advisory lock release path is implemented via an atomic Lua compare-and-
-  delete script (D-9, closes CR-1 / OR-13 / SF-4). Lua is enabled by default
-  on Redis standalone and Sentinel mode. **Redis Cluster mode with Lua
-  scripting disabled is not supported by the bundled `makeIoredisClients()`
-  adapter** — operators on AWS ElastiCache for Redis Cluster mode must
-  either enable Lua scripting in their cluster configuration, or wire a
-  custom `FederationTokenStoreClient` whose `compareAndDelete` uses an
-  alternative atomic primitive (e.g., a Cluster-safe transaction).
+- **Redis Lua scripting** (`EVAL` / `EVALSHA`). The clients this package
+  builds run their indivisible operations as scripts: the rate limiter's
+  increment-with-TTL, the federation-token lock release, the subject session
+  index and revocation watermarks, and every operation of the device-code,
+  consent and federation-grant stores. Lua is enabled by default on Redis
+  standalone and Sentinel. **Redis Cluster with Lua scripting disabled is not
+  supported by the bundled clients** — enable scripting, or implement the
+  per-purpose client interfaces ([Backing-client contract](#backing-client-contract))
+  over another atomic primitive yourself.
 
-This package ships sixteen adapters covering every redis-backed component
-that `@o3co/auth-provider-core` exposes as a typed slot:
+## Adapters
 
-- `ChallengeStore` (challenges)
-- `ReplaySeenSet` (replay-seen-set)
-- `AccessTokenDenylist` (access-token-denylist) — the store behind RFC 7009
+Each one implements a port core declares; the slot name is in parentheses.
+
+- `ChallengeStore` (`challengeStore`)
+- `ReplaySeenSet` (`replaySeenSet`)
+- `AccessTokenDenylist` (`accessTokenDenylist`) — the store behind RFC 7009
   access-token revocation. The in-process alternative forks per replica, so a
   token revoked on one replica keeps working on the others; core refuses that
-  one under `deployment.mode = "multi"` (#277)
-- `RefreshTokenFamilyStore` / `RefreshTokenFamilyRotation` /
-  `RefreshTokenFamilyRevocation` (refresh-token-family)
+  one under `deployment.mode = "multi"` (#277).
+- `RefreshTokenFamilyStore` (`refreshTokenFamilyStore`) — the store only.
+  Rotation and revocation are core's processes over it.
 - `UserSessionStore`, `SessionRPRegistry`, `SessionFamilyIndex`,
-  `SessionFederationIndex` (user sessions, A4 four-store split)
-- `SubjectSessionIndex` / `SubjectRevocation` (subject-level revocation,
-  #321) — bundled with the four above in `redisSessionStoresModule`
-- `FederationTokenStore` (federation tokens)
-- `FederationGrantStore` (federation grants, #593) — offline delegation of an
-  upstream's tokens to a backend or an agent, with no session behind the call.
-  `createRedisFederationGrantStore` takes its own connection through
-  `makeIoredisFederationGrantStoreClient`, and no module factory yet: the
-  routes and the configuration arrive with the package's slice.
-- `RateLimiter` (rate-limiter)
-- `CodeRepository` (relocated from `@o3co/auth-provider-foundation` in
-  v0.5.0; `redisCodeRepositoryBuilder` for AdapterFactory wiring)
-- `DeviceCodeStore` (device-code-store) — pending RFC 8628 device
+  `SessionFederationIndex`, `SubjectSessionIndex`, `SubjectRevocation` — the
+  six user-session and subject-revocation stores, installed together by
+  `redisSessionStoresModule`.
+- `FederationTokenStore` (`federationTokenStore`) — the upstream IdP tokens
+  held for a session. See [Federation-token keys and logout](#federation-token-keys-and-logout).
+- `FederationGrantStore` (`federationGrantStore`) and
+  `FederationGrantIntentStore` (`federationGrantIntentStore`) — federation
+  grants (#593): a user's standing consent that a client may obtain upstream
+  tokens with no session behind the call, and the records of acquiring one.
+  See [Federation grants](#federation-grants).
+- `RateLimiter` (`rateLimiter`)
+- `CodeRepository` (`codeRepository`) — authorization codes.
+- `DeviceCodeStore` (`deviceCodeStore`) — pending RFC 8628 device
   authorizations for `@o3co/auth-provider-device-grant`. The in-process
   alternative forks per replica — the human approves on the replica that
   served the verification page while the device polls one that has never
-  heard of the code — so core refuses it under `deployment.mode = "multi"`;
-  this adapter is what lets the grant run scaled (#433). See "Device
-  authorizations share one slot" below before choosing it.
-- `ConsentStore` / `PendingConsentStore` (consent-store) — the consent step
-  for clients that are not first-party: what a user agreed a client may
-  obtain, and the `/authorize` request parked while the consent page asks.
-  Core's in-process pair forks per replica and is refused under
-  `deployment.mode = "multi"`; `redisConsentStoreModule` provides both slots
-  (#561). See "Consent records and parked requests" below.
+  heard of the code — so core refuses it under `deployment.mode = "multi"`
+  (#433). See [Device authorizations share one slot](#device-authorizations-share-one-slot)
+  before choosing it.
+- `ConsentStore` / `PendingConsentStore` (`consentStore`, `pendingConsentStore`)
+  — the consent step for clients that are not first-party: what a user agreed
+  a client may obtain, and the `/authorize` request parked while the consent
+  page asks. Core's in-process pair forks per replica and is refused under
+  `deployment.mode = "multi"`. See [Consent records and parked requests](#consent-records-and-parked-requests).
+- `DPoPReplayStore` (`dpopReplayStore`) — the DPoP proof replay store of
+  `@o3co/auth-provider-dpop`, on the `/dpop` subpath. See
+  [DPoP replay store](#dpop-replay-store).
+
+## Entry points
+
+| Import | What it holds | Why it is separate |
+| --- | --- | --- |
+| `@o3co/auth-provider-redis` | The adapters, their modules and builders, and the backing-client interfaces | Imports no driver: a consumer that writes its own clients never has `ioredis` in its type closure |
+| `@o3co/auth-provider-redis/ioredis` | `makeIoredisClients` and the federation-grant client wrappers | The only entry that needs `ioredis` (an optional peer) installed |
+| `@o3co/auth-provider-redis/dpop` | `createRedisDPoPReplayStore` and its client interface | Its port is declared by `@o3co/auth-provider-dpop`, an optional peer; keeping it off the main entry means a consumer without DPoP compiles without that package |
+
+The exports are listed in [`src/index.mts`](src/index.mts),
+[`src/ioredis.mts`](src/ioredis.mts) and
+[`src/dpop-replay-store.mts`](src/dpop-replay-store.mts).
 
 ## Backing-client contract
 
-Each adapter consumes a **per-purpose backing-client interface** declared
-in this package (`src/clients.mts` — e.g. `ChallengeStoreClient`,
-`FederationTokenStoreClient`, `RateLimiterClient`). Core deliberately does
-not declare them: the backing-client vocabulary belongs to the adapter
-package (v0.5.0 pre-tag interface review S3). The interfaces declare
-only the methods the adapter actually calls — `ChallengeStoreClient` is
-`{ set(NX); pttl; del }`, `RateLimiterClient` is `{ incr; expire }`, etc.
-Consumers wire whichever backend wrapper (ioredis, node-redis, custom
-shim, future memcached/postgres adapters) satisfies the per-purpose
-interface.
+Each adapter consumes a **per-purpose backing-client interface** declared in
+[`src/clients.mts`](src/clients.mts) — `ChallengeStoreClient`,
+`FederationTokenStoreClient`, `RateLimiterClient` and so on. Core does not
+declare them: they are expressed in Redis-command terms, so they belong to the
+Redis adapter package. Each declares only the methods its adapter calls, and
+where an operation must be indivisible the interface makes it one method — the
+rate limiter's client increments and sets the TTL in a single call (#269), so
+an implementation cannot leave a counter with no expiry. Wire whichever driver
+satisfies the interfaces; a non-Redis backend writes its own ports' adapters
+rather than implementing these.
 
-For the common case of one ioredis connection serving every redis-backed
-adapter, this package exports `makeIoredisClients(io)`:
+For the common case of one ioredis connection serving every Redis-backed
+adapter, `makeIoredisClients(io)` returns every client slot the modules below
+require except the two federation-grant ones:
 
 ```ts
 import { Redis } from "ioredis";
@@ -111,18 +174,24 @@ const handle = await createApp({
 });
 ```
 
-For mixed-backend deployments (e.g. memcached for `ChallengeStore` +
-redis for `FederationTokenStore`), wire each per-purpose slot
-individually instead of spreading.
+The federation-grant clients are built separately,
+`makeIoredisFederationGrantStoreClient(io)` and
+`makeIoredisFederationGrantIntentStoreClient(io)`, so that a Cluster deployment
+can give the grants a connection of their own; they may equally be the same
+`io`.
+
+For mixed-backend deployments (another backend for `ChallengeStore`, Redis for
+`FederationTokenStore`), wire each per-purpose slot individually instead of
+spreading.
 
 ### Failure timing
 
 `makeIoredisClients` derives every client from the one connection you hand it
 and opens none of its own (the exception is
 `refreshTokenFamilyClient.duplicate()`, one per refresh rotation).
-Connection-level ioredis options are
-therefore shared by all sixteen purposes, and the ones governing how a partition
-*ends* are the ones worth setting deliberately:
+Connection-level ioredis options are therefore shared by every client it
+returns, and the ones governing how a partition *ends* are the ones worth
+setting deliberately:
 
 - **`commandTimeout`** is the only option that bounds a command which never
   reaches the wire. ioredis arms it before deciding whether the socket is
@@ -142,22 +211,25 @@ therefore shared by all sixteen purposes, and the ones governing how a partition
   interfaces exist for exactly that, and a second socket should be a deliberate
   choice rather than a side effect.
 
-## Module pattern vs AdapterFactory pattern
+## Modules and builders
 
-Each redis adapter ships in two flavours:
+Each adapter ships in up to two forms:
 
 - A **`defineModule` manifest** (`redisChallengeStoreModule`,
-  `redisFederationTokenStoreModule`, etc.) for declarative wiring via
-  `createApp({ modules: [...] })`. The federation-token store also has
-  `redisFederationTokenStoreModuleFor({ environment })` for a composition root
-  that selects its config by a name other than `NODE_ENV` (the standalone's
-  `CONFIG_ENV`): its `allow-plaintext` guard reads that name in addition to
-  `NODE_ENV`, and `deployment.mode` off the config — `"multi"` refuses
-  plaintext in every environment (#473).
+  `redisFederationTokenStoreModule`, …) for declarative wiring through
+  `createApp({ modules: [...] })`. This is what the standalone template uses.
+  The two stores that seal records at rest also have a `…ModuleFor({ environment })`
+  form, `redisFederationTokenStoreModuleFor` and
+  `redisFederationGrantStoreModuleFor`, for a composition root that selects its
+  config by a name other than `NODE_ENV` (the standalone's `CONFIG_ENV`): the
+  plaintext guard reads that name in addition to `NODE_ENV`, and
+  `deployment.mode` off the config — `"multi"` refuses plaintext in every
+  environment (#473).
 - An **`AdapterBuilder`** (`redisChallengeStoreBuilder`,
-  `redisCodeRepositoryBuilder`, etc.) for runtime-config-driven wiring
-  via `factory.register("redis", redisXxxBuilder)` + `factory.create({
-  type: "redis", ... })`.
+  `redisCodeRepositoryBuilder`, …) for a composition root that selects a
+  backend at runtime through core's `AdapterFactory`:
+  `factory.register("redis", redisXxxBuilder)`, then
+  `factory.create({ type: "redis", client, ... })`.
 
 | Module | Requires | Provides | Config key | Builder |
 | --- | --- | --- | --- | --- |
@@ -167,21 +239,49 @@ Each redis adapter ships in two flavours:
 | `redisRefreshTokenFamilyStoreModule` | `refreshTokenFamilyClient` | `refreshTokenFamilyStore` | `redisRefreshTokenFamilyStore` | `redisRefreshTokenFamilyStoreBuilder` |
 | `redisSessionStoresModule` | the six session/subject clients | the six session/subject stores | `redisSessionStores` | per-store builders |
 | `redisFederationTokenStoreModule` | `federationTokenStoreClient` | `federationTokenStore` | `redisFederationTokenStore` | `redisFederationTokenStoreBuilder` |
+| `redisFederationGrantStoreModule` | `federationGrantStoreClient` | `federationGrantStore` | `redisFederationGrantStore`, `federationGrants` | — |
+| `redisFederationGrantIntentStoreModule` | `federationGrantIntentStoreClient` | `federationGrantIntentStore` | `redisFederationGrantStore` (`keyPrefix`) | — |
 | `redisRateLimiterModule` | `rateLimiterClient` | `rateLimiter` | `redisRateLimiter` | `redisRateLimiterBuilder` |
 | `redisCodeRepositoryModule` | `codeRepositoryClient` | `codeRepository` | `redisCodeRepository` | `redisCodeRepositoryBuilder` |
 | `redisDeviceCodeStoreModule` | `deviceCodeStoreClient` | `deviceCodeStore` | `redisDeviceCodeStore` | `redisDeviceCodeStoreBuilder` |
 | `redisConsentStoreModule` | `consentStoreClient`, `pendingConsentStoreClient` | `consentStore`, `pendingConsentStore` | `redisConsentStore` | `redisConsentStoreBuilder`, `redisPendingConsentStoreBuilder` |
 
 Every module also requires `config`. The `*Client` column is the slot
-`makeIoredisClients` fills; a composition that wires a Redis-branch module
-without providing its client slot fails stage-1 boot with
-`missing-required-component` — named at boot, not at the first command.
+`makeIoredisClients` fills, except the two federation-grant clients (see
+above); a composition that wires a module without providing its client slot
+fails stage-1 boot with `missing-required-component` — named at boot, not at
+the first command. `DPoPReplayStore` has neither a module nor a builder: see
+the next section.
 
-The Module pattern is canonical for v0.5.0+; the AdapterFactory pattern
-remains supported for HOCON-config-driven backend selection in the
-standalone template and similar deployments.
+## DPoP replay store
 
-## Logout keys, and the keyspace scan you still have to turn off
+`@o3co/auth-provider-dpop` reads an optional `dpopReplayStore` slot and falls
+back to an in-process store when it is empty. This package has no module for
+it and `makeIoredisClients` does not build its client: the composition root
+fills the slot itself.
+
+```ts
+import { createRedisDPoPReplayStore } from "@o3co/auth-provider-redis/dpop";
+
+const dpopReplayStore = createRedisDPoPReplayStore({
+    // SET key value PX ttl NX, answering "OK" or null.
+    client: { set: (k, v, _px, ttlMs, _nx) => io.set(k, v, "PX", ttlMs, "NX") as Promise<"OK" | null> },
+    // keyPrefix defaults to "dpop:replay:"
+});
+
+await createApp({
+    modules: [dpopModule /* + others */],
+    bootstrapComponents: { config, pathResolver, ...clients, dpopReplayStore },
+});
+```
+
+Set `oauth.dpop.replay-store = "redis"` beside it: with DPoP enabled,
+`dpopModule` then refuses to boot when the slot is empty, instead of falling
+back to a per-process store that a replayed proof can dodge by landing on
+another replica. The setting is what makes the slot mandatory — `"memory"` (the
+default) boots without it under any `deployment.mode`.
+
+## Federation-token keys and logout
 
 **Read this before assuming logout stopped scanning: out of the box, it has
 not.** `scanFallback` ships enabled, so every `FederationTokenStore.removeBySid`
@@ -197,10 +297,58 @@ handful of named keys rather than a search:
 | `${keyPrefix}idx:${sid}` | **set** | the federation names attached to `${sid}` |
 | `${keyPrefix}lock:${sid}:${federationName}` | string | the advisory lock |
 
-### Federation grants (#593)
+The index (`idx:`) is what lets `removeBySid` name the keys it must delete
+instead of hunting for them, at a cost of O(that session's federations).
+Without it the only way to find them is `SCAN MATCH ${keyPrefix}${sid}:*` over
+the entire database — O(keys in Redis), on an end-user action, on the
+connection every other adapter here shares (#291).
 
-Its own keyspace, and its own connection, because what it holds outlives every
-session: default prefix `fg:`.
+Two improvements apply unconditionally, flag or not: reads are paged (`SSCAN`,
+`HSCAN`, `ZRANGE` by rank), so no single command's reply grows with how
+heavily linked a session is; and removals use `UNLINK`, so the shared
+connection is not blocked while Redis frees the values.
+
+### `scanFallback` — a migration flag, not a tuning knob
+
+Records written by releases before v0.10 have no index entry. An index-only
+`removeBySid` would walk past them and leave a logged-out session's
+**upstream IdP refresh tokens** in Redis until the store TTL expired them. So
+`scanFallback` (option on the builder, `redisFederationTokenStore.scanFallback`
+in the module config) keeps the pattern scan running after the index-driven
+removal.
+
+- **Default `true`,** because an upgrade that changes no configuration must not
+  silently orphan tokens. It is the safe default, not the fast one.
+- **What it costs while on:** one keyspace scan per `removeBySid` — exactly the
+  O(keyspace) work #291 is about. The index-driven removal runs first
+  regardless, so the *deletes* are always bounded and the paging and `UNLINK`
+  improvements are always in effect; but the scan is still there, so a
+  deployment on defaults has **not** yet got the headline fix.
+- **When to set it to `false`:** once no session predating the upgrade can
+  still exist — that is, once `ttl` (default 24 h) has elapsed since the last
+  replica running the previous release stopped writing. A deployment whose
+  Redis held no federation records before the upgrade (a fresh database, or
+  `federationTokenStore` newly enabled) can set it to `false` immediately.
+- **When it goes away:** the flag and the scan path are removed together once
+  the migration window has closed (the root CHANGELOG names the release that
+  performs the removal) — at which point the index-only behaviour becomes
+  unconditional and `scanIterator` leaves `FederationTokenStoreClient`.
+
+### The sealed envelope
+
+The federation-token store seals the **whole** envelope (#293) — `tokenType`,
+`scope`, `grantedScope` and the access-token expiry included, not just the
+three token fields — as one ciphertext, `{ "v": 2, "c": "…" }`, bound to its
+own Redis key as additional authenticated data (`allow-plaintext`, development
+only, writes `{ "v": 2, "p": { … } }`). A record without that wrapper — the
+per-field shape of earlier releases — is dropped on first read: `get` returns
+`null`, the key and its index member go, and the user re-federates. There is
+no dual-read path by design.
+
+## Federation grants
+
+Their own keyspace, because what they hold outlives every session: default
+prefix `fg:` (`redisFederationGrantStore.keyPrefix`).
 
 | Key | Type | Holds |
 | --- | --- | --- |
@@ -233,43 +381,16 @@ undoes by putting it back — and is told apart from a credential that will
 never open again. Nothing is ever deleted on a read. Rotate by adding the new
 key last, then moving it first, and keep the old one listed for 365 days after
 the last replica that sealed with it stopped — the procedure, and why it is
-the ceiling and not `maxExpiresIn`, is in `docs/operator-runbook.md`.
+the ceiling and not `maxExpiresIn`, is in the
+[operator runbook](../../docs/operator-runbook.md).
 
-The index (`idx:`) is what lets `removeBySid` name the keys it must delete
-instead of hunting for them, at a cost of O(that session's federations). Before
-v0.10 the only way to find them was `SCAN MATCH ${keyPrefix}${sid}:*` over the
-entire database — O(keys in Redis), on an end-user action, on the connection
-every other adapter here shares (#291).
-
-Two improvements do apply unconditionally, flag or not: reads are paged
-(`SSCAN`, `HSCAN`, `ZRANGE` by rank), so no single command's reply grows with
-how heavily linked a session is; and removals use `UNLINK`, so the shared
-connection is not blocked while Redis frees the values.
-
-### `scanFallback` — a migration flag, not a tuning knob
-
-Records written before v0.10 have no index entry. An index-only `removeBySid`
-would walk past them and leave a logged-out session's **upstream IdP refresh
-tokens** in Redis until the store TTL expired them. So `scanFallback` (option
-on the builder, `redisFederationTokenStore.scanFallback` in the module config)
-keeps the old pattern scan running after the index-driven removal.
-
-- **Default `true`,** because an upgrade that changes no configuration must not
-  silently orphan tokens. It is the safe default, not the fast one.
-- **What it costs while on:** one keyspace scan per `removeBySid` — exactly the
-  O(keyspace) work #291 is about. The index-driven removal runs first
-  regardless, so the *deletes* are always bounded and the paging and `UNLINK`
-  improvements are always in effect; but the scan is still there, so a
-  deployment on defaults has **not** yet got the headline fix.
-- **When to set it to `false`:** once no session predating the upgrade can
-  still exist — that is, once `ttl` (default 24 h) has elapsed since the last
-  replica running the previous release stopped writing. A deployment whose
-  Redis held no federation records before the upgrade (a fresh database, or
-  `federationTokenStore` newly enabled) can set it to `false` immediately.
-- **When it goes away:** the flag and the scan path are removed together once
-  the migration window has closed (see the root CHANGELOG for the release that
-  performs the removal) — at which point the index-only behaviour becomes
-  unconditional and `scanIterator` leaves `FederationTokenStoreClient`.
+**Acquisition's records share the prefix.** The intent store keeps the intent
+a backend lodged, the consent challenge and the connect transaction under
+`<prefix>{intents}:…`, beside the grants, and reads the same
+`redisFederationGrantStore.keyPrefix` — a deployment that moves one namespace
+moves both. It is its own module so that grants can live in Redis while
+acquisition stays in memory on a single replica (a restart then loses flows in
+progress and nothing else); nothing spans the two keyspaces.
 
 ## Device authorizations share one slot
 
@@ -345,29 +466,38 @@ by a key's TTL. The TTL a write sets — relative, `PEXPIRE`, so the skew betwee
 the writing replica and Redis cannot move it — runs `CONSENT_EXPIRY_SLACK_MS`
 (five minutes, the JWT verifier's default clock-skew allowance) past that expiry,
 so it only reclaims records nobody reads again: a replica whose clock runs
-behind the writer's by less than that still finds a record it holds to be live. A consent recorded until
-revoked — what `POST /oauth/consent` writes — has no TTL at all, including when
-an earlier grant for the pair had one.
+behind the writer's by less than that still finds a record it holds to be live.
+A consent recorded until revoked — what `POST /oauth/consent` writes — has no TTL
+at all, including when an earlier grant for the pair had one.
 
-## Internal helpers
+## Contract tests
 
-`src/internal/lock.mts` (`createRedisLock`) and `src/internal/crypto.mts`
-(the AES-256-GCM helpers) are private to this package.
-The lock embeds federation-tokens-specific options (`{ sid,
-federationName }`) in `AcquireLockOptions` and is not currently
-backend-agnostic; a public generic-lock API is on the roadmap for
-v0.6+.
+Each adapter whose port has a core conformance suite is run through that
+suite against a real Redis (Testcontainers) in [`__tests__/`](__tests__/). A
+contract file cannot be imported across a package boundary, so the suites
+there are copies of core's; [`contract-copies-parity.test.mts`](__tests__/contract-copies-parity.test.mts)
+and the per-port `*-parity.test.mts` tests fail when a copy differs from its
+core original anywhere below its imports, and when no Redis test runs it.
+Which ports have a suite, and the one Redis adapter the suites do not run
+against (`AccessTokenDenylist`, whose expiry is Redis's own key TTL and cannot
+follow the suite's fake clock), are in
+[docs/adapter-surface.md](../../docs/adapter-surface.md). The adapters whose
+ports have no core suite — `FederationTokenStore`, `RateLimiter`,
+`CodeRepository`, `DPoPReplayStore` — are covered by their own tests here.
 
-Since #293 the federation-token store seals the **whole** envelope —
-`tokenType`, `scope`, `grantedScope` and the access-token expiry included, not
-just the three token fields — as one ciphertext, `{ "v": 2, "c": "…" }`, bound
-to its own Redis key as additional authenticated data (`allow-plaintext`,
-development only, writes `{ "v": 2, "p": { … } }`). A record without that
-wrapper is the pre-#293 per-field shape and is dropped on first read: `get`
-returns `null`, the key and its index member go, and the user re-federates.
-There is no dual-read path by design.
+## Source layout
 
-`src/internal/redisSidHash.mts`, `redisSidSortedSet.mts` and `redisSidSet.mts`
-are the three sid-keyed structures the session and federation adapters are
-built from — same `${keyPrefix}${sid}` layout and TTL contract, different Redis
-type (HASH / ZSET / SET).
+Each adapter, with its module and builder, is one file in `src/`, named after
+its port. Two directories hold what several of them share:
+
+- **`src/modules/`** — modules that bundle more than one store. Every other
+  module is defined beside the one store it provides; `redisSessionStoresModule`
+  installs six, with one key scheme across them, so it has a file of its own.
+- **`src/internal/`** — helpers no consumer imports, and which the package's
+  exports do not reach: the advisory lock (its options carry the federation
+  token's `{ sid, federationName }`, so it is not a general-purpose lock), the
+  AES-256-GCM sealing, the plaintext guard both sealing stores share (one
+  escape hatch, `FEDERATION_TOKENS_ALLOW_INSECURE=1`, for both), the
+  federation-grant codecs and lock, and the three sid-keyed structures (HASH,
+  ZSET, SET) the session and federation adapters are built from — same
+  `${keyPrefix}${sid}` layout and TTL contract, different Redis type.
