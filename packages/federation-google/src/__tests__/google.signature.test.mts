@@ -26,9 +26,9 @@
  * is asserted is what the code does.
  */
 
+import { createFakeIdp } from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createGoogleProvider, type GoogleProvider } from "../google.mjs";
-import { createFakeIdp } from "./fake-idp.mjs";
 
 const GOOGLE = {
 	issuer: "https://accounts.google.com",

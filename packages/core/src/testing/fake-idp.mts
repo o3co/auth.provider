@@ -26,10 +26,11 @@ import { type CryptoKey, exportJWK, generateKeyPair, type JWK, SignJWT } from "j
  * a key it publishes at `jwksUri`; the knobs below let a test make it
  * misbehave in exactly one way at a time.
  *
- * The same harness as `@o3co/auth-provider-federation-oidc`'s test helper,
- * with the endpoints named explicitly — Google's and Apple's are not paths
- * under the issuer — and no discovery document, since these providers build
- * their metadata locally. Kept identical in the two packages that copy it.
+ * The endpoints are named explicitly — Google's and Apple's are not paths
+ * under the issuer — and there is no discovery document, since those
+ * providers build their metadata locally. One harness for every adapter that
+ * builds its metadata that way, so the adapters are held to one fake rather
+ * than to copies that drift.
  */
 export interface FakeIdpOptions {
 	readonly issuer: string;
@@ -41,7 +42,7 @@ export interface FakeIdpOptions {
 	readonly sub?: string;
 }
 
-export interface RecordedRequest {
+export interface FakeIdpRequest {
 	readonly url: URL;
 	readonly method: string;
 	readonly headers: Headers;
@@ -52,7 +53,7 @@ export interface FakeIdp {
 	readonly issuer: string;
 	readonly clientId: string;
 	readonly sub: string;
-	readonly requests: RecordedRequest[];
+	readonly requests: FakeIdpRequest[];
 	readonly fetch: typeof fetch;
 	/** Claims laid over the id_token defaults. */
 	idTokenClaims: Record<string, unknown>;
@@ -76,7 +77,7 @@ export interface FakeIdp {
 	rotateKey(): Promise<string>;
 	currentKid(): string;
 	/** Requests to an endpoint, compared on origin and path (a query string is ignored). */
-	requestsTo(endpoint: string): RecordedRequest[];
+	requestsTo(endpoint: string): FakeIdpRequest[];
 }
 
 function json(body: unknown, status = 200): Response {
@@ -114,7 +115,7 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 	};
 	await newKey();
 
-	const requests: RecordedRequest[] = [];
+	const requests: FakeIdpRequest[] = [];
 
 	const idp: FakeIdp = {
 		issuer,

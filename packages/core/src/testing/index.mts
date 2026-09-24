@@ -25,7 +25,8 @@
  * A2-γ spec §6.1 + §7 prescribes this subpath; PR α (orthogonal
  * schema/default cleanup) lands the initial export surface (config-fixture
  * factories). `createTestApp` / `TestInspect` are added in this PR
- * (Phase 9 caller migration).
+ * (Phase 9 caller migration). `createFakeIdp` is the fake OpenID Provider the
+ * federation adapters' tests run the real `openid-client` against.
  *
  * Stability: identifiers exported here follow the same semver discipline
  * as the main `.` export — additions are minor, signature changes are
@@ -49,6 +50,12 @@
  */
 export { GrantRegistry, GrantRegistryError } from "../grants/registry.mjs";
 export { createTestApp, type TestAppHandle } from "./create-test-app.mjs";
+export {
+	createFakeIdp,
+	type FakeIdp,
+	type FakeIdpOptions,
+	type FakeIdpRequest,
+} from "./fake-idp.mjs";
 export {
 	makeValidAppConfig,
 	makeValidCoreConfig,

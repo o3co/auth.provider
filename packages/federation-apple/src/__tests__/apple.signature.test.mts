@@ -27,9 +27,9 @@
  * request and signs real RS256 tokens.
  */
 
+import { createFakeIdp } from "@o3co/auth-provider-core/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type AppleProvider, createAppleProvider } from "../apple.mjs";
-import { createFakeIdp } from "./fake-idp.mjs";
 
 const APPLE = {
 	issuer: "https://appleid.apple.com",
