@@ -32,7 +32,9 @@
  *     proof's expected `htu` (#292), and `config.deployment.mode`.
  *
  * DI optional:
- *   - `logger`           — forwarded to `tokenBindingMw` + `createDPoPMechanism`.
+ *   - `logger`           — handed to `createDPoPMechanism` and used for the
+ *                          replay-store warning; core's `consoleLogger` when
+ *                          absent, so neither is dropped.
  *   - `dpopReplayStore`  — consumer-wired shared (Redis) store for production.
  *                          When absent, falls back to a per-process store, which
  *                          forks per replica: boot is refused under
@@ -234,6 +236,14 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 					return null;
 				}
 
+				// One logger for everything this factory and the mechanism report.
+				// With no `logger` component wired it is core's `consoleLogger`,
+				// as for every other module that declares the slot optional: the
+				// mechanism's own warnings (a replay TTL too short for the iat
+				// window, a replay store that cannot be reached) must not be the
+				// ones that vanish.
+				const logger = deps.logger ?? consoleLogger;
+
 				const typedConfig = deps.config as unknown as {
 					oauth: {
 						jwt?: { issuer?: unknown };
@@ -319,7 +329,7 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 						});
 					}
 					if (deploymentMode !== "single") {
-						(deps.logger ?? consoleLogger).warn(
+						logger.warn(
 							{ replayStore: "memory", iatWindowSeconds },
 							"dpop_replay_store_not_shared",
 						);
@@ -367,7 +377,7 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 					iatWindowSeconds: typedConfig.oauth.dpop["iat-window-seconds"],
 					algWhitelist: typedConfig.oauth.dpop["alg-whitelist"],
 					replayTtlSeconds: typedConfig.oauth.dpop["replay-store-ttl-seconds"],
-					logger: deps.logger,
+					logger,
 					...(nonce === undefined ? {} : { nonce }),
 				});
 			},
