@@ -471,13 +471,16 @@ describe("createClientAssertionVerifier (#484)", () => {
 			const broken: ReplaySeenSet = {
 				kind: "broken",
 				markSeen: async () => {
-					throw Object.assign(new Error("OOM command not allowed when used memory > 'maxmemory'."), {
-						name: "ReplyError",
-						command: {
-							name: "set",
-							args: ["client-assertion:rp-1:jti", "args-must-never-reach-a-log"],
+					throw Object.assign(
+						new Error("OOM command not allowed when used memory > 'maxmemory'."),
+						{
+							name: "ReplyError",
+							command: {
+								name: "set",
+								args: ["client-assertion:rp-1:jti", "args-must-never-reach-a-log"],
+							},
 						},
-					});
+					);
 				},
 				contains: async () => false,
 			};

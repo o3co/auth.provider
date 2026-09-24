@@ -145,15 +145,31 @@ export function createClientAssertionVerifier(
 		return undefined;
 	};
 
+	/**
+	 * Log a refusal and say how to answer it. A caught error handed over as
+	 * `err` reaches the log as `loggableError(err)`, never as itself: a replay
+	 * store's ioredis error carries the refused command's arguments, a client
+	 * lookup's library error its own fields, and jose's claim errors the
+	 * assertion's claims as `payload`. The context is typed, so nothing else
+	 * reaches the log beside the client id and an unsupported assertion type.
+	 */
 	const refuse = (
 		status: 400 | 401 | 500 | 503,
 		error: "invalid_request" | "invalid_client" | "server_error" | "temporarily_unavailable",
 		description: string,
 		reason: string,
-		context: Record<string, unknown> = {},
+		context: {
+			readonly clientId?: string;
+			readonly assertionType?: string;
+			readonly err?: unknown;
+		} = {},
 	): ClientAssertionOutcome => {
 		const log = status >= 500 ? logger.error.bind(logger) : logger.warn.bind(logger);
-		log({ reason, ...context }, "client_assertion_refused");
+		const { err, ...fields } = context;
+		log(
+			{ reason, ...fields, ...("err" in context ? { err: loggableError(err) } : {}) },
+			"client_assertion_refused",
+		);
 		return { kind: "refused", status, error, description };
 	};
 
