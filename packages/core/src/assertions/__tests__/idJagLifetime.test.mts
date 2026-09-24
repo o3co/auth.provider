@@ -26,14 +26,21 @@
  * far in the future", and the ID-JAG draft (§4.4.1) applies RFC 7521 §5.2's
  * processing and sets no number of its own; this server's number is the one
  * it already uses for client assertions and for an ID-JAG's `iat` age.
+ *
+ * The ceiling allows the entry's clock tolerance, as every other time check
+ * here does: an IdP whose clock runs a little ahead mints an hour-long
+ * ID-JAG whose `exp` is a little past an hour from this server's now. A
+ * refusal says why in the log (`jwt_bearer_assertion_refused`), since the
+ * grant answers every refusal the same `invalid_grant`.
  */
 
 import { generateKeyPairSync } from "node:crypto";
 import { SignJWT } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMemoryAssertionIssuerRegistry } from "#/assertions/issuerRegistry.mjs";
 import { MAX_ASSERTION_LIFETIME_SECONDS } from "#/assertions/lifetime.mjs";
 import { createRegistryAssertionVerifier } from "#/assertions/registryAssertionVerifier.mjs";
+import { consoleLogger } from "#/logging/consoleLogger.mjs";
 import { createMemoryReplaySeenSet } from "#/replay-seen-set/adapters/memory.mjs";
 import type { ReplaySeenSet } from "#/replay-seen-set/types.mjs";
 
@@ -58,14 +65,26 @@ const recordingSeenSet = () => {
 	return { seenSet, writes };
 };
 
-const verifierWith = (replaySeenSet: ReplaySeenSet) =>
+/** The clock tolerance the ID-JAG entry below is given. */
+const TOLERANCE_SECONDS = 120;
+
+const spyLogger = () => ({
+	...consoleLogger,
+	warn: vi.fn(),
+	info: vi.fn(),
+	error: vi.fn(),
+});
+
+const verifierWith = (replaySeenSet: ReplaySeenSet, logger = spyLogger()) =>
 	createRegistryAssertionVerifier({
+		logger,
 		registry: createMemoryAssertionIssuerRegistry([
 			{
 				issuer: IDP,
 				keys: { type: "key", key: idp.publicKey },
 				algorithms: ["EdDSA"],
 				profile: "id-jag",
+				clockToleranceSeconds: TOLERANCE_SECONDS,
 			},
 			{ issuer: DEVICES, keys: { type: "key", key: devices.publicKey }, algorithms: ["EdDSA"] },
 		]),
@@ -91,11 +110,33 @@ describe("an ID-JAG's lifetime is bounded, before its jti is recorded", () => {
 		expect(MAX_ASSERTION_LIFETIME_SECONDS).toBe(3600);
 	});
 
-	it("refuses an exp more than the ceiling past now, and records nothing for it", async () => {
+	it("refuses an exp more than the ceiling and the clock tolerance past now, records nothing for it, and logs why", async () => {
 		const { seenSet, writes } = recordingSeenSet();
-		const assertion = await idJag("jti-long", now() + MAX_ASSERTION_LIFETIME_SECONDS + 60);
-		expect(await verifierWith(seenSet).verify(assertion, { clientId: "app" })).toBeNull();
+		const logger = spyLogger();
+		const assertion = await idJag(
+			"jti-long",
+			now() + MAX_ASSERTION_LIFETIME_SECONDS + TOLERANCE_SECONDS + 60,
+		);
+		expect(await verifierWith(seenSet, logger).verify(assertion, { clientId: "app" })).toBeNull();
 		expect(writes).toEqual([]);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				issuer: IDP,
+				reason: "lifetime",
+				maxLifetimeSeconds: MAX_ASSERTION_LIFETIME_SECONDS + TOLERANCE_SECONDS,
+			}),
+			"jwt_bearer_assertion_refused",
+		);
+	});
+
+	it("allows the entry's clock tolerance past the ceiling — an IdP whose clock runs ahead", async () => {
+		const { seenSet, writes } = recordingSeenSet();
+		const assertion = await idJag(
+			"jti-skewed",
+			now() + MAX_ASSERTION_LIFETIME_SECONDS + TOLERANCE_SECONDS - 30,
+		);
+		expect(await verifierWith(seenSet).verify(assertion, { clientId: "app" })).not.toBeNull();
+		expect(writes).toEqual(["jti-skewed"]);
 	});
 
 	it("refuses a year-long one", async () => {

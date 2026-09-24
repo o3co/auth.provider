@@ -26,7 +26,9 @@
  * future"; the ID-JAG draft applies RFC 7521 §5.2's processing and names no
  * number of its own. This is the number: an assertion may run at most this
  * long past now (`exp − now`), and — the same hour the other way — may have
- * been issued at most this long ago (`iat` age). Client libraries mint
+ * been issued at most this long ago (`iat` age). The ID-JAG verifier allows
+ * its issuer entry's clock tolerance on top of both, as it does for every
+ * other time check (`registryAssertionVerifier.mts`). Client libraries mint
  * assertions that live a minute or ten; an hour leaves room for a client
  * whose clock runs ahead while keeping each record small.
  *

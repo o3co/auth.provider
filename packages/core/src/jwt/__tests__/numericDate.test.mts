@@ -23,7 +23,7 @@
 
 import { generateKeyPairSync } from "node:crypto";
 import { CompactSign } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createMemoryAssertionIssuerRegistry } from "#/assertions/issuerRegistry.mjs";
 import { createRegistryAssertionVerifier } from "#/assertions/registryAssertionVerifier.mjs";
 import {
@@ -31,6 +31,7 @@ import {
 	MAX_NUMERIC_DATE_SECONDS,
 	malformedNumericDateClaim,
 } from "#/jwt/numericDate.mjs";
+import { consoleLogger } from "#/logging/consoleLogger.mjs";
 
 describe("isNumericDate", () => {
 	it("admits whole and fractional seconds, negative ones included", () => {
@@ -76,11 +77,13 @@ describe("createRegistryAssertionVerifier — date claims that are not dates", (
 	const authority = generateKeyPairSync("ed25519");
 	const AS = "https://auth.example";
 	const ISSUER = "https://devices.example";
+	const warn = vi.fn();
 	const verifier = createRegistryAssertionVerifier({
 		registry: createMemoryAssertionIssuerRegistry([
 			{ issuer: ISSUER, keys: { type: "key", key: authority.publicKey }, algorithms: ["EdDSA"] },
 		]),
 		audience: AS,
+		logger: { ...consoleLogger, warn },
 	});
 	const now = () => Math.floor(Date.now() / 1000);
 	const signRaw = (json: string) =>
@@ -89,8 +92,13 @@ describe("createRegistryAssertionVerifier — date claims that are not dates", (
 			.sign(authority.privateKey);
 	const claims = (dates: string) => `{"iss":"${ISSUER}","sub":"device:1","aud":"${AS}",${dates}}`;
 
-	it("refuses exp: 1e400 itself, rather than verifying it with expiresAt: Infinity", async () => {
+	it("refuses exp: 1e400 itself, rather than verifying it with expiresAt: Infinity — and logs why", async () => {
+		warn.mockClear();
 		expect(await verifier.verify(await signRaw(claims(`"exp":1e400`)))).toBeNull();
+		expect(warn).toHaveBeenCalledWith(
+			expect.objectContaining({ issuer: ISSUER, reason: "numeric_date", claim: "exp" }),
+			"jwt_bearer_assertion_refused",
+		);
 	});
 
 	it("refuses iat: -1e400 and nbf: -1e400", async () => {
