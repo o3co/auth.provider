@@ -238,7 +238,7 @@ This is an OAuth 2.0 authorization server with the OIDC pieces a **first-party**
 
 **PKCE is mandatory, and `S256` is the method.** `plain` is admitted only for a client whose registration carries `allowPlainPkce: true`, which is why discovery lists `S256` alone.
 
-**`prompt=none` is supported.** No session answers `login_required` at the client's `redirect_uri` — which is the point, since a hidden renewal iframe cannot act on a login page. A session proceeds silently.
+**`prompt=none` is supported.** No session answers `login_required` at the client's `redirect_uri` — which is the point, since a hidden renewal iframe cannot act on a login page. A session proceeds silently. A `prompt` that names `none` but is malformed (`none<TAB>`) or combines it with another value still comes from a silent context, so it too is answered at the `redirect_uri` — `invalid_request` — never with the login page.
 
 **`prompt=login` re-authenticates** — see [Step-up and re-authentication](#step-up-and-re-authentication-481) below.
 

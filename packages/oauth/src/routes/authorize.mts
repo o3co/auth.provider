@@ -35,6 +35,7 @@ import {
 	matchesRegisteredRedirectUri,
 	type PendingConsentStore,
 	type PublicClient,
+	parseScopeTokens,
 	readSpaceDelimitedParameter,
 	sanitizeErrorText,
 	type UserSession,
@@ -1397,10 +1398,15 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		// which costs the lookup. Every other unauthenticated request still
 		// answers before touching the repository, which is what keeps an
 		// unauthenticated endpoint from doing a lookup per hit.
+		//
+		// For the same reason the gate reads `prompt` tolerantly
+		// (`parseScopeTokens`, any whitespace a delimiter), where
+		// `resolvePrompt` reads it strictly: `none<TAB>` is malformed, but it
+		// still comes from a silent context, and its `invalid_request` is
+		// `resolvePrompt`'s to deliver at the validated `redirect_uri`.
 		const promptRaw = authorizeParams(req).prompt;
 		const wantsSilentAuth =
-			typeof promptRaw === "string" &&
-			(readSpaceDelimitedParameter(promptRaw)?.includes("none") ?? false);
+			typeof promptRaw === "string" && parseScopeTokens(promptRaw).includes("none");
 
 		// R1b: one liveness read per authenticated request, resolved here so
 		// both the login redirect below and the `prompt=none` refusal further
