@@ -470,9 +470,9 @@ jobs:
           fi
           echo "OK: no '#/' subpath imports in any published tarball's dist/"
 
-      - name: Assert every published tarball ships the root LICENSE
-        # The root LICENSE is the only copy: pnpm packs it into every package
-        # that has none of its own, and a package's own copy would override it.
+      - name: Assert every package the release publishes was packed and ships the root LICENSE
+        # The root LICENSE is the only copy, and pnpm packs it only when nothing
+        # else it packs looks like a licence file (the script says what counts).
         # Read on the tarballs, which is what a consumer downloads.
         run: .github/scripts/check-tarball-license.sh /tmp/tarballs LICENSE
 

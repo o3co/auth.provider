@@ -1,50 +1,96 @@
 #!/usr/bin/env bash
-# Every tarball the release publishes carries the repository's LICENSE, word
-# for word.
+# Every package the release publishes goes out with the repository's LICENSE,
+# word for word, and none goes out unchecked.
 #
-# The root LICENSE is the only copy. Releases pack and publish with pnpm, and
-# pnpm puts the workspace root's LICENSE into the tarball of any package that
-# has none beside its package.json — so no package keeps one of its own, and
-# there is nothing to drift. (npm does not do this: `npm pack` run in a
-# package directory ships no LICENSE, which is why a package whose `files`
-# names `LICENSE` can look as if it publishes none. Publish with pnpm.)
+# The root LICENSE is the only copy. The release packs and publishes with
+# pnpm, and pnpm adds the workspace root's LICENSE to a tarball only when
+# nothing it already packs for that package looks like a licence file to it.
+# Its test is loose: `/LICEN[CS]E(\..+)?/i` against every packed path,
+# unanchored — so a package's own LICENSE counts, but so would a
+# `templates/standalone/LICENSE` shipped inside create-app, or a
+# `dist/licenseKey.mjs`, and either leaves the root file out. So no package
+# keeps a LICENSE of its own, and no packed path may be named like one. (npm
+# adds no root LICENSE at all: `npm pack` in a package directory ships none.)
 #
-# A package's own LICENSE takes precedence over the root one, and that is how
-# this went wrong: the four packages that committed a copy committed the
-# licence's unfilled template — `Copyright [yyyy] [name of copyright owner]`
-# — instead of the root file, and published it.
+# This reads the packed tarballs, which is what a consumer downloads:
+#   - each must hold `package/LICENSE`, byte for byte the root file; when one
+#     holds none, the packed paths that made pnpm leave the root file out are
+#     named;
+#   - every package `published-packages.sh` lists must be among them, so a new
+#     public package cannot be published without passing through here, and no
+#     tarball may be of a package the release does not publish.
 #
-# So this reads the packed tarballs, which is what a consumer downloads, and
-# not the checkout: every tarball must hold `package/LICENSE`, byte for byte
-# the root file. It fails on a package that commits a LICENSE that differs, and
-# on a pnpm that stops supplying the root one.
+# Fails closed: no tarballs, a package list pnpm cannot produce, or a tarball
+# whose manifest cannot be read is a failure, never a clean scan.
 #
-# Fails closed: a directory with no tarballs in it is a failure, never an
-# empty scan reported as clean.
-#
-# Usage: check-tarball-license.sh <tarball-dir> <license-file>
+# Usage (from inside the workspace):
+#   check-tarball-license.sh <tarball-dir> <license-file>
 set -euo pipefail
 
 dir="${1:?usage: check-tarball-license.sh <tarball-dir> <license-file>}"
 license="${2:?usage: check-tarball-license.sh <tarball-dir> <license-file>}"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ ! -f "$license" ]; then
 	echo "::error::${license} is not a file"
 	exit 2
 fi
 
+# `<name><TAB><directory>` of every package the release publishes.
+expected="$("$here/published-packages.sh")"
+
+scratch="$(mktemp)"
+trap 'rm -f "$scratch"' EXIT
+
 failures=0
 count=0
+packed=""
+fail() {
+	echo "::error::$1"
+	failures=$((failures + 1))
+}
+
 for tgz in "$dir"/*.tgz; do
 	[ -e "$tgz" ] || continue
 	count=$((count + 1))
-	name="$(basename "$tgz")"
-	if ! tar -tzf "$tgz" | grep -qx 'package/LICENSE'; then
-		echo "::error::${name} ships no LICENSE — pack it with pnpm from inside the workspace, which adds the root LICENSE"
-		failures=$((failures + 1))
-	elif ! tar -xzOf "$tgz" package/LICENSE | cmp -s - "$license"; then
-		echo "::error::${name} ships a LICENSE that differs from ${license} — delete the package's own LICENSE so the root one is packed"
-		failures=$((failures + 1))
+	file="$(basename "$tgz")"
+
+	# Into a variable, never piped into `grep -q`: grep stops reading at its
+	# first match, tar is then killed by SIGPIPE mid-listing, and `pipefail`
+	# reports the match as a failure — a LICENSE packed first read as missing.
+	listing="$(tar -tzf "$tgz")"
+
+	if ! manifest="$(tar -xzOf "$tgz" package/package.json)"; then
+		fail "${file} has no readable package/package.json"
+		continue
+	fi
+	name="$(printf '%s' "$manifest" | node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(0, "utf8")).name ?? ""))')"
+	if [ -z "$name" ]; then
+		fail "${file}: its package.json names no package"
+		continue
+	fi
+	if grep -qxF "$name" <<<"$packed"; then
+		fail "${file}: ${name} is packed more than once"
+	fi
+	packed="${packed}${name}"$'\n'
+	if ! cut -f1 <<<"$expected" | grep -xF "$name" >/dev/null; then
+		fail "${file}: ${name} is not a package the release publishes (private, or not in this workspace)"
+	fi
+
+	if ! grep -qx 'package/LICENSE' <<<"$listing"; then
+		lookalikes="$(grep -iE 'LICEN[CS]E' <<<"$listing" || true)"
+		if [ -n "$lookalikes" ]; then
+			fail "${file} ships no LICENSE: pnpm left the root one out because it packs these paths, which its licence-file test matches — rename them or stop packing them:"
+			printf '%s\n' "$lookalikes" | sed 's/^/    /'
+		else
+			fail "${file} ships no LICENSE and packs nothing pnpm takes for one — pack it with pnpm from inside the workspace (npm pack adds no root LICENSE)"
+		fi
+		continue
+	fi
+	if ! tar -xzOf "$tgz" package/LICENSE >"$scratch"; then
+		fail "${file}: package/LICENSE could not be read"
+	elif ! cmp -s "$scratch" "$license"; then
+		fail "${file} ships a LICENSE that differs from the root file (${license}) — a LICENSE of the package's own was packed in place of it; delete that one"
 	fi
 done
 
@@ -52,8 +98,17 @@ if [ "$count" -eq 0 ]; then
 	echo "::error::no tarballs found in ${dir}"
 	exit 2
 fi
+
+while IFS=$'\t' read -r name directory; do
+	[ -n "$name" ] || continue
+	if ! grep -qxF "$name" <<<"$packed"; then
+		fail "${name} (${directory#"$PWD"/}) is published by the release, but no tarball of it is in ${dir}"
+	fi
+done <<<"$expected"
+
+published="$(grep -c . <<<"$expected")"
 if [ "$failures" -gt 0 ]; then
-	echo "tarball LICENSE: ${failures} of ${count} tarball(s) would not publish the root LICENSE"
+	echo "tarball LICENSE: ${failures} problem(s) across ${count} tarball(s) for ${published} published package(s)"
 	exit 1
 fi
-echo "OK: all ${count} tarballs ship the root LICENSE"
+echo "OK: all ${published} packages the release publishes were packed, and each tarball ships the root LICENSE"
