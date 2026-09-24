@@ -63,13 +63,20 @@ export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): Rat
 	// place: a looser budget than the operator wrote. Only a default nobody
 	// gave is the built-in 60 per 60 s.
 	assertUsableRateLimitSpecs("createRedisRateLimiter", opts);
+	// Held as they were checked, the default included, as the in-process
+	// limiter holds them: a later change to the caller's objects cannot reach
+	// a check, and so cannot hand Redis a window nobody validated.
 	const limits: Record<string, RateLimitSpec> = Object.fromEntries(
 		Object.entries(opts.limits ?? {}).map(([prefix, spec]) => [
 			prefix,
 			{ limit: spec.limit, windowSeconds: spec.windowSeconds },
 		]),
 	);
-	const defaultLimit: RateLimitSpec = opts.defaultLimit ?? DEFAULT_LIMIT;
+	const givenDefault = opts.defaultLimit ?? DEFAULT_LIMIT;
+	const defaultLimit: RateLimitSpec = {
+		limit: givenDefault.limit,
+		windowSeconds: givenDefault.windowSeconds,
+	};
 	const client = opts.client;
 
 	return {
