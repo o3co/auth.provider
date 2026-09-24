@@ -118,6 +118,15 @@ describe("memory rate limiter — a spec it cannot apply as written", () => {
 describe("memory rate limiter — what it is built with", () => {
 	const SANE = { limit: 60, windowSeconds: 60 };
 
+	it("refuses to be built without a default, which its type requires", () => {
+		// A limiter with no default would have nothing to apply to an unmatched
+		// key; refused when built, not on the first check.
+		expect(() => createMemoryRateLimiter({ limits: {} } as never)).toThrow(RangeError);
+		expect(() => createMemoryRateLimiter({ limits: {} } as never)).toThrow(
+			"createMemoryRateLimiter: defaultLimit is required",
+		);
+	});
+
 	it("treats a limits it was not given as none, and answers with its default", async () => {
 		// It built, and then threw a TypeError on every check — which the guard
 		// reads as an outage, and fail-open leaves the route unguarded. The

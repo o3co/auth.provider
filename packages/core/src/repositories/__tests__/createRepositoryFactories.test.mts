@@ -164,6 +164,16 @@ describe("createRepositoryFactories", () => {
 			);
 		});
 
+		it("refuses an unusable defaultExpiresIn with a RangeError, as the repository's constructor does", async () => {
+			const { codeFactory } = createRepositoryFactories();
+			for (const defaultExpiresIn of [0, -1, 1.5, Infinity, "not-a-number"]) {
+				await expect(
+					codeFactory.create({ type: "memory", defaultExpiresIn }),
+					String(defaultExpiresIn),
+				).rejects.toBeInstanceOf(RangeError);
+			}
+		});
+
 		it("rejects zero defaultExpiresIn", async () => {
 			const { codeFactory } = createRepositoryFactories();
 			await expect(codeFactory.create({ type: "memory", defaultExpiresIn: 0 })).rejects.toThrow(

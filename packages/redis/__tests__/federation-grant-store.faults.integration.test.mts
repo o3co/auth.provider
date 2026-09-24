@@ -919,7 +919,7 @@ describe("a retention or allowance whose deadline no clock reaches (the Date ran
 		const left = await redis.keys(`${prefix}*`);
 		if (left.length > 0) await redis.del(...left);
 		expect({ lodged, left }).toEqual({ lodged: "not built", left: [] });
-		expect("refusal" in built && built.refusal).toBeInstanceOf(Error);
+		expect("refusal" in built && built.refusal).toBeInstanceOf(RangeError);
 	});
 
 	it("refuses a listing allowance past it when built, so no lodging leaves the subject's index without a TTL", async () => {
@@ -930,13 +930,21 @@ describe("a retention or allowance whose deadline no clock reaches (the Date ran
 			await lodge(built.store).catch(() => undefined);
 		}
 		expect(await withoutTtl()).toEqual([]);
-		expect("refusal" in built && built.refusal).toBeInstanceOf(Error);
+		expect("refusal" in built && built.refusal).toBeInstanceOf(RangeError);
 	});
 
 	it("refuses either past it when built, however far past, and takes one that ends inside it", () => {
-		for (const bad of [8_640_000_000_000_001, PAST_THE_DATE_RANGE, 1e21]) {
-			expect(attempt({ tombstoneRetentionMs: bad }), String(bad)).toHaveProperty("refusal");
-			expect(attempt({ listingAllowanceMs: bad }), String(bad)).toHaveProperty("refusal");
+		// A RangeError, as the in-process store refuses its retention and as
+		// the shared expiry rule refuses every lifetime: one setting, one class,
+		// whichever adapter a composition builds.
+		for (const bad of [8_640_000_000_000_001, PAST_THE_DATE_RANGE, 1e21, -1, Number.NaN]) {
+			for (const option of ["tombstoneRetentionMs", "listingAllowanceMs"] as const) {
+				const built = attempt({ [option]: bad });
+				expect(built, `${option} ${String(bad)}`).toHaveProperty("refusal");
+				expect("refusal" in built && built.refusal, `${option} ${String(bad)}`).toBeInstanceOf(
+					RangeError,
+				);
+			}
 		}
 		expect(attempt({ tombstoneRetentionMs: 365 * DAY })).toHaveProperty("store");
 		expect(attempt({ listingAllowanceMs: 365 * DAY })).toHaveProperty("store");

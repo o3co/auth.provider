@@ -191,6 +191,20 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		}
 	});
 
+	it("refuses an unusable ttl with a RangeError, as the shared expiry rule refuses every lifetime", () => {
+		for (const ttl of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 1e13]) {
+			expect(
+				() =>
+					createRedisFederationTokenStore({
+						client: redis,
+						encryption: { mode: "allow-plaintext" },
+						ttl,
+					}),
+				String(ttl),
+			).toThrow(RangeError);
+		}
+	});
+
 	it("rejects ttl: 0 at construction", () => {
 		expect(() =>
 			createRedisFederationTokenStore({

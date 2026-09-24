@@ -612,7 +612,7 @@ describe("an expiry or lifetime past the Date range is refused before Redis is a
 					encryption: { mode: "required", key: Buffer.alloc(32, 7) },
 					ttl: expiresIn,
 				}),
-			).toThrow(/ttl/);
+			).toThrow(RangeError);
 		}
 		expect(client.px).toEqual([]);
 	});

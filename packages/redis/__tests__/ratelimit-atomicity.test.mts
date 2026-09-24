@@ -138,6 +138,28 @@ describe("createRedisRateLimiter — atomicity (#269)", () => {
 		}
 	});
 
+	it("holds the specs it was built with: changing the caller's objects afterwards changes nothing", async () => {
+		// What construction checked is what every check applies, as the
+		// in-process limiter holds it. `defaultLimit` was kept by reference, so
+		// a later change reached the budget unchecked — a NaN window included.
+		const redis = fakeRedis();
+		const limits: Record<string, { limit: number; windowSeconds: number }> = {
+			"login.ip": { limit: 1, windowSeconds: 60 },
+		};
+		const defaultLimit = { limit: 1, windowSeconds: 60 };
+		const limiter = createRedisRateLimiter({ client: redis, limits, defaultLimit });
+		(limits["login.ip"] as { limit: number }).limit = 100;
+		limits["other.ip"] = { limit: 100, windowSeconds: 60 };
+		defaultLimit.limit = 100;
+		defaultLimit.windowSeconds = Number.NaN;
+
+		expect(await limiter.check("login.ip:1.2.3.4", {})).toMatchObject({ allowed: true, limit: 1 });
+		expect(await limiter.check("login.ip:1.2.3.4", {})).toMatchObject({ allowed: false, limit: 1 });
+		expect(await limiter.check("other.ip:1.2.3.4", {})).toMatchObject({ allowed: true, limit: 1 });
+		expect(await limiter.check("other.ip:1.2.3.4", {})).toMatchObject({ allowed: false, limit: 1 });
+		expect(redis.ttls.get("other.ip:1.2.3.4")).toBe(60);
+	});
+
 	it("applies its own default when none is given at all", async () => {
 		// Nothing configured is not a configured budget loosened: the adapter's
 		// documented 60 per 60 s applies.
