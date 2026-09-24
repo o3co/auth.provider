@@ -125,18 +125,30 @@ checks each field's type, as the template's Google bridge
   Configuring the library with GitHub's own issuer and then comparing `iss` is
   [#598](https://github.com/o3co/auth.provider/issues/598).
 - **The user** is `GET https://api.github.com/user`, with no subject binding
-  (there is no id_token `sub` to bind to). A user object with neither `sub` nor
-  `id` is refused.
+  (there is no id_token `sub` to bind to). It is GitHub's REST API, not an
+  OpenID Connect UserInfo endpoint — it answers a numeric `id` and no `sub` — so
+  the adapter fetches it as a protected resource and reads the answer itself,
+  rather than through `openid-client`'s UserInfo handling, which requires a
+  `sub`. Both `/user` and `/user/emails` are asked for
+  `application/vnd.github+json` at REST API version `2022-11-28`
+  (`X-GitHub-Api-Version`), the schema the `sub` rule reads `id` against.
+  GitHub supports a version for at least 24 months after its successor ships
+  (2022-11-28's successor shipped 2026-03-10), so revisit the pin before
+  2028-03: once GitHub retires it, every login fails. A
+  non-2xx answer, a body that is not JSON, or a user object with neither a
+  usable `sub` nor a usable `id` fails the exchange, and the login answers
+  `502 exchange_failed`.
 - **The e-mail** always comes from `GET /user/emails`, never from `/user`: the
-  primary verified address, else the first verified one, else none. A failed
-  `/user/emails` request is read as "no address" and does not fail the login.
+  primary verified address, else the first verified one, else none. A row that
+  is not an object is skipped. A failed `/user/emails` request is read as "no
+  address" and does not fail the login.
 
 What `exchangeCode` returns:
 
 | Field | Value |
 | --- | --- |
 | `issuer` | `https://github.com` |
-| `sub` | a non-empty string `sub` when the user object carries one; otherwise its `id` — a number as a string, or a non-empty string as it is |
+| `sub` | a non-empty string `sub` when the user object carries one; otherwise its `id` — a positive safe integer (`Number.isSafeInteger`, above 0) as a decimal string, or a string of decimal digits with no sign and no leading zero as it is. Any other `id` fails the exchange like a missing one: GitHub sends an int64 integer, and one outside the safe-integer range after `Response.json()`, where a parsed number no longer names one id — above 2^53 − 1, where two ids parse as the same number, or `1e400`, which parses as `Infinity` — would sign two GitHub users in as one `github:<id>` |
 | `email`, `emailVerified` | the chosen address and `true`, or both absent |
 | `name` | `/user`'s `name`, when a string |
 | `picture` | `/user`'s `avatar_url`, when a string |
@@ -173,7 +185,18 @@ Defined in [`src/github.mts`](src/github.mts), exported from
 
 ## Tests
 
+Nothing mocks `openid-client`. The provider tests run the real library against
+a fake GitHub ([`fake-github.mts`](src/__tests__/fake-github.mts)) installed as
+the global `fetch` — the fetch the library uses, since the adapter configures
+none — which answers with GitHub's own bodies and records every request. It
+enforces the two points where the library's defaults decide success: the token
+endpoint answers form-encoded unless `Accept` asks for JSON, and the REST API
+refuses a request without a `User-Agent`. `Authorization` and the API version
+are pinned by the tests' assertions instead.
+
 | Test file | Pins |
 | --- | --- |
-| [`github.test.mts`](src/__tests__/github.test.mts) | against a stubbed `openid-client`: the authorization request, the exchange URL without `iss`, the `sub`, e-mail and scope rules, `expiresAt: null`, no refresh, `mapClaims` and `endSession` |
+| [`github.test.mts`](src/__tests__/github.test.mts) | the authorization request, the token request (PKCE verifier, `client_secret_post`), the exchange without `iss`, the REST headers, the e-mail choice, malformed rows and a failed `/user/emails`, the scope rules, `expiresAt`, no refresh, `mapClaims` and `endSession` |
+| [`github.user.test.mts`](src/__tests__/github.user.test.mts) | how `/user` becomes the `sub`: GitHub's numeric `id` without a `sub`, the `sub` and `id` rules, and the refusals (a non-2xx answer, a body that is not JSON, no `id`, or one that is not a positive safe integer or a canonical digit string) |
+| [`fake-github.test.mts`](src/__tests__/fake-github.test.mts) | the fake itself: form-encoded token answers, the `User-Agent` refusal, and that the adapter's requests satisfy both |
 | [`github-module.test.mts`](src/__tests__/github-module.test.mts), [`github-module-boot.test.mts`](src/__tests__/github-module-boot.test.mts) | the module's contributions and boot with the session module |
