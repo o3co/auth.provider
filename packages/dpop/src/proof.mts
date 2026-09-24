@@ -13,7 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { isRecordableJti, MAX_JTI_LENGTH, malformedNumericDateClaim } from "@o3co/auth-provider-core";
+import {
+	isRecordableJti,
+	MAX_JTI_LENGTH,
+	malformedNumericDateClaim,
+} from "@o3co/auth-provider-core";
 import { decodeJwt, decodeProtectedHeader, type JWK } from "jose";
 import { DPoPError } from "./errors.mjs";
 import { computeJkt } from "./thumbprint.mjs";
