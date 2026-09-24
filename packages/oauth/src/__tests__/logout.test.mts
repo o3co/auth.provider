@@ -36,6 +36,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/logout.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import {
+	expectOutageLine,
 	expectProjectedWarn,
 	REFUSED_COMMAND_MARKER,
 	serialisedCalls,
@@ -722,6 +723,17 @@ describe("POST /oauth/logout", () => {
 			expect(res.status).toBe(503);
 			expect(res.body.error).toBe("temporarily_unavailable");
 		});
+
+		it("logs it once, at error level, as logout_store_unavailable", async () => {
+			const logger = createMockLogger();
+			const app = buildApp({
+				sessionStore: makeSessionStore({ get: vi.fn().mockRejectedValue(storeReplyError()) }),
+				logger,
+			});
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+			expect(res.status).toBe(503);
+			expectOutageLine(logger, "logout_store_unavailable", { store: "user_session", step: "get" });
+		});
 	});
 
 	describe("reverse-index pre-fetch throws (fail-closed)", () => {
@@ -738,6 +750,100 @@ describe("POST /oauth/logout", () => {
 
 			expect(res.status).toBe(503);
 			expect(res.body.error).toBe("temporarily_unavailable");
+		});
+
+		for (const [store, override] of [
+			[
+				"session_rp_registry",
+				{
+					sessionRPRegistry: makeSessionRPRegistry({
+						listRPs: vi.fn().mockRejectedValue(storeReplyError()),
+					}),
+				},
+			],
+			[
+				"session_federation_index",
+				{
+					sessionFederationIndex: makeSessionFederationIndex({
+						listFederations: vi.fn().mockRejectedValue(storeReplyError()),
+					}),
+				},
+			],
+		] as const) {
+			it(`logs a ${store} that cannot answer once, at error level, naming it`, async () => {
+				const logger = createMockLogger();
+				const app = buildApp({ ...override, logger });
+				const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+				expect(res.status).toBe(503);
+				expectOutageLine(logger, "logout_store_unavailable", { store, step: "list" });
+			});
+		}
+	});
+
+	describe("the logout cascade fails (fail-closed)", () => {
+		for (const [label, override, cascadeStep] of [
+			[
+				"its fanout context cannot be read (step 1)",
+				{
+					sessionFamilyIndex: makeSessionFamilyIndex({
+						listFamilyIds: vi.fn().mockRejectedValue(storeReplyError()),
+					}),
+				},
+				1,
+			],
+			[
+				"the session record cannot be deleted (step 4)",
+				{
+					sessionStore: makeSessionStore({ delete: vi.fn().mockRejectedValue(storeReplyError()) }),
+				},
+				4,
+			],
+		] as const) {
+			it(`logs it once, at error level, when ${label}`, async () => {
+				const logger = createMockLogger();
+				const app = buildApp({ ...override, logger });
+				const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+				expect(res.status).toBe(503);
+				expect(res.body.error_description).toBe("logout cascade failed");
+				expectOutageLine(logger, "logout_store_unavailable", {
+					store: "logout_cascade",
+					cascadeStep,
+					failures: 1,
+				});
+			});
+		}
+
+		it("logs a fanout failure (step 2) once at error level, each failed operation structured at warn", async () => {
+			const logger = createMockLogger();
+			const app = buildApp({
+				refreshFamilyRevocation: makeFamilyRevocation({
+					revokeFamily: vi.fn().mockRejectedValue(storeReplyError()),
+				}),
+				logger,
+			});
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+			expect(res.status).toBe(503);
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				expect.objectContaining({
+					store: "logout_cascade",
+					cascadeStep: 2,
+					failures: 1,
+					err: expect.objectContaining({ name: "ReplyError" }),
+				}),
+				"logout_store_unavailable",
+			);
+			// The per-operation detail: object-first, never a template string.
+			expect(logger.warn.mock.calls.filter(([first]) => typeof first === "string")).toEqual([]);
+			expect(logger.warn).toHaveBeenCalledWith(
+				expect.objectContaining({
+					operation: "revoke_family",
+					familyId: "fam-1",
+					err: expect.objectContaining({ name: "ReplyError" }),
+				}),
+				"logout_cascade_operation_failed",
+			);
+			expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
 		});
 	});
 
@@ -1504,7 +1610,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(503);
-			expectProjectedWarn(logger, /userSessionStore\.get failed/);
+			expectOutageLine(logger, "federation_logout_store_unavailable", {
+				federation: "google",
+				store: "user_session",
+				step: "get",
+			});
 		});
 
 		it("the federation index read", async () => {
@@ -1520,7 +1630,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(503);
-			expectProjectedWarn(logger, /listFederations failed/);
+			expectOutageLine(logger, "federation_logout_store_unavailable", {
+				federation: "google",
+				store: "session_federation_index",
+				step: "list",
+			});
 		});
 
 		it("the token store's read", async () => {
@@ -1534,7 +1648,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(503);
-			expectProjectedWarn(logger, /federationTokenStore\.get failed/);
+			expectOutageLine(logger, "federation_logout_store_unavailable", {
+				federation: "google",
+				store: "federation_token",
+				step: "get",
+			});
 		});
 
 		it("the token store's delete", async () => {
@@ -1550,7 +1668,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(503);
-			expectProjectedWarn(logger, /federationTokenStore\.delete failed/);
+			expectOutageLine(logger, "federation_logout_store_unavailable", {
+				federation: "google",
+				store: "federation_token",
+				step: "delete",
+			});
 		});
 
 		it("the federation link's removal", async () => {
@@ -1567,7 +1689,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(503);
-			expectProjectedWarn(logger, /removeFederation failed/);
+			expectOutageLine(logger, "federation_logout_store_unavailable", {
+				federation: "google",
+				store: "session_federation_index",
+				step: "remove",
+			});
 		});
 	});
 

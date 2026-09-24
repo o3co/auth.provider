@@ -33,9 +33,11 @@ export interface CascadeLogoutOptions {
 	readonly sessionFamilyIndex: SessionFamilyIndex;
 	readonly sessionFederationIndex: SessionFederationIndex;
 	/**
-	 * Optional structured logger for warning emissions on best-effort ops.
-	 * Defaults to `console`. Provide a pino/winston/etc instance with a compatible
-	 * `warn(message, ...args)` signature to route failures into your observability stack.
+	 * Optional structured logger. Defaults to `console`. Each failed operation
+	 * is one object-first warn line with the error's projection:
+	 * `logout_cascade_operation_failed` for a step-2 fanout operation (the
+	 * cascade then fails, and the caller answers and logs the outage), and
+	 * `logout_cascade_cleanup_failed` for a best-effort step-3 cleanup.
 	 */
 	readonly logger?: Logger;
 }
@@ -111,8 +113,8 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 		} catch (error) {
 			stepTwoFailures.push(error);
 			logger.warn(
-				`cascadeLogout: refreshTokenFamilyRevocation.revokeFamily(${familyId}) failed (continuing tally):`,
-				loggableError(error),
+				{ operation: "revoke_family", sid: opts.sid, familyId, err: loggableError(error) },
+				"logout_cascade_operation_failed",
 			);
 		}
 	}
@@ -122,8 +124,8 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 	} catch (error) {
 		stepTwoFailures.push(error);
 		logger.warn(
-			`cascadeLogout: federationTokenStore.removeBySid(${opts.sid}) failed (continuing tally):`,
-			loggableError(error),
+			{ operation: "remove_federation_tokens", sid: opts.sid, err: loggableError(error) },
+			"logout_cascade_operation_failed",
 		);
 	}
 
@@ -135,20 +137,20 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 	// halt. Orphan reverse-index entries are bounded by TTL.
 	await opts.sessionRPRegistry.removeBySid(opts.sid).catch((error) => {
 		logger.warn(
-			`cascadeLogout: sessionRPRegistry.removeBySid(${opts.sid}) failed:`,
-			loggableError(error),
+			{ operation: "remove_rp_registrations", sid: opts.sid, err: loggableError(error) },
+			"logout_cascade_cleanup_failed",
 		);
 	});
 	await opts.sessionFamilyIndex.removeBySid(opts.sid).catch((error) => {
 		logger.warn(
-			`cascadeLogout: sessionFamilyIndex.removeBySid(${opts.sid}) failed:`,
-			loggableError(error),
+			{ operation: "remove_family_index", sid: opts.sid, err: loggableError(error) },
+			"logout_cascade_cleanup_failed",
 		);
 	});
 	await opts.sessionFederationIndex.removeBySid(opts.sid).catch((error) => {
 		logger.warn(
-			`cascadeLogout: sessionFederationIndex.removeBySid(${opts.sid}) failed:`,
-			loggableError(error),
+			{ operation: "remove_federation_index", sid: opts.sid, err: loggableError(error) },
+			"logout_cascade_cleanup_failed",
 		);
 	});
 
@@ -171,8 +173,8 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 	// entries are bounded by the family index's TTL anyway).
 	await opts.sessionFamilyIndex.removeBySid(opts.sid).catch((error) => {
 		logger.warn(
-			`cascadeLogout: post-delete sessionFamilyIndex.removeBySid(${opts.sid}) failed:`,
-			loggableError(error),
+			{ operation: "remove_family_index_after_delete", sid: opts.sid, err: loggableError(error) },
+			"logout_cascade_cleanup_failed",
 		);
 	});
 
