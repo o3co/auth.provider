@@ -129,6 +129,15 @@ describe("createRedisRateLimiter — atomicity (#269)", () => {
 		}
 	});
 
+	it("refuses a limits that is not an object of specs, saying so of the map, not of a spec", () => {
+		for (const bad of [null, "x", 42, [{ limit: 5, windowSeconds: 60 }]]) {
+			expect(
+				() => createRedisRateLimiter({ client: fakeRedis(), limits: bad as never }),
+				JSON.stringify(bad),
+			).toThrow(/limits must be an object of \{ limit, windowSeconds \} specs, keyed by prefix/);
+		}
+	});
+
 	it("applies its own default when none is given at all", async () => {
 		// Nothing configured is not a configured budget loosened: the adapter's
 		// documented 60 per 60 s applies.

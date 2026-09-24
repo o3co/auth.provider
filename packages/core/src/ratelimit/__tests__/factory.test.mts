@@ -115,6 +115,54 @@ describe("memory rate limiter — a spec it cannot apply as written", () => {
 	});
 });
 
+describe("memory rate limiter — what it is built with", () => {
+	const SANE = { limit: 60, windowSeconds: 60 };
+
+	it("treats a limits it was not given as none, and answers with its default", async () => {
+		// It built, and then threw a TypeError on every check — which the guard
+		// reads as an outage, and fail-open leaves the route unguarded. The
+		// Redis adapter treats a missing `limits` as `{}`; so does this one.
+		const limiter = createMemoryRateLimiter({ defaultLimit: { limit: 1, windowSeconds: 60 } });
+		expect(await limiter.check("any:1", {})).toMatchObject({ allowed: true, limit: 1 });
+		expect(await limiter.check("any:1", {})).toMatchObject({ allowed: false, limit: 1 });
+	});
+
+	it("refuses a limits that is not an object of specs, saying so of the map, not of a spec", () => {
+		for (const bad of [null, "x", 42, [{ limit: 5, windowSeconds: 60 }]]) {
+			expect(
+				() => createMemoryRateLimiter({ limits: bad as never, defaultLimit: SANE }),
+				JSON.stringify(bad),
+			).toThrow(/limits must be an object of \{ limit, windowSeconds \} specs, keyed by prefix/);
+		}
+	});
+
+	it("refuses limits: null through the factory too, as the Redis adapter does, rather than reading it as none", async () => {
+		const factory = createRateLimiterFactory();
+		registerBuiltinRateLimiters(factory);
+		await expect((async () => factory.create({ type: "memory", limits: null }))()).rejects.toThrow(
+			RangeError,
+		);
+	});
+
+	it("holds the specs it was built with: a later change to what it was handed changes nothing", async () => {
+		// What construction checked is what every check applies. Read live, a
+		// spec changed afterwards reached the bucket arithmetic unchecked —
+		// a NaN window, a reset at a non-finite instant.
+		const limits: Record<string, { limit: number; windowSeconds: number }> = {
+			big: { limit: 1, windowSeconds: 60 },
+		};
+		const defaultLimit = { limit: 1, windowSeconds: 60 };
+		const limiter = createMemoryRateLimiter({ limits, defaultLimit });
+		limits.big = { limit: 100, windowSeconds: Number.NaN };
+		(defaultLimit as { limit: number }).limit = 100;
+
+		expect(await limiter.check("big:1", {})).toMatchObject({ allowed: true, limit: 1 });
+		expect(await limiter.check("big:1", {})).toMatchObject({ allowed: false, limit: 1 });
+		expect(await limiter.check("other:1", {})).toMatchObject({ allowed: true, limit: 1 });
+		expect(await limiter.check("other:1", {})).toMatchObject({ allowed: false, limit: 1 });
+	});
+});
+
 describe("registerBuiltinRateLimiters (memory)", () => {
 	it("memory sink respects limit and window", async () => {
 		vi.useFakeTimers();
