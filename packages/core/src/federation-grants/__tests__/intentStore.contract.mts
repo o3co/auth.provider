@@ -64,9 +64,27 @@ const DAY = 86_400_000;
  * TTL on a stored deadline, and a fixture dated in the past would be reclaimed
  * partway through the suite. Not on a whole second, so that an adapter
  * truncating an instant to seconds does not hand every fixture back unchanged.
+ *
+ * Not set until the first test starts, and read only through `T0()` — `at`
+ * included — which refuses to read it before then: a date taken while the
+ * suite is collected — in a `describe` body rather than a test — is dated
+ * from the import, not from the test that uses it, and next to that test's
+ * own dates it is off by however long the suite took to get there. The
+ * FederationGrantStore contract lost a test to exactly that, and only on a
+ * slow enough run.
+ *
+ * Handed out as a copy each time, never the clock itself: a store that wrote
+ * to the `now` it was given would otherwise move every date the test takes
+ * after it.
  */
-let T0 = new Date(Math.floor(Date.now() / 1000) * 1000 + 137);
-const at = (ms: number): Date => new Date(T0.getTime() + ms);
+let testClock = new Date(Number.NaN);
+const T0 = (): Date => {
+	if (Number.isNaN(testClock.getTime())) {
+		throw new Error("T0 is the test's clock: read it, or at(), inside a test, not a describe body");
+	}
+	return new Date(testClock.getTime());
+};
+const at = (ms: number): Date => new Date(T0().getTime() + ms);
 const INVALID = new Date(Number.NaN);
 
 /** Never handed out by reference: a fixture that shared it would hide a store that does too. */
@@ -88,7 +106,7 @@ const intent = (over: Partial<FederationGrantIntent> = {}): FederationGrantInten
 	redirectUri: "https://client.test/connected",
 	clientState: "client-state-1",
 	lifetimeMs: 30 * DAY,
-	createdAt: T0,
+	createdAt: T0(),
 	expiresAt: at(FEDERATION_GRANT_FLOW_BUDGET_MS),
 	correlationId: "corr-1",
 	resource: undefined,
@@ -123,7 +141,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 		let store: S;
 
 		beforeEach(async () => {
-			T0 = new Date(Math.floor(Date.now() / 1000) * 1000 + 137);
+			testClock = new Date(Math.floor(Date.now() / 1000) * 1000 + 137);
 			store = await factory.create();
 		});
 
@@ -132,7 +150,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 		});
 
 		/** Lodge, and assert it was admitted: the premise of nearly every test below. */
-		const lodge = async (over: Partial<FederationGrantIntent> = {}, now = T0) => {
+		const lodge = async (over: Partial<FederationGrantIntent> = {}, now = T0()) => {
 			const record = intent(over);
 			expect(await store.putIntent(record, now)).toEqual({ outcome: "created" });
 			return record;
@@ -231,10 +249,10 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 
 			it("refuses a time that is not a date rather than comparing it", async () => {
 				await expect(store.putIntent(intent(), INVALID)).rejects.toThrow(RangeError);
-				await expect(store.putIntent(intent({ expiresAt: INVALID }), T0)).rejects.toThrow(
+				await expect(store.putIntent(intent({ expiresAt: INVALID }), T0())).rejects.toThrow(
 					RangeError,
 				);
-				await expect(store.putIntent(intent({ createdAt: INVALID }), T0)).rejects.toThrow(
+				await expect(store.putIntent(intent({ createdAt: INVALID }), T0())).rejects.toThrow(
 					RangeError,
 				);
 				expect(await factory.intentResident(store, "h-1")).toBe(false);
@@ -303,7 +321,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 			it("holds one client to the bound for one subject, and counts no other pair", async () => {
 				for (let i = 0; i < FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT; i += 1) {
 					expect(
-						await store.putIntent(intent({ handle: `h-${i}`, grantId: `g-${i}` }), T0),
+						await store.putIntent(intent({ handle: `h-${i}`, grantId: `g-${i}` }), T0()),
 					).toEqual({
 						outcome: "created",
 					});
@@ -311,7 +329,9 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 				expect(await factory.reservations(store, "agent", "u-1")).toBe(
 					FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT,
 				);
-				expect(await store.putIntent(intent({ handle: "h-over", grantId: "g-over" }), T0)).toEqual({
+				expect(
+					await store.putIntent(intent({ handle: "h-over", grantId: "g-over" }), T0()),
+				).toEqual({
 					outcome: "refused",
 					reason: "limit",
 				});
@@ -320,10 +340,10 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 				// Another client for the same subject, and the same client for another
 				// subject, are untouched: the bound is on the pair.
 				expect(
-					await store.putIntent(intent({ handle: "h-other-client", clientId: "worker" }), T0),
+					await store.putIntent(intent({ handle: "h-other-client", clientId: "worker" }), T0()),
 				).toEqual({ outcome: "created" });
 				expect(
-					await store.putIntent(intent({ handle: "h-other-sub", subject: "u-2" }), T0),
+					await store.putIntent(intent({ handle: "h-other-sub", subject: "u-2" }), T0()),
 				).toEqual({
 					outcome: "created",
 				});
@@ -343,7 +363,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 									clientId: "agent:x",
 									subject: "u-1",
 								}),
-								T0,
+								T0(),
 							)
 						).outcome,
 					).toBe("created");
@@ -351,7 +371,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 				expect(
 					await store.putIntent(
 						intent({ handle: "h-other", grantId: "g-other", clientId: "agent", subject: "x:u-1" }),
-						T0,
+						T0(),
 					),
 				).toEqual({ outcome: "created" });
 				expect(await factory.reservations(store, "agent", "x:u-1")).toBe(1);
@@ -362,12 +382,12 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 
 			it("does not count a reauthorization against the bound", async () => {
 				for (let i = 0; i < FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT; i += 1) {
-					await store.putIntent(intent({ handle: `h-${i}`, grantId: `g-${i}` }), T0);
+					await store.putIntent(intent({ handle: `h-${i}`, grantId: `g-${i}` }), T0());
 				}
 				expect(
 					await store.putIntent(
 						intent({ handle: "h-renew", kind: "reauthorization", grantId: "g-established" }),
-						T0,
+						T0(),
 					),
 				).toEqual({ outcome: "created" });
 				expect(await factory.reservations(store, "agent", "u-1")).toBe(
@@ -425,7 +445,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 			});
 
 			it("is null for an unknown handle, and refuses an invalid now", async () => {
-				expect(await store.getIntent("nobody", T0)).toBeNull();
+				expect(await store.getIntent("nobody", T0())).toBeNull();
 				await expect(store.getIntent("nobody", INVALID)).rejects.toThrow(RangeError);
 			});
 		});
@@ -531,7 +551,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 						handle: "nobody",
 						challenge: "challenge-1",
 						binding: binding(),
-						now: T0,
+						now: T0(),
 					}),
 				).toBeNull();
 
@@ -922,11 +942,11 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 
 			it("admits one of two records competing for the last place", async () => {
 				for (let i = 0; i < FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT - 1; i += 1) {
-					await store.putIntent(intent({ handle: `h-${i}`, grantId: `g-${i}` }), T0);
+					await store.putIntent(intent({ handle: `h-${i}`, grantId: `g-${i}` }), T0());
 				}
 				const [a, b] = await both(
-					() => store.putIntent(intent({ handle: "h-a", grantId: "g-a" }), T0),
-					() => store.putIntent(intent({ handle: "h-b", grantId: "g-b" }), T0),
+					() => store.putIntent(intent({ handle: "h-a", grantId: "g-a" }), T0()),
+					() => store.putIntent(intent({ handle: "h-b", grantId: "g-b" }), T0()),
 				);
 				expect([a.outcome, b.outcome].sort()).toEqual(["created", "refused"]);
 				expect(await factory.reservations(store, "agent", "u-1")).toBe(
@@ -942,15 +962,15 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 			it("writes one record for two identical insertions, and refuses a conflicting one", async () => {
 				const record = intent();
 				const [a, b] = await both(
-					() => store.putIntent(record, T0),
-					() => store.putIntent(record, T0),
+					() => store.putIntent(record, T0()),
+					() => store.putIntent(record, T0()),
 				);
 				expect([a.outcome, b.outcome].sort()).toEqual(["created", "unchanged"]);
 				expect(await factory.reservations(store, "agent", "u-1")).toBe(1);
 
 				const [c, d] = await both(
-					() => store.putIntent(intent({ handle: "h-2", grantId: "g-2" }), T0),
-					() => store.putIntent(intent({ handle: "h-2", grantId: "g-3" }), T0),
+					() => store.putIntent(intent({ handle: "h-2", grantId: "g-2" }), T0()),
+					() => store.putIntent(intent({ handle: "h-2", grantId: "g-3" }), T0()),
 				);
 				expect([c.outcome, d.outcome].sort()).toEqual(["created", "refused"]);
 			});
@@ -1073,7 +1093,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 
 			it("releases one place when a finish races an admission at capacity", async () => {
 				for (let i = 0; i < FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT; i += 1) {
-					await store.putIntent(intent({ handle: `h-${i}`, grantId: `g-${i}` }), T0);
+					await store.putIntent(intent({ handle: `h-${i}`, grantId: `g-${i}` }), T0());
 				}
 				const [, admitted] = await both<unknown>(
 					() => store.finishIntent("h-0", at(MIN)).then(() => null),

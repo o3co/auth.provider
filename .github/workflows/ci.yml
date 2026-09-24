@@ -19,8 +19,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Full history needed by the "No cross-project references in PR commit
-          # messages" and "Every commit in the PR installs" steps below (both
+          # Full history needed by the "No cross-project references or
+          # agent-workspace paths in PR commit messages" and "Every commit in
+          # the PR installs" steps below (both
           # walk BASE..HEAD on the PR branch). Other steps don't depend on
           # history depth.
           fetch-depth: 0
@@ -111,7 +112,7 @@ jobs:
             exit 1
           fi
           echo "OK: all in-repo ComponentMap slot names are unnamespaced"
-      - name: No cross-project references
+      - name: No cross-project references or agent-workspace paths
         run: |
           set -euo pipefail
           # Forbid cross-project namespace references from leaking into auth.provider sources.
@@ -128,10 +129,36 @@ jobs:
             fi
           done
           echo "OK: no cross-project references in scanned paths"
-      - name: No cross-project references in PR commit messages
+
+          # Nor a path into an agent's workspace: the hidden agent directory, its
+          # spec and plan folders, the workspace volume's absolute path. None of
+          # them is in this repository, so a link or a citation to one is dead
+          # for every reader — a CHANGELOG entry linked such a spec until it was
+          # caught by hand. So every tracked file is read, the CHANGELOG
+          # included; `git grep` reads tracked files only, never build output or
+          # node_modules. The PR's commit messages are read for the same pattern
+          # in the next step. Assembled from parts, like the pattern above, so
+          # this file does not match itself.
+          WORKSPACE_PAT="$(printf '%s' '\.clau' 'de/|superpowers/' '(specs|plans)/|/Volu' 'mes/Work' 'space/')"
+          set +e
+          HITS="$(git grep -nIE "$WORKSPACE_PAT")"
+          STATUS=$?
+          set -e
+          case "$STATUS" in
+            0)
+              echo "ERROR: a path into an agent workspace outside the repository — cite a PR or issue number instead:"
+              echo "$HITS"
+              exit 1
+              ;;
+            1) echo "OK: no agent-workspace paths in tracked files" ;;
+            *)
+              echo "ERROR: git grep failed (status ${STATUS}); nothing was scanned"
+              exit 1
+              ;;
+          esac
+      - name: No cross-project references or agent-workspace paths in PR commit messages
         if: github.event_name == 'pull_request'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
@@ -141,26 +168,50 @@ jobs:
           # bodies into the merge commit which becomes immutable history.
           # The pattern is assembled from parts so this workflow does not match itself.
           PAT="$(printf '%s' 'dpla' 'as|@dpla' 'asio')"
-          if [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then
-            echo "PR base or head SHA missing; skipping commit-message scan."
+          if [ -z "${HEAD_SHA:-}" ] || [ -z "${GITHUB_BASE_REF:-}" ]; then
+            echo "PR head SHA or base branch missing; skipping commit-message scan."
             exit 0
           fi
-          # Full history is fetched via actions/checkout fetch-depth:0 above,
-          # so both SHAs are reachable. Verify defensively — if either is
-          # missing, fail loudly rather than silently passing.
-          for sha in "$BASE_SHA" "$HEAD_SHA"; do
-            if ! git cat-file -e "$sha^{commit}" 2>/dev/null; then
-              echo "ERROR: commit $sha not present in checkout; cannot scan PR commit messages."
-              exit 1
-            fi
-          done
-          MATCHES="$(git log --format='%H%n%B%n---' "$BASE_SHA..$HEAD_SHA" | grep -E "$PAT" || true)"
+          # The PR's own commits: those the head has and the base branch, as it
+          # stands now, does not. Not base.sha..head.sha — the event's base.sha
+          # can predate the base the PR was last rebased onto, and that range
+          # then takes in the base branch's own commits, which this PR cannot
+          # reword. The base branch is fetched here so its ref is present and
+          # current; the head is verified — if either is missing, fail loudly
+          # rather than silently passing.
+          git fetch --no-tags --quiet origin "+refs/heads/${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            echo "ERROR: commit $HEAD_SHA not present in checkout; cannot scan PR commit messages."
+            exit 1
+          fi
+          RANGE=("$HEAD_SHA" --not "origin/${GITHUB_BASE_REF}")
+          MATCHES="$(git log --format='%H%n%B%n---' "${RANGE[@]}" | grep -E "$PAT" || true)"
           if [ -n "$MATCHES" ]; then
             echo "ERROR: prohibited cross-project reference in PR commit messages:"
             echo "$MATCHES"
             exit 1
           fi
           echo "OK: no cross-project references in PR commit messages"
+
+          # Nor a path into an agent workspace — the pattern of the file scan in
+          # the step above, assembled the same way. A squash merge promotes these
+          # bodies into develop's history, where a dead link cannot be fixed.
+          # Commit by commit, so the error names the commit to reword.
+          WORKSPACE_PAT="$(printf '%s' '\.clau' 'de/|superpowers/' '(specs|plans)/|/Volu' 'mes/Work' 'space/')"
+          SHAS="$(git rev-list "${RANGE[@]}")"
+          FOUND=0
+          for sha in $SHAS; do
+            if HITS="$(git log -1 --format=%B "$sha" | grep -nE "$WORKSPACE_PAT")"; then
+              echo "ERROR: $(git log -1 --format='%h %s' "$sha") — its message names a path into an agent workspace:"
+              echo "$HITS"
+              FOUND=1
+            fi
+          done
+          if [ "$FOUND" -ne 0 ]; then
+            echo "Reword those commits: cite a PR or issue number instead."
+            exit 1
+          fi
+          echo "OK: no agent-workspace paths in PR commit messages"
       - name: Every commit in the PR installs (package.json parses, no conflict markers)
         if: github.event_name == 'pull_request'
         env:
@@ -350,50 +401,22 @@ jobs:
           console.log("OK: every @o3co/auth-provider-* peer range is workspace:^");
           EOF
 
-      - name: Pack all @o3co/auth-provider-* packages
+      - name: Pack every package the release publishes
         run: |
           set -euo pipefail
-          # Simulate the post-publish state by tarballing every workspace
-          # package and exercising the standalone template against the
-          # tarballs (rather than the workspace:* resolution that local
-          # builds use). Catches
-          # "template references symbols not in the published tarball"
-          # before tag push.
+          # Simulate the post-publish state by tarballing every package
+          # `pnpm -r publish` would publish, and exercise the standalone
+          # template against the tarballs (rather than the workspace:*
+          # resolution that local builds use). Catches "template references
+          # symbols not in the published tarball" before tag push.
           #
-          # Use `pnpm pack` (not `npm pack`): npm pack does not rewrite
-          # `workspace:*` ranges, so the tarball's package.json would still
-          # carry workspace: protocol — which npm install in the scratch
-          # dir cannot resolve (EUNSUPPORTEDPROTOCOL). pnpm pack rewrites
-          # workspace:* to the resolved version (0.0.0 in this repo).
-          mkdir -p /tmp/tarballs
-          for pkg in packages/*/; do
-            name=$(node -p "require('./${pkg}package.json').name")
-            case "$name" in
-              @o3co/auth-provider-*)
-                pushd "$pkg" >/dev/null
-                pnpm pack --pack-destination /tmp/tarballs
-                popd >/dev/null
-                ;;
-              *)
-                echo "skipping $name (not @o3co/auth-provider-*)"
-                ;;
-            esac
-          done
+          # The same script packs for release.yml, so CI checks the set the
+          # release publishes — create-app included — and not a list of its
+          # own. It packs with `pnpm pack` (npm pack leaves `workspace:`
+          # ranges in place, which npm install in the scratch dir cannot
+          # resolve), and with each pack's stdin closed.
+          .github/scripts/pack-published.sh /tmp/tarballs
           ls -la /tmp/tarballs
-
-      - name: Pack create-app
-        run: |
-          set -euo pipefail
-          # @o3co/create-auth-provider is published alongside @o3co/auth-provider-*
-          # via `pnpm -r publish` in release.yml. Pack it into the same tarball
-          # destination so the assertion step below covers it too.
-          # The tarball filename (`o3co-create-auth-provider-*.tgz`) is distinct
-          # from the packages tarballs (`o3co-auth-provider-*-*.tgz`).
-          pushd create-app >/dev/null
-          pnpm pack --pack-destination /tmp/tarballs
-          popd >/dev/null
-          echo "create-app tarball:"
-          ls -la /tmp/tarballs/o3co-create-auth-provider-*.tgz
 
       - name: Assert no __tests__ in published tarballs
         run: |
@@ -444,6 +467,13 @@ jobs:
             exit 1
           fi
           echo "OK: no '#/' subpath imports in any published tarball's dist/"
+
+      - name: Assert every package the release publishes was packed and ships the root LICENSE
+        # The root LICENSE is the only copy, and pnpm packs it only when nothing
+        # else it packs looks like a licence file (the script says what counts).
+        # Read on the tarballs, which is what a consumer downloads; release.yml
+        # runs the same script on the tag's tarballs before it publishes.
+        run: .github/scripts/check-tarball-license.sh /tmp/tarballs LICENSE
 
       - name: Assert packed manifests carry ^<version> sibling peer ranges
         run: |

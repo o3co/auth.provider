@@ -832,17 +832,24 @@ describe("findSubjectByFederatedIdentity over HTTP (#613)", () => {
 			// that never arrive are the abort signal's to cut, and without it the
 			// caller would still be told "timed out" — after the upstream finally
 			// answered. So the failure must land before the upstream does.
+			//
+			// Pinned by order, not by a stopwatch: the upstream notes when it
+			// answers, and it must not have by the time the caller is told. A bound
+			// on elapsed time measures the scheduler as well as the abort, and a
+			// loaded run stretches a 20ms deadline past any bound short enough to
+			// tell the two apart.
+			let answered = false;
 			server.use(
 				http.post(LOOKUP_URL, async () => {
 					await delay(400);
+					answered = true;
 					return HttpResponse.json({ kind: "unlinked" });
 				}),
 			);
-			const started = Date.now();
 			await expect(
 				looking([COVER], { timeout: 20 }).findSubjectByFederatedIdentity?.(IDENTITY),
 			).rejects.toThrow(/timed out after 20ms/);
-			expect(Date.now() - started).toBeLessThan(250);
+			expect(answered, "the caller was told only once the upstream had answered").toBe(false);
 		});
 
 		it("reports a transport that failed before any response with a fixed message, and no cause", async () => {

@@ -61,6 +61,18 @@ jobs:
       - run: pnpm -r --if-present run typecheck
       - run: pnpm run test
 
+      # The tarballs of this tag, checked before a draft release is created or
+      # anything is published: every package `pnpm -r publish` is about to
+      # publish must be packed, and ship the root LICENSE and nothing in its
+      # place (the script says what pnpm takes for a licence file). CI's
+      # publish-readiness job packs with the same script and runs the same
+      # check on every PR; this run is the one that can stop a release.
+      - name: Refuse a tarball without the root LICENSE
+        run: |
+          set -euo pipefail
+          .github/scripts/pack-published.sh "$RUNNER_TEMP/tarballs"
+          .github/scripts/check-tarball-license.sh "$RUNNER_TEMP/tarballs" LICENSE
+
       - name: Create GitHub Release (draft)
         uses: softprops/action-gh-release@v2
         with:

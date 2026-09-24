@@ -331,7 +331,7 @@ The header dialect parsers, the narrow-mode chain walker, the PEM↔DER codec an
 
 ## Source layout
 
-`src/` holds the mechanism ([`extractor.mts`](src/extractor.mts), the one entry the module builds), the module, and the narrow-mode pieces. `src/fullPki/` holds the `full-pki` arm: path validation delegated to `pkijs`, the four checks this package still owns, revocation (CRL and OCSP) and the fetch guard. The extractor reaches it through `createFullPkiValidator` ([`fullPki/validate.mts`](src/fullPki/validate.mts)), and the leaf-certificate profile is imported from the narrow mode rather than restated, so the two arms cannot disagree about a leaf.
+`src/` holds the mechanism ([`extractor.mts`](src/extractor.mts), the one entry the module builds), the module, and the narrow-mode pieces. `src/fullPki/` holds the `full-pki` arm: path validation delegated to `pkijs`, the four checks this package still owns, revocation (CRL and OCSP) and the fetch guard. The extractor reaches it through `createFullPkiValidator` ([`fullPki/validate.mts`](src/fullPki/validate.mts)), and the leaf-certificate profile is imported from the narrow mode rather than restated, so the two arms cannot disagree about a leaf. `src/fullPki/` has no barrel: the extractor and the module import each name from the file that defines it, and the package's one code entry is [`src/index.mts`](src/index.mts), which takes only the signature-algorithm vocabulary from the directory.
 
 ## License
 

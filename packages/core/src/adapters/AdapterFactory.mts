@@ -180,10 +180,9 @@ export interface AdapterFactory<T> {
 	 * runtime security boundary is the resolved adapter instance returned by
 	 * {@link AdapterFactory.create}, not this factory's builders map.
 	 * Freezing this factory would protect an object already off the runtime
-	 * path post-boot. See ADR:
-	 * `.claude/audit/decisions/D-3-resolution.md` (D-3, 2026-05-05) for the
-	 * full wrong-layer framing analysis and the explicit decision to close
-	 * SF-11 by documentation, not by adding `freeze()`.
+	 * path post-boot — the wrong layer — so SF-11 was closed by documentation,
+	 * not by adding `freeze()`: #113 (D-3, 2026-05-05; indexed in
+	 * `docs/design-campaign-index.md`).
 	 */
 	replace(type: string, builder: AdapterBuilder<T>): void;
 
