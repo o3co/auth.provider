@@ -58,16 +58,22 @@ export class StoreCredentialRefusedError extends Error {
 /** What went wrong with the exchange, when it was not the Store's answer. */
 export type StoreTransportFailure =
 	/**
-	 * No answer began: refused, reset, DNS, TLS, or a connection closed
-	 * before the peer sent a byte. The network path, or TLS to the Store.
+	 * No connection to exchange on: refused, DNS, TLS, a route or host the
+	 * network cannot reach. The network path, or TLS to the Store.
 	 */
 	| "unreachable"
 	/**
-	 * The Store (or whatever answers at the URL) sent bytes, and no usable
-	 * response head came of them: the parser refused the status line or a
-	 * header, the head outgrew the size limit, or the connection closed
-	 * after an interim `1xx` or mid-head. The Store's answer, or a proxy's —
-	 * not the network.
+	 * A connection that closed — or was reset — before a complete response
+	 * arrived: before any byte, after an interim `1xx`, mid-head, or a pooled
+	 * keep-alive connection the Store, a proxy or an idle timeout closed
+	 * between two requests. The transport cannot tell which, so this says no
+	 * more than that; it is not the network path, and not a malformed answer.
+	 */
+	| "connection_closed"
+	/**
+	 * The Store (or whatever answers at the URL) sent a response head the
+	 * transport cannot take: the parser refused the status line or a header,
+	 * or the head outgrew the size limit. The Store's answer, or a proxy's.
 	 */
 	| "malformed_response"
 	/** An HTTP answer arrived, and its body broke before it was read. */
@@ -170,48 +176,66 @@ export function transportCode(err: unknown): string | undefined {
 	return undefined;
 }
 
+/** Codes that say the connection closed or was reset under the request. */
+const CLOSED_CODES: ReadonlySet<string> = new Set([
+	"UND_ERR_SOCKET",
+	"ECONNRESET",
+	"EPIPE",
+	"ECONNABORTED",
+]);
+
 /**
- * Whether the peer sent bytes and no usable response head came of them — the
- * `malformed_response` case. undici says so three ways: an `HTTPParserError`
- * (an `HPE_*` code where the runtime sets one), `UND_ERR_HEADERS_OVERFLOW`,
- * and `UND_ERR_SOCKET` — the other side closed — on a socket that had read
- * bytes (after a `1xx`, or mid-head); on one that had read none, nothing
- * answered. Read by name, code and that byte count only.
+ * Which failure a rejected request is, read by the error's name and code
+ * only. A head the transport cannot take — an `HTTPParserError` (an `HPE_*`
+ * code where the runtime sets one), `UND_ERR_HEADERS_OVERFLOW` — is
+ * `malformed_response`. A connection closed or reset under the request —
+ * undici's `UND_ERR_SOCKET` ("other side closed"), `ECONNRESET`, `EPIPE` — is
+ * `connection_closed`, whatever the socket had read: undici counts bytes over
+ * the socket's life, and fetch reuses keep-alive connections, so a pooled
+ * connection closed between two requests has read an entire earlier answer.
+ * Anything else is `unreachable`.
  */
-function isMalformedResponse(err: unknown): boolean {
+function requestFailureReason(
+	err: unknown,
+): "unreachable" | "connection_closed" | "malformed_response" {
+	let closed = false;
 	for (const error of causes(err)) {
-		const { name, code, socket } = error as {
-			name?: unknown;
-			code?: unknown;
-			socket?: { bytesRead?: unknown } | null;
-		};
-		if (name === "HTTPParserError") return true;
+		const { name, code } = error as { name?: unknown; code?: unknown };
+		if (name === "HTTPParserError") return "malformed_response";
 		if (typeof code !== "string") continue;
-		if (code.startsWith("HPE_") || code === "UND_ERR_HEADERS_OVERFLOW") return true;
-		const bytesRead = socket?.bytesRead;
-		if (code === "UND_ERR_SOCKET" && typeof bytesRead === "number" && bytesRead > 0) return true;
+		if (code.startsWith("HPE_") || code === "UND_ERR_HEADERS_OVERFLOW") {
+			return "malformed_response";
+		}
+		if (CLOSED_CODES.has(code)) closed = true;
 	}
-	return false;
+	return closed ? "connection_closed" : "unreachable";
 }
 
 const withCode = (message: string, code: string | undefined): string =>
 	code === undefined ? message : `${message} (${code})`;
 
 /**
- * A request that failed before a response could be taken:
- * `messages.malformed` when the Store sent bytes and no usable head came of
- * them — it was reached, so "could not be reached" would send an operator to
- * the network — otherwise `messages.unreachable`. Either with the code, when
- * there is one.
+ * A request that failed before a response could be taken, as its reason's
+ * message — `unreachable`, `closed` or `malformed` — with the code, when
+ * there is one. Only `unreachable` points an operator at the network.
  */
 export function requestFailure(
 	err: unknown,
-	messages: { readonly unreachable: string; readonly malformed: string },
+	messages: {
+		readonly unreachable: string;
+		readonly closed: string;
+		readonly malformed: string;
+	},
 ): StoreTransportError {
 	const code = transportCode(err);
-	return isMalformedResponse(err)
-		? new StoreTransportError(withCode(messages.malformed, code), "malformed_response", code)
-		: new StoreTransportError(withCode(messages.unreachable, code), "unreachable", code);
+	const reason = requestFailureReason(err);
+	const message =
+		reason === "malformed_response"
+			? messages.malformed
+			: reason === "connection_closed"
+				? messages.closed
+				: messages.unreachable;
+	return new StoreTransportError(withCode(message, code), reason, code);
 }
 
 /** An answer whose body broke before it was read. */

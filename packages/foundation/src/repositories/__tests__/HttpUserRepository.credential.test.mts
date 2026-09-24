@@ -35,7 +35,7 @@
  * https URL on a plain-HTTP port, a peer that reflects the request into a
  * status line, header or body the parser rejects, a head too large, a close
  * after a 1xx — is a StoreTransportError: a fixed message naming the endpoint
- * and what failed (not reached, a malformed response, not readable) and at
+ * and what failed (not reached, closed first, malformed, not readable) and at
  * most a transport code, never the transport's own error, which quotes the
  * bytes it choked on. A timeout, whichever half stalls, is a TimeoutError.
  *
