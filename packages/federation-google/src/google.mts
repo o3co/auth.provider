@@ -78,6 +78,20 @@ export interface GoogleProviderConfig {
 	 */
 	requireAuthorizationResponseIss?: boolean;
 	/**
+	 * Whether sign-in asks Google for a refresh token. Default `"offline"`.
+	 *
+	 * Google issues a refresh token only when the user is shown the consent
+	 * screen, and without `prompt` it shows that screen only the first time.
+	 * Upstream tokens are kept per session, so `"offline"` sends
+	 * `access_type=offline` **and** `prompt=consent`: every sign-in shows
+	 * Google's consent screen and every session gets a refresh token that
+	 * `POST /oauth/federation/google/token` can use. `"online"` sends neither:
+	 * no consent screen after the first sign-in and no refresh token at all,
+	 * for a deployment that uses Google to sign in and never refreshes
+	 * Google's access token.
+	 */
+	accessType?: "offline" | "online";
+	/**
 	 * The fetch every request to Google goes through — JWKS, token, userinfo.
 	 * A proxy, or a test seam. Default: the global `fetch`.
 	 */
@@ -105,6 +119,21 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			'Google federation "google": requireAuthorizationResponseIss must be a boolean — coerce an environment string before passing it',
 		);
 	}
+
+	const accessType = config.accessType ?? "offline";
+	if (accessType !== "offline" && accessType !== "online") {
+		throw new Error(
+			`Google federation "google": accessType must be "offline" or "online", got ${JSON.stringify(config.accessType)}`,
+		);
+	}
+	// Google issues a refresh token only on a consent screen, and shows one
+	// unprompted only the first time. Asked for offline access, every sign-in
+	// asks for the screen too: the tokens are kept per session, so a session
+	// opened without one could never be refreshed. An earlier session's
+	// refresh token is not reachable from a new one — keeping one per
+	// `google:<sub>` would be a store that outlives sessions.
+	const offlineAccess: Readonly<Record<string, string>> =
+		accessType === "offline" ? { access_type: "offline", prompt: "consent" } : {};
 
 	// ServerMetadata constructed locally — no discovery call. Google's endpoints are stable.
 	// Local variable type (oidc.ServerMetadata) does not survive to the .d.mts.
@@ -161,7 +190,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				state: params.state,
 				code_challenge: codeChallenge(params.codeVerifier),
 				code_challenge_method: "S256",
-				access_type: "offline",
+				...offlineAccess,
 				nonce: params.nonce,
 			});
 		},
