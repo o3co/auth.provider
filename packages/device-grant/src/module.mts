@@ -126,6 +126,7 @@ import express, { type ErrorRequestHandler, type RequestHandler, type Response }
 import { z } from "zod";
 import { createDeviceAuthorizationHandler } from "./deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "./grant.mjs";
+import { loggableError } from "./loggableError.mjs";
 import { DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX, DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
@@ -335,7 +336,7 @@ const refuseTooLarge = (res: Response): void => {
  * the body is read. A body with no `Content-Length` (chunked) is left to the
  * parsers' own `limit`, as federation-grants leaves it; no other module's
  * parser reads these routes' bodies (`oauthModule`'s router parses its own
- * routes only), and `routeErrors` gives the parsers' refusal the same
+ * routes only), and `parserRefusals` gives the parsers' refusal the same
  * answer.
  */
 const withinBodyLimit: RequestHandler = (req, res, next) => {
@@ -375,49 +376,39 @@ const callerMistake = (
 };
 
 /**
- * What of an unexpected error may be logged: its `name`, `message`, `type`,
- * `code` and `status`, when they are strings or numbers — never the error
- * itself. A body-parser error carries the request body (`body`); an ioredis
- * reply error carries the command's arguments (a user code, the approving
- * subject); a `cause` can carry either. Express's own handler logged only
- * the stack, and this must not log more.
+ * The parsers' refusals, answered — mounted directly after `noStore`, the
+ * throttle, `withinBodyLimit` and the parsers, so it sees their errors and
+ * nobody else's. What `callerMistake` recognises is the caller's mistake:
+ * `413 body_too_large` (a chunked body the parsers found over the bound gets
+ * the answer a declared one gets from `withinBodyLimit`), `415
+ * unsupported_encoding` or `400 malformed_body`, quoting none of the body
+ * and logging nothing at error level. Anything else passes on to
+ * `unexpectedErrors`.
+ *
+ * Mounted last instead, it would read an `expose`d 4xx from anywhere — a
+ * store, a handler — as a refused body, and answer and log it as one.
  */
-const loggableError = (error: unknown): Record<string, string | number> => {
-	if (error === null || typeof error !== "object") return { thrown: typeof error };
-	const fields = error as Record<string, unknown>;
-	const out: Record<string, string | number> = {};
-	for (const key of ["name", "message", "type", "code", "status"] as const) {
-		const value = fields[key];
-		if (typeof value === "string" || typeof value === "number") out[key] = value;
+const parserRefusals: ErrorRequestHandler = (error, _req, res, next) => {
+	const mistake = res.headersSent ? null : callerMistake(error);
+	if (mistake === null) {
+		next(error);
+		return;
 	}
-	return out;
+	answerError(res, mistake.status, "invalid_request", mistake.description);
 };
 
 /**
- * What either route answers for an error its middleware or handler passed
- * on — federation-grants' `parserErrors`, with its codes. RFC 8628 §3.2
- * gives `/oauth/device_authorization` RFC 6749 §5.2's JSON error response,
- * and the verification API answers in JSON throughout, so none of these may
- * fall through to the host app's error page:
- *
- *   - the caller's mistake (`callerMistake`): `413 body_too_large` — a
- *     chunked body the parsers found over the bound gets the answer a
- *     declared one gets from `withinBodyLimit` — `415 unsupported_encoding`
- *     or `400 malformed_body`, quoting none of the body and logging nothing
- *     at error level;
- *   - anything else is `500 server_error` (`unexpected_error`), with
- *     `loggableError`'s projection of it in the log.
+ * The last error handler on either route: every error that reaches it is a
+ * `500 server_error` (`unexpected_error`), with `loggableError`'s projection
+ * of it in the log. RFC 8628 §3.2 gives `/oauth/device_authorization` RFC
+ * 6749 §5.2's JSON error response, and the verification API answers in JSON
+ * throughout, so nothing falls through to the host app's error page.
  */
-const routeErrors =
+const unexpectedErrors =
 	(logger: DeviceGrantModuleDeps["logger"]): ErrorRequestHandler =>
 	(error, _req, res, next) => {
 		if (res.headersSent) {
 			next(error);
-			return;
-		}
-		const mistake = callerMistake(error);
-		if (mistake !== null) {
-			answerError(res, mistake.status, "invalid_request", mistake.description);
 			return;
 		}
 		(logger ?? consoleLogger).error({ err: loggableError(error) }, "device_route_unexpected_error");
@@ -663,6 +654,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					router.use(withinBodyLimit);
 					router.use(express.json({ limit: BODY_LIMIT }));
 					router.use(express.urlencoded({ extended: false, limit: BODY_LIMIT }));
+					router.use(parserRefusals);
 					// RFC 8628 §3.1 applies RFC 6749 §3.2.1's client-authentication
 					// requirements to this endpoint, and §5.6 expects device clients
 					// to be public. `allowPublicClients: true` is exactly that pair:
@@ -697,7 +689,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							logger: deps.logger,
 						}),
 					);
-					router.use(routeErrors(deps.logger));
+					router.use(unexpectedErrors(deps.logger));
 					return {
 						id: "device-authorization",
 						mountPath: "/oauth/device_authorization",
@@ -721,6 +713,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// what is mounted around it.
 					router.use(withinBodyLimit);
 					router.use(express.json({ limit: BODY_LIMIT }));
+					router.use(parserRefusals);
 					// The session guard, verbatim: foreign origin refused, same
 					// origin or `session.csrf.trustedOrigins` accepted, no origin
 					// signal → the signed double-submit token `GET /session/csrf`
@@ -757,7 +750,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							auditSink: deps.auditSink,
 						}),
 					);
-					router.use(routeErrors(deps.logger));
+					router.use(unexpectedErrors(deps.logger));
 					return {
 						id: "device-verification",
 						mountPath: "/oauth/device/verification",
