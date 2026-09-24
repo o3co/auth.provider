@@ -107,9 +107,9 @@ as the client sends it.
 
 | Client | Entry | Notes |
 |---|---|---|
-| Browser | `https://example.com` | Literal origin: scheme + host + optional port. **No trailing slash** — `https://example.com/` never matches. |
+| Browser | `https://example.com` | Bare serialized origin: scheme + host + a port only when it is not the default. **No trailing slash**, path or uppercase host — such an entry would never match, so the schema refuses it at boot and names the origin it should have been. |
 | Browser, sub-domain | `https://app.example.com:8443` | Sharing one `rpId` across sub-domains means listing each origin. |
-| Browser, local dev | `http://localhost:3000` | `http:` is accepted for loopback only (`localhost`, `127.0.0.1`, `[::1]`). |
+| Browser, local dev | `http://localhost:3000` | `http:` is accepted for loopback only (`localhost`, `127.0.0.0/8`, `[::1]`). |
 | Android app | `android:apk-key-hash:<base64url>` | What Credential Manager sends in place of an origin ([#497](https://github.com/o3co/auth.provider/issues/497)). |
 
 ```hocon
