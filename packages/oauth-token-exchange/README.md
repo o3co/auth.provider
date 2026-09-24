@@ -1,7 +1,29 @@
 # @o3co/auth-provider-oauth-token-exchange
 
+Last updated: 2026-09-24
+
 RFC 8693 Token Exchange grant for [auth.provider](https://github.com/o3co/auth.provider).
 Supports on-behalf-of, delegation (`act` claim), and scope / audience narrowing.
+
+## Responsibility
+
+**Role.** The `urn:ietf:params:oauth:grant-type:token-exchange` grant handler, and the built-in validator for this provider's own access tokens presented as `subject_token` or `actor_token`. The package has no route: `tokenExchangeModule` contributes the handler as a `grants` entry, core's boot planner puts it in the `grantHandlerResolver`, and [`@o3co/auth-provider-oauth`](../oauth/README.md)'s `oauthModule` dispatches `POST /oauth/token` requests of this grant type to it. A composition therefore installs both — a dependency through composition, not an import.
+
+**Owns:**
+
+- the exchange decision: which client may exchange ([note 14](#security-notes), [note 15](#security-notes)), the scope and audience ceilings, `may_act`, the actor chain and the `act` claim, the sender-constraint matrices, and the issued token's lifetime;
+- the built-in `access_token` validator in [`src/validator/`](./src/validator) (`createSelfIssuedAccessTokenValidator`), which verifies a token this provider issued and consults the revocation stores.
+
+**Does not own:**
+
+- the validator contract — `ExchangeTokenValidator`, `ValidatedToken`, `ExchangeTokenValidationContext` — which is core's ([`token-exchange/validator.mts`](../core/src/token-exchange/validator.mts)), nor the `TokenExchangeValidatorResolver` the boot planner builds from every module's `tokenExchangeValidators` contribution ([`modules/manifest/synthetic-keys.mts`](../core/src/modules/manifest/synthetic-keys.mts));
+- the HTTP route, client authentication and the dispatch-time grant-type allowlist — `@o3co/auth-provider-oauth`;
+- validators for other token types, such as external JWTs — the deployment's own modules ([below](#external-jwt-subject_token));
+- the revocation stores it consults (`refreshTokenFamilyRevocation`, `accessTokenDenylist`, `subjectRevocation`).
+
+**Why a separate package.** Token exchange is optional, and not installing the module is how it is disabled; keeping it out of `@o3co/auth-provider-oauth` keeps a deployment that does not exchange tokens from carrying the grant at all. It depends on core alone — the handler and the validator need only core's grant and validator contracts — so it does not import the oauth package, and a sibling can contribute further validators without depending on either.
+
+`src/validator/registry.mts` (`ExchangeTokenValidatorRegistry`) is not part of the package's runtime: nothing but tests imports it, and the resolver the grant reads at runtime is the one core's boot planner builds.
 
 ## Install
 
@@ -9,35 +31,54 @@ Supports on-behalf-of, delegation (`act` claim), and scope / audience narrowing.
 pnpm add @o3co/auth-provider-oauth-token-exchange
 ```
 
+Peer dependency: `@o3co/auth-provider-core`.
+
 ## Register the grant
 
 ```ts
-import { createApp } from "@o3co/auth-provider-core";
+import {
+  createApp,
+  defaultRefreshTokenFamilyRevocationModule,
+  memoryRefreshTokenFamilyStoreModule,
+} from "@o3co/auth-provider-core";
+import { oauthModule } from "@o3co/auth-provider-oauth";
 import { tokenExchangeModule } from "@o3co/auth-provider-oauth-token-exchange";
 
 const handle = await createApp({
   modules: [
+    oauthModule({ config }), // serves POST /oauth/token, which dispatches the exchange
     tokenExchangeModule,
-    clientRepositoryModule,
-    keyStoreModule,
-    refreshTokenStoreModule,
+    // refreshTokenFamilyRevocation, so an exchange can see a revoked family (note 1).
+    // The memory store is single-replica; @o3co/auth-provider-redis ships a shared one.
+    memoryRefreshTokenFamilyStoreModule,
+    defaultRefreshTokenFamilyRevocationModule,
+    // …the modules that provide clientRepository, codeRepository and keyStore
   ],
-  bootstrapComponents: {
-    config,
-    pathResolver,
-  },
+  bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
+// on shutdown
+await handle.dispose();
 ```
 
 The grant type URI is `urn:ietf:params:oauth:grant-type:token-exchange` (IETF registered).
 
 The built-in `access_token` validator is contributed by `tokenExchangeModule` itself. Consumers do not create or mutate a validator registry.
 
+`oauthModule` has requirements of its own — `endpoints.login.url`, and the absence decisions for `auditSink` and the revocation stores — listed in the oauth README's [Composing it](../oauth/README.md#composing-it). What this module requires, what it reads optionally and which absent slots must be declared is its manifest, [`module.mts`](./src/module.mts): it requires `config`, `clientRepository` and `keyStore`, and `oauth.jwt.issuer` must be a non-empty string or boot fails with `config-validation-failed`. `accessTokenDenylist` and `subjectRevocation` are optional to wire but not to decide: an unfilled one must be declared with `oauth.revocation.accessToken = "unsupported"` / `oauth.revocation.subject = "unsupported"`, or boot refuses.
+
+## Public API
+
+Exported from [`src/index.mts`](./src/index.mts):
+
+- `tokenExchangeModule` — [`module.mts`](./src/module.mts). The module value to install.
+- `createTokenExchangeGrant`, `TokenExchangeDependencies`, `TOKEN_EXCHANGE_GRANT_TYPE`, `ACCESS_TOKEN_TYPE` — [`grant.mts`](./src/grant.mts). The handler itself, for a composition that dispatches it from its own route.
+- `createSelfIssuedAccessTokenValidator`, `CreateSelfIssuedAccessTokenValidatorOptions` — [`validator/selfIssuedAccessToken.mts`](./src/validator/selfIssuedAccessToken.mts). The built-in validator. `issuer` is required; the factory throws without a non-empty one, because without it an `at+jwt` signed by the same key store but naming another issuer could pass.
+
+The validator contract is not re-exported: import `ExchangeTokenValidator`, `ValidatedToken` and `ExchangeTokenValidationContext` from `@o3co/auth-provider-core`.
+
 ## Disabling the module
 
-There is no config-driven disable switch. To disable Token Exchange, **do not import `tokenExchangeModule`**.
-
-Rationale: the RFC 8693 grant type URI (used for HTTP dispatch) differs from the HOCON-friendly config key, which makes a config-driven `enabled` flag structurally awkward to implement cleanly. Consumer-level opt-in via module import is both simpler and consistent with the rest of the v0.5.0 package-split philosophy (`@o3co/auth-provider-oauth-federation-*`).
+There is no config-driven switch: installing `tokenExchangeModule` is enabling the grant. To disable token exchange, **leave `tokenExchangeModule` out of the composition**. Per client, a registration that does not name the grant in `allowedGrantTypes` cannot use it (note 15).
 
 ## Client configuration
 
@@ -52,9 +93,9 @@ clients:
     allowedAudiences: ["billing-service", "inventory-service"]
 ```
 
-- **`allowedGrantTypes` must name the exchange grant type.** This grant denies by absence (#326): a registration that omits the field, or names other grants only, is refused with `unauthorized_client`. See Security note 15.
+- **`allowedGrantTypes` must name the exchange grant type.** This grant denies by absence: a registration that omits the field, or names other grants only, is refused with `unauthorized_client`. See Security note 15.
 - **`allowedScopes` bounds the granted scope**, on top of the subject token's own scope. Empty or omitted means no scope is granted. See Security note 2.
-- **`allowedAudiences` bounds the `audience` parameter.** When it is empty or omitted, the only accepted `audience` parameter value is the client's own `clientId`. This allowlist applies to the **request's `audience` parameter only** — a `GrantPolicyHook` can override `grantedAudience` in its decision, which is not re-validated against the allowlist (see Security note 4 for the rationale). If you want hard-boundary enforcement across both paths, write your policy hook defensively.
+- **`allowedAudiences` bounds the `audience` parameter.** When it is empty or omitted, the only accepted `audience` parameter value is the client's own `clientId`. This allowlist applies to the **request's `audience` parameter only** — a `GrantPolicyHook` can override `grantedAudience` in its decision, which is checked against the subject token's audience boundary rather than this allowlist (see Security notes 4 and 5). If you want hard-boundary enforcement across both paths, write your policy hook defensively.
 
 ## Requesting a lifetime (`expires_in`)
 
@@ -72,8 +113,9 @@ The package ships a built-in validator only for the `access_token` token type (t
 
 ```ts
 import { createApp, defineModule } from "@o3co/auth-provider-core";
-// The validator contract is core's since #626 P1, not this package's.
+// The validator contract is core's, not this package's.
 import type { ExchangeTokenValidator, ValidatedToken } from "@o3co/auth-provider-core";
+import { oauthModule } from "@o3co/auth-provider-oauth";
 import { tokenExchangeModule } from "@o3co/auth-provider-oauth-token-exchange";
 
 class ExternalJwtValidator implements ExchangeTokenValidator {
@@ -102,24 +144,27 @@ const externalJwtTokenExchangeValidatorModule = defineModule({
 
 const handle = await createApp({
   modules: [
+    oauthModule({ config }),
     tokenExchangeModule,
     externalJwtTokenExchangeValidatorModule,
-    clientRepositoryModule,
-    keyStoreModule,
+    // …the modules that provide clientRepository, codeRepository, keyStore and
+    // refreshTokenFamilyRevocation, as above
   ],
-  bootstrapComponents: { config, pathResolver },
+  bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
 ```
 
+Two modules contributing a validator for the same token type is refused at boot.
+
 ## Security notes
 
-1. **refreshTokenStore must be wired via a module that provides `refreshTokenStore`** so the boot planner injects it into `tokenExchangeModule`'s typed deps and the handler can surface the specific `family_revoked` errorDescription (spec §5.3). Without `refreshTokenStore` in the module graph, self-issued access_tokens carrying `family_id` cannot be revocation-checked; the handler returns `invalid_grant` (fail-closed). `tokenExchangeModule` declares both `refreshTokenStore` and `grantPolicy` in `optional`. See the "Register the grant" example above.
+1. **Wire `refreshTokenFamilyRevocation`, or this provider's family-bearing access tokens cannot be exchanged.** A self-issued access token carrying `family_id` — every token the `authorization_code` and `refresh_token` grants mint — is exchangeable only when its family's revocation state can be read. With no `refreshTokenFamilyRevocation` in the module graph the handler answers `invalid_grant` / `refresh token family revocation not configured (revocation cannot be verified)` (fail-closed, RFC 8693 §7.2). Core's `defaultRefreshTokenFamilyRevocationModule` provides the slot over a refresh-token family store (see [Register the grant](#register-the-grant)). With it wired, a subject token whose family is revoked is `invalid_grant`: through `tokenExchangeModule` the built-in validator reads the slot too and refuses first, so the description is `subject_token validation failed`; the handler's own `family_revoked` description is reached only when `createTokenExchangeGrant` is given a validator built without the slot. A store that cannot answer is `503 temporarily_unavailable`.
 
 2. **Scope is bounded by two ceilings, always.** `granted scope ⊆ subject_token.scope ∩ client.allowedScopes` is enforced unconditionally, and a `GrantPolicyHook` cannot bypass either **through the request parameter** (point 5 covers the policy-level override, which is re-checked against both). An explicitly requested scope outside either ceiling is refused with `invalid_scope` naming it; an omitted `scope` inherits the subject token's, clamped to the registration.
 
-   **An absent or empty `allowedScopes` grants no scope at all.** A registration that names no scope may receive none — the deny-by-absence discipline of #363 / #396, not a permissive "unrestricted" reading. The exchange still succeeds; the issued token simply carries no `scope` claim. Without this ceiling a client registered for `read` that obtained a subject token carrying `admin` exchanged it and received `admin`, its own registration bounding nothing.
+   **An absent or empty `allowedScopes` grants no scope at all.** A registration that names no scope may receive none — deny by absence, not a permissive "unrestricted" reading. The exchange still succeeds; the issued token simply carries no `scope` claim. Without this ceiling a client registered for `read` that obtained a subject token carrying `admin` could exchange it and receive `admin`, its own registration bounding nothing.
 
-3. **Audience allowlist (client-scoped).** The `audience` request parameter must be in `client.allowedAudiences ∪ { client.clientId }`. This is enforced by the core handler before the policy hook runs. Empty `allowedAudiences` means only the client's own `clientId` is a valid exchange audience.
+3. **Audience allowlist (client-scoped).** The `audience` request parameter must be in `client.allowedAudiences ∪ { client.clientId }`. The handler enforces this before the policy hook runs. Empty `allowedAudiences` means only the client's own `clientId` is a valid exchange audience.
 
 4. **Cross-client audience confusion defense.** When the `audience` request parameter is omitted, the handler inherits `subject_token.aud` only if it is in `client.allowedAudiences ∪ { client.clientId }`. Otherwise it falls back to `clientId`. This prevents a malicious client from exchanging a stolen token outside its intended audience just by omitting the audience parameter.
 
@@ -139,9 +184,9 @@ const handle = await createApp({
    }
    ```
 
-8. **`may_act` is enforced when present — on both exchange shapes.** If a subject token carries a `may_act` claim, the party acting on the subject's behalf must match one of its `{ sub?, iss? }` constraints. Malformed or non-matching values fail closed with `may_act_violation`; subject tokens without `may_act` continue to use the existing policy-hook boundary.
+8. **`may_act` is enforced when present — on both exchange shapes.** If a subject token carries a `may_act` claim, the party acting on the subject's behalf must match one of its `{ sub?, iss? }` constraints. Malformed or non-matching values fail closed with `may_act_violation`; subject tokens without `may_act` continue to use the policy-hook boundary.
 
-   Which party that is depends on the exchange. **Delegation** (`actor_token` supplied): the actor token must match, comparing `sub` against its subject and `iss` against its issuer. **Impersonation** (no `actor_token`, note 7): the authenticated calling client is the actor, and its `clientId` must match a `may_act` entry's `sub`. Enforcing the claim only when an `actor_token` happened to be supplied made it opt-out — omitting the parameter skipped it entirely, so a token naming one permitted actor was exchangeable by any exchange-enabled client that got hold of it.
+   Which party that is depends on the exchange. **Delegation** (`actor_token` supplied): the actor token must match, comparing `sub` against its subject and `iss` against its issuer. **Impersonation** (no `actor_token`, note 7): the authenticated calling client is the actor, and its `clientId` must match a `may_act` entry's `sub`. Enforcing the claim only when an `actor_token` happened to be supplied would make it opt-out — omitting the parameter would skip it, so a token naming one permitted actor would be exchangeable by any exchange-enabled client that got hold of it.
 
    The impersonation check is deliberately narrower: an entry that also constrains `iss` is **never** satisfied by a client identity. No token was presented for the actor, so there is no issuer to compare, and substituting this AS's own issuer would be a guess in the permissive direction. Write `may_act` entries as `{ "sub": "<client-id>" }` when the intended actor is a client acting in its own name.
 
@@ -155,63 +200,33 @@ const handle = await createApp({
 
 13. **Validator contributions are immutable after boot.** The boot planner aggregates `tokenExchangeValidators` contributions, freezes the world during activation, and exposes only a read-only resolver to the grant handler. Post-boot mutation cannot replace the built-in validator at runtime.
 
-14. **Confidential clients only (v0.5.0).** The handler requires `client_secret` and authenticates via `clientRepository.authenticate()`. Requests without a secret are rejected with `invalid_client` (401). The core `Client` type carries `clientSecret: string` as a required field and `PublicClient = Omit<Client, "clientSecret">`, so `findById()` alone cannot tell a "no secret configured" client from "secret omitted by caller" — accepting the unauthenticated path would let an attacker exchange a stolen `subject_token` under any client's allowlist. Public-client support is deferred until a `Client.public` flag (or equivalent) lands in core.
+14. **Confidential clients only.** A public client (`tokenEndpointAuthMethod: "none"`) is refused with `401 invalid_client`. Through `/oauth/token` the client has already been authenticated by the oauth package's client authentication — `client_secret_basic`, `client_secret_post` or `private_key_jwt` — and the handler uses that identity, re-reading the record with `clientRepository.findById()`. A body `client_id` that disagrees with the authenticated client is refused there by client authentication itself (`401 invalid_client`); the handler's own `400 invalid_request` for a mismatch applies only where something other than that middleware supplied `ctx.authenticatedClient`. A composition that dispatches the handler without client-authentication middleware (`ctx.authenticatedClient === null`) must send `client_id` and `client_secret` in the body, which the handler checks with `clientRepository.authenticate()`: a missing secret is `401 invalid_client`, and so is a failed authentication. A client-repository failure is `503 temporarily_unavailable` on either path.
 
-15. **The grant denies by absence of `allowedGrantTypes` (#326).** Token exchange mints a fresh credential out of one a client already holds — a standing capability of a registration, not a per-user ceremony — so it is never acquired by omission. The handler declares `requiresExplicitGrantAllowlist`, which `/oauth/token` dispatch enforces before `handle` runs, and repeats the check internally for the standalone wiring this package documents (no `clientAuthMw`, `ctx.authenticatedClient === null`), where no dispatch rule runs at all. Both paths refuse with `400 unauthorized_client` / `client is not authorized for urn:ietf:params:oauth:grant-type:token-exchange`. This does not depend on `oauth.requireGrantTypeAllowlist`, which defaults off; the two compose to the stricter rule.
+15. **The grant denies by absence of `allowedGrantTypes` (#326).** Token exchange mints a fresh credential out of one a client already holds — a standing capability of a registration, not a per-user ceremony — so it is never acquired by omission. The handler declares `requiresExplicitGrantAllowlist`, which `/oauth/token` dispatch enforces before `handle` runs, and repeats the check itself for a composition that dispatches it without client-authentication middleware (`ctx.authenticatedClient === null`), where no dispatch rule runs at all. Both paths refuse with `400 unauthorized_client` / `client is not authorized for urn:ietf:params:oauth:grant-type:token-exchange`. This does not depend on `oauth.requireGrantTypeAllowlist`, which defaults off; the two compose to the stricter rule.
 
 16. **The issued token never outlives the subject token (RFC 8693 §2.2.1), nor exceeds `oauth.accessToken.maxExpiresIn`.** `expires_in` is `min(requested expires_in ?? oauth.accessToken.defaultExpiresIn, oauth.accessToken.maxExpiresIn, subject_token exp − now)`, where `now` is the one issuance instant the minted `iat` and `exp` are also measured from — so the cap and the stamp cannot land in different seconds and put `exp` past the subject's. A chain of exchanges therefore cannot refresh the clock past the credential it descends from, and a client cannot ask its way past the operator's max (see [Requesting a lifetime](#requesting-a-lifetime-expires_in)). A subject token with no remaining lifetime — already expired, or expiring within the current second — is refused with `invalid_grant` / `subject_token has expired` rather than minting a token with a zero or negative lifetime. A subject token carrying **no `exp` claim at all** leaves `min(requested ?? default, max)` standing: there is no lifetime for the cap to descend from. The built-in validator never produces one (jose rejects an expired token before the handler sees it); a consumer-implemented validator that returns an `exp`-less `ValidatedToken` is asserting an unbounded credential, and should not do so lightly.
 
-17. **A DPoP-bound issued token is advertised as `token_type: "DPoP"` (RFC 9449 §5).** The response envelope names the mechanism the issued `cnf` actually binds, read off the confirmation stamped into the token. mTLS-bound tokens keep `"Bearer"` — RFC 8705 §3 does not redefine the wire-level type. Previously the envelope always said `Bearer`, so a DPoP-aware client presented a `cnf.jkt` token as a Bearer token and this provider's own protected-resource middleware refused it (RFC 9449 §7.1).
+17. **A DPoP-bound issued token is advertised as `token_type: "DPoP"` (RFC 9449 §5).** The response envelope names the mechanism the issued `cnf` actually binds, read off the confirmation stamped into the token. mTLS-bound tokens keep `"Bearer"` — RFC 8705 §3 does not redefine the wire-level type. A client must read `token_type`: this provider's own protected-resource middleware refuses a `cnf.jkt` token presented as Bearer (RFC 9449 §7.1).
 
 18. **Nothing ties the `subject_token` to the calling client.** This is a known property, stated rather than fixed. The built-in validator does not pin `aud` — `ExchangeTokenValidationContext` deliberately does not carry the calling-client identity, and the central verifier records the gap as `jwt_verify_aud_skipped` — and omitting the `audience` parameter falls back to the caller's own `clientId` (note 4). So an exchange-enabled client can present a self-issued access token it legitimately obtained and re-audience it to itself.
 
     What bounds the consequence is the registration, which is why notes 2 and 15 matter beyond their own findings: the re-audienced token cannot carry a scope outside the client's `allowedScopes`, cannot outlive the subject or exceed `maxExpiresIn` (note 16), and cannot be minted at all by a client whose registration does not name this grant. The escalation is therefore bounded by what the client was already registered to hold, not by what the subject token happened to carry.
 
-    **Recommended:** gate the grant with a `GrantPolicyHook` (`grantPolicy`) that asserts the relationship your deployment expects between the subject token and the caller — the hook is the layer that has both identities in hand. Registrations that do not need token exchange should simply omit it from `allowedGrantTypes`, which note 15 now makes sufficient.
+    **Recommended:** gate the grant with a `GrantPolicyHook` (`grantPolicy`) that asserts the relationship your deployment expects between the subject token and the caller — the hook is the layer that has both identities in hand. Registrations that do not need token exchange should simply omit it from `allowedGrantTypes`, which note 15 makes sufficient.
 
-19. **`oauth.accessToken.maxExpiresIn` bounds the offline-revocation window of an exchanged token.** Revoking the subject's family (note 10) stops an exchanged token wherever the family is consulted — introspection, userinfo, a verifier that checks revocation. A resource server that validates the JWT offline, by signature and `exp` alone, cannot observe that and keeps accepting the token until it expires. The longest that can be is the issued lifetime, and the longest a token-exchange request can make the issued lifetime is `maxExpiresIn`. Unset, it equals `defaultExpiresIn`, so the window is what it was before a request could ask. Raise it only as far as you accept an exchanged token outliving its revocation at such a resource server.
+19. **`oauth.accessToken.maxExpiresIn` bounds the offline-revocation window of an exchanged token.** Revoking the subject's family (note 10) stops an exchanged token wherever the family is consulted — introspection, userinfo, a verifier that checks revocation. A resource server that validates the JWT offline, by signature and `exp` alone, cannot observe that and keeps accepting the token until it expires. The longest that can be is the issued lifetime, and the longest a token-exchange request can make the issued lifetime is `maxExpiresIn`. Unset, it equals `defaultExpiresIn`, so the window is the default lifetime. Raise it only as far as you accept an exchanged token outliving its revocation at such a resource server.
 
-## Registration pattern summary
+## What it does not do
 
-- Import `tokenExchangeModule` and any sibling modules that contribute additional validators
-- Boot the app with `await createApp({ modules: [...], bootstrapComponents: { config, pathResolver } })`
-- Call `handle.dispose()` during shutdown
+- `saml1` / `saml2` subject token types.
+- Token type conversion (access ↔ id, access → refresh): answered `unsupported_token_type`.
+- Validate external JWTs out of the box: implement a validator ([above](#external-jwt-subject_token)).
 
-## Unsupported RFC 8693 features (v0.5.0 scope-out)
+Sender-constrained exchange is supported: the handler enforces the DPoP and mTLS `cnf` matrices on the `subject_token` and the `actor_token`, stamps the proven binding into the issued token, and advertises `token_type: "DPoP"` for a `cnf.jkt` token (Security note 17). [`senderConstraint.test.mts`](./src/__tests__/senderConstraint.test.mts) holds the matrix rows.
 
-- `saml1` / `saml2` subject token types
-- Token type conversion (access ↔ id, access → refresh): returns `unsupported_token_type`
-- Built-in external JWT validator (consumer-implement; planned as a separate package post-0.5)
+## Tests
 
-Sender-constrained token minting **is** supported and was listed here in error: the handler enforces the full DPoP and mTLS `cnf` matrices on the `subject_token` and the `actor_token` (#265, #309), stamps the proven binding into the issued token, and advertises `token_type: "DPoP"` for a `cnf.jkt` token (Security note 17). See `src/__tests__/senderConstraint.test.mts` for the matrix rows.
-
-## Breaking changes (v0.12.0)
-
-Each of these fails closed. A client registration that relied on omission stops working until the field is declared; that is the intended direction.
-
-- **The grant denies by absence of `allowedGrantTypes`.** Add `"urn:ietf:params:oauth:grant-type:token-exchange"` to `allowedGrantTypes` on every registration that performs an exchange. Registrations that omit the field, or name other grants only, now receive `400 unauthorized_client`. Security note 15.
-- **`client.allowedScopes` is a ceiling on the granted scope.** Declare every scope an exchanging client may receive. A registration with an absent or empty `allowedScopes` now receives a token with no `scope` claim, and any explicitly requested scope is refused with `invalid_scope`. Security note 2.
-- **`may_act` is enforced on impersonation exchanges.** A subject token carrying `may_act` is no longer exchangeable without an `actor_token` by a client the claim does not name. Add the acting client's id as a `may_act` entry's `sub` (with no `iss`), or stop minting `may_act` onto subject tokens that are meant to be freely exchangeable. Security note 8.
-- **The issued token's lifetime is capped by the subject token's**, and a subject token with no remaining lifetime is refused with `invalid_grant`. Consumers that relied on an exchange refreshing the clock must re-authenticate instead. Security note 16.
-- **`token_type` is `"DPoP"` for a DPoP-bound issued token.** Clients that hard-coded `Bearer` from this endpoint's response must read `token_type`. This is a fix: the previous envelope was rejected by the provider's own protected-resource middleware. Security note 17.
-
-## Breaking changes (v0.5.0)
-
-- **`createSelfIssuedAccessTokenValidator({ issuer })` requires `issuer`.**
-  The `issuer` field on `CreateSelfIssuedAccessTokenValidatorOptions` is
-  no longer optional and must be a non-empty string. Constructing the
-  validator without it throws synchronously. Without an issuer, any
-  `access_token`-typed JWT signed by the same KeyStore could pass
-  validation — a token-type confusion vector. Most consumers do not
-  invoke this factory directly and pick up `issuer` automatically from
-  `config.oauth.jwt.issuer` via `tokenExchangeModule`; only direct
-  callers of the factory function need to update their call sites.
-- **`tokenExchangeModule` declares `configSchema` requiring
-  `config.oauth.jwt.issuer: string().min(1)`.** Boot fails with
-  `BootError(reason: "config-validation-failed")` when the issuer is
-  missing or empty. The schema is intersected over the core schema's
-  optional issuer via `composeConfigSchema`, so the more-restrictive
-  module schema wins.
+[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest and the family cascade.
 
 ## RFC references
 

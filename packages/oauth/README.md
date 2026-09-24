@@ -1,117 +1,76 @@
 # @o3co/auth-provider-oauth
 
-OAuth 2.0 routes module for [auth.provider](../../README.md).
+Last updated: 2026-09-24
 
-Mounts `POST /oauth/token`, `POST /oauth/introspect`, and `GET /oauth/authorize` onto an Express app. Implements a registry-based grant dispatch model so additional grant types can be plugged in without modifying this package.
+The OAuth 2.0 / OpenID Connect authorization-server endpoints of [auth.provider](../../README.md): the HTTP surface under `/oauth`, the built-in grant types, client authentication, and the logout cascade.
+
+## Responsibility
+
+**Role.** The authorization server's HTTP face. [`@o3co/auth-provider-core`](../core/README.md) defines the ports, records, token primitives and the boot planner; this package turns them into the endpoints a client talks to — authorize, token, introspect, userinfo, revoke, consent, logout, federation token — and contributes this server's part of the discovery document. It sits beside [`@o3co/auth-provider-session`](../session/README.md) (login and the browser session) on top of core; neither imports the other.
+
+**Owns:**
+
+- the routes in the [Endpoints](#endpoints) table — other packages, such as the device grant and federation grants, mount routes under `/oauth` too — the order of the checks each one runs, and their wire answers;
+- client authentication at every client-authenticated endpoint — `client_secret_basic`, `client_secret_post`, `private_key_jwt` and public clients where a route admits them — as one middleware, `createClientAuthMiddleware`, which [`@o3co/auth-provider-device-grant`](../device-grant/README.md) and [`@o3co/auth-provider-federation-grants`](../federation-grants/README.md) reuse;
+- the built-in grants: `authorization_code`, `refresh_token`, `client_credentials`, `session` and RFC 7523 jwt-bearer;
+- the logout cascade (`cascadeLogout`), OIDC back- and front-channel logout, and the module that wires core's subject revocation service over that cascade;
+- resolving Client ID Metadata Documents: the fetch, its SSRF guard and its cache;
+- the discovery slice this server's endpoints and capabilities contribute.
+
+**Does not own:**
+
+- the ports and records (`ClientRepository`, `CodeRepository`, `KeyStore`, `UserSessionStore`, the `Client` record …), token minting and verification (`generateToken`, `verifyJwt`), the grant contract and the registry `/oauth/token` dispatches against, the discovery document itself and `jwks_uri` — core;
+- login, the browser session and the federation login routes — `@o3co/auth-provider-session` (`POST /session/logout` is there too, and does not run this package's cascade: see [Logout](#logout));
+- the other grant types — token exchange, device code, WebAuthn — which their own packages contribute to the same `/oauth/token`;
+- offline delegation of upstream tokens (`/oauth/federation-grants`) — `@o3co/auth-provider-federation-grants`;
+- proving a DPoP key or a client certificate — `@o3co/auth-provider-dpop` / `@o3co/auth-provider-mtls`. This package reads the binding they establish and stamps it as `cnf`;
+- store adapters (Redis and others) and the user Store.
+
+**Why a separate package.** Core holds the contracts every package shares, and the adapter and grant packages — Redis, token exchange, WebAuthn — depend on core and not on this package; keeping the HTTP surface here, with Express and express-session as its peers, means none of them pulls it in. Login and the browser session are a package of their own because an API-only deployment issues tokens without them; this package is the one every token-issuing deployment installs. The two are siblings over core and neither imports the other, which is why `POST /session/logout` cannot run this package's cascade.
+
+**Why four modules.** The package installs as four separate modules, each with only the requirements its own code reads, because they are needed in different compositions:
+
+| Module | What it contributes | Why it is separate |
+|---|---|---|
+| [`oauthModule`](./src/module.mts) | The `/oauth` routes and the discovery slice. It registers no grant: `/oauth/token` dispatches against core's `grantHandlerResolver`, which every installed module's `grants` contribution fills. | The token endpoint is the same whichever grants are installed, and it runs with no session store at all. |
+| [`oauthAuthorizationModule`](./src/oauthAuthorization.mts) | `authorization_code`, `refresh_token`, `client_credentials` and jwt-bearer, each only when enabled. | A deployment picks its grant set; the grants can also be installed without these routes, which is why this module declares its own `subjectRevocation` absence policy. |
+| [`oauthSessionModule`](./src/oauthSession.mts) | The `session` grant, only when enabled. | It serves another topology — first-party / BFF, minting from the browser session — is enabled independently of the code grants, and declares only `config` and `keyStore` (and `userSessionStore`, optionally). |
+| [`subjectRevocationServiceModule`](./src/logout/subjectRevocationService.mts) | Core's `subjectRevocationService` component, built over `cascadeLogout`. | It requires the six session-cascade stores, which `oauthModule`'s routes do not; with `federationGrants.enabled = true` it also requires a `federationGrantStore` and a `subjectRevocation` that carries the grants boundary, and refuses to boot without them. It lives here rather than in core because core cannot import `cascadeLogout` without inverting the package dependency. |
+
+Each is installed explicitly: none of them registers another.
 
 ## Install
 
-This package is **private** — it is not published to npm and is only available within the `auth.provider` monorepo.
-
-```jsonc
-// packages/*/package.json
-{
-  "dependencies": {
-    "@o3co/auth-provider-oauth": "workspace:*"
-  }
-}
+```sh
+pnpm add @o3co/auth-provider-oauth
 ```
 
-Peer dependencies (install separately in the workspace root):
+Peer dependencies: `express@^5.0.0` and `express-session@^1.17.0`. express-session is a peer because the router reads and augments the browser session (`/authorize`, the `session` grant, logout); a composition that serves browser flows mounts it through `@o3co/auth-provider-session`'s `sessionStoreModuleFor(config)`, as below. The package depends on `@o3co/auth-provider-core`, `accepts`, `jose` and `zod`.
 
-```
-express@^5.0.0
-```
+## Composing it
 
-## Public API
-
-### `oauthModule`
-
-```typescript
-function oauthModule(params: {
-  clientRepository: ClientRepository;
-  codeRepository: CodeRepository;
-  express?: ExpressLike;
-}): Module;
-```
-
-Top-level module. Registers `oauthSessionModule` and `oauthAuthorizationModule` as sub-modules and mounts the OAuth router at `/oauth`. Use this as the single entry point unless you need to mount the sub-modules individually.
-
-Routes mounted:
-
-| Method | Path               | Description                        |
-|--------|--------------------|------------------------------------|
-| POST   | /oauth/token       | Token endpoint — dispatches by `grant_type` |
-| POST   | /oauth/introspect  | Token introspection (RFC 7662)     |
-| GET    | /oauth/authorize   | Authorization endpoint — PKCE auth code flow |
-
----
-
-### `oauthSessionModule`
-
-```typescript
-function oauthSessionModule(params: {
-  config: AppConfig;
-}): Module;
-```
-
-Registers the `"session"` grant type in the grant registry. Activation is gated on `config.oauth.grants.session.enabled`. Use this sub-module directly when you need to compose the grant registry manually.
-
-When a `userSessionStore` is wired, every session grant requires a non-empty
-`sid` and a live UserSession before signing a token. Missing or revoked sessions
-return `400 invalid_grant`; store failures return `503 temporarily_unavailable`.
-The tracked session must have a non-empty subject matching the browser user;
-malformed or inconsistent identities are refused before any token is signed.
-Deployments without a session store retain the existing browser-session behavior.
-Validated DPoP/mTLS bindings are retained in the access token's `cnf`;
-DPoP responses use `token_type=DPoP`, while mTLS responses retain `Bearer`.
-The resource server must support and verify the corresponding possession evidence.
-
----
-
-### `oauthAuthorizationModule`
-
-```typescript
-function oauthAuthorizationModule(params: {
-  codeRepository: CodeRepository;
-}): Module;
-```
-
-Registers the `"authorization_code"` and `"refresh_token"` grant types in the grant registry. Use this sub-module directly when composing the grant registry manually.
-
----
-
-### `createOAuthRouter`
-
-```typescript
-function createOAuthRouter(
-  express: ExpressLike,
-  options: {
-    registry: Pick<GrantHandlerResolver, "get">;
-    config: AppConfig;
-    clientRepository: ClientRepository;
-    codeRepository: CodeRepository;
-    keyStore: KeyStore;
-  }
-): Promise<{ router: Router; registry: Pick<GrantHandlerResolver, "get"> }>;
-```
-
-Low-level factory. Creates the Express router and the fully-configured grant registry. Called internally by `oauthModule`; use directly when you need access to the registry instance after construction.
-
-`registry` is `Pick<GrantHandlerResolver, "get">` because `get` is all the router reads: `/oauth/token` looks a `grant_type` up, and `grant_types_supported` is derived in `oauthModule` from the boot planner's resolver, not from this one (#626). A full `GrantHandlerResolver` satisfies it, and so does any object with `get`. The returned `registry` is the same value narrowed to the same type, so a caller that needs `entries()` should read the planner's `grantHandlerResolver` slot instead. Client authentication at `/oauth/introspect` is handled by `createClientAuthMiddleware(clientRepository)` — no Passport dependency required.
-
-## Usage Example
-
-```typescript
+```ts
 import express from "express";
-import { createApp } from "@o3co/auth-provider-core";
-import { oauthModule } from "@o3co/auth-provider-oauth";
+import { createApp, jwksModule } from "@o3co/auth-provider-core";
+import {
+  oauthAuthorizationModule,
+  oauthModule,
+  oauthSessionModule,
+} from "@o3co/auth-provider-oauth";
+import { sessionStoreModuleFor } from "@o3co/auth-provider-session";
 
 const handle = await createApp({
   modules: [
-    // composition-root modules that provide clientRepository, codeRepository,
-    // keyStore, and grant handlers go here
+    // Mounts express-session. It has no ordering edge of its own, so it must be
+    // listed ahead of every module that reads the browser session.
+    sessionStoreModuleFor(config),
     oauthModule({ config }),
+    oauthSessionModule({ config }),
+    oauthAuthorizationModule({ config }),
+    jwksModule, // core's: `jwks_uri` is not this package's
+    // …the modules that provide clientRepository, codeRepository, keyStore and the
+    // optional slots below; add subjectRevocationServiceModule when a Store calls
+    // `handle.components.subjectRevocationService`.
   ],
   bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
@@ -119,9 +78,135 @@ const handle = await createApp({
 const server = express();
 server.use(handle.router);
 server.listen(config.http.port);
-
+// on shutdown
 await handle.dispose();
 ```
+
+The standalone template's [`buildModules.mts`](../../templates/standalone/src/buildModules.mts) is a complete composition root.
+
+What each module requires and reads is declared in its manifest (linked in the table above). What a composition has to decide at boot:
+
+- `oauthModule` requires `config`, `clientRepository`, `codeRepository` and `keyStore`, and a non-empty `endpoints.login.url` — `/authorize` sends an unauthenticated browser there, so boot refuses without it.
+- `subjectRevocation`, `auditSink` and `accessTokenDenylist` are optional to wire and not optional to decide: an unfilled slot must be declared absent — `oauth.revocation.subject = "unsupported"`, `audit.sink.type = "none"`, `oauth.revocation.accessToken = "unsupported"` — or boot refuses.
+- An `oauth.jwt.issuer` that is not a canonical issuer URL fails router construction: `iss` is a property of the deployment, never read from a request.
+- `oauthModule`'s router parses JSON and form bodies for every request under `/oauth`, whichever route it is for, and routes mount in the order their modules are listed. Modules whose body handling is part of their security and that mount under `/oauth` — federation grants and the device grant — are therefore listed ahead of it; each package's README says why.
+
+## Endpoints
+
+All mounted under `/oauth` by `oauthModule`.
+
+| Endpoint | Mounted | Described in |
+|---|---|---|
+| `POST /oauth/token` | always; dispatches by `grant_type` | [Grants](#grants) |
+| `GET`, `POST /oauth/authorize` | always | [The OIDC surface](#the-oidc-surface-stated-284) |
+| `POST /oauth/introspect` | always | [Introspection](#introspection-which-tokens-a-caller-may-ask-about) |
+| `GET`, `POST /oauth/userinfo` | always | [Userinfo](#userinfo) |
+| `POST /oauth/revoke` | always; what it can revoke depends on the wiring | [Revocation](#revocation) |
+| `GET`, `POST /oauth/consent` | when `consentStore` and `pendingConsentStore` are both wired | [Consent](#consent-for-third-party-clients-527) |
+| `GET`, `POST /oauth/logout` | when the six session-cascade slots are all wired | [Logout](#logout) |
+| `POST /oauth/federation/:name/logout` | the same six | [Logout](#logout) |
+| `POST /oauth/federation/:name/token` | the same six | [Federation token endpoint](#federation-token-endpoint) |
+
+The six slots are `userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`, `federationTokenStore` and `refreshTokenFamilyRevocation`. The same check decides whether discovery advertises `end_session_endpoint` and the logout capabilities, so a document never names an endpoint that is not mounted.
+
+`/token`, `/introspect`, `/authorize` and `/revoke` are throttled by the composition's `rateLimiter` when one is wired, ahead of client authentication, under the product's `rateLimit.failMode`; without one they are not throttled.
+
+The router refuses to be built — which through `createApp` is a boot failure — when `consentStore` is wired without `pendingConsentStore` or the reverse, and when `oauth.revocation.accessToken = "denylist"` is declared with no `accessTokenDenylist`.
+
+**Discovery.** `oauthModule` contributes its endpoints and metadata to core's `/.well-known/openid-configuration`, which core serves only when an issuer is configured. Each capability is advertised only where it can be honoured: `revocation_endpoint` when the endpoint can revoke something, `private_key_jwt` when a `replaySeenSet` is wired, `client_id_metadata_document_supported` when the feature is on and a consent store is wired, the logout fields under the six-slot check above. `grant_types_supported` is read off the resolver `/oauth/token` dispatches against; `code_challenge_methods_supported` is `["S256"]`. The rules are stated where they are computed, in [`module.mts`](./src/module.mts), and pinned by [`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts).
+
+## Public API
+
+Everything below is exported from [`src/index.mts`](./src/index.mts); the linked file holds each definition and its doc comment.
+
+**Modules** — see [Why four modules](#responsibility).
+
+- `oauthModule({ config })` — [`module.mts`](./src/module.mts)
+- `oauthAuthorizationModule({ config })` — [`oauthAuthorization.mts`](./src/oauthAuthorization.mts)
+- `oauthSessionModule({ config })` — [`oauthSession.mts`](./src/oauthSession.mts)
+- `subjectRevocationServiceModule` (a module value, not a factory) — [`logout/subjectRevocationService.mts`](./src/logout/subjectRevocationService.mts)
+
+**Router.** `createOAuthRouter(express, options)` — [`routes.mts`](./src/routes.mts) — builds the `/oauth` router from explicit options; it is what `oauthModule` calls with its resolved deps, for a composition root that mounts the router itself. It creates no grant registry: `registry` is whatever object with a `get(grantType)` the caller passes, and the same value is returned. A caller that needs the registered grant types reads core's `grantHandlerResolver` instead.
+
+**Client authentication.**
+
+- `createClientAuthMiddleware(clientRepository, options)` and `ClientAuthMiddlewareOptions` — [`middleware/clientAuth.mts`](./src/middleware/clientAuth.mts). Authenticates the client by `client_secret_basic`, `client_secret_post` or `private_key_jwt` (one method per request), admits public clients only when `allowPublicClients` is set, and puts the authenticated client on `req.oauthClient` (typed by a global Express augmentation). Its refusals are RFC 6749 §5.2 `{ error, error_description }`.
+- `createClientAssertionVerifier`, `CLIENT_ASSERTION_ALGORITHMS`, `JWT_BEARER_CLIENT_ASSERTION_TYPE`, `MAX_CLIENT_ASSERTION_LIFETIME_SECONDS` and the types `ClientAssertionVerifier`, `ClientAssertionVerifierOptions`, `ClientAssertionOutcome` — [`middleware/clientAssertion.mts`](./src/middleware/clientAssertion.mts). The `private_key_jwt` verifier the middleware uses; see [`private_key_jwt`](#client-authentication-private_key_jwt-rfc-7523-22).
+
+**Client ID Metadata Documents.** `createClientIdMetadataDocumentResolver`, `withClientIdMetadataDocuments` (a `ClientRepository` that answers registered clients first and documents second), `isClientIdMetadataDocumentUrl`, `isClientIdMetadataDocumentClient`, and the types `ClientIdMetadataDocumentOptions`, `ClientIdMetadataDocumentResolver` — [`clients/clientIdMetadataDocument.mts`](./src/clients/clientIdMetadataDocument.mts). See [Client ID Metadata Documents](#client-id-metadata-documents-529).
+
+**Logout primitives**, for a composition that assembles its own logout:
+
+- `cascadeLogout`, `CascadeLogoutOptions`, `CascadeLogoutResult` — [`logout/cascadeLogout.mts`](./src/logout/cascadeLogout.mts)
+- `broadcastBackchannelLogout`, `BroadcastBackchannelLogoutOptions`, `BroadcastRP` — [`logout/broadcastBackchannel.mts`](./src/logout/broadcastBackchannel.mts)
+- `renderFrontchannelLogoutHtml`, `RenderFrontchannelLogoutHtmlOptions`, `FrontchannelRP` — [`logout/renderFrontchannel.mts`](./src/logout/renderFrontchannel.mts)
+
+**Introspection types.** `IntrospectResponse` — [`types/introspect.mts`](./src/types/introspect.mts), the RFC 7662 response shape a resource server or proxy can type against — and `extractConfirmation` / `isCompoundConfirmation`, core's `cnf` helpers re-exported from there.
+
+## Source layout
+
+Each directory under `src/` has one kind of responsibility; what a single file does is in its header comment.
+
+| Directory | Responsibility |
+|---|---|
+| `src/` (root) | Assembly: `oauthModule`, `oauthAuthorizationModule` and `oauthSessionModule` (the fourth, `subjectRevocationServiceModule`, is in `logout/` beside the cascade it wires), `createOAuthRouter` (which composes every route below), option resolution, and a re-export of core's access-token header parser. |
+| [`routes/`](./src/routes) | One router or handler per endpoint family — authorize, consent, logout, federation token, revoke, userinfo. Routes may use `grants/`, `logout/`, `middleware/` and `clients/`; none of those imports a route. `routes/authorize.mts` also reads two grant helpers (the RFC 8707 `resource` parser and the per-client PKCE method rules), because `/authorize` validates both the way `/token` does. |
+| [`grants/`](./src/grants) | The grant handlers: pure request-to-token decisions over core's grant contract, with no HTTP. |
+| [`middleware/`](./src/middleware) | Client authentication, reused by sibling packages. |
+| [`logout/`](./src/logout) | The ordered session cascade (`cascadeLogout`), the outbound back-channel POSTs to relying parties, the front-channel page, and the module that wires the subject revocation service. |
+| [`clients/`](./src/clients) | Client ID Metadata Document resolution: fetching a client's registration from the URL it names, behind the SSRF guard, and caching it. |
+| [`types/`](./src/types) | The introspection response contract. |
+
+## Grants
+
+### Which grants are on
+
+Every built-in grant is off until `oauth.grants.<name>.enabled` is `true` — the boolean, or the string `"true"` an environment substitution produces; anything else is off:
+
+| Grant | Key | Environment |
+|---|---|---|
+| `authorization_code` | `oauth.grants.authorization_code.enabled` | `OAUTH_GRANTS_AUTHORIZATION_CODE_ENABLED` |
+| `refresh_token` | `oauth.grants.refresh_token.enabled` | `OAUTH_GRANTS_REFRESH_TOKEN_ENABLED` |
+| `client_credentials` | `oauth.grants.client_credentials.enabled` | `OAUTH_GRANTS_CLIENT_CREDENTIALS_ENABLED` |
+| `session` | `oauth.grants.session.enabled` | `OAUTH_GRANTS_SESSION_ENABLED` |
+| jwt-bearer | `oauth.grants."urn:ietf:params:oauth:grant-type:jwt-bearer".enabled` | see core's `reference.conf` |
+
+A grant that is off is not registered: `/oauth/token` answers `unsupported_grant_type` for it and `grant_types_supported` does not list it.
+
+A registered grant must also be allowed for the client, by `allowedGrantTypes` on its registration — at `/oauth/token`, where a refusal is `400 unauthorized_client`, and at `/authorize` for `authorization_code`, where the `unauthorized_client` error is redirected to the client's `redirect_uri`. A list admits exactly the grant types it names, so an empty list admits none. An absent list admits every grant except those that deny by absence — `client_credentials`, jwt-bearer, token exchange, the device grant and the WebAuthn grant — which the list must name. `oauth.requireGrantTypeAllowlist = true` (`OAUTH_REQUIRE_GRANT_TYPE_ALLOWLIST`, off by default) makes an absent list deny every grant. The base rule is core's `isGrantTypeAllowed` ([`repositories/allowedGrantTypes.mts`](../core/src/repositories/allowedGrantTypes.mts)); the grants that deny by absence declare `requiresExplicitGrantAllowlist`, which the `/oauth/token` dispatch enforces ([`routes.mts`](src/routes.mts)).
+
+Enabling jwt-bearer without a `userRepository` or an `assertionVerifier` fails at boot — see [jwt-bearer](#jwt-bearer-which-issuers-are-trusted-525).
+
+### `authorization_code`: the session, `sid`, `family_id` and the id_token
+
+The access and refresh tokens the `authorization_code` and `refresh_token` grants mint carry `family_id` — the refresh-token family, which is what [introspection](#introspection-which-tokens-a-caller-may-ask-about), [userinfo](#userinfo), [logout](#logout) and the federation token route check for revocation — and `sid`, the session id, when the code record has one. The login path writes `sid` onto the code at `/authorize` (local login or the federation callback).
+
+**With a `userSessionStore` wired, the code must name a live session.** The session is where the tokens' subject comes from, and the grant links the new family and the client to it so that [logout](#logout) can find them:
+
+- a code with no `sid` is `400 invalid_grant` — the login wiring did not record one;
+- a `sid` the store does not resolve, or a session with no subject, is `400 invalid_grant` / `session_invalid`; a session that ends while the tokens are being issued is `400 invalid_grant` / `session_invalidated`;
+- a store that cannot answer — the session read or the linking writes — is `503 temporarily_unavailable`.
+
+Without a `userSessionStore`, the subject is the user of the browser session that accompanies the token request, and no id_token is issued.
+
+**The id_token** is issued when `openid` is among the granted scopes, a `userSessionStore` is wired and `oauth.jwt.issuer` is set; otherwise it is omitted and the access and refresh tokens are returned as usual. It carries `iss`, `sub`, `aud`, `exp`, `iat`, `jti`, `auth_time`, `sid` and `azp`; `nonce` when the authorization request had one (OIDC Core §3.1.3.7); `amr` / `acr` as described in [Step-up](#step-up-and-re-authentication-481); and the user's claims filtered by scope ([the same table userinfo uses](#userinfo)).
+
+### `refresh_token`
+
+- **The session must still exist.** When a `userSessionStore` is wired and the refresh token carries `sid`, the grant reads the session: gone is `400 invalid_grant`, a store failure `503 temporarily_unavailable`.
+- **The rotation is reserved before anything is signed.** The new refresh token's `jti` and the instant its lifetime is measured from are chosen first, committed to the family store by `RefreshTokenFamilyRotation.rotate`, and signed only once that commit holds. A lost race — a replay, a revoked family, an unknown family under `reject` — therefore returns having produced no signature, which matters under a KMS-backed `SigningKeyProvider` where each signature is a billable remote call. The issued token carries exactly the `jti` that was reserved and an `exp` no later than the ceiling the store committed — `RefreshTokenFamilyRotationOutcome.cappedExpiresAtMs`, less a one-second margin for the forward drift its contract documents, floored to the second — so a refresh token never outlives the family record that catches its replay. A ceiling that leaves no lifetime is `400 invalid_grant` ("refresh token family has reached its lifetime"), not a `200` carrying an already-expired refresh token.
+- **What that ordering costs.** Once `rotate` commits, the presented token is spent. A signer that fails after it — a KMS outage — leaves a rotation nobody holds a token for: the grant answers `503 temporarily_unavailable` and logs `refresh_token_rotation_orphaned` with the family id, the spent `jti` and the reserved one — only when the store actually committed the rotation, so a composition with no rotation wired, or an unknown family accepted under `unknownFamilyPolicy`, keeps the ordinary signer behaviour. The client's retry presents the old token, which now reads as a replay, so the family is revoked and the user re-authenticates.
+- **A replay revokes the family** (RFC 6819 §5.2.2), which is why the module reads `refreshTokenFamilyRevocation` beside the rotation; and a refresh token whose `iat` is at or before the subject's revocation watermark is `invalid_grant`.
+
+### `session`
+
+Mints an access token for the user of an already-authenticated browser session (first-party / BFF topologies). The caller authenticates as a client at `/oauth/token`; the client's `allowedScopes` are the ceiling. `aud` is the client's first `allowedAudiences` entry, or its client id when it has none, and `azp` is the client id. No refresh token is issued, so the token never carries `family_id`; it carries `sid` when the browser session has one.
+
+When a `userSessionStore` is wired, every session grant requires a non-empty `sid` and a live `UserSession` before signing a token: a missing or revoked session is `400 invalid_grant`, a store failure `503 temporarily_unavailable`, and the tracked session must have a non-empty subject matching the browser's user — a malformed or inconsistent identity is refused before any token is signed. Without a `userSessionStore` the grant relies on the browser session alone. Validated DPoP / mTLS bindings are kept in the access token's `cnf`: DPoP answers `token_type=DPoP`, mTLS keeps `Bearer`, and the resource server must verify the corresponding proof.
+
+### `client_credentials`
+
+RFC 6749 §4.4 machine-to-machine: public clients are refused, the token's `sub` is the client id, and no refresh token is issued. The client's `allowedGrantTypes` must name the grant — an absent list denies it rather than admitting it by omission, as it does for jwt-bearer, token exchange, the device grant and the WebAuthn grant.
 
 ## The OIDC surface, stated (#284)
 
@@ -136,33 +221,39 @@ This is an OAuth 2.0 authorization server with the OIDC pieces a **first-party**
 - The **presented** URI is where the response goes, and it is what gets bound to the authorization code. The token endpoint's `redirect_uri` check (RFC 6749 §4.1.3) compares against that record with plain equality — port included — so a listener on a different port cannot redeem another one's code.
 - The comparison lives in `matchesRegisteredRedirectUri` (`@o3co/auth-provider-core`), exported so a custom authorization endpoint matches the way this one does.
 
+**PKCE is mandatory, and `S256` is the method.** `plain` is admitted only for a client whose registration carries `allowPlainPkce: true`, which is why discovery lists `S256` alone.
+
 **`prompt=none` is supported.** No session answers `login_required` at the client's `redirect_uri` — which is the point, since a hidden renewal iframe cannot act on a login page. A session proceeds silently.
 
-**`prompt=login` re-authenticates** (#481) — see [Step-up and re-authentication](#step-up-and-re-authentication-481) below.
+**`prompt=login` re-authenticates** — see [Step-up and re-authentication](#step-up-and-re-authentication-481) below.
 
-**`prompt=consent` is honoured** (#527): for a client that is not first-party it forces the consent page even when a recorded consent covers the request; for a first-party client it is a no-op — the deployment operates that client, so there is nothing to consent to. See [Consent for third-party clients](#consent-for-third-party-clients-527).
+**`prompt=consent` is honoured**: for a client that is not first-party it forces the consent page even when a recorded consent covers the request; for a first-party client it is a no-op — the deployment operates that client, so there is nothing to consent to. See [Consent for third-party clients](#consent-for-third-party-clients-527).
 
 **`select_account` is refused** with `invalid_request` naming the value, not ignored: there is no account picker, and ignoring it would hand back a token the RP believes was freshly account-picked.
 
-**`request` and `request_uri` are refused** with `request_not_supported` / `request_uri_not_supported`. Ignoring them was the pre-#284 behaviour and the dangerous one: a signed request object exists to make the parameters tamper-proof, so processing the query string instead gives an attacker precisely what the object was there to prevent while the RP believes it was honoured. The discovery document now says `request_uri_parameter_supported: false` for the same reason — OIDC Discovery **defaults that field to `true`**, so omitting it was a claim.
+**`request` and `request_uri` are refused** with `request_not_supported` / `request_uri_not_supported`, not ignored: a signed request object exists to make the parameters tamper-proof, so processing the query string instead would give an attacker precisely what the object was there to prevent while the RP believes it was honoured. The discovery document says `request_uri_parameter_supported: false` for the same reason — OIDC Discovery **defaults that field to `true`**, so omitting it would be a claim.
 
-**Not implemented:** the `claims` parameter, and `response_mode` beyond the default. `claims_parameter_supported` and `request_parameter_supported` default to `false` when omitted, so the discovery document already tells the truth about them by saying nothing.
+**Not implemented:** the `claims` parameter, and `response_mode` beyond the default. `claims_parameter_supported` and `request_parameter_supported` default to `false` when omitted, so the discovery document tells the truth about them by saying nothing.
+
+**Before minting, `/authorize` re-checks the session.** An authenticated browser session whose `sid` no longer resolves in the `UserSessionStore` is sent to the login page (or answered `login_required` under `prompt=none`) rather than issued a code carrying a dead `sid`; a store that cannot answer fails closed the same way.
 
 ## Step-up and re-authentication (#481)
 
 A native app needs two things from the OP for a sensitive action: to **force a fresh authentication** (a payment, a credential change) and to **know how the user authenticated** (passkey, password, password plus a second factor), so it — or the resource server — can require a level. Both rest on what the session records at login.
 
-**What a session records.** `UserSession.authTime` (already there) and, since #481, `UserSession.amr` — RFC 8176 values written by the login path: `["pwd"]` for `POST /session/login`; the upstream IdP's `amr` (when the provider surfaces it on the profile) plus the deployment-defined `fed` for a federation callback; the WebAuthn grant, which mints tokens without a session, stamps `amr: ["hwk"]` on its access token directly. RFC 8176 registers no value for "federated", and OIDC Core §2 leaves `amr` values to the deployment, so `fed` is documented here rather than borrowed. A composition that resumes a login after `POST /auth/mfa/verify` (the MFA route is not composed in this repository; its resume handlers are the deployment's) records `mfa` — and the factor's own value, `otp` say — in the session it creates; `CreateUserSessionInput.amr` is the seam.
+**What a session records.** `UserSession.authTime` and `UserSession.amr` — RFC 8176 values written by the login path: `["pwd"]` for `POST /session/login`; the upstream IdP's `amr` (when the provider surfaces it on the profile) plus the deployment-defined `fed` for a federation callback; the WebAuthn grant, which mints tokens without a session, stamps `amr: ["hwk"]` on its access token directly. RFC 8176 registers no value for "federated", and OIDC Core §2 leaves `amr` values to the deployment, so `fed` is documented here rather than borrowed. A composition that resumes a login after `POST /auth/mfa/verify` (the MFA route is not composed in this repository; its resume handlers are the deployment's) records `mfa` — and the factor's own value, `otp` say — in the session it creates; `CreateUserSessionInput.amr` is the seam.
 
-**What the tokens carry.** The id_token has `auth_time` always (it did before #481), `amr` when the session recorded one, and `acr` when `/authorize` satisfied an `acr_values` request. The access token mirrors `amr` and `acr` when present, so `auth.policy-verifier` or a resource server can gate on them without an id_token — and **keeps mirroring them across refreshes**: the `authorization_code` grant stamps both on the refresh token as well, and the `refresh_token` grant carries them from the presented token onto the access and refresh tokens it mints, since a refresh does not repeat the authentication (OIDC Core §12.2 treats `auth_time` the same way). The `session` grant mirrors the tracked session's `amr` (it has no `acr_values` negotiation, so no `acr`), and the passkey grant (`@o3co/auth-provider-webauthn`) stamps its `amr: ["hwk"]` on its refresh token as well as its access token. Every grant reads the claims in one shape — `amr` a non-empty array of non-empty strings, `acr` a non-empty string (core's `wellFormedAmr` / `wellFormedAcr`) — and omits anything else, so a session that recorded `amr: []` stamps no `amr` on any token rather than one that vanishes at the first refresh. A refresh token minted before this carried neither, so the tokens refreshed from it carry neither.
+**What the tokens carry.** The id_token has `auth_time` always, `amr` when the session recorded one, and `acr` when `/authorize` satisfied an `acr_values` request. The access token mirrors `amr` and `acr` when present, so `auth.policy-verifier` or a resource server can gate on them without an id_token — and **keeps mirroring them across refreshes**: the `authorization_code` grant stamps both on the refresh token as well, and the `refresh_token` grant carries them from the presented token onto the access and refresh tokens it mints, since a refresh does not repeat the authentication (OIDC Core §12.2 treats `auth_time` the same way). The `session` grant mirrors the tracked session's `amr` (it has no `acr_values` negotiation, so no `acr`), and the passkey grant (`@o3co/auth-provider-webauthn`) stamps its `amr: ["hwk"]` on its refresh token as well as its access token. Every grant reads the claims in one shape — `amr` a non-empty array of non-empty strings, `acr` a non-empty string (core's `wellFormedAmr` / `wellFormedAcr`) — and omits anything else, so a session that recorded `amr: []` stamps no `amr` on any token rather than one that vanishes at the first refresh. A refresh token that carries neither yields tokens that carry neither.
 
-**`max_age`.** A non-negative integer (anything else is `invalid_request`). A session whose `auth_time` is older than `max_age` seconds — `max_age=0` is always older — is sent to the login page with the request round-tripped, exactly as an unauthenticated one is, plus one thing: the instant of the ask is recorded **on the session**, server-side. On the way back, a session authenticated strictly after that instant — compared to the millisecond — is the re-authentication that was asked for, and the request proceeds — `max_age=0` included, which is what keeps it from looping; one authenticated before it is answered `login_required` rather than sent round again. Under `prompt=none` a stale session is `login_required` straight away: silent means silent. `auth_time` in the id_token is what an RP verifies, and it is always the truth.
+**`max_age`.** A non-negative integer (anything else is `invalid_request`). A session whose `auth_time` is older than `max_age` seconds — `max_age=0` is always older — is sent to the login page with the request round-tripped, exactly as an unauthenticated one is, plus one thing: the instant of the ask is recorded **on the server**. On the way back, a session authenticated strictly after that instant — compared to the millisecond — is the re-authentication that was asked for, and the request proceeds — `max_age=0` included, which is what keeps it from looping; one authenticated before it is answered `login_required` rather than sent round again. Under `prompt=none` a stale session is `login_required` straight away: silent means silent. `auth_time` in the id_token is what an RP verifies, and it is always the truth.
 
-The ask is a **record in the session store**, named by an opaque id the returned URL carries as `reauth_ask`. It is not the timestamp itself on the URL: a marker read straight off the request is the caller's to write, and `reauth_after=0` would satisfy the check for any live session and skip the round trip it exists to force. A record cannot be forged (the id is 32 bytes from the CSPRNG, and naming one that does not exist is the same as naming none); it survives the session regeneration `/session/login` performs, which a field on the session would not; it is bound to the authorize request it was minted for, so an ask outstanding for one request cannot answer another's freshness requirement; and it is consumed when read, so a replay of the returned URL asks again rather than minting a second code. It expires after ten minutes.
+The ask is a **record in the session store**, named by an opaque id the returned URL carries as `reauth_ask`. It is not the timestamp itself on the URL: a marker read straight off the request is the caller's to write, and a forged one would satisfy the check for any live session and skip the round trip it exists to force. A record cannot be forged (the id is 32 bytes from the CSPRNG, and naming one that does not exist is the same as naming none); it survives the session regeneration `/session/login` performs, which a field on the session would not; it is bound to the authorize request it was minted for, so an ask outstanding for one request cannot answer another's freshness requirement; and it is consumed when read, so a replay of the returned URL asks again rather than minting a second code. It expires after ten minutes. The rationale is in [`routes/reauthAsk.mts`](./src/routes/reauthAsk.mts).
 
-The login page must return the browser to `redirect_to` **verbatim**: a page that rebuilds the authorize URL drops the ask id, and the request is asked to authenticate again. That has always been the contract of this round trip.
+`max_age` and `prompt=login` need a `userSessionStore` (there is no `auth_time` to measure without one) and the session middleware's store (where the ask is recorded); a composition without either answers them `invalid_request` rather than accepting them silently.
 
-**`prompt=login`** uses the same mechanism with the staleness test replaced by "always": to the login page, the ask recorded, then satisfied by a session authenticated after it, else `login_required`. `prompt=none login` is still refused as OIDC Core §3.1.2.1 says.
+The login page must return the browser to `redirect_to` **verbatim**: a page that rebuilds the authorize URL drops the ask id, and the request is asked to authenticate again.
+
+**`prompt=login`** uses the same mechanism with the staleness test replaced by "always": to the login page, the ask recorded, then satisfied by a session authenticated after it, else `login_required`. `prompt=none login` is refused as OIDC Core §3.1.2.1 says.
 
 **`acr_values`** is answered from a configured table and from nothing else:
 
@@ -188,9 +279,9 @@ Every client-authenticated endpoint here — `/oauth/token`, `/oauth/introspect`
 
 **The assertion.** `iss` and `sub` both equal to the `client_id`; `aud` naming the issuer or the token endpoint URL (RFC 7523 §3 — either form, so a client library that uses one or the other works); `exp` required and at most one hour ahead (`MAX_CLIENT_ASSERTION_LIFETIME_SECONDS`); `jti` required and single-use, recorded in the composition's `replaySeenSet` under `client-assertion:<client_id>` until the assertion expires; signed with an asymmetric algorithm (`RS*`, `PS*`, `ES*`, `EdDSA` — `token_endpoint_auth_signing_alg_values_supported` lists them; `HS*` and `none` are never accepted against a JWKS). `nbf` is validated when present, and `iat` when present must be neither ahead of the server's clock beyond the 30 s tolerance nor older than the lifetime ceiling.
 
-**Refusals** are `401 invalid_client` — a replayed `jti`, a wrong `aud`, an expired or over-long assertion, a signature under a key the JWKS does not hold, a `kid` it does not publish, a client registered for another method, an unknown client, or a `jwks_uri` that cannot be fetched (fail closed, logged as `client_assertion_refused` with the reason). A `private_key_jwt` request in a composition that wired no `replaySeenSet` is `500 server_error`: a `jti` that cannot be recorded is one that could be replayed, so the path refuses rather than authenticating unchecked. The scaffold wires one (`REPLAY_SEEN_SET_ADAPTER`, Redis by default; the memory adapter is refused under `DEPLOYMENT_MODE=multi` because a captured assertion would replay once per replica).
+**Refusals** are `401 invalid_client` — a replayed `jti`, a wrong `aud`, an expired or over-long assertion, a signature under a key the JWKS does not hold, a `kid` it does not publish, a client registered for another method, an unknown client, or a `jwks_uri` that cannot be fetched (fail closed, logged as `client_assertion_refused` with the reason). A `private_key_jwt` request in a composition that wired no `replaySeenSet` is `500 server_error`: a `jti` that cannot be recorded is one that could be replayed, so the path refuses rather than authenticating unchecked. The standalone template wires one (`REPLAY_SEEN_SET_ADAPTER`, Redis by default; the memory adapter is refused under `DEPLOYMENT_MODE=multi` because a captured assertion would replay once per replica).
 
-**Not shipped: `client_secret_jwt`.** It would need the repository interface to hand the middleware the raw secret as an HMAC key — `authenticate(clientId, secret)` compares, it does not reveal — and a bcrypt-hashed `clientSecret`, which is what the scaffold recommends storing, cannot serve as one at all. The secret-based methods a deployment already has cover that case; the asymmetric one is the point of this feature.
+**Not shipped: `client_secret_jwt`.** It would need the repository interface to hand the middleware the raw secret as an HMAC key — `authenticate(clientId, secret)` compares, it does not reveal — and a bcrypt-hashed `clientSecret`, which is what the template recommends storing, cannot serve as one at all. The secret-based methods a deployment already has cover that case; the asymmetric one is the point of this feature.
 
 ```yaml
 # config/clients.yaml
@@ -214,16 +305,16 @@ grant_type=client_credentials
 
 ## Consent for third-party clients (#527)
 
-`/oauth/authorize` mints a code for a client marked `firstParty: true` as soon as the session is authenticated — the deployment operates that client, and auto-consent is the honest model. Every other client goes through **consent**: the user is asked, on the deployment's own page, and the answer is recorded so they are not asked again for what they already allowed. Before #527 the only way to serve such a client was to mark it first-party, which minted with no consent step at all.
+`/oauth/authorize` mints a code for a client marked `firstParty: true` as soon as the session is authenticated — the deployment operates that client, and auto-consent is the honest model. Every other client goes through **consent**: the user is asked, on the deployment's own page, and the answer is recorded so they are not asked again for what they already allowed. Without a consent store, such a client is refused at `/authorize`.
 
-Wire a `consentStore` and a `pendingConsentStore` and point `endpoints.consent.url` at your page. Each bundled module provides both: `memoryConsentStoreModule` from `@o3co/auth-provider-core` (single replica — refused under `deployment.mode = "multi"`) and `redisConsentStoreModule` from `@o3co/auth-provider-redis` (#561), which shares the consent records and the parked requests across replicas. In the standalone template that is `consentStore.adapter = "memory"` or `"redis"`. Then, for a client that is not first-party:
+Wire a `consentStore` and a `pendingConsentStore` and point `endpoints.consent.url` at your page. Each bundled module provides both: `memoryConsentStoreModule` from `@o3co/auth-provider-core` (single replica — refused under `deployment.mode = "multi"`) and `redisConsentStoreModule` from `@o3co/auth-provider-redis`, which shares the consent records and the parked requests across replicas. In the standalone template that is `consentStore.adapter = "memory"` or `"redis"`. Then, for a client that is not first-party:
 
 1. `/authorize` runs every request-shape check as usual, then looks up the consent record for (`sub`, `client_id`). A live record covering the requested scopes (a subset of what was granted) mints the code with no interaction.
 2. Otherwise the request is **parked under a 32-byte challenge** in the `pendingConsentStore`, bound to the session and the subject it was asked of, and the browser is redirected to `endpoints.consent.url?challenge=<id>`. `prompt=none` gets `consent_required` at the `redirect_uri` instead (OIDC Core §3.1.2.6); `prompt=consent` parks the request even when a record covers it.
 3. The page calls **`GET /oauth/consent?challenge=<id>`** (session cookie, uncacheable) and receives `client_id`, `client_id_host` (only for a client resolved from a Client ID Metadata Document — see below), `client_name`, `client_uri` (from the registration), `scopes` (what is asked), `granted_scopes` (what the user already agreed to, so the page can highlight the delta), `redirect_uri` (show its host — this is where the code goes) and `expires_in`.
 4. The page **`POST`s `/oauth/consent`** with `{ "challenge": "<id>", "decision": "accept" | "deny" }` (JSON or a form). `accept` records the union of what was granted and what is asked, emits `consent.granted`, and answers `303` to the parked `/authorize` URL — which now finds the record and mints. `deny` emits `consent.denied` and answers `303` to the client's `redirect_uri` with `error=access_denied` and the `state`. Either way the challenge is spent.
 
-The challenge is bound to the session that parked the request and reaches the page only through the redirect URL, which a cross-site page cannot read; a POST carrying the matching value was composed by same-origin code (the synchronizer-token pattern, with the session as the synchronizer). A foreign, replayed or expired (10 minutes) challenge is `400`. The answer **consumes** the parked record in one step (`PendingConsentStore.consume`), so two answers in flight for one challenge — a duplicated tab, a double submit — apply exactly one, and the other is told there is no pending consent (#552). A consent-store outage at `/authorize` is `temporarily_unavailable`, never a code and never a refusal the user could act on. An operator revokes a consent by removing the record (`consentStore.revoke(sub, clientId)`); the next `/authorize` for that client asks again.
+The challenge is bound to the session that parked the request and reaches the page only through the redirect URL, which a cross-site page cannot read; a POST carrying the matching value was composed by same-origin code (the synchronizer-token pattern, with the session as the synchronizer). A foreign, replayed or expired (10 minutes) challenge is `400`. The answer **consumes** the parked record in one step (`PendingConsentStore.consume`), so two answers in flight for one challenge — a duplicated tab, a double submit — apply exactly one, and the other is told there is no pending consent. A consent-store outage at `/authorize` is `temporarily_unavailable`, never a code and never a refusal the user could act on. An operator revokes a consent by removing the record (`consentStore.revoke(sub, clientId)`); the next `/authorize` for that client asks again.
 
 Register what the page will show: `clientName` (RFC 7591 `client_name`) and `clientUri` (`client_uri`) on the client record. A native client with a loopback `redirect_uri` is the case the MCP authorization spec asks the page to warn about — `redirect_uri` is in the response for exactly that.
 
@@ -257,7 +348,7 @@ What the server does with it:
 
 ## Introspection: which tokens a caller may ask about
 
-`POST /oauth/introspect` authenticates its caller first (RFC 7662 §2.1 — public clients are refused), then answers only about tokens that caller is entitled to see. Two rules decide that, and both are stated here because both bit during live testing.
+`POST /oauth/introspect` authenticates its caller first (RFC 7662 §2.1 — public clients are refused), then answers only about tokens that caller is entitled to see. Every answer carries `Cache-Control: no-store`; a refusal of client authentication is RFC 6749 §5.2 `{ error, error_description }`.
 
 ### The audience pin is `allowedAudiences` ∪ `{client_id}`
 
@@ -268,7 +359,7 @@ When client authentication identified the caller, the token's `aud` must be one 
 
 That is the same ceiling every issuing grant already derives an audience within (`client_credentials`, `refresh_token`, `/authorize`), so introspection admits exactly the audiences the registration already trusted this client to be associated with, and nothing beyond them.
 
-The rule matters the moment RFC 8707 resource indicators are in use. Every access token then carries `aud: <resource URI>`, so a pin on `client_id` alone means a **resource server cannot introspect its own tokens** — it gets `active: false` unless it happens to be registered under a `client_id` that IS the resource URI. Register the resource URI as an allowed audience instead:
+The rule matters the moment RFC 8707 resource indicators are in use. Every access token then carries `aud: <resource URI>`, so a pin on `client_id` alone would mean a **resource server cannot introspect its own tokens** — it gets `active: false` unless it happens to be registered under a `client_id` that IS the resource URI. Register the resource URI as an allowed audience instead:
 
 ```jsonc
 {
@@ -278,7 +369,7 @@ The rule matters the moment RFC 8707 resource indicators are in use. Every acces
 }
 ```
 
-Everything the pin refused before, it still refuses: an audience outside that set, an unknown or expired token, one revoked through the jti denylist or the subject watermark, one from another issuer. The **bearer self-introspection** path — `Authorization: Bearer <token>` where the body `token` is that same value — establishes no calling-client identity, so there is no set to pin against; the verifier records the gap as `jwt_verify_aud_skipped` rather than inventing one.
+An audience outside that set, an unknown or expired token, one revoked through the jti denylist or the subject watermark, and one from another issuer all answer `active: false`. The **bearer self-introspection** path — `Authorization: Bearer <token>` where the body `token` is that same value — establishes no calling-client identity, so there is no set to pin against; the verifier records the gap as `jwt_verify_aud_skipped` rather than inventing one.
 
 ### A `client_id` with reserved characters must be percent-encoded in HTTP Basic
 
@@ -294,82 +385,43 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 
 `client_secret_post` (credentials in the form body) avoids the question entirely — the body encoding already does it.
 
-### Session liveness
+### Revoked families and ended sessions
 
-A token carrying a `sid` claim is checked against the `UserSessionStore` before it is vouched for — the same read `/oauth/userinfo` performs. A session that has been logged out, has expired, or was deleted out of band answers `active: false` and emits `introspect.session_invalid`. A store outage also answers `active: false`, because RFC 7662 defines no `temporarily_unavailable` for this endpoint and inactive is the only fail-closed answer available; it emits `introspect.store_unavailable`. A token with no `sid` (client credentials, jwt-bearer) does not pay for the read, and neither does a composition that wires no `userSessionStore`.
+- **Refresh-token family.** A token carrying `family_id` is checked with `refreshTokenFamilyRevocation.isFamilyRevoked` when that slot is wired: a revoked family answers `active: false` and emits `introspect.family_revoked`; a store that cannot answer also answers `active: false` (emitting `introspect.store_unavailable`), because RFC 7662 defines no `temporarily_unavailable` for this endpoint and inactive is the only fail-closed answer. A token without `family_id` is verified by signature and the revocation stores alone.
+- **Session liveness.** A token carrying a `sid` claim is checked against the `UserSessionStore` — the same read `/oauth/userinfo` performs. A session that has been logged out, has expired, or was deleted out of band answers `active: false` and emits `introspect.session_invalid`; a store outage answers `active: false` and emits `introspect.store_unavailable`. A token with no `sid` (client credentials, jwt-bearer) does not pay for the read, and neither does a composition that wires no `userSessionStore`.
 
-## Token-binding cnf flow (Wave 2)
+These bind only callers that ask: a resource server validating the JWT offline, by signature and `exp`, sees no revocation and accepts the token until it expires.
 
-When a token-binding mechanism is installed (`@o3co/auth-provider-dpop` and/or `@o3co/auth-provider-mtls`), the grants here emit RFC 7800 `cnf` claims and the introspect handler echoes them back to resource servers.
+## Revocation
 
-### Issuance
+`POST /oauth/revoke` is RFC 7009. It authenticates the caller like `/oauth/token` — public clients included, since a public client may revoke its own tokens (§2.1) — answers `400 invalid_request` without a `token` and `400 unsupported_token_type` for a `token_type_hint` it does not recognise, and otherwise `200` whether or not the token existed or belonged to the caller (§2.2). A token is revoked only for the client it was issued to.
 
-- **AT cnf is mechanism-agnostic.** Any binding's `confirmation` flows through unchanged — DPoP `{ jkt }`, mTLS `{ "x5t#S256" }`, or future mechanisms (all variants in the [`Confirmation` union](../core/README.md#token-binding-mechanisms-wave-2)).
-- **RT cnf is gated on `(bindingIsDpop || bindingIsMtls) && isPublicClient`.** Confidential clients always get plain RTs (RFC 9449 §5 rationale generalized: client_secret is the refresh-time authenticator). Public clients with a bound AT get a bound RT so the next refresh enforces continuity.
-- **Wire-level `token_type`:** `"DPoP"` only when `kind === "dpop"` (RFC 9449 §5). mTLS keeps `"Bearer"` (RFC 8705 §3) — the cert IS the binding evidence, not the wire token type.
+- **A refresh token** revokes its family through `refreshTokenFamilyRevocation`; without that slot the request is a no-op `200`.
+- **An access token** is added to the `accessTokenDenylist` when `oauth.revocation.accessToken` is `"denylist"`. Under `"unsupported"`, `token_type_hint=access_token` is `400 unsupported_token_type` rather than a `200` that revokes nothing, and an unhinted token takes the refresh-token path only.
 
-### Refresh-time matrix (5 outcomes — applied independently per mechanism)
+Discovery advertises `revocation_endpoint` only when at least one of the two can revoke something. The endpoint's full behaviour is in the doc comment of [`routes/revoke.mts`](./src/routes/revoke.mts).
 
-`refreshToken.mts` runs a separate matrix per binding mechanism (one for DPoP `cnf.jkt`, one for mTLS `cnf.x5t#S256`). Each matrix has the same 5 outcomes, expressed below in mechanism-agnostic form:
-
-| RT cnf | request binding | outcome |
-| --- | --- | --- |
-| plain | none | issue plain Bearer (legacy) |
-| plain | bound | opt-in upgrade — bind new AT (RT bound only for public clients) |
-| bound | none | reject `invalid_grant` |
-| bound | bound, differs | reject `invalid_grant` (multi-key / cert-substitution attack) |
-| bound | bound, matches | rotation preserves binding |
-
-The proof field is extracted gated on `kind === "<mechanism>"` so a confirmation shape alone cannot satisfy a bound RT (mechanism-boundary regression from PR #185 / Codex Important #2). RT carrying BOTH `cnf.jkt` AND `cnf.x5t#S256` is rejected with `invalid_grant` BEFORE either matrix runs (compound-cnf reject from Codex Critical #2).
-
-### Introspect
-
-`/oauth/introspect` reads `cnf` from the AT claims and sets `token_type` based on whether `jkt` is present (DPoP) or not (Bearer for mTLS or unbound). The introspect response carries the full `cnf` so resource servers can require the right mechanism's proof at their boundary.
-
-See [ADR 2026-05-20-token-binding-first-class-abstraction.md](../core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md) for the design rationale.
-
-## TODO-F-4 changes
-
-### `authorization_code` grant — id_token issuance
-
-When the `openid` scope is included in the granted scopes and a `UserSessionStore` is wired, the `authorization_code` grant issues an `id_token` alongside the access token and refresh token. The `id_token` is a signed JWT built by `generateIdToken` (from `@o3co/auth-provider-core`) and appended to the token response as the `id_token` field.
-
-Conditions for id_token issuance:
-
-- `openid` must appear in the granted scopes (set by `GrantPolicyHook` at `/oauth/authorize` time)
-- `AppOptions.userSessionStore` must be wired (session is the source of truth for user claims)
-- The code record must contain `sid` (written by login/federation wiring at authorize time)
-- `AppOptions.config.oauth.jwt.issuer` must be set (prevents emitting a noncompliant `iss: ""` claim)
-
-When any condition is not met, `id_token` is omitted from the response — the token endpoint still returns `access_token` and `refresh_token` normally.
-
-Claim composition of the issued `id_token`:
-
-- `iss`, `sub`, `aud`, `exp`, `iat`, `jti`, `auth_time`, `sid`, `azp` — OIDC Core §2 standard claims
-- `nonce` — reflected verbatim from the code record when present (OIDC Core §3.1.3.7)
-- scope-filtered user claims (see claim mapping table below)
-
-### `/oauth/userinfo` — OIDC Core §5.3
+## Userinfo
 
 ```http
 GET /oauth/userinfo
 Authorization: Bearer <access_token>
 ```
 
-Returns scope-filtered claims sourced from the durable `UserSession`. The endpoint is mounted by `oauthModule` alongside the existing `/oauth/token`, `/oauth/introspect`, and `/oauth/authorize` routes.
+OIDC Core §5.3, on `GET` and `POST`. Returns scope-filtered claims sourced from the durable `UserSession`.
 
 | Condition | Response |
 | --- | --- |
 | Missing / invalid Bearer token | `401` with `WWW-Authenticate: Bearer realm="userinfo"` |
 | Invalid JWT signature | `401 invalid_token` |
-| `family_id` claim revoked (F-3 cascade) | `401 invalid_token` |
+| The token's `family_id` is revoked | `401 invalid_token` |
 | Session not found or store error | `401 invalid_token` (fail-closed) |
 | No `userSessionStore` wired or no `sid` claim | `200 { sub }` (sub only, no durable claims) |
 | Session active | `200 { sub, ...scope-filtered claims }` |
 
 All responses set `Cache-Control: no-store` and `Pragma: no-cache` (RFC 6750 §5.3).
 
-Scope-to-claim mapping (OIDC Core §5.4 standard scopes):
+Scope-to-claim mapping (OIDC Core §5.4 standard scopes), shared with the id_token:
 
 | Scope | Emitted claims |
 | --- | --- |
@@ -378,54 +430,81 @@ Scope-to-claim mapping (OIDC Core §5.4 standard scopes):
 | `email` | `email`, `email_verified` |
 | `groups` | `groups` |
 
-## TODO-F-3 changes
+## Token binding (`cnf`)
 
-- **`/oauth/introspect` cascading revoke.** When the access token carries a `family_id` claim and `AppOptions.refreshTokenStore` is wired, the introspect endpoint calls `RefreshTokenStore.isFamilyRevoked(familyId)` before returning an active response. If the family is revoked or the store is unreachable, the response is `{ active: false }` (fail-closed, per RFC 7009 §2.1 SHOULD). Tokens minted before F-3 that lack a `family_id` claim bypass this check and are validated by signature only.
-- **`family_id` + `sid` data claims.** Both `access_token` and `refresh_token` minted by the `authorization_code` and `refresh_token` grants carry `family_id` (token family for cascading revoke) and `sid` (session ID, when the code record contains it) as JWT claims.
-- **`authorization_code` grant — `sid` requirement.** The grant reads `sid` from the `CodeData` record. Deployments must have the F-2/F-3 login wiring in place (local login or federation callback writing `sid` onto the code) for the `sid` claim to be present in issued tokens.
-- **`refresh_token` grant — session validation.** When `AppOptions.userSessionStore` is wired and the refresh token carries a `sid` claim, the grant calls `userSessionStore.get(sid)` to verify the session is still active. A missing session returns `400 invalid_grant`; a store error returns `503 temporarily_unavailable`.
-- **`refresh_token` grant — the rotation is reserved before anything is signed (#449).** The new refresh token's `jti` and the instant its lifetime is measured from are chosen first, committed to the family store by `RefreshTokenFamilyRotation.rotate`, and signed only once that commit holds. A lost race — a replay, a revoked family, an unknown family under `reject` — therefore returns having produced no signature at all, which is what matters under a KMS-backed `SigningKeyProvider` where each signature is a billable remote call. The token that is issued carries exactly the `jti` that was reserved and an `exp` no later than the ceiling the store committed — `RefreshTokenFamilyRotationOutcome.cappedExpiresAtMs`, less a one-second margin for the forward drift its contract documents, then floored to the second — so a refresh token can never outlive the family record that catches its replay. A ceiling that leaves no lifetime is `400 invalid_grant` ("refresh token family has reached its lifetime"), not a `200` carrying an already-expired refresh token.
+When a token-binding mechanism is installed (`@o3co/auth-provider-dpop` and/or `@o3co/auth-provider-mtls`), the grants here emit RFC 7800 `cnf` claims and the introspect handler echoes them back to resource servers. The binding contract and the `Confirmation` union are core's ([`confirmation.mts`](../core/src/grants/confirmation.mts), [`confirmationMatch.mts`](../core/src/grants/confirmationMatch.mts)); the design is in [ADR 2026-05-20-token-binding-first-class-abstraction.md](../core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md).
 
-  The cost of that ordering, stated plainly: once `rotate` commits, the presented token is spent. A signer that fails **after** it — a KMS outage — therefore leaves a rotation nobody holds a token for. The grant answers `503 temporarily_unavailable` and logs `refresh_token_rotation_orphaned` with the family id, the spent `jti` and the reserved one — only when the store actually committed the rotation, so a composition with no rotation wired, or an unknown family accepted under `unknownFamilyPolicy`, keeps the ordinary signer behaviour every other mint has; the client's retry presents the old token, which now reads as a replay, so the family is revoked and the user re-authenticates. That is the honest outcome, not a regression to hide: before #449 the signature came first, so a signer failure left the old token usable — and a lost race cost two signatures.
+### Issuance
 
-## TODO-F-5 changes — Logout endpoints
+- **Access-token `cnf` is mechanism-agnostic.** Any binding's `confirmation` flows through unchanged — DPoP `{ jkt }`, mTLS `{ "x5t#S256" }`.
+- **Refresh-token `cnf` is bound for public clients, and for confidential clients only on request.** A public client with a bound access token gets a bound refresh token, so the next refresh enforces continuity. A confidential client gets a plain refresh token — its client authentication is the refresh-time authenticator (RFC 9449 §5, RFC 8705 §7.1) — unless `oauth.tokenBinding.bindConfidentialClientRefreshTokens = true` (`OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS`), which binds it too. That costs key rotation: a bound refresh token pins the client to one key or certificate for its whole lifetime.
+- **Wire-level `token_type`:** `"DPoP"` only for a DPoP binding (RFC 9449 §5). mTLS keeps `"Bearer"` (RFC 8705 §3) — the certificate is the binding evidence, not the wire token type.
 
-The OAuth module exposes two logout-related routes when wired with `userSessionStore`, `federationTokenStore`, `refreshTokenStore`, and `oauth.jwt.issuer`:
+### Refresh-time matrix
+
+The refresh grant evaluates core's `matchConfirmation` once per mechanism (DPoP `cnf.jkt`, mTLS `cnf.x5t#S256`); each has the same five outcomes:
+
+| Refresh token `cnf` | request binding | outcome |
+| --- | --- | --- |
+| plain | none | issue plain Bearer |
+| plain | bound | opt-in upgrade — bind the new access token (the refresh token by the issuance rule above) |
+| bound | none | reject `invalid_grant` |
+| bound | bound, differs | reject `invalid_grant` (multi-key / certificate-substitution attack) |
+| bound | bound, matches | rotation preserves the binding |
+
+A `cnf` member is honoured only for its own mechanism, so a confirmation shape alone cannot satisfy a bound refresh token. A refresh token carrying **both** `cnf.jkt` and `cnf.x5t#S256` is rejected with `invalid_grant` before either matrix runs.
+
+### Introspect
+
+`/oauth/introspect` reads `cnf` from the access token and sets `token_type` to `"DPoP"` when `jkt` is present and `"Bearer"` otherwise (mTLS or unbound). The response carries the full `cnf`, so a resource server can require the right mechanism's proof at its boundary.
+
+## Logout
+
+The OIDC logout endpoints are mounted when the six session-cascade slots are all wired (see [Endpoints](#endpoints)).
 
 > **There is a third logout endpoint, and it is not in this package.**
 > `POST /session/logout` (`@o3co/auth-provider-session`) is the browser's own
 > logout and the one a BFF / `auth.proxy` topology calls. It deletes the
 > `UserSession` record, the subject-index entry and the federation pair — so
-> the liveness checks below do bite — but it revokes **no refresh-token
-> families**, because `cascadeLogout` is not reachable across the package
-> boundary. `POST /oauth/logout` is the only endpoint that runs the full
+> the liveness checks elsewhere in this README do bite — but it revokes **no
+> refresh-token families**, because `cascadeLogout` is not reachable across the
+> package boundary. `POST /oauth/logout` is the only endpoint that runs the full
 > cascade. If a session holds a refresh token, that is the one to call. See
-> [the session package README](../session/README.md#what-postsessionlogout-invalidates).
+> [the session package README](../session/README.md#what-post-sessionlogout-invalidates).
 
-### POST /oauth/logout
+### `POST /oauth/logout` and `GET /oauth/logout`
 
-OIDC RP-Initiated Logout 1.0 `end_session_endpoint`. Accepts `application/x-www-form-urlencoded`:
+OIDC RP-Initiated Logout 1.0 `end_session_endpoint`. Parameters (`application/x-www-form-urlencoded` on `POST`, the query on `GET`):
 
-- `id_token_hint` (required) — signed id_token from this provider; `sid` claim identifies the session
-- `post_logout_redirect_uri` (optional) — must match one of `client.postLogoutRedirectUris` **exactly**, byte for byte. A reverse-domain custom scheme is a legal entry (#498), and gets no relaxation for being one.
+- `id_token_hint` (required) — signed id_token from this provider; its `sid` claim identifies the session
+- `post_logout_redirect_uri` (optional) — must match one of `client.postLogoutRedirectUris` **exactly**, byte for byte. A reverse-domain custom scheme is a legal entry, and gets no relaxation for being one.
 - `state` (optional) — round-tripped when redirecting to `post_logout_redirect_uri`
 
-Flow: verifies `id_token_hint` → loads session → broadcasts OIDC Back-Channel Logout 1.0 `logout_token` to every RP with `backchannelLogoutUri` → executes store cascade (refresh-family revoke, federation-token delete, session delete) → responds with one of:
+A `GET` whose `id_token_hint` was issued more than 24 hours ago is answered with a confirmation page instead of logging out; its form posts the hint and `state` back to this endpoint, and `post_logout_redirect_uri` only when it is on the client's allowlist.
 
-- `text/html` page with `<iframe>` per RP with `frontchannelLogoutUri` (when `Accept: text/html` wins q-weighted negotiation)
-- `303` to first-federation IdP end-session URL (when that federation's provider implements `SupportsLogout`)
+Flow: verifies `id_token_hint` → loads the session → broadcasts an OIDC Back-Channel Logout 1.0 `logout_token` to every RP with a `backchannelLogoutUri` (best-effort; a failed POST does not stop the logout) → runs the store cascade → answers with one of:
+
+- `text/html` page with an `<iframe>` per RP with a `frontchannelLogoutUri` (when `Accept: text/html` wins q-weighted negotiation)
+- `303` to the first federation's IdP end-session URL (when that federation's provider implements `SupportsLogout`)
 - `303` to `post_logout_redirect_uri` (when it matches the client's allowlist)
 - `200 {"logged_out": true}` (fallback)
 
-On every one of those success shapes — and on the no-op answer for a session that is already gone — the endpoint also **ends the browser's own express-session**, but only when that session's `sid` is the one being logged out. RP-initiated logout is a request any party may make about any session, so a cookie naming a different `sid`, or naming none, is left alone rather than signing out an unrelated user. Without this the cascade emptied the stores while the cookie kept satisfying `req.session.isAuthenticated` at `/authorize`, which went on minting codes carrying a dead `sid` that `/token` then refused with `invalid_grant` — a login loop with no login page, for up to `session.maxAge`. A destroy the session store cannot complete is logged and does not turn a successful cascade into a `503`; `/authorize` refuses the dead `sid` on its own account either way, by re-checking that an authenticated session's `sid` still resolves in the `UserSessionStore` before it mints anything (a store that cannot answer fails closed to the login page, or to `login_required` under `prompt=none`).
+**The cascade** is [`cascadeLogout`](./src/logout/cascadeLogout.mts), four steps in a fixed order; its doc comment is the full contract, and [`cascadeLogout.test.mts`](./src/logout/__tests__/cascadeLogout.test.mts) pins it:
 
-Cascade failure returns `503 {"error": "temporarily_unavailable"}`. The cascade order is fixed per the spec: step 1 (refresh-family revoke) and step 3 (session delete) fail hard; step 2 (federation-token delete) is best-effort and logs a warning on failure without aborting the cascade.
+1. Read the session's refresh-token families. Failure stops the cascade.
+2. Revoke every family and delete the session's federation tokens. Every operation is attempted; if **any** failed, the cascade stops here, before the bookkeeping a retry needs is erased.
+3. Remove the session's reverse-index entries (relying parties, families, federations) — best-effort, logged, bounded by TTL.
+4. Delete the `UserSession` last. Failure stops the cascade.
 
-### POST /oauth/federation/:name/logout
+A cascade that stopped answers `503 {"error": "temporarily_unavailable"}`, and a retry of the same logout is safe.
+
+On every success shape — and on the no-op answer for a session that is already gone — the endpoint also **ends the browser's own express-session**, but only when that session's `sid` is the one being logged out. RP-initiated logout is a request any party may make about any session, so a cookie naming a different `sid`, or naming none, is left alone rather than signing out an unrelated user. Without this the cookie would keep satisfying `req.session.isAuthenticated` at `/authorize` after the stores were emptied. A destroy the session store cannot complete is logged and does not turn a successful cascade into a `503`; `/authorize` refuses the dead `sid` on its own account either way (see [The OIDC surface](#the-oidc-surface-stated-284)). The `503` deliberately leaves the cookie in place, so a retry still names the session.
+
+### `POST /oauth/federation/:name/logout`
 
 Provider-scoped federation disconnect. Authorization: `Bearer <access_token>` with `typ: at+jwt`. Optional body: `post_logout_redirect_uri`, `state`.
 
-Flow: verifies access_token → checks family not revoked → loads session → verifies federation is linked → deletes federation token → removes federation from session → if the provider implements `SupportsLogout`, redirects to the IdP end-session URL; otherwise returns `200 {"disconnected": true}`.
+Flow: verifies the access token → checks its family is not revoked → loads the session → verifies the federation is linked → deletes the federation token → removes the federation from the session → if the provider implements `SupportsLogout`, redirects to the IdP end-session URL; otherwise returns `200 {"disconnected": true}`.
 
 If the IdP end-session call throws, local state is already cleared; the response is `200 {"disconnected": true}` and an audit event `federation.logout.idp_unreachable` is emitted for operator visibility.
 
@@ -433,42 +512,41 @@ Returns `404 {"error": "federation_not_linked"}` when the named federation is no
 
 ### Discovery metadata
 
-`GET /.well-known/openid-configuration` now advertises:
+Under the same six-slot check, `GET /.well-known/openid-configuration` advertises:
 
 - `end_session_endpoint`
 - `backchannel_logout_supported: true`
 - `backchannel_logout_session_supported: true` — `logout_token` includes `sid` by default
 - `frontchannel_logout_supported: true`
-- `frontchannel_logout_session_supported: true` — front-channel iframe URL includes `sid` by default
+- `frontchannel_logout_session_supported: true` — the front-channel iframe URL includes `sid` by default
 
 The `session_supported` defaults of `true` intentionally deviate from OIDC Back-Channel Logout 1.0 §2.2 (spec default: `false`). Clients that require the spec-default behavior must set `backchannelLogoutSessionRequired: false` or `frontchannelLogoutSessionRequired: false` on their client record.
 
 ### Client record logout metadata
 
-Each `Client` supports five optional fields for logout behavior:
+The fields are defined on core's `Client` record ([`repositories/types.mts`](../core/src/repositories/types.mts)). What this package holds them to:
 
-- `postLogoutRedirectUris?: string[]` — allowlist for `POST /oauth/logout`'s `post_logout_redirect_uri`. Held to the **same grammar as `allowedRedirectUris`** since [#498](https://github.com/o3co/auth.provider/issues/498): `https:`, `http:` for a loopback host, or an RFC 8252 §7.1 reverse-domain custom scheme (`com.example.app:/signout`), and never a fragment, userinfo or executable scheme. Registering the custom scheme is what lets a native app be returned to itself after logout instead of landing on a JSON body.
-- `backchannelLogoutUri?: string` — receives `logout_token` POST. **`http`/`https` only** — this server dispatches the POST itself, and it has no way to reach a custom scheme.
-- `backchannelLogoutSessionRequired?: boolean` — default `true`; set `false` to exclude `sid` from `logout_token`
-- `frontchannelLogoutUri?: string` — iframe src target. **`http`/`https` only** — the browser resolves this value in a document context, where a custom scheme is at best inert and at worst a handler invocation the RP never asked for.
-- `frontchannelLogoutSessionRequired?: boolean` — default `true`; set `false` to exclude `sid` from iframe URL
+- `postLogoutRedirectUris` — the allowlist for `post_logout_redirect_uri`, held to the **same grammar as `allowedRedirectUris`** (#498): `https:`, `http:` for a loopback host, or an RFC 8252 §7.1 reverse-domain custom scheme (`com.example.app:/signout`), and never a fragment, userinfo or executable scheme. Registering the custom scheme is what lets a native app be returned to itself after logout instead of landing on a JSON body.
+- `backchannelLogoutUri` — receives the `logout_token` POST. **`http`/`https` only** — this server dispatches the POST itself, and it has no way to reach a custom scheme.
+- `frontchannelLogoutUri` — the iframe src. **`http`/`https` only** — the browser resolves this value in a document context, where a custom scheme is at best inert and at worst a handler invocation the RP never asked for.
+- `backchannelLogoutSessionRequired` / `frontchannelLogoutSessionRequired` — default `true`; `false` leaves `sid` out of the `logout_token` / the iframe URL.
 
-## TODO-F-6 changes — Federation token endpoint
+## Federation token endpoint
 
-`POST /oauth/federation/:name/token` retrieves the upstream IdP access_token for the caller's session, so consumers can make server-side API calls to Google Calendar / GitHub API / etc. on the user's behalf.
+`POST /oauth/federation/:name/token` retrieves the upstream IdP access token for the caller's session, so a consumer can make server-side API calls to Google Calendar / GitHub API / etc. on the user's behalf. It is mounted under the six-slot check (see [Endpoints](#endpoints)). Offline delegation — a token without the user's session — is a different feature, `@o3co/auth-provider-federation-grants`.
 
 ### Authentication
 
-- Bearer access_token minted by this auth.provider instance (`typ: at+jwt`).
+- A Bearer access token minted by this auth.provider instance (`typ: at+jwt`).
 - The token's `azp` claim identifies the client; the client record MUST opt in via `allowedAzpForFederationToken: true` (see below).
 
 ### Flow
 
-1. Verify the Bearer access_token.
-2. Deny if the family_id is revoked or the session no longer exists.
+1. Verify the Bearer access token.
+2. Deny if its family is revoked or the session no longer exists.
 3. Deny unless `client.allowedAzpForFederationToken === true`.
 4. Deny unless the federation is linked to the session.
-5. Return the cached upstream access_token if it has > 30 seconds of validity remaining.
+5. Return the stored upstream access token if it has more than 30 seconds of validity remaining.
 6. Otherwise, refresh it:
    - Acquire an advisory lock (when `FederationTokenStore` implements `SupportsLock`) to prevent concurrent refresh fan-out.
    - Re-read after the lock — another waiter may have refreshed during the wait.
@@ -493,41 +571,35 @@ possession of a key that a caller receiving it by value does not hold — or not
 an access token type at all (`N_A`, RFC 8693 §2.2.1). This endpoint answers
 `502 upstream_token_ineligible` for one instead of handing it out, which is the
 same judgement `core` makes of the same contract on the offline-delegation
-route (#645). Before that it answered `token_type: "Bearer"` whatever the
-upstream said, which dropped a constraint the upstream had imposed.
+route.
 
 The upstream's own spelling is kept in the stored record — it is what the audit
 event reports, and what an operator reads — but is not echoed on the wire. Once
 a non-bearer type is refused, the only values left are case-variants of one
 word, and RFC 6749 §5.1 makes the comparison case-insensitive ("Value is case
 insensitive"), so the spelling carries nothing a caller can act on; echoing it
-would have flipped every `federation-oidc` connection from `Bearer` to `bearer`
-on its first refresh after deploy, for no gain. The sibling
-offline-delegation route does echo it, deliberately — it had no clients when
-that was decided, and this one does.
+would flip a `federation-oidc` connection between `Bearer` and `bearer` with the
+upstream's answer, for no gain. The sibling offline-delegation route does echo
+it, deliberately.
 
 A connection whose adapter names no type **at all** is answered `Bearer`: §5.1
-makes the field REQUIRED, so an absent field is an adapter written before
-`FederationProfile` carried it — which is every bundled adapter but
-`federation-oidc` — rather than an upstream meaning something else. In practice
-the refusal therefore binds only on `federation-oidc` connections today;
-`federation-google`, `-github` and `-apple` forward no type, and all three
-issue bearer tokens.
+makes the field REQUIRED, so an absent field is an adapter that does not report
+it — every bundled adapter but `federation-oidc` — rather than an upstream
+meaning something else. In practice the refusal therefore binds only on
+`federation-oidc` connections; `federation-google`, `-github` and `-apple`
+forward no type, and all three issue bearer tokens.
 
 Absence is the only reading treated that way. A stored value that is not a
 bearer spelling is refused whatever it is — `"DPoP "`, `""`, `null`, a number —
 because a store is one more thing this route does not own, and reading a
-malformed record as silence would answer `Bearer` for it. A JSON round-trip
-drops an absent field rather than writing `null`, so a stored `null` is a store
-writing one deliberately; the built-in Redis codec refuses the record that
-holds it. At the other end, an adapter that names something which is not a
-string is recorded as `""` rather than dropped, so the refusal has something to
-refuse.
+malformed record as silence would answer `Bearer` for it. At the other end, an
+adapter that names something which is not a string is recorded as `""` rather
+than dropped, so the refusal has something to refuse.
 
-`scope` is what the stored connection holds, which since #647 is recorded when
-the federation is linked rather than left empty. It is bounded by what the user
-consented to at that moment, so a refresh can narrow it and can restore it to
-the grant, and can never take it past.
+`scope` is what the stored connection holds, recorded when the federation is
+linked. It is bounded by what the user consented to at that moment, so a
+refresh can narrow it and can restore it to the grant, and can never take it
+past.
 
 One consequence worth stating: an upstream that narrows and then stays silent
 on later refreshes leaves this field claiming more than the token holds. That
@@ -536,37 +608,15 @@ bounded by consent. A client that reads `scope` to decide whether to send the
 user back for consent should treat it as an upper bound rather than a
 guarantee.
 
-Third-party `FederationTokenStore` adapters must carry every field of
-`FederationTokens` through `attach`, `update` and `get`. Every field is a
-**required key**, holding `undefined` where there is nothing to record. Code
-that builds a `FederationTokens` value and forgets any key therefore fails to
-compile:
-a store's `get`, and any caller of `attach` or `update`, including app code
-seeding a store and test fixtures. That is a breaking type change for anyone
-who constructs one — a record literal has to name every field, as `undefined`
-when there is nothing to record.
+### What this route needs from the federation token store
 
-The type does not reach an adapter's own storage shape. An adapter that
-converts the record to a row or document of its own should declare the same
-required keys on that shape, as the bundled Redis store does for its envelope;
-otherwise the conversion can forget a field and still compile. Nor does it
-reach plain JavaScript, or code that steps around the checker (`as
-FederationTokens` on an incomplete literal, `JSON.parse(raw) as
-FederationTokens`, `Object.assign`).
+The store's contract is core's `FederationTokenStore` and `FederationTokens` ([`federation-tokens/types.mts`](../core/src/federation-tokens/types.mts)); every field of a record is a required key, as [Upgrading: store records name every field](../../docs/upgrading-required-record-keys.md) describes for anyone implementing or calling a store. What this route depends on:
 
-A store must also hand back an unset value as `undefined` or absent, never
-`null`. This endpoint refuses `null`, so a serialiser that writes `undefined`
-as `null` — MongoDB's driver does unless `ignoreUndefined` is set — turns every
-connection whose adapter names no type into a `502`.
+- **Every field survives `attach`, `update` and `get`.** Losing `tokenType` fails **open**: the record comes back silent, silence is read as `Bearer`, and a sender-constrained token is handed on as one. Losing `refreshToken` makes the connection unrefreshable (`410 refresh_token_absent`); losing `idToken` drops the upstream's `id_token_hint` at logout; losing `grantedScope` makes the current scope the refresh bound, which under-reports.
+- **An adapter's own storage shape names every field too.** The required keys reach `FederationTokens`, not a row or document an adapter converts it to: declare the same required keys on that shape, as the bundled Redis store does for its envelope, or the conversion can forget a field and still compile.
+- **An unset value comes back as `undefined` or absent, never `null`.** This route refuses a stored `null`, so a serialiser that writes `undefined` as `null` — MongoDB's driver does unless `ignoreUndefined` is set — turns every connection whose adapter names no type into a `502`. The bundled Redis codec refuses a record holding `null`.
 
-Every field costs something when it is lost, which is why all of them are
-enforced rather than documented. Losing `tokenType` fails **open**: the record
-comes back silent, silence is read as a record written before #645, and a
-sender-constrained token is handed on as `Bearer`. Losing `refreshToken` makes
-the connection unrefreshable (`410 refresh_token_absent`); losing `idToken`
-drops the upstream's `id_token_hint` at logout; losing `grantedScope` makes the
-current scope the refresh bound, which under-reports. Both bundled stores meet
-the requirement and are pinned on it.
+Both bundled stores meet these and are pinned on them.
 
 ### Error responses
 
@@ -575,11 +625,11 @@ the requirement and are pinned on it.
 | 401 | `invalid_token` | Bearer missing, invalid, wrong type (not `at+jwt`), or family revoked |
 | 403 | `forbidden` | Client not opted in via `allowedAzpForFederationToken` |
 | 404 | `federation_not_linked` | The named federation isn't linked to this session |
-| 410 | `refresh_token_absent` | Stored tokens have no refresh_token (upstream didn't return one at login, or post-lock re-read found a record without one) |
-| 410 | `re_authentication_required` | IdP returned `invalid_grant` / `invalid_token` — session federation is cleared; user must re-authenticate with the IdP |
+| 410 | `refresh_token_absent` | Stored tokens have no refresh token (upstream didn't return one at login, or the post-lock re-read found a record without one) |
+| 410 | `re_authentication_required` | IdP returned `invalid_grant` / `invalid_token` — the session's federation is cleared; the user must re-authenticate with the IdP |
 | 429 | `rate_limited` | Upstream IdP rate limit exceeded (`status: 429` or `error: "too_many_requests"`); retry later |
-| 500 | `refresh_failed` | Generic / unclassified error from the IdP refresh path, or an answer this route could not read; SIEM should group on the `details.reason` audit field |
-| 502 | `upstream_token_ineligible` | The upstream's token is one this provider may not hand on. `error_description` names the reason — `token_type_unsupported` is the only one today (#645) |
+| 500 | `refresh_failed` | Unclassified error from the IdP refresh path, or an answer this route could not read; SIEM should group on the `details.reason` audit field |
+| 502 | `upstream_token_ineligible` | The upstream's token is one this provider may not hand on. `error_description` names the reason — `token_type_unsupported` is the only one. Carries `Retry-After: 300` |
 | 503 | `refresh_not_supported` | Provider doesn't implement `SupportsRefresh` |
 | 503 | `lock_timeout` | Advisory lock could not be acquired within the wait window |
 | 503 | `temporarily_unavailable` | Store outage, IdP 5xx, or upstream network failure (ECONNREFUSED / ENOTFOUND / ETIMEDOUT — including codes wrapped on `error.cause.code` of a fetch TypeError) |
@@ -599,38 +649,24 @@ clients:
     allowedAzpForFederationToken: true  # explicit opt-in
 ```
 
-Rationale: federation access_tokens grant access to the user's external resources (Google Drive, GitHub API, etc.). Deny-by-default prevents accidental exposure when a generic OAuth client registration only needs auth.
+Rationale: federation access tokens grant access to the user's external resources (Google Drive, GitHub API, etc.). Deny-by-default prevents accidental exposure when a generic OAuth client registration only needs auth.
 
 ### Audit events
 
-The following audit events fire on this endpoint:
-
-- `federation.token.success` — on token issuance (details include `refreshed: boolean` to distinguish cache hits from refresh path)
+- `federation.token.success` — on token issuance (details include `refreshed: boolean` to distinguish a stored token from the refresh path)
 - `federation.token.forbidden` — on 403 (client not opted in)
 - `federation.token.family_revoked` — on 401 via revoked family
-- `federation.token.refresh_failed` — on the 500 `refresh_failed`, which is two cases. `provider.refreshToken` threw an error the SF-13 (v0.5.1) classifier could not place: `details.reason` is `"unknown"`. Or an answer came back that this route cannot use: `"no_access_token"`, `"invalid_expiry"` or `"invalid_token_type"`. Those four are every value this event carries, and SIEM rules should group on them. The classifier's other results are **not** this event: `invalid_grant` is `federation.token.reauthentication_required` (410), and `rate_limited` (429) and `network` (503) emit no audit event. Pre-v0.5.1 the detail field was `details.error: <raw message>` — migrate dashboards.
-- `federation.token.reauthentication_required` — on `invalid_grant` or `invalid_token` from IdP
+- `federation.token.refresh_failed` — on the 500 `refresh_failed`, which is two cases. `provider.refreshToken` threw an error the refresh-error classifier could not place: `details.reason` is `"unknown"`. Or an answer came back that this route cannot use: `"no_access_token"`, `"invalid_expiry"` or `"invalid_token_type"`. Those four are every value this event carries, and SIEM rules should group on them. The classifier's other results are **not** this event: `invalid_grant` is `federation.token.reauthentication_required` (410), and `rate_limited` (429) and `network` (503) emit no audit event.
+- `federation.token.reauthentication_required` — on `invalid_grant` or `invalid_token` from the IdP
 - `federation.token.upstream_ineligible` — on 502. `details.reason` is `"token_type_unsupported"` and `details.tokenType` is what the record held, reported as it was read — including a value that is not a token type, which is the one worth seeing; `null` means the record held something that is not a string. The response carries `Retry-After: 300`, matching `federationGrants.ineligibleRetryAfter`'s default, because the condition ends when an operator changes the upstream's registration and not before. The caller is not told which type it was; it can do nothing with that but retry
-
-## Migrating from v0.3.x to v0.4.0
-
-v0.4.0 removes passport from this package. The `/oauth/introspect` endpoint now uses `createClientAuthMiddleware(clientRepository)` — a self-hosted RFC 6749 §2.3.1 HTTP Basic + form-encoded client-auth middleware.
-
-### Breaking changes
-
-1. **`createOAuthRouter` signature**: the `passport` option is dropped. Pass `clientRepository: ClientRepository` directly. `oauthModule({ config })` receives repositories through module `requires` from composition-root providers.
-2. **`/introspect` error response**: follows RFC 6749 §5.2 shape `{ error, error_description }`.
-3. **`req.oauthClient`** (typed as `PublicClient | undefined`) is attached to the express `Request` by `createClientAuthMiddleware`. Consumers composing this middleware onto their own routes can read it directly — types come via global Express namespace augmentation.
-
-### For consumers
-
-If you consume `@o3co/auth-provider-oauth` via its public API (`oauthModule`, `createOAuthRouter`), no code changes beyond updating your config are required — the module internally wires the new middleware.
-
-If you extend or replace the middleware for custom client-auth schemes, import `createClientAuthMiddleware` from `@o3co/auth-provider-oauth` as a reference, or write a drop-in replacement that attaches a compatible `PublicClient` to `req.oauthClient`.
 
 ## jwt-bearer: which issuers are trusted (#525)
 
-The RFC 7523 grant (`urn:ietf:params:oauth:grant-type:jwt-bearer`) accepts a signed assertion from an issuer this deployment trusts and hands the verified handle to the Store. Which issuers, on what keys, on what terms, is a **trust registry** of issuer entries — `AssertionIssuerEntryInput` as written, `AssertionIssuerEntry` as the registry answers with them — and the bundled verifier is built over it:
+The RFC 7523 grant (`urn:ietf:params:oauth:grant-type:jwt-bearer`) accepts a signed assertion from an issuer this deployment trusts and hands the verified handle to the Store (`userRepository.authenticateByToken`). It issues no refresh token.
+
+**Through `/oauth/token` every request carries a client.** Client authentication admits a public client (`tokenEndpointAuthMethod: "none"`) by its `client_id` alone — which is what a device holding a signed assertion is — and refuses a request with no client at all (`401 invalid_client`). That client's `allowedGrantTypes` must name this grant. The grant itself also accepts a request with no client identity, since RFC 7523 §3 makes client authentication optional; that is reachable only from a composition that dispatches the grant without client-authentication middleware, and it is what the "no authenticated client" rules below refer to. Enabling it without a `userRepository` or an `assertionVerifier` fails at boot: there is no default verifier, because the only possible default would accept things.
+
+Which issuers, on what keys, on what terms, is a **trust registry** of issuer entries — `AssertionIssuerEntryInput` as written, `AssertionIssuerEntry` as the registry answers with them — and the bundled verifier is built over it:
 
 ```ts
 import {
@@ -670,14 +706,14 @@ What an entry says, and what it means at `/oauth/token`:
 - **`allowedAudiences`** bounds the issued `aud` whatever chose it — a `grantPolicy`, an RFC 8707 `resource`, the client registration (its `allowedAudiences` narrowed to the issuer's, its client id only if the issuer admits it). With no authenticated client it is also the source: the token names the issuer's first audience instead of this server. A client and an issuer that admit no audience in common is `invalid_grant` and logs `jwt_bearer_issuer_audience_mismatch`.
 - **`expiresAt`** is the one field that changes in place (`registry.setExpiresAt`); everything else is immutable — remove and re-add — so the history of what was trusted is the history of adds and removes. `add`, `list`, `remove` are the rest of the admin surface. **On the memory registry that surface reaches one process:** an issuer revoked with `setExpiresAt` on one replica stays trusted on the others, a restart rebuilds the registry from the composition's entries — restoring the issuer even where it was revoked — and `deployment.mode = "multi"` cannot catch it, because the registry lives inside the `assertionVerifier` you hand in rather than on a module. Entries supplied when the registry is built are identical everywhere; with several replicas, change the entry list and redeploy, or implement the registry over a shared store.
 
-`createJwtAssertionVerifier({ key, issuer, audience, algorithms })` — the static one-key shape — is a one-entry registry and keeps working unchanged. A deployment that registers issuers at runtime and needs them to survive a restart implements `AssertionIssuerRegistry` (`findIssuer`) over its own store. **An entry is data** a store can hold: every field survives a JSON round trip (revive `expiresAt` as a `Date`), except `keys: { type: "key" }`, a live key object — a store-backed entry uses `jwks` (a one-key set is fine) or `jwks_uri`.
+`createJwtAssertionVerifier({ key, issuer, audience, algorithms })` — the static one-key shape — is a one-entry registry. A deployment that registers issuers at runtime and needs them to survive a restart implements `AssertionIssuerRegistry` (`findIssuer`) over its own store. **An entry is data** a store can hold: every field survives a JSON round trip (revive `expiresAt` as a `Date`), except `keys: { type: "key" }`, a live key object — a store-backed entry uses `jwks` (a one-key set is fine) or `jwks_uri`.
 
 A store-backed registry must hand back **every ceiling** it was given. Each field beyond `issuer`, `keys` and `algorithms` narrows what the issuer's assertions may obtain, so a read-back that forgets one fails **open**: `allowedClients` gone admits any presenter, `expiresAt` gone trusts the issuer for ever, `profile: "id-jag"` gone drops the `jti` replay, `typ` and exact-`aud` checks. So `findIssuer` answers with `AssertionIssuerEntry`, whose fields are all **required keys** (`undefined` where the entry names no ceiling). What callers write — the composition's list and `add` — stays `AssertionIssuerEntryInput`, where absent means "no ceiling". A store-backed registry:
 
 - **on write**, validates with `checkAssertionIssuerEntry`, normalises with `toAssertionIssuerEntry(input)`, and persists every field — declaring its own row type with every key required, or the write into it can forget one;
 - **on read**, builds an `AssertionIssuerEntry` object literal naming every field. That literal is what the type checks: forgetting a key fails to compile. Mapping a row through `toAssertionIssuerEntry` does *not* — it takes the input type, where every ceiling is optional.
 
-The type does not reach a registry in plain JavaScript, `as AssertionIssuerEntry` / `JSON.parse(row) as …` casts, or a `jwks_uri` key source's optional tuning (`cacheMaxAgeMs` lost restores the ten-minute default); those are held to the rule alone.
+The type does not reach a registry in plain JavaScript, `as AssertionIssuerEntry` / `JSON.parse(row) as …` casts, or a `jwks_uri` key source's optional tuning (`cacheMaxAgeMs` lost restores the ten-minute default); those are held to the rule alone. See also [Upgrading: store records name every field](../../docs/upgrading-required-record-keys.md).
 
 How claims are read is code, so it is the verifier's, not the entry's. With several issuers, namespace the handle unless every issuer's `sub` values are known to be disjoint — the Store receives the handle alone:
 
@@ -732,9 +768,22 @@ The access token's lifetime is `min(oauth.accessToken.defaultExpiresIn, exp − 
 
 - **A short-lived assertion yields a short-lived access token.** An ID-JAG's `iat` may be at most an hour old and IdPs commonly give it minutes of lifetime; the token exchanged from it lives no longer. No refresh token is issued, so when the token expires the client **re-exchanges a fresh assertion**. It cannot present the same ID-JAG again — each `jti` is accepted once.
 - **An assertion with no whole second left is refused** with `invalid_grant` / `assertion did not verify` — the answer every failed verification gets, so it tells a caller nothing about the handle behind it — and logged for the operator as `jwt_bearer_assertion_expired`. That covers an assertion past its `exp` that the entry's `clockToleranceSeconds` (default 60) still let verify: the tolerance absorbs clock skew for verification, but leaves no lifetime for a token to inherit. A steady rate of that line from one issuer is a clock out of step with this server's, or clients presenting assertions at the last moment.
-- **A custom `AssertionVerifier` reports `expiresAt`** whenever its credential expires. The field is optional so a verifier written before it existed still compiles, but omitting it asserts a credential with **no expiry**, and the configured lifetime then stands uncapped. Present, it must be a finite number: a numeric string, `null`, `NaN` or `Infinity` is refused as `invalid_grant`, never read as an expiry or as none. `createRegistryAssertionVerifier` and `createJwtAssertionVerifier` always report it, from the `exp` they require.
+- **A custom `AssertionVerifier` reports `expiresAt`** whenever its credential expires. The field is optional, but omitting it asserts a credential with **no expiry**, and the configured lifetime then stands uncapped. Present, it must be a finite number: a numeric string, `null`, `NaN` or `Infinity` is refused as `invalid_grant`, never read as an expiry or as none. `createRegistryAssertionVerifier` and `createJwtAssertionVerifier` always report it, from the `exp` they require.
 
-## See Also
+## Tests
 
-- [`@o3co/auth-provider-session`](../session/README.md) — session login / federation routes
-- [`@o3co/auth-provider-core`](../core/README.md) — shared types (`Module`, `GrantHandlerResolver`, `ClientRepository`, `CodeRepository`, `KeyStore`)
+The invariants above are pinned where they are implemented; a starting set:
+
+- module wiring and what each module declares — [`module.test.mts`](./src/__tests__/module.test.mts), [`oauthAuthorization.test.mts`](./src/__tests__/oauthAuthorization.test.mts), [`oauthSession.test.mts`](./src/__tests__/oauthSession.test.mts), [`subjectRevocationService.module.test.mts`](./src/logout/__tests__/subjectRevocationService.module.test.mts);
+- the discovery gates — [`discovery-contribution.test.mts`](./src/__tests__/discovery-contribution.test.mts);
+- the logout cascade order and failure handling — [`cascadeLogout.test.mts`](./src/logout/__tests__/cascadeLogout.test.mts), and the endpoints — [`logout.test.mts`](./src/__tests__/logout.test.mts);
+- introspection's audience pin, session liveness and outage answers — [`introspect.audience.test.mts`](./src/__tests__/introspect.audience.test.mts), [`introspect.sessionLiveness.test.mts`](./src/__tests__/introspect.sessionLiveness.test.mts), [`introspect.revocationOutage.test.mts`](./src/__tests__/introspect.revocationOutage.test.mts);
+- client authentication — [`clientAuth.test.mts`](./src/middleware/__tests__/clientAuth.test.mts), [`clientAssertion.test.mts`](./src/middleware/__tests__/clientAssertion.test.mts);
+- the federation token route — [`federationToken.test.mts`](./src/__tests__/federationToken.test.mts).
+
+## See also
+
+- [`@o3co/auth-provider-core`](../core/README.md) — the ports, records and token primitives this package builds on (`Module`, `GrantHandlerResolver`, `ClientRepository`, `CodeRepository`, `KeyStore`)
+- [`@o3co/auth-provider-session`](../session/README.md) — login, the browser session and the federation login routes
+- [`@o3co/auth-provider-oauth-token-exchange`](../oauth-token-exchange/README.md), [`@o3co/auth-provider-device-grant`](../device-grant/README.md), [`@o3co/auth-provider-webauthn`](../webauthn/README.md) — grants contributed to `/oauth/token`
+- [`@o3co/auth-provider-federation-grants`](../federation-grants/README.md) — offline delegation of upstream tokens

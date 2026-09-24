@@ -69,8 +69,10 @@ const tokenExchangeConfigSchema = z.object({
  * through the typed DI graph.
  *
  * The mutable ExchangeTokenValidatorRegistry class is no longer part of
- * the public exports (per §3.3 "REMOVED"); the planner-internal collector
- * projects a TokenExchangeValidatorResolver view at activation time.
+ * the public exports (per §3.3 "REMOVED"); core's boot planner collects the
+ * contributions and projects a TokenExchangeValidatorResolver view at
+ * activation time. The class survives in `validator/registry.mts` for this
+ * package's tests only.
  *
  * Theme B (one responsibility per module: grant + built-in validator),
  * Theme C (no synthetic-key redeclaration; planner registers contributions),

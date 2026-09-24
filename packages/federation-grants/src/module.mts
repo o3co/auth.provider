@@ -46,8 +46,10 @@
  *
  * `federationGrants.enabled = false` in `reference.conf`. Installing a package
  * must not turn on offline delegation; the operator says so. A disabled
- * deployment answers the same 404 a deployment without the package answers,
- * and reads none of the feature's configuration or components on the way.
+ * deployment answers a 404 that names no feature — JSON on the client routes,
+ * plain text on the browser half — and reads none of the feature's
+ * configuration or components on the way. It is not byte-identical to a
+ * deployment without the package, whose host's own fallback answers instead.
  */
 
 import {

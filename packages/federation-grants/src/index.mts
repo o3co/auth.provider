@@ -22,11 +22,12 @@
  * `@o3co/auth-provider-core`. A store adapter depends on core alone and never
  * on this package — which is what lets `@o3co/auth-provider-redis` ship a
  * federation grant store without taking a dependency on the routes that spend
- * one, and what lets a logout revoke grants through the port with these routes
- * not installed at all.
+ * one, and what lets a subject-wide revocation revoke grants through the port
+ * with these routes not installed at all (an ordinary logout leaves them
+ * standing).
  *
  * Also not exported: the HTTP serialization, the body parser, the audit bridge
- * and the connection resolver. They are how these two routes are spelled, not
+ * and the connection resolver. They are how these routes are spelled, not
  * a second HTTP convention for the product — and a composition root that
  * needed one of them directly would be building a route this package should
  * have built.

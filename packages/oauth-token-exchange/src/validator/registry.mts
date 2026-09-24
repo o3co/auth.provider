@@ -54,8 +54,12 @@ export class ExchangeTokenValidatorRegistryError extends Error {
 }
 
 /**
- * Registry keyed by RFC 8693 `token_type` URI. Used by the Token Exchange
- * grant handler to dispatch `subject_token` / `actor_token` validation.
+ * Registry keyed by RFC 8693 `token_type` URI. It has `get` and no `entries`,
+ * so it satisfies `Pick<TokenExchangeValidatorResolver, "get">` — what the
+ * grant reads — and is imported only by this package's tests, as a hand-built
+ * resolver: at runtime the grant handler reads the resolver core's boot
+ * planner builds from `contributes.tokenExchangeValidators`, and nothing in
+ * `src/` outside the tests uses this class.
  *
  * Per A6+A7 §2.1–§2.4 (v0.5.0 unified contract):
  * - `register(name, validator)` throws on duplicate REGARDLESS of freeze
@@ -63,10 +67,6 @@ export class ExchangeTokenValidatorRegistryError extends Error {
  * - `replace(name, validator)` is the explicit override path.
  * - `freeze()` is the activation boundary — after freeze, register and
  *   replace throw reason="frozen"; get continues to work.
- *
- * Phase 4 (A2-β boot planner) becomes the only caller in v0.5.0; Phase 9
- * internalises the registry per spec §3.1bis. Phase 3 establishes the
- * contract.
  */
 export class ExchangeTokenValidatorRegistry {
 	private validators = new Map<string, ExchangeTokenValidator>();

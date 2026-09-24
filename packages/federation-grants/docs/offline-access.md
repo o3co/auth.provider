@@ -34,7 +34,7 @@ authorization request it builds is fixed (`packages/federation-oidc/src/oidc.mts
   `audience`, a vendor's own — goes through as written.
 
 And what the callback holds the answer to (`packages/federation-grants/README.md`,
-"The callback"):
+"`GET /session/federation-grants/callback/:connection`"):
 
 - a refresh token must be present, or the grant never leaves `pending`
   (`refresh_token_absent`);
