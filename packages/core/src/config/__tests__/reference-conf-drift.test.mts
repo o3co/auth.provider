@@ -198,7 +198,7 @@ describe("every shipped reference.conf survives AppConfigSchema (#496)", () => {
 	it("resolves the sections those packages own", () => {
 		const paths = collectPaths(resolved);
 		expect(paths).toContain("oauth.mtls.full-pki.max-chain-depth");
-		expect(paths).toContain("oauth.dpop.replay-store");
+		expect(paths).toContain("oauth.dpop.replay-store-ttl-seconds");
 		expect(paths).toContain("oauth.deviceAuthorization.enabled");
 		expect(paths).toContain("webauthn.rateLimit.authenticationOptions.limit");
 		expect(paths).toContain("redisRateLimiter.defaultLimit.limit");

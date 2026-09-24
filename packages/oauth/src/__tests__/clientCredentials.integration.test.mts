@@ -32,6 +32,7 @@ import {
 	type CodeRepository,
 	createMemoryReplaySeenSet,
 	createSymmetricKeyStore,
+	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
 import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -291,7 +292,7 @@ describe("client_credentials — private_key_jwt client authentication at /oauth
 	};
 
 	async function buildJwtApp(
-		replaySeenSet = createMemoryReplaySeenSet(),
+		replaySeenSet: ReplaySeenSet | null = createMemoryReplaySeenSet(),
 	): Promise<express.Express> {
 		const app = express();
 		app.use(express.urlencoded({ extended: false }));
@@ -307,11 +308,37 @@ describe("client_credentials — private_key_jwt client authentication at /oauth
 			clientRepository: jwtClientRepo(),
 			codeRepository: codeRepoStub,
 			keyStore,
-			replaySeenSet,
+			...(replaySeenSet === null ? {} : { replaySeenSet }),
 		});
 		app.use("/oauth", router);
 		return app;
 	}
+
+	it("the replay seen-set alone switches the method on: the same client, without one, is refused 500 server_error", async () => {
+		// The coupling a composition inherits when it installs a seen-set for
+		// another consumer — DPoP records its proofs there since the seen-set
+		// replaced its own replay store. Same client, same keys, same
+		// assertion shape; only the seen-set differs. (Discovery follows the
+		// same condition: oauthModule advertises private_key_jwt iff a
+		// replaySeenSet is wired — pinned in discovery-contribution.test.mts.)
+		const send = async (app: express.Express) =>
+			request(app)
+				.post("/oauth/token")
+				.type("form")
+				.send({
+					grant_type: "client_credentials",
+					client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+					client_assertion: await assertion(),
+				});
+
+		const without = await send(await buildJwtApp(null));
+		expect(without.status).toBe(500);
+		expect(without.body.error).toBe("server_error");
+
+		const withSeenSet = await send(await buildJwtApp());
+		expect(withSeenSet.status).toBe(200);
+		expect(decodeJwt(withSeenSet.body.access_token).sub).toBe(RP);
+	});
 
 	it("a client registered with a JWKS authenticates with an assertion and receives a token", async () => {
 		const res = await request(await buildJwtApp())

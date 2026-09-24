@@ -179,7 +179,6 @@ describe("oauth.dpop survives AppConfigSchema (#496)", () => {
 			enabled: true,
 			"iat-window-seconds": 30,
 			"alg-whitelist": ["ES256"],
-			"replay-store": "redis",
 			"replay-store-ttl-seconds": 600,
 		};
 		expect(AppConfigSchema.parse({ ...base, oauth: { ...base.oauth, dpop } }).oauth.dpop).toEqual(
@@ -195,13 +194,25 @@ describe("oauth.dpop survives AppConfigSchema (#496)", () => {
 		expect(parsed.oauth.dpop?.enabled).toBe(true);
 	});
 
-	it("refuses a replay store the module does not have", () => {
-		expect(() =>
-			AppConfigSchema.parse({
+	it("refuses the retired replay-store key, whatever it says, naming what replaced it", () => {
+		// DPoP proofs are recorded in the `replaySeenSet` slot now, and the
+		// key's two readings — a per-process fallback, or a mandatory
+		// `dpopReplayStore` slot — no longer exist. Ignored, a deployment that
+		// had wired a shared DPoP store beside a memory seen-set would move
+		// its DPoP records into memory with no new signal.
+		for (const value of ["memory", "redis"]) {
+			const result = AppConfigSchema.safeParse({
 				...base,
-				oauth: { ...base.oauth, dpop: { "replay-store": "postgres" } },
-			}),
-		).toThrow();
+				oauth: { ...base.oauth, dpop: { enabled: true, "replay-store": value } },
+			});
+			expect(result.success).toBe(false);
+			const issue = result.success
+				? undefined
+				: result.error.issues.find((i) => i.path.join(".") === "oauth.dpop.replay-store");
+			expect(issue?.message).toMatch(/^oauth\.dpop\.replay-store was removed in /);
+			expect(issue?.message).toMatch(/replaySeenSet/);
+			expect(issue?.message).toMatch(/Remove this field from your config\.$/);
+		}
 	});
 
 	it("is absent when omitted — the defaults live in the dpop reference.conf", () => {

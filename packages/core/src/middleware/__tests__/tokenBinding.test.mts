@@ -330,7 +330,69 @@ describe("a retry instruction is the mechanism's to state, not core's to know (v
 				.replace(/\/\*[\s\S]*?\*\//g, "")
 				.replace(/(^|[^:])\/\/.*$/gm, "$1");
 			expect(source, file).not.toMatch(/["'`]use_dpop_nonce["'`]/);
+			expect(source, file).not.toMatch(/["'`]temporarily_unavailable["'`]/);
 		}
+	});
+});
+
+describe("a server-side outage is the mechanism's to state, and answers 503", () => {
+	// A mechanism that cannot reach a verdict — a replay store it cannot read —
+	// has not found the material invalid. Answering 400 with the mechanism's
+	// proof error told the client its proof was bad, and a client that treats
+	// a 400 from the token endpoint as final gave up on a request that would
+	// have succeeded a moment later. The client did nothing wrong: 503, with
+	// the code and description the mechanism states.
+	const outage = () =>
+		Object.assign(new Error("ECONNREFUSED"), {
+			code: "temporarily_unavailable",
+			unavailable: "the replay store cannot be read; retry later",
+		});
+	const spyLogger = () => ({
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child() {
+			return this;
+		},
+	});
+
+	it("answers 503 with the code and description the refusal carries", async () => {
+		const logger = spyLogger();
+		const mw = tokenBindingMw({
+			mechanisms: [dpopMechanism(outage())],
+			dispatchPolicy: "intent-explicit",
+			logger: logger as never,
+		});
+		const res = fakeRes();
+		const next = vi.fn();
+		await mw(fakeReq(), res, next);
+		expect(next).not.toHaveBeenCalled();
+		expect(res.status).toHaveBeenCalledWith(503);
+		expect(res.json).toHaveBeenCalledWith({
+			error: "temporarily_unavailable",
+			error_description: "the replay store cannot be read; retry later",
+		});
+		// Logged apart from proof failures: a dashboard counting bad proofs must
+		// not count an outage, and the reverse.
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ mechanism: "dpop", code: "temporarily_unavailable" },
+			"token_binding_unavailable",
+		);
+		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), "token_binding_proof_invalid");
+	});
+
+	it("reads a bare code as a verdict: only the mechanism can say it was an outage", async () => {
+		const bare = Object.assign(new Error("down"), { code: "temporarily_unavailable" });
+		const mw = tokenBindingMw({
+			mechanisms: [dpopMechanism(bare)],
+			dispatchPolicy: "intent-explicit",
+		});
+		const res = fakeRes();
+		await mw(fakeReq(), res, vi.fn());
+		expect(res.status).toHaveBeenCalledWith(400);
 	});
 });
 

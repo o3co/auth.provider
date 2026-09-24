@@ -60,3 +60,15 @@ export const retryInstructionOf = (err: unknown): string | undefined => {
 	const instruction = (err as { retryInstruction?: unknown }).retryInstruction;
 	return typeof instruction === "string" && instruction.length > 0 ? instruction : undefined;
 };
+
+/**
+ * The outage a refusal reports (`TokenBindingRefusal.unavailable`), or
+ * `undefined` when it is not one. Same rule as {@link retryInstructionOf}: a
+ * non-empty string beside an OAuth code, so a mechanism has to say both what
+ * to answer and that it is the server's fault.
+ */
+export const unavailableOf = (err: unknown): string | undefined => {
+	if (oauthErrorCodeOf(err) === undefined) return undefined;
+	const description = (err as { unavailable?: unknown }).unavailable;
+	return typeof description === "string" && description.length > 0 ? description : undefined;
+};

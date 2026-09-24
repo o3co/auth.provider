@@ -94,6 +94,13 @@ export function createMemoryAccessTokenDenylist(
 		},
 
 		async add(jti, expiresAtMs) {
+			// NaN is never `<= now`: the jti would stay denied forever and the
+			// sweep would never drop it. ±Infinity is no expiry either.
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError(
+					`AccessTokenDenylist.add: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+				);
+			}
 			entries.set(jti, expiresAtMs);
 			addsSinceSweep += 1;
 			if (addsSinceSweep >= sweepInterval) {

@@ -70,6 +70,37 @@ export function runChallengeStoreContract(
 			});
 		});
 
+		it("issue refuses an expiry that is not a finite number, and records nothing", async () => {
+			// NaN is never `<= now`, so it slipped past the expired-at-issue check:
+			// the memory adapter kept the challenge forever (and `find` answered
+			// `expiresAtMs: NaN`), and Redis was sent `PX NaN`. A non-finite expiry
+			// is a caller fault, not the timing race `expired-at-issue` names.
+			await withStore(async (store) => {
+				for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+					await expect(store.issue("scope-A", "v-bad", bad)).rejects.toThrow(RangeError);
+					expect(await store.find("scope-A", "v-bad")).toBeNull();
+				}
+				// Nothing was recorded, so this is not a duplicate.
+				await store.issue("scope-A", "v-bad", future());
+				expect(await store.consume("scope-A", "v-bad")).toBe(true);
+			});
+		});
+
+		it("issue accepts a fractional expiry, and keeps the challenge at least until it", async () => {
+			// A lifetime configured in fractional milliseconds or seconds makes
+			// one. Redis's PX takes whole milliseconds, so an adapter rounds the
+			// challenge's life up, never down.
+			await withStore(async (store) => {
+				await store.issue("scope-A", "v-frac", Date.now() + 60_000.5);
+				const challenge = await store.find("scope-A", "v-frac");
+				expect(challenge?.expiresAtMs).toBeGreaterThan(Date.now() + 59_000);
+				await expect(store.issue("scope-A", "v-frac", future())).rejects.toMatchObject({
+					reason: "duplicate",
+				});
+				expect(await store.consume("scope-A", "v-frac")).toBe(true);
+			});
+		});
+
 		it("find returns null for nonexistent entries", async () => {
 			await withStore(async (store) => {
 				expect(await store.find("scope-A", "nope")).toBeNull();

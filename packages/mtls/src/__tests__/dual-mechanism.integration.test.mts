@@ -38,7 +38,12 @@ import { createHash, X509Certificate } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type BootstrapMap, createApp, defineModule } from "@o3co/auth-provider-core";
+import {
+	type BootstrapMap,
+	createApp,
+	createMemoryReplaySeenSet,
+	defineModule,
+} from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { dpopModule } from "@o3co/auth-provider-dpop";
 import express, { type RequestHandler, Router } from "express";
@@ -69,7 +74,6 @@ const makeBoot = ({ dispatchPolicy }: DualBootOpts): BootstrapMap =>
 					enabled: true,
 					"iat-window-seconds": 60,
 					"alg-whitelist": ["ES256", "ES384", "EdDSA", "RS256"],
-					"replay-store": "memory",
 					"replay-store-ttl-seconds": 300,
 				},
 				mtls: {
@@ -88,6 +92,8 @@ const makeBoot = ({ dispatchPolicy }: DualBootOpts): BootstrapMap =>
 			},
 		} as never,
 		pathResolver: (s: string) => s,
+		// DPoP records every proof it accepts in the seen-set.
+		replaySeenSet: createMemoryReplaySeenSet(),
 	}) satisfies Record<string, unknown> as BootstrapMap;
 
 /**

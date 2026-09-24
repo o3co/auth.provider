@@ -58,6 +58,32 @@ export function runReplaySeenSetContract(
 			});
 		});
 
+		it("markSeen refuses an expiry that is not a finite number, and records nothing", async () => {
+			// A NaN expiry is never `<= now`, so it slipped past the expired-at-issue
+			// check: the memory adapter kept the record forever and Redis was sent
+			// `PX NaN`. A non-finite expiry is a caller fault, not the timing race
+			// `expired-at-issue` names, so it is a RangeError — which the challenge
+			// ceremony, swallowing `expired-at-issue`, does not swallow.
+			await withSet(async (set) => {
+				for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+					await expect(set.markSeen("scope-A", "k-bad", bad)).rejects.toThrow(RangeError);
+					expect(await set.contains("scope-A", "k-bad")).toBe(false);
+				}
+				expect(await set.markSeen("scope-A", "k-bad", future())).toBe(true);
+			});
+		});
+
+		it("markSeen accepts a fractional expiry, and keeps the record at least until it", async () => {
+			// JWT NumericDates may be non-integer, and a lifetime in fractional
+			// seconds makes one too. Redis's PX takes whole milliseconds, so an
+			// adapter rounds the record's life up, never down.
+			await withSet(async (set) => {
+				expect(await set.markSeen("scope-A", "k-frac", Date.now() + 60_000.5)).toBe(true);
+				expect(await set.markSeen("scope-A", "k-frac", Date.now() + 60_000.5)).toBe(false);
+				expect(await set.contains("scope-A", "k-frac")).toBe(true);
+			});
+		});
+
 		it("expired entries treated as absent (contains=false after TTL)", async () => {
 			await withSet(async (set) => {
 				const soon = Date.now() + 50;

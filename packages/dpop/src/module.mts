@@ -27,27 +27,24 @@
  *     enabled; an empty contribution otherwise.
  *
  * DI requires:
- *   - `config` — reads `config.oauth.dpop` + `config.oauth.tokenBinding`,
+ *   - `config` — reads `config.oauth.dpop` + `config.oauth.tokenBinding`, and
  *     `config.oauth.jwt.issuer`, whose origin is the authority half of every
- *     proof's expected `htu` (#292), and `config.deployment.mode`.
+ *     proof's expected `htu` (#292).
  *
  * DI optional:
- *   - `logger`           — handed to `createDPoPMechanism` and used for the
- *                          replay-store warning; core's `consoleLogger` when
- *                          absent, so neither is dropped.
- *   - `dpopReplayStore`  — consumer-wired shared (Redis) store for production.
- *                          When absent under `replay-store = "redis"`, boot is
- *                          refused in every mode. When absent under `"memory"`
- *                          (the default), falls back to a per-process store,
- *                          which forks per replica: boot is refused under
- *                          `deployment.mode = "multi"`, warns
- *                          (`dpop_replay_store_not_shared`) when the mode is
- *                          unset, and is silent under `"single"`. When wired,
- *                          it is used whatever `replay-store` says.
- *
- * The `dpopReplayStore` optional slot is declared here via ComponentMap
- * augmentation so consumers (e.g. `@o3co/auth-provider-redis`) can provide
- * a Redis-backed implementation without modifying this package.
+ *   - `logger`         — handed to `createDPoPMechanism`; core's
+ *                        `consoleLogger` when absent, so the mechanism's
+ *                        warnings are not dropped.
+ *   - `replaySeenSet`  — core's seen-set, where every accepted proof's `jti`
+ *                        is recorded (`dpop-proof:<jkt>`). Optional to wire
+ *                        because DPoP left disabled records nothing; with
+ *                        DPoP enabled and the slot empty, boot is refused in
+ *                        every `deployment.mode`. Whether the set is shared
+ *                        is the providing module's declaration, read by
+ *                        core's replica-safety guard: the memory seen-set
+ *                        module is refused under `"multi"` and warned about
+ *                        when the mode is unset. This module adds no check of
+ *                        its own.
  *
  * Secure-default-opt-in: `oauth.dpop.enabled = false` in reference.conf.
  * Operators must explicitly set `enabled = true` to activate DPoP.
@@ -55,52 +52,10 @@
  * Per Wave 2 Phase 2 spec §10 (config) + §11.2 (module).
  */
 
-// biome-ignore lint/correctness/noUnusedImports: ComponentMap is used in the `declare module` augmentation below
-import type { ComponentMap as _ComponentMap } from "@o3co/auth-provider-core";
-import {
-	assertSecretEntropy,
-	BootError,
-	consoleLogger,
-	defineModule,
-} from "@o3co/auth-provider-core";
+import { assertSecretEntropy, consoleLogger, defineModule } from "@o3co/auth-provider-core";
 import { z } from "zod";
-import { createMemoryDPoPReplayStore } from "./memory/replay-store.mjs";
 import { createDPoPNonceIssuer } from "./nonce.mjs";
-import type { DPoPReplayStore } from "./replay-store.mjs";
 import { createDPoPMechanism, type DPoPMechanismOptions } from "./verifier.mjs";
-
-// ---------------------------------------------------------------------------
-// ComponentMap augmentation — dpopReplayStore slot
-// ---------------------------------------------------------------------------
-
-/**
- * Optional ComponentMap slot for the DPoP replay store. When absent under
- * `replay-store = "memory"` (the default), `dpopModule` falls back to the
- * in-memory adapter, which one process alone can use correctly, and under
- * `deployment.mode = "multi"` boot is refused; under `"redis"` an absent slot
- * is refused in every mode. Production deployments wire the Redis-backed
- * implementation via:
- *
- * ```ts
- * import { createRedisDPoPReplayStore } from "@o3co/auth-provider-redis/dpop";
- * const store = createRedisDPoPReplayStore({
- *     client: { set: (k, v, _px, ttlMs, _nx) => io.set(k, v, "PX", ttlMs, "NX") as Promise<"OK" | null> },
- * });
- * // either in a composition module's `provides` (a factory):
- * dpopReplayStore: () => store,
- * // or in `createApp`'s `bootstrapComponents` (the value itself):
- * bootstrapComponents: { config, pathResolver, dpopReplayStore: store },
- * ```
- *
- * Pattern mirrors `webauthnCredentialStore` in core + `accessTokenDenylist`.
- * Per Wave 2 Phase 2 spec §11.2.
- */
-declare module "@o3co/auth-provider-core" {
-	interface ComponentMap {
-		/** Optional DPoP replay store. In-memory when absent under `replay-store = "memory"`. */
-		readonly dpopReplayStore?: DPoPReplayStore;
-	}
-}
 
 // ---------------------------------------------------------------------------
 // Config schema
@@ -129,13 +84,9 @@ export const dpopConfigSchema = z.object({
 				"iat-window-seconds": z.number().int().positive().default(60),
 				/** JOSE algorithm allowlist. Default: ES256, ES384, EdDSA, RS256. */
 				"alg-whitelist": z.array(z.string()).default(["ES256", "ES384", "EdDSA", "RS256"]),
-				/**
-				 * What an empty `dpopReplayStore` slot means. "redis": boot is refused.
-				 * "memory": a per-process store, correct for one replica only. A wired
-				 * slot is used whichever this says.
-				 */
-				"replay-store": z.enum(["memory", "redis"]).default("memory"),
-				/** TTL for replay entries in seconds. Default: 300. */
+				// `replay-store` is retired: proofs are recorded in the
+				// `replaySeenSet` slot, and core's schema refuses the key by name.
+				/** How long a proof's replay record is kept, in seconds. Default: 300. */
 				"replay-store-ttl-seconds": z.number().int().positive().default(300),
 				// #530: server-provided nonce (RFC 9449 §8 / §9). "never" (the
 				// default) asks for none; "as" asks at the token endpoint; "as+rs"
@@ -154,7 +105,6 @@ export const dpopConfigSchema = z.object({
 				enabled: false,
 				"iat-window-seconds": 60,
 				"alg-whitelist": ["ES256", "ES384", "EdDSA", "RS256"],
-				"replay-store": "memory" as const,
 				"replay-store-ttl-seconds": 300,
 				nonce: { required: "never" as const, "ttl-seconds": 300 },
 			})),
@@ -164,9 +114,6 @@ export const dpopConfigSchema = z.object({
 // ---------------------------------------------------------------------------
 // Module manifest
 // ---------------------------------------------------------------------------
-
-/** The manifest's name, and the offender a replica-safety refusal names. */
-const MODULE_NAME = "dpop";
 
 /**
  * Declarative manifest for the DPoP package.
@@ -178,17 +125,15 @@ const MODULE_NAME = "dpop";
  * for core to compose alongside any other binding-mechanism modules
  * (mTLS, future) under the unified `oauth.tokenBinding.dispatch-policy`.
  *
- * The `dpopReplayStore` optional slot is backed by `createMemoryDPoPReplayStore`
- * when absent. Production deployments provide a Redis-backed implementation
- * by wiring the `dpopReplayStore` slot via their composition root.
- *
- * The manifest declares no `replicaSafety`: whether the replay store is
- * per-process depends on whether that slot is filled, which the stage-1 guard
- * cannot see and the mechanism factory can. The factory therefore applies the
- * guard's three states itself when it falls back — `deployment.mode = "multi"`
- * refuses boot (`replica-unsafe-adapter`), unset warns
- * (`dpop_replay_store_not_shared`), `"single"` is silent — the shape the
- * per-process rate-limit fallbacks in session and webauthn use (#474).
+ * Every accepted proof is recorded in core's `replaySeenSet` slot, which
+ * this module reads and does not fill. The manifest declares no
+ * `replicaSafety` because it holds no state: the module that provides the
+ * seen-set declares whether it forks per replica, and core's stage-1 guard
+ * reads that declaration — `memoryReplaySeenSetModule` is refused under
+ * `deployment.mode = "multi"`, warned about when the mode is unset, and
+ * silent under `"single"`. An enabled mechanism with no seen-set at all is
+ * refused at boot in every mode: it would have nowhere to record a proof,
+ * and so no way to refuse its replay.
  *
  * Migrated from the `grantMiddleware` contribution slot (Phase 2) to
  * `tokenBindingMechanisms` (cross-mechanism dispatch refactor, 2026-05-19)
@@ -198,11 +143,11 @@ const MODULE_NAME = "dpop";
  * See ADR `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
  * for the cross-mechanism design rationale.
  */
-export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
-	name: MODULE_NAME,
+export const dpopModule = defineModule<"config", "logger" | "replaySeenSet">({
+	name: "dpop",
 	configSchema: dpopConfigSchema,
 	requires: ["config"],
-	optional: ["logger", "dpopReplayStore"],
+	optional: ["logger", "replaySeenSet"],
 	contributes: {
 		// RFC 9449 §5.1 authorization-server metadata (#283). Without it a client
 		// reading `/.well-known/openid-configuration` cannot discover that this
@@ -245,12 +190,11 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 					return null;
 				}
 
-				// One logger for everything this factory and the mechanism report.
-				// With no `logger` component wired it is core's `consoleLogger`,
-				// as for every other module that declares the slot optional: the
-				// mechanism's own warnings (a replay TTL too short for the iat
-				// window, a replay store that cannot be reached) must not be the
-				// ones that vanish.
+				// One logger for everything the mechanism reports. With no `logger`
+				// component wired it is core's `consoleLogger`, as for every other
+				// module that declares the slot optional: the mechanism's own
+				// warnings (a replay TTL too short for the iat window, a seen-set
+				// that cannot be reached) must not be the ones that vanish.
 				const logger = deps.logger ?? consoleLogger;
 
 				const typedConfig = deps.config as unknown as {
@@ -260,7 +204,6 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 							enabled: boolean;
 							"iat-window-seconds": number;
 							"alg-whitelist": readonly string[];
-							"replay-store": "memory" | "redis";
 							"replay-store-ttl-seconds": number;
 							nonce?: {
 								required?: "never" | "as" | "as+rs";
@@ -292,59 +235,22 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 					);
 				}
 
-				// `replay-store = "redis"` is a load-bearing contract for
-				// multi-replica deployments: per-process in-memory state would
-				// silently accept the same (jti, jkt) on a second replica → replay
-				// protection bypassed. Fail boot loudly when config promises redis
-				// but the composition root forgot to wire `dpopReplayStore`. The
-				// reverse asymmetry (config says "memory" + slot wired) is fine:
-				// the wired slot wins because it expresses a stronger guarantee.
-				const replayStoreBackend = typedConfig.oauth.dpop["replay-store"];
-				if (replayStoreBackend === "redis" && deps.dpopReplayStore === undefined) {
+				// Every accepted proof is recorded in the seen-set; without one the
+				// mechanism could not refuse a replay at all. There is no
+				// per-process fallback to choose on the composition's behalf: which
+				// set backs the slot — and whether it is shared across replicas —
+				// is the providing module's declaration, which core's
+				// replica-safety guard has already read by the time this runs.
+				const replaySeenSet = deps.replaySeenSet;
+				if (replaySeenSet === undefined) {
 					throw new Error(
-						'dpopModule: config.oauth.dpop.replay-store = "redis" requires the `dpopReplayStore` ComponentMap slot to be wired (e.g. via `createRedisDPoPReplayStore` from `@o3co/auth-provider-redis/dpop`). Configuring "redis" without the slot would silently fall back to a per-process in-memory store and bypass cross-replica replay protection.',
+						"dpopModule: oauth.dpop.enabled = true requires a replaySeenSet component. " +
+							"Every accepted DPoP proof's jti is recorded there so the same proof is " +
+							"accepted once; without it no replay could be refused. Install " +
+							"memoryReplaySeenSetModule (single replica only) or redisReplaySeenSetModule " +
+							"(shared across replicas), or leave DPoP disabled.",
 					);
 				}
-				if (deps.dpopReplayStore === undefined) {
-					// The per-process fallback below is replica-unsafe state of the
-					// kind core's boot guard refuses (#271), and it sits outside that
-					// guard because it is chosen here — by whether a DI slot is
-					// filled — rather than declared on the manifest. So it reads the
-					// same three-state switch the per-process rate-limit fallbacks
-					// read (#474): "multi" refuses, "single" is silent, unset warns.
-					// Thrown from a contribution factory, the planner wraps this as
-					// `contribute-factory-failed` with this error as its `cause`.
-					//
-					// The check is whether the slot is empty, nothing more: a
-					// per-process store handed into the slot (the exported
-					// `createMemoryDPoPReplayStore`) counts as wired, because the
-					// wired slot wins and this factory cannot tell what backs it.
-					const iatWindowSeconds: unknown = typedConfig.oauth.dpop["iat-window-seconds"];
-					// The verifier accepts a proof while |floor(now) - iat| <= W,
-					// i.e. from iat - W until iat + W + 1: up to 2W + 1 seconds. A
-					// hand-built config can omit W (the verifier then defaults it);
-					// the message then names the key instead of a number.
-					const replaySpan =
-						typeof iatWindowSeconds === "number"
-							? `within ±${iatWindowSeconds}s of that replica's clock (up to ${2 * iatWindowSeconds + 1}s)`
-							: "within ±oauth.dpop.iat-window-seconds of that replica's clock";
-					const deploymentMode = deps.config.deployment?.mode;
-					if (deploymentMode === "multi") {
-						throw new BootError({
-							stage: "applyContributions",
-							reason: "replica-unsafe-adapter",
-							message: `deployment.mode is "multi" but DPoP is enabled with no dpopReplayStore wired: proofs would be checked against a per-process replay store, so a DPoP proof captured once can be replayed once against each replica while its iat is ${replaySpan}. Wire a shared dpopReplayStore (createRedisDPoPReplayStore from @o3co/auth-provider-redis/dpop) and set oauth.dpop.replay-store = "redis", or set deployment.mode = "single".`,
-							details: { reason: "replica-unsafe-adapter", modules: [MODULE_NAME] },
-						});
-					}
-					if (deploymentMode !== "single") {
-						logger.warn(
-							{ replayStore: "memory", iatWindowSeconds },
-							"dpop_replay_store_not_shared",
-						);
-					}
-				}
-				const replayStore: DPoPReplayStore = deps.dpopReplayStore ?? createMemoryDPoPReplayStore();
 
 				// #530: the nonce is an HMAC under a secret every replica shares.
 				// Required once a nonce is asked for: a per-replica random key
@@ -382,7 +288,7 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 
 				return createDPoPMechanism({
 					issuer,
-					replayStore,
+					replaySeenSet,
 					iatWindowSeconds: typedConfig.oauth.dpop["iat-window-seconds"],
 					algWhitelist: typedConfig.oauth.dpop["alg-whitelist"],
 					replayTtlSeconds: typedConfig.oauth.dpop["replay-store-ttl-seconds"],

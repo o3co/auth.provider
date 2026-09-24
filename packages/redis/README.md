@@ -78,7 +78,12 @@ backend is a package of its own beside this one, implementing the same ports.
 Each one implements a port core declares; the slot name is in parentheses.
 
 - `ChallengeStore` (`challengeStore`)
-- `ReplaySeenSet` (`replaySeenSet`)
+- `ReplaySeenSet` (`replaySeenSet`) — single-use records: `private_key_jwt`
+  `jti`s, consumed WebAuthn challenges, and every proof
+  `@o3co/auth-provider-dpop` accepts (under `dpop-proof:<jkt>`). The
+  in-process alternative forks per replica, so a captured assertion or proof
+  replays once against each; core refuses that one under
+  `deployment.mode = "multi"`.
 - `AccessTokenDenylist` (`accessTokenDenylist`) — the store behind RFC 7009
   access-token revocation. The in-process alternative forks per replica, so a
   token revoked on one replica keeps working on the others; core refuses that
@@ -110,9 +115,6 @@ Each one implements a port core declares; the slot name is in parentheses.
   a client may obtain, and the `/authorize` request parked while the consent
   page asks. Core's in-process pair forks per replica and is refused under
   `deployment.mode = "multi"`. See [Consent records and parked requests](#consent-records-and-parked-requests).
-- `DPoPReplayStore` (`dpopReplayStore`) — the DPoP proof replay store of
-  `@o3co/auth-provider-dpop`, on the `/dpop` subpath. See
-  [DPoP replay store](#dpop-replay-store).
 
 ## Entry points
 
@@ -120,11 +122,9 @@ Each one implements a port core declares; the slot name is in parentheses.
 | --- | --- | --- |
 | `@o3co/auth-provider-redis` | The adapters, their modules and builders, and the backing-client interfaces | Imports no driver: a consumer that writes its own clients never has `ioredis` in its type closure |
 | `@o3co/auth-provider-redis/ioredis` | `makeIoredisClients` and the federation-grant client wrappers | The only entry that needs `ioredis` (an optional peer) installed |
-| `@o3co/auth-provider-redis/dpop` | `createRedisDPoPReplayStore` and its client interface | Its port is declared by `@o3co/auth-provider-dpop`, an optional peer; keeping it off the main entry means a consumer without DPoP compiles without that package |
 
-The exports are listed in [`src/index.mts`](src/index.mts),
-[`src/ioredis.mts`](src/ioredis.mts) and
-[`src/dpop-replay-store.mts`](src/dpop-replay-store.mts).
+The exports are listed in [`src/index.mts`](src/index.mts) and
+[`src/ioredis.mts`](src/ioredis.mts).
 
 ## Backing-client contract
 
@@ -251,39 +251,7 @@ Every module also requires `config`. The `*Client` column is the slot
 `makeIoredisClients` fills, except the two federation-grant clients (see
 above); a composition that wires a module without providing its client slot
 fails stage-1 boot with `missing-required-component` — named at boot, not at
-the first command. `DPoPReplayStore` has neither a module nor a builder: see
-the next section.
-
-## DPoP replay store
-
-`@o3co/auth-provider-dpop` reads an optional `dpopReplayStore` slot and falls
-back to an in-process store when it is empty. This package has no module for
-it and `makeIoredisClients` does not build its client: the composition root
-fills the slot itself.
-
-```ts
-import { createRedisDPoPReplayStore } from "@o3co/auth-provider-redis/dpop";
-
-const dpopReplayStore = createRedisDPoPReplayStore({
-    // SET key value PX ttl NX, answering "OK" or null.
-    client: { set: (k, v, _px, ttlMs, _nx) => io.set(k, v, "PX", ttlMs, "NX") as Promise<"OK" | null> },
-    // keyPrefix defaults to "dpop:replay:"
-});
-
-await createApp({
-    modules: [dpopModule /* + others */],
-    bootstrapComponents: { config, pathResolver, ...clients, dpopReplayStore },
-});
-```
-
-Set `oauth.dpop.replay-store = "redis"` beside it: with DPoP enabled,
-`dpopModule` then refuses to boot when the slot is empty, instead of falling
-back to a per-process store that a replayed proof can dodge by landing on
-another replica. The setting makes the slot mandatory in every
-`deployment.mode`; under `"memory"` (the default) an empty slot is refused only
-under `"multi"`, warned about when the mode is unset, and accepted under
-`"single"` (see the dpop package's
-[operator requirements](../dpop/README.md#operator-requirements)).
+the first command.
 
 ## Federation-token keys and logout
 
@@ -487,7 +455,7 @@ against (`AccessTokenDenylist`, whose expiry is Redis's own key TTL and cannot
 follow the suite's fake clock), are in
 [docs/adapter-surface.md](../../docs/adapter-surface.md). The adapters whose
 ports have no core suite — `FederationTokenStore`, `RateLimiter`,
-`CodeRepository`, `DPoPReplayStore` — are covered by their own tests here.
+`CodeRepository` — are covered by their own tests here.
 
 ## Source layout
 

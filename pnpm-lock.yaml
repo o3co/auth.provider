@@ -466,9 +466,6 @@ importers:
       '@o3co/auth-provider-core':
         specifier: workspace:*
         version: link:../core
-      '@o3co/auth-provider-dpop':
-        specifier: workspace:*
-        version: link:../dpop
       '@vitest/coverage-v8':
         specifier: ^5.0.0
         version: 5.0.0(vitest@5.0.0)

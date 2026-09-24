@@ -25,9 +25,9 @@ contributes the DPoP mechanism to both.
   proof's `ath` when it accompanies an access token;
 - the key thumbprint that becomes the token's `cnf.jkt`;
 - server-provided nonces (`use_dpop_nonce`, `DPoP-Nonce`);
-- the `DPoPReplayStore` port, its in-process implementation, the optional
-  `dpopReplayStore` slot a shared one goes in, and the refusal of the
-  in-process one under `deployment.mode = "multi"`;
+- what a proof's replay record is: its `jti`, under a seen-set scope of its
+  own per key (`dpop-proof:<jkt>`), kept for `replay-store-ttl-seconds`; and
+  the boot refusal of an enabled mechanism with no seen-set to record in;
 - the `dpop_signing_alg_values_supported` discovery field.
 
 **Does not own:**
@@ -39,8 +39,13 @@ contributes the DPoP mechanism to both.
   (`oauth.tokenBinding.bindConfidentialClientRefreshTokens`);
 - matching a presented proof against a refresh token's stored binding — core's
   refresh-time matrix, [`core/src/grants/confirmationMatch.mts`](../core/src/grants/confirmationMatch.mts);
-- a shared replay store. [`@o3co/auth-provider-redis`](../redis/README.md#dpop-replay-store)
-  has one; the composition root wires it.
+- where the replay records are kept. That is core's `ReplaySeenSet` port, the
+  `replaySeenSet` slot that `private_key_jwt` client authentication and the
+  WebAuthn challenge ceremony record in too;
+  core's `memoryReplaySeenSetModule` and the replica-safety check that
+  refuses it under `deployment.mode = "multi"`; and
+  [`@o3co/auth-provider-redis`](../redis/README.md)'s `redisReplaySeenSetModule`,
+  the one replicas share. The composition root installs one of them.
 
 **Why a separate package.** Sender-constraint mechanisms are plug-ins to one
 core slot, not part of core: a deployment chooses DPoP by installing it, core
@@ -50,21 +55,28 @@ by default even when installed (`oauth.dpop.enabled = false`).
 ## Status
 
 Implemented: proof verification at the token endpoint, binding at protected
-resources (`ath`), and server-provided nonces at both. With DPoP enabled and
-the `dpopReplayStore` slot empty, the in-process replay store it falls back to
-takes part in `deployment.mode`: it is refused under `"multi"`, warns when the
-mode is unset, and is silent under `"single"` (see
-[Operator requirements](#operator-requirements)). Not implemented: the
-`dpop_jkt` authorization-request parameter at `/authorize` (RFC 9449 §10).
+resources (`ath`), and server-provided nonces at both. Replay records are kept
+in core's seen-set, so a deployment's replicas refuse each other's proofs
+exactly when they share that set, and core's replica-safety check answers for
+the memory one (see [Operator requirements](#operator-requirements)). Not
+implemented: the `dpop_jkt` authorization-request parameter at `/authorize`
+(RFC 9449 §10).
 
 ## Quick start
 
 ```typescript
-import { createApp } from "@o3co/auth-provider-core";
+import { createApp, memoryReplaySeenSetModule } from "@o3co/auth-provider-core";
 import { dpopModule } from "@o3co/auth-provider-dpop";
 
 const handle = await createApp({
-    modules: [dpopModule /* + your other modules */],
+    modules: [
+        dpopModule,
+        // Where each accepted proof is recorded. One replica: the memory
+        // seen-set. Several: redisReplaySeenSetModule from
+        // @o3co/auth-provider-redis, which every replica shares.
+        memoryReplaySeenSetModule,
+        /* + your other modules */
+    ],
     bootstrapComponents: { config, /* ... */ },
 });
 ```
@@ -77,8 +89,7 @@ oauth {
     enabled = true                  # default: false (secure-default opt-in)
     iat-window-seconds = 60
     alg-whitelist = ["ES256", "ES384", "EdDSA", "RS256"]
-    replay-store = "memory"         # or "redis" — see Operator requirements
-    replay-store-ttl-seconds = 300
+    replay-store-ttl-seconds = 300  # at least 2 × iat-window-seconds + 1
   }
   # Cross-mechanism dispatch policy (owned by core):
   tokenBinding {
@@ -90,7 +101,9 @@ oauth {
 The defaults are the ones shown; the module's schema applies them, and the
 package ships them as HOCON in [`src/reference.conf`](src/reference.conf)
 (exported as `@o3co/auth-provider-dpop/reference.conf`). The public exports are
-listed in [`src/index.mts`](src/index.mts).
+listed in [`src/index.mts`](src/index.mts). `oauth.dpop.replay-store` is
+retired: the seen-set's own module chooses the backend, and a config that
+still sets the key fails boot naming it.
 
 **Which tokens are bound.** A public client's access token and refresh token
 both carry `cnf.jkt`. A confidential client's access token is bound and its
@@ -129,7 +142,45 @@ Boot refuses `required` without a `secret`: a per-replica random key would mint 
 
 ## Replay store
 
-The port is `DPoPReplayStore` ([`src/replay-store.mts`](src/replay-store.mts)): `seen(jti, jkt, ttlSeconds)` records the pair and answers whether it had already been seen, as one atomic step — a check followed by a separate write would let two concurrent requests both accept the same proof. It is scoped by `jkt`, so the same `jti` under a different key is not a replay. The in-process implementation ([`src/memory/replay-store.mts`](src/memory/replay-store.mts)) is correct for one process; [`@o3co/auth-provider-redis/dpop`](../redis/README.md#dpop-replay-store) provides a shared one. There is no conformance suite for the port: each implementation is covered by its own tests.
+Every accepted proof is recorded in core's `ReplaySeenSet` — the
+`replaySeenSet` slot, the same seen-set `private_key_jwt` client assertions
+and consumed WebAuthn challenges are recorded in
+([`core/src/replay-seen-set/types.mts`](../core/src/replay-seen-set/types.mts)).
+The check is one `markSeen`, which records the value and answers whether this
+call was the first to record it, as one atomic step: a check followed by a
+separate write would let two concurrent requests both accept the same proof.
+So of two requests carrying one proof, exactly one is accepted.
+
+- **Key.** The proof's `jti`, under the scope `dpop-proof:<jkt>`. The same
+  `jti` under another key is a different proof, not a replay, and the scope
+  cannot collide with another consumer's (`client-assertion:<client_id>`,
+  `webauthn:*`, or `jwt-bearer:id-jag:<issuer>` where a composition hands the
+  jwt-bearer verifier the same set).
+- **How long.** `replay-store-ttl-seconds` from the moment the proof is first
+  accepted, which must be at least `2 × iat-window-seconds + 1` to outlive the
+  proof's acceptance window; below that the mechanism logs
+  `replay_ttl_below_iat_window` (derivation: `replayTtlSeconds` in
+  [`src/verifier.mts`](src/verifier.mts)). A value that is not a positive
+  finite number is refused when the mechanism is built.
+- **When the store fails.** A seen-set that cannot be reached refuses the
+  request as the server's fault, not the proof's: `503 temporarily_unavailable`
+  at the token endpoint and at a protected resource, with no
+  `WWW-Authenticate` challenge, and `dpop_replay_store_unavailable` logged
+  (reason `replay_store_unavailable`). A seen-set that answers with its own
+  contract error (a `RangeError`, or `expired-at-issue`) is broken rather than
+  down: the same 503, logged `dpop_replay_store_fault` with the error (reason
+  `replay_store_fault`), because the fix is in the composition, not in Redis.
+  A proof is never accepted unrecorded,
+  and it is not called invalid either — RFC 9449 keeps `invalid_dpop_proof`
+  for a proof that failed its checks (§5, §7.1), and a resource's
+  `401 invalid_token` would send the client to replace a token that is fine.
+  The client retries later; the same answer `private_key_jwt` gives when its
+  replay record cannot be written.
+- **Ordering.** A proof refused for its nonce or its `ath` is refused before
+  the seen-set is consulted, so it does not spend its `jti`.
+
+The port has a conformance suite, and core's memory seen-set and the Redis one
+both run it ([docs/adapter-surface.md](../../docs/adapter-surface.md)).
 
 ## Operator requirements
 
@@ -138,14 +189,27 @@ The port is `DPoPReplayStore` ([`src/replay-store.mts`](src/replay-store.mts)): 
   The practical consequence: a deployment whose issuer is `https://auth.example.com` verifies proofs whose `htu` names `https://auth.example.com/...` regardless of what the proxy forwards, and **regardless of whether `trust proxy` is set at all**. If clients reach the AS at some other origin, that origin — not the internal one — is the issuer you should have configured. A path prefix on the issuer is ignored: the path comes from the request, which already carries the prefix the AS is mounted under.
 
   `http.trustProxy` still matters for IP-keyed rate limiting and for the CSRF origin check — it is simply not load-bearing for DPoP.
-- **Replay protection across replicas needs a shared store.** The in-process replay store is per process: with several replicas, a proof replayed to a replica that did not see it is accepted. Wire a shared store in the `dpopReplayStore` slot — [`@o3co/auth-provider-redis/dpop`](../redis/README.md#dpop-replay-store) — and set `replay-store = "redis"`, which makes boot fail if the slot is empty in every `deployment.mode`.
+- **Replay protection across replicas needs a shared seen-set.** A per-process seen-set is per process: with several replicas, a proof replayed to a replica that did not see it is accepted. Install `redisReplaySeenSetModule` from [`@o3co/auth-provider-redis`](../redis/README.md) — `replaySeenSet.adapter = "redis"` in the standalone template — and every replica records in, and refuses from, the same set.
 
-  With DPoP enabled and the slot empty (`replay-store = "memory"`, the default), `dpopModule` falls back to the in-process store and answers `deployment.mode` the way core's replica-safety check answers for every other per-process store:
+  With DPoP enabled and no seen-set wired, boot is refused in every `deployment.mode`: the mechanism would have nowhere to record a proof, so it could refuse no replay. There is no per-process fallback. Installed with `memoryReplaySeenSetModule`, the deployment gets core's replica-safety answer for that module, as for every other per-process store — DPoP adds no check of its own:
 
   | `deployment.mode` | What boot does |
   | --- | --- |
-  | `"multi"` | Refuses: a `replica-unsafe-adapter` `BootError` naming `dpop`, carried as the `cause` of `contribute-factory-failed`. Each replica would keep its own seen set, so a proof captured once could be replayed once against each replica while its `iat` is within ±`iat-window-seconds` of that replica's clock (up to 121 s at the default 60). |
-  | unset | Boots, and logs `dpop_replay_store_not_shared` (warn). |
-  | `"single"` | Silent: one replica, so the in-process store is correct. |
+  | `"multi"` | Refuses: a `replica-unsafe-adapter` `BootError` naming `core-replay-seen-set-memory`, whose reason says a DPoP proof captured once can be replayed once against each replica. |
+  | unset | Boots, and logs one `replica_unsafe_adapters` warning listing `core-replay-seen-set-memory` with every other per-process store. |
+  | `"single"` | Silent: one replica, so the memory seen-set is correct. |
 
-  The check runs in the mechanism factory rather than as `replicaSafety` on the manifest, because whether the store is per-process depends on whether the slot is filled, not on config — the same shape the per-process rate-limit fallbacks in session and webauthn use. So a store wired under `replay-store = "memory"` is used as wired and is not refused, and DPoP left disabled builds no store and is not refused either. The check asks only whether the slot is filled, not what backs it: a per-process store handed into the slot — `createMemoryDPoPReplayStore` is exported — counts as wired and boots under `"multi"` without a warning.
+  The check reads the modules that are installed, so a per-process seen-set handed in as a bootstrap component (`createMemoryReplaySeenSet()`) is not seen by it and boots under `"multi"` without a warning. DPoP left disabled records nothing and needs no seen-set.
+
+- **Installing a seen-set also turns on `private_key_jwt`.** The slot is shared, and a filled `replaySeenSet` is also where a `private_key_jwt` client assertion's `jti` is recorded — so filling it is what makes that method work. With the slot filled:
+  - `@o3co/auth-provider-oauth` advertises `private_key_jwt`, with its signing algorithms, in `token_endpoint_auth_methods_supported` and in the introspection list (and in the revocation list while revocation is on), and accepts it at `/oauth/token`, `/oauth/introspect` and `/oauth/revoke` ([`oauth/src/module.mts`](../oauth/src/module.mts));
+  - `@o3co/auth-provider-device-grant` accepts it at `POST /oauth/device_authorization` ([`device-grant/src/module.mts`](../device-grant/src/module.mts));
+  - `@o3co/auth-provider-federation-grants` accepts it on every client route under `/oauth/federation-grants`: `POST /:grantId/token`, `/:grantId/status` and `/:grantId/revoke`, and, with acquisition on, `POST /` and `/:grantId/reauthorize` ([`federation-grants/src/routes.mts`](../federation-grants/src/routes.mts)).
+
+  Without a seen-set, a client registered with `jwks` / `jwksUri` was refused `500 server_error` at every one of these. A composition that relied on DPoP's own store before this release, and now installs a seen-set for DPoP, turns all of them on. None is reachable without a client registered with keys, but the discovery document changes on its own, so check what it now offers.
+
+- **Upgrading from a release with `oauth.dpop.replay-store`.** DPoP's Redis records move from `dpop:replay:<jkt>:<jti>` to the seen-set's `replay:…dpop-proof:<jkt>…` keys, and neither release reads the other's. While both serve against one Redis, a captured proof can be accepted once by an old replica and once by a new one. Each replica bounds a replay by its own `iat-window-seconds` (W): a proof the old release accepted can still be accepted by the new one for up to W<sub>old</sub> + W<sub>new</sub> + 1 seconds after the last old replica stops — 121 s at the default 60 on both — plus the largest clock skew between replicas. To avoid it:
+  - cut over stop-then-start, starting the new release at least W<sub>old</sub> + W<sub>new</sub> + 1 seconds plus that skew after the last old replica stopped. No replica serves in the gap, so this is at least 121 s of downtime at the defaults, for every request, DPoP or not; or
+  - run a lowered W on **both** releases for the roll: restart the old release with it first, then deploy the new release with it. With W = 5 on both, a proof has 11 s in which it can be replayed across releases, and the window closes 11 s after the last old replica stops. Lowering it on the old release alone is not enough: a replay to a new replica is bounded by the new release's W, so at 5 and 60 it stays open for 66 s after the last old replica stops. Put the full W back on the new release no earlier than W<sub>low</sub> + W<sub>full</sub> + 1 seconds after the last old replica stopped (66 s at 5 and 60): sooner reopens the window for proofs the old release accepted. Clients whose clocks are off by more than the lowered W are refused while it is lowered.
+
+  The leftover `dpop:replay:*` keys expire by themselves within `replay-store-ttl-seconds` (300 s by default); nothing reads them and nothing needs deleting. Delete `oauth.dpop.replay-store` from the config **before** deploying: the new release refuses to boot while the key is set, and the old release reads its absence as its default `"memory"`, under which a wired `dpopReplayStore` is still the store it uses. Then deploy the new release with a seen-set module installed (`redisReplaySeenSetModule` for several replicas) and without the `dpopReplayStore` component, which is no longer read.

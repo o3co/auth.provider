@@ -31,7 +31,10 @@ export interface RedisAccessTokenDenylistOptions {
 
 /**
  * Redis-backed AccessTokenDenylist (#277). Two 1-op primitives:
- *   - add: SET <prefix><jti> "1" PX <remaining lifetime>
+ *   - add: SET <prefix><jti> "1" PX <remaining lifetime>, rounded up to whole
+ *     milliseconds — `exp * 1000` is fractional for a non-integer JWT
+ *     NumericDate, and a fractional `PX` is a Redis error the revoke route
+ *     would swallow, leaving the token valid. A non-finite expiry is refused.
  *   - has: EXISTS <prefix><jti> → 1 | 0
  *
  * **Why this adapter exists at all.** The in-process denylist forks per
@@ -67,13 +70,18 @@ export function createRedisAccessTokenDenylist(
 		kind: "redis",
 
 		async add(jti, expiresAtMs) {
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError(
+					`AccessTokenDenylist.add: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+				);
+			}
 			const ttlMs = expiresAtMs - Date.now();
 			if (ttlMs <= 0) {
 				// Already expired: nothing to deny. See the note above — this is a
 				// success, not a swallowed error.
 				return;
 			}
-			await client.set(fullKey(jti), "1", "PX", ttlMs);
+			await client.set(fullKey(jti), "1", "PX", Math.ceil(ttlMs));
 		},
 
 		async has(jti) {

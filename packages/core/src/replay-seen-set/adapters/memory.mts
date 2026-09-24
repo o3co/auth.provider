@@ -18,23 +18,111 @@ import { ChallengeStorageError } from "../../challenges/errors.mjs";
 import type { ReplaySeenSet } from "../types.mjs";
 
 /**
+ * How many writing `markSeen` calls pass between amortized sweeps.
+ *
+ * A sweep is O(size), so one per write would make every accepted assertion
+ * or proof linear in the set. Every 1000th write keeps the amortized cost
+ * constant while bounding the resident set at "live records, plus at most
+ * one interval of expired ones" — the access-token denylist's trade (#293
+ * item 6), for the same kind of store.
+ */
+export const DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL = 1_000;
+
+/**
+ * The least time, in milliseconds, between two sweeps, whatever the write
+ * rate.
+ *
+ * The write interval alone does not bound how often the O(size) scan runs:
+ * DPoP writes a record per request at every protected resource, so at 1000
+ * requests a second a 1000-write interval is a full scan every second — of
+ * roughly 300,000 records at the default 300-second replay TTL. With a
+ * ten-second floor the scans are at most one per ten seconds, and the
+ * resident set grows by at most the records that expire inside those ten
+ * seconds (about 3% of the live set in that example).
+ */
+export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS = 10_000;
+
+export interface MemoryReplaySeenSetOptions {
+	/**
+	 * Writing `markSeen` calls between sweeps. Lower trades work for memory.
+	 * A non-integer or non-positive value falls back to the default rather
+	 * than disabling the sweep.
+	 */
+	readonly sweepInterval?: number;
+	/**
+	 * The least time between two sweeps, in milliseconds. `0` sweeps on the
+	 * write interval alone. A negative or non-integer value falls back to
+	 * the default rather than being read as no floor.
+	 */
+	readonly minSweepIntervalMs?: number;
+}
+
+/** In-process seen-set, with the record count exposed for observability. */
+export interface MemoryReplaySeenSet extends ReplaySeenSet {
+	/** Records currently resident, expired-but-unswept included. */
+	readonly size: number;
+}
+
+/**
  * In-process Map-backed ReplaySeenSet. Same atomicity argument as the
  * memory ChallengeStore: Node.js single-event-loop + no awaits inside the
  * critical section between Map.get/check and Map.set/delete.
  *
- * GC is lazy (per-operation cleanup of expired entries). No background sweep.
+ * ## Why the sweep exists
+ *
+ * A record is looked up again only when its value is presented again, and
+ * what every consumer records — a client assertion's `jti`, an ID-JAG's
+ * `jti`, a DPoP proof's `jti`, a consumed WebAuthn challenge — is exactly
+ * the value that stops being presented once it has been honoured. Dropping
+ * expired records only on lookup therefore reclaimed almost nothing: one
+ * permanent entry per accepted credential, and with DPoP one per request at
+ * every protected resource. The set is keyed by single-use values, so
+ * nothing bounds it but time, and the sweep has to be its own step.
+ *
+ * Amortized on the writing `markSeen` rather than on a timer, as the
+ * access-token denylist's is: a background interval would need lifecycle
+ * registration to avoid holding the process open, and a write is the only
+ * operation that grows the map. A replay is refused without writing and
+ * pays nothing. A sweep runs once `sweepInterval` writes have accumulated
+ * and at least `minSweepIntervalMs` has passed since the last one — the
+ * count bounds the work per write, the floor bounds the scans per second.
+ * The floor is measured on the monotonic clock (`performance.now()`), so a
+ * wall clock stepped back cannot stall sweeps; which records are expired is
+ * judged on the wall clock, as their `expiresAtMs` is.
+ * Writes keep counting through the floor, so the first write after it
+ * sweeps. The guarantee is bounded growth, not zero-lag reclamation: an
+ * expired record is dropped within an interval, and `markSeen` / `contains`
+ * keep answering correctly for one that has not been swept yet.
  *
  * The `getLive` helper is deliberately duplicated rather than shared with
  * the memory ChallengeStore — three similar lines is preferable to a
  * premature abstraction here, since the two stores have semantically
  * distinct contracts (`issue` throws on duplicate; `markSeen` returns false
- * on duplicate). A shared helper would either branch on that distinction
- * (defeating the purpose) or share trivial Map+TTL plumbing only.
+ * on duplicate).
  *
  * Per A1 §7.1.
  */
-export function createMemoryReplaySeenSet(): ReplaySeenSet {
+export function createMemoryReplaySeenSet(
+	options: MemoryReplaySeenSetOptions = {},
+): MemoryReplaySeenSet {
 	const map = new Map<string, { expiresAtMs: number }>();
+	const sweepInterval =
+		typeof options.sweepInterval === "number" &&
+		Number.isInteger(options.sweepInterval) &&
+		options.sweepInterval > 0
+			? options.sweepInterval
+			: DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL;
+	const minSweepIntervalMs =
+		typeof options.minSweepIntervalMs === "number" &&
+		Number.isInteger(options.minSweepIntervalMs) &&
+		options.minSweepIntervalMs >= 0
+			? options.minSweepIntervalMs
+			: DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS;
+	let writesSinceSweep = 0;
+	// Monotonic (`performance.now()`), not wall-clock: the floor is an
+	// interval, and a wall clock stepped back would read as a negative one and
+	// stall sweeps until it caught up. Record expiry stays wall-clock.
+	let lastSweepAtMonotonicMs = Number.NEGATIVE_INFINITY;
 
 	function getLive(key: string, nowMs: number): { expiresAtMs: number } | undefined {
 		const entry = map.get(key);
@@ -46,10 +134,27 @@ export function createMemoryReplaySeenSet(): ReplaySeenSet {
 		return entry;
 	}
 
+	function sweep(nowMs: number): void {
+		for (const [key, entry] of map) {
+			if (entry.expiresAtMs <= nowMs) map.delete(key);
+		}
+	}
+
 	return {
 		kind: "memory",
 
+		get size() {
+			return map.size;
+		},
+
 		async markSeen(scope, key, expiresAtMs) {
+			// NaN is never `<= now`, and ±Infinity is no expiry: without this the
+			// record would be kept forever (the sweep never drops it either).
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError(
+					`ReplaySeenSet.markSeen: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+				);
+			}
 			const nowMs = Date.now();
 			if (expiresAtMs <= nowMs) {
 				throw new ChallengeStorageError({ reason: "expired-at-issue" });
@@ -59,6 +164,15 @@ export function createMemoryReplaySeenSet(): ReplaySeenSet {
 				return false;
 			}
 			map.set(k, { expiresAtMs });
+			writesSinceSweep += 1;
+			if (writesSinceSweep >= sweepInterval) {
+				const monotonicMs = performance.now();
+				if (monotonicMs - lastSweepAtMonotonicMs >= minSweepIntervalMs) {
+					writesSinceSweep = 0;
+					lastSweepAtMonotonicMs = monotonicMs;
+					sweep(nowMs);
+				}
+			}
 			return true;
 		},
 

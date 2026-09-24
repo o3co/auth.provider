@@ -20,6 +20,12 @@
  *
  * Wave 2 forward-compat: signature is `add(jti, expiresAtMs, options?)`. Wave 1
  * implementations omit `options` parameter and remain valid when Wave 2 adds DPoP `cnf` binding.
+ *
+ * `add` keeps the jti denied until `expiresAtMs` (the token's own `exp`):
+ * a fractional value is valid (a JWT NumericDate may be non-integer) and the
+ * entry lives at least until it; a value that is not a finite number is a
+ * RangeError and records nothing. An `expiresAtMs` already past is not an
+ * error — revoking an expired token is legal (RFC 7009 §2.1).
  */
 export interface AccessTokenDenylist {
 	readonly kind: string;

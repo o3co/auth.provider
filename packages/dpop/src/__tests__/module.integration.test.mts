@@ -26,9 +26,12 @@
  *   - When `oauth.dpop.enabled = true`, a valid DPoP proof populates
  *     `req.tokenBinding` with the correct `kind` and `confirmation.jkt`.
  *   - An invalid proof returns HTTP 400 with `error: "invalid_dpop_proof"`.
- *   - The in-process replay store answers `deployment.mode` the way every
- *     other per-process store does: `"multi"` refuses boot, unset warns,
- *     `"single"` is silent, and a wired shared store is never refused.
+ *   - Every accepted proof is recorded in core's `replaySeenSet` slot, so a
+ *     proof accepted by one replica is refused by every replica that shares
+ *     the set; an enabled mechanism with no seen-set is refused at boot.
+ *   - The memory seen-set answers `deployment.mode` through core's
+ *     replica-safety guard: `"multi"` refuses boot, unset warns, `"single"`
+ *     is silent. DPoP adds no check of its own.
  *
  * Sub-PR 2c deferred:
  *   - `token_type: "DPoP"` in the response body.
@@ -40,14 +43,21 @@
  * Per Wave 2 Phase 2 spec §12.2 (narrowed) + Phase 2 plan T2.6.3.
  */
 
-import { type BootstrapMap, createApp, defineModule, type Logger } from "@o3co/auth-provider-core";
+import {
+	type BootstrapMap,
+	createApp,
+	createMemoryReplaySeenSet,
+	defineModule,
+	type Logger,
+	memoryReplaySeenSetModule,
+	type ReplaySeenSet,
+} from "@o3co/auth-provider-core";
 import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import express, { type RequestHandler, Router } from "express";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { dpopModule } from "#/module.mjs";
-import type { DPoPReplayStore } from "#/replay-store.mjs";
 import { computeJkt } from "#/thumbprint.mjs";
 
 // ---------------------------------------------------------------------------
@@ -65,7 +75,6 @@ const makeBoot = (dpopEnabled: boolean): BootstrapMap =>
 					enabled: dpopEnabled,
 					"iat-window-seconds": 60,
 					"alg-whitelist": ["ES256", "ES384", "EdDSA", "RS256"],
-					"replay-store": "memory",
 					"replay-store-ttl-seconds": 300,
 				},
 				tokenBinding: {
@@ -74,6 +83,8 @@ const makeBoot = (dpopEnabled: boolean): BootstrapMap =>
 			},
 		} as never,
 		pathResolver: (s: string) => s,
+		// Where every accepted proof's jti is recorded.
+		replaySeenSet: createMemoryReplaySeenSet(),
 	}) satisfies Record<string, unknown> as BootstrapMap;
 
 /**
@@ -96,15 +107,16 @@ const mintProof = async () => {
 	const { publicKey, privateKey } = await generateKeyPair("ES256");
 	const jwk = await exportJWK(publicKey);
 	const jkt = await computeJkt(jwk);
+	const jti = crypto.randomUUID();
 	const proof = await new SignJWT({
 		htm: "POST",
 		htu: `${ISSUER_ORIGIN}/oauth/token`,
 		iat: Math.floor(Date.now() / 1000),
-		jti: crypto.randomUUID(),
+		jti,
 	})
 		.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
 		.sign(privateKey);
-	return { proof, jkt };
+	return { proof, jkt, jti };
 };
 
 /**
@@ -123,12 +135,14 @@ const makeTokenBindingObserver =
 /**
  * Invoke the module's contributed mechanism factory directly, the way the boot
  * planner does. Used for the boot-time guards, which have to be reached
- * without `createApp` first rejecting the config for the same reason.
+ * without `createApp` first rejecting the config for the same reason. The
+ * seen-set is handed over as the planner would, so each guard is reached on
+ * its own account rather than refused for the missing set.
  */
 const buildMechanism = (config: unknown) => {
 	const factory = dpopModule.contributes?.tokenBindingMechanisms?.[0];
 	if (factory === undefined) throw new Error("dpopModule contributes no mechanism factory");
-	return factory({ config } as never);
+	return factory({ config, replaySeenSet: createMemoryReplaySeenSet() } as never);
 };
 
 // ---------------------------------------------------------------------------
@@ -271,30 +285,23 @@ describe("dpopModule — integration via createApp", () => {
 		await handle.dispose();
 	});
 
-	it("when enabled: consumer-wired dpopReplayStore is passed through to the mechanism (ComponentMap slot contract)", async () => {
-		// Spy store: records each (jti, jkt) call so we can confirm the
-		// composition root's store reached the mechanism — not the
-		// in-memory fallback. The whole reason `dpopReplayStore` is a
-		// ComponentMap slot is so production deployments can substitute
-		// a Redis-backed adapter without forking core or dpop.
-		const calls: { jti: string; jkt: string; ttlSeconds: number }[] = [];
-		const consumerStore: DPoPReplayStore = {
-			seen: async (jti, jkt, ttlSeconds) => {
-				calls.push({ jti, jkt, ttlSeconds });
-				return false;
+	it("when enabled: records each proof in the replaySeenSet slot, scoped by the proof's key", async () => {
+		// The seen-set is core's, shared with private_key_jwt client
+		// authentication and WebAuthn. DPoP's records carry a scope of their own
+		// that names the key, so the same jti under another key is not a replay
+		// and no other consumer's record can collide with one.
+		const calls: { scope: string; key: string; expiresAtMs: number }[] = [];
+		const backing = createMemoryReplaySeenSet();
+		const spy: ReplaySeenSet = {
+			kind: "spy",
+			markSeen: async (scope, key, expiresAtMs) => {
+				calls.push({ scope, key, expiresAtMs });
+				return backing.markSeen(scope, key, expiresAtMs);
 			},
+			contains: (scope, key) => backing.contains(scope, key),
 		};
-
-		const boot = {
-			...makeBoot(true),
-			// Wire the slot via bootstrapComponents. Cast required because
-			// the ambient `declare module` augmentation that adds
-			// `dpopReplayStore` to ComponentMap only loads when @o3co/auth-
-			// provider-dpop is in scope; the test imports it, but
-			// BootstrapMap's structural typing here is satisfied via cast.
-			dpopReplayStore: consumerStore,
-		} as never as BootstrapMap;
-		const { proof, jkt } = await mintProof();
+		const boot = { ...makeBoot(true), replaySeenSet: spy } satisfies BootstrapMap;
+		const { proof, jkt, jti } = await mintProof();
 
 		const observerModule = defineModule({
 			name: "observer",
@@ -323,6 +330,7 @@ describe("dpopModule — integration via createApp", () => {
 		app.use(express.json());
 		app.use(handle.router);
 
+		const before = Date.now();
 		const res = await request(app)
 			.post("/oauth/token")
 			.set("DPoP", proof)
@@ -331,51 +339,79 @@ describe("dpopModule — integration via createApp", () => {
 			// succeeds anyway.
 			.set("Host", "attacker.example")
 			.send({});
+		const after = Date.now();
 
 		expect(res.status).toBe(200);
-		// The consumer store recorded exactly one (jti, jkt) call — proving
-		// the slot was forwarded to the mechanism and the in-memory
-		// fallback was NOT used.
 		expect(calls).toHaveLength(1);
-		expect(calls[0]?.jkt).toBe(jkt);
-		expect(calls[0]?.ttlSeconds).toBe(300);
+		expect(calls[0]).toMatchObject({ scope: `dpop-proof:${jkt}`, key: jti });
+		// Kept for `replay-store-ttl-seconds` (300) from the moment it was seen.
+		expect(calls[0]?.expiresAtMs).toBeGreaterThanOrEqual(before + 300_000);
+		expect(calls[0]?.expiresAtMs).toBeLessThanOrEqual(after + 300_000);
+
+		// The record is what refuses the replay.
+		const replay = await request(app).post("/oauth/token").set("DPoP", proof).send({});
+		expect(replay.status).toBe(400);
+		expect(replay.body).toMatchObject({ error: "invalid_dpop_proof" });
 
 		await handle.dispose();
 	});
 
-	it("when enabled with replay-store=redis but slot unset: createApp fails fast (no silent in-memory fallback)", async () => {
-		// Multi-replica deployments rely on Redis for cross-process
-		// replay protection. A silent fallback to memory would let the
-		// same (jti, jkt) be accepted by another replica — replay
-		// protection bypassed. The module's factory throws at boot when
-		// the config asks for redis but the slot is unwired.
-		const boot = {
-			config: {
-				...makeValidCoreConfig(),
-				oauth: {
-					...makeValidCoreConfig().oauth,
-					dpop: {
-						enabled: true,
-						"iat-window-seconds": 60,
-						"alg-whitelist": ["ES256"],
-						"replay-store": "redis", // ← contract: slot MUST be wired
-						"replay-store-ttl-seconds": 300,
-					},
-					tokenBinding: {
-						"dispatch-policy": "intent-explicit",
-					},
+	it("when enabled: refuses to boot with no replaySeenSet, in every deployment.mode", async () => {
+		// There is no per-process fallback any more: a mechanism that cannot
+		// record a proof cannot refuse its replay, so boot says what to wire
+		// rather than choosing a store on the composition's behalf.
+		for (const mode of [undefined, "single", "multi"] as const) {
+			const { replaySeenSet: _omitted, ...withoutSeenSet } = makeBoot(true) as BootstrapMap & {
+				replaySeenSet?: unknown;
+			};
+			const config = withoutSeenSet.config as unknown as Record<string, unknown>;
+			const boot = {
+				...withoutSeenSet,
+				config: { ...config, ...(mode === undefined ? {} : { deployment: { mode } }) } as never,
+			} satisfies BootstrapMap;
+			const refusal = await createApp({ modules: [dpopModule], bootstrapComponents: boot }).then(
+				async (handle) => {
+					await handle.dispose();
+					return undefined;
 				},
-			} as never,
-			pathResolver: (s: string) => s,
-			// NOTE: dpopReplayStore intentionally NOT wired.
-		} satisfies Record<string, unknown> as BootstrapMap;
+				(err: unknown) => err as { reason?: unknown; cause?: { message?: unknown } },
+			);
+			expect(refusal, `mode ${String(mode)} must refuse`).toMatchObject({
+				name: "BootError",
+				reason: "contribute-factory-failed",
+			});
+			const message = String(refusal?.cause?.message);
+			expect(message).toMatch(/oauth\.dpop\.enabled = true requires a replaySeenSet/);
+			expect(message).toMatch(/memoryReplaySeenSetModule \(single replica only\)/);
+			expect(message).toMatch(/redisReplaySeenSetModule/);
+		}
+	});
 
-		await expect(
-			createApp({
-				modules: [dpopModule],
-				bootstrapComponents: boot,
-			}),
-		).rejects.toThrow(/replay-store = "redis" requires the `dpopReplayStore` ComponentMap slot/);
+	it("refuses the retired oauth.dpop.replay-store key rather than ignoring it", async () => {
+		// The key chose between a per-process fallback and a mandatory
+		// dpopReplayStore slot; neither exists now. Ignored silently, a
+		// deployment that had wired a shared DPoP store beside a memory
+		// seen-set would move its DPoP records into memory with no new signal,
+		// so the stale line fails boot and names what replaced it.
+		const boot = makeBoot(true) as unknown as {
+			config: { oauth: { dpop: Record<string, unknown> } };
+		};
+		boot.config.oauth.dpop["replay-store"] = "redis";
+
+		const refusal = await createApp({
+			modules: [dpopModule],
+			bootstrapComponents: boot as unknown as BootstrapMap,
+		}).then(
+			async (handle) => {
+				await handle.dispose();
+				return undefined;
+			},
+			(err: unknown) => err as { reason?: unknown; details?: { issues?: { message: string }[] } },
+		);
+		expect(refusal).toMatchObject({ name: "BootError", reason: "config-validation-failed" });
+		const messages = (refusal?.details?.issues ?? []).map((i) => i.message).join("\n");
+		expect(messages).toMatch(/oauth\.dpop\.replay-store was removed/);
+		expect(messages).toMatch(/replaySeenSet/);
 	});
 
 	it("when enabled: absent DPoP header leaves req.tokenBinding unset (mechanism returns null)", async () => {
@@ -543,20 +579,21 @@ describe("dpopModule — server-provided nonce from config (#530)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Replica safety of the replay store
+// Replica safety of the replay records
 //
-// With no `dpopReplayStore` wired the module falls back to a per-process
-// replay store, which forks per replica: a proof captured once can be
-// presented once to every replica, each of which has never seen its `jti`.
-// That is the state core's replica-safety guard refuses for every other
-// per-process store, and it booted under `deployment.mode = "multi"` because
-// the fallback is built inside the mechanism factory rather than declared on
-// a manifest. It now reads the same three-state switch the per-process
-// rate-limit fallbacks read (#474): `"multi"` refuses, unset warns,
-// `"single"` is silent.
+// A per-process seen-set forks per replica: a proof captured once could be
+// presented once to every replica, each of which had never seen its `jti`.
+// DPoP records its proofs in core's `replaySeenSet` slot, so the answer is
+// the one core's replica-safety guard already gives for the memory seen-set
+// module — `"multi"` refuses boot, unset warns, `"single"` is silent — with
+// no check of DPoP's own. A shared seen-set is what makes a replay to another
+// replica fail.
 // ---------------------------------------------------------------------------
 
-const spyLogger = (): Logger & { warn: ReturnType<typeof vi.fn> } => {
+const spyLogger = (): Logger & {
+	warn: ReturnType<typeof vi.fn>;
+	error: ReturnType<typeof vi.fn>;
+} => {
 	const logger = {
 		trace: vi.fn(),
 		debug: vi.fn(),
@@ -566,31 +603,26 @@ const spyLogger = (): Logger & { warn: ReturnType<typeof vi.fn> } => {
 		fatal: vi.fn(),
 		child: () => logger,
 	};
-	return logger as unknown as Logger & { warn: ReturnType<typeof vi.fn> };
-};
-
-/** The warning event the unset-mode fallback logs. */
-const NOT_SHARED_EVENT = "dpop_replay_store_not_shared";
-
-/** A stand-in for a shared store: remembers every (jti, jkt) it is shown. */
-const makeSharedStore = () => {
-	const seen = new Set<string>();
-	const store: DPoPReplayStore = {
-		seen: async (jti, jkt) => {
-			const key = `${jkt}:${jti}`;
-			if (seen.has(key)) return true;
-			seen.add(key);
-			return false;
-		},
+	return logger as unknown as Logger & {
+		warn: ReturnType<typeof vi.fn>;
+		error: ReturnType<typeof vi.fn>;
 	};
-	return { store, seen };
 };
+
+/** The event core's replica-safety guard logs when the mode is unset. */
+const REPLICA_UNSAFE_EVENT = "replica_unsafe_adapters";
+/** The event DPoP logged for its own per-process fallback, which is gone. */
+const RETIRED_NOT_SHARED_EVENT = "dpop_replay_store_not_shared";
 
 interface ReplicaBootOptions {
 	readonly mode?: "single" | "multi";
-	readonly replayStore: "memory" | "redis";
 	readonly enabled?: boolean;
-	readonly wired?: DPoPReplayStore;
+	/**
+	 * `"module"` installs core's `memoryReplaySeenSetModule`; a set is handed
+	 * in as a bootstrap component, as a composition root wires a shared one;
+	 * `"none"` wires nothing.
+	 */
+	readonly seenSet: "module" | "none" | ReplaySeenSet;
 	/** Omitted: the composition wires no `logger` component. */
 	readonly logger?: Logger;
 	readonly replayTtlSeconds?: number;
@@ -608,7 +640,6 @@ const bootReplica = async (opts: ReplicaBootOptions) => {
 					enabled: opts.enabled ?? true,
 					"iat-window-seconds": 60,
 					"alg-whitelist": ["ES256"],
-					"replay-store": opts.replayStore,
 					"replay-store-ttl-seconds": opts.replayTtlSeconds ?? 300,
 				},
 				tokenBinding: { "dispatch-policy": "intent-explicit" },
@@ -616,7 +647,7 @@ const bootReplica = async (opts: ReplicaBootOptions) => {
 		},
 		pathResolver: (s: string) => s,
 		...(opts.logger === undefined ? {} : { logger: opts.logger }),
-		...(opts.wired === undefined ? {} : { dpopReplayStore: opts.wired }),
+		...(typeof opts.seenSet === "object" ? { replaySeenSet: opts.seenSet } : {}),
 	} as never as BootstrapMap;
 
 	const observerModule = defineModule({
@@ -638,7 +669,11 @@ const bootReplica = async (opts: ReplicaBootOptions) => {
 	});
 
 	const handle = await createApp({
-		modules: [dpopModule, observerModule],
+		modules: [
+			dpopModule,
+			...(opts.seenSet === "module" ? [memoryReplaySeenSetModule] : []),
+			observerModule,
+		],
 		bootstrapComponents,
 	});
 	const app = express();
@@ -647,54 +682,44 @@ const bootReplica = async (opts: ReplicaBootOptions) => {
 	return { handle, app };
 };
 
-describe("dpopModule — replay store under deployment.mode (replica safety)", () => {
-	it('refuses to boot under "multi" when the replay store would be per-process, naming what a replica fork costs', async () => {
-		// The mechanism factory throws; the planner wraps a factory throw as
-		// `contribute-factory-failed` and carries the module's own BootError
-		// as `cause`, which is where the reason lives.
+describe("dpopModule — replay records under deployment.mode (replica safety)", () => {
+	it('refuses to boot under "multi" with the memory seen-set, naming what a replica fork costs a DPoP proof', async () => {
 		const logger = spyLogger();
-		const refusal = await bootReplica({ mode: "multi", replayStore: "memory", logger }).then(
+		const refusal = await bootReplica({ mode: "multi", seenSet: "module", logger }).then(
 			async ({ handle }) => {
 				await handle.dispose();
 				return undefined;
 			},
-			(err: unknown) => err as { cause?: { message?: unknown } },
+			(err: unknown) => err as { message?: unknown },
 		);
 
+		// Core's stage-1 guard, reading the memory module's own declaration —
+		// not a DPoP-specific refusal from a factory.
 		expect(refusal, "boot must be refused").toMatchObject({
 			name: "BootError",
-			reason: "contribute-factory-failed",
-			cause: {
-				name: "BootError",
-				reason: "replica-unsafe-adapter",
-				details: { reason: "replica-unsafe-adapter", modules: ["dpop"] },
-			},
+			stage: "validateManifests",
+			reason: "replica-unsafe-adapter",
+			details: { reason: "replica-unsafe-adapter", modules: ["core-replay-seen-set-memory"] },
 		});
-		// Names the thing, what it costs, and both ways out.
-		const message = String(refusal?.cause?.message);
+		const message = String(refusal?.message);
 		expect(message).toMatch(/deployment\.mode is "multi"/);
-		// It says what the check tests — an empty slot — and not "no shared
-		// store": a per-process store handed into the slot counts as wired.
-		expect(message).toMatch(/no dpopReplayStore wired/);
-		expect(message).not.toMatch(/no shared dpopReplayStore/);
+		expect(message).toMatch(/core-replay-seen-set-memory: .*a DPoP proof/);
 		expect(message).toMatch(/replayed once against each replica/);
-		// The verifier accepts |floor(now) - iat| <= 60, i.e. from iat - 60
-		// until iat + 61: the span a replay has on each replica.
-		expect(message).toMatch(/within ±60s of that replica's clock \(up to 121s\)/);
-		expect(message).toMatch(/replay-store = "redis"/);
-		expect(message).toMatch(/deployment\.mode = "single"/);
 	});
 
-	it("warns when the mode is unset, and still refuses a replay to the same replica", async () => {
+	it("warns once through the guard when the mode is unset, and still refuses a replay to the same replica", async () => {
 		const logger = spyLogger();
-		const { handle, app } = await bootReplica({ replayStore: "memory", logger });
+		const { handle, app } = await bootReplica({ seenSet: "module", logger });
 
-		const notShared = logger.warn.mock.calls.filter((call) => call[1] === NOT_SHARED_EVENT);
-		expect(notShared).toHaveLength(1);
-		expect(notShared[0]?.[0]).toMatchObject({ replayStore: "memory", iatWindowSeconds: 60 });
+		const unsafe = logger.warn.mock.calls.filter((call) => call[1] === REPLICA_UNSAFE_EVENT);
+		expect(unsafe).toHaveLength(1);
+		const fields = unsafe[0]?.[0] as { modules?: unknown; reasons?: unknown } | undefined;
+		expect(fields).toMatchObject({ modules: ["core-replay-seen-set-memory"] });
+		expect(String(fields?.reasons)).toMatch(/a DPoP proof/);
+		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), RETIRED_NOT_SHARED_EVENT);
 
-		// The fallback is weak protection, not absent protection: one replica
-		// still refuses a proof it has already seen.
+		// Per-process protection is weak, not absent: one replica still
+		// refuses a proof it has already seen.
 		const { proof } = await mintProof();
 		expect((await request(app).post("/oauth/token").set("DPoP", proof).send({})).status).toBe(200);
 		const replay = await request(app).post("/oauth/token").set("DPoP", proof).send({});
@@ -706,11 +731,11 @@ describe("dpopModule — replay store under deployment.mode (replica safety)", (
 
 	it('is silent under "single": the operator has declared one replica', async () => {
 		const logger = spyLogger();
-		const { handle, app } = await bootReplica({ mode: "single", replayStore: "memory", logger });
+		const { handle, app } = await bootReplica({ mode: "single", seenSet: "module", logger });
 
 		expect(logger.warn).not.toHaveBeenCalled();
 
-		// Silent, not unguarded: the in-process store is the correct one for a
+		// Silent, not unguarded: the in-process set is the correct one for a
 		// single replica, and it refuses a proof it has already seen.
 		const { proof } = await mintProof();
 		expect((await request(app).post("/oauth/token").set("DPoP", proof).send({})).status).toBe(200);
@@ -721,52 +746,99 @@ describe("dpopModule — replay store under deployment.mode (replica safety)", (
 		await handle.dispose();
 	});
 
-	it('boots under "multi" with replay-store = "redis" and the slot wired, and checks proofs against the wired store', async () => {
+	it('refuses on one replica a proof another replica accepted, when they share the seen-set (boots under "multi")', async () => {
+		// Two replicas, one seen-set: the shape a Redis-backed set gives a
+		// scaled deployment. The set is handed in rather than installed as a
+		// module, so the guard has nothing to refuse under "multi".
+		const shared = createMemoryReplaySeenSet();
 		const logger = spyLogger();
-		const shared = makeSharedStore();
-		const { handle, app } = await bootReplica({
-			mode: "multi",
-			replayStore: "redis",
-			wired: shared.store,
-			logger,
-		});
+		const replicaA = await bootReplica({ mode: "multi", seenSet: shared, logger });
+		const replicaB = await bootReplica({ mode: "multi", seenSet: shared, logger });
+		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), REPLICA_UNSAFE_EVENT);
 
-		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), NOT_SHARED_EVENT);
-		const { proof, jkt } = await mintProof();
-		expect((await request(app).post("/oauth/token").set("DPoP", proof).send({})).status).toBe(200);
-		expect([...shared.seen].some((key) => key.startsWith(`${jkt}:`))).toBe(true);
+		const { proof, jkt, jti } = await mintProof();
+		expect(
+			(await request(replicaA.app).post("/oauth/token").set("DPoP", proof).send({})).status,
+		).toBe(200);
+		const replay = await request(replicaB.app).post("/oauth/token").set("DPoP", proof).send({});
+		expect(replay.status).toBe(400);
+		expect(replay.body).toMatchObject({ error: "invalid_dpop_proof" });
+		expect(shared.size).toBe(1);
+		expect(await shared.contains(`dpop-proof:${jkt}`, jti)).toBe(true);
+
+		// A fresh proof from the same key is still accepted on either replica.
+		const next = await mintProof();
+		expect(
+			(await request(replicaB.app).post("/oauth/token").set("DPoP", next.proof).send({})).status,
+		).toBe(200);
+
+		await replicaA.handle.dispose();
+		await replicaB.handle.dispose();
+	});
+
+	it("answers 503 temporarily_unavailable at the token endpoint when the seen-set cannot be read, and logs it", async () => {
+		// The client did nothing wrong: its proof may be perfectly good, and it
+		// will be accepted once the store answers again. `400 invalid_dpop_proof`
+		// said the proof was invalid (RFC 9449 §5), which a client can read as
+		// final. The token endpoint answers store outages elsewhere in this
+		// repository with 503 temporarily_unavailable too (private_key_jwt's
+		// replay record, the refresh-token family, the revocation stores).
+		const logger = spyLogger();
+		const down: ReplaySeenSet = {
+			kind: "down",
+			markSeen: async () => {
+				throw new Error("ECONNREFUSED 127.0.0.1:6379");
+			},
+			contains: async () => false,
+		};
+		const { handle, app } = await bootReplica({ mode: "single", seenSet: down, logger });
+
+		const { proof } = await mintProof();
+		const res = await request(app).post("/oauth/token").set("DPoP", proof).send({});
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(res.headers["www-authenticate"]).toBeUndefined();
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ err: expect.any(Error) }),
+			"dpop_replay_store_unavailable",
+		);
 
 		await handle.dispose();
 	});
 
-	it('boots under "multi" with replay-store = "memory" when a store is wired anyway: the wired slot wins', async () => {
+	it("answers 503 at the token endpoint when the seen-set breaks its own contract, and logs the fault", async () => {
 		const logger = spyLogger();
-		const shared = makeSharedStore();
-		const { handle, app } = await bootReplica({
-			mode: "multi",
-			replayStore: "memory",
-			wired: shared.store,
-			logger,
-		});
+		const broken: ReplaySeenSet = {
+			kind: "broken",
+			markSeen: async () => {
+				throw new RangeError("markSeen: expiresAtMs must be a finite number");
+			},
+			contains: async () => false,
+		};
+		const { handle, app } = await bootReplica({ mode: "single", seenSet: broken, logger });
 
-		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), NOT_SHARED_EVENT);
-		const { proof, jkt } = await mintProof();
-		expect((await request(app).post("/oauth/token").set("DPoP", proof).send({})).status).toBe(200);
-		expect([...shared.seen].some((key) => key.startsWith(`${jkt}:`))).toBe(true);
+		const { proof } = await mintProof();
+		const res = await request(app).post("/oauth/token").set("DPoP", proof).send({});
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ err: expect.any(RangeError) }),
+			"dpop_replay_store_fault",
+		);
+		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), "token_binding_proof_invalid");
 
 		await handle.dispose();
 	});
 
 	it("reports a replay TTL below 2W + 1 on the console when no logger is wired", async () => {
-		// `reference.conf` points operators at this warning, and the replay
-		// store's own `dpop_replay_store_not_shared` falls back to
-		// `consoleLogger`. The mechanism's warnings must not be the ones that
-		// vanish in a composition that wires no `logger` component.
+		// `reference.conf` points operators at this warning. The mechanism's
+		// warnings must not be the ones that vanish in a composition that
+		// wires no `logger` component.
 		const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
 		try {
 			const { handle } = await bootReplica({
 				mode: "single",
-				replayStore: "memory",
+				seenSet: createMemoryReplaySeenSet(),
 				// The default 60s window needs 121.
 				replayTtlSeconds: 120,
 			});
@@ -786,16 +858,16 @@ describe("dpopModule — replay store under deployment.mode (replica safety)", (
 		}
 	});
 
-	it('boots under "multi" with DPoP installed but disabled: no replay store is built', async () => {
+	it('boots under "multi" with DPoP installed but disabled and no seen-set: nothing is recorded', async () => {
 		const logger = spyLogger();
 		const { handle } = await bootReplica({
 			mode: "multi",
-			replayStore: "memory",
+			seenSet: "none",
 			enabled: false,
 			logger,
 		});
 
-		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), NOT_SHARED_EVENT);
+		expect(logger.warn).not.toHaveBeenCalled();
 
 		await handle.dispose();
 	});

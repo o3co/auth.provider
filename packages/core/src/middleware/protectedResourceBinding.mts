@@ -38,7 +38,10 @@
  * `errorEnvelope`. Here the token already names its binding, so there is
  * nothing to arbitrate — the answer must come from the mechanism the token
  * points at — and a protected resource owes RFC 6750 §3 a 401 with a
- * `WWW-Authenticate` challenge.
+ * `WWW-Authenticate` challenge. The exception is a mechanism that reports an
+ * outage rather than a verdict (`TokenBindingRefusal.unavailable`): the
+ * request is still refused, as `503` with no challenge, because the
+ * credential is not what failed.
  */
 
 import type { Request, RequestHandler } from "express";
@@ -50,8 +53,13 @@ import type { TokenBinding } from "../grants/tokenBinding.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import type { TokenBindingMechanism } from "./tokenBinding.mjs";
 
-import "./express.mjs";
-import { applyResponseHeaders, oauthErrorCodeOf, retryInstructionOf } from "./_responseHeaders.mjs"; // ensure ambient Express.Request augmentation is loaded
+import "./express.mjs"; // ensure ambient Express.Request augmentation is loaded
+import {
+	applyResponseHeaders,
+	oauthErrorCodeOf,
+	retryInstructionOf,
+	unavailableOf,
+} from "./_responseHeaders.mjs";
 
 export interface ProtectedResourceBindingOptions {
 	/**
@@ -150,12 +158,27 @@ export const protectedResourceBindingMw = ({
 			try {
 				candidate = await mechanism.extract(req as Request, { boundAccessToken: accessToken });
 			} catch (err) {
+				const code = oauthErrorCodeOf(err);
+				const unavailable = unavailableOf(err);
+				if (unavailable !== undefined && code !== undefined) {
+					// The mechanism could not reach a verdict (`TokenBindingRefusal`):
+					// refused, as the server's fault. No challenge — `401
+					// invalid_token` would tell the client to replace a token that is
+					// fine, and the refresh it prompts meets the same outage at the
+					// token endpoint. RFC 6750 §3.1's codes describe request and
+					// token faults; a server that cannot answer says 503.
+					logger?.warn(
+						{ mechanism: mechanism.kind, code, err },
+						"protected_resource_binding_unavailable",
+					);
+					res.status(503).json(errorEnvelope(code, unavailable));
+					return;
+				}
 				logger?.warn(
 					{ mechanism: mechanism.kind, err },
 					"protected_resource_binding_proof_invalid",
 				);
 				const retryInstruction = retryInstructionOf(err);
-				const code = oauthErrorCodeOf(err);
 				if (retryInstruction !== undefined && code !== undefined) {
 					// A retry instruction, not a verdict (`TokenBindingRefusal`) —
 					// RFC 9449 §9's nonce challenge (#530): the resource asks with the
