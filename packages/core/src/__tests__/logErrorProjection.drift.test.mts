@@ -52,9 +52,15 @@
  *   (`const failure = err`), an `allSettled` result's `reason`;
  * - an error flattened into a value before the call (`const reason =
  *   err.message`, then `{ reason }`). The second rule below closes the
- *   common shape of this — `x instanceof Error ? x.message : String(x)`, or a
- *   helper that returns `x.message` — by flagging the flattening itself,
- *   wherever it is, since the string it makes can travel into another file;
+ *   common shapes of this by flagging the flattening itself, wherever it is,
+ *   since the string it makes can travel into another file: `x.message`
+ *   read behind an `instanceof Error` test — `x instanceof Error ?
+ *   x.message`, `x instanceof Error && x.message`, `if (x instanceof Error)
+ *   return x.message`, braced or not — and `(x as Error).message`. A bare
+ *   `err.message` with no such test or cast is not one of them, and neither
+ *   are `String(err)`, `` `${err}` `` and `err.toString()`: each also reads
+ *   the message, but a regex cannot tell them from the same calls on a
+ *   string or a number. Those are left to review;
  * - an error handed to a helper that logs it: `refuse(…, { err })`, a
  *   failure reporter. The call site is not a logger call, and the helper's
  *   own log line sees only its parameter (`{ reason, ...context }`), not a
@@ -397,9 +403,14 @@ function workspaceSourceTrees(): string[] {
 
 /**
  * The shape the rule above cannot follow: a caught error flattened to its
- * text — `x instanceof Error ? x.message : String(x)`, or a helper that
- * returns `x.message` — which then travels as an ordinary string, often into
- * another file, and reaches a log line nobody would read as holding an error.
+ * text, which then travels as an ordinary string, often into another file,
+ * and reaches a log line nobody would read as holding an error. Flagged:
+ * `.message` (optionally chained, on a name or a member path) read right
+ * after an `instanceof Error` test — as a ternary's `?`, after `&&`, or as
+ * the `return` an `if` makes, braced or not — and `(x as Error).message`,
+ * through any chain of `as` casts ending in `Error`. Not flagged, and not
+ * distinguishable by a regex from the same calls on a non-error:
+ * `String(err)`, `` `${err}` ``, `err.toString()`.
  * Core's readiness runner did this: each failed probe's `err.message` went into
  * the report the readiness route logs. The flattening is the part a file can
  * be read for, so it is what is flagged, wherever it is; a site that
@@ -408,7 +419,7 @@ function workspaceSourceTrees(): string[] {
  * sites in its file, so a new one fails and a removed one fails as stale.
  */
 const FLATTENED_ERROR_TEXT =
-	/\binstanceof\s+Error\s*\)?\s*(?:\?|return)\s*[A-Za-z_$][\w$]*\.message\b/g;
+	/\binstanceof\s+Error\s*\)?\s*(?:\?|&&|\{?\s*return)\s*(?:[A-Za-z_$][\w$]*\??\.)+message\b|\(\s*[A-Za-z_$][\w$.]*(?:\s+as\s+[\w$]+)*\s+as\s+Error\s*\)\s*\??\.message\b/g;
 
 const FLATTENING_ALLOWED: ReadonlyArray<{
 	readonly file: string;
@@ -424,6 +435,11 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 		file: "packages/core/src/jwt/verify.mts",
 		sites: 1,
 		why: "jose's own fixed text about the token, as the verdict's message; jose's claims ride on the error, not in its message",
+	},
+	{
+		file: "packages/federation-grants/src/browserRoutes.mts",
+		sites: 2,
+		why: "an outage classifier reads the error's and its cause's text for network error codes; it is never logged (outside this PR; for review)",
 	},
 	{
 		file: "packages/federation-oidc/src/at-hash.mts",
@@ -451,14 +467,19 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 		why: "a PKI library's text about the certificate under check, as a refusal's `detail` (outside this change; for review)",
 	},
 	{
+		file: "packages/mtls/src/extractor.mts",
+		sites: 7,
+		why: "a PEM/DER or header parser's text, and a trust-anchor file read's, cast `(err as Error)` into the message of an error it throws, the original not kept as `cause` (outside this PR; for review)",
+	},
+	{
 		file: "packages/mtls/src/fullPki/validate.mts",
 		sites: 1,
 		why: "a PKI library's text about the certificate under check, as a refusal's `detail` (outside this change; for review)",
 	},
 	{
 		file: "packages/redis/src/ioredis.mts",
-		sites: 1,
-		why: "the message of an error it throws, the queued command's error kept as `cause` (outside this change; for review)",
+		sites: 2,
+		why: "the message of an error it throws, the queued command's error kept as `cause`; and a NOSCRIPT classifier that reads the text and never logs it (outside this change; for review)",
 	},
 	{
 		file: "packages/session/src/store/redisStoreLibraries.mts",
@@ -502,6 +523,10 @@ describe("a caught error is not flattened to text on its way to a log line", () 
 	it.each([
 		["a ternary", "const text = err instanceof Error ? err.message : String(err);"],
 		["a helper's early return", "if (err instanceof Error) return err.message;"],
+		["a helper's braced early return", "if (err instanceof Error) {\n\treturn err.message;\n}"],
+		["a short-circuit", "const text = err instanceof Error && err.message;"],
+		["a cast", "const text = (err as Error).message;"],
+		["a cast, optionally chained", "const text = (err as Error)?.message;"],
 	])("flags %s", (_label, source) => {
 		expect(source.match(FLATTENED_ERROR_TEXT)).not.toBeNull();
 	});
