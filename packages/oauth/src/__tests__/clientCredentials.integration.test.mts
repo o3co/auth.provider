@@ -162,10 +162,11 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 		expect(res.body.error).toBe("unauthorized_client");
 	});
 
-	it("keeps the pre-#326 denial wire format for deny-by-absence", async () => {
+	it("refuses deny-by-absence in the base allowlist rule's words", async () => {
 		// #326 moved the deny-by-absence check from the handler onto dispatch
-		// (`requiresExplicitGrantAllowlist`). Pure refactor: the response the
-		// handler used to emit — code AND description — must survive the move.
+		// (`requiresExplicitGrantAllowlist`). Its answer is the one the base
+		// allowlist check gives, code and description, so the two rules cannot
+		// be told apart on the wire.
 		const app = await buildApp(clientRepoWith({ allowedGrantTypes: undefined }));
 		const res = await request(app)
 			.post("/oauth/token")
@@ -175,7 +176,9 @@ describe("client_credentials — /oauth/token integration (route → ctx propaga
 
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("unauthorized_client");
-		expect(res.body.error_description).toBe("client is not authorized for client_credentials");
+		expect(res.body.error_description).toBe(
+			"client is not authorized for grant_type 'client_credentials'",
+		);
 	});
 
 	it("denies a public client with no allowlist through the allowlist rule (#326 precedence)", async () => {

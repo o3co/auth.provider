@@ -519,10 +519,11 @@ describe("the token route — denials decided before the handler", () => {
 	});
 
 	it("audits a limiter outage as one, and keeps its message out of the trail", async () => {
-		// Found by review. `checkWithFailMode` turns the limiter's exception
-		// into its MESSAGE and puts that string into both the log line and the
-		// `rate_limit.unavailable` event — and a string was passing this
-		// package's sanitizer, which trusted scalars.
+		// Found by review. `checkWithFailMode` put the limiter exception's
+		// message into both the log line and the `rate_limit.unavailable` event
+		// — and a string was passing this package's sanitizer, which trusted
+		// scalars. Core's event now carries the error's name and code only; the
+		// sanitizer still holds the trail to its allowlist whatever arrives.
 		const h = harness({ rateLimiter: brokenLimiter });
 		const response = await request(h.app).post(path()).send({ sub: SUBJECT });
 

@@ -332,7 +332,10 @@ describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 		const res = await startDevice(app, { client_id: OTHER_GRANTS_ID });
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("unauthorized_client");
-		expect(res.body.error_description).toContain(DEVICE_CODE_GRANT_TYPE);
+		// The token endpoint's words for the same refusal.
+		expect(res.body.error_description).toBe(
+			`client is not authorized for grant_type '${DEVICE_CODE_GRANT_TYPE}'`,
+		);
 	});
 
 	it("refuses a client with no allowedGrantTypes at all (#326: never acquired by omission)", async () => {
@@ -408,6 +411,23 @@ describe("verification endpoint", () => {
 
 		expect(malformed.status).toBe(unknown.status);
 		expect(malformed.body).toEqual(unknown.body);
+		// RFC 6749 Appendix A.8: printable ASCII only, so no em dash.
+		expect(unknown.body).toEqual({
+			error: "invalid_user_code",
+			error_description: "that code is not valid; check it and try again",
+		});
+	});
+
+	it("answers an approval of an expired code in RFC 6749's characters", async () => {
+		const { app, clock } = makeHarness();
+		const started = await startDevice(app);
+		clock.advance(601 * 1000);
+		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+		expect(res.status).toBe(410);
+		expect(res.body).toEqual({
+			error: "expired_token",
+			error_description: "that code has expired; start again on the device",
+		});
 	});
 
 	it("refuses an action it does not implement", async () => {
@@ -646,7 +666,7 @@ describe("limiter outage — rateLimit.failMode applies here too (#457)", () => 
 		expect(events[0]).toMatchObject({
 			type: "rate_limit.unavailable",
 			userAgent: "device-test/1.0",
-			details: { tag: "device_verification", error: "redis down" },
+			details: { tag: "device_verification", cause: { name: "Error" } },
 		});
 		expect(typeof events[0]?.ip).toBe("string");
 		expect(events[0]?.timestamp).toBeInstanceOf(Date);

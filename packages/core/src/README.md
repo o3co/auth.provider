@@ -1,6 +1,6 @@
 # core/src — directory map
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 ## Responsibility
 
@@ -42,7 +42,7 @@ The ports, the record types, and the rules every implementation must satisfy.
 | `webauthn-credentials/` | The WebAuthn credential store port, memory adapter, factory, module. | — | Its own slot. |
 | `mfa/` | `MfaProvider` with its capability guards, the factory, the `MfaCoordinator` / `MfaTransactionStore` types, and `createMfaRouter` (`POST /auth/mfa/verify`). | Bundle a factor; none is here. | An extension point for a composition root; nothing in this repository wires it (see [the package README](../README.md#mfa)). It holds a router, which is HTTP — a judgement call. |
 | `policy/` | `GrantPolicyHook` and its factory. | Evaluate a policy; `grants/grantPolicy.mts` does, with the ceiling rules. | The hook is a slot a consumer fills; its evaluation is shared grant logic and lives in `grants/`. |
-| `audit/` | `AuditSink`, the pinned `BUILT_IN_AUDIT_EVENT_TYPES` inventory, factory, absence policy. | Block a flow; an emitter swallows sink failures. | Every package emits; the inventory is pinned in both directions by [`auditEventInventory.drift.test.mts`](./audit/__tests__/auditEventInventory.drift.test.mts). |
+| `audit/` | `AuditSink`, the pinned `BUILT_IN_AUDIT_EVENT_TYPES` inventory, factory, absence policy, and `auditedError` — what an event may carry of an error (its name and code, never its message), read through `logging/`'s projection and `errors/`' sanitiser. | Block a flow; an emitter swallows sink failures. | Every package emits; the inventory is pinned in both directions by [`auditEventInventory.drift.test.mts`](./audit/__tests__/auditEventInventory.drift.test.mts). |
 | `ratelimit/` | `RateLimiter`, memory adapter and module, the seeded limit specs and the guard. | — | Its own slot. The guard is an Express `RequestHandler` and the seeded specs name endpoints, which is HTTP — a judgement call. |
 | `readiness/` | `ReadinessProbe`, the registrar builders register into, the runner. | Probe from the outside; only the builder holding a connection can register one. | Builders register through `BuilderContext` and `routes/Readiness.mts` runs what they registered; they meet here. |
 | `assertions/` | jwt-bearer assertion verification and the issuer registry (#525). | Resolve identity; the Store does, from the opaque `subjectHandle`. | Possession is cryptography and is decided here; who the subject is belongs to the Store. It verifies third-party assertions with jose directly, and takes the remote key set from `jwks/`. |
@@ -52,7 +52,7 @@ The ports, the record types, and the rules every implementation must satisfy.
 | `discovery/` | `OidcDiscoveryContribution`, `buildDiscoveryDocument`, `discoveryPathsFor`, and the two hooks `boot/assemble-app.mts` calls: `planDiscoveryDocument` (whether a document is served, and the document, returning one that failed to validate as a value) and `discoveryRouteFor` (the route that serves it). | Mount anything itself, or import from `boot/`. | Keeps OIDC out of the generic planner: boot hands it values and gets an ordinary route contribution back. |
 | `adapters/` | `AdapterFactory`, `BuilderContext`, `LifecycleRegistrar`. | — | A leaf every adapter-owning directory builds on. |
 | `logging/` | `Logger` (pino-compatible), `EventLogger`, `consoleLogger`, and `loggableError` — what a log line may carry of a library's or a store's error: known quoting shapes removed from messages, frames without the header, an IdP's `error_description` under its own rule. | — | A leaf. |
-| `errors/` | The RFC 6749 §5.2 error envelope, and the characters its error text may carry (`sanitizeErrorText`, `auditErrorText`, `isWellFormedErrorCode`). | — | A leaf. |
+| `errors/` | The RFC 6749 §5.2 error envelope, and the characters its error text may carry (`sanitizeErrorText`, `auditErrorText`, `isWellFormedErrorCode`), which `errorEnvelope` applies to everything it is handed. | — | Nearly a leaf: it depends only on `logging/`, to report a malformed code. |
 | `net/` | Loopback, origin, the redirect-URI grammar, canonical request URL, special-use addresses, trusted-proxy parsing. | — | A leaf: one home per network rule, most of them rows of the [design vocabulary](../../../docs/design-vocabulary.md). |
 | `security/` | `constantTimeStringEqual`. | Be used where an input's length is itself secret (see its contract). | A leaf. |
 

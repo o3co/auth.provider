@@ -1317,6 +1317,21 @@ describe("POST /oauth/federation/:name/logout", () => {
 
 			expect(res.status).toBe(404);
 			expect(res.body.error).toBe("federation_not_linked");
+			expect(res.body.error_description).toBe("federation 'github' is not linked to this session");
+		});
+
+		it("quotes the requested name within RFC 6749's characters", async () => {
+			// The name is the client's path segment: `'` for the quotes, `?` for
+			// any character Appendix A.8 does not allow.
+			const app = buildFedLogoutApp();
+			const token = await mintAccessToken();
+
+			const res = await postFedLogout(app, encodeURIComponent('git"h\\ub\u00e9'), token);
+
+			expect(res.status).toBe(404);
+			expect(res.body.error_description).toBe(
+				"federation 'git?h?ub?' is not linked to this session",
+			);
 		});
 	});
 
@@ -1588,9 +1603,51 @@ describe("audit events", () => {
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
 					type: "federation.logout.idp_unreachable",
-					details: expect.objectContaining({ federation: "google", error: "IdP down" }),
+					details: { federation: "google", cause: { name: "Error" } },
 				}),
 			);
+		});
+
+		it("keeps the IdP's own words out of the event", async () => {
+			// An IdP's refusal, as its client library carries it: the upstream's
+			// description and the body it answered with, in the message too.
+			const leaked = "id-token-hint-SECRET";
+			const auditSink: AuditSink = {
+				kind: "mock",
+				record: vi.fn().mockResolvedValue(undefined),
+			};
+			const refusal = Object.assign(
+				new Error(`server responded with an error in the response body: {"hint":"${leaked}"}`),
+				{
+					name: "ResponseBodyError",
+					code: "OAUTH_RESPONSE_BODY_ERROR",
+					error: "invalid_request",
+					error_description: `id_token_hint ${leaked} is not valid`,
+				},
+			);
+			const throwingProvider: FederationProvider & { endSession: () => Promise<never> } = {
+				...federationBase("google"),
+				endSession: vi.fn().mockRejectedValue(refusal),
+			};
+			const app = buildFedLogoutApp({
+				auditSink,
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", throwingProvider]]),
+			});
+
+			const res = await postFedLogout(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expect(auditSink.record).toHaveBeenCalledWith(
+				expect.objectContaining({
+					type: "federation.logout.idp_unreachable",
+					details: {
+						federation: "google",
+						cause: { name: "ResponseBodyError", code: "OAUTH_RESPONSE_BODY_ERROR" },
+					},
+				}),
+			);
+			expect(JSON.stringify(vi.mocked(auditSink.record).mock.calls)).not.toContain(leaked);
 		});
 	});
 

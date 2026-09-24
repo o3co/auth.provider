@@ -42,6 +42,7 @@ import {
 	type SessionCsrfConfigSlice,
 } from "../csrf.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
+import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
 
 declare module "express-session" {
@@ -368,10 +369,7 @@ export const createRouter = (
 				if (redirect_to != null) {
 					const validation = redirectPolicy.validateRedirect(redirect_to);
 					if (!validation.ok) {
-						res.status(validation.status).json({
-							error: validation.error,
-							error_description: validation.errorDescription,
-						});
+						res.status(validation.status).json(refusalEnvelope(validation, logger));
 						return;
 					}
 				}

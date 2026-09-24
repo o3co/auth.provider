@@ -275,7 +275,7 @@ export const createDeviceVerificationHandler = (
 			// malformed, narrows the search space for free.
 			respond(res, 404, {
 				error: "invalid_user_code",
-				error_description: "that code is not valid — check it and try again",
+				error_description: "that code is not valid; check it and try again",
 			});
 			return;
 		}
@@ -287,7 +287,7 @@ export const createDeviceVerificationHandler = (
 			if (authorization === null) {
 				respond(res, 404, {
 					error: "invalid_user_code",
-					error_description: "that code is not valid — check it and try again",
+					error_description: "that code is not valid; check it and try again",
 				});
 				return;
 			}
@@ -354,7 +354,7 @@ export const createDeviceVerificationHandler = (
 			case "expired":
 				respond(res, 410, {
 					error: "expired_token",
-					error_description: "that code has expired — start again on the device",
+					error_description: "that code has expired; start again on the device",
 				});
 				return;
 			case "already_decided":
@@ -369,7 +369,7 @@ export const createDeviceVerificationHandler = (
 			default:
 				respond(res, 404, {
 					error: "invalid_user_code",
-					error_description: "that code is not valid — check it and try again",
+					error_description: "that code is not valid; check it and try again",
 				});
 		}
 	};

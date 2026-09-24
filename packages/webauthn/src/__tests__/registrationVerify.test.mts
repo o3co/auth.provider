@@ -276,6 +276,22 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 		expect(res.body).toMatchObject({ error: "origin_mismatch" });
 	});
 
+	it("500 for a subject whose userId is not a 1-64 byte handle, in RFC 6749's characters", async () => {
+		// Appendix A.8 allows printable ASCII only: "section", not the sign.
+		const { app } = buildApp({ userId: "x".repeat(65) });
+
+		const res = await supertest(app)
+			.post("/oauth/webauthn/registration/verify")
+			.send({ response: makeStubResponse("any") });
+
+		expect(res.status).toBe(500);
+		expect(res.body).toEqual({
+			error: "server_error",
+			error_description:
+				"webauthnSubject.userId must be 1-64 bytes per WebAuthn section 5.4.3 (opaque user-handle)",
+		});
+	});
+
 	// -------------------------------------------------------------------------
 	// Test 6: Nickname too long → 400 invalid_request
 	// -------------------------------------------------------------------------

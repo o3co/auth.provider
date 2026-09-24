@@ -31,7 +31,13 @@
  * arrives from another system.
  */
 
-import type { AuditSink, Logger } from "@o3co/auth-provider-core";
+import {
+	type AuditEventDetails,
+	type AuditedError,
+	type AuditSink,
+	type Logger,
+	sanitizeErrorText,
+} from "@o3co/auth-provider-core";
 
 /**
  * The closed set a failure is described by.
@@ -198,13 +204,80 @@ const sanitizePayload = (payload: Record<string, unknown>): Record<string, unkno
 	return safe;
 };
 
+/** The longest name or code an audited error is allowed: `auditErrorText`'s cap. */
+const AUDITED_FIELD_MAX_LENGTH = 200;
+
+/**
+ * A name or a code as `auditedError` writes one: a string within
+ * `auditErrorText`'s cap and its characters (`sanitizeErrorText` leaves it
+ * as it is).
+ */
+const auditedField = (value: unknown): value is string =>
+	typeof value === "string" &&
+	value.length <= AUDITED_FIELD_MAX_LENGTH &&
+	sanitizeErrorText(value) === value;
+
+/**
+ * `value` rebuilt as core's `AuditedError` — `{ name, code?, cause?: { name,
+ * code? } }`, bounded strings in RFC 6749's error-text characters and
+ * nothing else — or `undefined` when it is not one. What `auditedError`
+ * writes passes; anything carrying other fields (a message), other types, or
+ * other characters (a line break) is not an audited error.
+ *
+ * This is a check of shape and characters, not of content: a name or a code
+ * that happens to hold a secret in those characters passes. What keeps a
+ * secret out is that `auditedError` reads only an error's name and code,
+ * never its message.
+ */
+const auditedErrorShape = (value: unknown, depth = 0): AuditedError | undefined => {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const { name, code, cause, ...rest } = value as Record<string, unknown>;
+	if (Object.keys(rest).length > 0 || !auditedField(name)) return undefined;
+	if (code !== undefined && !auditedField(code)) return undefined;
+	const nested = cause === undefined || depth > 0 ? undefined : auditedErrorShape(cause, depth + 1);
+	if (cause !== undefined && nested === undefined) return undefined;
+	return {
+		name,
+		...(code !== undefined ? { code } : {}),
+		...(nested !== undefined ? { cause: nested } : {}),
+	};
+};
+
+/**
+ * What a cause that is not an audited error is replaced with: still an
+ * `AuditedError`, so `details.cause` keeps one type in every event this sink
+ * relays. A sink that fixes a field's type the first time it sees it
+ * (Elasticsearch dynamic mapping, a BigQuery schema) would drop an event
+ * whose `cause` turned into the string `"[redacted]"` here, and the key is
+ * kept rather than dropped for the reason every redaction here is: an
+ * operator can still see that there was one.
+ */
+const REDACTED_CAUSE: AuditedError = { name: "[redacted]" };
+
+/**
+ * An audit event's details: {@link sanitizePayload}, except that `cause` —
+ * core's `auditedError`, the one field an event carries an error in — passes
+ * when it is an audited error and nothing more, and is
+ * {@link REDACTED_CAUSE} otherwise.
+ */
+const sanitizeAuditDetails = (details: AuditEventDetails): AuditEventDetails => {
+	const { cause, ...rest } = details;
+	const audited = cause === undefined ? undefined : auditedErrorShape(cause);
+	return {
+		...sanitizePayload(rest),
+		...(cause === undefined ? {} : { cause: audited ?? REDACTED_CAUSE }),
+	};
+};
+
 /**
  * The audit sink handed to the shared rate-limit guard.
  *
- * Its `rate_limit.unavailable` event carries `details.error` — the same
- * stringified limiter exception the log line carries — so the sink needs the
- * same allowlist the logger does. The event itself is kept: an operator's
- * dashboard counts limiter outages, and the count is the useful part.
+ * Its `rate_limit.unavailable` event carries `details.cause` — core's
+ * `auditedError`, the limiter exception's name and code — which passes when it
+ * is exactly that shape; every other detail is held to the same allowlist the
+ * logger is, whatever core puts there. The event itself is kept: an
+ * operator's dashboard counts limiter outages, and the count is the useful
+ * part.
  */
 export function createSanitizedAuditSink(sink: AuditSink): AuditSink {
 	return {
@@ -212,7 +285,7 @@ export function createSanitizedAuditSink(sink: AuditSink): AuditSink {
 		record: (event) =>
 			sink.record({
 				...event,
-				...(event.details === undefined ? {} : { details: sanitizePayload(event.details) }),
+				...(event.details === undefined ? {} : { details: sanitizeAuditDetails(event.details) }),
 			}),
 	};
 }

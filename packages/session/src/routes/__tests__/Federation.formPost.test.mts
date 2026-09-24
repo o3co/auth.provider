@@ -524,6 +524,10 @@ describe("a cross-site request cannot spend an in-flight transaction (#502)", ()
 
 		expect(res.status).toBe(405);
 		expect(res.body.error).toBe("method_not_allowed");
+		// RFC 6749 Appendix A.8 allows no `"`: the name is quoted with `'`.
+		expect(res.body.error_description).toBe(
+			"Federation 'apple' returns its authorization response as a form post; the GET callback is accepted only for a query federation",
+		);
 		expect(res.headers.allow).toBe("POST");
 	});
 

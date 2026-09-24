@@ -199,6 +199,72 @@ describe("createSanitizedLogger", () => {
 		expect(JSON.stringify(error.mock.calls[0])).not.toContain(SENTINEL);
 	});
 
+	it("carries an audited error under cause, and redacts any other value there to one", () => {
+		// Core's `rate_limit.unavailable` names the limiter's error as
+		// `details.cause`, `auditedError`'s `{ name, code?, cause? }` — bounded
+		// and free of the error's text, so the trail keeps it. Anything else
+		// under that key is not an audited error and is redacted.
+		const recorded: unknown[] = [];
+		const sanitized = createSanitizedAuditSink({
+			kind: "test",
+			record: async (event) => {
+				recorded.push(event);
+			},
+		});
+		void sanitized.record({
+			timestamp: new Date(),
+			type: "rate_limit.unavailable",
+			details: {
+				tag: "federation_grants",
+				cause: { name: "ReplyError", code: "ECONNRESET", cause: { name: "Error" } },
+			},
+		});
+		void sanitized.record({
+			timestamp: new Date(),
+			type: "rate_limit.unavailable",
+			// What a JavaScript emitter could hand over: the type refuses it.
+			details: { tag: "federation_grants", cause: { name: "Error", message: SENTINEL } as never },
+		});
+		expect((recorded[0] as { details: Record<string, unknown> }).details).toEqual({
+			tag: "federation_grants",
+			cause: { name: "ReplyError", code: "ECONNRESET", cause: { name: "Error" } },
+		});
+		expect((recorded[1] as { details: Record<string, unknown> }).details).toEqual({
+			tag: "federation_grants",
+			// Still an audited error: a sink that fixes the field's type on
+			// first sight must not see it change to a string here.
+			cause: { name: "[redacted]" },
+		});
+		expect(JSON.stringify(recorded)).not.toContain(SENTINEL);
+	});
+
+	it.each([
+		["a name carrying CRLF", { name: "Error\r\nX-Injected: 1" }],
+		["a code carrying a double quote", { name: "Error", code: 'E"CODE' }],
+		["a nested cause carrying non-ASCII", { name: "Error", cause: { name: "Erreur\u00e9" } }],
+	])("redacts a cause with %s, which auditedError never writes", (_label, cause) => {
+		// `auditedError` sanitises every name and code; a value outside those
+		// characters did not come from it, so it is not carried.
+		const recorded: unknown[] = [];
+		const sanitized = createSanitizedAuditSink({
+			kind: "test",
+			record: async (event) => {
+				recorded.push(event);
+			},
+		});
+		void sanitized.record({
+			timestamp: new Date(),
+			type: "rate_limit.unavailable",
+			details: { tag: "federation_grants", cause: cause as never },
+		});
+		expect((recorded[0] as { details: Record<string, unknown> }).details).toEqual({
+			tag: "federation_grants",
+			// Still an audited error: a sink that fixes the field's type on
+			// first sight must not see it change to a string here.
+			cause: { name: "[redacted]" },
+		});
+	});
+
 	it("applies the same allowlist to an audit event's details", () => {
 		// `rate_limit.unavailable` carries the same stringified exception the
 		// log line does, on a channel the logger facade never sees.

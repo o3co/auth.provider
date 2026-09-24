@@ -204,10 +204,11 @@ describe("requiresExplicitGrantAllowlist — deny-by-absence at dispatch (#326)"
 		const res = await tokenRequest(app, STRICT_GRANT_TYPE);
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("unauthorized_client");
-		// Wire-format pin: the deleted per-grant checks emitted exactly this
-		// description (no `grant_type "…"` quoting); the central strict rule
-		// must keep the historical shape.
-		expect(res.body.error_description).toBe(`client is not authorized for ${STRICT_GRANT_TYPE}`);
+		// Wire-format pin: the same description the base rule gives (next
+		// test), so a client cannot tell which of the two rules refused it.
+		expect(res.body.error_description).toBe(
+			`client is not authorized for grant_type '${STRICT_GRANT_TYPE}'`,
+		);
 	});
 
 	it("still applies the base rule when the allowlist is declared but excludes the grant", async () => {
@@ -215,6 +216,9 @@ describe("requiresExplicitGrantAllowlist — deny-by-absence at dispatch (#326)"
 		const res = await tokenRequest(app, STRICT_GRANT_TYPE);
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("unauthorized_client");
+		expect(res.body.error_description).toBe(
+			`client is not authorized for grant_type '${STRICT_GRANT_TYPE}'`,
+		);
 	});
 
 	it("refuses a strict grant on an empty allowlist (base rule, unchanged)", async () => {
@@ -257,6 +261,10 @@ describe("allowedGrantTypes — /authorize enforcement (#268)", () => {
 		const location = new URL(res.headers.location as string);
 		expect(location.origin + location.pathname).toBe(REDIRECT_URI);
 		expect(location.searchParams.get("error")).toBe("unauthorized_client");
+		// The token endpoint's words for the same refusal.
+		expect(location.searchParams.get("error_description")).toBe(
+			"client is not authorized for grant_type 'authorization_code'",
+		);
 		expect(location.searchParams.get("state")).toBe("xyz");
 	});
 
@@ -344,6 +352,9 @@ describe("requireGrantTypeAllowlist — deployment-wide deny-by-absence (#311)",
 		const location = new URL(res.headers.location as string);
 		expect(location.origin + location.pathname).toBe(REDIRECT_URI);
 		expect(location.searchParams.get("error")).toBe("unauthorized_client");
+		expect(location.searchParams.get("error_description")).toBe(
+			"client is not authorized for grant_type 'authorization_code'",
+		);
 		expect(location.searchParams.get("state")).toBe("xyz");
 	});
 

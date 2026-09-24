@@ -531,6 +531,52 @@ describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () =>
 	);
 });
 
+describe("deviceGrantModule beside oauthModule — error text (RFC 6749 Appendix A.8)", () => {
+	// `error_description` is 1*NQSCHAR: printable ASCII without `"` and `\`.
+	it("sends a refused scope the client asked for within that set", async () => {
+		// The refused values are the client's own; each character outside the
+		// set is sent as `?`.
+		const config = makeConfig(ENABLED);
+		const [oauth, device] = orders[0][1](config);
+		const { handle, app } = await bootWith(config, [sessionStoreModuleFor(config), oauth, device]);
+		try {
+			const res = await request(app)
+				.post("/oauth/device_authorization")
+				.type("form")
+				.send({ client_id: CLIENT_ID, scope: 'openid ad"min caf\u00e9' });
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({
+				error: "invalid_scope",
+				error_description: "scope not permitted for this client: ad?min caf?",
+			});
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("answers an unknown code in plain ASCII", async () => {
+		const config = makeConfig(ENABLED);
+		const [oauth, device] = orders[0][1](config);
+		const { handle, app } = await bootWith(config, [sessionStoreModuleFor(config), oauth, device]);
+		try {
+			const agent = request.agent(app);
+			await signIn(agent);
+			const { header, token } = await csrfToken(agent);
+			const res = await agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "lookup", user_code: "BCDF-GHJK" });
+			expect(res.status).toBe(404);
+			expect(res.body).toEqual({
+				error: "invalid_user_code",
+				error_description: "that code is not valid; check it and try again",
+			});
+		} finally {
+			await handle.dispose();
+		}
+	});
+});
+
 /**
  * A route of some other module, with no parser of its own: it reads the
  * request stream itself and reports what it found — and whether anything

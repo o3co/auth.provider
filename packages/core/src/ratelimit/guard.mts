@@ -15,6 +15,7 @@
  */
 
 import type { Request, RequestHandler, Response } from "express";
+import { auditedError } from "../audit/auditedError.mjs";
 import { emitAuditEvent } from "../audit/factory.mjs";
 import type { AuditSink } from "../audit/types.mjs";
 import { type ErrorEnvelope, errorEnvelope } from "../errors/envelope.mjs";
@@ -136,11 +137,13 @@ export const checkWithFailMode = async (
 	try {
 		return { status: "decided", decision: await limiter.check(key, ctx) };
 	} catch (cause) {
-		// A string, as the log line and the audit event have always carried —
-		// but the projection's: a limiter's error is a store's (a Redis reply
-		// echoes the command it refused), so its message is read through
-		// loggableError, and a thrown non-Error says what kind it was, not what
-		// it held.
+		// A string, as the log line has always carried — but the projection's:
+		// a limiter's error is a store's (a Redis reply echoes the command it
+		// refused), so its message is read through loggableError, and a thrown
+		// non-Error says what kind it was, not what it held. The audit event
+		// keeps less: the error's name and code (`auditedError`) as
+		// `details.cause`, because a sink is a record other systems read, and
+		// the message is still a store's words.
 		const projected = loggableError(cause);
 		const reported = projected.detail ?? projected.name;
 		const ip = ctx.ip ?? "unknown";
@@ -155,7 +158,7 @@ export const checkWithFailMode = async (
 			userAgent: ctx.userAgent,
 			details: {
 				tag,
-				error: reported,
+				cause: auditedError(cause),
 			},
 		});
 		return { status: "unavailable", failMode };
@@ -259,18 +262,17 @@ export const createRateLimitGuard = ({
 			}
 			// AS-2: rate-limit body migrated from `{error, reason}` to RFC 6749 §5.2
 			// `{error, error_description}` so all auth-product error responses share
-			// a single shape. `decision.reason` is the operator-visible cause string.
-			// `||` (not `??`) so that `decision.reason: ""` from a custom rate
-			// limiter also falls back — the envelope helper would otherwise drop
-			// the empty string and produce a 429 response with no `error_description`.
-			res
-				.status(429)
-				.json(
-					errorEnvelope(
-						"rate_limited",
-						deniedDescription ?? (decision.reason || "Rate limit exceeded"),
-					),
-				);
+			// a single shape. `decision.reason` is the operator-visible cause string,
+			// sent as the envelope sends every description: within RFC 6749's
+			// characters. A reason that is empty or not a string — a custom
+			// adapter can put anything there — falls back to the default, which
+			// the envelope would otherwise drop and leave the 429 without an
+			// `error_description`.
+			const reason =
+				typeof decision.reason === "string" && decision.reason !== ""
+					? decision.reason
+					: "Rate limit exceeded";
+			res.status(429).json(errorEnvelope("rate_limited", deniedDescription ?? reason));
 			return;
 		}
 		next();

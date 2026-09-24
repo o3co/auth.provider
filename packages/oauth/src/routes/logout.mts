@@ -28,7 +28,14 @@ import type {
 	SessionRPRegistry,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
-import { emitAuditEvent, loggableError, supportsLogout, verifyJwt } from "@o3co/auth-provider-core";
+import {
+	auditedError,
+	emitAuditEvent,
+	loggableError,
+	sanitizeErrorText,
+	supportsLogout,
+	verifyJwt,
+} from "@o3co/auth-provider-core";
 import accepts from "accepts";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
@@ -415,7 +422,9 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			if (!federations.includes(name)) {
 				return res.status(404).json({
 					error: "federation_not_linked",
-					error_description: `federation "${name}" is not linked to this session`,
+					error_description: sanitizeErrorText(
+						`federation '${name}' is not linked to this session`,
+					),
 				});
 			}
 
@@ -502,10 +511,9 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 						subject: sub ?? undefined,
 						ip: req.ip,
 						userAgent: req.get("user-agent"),
-						details: {
-							federation: name,
-							error: error instanceof Error ? error.message : String(error),
-						},
+						// The error's name and code, never its message: an IdP's
+						// refusal carries the IdP's own words.
+						details: { federation: name, cause: auditedError(error) },
 					});
 					return res.status(200).json({ disconnected: true });
 				}

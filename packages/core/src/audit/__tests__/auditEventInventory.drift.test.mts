@@ -33,8 +33,9 @@
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { BUILT_IN_AUDIT_EVENT_TYPES } from "#/audit/types.mjs";
 
@@ -194,5 +195,213 @@ describe("built-in audit event inventory (#369)", () => {
 			(type) => !emitted.has(type),
 		);
 		expect(dead, "listed but no emission site found").toEqual([]);
+	});
+});
+
+/**
+ * One type per `details` key, across every event (#369's inventory, extended).
+ *
+ * A sink that fixes a field's type the first time it sees it —
+ * Elasticsearch / OpenSearch dynamic mapping, a BigQuery schema, a Datadog
+ * facet — rejects every later event that carries the other type, and the
+ * events it drops are whichever arrive second. `details.error` is a string
+ * (an OAuth code, a reason) wherever it appears; an error an event reports
+ * travels as `details.cause`, always core's `auditedError(…)` projection.
+ *
+ * Read from the source, at every emission whose event is an object literal
+ * (a `details` anywhere inside it, a conditional spread's included):
+ * `details.error` has to be written as a string (a literal, a template, a
+ * name, or a call to `auditErrorText` / `String`), and `details.cause` as a
+ * call to `auditedError`. Where the details are built by a function in the
+ * same file (`details: sanitizeAuditDetails(event.details)`, a relaying
+ * sink), no `cause` that function writes may be a string: no string or
+ * template literal, `String(…)`, `auditErrorText(…)` or `.message` on any
+ * arm of `??`, `||` or `?:`, following same-file consts. `AuditEvent`'s type
+ * says the same (`audit-details.types.test.mts`); this catches what a cast
+ * would let by.
+ *
+ * The gap: a name or a property access counts as string-shaped whatever it
+ * holds, because this reads syntax, not types. An `any`-typed `err` under
+ * `details.error` passes this check and `tsc` alike; review is what catches
+ * that one.
+ */
+function detailsShapeViolations(file: string, source: string): string[] {
+	const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const found: string[] = [];
+	const at = (node: ts.Node): string =>
+		`${relative(repoRoot, file)}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}`;
+	const stringShaped = (value: ts.Expression): boolean => {
+		if (
+			ts.isStringLiteral(value) ||
+			ts.isNoSubstitutionTemplateLiteral(value) ||
+			ts.isTemplateExpression(value) ||
+			ts.isIdentifier(value) ||
+			ts.isPropertyAccessExpression(value)
+		)
+			return true;
+		if (ts.isParenthesizedExpression(value)) return stringShaped(value.expression);
+		if (ts.isConditionalExpression(value))
+			return stringShaped(value.whenTrue) && stringShaped(value.whenFalse);
+		if (ts.isBinaryExpression(value)) return stringShaped(value.left) && stringShaped(value.right);
+		return (
+			ts.isCallExpression(value) &&
+			ts.isIdentifier(value.expression) &&
+			["auditErrorText", "String"].includes(value.expression.text)
+		);
+	};
+	const checkDetails = (details: ts.ObjectLiteralExpression): void => {
+		for (const property of details.properties) {
+			if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name)) continue;
+			const value = property.initializer;
+			if (property.name.text === "error" && !stringShaped(value)) {
+				found.push(`${at(property)} details.error is not a string: ${value.getText(sf)}`);
+			}
+			if (
+				property.name.text === "cause" &&
+				!(
+					ts.isCallExpression(value) &&
+					ts.isIdentifier(value.expression) &&
+					value.expression.text === "auditedError"
+				)
+			) {
+				found.push(`${at(property)} details.cause is not auditedError(…): ${value.getText(sf)}`);
+			}
+		}
+	};
+	// Same-file consts and functions, for the helper that builds a relayed
+	// event's details.
+	const constants = new Map<string, ts.Expression>();
+	const functions = new Map<string, ts.Node>();
+	const collect = (node: ts.Node): void => {
+		if (ts.isFunctionDeclaration(node) && node.name !== undefined && node.body !== undefined) {
+			functions.set(node.name.text, node.body);
+		}
+		if (
+			ts.isVariableDeclaration(node) &&
+			ts.isIdentifier(node.name) &&
+			node.initializer !== undefined
+		) {
+			const init = node.initializer;
+			if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+				functions.set(node.name.text, init.body);
+			} else {
+				constants.set(node.name.text, init);
+			}
+		}
+		ts.forEachChild(node, collect);
+	};
+	collect(sf);
+	/** Whether any arm of `value` writes a string: what `details.cause` may never be. */
+	const stringArm = (value: ts.Expression, seen: ReadonlySet<string> = new Set()): boolean => {
+		if (
+			ts.isStringLiteral(value) ||
+			ts.isNoSubstitutionTemplateLiteral(value) ||
+			ts.isTemplateExpression(value)
+		)
+			return true;
+		if (ts.isParenthesizedExpression(value) || ts.isAsExpression(value)) {
+			return stringArm(value.expression, seen);
+		}
+		if (ts.isConditionalExpression(value)) {
+			return stringArm(value.whenTrue, seen) || stringArm(value.whenFalse, seen);
+		}
+		if (ts.isBinaryExpression(value))
+			return stringArm(value.left, seen) || stringArm(value.right, seen);
+		if (ts.isPropertyAccessExpression(value) && value.name.text === "message") return true;
+		if (ts.isCallExpression(value) && ts.isIdentifier(value.expression)) {
+			return ["String", "auditErrorText", "sanitizeErrorText"].includes(value.expression.text);
+		}
+		if (ts.isIdentifier(value) && !seen.has(value.text)) {
+			const bound = constants.get(value.text);
+			return bound !== undefined && stringArm(bound, new Set([...seen, value.text]));
+		}
+		return false;
+	};
+	const checkHelper = (body: ts.Node): void => {
+		const walk = (node: ts.Node): void => {
+			if (ts.isObjectLiteralExpression(node)) {
+				for (const property of node.properties) {
+					if (
+						ts.isPropertyAssignment(property) &&
+						ts.isIdentifier(property.name) &&
+						property.name.text === "cause" &&
+						stringArm(property.initializer)
+					) {
+						found.push(
+							`${at(property)} details.cause can be a string: ${property.initializer.getText(sf)}`,
+						);
+					}
+				}
+			}
+			ts.forEachChild(node, walk);
+		};
+		walk(body);
+	};
+	const checkEvent = (event: ts.ObjectLiteralExpression): void => {
+		const walk = (node: ts.Node): void => {
+			if (
+				ts.isPropertyAssignment(node) &&
+				ts.isIdentifier(node.name) &&
+				node.name.text === "details"
+			) {
+				const value = node.initializer;
+				if (ts.isObjectLiteralExpression(value)) checkDetails(value);
+				if (ts.isCallExpression(value) && ts.isIdentifier(value.expression)) {
+					const helper = functions.get(value.expression.text);
+					if (helper !== undefined) checkHelper(helper);
+				}
+				return;
+			}
+			ts.forEachChild(node, walk);
+		};
+		walk(event);
+	};
+	const visit = (node: ts.Node): void => {
+		if (ts.isCallExpression(node)) {
+			const callee = node.expression.getText(sf);
+			const event =
+				callee === "emitAuditEvent"
+					? node.arguments[1]
+					: /(^|\.)sink\??\.record$/.test(callee)
+						? node.arguments[0]
+						: undefined;
+			if (event !== undefined && ts.isObjectLiteralExpression(event)) checkEvent(event);
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(sf);
+	return found;
+}
+
+describe("audit details keep one type per key", () => {
+	it("writes details.error as a string and details.cause as auditedError(…), in every emission", () => {
+		const violations = listShippedSources().flatMap((file) =>
+			detailsShapeViolations(file, readFileSync(file, "utf8")),
+		);
+		expect(violations).toEqual([]);
+	});
+
+	it("sees the shapes it exists for", () => {
+		const flagged = (source: string): number => detailsShapeViolations("sample.mts", source).length;
+		expect(
+			flagged(`emitAuditEvent(sink, { type: "x", details: { error: auditedError(cause) } });`),
+		).toBe(1);
+		expect(flagged(`sink.record({ type: "x", details: { error: { name: "Error" } } });`)).toBe(1);
+		expect(flagged(`emitAuditEvent(sink, { type: "x", details: { cause: cause.message } });`)).toBe(
+			1,
+		);
+		expect(
+			flagged(
+				`emitAuditEvent(sink, { type: "x", details: { error: code, reason: "r", cause: auditedError(err) } });`,
+			),
+		).toBe(0);
+		// A relaying sink whose helper builds the details.
+		const relay = (fallback: string): string =>
+			`const REDACTED = { name: "[redacted]" };
+			const relayed = (details) => ({ ...rest(details), ...(details.cause === undefined ? {} : { cause: shape(details.cause) ?? ${fallback} }) });
+			sink.record({ ...event, ...(event.details === undefined ? {} : { details: relayed(event.details) }) });`;
+		expect(flagged(relay(`"[redacted]"`))).toBe(1);
+		expect(flagged(relay("String(details.cause)"))).toBe(1);
+		expect(flagged(relay("REDACTED"))).toBe(0);
 	});
 });

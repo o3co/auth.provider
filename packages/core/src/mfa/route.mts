@@ -15,6 +15,7 @@
  */
 
 import type { Request, Response, Router } from "express";
+import { sanitizeErrorText } from "../errors/envelope.mjs";
 import type { MfaProviderFactory, MfaResumeState, MfaTransactionStore } from "./types.mjs";
 
 export interface MfaRouteDeps {
@@ -88,9 +89,12 @@ export function createMfaRouter(express: { Router: () => Router }, deps: MfaRout
 			});
 		}
 		if (!result.success) {
+			// The provider's reason, held to RFC 6749's characters (Appendix A.8): a
+			// provider is an adapter a deployment writes, and a JavaScript one can
+			// return anything — `invalid` for one that is empty or not a string.
 			return res.status(401).json({
 				error: "mfa_failed",
-				error_description: result.failureReason ?? "invalid",
+				error_description: sanitizeErrorText(result.failureReason) || "invalid",
 			});
 		}
 		await deps.transactionStore.delete(transactionId);

@@ -79,7 +79,14 @@ A grant that honours `resource` reads it with `extractResourceParam`, derives th
 
 ### Error text (RFC 6749)
 
-`errorEnvelope(error, description?, uri?)` builds the RFC 6749 §5.2 error body and does not check its text. RFC 6749 Appendix A.7 and A.8 limit `error` and `error_description` to `1*NQSCHAR`: printable ASCII without `"` and `\`. `sanitizeErrorText` replaces every other character with `?`, and answers `undefined` for a value that is not a string, so the caller falls back to its own default. `auditErrorText` does the same and caps the text at 200 characters, for a log line or an audit event. `isWellFormedErrorCode` checks an `error` code, such as a grant policy's deny, before it goes out. All three are in [`src/errors/envelope.mts`](src/errors/envelope.mts).
+RFC 6749 Appendix A.7 and A.8 limit `error` and `error_description` to `1*NQSCHAR`: printable ASCII without `"` and `\`. The rule is in [`src/errors/envelope.mts`](src/errors/envelope.mts):
+
+- `errorEnvelope(error, description?, uri?)` builds the RFC 6749 §5.2 error body and applies the rule itself, so every writer that goes through it conforms whatever it was handed: core's token-binding middleware (a mechanism's `retryInstruction` or `unavailable` text, the kinds a dispatch conflict names), the protected-resource binding, the rate limiter (a limiter adapter's `reason`), the session routes and a contributed module's own routes. A description character outside the set is sent as `?`; a description that is not a string is dropped like an empty one. A malformed `error` code is sent as `server_error` and logged as `error_envelope_code_malformed` through `consoleLogger`: the code came from server-side code, and the envelope does not know the status its caller answers with. `error_uri` is sent only when it is an `http:` or `https:` URI — §5.2's human-readable web page — or a relative reference, parsed component by component against RFC 3986's grammar (no userinfo — `https://example.com@evil.example/` goes to evil.example — brackets only around an IP-literal host, no colon in a relative path's first segment, one fragment) and resolved by the WHATWG URL parser. Every character that grammar admits is in RFC 6749's `error_uri` set (Appendix A.9). Any other `error_uri` is dropped, not altered, and logged as `error_envelope_uri_malformed`.
+- `sanitizeErrorText` replaces every character outside the set with `?`, and answers `undefined` for a value that is not a string, so the caller falls back to its own default. A writer that builds its body itself — a redirect's query, a literal `{ error, error_description }` — sends what it echoes through it.
+- `auditErrorText` does the same and caps the text at 200 characters, for a log line or an audit event.
+- `isWellFormedErrorCode` checks an `error` code before it goes out. A caller that builds a code from something it does not control and knows its answer is a refusal of the client's request falls back to a client-error code itself: the token-binding middleware answers a refusal whose `invalid_<kind>_proof` would be malformed as `invalid_request`, and `/oauth/token` and `/oauth/authorize` do the same for a grant policy's deny (below).
+
+Text written in this repository's own words is held to the set where it is written by [`__tests__/errorText.drift.test.mts`](src/__tests__/errorText.drift.test.mts): quote a value with `'`, write "section" for the section sign, and use no em dash.
 
 ### Token Utilities
 
@@ -394,12 +401,38 @@ Five optional extension points: a slot or contribution kind a composition root f
 - `AuditSink.record(event)` fire-and-forget
 - Factory: `createAuditSinkFactory()`, built-in `"console"` via `registerBuiltinAuditSinks()`
 - Errors swallowed by core — audit failure never blocks auth flow
+- An event carries an error it reports as `details.cause`, `auditedError(err)` ([`src/audit/auditedError.mts`](src/audit/auditedError.mts)): `{ name, code?, cause?: { name, code? } }` — the name and code `loggableError` reads, and one level of its cause, sanitised and capped, and never a message. A sink is a record other systems read, and a store's or an IdP's message is theirs: the arguments a Redis reply quotes, the input a JSON parse error quotes, an upstream's description. `rate_limit.unavailable`, `introspect.store_unavailable` and `federation.logout.idp_unreachable` carry it
+- Each `details` key keeps one type in every event, because a sink that fixes a field's type on first sight (Elasticsearch dynamic mapping, a BigQuery schema, a Datadog facet) drops the events that disagree: `details.error` is a string wherever it appears (an OAuth code, a reason), and a code in `details.cause` is a string. [`AuditEventDetails`](src/audit/types.mts) types both keys, and [`auditEventInventory.drift.test.mts`](src/audit/__tests__/auditEventInventory.drift.test.mts) reads every emission for them
+
+##### The details contract: `AuditEventDetails` and `AuditedError`
+
+`AuditEvent.details` is [`AuditEventDetails`](src/audit/types.mts): an open record, with two keys typed so that no event can give them a second type:
+
+| Key | Type | What it holds |
+| --- | --- | --- |
+| `details.error` | `string` | An OAuth error code or a refusal's reason — never an error object and never an error's message |
+| `details.cause` | [`AuditedError`](src/audit/auditedError.mts) | The error the event reports: `{ name: string, code?: string, cause?: { name: string, code?: string } }` |
+
+Every other key is open, and is still expected to keep one type across the events that carry it.
+
+- **A custom emitter** (a module calling `emitAuditEvent`, or a sink wrapper that builds events):
+  - puts an error it reports under `details.cause`, built with `auditedError(err)` and nothing else;
+  - never writes an error object, its message or its stack anywhere in `details`;
+  - writes `details.error` only as a string.
+
+  An event written as an object literal is held to the two keys by the compiler. A `details` built first as a `Record<string, unknown>` is not, so an emitter that assembles one owns the rule itself.
+- **A custom sink** (an `AuditSink` implementation, or a wrapper that relays events):
+  - may rely on `details.error` being a string and `details.cause` an `AuditedError` wherever they appear;
+  - if it transforms or redacts details, keeps those types: a `cause` it will not carry is replaced with an `AuditedError` (federation-grants' sanitised sink uses `{ name: "[redacted]" }`), never with a string or a message;
+  - may drop a key, but should not change its type.
+
+  Every name and code in an `AuditedError` is already held to printable ASCII without `"` and `\` and capped at 200 characters.
 
 #### Rate limiter
 
 - `RateLimiter.check(key, ctx)` atomic check + increment
 - Factory: `createRateLimiterFactory()`; `registerBuiltinRateLimiters()` registers `"memory"` only. The `"redis"` backend is `@o3co/auth-provider-redis` (`redisRateLimiterBuilder`, or the declarative `redisRateLimiterModule`); `ratelimit/__tests__/factory.test.mts` asserts it is not registered here
-- 429 + `Retry-After` emitted by core on denial
+- 429 + `Retry-After` emitted by core on denial; the decision's `reason` is the `error_description`, within RFC 6749's characters, and `Rate limit exceeded` when it is absent, empty or not a string
 
 #### Refresh-token families (RFC 6819 §5.2.2.3 replay detection)
 

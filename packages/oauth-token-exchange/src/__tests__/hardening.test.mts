@@ -297,10 +297,13 @@ describe("token exchange — deny-by-absence of allowedGrantTypes (#326)", () =>
 		});
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const { result } = await g.handle(ctx(exchangeBody(token)));
+		// Byte for byte what dispatch's allowlist checks answer, so a caller
+		// cannot tell which gate refused it.
 		expect(result).toMatchObject({
 			status: 400,
 			error: "unauthorized_client",
-			errorDescription: expect.stringMatching(/token-exchange/),
+			errorDescription:
+				"client is not authorized for grant_type 'urn:ietf:params:oauth:grant-type:token-exchange'",
 		});
 	});
 

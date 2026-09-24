@@ -99,7 +99,7 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f-\u009f]/;
  * failure response independent of anything the server knows about the account.
  */
 const INVALID_USER_ID_DESCRIPTION =
-	"userId must be an opaque handle of 1-64 UTF-8 bytes with no control characters (WebAuthn §5.4.3)";
+	"userId must be an opaque handle of 1-64 UTF-8 bytes with no control characters (WebAuthn section 5.4.3)";
 
 const userIdSchema = z
 	// `.max` on code units first: a UTF-8 encoding is never shorter than the

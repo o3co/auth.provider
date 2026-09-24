@@ -19,6 +19,7 @@ import {
 	type AppConfig,
 	type AuditSink,
 	auditErrorText,
+	auditedError,
 	type ClientRepository,
 	type CodeRepository,
 	type ConsentStore,
@@ -612,8 +613,7 @@ export const createOAuthRouter = async (
 				// property of the handler contract and this the single place both
 				// rules compose.
 				//
-				// Three deliberate shape choices keep the refactor observable-
-				// semantics-preserving:
+				// Three deliberate shape choices:
 				// - Position: after the sender-constraint gate, immediately before
 				//   the handler — exactly where the deleted per-grant checks ran —
 				//   so no dispatch-level rule changes relative order.
@@ -622,10 +622,10 @@ export const createOAuthRouter = async (
 				//   itself with `invalid_client`; WebAuthn deliberately serves
 				//   unauthenticated passkey callers).
 				// - The denial is threaded through the shared result path below
-				//   (not an early `res.json`), and its description keeps the
-				//   per-grant wire format `client is not authorized for <type>`
-				//   (the base check above quotes the type; the deleted checks did
-				//   not), so response body and audit emission stay byte-identical.
+				//   (not an early `res.json`), so it is audited like any grant's
+				//   refusal. Its description is the base check's above, word for
+				//   word — `client is not authorized for grant_type '<type>'` — so a
+				//   client cannot tell which of the two rules refused it.
 				const strictAllowlistDenial: GrantHandlerResult | null =
 					handler.requiresExplicitGrantAllowlist === true &&
 					ctx.authenticatedClient !== null &&
@@ -634,7 +634,7 @@ export const createOAuthRouter = async (
 								result: {
 									status: 400,
 									error: "unauthorized_client",
-									errorDescription: `client is not authorized for ${grant_type}`,
+									errorDescription: `client is not authorized for grant_type '${grant_type}'`,
 								},
 							}
 						: null;
@@ -845,10 +845,10 @@ export const createOAuthRouter = async (
 								type: "introspect.store_unavailable",
 								ip: req.ip,
 								userAgent: req.get("user-agent"),
-								details: {
-									family_id: familyId,
-									error: cause instanceof Error ? cause.message : String(cause),
-								},
+								// The error's name and code, never its message: the store's
+								// words (a Redis reply quotes the command it refused) are not
+								// the audit trail's to keep.
+								details: { family_id: familyId, cause: auditedError(cause) },
 							});
 							return res.status(200).json({ active: false });
 						}
@@ -910,10 +910,7 @@ export const createOAuthRouter = async (
 								type: "introspect.store_unavailable",
 								ip: req.ip,
 								userAgent: req.get("user-agent"),
-								details: {
-									sid,
-									error: cause instanceof Error ? cause.message : String(cause),
-								},
+								details: { sid, cause: auditedError(cause) },
 							});
 							return res.status(200).json({ active: false });
 						}

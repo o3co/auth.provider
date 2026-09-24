@@ -520,6 +520,22 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(404);
 			expect(res.body.error).toBe("federation_not_linked");
+			expect(res.body.error_description).toBe("federation 'github' is not linked to this session");
+		});
+
+		it("quotes the requested name within RFC 6749's characters", async () => {
+			// The name is the client's path segment. Appendix A.8 allows no `"`,
+			// `\` or non-ASCII in error_description, so the description quotes
+			// with `'` and sends any other character as `?`.
+			const app = buildApp();
+			const token = await mintAccessToken();
+
+			const res = await postFedToken(app, encodeURIComponent('git"h\\ub\u00e9'), token);
+
+			expect(res.status).toBe(404);
+			expect(res.body.error_description).toBe(
+				"federation 'git?h?ub?' is not linked to this session",
+			);
 		});
 	});
 
@@ -540,6 +556,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(404);
 			expect(res.body.error).toBe("federation_not_linked");
+			expect(res.body.error_description).toBe("federation 'google' tokens not found");
 			expect(removeFederationSpy).toHaveBeenCalledWith("sid-1", "google");
 		});
 	});
@@ -594,6 +611,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(503);
 			expect(res.body.error).toBe("refresh_not_supported");
+			expect(res.body.error_description).toBe("federation 'google' does not support token refresh");
 		});
 	});
 

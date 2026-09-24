@@ -62,6 +62,8 @@ export interface FederationRedirectPolicy {
 	 * Returns `{ ok: true }` when the URL passes the policy's allowlist;
 	 * otherwise returns a `FederationResult` failure with HTTP status code,
 	 * OAuth error code, and error description suitable for direct response.
+	 * The route sends the code and description through core's `errorEnvelope`,
+	 * which holds them to RFC 6749's characters.
 	 *
 	 * An implementation MUST fail closed: refuse everything it has not been
 	 * told to permit. The default implementation below does; a replacement that

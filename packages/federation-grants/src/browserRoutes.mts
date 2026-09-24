@@ -150,7 +150,7 @@ export const FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX = "federation_grants_br
  * which. The sibling's wording, for the page that already handles it.
  */
 const NO_PENDING =
-	"no pending consent for this challenge — it was answered, has expired, or was not issued to this session; start again";
+	"no pending consent for this challenge: it was answered, has expired, or was not issued to this session; start again";
 
 const BODY_LIMIT = "8kb";
 
@@ -637,7 +637,7 @@ export function createFederationGrantBrowserRouter(
 				const decision = body.decision;
 				if (decision !== "accept" && decision !== "deny") {
 					// Refused with the question still parked: nothing was answered.
-					jsonError(res, 400, "invalid_request", 'decision must be "accept" or "deny"');
+					jsonError(res, 400, "invalid_request", "decision must be 'accept' or 'deny'");
 					return;
 				}
 

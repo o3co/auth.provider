@@ -525,9 +525,12 @@ describe("POST /oauth/consent (#527)", () => {
 					.send({ challenge: "not-mine", decision: "accept" })
 			).status,
 		).toBe(400);
-		expect(
-			(await request(app).post("/oauth/consent").send({ challenge, decision: "maybe" })).status,
-		).toBe(400);
+		const unknown = await request(app)
+			.post("/oauth/consent")
+			.send({ challenge, decision: "maybe" });
+		expect(unknown.status).toBe(400);
+		// RFC 6749 Appendix A.8: no `"` in error text, so the values are quoted with `'`.
+		expect(unknown.body.error_description).toBe("decision must be 'accept' or 'deny'");
 		expect(await pending.get(challenge)).not.toBeNull();
 
 		expect(
@@ -856,7 +859,10 @@ describe("one challenge, one answer (#552)", () => {
 		sessionId = "sess-2";
 		const res = await request(app).post("/oauth/consent").send({ challenge, decision: "accept" });
 		expect(res.status).toBe(400);
-		expect(res.body.error_description).toMatch(/no pending consent/);
+		// RFC 6749 Appendix A.8: printable ASCII only, so no em dash.
+		expect(res.body.error_description).toBe(
+			"no pending consent for this challenge: it was answered, has expired, or was not issued to this session; start again",
+		);
 		expect(await pending.get(challenge)).not.toBeNull();
 	});
 

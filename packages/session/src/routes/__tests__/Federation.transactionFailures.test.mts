@@ -199,6 +199,10 @@ describe("a form_post start leg refuses when it cannot hold a transaction", () =
 		const res = await request(app).get("/oauth/federation/apple");
 		expect(res.status).toBe(500);
 		expect(res.body.error).toBe("misconfiguration");
+		// RFC 6749 Appendix A.8 allows no `"`: the name is quoted with `'`.
+		expect(res.body.error_description).toBe(
+			"Federation 'apple' cannot start: no session store is mounted to hold its transaction",
+		);
 	});
 
 	it("500s when what is mounted is not a store", async () => {
@@ -220,6 +224,7 @@ describe("a form_post start leg refuses when it cannot hold a transaction", () =
 		const res = await request(app).get("/oauth/federation/apple");
 		expect(res.status).toBe(500);
 		expect(res.body.error).toBe("misconfiguration");
+		expect(res.body.error_description).toBe("No callback URL registered for provider 'apple'");
 	});
 
 	it("500s, and redirects nobody, when the transaction cannot be written", async () => {

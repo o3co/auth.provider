@@ -28,6 +28,7 @@ import {
 	resolveFederationResponseMode,
 	type SessionFederationIndex,
 	type SubjectSessionIndex,
+	sanitizeErrorText,
 	supportsClaimMapping,
 	type UserRepository,
 	type UserSessionStore,
@@ -49,6 +50,7 @@ import {
 } from "../federations/transaction.mjs";
 import { readCookie } from "../internal/cookies.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
+import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 
 declare module "express-session" {
 	interface SessionData {
@@ -451,8 +453,11 @@ export const createRouter = (
 				const conflict = outcome.reason === "conflict";
 				return res.status(conflict ? 409 : 403).json({
 					error: conflict ? "identity_conflict" : "link_refused",
+					// The Store's own words when it gave any: an adapter's text, held to
+					// RFC 6749's characters (Appendix A.8), with ours for one that is
+					// absent, empty or not a string.
 					error_description:
-						outcome.description ??
+						sanitizeErrorText(outcome.description) ||
 						(conflict
 							? "This federated identity is already linked to another account"
 							: "The user directory refused to link this identity"),
@@ -535,10 +540,9 @@ export const createRouter = (
 		}
 		const redirect = policy.resolveCallbackRedirect({ redirectTo });
 		if (!redirect.ok) {
-			return res.status(redirect.status).json({
-				error: redirect.error,
-				error_description: redirect.errorDescription,
-			});
+			// A policy's refusal, in its words, held to RFC 6749's characters, and
+			// a client error kept one (`refusalEnvelope`).
+			return res.status(redirect.status).json(refusalEnvelope(redirect, logger));
 		}
 		return res.redirect(redirect.value);
 	};
@@ -773,7 +777,9 @@ export const createRouter = (
 		if (!callbackUrl) {
 			return res.status(500).json({
 				error: "misconfiguration",
-				error_description: `No callback URL registered for provider "${provider.name}"`,
+				error_description: sanitizeErrorText(
+					`No callback URL registered for provider '${provider.name}'`,
+				),
 			});
 		}
 
@@ -1034,10 +1040,7 @@ export const createRouter = (
 			}
 			const redirectResult = callbackPolicy.resolveCallbackRedirect({ redirectTo });
 			if (!redirectResult.ok) {
-				return res.status(redirectResult.status).json({
-					error: redirectResult.error,
-					error_description: redirectResult.errorDescription,
-				});
+				return res.status(redirectResult.status).json(refusalEnvelope(redirectResult, logger));
 			}
 
 			return res.redirect(redirectResult.value);
@@ -1113,7 +1116,9 @@ export const createRouter = (
 					.set("Allow", "GET")
 					.json({
 						error: "method_not_allowed",
-						error_description: `Federation "${provider.name}" returns its authorization response in the query string; the POST callback is accepted only for a form_post federation`,
+						error_description: sanitizeErrorText(
+							`Federation '${provider.name}' returns its authorization response in the query string; the POST callback is accepted only for a form_post federation`,
+						),
 					});
 			}
 
@@ -1129,7 +1134,9 @@ export const createRouter = (
 					.set("Allow", "POST")
 					.json({
 						error: "method_not_allowed",
-						error_description: `Federation "${provider.name}" returns its authorization response as a form post; the GET callback is accepted only for a query federation`,
+						error_description: sanitizeErrorText(
+							`Federation '${provider.name}' returns its authorization response as a form post; the GET callback is accepted only for a query federation`,
+						),
 					});
 			}
 
@@ -1188,10 +1195,7 @@ export const createRouter = (
 				}
 				const validation = policy.validateRedirect(redirect_to);
 				if (!validation.ok) {
-					return res.status(validation.status).json({
-						error: validation.error,
-						error_description: validation.errorDescription,
-					});
+					return res.status(validation.status).json(refusalEnvelope(validation, logger));
 				}
 				redirectTo = redirect_to;
 			}
@@ -1268,7 +1272,9 @@ export const createRouter = (
 			if (!callbackUrl) {
 				return res.status(500).json({
 					error: "misconfiguration",
-					error_description: `No callback URL registered for provider "${provider.name}"`,
+					error_description: sanitizeErrorText(
+						`No callback URL registered for provider '${provider.name}'`,
+					),
 				});
 			}
 
@@ -1304,7 +1310,9 @@ export const createRouter = (
 					);
 					return res.status(500).json({
 						error: "misconfiguration",
-						error_description: `Federation "${provider.name}" cannot start: no session store is mounted to hold its transaction`,
+						error_description: sanitizeErrorText(
+							`Federation '${provider.name}' cannot start: no session store is mounted to hold its transaction`,
+						),
 					});
 				}
 

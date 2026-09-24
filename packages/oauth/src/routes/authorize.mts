@@ -308,10 +308,11 @@ const checkAuthorizationCodeGrantAllowed = async (
 	)
 		return true;
 	await auditFailure(ctx, { reason: "grant_type_not_allowed", grant_type: "authorization_code" });
+	// The token endpoint's words for the same refusal.
 	redirectError(
 		ctx,
 		"unauthorized_client",
-		"client is not authorized for the authorization_code grant",
+		"client is not authorized for grant_type 'authorization_code'",
 	);
 	return false;
 };

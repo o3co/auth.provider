@@ -55,7 +55,9 @@
 		"src/repositories/__tests__/code-fields.types.test.mts",
 		"src/repositories/__tests__/createRepositoryFactories.test.mts",
 		// #626: paired with vitest.config.mts, as #343 requires.
-		"src/device-authorization/**/*.mts"
+		"src/device-authorization/**/*.mts",
+		// One type per audit `details` key; paired with vitest.config.mts.
+		"src/audit/__tests__/audit-details.types.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }

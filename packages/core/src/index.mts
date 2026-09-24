@@ -66,13 +66,20 @@ export type {
 	AssertionVerificationResult,
 	AssertionVerifier,
 } from "./assertions/types.mjs";
+// What an audit event may carry of an error: its name and code, never its
+// message (a store's or an IdP's words).
+export {
+	type AuditedError,
+	type AuditedErrorCause,
+	auditedError,
+} from "./audit/auditedError.mjs";
 export {
 	createAuditSinkFactory,
 	emitAuditEvent,
 	registerBuiltinAuditSinks,
 } from "./audit/factory.mjs";
 // Audit
-export type { AuditEvent, AuditSink, AuditSinkFactory } from "./audit/types.mjs";
+export type { AuditEvent, AuditEventDetails, AuditSink, AuditSinkFactory } from "./audit/types.mjs";
 // Two audit constants: the declared-absence policy the bundled auditSink
 // readers share (#363 — one constant, so the boot error's advice cannot
 // depend on which module tripped it; the AbsencePolicy vocabulary itself is

@@ -71,6 +71,7 @@ import {
 	isGrantTypeAllowed,
 	loggableError,
 	normaliseUserCode,
+	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import { DEVICE_CODE_GRANT_TYPE, type DeviceGrantDependencies } from "./types.mjs";
@@ -135,7 +136,9 @@ const resolveScope = (
 		return {
 			ok: false,
 			error: "invalid_scope",
-			description: `scope not permitted for this client: ${refused.join(" ")}`,
+			// The refused values are the client's own: RFC 6749 Appendix A.8 holds
+			// the description to 1*NQSCHAR, so any other character goes out as `?`.
+			description: sanitizeErrorText(`scope not permitted for this client: ${refused.join(" ")}`),
 		};
 	}
 	return { ok: true, scope: requested };
@@ -183,7 +186,7 @@ export const createDeviceAuthorizationHandler = (
 			options.logger?.warn({ clientId: client.clientId }, "device_authorization_grant_not_allowed");
 			fail(res, 400, {
 				error: "unauthorized_client",
-				error_description: `client is not authorized for ${DEVICE_CODE_GRANT_TYPE}`,
+				error_description: `client is not authorized for grant_type '${DEVICE_CODE_GRANT_TYPE}'`,
 			});
 			return;
 		}

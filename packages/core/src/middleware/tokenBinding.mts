@@ -12,7 +12,7 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  */
 import type { Request, RequestHandler } from "express";
-import { errorEnvelope } from "../errors/envelope.mjs";
+import { errorEnvelope, isWellFormedErrorCode } from "../errors/envelope.mjs";
 import type { TokenBinding } from "../grants/tokenBinding.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 
@@ -81,8 +81,11 @@ export interface TokenBindingMechanism {
 	 * code is forwarded as the OAuth `error` field of the response.
 	 * Errors without a snake_case `code` fall back to
 	 * `invalid_<kind>_proof` so infrastructure-layer codes (e.g. Node
-	 * `ECONNREFUSED`) do not leak through the public error envelope. The
-	 * full shape a refusal may carry is {@link TokenBindingRefusal}.
+	 * `ECONNREFUSED`) do not leak through the public error envelope — or to
+	 * `invalid_request` when the kind makes that code fall outside RFC
+	 * 6749's characters. The full shape a refusal may carry is
+	 * {@link TokenBindingRefusal}; its texts are sent sanitised, as
+	 * `errorEnvelope` sends every description.
 	 */
 	extract(req: Request, ctx?: TokenBindingExtractContext): Promise<TokenBinding | null>;
 }
@@ -184,6 +187,18 @@ export const isTokenBindingMw = (handler: unknown): boolean =>
 	Object.hasOwn(handler, TOKEN_BINDING_MW_BRAND) &&
 	(handler as unknown as Record<PropertyKey, unknown>)[TOKEN_BINDING_MW_BRAND] === true;
 
+/**
+ * The code a refusal without one of its own is answered under:
+ * `invalid_<kind>_proof`. The kind is the contributed mechanism's, so the
+ * code it makes may fall outside RFC 6749's characters (Appendix A.7); the
+ * refusal is still a verdict on the client's material, so such a code is
+ * answered `invalid_request` rather than `errorEnvelope`'s `server_error`.
+ */
+const refusalCodeFor = (kind: string): string => {
+	const code = `invalid_${kind}_proof`;
+	return isWellFormedErrorCode(code) ? code : "invalid_request";
+};
+
 export const tokenBindingMw = ({
 	mechanisms,
 	dispatchPolicy,
@@ -197,7 +212,7 @@ export const tokenBindingMw = ({
 			try {
 				binding = await mechanism.extract(req);
 			} catch (err) {
-				const code = oauthErrorCodeOf(err) ?? `invalid_${mechanism.kind}_proof`;
+				const code = oauthErrorCodeOf(err) ?? refusalCodeFor(mechanism.kind);
 				// An outage the mechanism reports is not a refused proof: 503, and
 				// logged under its own event so the two are never counted as one.
 				const unavailable = unavailableOf(err);

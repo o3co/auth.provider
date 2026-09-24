@@ -15,6 +15,7 @@
  */
 
 import type { AdapterFactory } from "../adapters/AdapterFactory.mjs";
+import type { AuditedError } from "./auditedError.mjs";
 
 /**
  * Every audit-event type the bundled packages emit (#369).
@@ -97,7 +98,24 @@ export interface AuditEvent {
 	readonly clientId?: string;
 	readonly ip?: string;
 	readonly userAgent?: string;
-	readonly details?: Record<string, unknown>;
+	readonly details?: AuditEventDetails;
+}
+
+/**
+ * An event's details: open, with one type per key across every event. A sink
+ * that fixes a field's type the first time it sees it (Elasticsearch /
+ * OpenSearch dynamic mapping, a BigQuery schema, a Datadog facet) drops the
+ * events that disagree, so the two keys that could drift are typed here.
+ */
+export interface AuditEventDetails {
+	/** A string where it appears: an OAuth error code, a refusal's reason. */
+	readonly error?: string;
+	/**
+	 * The error an event reports, as `auditedError(err)` projects it — its
+	 * name and code, one level of its cause, never its message.
+	 */
+	readonly cause?: AuditedError;
+	readonly [key: string]: unknown;
 }
 
 /**
