@@ -132,9 +132,10 @@ declare module "express-session" {
  * (`extended: false`), Express's default limits, ahead of anything else.
  * `bodyParsing.test.mts` discovers the router's routes with every surface
  * mounted and with none, asserts this list equals them, and checks both
- * directions — each mounted route is parsed, each unmounted one is not — so
- * a route added without its path here, or a path left here without its
- * route, fails there.
+ * directions — each mounted route is parsed, each unmounted one is not, nor
+ * a path beneath a mounted one — so a route added without its path here, a
+ * path left here without its route, or parsers that match by prefix, fail
+ * there.
  *
  * @internal Exported for that test only; not part of the package's API.
  */
