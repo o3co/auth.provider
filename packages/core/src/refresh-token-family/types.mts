@@ -128,7 +128,8 @@ export interface RefreshTokenFamilyStore {
 	 * if `family.expiresAtMs <= now()` at call time.
 	 *
 	 * MUST throw `RangeError`, recording nothing, when `family.expiresAtMs` is
-	 * not a finite number (NaN, ±Infinity) — a caller fault, not the timing
+	 * not a finite instant within the Date range (NaN, ±Infinity, past
+	 * ±8.64e15 ms — `isStorableExpiry`) — a caller fault, not the timing
 	 * race above. A fractional `expiresAtMs` is valid: the family lives at
 	 * least until it, and an adapter that stores whole milliseconds rounds it
 	 * up.
@@ -203,8 +204,8 @@ export interface RefreshTokenFamilyStore {
 	 *     symmetric with `registerFamily` and prevents committing a
 	 *     dead-on-arrival entry. Callers shrinking TTL during rotation
 	 *     should compute the new `expiresAtMs` from a forward window.
-	 *   - A committed `expiresAtMs` that is not a finite number is a
-	 *     `RangeError`, and nothing is written — as for `registerFamily`. A
+	 *   - A committed `expiresAtMs` that is not a finite instant within the
+	 *     Date range is a `RangeError`, and nothing is written — as for `registerFamily`. A
 	 *     fractional one is valid and may come back rounded up to a whole
 	 *     millisecond.
 	 *

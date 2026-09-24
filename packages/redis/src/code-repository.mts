@@ -22,6 +22,7 @@ import {
 	type CreateCodeInput,
 	consoleLogger,
 	defineModule,
+	isStorableLifetime,
 	type Logger,
 	loggableError,
 } from "@o3co/auth-provider-core";
@@ -77,7 +78,7 @@ export class RedisCodeRepository implements CodeRepository {
 		// Per Copilot review on PR #122.
 		const expiresIn = opts.defaultExpiresIn;
 		if (expiresIn !== undefined) {
-			if (!Number.isInteger(expiresIn) || expiresIn <= 0) {
+			if (!Number.isInteger(expiresIn) || !isStorableLifetime(expiresIn * 1000)) {
 				throw new RangeError(
 					`RedisCodeRepository: defaultExpiresIn must be a positive integer (seconds), got ${expiresIn}`,
 				);
@@ -103,9 +104,9 @@ export class RedisCodeRepository implements CodeRepository {
 		// NaN or ±Infinity would be `PX NaN`, zero or less a PX Redis refuses,
 		// and each surfaced as a failed /authorize rather than as the caller's
 		// fault it is.
-		if (!Number.isFinite(expiresIn) || expiresIn <= 0) {
+		if (!isStorableLifetime(expiresIn * 1000)) {
 			throw new RangeError(
-				`RedisCodeRepository.createCode: expiresIn must be a positive finite number of seconds (got ${String(expiresIn)})`,
+				`RedisCodeRepository.createCode: expiresIn must be a positive finite number of seconds that ends within the Date range (got ${String(expiresIn)})`,
 			);
 		}
 		const code = crypto.randomBytes(32).toString("base64url");

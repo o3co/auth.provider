@@ -33,7 +33,8 @@ export type ChallengeStorageErrorReason = "duplicate" | "expired-at-issue";
  *   ReplaySeenSet.contains     — (no throws)
  *   ChallengeCeremony.consume  — (no throws in normal flow)
  *
- * A non-finite expiry passed to `issue` or `markSeen` is a RangeError, not
+ * An expiry outside the Date range (NaN, ±Infinity, past ±8.64e15 ms)
+ * passed to `issue` or `markSeen` is a RangeError, not
  * this class: it is a caller fault rather than a storage outcome, and must
  * not be mistaken for the `expired-at-issue` race the ceremony swallows.
  */

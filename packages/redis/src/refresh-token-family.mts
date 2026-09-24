@@ -16,6 +16,7 @@
 import {
 	type AdapterBuilder,
 	defineModule,
+	isStorableExpiry,
 	type RefreshTokenFamily,
 	type RefreshTokenFamilyStore,
 	type RefreshTokenFamilyUpdateResult,
@@ -63,9 +64,9 @@ const serialize = (fam: RefreshTokenFamily): string =>
  * reached Redis as `PX NaN`.
  */
 const storedExpiry = (expiresAtMs: number, operation: string): number => {
-	if (!Number.isFinite(expiresAtMs)) {
+	if (!isStorableExpiry(expiresAtMs)) {
 		throw new RangeError(
-			`RefreshTokenFamilyStore.${operation}: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+			`RefreshTokenFamilyStore.${operation}: expiresAtMs must be a finite instant within the Date range (got ${String(expiresAtMs)})`,
 		);
 	}
 	return Math.ceil(expiresAtMs);

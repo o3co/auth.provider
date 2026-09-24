@@ -25,8 +25,8 @@
  * token's `exp` plus the verification clock tolerance, the time it stops
  * verifying:
  * a fractional value is valid (a JWT NumericDate may be non-integer) and the
- * entry lives at least until it; a value that is not a finite number is a
- * RangeError and records nothing. An `expiresAtMs` already past is not an
+ * entry lives at least until it; a value that is not a finite instant within
+ * the Date range (`isStorableExpiry`) is a RangeError and records nothing. An `expiresAtMs` already past is not an
  * error — revoking an expired token is legal (RFC 7009 §2.1).
  */
 export interface AccessTokenDenylist {

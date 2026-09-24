@@ -6,6 +6,7 @@
 import {
 	type AdapterBuilder,
 	defineModule,
+	isStorableLifetime,
 	type RateLimiter,
 	type RateLimitSpec,
 	resolveSeededLimitSpecs,
@@ -35,12 +36,18 @@ interface RedisRateLimiterConfig {
 const isPositiveInteger = (value: unknown): value is number =>
 	typeof value === "number" && Number.isInteger(value) && value > 0;
 
-/** Whether an arbitrary value is a usable {@link RateLimitSpec}. */
+/**
+ * Whether an arbitrary value is a usable {@link RateLimitSpec}. Its window must
+ * also end within the Date range: a whole but enormous `windowSeconds` is an
+ * `EXPIRE` Redis refuses — after the script's `INCR` has run, leaving a
+ * counter with no TTL (#269's shape).
+ */
 const isRateLimitSpec = (value: unknown): value is RateLimitSpec =>
 	typeof value === "object" &&
 	value !== null &&
 	isPositiveInteger((value as { limit?: unknown }).limit) &&
-	isPositiveInteger((value as { windowSeconds?: unknown }).windowSeconds);
+	isPositiveInteger((value as { windowSeconds?: unknown }).windowSeconds) &&
+	isStorableLifetime((value as { windowSeconds: number }).windowSeconds * 1000);
 
 function normalizeLimits(raw: unknown): Record<string, RateLimitSpec> {
 	if (raw == null || typeof raw !== "object") return {};

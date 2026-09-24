@@ -186,8 +186,9 @@ declare module "@o3co/auth-provider-core" {
  *
  * `acquireLock` rejects with a `RangeError`, taking nothing, when `ttlMs` is
  * not a positive finite number or `waitForMs` is not a non-negative finite
- * one: a NaN TTL would leave the lock never held (or, in Redis, be refused),
- * and a NaN wait would never end.
+ * one, or either ends past the Date range (`isStorableLifetime`): a NaN TTL
+ * would leave the lock never held (or, in Redis, be refused), and a NaN wait
+ * would never end.
  */
 export interface AcquireLockOptions {
 	readonly sid: string;

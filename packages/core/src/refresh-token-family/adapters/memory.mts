@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import { isStorableExpiry } from "../../adapters/expiry.mjs";
 import { RefreshTokenStorageError } from "../errors.mjs";
 import { withReason } from "../reason.mjs";
 import type {
@@ -32,9 +34,9 @@ interface Entry {
  * caller fault, refused with the RangeError the Redis adapter throws for it.
  */
 const requireFiniteExpiry = (expiresAtMs: number, operation: string): void => {
-	if (!Number.isFinite(expiresAtMs)) {
+	if (!isStorableExpiry(expiresAtMs)) {
 		throw new RangeError(
-			`RefreshTokenFamilyStore.${operation}: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+			`RefreshTokenFamilyStore.${operation}: expiresAtMs must be a finite instant within the Date range (got ${String(expiresAtMs)})`,
 		);
 	}
 };

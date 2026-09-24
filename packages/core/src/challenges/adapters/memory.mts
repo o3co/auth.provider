@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import { isStorableExpiry } from "../../adapters/expiry.mjs";
 import { canonicalKey } from "../canonical-key.mjs";
 import { ChallengeStorageError } from "../errors.mjs";
 import { type AmortizedSweepOptions, createAmortizedSweep } from "../sweep.mjs";
@@ -116,9 +118,9 @@ export function createMemoryChallengeStore(
 		async issue(scope, value, expiresAtMs) {
 			// NaN is never `<= now`, and ±Infinity is no expiry: without this the
 			// challenge would be kept forever (the sweep never drops it either).
-			if (!Number.isFinite(expiresAtMs)) {
+			if (!isStorableExpiry(expiresAtMs)) {
 				throw new RangeError(
-					`ChallengeStore.issue: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+					`ChallengeStore.issue: expiresAtMs must be a finite instant within the Date range (got ${String(expiresAtMs)})`,
 				);
 			}
 			const nowMs = Date.now();

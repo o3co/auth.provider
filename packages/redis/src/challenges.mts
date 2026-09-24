@@ -20,6 +20,7 @@ import {
 	type ChallengeStore,
 	canonicalChallengeKey,
 	defineModule,
+	isStorableExpiry,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { ChallengeStoreClient } from "./clients.mjs";
@@ -57,9 +58,9 @@ export function createRedisChallengeStore(opts: RedisChallengeStoreOptions): Cha
 		kind: "redis",
 
 		async issue(scope, value, expiresAtMs) {
-			if (!Number.isFinite(expiresAtMs)) {
+			if (!isStorableExpiry(expiresAtMs)) {
 				throw new RangeError(
-					`ChallengeStore.issue: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+					`ChallengeStore.issue: expiresAtMs must be a finite instant within the Date range (got ${String(expiresAtMs)})`,
 				);
 			}
 			const ttlMs = expiresAtMs - Date.now();

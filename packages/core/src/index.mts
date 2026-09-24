@@ -31,6 +31,11 @@ export {
 	createAdapterFactory,
 	type LifecycleRegistrar,
 } from "./adapters/AdapterFactory.mjs";
+export {
+	isStorableExpiry,
+	isStorableLifetime,
+	MAX_STORABLE_EXPIRY_MS,
+} from "./adapters/expiry.mjs";
 // App factory — v0.5.0 boot planner. Re-exports from ./boot/index.mjs through
 // ./app.mjs for backwards-compatible import-path stability.
 export { createApp } from "./app.mjs";

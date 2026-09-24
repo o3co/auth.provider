@@ -147,7 +147,9 @@ export interface DeviceCodeStore {
 	 * answer in flight, and the caller can ask again while the user cannot
 	 * re-approve what they never saw fail.
 	 * @throws `RangeError`, recording nothing, when `expiresAtMs` is not a
-	 * finite number (NaN, ±Infinity): such a record would never expire. A
+	 * finite instant within the Date range (NaN, ±Infinity, past ±8.64e15 ms —
+	 * `isStorableExpiry`): such a record would never expire, or could not be
+	 * given a deadline. A
 	 * fractional `expiresAtMs` is valid, and is the instant the record
 	 * expires at.
 	 */

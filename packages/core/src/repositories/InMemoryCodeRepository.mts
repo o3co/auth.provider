@@ -15,6 +15,7 @@
  */
 
 import crypto from "node:crypto";
+import { isStorableLifetime } from "../adapters/expiry.mjs";
 import type { CodeRepository, CreateCodeInput } from "./CodeRepository.mjs";
 import type { Code } from "./types.mjs";
 
@@ -23,15 +24,15 @@ interface StoredCode extends Code {
 }
 
 /**
- * A code's lifetime, in seconds, is a positive finite number, or the code is
- * refused. NaN is never `>= now`, so a code minted with it was redeemable for
+ * A code's lifetime, in seconds, is a positive finite number whose end is
+ * within the Date range (`adapters/expiry.mts`), or the code is refused. NaN is never `>= now`, so a code minted with it was redeemable for
  * ever and outlived every sweep; ±Infinity is no lifetime; zero or less is a
  * code dead on arrival, which the Redis repository cannot store at all.
  */
 const requireLifetime = (seconds: number, what: string): number => {
-	if (!Number.isFinite(seconds) || seconds <= 0) {
+	if (!isStorableLifetime(seconds * 1000)) {
 		throw new RangeError(
-			`InMemoryCodeRepository: ${what} must be a positive finite number of seconds (got ${String(seconds)})`,
+			`InMemoryCodeRepository: ${what} must be a positive finite number of seconds that ends within the Date range (got ${String(seconds)})`,
 		);
 	}
 	return seconds;

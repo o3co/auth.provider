@@ -15,7 +15,12 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { AcquireLockOptions, LockResult, SupportsLock } from "@o3co/auth-provider-core";
+import {
+	type AcquireLockOptions,
+	isStorableLifetime,
+	type LockResult,
+	type SupportsLock,
+} from "@o3co/auth-provider-core";
 
 /**
  * Minimal redis client shape the lock needs. Consumers can pass any client
@@ -93,14 +98,14 @@ export function createRedisLock(opts: RedisLockOptions): Pick<SupportsLock, "acq
 			// The rule the federation-grant lock keeps: a TTL of NaN is `PX NaN`,
 			// and an infinite one is not a lease; a wait of NaN is a deadline no
 			// clock reaches, so a held lock would be polled for ever.
-			if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+			if (!isStorableLifetime(ttlMs)) {
 				throw new RangeError(
-					`acquireLock: ttlMs must be a positive finite number (got ${String(ttlMs)})`,
+					`acquireLock: ttlMs must be a positive finite number that ends within the Date range (got ${String(ttlMs)})`,
 				);
 			}
-			if (!Number.isFinite(waitForMs) || waitForMs < 0) {
+			if (!isStorableLifetime(waitForMs, { allowZero: true })) {
 				throw new RangeError(
-					`acquireLock: waitForMs must be a non-negative finite number (got ${String(waitForMs)})`,
+					`acquireLock: waitForMs must be a non-negative finite number that ends within the Date range (got ${String(waitForMs)})`,
 				);
 			}
 			// Rounded up: `PX` takes whole milliseconds, and a lease rounded down

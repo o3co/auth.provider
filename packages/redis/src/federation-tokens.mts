@@ -56,6 +56,7 @@ import {
 	defineModule,
 	type FederationTokenStore,
 	type FederationTokens,
+	isStorableLifetime,
 	type SupportsLock,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
@@ -256,8 +257,13 @@ export function createRedisFederationTokenStore(
 	}
 	const prefix = opts.keyPrefix ?? "ft:";
 	const ttlSeconds = opts.ttl ?? DEFAULT_TTL_SECONDS;
-	if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
-		throw new Error("FederationTokenStore redis: ttl must be a positive finite number of seconds");
+	// Its end, measured from now, must be within the Date range: past it the
+	// PX is no number Redis can take, and the index write it pairs with is
+	// refused after the SADD.
+	if (!isStorableLifetime(ttlSeconds * 1000)) {
+		throw new Error(
+			"FederationTokenStore redis: ttl must be a positive finite number of seconds that ends within the Date range",
+		);
 	}
 	// Whole milliseconds, rounded up: a fractional `PX` is a Redis error, and
 	// the index write it pairs with would be refused the same way.

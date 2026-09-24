@@ -28,7 +28,8 @@
  *
  * markSeen MUST throw ChallengeStorageError({ reason: "expired-at-issue" })
  * for expiresAtMs <= now(), and RangeError for an expiresAtMs that is not a
- * finite number (NaN, ±Infinity) — a caller fault rather than a timing
+ * finite instant within the Date range (NaN, ±Infinity, past ±8.64e15 ms —
+ * `isStorableExpiry`) — a caller fault rather than a timing
  * race, so it is not the error consumers swallow. Either way nothing is
  * recorded. A fractional expiresAtMs is valid, and the record lives at least
  * until it. contains MUST NOT throw domain errors.
@@ -50,7 +51,8 @@ export interface ReplaySeenSet {
 	 *          false iff (scope, key) already had a non-expired record (= replay).
 	 * @throws ChallengeStorageError({ reason: "expired-at-issue" }) for
 	 *   expiresAtMs <= now().
-	 * @throws RangeError for an expiresAtMs that is not a finite number.
+	 * @throws RangeError for an expiresAtMs that is not a finite instant within
+	 *   the Date range.
 	 */
 	markSeen(scope: string, key: string, expiresAtMs: number): Promise<boolean>;
 

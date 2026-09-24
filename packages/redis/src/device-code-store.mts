@@ -80,6 +80,7 @@ import {
 	type DeviceDecisionOutcome,
 	type DevicePollOutcome,
 	defineModule,
+	isStorableExpiry,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type {
@@ -172,9 +173,9 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 			// NaN is never `<= now`, so such a record would read as pending until
 			// Redis reclaimed it — which, with `PEXPIREAT NaN` refused after the
 			// pair was written, it never would.
-			if (!Number.isFinite(input.expiresAtMs)) {
+			if (!isStorableExpiry(input.expiresAtMs)) {
 				throw new RangeError(
-					`DeviceCodeStore.create: expiresAtMs must be a finite number (got ${String(input.expiresAtMs)})`,
+					`DeviceCodeStore.create: expiresAtMs must be a finite instant within the Date range (got ${String(input.expiresAtMs)})`,
 				);
 			}
 			const fields: DeviceCodeRecordFields = {

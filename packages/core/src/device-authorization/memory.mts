@@ -76,6 +76,7 @@
  * and that policy would evict its real users first all the same.
  */
 
+import { isStorableExpiry } from "../adapters/expiry.mjs";
 import { DeviceCodeStoreError } from "./errors.mjs";
 import type {
 	ApproveDeviceAuthorizationInput,
@@ -227,9 +228,9 @@ export const createMemoryDeviceCodeStore = (
 			// NaN is never `<= now`: such a record read as pending, and held a
 			// slot under the cap, until a sweep found it. A caller fault, and
 			// refused here so that no resident record can carry one.
-			if (!Number.isFinite(input.expiresAtMs)) {
+			if (!isStorableExpiry(input.expiresAtMs)) {
 				throw new RangeError(
-					`DeviceCodeStore.create: expiresAtMs must be a finite number (got ${String(input.expiresAtMs)})`,
+					`DeviceCodeStore.create: expiresAtMs must be a finite instant within the Date range (got ${String(input.expiresAtMs)})`,
 				);
 			}
 			// A collision here is a generator failure, not traffic. Overwriting

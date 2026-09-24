@@ -281,38 +281,46 @@ the first command.
 
 ## Expiries and key TTLs
 
-Every adapter turns the expiry or lifetime it is handed into a key TTL by one
-rule, and the core ports state the same refusals so the in-process adapters
+Every adapter in this package that hands Redis a deadline — each one in the
+table below — turns the expiry or lifetime it is given into a key TTL by one
+rule, and the core ports state the same refusals, so the in-process adapters
 give the same answers:
 
 - **Whole milliseconds, rounded up.** `PX` and `PEXPIREAT` take whole
   milliseconds and Redis refuses anything else. A fractional expiry — a JWT
-  `NumericDate` times 1000, a lifetime configured in fractional seconds — is
-  rounded up, so a key outlives the instant it was asked to live until by
-  under a millisecond rather than dying before it.
-- **A non-finite expiry is refused before Redis is asked**, with a
-  `RangeError`: NaN (an Invalid Date, an unset setting) or ±Infinity.
-  `NaN <= now` is false, so such a value slipped past every "already expired"
-  check and reached Redis as `PX NaN` — and where a script writes its record
-  before it sets the deadline, a refused deadline left the record with no TTL
-  at all.
+  `NumericDate` times 1000, a lifetime in fractional seconds — is rounded up,
+  so a key outlives the instant it was asked to live until by under a
+  millisecond rather than dying before it.
+- **An expiry outside the Date range is refused before Redis is asked**, with
+  a `RangeError`: NaN (an Invalid Date, an unset setting), ±Infinity, or a
+  finite number past ±8.64e15 ms (core's `isStorableExpiry`; a lifetime must
+  end inside it, `isStorableLifetime`). `NaN <= now` is false, so NaN slipped
+  past every "already expired" check; past the Date range a number is no
+  deadline Redis can take (`1e21` is sent as `1e+21`). Where a script writes
+  its record before it sets the deadline, a refused deadline left the record
+  with no TTL at all.
 
-| Adapter | Refused with a `RangeError` | Sent to Redis |
+| Adapter | Refused | Sent to Redis |
 | --- | --- | --- |
-| `ChallengeStore.issue`, `ReplaySeenSet.markSeen`, `AccessTokenDenylist.add` | a non-finite `expiresAtMs` | `PX` = the remaining life, rounded up |
-| `RefreshTokenFamilyStore.registerFamily`, `updateFamily` | a non-finite `expiresAtMs`, registered or committed | `PX` = the remaining life, rounded up; the stored `expiresAtMs` is the rounded expiry, since the reader takes whole milliseconds only |
-| `DeviceCodeStore.create` | a non-finite `expiresAtMs` | `PEXPIREAT` = the expiry rounded up; the record keeps the exact expiry `poll` answers from |
-| `CodeRepository.createCode` | an `expiresIn` that is not a positive finite number of seconds | `PX` = `expiresIn` × 1000, rounded up |
-| `FederationTokenStore` | a `ttl` that is not a positive finite number (at construction) | `PX` and the index TTL = `ttl` × 1000, rounded up |
-| The federation-token lock (`acquireLock`) | a `ttlMs` that is not a positive finite number, a `waitForMs` that is not a non-negative finite one | `PX` = `ttlMs`, rounded up |
-| `UserSessionStore.create` | an Invalid Date `expiresAt`; an `authTime` that is an Invalid Date or before the epoch (the stored envelope reads back neither) | `PX` = the remaining life (a `Date` is whole milliseconds) |
+| `ChallengeStore.issue`, `ReplaySeenSet.markSeen`, `AccessTokenDenylist.add` | an `expiresAtMs` outside the Date range | `PX` = the remaining life, rounded up |
+| `RefreshTokenFamilyStore.registerFamily`, `updateFamily` | an `expiresAtMs` outside the Date range, registered or committed | `PX` = the remaining life, rounded up; the stored `expiresAtMs` is the rounded expiry, since the reader takes whole milliseconds only |
+| `DeviceCodeStore.create` | an `expiresAtMs` outside the Date range | `PEXPIREAT` = the expiry rounded up; the record keeps the exact expiry `poll` answers from |
+| `CodeRepository.createCode` | an `expiresIn` that is not a positive number of seconds ending within the Date range; a default that is not whole seconds (at construction) | `PX` = `expiresIn` × 1000, rounded up |
+| `FederationTokenStore` | a `ttl` that is not a positive number of seconds ending within the Date range (at construction) | `PX` and the index TTL = `ttl` × 1000, rounded up |
+| The federation-token lock (`acquireLock`) and the federation-grant refresh lock | a TTL that is not a positive lifetime, or a wait that is not a non-negative one, ending within the Date range | `PX` = the TTL, rounded up |
+| `UserSessionStore.create` | an Invalid Date `expiresAt`; an `authTime` that is an Invalid Date or before the epoch (the stored envelope reads back neither) | `PX` = the remaining life (a `Date` is whole milliseconds, and always within the range) |
 | `SessionRPRegistry.registerRP`, `SessionFamilyIndex.addFamilyId`, `SessionFederationIndex.addFederation`, `SubjectSessionIndex.addSid` | an Invalid Date `expiresAt` (and, for `registerRP`, an Invalid Date `registeredAt`) | `PEXPIREAT` = the session's `expiresAt` |
-| `ConsentStore.grant`, `PendingConsentStore.set` | a non-finite `expiresAt` (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
+| `ConsentStore.grant`, `PendingConsentStore.set` | an `expiresAt` outside the Date range (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
+| `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is an Invalid Date | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor for a full revocation — never lowered |
+| `FederationGrantStore`, `FederationGrantIntentStore` | a caller's clock that is an Invalid Date (`RangeError`); an intent or authorization expiry that is not a date writes nothing (`{ ok: false }`, as the port says) | `PEXPIREAT` = the record's expiry plus its retention or listing allowance, rounded up (`math.ceil`) inside the script that writes it |
+| `RateLimiter` | a spec whose `windowSeconds` is not a positive integer ending within the Date range is screened out at construction, and the default window applies | `EXPIRE` = `windowSeconds`, set in the same script as the `INCR` |
 
 [`px-rounding.test.mts`](__tests__/px-rounding.test.mts) pins both halves for
 each adapter with a recording client: the contract suites cannot tell
 `Math.ceil` from `Math.round` against a real Redis, where the difference is
-under a millisecond.
+under a millisecond. The device-code, consent and rate-limiter cases past the
+Date range also run against a real Redis, where they check that no key is
+left behind.
 
 ## Federation-token keys and logout
 

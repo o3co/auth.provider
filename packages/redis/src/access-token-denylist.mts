@@ -17,6 +17,7 @@ import {
 	type AccessTokenDenylist,
 	type AdapterBuilder,
 	defineModule,
+	isStorableExpiry,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { AccessTokenDenylistClient } from "./clients.mjs";
@@ -70,9 +71,9 @@ export function createRedisAccessTokenDenylist(
 		kind: "redis",
 
 		async add(jti, expiresAtMs) {
-			if (!Number.isFinite(expiresAtMs)) {
+			if (!isStorableExpiry(expiresAtMs)) {
 				throw new RangeError(
-					`AccessTokenDenylist.add: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+					`AccessTokenDenylist.add: expiresAtMs must be a finite instant within the Date range (got ${String(expiresAtMs)})`,
 				);
 			}
 			const ttlMs = expiresAtMs - Date.now();

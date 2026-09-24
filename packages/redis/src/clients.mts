@@ -661,10 +661,13 @@ export interface CreateDeviceCodeRecordInput {
 	readonly deviceCode: string;
 	readonly userCode: string;
 	/**
-	 * The deadline both keys expire at, in whole epoch milliseconds —
-	 * `createRedisDeviceCodeStore` rounds the authorization's expiry up to one,
-	 * so `PEXPIREAT` never refuses it after the pair is written. The record's
-	 * own `fields.expiresAtMs` stays the exact expiry.
+	 * The deadline both keys expire at, in whole epoch milliseconds within the
+	 * Date range. The script writes the pair before its `PEXPIREAT`, so a
+	 * deadline Redis refused there would leave both keys with no TTL:
+	 * `createRedisDeviceCodeStore` therefore refuses an expiry outside the
+	 * Date range before calling `create`, and rounds the one it passes up to a
+	 * whole millisecond. A client called some other way must hold to the same.
+	 * The record's own `fields.expiresAtMs` stays the exact expiry.
 	 */
 	readonly expiresAtMs: number;
 	readonly fields: DeviceCodeRecordFields;

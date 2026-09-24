@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { isStorableLifetime } from "../adapters/expiry.mjs";
 import { constantTimeStringEqual } from "../security/timingSafe.mjs";
 import {
 	federationGrantInteractionCode,
@@ -559,10 +560,12 @@ export function createMemoryFederationGrantStore(
 		async acquireRefreshLock(grantId, { ttlMs, waitForMs }): Promise<FederationGrantLockResult> {
 			// A TTL of NaN compares as already expired: exclusion would be silently
 			// off, and two refreshes would present one refresh token (D12).
-			if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+			// And each must end within the Date range: a lease or a wait past it
+			// is one no clock reaches the end of.
+			if (!isStorableLifetime(ttlMs)) {
 				throw new RangeError("acquireRefreshLock: ttlMs must be a positive finite number");
 			}
-			if (!Number.isFinite(waitForMs) || waitForMs < 0) {
+			if (!isStorableLifetime(waitForMs, { allowZero: true })) {
 				throw new RangeError("acquireRefreshLock: waitForMs must be a non-negative finite number");
 			}
 			const askedAt = Date.now();
