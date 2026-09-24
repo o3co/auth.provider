@@ -180,7 +180,11 @@ So of two requests carrying one proof, exactly one is accepted.
   contract error (a `RangeError`, or `expired-at-issue`) is broken rather than
   down: the same 503, logged `dpop_replay_store_fault` with the error (reason
   `replay_store_fault`), because the fix is in the composition, not in Redis.
-  A proof is never accepted unrecorded,
+  Either line carries core's [`loggableError`](../core/README.md#logger)
+  projection of the store's error, never the error: ioredis puts the refused
+  write — the record's key — on it. A proof the signature step refuses is
+  logged `dpop_signature_invalid` the same way, because jose puts the proof's
+  whole payload on a claim failure. A proof is never accepted unrecorded,
   and it is not called invalid either — RFC 9449 keeps `invalid_dpop_proof`
   for a proof that failed its checks (§5, §7.1), and a resource's
   `401 invalid_token` would send the client to replace a token that is fine.

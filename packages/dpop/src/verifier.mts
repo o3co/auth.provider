@@ -50,6 +50,7 @@ import {
 	checkCanonicalIssuer,
 	describeIssuerRejection,
 	type Logger,
+	loggableError,
 	type ReplaySeenSet,
 	type TokenBindingExtractContext,
 	type TokenBindingMechanism,
@@ -301,7 +302,9 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 			} catch (err) {
 				// Re-throw DPoPError as-is (shouldn't happen here, but safe).
 				if (err instanceof DPoPError) throw err;
-				logger?.warn({ err }, "dpop_signature_invalid");
+				// The projection: jose puts the proof's whole payload on a
+				// claim failure (`JWTExpired`, `JWTClaimValidationFailed`).
+				logger?.warn({ err: loggableError(err) }, "dpop_signature_invalid");
 				throw new DPoPError("signature_invalid", "DPoP proof signature verification failed");
 			}
 
@@ -463,13 +466,21 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				// Its own audit reason and error-level log event keep operator
 				// triage off Redis health: the fix is in the composition.
 				if (err instanceof ChallengeStorageError || err instanceof RangeError) {
-					logger?.error({ err, jti: proof.claims.jti }, "dpop_replay_store_fault");
+					logger?.error(
+						{ err: loggableError(err), jti: proof.claims.jti },
+						"dpop_replay_store_fault",
+					);
 					throw new DPoPError(
 						"replay_store_fault",
 						"DPoP replay store broke its own contract; cannot determine replay status",
 					);
 				}
-				logger?.error({ err, jti: proof.claims.jti }, "dpop_replay_store_unavailable");
+				// The projection: a store error carries what it sent — ioredis
+				// puts the refused command, the record's key included, on it.
+				logger?.error(
+					{ err: loggableError(err), jti: proof.claims.jti },
+					"dpop_replay_store_unavailable",
+				);
 				throw new DPoPError(
 					"replay_store_unavailable",
 					"DPoP replay store is unavailable; cannot determine replay status",
