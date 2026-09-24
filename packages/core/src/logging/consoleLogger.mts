@@ -13,7 +13,6 @@
  * limitations under the License.
  */
 
-import { type InspectOptions, inspect } from "node:util";
 import type { Logger, LogLevel } from "./Logger.mjs";
 
 /**
@@ -64,9 +63,10 @@ export interface ConsoleLoggerOptions {
  * Per-call obj wins over child bindings on key collision (pino-compatible
  * last-write-wins).
  *
- * The console prints the object {@link PRINT_DEPTH} levels deep rather than
- * its default two, so a `loggableError` projection prints whole — its cause
- * chain and AggregateError members included — instead of as `[Object]`.
+ * The console prints every object at its default depth. A `loggableError`
+ * projection prints whole — its cause chain and AggregateError members
+ * included — because the projection carries its own `util.inspect.custom`
+ * (see `loggableError`); nothing here widens any other object.
  */
 function emit(
 	method: "debug" | "info" | "warn" | "error",
@@ -80,44 +80,10 @@ function emit(
 	// in this repo does not enable `noConsole`, so no suppression is
 	// needed.
 	if (typeof obj === "string") {
-		console[method](
-			printedDeep({ ...bindings }),
-			obj,
-			...(msg !== undefined ? [msg] : []),
-			...args,
-		);
+		console[method]({ ...bindings }, obj, ...(msg !== undefined ? [msg] : []), ...args);
 	} else {
-		console[method](
-			printedDeep({ ...bindings, ...obj }),
-			...(msg !== undefined ? [msg] : []),
-			...args,
-		);
+		console[method]({ ...bindings, ...obj }, ...(msg !== undefined ? [msg] : []), ...args);
 	}
-}
-
-/**
- * How many levels deep the console prints the object: past the deepest a
- * `loggableError` projection nests under the call's object — `err`, three
- * levels of causes or AggregateError members (a member is two levels, the
- * array and its element), and a `response` or `command` inside the last.
- */
-const PRINT_DEPTH = 8;
-
-/**
- * `obj` — a fresh object `emit` built — printed by `util.inspect`
- * {@link PRINT_DEPTH} levels deep. The hook is a non-enumerable
- * `util.inspect.custom`, so everything else that reads the object — a spy on
- * `console.*`, `JSON.stringify`, an aggregator that takes the object form —
- * sees exactly the fields it was given, and the console prints what it
- * printed before, only deeper.
- */
-function printedDeep<T extends object>(obj: T): T {
-	return Object.defineProperty(obj, inspect.custom, {
-		value(this: T, _depth: number, options: InspectOptions, print: typeof inspect): string {
-			return print({ ...this }, { ...options, depth: PRINT_DEPTH });
-		},
-		enumerable: false,
-	});
 }
 
 /**

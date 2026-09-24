@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { inspect } from "node:util";
 import { runInNewContext } from "node:vm";
 import express from "express";
 import pino from "pino";
@@ -23,6 +24,7 @@ import {
 	guardedRead,
 	LOGGED_AGGREGATE_MAX_ERRORS,
 	LOGGED_MAX_PROJECTIONS,
+	LOGGED_PRINT_DEPTH,
 	LOGGED_STACK_MAX_FRAMES,
 	LOGGED_STACK_MAX_LENGTH,
 	type LoggableError,
@@ -1015,6 +1017,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 	});
 
 	it("exports the limits and the guarded read the rule is built from", () => {
+		expect(LOGGED_PRINT_DEPTH).toBe(8);
 		expect(LOGGED_AGGREGATE_MAX_ERRORS).toBe(5);
 		expect(LOGGED_MAX_PROJECTIONS).toBe(16);
 		expect(LOGGED_STACK_MAX_FRAMES).toBe(10);
@@ -1027,6 +1030,21 @@ describe("loggableError — what a log line may carry of an error", () => {
 			},
 		});
 		expect(guardedRead(hostile, "field")).toBeNull();
+	});
+
+	it("carries its deep printing as a brand nothing but `util.inspect` sees", () => {
+		const projected = loggableError(
+			new AggregateError([new Error("member")], "outer", { cause: new Error("inner") }),
+		);
+		for (const level of [projected, projected.cause, projected.aggregateErrors?.[0]]) {
+			const brand = Object.getOwnPropertyDescriptor(level, inspect.custom);
+			expect(typeof brand?.value).toBe("function");
+			expect(brand?.enumerable).toBe(false);
+		}
+		expect(Object.keys(projected)).not.toContain(String(inspect.custom));
+		expect(JSON.stringify(projected)).toBe(JSON.stringify(JSON.parse(JSON.stringify(projected))));
+		expect(JSON.stringify(projected)).not.toMatch(/inspect|nodejs\.util/);
+		expect(inspect({ at: { depth: { two: projected } } })).toContain("inner");
 	});
 
 	it("is plain data with no `message`, which a serializer would take for an Error's", () => {
@@ -1091,8 +1109,10 @@ describe("loggableError — what a log line may carry of an error", () => {
 		] as const)("with %s", (_label, options) => {
 			const projected = loggableError(layered());
 			const err = loggedBy(options, projected);
-			// Exactly the projection's own JSON: nothing dropped, nothing added.
+			// Exactly the projection's own JSON: nothing dropped, nothing added —
+			// the inspect brand included, which pino never writes.
 			expect(err).toEqual(JSON.parse(JSON.stringify(projected)));
+			expect(JSON.stringify(err)).not.toMatch(/inspect|nodejs\.util/);
 			expect(err).toMatchObject({
 				type: "upstream.failed",
 				status: 502,

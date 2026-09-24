@@ -90,12 +90,21 @@
  * - Never kept: a cause or a member that is not an Error, any other field
  *   (a command's `args`, `body`, `buffer`), and anything of a thrown value that is
  *   not an Error but its `typeof`, as `thrown`.
+ * - Printed whole: each projection carries a non-enumerable
+ *   `util.inspect.custom` that prints it {@link LOGGED_PRINT_DEPTH} levels
+ *   deep rather than Node's default two, so `consoleLogger` (and anything
+ *   else that inspects it) shows its causes and members instead of
+ *   `[Object]`. Only a projection is printed so — any other object a caller
+ *   logs keeps Node's default depth. The hook is a symbol, so JSON, pino and
+ *   a spy never see it, and the projection is still not error-like.
  * - It never throws: an error from another realm counts; a throwing getter
  *   drops its field; a value the Error check cannot inspect reads as a
  *   non-Error.
  *
  * No state.
  */
+
+import { type InspectOptions, inspect } from "node:util";
 
 /**
  * The fields of an error a log line carries, and its Error causes the same
@@ -184,6 +193,35 @@ const MAX_CAUSE_DEPTH = 3;
 
 /** The most AggregateError members the projection looks at, at each level. */
 export const LOGGED_AGGREGATE_MAX_ERRORS = 5;
+
+/**
+ * How many levels deep `util.inspect` prints a projection: past the deepest
+ * it nests — three levels of causes or AggregateError members (a member is
+ * two, the array and its element) and a `response` or `command` in the last.
+ */
+export const LOGGED_PRINT_DEPTH = 8;
+
+/**
+ * The projection's own `util.inspect.custom`: print it
+ * {@link LOGGED_PRINT_DEPTH} levels deep. A copy of its fields is printed, so
+ * the hook does not call itself.
+ */
+function printWhole(
+	this: object,
+	_depth: number,
+	options: InspectOptions,
+	print: typeof inspect,
+): string {
+	return print({ ...this }, { ...options, depth: LOGGED_PRINT_DEPTH });
+}
+
+/**
+ * `draft`, branded: a non-enumerable `util.inspect.custom` that prints it
+ * whole. Invisible to `JSON.stringify`, to pino and to `Object.keys`, and it
+ * adds no `message`, so no serializer takes the projection for an Error.
+ */
+const printedWhole = <T extends object>(draft: T): T =>
+	Object.defineProperty(draft, inspect.custom, { value: printWhole, enumerable: false });
 
 /**
  * The most projections one line holds: the error, its causes and its
@@ -545,6 +583,10 @@ type Draft = {
 
 /** The error's own fields — everything but its cause and members, which `loggableError` attaches. */
 function fieldsOf(err: unknown): Draft {
+	return printedWhole(ownFieldsOf(err));
+}
+
+function ownFieldsOf(err: unknown): Draft {
 	if (!isError(err)) {
 		return { name: "NonError", thrown: err === null ? "null" : typeof err };
 	}
