@@ -37,7 +37,6 @@ import { createRouter } from "#/routes/logout.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import {
 	expectOutageLine,
-	expectProjectedWarn,
 	REFUSED_COMMAND_MARKER,
 	serialisedCalls,
 	storeReplyError,

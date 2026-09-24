@@ -25,6 +25,8 @@ import {
 	generateIdToken,
 	generateToken,
 	generateTokenResponse,
+	logClientRepositoryUnavailable,
+	loggableError,
 	type ProviderDeps,
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
@@ -58,6 +60,21 @@ export type AuthorizationGrantDeps = Pick<
 
 export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHandler => {
 	const { config, codeRepository, clientRepository, keyStore, logger } = deps;
+	// Every store this grant reads or writes that cannot answer is `503`,
+	// logged once at error level as `authorization_grant_store_unavailable`,
+	// `store` naming which and `step` the operation, with the error's
+	// projection — never the error, which can carry what the store was sent.
+	const storeUnavailable = (
+		store: "user_session" | "refresh_token_family" | "session_family_index" | "session_rp_registry",
+		step: "get" | "revalidate" | "register" | "add",
+		clientId: string,
+		err: unknown,
+	): void => {
+		logger?.error(
+			{ store, step, clientId, err: loggableError(err) },
+			"authorization_grant_store_unavailable",
+		);
+	};
 
 	// TODO-F-4: id_token issuance requires a configured issuer URL. We read it
 	// directly from config (not ctx.issuer) because the express adapter falls
@@ -380,7 +397,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 			if (deps.userSessionStore && sid) {
 				try {
 					userSession = await deps.userSessionStore.get(sid);
-				} catch {
+				} catch (err) {
+					storeUnavailable("user_session", "get", authenticatedClientId, err);
 					return {
 						result: {
 							status: 503,
@@ -621,7 +639,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// of an unhandled HTML 500 from express.
 					try {
 						await deps.refreshTokenFamilyRotation.register(jti, familyId, exp * 1000);
-					} catch {
+					} catch (err) {
+						storeUnavailable("refresh_token_family", "register", authenticatedClientId, err);
 						return {
 							result: {
 								status: 503,
@@ -649,6 +668,9 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				// Fix I2: clientRepository.findById is fallible — move inside try/catch
 				// so a throw here returns a controlled 503 instead of propagating to the
 				// express default handler as an unhandled HTML 500.
+				// Which dependency the block below is waiting on, so the one catch
+				// that answers them all can log the one that failed.
+				let linking: "client" | "session_family_index" | "session_rp_registry" = "client";
 				try {
 					// D-6: logout-metadata lookup uses the authenticated client id
 					// (was raw body `client_id`). The two are guaranteed equal by
@@ -675,7 +697,8 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					let revalidatedSession: Awaited<ReturnType<typeof deps.userSessionStore.get>>;
 					try {
 						revalidatedSession = await deps.userSessionStore.get(sid);
-					} catch {
+					} catch (err) {
+						storeUnavailable("user_session", "revalidate", authenticatedClientId, err);
 						return {
 							result: {
 								status: 503,
@@ -732,8 +755,10 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					// present (outer guard), sessionFamilyIndex and sessionRPRegistry are also
 					// present. Using ?. would silently no-op on a misconfigured root instead of
 					// surfacing the bug at the throw site.
+					linking = "session_family_index";
 					// biome-ignore lint/style/noNonNullAssertion: intentional — see invariant comment above
 					await deps.sessionFamilyIndex!.addFamilyId(sid, familyId, userSession.expiresAt);
+					linking = "session_rp_registry";
 					// biome-ignore lint/style/noNonNullAssertion: intentional — same invariant
 					await deps.sessionRPRegistry!.registerRP(
 						sid,
@@ -752,12 +777,27 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						},
 						userSession.expiresAt,
 					);
-				} catch {
+				} catch (err) {
 					// Fail-closed for any downstream dependency throw in this block —
 					// clientRepository.findById, sessionFamilyIndex.addFamilyId, or
 					// sessionRPRegistry.registerRP. The errorDescription is intentionally
 					// generic because the try spans both client lookup and session-store
 					// mutations; a more specific message would misattribute failures.
+					// The log line is not: it names the one that threw.
+					if (linking === "client") {
+						logClientRepositoryUnavailable(
+							logger,
+							{ site: "authorization_code", step: "find", clientId: authenticatedClientId },
+							err,
+						);
+					} else {
+						storeUnavailable(
+							linking,
+							linking === "session_family_index" ? "add" : "register",
+							authenticatedClientId,
+							err,
+						);
+					}
 					return {
 						result: {
 							status: 503,

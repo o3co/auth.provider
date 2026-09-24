@@ -20,7 +20,7 @@ import {
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
 
 const mockConfig = {
@@ -614,5 +614,60 @@ describe("createSessionGrant — sid binds the token to the browser session (R3)
 			const claims = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
 			expect("sid" in claims).toBe(false);
 		}
+	});
+});
+
+describe("createSessionGrant — a session store that cannot answer is logged, not only answered 503", () => {
+	it("logs it once, at error level, as session_grant_store_unavailable", async () => {
+		const warn = vi.fn();
+		const error = vi.fn();
+		const outage = Object.assign(
+			new Error("READONLY You can't write against a read only replica."),
+			{
+				name: "ReplyError",
+				command: { name: "get", args: ["ss:us:sid-1", "refused-command-marker"] },
+			},
+		);
+		const handler = createSessionGrant({
+			...makeDeps(),
+			userSessionStore: {
+				kind: "broken",
+				create: async () => {},
+				get: async () => {
+					throw outage;
+				},
+				delete: async () => {},
+			},
+			logger: {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn,
+				error,
+				fatal: vi.fn(),
+				child: vi.fn(),
+			},
+		} as Parameters<typeof createSessionGrant>[0]);
+		const { result } = await handler.handle({
+			body: {},
+			session: { isAuthenticated: true, sid: "sid-1", user: { id: "u1" } },
+			issuer: "https://auth.example",
+			metadata: {},
+			authenticatedClient: AUTH_CLIENT,
+		} as unknown as GrantContext);
+		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+		expect(warn).not.toHaveBeenCalled();
+		expect(error).toHaveBeenCalledTimes(1);
+		expect(error).toHaveBeenCalledWith(
+			{
+				store: "user_session",
+				step: "get",
+				clientId: "my-app",
+				err: expect.objectContaining({ name: "ReplyError" }),
+			},
+			"session_grant_store_unavailable",
+		);
+		expect(error.mock.calls[0]?.[0].err).not.toBeInstanceOf(Error);
+		expect(JSON.stringify(error.mock.calls)).not.toContain("refused-command-marker");
 	});
 });

@@ -328,6 +328,8 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 					},
 					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: ctx.issuer ?? "" },
 					effectiveScopes,
+					undefined,
+					deps.logger,
 				);
 				if (!policy.ok) return { result: policy.result };
 				effectiveScopes = policy.scopes;

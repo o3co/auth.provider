@@ -436,6 +436,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 					// scope of the original grant — the ceiling here, wider than the
 					// scope this refresh asked for, which a silent policy leaves.
 					{ scopes: originalScopes, name: "original grant" },
+					logger,
 				);
 				if (!outcome.ok) return { result: outcome.result };
 				const { decision } = outcome;

@@ -33,6 +33,7 @@ import {
 	isWellFormedErrorCode,
 	type Logger,
 	logClientRepositoryUnavailable,
+	logGrantPolicyUnavailable,
 	loggableError,
 	matchesRegisteredRedirectUri,
 	type PendingConsentStore,
@@ -1180,7 +1181,14 @@ const applyGrantPolicy = async (
 					issuer: ctx.opts.issuer,
 				},
 			);
-		} catch {
+		} catch (err) {
+			// The redirect is the outage's answer at this endpoint; the line is
+			// its log, as every grant that consults the policy writes it.
+			logGrantPolicyUnavailable(
+				ctx.opts.logger,
+				{ site: "authorize", grantType: "authorization_code", policy: grantPolicy.kind },
+				err,
+			);
 			redirectError(ctx, "temporarily_unavailable", "policy evaluation unavailable");
 			return null;
 		}
