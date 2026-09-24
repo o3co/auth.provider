@@ -71,11 +71,19 @@ import { z } from "zod";
  * delivers, comma-separated — an environment variable cannot carry a list any
  * other way. The reader is core's `normalizeAllowedOrigins`, the one
  * `CORS_ALLOWED_ORIGINS` goes through, so every origin list an operator sets
- * from the environment is spelled alike: entries trimmed, empty ones dropped.
- * It decides the shape only; each entry still meets the rules below.
+ * from the environment is spelled alike: the string is split on commas, each
+ * entry trimmed and the empty ones dropped; a list has its entries trimmed.
+ *
+ * It decides the shape only. Every entry the split yields is one the operator
+ * wrote, and each still meets the rules below, so the split cannot admit an
+ * entry the list spelling would refuse. An index in a refusal counts entries
+ * after the split, empty ones already dropped.
+ *
+ * Any other shape is handed on as it is, so the schema refuses it as the
+ * wrong type rather than as an empty list.
  */
 const readOriginList = (raw: unknown): unknown =>
-	raw === undefined ? raw : normalizeAllowedOrigins(raw);
+	typeof raw === "string" || Array.isArray(raw) ? normalizeAllowedOrigins(raw) : raw;
 
 /**
  * {@link readOriginList} for the optional `topOrigin`, where an exported-but-
@@ -84,9 +92,8 @@ const readOriginList = (raw: unknown): unknown =>
  * refused.
  */
 const readTopOriginList = (raw: unknown): unknown => {
-	if (raw === undefined) return raw;
-	const list = normalizeAllowedOrigins(raw);
-	return typeof raw === "string" && list.length === 0 ? undefined : list;
+	const read = readOriginList(raw);
+	return typeof raw === "string" && Array.isArray(read) && read.length === 0 ? undefined : read;
 };
 
 /**
@@ -315,8 +322,9 @@ export const webauthnConfigSchema = z.object({
 	 * behind an authenticated identifier-first step where you can.
 	 *
 	 * `${?WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER}` arrives as a string:
-	 * "true" / "1" turn it on, "false" / "0" (or an empty value) leave it off,
-	 * and any other spelling fails the parse.
+	 * "true" / "1" turn it on, "false" / "0" (or an empty value) leave it off —
+	 * case and surrounding spaces ignored — and any other value fails the
+	 * parse.
 	 */
 	allowCredentialsForKnownUser: coerceBooleanFromEnv,
 	/**
