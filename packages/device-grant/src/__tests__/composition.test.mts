@@ -26,6 +26,7 @@
  * nothing here is stubbed except the repositories a deployment supplies.
  */
 
+import http from "node:http";
 import type {
 	AppConfig,
 	ClientRepository,
@@ -162,6 +163,62 @@ const signIn = async (agent: Agent): Promise<void> => {
 	expect(res.status).toBe(200);
 };
 
+/** A JSON body of exactly `bytes` bytes: `fields`, padded. */
+const sized = (bytes: number, fields: Record<string, unknown>): string => {
+	const body = { ...fields, padding: "" };
+	body.padding = "x".repeat(bytes - Buffer.byteLength(JSON.stringify(body)));
+	const json = JSON.stringify(body);
+	expect(Buffer.byteLength(json)).toBe(bytes);
+	return json;
+};
+
+/**
+ * POST `body` with `Transfer-Encoding: chunked` and no `Content-Length` —
+ * the one shape a size check ahead of the parsers cannot see. supertest
+ * always declares a length, so this goes through `node:http`.
+ */
+const postChunked = (
+	app: express.Express,
+	path: string,
+	body: string,
+): Promise<{ status: number; contentType: string | undefined; text: string }> =>
+	new Promise((resolve, reject) => {
+		const server = app.listen(0, "127.0.0.1", () => {
+			const { port } = server.address() as { port: number };
+			const req = http.request(
+				{
+					host: "127.0.0.1",
+					port,
+					path,
+					method: "POST",
+					headers: { "content-type": "application/json", "transfer-encoding": "chunked" },
+				},
+				(res) => {
+					let text = "";
+					res.setEncoding("utf8");
+					res.on("data", (chunk: string) => {
+						text += chunk;
+					});
+					res.on("end", () => {
+						server.close();
+						resolve({
+							status: res.statusCode ?? 0,
+							contentType: res.headers["content-type"],
+							text,
+						});
+					});
+				},
+			);
+			req.on("error", (error) => {
+				server.close();
+				reject(error);
+			});
+			const half = Math.floor(body.length / 2);
+			req.write(body.slice(0, half));
+			req.end(body.slice(half));
+		});
+	});
+
 /** A device starts the flow; returns the code a person would type. */
 const startDevice = async (app: express.Express): Promise<string> => {
 	const res = await request(app)
@@ -291,6 +348,40 @@ describe("deviceGrantModule beside oauthModule — POST /oauth/device/verificati
 			}
 		},
 	);
+
+	it.each(orders)(
+		"reads no CSRF token from a form body — the guard refuses it before the media type is asked (%s)",
+		async (_label, ordered) => {
+			// The session's token may travel in a body field, which the guard
+			// can only see in a body something has parsed. The route parses
+			// JSON only, so a form carrying its token in the body has none —
+			// the same answer whether or not `oauthModule`'s router could have
+			// parsed it first.
+			const config = makeConfig(ENABLED);
+			const { handle, app } = await bootWith(config, [
+				sessionStoreModuleFor(config),
+				...ordered(config),
+			]);
+			try {
+				const userCode = await startDevice(app);
+				const agent = request.agent(app);
+				await signIn(agent);
+				const issued = await agent.get("/session/csrf");
+				const field = issued.body.body_field as string;
+				const token = issued.body.csrf_token as string;
+
+				const form = await agent
+					.post("/oauth/device/verification")
+					.type("form")
+					.send(`action=approve&user_code=${userCode}&${field}=${token}`);
+
+				expect(form.status).toBe(403);
+				expect(form.body.error).toBe("access_denied");
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
 });
 
 describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () => {
@@ -300,9 +391,16 @@ describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () =>
 	// with one answer.
 	const TOO_LARGE = { error: "invalid_request", error_description: "body_too_large" };
 
-	it.each(orders)(
-		"refuses a 40 KB JSON body at both routes with 413 body_too_large (%s)",
-		async (_label, ordered) => {
+	// 40 000 bytes is over this package's bound and under `oauthModule`'s;
+	// 102 401 is one byte over `oauthModule`'s own 100 KiB, where its parser
+	// refuses the body itself if it reads it first.
+	const oversized = orders.flatMap(([label, ordered]) =>
+		[40_000, 102_401].map((bytes) => [bytes, label, ordered] as const),
+	);
+
+	it.each(oversized)(
+		"refuses a declared %i-byte JSON body at both routes with 413 body_too_large (%s)",
+		async (bytes, _label, ordered) => {
 			const config = makeConfig(ENABLED);
 			const { handle, app } = await bootWith(config, [
 				sessionStoreModuleFor(config),
@@ -313,22 +411,46 @@ describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () =>
 				const agent = request.agent(app);
 				await signIn(agent);
 				const { header, token } = await csrfToken(agent);
-				const padding = "x".repeat(40_000);
 
 				// Signed in and carrying a valid token, so nothing but the size
 				// stands between this lookup and the handler.
 				const verification = await agent
 					.post("/oauth/device/verification")
 					.set(header, token)
-					.send({ action: "lookup", user_code: userCode, padding });
+					.type("json")
+					.send(sized(bytes, { action: "lookup", user_code: userCode }));
 				expect(verification.status).toBe(413);
 				expect(verification.body).toEqual(TOO_LARGE);
 
 				const authorization = await request(app)
 					.post("/oauth/device_authorization")
-					.send({ client_id: CLIENT_ID, padding });
+					.type("json")
+					.send(sized(bytes, { client_id: CLIENT_ID }));
 				expect(authorization.status).toBe(413);
 				expect(authorization.body).toEqual(TOO_LARGE);
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
+
+	it.each(orders)(
+		"refuses a chunked body over 16 KiB at both routes (%s)",
+		async (_label, ordered) => {
+			// No `Content-Length`, so only a parser can find the size — and
+			// the parser that runs first is the one that decides. Nothing is
+			// signed in: the size is refused before anything else is asked.
+			const config = makeConfig(ENABLED);
+			const { handle, app } = await bootWith(config, [
+				sessionStoreModuleFor(config),
+				...ordered(config),
+			]);
+			try {
+				const body = sized(40_000, { client_id: CLIENT_ID, action: "lookup" });
+				for (const path of ["/oauth/device_authorization", "/oauth/device/verification"]) {
+					const res = await postChunked(app, path, body);
+					expect(res.status, path).toBe(413);
+				}
 			} finally {
 				await handle.dispose();
 			}
