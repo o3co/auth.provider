@@ -44,15 +44,18 @@
  *     header is `name: message`, and the message is the untrusted part, so
  *     the header is cut by the message's own text — everything up to the end
  *     of its first occurrence — and a line of the message shaped like a
- *     frame goes with it; an empty or absent message leaves a one-line
- *     header, and the first line is dropped. Of what remains, only lines
- *     that are frames (`    at …`) are kept, the first
+ *     frame goes with it; the rest of that line is never a frame. An empty
+ *     or absent message leaves a one-line header, and the first line is
+ *     dropped. Then the unbroken run of frame lines (`    at …`) from the
+ *     first one is kept, stopping at the first line that is not a frame —
+ *     so a `Caused by:` section appended after the frames goes too — at most
  *     {@link LOGGED_STACK_MAX_FRAMES} of them, joined and cut at
  *     {@link LOGGED_STACK_MAX_LENGTH} characters. No `stack` when its read
  *     throws or it is not a string, when there are no frames, or when the
  *     stack does not carry the message (rewritten after V8 formatted the
  *     stack, which it does on the first read of `stack`): there is then no
- *     telling the header's lines from the frames;
+ *     telling the header's lines from the frames. What can still reach the
+ *     log through `stack` is listed on `framesOf`;
  *   - every other string kept is capped at {@link LOGGED_STRING_MAX_LENGTH};
  *   - a field whose read throws (a getter) is left out, so the projection
  *     itself never throws;
@@ -60,7 +63,8 @@
  *     pino's error serializer types an error by its constructor's name when
  *     it has one; without this it would log every projection as
  *     `"type": "Object"`, and with it logs the `name` (`"TypeError"`).
- *     Non-enumerable, so nothing that copies or prints the fields sees it.
+ *     Non-enumerable, so nothing that copies or prints the fields sees it;
+ *     see {@link LoggedErrorFields} on comparing one.
  *
  * The frames are what locates a failure in this package's own code — a
  * `TypeError` on data it did not expect — which name and message alone do
@@ -112,38 +116,59 @@ export const guardedRead = (target: object, key: string): { readonly value: unkn
  * The frames of `stack`, without the header ahead of them; `undefined` for
  * none. The header is cut by `message`'s own text — the message as it is
  * now — not at the first line shaped like a frame, which the message itself
- * may contain. What the text cannot show is a message rewritten, after the
- * stack was formatted, to a leading part of the one the header carries: the
- * rest of the old message then reads as the start of the frames, and only
- * its lines shaped like a frame survive the filter.
+ * may contain; the rest of the line the cut falls in is skipped. Then the
+ * unbroken run of frame lines from the first one, stopping at the first
+ * line that is not a frame.
+ *
+ * What can still reach the log through it, because the text alone cannot
+ * show it:
+ *
+ *   - a message rewritten, after the stack was formatted, to a leading part
+ *     of the one the header carries: the rest of the old message then reads
+ *     as the lines after the cut, and a run of frame-shaped lines in it is
+ *     kept;
+ *   - a `stack` assigned by hand, whose frame-shaped lines carry data: they
+ *     are kept as frames;
+ *   - a `message` that is not a string: there is no text to cut by, so only
+ *     the first line is dropped, and a header of several lines keeps the
+ *     frame-shaped ones among them.
  */
 const framesOf = (stack: unknown, message: unknown): string | undefined => {
 	if (typeof stack !== "string") return undefined;
-	let rest: string;
+	let rest = stack;
 	if (typeof message === "string" && message !== "") {
 		const at = stack.indexOf(message);
 		if (at < 0) return undefined;
 		rest = stack.slice(at + message.length);
-	} else {
-		const newline = stack.indexOf("\n");
-		rest = newline < 0 ? "" : stack.slice(newline + 1);
 	}
-	const frames = rest
-		.split("\n")
-		.filter((line) => FRAME.test(line))
-		.slice(0, LOGGED_STACK_MAX_FRAMES);
-	if (frames.length === 0) return undefined;
+	// The first line is what is left of the header's last line: never a frame.
+	const lines = rest.split("\n").slice(1);
+	const first = lines.findIndex((line) => FRAME.test(line));
+	if (first < 0) return undefined;
+	const frames: string[] = [];
+	for (const line of lines.slice(first)) {
+		if (frames.length === LOGGED_STACK_MAX_FRAMES || !FRAME.test(line)) break;
+		frames.push(line);
+	}
 	return frames.join("\n").slice(0, LOGGED_STACK_MAX_LENGTH);
 };
+
+/**
+ * What {@link loggableError} returns: the fields a log line may carry, and an
+ * own, non-enumerable `constructor: undefined`. Compare one with `toEqual`,
+ * never `toStrictEqual`: the strict form also compares the objects'
+ * constructors, and fails on the hidden one.
+ */
+export type LoggedErrorFields = Record<string, string | number>;
 
 /**
  * `fields`, with the own non-enumerable `constructor: undefined` that makes
  * pino's error serializer type it by `name` rather than as `Object`.
  */
-const projection = (fields: Record<string, string | number>): Record<string, string | number> =>
+const projection = (fields: LoggedErrorFields): LoggedErrorFields =>
 	Object.defineProperty(fields, "constructor", { value: undefined, enumerable: false });
 
-export const loggableError = (error: unknown): Record<string, string | number> => {
+export const loggableError = (error: unknown): LoggedErrorFields => {
 	let isError: boolean;
 	try {
 		isError =
@@ -159,7 +184,7 @@ export const loggableError = (error: unknown): Record<string, string | number> =
 			? `${value.slice(0, LOGGED_STRING_MAX_LENGTH - 1)}…`
 			: value;
 
-	const out: Record<string, string | number> = {};
+	const out: LoggedErrorFields = {};
 	const name = read("name");
 	if (typeof name === "string") out.name = cap(name);
 	const message = read("message");
