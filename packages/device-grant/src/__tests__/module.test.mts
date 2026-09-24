@@ -58,14 +58,20 @@ const FRAMES = expect.stringMatching(/^ {4}at /);
  * A projected error, held to what these routes may log without naming the
  * field its text sits in (that field is the projection's own business): its
  * `name` and stack frames, the numeric or string fields named, and none of
- * the fields that carry a request or a command — `command` (a user code, the
- * approving subject), `body` (a client secret), `cause`, `args`, `expose`.
+ * the fields that carry a request or a command's arguments — `body` (a
+ * client secret), `args`, `expose`, and a command's `args` (a user code, the
+ * approving subject). Core's projection keeps a command's name, and nothing
+ * else of it, and a cause only as a projection of its own.
  */
 const expectProjection = (err: unknown, fields: Record<string, unknown>): void => {
 	expect(err).not.toBeInstanceOf(Error);
 	expect(err).toMatchObject({ ...fields, stack: FRAMES });
-	for (const carrier of ["command", "body", "cause", "args", "expose"]) {
+	for (const carrier of ["body", "args", "expose"]) {
 		expect(err).not.toHaveProperty(carrier);
+	}
+	expect(err).not.toHaveProperty(["command", "args"]);
+	if (typeof err === "object" && err !== null && "cause" in err) {
+		expect(err.cause).not.toBeInstanceOf(Error);
 	}
 };
 
