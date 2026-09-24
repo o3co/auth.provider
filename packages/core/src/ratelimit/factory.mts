@@ -50,7 +50,9 @@ export function registerBuiltinRateLimiters(factory: RateLimiterFactory): void {
 		// operator wrote, and a different one from the Redis adapter's answer.
 		// Only a default nobody gave is the built-in 60 per 60 s.
 		return createMemoryRateLimiter({
-			limits: (config.limits ?? {}) as Record<string, RateLimitSpec>,
+			// Only a `limits` nobody gave is none: `null` is refused, as the
+			// Redis adapter refuses it, rather than read as an empty map.
+			limits: (config.limits === undefined ? {} : config.limits) as Record<string, RateLimitSpec>,
 			defaultLimit: config.defaultLimit === undefined ? DEFAULT_LIMIT : config.defaultLimit,
 			maxBuckets:
 				typeof config.maxBuckets === "number"

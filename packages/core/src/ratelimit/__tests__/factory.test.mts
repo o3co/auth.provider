@@ -246,9 +246,11 @@ describe("registerBuiltinRateLimiters (memory)", () => {
 		// Regression: a misconfigured spec with NaN windowSeconds produced NaN
 		// resetAt, and evictEarliestResetBucket, comparing with `<`, selected
 		// no key when every bucket had one — the caller's
-		// `while (buckets.size >= maxBuckets)` loop pinned the event loop. The
-		// eviction still makes progress on such a bucket, but none can exist
-		// now: the spec is refused before the limiter holds anything.
+		// `while (buckets.size >= maxBuckets)` loop pinned the event loop. No
+		// such bucket can exist now: the spec is refused before the limiter
+		// holds anything, and the limiter holds its specs as it checked them
+		// (below). Eviction takes the first bucket before comparing any, so a
+		// full map always loses one.
 		const factory = createRateLimiterFactory();
 		registerBuiltinRateLimiters(factory);
 		await expect(

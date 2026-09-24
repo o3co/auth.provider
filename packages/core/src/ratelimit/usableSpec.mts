@@ -74,7 +74,9 @@ export function assertUsableRateLimitSpecs(
 	const { limits, defaultLimit } = specs;
 	if (limits !== undefined) {
 		if (typeof limits !== "object" || limits === null || Array.isArray(limits)) {
-			refuse("limits", limits);
+			throw new RangeError(
+				`${who}: limits must be an object of { limit, windowSeconds } specs, keyed by prefix (got ${Array.isArray(limits) ? "an array" : String(limits)})`,
+			);
 		}
 		for (const [prefix, spec] of Object.entries(limits as Record<string, unknown>)) {
 			if (!isUsableRateLimitSpec(spec)) refuse(`limits.${prefix}`, spec);

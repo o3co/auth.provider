@@ -25,7 +25,8 @@ interface BucketState {
 }
 
 export interface MemoryRateLimiterOptions {
-	limits: Record<string, RateLimitSpec>;
+	/** Specs by key prefix. Not given is none, as the Redis adapter reads it. */
+	limits?: Record<string, RateLimitSpec>;
 	defaultLimit: RateLimitSpec;
 	maxBuckets?: number;
 }
@@ -47,35 +48,23 @@ function pruneExpiredBuckets(buckets: Map<string, BucketState>, now: number): vo
 	}
 }
 
+/**
+ * Removes the bucket that resets first. Every `resetAt` is finite: it is
+ * `Date.now()` plus a window construction checked, from specs the limiter
+ * holds as it checked them. And a non-empty map always loses one bucket,
+ * since the first entry is taken before any comparison, so the caller's
+ * `while (size >= max)` loop always makes progress.
+ */
 function evictEarliestResetBucket(buckets: Map<string, BucketState>): void {
 	let evictKey: string | undefined;
-	let earliestResetAt = Number.POSITIVE_INFINITY;
+	let earliestResetAt = 0;
 	for (const [key, bucket] of buckets) {
-		// Non-finite resetAt (NaN / ±Infinity from a misconfigured
-		// windowSeconds) is highest priority for removal: drop it eagerly so
-		// the caller's `while (size >= max)` loop is guaranteed to make
-		// progress and cannot pin the event loop. Without this, NaN < x
-		// returns false for every comparison and evictKey stays undefined.
-		// Construction now refuses such a window, so this is a second line.
-		if (!Number.isFinite(bucket.resetAt)) {
-			buckets.delete(key);
-			return;
-		}
-		if (bucket.resetAt < earliestResetAt) {
+		if (evictKey === undefined || bucket.resetAt < earliestResetAt) {
 			evictKey = key;
 			earliestResetAt = bucket.resetAt;
 		}
 	}
-	if (evictKey !== undefined) {
-		buckets.delete(evictKey);
-		return;
-	}
-	// Defensive fallback: should be unreachable once the non-finite drop
-	// above runs at least once per call, but keep eviction unconditionally
-	// progress-guaranteed by deleting the first map entry. Map iteration
-	// preserves insertion order, so this is the oldest bucket.
-	const firstKey = buckets.keys().next().value;
-	if (firstKey !== undefined) buckets.delete(firstKey);
+	if (evictKey !== undefined) buckets.delete(evictKey);
 }
 
 export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): RateLimiter {
@@ -87,6 +76,19 @@ export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): Rate
 		throw new RangeError("createMemoryRateLimiter: defaultLimit is required");
 	}
 	assertUsableRateLimitSpecs("createMemoryRateLimiter", options);
+	// Held as they were checked, as the Redis adapter holds them: a change to
+	// the objects it was handed cannot reach a check. A missing `limits` is
+	// none; a present one that is not an object was refused above.
+	const limits: Readonly<Record<string, RateLimitSpec>> = Object.fromEntries(
+		Object.entries(options.limits ?? {}).map(([prefix, spec]) => [
+			prefix,
+			{ limit: spec.limit, windowSeconds: spec.windowSeconds },
+		]),
+	);
+	const defaultLimit: RateLimitSpec = {
+		limit: options.defaultLimit.limit,
+		windowSeconds: options.defaultLimit.windowSeconds,
+	};
 	const buckets = new Map<string, BucketState>();
 	const maxBuckets = normalizeMaxBuckets(options.maxBuckets);
 
@@ -94,7 +96,7 @@ export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): Rate
 		kind: "memory",
 		async check(key) {
 			const now = Date.now();
-			const spec = options.limits[keyPrefix(key)] ?? options.defaultLimit;
+			const spec = limits[keyPrefix(key)] ?? defaultLimit;
 			const bucket = buckets.get(key);
 			if (!bucket || bucket.resetAt <= now) {
 				if (!bucket && buckets.size >= maxBuckets) {
