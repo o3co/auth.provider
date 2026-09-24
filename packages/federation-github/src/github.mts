@@ -232,8 +232,9 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			// no id_token `sub` to bind the user to (OIDC §5.3.2 applies only when
 			// an id_token is in scope). Do NOT mirror the Google PB-5 fix here.
 			const body = await getGithubJson(oidcConfig, tokens.access_token, GITHUB_USER_URL);
-			// An answer that is not a JSON object carries no user, so no id/sub; an
-			// id githubSub will not take counts as none.
+			// A body that is not a JSON object is treated as a user with no id or
+			// sub, and so is a user whose id githubSub refuses: either fails the
+			// exchange below.
 			const user: Record<string, unknown> = isJsonObject(body) ? body : {};
 			const sub = githubSub(user);
 			if (sub === undefined) {
