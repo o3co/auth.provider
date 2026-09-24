@@ -304,7 +304,7 @@ const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
 const REMOVED_DPOP_FIELDS: readonly RemovedKey[] = [
 	{
 		name: "replay-store",
-		removedIn: "this release (follows #669)",
+		removedIn: "this release (#673)",
 		note:
 			"Every accepted DPoP proof is now recorded in the replaySeenSet component — the " +
 			"seen-set private_key_jwt client authentication and WebAuthn record in — and the " +
