@@ -640,6 +640,38 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					};
 				}
 			}
+			// A requested `resource` must equal the issued audience (RFC 8707,
+			// checked after the policy below), and that audience is the client id
+			// or one the registration and the subject token both carry. A resource
+			// outside that set can never be represented, so it is the request's
+			// own `invalid_target`, answered here before the policy runs — the
+			// same reason the audience is: a policy that turned it into its
+			// granted audience would otherwise meet the policy ceiling first and
+			// convert the caller's 400 into a 500.
+			if (requestedResource) {
+				const unrepresentable = requestedResource.filter(
+					(resource) =>
+						resource !== client.clientId &&
+						!(clientAudienceSet.has(resource) && subjectAudienceSet.has(resource)),
+				);
+				if (unrepresentable.length > 0) {
+					deps.logger?.warn(
+						{
+							subject: subjectValidated.sub,
+							clientId: client.clientId,
+							missingResources: unrepresentable,
+						},
+						"token_exchange_resource_not_in_audience",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_target",
+							errorDescription: `requested_resources_not_in_audience: ${unrepresentable.join(" ")}`,
+						},
+					};
+				}
+			}
 
 			// Policy hook — existing GrantPolicyHook contract.
 			// grantedScope/grantedAudience start as the narrowed values from the
