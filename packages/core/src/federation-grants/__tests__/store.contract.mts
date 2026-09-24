@@ -60,9 +60,23 @@ const DAY = 86_400_000;
  * takes long enough for a clock fixed at import to put that lapse in the
  * past. The record would then be reclaimed by the store's own clock partway
  * through the suite, which reads as a failure of whatever test looked next.
+ *
+ * Not set until the first test starts, and `at` refuses to read it before
+ * then: a date taken while the suite is collected — in a `describe` body
+ * rather than a test — is dated from the import, not from the test that uses
+ * it, and next to that test's own dates it is off by however long the suite
+ * took to get there. A stamp "a minute later" would then be dated before the
+ * one it follows, and be refused as stale, only on a slow enough run.
  */
-let T0 = new Date(Math.floor(Date.now() / 1000) * 1000 + 137);
-const at = (ms: number): Date => new Date(T0.getTime() + ms);
+let T0 = new Date(Number.NaN);
+const at = (ms: number): Date => {
+	if (Number.isNaN(T0.getTime())) {
+		throw new Error(
+			"at() is dated from the test's clock: call it inside a test, not a describe body",
+		);
+	}
+	return new Date(T0.getTime() + ms);
+};
 const INVALID = new Date(Number.NaN);
 
 /** Never handed out by reference: a fixture that shares it would hide a store that does too. */
