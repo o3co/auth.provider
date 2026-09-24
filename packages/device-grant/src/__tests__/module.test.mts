@@ -197,13 +197,15 @@ describe("deviceGrantModule — boot", () => {
 });
 
 describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
-	it("advertises the endpoint and the grant type when enabled", async () => {
+	it("contributes the endpoint as an issuer-relative path when enabled", () => {
 		// A client has no other way to find the endpoint, so the metadata is
-		// the feature being reachable rather than a description of it.
-		const handle = await boot({ deviceAuthorization: ENABLED });
+		// the feature being reachable rather than a description of it. Under
+		// `endpoints`, not `metadata`: core prefixes the issuer and refuses an
+		// `*_endpoint` literal — the served document is pinned end to end in
+		// composition.test.mts.
 		const contribution = deviceGrantModule.contributes?.discoveryMetadata?.[0] as (
 			deps: unknown,
-		) => { metadata?: Record<string, unknown>; grantTypes?: readonly string[] };
+		) => Record<string, unknown>;
 		const result = contribution({
 			config: {
 				oauth: {
@@ -212,11 +214,9 @@ describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
 				},
 			},
 		});
-		expect(result.metadata?.device_authorization_endpoint).toBe(
-			"https://as.example.test/oauth/device_authorization",
-		);
-		expect(result.grantTypes).toEqual([DEVICE_CODE_GRANT_TYPE]);
-		await handle.dispose();
+		expect(result).toEqual({
+			endpoints: { device_authorization_endpoint: "/oauth/device_authorization" },
+		});
 	});
 
 	it("advertises nothing when disabled", async () => {

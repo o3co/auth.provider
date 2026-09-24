@@ -564,17 +564,16 @@ export const deviceGrantModule = defineModule<Requires, Optional>({
 				// RFC 8628 §4. A client that cannot discover this endpoint cannot
 				// start the flow, so the metadata is the feature being reachable
 				// rather than a description of it.
-				const issuer = deps.config.oauth.jwt.issuer as string;
+				//
+				// An issuer-relative path under `endpoints`, which core prefixes
+				// with the issuer and validates. Core's builder refuses an
+				// `*_endpoint` field under `metadata`, so a URL built here would
+				// fail every boot that has an issuer — every boot beside
+				// `oauthModule`. The grant type itself is not contributed here:
+				// `grant_types_supported` is read off the grant resolver
+				// `/oauth/token` dispatches against (#283).
 				return {
-					metadata: {
-						device_authorization_endpoint: new URL(
-							"/oauth/device_authorization",
-							issuer,
-						).toString(),
-					},
-					// The grant appears in `grant_types_supported` through the same
-					// aggregation every other grant uses (#283).
-					grantTypes: [DEVICE_CODE_GRANT_TYPE],
+					endpoints: { device_authorization_endpoint: "/oauth/device_authorization" },
 				};
 			},
 		],
