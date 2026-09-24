@@ -123,6 +123,15 @@ describe("the federationGrants section (#593)", () => {
 		}
 	});
 
+	it("holds the tombstone retention to a year, the ceiling of every duration here", () => {
+		// Past the Date range it is a deadline no store can keep; a year is the
+		// typo guard every duration an operator writes has.
+		expect(parse({ tombstoneRetention: 31_536_000 })?.tombstoneRetention).toBe(31_536_000);
+		for (const value of [31_536_001, 1e18, "31536001"]) {
+			expect(() => parse({ tombstoneRetention: value }), JSON.stringify(value)).toThrow();
+		}
+	});
+
 	it("is absent when nothing declares it, and an empty block is valid", () => {
 		expect(section.parse({} as never).federationGrants).toBeUndefined();
 		expect(parse({})).toStrictEqual({});

@@ -241,8 +241,11 @@ describe("createMemoryFederationGrantStore (#593, D16)", () => {
 		expect((await lodge(store, "g-1", at(10 * MIN))).ok).toBe(true);
 	});
 
-	it("refuses a retention that is not a non-negative finite number", () => {
-		for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY]) {
+	it("refuses a retention that is not a non-negative finite number ending within the Date range", () => {
+		// The Redis store refuses the same: past the Date range a tombstone's
+		// horizon is no deadline a key can carry. The two adapters give one
+		// answer to one setting.
+		for (const bad of [-1, Number.NaN, Number.POSITIVE_INFINITY, 8_640_000_000_000_001, 1e21]) {
 			expect(() => createMemoryFederationGrantStore({ tombstoneRetentionMs: bad })).toThrow(
 				RangeError,
 			);

@@ -188,6 +188,30 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 		}
 	});
 
+	it("holds the retention and the listing allowance to a year, as core's schema does", () => {
+		// A typo nothing bounded — `tombstoneRetention = 1e18` — became a
+		// deadline Redis refuses after the script has written, and a record
+		// with no TTL.
+		const resolve = (federationGrants: Record<string, unknown>, redisFederationGrantStore = {}) =>
+			resolveRedisFederationGrantStoreOptions(
+				{
+					federationGrants: { encryptionKeys: [{ id: "k", key: KEY }], ...federationGrants },
+					redisFederationGrantStore,
+				} as never,
+				{},
+			);
+		expect(resolve({ tombstoneRetention: 31_536_000 }).tombstoneRetentionMs).toBe(31_536_000_000);
+		expect(resolve({}, { listingAllowanceMs: 31_536_000_000 }).listingAllowanceMs).toBe(
+			31_536_000_000,
+		);
+		for (const tombstoneRetention of [31_536_001, 1e18]) {
+			expect(() => resolve({ tombstoneRetention }), String(tombstoneRetention)).toThrow();
+		}
+		for (const listingAllowanceMs of [31_536_000_001, 1e21]) {
+			expect(() => resolve({}, { listingAllowanceMs }), String(listingAllowanceMs)).toThrow();
+		}
+	});
+
 	it("leaves the key prefix and the listing allowance to their own section", () => {
 		// They are adapter layout rather than grant policy, as the other stores'
 		// prefixes are: `redisFederationGrantStore`, beside them.

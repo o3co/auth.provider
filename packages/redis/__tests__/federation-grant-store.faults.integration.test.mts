@@ -857,3 +857,88 @@ describe("plaintext, where an operator has allowed it (#593, D16)", () => {
 		).toThrow(/32 bytes/);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// What the store refuses to be built with. The scripts write a record or its
+// subject-index entry and set the key's deadline last, so a deadline Redis
+// refuses leaves what was written with no TTL at all. A retention past 2^53
+// fails differently: the record it is written into does not read back.
+// ---------------------------------------------------------------------------
+
+describe("a retention or allowance whose deadline no clock reaches (the Date range)", () => {
+	// 1e20 ms runs past ECMAScript's Date range from any today. Through
+	// configuration it is `tombstoneRetention = 1e17` seconds, or a listing
+	// allowance with a few zeros too many: typos nothing bounded.
+	const PAST_THE_DATE_RANGE = 1e20;
+
+	/** The store these options build, or the refusal — which is what they should get. */
+	const attempt = (
+		options: Partial<Parameters<typeof createRedisFederationGrantStore>[0]>,
+	): { store: FederationGrantStore } | { refusal: unknown } => {
+		try {
+			return {
+				store: createRedisFederationGrantStore({
+					client: makeIoredisFederationGrantStoreClient(redis),
+					keyPrefix: prefix,
+					encryption: { mode: "required", keys: [KEY_A] },
+					...options,
+				}),
+			};
+		} catch (refusal) {
+			return { refusal };
+		}
+	};
+
+	/** Every key of this case that Redis holds with no deadline. */
+	const withoutTtl = async (): Promise<string[]> => {
+		const keys = await redis.keys(`${prefix}*`);
+		const found: string[] = [];
+		for (const name of keys) if ((await redis.pttl(name)) < 0) found.push(name);
+		if (keys.length > 0) await redis.del(...keys);
+		return found;
+	};
+
+	const lodge = (held: FederationGrantStore) =>
+		held.createPending({
+			id: "g-1",
+			subject: "u-1",
+			clientId: "agent",
+			connection: "okta-calendar",
+			intent: { handle: "h-g-1", expiresAt: at(10 * MIN) },
+			now: T0,
+		});
+
+	it("refuses a tombstone retention past it when built, so no lodging fails and leaves its record behind", async () => {
+		// Every record carries the retention it was written with, and one past
+		// 2^53 does not read back. Such a store answered every lodging
+		// `{ ok: false }`, and left the record and its index entry it had just
+		// written behind — a store no grant could ever be made in, saying so
+		// only as a refusal each client took for its own.
+		const built = attempt({ tombstoneRetentionMs: PAST_THE_DATE_RANGE });
+		const lodged = "store" in built ? await lodge(built.store) : "not built";
+		const left = await redis.keys(`${prefix}*`);
+		if (left.length > 0) await redis.del(...left);
+		expect({ lodged, left }).toEqual({ lodged: "not built", left: [] });
+		expect("refusal" in built && built.refusal).toBeInstanceOf(Error);
+	});
+
+	it("refuses a listing allowance past it when built, so no lodging leaves the subject's index without a TTL", async () => {
+		const built = attempt({ listingAllowanceMs: PAST_THE_DATE_RANGE });
+		if ("store" in built) {
+			// What such a store did: the lodging reserved the grant in its
+			// subject's index, and then Redis refused the index's deadline.
+			await lodge(built.store).catch(() => undefined);
+		}
+		expect(await withoutTtl()).toEqual([]);
+		expect("refusal" in built && built.refusal).toBeInstanceOf(Error);
+	});
+
+	it("refuses either past it when built, however far past, and takes one that ends inside it", () => {
+		for (const bad of [8_640_000_000_000_001, PAST_THE_DATE_RANGE, 1e21]) {
+			expect(attempt({ tombstoneRetentionMs: bad }), String(bad)).toHaveProperty("refusal");
+			expect(attempt({ listingAllowanceMs: bad }), String(bad)).toHaveProperty("refusal");
+		}
+		expect(attempt({ tombstoneRetentionMs: 365 * DAY })).toHaveProperty("store");
+		expect(attempt({ listingAllowanceMs: 365 * DAY })).toHaveProperty("store");
+	});
+});

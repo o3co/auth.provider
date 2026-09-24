@@ -104,6 +104,21 @@ describe("redisRateLimiter survives AppConfigSchema (#495)", () => {
 	});
 });
 
+describe("redisFederationGrantStore's listing allowance", () => {
+	it("is held to a year, the ceiling of every duration an operator writes", () => {
+		// Past the Date range it is a deadline Redis refuses after the script
+		// has reserved the grant in its subject's index, which is left with no
+		// TTL; the store refuses it too, as the second line.
+		const allowance = (listingAllowanceMs: unknown) =>
+			AppConfigSchema.parse({ ...base, redisFederationGrantStore: { listingAllowanceMs } })
+				.redisFederationGrantStore?.listingAllowanceMs;
+		expect(allowance(31_536_000_000)).toBe(31_536_000_000);
+		for (const value of [31_536_000_001, 1e21]) {
+			expect(() => allowance(value), String(value)).toThrow();
+		}
+	});
+});
+
 describe("the remaining redis store namespaces survive AppConfigSchema (#495)", () => {
 	it("keeps redisChallengeStore's key namespace", () => {
 		const parsed = AppConfigSchema.parse({
