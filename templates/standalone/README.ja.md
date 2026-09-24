@@ -331,6 +331,7 @@ cors {
 | `FEDERATIONS_GOOGLE_CLIENT_ID` | — | Google OAuth クライアント ID |
 | `FEDERATIONS_GOOGLE_CLIENT_SECRET` | — | Google OAuth クライアントシークレット |
 | `FEDERATIONS_GOOGLE_CALLBACK_URL` | `http://localhost:3000/session/oauth/federation/google/callback` | Google OAuth コールバック URL |
+| `FEDERATIONS_GOOGLE_ACCESS_TYPE` | 未設定（`offline`） | `offline`: サインインのたびに Google の同意画面を表示し、すべてのセッションがリフレッシュトークンを得る。`online`: 同意画面は初回のサインインだけで、リフレッシュトークンはまったく得ない。[federation-google](../../packages/federation-google/README.md#refresh-tokens-and-the-consent-screen) を参照 |
 
 ### OIDC フェデレーション（任意の OpenID Connect プロバイダー）
 
