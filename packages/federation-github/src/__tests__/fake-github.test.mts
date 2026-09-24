@@ -22,7 +22,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { createGithubProvider } from "../github.mjs";
+import { createGithubProvider } from "#/github.mjs";
 import { ACCESS_TOKEN, createFakeGithub, GITHUB } from "./fake-github.mjs";
 
 const tokenRequest = (accept?: string): RequestInit => ({

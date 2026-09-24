@@ -31,11 +31,7 @@
 
 import { createFakeIdp } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
-import {
-	createGoogleProvider,
-	type GoogleProvider,
-	type GoogleProviderConfig,
-} from "../google.mjs";
+import { createGoogleProvider, type GoogleProvider, type GoogleProviderConfig } from "#/google.mjs";
 
 const GOOGLE = {
 	issuer: "https://accounts.google.com",

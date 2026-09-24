@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it, vi } from "vitest";
-import { resolveClientSecret } from "../client-secret.mjs";
+import { resolveClientSecret } from "#/federations/client-secret.mjs";
 
 describe("resolveClientSecret", () => {
 	it("returns a static string unchanged (Google / GitHub keep working)", async () => {

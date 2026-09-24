@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { federationTokenSnapshot } from "../token-snapshot.mjs";
+import { federationTokenSnapshot } from "#/federations/token-snapshot.mjs";
 
 const RECEIVED_AT = Date.parse("2026-09-24T00:00:00Z");
 

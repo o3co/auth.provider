@@ -24,7 +24,7 @@
 
 import { createFakeIdp } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it } from "vitest";
-import { type AppleProvider, createAppleProvider } from "../apple.mjs";
+import { type AppleProvider, createAppleProvider } from "#/apple.mjs";
 
 const APPLE = {
 	issuer: "https://appleid.apple.com",

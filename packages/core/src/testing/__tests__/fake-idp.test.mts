@@ -25,7 +25,7 @@
 import { createHash } from "node:crypto";
 import { createLocalJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
 import { describe, expect, it } from "vitest";
-import { createFakeIdp } from "../fake-idp.mjs";
+import { createFakeIdp } from "#/testing/fake-idp.mjs";
 
 const ENDPOINTS = {
 	issuer: "https://idp.test",

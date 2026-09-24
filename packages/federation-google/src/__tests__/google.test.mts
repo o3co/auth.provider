@@ -48,7 +48,7 @@ vi.mock("openid-client", () => ({
 	skipSubjectCheck: hoisted.skipSubjectCheckSym,
 }));
 
-import { createGoogleProvider } from "../google.mjs";
+import { createGoogleProvider } from "#/google.mjs";
 import { makeTestGoogleIdToken } from "./helpers.mjs";
 
 describe("createGoogleProvider on openid-client", () => {

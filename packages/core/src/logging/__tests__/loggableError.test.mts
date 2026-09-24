@@ -25,7 +25,7 @@ import {
 	LOGGED_STACK_MAX_LENGTH,
 	type LoggableError,
 	loggableError,
-} from "../loggableError.mjs";
+} from "#/logging/loggableError.mjs";
 
 /** The shape openid-client throws for a token response it refuses: the body two causes down. */
 const libraryError = (): Error => {

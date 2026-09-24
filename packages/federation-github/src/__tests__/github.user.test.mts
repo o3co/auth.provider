@@ -27,7 +27,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createGithubProvider } from "../github.mjs";
+import { createGithubProvider } from "#/github.mjs";
 import {
 	ACCESS_TOKEN,
 	createFakeGithub,

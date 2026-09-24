@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import * as core from "../index.mjs";
+import * as core from "#/index.mjs";
 
 describe("core barrel — Wave 1 AccessTokenDenylist exports", () => {
 	it("re-exports createMemoryAccessTokenDenylist", () => {

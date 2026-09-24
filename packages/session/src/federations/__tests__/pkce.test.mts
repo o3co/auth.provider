@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { generateCodeVerifier } from "../pkce.mjs";
+import { generateCodeVerifier } from "#/federations/pkce.mjs";
 
 describe("generateCodeVerifier", () => {
 	it("produces a 43-character base64url string (RFC 7636 §4.1)", () => {

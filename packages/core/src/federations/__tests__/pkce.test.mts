@@ -16,7 +16,7 @@
 
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { codeChallenge } from "../pkce.mjs";
+import { codeChallenge } from "#/federations/pkce.mjs";
 
 describe("codeChallenge", () => {
 	it("returns BASE64URL(SHA256(verifier)) per RFC 7636 §4.2 S256", () => {
