@@ -131,7 +131,10 @@ checks each field's type, as the template's Google bridge
   rather than through `openid-client`'s UserInfo handling, which requires a
   `sub`. Both `/user` and `/user/emails` are asked for
   `application/vnd.github+json` at REST API version `2022-11-28`
-  (`X-GitHub-Api-Version`), the schema the `sub` rule reads `id` against. A
+  (`X-GitHub-Api-Version`), the schema the `sub` rule reads `id` against.
+  GitHub supports a version for at least 24 months after its successor ships
+  (2022-11-28's successor shipped 2026-03-10), so revisit the pin before
+  2028-03: once GitHub retires it, every login fails. A
   non-2xx answer, a body that is not JSON, or a user object with neither a
   usable `sub` nor a usable `id` fails the exchange, and the login answers
   `502 exchange_failed`.
@@ -145,7 +148,7 @@ What `exchangeCode` returns:
 | Field | Value |
 | --- | --- |
 | `issuer` | `https://github.com` |
-| `sub` | a non-empty string `sub` when the user object carries one; otherwise its `id` — a positive safe integer (`Number.isSafeInteger`, above 0) as a decimal string, or a string of decimal digits with no sign and no leading zero as it is. Any other `id` fails the exchange like a missing one: GitHub sends an int64 integer, and one that `Response.json()` cannot turn into a JavaScript number exactly — above 2^53 − 1, where two ids parse as the same number, or `1e400`, which parses as `Infinity` — would sign two GitHub users in as one `github:<id>` |
+| `sub` | a non-empty string `sub` when the user object carries one; otherwise its `id` — a positive safe integer (`Number.isSafeInteger`, above 0) as a decimal string, or a string of decimal digits with no sign and no leading zero as it is. Any other `id` fails the exchange like a missing one: GitHub sends an int64 integer, and one outside the safe-integer range after `Response.json()`, where a parsed number no longer names one id — above 2^53 − 1, where two ids parse as the same number, or `1e400`, which parses as `Infinity` — would sign two GitHub users in as one `github:<id>` |
 | `email`, `emailVerified` | the chosen address and `true`, or both absent |
 | `name` | `/user`'s `name`, when a string |
 | `picture` | `/user`'s `avatar_url`, when a string |
@@ -185,10 +188,11 @@ Defined in [`src/github.mts`](src/github.mts), exported from
 Nothing mocks `openid-client`. The provider tests run the real library against
 a fake GitHub ([`fake-github.mts`](src/__tests__/fake-github.mts)) installed as
 the global `fetch` — the fetch the library uses, since the adapter configures
-none — which answers with GitHub's own bodies and records every request. It is
-no laxer than GitHub where the adapter could come to depend on it: the token
+none — which answers with GitHub's own bodies and records every request. It
+enforces the two points where the library's defaults decide success: the token
 endpoint answers form-encoded unless `Accept` asks for JSON, and the REST API
-refuses a request without a `User-Agent`.
+refuses a request without a `User-Agent`. `Authorization` and the API version
+are pinned by the tests' assertions instead.
 
 | Test file | Pins |
 | --- | --- |

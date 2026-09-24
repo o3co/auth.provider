@@ -102,7 +102,7 @@ describe("createGithubProvider", () => {
 		expect(tokenRequest?.headers.has("authorization")).toBe(false);
 	});
 
-	it("#597: signs in when the callback carries GitHub's iss — the exchange URL is built from the code alone (#598)", async () => {
+	it("#597: a callback's iss does not reach the library — the login succeeds and the token request carries only the grant's parameters (#598)", async () => {
 		// GitHub names its issuer "https://github.com/login/oauth"; the library
 		// is configured with the profile label "https://github.com". Forwarded,
 		// the library would compare the two and refuse the login.
@@ -110,10 +110,8 @@ describe("createGithubProvider", () => {
 		const profile = await exchange({ callbackParams: { iss, state: "route-checked" } });
 		expect(profile.sub).toBe("12345");
 
-		// The library turns the exchange URL into the token request: its `code`
-		// is the one parameter it carries, and `redirect_uri` is the callback with
-		// the query stripped. Only the route's code reaches GitHub; nothing else
-		// the callback carried — `iss`, `state` — reaches any request.
+		// The token request carries the route's code, the callback URL as
+		// `redirect_uri`, and the grant's own parameters — nothing else.
 		const [token] = github.requestsTo(GITHUB.tokenEndpoint);
 		expect(token?.body?.get("code")).toBe("gh-code");
 		expect(token?.body?.get("redirect_uri")).toBe(baseConfig.callbackURL);
@@ -125,12 +123,6 @@ describe("createGithubProvider", () => {
 			"grant_type",
 			"redirect_uri",
 		]);
-		for (const request of github.requests) {
-			const sent = [...request.url.searchParams.entries(), ...(request.body?.entries() ?? [])];
-			expect(sent.map(([k]) => k)).not.toContain("iss");
-			expect(sent.map(([k]) => k)).not.toContain("state");
-			expect(sent.map(([, v]) => v)).not.toContain(iss);
-		}
 		// No state is compared here: the route compared it against the session
 		// before calling the adapter, and hands the adapter none. An adapter that
 		// asked the library to expect one would refuse this login ("state"

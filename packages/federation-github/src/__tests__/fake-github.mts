@@ -29,11 +29,12 @@
  * `/user` answers a numeric `id` and no `sub`. The knobs below let a test make
  * one endpoint answer differently at a time.
  *
- * It is no laxer than GitHub where a client could come to depend on the
- * difference: the token endpoint answers form-encoded unless the request's
- * `Accept` asks for JSON, and the REST API (`api.github.com`) refuses a
- * request without a `User-Agent` with `403`. `fake-github.test.mts` holds it
- * to both.
+ * It enforces the two points where the library's defaults decide success:
+ * the token endpoint answers form-encoded unless the request's `Accept` asks
+ * for JSON, and the REST API (`api.github.com`) refuses a request without a
+ * `User-Agent` with `403`. `fake-github.test.mts` holds it to both. It does not
+ * check `Authorization` or `X-GitHub-Api-Version`; the adapter's tests assert
+ * those header values exactly instead.
  */
 
 export const GITHUB = {

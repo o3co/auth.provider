@@ -44,7 +44,10 @@ const GITHUB_EMAILS_URL = "https://api.github.com/user/emails";
 /**
  * GitHub's recommended REST request headers: its JSON media type, and the API
  * version the `sub` rule reads `id` against (an int64 integer), pinned rather
- * than left to whatever version GitHub serves by default.
+ * than left to whatever version GitHub serves by default. GitHub supports a
+ * version for at least 24 months after its successor ships (2022-11-28's
+ * shipped 2026-03-10): revisit this pin before 2028-03, or every login fails
+ * once GitHub retires it.
  */
 const GITHUB_API_HEADERS = {
 	accept: "application/vnd.github+json",
@@ -143,9 +146,10 @@ const DECIMAL_ID = /^[1-9][0-9]*$/;
  * `undefined` when neither is usable.
  *
  * GitHub types `id` as an int64 integer. The identity handed to the Store is
- * `github:<id>`, so an id that `Response.json()` (`JSON.parse`) cannot turn
- * into a JavaScript number exactly is not one: at 2^53 or above, two ids parse
- * as the same number, and `1e400` parses as `Infinity`. Taken as they came,
+ * `github:<id>`, so an id outside the safe-integer range after
+ * `Response.json()` (`JSON.parse`) is not one — a parsed number there no
+ * longer names one id: at 2^53 or above, two ids parse as the same number, and
+ * `1e400` parses as `Infinity`. Taken as they came,
  * two GitHub users would sign in as one account. The
  * string form is held to the digits `String(n)` would give, so one user
  * cannot arrive under two spellings.
