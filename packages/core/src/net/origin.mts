@@ -67,9 +67,11 @@ import { isLoopbackHostname } from "./loopback.mjs";
 
 /**
  * Read a configured origin allowlist from whatever shape it arrived in:
- * `cors.allowedOrigins` here, and the WebAuthn package's `webauthn.origin` /
- * `webauthn.topOrigin` (`${?WEBAUTHN_ORIGIN}` / `${?WEBAUTHN_TOP_ORIGIN}`),
- * which is why it is on the package barrel.
+ * `cors.allowedOrigins` here. The WebAuthn package reads the environment
+ * spelling of `webauthn.origin` / `webauthn.topOrigin` (`${?WEBAUTHN_ORIGIN}` /
+ * `${?WEBAUTHN_TOP_ORIGIN}`) with it too, which is why it is on the package
+ * barrel; that package reads a list itself and refuses a non-string entry
+ * rather than dropping it.
  *
  * Two shapes are legitimate and both have to work at every reader:
  *
@@ -84,11 +86,12 @@ import { isLoopbackHostname } from "./loopback.mjs";
  * included so the entry check refuses them by index, and drops an entry that
  * is not a string.
  *
- * The split only ever yields entries the operator wrote, each of which the
- * caller then checks. A comma is legal inside a special-scheme host
- * (`https://a,b.example` parses), so the string spelling cannot express such
- * an origin — it splits there, and the halves are refused — but it cannot
- * admit one the array spelling would refuse.
+ * The split only yields pieces of what the operator wrote, and the caller
+ * checks each piece as it would an array entry, so the string spelling cannot
+ * admit an origin the array spelling would refuse. A comma is legal inside a
+ * special-scheme host (`https://a,b.example` parses), and the string spelling
+ * cannot express such an origin: it splits there, the piece after the comma
+ * has no scheme, and the list is refused.
  *
  * It lives here, beside {@link checkSerializedOrigin}, because the config
  * schema is not the only reader. `assembleApp` decides whether to mount the

@@ -69,21 +69,28 @@ import { z } from "zod";
  * `origin` / `topOrigin` in both of their spellings: the list a config file
  * carries, or the one string `${?WEBAUTHN_ORIGIN}` / `${?WEBAUTHN_TOP_ORIGIN}`
  * delivers, comma-separated — an environment variable cannot carry a list any
- * other way. The reader is core's `normalizeAllowedOrigins`, the one
+ * other way.
+ *
+ * The string is read by core's `normalizeAllowedOrigins`, the reader
  * `CORS_ALLOWED_ORIGINS` goes through, so every origin list an operator sets
- * from the environment is spelled alike: the string is split on commas, each
- * entry trimmed and the empty ones dropped; a list has its entries trimmed.
+ * from the environment is spelled alike: split on commas, each entry trimmed,
+ * the empty ones dropped. The split yields only pieces of what the operator
+ * wrote, and each piece meets the rules below as a list entry would, so the
+ * string cannot admit an origin the list would refuse. An index in a refusal
+ * counts entries after the split, empty ones already dropped.
  *
- * It decides the shape only. Every entry the split yields is one the operator
- * wrote, and each still meets the rules below, so the split cannot admit an
- * entry the list spelling would refuse. An index in a refusal counts entries
- * after the split, empty ones already dropped.
- *
- * Any other shape is handed on as it is, so the schema refuses it as the
- * wrong type rather than as an empty list.
+ * A list keeps every entry where it is: a string entry is trimmed, and any
+ * other entry is left for the schema to refuse at its index — not dropped,
+ * which is what core's reader does for CORS, and which would shorten the
+ * list the operator wrote. Any other shape is handed on as it is, so the
+ * schema refuses it as the wrong type rather than as an empty list.
  */
-const readOriginList = (raw: unknown): unknown =>
-	typeof raw === "string" || Array.isArray(raw) ? normalizeAllowedOrigins(raw) : raw;
+const readOriginList = (raw: unknown): unknown => {
+	if (typeof raw === "string") return normalizeAllowedOrigins(raw);
+	if (Array.isArray(raw))
+		return raw.map((entry) => (typeof entry === "string" ? entry.trim() : entry));
+	return raw;
+};
 
 /**
  * {@link readOriginList} for the optional `topOrigin`, where an exported-but-
