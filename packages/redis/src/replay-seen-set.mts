@@ -33,7 +33,10 @@ export interface RedisReplaySeenSetOptions {
 
 /**
  * Redis-backed ReplaySeenSet. Two ops are 1-Redis-op primitives:
- *   - markSeen: SET <prefix><key> "1" PX <ttlMs> NX → "OK" | null
+ *   - markSeen: SET <prefix><key> "1" PX <ttlMs> NX → "OK" | null. `PX` takes
+ *     whole milliseconds, so a fractional remaining life is rounded up — the
+ *     record outlives its expiry by under a millisecond rather than dying
+ *     before it; a non-finite expiry is refused before Redis is asked.
  *   - contains: EXISTS <prefix><key> → 1 | 0
  *
  * Note: markSeen returns true on "OK" (= first observation), false on null
@@ -59,11 +62,16 @@ export function createRedisReplaySeenSet(opts: RedisReplaySeenSetOptions): Repla
 		kind: "redis",
 
 		async markSeen(scope, key, expiresAtMs) {
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError(
+					`ReplaySeenSet.markSeen: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+				);
+			}
 			const ttlMs = expiresAtMs - Date.now();
 			if (ttlMs <= 0) {
 				throw new ChallengeStorageError({ reason: "expired-at-issue" });
 			}
-			const result = await client.set(fullKey(scope, key), "1", "PX", ttlMs, "NX");
+			const result = await client.set(fullKey(scope, key), "1", "PX", Math.ceil(ttlMs), "NX");
 			return result === "OK";
 		},
 

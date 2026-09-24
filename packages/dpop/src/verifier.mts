@@ -450,11 +450,15 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				//     directly as DPoPError; preserve that classification.
 				//   - ChallengeStorageError: the seen-set's one domain error
 				//     (`expired-at-issue`), which a record computed from a
-				//     positive TTL cannot earn. Misclassifying it as
-				//     `replay_store_unavailable` would send operator triage to
-				//     Redis health when the fault is in the composition.
+				//     positive TTL cannot earn.
+				//   - RangeError: the seen-set's refusal of a non-finite expiry,
+				//     which construction already rules out.
+				// Misclassifying either as `replay_store_unavailable` would send
+				// operator triage to Redis health when the fault is in the
+				// composition.
 				if (err instanceof DPoPError) throw err;
 				if (err instanceof ChallengeStorageError) throw err;
+				if (err instanceof RangeError) throw err;
 				logger?.error({ err, jti: proof.claims.jti }, "dpop_replay_store_unavailable");
 				throw new DPoPError(
 					"replay_store_unavailable",

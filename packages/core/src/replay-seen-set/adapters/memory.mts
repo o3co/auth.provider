@@ -111,6 +111,13 @@ export function createMemoryReplaySeenSet(
 		},
 
 		async markSeen(scope, key, expiresAtMs) {
+			// NaN is never `<= now`, and ±Infinity is no expiry: without this the
+			// record would be kept forever (the sweep never drops it either).
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError(
+					`ReplaySeenSet.markSeen: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+				);
+			}
 			const nowMs = Date.now();
 			if (expiresAtMs <= nowMs) {
 				throw new ChallengeStorageError({ reason: "expired-at-issue" });

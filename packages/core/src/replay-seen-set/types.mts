@@ -27,7 +27,11 @@
  *     null, so the read-vs-write race window is benign).
  *
  * markSeen MUST throw ChallengeStorageError({ reason: "expired-at-issue" })
- * for expiresAtMs <= now(). contains MUST NOT throw domain errors.
+ * for expiresAtMs <= now(), and RangeError for an expiresAtMs that is not a
+ * finite number (NaN, ±Infinity) — a caller fault rather than a timing
+ * race, so it is not the error consumers swallow. Either way nothing is
+ * recorded. A fractional expiresAtMs is valid, and the record lives at least
+ * until it. contains MUST NOT throw domain errors.
  *
  * `contains` is the security-friendly disambiguation primitive — attacker
  * probing via ChallengeCeremony.consume hits `contains` (read-only, zero
@@ -46,6 +50,7 @@ export interface ReplaySeenSet {
 	 *          false iff (scope, key) already had a non-expired record (= replay).
 	 * @throws ChallengeStorageError({ reason: "expired-at-issue" }) for
 	 *   expiresAtMs <= now().
+	 * @throws RangeError for an expiresAtMs that is not a finite number.
 	 */
 	markSeen(scope: string, key: string, expiresAtMs: number): Promise<boolean>;
 
