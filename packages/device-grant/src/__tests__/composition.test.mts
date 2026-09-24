@@ -143,6 +143,35 @@ const bootWith = async (config: AppConfig, ordered: readonly Module[]) => {
 	return { handle, app };
 };
 
+type Agent = ReturnType<typeof request.agent>;
+
+/** The session's double-submit token, fresh: `GET /session/csrf` sets the cookie and returns the value. */
+const csrfToken = async (agent: Agent): Promise<{ header: string; token: string }> => {
+	const res = await agent.get("/session/csrf");
+	expect(res.status).toBe(200);
+	return { header: res.body.header_name as string, token: res.body.csrf_token as string };
+};
+
+/** Sign in through `POST /session/login`, as the verification page's user would have. */
+const signIn = async (agent: Agent): Promise<void> => {
+	const { header, token } = await csrfToken(agent);
+	const res = await agent
+		.post("/session/login")
+		.set(header, token)
+		.send({ username: USERNAME, password: PASSWORD });
+	expect(res.status).toBe(200);
+};
+
+/** A device starts the flow; returns the code a person would type. */
+const startDevice = async (app: express.Express): Promise<string> => {
+	const res = await request(app)
+		.post("/oauth/device_authorization")
+		.type("form")
+		.send({ client_id: CLIENT_ID });
+	expect(res.status).toBe(200);
+	return res.body.user_code as string;
+};
+
 describe("deviceGrantModule beside oauthModule — discovery (RFC 8628 §4)", () => {
 	it("boots enabled and advertises device_authorization_endpoint under the issuer", async () => {
 		// `oauthModule` always activates discovery, and core's builder refuses
@@ -168,4 +197,62 @@ describe("deviceGrantModule beside oauthModule — discovery (RFC 8628 §4)", ()
 			await handle.dispose();
 		}
 	});
+});
+
+describe("deviceGrantModule beside oauthModule — POST /oauth/device/verification is JSON-only", () => {
+	// A form body is a CORS "simple" request: a browser sends it cross-site,
+	// with the victim's session cookie and no preflight. `oauthModule`'s router
+	// parses form bodies for every request under `/oauth`, so a rule that
+	// rested on this package mounting no form parser held only when this
+	// package was listed first. The CSRF token is valid here on purpose: the
+	// media type is the first defence, and it must not depend on the second.
+	const orders = [
+		[
+			"oauthModule listed first",
+			(config: AppConfig) => [oauthModule({ config }), deviceGrantModule],
+		],
+		[
+			"deviceGrantModule listed first",
+			(config: AppConfig) => [deviceGrantModule, oauthModule({ config })],
+		],
+	] as const;
+
+	it.each(orders)(
+		"refuses a form-encoded approval carrying a valid CSRF token (%s)",
+		async (_label, ordered) => {
+			const config = makeConfig(ENABLED);
+			const { handle, app } = await bootWith(config, [
+				sessionStoreModuleFor(config),
+				...ordered(config),
+			]);
+			try {
+				const userCode = await startDevice(app);
+				const agent = request.agent(app);
+				await signIn(agent);
+				const { header, token } = await csrfToken(agent);
+
+				const form = await agent
+					.post("/oauth/device/verification")
+					.set(header, token)
+					.type("form")
+					.send(`action=approve&user_code=${userCode}`);
+
+				expect(form.status).toBe(415);
+				expect(form.body.error).toBe("invalid_request");
+
+				// The same approval as JSON goes through — so what refused the
+				// form was its media type, not the session or the token — and it
+				// is an approval, not `409 already_decided`: the form decided
+				// nothing.
+				const json = await agent
+					.post("/oauth/device/verification")
+					.set(header, token)
+					.send({ action: "approve", user_code: userCode });
+				expect(json.status).toBe(200);
+				expect(json.body.status).toBe("approved");
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
 });
