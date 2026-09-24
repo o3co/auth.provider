@@ -16,7 +16,9 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { AppConfigSchema } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { webauthnConfigSchema } from "../config.mjs";
 
 // Per ADR 2026-04-30: schema is a pure type contract; defaults live in
@@ -470,5 +472,41 @@ describe("origin lists from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIG
 		expect(webauthnConfigSchema.parse({ ...VALID, topOrigin: "" }).topOrigin).toBeUndefined();
 		// The list spelling keeps its rule: an explicit empty list is refused.
 		expect(webauthnConfigSchema.safeParse({ ...VALID, topOrigin: [] }).success).toBe(false);
+	});
+});
+
+// A composition root parses its HOCON with core's `AppConfigSchema` before
+// this package sees it, and `AppConfigSchema` is a strip-mode object: a key
+// its `webauthn` section does not name is gone by the time a bootstrap module
+// hands `config.webauthn` to `webauthnConfigSchema` (#496). Core cannot
+// import this package, so the parity is checked from this side, over the
+// whole key tree.
+describe("core's AppConfigSchema passes through every key webauthnConfigSchema reads", () => {
+	/** Every dotted key path in an object schema, through optional / default / pipe wrappers. */
+	const keyPaths = (schema: z.ZodType, prefix = ""): string[] => {
+		let inner: z.ZodType = schema;
+		for (;;) {
+			if (inner instanceof z.ZodOptional || inner instanceof z.ZodNullable) {
+				inner = inner.unwrap() as z.ZodType;
+			} else if (inner instanceof z.ZodDefault) {
+				inner = inner.removeDefault() as z.ZodType;
+			} else if (inner instanceof z.ZodPipe) {
+				inner = inner.out as z.ZodType;
+			} else {
+				break;
+			}
+		}
+		if (!(inner instanceof z.ZodObject)) return [];
+		return Object.entries(inner.shape).flatMap(([key, value]) => {
+			const path = prefix === "" ? key : `${prefix}.${key}`;
+			return [path, ...keyPaths(value as z.ZodType, path)];
+		});
+	};
+
+	it("names the same key tree in both schemas", () => {
+		const coreSection = AppConfigSchema.shape.webauthn;
+		expect(keyPaths(coreSection).sort()).toEqual(keyPaths(webauthnConfigSchema).sort());
+		// Not vacuous: the walk reached the nested rate-limit spec.
+		expect(keyPaths(webauthnConfigSchema)).toContain("rateLimit.authenticationOptions.limit");
 	});
 });

@@ -147,7 +147,9 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
  * that every key here is a slot it declares. A slot read here without the
  * module declaring it — optional or not — is therefore a compile error at
  * that call rather than an `undefined` at runtime, and a slot the module
- * declares cannot be dropped on the way.
+ * declares cannot be dropped on the way. That check stops at slots: that the
+ * `webauthnConfig` fields read here are all fields of `WebAuthnConfig` is
+ * pinned by `grant.types.test.mts`, which `pnpm run typecheck` compiles.
  *
  * `grantPolicy` stays optional in this type although `webauthnModule` refuses
  * to boot without it (H-2): a handler built directly, as the unit tests do,

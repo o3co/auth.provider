@@ -22,6 +22,7 @@ import type {
 	WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
 import { describe, expect, expectTypeOf, it } from "vitest";
+import type { WebAuthnConfig } from "#/config.mjs";
 import type { WebAuthnGrantDeps } from "#/grant.mjs";
 import { webauthnModule } from "#/module.mjs";
 
@@ -80,6 +81,15 @@ describe("the webauthn grant declares the slots it reads (#626 P2)", () => {
 			// @ts-expect-error — the grant opens refresh-token families, it never revokes one
 			void deps.refreshTokenFamilyRevocation;
 		}
+		expect(true).toBe(true);
+	});
+
+	it("reads only fields of webauthnConfig that the config has", () => {
+		// The module's `satisfies` checks slots, not the fields inside one: a
+		// field added to the grant's `webauthnConfig` type that WebAuthnConfig
+		// lacks would compile (an optional one is satisfied by absence) and be
+		// `undefined` forever — the #554 `topOrigin` class, one level down.
+		expectTypeOf<keyof WebAuthnGrantDeps["webauthnConfig"]>().toMatchTypeOf<keyof WebAuthnConfig>();
 		expect(true).toBe(true);
 	});
 
