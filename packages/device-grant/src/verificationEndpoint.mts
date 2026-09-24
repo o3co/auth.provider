@@ -90,16 +90,20 @@
  * `application/json` with `415 invalid_request` before it reads a field.
  *
  * It checks the media type itself rather than relying on no form parser
- * having run: routes under `/oauth` share the prefix with `oauthModule`'s
- * router, which parses form bodies for every request beneath it, so whether a
- * form arrived parsed depended on which module the composition listed first.
+ * having run. Routes under `/oauth` share the prefix with `oauthModule`'s
+ * router, which parses form bodies for every request beneath it; the route
+ * `deviceGrantModule` mounts is placed ahead of that router, but a
+ * composition that mounts this handler by hand may not be, and the rule is
+ * the endpoint's either way.
  *
- * ### The origin check is the module's
+ * ### The origin check is the module's, and runs first
  *
  * This handler runs no body parser and no origin check. The router
  * `deviceGrantModule` mounts parses JSON and runs the session package's CSRF
  * guard ahead of it (see `module.mts`); a composition that mounts this
- * handler by hand must do the same.
+ * handler by hand must do the same. So a cross-site form is refused by the
+ * guard, `403 access_denied`, before this handler sees it: only a request
+ * the guard lets through can be answered `415`.
  */
 
 import type {

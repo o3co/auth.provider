@@ -70,9 +70,8 @@
  *
  * So the route the module mounts is JSON-only — a form body is a "simple"
  * request the browser sends without a preflight, `application/json` is not;
- * the handler refuses any other media type itself, so the rule holds even
- * when `oauthModule`'s router has already parsed the body — and sits behind
- * the same `createCsrfGuard` `/session/login` runs (#272):
+ * the handler refuses any other media type itself — and sits behind the
+ * same `createCsrfGuard` `/session/login` runs (#272):
  * a foreign `Origin` / `Referer` is refused outright, the server's own origin
  * or one on `session.csrf.trustedOrigins` is accepted, and a request with no
  * origin signal must carry the session's signed double-submit token. That is
@@ -80,6 +79,15 @@
  * which is why this package depends on `@o3co/auth-provider-session` rather
  * than restating an origin check. The guard is built from the `session.*`
  * config slice, so enabling the grant without one fails at boot.
+ *
+ * ### Mounted ahead of `oauthModule`'s router
+ *
+ * Both routes live under `/oauth`, where `oauthModule`'s router parses every
+ * body with Express's defaults. Enabled, they declare `before` that router,
+ * so what they accept — the 16 KiB bound, the media type, where a CSRF
+ * token may come from — is decided by their own middleware in any module
+ * order. The cost is that an enabled grant needs `oauthModule`; see
+ * `OAUTH_ROUTER_ID`.
  *
  * ### One outage policy for both routes (#457)
  *
@@ -288,25 +296,37 @@ const requireVerificationUri = (slice: DeviceAuthorizationConfigSlice): string =
 	return uri;
 };
 
+/**
+ * The id of the route `oauthModule` contributes at `/oauth`. Both enabled
+ * routes declare `before` it, so they mount ahead of that router whatever
+ * order the composition lists the modules in: its `express.json()` /
+ * `express.urlencoded()` (Express's 100 KiB default) would otherwise read
+ * every body under `/oauth` first, and `body-parser` does not parse a body
+ * twice. Mounted first, what these routes accept — the size bound, the
+ * media type, a CSRF token only from a header or a JSON body — is theirs
+ * alone.
+ *
+ * The edge is declared on the enabled path only. A disabled module mounts
+ * two 404 routers, which have no body to protect, and a composition without
+ * `oauthModule` must still boot with the grant off. An enabled grant without
+ * it is refused (`route-order-target-missing`) — there would be no
+ * `/oauth/token` to poll.
+ */
+const OAUTH_ROUTER_ID = "oauth-endpoints";
+
 /** Both routes' body bound: the parsers' `limit`, and the check ahead of them. */
 const BODY_LIMIT = "16kb";
 const BODY_LIMIT_BYTES = 16 * 1024;
 
 /**
  * The body limit, restated ahead of the parsers — federation-grants'
- * `withinBodyLimit`, with its status and body, for the same reason.
+ * `withinBodyLimit`, with its status and body.
  *
- * Both routes live under `/oauth`, where `oauthModule` mounts a router whose
- * first middlewares are `express.json()` and `express.urlencoded()` with
- * Express's 100 KiB default. Listed ahead of this module, those parsers have
- * read the body before these routes run, and `body-parser` does not parse a
- * body twice — so the `limit` on the parsers below is skipped. A declared
- * `Content-Length` over the bound is refused here, before anything else, so
- * the answer is the same `413` in either order.
- *
- * A body with no `Content-Length` (chunked) is left to the parsers, as
- * federation-grants leaves it: this module's own bound it when they run
- * first, `oauthModule`'s 100 KiB default when that router does.
+ * A declared `Content-Length` over the bound is refused here, before any of
+ * the body is read. A body with no `Content-Length` (chunked) is left to the
+ * parsers' own `limit`, as federation-grants leaves it; both routes mount
+ * ahead of `oauthModule`'s router (`OAUTH_ROUTER_ID`), so those parsers are
+ * the first to read it whatever the module order.
  */
 const withinBodyLimit: RequestHandler = (req, res, next) => {
 	const declared = Number(req.headers["content-length"]);
@@ -531,9 +551,8 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					}
 					const router = express.Router();
 					// Router-level body parsing, matching `oauthModule` and the
-					// WebAuthn routes: `createApp` installs no global parser. The
-					// bound is checked first, from `Content-Length`, so it holds
-					// when `oauthModule`'s parsers have already read the body.
+					// WebAuthn routes: `createApp` installs no global parser. A
+					// declared oversized body is refused before it is read.
 					router.use(withinBodyLimit);
 					router.use(express.json({ limit: BODY_LIMIT }));
 					router.use(express.urlencoded({ extended: false, limit: BODY_LIMIT }));
@@ -591,6 +610,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 						id: "device-authorization",
 						mountPath: "/oauth/device_authorization",
 						handler: router,
+						before: [OAUTH_ROUTER_ID],
 					};
 				},
 				(deps: DeviceGrantModuleDeps) => {
@@ -602,13 +622,11 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// JSON only, deliberately — see the file header. A form body is
 					// a "simple" request a browser sends cross-site with the
 					// victim's cookie and no preflight; JSON is not. No form parser
-					// is mounted here, but that is not what enforces the rule:
-					// `oauthModule`'s router parses form bodies for every request
-					// under `/oauth`, and when it is listed first it has done so
-					// before this router runs. The handler checks the media type
-					// itself and answers anything else `415`. The body bound is
-					// checked from `Content-Length` ahead of the parser, for the
-					// same reason: see `withinBodyLimit`.
+					// is mounted here, and the route mounts ahead of
+					// `oauthModule`'s router, so nothing else has parsed the body
+					// either. The handler still checks the media type itself and
+					// answers anything else `415`: the rule belongs to the
+					// endpoint, not to what is mounted around it.
 					router.use(withinBodyLimit);
 					router.use(express.json({ limit: BODY_LIMIT }));
 					// The session guard, verbatim: foreign origin refused, same
@@ -651,6 +669,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 						id: "device-verification",
 						mountPath: "/oauth/device/verification",
 						handler: router,
+						before: [OAUTH_ROUTER_ID],
 					};
 				},
 			],
