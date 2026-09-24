@@ -442,9 +442,24 @@ describe("loggableError — what a log line may carry of an error", () => {
 			expect(JSON.stringify(loggableError(refused))).not.toContain("S3CRET");
 		});
 
+		it.each([["JSON.SET"], ["FT.SEARCH"], ["json.get"]])(
+			"keeps a Redis module command's dotted name: %s",
+			(name) => {
+				const refused = Object.assign(new Error("ERR could not perform this operation"), {
+					name: "ReplyError",
+					command: { name, args: ["doc:S3CRET", "$", "{}"] },
+				});
+				expect(loggableError(refused).command).toEqual({ name });
+				expect(JSON.stringify(loggableError(refused))).not.toContain("S3CRET");
+			},
+		);
+
 		it.each([
 			["a shell command line, as execa carries it", "git push https://token-S3CRET@example.com"],
 			["a name with a space", { name: "set key-S3CRET" }],
+			["a name with two dots", { name: "a.b.c" }],
+			["a dotted name with a space", { name: "JSON.SET key-S3CRET" }],
+			["a name that ends in a dot", { name: "JSON." }],
 			["an over-long name", { name: "x".repeat(33) }],
 			["a name that is not a string", { name: 42 }],
 			["no name", { args: ["S3CRET"] }],
