@@ -42,10 +42,10 @@
 ## インストール
 
 ```sh
-pnpm add @o3co/auth-provider-oauth
+pnpm add @o3co/auth-provider-oauth @o3co/auth-provider-core express express-session
 ```
 
-peer dependencies: `express@^5.0.0` と `express-session@^1.17.0`。express-session が peer なのは、ルーターがブラウザーセッションを読み、その型を拡張するから（`/authorize`、`session` グラント、ログアウト）。ブラウザーのフローを扱う構成は、下の例のとおり `@o3co/auth-provider-session` の `sessionStoreModuleFor(config)` でそれをマウントする。このパッケージは `@o3co/auth-provider-core`、`accepts`、`jose`、`zod` に依存する。
+peer dependencies: `@o3co/auth-provider-core`、`express@^5.0.0`、`express-session@^1.17.0`。core が peer なのは、構成が core を 1 つだけ持つようにするため: コンポジションルートが `createApp` を import する core であり、他のパッケージの `declare module` による core の拡張が届く core である。express-session が peer なのは、ルーターがブラウザーセッションを読み、その型を拡張するから（`/authorize`、`session` グラント、ログアウト）。ブラウザーのフローを扱う構成は、下の例のとおり `@o3co/auth-provider-session` の `sessionStoreModuleFor(config)` でそれをマウントする。このパッケージは `accepts`、`jose`、`zod` に依存する。
 
 ## 組み込み方
 

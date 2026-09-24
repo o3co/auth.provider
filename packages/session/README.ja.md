@@ -43,8 +43,8 @@
 npm install @o3co/auth-provider-session @o3co/auth-provider-core express express-session
 ```
 
-- peer dependencies: `express@^5.0.0` と `express-session@^1.17.0`。
-- 一緒にインストールされるもの: `@o3co/auth-provider-core`、および Redis セッションストア用の `connect-redis` と `redis`。この二つは常にインストールされ、`session.storage.type = "redis"` のときにだけロードされる。
+- peer dependencies: `@o3co/auth-provider-core`、`express@^5.0.0`、`express-session@^1.17.0`。core が peer なのは、このパッケージが core を拡張する（`federationRedirectPolicies` の contribution 種別とそのスロット）からで、拡張は自分が解決した core にしか届かない。peer であれば、それは構成が持つ唯一の core になる。
+- 一緒にインストールされるもの: Redis セッションストア用の `connect-redis` と `redis`。この二つは常にインストールされ、`session.storage.type = "redis"` のときにだけロードされる。
 
 ## 組み立て
 

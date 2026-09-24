@@ -37,16 +37,17 @@
 		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
-		"@o3co/auth-provider-core": "workspace:*",
 		"accepts": "^2.0.0",
 		"jose": "^6.2.12",
 		"zod": "^4.6.2"
 	},
 	"peerDependencies": {
+		"@o3co/auth-provider-core": "workspace:^",
 		"express": "^5.0.0",
 		"express-session": "^1.17.0"
 	},
 	"devDependencies": {
+		"@o3co/auth-provider-core": "workspace:*",
 		"@types/accepts": "^1.3.7",
 		"@types/express": "^5.0.6",
 		"@types/express-session": "^1",
