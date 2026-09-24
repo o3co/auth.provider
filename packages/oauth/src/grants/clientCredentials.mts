@@ -258,7 +258,9 @@ function resolveScope(
 		};
 	};
 	const requestedRaw = ctx.body.scope;
-	if (requestedRaw === undefined) {
+	// RFC 6749 §3.2: a parameter sent without a value is treated as omitted —
+	// `scope=""` in a form body, `"scope": null` in a JSON one.
+	if (requestedRaw === undefined || requestedRaw === null) {
 		return omittedScopeGrant();
 	}
 	// RFC 6749 §3.3: `scope` MUST be a single space-delimited string when

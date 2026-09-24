@@ -232,7 +232,7 @@ The registration endpoints enforce a 1..64-byte length on `webauthnSubject.userI
 
 The webauthn grant has **no library-side `allowedScopes` ceiling**. Client credentials and authorization code grants bind issued scope to `client.allowedScopes` at the handler level; webauthn cannot, because the passkey is the authentication event, not a scope authorization token.
 
-The requested `scope` is read strictly by RFC 6749 §3.3's grammar (core's `readSpaceDelimitedParameter`) before the policy sees it: a value that is not a space-delimited list of scope-tokens — a tab, a quote — is `400 invalid_scope`, so a malformed scope never reaches a token's `scope` claim as sent, whatever the policy allows. A value of spaces alone requests no scope; a tab alone is malformed.
+The requested `scope` is read strictly by RFC 6749 §3.3's grammar (core's `readSpaceDelimitedParameter`) before the policy sees it: a value that is not a space-delimited list of scope-tokens — a tab, a quote — is `400 invalid_scope`, so a malformed scope never reaches a token's `scope` claim as sent, whatever the policy allows. A value of spaces alone, or a JSON `null` (RFC 6749 §3.2), requests no scope; a tab alone is malformed, and a value that is not a string is `400 invalid_request`.
 
 `grantPolicy` is the **only scope-bounding gate** for this grant. Policy invocation is unconditional whenever `grantPolicy` is wired — it is NOT gated on `oauth.resourceIndicator.enabled` (that flag controls only whether `body.resource` is forwarded to the policy). This mirrors the `refresh_token` grant pattern.
 

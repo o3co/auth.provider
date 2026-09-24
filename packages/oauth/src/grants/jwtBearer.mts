@@ -540,7 +540,9 @@ function resolveScope(
 ):
 	| { scopes: readonly string[] }
 	| { status: 400; error: "invalid_scope" | "invalid_request"; errorDescription: string } {
-	const raw = ctx.body.scope;
+	// RFC 6749 §3.2: a parameter sent without a value is treated as omitted —
+	// `scope=""` in a form body, `"scope": null` in a JSON one.
+	const raw = ctx.body.scope ?? undefined;
 	if (raw !== undefined && typeof raw !== "string") {
 		return {
 			status: 400,

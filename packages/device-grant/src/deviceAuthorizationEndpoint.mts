@@ -107,8 +107,10 @@ const resolveScope = (
 
 	// RFC 6749 §3.3: a single space-delimited string. Express turns repeated
 	// `scope=` form keys into an array; defaulting that to the client's whole
-	// allowlist would grant more than was asked for.
-	if (raw !== undefined && typeof raw !== "string") {
+	// allowlist would grant more than was asked for. RFC 6749 §3.2: a
+	// parameter sent without a value is treated as omitted — `scope=""` in a
+	// form body, `"scope": null` in a JSON one.
+	if (raw !== undefined && raw !== null && typeof raw !== "string") {
 		return {
 			ok: false,
 			error: "invalid_request",
@@ -118,7 +120,7 @@ const resolveScope = (
 	// Read strictly, as every token-endpoint grant reads a request: the space
 	// is the one delimiter, and an entry that is not a scope-token makes the
 	// value malformed. Spaces alone name nothing, which is an omitted scope.
-	const requested = raw === undefined ? [] : readSpaceDelimitedParameter(raw);
+	const requested = typeof raw === "string" ? readSpaceDelimitedParameter(raw) : [];
 	if (requested === null) {
 		return {
 			ok: false,
