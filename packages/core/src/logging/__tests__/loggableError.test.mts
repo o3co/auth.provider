@@ -21,6 +21,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import {
 	guardedRead,
+	LOGGED_AGGREGATE_MAX_ERRORS,
 	LOGGED_STACK_MAX_FRAMES,
 	LOGGED_STACK_MAX_LENGTH,
 	type LoggableError,
@@ -64,8 +65,12 @@ const bodyParserError = async (
 /** The projection without `stack`, whose frames are pinned by cases of their own. */
 const shape = (err: unknown): unknown => {
 	const walk = (projected: LoggableError): Record<string, unknown> => {
-		const { stack: _frames, cause, ...fields } = projected;
-		return cause === undefined ? fields : { ...fields, cause: walk(cause) };
+		const { stack: _frames, cause, aggregateErrors, ...fields } = projected;
+		return {
+			...fields,
+			...(cause === undefined ? {} : { cause: walk(cause) }),
+			...(aggregateErrors === undefined ? {} : { aggregateErrors: aggregateErrors.map(walk) }),
+		};
 	};
 	return walk(loggableError(err));
 };
@@ -223,6 +228,201 @@ describe("loggableError — what a log line may carry of an error", () => {
 		(a as { cause?: unknown }).cause = b;
 		const projected = JSON.stringify(loggableError(a));
 		expect(projected.match(/"message"/g)?.length).toBeLessThanOrEqual(4);
+	});
+
+	describe("an AggregateError's members", () => {
+		/** What an OAuth library throws for a refresh answer it refused: the answer on a non-Error cause. */
+		const refusedRefresh = (): Error =>
+			Object.assign(
+				new Error("invalid response encountered", {
+					cause: { body: { refresh_token: "rt-MEMBER-S3CRET" } },
+				}),
+				{ name: "ClientError", code: "OAUTH_INVALID_RESPONSE" },
+			);
+
+		it("keeps its Error members, each projected as a cause is — names and codes, never what they carry", () => {
+			const reply = Object.assign(
+				new Error(
+					"ERR unknown command 'evalsha', with args beginning with: 'sha' '1' 'fg:grant:rt-ARG-S3CRET'",
+				),
+				{ name: "ReplyError", command: { name: "evalsha", args: ["fg:grant:rt-ARG-S3CRET"] } },
+			);
+			const failed = new AggregateError(
+				[refusedRefresh(), reply],
+				"AppHandle.dispose: 2 cleanup errors",
+			);
+
+			expect(shape(failed)).toEqual({
+				name: "AggregateError",
+				message: "AppHandle.dispose: 2 cleanup errors",
+				aggregateErrors: [
+					{
+						name: "ClientError",
+						message: "invalid response encountered",
+						code: "OAUTH_INVALID_RESPONSE",
+					},
+					{ name: "ReplyError", message: "ERR unknown command 'evalsha'" },
+				],
+			});
+			const projected = loggableError(failed);
+			expect(projected.aggregateErrors?.[0]?.stack).toMatch(/^ {4}at /);
+			const serialised = JSON.stringify(projected);
+			expect(serialised).not.toContain("S3CRET");
+			expect(serialised).not.toContain("refresh_token");
+		});
+
+		it(`keeps at most the first ${LOGGED_AGGREGATE_MAX_ERRORS}, and says how many it left out`, () => {
+			expect(LOGGED_AGGREGATE_MAX_ERRORS).toBe(5);
+			const many = new AggregateError(
+				Array.from({ length: 7 }, (_, i) => Object.assign(new Error(`m${i}`), { name: `E${i}` })),
+				"all failed",
+			);
+			const projected = loggableError(many);
+			expect(projected.aggregateErrors?.map((member) => member.name)).toEqual([
+				"E0",
+				"E1",
+				"E2",
+				"E3",
+				"E4",
+			]);
+			expect(projected.aggregateErrorsOmitted).toBe(2);
+		});
+
+		it("leaves out a member that is not an Error, as it does a cause, and counts it", () => {
+			const mixed = new AggregateError(
+				["rt-STRING-S3CRET", { access_token: "at-OBJECT-S3CRET" }, new TypeError("kept")],
+				"mixed",
+			);
+			expect(shape(mixed)).toEqual({
+				name: "AggregateError",
+				message: "mixed",
+				aggregateErrors: [{ name: "TypeError", message: "kept" }],
+				aggregateErrorsOmitted: 2,
+			});
+			expect(JSON.stringify(loggableError(mixed))).not.toContain("S3CRET");
+		});
+
+		it("keeps no members field when none of them is an Error — a validation library's issues", () => {
+			const issues = Object.assign(new Error("invalid input"), {
+				name: "ZodError",
+				errors: [{ path: ["client_secret"], message: "s3cret-value is too short" }],
+			});
+			expect(shape(issues)).toEqual({ name: "ZodError", message: "invalid input" });
+		});
+
+		it("follows members as deep as causes, and no deeper", () => {
+			let nested: Error = new Error("innermost");
+			for (let level = 4; level >= 0; level--) {
+				nested = new AggregateError([nested], `level ${level}`);
+			}
+			const depthOf = (projected: LoggableError | undefined): number =>
+				projected === undefined ? 0 : 1 + depthOf(projected.aggregateErrors?.[0]);
+			// The error and three levels below it, as with causes.
+			expect(depthOf(loggableError(nested))).toBe(4);
+		});
+
+		it("never throws on an `errors` that cannot be read", () => {
+			const unreadable = Object.defineProperty(new AggregateError([], "outer"), "errors", {
+				get() {
+					throw new Error("getter");
+				},
+			});
+			expect(shape(unreadable)).toEqual({ name: "AggregateError", message: "outer" });
+			const trap = () => {
+				throw new Error("trap");
+			};
+			const hostile = Object.assign(new Error("outer"), {
+				errors: new Proxy([new Error("m")], { get: trap, getPrototypeOf: trap }),
+			});
+			expect(() => loggableError(hostile)).not.toThrow();
+			const revocable = Proxy.revocable([new Error("m")], {});
+			revocable.revoke();
+			const revoked = Object.assign(new Error("outer"), { errors: revocable.proxy });
+			expect(shape(revoked)).toEqual({ name: "Error", message: "outer" });
+		});
+	});
+
+	describe("a closed-set field a store's error records", () => {
+		it.each([
+			["unreachable"],
+			["connection_closed"],
+			["malformed_response"],
+			["expired-at-issue"],
+		])("keeps an own `reason` that is a code: %j", (reason) => {
+			expect(shape(Object.assign(new Error("m"), { reason }))).toEqual({
+				name: "Error",
+				message: "m",
+				reason,
+			});
+		});
+
+		it.each([
+			["free text", "Token has been expired or revoked."],
+			["a camel-cased word", "keyCompromise"],
+			["a lowercase hex token", "a3f9c0e1d2b4a6f8c0e1d2b4a6f8c0e1"],
+			["a UUID", "f47ac10b-58cc-4372-a567-0e02b2c3d479"],
+			["an over-long code", `${"a_".repeat(40)}b`],
+			["a number", 42],
+		])("drops a `reason` that is %s", (_label, reason) => {
+			expect(shape(Object.assign(new Error("m"), { reason }))).toEqual({
+				name: "Error",
+				message: "m",
+			});
+		});
+
+		it("drops a `reason` the error inherits rather than owns", () => {
+			class Inherited extends Error {}
+			Object.defineProperty(Inherited.prototype, "reason", { value: "unreachable" });
+			expect(shape(new Inherited("m"))).toEqual({ name: "Error", message: "m" });
+		});
+
+		it("keeps an own `…Status` field that holds an HTTP status — an upstream's answer beside the error's own `status`", () => {
+			const refused = Object.assign(new Error("the Store refused this deployment's credential"), {
+				name: "StoreCredentialRefusedError",
+				storeStatus: 401,
+				upstreamStatus: 503,
+			});
+			expect(shape(refused)).toEqual({
+				name: "StoreCredentialRefusedError",
+				message: "the Store refused this deployment's credential",
+				storeStatus: 401,
+				upstreamStatus: 503,
+			});
+		});
+
+		it.each([
+			["below the HTTP range", { storeStatus: 99 }],
+			["above it", { storeStatus: 600 }],
+			["fractional", { storeStatus: 401.5 }],
+			["a string", { storeStatus: "401" }],
+			["under a name that is not `<word>Status`", { store_status: 401, Status: 401, storestatus: 401 }],
+		])("drops a status field %s", (_label, fields) => {
+			expect(shape(Object.assign(new Error("m"), fields))).toEqual({ name: "Error", message: "m" });
+		});
+
+		it("keeps at most four `…Status` fields", () => {
+			const many = Object.assign(new Error("m"), {
+				aStatus: 401,
+				bStatus: 402,
+				cStatus: 403,
+				dStatus: 404,
+				eStatus: 405,
+			});
+			expect(Object.keys(loggableError(many)).filter((key) => key.endsWith("Status"))).toEqual([
+				"aStatus",
+				"bStatus",
+				"cStatus",
+				"dStatus",
+			]);
+		});
+
+		it("never throws on an error whose own keys cannot be listed", () => {
+			const trap = () => {
+				throw new Error("trap");
+			};
+			const hostile = new Proxy(new Error("m"), { ownKeys: trap, getOwnPropertyDescriptor: trap });
+			expect(() => loggableError(hostile)).not.toThrow();
+		});
 	});
 
 	describe("the known shapes in which a message quotes a peer are removed", () => {
@@ -672,6 +872,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 	});
 
 	it("exports the limits and the guarded read the rule is built from", () => {
+		expect(LOGGED_AGGREGATE_MAX_ERRORS).toBe(5);
 		expect(LOGGED_STACK_MAX_FRAMES).toBe(10);
 		expect(LOGGED_STACK_MAX_LENGTH).toBe(2048);
 		expect(guardedRead({ field: 1 }, "field")).toEqual({ value: 1 });
@@ -716,6 +917,30 @@ describe("loggableError — what a log line may carry of an error", () => {
 		// The message is this process's own text here, and kept; the stack
 		// carries none of it.
 		expect(err.stack).not.toContain("STACKSECRET");
+	});
+
+	it("reaches pino with an AggregateError's members once, as `aggregateErrors`", () => {
+		// pino's err serializer writes an `errors` array out a second time as
+		// `aggregateErrors`; the projection uses pino's own name, so its
+		// members are written once.
+		const lines: string[] = [];
+		const log = pino(
+			{ base: null, timestamp: false },
+			{
+				write(line: string) {
+					lines.push(line);
+				},
+			},
+		);
+		log.error(
+			{ err: loggableError(new AggregateError([new TypeError("kept")], "all failed")) },
+			"failed",
+		);
+		const { err } = JSON.parse(lines[0] ?? "{}") as { err: Record<string, unknown> };
+		expect(err.aggregateErrors).toEqual([
+			expect.objectContaining({ name: "TypeError", message: "kept" }),
+		]);
+		expect(err).not.toHaveProperty("errors");
 	});
 
 	it("counts an error from another realm as an error", () => {

@@ -31,7 +31,14 @@
  */
 
 import { createServer, type Server } from "node:http";
-import type { Logger } from "@o3co/auth-provider-core";
+import {
+	type BootstrapMap,
+	createApp,
+	createMemoryReplaySeenSet,
+	defineModule,
+	type Logger,
+} from "@o3co/auth-provider-core";
+import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
 import {
 	cleanupAllowanceFor,
@@ -233,30 +240,56 @@ describe("installGracefulShutdown (#290)", () => {
 	it("reports a cleanup failure through the app logger, not console, as loggableError's projection", async () => {
 		// Every other line this service emits is NDJSON through pino; a bare
 		// console.error on the shutdown path is the one a log pipeline drops.
-		// What `handle.dispose()` rejects with is an AggregateError of every
-		// cleanup's own error — among them a store write that failed while
-		// the federation-grant drain waited on it, whose ioredis reply error
-		// carries the write, a rotated upstream credential included. The line
-		// carries the projection, never those.
-		const refused = Object.assign(
+		// What a real `handle.dispose()` rejects with is an AggregateError of
+		// every cleanup's own error. The line names each member and its code,
+		// and carries nothing of what they hold: an OAuth library's refusal
+		// keeps the refresh answer it refused on a non-Error cause, an ioredis
+		// reply the write it refused.
+		const refusedRefresh = Object.assign(
+			new Error("invalid response encountered", {
+				cause: { body: { refresh_token: "1//0g-UPSTREAM-S3CRET" } },
+			}),
+			{ name: "ClientError", code: "OAUTH_INVALID_RESPONSE" },
+		);
+		const refusedWrite = Object.assign(
 			new Error("READONLY You can't write against a read only replica."),
 			{
 				name: "ReplyError",
-				command: {
-					name: "set",
-					args: ["fg:credential:grant-1", '{"refresh_token":"1//0g-UPSTREAM-S3CRET"}'],
-				},
+				command: { name: "set", args: ["fg:credential:grant-1", "1//0g-ARGS-S3CRET"] },
 			},
 		);
+		const failingCleanups = defineModule({
+			name: "test:failing-cleanups",
+			provides: {
+				replaySeenSet: () => createMemoryReplaySeenSet(),
+				challengeStore: () => ({}) as never,
+			},
+			lifecycle: {
+				replaySeenSet: {
+					eager: true,
+					cleanup: () => {
+						throw refusedRefresh;
+					},
+				},
+				challengeStore: {
+					eager: true,
+					cleanup: () => {
+						throw refusedWrite;
+					},
+				},
+			},
+		});
+		const handle = await createApp({
+			modules: [failingCleanups],
+			bootstrapComponents: {
+				config: makeValidCoreConfig(),
+				pathResolver: (path: string) => path,
+			} as unknown as BootstrapMap,
+		});
 		const { logger, lines } = serialiseEverythingLogger();
 		const { exit, signals, finishDraining } = install({
 			logger,
-			cleanup: () => {
-				throw new AggregateError(
-					[refused],
-					"AppHandle.dispose: 1 cleanup error (federation-grants:federationGrantRegistry)",
-				);
-			},
+			cleanup: () => handle.dispose(),
 		});
 		signals.get("SIGTERM")?.();
 		finishDraining();
@@ -265,13 +298,29 @@ describe("installGracefulShutdown (#290)", () => {
 			{
 				err: {
 					name: "AggregateError",
-					message: "AppHandle.dispose: 1 cleanup error (federation-grants:federationGrantRegistry)",
+					message: expect.stringMatching(/^AppHandle\.dispose: 2 cleanup errors /),
 					stack: FRAMES,
+					aggregateErrors: expect.arrayContaining([
+						{
+							name: "ClientError",
+							message: "invalid response encountered",
+							code: "OAUTH_INVALID_RESPONSE",
+							stack: FRAMES,
+						},
+						{
+							name: "ReplyError",
+							message: "READONLY You can't write against a read only replica.",
+							stack: FRAMES,
+						},
+					]),
 				},
 			},
 			"graceful shutdown: cleanup failed",
 		);
-		for (const line of lines) expect(line).not.toContain("UPSTREAM-S3CRET");
+		for (const line of lines) {
+			expect(line).not.toContain("S3CRET");
+			expect(line).not.toContain("refresh_token");
+		}
 	});
 
 	it("still exits when cleanup throws — a failed dispose must not wedge the process", async () => {

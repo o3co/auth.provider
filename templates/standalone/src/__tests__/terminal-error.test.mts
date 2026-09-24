@@ -167,6 +167,49 @@ describe("terminal error handler (#293 item 8)", () => {
 		}
 	});
 
+	it("logs a Store failure with the closed-set fields an operator triages it by", async () => {
+		// The Store's own status (`storeStatus`: 401 or 403, named apart from
+		// `status`, which would read here as the client's) says whether the
+		// deployment's token was refused or forbidden; a transport failure's
+		// `reason` and `code` say what broke. Neither can carry free text.
+		const cases = [
+			{
+				thrown: new StoreCredentialRefusedError("https://store.test/authenticate", 403),
+				kept: { name: "StoreCredentialRefusedError", storeStatus: 403 },
+			},
+			{
+				thrown: new StoreTransportError(
+					"HttpUserRepository: request to https://store.test/authenticate could not be reached",
+					"unreachable",
+					"ECONNREFUSED",
+				),
+				kept: { name: "StoreTransportError", reason: "unreachable", code: "ECONNREFUSED" },
+			},
+			{
+				thrown: new StoreTransportError(
+					"HttpUserRepository: the Store closed the connection before answering",
+					"connection_closed",
+				),
+				kept: { name: "StoreTransportError", reason: "connection_closed" },
+			},
+		];
+		for (const { thrown, kept } of cases) {
+			const { logger } = serialiseEverythingLogger();
+			const app = express();
+			app.get("/login", () => {
+				throw thrown;
+			});
+			app.use(createTerminalErrorHandler(logger));
+
+			await request(app).get("/login");
+
+			expect(logger.error, thrown.name).toHaveBeenCalledWith(
+				{ err: expect.objectContaining(kept), endpoint: "/login" },
+				"unhandled_request_error",
+			);
+		}
+	});
+
 	it("logs an unhandled error as loggableError's projection, never what an upstream put on it", async () => {
 		// An OAuth library that refuses a token answer puts the answer — the
 		// tokens included — on its error's cause chain, and a route that lets
