@@ -68,13 +68,17 @@ const DAY = 86_400_000;
  * own dates it is off by however long the suite took to get there. A stamp
  * "a minute later" would then be dated before the one it follows, and be
  * refused as stale, only on a slow enough run.
+ *
+ * Handed out as a copy each time, never the clock itself: a store that wrote
+ * to the `now` it was given would otherwise move every date the test takes
+ * after it.
  */
 let testClock = new Date(Number.NaN);
 const T0 = (): Date => {
 	if (Number.isNaN(testClock.getTime())) {
 		throw new Error("T0 is the test's clock: read it, or at(), inside a test, not a describe body");
 	}
-	return testClock;
+	return new Date(testClock.getTime());
 };
 const at = (ms: number): Date => new Date(T0().getTime() + ms);
 const INVALID = new Date(Number.NaN);
