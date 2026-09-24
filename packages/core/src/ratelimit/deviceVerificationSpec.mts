@@ -70,10 +70,11 @@ export const isDeviceVerificationRateLimitSpec: (value: unknown) => value is Rat
  * about this adapter and wins.
  *
  * A key that is not given (the section absent, the device-grant package not
- * loaded) seeds nothing. A key that is given is judged by the one predicate
- * even though the device-grant schema validates it: a hand-built config never
- * passed that schema, and it is still a configuration someone wrote. One the
- * predicate refuses (`0`, `"5"`, a window past the Date range) is a
+ * loaded) seeds nothing. A key that is given is read as core's schema coerces
+ * it (a numeric string is its number) and judged by the one predicate, even
+ * though the schema validates it: a hand-built config never passed that
+ * schema, and it is still a configuration someone wrote. One the predicate
+ * refuses (`0`, `"five"`, a blank string, a window past the Date range) is a
  * `RangeError` naming `oauth.deviceAuthorization.rateLimit`, whether or not an
  * explicit entry would have won; it used to be skipped, and the route ran on
  * the adapter's default instead.

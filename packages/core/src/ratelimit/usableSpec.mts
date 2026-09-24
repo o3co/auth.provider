@@ -43,10 +43,41 @@ export const isUsableRateLimitSpec = (value: unknown): value is RateLimitSpec =>
 	);
 };
 
+/**
+ * A value as a refusal shows it, with its type: a string quoted, a number as
+ * it prints (`NaN` included), anything else as JSON. `String()` showed the
+ * string "20" as 20, which read as a refusal of a usable number.
+ */
+export const shownConfigValue = (value: unknown): string => {
+	if (typeof value === "number" || value === undefined) return String(value);
+	if (typeof value === "string") return JSON.stringify(value);
+	try {
+		return JSON.stringify(value) ?? String(value);
+	} catch {
+		return String(value);
+	}
+};
+
 const described = (spec: unknown): string => {
-	if (typeof spec !== "object" || spec === null) return String(spec);
+	if (typeof spec !== "object" || spec === null) return shownConfigValue(spec);
 	const { limit, windowSeconds } = spec as { limit?: unknown; windowSeconds?: unknown };
-	return `limit ${String(limit)}, windowSeconds ${String(windowSeconds)}`;
+	return `limit ${shownConfigValue(limit)}, windowSeconds ${shownConfigValue(windowSeconds)}`;
+};
+
+/**
+ * What `z.coerce.number()` makes of a configured value, for a key whose
+ * owning schema coerces: a number as it is, and a string that is not blank
+ * and whose `Number()` is finite as that number. HOCON substitutes an
+ * environment variable as a string, so a key filled from one arrives as one
+ * wherever the schema did not run. Anything else — a blank or non-numeric
+ * string, a boolean, an array, an object — is `undefined`: none of it can
+ * come from a substitution, and none of it is a number.
+ */
+export const configuredNumber = (value: unknown): number | undefined => {
+	if (typeof value === "number") return value;
+	if (typeof value !== "string" || value.trim() === "") return undefined;
+	const parsed = Number(value);
+	return Number.isFinite(parsed) ? parsed : undefined;
 };
 
 /**
@@ -55,7 +86,8 @@ const described = (spec: unknown): string => {
  *
  * For a seed and anything else that reads a budget from its own config key
  * (`oauth.deviceAuthorization.rateLimit`,
- * `webauthn.rateLimit.authenticationOptions`). A key that was given is a
+ * `webauthn.rateLimit.authenticationOptions`). Each field is read as the
+ * key's schema coerces it, so a numeric string is its number. A key that was given is a
  * configuration someone wrote, a hand-built one included, so it is refused
  * rather than skipped: skipped, the route ran on the limiter's default
  * instead. The message names the key and says what it must be, not which
@@ -63,12 +95,24 @@ const described = (spec: unknown): string => {
  * to handle: it is not a refusal.
  */
 export function requireUsableConfiguredRateLimitSpec(key: string, value: unknown): RateLimitSpec {
-	if (!isUsableRateLimitSpec(value)) {
+	// Read as the key's owning schema reads it (`configuredNumber`), so a
+	// value that schema accepts is not refused here; then judged by the one
+	// predicate. The adapters' own `limits` take no such reading: their
+	// schemas do not coerce, and neither do they.
+	const fields =
+		typeof value === "object" && value !== null
+			? (value as { limit?: unknown; windowSeconds?: unknown })
+			: undefined;
+	const spec = fields && {
+		limit: configuredNumber(fields.limit),
+		windowSeconds: configuredNumber(fields.windowSeconds),
+	};
+	if (!isUsableRateLimitSpec(spec)) {
 		throw new RangeError(
 			`${key} must be { limit, windowSeconds } as positive whole numbers, with a window that ends within the Date range (got ${described(value)})`,
 		);
 	}
-	return { limit: value.limit, windowSeconds: value.windowSeconds };
+	return { limit: spec.limit, windowSeconds: spec.windowSeconds };
 }
 
 /**

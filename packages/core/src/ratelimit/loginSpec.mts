@@ -15,7 +15,7 @@
  */
 
 import type { RateLimitSpec } from "./types.mjs";
-import { isUsableRateLimitSpec } from "./usableSpec.mjs";
+import { configuredNumber, isUsableRateLimitSpec, shownConfigValue } from "./usableSpec.mjs";
 
 /** The key prefix `/session/login` limits under. See `RateLimiter.check`. */
 const LOGIN_PREFIX = "login";
@@ -40,6 +40,7 @@ const LOGIN_PREFIX = "login";
  * this adapter, and overwriting it would discard what they wrote.
  *
  * A `rateLimit.login` that is not given seeds nothing. One that is given is
+ * read as CoreConfigSchema coerces it (a numeric string is its number) and
  * judged by the one predicate every limiter uses, after the conversion to
  * whole seconds, and one it refuses is a `RangeError` naming
  * `rateLimit.login` — a hand-built config that never passed
@@ -64,18 +65,19 @@ export const resolveLoginLimitSpec = (
 		typeof login === "object" && login !== null
 			? (login as { windowMs?: unknown; limit?: unknown })
 			: { windowMs: undefined, limit: undefined };
+	// Read as CoreConfigSchema's `z.coerce.number()` reads them: HOCON
+	// substitutes an environment variable as a string, and a composition
+	// that skipped the parse hands this the string.
+	const ms = configuredNumber(windowMs);
 	const spec = {
-		limit,
+		limit: configuredNumber(limit),
 		// Specs are whole seconds; a sub-second window would round down to 0,
 		// and a zero window is not a window.
-		windowSeconds:
-			typeof windowMs === "number" && windowMs > 0
-				? Math.max(1, Math.ceil(windowMs / 1000))
-				: Number.NaN,
+		windowSeconds: ms !== undefined && ms > 0 ? Math.max(1, Math.ceil(ms / 1000)) : Number.NaN,
 	};
 	if (!isUsableRateLimitSpec(spec)) {
 		throw new RangeError(
-			`rateLimit.login must be { windowMs, limit }: windowMs a positive number of milliseconds and limit a positive whole number, with a window that ends within the Date range (got windowMs ${String(windowMs)}, limit ${String(limit)})`,
+			`rateLimit.login must be { windowMs, limit }: windowMs a positive number of milliseconds and limit a positive whole number, with a window that ends within the Date range (got windowMs ${shownConfigValue(windowMs)}, limit ${shownConfigValue(limit)})`,
 		);
 	}
 	if (result[LOGIN_PREFIX] !== undefined) return result;
