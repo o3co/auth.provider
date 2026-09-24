@@ -226,7 +226,7 @@ overlay の値は `application.conf` より優先される。scaffold には `de
 | `OAUTH_CIMD_STALE_IF_ERROR_MS` | `300000` | 検証済みの登録情報を、ドキュメント側に原因の無い理由（DNS の一時的な不調、5xx、タイムアウト）で再検証が失敗した後も返し続ける期間 — 障害で、動いているクライアントを壊すべきではないため。*拒否*されたドキュメントは即座に破棄される。`0` で無効化する。 |
 | `OAUTH_CIMD_NEGATIVE_CACHE_MS` | `60000` | 拒否を記憶しておく期間。同じ `client_id` をリクエストのたびに解決・取得し直さないためである。ドキュメントを修正したクライアントが締め出されないよう、短くしてある。 |
 | `OAUTH_CIMD_MAX_CONCURRENT_FETCHES` | `8` | すべての `client_id` を通じて、同時に取得中にできるドキュメントの数。未認証の呼び出し元がこのサーバーに接続させられる量を制限する。 |
-| `OAUTH_JWT_KID` | `v0` | JWT ヘッダーに含まれる key ID |
+| `OAUTH_JWT_KID` | `v0` | JWT ヘッダーに含まれる key ID。制御文字を含まない 1〜256 文字。それ以外は起動時に拒否される — export されているが空の変数も含む（以前は kid `""` で署名されていた。そうして発行されたトークンは修正後に拒否されるため、そのユーザーは再ログインになる） |
 | `OAUTH_JWT_PRIVATE_KEY` | — | PEM エンコードされた秘密鍵（非対称アルゴリズム用） |
 | `OAUTH_JWT_PRIVATE_KEY_PATH` | — | PEM 秘密鍵ファイルのパス |
 | `OAUTH_JWT_PUBLIC_KEY` | — | PEM エンコードされた公開鍵 |

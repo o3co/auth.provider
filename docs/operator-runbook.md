@@ -862,7 +862,7 @@ If you build the socket yourself, attach an `error` listener: an `EventEmitter`
 | Key | Meaning |
 | --- | --- |
 | `algorithm` (`OAUTH_JWT_ALGORITHM`) | `EdDSA` (shipped default), `ES256`, `RS256`, `HS256`. No implicit fallback |
-| `kid` (`OAUTH_JWT_KID`) | the key id stamped in every token header; default `v0` |
+| `kid` (`OAUTH_JWT_KID`) | the key id stamped in every token header; default `v0`. A string of 1 to 256 characters with no control character (`isWellFormedKid`); anything else fails boot — an `OAUTH_JWT_KID` that is exported but empty included |
 | `privateKeyPath` / `publicKeyPath` (or inline `privateKey` / `publicKey`) | PEM pair for the asymmetric algorithms; the file path wins when both are given |
 | `secret` (`OAUTH_JWT_SECRET`) | HS256 only, ≥ 32 bytes decoded |
 | `previousKeys = [ { kid, publicKeyPath, expiresAt } ]` (or inline `publicKey` instead of `publicKeyPath`) | asymmetric only — additional **verification** keys, published in JWKS until `expiresAt` (an ISO date; invalid fails boot) |
@@ -872,7 +872,10 @@ The two rotation shapes are a discriminated union in the schema
 (`packages/core/src/config/application.schema.mts`): `previousKeys` under
 `HS256`, or `previousSecrets` under an asymmetric algorithm, fails boot rather
 than being dropped. `kid` values must be unique across the current key and
-every previous entry (`Duplicate kid values`). There is no env binding for
+every previous entry (`Duplicate kid values`). Before the kid shape check, an
+`OAUTH_JWT_KID` exported but empty signed and verified under the kid `""`; it
+now fails boot. Tokens already issued under `""` are refused as `kid_unknown`
+once the kid is corrected, so their users sign in again. There is no env binding for
 `previousKeys` / `previousSecrets` — they are written in your HOCON layer.
 
 Keys are read **once, at boot** (`keyStoreModule`,
