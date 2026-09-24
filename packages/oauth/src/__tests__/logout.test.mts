@@ -1598,6 +1598,31 @@ describe("POST /oauth/federation/:name/logout", () => {
 			expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
 		});
 
+		for (const [label, raw] of [
+			["a control character", "goo\u0007gle"],
+			["more than 200 characters", "g".repeat(300)],
+		] as const) {
+			it(`records a federation name carrying ${label} sanitised and capped`, async () => {
+				const logger = createMockLogger();
+				const res = await postFedLogout(
+					buildFedLogoutApp({
+						sessionStore: makeSessionStore({ get: vi.fn().mockRejectedValue(storeReplyError()) }),
+						logger,
+					}),
+					encodeURIComponent(raw),
+					await mintAccessToken(),
+				);
+				expect(res.status).toBe(503);
+				const line = expectOutageLine(logger, "federation_logout_store_unavailable", {
+					store: "user_session",
+				});
+				const logged = String(line.federation);
+				expect(logged.length).toBeLessThanOrEqual(200);
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+				expect(logged).not.toMatch(/[\u0000-\u001f\u007f]/);
+			});
+		}
+
 		it("the session read", async () => {
 			const logger = createMockLogger();
 			const res = await postFedLogout(

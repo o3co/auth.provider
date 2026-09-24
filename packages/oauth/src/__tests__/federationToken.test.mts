@@ -970,7 +970,10 @@ describe("POST /oauth/federation/:name/token", () => {
 				([, event]) => event === "federation_token_lock_timeout",
 			);
 			expect(lines).toEqual([
-				[{ federation: "google", clientId: "client-1", sid: "sid-1" }, "federation_token_lock_timeout"],
+				[
+					{ federation: "google", clientId: "client-1", sid: "sid-1" },
+					"federation_token_lock_timeout",
+				],
 			]);
 		});
 	});
@@ -2309,6 +2312,33 @@ describe("POST /oauth/federation/:name/token", () => {
 			expect(line?.[0].err).not.toBeInstanceOf(Error);
 			expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
 		});
+
+		for (const [label, raw] of [
+			["a control character", "goo\u0007gle"],
+			["more than 200 characters", "g".repeat(300)],
+		] as const) {
+			it(`records a federation name carrying ${label} sanitised and capped`, async () => {
+				// The path parameter is the caller's text, logged before any
+				// membership check: any holder of a valid access token chooses it.
+				const logger = createMockLogger();
+				const refreshFamilyRevocation = makeFamilyRevocation({
+					isFamilyRevoked: vi.fn().mockRejectedValue(storeReplyError()),
+				});
+				const res = await postFedToken(
+					buildApp({ refreshFamilyRevocation, logger }),
+					encodeURIComponent(raw),
+					await mintAccessToken(),
+				);
+				expect(res.status).toBe(503);
+				const line = expectOutageLine(logger, "federation_token_store_unavailable", {
+					store: "refresh_token_family",
+				});
+				const logged = String(line.federation);
+				expect(logged.length).toBeLessThanOrEqual(200);
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+				expect(logged).not.toMatch(/[\u0000-\u001f\u007f]/);
+			});
+		}
 
 		it("the client lookup", async () => {
 			const logger = createMockLogger();
