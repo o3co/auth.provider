@@ -15,6 +15,7 @@
  */
 
 import type { Response } from "express";
+import { loggableError } from "../logging/loggableError.mjs";
 
 /**
  * The response headers a token-binding outcome asks for (#530): a refusal
@@ -67,6 +68,22 @@ export const retryInstructionOf = (err: unknown): string | undefined => {
  * non-empty string beside an OAuth code, so a mechanism has to say both what
  * to answer and that it is the server's fault.
  */
+/**
+ * What an outage's log line carries of the refusal
+ * (`TokenBindingRefusal.reason` and `.cause`): the mechanism's own name for
+ * it when it gives a string one, and the projection of the failure that
+ * stopped the verdict when it gives one — never the failure itself, which a
+ * store's error can make carry the command it refused.
+ */
+export const unavailableLogFields = (err: unknown): Record<string, unknown> => {
+	if (typeof err !== "object" || err === null) return {};
+	const { reason, cause } = err as { reason?: unknown; cause?: unknown };
+	return {
+		...(typeof reason === "string" && reason.length > 0 ? { reason } : {}),
+		...(cause !== undefined ? { err: loggableError(cause) } : {}),
+	};
+};
+
 export const unavailableOf = (err: unknown): string | undefined => {
 	if (oauthErrorCodeOf(err) === undefined) return undefined;
 	const description = (err as { unavailable?: unknown }).unavailable;

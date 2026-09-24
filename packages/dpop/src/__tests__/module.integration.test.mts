@@ -897,18 +897,25 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 		expect(res.status).toBe(503);
 		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 		expect(res.headers["www-authenticate"]).toBeUndefined();
+		// One line, from the dispatcher that answered the 503, with the store
+		// error's projection the mechanism handed it as the refusal's cause.
+		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
 			{
+				mechanism: "dpop",
+				code: "temporarily_unavailable",
+				reason: "replay_store_unavailable",
 				err: {
 					name: "ReplyError",
 					detail: "READONLY You can't write against a read only replica.",
 					command: { name: "set" },
 					stack: FRAMES,
 				},
-				jti,
 			},
-			"dpop_replay_store_unavailable",
+			"token_binding_unavailable",
 		);
+		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), "token_binding_unavailable");
+		expect(jti).toBeDefined();
 		for (const line of lines) expect(line).not.toContain("dpop-proof:");
 
 		await handle.dispose();
@@ -929,17 +936,21 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 		const res = await request(app).post("/oauth/token").set("DPoP", proof).send({});
 		expect(res.status).toBe(503);
 		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
 			{
+				mechanism: "dpop",
+				code: "temporarily_unavailable",
+				reason: "replay_store_fault",
 				err: {
 					name: "RangeError",
 					detail: "markSeen: expiresAtMs must be a finite number",
 					stack: FRAMES,
 				},
-				jti,
 			},
-			"dpop_replay_store_fault",
+			"token_binding_unavailable",
 		);
+		expect(jti).toBeDefined();
 		// The frames, never the header line that repeats the message.
 		for (const line of lines) expect(line).not.toContain("RangeError: markSeen");
 		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), "token_binding_proof_invalid");

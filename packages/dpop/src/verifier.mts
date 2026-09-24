@@ -463,27 +463,31 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				// it takes the outage's wire answer (503, the proof refused
 				// unrecorded) rather than a rethrow, which core's dispatcher would
 				// answer `400 invalid_dpop_proof` and log only as a failed proof.
-				// Its own audit reason and error-level log event keep operator
-				// triage off Redis health: the fix is in the composition.
+				// Its own reason (`replay_store_fault`) keeps operator triage off
+				// Redis health: the fix is in the composition.
+				//
+				// Either way the error goes upward as the refusal's `cause`, and
+				// this mechanism logs nothing of its own: core's dispatcher that
+				// answers the 503 owns the outage's one line
+				// (`token_binding_unavailable` / `protected_resource_binding_unavailable`),
+				// with this refusal's `reason` and the cause's projection — never
+				// the error, which ioredis makes carry the refused command, the
+				// record's key included.
 				if (err instanceof ChallengeStorageError || err instanceof RangeError) {
-					logger?.error(
-						{ err: loggableError(err), jti: proof.claims.jti },
-						"dpop_replay_store_fault",
-					);
 					throw new DPoPError(
 						"replay_store_fault",
 						"DPoP replay store broke its own contract; cannot determine replay status",
+						undefined,
+						undefined,
+						{ cause: err },
 					);
 				}
-				// The projection: a store error carries what it sent — ioredis
-				// puts the refused command, the record's key included, on it.
-				logger?.error(
-					{ err: loggableError(err), jti: proof.claims.jti },
-					"dpop_replay_store_unavailable",
-				);
 				throw new DPoPError(
 					"replay_store_unavailable",
 					"DPoP replay store is unavailable; cannot determine replay status",
+					undefined,
+					undefined,
+					{ cause: err },
 				);
 			}
 			if (!fresh) {

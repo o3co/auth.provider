@@ -267,23 +267,26 @@ describe("DPoP at a protected resource — a replay store that cannot be read", 
 			},
 			contains: async () => false,
 		};
+		// One logger for the mechanism and the dispatcher, as a composition
+		// wires them, so the test sees every line the outage produces.
+		const logger = {
+			trace: () => {},
+			debug: () => {},
+			info: () => {},
+			warn: () => {},
+			error: (_obj: unknown, msg?: string) => errors.push(String(msg)),
+			fatal: () => {},
+			child() {
+				return this;
+			},
+		} as never;
 		const mechanism = createDPoPMechanism({
 			issuer: `http://127.0.0.1:${port}`,
 			replaySeenSet: down,
 			iatWindowSeconds: 60,
-			logger: {
-				trace: () => {},
-				debug: () => {},
-				info: () => {},
-				warn: () => {},
-				error: (_obj: unknown, msg?: string) => errors.push(String(msg)),
-				fatal: () => {},
-				child() {
-					return this;
-				},
-			} as never,
+			logger,
 		});
-		app.use(protectedResourceBindingMw({ mechanisms: [mechanism] }));
+		app.use(protectedResourceBindingMw({ mechanisms: [mechanism], logger }));
 		app.get(RESOURCE_PATH, (req, res) => {
 			res.status(200).json({ binding: req.tokenBinding ?? null });
 		});
@@ -301,6 +304,7 @@ describe("DPoP at a protected resource — a replay store that cannot be read", 
 		expect(res.status).toBe(503);
 		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 		expect(res.headers["www-authenticate"]).toBeUndefined();
-		expect(errors).toEqual(["dpop_replay_store_unavailable"]);
+		// One line, from the dispatcher that answered the 503.
+		expect(errors).toEqual(["protected_resource_binding_unavailable"]);
 	});
 });

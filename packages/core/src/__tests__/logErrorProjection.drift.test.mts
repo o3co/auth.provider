@@ -123,6 +123,17 @@ const OTHER_PROJECTIONS: ReadonlyArray<{
 			"error names and a numeric status — nothing of the error's text, which is stricter than " +
 			"loggableError",
 	},
+	...[
+		"packages/core/src/middleware/tokenBinding.mts",
+		"packages/core/src/middleware/protectedResourceBinding.mts",
+	].map((file) => ({
+		file,
+		projection: "unavailableLogFields",
+		why:
+			"core's own (middleware/_responseHeaders.mts): a token-binding refusal's string `reason` " +
+			"and `loggableError` of its `cause` — nothing else of the refusal, so exactly as strict " +
+			"as loggableError",
+	})),
 ];
 
 /** A logger call: a level (or `child`) on `log`, `logger` or `….logger`, and `console`'s. */

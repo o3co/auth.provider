@@ -611,12 +611,12 @@ describe("createDPoPMechanism", () => {
 				reason: "replay_store_fault",
 				code: "temporarily_unavailable",
 				unavailable: expect.any(String),
+				// Handed to the dispatcher that answers the 503, which logs it.
+				cause: fault,
 			});
-			expect(errors.map((e) => e.msg)).toEqual(["dpop_replay_store_fault"]);
-			// Logged as its projection: the name and message say which fault.
-			expect(errors[0]?.obj).toMatchObject({
-				err: { name: fault.name, detail: fault.message },
-			});
+			// The mechanism reports the outage upward and logs nothing of its
+			// own: the dispatcher's line is the one (token_binding_unavailable).
+			expect(errors).toEqual([]);
 		},
 	);
 
@@ -657,8 +657,9 @@ describe("createDPoPMechanism", () => {
 			reason: "replay_store_unavailable",
 			code: "temporarily_unavailable",
 			unavailable: expect.stringMatching(/retry/),
+			cause: expect.objectContaining({ message: "ECONNREFUSED — Redis down" }),
 		});
-		expect(errors.map((e) => e.msg)).toEqual(["dpop_replay_store_unavailable"]);
+		expect(errors).toEqual([]);
 	});
 });
 

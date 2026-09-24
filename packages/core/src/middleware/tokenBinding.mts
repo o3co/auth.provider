@@ -21,6 +21,7 @@ import {
 	applyResponseHeaders,
 	oauthErrorCodeOf,
 	retryInstructionOf,
+	unavailableLogFields,
 	unavailableOf,
 } from "./_responseHeaders.mjs";
 
@@ -126,6 +127,22 @@ export interface TokenBindingRefusal {
 	 * way: nothing is admitted unchecked.
 	 */
 	readonly unavailable?: string;
+	/**
+	 * With `unavailable`: the failure that stopped the verdict — the replay
+	 * store's error — as the standard `Error.cause`. The dispatcher that
+	 * answers the `503` owns its one error-level log line
+	 * (`token_binding_unavailable`, `protected_resource_binding_unavailable`)
+	 * and logs this cause's projection there, so a mechanism need not log the
+	 * outage itself — and should not, or it is logged twice. Optional: a
+	 * mechanism that gives none is still logged, without `err`.
+	 */
+	readonly cause?: unknown;
+	/**
+	 * The mechanism's own name for the refusal (`replay_store_unavailable`,
+	 * `replay_store_fault`), written on the outage's log line beside the
+	 * `code`. Never sent.
+	 */
+	readonly reason?: string;
 }
 
 /**
@@ -217,7 +234,11 @@ export const tokenBindingMw = ({
 				// logged under its own event so the two are never counted as one.
 				const unavailable = unavailableOf(err);
 				if (unavailable !== undefined) {
-					logger?.warn({ mechanism: mechanism.kind, code }, "token_binding_unavailable");
+					// This layer answers the 503, so it owns the outage's one line.
+					logger?.error(
+						{ mechanism: mechanism.kind, code, ...unavailableLogFields(err) },
+						"token_binding_unavailable",
+					);
 					res.status(503).json(errorEnvelope(code, unavailable));
 					return;
 				}
