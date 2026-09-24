@@ -24,6 +24,12 @@
 // from anywhere, and pnpm sets it for the scripts it runs, so the test starts
 // this process without it.
 //
+// The limit: CommonJS also searches its global folders from anywhere —
+// `~/.node_modules`, `~/.node_libraries` and `$PREFIX/lib/node` — and this
+// hook does not hide a package installed in one of them from `require`. On
+// such a machine the test's require probe reports the package as loaded and
+// fails; it cannot pass with the package visible.
+//
 // `module.registerHooks` needs Node >= 22.15 or >= 23.5; the test that loads
 // this file checks for it first.
 import { createRequire, registerHooks } from "node:module";
