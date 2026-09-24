@@ -126,8 +126,18 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 	// caller is a value, and refused like any other that is not one of the two.
 	const accessType = config.accessType === undefined ? "offline" : config.accessType;
 	if (accessType !== "offline" && accessType !== "online") {
+		// A string is quoted (escaped, so it cannot break the line); a number,
+		// a boolean or null is printed as itself; anything else is named by
+		// its type — JSON.stringify throws on a bigint and prints nothing for a
+		// symbol or a function.
+		const got =
+			typeof accessType === "string"
+				? JSON.stringify(accessType)
+				: accessType === null || typeof accessType === "number" || typeof accessType === "boolean"
+					? String(accessType)
+					: typeof accessType;
 		throw new Error(
-			`Google federation "google": accessType must be "offline" or "online", got ${JSON.stringify(config.accessType)}`,
+			`Google federation "google": accessType must be "offline" or "online", got ${got}`,
 		);
 	}
 	// Google issues a refresh token only on a consent screen, and shows one
