@@ -638,6 +638,8 @@ Both bundled stores meet these and are pinned on them.
 
 All error responses set `Cache-Control: no-store` and `Pragma: no-cache`. 401 responses include `WWW-Authenticate: Bearer error="invalid_token"` per RFC 6750.
 
+Every failure this route logs carries core's `loggableError(err)`, never the error — the `refreshToken failed (reason: …)` warning included. The adapter's library puts the refresh answer it refused, rotated refresh token included, on the error's cause chain, and a Redis store's error carries the refused command's arguments (the token record, under `allow-plaintext`); the projection keeps what tells the failures apart — the library's code, the HTTP status and content type, the upstream's OAuth `error` and `error_description` — and nothing a peer wrote. The rest of this package's logs follow the same rule.
+
 ### Opt-in: `allowedAzpForFederationToken`
 
 Each `Client` carries an optional `allowedAzpForFederationToken: boolean` flag. Default is `false` — clients do NOT get federation-token access automatically. Operators explicitly opt in for clients that need it:

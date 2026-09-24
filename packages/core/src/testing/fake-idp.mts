@@ -27,12 +27,13 @@ import { type CryptoKey, exportJWK, generateKeyPair, type JWK, SignJWT } from "j
  * a key it publishes at its JWKS URI; the knobs below let a test make it
  * misbehave in exactly one way at a time.
  *
- * One harness for every adapter, so the adapters are held to one fake rather
- * than to copies that drift. Endpoints may be named explicitly — Google's and
- * Apple's are not paths under the issuer, and those providers build their
- * metadata locally — or left to default to paths under the issuer, with
- * `discovery` serving the document a discovering provider (federation-oidc)
- * reads at boot.
+ * One harness for the OpenID Connect adapters — Google, Apple and the generic
+ * OIDC one — so they are held to one fake rather than to copies that drift.
+ * (GitHub is not an OpenID Provider; its tests run on its own fake GitHub.)
+ * Endpoints may be named explicitly — Google's and Apple's are not paths
+ * under the issuer, and those providers build their metadata locally — or
+ * left to default to paths under the issuer, with `discovery` serving the
+ * document a discovering provider (federation-oidc) reads at boot.
  */
 export interface FakeIdpOptions {
 	readonly issuer: string;

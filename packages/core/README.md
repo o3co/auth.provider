@@ -528,7 +528,14 @@ The canonical event URI every `logout_token`'s `events` claim carries, `http://s
 
 The structural, pino-compatible logger in [`src/logging/Logger.mts`](src/logging/Logger.mts): `trace` / `debug` / `info` / `warn` / `error` / `fatal`, each accepting an object-first or a string-first call, plus `child(bindings)`. A pino instance satisfies it without an adapter, and `consoleLogger` is the default. It is also the optional `logger` component slot.
 
-[`loggableError(err)`](src/logging/loggableError.mts) is what a call site hands the logger instead of an error that came out of a library talking to another system: the Error's name, message, code, status and OAuth `error` code, and its Error causes the same way — never a cause that is a plain object, which is where an OAuth library puts the response it refused (a token response: access and refresh tokens).
+[`loggableError(err)`](src/logging/loggableError.mts) is what a call site hands the logger instead of an error that came out of a library or a store talking to another system. Every logger call in core, `session` and `oauth` that reports a caught error goes through it, and `src/__tests__/logErrorProjection.drift.test.mts` keeps it so.
+
+The rule: **a message written by code in this process from fixed text is kept; a message a parser or a peer wrote is not trusted.** An error built from a parsed upstream response carries whatever that response said — an OAuth library puts the token answer it refused on the cause chain, a JSON parser quotes the text it could not parse, a Redis reply echoes the command it refused, and ioredis puts that command's arguments (a token record, for a store write) on the error.
+
+- Kept: `name`; `message` (capped); a string or numeric `code`; an integer `status`; a string `type` (body-parser's `entity.too.large`); an `error` and an `error_description` within RFC 6749 §5.2's character set; `response: { status, contentType }` for a `Response` on the cause or on `response` (a gateway's 503 page); the Error causes, the same way, three deep.
+- Not trusted: a `SyntaxError`'s `message` is dropped — V8's `JSON.parse` and body-parser quote the input — and only ` at position N` (at most ten digits) is kept, as `position`; Redis's `, with args beginning with: …` is cut from every message, whichever client's class carries it.
+- Never kept: a cause that is not an Error (where openid-client puts the answer it refused), any other field (`command`, `body`, `buffer`), and anything of a thrown non-Error but its `typeof`, as `thrown`.
+- Every string is capped at 256 characters. It never throws: an error from another realm counts, a throwing getter drops its field, and a value the Error check cannot inspect (a hostile Proxy on Node 22) reads as a non-Error.
 
 ## See Also
 

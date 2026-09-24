@@ -527,7 +527,14 @@ OIDC Discovery 1.0 メタデータエンドポイント。`config.oauth.jwt.issu
 
 [`src/logging/Logger.mts`](src/logging/Logger.mts) にある、pino 互換の構造的ロガー: `trace` / `debug` / `info` / `warn` / `error` / `fatal`（それぞれオブジェクト先頭・文字列先頭のどちらの呼び出しも受け付ける）と `child(bindings)`。pino のインスタンスはアダプターなしでこれを満たし、デフォルトは `consoleLogger`。任意の `logger` コンポーネントスロットでもある。
 
-[`loggableError(err)`](src/logging/loggableError.mts) は、他のシステムと話すライブラリから出てきたエラーの代わりに呼び出し箇所がロガーへ渡すもの: Error の name、message、code、status、OAuth の `error` コード、そして同じ形の Error である cause — プレーンなオブジェクトである cause は決して運ばない。そこは OAuth ライブラリが拒否した応答（トークン応答ならアクセストークンとリフレッシュトークン）を置く場所である。
+[`loggableError(err)`](src/logging/loggableError.mts) は、他のシステムと話すライブラリやストアから出てきたエラーの代わりに呼び出し箇所がロガーへ渡すもの。core・`session`・`oauth` で捕捉したエラーを報告するロガー呼び出しはすべてこれを通り、`src/__tests__/logErrorProjection.drift.test.mts` がそれを保つ。
+
+規則: **このプロセスのコードが固定文から書いたメッセージは残す。パーサーや相手側が書いたメッセージは信用しない。** 解析した上流の応答から作られたエラーは、その応答が言ったことを何でも運ぶ — OAuth ライブラリは拒否したトークン応答を cause の連鎖に載せ、JSON パーサーは解析できなかったテキストを引用し、Redis の応答は拒否したコマンドを反復し、ioredis はそのコマンドの引数（ストアへの書き込みならトークンレコード）をエラーに載せる。
+
+- 残すもの: `name`、`message`（上限あり）、文字列または数値の `code`、整数の `status`、文字列の `type`（body-parser の `entity.too.large`）、RFC 6749 §5.2 の文字集合に収まる `error` と `error_description`、cause または `response` にある `Response` の `response: { status, contentType }`（ゲートウェイの 503 ページ）、そして同じ形の Error である cause（3 段まで）。
+- 信用しないもの: `SyntaxError` の `message` は捨てる — V8 の `JSON.parse` も body-parser も入力を引用する — そして ` at position N`（10 桁まで）だけを `position` として残す。Redis の `, with args beginning with: …` は、どのクライアントのクラスが運んでいてもすべてのメッセージから切り取る。
+- 決して残さないもの: Error でない cause（openid-client が拒否した応答を置く場所）、それ以外のフィールド（`command`、`body`、`buffer`）、そして Error でない値を投げた場合は `typeof` 以外の何も（`thrown` として）。
+- 文字列はすべて 256 文字で切る。例外は投げない: 別 realm のエラーも Error と数え、例外を投げる getter はそのフィールドを落とし、Error かどうかの判定ができない値（Node 22 の敵対的な Proxy）は Error でないものとして読む。
 
 ## 関連
 

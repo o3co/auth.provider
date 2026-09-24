@@ -201,7 +201,7 @@ const handle = await createApp({
 ### コールバックがプロファイルで行うこと
 
 1. **アダプターは `callbackParams` を見る** — コールバックの文字列パラメーターから、ルーターが既に束縛した `code` と `state` を除いたもの。ユーザーエージェント経由で中継され署名されていない。アダプターはその中の RFC 9207 `iss` を core の `callbackUrlForExchange` 経由で渡す。
-2. **`exchangeCode` が例外を投げると `502 exchange_failed`。** アダプター内のあらゆる拒否 — 誤った `iss`、不正な id_token、UserInfo の不一致 — はこの形で表に出て、Store には届かない。`sub` の無いプロファイルは `400 invalid_profile`。警告 `federation token exchange failed` が運ぶのは core の `loggableError(err)` — name、message、code、status、上流の OAuth `error`、Error である cause — であり、エラーそのものではない: OAuth ライブラリは拒否したトークン応答を、アクセストークンとリフレッシュトークンを含めてエラーの cause の連鎖に載せるので、エラー全体をシリアライズするロガーはそれを書き出してしまう。
+2. **`exchangeCode` が例外を投げると `502 exchange_failed`。** アダプター内のあらゆる拒否 — 誤った `iss`、不正な id_token、UserInfo の不一致 — はこの形で表に出て、Store には届かない。`sub` の無いプロファイルは `400 invalid_profile`。警告 `federation token exchange failed` が運ぶのは core の `loggableError(err)` であり、エラーそのものではない: OAuth ライブラリは拒否したトークン応答を、アクセストークンとリフレッシュトークンを含めてエラーの cause の連鎖に載せるので、エラー全体をシリアライズするロガーはそれを書き出してしまう。これらのルートがログに書く他の失敗 — ストア、リポジトリ、express-session のもの — も同じように射影する（Redis ストアのエラーは拒否されたコマンドの引数を運ぶ。`allow-plaintext` ならトークンレコードである）。
 3. **ID は Store が解決する。** `<name>:<sub>` を `UserRepository.authenticateByToken` に渡し、例外なら `503 temporarily_unavailable`、`null` なら `401 unknown_user`（開始でリンクを求めていない限り）。
 4. **クレーム** はローカルの `User` のものに、`mapClaims` の結果を [クレームの優先順位](#クレームの優先順位-ローカルが勝ちfederated-は名前空間に隔離される) に従って合わせたもの。`amr` は `profile.amr` に `fed` を加えたもの。
 5. **セッション** は新しい `UserSession`（寿命 `session.maxAge`）、配線されていれば `subjectSessionIndex` のエントリー、`sessionFederationIndex` のエントリー、そして再生成された express session。`UserSession` か `sessionFederationIndex` の書き込みが失敗すれば `503 temporarily_unavailable`、セッションの再生成・保存、または下のトークンの紐づけが失敗すれば `500 session_create_failed`。どちらの場合も書き込んだものはベストエフォートで逆順にロールバックされる。`subjectSessionIndex` の書き込みが失敗してもログに出るだけでログインは進む。
@@ -414,6 +414,7 @@ export const exampleFederationModule = defineModule({
 - `codeChallenge(codeVerifier)` — ルーターが生成した verifier に対する S256 challenge（[`pkce.mts`](../core/src/federations/pkce.mts)）。
 - `callbackUrlForExchange({ redirectUri, code, callbackParams })` — コード交換で OAuth ライブラリに渡す URL: `code`、コールバックが持っていれば RFC 9207 の `iss`、そしてバッグからはそれ以外何も載せない。`code` だけから URL を組み直すと `iss` が落ち、mix-up の検査が行われず、`authorization_response_iss_parameter_supported` を広告する issuer ではすべてのログインが失敗する。ライブラリには IdP が実際に公開している issuer を設定する。そうしなければ比較がすべてのログインを拒否する（[`callback-url.mts`](../core/src/federations/callback-url.mts)）。
 - `FederationClientSecret` / `resolveClientSecret` — 文字列またはリゾルバー（`() => string | Promise<string>`）の `client_secret`。アダプターはトークン要求のたびに `resolveClientSecret` を呼び、それは何もキャッシュしないので、secret がローテーションするアダプター（Apple の ES256 JWT）がキャッシュを受け持つ。空や文字列でない結果は上流に送らずローカルで拒否する（[`client-secret.mts`](../core/src/federations/client-secret.mts)）。
+- `federationTokenSnapshot(tokens, obtainedAt)` — プロファイルやリフレッシュのためのトークン応答の唯一の読み方: ライブラリが読んだ `expiresIn` とそこから求める `expiresAt`（有効期間が送られなければ両方 `null`）、`tokenType`、送られたときにだけ存在する `scope`（[`token-snapshot.mts`](../core/src/federations/token-snapshot.mts)）。
 
 同梱のアダプターが実例になる — 例えば `federation-google` の [`google.mts`](../federation-google/src/google.mts)。
 

@@ -27,10 +27,11 @@
  *
  * What stays in `@o3co/auth-provider-session` is what only its router uses:
  * `FederationResult`, the redirect policy it feeds, and the routes
- * themselves. The pure helpers an adapter builds its requests with — the
- * PKCE challenge, the code-exchange URL, the client-secret resolver — are
- * beside this contract, in `pkce.mts`, `callback-url.mts` and
- * `client-secret.mts`.
+ * themselves. The pure helpers an adapter builds its requests with and reads
+ * its token response through — the PKCE challenge, the code-exchange URL,
+ * the client-secret resolver, `federationTokenSnapshot` — are beside this
+ * contract, in `pkce.mts`, `callback-url.mts`, `client-secret.mts` and
+ * `token-snapshot.mts`.
  */
 
 import type { FederationResponseMode } from "./response-mode.mjs";

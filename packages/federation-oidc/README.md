@@ -36,7 +36,8 @@ installs only the IdPs it uses, and `openid-client` only with an adapter.
 The Google, GitHub and Apple packages implement the same contract for one IdP
 each, for what a generic OpenID Connect client cannot express: GitHub is not
 OpenID Connect, Apple's scopes, client secret and callback are not standard, and
-Google's adapter sends `access_type=offline` and carries the `hd` claim — each
+Google's adapter sends `access_type=offline` with `prompt=consent` by default
+(neither under `accessType: "online"`) and carries the `hd` claim — each
 package's README says which. This package has no setting for a login-time
 authorization parameter or an extension claim.
 

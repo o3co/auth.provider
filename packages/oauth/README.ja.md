@@ -633,6 +633,8 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 
 すべてのエラーレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける。401 レスポンスには RFC 6750 に従い `WWW-Authenticate: Bearer error="invalid_token"` を含める。
 
+このルートがログに書く失敗はすべて core の `loggableError(err)` を運び、エラーそのものは運ばない — 警告 `refreshToken failed (reason: …)` も含めて。アダプターのライブラリは拒否したリフレッシュ応答を、ローテーションされたリフレッシュトークンを含めてエラーの cause の連鎖に載せ、Redis ストアのエラーは拒否されたコマンドの引数（`allow-plaintext` ならトークンレコード）を運ぶ。射影は失敗を見分けるもの — ライブラリのコード、HTTP ステータスと content type、上流の OAuth `error` と `error_description` — を残し、相手側が書いたものは何も残さない。このパッケージの他のログも同じ規則に従う。
+
 ### Opt-in: `allowedAzpForFederationToken`
 
 各 `Client` は任意の `allowedAzpForFederationToken: boolean` フラグを持つ。既定は `false` — クライアントは自動的にはフェデレーショントークンへのアクセスを得ない。必要なクライアントにはオペレーターが明示的にオプトインする:

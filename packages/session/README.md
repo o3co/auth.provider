@@ -417,11 +417,13 @@ URL is exactly what the adapter returned.
    adapter — a wrong `iss`, a bad id_token, a UserInfo mismatch — surfaces this
    way and never reaches the Store. A profile without `sub` is
    `400 invalid_profile`. The `federation token exchange failed` warning
-   carries core's `loggableError(err)` — name, message, code, status, the
-   upstream's OAuth `error` and the Error causes — never the error itself: an
-   OAuth library puts the token response it refused, access and refresh token
+   carries core's `loggableError(err)`, never the error itself: an OAuth
+   library puts the token response it refused, access and refresh token
    included, on the error's cause chain, and a logger that serialises the
-   whole error would write them out.
+   whole error would write them out. Every other failure these routes log —
+   a store's, a repository's, express-session's — is projected the same way
+   (a Redis store's error carries the refused command's arguments; under
+   `allow-plaintext`, a token record).
 3. **The Store resolves the identity.** `<name>:<sub>` goes to
    `UserRepository.authenticateByToken`; a throw is `503 temporarily_unavailable`,
    `null` is `401 unknown_user` (unless the start asked to link).
@@ -854,6 +856,11 @@ core gives the provider half, exported from `@o3co/auth-provider-core`:
   adapter whose secret rotates (Apple's ES256 JWT) owns its caching. An empty or non-string result is refused
   locally rather than posted upstream
   ([`client-secret.mts`](../core/src/federations/client-secret.mts)).
+- `federationTokenSnapshot(tokens, obtainedAt)` — the one reading of a token
+  response for a profile or a refresh: `expiresIn` as the library read it and
+  `expiresAt` from it, `null` on both when no lifetime was sent, `tokenType`,
+  `scope` present exactly when sent
+  ([`token-snapshot.mts`](../core/src/federations/token-snapshot.mts)).
 
 The bundled adapters are the worked examples — for instance
 [`google.mts`](../federation-google/src/google.mts) in `federation-google`.
