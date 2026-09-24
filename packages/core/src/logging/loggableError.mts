@@ -34,8 +34,9 @@
  * - `error_description`: the one peer-written string kept on purpose — an
  *   operator needs "Token has been expired or revoked." — and only its first
  *   line (split on CRLF or LF), when that line is within RFC 6749 §5.2's
- *   character set (`%x20-21 / %x23-5B / %x5D-7E`) and carries no run of
- *   twenty or more characters from `[A-Za-z0-9._~+/=-]`; capped at 256.
+ *   character set (`%x20-21 / %x23-5B / %x5D-7E`), cut before its first run
+ *   of twenty or more characters from `[A-Za-z0-9._~+/=-]` and trimmed;
+ *   omitted when nothing is left; capped at 256.
  * - `stack`: the frames, never the header. A non-empty message is found in
  *   the stack and everything up to the end of it dropped (an empty one: the
  *   first line); a message not found — rewritten after V8 formatted the
@@ -77,8 +78,9 @@ export interface LoggableError {
 	readonly error?: string;
 	/**
 	 * The upstream's `error_description`: its first line, when that line is
-	 * within RFC 6749 §5.2's character set and carries no run of twenty token
-	 * characters. The one peer-written string kept on purpose.
+	 * within RFC 6749 §5.2's character set, cut before its first run of
+	 * twenty token characters and trimmed. The one peer-written string kept
+	 * on purpose.
 	 */
 	readonly error_description?: string;
 	/** A Response the library put on the error — its cause, or its own `response`. */
@@ -116,16 +118,20 @@ const TOKEN_RUN = /[A-Za-z0-9._~+/=-]{20,}/;
 /**
  * An upstream's `error_description`: its first line — Azure AD puts a Trace
  * ID, a Correlation ID and a timestamp on CRLF-separated lines after the
- * AADSTS one — when that line is within RFC 6749 §5.2's character set and
- * carries no token-shaped run. The one peer-written string the projection
- * keeps, because an operator needs it to tell a revoked grant from a broken
- * client.
+ * AADSTS one — when that line is within RFC 6749 §5.2's character set, cut
+ * at its first token-shaped run and trimmed: "Invalid refresh token: <the
+ * token>" keeps "Invalid refresh token:", AADSTS700016 keeps the text up to
+ * the application id. Omitted when nothing is left. The one peer-written
+ * string the projection keeps, because an operator needs it to tell a
+ * revoked grant from a broken client.
  */
 const descriptionOf = (value: unknown): string | undefined => {
 	if (typeof value !== "string") return undefined;
 	const firstLine = value.split(/\r?\n/, 1)[0] ?? "";
-	if (!OAUTH_ERROR_TEXT.test(firstLine) || TOKEN_RUN.test(firstLine)) return undefined;
-	return capped(firstLine);
+	if (!OAUTH_ERROR_TEXT.test(firstLine)) return undefined;
+	const run = TOKEN_RUN.exec(firstLine);
+	const kept = (run === null ? firstLine : firstLine.slice(0, run.index)).trim();
+	return kept === "" ? undefined : capped(kept);
 };
 
 /**
