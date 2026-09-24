@@ -305,6 +305,11 @@ describe("error text written in this repository's own words (RFC 6749 Appendix A
 		expect(written.filter((piece) => piece.kind === "code").length).toBeGreaterThan(300);
 	});
 
+	it("reads the standalone template, which answers with errorEnvelope too", () => {
+		// `create-app`'s copy is generated from it, so the template is the one read.
+		expect(written.some((piece) => piece.at.startsWith("templates/standalone/src/"))).toBe(true);
+	});
+
 	it("keeps to printable ASCII without '\"' and '\\': quote with ', write 'section', no em dash", () => {
 		expect(
 			written.filter((piece) => !conforms(piece)).map((piece) => `${piece.at} ${piece.text}`),
@@ -358,6 +363,19 @@ describe("error text written in this repository's own words (RFC 6749 Appendix A
 				`res.setHeader("WWW-Authenticate", 'Bearer error="invalid_token"');`,
 			],
 			["a thrown message", `throw new Error('mode = "pki" requires trustedCas — set it');`],
+			[
+				"a code written as a template that starts with a substitution",
+				// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+				"res.json({ error: `${prefix}_denied`, error_description: 'refused' });",
+			],
+			[
+				"an error object beside a description that is not an OAuth body",
+				`return { error: err, description: "retrying — the store is down" };`,
+			],
+			[
+				"a log payload that names its field error_description",
+				`logger.warn({ error_description: 'upstream said "no"' }, "idp_refused");`,
+			],
 		])("leaves %s alone", (_label, source) => {
 			expect(flagged(source)).toEqual([]);
 		});
