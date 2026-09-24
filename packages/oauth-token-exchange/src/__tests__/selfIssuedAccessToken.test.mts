@@ -103,6 +103,21 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		expect(store.isFamilyRevoked).not.toHaveBeenCalled();
 	});
 
+	it("does not compile a deps bag carrying refreshTokenFamilyRevocation spread into its options", () => {
+		// `refreshTokenFamilyRevocation?: never` in the options type: the likely
+		// way to pass the removed option by accident — spreading a deps object
+		// into the options — fails to compile, ahead of the runtime refusal a
+		// JavaScript caller still gets.
+		const deps: { keyStore: typeof keyStore; refreshTokenFamilyRevocation: unknown } = {
+			keyStore,
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
+		};
+		expect(() =>
+			// @ts-expect-error — the spread carries `refreshTokenFamilyRevocation`, typed `never`.
+			createSelfIssuedAccessTokenValidator({ ...deps, issuer: ISSUER }),
+		).toThrow(/refreshTokenFamilyRevocation is not an option/);
+	});
+
 	it("accepts a token without a family_id claim, leaving familyId absent", async () => {
 		const token = await signSelfIssuedAccessToken({});
 		const result = await validator().validate(token, { role: "subject" });

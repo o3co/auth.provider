@@ -495,6 +495,78 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					"refresh token family revocation not configured (revocation cannot be verified)",
 			});
 		});
+
+		// The actor half: the actor_token goes through the same rule whatever
+		// actor_token_type named its validator.
+		it("answers actor_token family_revoked for an actor_token of that type once its family is revoked", async () => {
+			const { grant, components } = await boot([
+				memoryRefreshTokenFamilyStoreModule,
+				defaultRefreshTokenFamilyRevocationModule,
+				selfIssuedAsJwt,
+			]);
+			await liveFamily(components, "fam-subject");
+			await liveFamily(components, "fam-actor-jwt");
+			const body = {
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-subject" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", family_id: "fam-actor-jwt" }),
+				actor_token_type: JWT_TOKEN_TYPE,
+			};
+			expect((await exchange(grant, body)).result.status).toBe(200);
+
+			await revoke(components, "fam-actor-jwt");
+			expect((await exchange(grant, body)).result).toMatchObject({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "actor_token family_revoked",
+			});
+		});
+
+		it("refuses a family-bearing actor_token of that type when no refreshTokenFamilyRevocation is wired", async () => {
+			const { grant } = await boot([selfIssuedAsJwt]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({}),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", family_id: "fam-actor-jwt" }),
+				actor_token_type: JWT_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription:
+					"actor_token refresh token family revocation not configured (revocation cannot be verified)",
+			});
+		});
+
+		// An empty `familyId` names no family: there is nothing to check, and
+		// nothing for the issued token to inherit — not a `family_id: ""` that
+		// no revocation could ever reach.
+		it("treats an empty familyId as no family: nothing checked, nothing inherited", async () => {
+			const EMPTY_FAMILY_TOKEN_TYPE = "urn:example:params:oauth:token-type:empty-family";
+			const { grant } = await boot([
+				defineModule({
+					name: "test:empty-family-validator",
+					contributes: {
+						tokenExchangeValidators: {
+							[EMPTY_FAMILY_TOKEN_TYPE]: () => ({
+								validate: async () => ({
+									sub: "user-1",
+									claims: { sub: "user-1", family_id: "" },
+									familyId: "",
+								}),
+							}),
+						},
+					},
+				}),
+			]);
+			const { result } = await exchange(grant, {
+				subject_token: "opaque-subject-token",
+				subject_token_type: EMPTY_FAMILY_TOKEN_TYPE,
+			});
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) return;
+			expect(decodeJwt(result.tokens.access_token)).not.toHaveProperty("family_id");
+		});
 	});
 
 	// Core's ExchangeTokenValidator contract: `null` means the token is not
@@ -680,8 +752,12 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			);
 		});
 
-		it("answers 503 naming the actor when the family store cannot be read for the actor_token", async () => {
-			const { grant } = await boot([unreachableFamilyRevocation((id) => id === "fam-actor")]);
+		it("answers 503 naming the actor, and logs the actor's role, when the family store cannot be read for the actor_token", async () => {
+			const logger = spyLogger();
+			const { grant } = await boot([
+				unreachableFamilyRevocation((id) => id === "fam-actor"),
+				defineModule({ name: "test:logger", provides: { logger: () => logger } }),
+			]);
 			const { result } = await exchange(grant, {
 				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-subject" }),
 				subject_token_type: ACCESS_TOKEN_TYPE,
@@ -693,6 +769,10 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				error: "temporarily_unavailable",
 				errorDescription: "actor_token refresh token store unavailable",
 			});
+			expect(logger.error).toHaveBeenCalledWith(
+				{ err: expect.any(Error), role: "actor" },
+				"token_exchange_family_store_unavailable",
+			);
 		});
 	});
 });
