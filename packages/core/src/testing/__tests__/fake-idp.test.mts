@@ -160,8 +160,12 @@ describe("createFakeIdp", () => {
 				/authorization endpoint/,
 			);
 			expect(() => idp.authorize(request({ client_id: "stranger" }))).toThrow(/client_id/);
-			const bare = await createFakeIdp({ ...ENDPOINTS, authorizationEndpoint: undefined });
-			expect(() => bare.authorize(request())).toThrow(/authorization endpoint/);
+			// Its own is where it was told, and a request for any other is refused.
+			const elsewhere = await createFakeIdp({
+				...ENDPOINTS,
+				authorizationEndpoint: "https://login.idp.test/auth",
+			});
+			expect(() => elsewhere.authorize(request())).toThrow(/authorization endpoint/);
 		});
 
 		it("holds the exchange to the request: one use, its redirect URI, a verifier matching its challenge", async () => {

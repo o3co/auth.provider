@@ -21,26 +21,33 @@ import { type CryptoKey, exportJWK, generateKeyPair, type JWK, SignJWT } from "j
  * A fake OpenID Provider behind a `fetch` implementation (#542).
  *
  * The provider under test is handed `idp.fetch` through its `fetch` option,
- * which openid-client uses for every request it makes — JWKS, token,
- * userinfo — so nothing here touches the network and every request is
+ * which openid-client uses for every request it makes — discovery, JWKS,
+ * token, userinfo — so nothing here touches the network and every request is
  * recorded for the tests to inspect. The IdP signs real RS256 id_tokens under
- * a key it publishes at `jwksUri`; the knobs below let a test make it
+ * a key it publishes at its JWKS URI; the knobs below let a test make it
  * misbehave in exactly one way at a time.
  *
- * The endpoints are named explicitly — Google's and Apple's are not paths
- * under the issuer — and there is no discovery document, since those
- * providers build their metadata locally. One harness for every adapter that
- * builds its metadata that way, so the adapters are held to one fake rather
- * than to copies that drift.
+ * One harness for every adapter, so the adapters are held to one fake rather
+ * than to copies that drift. Endpoints may be named explicitly — Google's and
+ * Apple's are not paths under the issuer, and those providers build their
+ * metadata locally — or left to default to paths under the issuer, with
+ * `discovery` serving the document a discovering provider (federation-oidc)
+ * reads at boot.
  */
 export interface FakeIdpOptions {
 	readonly issuer: string;
-	readonly tokenEndpoint: string;
-	readonly jwksUri: string;
+	/** Default: `<issuer>/token`. */
+	readonly tokenEndpoint?: string;
+	/** Default: `<issuer>/jwks`. */
+	readonly jwksUri?: string;
 	/** Absent for a provider that publishes none (Apple). */
 	readonly userinfoEndpoint?: string;
-	/** Where `authorize` accepts an authorization request. Required to call it. */
+	/** Where `authorize` accepts an authorization request. Default: `<issuer>/authorize`. */
 	readonly authorizationEndpoint?: string;
+	/** Named in the discovery document only; nothing is served there. */
+	readonly endSessionEndpoint?: string;
+	/** Serve `metadata` at `<issuer>/.well-known/openid-configuration`. Default: no. */
+	readonly discovery?: boolean;
 	readonly clientId?: string;
 	readonly sub?: string;
 }
@@ -66,6 +73,14 @@ export interface FakeIdp {
 	readonly sub: string;
 	readonly requests: FakeIdpRequest[];
 	readonly fetch: typeof fetch;
+	/**
+	 * The discovery document, served when `discovery` is on. Mutable, so a
+	 * test can corrupt one field or add one (`authorization_response_iss_
+	 * parameter_supported`) before the provider under test discovers it.
+	 */
+	readonly metadata: Record<string, unknown>;
+	/** The status the discovery document is answered with. */
+	discoveryStatus: number;
 	/** Claims laid over the id_token defaults. */
 	idTokenClaims: Record<string, unknown>;
 	/** The nonce the next id_token echoes; absent when undefined. */
@@ -80,9 +95,18 @@ export interface FakeIdp {
 	signWithUnpublishedKey: boolean;
 	/** Leave the id_token out of the token responses — the code exchange's and the refresh's. */
 	omitIdToken: boolean;
+	/**
+	 * Whether a refresh answer carries an id_token. Default `true`: Google and
+	 * Apple re-issue one, and the library verifies it like the login's.
+	 */
+	refreshWithIdToken: boolean;
+	/** Whether the code exchange's id_token carries `at_hash`, and whether it is right. */
+	atHash: "none" | "valid" | "wrong";
 	/** Claims laid over the userinfo defaults. */
 	userinfoClaims: Record<string, unknown>;
 	tokenStatus: number;
+	/** The body of a token-endpoint refusal (when `tokenStatus` is not 200). */
+	refusal: Record<string, unknown>;
 	accessToken: string;
 	/**
 	 * Laid over the code exchange's answer; a value of `undefined` removes the
@@ -92,6 +116,8 @@ export interface FakeIdp {
 	codeAnswer: Record<string, unknown>;
 	/** Laid over the refresh answer, as `codeAnswer` is over the code exchange's. */
 	refreshAnswer: Record<string, unknown>;
+	/** How long the JWKS takes to answer, in real milliseconds. */
+	jwksDelayMs: number;
 	/**
 	 * Google's documented rule for a code `authorize` issued: the exchange
 	 * carries a `refresh_token` only when the authorization asked for
@@ -113,8 +139,13 @@ export interface FakeIdp {
 	/** Replace the signing key; the JWKS then holds only the new one. */
 	rotateKey(): Promise<string>;
 	currentKid(): string;
-	/** Requests to an endpoint, compared on origin and path (a query string is ignored). */
+	/**
+	 * Requests to an endpoint — an absolute URL, or a path under the issuer
+	 * (`"/token"`) — compared on origin and path (a query string is ignored).
+	 */
 	requestsTo(endpoint: string): FakeIdpRequest[];
+	/** The last request to the token endpoint. */
+	lastTokenRequest(): FakeIdpRequest | undefined;
 }
 
 /** The defaults with the overlay laid over them, and every field the overlay set to `undefined` gone. */
@@ -133,23 +164,59 @@ function json(body: unknown, status = 200): Response {
 	});
 }
 
-const originAndPath = (url: URL): string => `${url.origin}${url.pathname}`;
+/**
+ * Where a request goes: origin and path, the host without the DNS root dot.
+ * `idp.test.` and `idp.test` resolve to the same server, so a request that
+ * carries the dot reaches this IdP too.
+ */
+const originAndPath = (url: URL): string => {
+	const routed = new URL(url.href);
+	routed.hostname = routed.hostname.replace(/\.$/, "");
+	return `${routed.origin}${routed.pathname}`;
+};
+
+/** OIDC Core §3.3.2.11 for an RS256 id_token: SHA-256, left half, base64url. */
+const sha256LeftHalf = (value: string): string => {
+	const digest = createHash("sha256").update(value).digest();
+	return digest.subarray(0, digest.length / 2).toString("base64url");
+};
 
 export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 	const issuer = options.issuer.replace(/\/$/, "");
 	const clientId = options.clientId ?? "client-under-test";
 	const sub = options.sub ?? "user-0001";
+	const urls = {
+		authorization: options.authorizationEndpoint ?? `${issuer}/authorize`,
+		token: options.tokenEndpoint ?? `${issuer}/token`,
+		jwks: options.jwksUri ?? `${issuer}/jwks`,
+		userinfo: options.userinfoEndpoint,
+		discovery: `${issuer}/.well-known/openid-configuration`,
+	};
 	const endpoints = {
-		token: originAndPath(new URL(options.tokenEndpoint)),
-		jwks: originAndPath(new URL(options.jwksUri)),
-		userinfo:
-			options.userinfoEndpoint === undefined
-				? undefined
-				: originAndPath(new URL(options.userinfoEndpoint)),
-		authorization:
-			options.authorizationEndpoint === undefined
-				? undefined
-				: originAndPath(new URL(options.authorizationEndpoint)),
+		authorization: originAndPath(new URL(urls.authorization)),
+		token: originAndPath(new URL(urls.token)),
+		jwks: originAndPath(new URL(urls.jwks)),
+		userinfo: urls.userinfo === undefined ? undefined : originAndPath(new URL(urls.userinfo)),
+		discovery: options.discovery ? originAndPath(new URL(urls.discovery)) : undefined,
+	};
+	/** A path under the issuer (`"/token"`) or an absolute URL, as the endpoint it names. */
+	const endpointOf = (endpoint: string): string =>
+		originAndPath(new URL(endpoint.startsWith("/") ? `${issuer}${endpoint}` : endpoint));
+
+	const metadata: Record<string, unknown> = {
+		issuer,
+		authorization_endpoint: urls.authorization,
+		token_endpoint: urls.token,
+		jwks_uri: urls.jwks,
+		...(urls.userinfo === undefined ? {} : { userinfo_endpoint: urls.userinfo }),
+		...(options.endSessionEndpoint === undefined
+			? {}
+			: { end_session_endpoint: options.endSessionEndpoint }),
+		response_types_supported: ["code"],
+		subject_types_supported: ["public"],
+		id_token_signing_alg_values_supported: ["RS256"],
+		token_endpoint_auth_methods_supported: ["client_secret_basic", "private_key_jwt"],
+		code_challenge_methods_supported: ["S256"],
 	};
 
 	/** The authorization request behind each code `authorize` issued, until it is exchanged. */
@@ -157,6 +224,7 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		string,
 		{ readonly params: URLSearchParams; readonly consentShown: boolean }
 	>();
+	let codesIssued = 0;
 	/** Whether this client has been granted consent by this user before. */
 	let consentGranted = false;
 
@@ -174,26 +242,36 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 	await newKey();
 
 	const requests: FakeIdpRequest[] = [];
+	const requestsTo = (endpoint: string): FakeIdpRequest[] => {
+		const wanted = endpointOf(endpoint);
+		return requests.filter((r) => originAndPath(r.url) === wanted);
+	};
 
 	const idp: FakeIdp = {
 		issuer,
 		clientId,
 		sub,
 		requests,
+		metadata,
+		discoveryStatus: 200,
 		idTokenClaims: {},
 		nonce: undefined,
 		signingKid: undefined,
 		signWithUnpublishedKey: false,
 		omitIdToken: false,
+		refreshWithIdToken: true,
+		atHash: "none",
 		userinfoClaims: {},
 		tokenStatus: 200,
+		refusal: { error: "invalid_client" },
 		accessToken: "at-1",
 		codeAnswer: {},
 		refreshAnswer: {},
+		jwksDelayMs: 0,
 		refreshTokenOnlyOnConsent: false,
 		authorize: (input) => {
 			const url = new URL(input);
-			if (endpoints.authorization === undefined || originAndPath(url) !== endpoints.authorization) {
+			if (originAndPath(url) !== endpoints.authorization) {
 				throw new Error(`fake IdP: ${originAndPath(url)} is not its authorization endpoint`);
 			}
 			const params = url.searchParams;
@@ -203,7 +281,8 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 			const prompts = (params.get("prompt") ?? "").split(" ");
 			const consentShown = !consentGranted || prompts.includes("consent");
 			consentGranted = true;
-			const code = `authorized-code-${authorizations.size + 1}`;
+			codesIssued += 1;
+			const code = `authorized-code-${codesIssued}`;
 			authorizations.set(code, { params: new URLSearchParams(params), consentShown });
 			idp.nonce = params.get("nonce") ?? undefined;
 			return { code, state: params.get("state"), iss: issuer };
@@ -211,14 +290,17 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		fetch: undefined as unknown as typeof fetch,
 		rotateKey: newKey,
 		currentKid: () => signer.kid,
-		requestsTo: (endpoint) => {
-			const wanted = originAndPath(new URL(endpoint));
-			return requests.filter((r) => originAndPath(r.url) === wanted);
-		},
+		requestsTo,
+		lastTokenRequest: () => requestsTo(urls.token).at(-1),
 	};
 
-	/** A refresh's id_token carries no nonce: there is no authorization request for it to echo. */
-	const mintIdToken = async (opts: { nonce: boolean } = { nonce: true }): Promise<string> => {
+	/**
+	 * A refresh's id_token carries no nonce: there is no authorization request
+	 * for it to echo. `at_hash` binds the code exchange's access token.
+	 */
+	const mintIdToken = async (
+		opts: { readonly nonce: boolean; readonly accessToken?: string } = { nonce: true },
+	): Promise<string> => {
 		const now = Math.floor(Date.now() / 1000);
 		const claims: Record<string, unknown> = {
 			iss: issuer,
@@ -230,6 +312,12 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 			email_verified: true,
 			name: "Alice Example",
 			...(opts.nonce && idp.nonce !== undefined ? { nonce: idp.nonce } : {}),
+			...(opts.accessToken === undefined || idp.atHash === "none"
+				? {}
+				: {
+						at_hash:
+							idp.atHash === "valid" ? sha256LeftHalf(opts.accessToken) : "AAAAAAAAAAAAAAAAAAAAAA",
+					}),
 			...idp.idTokenClaims,
 		};
 		const key = idp.signWithUnpublishedKey
@@ -264,12 +352,16 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		requests.push({ url, method, headers, body });
 
 		const where = originAndPath(url);
-		if (where === endpoints.jwks) return json(jwks);
+		if (endpoints.discovery !== undefined && where === endpoints.discovery) {
+			return json(metadata, idp.discoveryStatus);
+		}
+		if (where === endpoints.jwks) {
+			if (idp.jwksDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, idp.jwksDelayMs));
+			return json(jwks);
+		}
 		if (where === endpoints.token && method === "POST") {
-			if (idp.tokenStatus !== 200) return json({ error: "invalid_client" }, idp.tokenStatus);
+			if (idp.tokenStatus !== 200) return json(idp.refusal, idp.tokenStatus);
 			if (body?.get("grant_type") === "refresh_token") {
-				// Google and Apple both return a fresh id_token on refresh; the
-				// library verifies it like the login's when it is there.
 				return json(
 					overlaid(
 						{
@@ -277,7 +369,9 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 							token_type: "Bearer",
 							expires_in: 1800,
 							refresh_token: "rt-2",
-							...(idp.omitIdToken ? {} : { id_token: await mintIdToken({ nonce: false }) }),
+							...(idp.omitIdToken || !idp.refreshWithIdToken
+								? {}
+								: { id_token: await mintIdToken({ nonce: false }) }),
 						},
 						idp.refreshAnswer,
 					),
@@ -311,7 +405,9 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 						token_type: "Bearer",
 						expires_in: 3600,
 						...(issueRefreshToken ? { refresh_token: "rt-1" } : {}),
-						...(idp.omitIdToken ? {} : { id_token: await mintIdToken() }),
+						...(idp.omitIdToken
+							? {}
+							: { id_token: await mintIdToken({ nonce: true, accessToken: idp.accessToken }) }),
 					},
 					idp.codeAnswer,
 				),
