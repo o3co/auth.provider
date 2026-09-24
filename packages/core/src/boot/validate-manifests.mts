@@ -172,7 +172,8 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 /**
  * A `modules` entry that is a function is a module factory listed without
  * being called — `deviceGrantModule` where `deviceGrantModule({ config })`
- * was meant. `Module` requires only `name`, and a function has one, so the
+ * was meant, or `sessionStoreModuleFor` for `sessionStoreModuleFor(config)`.
+ * Factories take different arguments, so the message does not guess them. `Module` requires only `name`, and a function has one, so the
  * compiler accepts the entry; every other check below would then read it as
  * a manifest that declares nothing, and boot would succeed with the module's
  * grants, routes and refusals all silently absent. Refused first, before any
@@ -186,8 +187,8 @@ function checkModuleEntriesAreManifests(modules: readonly Module[]): void {
 		const label = typeof name === "string" && name !== "" ? name : "<anonymous>";
 		throw new BootError({
 			message:
-				`module entry "${label}" is a function — call it (e.g. ${label}({ config })) ` +
-				`and list the module it returns (modules[${index}]).`,
+				`module entry "${label}" is a function — call it with its arguments and list ` +
+				`the module it returns (modules[${index}]).`,
 			reason: "module-factory-not-called",
 			stage: "validateManifests",
 			details: { reason: "module-factory-not-called", index, name: label },

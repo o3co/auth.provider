@@ -218,7 +218,7 @@ function computeMountOrder(
 				const targetIdx = idToIndex.get(targetId);
 				if (targetIdx === undefined) {
 					throw new BootError({
-						message: `assembleApp: route-order-target-missing — route '${id ?? r.contribution.mountPath}' references unknown before-target '${targetId}'`,
+						message: `assembleApp: route-order-target-missing — route '${id ?? r.contribution.mountPath}' of module "${r.contributedBy}" references unknown before-target '${targetId}'`,
 						reason: "route-order-target-missing",
 						stage: "assembleApp",
 						details: {
@@ -245,7 +245,7 @@ function computeMountOrder(
 				const targetIdx = idToIndex.get(targetId);
 				if (targetIdx === undefined) {
 					throw new BootError({
-						message: `assembleApp: route-order-target-missing — route '${id ?? r.contribution.mountPath}' references unknown after-target '${targetId}'`,
+						message: `assembleApp: route-order-target-missing — route '${id ?? r.contribution.mountPath}' of module "${r.contributedBy}" references unknown after-target '${targetId}'`,
 						reason: "route-order-target-missing",
 						stage: "assembleApp",
 						details: {

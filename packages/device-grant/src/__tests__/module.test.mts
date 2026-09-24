@@ -153,7 +153,9 @@ describe("deviceGrantModule — boot", () => {
 			}),
 		).rejects.toMatchObject({
 			reason: "module-factory-not-called",
-			message: expect.stringMatching(/deviceGrantModule\(\{ config \}\)/),
+			message: expect.stringMatching(
+				/module entry "deviceGrantModule" is a function — call it with its arguments/,
+			),
 		});
 	});
 

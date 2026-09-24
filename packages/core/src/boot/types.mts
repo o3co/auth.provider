@@ -677,7 +677,7 @@ export type BootErrorReason =
 	| "component-absence-undeclared";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — 25 total, Per A2-β §6.1 (+ #271)
+// Per-reason *Details interfaces — one per BootErrorReason, 27 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called)
 // ---------------------------------------------------------------------------
 
 /**
@@ -1052,7 +1052,10 @@ export interface ComponentAbsenceUndeclaredDetails {
  *
  * Per A2-β §6.1, extended by A5 §8.2 and the Phase 9 boot-validator
  * restoration (A4 four-store + CP-20 issuer guard). Extended by issue #101
- * (mfa-partial-wiring, federation-stores-incomplete).
+ * (mfa-partial-wiring, federation-stores-incomplete), the OIDC discovery
+ * aggregator (discovery-document-invalid), #271 (replica-unsafe-adapter),
+ * #363 (component-absence-undeclared) and module-factory-not-called — one
+ * member per `BootErrorReason`, 27 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails

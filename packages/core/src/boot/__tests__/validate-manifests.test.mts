@@ -122,7 +122,9 @@ describe("validateManifests — a module factory listed without being called", (
 			name: "lateModule",
 		});
 		expect(err.message).toMatch(/module entry "lateModule" is a function/);
-		expect(err.message).toMatch(/lateModule\(\{ config \}\)/);
+		// A factory's arguments are its own — `({ config })`, `(config)`,
+		// `(name)` — so the hint does not guess them.
+		expect(err.message).toMatch(/call it with its arguments and list the module it returns/);
 	});
 });
 
