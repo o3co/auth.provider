@@ -71,7 +71,11 @@ export interface LoggableError {
 	readonly type?: string;
 	/** The upstream's OAuth `error` code (RFC 6749 §5.2), e.g. `invalid_grant`. */
 	readonly error?: string;
-	/** The upstream's `error_description`, when it is within RFC 6749 §5.2's character set. */
+	/**
+	 * The upstream's `error_description`: its first line, when that line is
+	 * within RFC 6749 §5.2's character set and carries no run of twenty token
+	 * characters. The one peer-written string kept on purpose.
+	 */
 	readonly error_description?: string;
 	/** A Response the library put on the error — its cause, or its own `response`. */
 	readonly response?: { readonly status: number; readonly contentType?: string };
