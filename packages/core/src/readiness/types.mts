@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import type { LoggableError } from "../logging/loggableError.mjs";
+
 /**
  * A liveness signal for one backing dependency.
  *
@@ -68,8 +70,18 @@ export interface ProbeResult {
 	readonly ok: boolean;
 	/** Wall-clock duration of the probe in milliseconds. */
 	readonly durationMs: number;
-	/** Failure reason, present only when `ok` is false. */
+	/**
+	 * Failure reason, present only when `ok` is false: the error's message, for
+	 * the response body when the operator opts in (`includeErrorDetail`). Never
+	 * logged — the log carries {@link ProbeResult.err}.
+	 */
 	readonly error?: string;
+	/**
+	 * The failure's projection (core's `loggableError`), present only when `ok`
+	 * is false: what the readiness route logs. A caught error reaches a log
+	 * only through the projection, never as its message flattened to text.
+	 */
+	readonly err?: LoggableError;
 }
 
 /** Aggregate outcome across every registered probe. */

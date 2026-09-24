@@ -711,10 +711,13 @@ export async function verifyJwt(
 			try {
 				isRevoked = await denylist.has(jti);
 			} catch (cause) {
-				const causeMessage = cause instanceof Error ? cause.message : String(cause);
+				// The store's error is the cause, never folded into the message:
+				// a caller's log projects it (`loggableError`), and its text must
+				// not ride past that as the verdict's own words.
 				const err = new JwtVerificationError(
 					"revocation_unavailable",
-					`denylist consult failed (fail-closed): ${causeMessage}`,
+					"denylist consult failed (fail-closed)",
+					{ cause },
 				);
 				emitRejection(logger, err, payload, header);
 				throw err;
@@ -746,16 +749,18 @@ export async function verifyJwt(
 			try {
 				watermark = await subjectRevocation.revokedBefore(sub);
 			} catch (cause) {
-				const causeMessage = cause instanceof Error ? cause.message : String(cause);
 				// #408: still fail closed — an unreachable store must never read
 				// as "not revoked" — but report it as the outage it is. Reported
 				// as `revoked`, it was indistinguishable from a finding, and the
 				// refresh grant's blanket `invalid_grant` mapping turned a
 				// transient outage into a forced logout for every user who
 				// refreshed during it (RFC 6749 §5.2).
+				// The store's error is the cause, never folded into the message
+				// (see the denylist consult above).
 				const err = new JwtVerificationError(
 					"revocation_unavailable",
-					`subject revocation consult failed (fail-closed): ${causeMessage}`,
+					"subject revocation consult failed (fail-closed)",
+					{ cause },
 				);
 				emitRejection(logger, err, payload, header);
 				throw err;

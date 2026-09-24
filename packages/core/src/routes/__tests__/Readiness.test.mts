@@ -83,11 +83,28 @@ describe("GET /readyz", () => {
 		});
 		expect(JSON.stringify(res.body)).not.toContain("10.0.3.14");
 
-		// The detail is not discarded — it goes where the reader is authenticated.
+		// The detail is not discarded — it goes where the reader is authenticated,
+		// as each failed check's error projection (`loggableError`), never the
+		// error nor its message flattened to text. At warn: a readiness 503 is
+		// the signal to the orchestrator, not a refusal of a client.
 		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.error).not.toHaveBeenCalled();
 		const [payload, msg] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
 		expect(msg).toBe("readiness_probe_failed");
-		expect(JSON.stringify(payload)).toContain("10.0.3.14");
+		expect(payload).toEqual({
+			checks: [
+				{
+					name: "redis",
+					durationMs: expect.any(Number),
+					err: expect.objectContaining({
+						name: "Error",
+						detail: "connect ECONNREFUSED 10.0.3.14:6379",
+					}),
+				},
+			],
+		});
+		const [check] = (payload as { checks: Array<{ err: unknown }> }).checks;
+		expect(check?.err).not.toBeInstanceOf(Error);
 	});
 
 	it("includes the error message when the operator opts in", async () => {

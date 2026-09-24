@@ -289,8 +289,9 @@ What a `503` means: at least one probe rejected or did not settle within
 `http.readinessTimeoutMs` (env `HTTP_READINESS_TIMEOUT_MS`, default `1000`;
 `reference.conf`). Every probe runs; one failing does not hide the others.
 The body carries only `name`, `ok` and `durationMs` per check. The failure
-**message** goes to the log as `readiness_probe_failed` (warn) with the failing
-checks, because a driver message like `connect ECONNREFUSED 10.0.3.14:6379`
+goes to the log as `readiness_probe_failed` (warn) with each failing check's
+`name`, `durationMs` and `err` — the error's `loggableError` projection, the
+driver's message in its `detail` — because a driver message like `connect ECONNREFUSED 10.0.3.14:6379`
 names an internal host on an unauthenticated endpoint. `includeErrorDetail:
 true` on `createReadinessRouter` puts it in the body; do that only when the
 route is reachable solely from inside the deployment.

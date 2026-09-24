@@ -150,6 +150,35 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 			message: expect.stringContaining("denylist consult failed"),
 		});
 	});
+
+	it("keeps the store's error as the cause, never its text in the verdict's message", async () => {
+		// A caught error reaches a log only through loggableError. Folded into
+		// the message, the store's text rode past the projection as the
+		// verdict's own words; kept as `cause`, a caller's log projects it.
+		const outage = Object.assign(
+			new Error("READONLY You can't write against a read only replica."),
+			{
+				name: "ReplyError",
+			},
+		);
+		const throwingDenylist: AccessTokenDenylist = {
+			kind: "throwing",
+			add: async () => {},
+			has: async () => {
+				throw outage;
+			},
+		};
+		const { token } = await mintAccessToken();
+		const err = await verifyJwt(token, testKeyStore(), {
+			type: "access_token",
+			expectedIssuer: TEST_ISSUER,
+			expectedAudience: TEST_AUDIENCE,
+			revocation: { denylist: throwingDenylist },
+		}).catch((e: unknown) => e);
+		expect(err).toMatchObject({ reason: "revocation_unavailable" });
+		expect((err as Error).cause).toBe(outage);
+		expect((err as Error).message).not.toContain("READONLY");
+	});
 });
 
 /*

@@ -893,7 +893,8 @@ changing the image.
 ```
 
 The failure's *reason* is deliberately absent from the body and goes to the log
-instead (`readiness_probe_failed`, with the full per-check detail). A driver
+instead (`readiness_probe_failed`, with each failing check's error as core's
+`loggableError` projection). A driver
 error reads `connect ECONNREFUSED 10.0.3.14:6379` — an internal host and port —
 and this endpoint is unauthenticated because an orchestrator has no credentials
 to present. Set `includeErrorDetail: true` on `createReadinessRouter` only when

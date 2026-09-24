@@ -51,7 +51,10 @@
  *   listener, `const outcome = await …`), a re-bound value
  *   (`const failure = err`), an `allSettled` result's `reason`;
  * - an error flattened into a value before the call (`const reason =
- *   err.message`, then `{ reason }`);
+ *   err.message`, then `{ reason }`). The second rule below closes the
+ *   common shape of this — `x instanceof Error ? x.message : String(x)`, or a
+ *   helper that returns `x.message` — by flagging the flattening itself,
+ *   wherever it is, since the string it makes can travel into another file;
  * - an error handed to a helper that logs it: `refuse(…, { err })`, a
  *   failure reporter. The call site is not a logger call, and the helper's
  *   own log line sees only its parameter (`{ reason, ...context }`), not a
@@ -391,6 +394,118 @@ function workspaceSourceTrees(): string[] {
 	}
 	return trees;
 }
+
+/**
+ * The shape the rule above cannot follow: a caught error flattened to its
+ * text — `x instanceof Error ? x.message : String(x)`, or a helper that
+ * returns `x.message` — which then travels as an ordinary string, often into
+ * another file, and reaches a log line nobody would read as holding an error.
+ * Core's readiness runner did this: each failed probe's `err.message` went into
+ * the report the readiness route logs. The flattening is the part a file can
+ * be read for, so it is what is flagged, wherever it is; a site that
+ * legitimately needs the text (a message it throws, with the original kept as
+ * `cause`) is listed here with the reason. Each entry allows exactly that many
+ * sites in its file, so a new one fails and a removed one fails as stale.
+ */
+const FLATTENED_ERROR_TEXT =
+	/\binstanceof\s+Error\s*\)?\s*(?:\?|return)\s*[A-Za-z_$][\w$]*\.message\b/g;
+
+const FLATTENING_ALLOWED: ReadonlyArray<{
+	readonly file: string;
+	readonly sites: number;
+	readonly why: string;
+}> = [
+	{
+		file: "packages/core/src/federation-tokens/refresh-error.mts",
+		sites: 1,
+		why: "a legacy classifier reads the text for `invalid_grant` / `5xx`; it is never logged",
+	},
+	{
+		file: "packages/core/src/jwt/verify.mts",
+		sites: 1,
+		why: "jose's own fixed text about the token, as the verdict's message; jose's claims ride on the error, not in its message",
+	},
+	{
+		file: "packages/federation-oidc/src/at-hash.mts",
+		sites: 1,
+		why: "the message of an error it throws, the original kept as `cause` (outside this change; for review)",
+	},
+	{
+		file: "packages/federation-oidc/src/client-auth.mts",
+		sites: 1,
+		why: "the message of a construction error it throws, the original kept as `cause` (outside this change; for review)",
+	},
+	{
+		file: "packages/federation-oidc/src/oidc.mts",
+		sites: 1,
+		why: "the message of a construction error it throws, the original kept as `cause` (outside this change; for review)",
+	},
+	{
+		file: "packages/mtls/src/fullPki/crl.mts",
+		sites: 2,
+		why: "a PKI library's text about the certificate under check, as a refusal's `detail` (outside this change; for review)",
+	},
+	{
+		file: "packages/mtls/src/fullPki/ocsp.mts",
+		sites: 1,
+		why: "a PKI library's text about the certificate under check, as a refusal's `detail` (outside this change; for review)",
+	},
+	{
+		file: "packages/mtls/src/fullPki/validate.mts",
+		sites: 1,
+		why: "a PKI library's text about the certificate under check, as a refusal's `detail` (outside this change; for review)",
+	},
+	{
+		file: "packages/redis/src/ioredis.mts",
+		sites: 1,
+		why: "the message of an error it throws, the queued command's error kept as `cause` (outside this change; for review)",
+	},
+	{
+		file: "packages/session/src/store/redisStoreLibraries.mts",
+		sites: 1,
+		why: "a 60-character one-line brief of each member of a composite error, sized for loggableError (outside this change; for review)",
+	},
+];
+
+function flatteningSites(): Map<string, number[]> {
+	const sites = new Map<string, number[]>();
+	for (const root of SOURCE_ROOTS) {
+		for (const file of sourceFiles(join(repoRoot, root))) {
+			const source = withoutComments(readFileSync(file, "utf8"));
+			const lines: number[] = [];
+			for (const match of source.matchAll(FLATTENED_ERROR_TEXT)) {
+				lines.push(source.slice(0, match.index).split("\n").length);
+			}
+			if (lines.length > 0) sites.set(relative(repoRoot, file), lines);
+		}
+	}
+	return sites;
+}
+
+describe("a caught error is not flattened to text on its way to a log line", () => {
+	it(`in ${SOURCE_ROOTS.join(", ")}: every flattening is one this file lists, with its reason`, () => {
+		const unexpected: string[] = [];
+		for (const [file, lines] of flatteningSites()) {
+			const allowed = FLATTENING_ALLOWED.find((entry) => entry.file === file)?.sites ?? 0;
+			if (lines.length > allowed) unexpected.push(`${file}:${lines.join(",")}`);
+		}
+		expect(unexpected).toEqual([]);
+	});
+
+	it("has no stale entry in FLATTENING_ALLOWED", () => {
+		const sites = flatteningSites();
+		for (const { file, sites: allowed, why } of FLATTENING_ALLOWED) {
+			expect(sites.get(file)?.length ?? 0, `${file} — ${why}`).toBe(allowed);
+		}
+	});
+
+	it.each([
+		["a ternary", "const text = err instanceof Error ? err.message : String(err);"],
+		["a helper's early return", "if (err instanceof Error) return err.message;"],
+	])("flags %s", (_label, source) => {
+		expect(source.match(FLATTENED_ERROR_TEXT)).not.toBeNull();
+	});
+});
 
 describe("a caught error reaches a logger only through loggableError", () => {
 	it(`in ${SOURCE_ROOTS.join(", ")}`, () => {
