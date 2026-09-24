@@ -171,6 +171,16 @@ export function createClientAssertionVerifier(
 	};
 
 	/**
+	 * The ceiling a lifetime refusal applied, as the client is told it: the
+	 * hour plus this verifier's clock tolerance — the number the comparison
+	 * used, not the bare hour, which an assertion a few seconds past it
+	 * satisfies. Digits, letters and `:()` only: within RFC 6749's error-text
+	 * characters.
+	 */
+	const describeCeiling = (maxSeconds: number): string =>
+		`at most ${maxSeconds} seconds: ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} plus the ${clockTolerance} s clock tolerance`;
+
+	/**
 	 * Log a refusal and say how to answer it. A caught error handed over as
 	 * `err` reaches the log as `loggableError(err)`, never as itself: a replay
 	 * store's ioredis error carries the refused command's arguments, a client
@@ -181,16 +191,6 @@ export function createClientAssertionVerifier(
 	 * is checked, so they are recorded through `auditErrorText` (sanitised,
 	 * capped).
 	 */
-	/**
-	 * The ceiling a lifetime refusal applied, as the client is told it: the
-	 * hour plus this verifier's clock tolerance — the number the comparison
-	 * used, not the bare hour, which an assertion a few seconds past it
-	 * satisfies. Digits, letters and `:()` only: within RFC 6749's error-text
-	 * characters.
-	 */
-	const describeCeiling = (maxSeconds: number): string =>
-		`at most ${maxSeconds} seconds: ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} plus the ${clockTolerance} s clock tolerance`;
-
 	const refuse = (
 		status: 400 | 401 | 500 | 503,
 		error: "invalid_request" | "invalid_client" | "server_error" | "temporarily_unavailable",
