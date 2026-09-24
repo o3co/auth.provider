@@ -28,6 +28,12 @@
  * `token_type: "bearer"` with a comma-delimited `scope` and no id_token, and
  * `/user` answers a numeric `id` and no `sub`. The knobs below let a test make
  * one endpoint answer differently at a time.
+ *
+ * It is no laxer than GitHub where a client could come to depend on the
+ * difference: the token endpoint answers form-encoded unless the request's
+ * `Accept` asks for JSON, and the REST API (`api.github.com`) refuses a
+ * request without a `User-Agent` with `403`. `fake-github.test.mts` holds it
+ * to both.
  */
 
 export const GITHUB = {
@@ -109,9 +115,14 @@ export const githubEmails = (): unknown[] => [
 ];
 
 const JSON_TYPE = "application/json; charset=utf-8";
+const FORM_TYPE = "application/x-www-form-urlencoded; charset=utf-8";
 const answer = (body: unknown): FakeAnswer => ({ status: 200, body, contentType: JSON_TYPE });
 
 const originAndPath = (url: URL): string => `${url.origin}${url.pathname}`;
+
+/** GitHub's own answer to a REST request without a `User-Agent`. */
+const NO_USER_AGENT =
+	"Request forbidden by administrative rules. Please make sure your request has a User-Agent header (https://docs.github.com/en/rest/overview/resources-in-the-rest-api#user-agent-required). Check https://developer.github.com for other possible causes.";
 
 export function createFakeGithub(): FakeGithub {
 	const requests: RecordedRequest[] = [];
@@ -121,6 +132,23 @@ export function createFakeGithub(): FakeGithub {
 			status: a.status,
 			headers: { "content-type": a.contentType },
 		});
+
+	/**
+	 * The token endpoint answers `application/x-www-form-urlencoded` by default,
+	 * and JSON only when `Accept` asks for it.
+	 */
+	const respondToken = (headers: Headers): Response => {
+		const a = github.token;
+		if (a.raw !== undefined || (headers.get("accept") ?? "").includes("application/json")) {
+			return respond(a);
+		}
+		const form = new URLSearchParams();
+		for (const [k, v] of Object.entries(a.body as Record<string, unknown>)) form.set(k, String(v));
+		return new Response(form.toString(), {
+			status: a.status,
+			headers: { "content-type": FORM_TYPE },
+		});
+	};
 
 	const github: FakeGithub = {
 		requests,
@@ -158,7 +186,13 @@ export function createFakeGithub(): FakeGithub {
 		requests.push({ url, method, headers, body });
 
 		const where = originAndPath(url);
-		if (where === GITHUB.tokenEndpoint && method === "POST") return respond(github.token);
+		if (url.hostname === "api.github.com" && !headers.has("user-agent")) {
+			return new Response(NO_USER_AGENT, {
+				status: 403,
+				headers: { "content-type": "text/plain; charset=utf-8" },
+			});
+		}
+		if (where === GITHUB.tokenEndpoint && method === "POST") return respondToken(headers);
 		if (where === GITHUB.user && method === "GET") return respond(github.user);
 		if (where === GITHUB.emails && method === "GET") return respond(github.emails);
 		return new Response(JSON.stringify({ message: "Not Found" }), {

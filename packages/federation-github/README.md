@@ -181,10 +181,14 @@ Defined in [`src/github.mts`](src/github.mts), exported from
 Nothing mocks `openid-client`. The provider tests run the real library against
 a fake GitHub ([`fake-github.mts`](src/__tests__/fake-github.mts)) installed as
 the global `fetch` — the fetch the library uses, since the adapter configures
-none — which answers with GitHub's own bodies and records every request.
+none — which answers with GitHub's own bodies and records every request. It is
+no laxer than GitHub where the adapter could come to depend on it: the token
+endpoint answers form-encoded unless `Accept` asks for JSON, and the REST API
+refuses a request without a `User-Agent`.
 
 | Test file | Pins |
 | --- | --- |
 | [`github.test.mts`](src/__tests__/github.test.mts) | the authorization request, the token request (PKCE verifier, `client_secret_post`), the exchange without `iss`, the e-mail choice and a failed `/user/emails`, the scope rules, `expiresAt`, no refresh, `mapClaims` and `endSession` |
 | [`github.user.test.mts`](src/__tests__/github.user.test.mts) | how `/user` becomes the `sub`: GitHub's numeric `id` without a `sub`, the `sub` and `id` rules, and the refusals (a non-2xx answer, a body that is not JSON, no `id`, or one that is not a positive safe integer or a canonical digit string) |
+| [`fake-github.test.mts`](src/__tests__/fake-github.test.mts) | the fake itself: form-encoded token answers, the `User-Agent` refusal, and that the adapter's requests satisfy both |
 | [`github-module.test.mts`](src/__tests__/github-module.test.mts), [`github-module-boot.test.mts`](src/__tests__/github-module-boot.test.mts) | the module's contributions and boot with the session module |

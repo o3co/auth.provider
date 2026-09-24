@@ -106,8 +106,35 @@ describe("createGithubProvider", () => {
 		// GitHub names its issuer "https://github.com/login/oauth"; the library
 		// is configured with the profile label "https://github.com". Forwarded,
 		// the library would compare the two and refuse the login.
-		const profile = await exchange({ callbackParams: { iss: "https://github.com/login/oauth" } });
+		const iss = "https://github.com/login/oauth";
+		const profile = await exchange({ callbackParams: { iss, state: "route-checked" } });
 		expect(profile.sub).toBe("12345");
+
+		// The library turns the exchange URL into the token request: its `code`
+		// is the one parameter it carries, and `redirect_uri` is the callback with
+		// the query stripped. Only the route's code reaches GitHub; nothing else
+		// the callback carried — `iss`, `state` — reaches any request.
+		const [token] = github.requestsTo(GITHUB.tokenEndpoint);
+		expect(token?.body?.get("code")).toBe("gh-code");
+		expect(token?.body?.get("redirect_uri")).toBe(baseConfig.callbackURL);
+		expect([...(token?.body?.keys() ?? [])].sort()).toEqual([
+			"client_id",
+			"client_secret",
+			"code",
+			"code_verifier",
+			"grant_type",
+			"redirect_uri",
+		]);
+		for (const request of github.requests) {
+			const sent = [...request.url.searchParams.entries(), ...(request.body?.entries() ?? [])];
+			expect(sent.map(([k]) => k)).not.toContain("iss");
+			expect(sent.map(([k]) => k)).not.toContain("state");
+			expect(sent.map(([, v]) => v)).not.toContain(iss);
+		}
+		// No state is compared here: the route compared it against the session
+		// before calling the adapter, and hands the adapter none. An adapter that
+		// asked the library to expect one would refuse this login ("state"
+		// missing), so the success above is the check that it does not.
 	});
 
 	it("fails the exchange when GitHub refuses the code, which it answers with HTTP 200 and an error body", async () => {
@@ -227,8 +254,9 @@ describe("createGithubProvider", () => {
 		["is not JSON", { status: 200, raw: "<html></html>", contentType: "text/html" }],
 		["is not an array", { status: 200, body: { message: "unexpected" } }],
 	])(
-		"signs in without an e-mail when /user/emails %s",
+		"signs in without an e-mail when /user/emails %s — and never falls back to /user's",
 		async (_label, answer: Partial<FakeGithub["emails"]>) => {
+			github.user.body = { ...githubUser(), email: "public@example.com" };
 			Object.assign(github.emails, answer);
 			const profile = await exchange();
 			expect(profile.sub).toBe("12345");
