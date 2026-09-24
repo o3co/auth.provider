@@ -482,6 +482,22 @@ describe("a Store that refuses this deployment's credential", () => {
 	});
 });
 
+/** The message a StoreTransportError carries for `reason`, on the lookup or one of the other three. */
+const transportMessage = (lookup: boolean, url: string, reason: string, code: string): string => {
+	switch (reason) {
+		case "unreachable":
+			return `HttpUserRepository: ${lookup ? `identity lookup at ${url}` : `request to ${url}`} could not be reached (${code})`;
+		case "connection_closed":
+			return lookup
+				? `HttpUserRepository: identity lookup at ${url}: the connection closed before a complete response arrived (${code})`
+				: `HttpUserRepository: the connection to ${url} closed before a complete response arrived (${code})`;
+		case "malformed_response":
+			return `HttpUserRepository: ${lookup ? `identity lookup at ${url}` : `the Store at ${url}`} answered with a malformed HTTP response (${code})`;
+		default:
+			throw new Error(`no message for ${reason}`);
+	}
+};
+
 describe("a transport failure carries nothing the request carried", () => {
 	/**
 	 * A peer that answers by reflecting the request's `Authorization` into a
@@ -560,8 +576,8 @@ describe("a transport failure carries nothing the request carried", () => {
 							? `HttpUserRepository: identity lookup at ${url} could not be read`
 							: `HttpUserRepository: response from ${url} could not be read`
 						: lookup
-							? `HttpUserRepository: identity lookup at ${url} answered with a malformed or incomplete HTTP response`
-							: `HttpUserRepository: the Store at ${url} answered with a malformed or incomplete HTTP response`,
+							? `HttpUserRepository: identity lookup at ${url} answered with a malformed HTTP response`
+							: `HttpUserRepository: the Store at ${url} answered with a malformed HTTP response`,
 					cause: undefined,
 					carriesTheToken: false,
 				};
@@ -697,13 +713,14 @@ describe("a transport failure carries nothing the request carried", () => {
 	});
 
 	it.each(calls)(
-		"%s: a Store that answered, but not with a usable response head, is a malformed response — not the network",
+		"%s: a head the transport cannot take is malformed_response; a connection that closes before a complete response is connection_closed — neither is the network",
 		async (name, path, call) => {
-			// Each of these reached a Store that sent bytes: a head too large to
-			// take, an interim 1xx and then a close, a head cut off. "Could not be
-			// reached" would send an operator to the network; the answer is the
-			// Store's, or a proxy's. A connection closed before any byte is still
-			// "could not be reached".
+			// A head too large to take reached a Store that sent bytes that are
+			// not a usable head: the answer is the Store's, or a proxy's. A close —
+			// after an interim 1xx, mid-head, or before any byte — says only that
+			// the connection closed first: the transport cannot tell who closed
+			// it or why, so the reason names no more than that. Neither is "could
+			// not be reached", which would send an operator to the network.
 			const lookup = name === "findSubjectByFederatedIdentity";
 			const ANSWERS = {
 				"a head over the size limit": [
@@ -713,15 +730,11 @@ describe("a transport failure carries nothing the request carried", () => {
 				],
 				"an interim 1xx, then a close": [
 					"HTTP/1.1 100 Continue\r\n\r\n",
-					"malformed_response",
+					"connection_closed",
 					"UND_ERR_SOCKET",
 				],
-				"a head cut off": [
-					"HTTP/1.1 200 OK\r\nContent-Len",
-					"malformed_response",
-					"UND_ERR_SOCKET",
-				],
-				"a close before any byte": ["", "unreachable", "UND_ERR_SOCKET"],
+				"a head cut off": ["HTTP/1.1 200 OK\r\nContent-Len", "connection_closed", "UND_ERR_SOCKET"],
+				"a close before any byte": ["", "connection_closed", "UND_ERR_SOCKET"],
 			} as const;
 			const seen: Record<string, unknown> = {};
 			const expected: Record<string, unknown> = {};
@@ -742,19 +755,73 @@ describe("a transport failure carries nothing the request carried", () => {
 					message: error?.message,
 					code: error?.code,
 				};
-				const url = `${origin}${path}`;
-				const subject = lookup ? `identity lookup at ${url}` : `the Store at ${url}`;
 				expected[what] = {
 					class: true,
 					reason,
-					message:
-						reason === "unreachable"
-							? `HttpUserRepository: ${lookup ? `identity lookup at ${url}` : `request to ${url}`} could not be reached (${code})`
-							: `HttpUserRepository: ${subject} answered with a malformed or incomplete HTTP response (${code})`,
+					message: transportMessage(lookup, `${origin}${path}`, reason, code),
 					code,
 				};
 			}
 			expect(seen).toEqual(expected);
+		},
+	);
+
+	it.each(calls)(
+		"%s: a pooled keep-alive connection the Store closes between requests is connection_closed — not a malformed answer",
+		async (name, path, call) => {
+			// fetch keeps the connection a completed exchange used and sends the
+			// next request on it. A Store, a proxy or an idle timeout that closes
+			// it in between makes that request fail with "other side closed" on a
+			// socket that has read the whole of the first answer — bytes read,
+			// and nothing malformed about any of them.
+			const lookup = name === "findSubjectByFederatedIdentity";
+			const ports: (number | undefined)[] = [];
+			let requests = 0;
+			const origin = await serve((req, res) => {
+				requests += 1;
+				ports.push(req.socket.remotePort);
+				const first = requests === 1;
+				req.resume();
+				req.on("end", () => {
+					if (!first) {
+						req.socket.destroy();
+						return;
+					}
+					res.writeHead(200, { "Content-Type": "application/json" });
+					res.end(JSON.stringify({ id: "user-1", username: "alice", kind: "unlinked" }));
+				});
+			});
+			const repo = new HttpUserRepository({ ...urls(origin), bearerToken: TOKEN, timeout: 5000 });
+
+			await call(repo);
+			// One turn of the event loop, as any real gap between two logins is:
+			// undici returns the finished exchange's socket to its pool on a
+			// later tick, and a request sent in the same tick opens a new one.
+			await new Promise((resolve) => setTimeout(resolve, 10));
+			const error = await Promise.resolve(call(repo)).then(
+				() => undefined,
+				(thrown: unknown) => thrown as Error & { code?: unknown; reason?: unknown },
+			);
+
+			// The second request rode the first one's connection.
+			expect(ports).toHaveLength(2);
+			expect(ports[1]).toBe(ports[0]);
+			expect({
+				class: error instanceof StoreTransportError,
+				reason: error?.reason,
+				message: error?.message,
+				code: error?.code,
+			}).toEqual({
+				class: true,
+				reason: "connection_closed",
+				message: transportMessage(
+					lookup,
+					`${origin}${path}`,
+					"connection_closed",
+					"UND_ERR_SOCKET",
+				),
+				code: "UND_ERR_SOCKET",
+			});
 		},
 	);
 });

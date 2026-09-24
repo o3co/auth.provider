@@ -25,7 +25,7 @@
 
 import { describe, expect, it } from "vitest";
 import { StoreCredentialRefusedError, StoreTransportError } from "#/index.mjs";
-import { transportCode } from "#/repositories/storeErrors.mjs";
+import { requestFailure, transportCode } from "#/repositories/storeErrors.mjs";
 
 const SECRET = "0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a";
 
@@ -82,6 +82,57 @@ describe("transportCode", () => {
 		expect(
 			transportCode(chain(undefined, undefined, undefined, undefined, "ECONNREFUSED")),
 		).toBeUndefined();
+	});
+});
+
+describe("requestFailure: which reason a failed request is", () => {
+	/** undici's shape for "other side closed": a SocketError carrying the socket's byte counts. */
+	const socketClosed = (bytesRead: number): unknown =>
+		Object.assign(new TypeError("fetch failed"), {
+			cause: Object.assign(new Error("other side closed"), {
+				name: "SocketError",
+				code: "UND_ERR_SOCKET",
+				socket: { bytesRead, bytesWritten: 120 },
+			}),
+		});
+	const named = (name: string, code?: string): unknown =>
+		Object.assign(new TypeError("fetch failed"), {
+			cause: Object.assign(new Error("transport"), {
+				name,
+				...(code === undefined ? {} : { code }),
+			}),
+		});
+	const messages = { unreachable: "u", malformed: "m", closed: "c" };
+
+	it("names a closed connection for what it is, whatever the socket had read — a pooled keep-alive socket has read a whole earlier answer", () => {
+		const cases: [string, unknown, string][] = [
+			["closed before any byte", socketClosed(0), "connection_closed"],
+			[
+				"closed after bytes (a 1xx, a cut head, or an earlier answer on a reused socket)",
+				socketClosed(124),
+				"connection_closed",
+			],
+			["reset", named("Error", "ECONNRESET"), "connection_closed"],
+			["written after the peer closed", named("Error", "EPIPE"), "connection_closed"],
+			["parser refused the head", named("HTTPParserError"), "malformed_response"],
+			[
+				"parser code where the runtime sets one",
+				named("Error", "HPE_INVALID_CONSTANT"),
+				"malformed_response",
+			],
+			[
+				"head over the size limit",
+				named("HeadersOverflowError", "UND_ERR_HEADERS_OVERFLOW"),
+				"malformed_response",
+			],
+			["refused", named("Error", "ECONNREFUSED"), "unreachable"],
+			["DNS", named("Error", "ENOTFOUND"), "unreachable"],
+			["TLS", named("Error", "ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE"), "unreachable"],
+			["no code at all", named("Error"), "unreachable"],
+		];
+		expect(cases.map(([what, err]) => [what, requestFailure(err, messages).reason])).toEqual(
+			cases.map(([what, , reason]) => [what, reason]),
+		);
 	});
 });
 
