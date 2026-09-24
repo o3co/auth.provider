@@ -374,8 +374,8 @@ describe("loggableError — what a log line may carry of an error", () => {
 	 * The shared `stack` vectors. device-grant's copy of this rule
 	 * (`packages/device-grant/src/loggableError.mts`) passes the same list;
 	 * keep the two in step, so that replacing that copy by this one stays an
-	 * import swap. Each vector needs only `loggableError` and the helpers
-	 * inside this block.
+	 * import swap. Each vector needs only `loggableError`, the helpers inside
+	 * this block and Node's own globals and built-ins.
 	 */
 	describe("stack — the shared vectors", () => {
 		const stackOf = (thrown: unknown): string | undefined =>
@@ -431,7 +431,123 @@ describe("loggableError — what a log line may carry of an error", () => {
 			expect(stackOf(rewritten)).toBeUndefined();
 		});
 
-		it("an empty message: the frames after the first line", () => {
+		/** An error whose message hides a frame-shaped line, its stack formatted, then its message set to `message`. */
+		const rewrittenTo = (message: unknown, original = "orig\n    at evil (S3CRET:1:1)"): Error => {
+			const rewritten = new Error(original);
+			void rewritten.stack;
+			(rewritten as { message: unknown }).message = message;
+			return rewritten;
+		};
+
+		it.each([
+			"E",
+			"r",
+			"Err",
+			": orig",
+			"rig",
+			"o",
+			"Error: orig",
+			"",
+		])("a message rewritten to %j, which the header holds but is not: no stack", (message) => {
+			// Found anywhere in the stack — inside the name, part-way along the
+			// header's line — a message would cut the header short and let the
+			// frame-shaped line after it through. Only the whole header, `name:
+			// message` ending its line, is accepted.
+			expect(stackOf(rewrittenTo(message))).toBeUndefined();
+		});
+
+		it("a message rewritten to a leading part of itself that ends mid-line: no stack", () => {
+			expect(
+				stackOf(rewrittenTo("orig", "orig and more\n    at evil (S3CRET:1:1)")),
+			).toBeUndefined();
+		});
+
+		it("a message rewritten to a leading part of itself that ends a line: the residual, pinned", () => {
+			// The stack's text cannot tell this header from the one V8 would
+			// have written for "orig": the old message's next line reads as a
+			// frame. The documented residual — `framesOf` names it.
+			expect(stackOf(rewrittenTo("orig"))).toMatch(/^ {4}at evil \(S3CRET:1:1\)\n {4}at /);
+		});
+
+		it("a custom name with a message found inside it: no stack", () => {
+			const named = new Error("orig\n    at evil (S3CRET:1:1)");
+			named.name = "MyError";
+			void named.stack;
+			named.message = "Error";
+			expect(stackOf(named)).toBeUndefined();
+		});
+
+		it("a message that is not a string: no stack", () => {
+			expect(stackOf(rewrittenTo(42))).toBeUndefined();
+		});
+
+		it("a name that is not a string compares as Error", () => {
+			const unnamed = new Error("m");
+			unnamed.stack = "Error: m\n    at a";
+			(unnamed as { name: unknown }).name = 42;
+			expect(stackOf(unnamed)).toBe("    at a");
+		});
+
+		it("Node's coded header, `name [code]: message`: its frames", () => {
+			// Buffer.alloc(-1) is a wrong argument to a Node API — a bug in this
+			// codebase's own code, where the frames are what finds it.
+			const stack = stackOf(thrownBy(() => Buffer.alloc(-1)));
+			expect(stack).toMatch(/^ {4}at /);
+			expect(stack).not.toContain("ERR_OUT_OF_RANGE");
+			expect(stack).not.toContain("out of range");
+		});
+
+		it("a coded header with an empty message, `name [code]`: its frames", () => {
+			const coded = Object.assign(new Error(""), { code: "ERR_X" });
+			coded.stack = "Error [ERR_X]\n    at a";
+			expect(stackOf(coded)).toBe("    at a");
+		});
+
+		it("a coded header whose code is not a string: no stack", () => {
+			const coded = Object.assign(new Error("m"), { code: 42 });
+			coded.stack = "Error [42]: m\n    at a";
+			expect(stackOf(coded)).toBeUndefined();
+		});
+
+		it.each([
+			["new URL's TypeError", "Invalid URL", () => new URL("x")],
+			["a JSON SyntaxError", "in JSON", () => JSON.parse("{")],
+			[
+				"an AggregateError",
+				"all failed",
+				() => {
+					throw new AggregateError([new Error("a")], "all failed");
+				},
+			],
+			[
+				"an AggregateError without a message",
+				"AggregateError",
+				() => {
+					throw new AggregateError([new Error("a")]);
+				},
+			],
+			[
+				"a DOMException TimeoutError",
+				"aborted due to timeout",
+				() => {
+					throw new DOMException("The operation was aborted due to timeout", "TimeoutError");
+				},
+			],
+		])("%s: its frames, and not its header", (_label, header, fn) => {
+			const stack = stackOf(thrownBy(fn));
+			expect(stack).toMatch(/^ {4}at /);
+			expect(stack).not.toContain(header);
+		});
+
+		it("an fs ENOENT: its frames, and not its header", async () => {
+			const { readFileSync } = await import("node:fs");
+			const stack = stackOf(thrownBy(() => readFileSync("/nonexistent/loggable-error-vector")));
+			expect(stack).toMatch(/^ {4}at /);
+			expect(stack).not.toContain("ENOENT");
+			expect(stack).not.toContain("loggable-error-vector");
+		});
+
+		it("an empty message: the frames after a header of the name alone", () => {
 			const stack = stackOf(
 				thrownBy(() => {
 					throw new Error("");
