@@ -206,6 +206,51 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 		}
 	});
 
+	// SimpleWebAuthn compares each entry with the browser's clientDataJSON
+	// origin by exact string, and a browser sends the serialized origin. An
+	// entry that is not one — a trailing slash, a path, an uppercase host, an
+	// explicit default port — parses, and then matches no ceremony. Both lists
+	// hold web entries to core's serialized-origin rule (`checkSerializedOrigin`),
+	// the one `cors.allowedOrigins` is held to, with the loopback carve-out
+	// core's vocabulary names.
+	describe("web entries are bare serialized origins, in both lists", () => {
+		const { origin: _origin, ...okBase } = VALID;
+		const notSerialized = [
+			"https://example.com/",
+			"https://example.com/app",
+			"https://EXAMPLE.com",
+			"https://example.com:443",
+			"https://example.com?x=1",
+			"https://example.com#f",
+		];
+		for (const entry of notSerialized) {
+			it(`refuses ${entry}`, () => {
+				expect(webauthnConfigSchema.safeParse({ ...okBase, origin: [entry] }).success).toBe(false);
+				expect(webauthnConfigSchema.safeParse({ ...VALID, topOrigin: [entry] }).success).toBe(
+					false,
+				);
+			});
+		}
+
+		it("names the index and says what the entry should have been", () => {
+			const result = webauthnConfigSchema.safeParse({
+				...okBase,
+				origin: ["https://example.com", "https://app.example.com/"],
+			});
+			expect(result.error?.issues[0]?.path).toEqual(["origin", 1]);
+			expect(result.error?.issues[0]?.message).toContain('"https://app.example.com"');
+		});
+
+		it("accepts http for the whole 127.0.0.0/8 loopback block, as core's vocabulary names it", () => {
+			expect(
+				webauthnConfigSchema.safeParse({ ...okBase, origin: ["http://127.0.0.53:3000"] }).success,
+			).toBe(true);
+			expect(
+				webauthnConfigSchema.safeParse({ ...VALID, topOrigin: ["http://127.0.0.53:3000"] }).success,
+			).toBe(true);
+		});
+	});
+
 	// #497: Android Credential Manager presents `android:apk-key-hash:<base64url>`
 	// as the ceremony origin, and SimpleWebAuthn — which this package delegates
 	// verification to — matches it by exact string like any other origin. The
