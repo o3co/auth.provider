@@ -67,8 +67,8 @@ const OAUTH_ERROR_TEXT = /^[\x20\x21\x23-\x5B\x5D-\x7E]+$/;
  */
 const REDIS_ECHOED_ARGS = /, with args beginning with:[\s\S]*$/;
 
-/** A SyntaxError's offset, and nothing else of its message. */
-const SYNTAX_POSITION = / at position (\d{1,10})/;
+/** A SyntaxError's offset, and nothing else of its message; a longer number is no offset. */
+const SYNTAX_POSITION = / at position (\d{1,10})(?!\d)/;
 
 const capped = (value: string): string => value.slice(0, MAX_STRING);
 
