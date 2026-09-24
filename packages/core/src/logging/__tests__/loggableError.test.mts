@@ -141,22 +141,44 @@ describe("loggableError — what a log line may carry of an error", () => {
 		);
 	});
 
-	it("drops an error_description that carries a run of twenty token characters — an echoed credential", () => {
-		// Legacy Spring Security echoes what it refused: "Invalid refresh
-		// token: <the token>". A description is the rule's one peer-written
-		// string, so one that looks like it carries a credential is not kept.
+	it("cuts an error_description at its first run of twenty token characters — an echoed credential or identifier", () => {
+		// Legacy Spring Security echoes what it refused ("Invalid refresh
+		// token: <the token>"); Azure AD names the client or redirect it
+		// refused. A description is the rule's one peer-written string: the
+		// text before the run is what says what went wrong, and is kept.
 		const described = (error_description: string) =>
 			loggableError(
 				Object.assign(new Error("refused"), { error: "invalid_grant", error_description }),
 			).error_description;
-		expect(described("Invalid refresh token: 3f2a9c1e7b4d4c0a9e8f7a6b5c4d3e2f")).toBeUndefined();
-		expect(described("Invalid access token: eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0")).toBeUndefined();
-		expect(described("Bad credentials for client a1b2c3d4e5f6g7h8i9j0k")).toBeUndefined();
-		// Nineteen is not a run of twenty; words and punctuation are not either.
-		expect(described("code abcdefghijklmnopqrs expired")).toBe("code abcdefghijklmnopqrs expired");
+		expect(
+			described(
+				"AADSTS700016: Application with identifier 'f1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d' was not found in the directory 'Contoso'.",
+			),
+		).toBe("AADSTS700016: Application with identifier '");
+		expect(
+			described(
+				"AADSTS7000215: Invalid client secret provided. Ensure the secret being sent in the request is the client secret value, not the client secret ID, for a secret added to app 'f1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d'.",
+			),
+		).toBe(
+			"AADSTS7000215: Invalid client secret provided. Ensure the secret being sent in the request is the client secret value, not the client secret ID, for a secret added to app '",
+		);
+		expect(described("Invalid refresh token: 3f2a9c1e-7b4d-4c0a-9e8f-7a6b5c4d3e2f")).toBe(
+			"Invalid refresh token:",
+		);
+		expect(described("Invalid access token: eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0")).toBe(
+			"Invalid access token:",
+		);
+		// A description that is nothing but a token is omitted.
+		expect(described("eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0")).toBeUndefined();
+		expect(described("  3f2a9c1e7b4d4c0a9e8f7a6b5c4d3e2f")).toBeUndefined();
+		// Google's and Okta's plain descriptions, and a run of nineteen, are kept whole.
 		expect(described("Token has been expired or revoked.")).toBe(
 			"Token has been expired or revoked.",
 		);
+		expect(described("The client specified not to prompt, but the user is not logged in.")).toBe(
+			"The client specified not to prompt, but the user is not logged in.",
+		);
+		expect(described("code abcdefghijklmnopqrs expired")).toBe("code abcdefghijklmnopqrs expired");
 	});
 
 	it("drops a field of the wrong shape rather than coercing it", () => {
