@@ -122,7 +122,7 @@ export const dpopConfigSchema = z.object({
 				"iat-window-seconds": z.number().int().positive().default(60),
 				/** JOSE algorithm allowlist. Default: ES256, ES384, EdDSA, RS256. */
 				"alg-whitelist": z.array(z.string()).default(["ES256", "ES384", "EdDSA", "RS256"]),
-				/** Replay store backend selector. "memory" is dev/test only. */
+				/** Replay store backend selector. "memory" is per-process: one replica only. */
 				"replay-store": z.enum(["memory", "redis"]).default("memory"),
 				/** TTL for replay entries in seconds. Default: 300. */
 				"replay-store-ttl-seconds": z.number().int().positive().default(300),
@@ -295,16 +295,26 @@ export const dpopModule = defineModule<"config", "logger" | "dpopReplayStore">({
 					// read (#474): "multi" refuses, "single" is silent, unset warns.
 					// Thrown from a contribution factory, the planner wraps this as
 					// `contribute-factory-failed` with this error as its `cause`.
+					//
+					// The check is whether the slot is empty, nothing more: a
+					// per-process store handed into the slot (the exported
+					// `createMemoryDPoPReplayStore`) counts as wired, because the
+					// wired slot wins and this factory cannot tell what backs it.
 					const iatWindowSeconds: unknown = typedConfig.oauth.dpop["iat-window-seconds"];
-					// A hand-built config can omit the window (the verifier then
-					// defaults it); the message must not read "undefineds".
-					const window = typeof iatWindowSeconds === "number" ? `${iatWindowSeconds}s ` : "";
+					// The verifier accepts a proof while |floor(now) - iat| <= W,
+					// i.e. from iat - W until iat + W + 1: up to 2W + 1 seconds. A
+					// hand-built config can omit W (the verifier then defaults it);
+					// the message then names the key instead of a number.
+					const replaySpan =
+						typeof iatWindowSeconds === "number"
+							? `within ±${iatWindowSeconds}s of that replica's clock (up to ${2 * iatWindowSeconds + 1}s)`
+							: "within ±oauth.dpop.iat-window-seconds of that replica's clock";
 					const deploymentMode = deps.config.deployment?.mode;
 					if (deploymentMode === "multi") {
 						throw new BootError({
 							stage: "applyContributions",
 							reason: "replica-unsafe-adapter",
-							message: `deployment.mode is "multi" but DPoP is enabled with no shared dpopReplayStore wired: proofs would be checked against a per-process replay store, so a DPoP proof captured once can be replayed once against each replica for as long as its iat stays inside the ${window}acceptance window. Wire a shared dpopReplayStore (createRedisDPoPReplayStore from @o3co/auth-provider-redis/dpop) and set oauth.dpop.replay-store = "redis", or set deployment.mode = "single".`,
+							message: `deployment.mode is "multi" but DPoP is enabled with no dpopReplayStore wired: proofs would be checked against a per-process replay store, so a DPoP proof captured once can be replayed once against each replica while its iat is ${replaySpan}. Wire a shared dpopReplayStore (createRedisDPoPReplayStore from @o3co/auth-provider-redis/dpop) and set oauth.dpop.replay-store = "redis", or set deployment.mode = "single".`,
 							details: { reason: "replica-unsafe-adapter", modules: [MODULE_NAME] },
 						});
 					}
