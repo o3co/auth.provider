@@ -129,11 +129,11 @@ export interface FakeIdp {
 	/**
 	 * Play the user agent and the user at the authorization endpoint: accept
 	 * the authorization request `url` names (its client, redirect URI, PKCE
-	 * challenge and nonce are recorded, and the next id_token echoes the
+	 * challenge and nonce are recorded, and that code's id_token echoes that
 	 * nonce), approve it, and answer what the IdP redirects back with. The
 	 * token endpoint then holds the exchange of that code to the recorded
 	 * request: the same redirect URI, a verifier that matches the challenge,
-	 * one use.
+	 * one use — a second exchange is `invalid_grant`.
 	 */
 	authorize(url: URL | string): FakeIdpAuthorizationResponse;
 	/** Replace the signing key; the JWKS then holds only the new one. */
@@ -224,6 +224,8 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		string,
 		{ readonly params: URLSearchParams; readonly consentShown: boolean }
 	>();
+	/** Codes `authorize` issued that have been exchanged: a second exchange is refused. */
+	const spentCodes = new Set<string>();
 	let codesIssued = 0;
 	/** Whether this client has been granted consent by this user before. */
 	let consentGranted = false;
@@ -284,7 +286,6 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 			codesIssued += 1;
 			const code = `authorized-code-${codesIssued}`;
 			authorizations.set(code, { params: new URLSearchParams(params), consentShown });
-			idp.nonce = params.get("nonce") ?? undefined;
 			return { code, state: params.get("state"), iss: issuer };
 		},
 		fetch: undefined as unknown as typeof fetch,
@@ -296,11 +297,18 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 
 	/**
 	 * A refresh's id_token carries no nonce: there is no authorization request
-	 * for it to echo. `at_hash` binds the code exchange's access token.
+	 * for it to echo. A code's carries the nonce of the authorization it came
+	 * from, or — for a code `authorize` did not issue — `idp.nonce`. `at_hash`
+	 * binds the code exchange's access token.
 	 */
 	const mintIdToken = async (
-		opts: { readonly nonce: boolean; readonly accessToken?: string } = { nonce: true },
+		opts: {
+			readonly nonce: boolean;
+			readonly authorizedNonce?: string | null;
+			readonly accessToken?: string;
+		} = { nonce: true },
 	): Promise<string> => {
+		const nonce = opts.authorizedNonce !== undefined ? opts.authorizedNonce : idp.nonce;
 		const now = Math.floor(Date.now() / 1000);
 		const claims: Record<string, unknown> = {
 			iss: issuer,
@@ -311,7 +319,7 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 			email: "alice@example.test",
 			email_verified: true,
 			name: "Alice Example",
-			...(opts.nonce && idp.nonce !== undefined ? { nonce: idp.nonce } : {}),
+			...(opts.nonce && nonce !== undefined && nonce !== null ? { nonce } : {}),
 			...(opts.accessToken === undefined || idp.atHash === "none"
 				? {}
 				: {
@@ -378,12 +386,14 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 				);
 			}
 			const code = body?.get("code") ?? "";
+			if (spentCodes.has(code)) return json({ error: "invalid_grant" }, 400);
 			const authorization = authorizations.get(code);
 			let issueRefreshToken = true;
 			if (authorization !== undefined) {
 				// One use, the same redirect URI, and a verifier that matches the
 				// challenge (RFC 6749 §4.1.3, RFC 7636 §4.6).
 				authorizations.delete(code);
+				spentCodes.add(code);
 				const challenge = createHash("sha256")
 					.update(body?.get("code_verifier") ?? "")
 					.digest("base64url");
@@ -407,7 +417,15 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 						...(issueRefreshToken ? { refresh_token: "rt-1" } : {}),
 						...(idp.omitIdToken
 							? {}
-							: { id_token: await mintIdToken({ nonce: true, accessToken: idp.accessToken }) }),
+							: {
+									id_token: await mintIdToken({
+										nonce: true,
+										...(authorization !== undefined
+											? { authorizedNonce: authorization.params.get("nonce") }
+											: {}),
+										accessToken: idp.accessToken,
+									}),
+								}),
 					},
 					idp.codeAnswer,
 				),

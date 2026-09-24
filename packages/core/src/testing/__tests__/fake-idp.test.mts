@@ -144,11 +144,12 @@ describe("createFakeIdp", () => {
 				}),
 			);
 
-		it("answers a code, the state and its issuer, and binds the next id_token to the nonce", async () => {
+		it("answers a code, the state and its issuer, and binds that code's id_token to the nonce", async () => {
 			const idp = await createFakeIdp(ENDPOINTS);
 			const answer = idp.authorize(request());
 			expect(answer).toEqual({ code: "authorized-code-1", state: "s-1", iss: ENDPOINTS.issuer });
-			expect(idp.nonce).toBe("n-1");
+			// The nonce is the authorization's, not a global another one overwrites.
+			expect(idp.nonce).toBeUndefined();
 			const token = await (await redeem(idp, answer.code)).json();
 			const { payload } = await jwtVerify(token.id_token, await jwks(idp));
 			expect(payload.nonce).toBe("n-1");
