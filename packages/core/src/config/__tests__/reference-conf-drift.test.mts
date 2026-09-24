@@ -277,6 +277,32 @@ describe("core's reference.conf declares the operator keys a composition layerin
 		expect(parsed.repositories?.user?.http?.federatedIdentityLookupCoverage).toEqual([]);
 	});
 
+	it("substitutes CLIENT_USER_BEARER_TOKEN and keeps it through AppConfigSchema", () => {
+		// The credential the http user adapter presents to the Store. Declared
+		// here for the reason the link URL is: a composition layering on this
+		// file alone would otherwise export the variable and send nothing.
+		const token = "0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a";
+		const parsed = validate(
+			parseFile(REFERENCE_CONF_PATH, { env: { ...REQUIRED_ENV, CLIENT_USER_BEARER_TOKEN: token } }),
+			AppConfigSchema,
+		) as {
+			repositories?: { user?: { http?: { bearerToken?: unknown } } };
+		};
+		expect(parsed.repositories?.user?.http?.bearerToken).toBe(token);
+	});
+
+	it("leaves the Store credential absent when the variable is unset, so no Authorization is sent", () => {
+		// Absent, not blank: a blank token is refused by the adapter, so an
+		// unset variable must not reach it as "".
+		const parsed = validate(
+			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),
+			AppConfigSchema,
+		) as {
+			repositories?: { user?: { http?: Record<string, unknown> } };
+		};
+		expect(parsed.repositories?.user?.http).not.toHaveProperty("bearerToken");
+	});
+
 	it("declares oauth.authorize.acrValues, empty, so an unset table resolves to no acr values", () => {
 		const parsed = validate(
 			parseFile(REFERENCE_CONF_PATH, { env: REQUIRED_ENV }),
