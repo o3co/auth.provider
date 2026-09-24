@@ -96,6 +96,7 @@ import type { FederationGrantBackground } from "./background.mjs";
 import { federationGrantConnectUri } from "./lodgeRoute.mjs";
 import { createSanitizedReporter } from "./report.mjs";
 import { createRequestIdMiddleware, requestIdOf } from "./requestId.mjs";
+import { parserRefusal } from "./routes.mjs";
 
 /** Where this router is mounted. */
 export const FEDERATION_GRANTS_BROWSER_MOUNT_PATH = "/session/federation-grants";
@@ -1265,11 +1266,9 @@ export function createFederationGrantBrowserRouter(
 	router.use((_req, res) => plain(res, 404, "Not found."));
 	const parserErrors: ErrorRequestHandler = (error, _req, res, next) => {
 		if (res.headersSent) return next(error);
-		const type = (error as { type?: unknown }).type;
-		if (type === "entity.too.large")
-			return jsonError(res, 413, "invalid_request", "body_too_large");
-		if (type === "entity.parse.failed" || type === "encoding.unsupported") {
-			return jsonError(res, 400, "invalid_request", "malformed_body");
+		const refusal = parserRefusal(error);
+		if (refusal !== null) {
+			return jsonError(res, refusal.status, "invalid_request", refusal.description);
 		}
 		jsonError(res, 500, "server_error", "unexpected_error");
 	};

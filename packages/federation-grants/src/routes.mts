@@ -158,21 +158,46 @@ const supportedContentType: RequestHandler = (req, res, next) => {
 };
 
 /**
+ * A body-parser refusal that is the caller's mistake, as the answer it gets.
+ *
+ * body-parser raises `http-errors`: `expose: true` with a 4xx `status` for
+ * everything the request got wrong — a body over the limit or with more
+ * parameters than it takes (`413 body_too_large`), a charset or
+ * `Content-Encoding` it cannot decode (`415 unsupported_encoding`), JSON it
+ * cannot read or a compressed body that does not decompress (`400
+ * malformed_body`). Answered as a 500 instead, any caller could produce
+ * server errors at will. `null` for anything else. Shared by both routers.
+ */
+export const parserRefusal = (
+	error: unknown,
+): { readonly status: 400 | 413 | 415; readonly description: string } | null => {
+	if (error === null || typeof error !== "object") return null;
+	const { expose, status, type } = error as { expose?: unknown; status?: unknown; type?: unknown };
+	if (expose !== true || typeof status !== "number" || status < 400 || status >= 500) return null;
+	if (type === "entity.too.large" || type === "parameters.too.many") {
+		return { status: 413, description: "body_too_large" };
+	}
+	if (type === "charset.unsupported" || type === "encoding.unsupported") {
+		return { status: 415, description: "unsupported_encoding" };
+	}
+	return { status: 400, description: "malformed_body" };
+};
+
+/**
  * What the body parsers reject, in this package's own vocabulary.
  *
  * Nothing of the parser's error reaches the caller: `body-parser` puts the
- * offending input into its message for a JSON syntax error, so the `type` it
- * classifies with is all that is read.
+ * offending input into its message for a JSON syntax error, so only its
+ * `expose`, `status` and `type` are read (`parserRefusal`).
  */
 export const parserErrors: ErrorRequestHandler = (error, _req, res, next) => {
 	if (res.headersSent) return next(error);
-	const type = (error as { type?: unknown }).type;
-	if (type === "entity.too.large") {
-		res.status(413).json({ error: "invalid_request", error_description: "body_too_large" });
-		return;
-	}
-	if (type === "entity.parse.failed" || type === "encoding.unsupported") {
-		res.status(400).json({ error: "invalid_request", error_description: "malformed_body" });
+	const refusal = parserRefusal(error);
+	if (refusal !== null) {
+		res.status(refusal.status).json({
+			error: "invalid_request",
+			error_description: refusal.description,
+		});
 		return;
 	}
 	// A composition or programming fault: a fixed description, because whatever

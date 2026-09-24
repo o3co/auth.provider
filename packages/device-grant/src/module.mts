@@ -301,7 +301,19 @@ const requireVerificationUri = (slice: DeviceAuthorizationConfigSlice): string =
 const BODY_LIMIT = "16kb";
 const BODY_LIMIT_BYTES = 16 * 1024;
 
-/** An RFC 6749 §5.2 error body, with the cache directives every exit of these routes carries. */
+/**
+ * The cache directives every exit of both routes carries — mounted first on
+ * each router, so the answers no handler here writes (the throttle's `429`,
+ * client authentication's `401`, the CSRF guard's `403`) carry them too, as
+ * federation-grants' `transport()` does for its routes. A refusal an
+ * intermediary caches is served to the next caller.
+ */
+const noStore: RequestHandler = (_req, res, next) => {
+	res.set("Cache-Control", "no-store").set("Pragma", "no-cache");
+	next();
+};
+
+/** An RFC 6749 §5.2 error body, with the same cache directives `noStore` sets. */
 const answerError = (res: Response, status: number, error: string, description: string): void => {
 	res
 		.status(status)
@@ -336,19 +348,65 @@ const withinBodyLimit: RequestHandler = (req, res, next) => {
 };
 
 /**
+ * A body-parser refusal that is the caller's mistake, as the answer it gets.
+ *
+ * body-parser raises `http-errors`: `expose: true` with a 4xx `status` for
+ * everything the request got wrong — a body over the limit or with more
+ * parameters than it takes, a charset or `Content-Encoding` it cannot
+ * decode, JSON it cannot read, a compressed body that does not decompress.
+ * Those are answered as 4xx, with no error-level log: on the verification
+ * route the parser runs ahead of the CSRF guard and of any throttle, so a
+ * 500 and an error line for them would let anyone fill the error log at
+ * will. `null` for anything else.
+ */
+const callerMistake = (
+	error: unknown,
+): { readonly status: 400 | 413 | 415; readonly description: string } | null => {
+	if (error === null || typeof error !== "object") return null;
+	const { expose, status, type } = error as { expose?: unknown; status?: unknown; type?: unknown };
+	if (expose !== true || typeof status !== "number" || status < 400 || status >= 500) return null;
+	if (type === "entity.too.large" || type === "parameters.too.many") {
+		return { status: 413, description: "body_too_large" };
+	}
+	if (type === "charset.unsupported" || type === "encoding.unsupported") {
+		return { status: 415, description: "unsupported_encoding" };
+	}
+	return { status: 400, description: "malformed_body" };
+};
+
+/**
+ * What of an unexpected error may be logged: its `name`, `message`, `type`,
+ * `code` and `status`, when they are strings or numbers — never the error
+ * itself. A body-parser error carries the request body (`body`); an ioredis
+ * reply error carries the command's arguments (a user code, the approving
+ * subject); a `cause` can carry either. Express's own handler logged only
+ * the stack, and this must not log more.
+ */
+const loggableError = (error: unknown): Record<string, string | number> => {
+	if (error === null || typeof error !== "object") return { thrown: typeof error };
+	const fields = error as Record<string, unknown>;
+	const out: Record<string, string | number> = {};
+	for (const key of ["name", "message", "type", "code", "status"] as const) {
+		const value = fields[key];
+		if (typeof value === "string" || typeof value === "number") out[key] = value;
+	}
+	return out;
+};
+
+/**
  * What either route answers for an error its middleware or handler passed
  * on — federation-grants' `parserErrors`, with its codes. RFC 8628 §3.2
  * gives `/oauth/device_authorization` RFC 6749 §5.2's JSON error response,
- * and the verification API answers in JSON throughout, so none of these
- * may fall through to the host app's error page:
+ * and the verification API answers in JSON throughout, so none of these may
+ * fall through to the host app's error page:
  *
- *   - a chunked body the parsers found over the bound is the `413` a
- *     declared one gets from `withinBodyLimit`;
- *   - a body the parser could not read is `400 invalid_request`
- *     (`malformed_body`), quoting none of it — `body-parser` puts the
- *     offending input into its message;
- *   - anything else is `500 server_error` (`unexpected_error`), with the
- *     error itself written to the log rather than the response.
+ *   - the caller's mistake (`callerMistake`): `413 body_too_large` — a
+ *     chunked body the parsers found over the bound gets the answer a
+ *     declared one gets from `withinBodyLimit` — `415 unsupported_encoding`
+ *     or `400 malformed_body`, quoting none of the body and logging nothing
+ *     at error level;
+ *   - anything else is `500 server_error` (`unexpected_error`), with
+ *     `loggableError`'s projection of it in the log.
  */
 const routeErrors =
 	(logger: DeviceGrantModuleDeps["logger"]): ErrorRequestHandler =>
@@ -357,16 +415,12 @@ const routeErrors =
 			next(error);
 			return;
 		}
-		const type = (error as { type?: unknown } | null)?.type;
-		if (type === "entity.too.large") {
-			refuseTooLarge(res);
+		const mistake = callerMistake(error);
+		if (mistake !== null) {
+			answerError(res, mistake.status, "invalid_request", mistake.description);
 			return;
 		}
-		if (type === "entity.parse.failed" || type === "encoding.unsupported") {
-			answerError(res, 400, "invalid_request", "malformed_body");
-			return;
-		}
-		(logger ?? consoleLogger).error({ err: error }, "device_route_unexpected_error");
+		(logger ?? consoleLogger).error({ err: loggableError(error) }, "device_route_unexpected_error");
 		answerError(res, 500, "server_error", "unexpected_error");
 	};
 
@@ -584,6 +638,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 						return disabledRoute("device-authorization", "/oauth/device_authorization");
 					}
 					const router = express.Router();
+					router.use(noStore);
 					// Throttled like every other public entry point (#325), and
 					// AHEAD of client authentication — the token endpoint's D-6
 					// ordering — so repeated unauthenticated hits are bounded before
@@ -655,6 +710,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 						return disabledRoute("device-verification", "/oauth/device/verification");
 					}
 					const router = express.Router();
+					router.use(noStore);
 					// JSON only, deliberately — see the file header. A form body is
 					// a "simple" request a browser sends cross-site with the
 					// victim's cookie and no preflight; JSON is not. No form parser
