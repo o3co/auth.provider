@@ -1324,7 +1324,12 @@ const resolveAudienceForPersist = (
 	return { audienceForPersist };
 };
 
-/** RFC 6749 §4.1.2 code issuance, or `null` after a `server_error` redirect. */
+/**
+ * RFC 6749 §4.1.2 code issuance, or `null` after a `temporarily_unavailable`
+ * redirect: a code store that cannot answer is the condition §4.1.2.1 names
+ * `temporarily_unavailable` for, not `server_error`. Logged once at error
+ * level as `authorize_store_unavailable`.
+ */
 const mintCode = async (
 	ctx: AuthorizeContext,
 	params: {
@@ -1350,8 +1355,17 @@ const mintCode = async (
 			sid: typeof ctx.req.session?.sid === "string" ? ctx.req.session.sid : undefined,
 			acr: params.acr,
 		});
-	} catch {
-		redirectError(ctx, "server_error", "Failed to create authorization code");
+	} catch (err) {
+		ctx.opts.logger.error(
+			{
+				store: "authorization_code",
+				step: "create",
+				clientId: ctx.clientId,
+				err: loggableError(err),
+			},
+			"authorize_store_unavailable",
+		);
+		redirectError(ctx, "temporarily_unavailable", "authorization code store unavailable");
 		return null;
 	}
 	return { code: issue.code };

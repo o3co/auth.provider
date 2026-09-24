@@ -749,13 +749,29 @@ describe("/authorize — resource indicator without allowedAudiences (RFC 8707)"
 });
 
 describe("/authorize — code issuance failure", () => {
-	it("redirects server_error when the code repository is down", async () => {
-		const { app } = await makeApp({ createCodeThrows: true });
+	it("redirects temporarily_unavailable when the code repository is down, and logs it once at error level", async () => {
+		// RFC 6749 §4.1.2.1 defines `temporarily_unavailable` for exactly this:
+		// the authorization server cannot handle the request because of a
+		// temporary condition. `server_error` says the server is broken.
+		const logger = createMockLogger();
+		const { app } = await makeApp({ createCodeThrows: true, logger });
 		const res = await authorize(app, baseQuery);
 		const params = redirectParams(res);
-		expect(params.get("error")).toBe("server_error");
-		expect(params.get("error_description")).toBe("Failed to create authorization code");
+		expect(params.get("error")).toBe("temporarily_unavailable");
+		expect(params.get("error_description")).toBe("authorization code store unavailable");
 		expect(params.get("code")).toBeNull();
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				store: "authorization_code",
+				step: "create",
+				clientId: CLIENT_ID,
+				err: expect.objectContaining({ name: "Error" }),
+			},
+			"authorize_store_unavailable",
+		);
+		expect(logger.error.mock.calls[0]?.[0].err).not.toBeInstanceOf(Error);
 	});
 });
 
