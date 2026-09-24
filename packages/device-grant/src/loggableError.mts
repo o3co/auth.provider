@@ -40,18 +40,27 @@
  *     quotes the command's first arguments — so the cut is keyed on the
  *     phrase, not on a client library's class: ioredis's `ReplyError` names
  *     itself, node-redis's `ErrorReply` does not;
- *   - `stack` keeps the frames and nothing of the header before them — the
+ *   - `stack` keeps the frames and nothing of the header before them. The
  *     header is `name: message`, and the message is the untrusted part, so
- *     it is cut by the message's own text: a line of the message shaped
- *     like a frame is cut with it. At most {@link LOGGED_STACK_MAX_FRAMES}
- *     frames and {@link LOGGED_STACK_MAX_LENGTH} characters, whichever
- *     comes first. No `stack` when it has no frames, or when its header no
- *     longer carries the message (rewritten after V8 formatted the stack,
- *     which it does on the first read of `stack`): there is then no telling
- *     the header's lines from the frames;
+ *     the header is cut by the message's own text — everything up to the end
+ *     of its first occurrence — and a line of the message shaped like a
+ *     frame goes with it; an empty or absent message leaves a one-line
+ *     header, and the first line is dropped. Of what remains, only lines
+ *     that are frames (`    at …`) are kept, the first
+ *     {@link LOGGED_STACK_MAX_FRAMES} of them, joined and cut at
+ *     {@link LOGGED_STACK_MAX_LENGTH} characters. No `stack` when its read
+ *     throws or it is not a string, when there are no frames, or when the
+ *     stack does not carry the message (rewritten after V8 formatted the
+ *     stack, which it does on the first read of `stack`): there is then no
+ *     telling the header's lines from the frames;
  *   - every other string kept is capped at {@link LOGGED_STRING_MAX_LENGTH};
  *   - a field whose read throws (a getter) is left out, so the projection
- *     itself never throws.
+ *     itself never throws;
+ *   - every projection has an own, non-enumerable `constructor: undefined`.
+ *     pino's error serializer types an error by its constructor's name when
+ *     it has one; without this it would log every projection as
+ *     `"type": "Object"`, and with it logs the `name` (`"TypeError"`).
+ *     Non-enumerable, so nothing that copies or prints the fields sees it.
  *
  * The frames are what locates a failure in this package's own code — a
  * `TypeError` on data it did not expect — which name and message alone do
@@ -82,8 +91,8 @@ export const LOGGED_STACK_MAX_FRAMES = 10;
 /** The longest `stack` the projection keeps, frames joined; the cut may fall mid-frame. */
 export const LOGGED_STACK_MAX_LENGTH = 2048;
 
-/** A V8 stack frame's line, as it starts. */
-const FRAME_PREFIX = "    at ";
+/** A V8 stack frame's line. */
+const FRAME = /^ {4}at /;
 
 /**
  * `target[key]`, read so that the read cannot throw: `{ value }`, or `null`
@@ -100,32 +109,39 @@ export const guardedRead = (target: object, key: string): { readonly value: unkn
 };
 
 /**
- * The frames of `stack`, without the header ahead of them. The header is cut
- * by `message`'s own text, not at the first line shaped like a frame, which
- * the message itself may contain. `undefined` when there are no frames, or
- * when the header no longer carries `message`. What the text cannot show is
- * a message rewritten, after the stack was formatted, to a leading part of
- * the one the header carries: the rest of the old message then reads as
- * the start of the frames.
+ * The frames of `stack`, without the header ahead of them; `undefined` for
+ * none. The header is cut by `message`'s own text — the message as it is
+ * now — not at the first line shaped like a frame, which the message itself
+ * may contain. What the text cannot show is a message rewritten, after the
+ * stack was formatted, to a leading part of the one the header carries: the
+ * rest of the old message then reads as the start of the frames, and only
+ * its lines shaped like a frame survive the filter.
  */
 const framesOf = (stack: unknown, message: unknown): string | undefined => {
 	if (typeof stack !== "string") return undefined;
-	let rest = stack;
+	let rest: string;
 	if (typeof message === "string" && message !== "") {
 		const at = stack.indexOf(message);
 		if (at < 0) return undefined;
 		rest = stack.slice(at + message.length);
+	} else {
+		const newline = stack.indexOf("\n");
+		rest = newline < 0 ? "" : stack.slice(newline + 1);
 	}
-	const lines = rest.split("\n");
-	const first = lines.findIndex((line, index) => index > 0 && line.startsWith(FRAME_PREFIX));
-	if (first < 0) return undefined;
-	const frames: string[] = [];
-	for (const line of lines.slice(first, first + LOGGED_STACK_MAX_FRAMES)) {
-		if (!line.startsWith(FRAME_PREFIX)) break;
-		frames.push(line);
-	}
+	const frames = rest
+		.split("\n")
+		.filter((line) => FRAME.test(line))
+		.slice(0, LOGGED_STACK_MAX_FRAMES);
+	if (frames.length === 0) return undefined;
 	return frames.join("\n").slice(0, LOGGED_STACK_MAX_LENGTH);
 };
+
+/**
+ * `fields`, with the own non-enumerable `constructor: undefined` that makes
+ * pino's error serializer type it by `name` rather than as `Object`.
+ */
+const projection = (fields: Record<string, string | number>): Record<string, string | number> =>
+	Object.defineProperty(fields, "constructor", { value: undefined, enumerable: false });
 
 export const loggableError = (error: unknown): Record<string, string | number> => {
 	let isError: boolean;
@@ -136,7 +152,7 @@ export const loggableError = (error: unknown): Record<string, string | number> =
 	} catch {
 		isError = false;
 	}
-	if (!isError) return { thrown: typeof error };
+	if (!isError) return projection({ thrown: typeof error });
 	const read = (key: string): unknown => guardedRead(error as object, key)?.value;
 	const cap = (value: string): string =>
 		value.length > LOGGED_STRING_MAX_LENGTH
@@ -164,5 +180,5 @@ export const loggableError = (error: unknown): Record<string, string | number> =
 	}
 	const stack = framesOf(read("stack"), message);
 	if (stack !== undefined) out.stack = stack;
-	return out;
+	return projection(out);
 };
