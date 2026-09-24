@@ -397,6 +397,14 @@ describe("a caught error reaches a logger only through loggableError", () => {
 				`function onError(error, req, res, next) { log.error({ error }, "unhandled"); }`,
 			],
 			[
+				"an Express error handler whose request type has generic arguments",
+				`const handler = (logger) => { return (failure: unknown, req: Request<P, B>, res: Response, next: NextFunction) => { logger.error({ err: failure }, "unhandled"); }; };`,
+			],
+			[
+				"an Express error handler whose parameter types hold parentheses and nested generics",
+				`app.use((failure: unknown, _req: Request<{ id: string }, unknown>, res: Response<unknown, Record<string, unknown>>, next: (err?: unknown) => void) => { console.error(failure); });`,
+			],
+			[
 				"a projection accepted in another file",
 				`try { x() } catch (err) { log.error(unexpectedErrorFields(err), "unexpected"); }`,
 			],
@@ -449,6 +457,10 @@ describe("a caught error reaches a logger only through loggableError", () => {
 			[
 				"an Express error handler's error, projected",
 				`return (err, req, res, next) => { logger.error({ err: loggableError(err), endpoint: req.path }, "unhandled"); };`,
+			],
+			[
+				"an Express error handler with generic parameter types, projected",
+				`app.use((err: unknown, req: Request<P, B>, res: Response, next: NextFunction) => { logger.error({ err: loggableError(err) }, "unhandled"); });`,
 			],
 			[
 				"a middleware's request, which is not an error",
