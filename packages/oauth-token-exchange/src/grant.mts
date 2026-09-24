@@ -639,6 +639,13 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			let grantedScope: readonly string[] | undefined =
 				requestedScope ?? subjectScope.filter((s) => clientScopeSet.has(s));
 			let grantedAudience: readonly string[] | undefined = requestedAudience ?? undefined;
+			// The audience ceiling: what the subject token carries (its own
+			// clientId when it names none). Both the request's audience and a
+			// policy's are held to it, and who named the audience decides the
+			// answer — see the policy check below and the request check after it.
+			const subjectAudienceSet = new Set(
+				subjectAudienceBoundary(subjectValidated.aud, client.clientId),
+			);
 			if (deps.grantPolicy) {
 				const policyRequest: GrantPolicyRequest = {
 					grantType: GRANT_TYPE,
@@ -693,6 +700,30 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					if (!Array.isArray(decision.grantedAudience)) {
 						return { result: policyOutOfBounds("policy returned a non-array grantedAudience") };
 					}
+					// Checked before it replaces the request's audience, so a
+					// widening found here is the policy's own: the deployment's
+					// policy exceeding its ceiling, which every other grant answers
+					// through core's `boundPolicyAudience` with `policyOutOfBounds`
+					// (`500 server_error`). The ceiling is the subject token's
+					// audience rather than `allowedAudiences` (README notes 3 and 5).
+					const policyWidenedAudiences = decision.grantedAudience.filter(
+						(audience) => !subjectAudienceSet.has(audience),
+					);
+					if (policyWidenedAudiences.length > 0) {
+						deps.logger?.warn(
+							{
+								subject: subjectValidated.sub,
+								clientId: client.clientId,
+								widenedAudiences: policyWidenedAudiences,
+							},
+							"token_exchange_audience_widening_rejected",
+						);
+						return {
+							result: policyOutOfBounds(
+								`policy returned audiences outside the subject_token audience: ${policyWidenedAudiences.join(" ")}`,
+							),
+						};
+					}
 					grantedAudience = decision.grantedAudience;
 				}
 			}
@@ -733,9 +764,14 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				};
 			}
 
-			const subjectAudienceSet = new Set(
-				subjectAudienceBoundary(subjectValidated.aud, client.clientId),
-			);
+			// The request's own audience past the subject token's: the client's
+			// allowlist names an audience the subject token does not carry. A
+			// policy audience cannot reach this — it was held to the same
+			// ceiling above — so this is the caller's request, and RFC 8693
+			// §2.2.2 answers it: "If the authorization server is unwilling or
+			// unable to issue a token for any target service indicated by the
+			// resource or audience parameters, the invalid_target error code
+			// SHOULD be used".
 			const widenedAudiences =
 				grantedAudience?.filter((audience) => !subjectAudienceSet.has(audience)) ?? [];
 			if (widenedAudiences.length > 0) {
@@ -759,8 +795,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// Audience derivation (spec §8.1 rule 2):
 			//   explicit narrowed audience  → use grantedAudience (first element).
 			//     Note: grantedAudience reflects either the allowlist-validated request
-			//     parameter OR a policy hook override; policy overrides are always
-			//     re-checked against the validated subject token boundary above.
+			//     parameter OR a policy hook override; both have been held to the
+			//     subject token's audience above.
 			//   omitted + subject single    → inherit subject.aud IFF in allowlist;
 			//                                   else fall back to clientId (prevents
 			//                                   cross-client audience confusion when a
