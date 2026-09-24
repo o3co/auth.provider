@@ -29,6 +29,8 @@
 import http from "node:http";
 import type {
 	AppConfig,
+	AuditEvent,
+	AuditSink,
 	ClientRepository,
 	CodeRepository,
 	DeviceCodeStore,
@@ -130,8 +132,12 @@ const ENABLED = {
 const bootWith = async (
 	config: AppConfig,
 	ordered: readonly Module[],
-	// What a case swaps in: the device-code store, and the logger it reads.
-	swap: { readonly deviceCodeStore?: Module; readonly logger?: Logger } = {},
+	// What a case swaps in: the device-code store, and the logger and audit sink it reads.
+	swap: {
+		readonly deviceCodeStore?: Module;
+		readonly logger?: Logger;
+		readonly auditSink?: AuditSink;
+	} = {},
 ) => {
 	const handle = await createApp({
 		modules: [
@@ -149,6 +155,7 @@ const bootWith = async (
 			config,
 			pathResolver: (s: string) => s,
 			...(swap.logger ? { logger: swap.logger } : {}),
+			...(swap.auditSink ? { auditSink: swap.auditSink } : {}),
 		},
 	});
 	const app = express();
@@ -230,6 +237,9 @@ const postChunked = (
 			req.end(body.slice(half));
 		});
 	});
+
+/** A user code as the store keys it: upper case, separator dropped. */
+const normalised = (userCode: string): string => userCode.replace(/[^A-Za-z]/g, "").toUpperCase();
 
 /** A device starts the flow; returns the code a person would type. */
 const startDevice = async (app: express.Express): Promise<string> => {
@@ -792,17 +802,24 @@ describe("deviceGrantModule beside oauthModule — a device-code store outage is
 	});
 
 	it.each(orders)(
-		"answers the verification page's lookup, approval and denial with 503, and logs each at error (%s)",
+		"answers the verification page's lookup, approval and denial with 503, logs each at error, and audits a decision whose outcome is unknown (%s)",
 		async (_label, ordered) => {
 			const config = makeConfig(ENABLED);
 			const outage = storeWithOutage();
 			const logger = recordingLogger();
+			const events: AuditEvent[] = [];
 			const { handle, app } = await bootWith(
 				config,
 				[sessionStoreModuleFor(config), ...ordered(config)],
 				{
 					deviceCodeStore: outage.module,
 					logger: logger as unknown as Logger,
+					auditSink: {
+						kind: "recording",
+						record: async (event) => {
+							events.push(event);
+						},
+					},
 				},
 			);
 			try {
@@ -833,6 +850,25 @@ describe("deviceGrantModule beside oauthModule — a device-code store outage is
 					expect.anything(),
 					"device_route_unexpected_error",
 				);
+
+				// An approval or a denial whose reply was lost may already be
+				// recorded — the store's script can run before the connection goes
+				// — and the device's poll can then mint tokens that no
+				// `device.approved` accounts for. So each is audited as an outcome
+				// nobody knows, naming the action; a lookup decides nothing and is
+				// not. The subject is left out, and the client cannot be known: the
+				// record could not be read.
+				const unknown = events.filter((event) => event.type === "device.decision_outcome_unknown");
+				expect(unknown.map((event) => event.details)).toEqual([
+					{ action: "approve" },
+					{ action: "deny" },
+				]);
+				for (const event of unknown) {
+					expect(event.subject).toBeUndefined();
+					expect(event.timestamp).toBeInstanceOf(Date);
+					expect(JSON.stringify(event)).not.toContain(normalised(userCode));
+				}
+				expect(events.some((event) => event.type === "device.approved")).toBe(false);
 
 				// Every other answer is what it was: back up, the same code is
 				// still pending, and the approval goes through.
