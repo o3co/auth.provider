@@ -396,11 +396,12 @@ export const storesModule: Module = defineModule({
  * the single connection cleanly.
  *
  * Conditional inclusion: `buildModules` only adds this module to the
- * manifest when at least one Redis-backed adapter is selected
- * (`userSessionStores.adapter = "redis"` OR `rateLimiter.adapter = "redis"`
- * — refresh-token-family is always Redis-backed in production). Adding the
- * module unconditionally would open an ioredis socket for memory-only
- * deployments.
+ * manifest when at least one composed module needs a Redis client
+ * (`usingRedisAnywhere` there): an adapter switch set to `"redis"` — the two
+ * federation-grant store switches only while `federationGrants.enabled` —
+ * and the refresh-token family store, which is Redis-backed unless a test
+ * override replaces it. Adding the module unconditionally would open an
+ * ioredis socket for memory-only compositions.
  */
 export const standaloneRedisClientsModule: Module = defineModule({
 	name: "standalone:redis-clients",

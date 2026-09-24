@@ -46,7 +46,7 @@ Core's own in-memory modules declare it as follows
 | `memorySessionStores` | user sessions, RP registrations, family indexes and the subject-level revocation pair — back-channel logout reaches only the replica that received it; a credential change watermarks only the replica that handled it |
 | `core-rate-limiter-memory` | rate-limit counters — every limit is multiplied by the replica count and resets on each deploy |
 | `core-access-token-denylist-memory` | access-token revocation — a revoked token keeps working on every replica that did not receive the revocation |
-| `core-replay-seen-set-memory` | DPoP proof-replay detection — a captured proof replays once per replica |
+| `core-replay-seen-set-memory` | single-use records — a `private_key_jwt` client assertion, the `jti` of an ID-JAG (jwt-bearer) assertion, or a consumed WebAuthn challenge (the ceremony marks it seen here) captured once can be replayed once against each replica |
 | `core-refresh-token-family-store-memory` | refresh-token families — rotation replay detection and cascade revoke see only this replica's history |
 | `core-challenge-store-memory` | WebAuthn challenges — a ceremony started on one replica cannot finish on another |
 | `core-webauthn-credential-store-memory` | registered passkeys — a passkey registered on one replica does not exist on the others |
@@ -56,6 +56,13 @@ Core's own in-memory modules declare it as follows
 | `core-federation-grant-store-memory` | federation grants — a grant lodged or authorized on one replica is unknown to every other, one revoked there still yields upstream tokens here, and a refresh token rotated on one replica leaves every other presenting the old one, which a reuse-detecting IdP answers by revoking the family |
 | `core-federation-grant-intent-store-memory` | federation grant acquisition — an intent lodged on one replica is unknown to every other, so the consent page and the upstream callback answer as if the flow had expired whenever they land elsewhere, and the bound on live intents is counted per replica instead of per (client, subject). Established grants and revocations are unaffected, so this adapter beside a durable grant store is a single-replica configuration rather than a broken one |
 | `sessionStoreModule` (only with `session.storage.type = "memory"`, `SESSION_STORAGE_TYPE=memory`; #474) | the express-session store — a login served by one replica is unknown to the others, so a browser whose next request lands elsewhere is logged out, and every session is lost on restart |
+
+DPoP is not in this table. It keeps proofs in a replay store of its own
+(`dpopReplayStore`), not in the seen-set above, and `dpopModule` declares no
+`replicaSafety`: its in-process replay store boots under `multi` too, so a
+proof replayed to a replica that did not see it is accepted. Wire a shared
+store and set `oauth.dpop.replay-store = "redis"`
+(`packages/dpop/README.md` "Operator requirements").
 
 Three things the guard cannot do:
 
@@ -71,8 +78,9 @@ Three things the guard cannot do:
   so `multi` refuses them by name; before #455 they booted. Three more joined
   them in #474 and are refused the same way: express-session's own store under
   `SESSION_STORAGE_TYPE=memory`, and the login and WebAuthn-options rate
-  limiters when no shared `rateLimiter` is wired. With the mode **unset** those
-  three warn instead (`login_rate_limiter_not_shared`,
+  limiters when no shared `rateLimiter` is wired. With the mode **unset**
+  express-session's store joins the single `replica_unsafe_adapters` warning,
+  and the two rate limiters warn on their own (`login_rate_limiter_not_shared`,
   `webauthn_authentication_options_rate_limiter_not_shared`, [§4](#4-alerts)).
 - **It does not see state inside a component you build and hand in.** The
   jwt-bearer trust registry is one: `createMemoryAssertionIssuerRegistry` lives
@@ -759,7 +767,7 @@ If you build the socket yourself, attach an `error` listener: an `EventEmitter`
   `redisFederationTokenStore.scanFallback = false` once no session that
   predates the index (v0.10) can still exist — that is, once `ttl` has elapsed
   since the last pre-v0.10 replica stopped writing (`packages/redis/README.md`
-  "Logout keys").
+  "Federation-token keys and logout").
 - Removals during logout use `UNLINK` in batches of 100 keys and paged
   `SSCAN`/`HSCAN`/`ZRANGE` reads, so one heavily-linked session does not block
   the shared connection (`packages/redis/src/federation-tokens.mts`,

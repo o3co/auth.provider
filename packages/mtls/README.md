@@ -1,14 +1,29 @@
 # @o3co/auth-provider-mtls
 
-mTLS ([RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)) sender-constrained access token support for `@o3co/auth-provider`.
+Last updated: 2026-09-24
 
-> **Status:** complete — shipped in v0.8.0 as phase 3 of the token-binding cluster (roadmap Wave 2; see [docs/design-campaign-index.md](../../docs/design-campaign-index.md)). The package ships `createMtlsMechanism` (header / tls-layer sources, envoy + plain-pem dialects), narrow-mode PKI chain validation with explicit cryptographic signature verification at every hop, `mtlsModule` wiring via the core `tokenBindingMechanisms` contribution slot, grant-side `cnf.x5t#S256` emission, and the mTLS rows of the refresh-time token-binding enforcement matrix (the "§9.2 matrix", core `confirmationMatch.mts` — 5 rows + compound-`cnf` pre-matrix reject + mechanism-boundary regression). RT binding for public clients per RFC 8705 §4 is enforced end-to-end.
+mTLS ([RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)) sender-constrained tokens for [`auth.provider`](../../README.md): a token issued to a client that presented a certificate is bound to that certificate, and is refused from anyone presenting another.
 
-## Overview
+## Responsibility
 
-Sender-constrained access tokens per RFC 8705 §3 — Mutual TLS Client Certificate-Bound Access Tokens. The mechanism extracts the client cert presented during the TLS handshake (or forwarded by a reverse proxy), computes the SHA-256 thumbprint of the DER encoding (RFC 8705 §3.1), and emits it as the `cnf["x5t#S256"]` claim on the issued access token (and on refresh tokens for public clients per RFC 8705 §4).
+**Role.** The mTLS mechanism behind core's token-binding slot — the certificate-based sibling of [`@o3co/auth-provider-dpop`](../dpop/README.md). Core defines what a sender-constraint mechanism is — `TokenBindingMechanism`, in [`core/src/middleware/tokenBinding.mts`](../core/src/middleware/tokenBinding.mts) — and the `TokenBinding` it produces ([`core/src/grants/tokenBinding.mts`](../core/src/grants/tokenBinding.mts)); it composes one `tokenBindingMw` at `/oauth/token` and one protected-resource check from every mechanism installed. `mtlsModule` contributes the mTLS mechanism, which emits a `TokenBinding` with `kind: "mtls"`.
 
-This package plugs into the existing `tokenBindingMw` from `@o3co/auth-provider-core` (Phase 1b) and emits a `TokenBinding` with `kind: "mtls"`.
+**Owns:**
+
+- obtaining the client certificate — from the TLS handshake, or from a forwarded-certificate header sent by an allowlisted proxy (`envoy` and `plain-pem` dialects);
+- validating it under the configured `mode`: `self-signed` (the thumbprint is the credential), the narrow `pki` chain check, or `full-pki` RFC 5280 path validation with CRL / OCSP revocation, including the guarded outbound fetch that revocation needs;
+- the SHA-256 thumbprint of the certificate's DER encoding (RFC 8705 §3.1) that becomes the token's `cnf["x5t#S256"]`;
+- the `tls_client_certificate_bound_access_tokens` discovery field.
+
+**Does not own:**
+
+- which mechanism wins when DPoP is installed too — core's dispatch policy (`oauth.tokenBinding.dispatch-policy`);
+- whether a grant stamps the binding on the tokens it mints, and which refresh tokens are bound — the grants, on core's rules. A public client's refresh token is bound (RFC 8705 §4); a confidential client's is not, unless `oauth.tokenBinding.bindConfidentialClientRefreshTokens = true`;
+- matching a presented certificate against a refresh token's stored binding — core's refresh-time matrix, [`core/src/grants/confirmationMatch.mts`](../core/src/grants/confirmationMatch.mts);
+- client authentication by certificate (RFC 8705 §2) — the token endpoint does not accept a certificate as a client credential; see [Discovery metadata](#discovery-metadata);
+- the TLS listener and the proxy: terminating TLS with `requestCert`, and a proxy that strips inbound certificate headers, are the deployment's (see [Trusted-Proxy Security Guidance](#trusted-proxy-security-guidance)).
+
+**Why a separate package.** Sender-constraint mechanisms are plug-ins to one core slot, not part of core: a deployment chooses mTLS by installing it. This one also carries X.509 path validation on `pkijs` / `asn1js` and a component that fetches URLs named inside certificates; a deployment without mTLS installs neither. It is off by default even when installed (`oauth.mtls.enabled = false`).
 
 ## Quick start
 
@@ -154,7 +169,7 @@ location / {
 
 Either way, add the address nginx or Envoy reaches the auth provider from to `oauth.mtls.trusted-proxies` — `"loopback"` when they share a host or pod, the pod / instance address otherwise.
 
-> **Note:** nginx does not emit Envoy-format XFCC. The Phase 3 `cert-header-dialect` enumeration is `"envoy" | "plain-pem"` — `"plain-pem"` is what nginx + similar minimal proxies should use, NOT an nginx-specific XFCC variant (which is out of scope for Stage 1).
+> **Note:** nginx does not emit Envoy-format XFCC. The `cert-header-dialect` enumeration is `"envoy" | "plain-pem"` — `"plain-pem"` is what nginx + similar minimal proxies should use; there is no nginx-specific XFCC dialect.
 >
 > To strip any inbound header before nginx injects its own, add `proxy_set_header X-Forwarded-Client-Cert "";` to a higher-priority location, or use a sanitization filter on the upstream.
 
@@ -162,8 +177,8 @@ Either way, add the address nginx or Envoy reaches the auth provider from to `oa
 
 There are two PKI arms, and the difference between them is not a matter of degree.
 
-- **`mode = "pki"`** — a **narrow** chain-validation check set, **not full [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) path validation** and with **no revocation**. Unchanged since #280.
-- **`mode = "full-pki"`** — RFC 5280 §6 path validation with revocation, added by [#341](https://github.com/o3co/auth.provider/issues/341). This is the arm to use when a revoked certificate must stop working.
+- **`mode = "pki"`** — a **narrow** chain-validation check set, **not full [RFC 5280](https://www.rfc-editor.org/rfc/rfc5280) path validation** and with **no revocation**.
+- **`mode = "full-pki"`** — RFC 5280 §6 path validation with revocation ([#341](https://github.com/o3co/auth.provider/issues/341)). This is the arm to use when a revoked certificate must stop working.
 
 ### Checks performed in `mode = "pki"`
 
@@ -231,9 +246,9 @@ In `mode = "pki"` the parsing layer satisfies this SHOULD (everything routes thr
 
 `mode = "full-pki"` closes that: path validation is delegated to [`pkijs`](https://pkijs.org)'s `CertificateChainValidationEngine`, which implements RFC 5280 §6 including the policy tree and name-constraint processing. What is *not* delegated is listed explicitly in the next section — silently assuming a library covers something it does not is the failure mode this SHOULD exists to prevent.
 
-## `mode = "full-pki"` (#341)
+## `mode = "full-pki"`
 
-RFC 5280 §6 path validation with revocation. Requires a non-empty `trusted-cas` and an explicit `full-pki.revocation` block. Works with either `source`; under `tls-layer` the chain is read from the TLS session via `getPeerCertificate(true)`.
+RFC 5280 §6 path validation with revocation ([#341](https://github.com/o3co/auth.provider/issues/341)). Requires a non-empty `trusted-cas` and an explicit `full-pki.revocation` block. Works with either `source`; under `tls-layer` the chain is read from the TLS session via `getPeerCertificate(true)`.
 
 ### What the library does, and what this package still owns
 
@@ -300,20 +315,23 @@ On top of those: redirects are never followed (a redirect names a second destina
 
 ## Hash algorithm
 
-[RFC 8705 §7.2](https://www.rfc-editor.org/rfc/rfc8705#section-7.2) is explicit that SHA-256 is sufficient for the leaf-cert thumbprint binding — operators do not need to configure or rotate the algorithm. The Phase 3 implementation hardcodes SHA-256 with no allowlist; this is intentional and matches the RFC's normative `x5t#S256` claim name.
+[RFC 8705 §7.2](https://www.rfc-editor.org/rfc/rfc8705#section-7.2) is explicit that SHA-256 is sufficient for the leaf-cert thumbprint binding — operators do not need to configure or rotate the algorithm. The implementation hardcodes SHA-256 with no allowlist; this is intentional and matches the RFC's normative `x5t#S256` claim name.
 
 ## API surface
 
-```ts
-export type { CertHeaderDialect } from "@o3co/auth-provider-mtls";  // "envoy" | "plain-pem"
-export type { ClientCertificate } from "@o3co/auth-provider-mtls";  // diagnostic struct
-export { MtlsError, type MtlsErrorCode, type MtlsReasonCode } from "@o3co/auth-provider-mtls";
-export { computeCertThumbprint } from "@o3co/auth-provider-mtls";
-export { createMtlsMechanism, type MtlsMechanismOptions } from "@o3co/auth-provider-mtls";
-export { mtlsConfigSchema, mtlsModule } from "@o3co/auth-provider-mtls";
-```
+The exports are listed in [`src/index.mts`](src/index.mts), whose header also says what is deliberately left out and why. What a consumer gets:
 
-The dialect parsers, PKI chain walker, and PEM↔DER codec are intentionally **internal** — consumers compose dialects via the `cert-header-dialect` config key, not via direct import.
+- the module and its config schema (`mtlsModule`, `mtlsConfigSchema`) — the normal way in;
+- the mechanism factory (`createMtlsMechanism`) for a composition that builds its mechanisms by hand;
+- `computeCertThumbprint`, the RFC 8705 §3.1 `x5t#S256` value of a DER-encoded certificate;
+- the error type and its codes (`MtlsError`), and the diagnostic `ClientCertificate` / `CertHeaderDialect` types;
+- the signature-algorithm vocabulary (`SIGNATURE_ALGORITHM_NAMES`, `DEFAULT_SIGNATURE_ALGORITHMS`, `SignatureAlgorithmName`) — the legal values of `full-pki.signature-algorithms`, exported so that an operator's list can be checked against the one the schema enforces.
+
+The header dialect parsers, the narrow-mode chain walker, the PEM↔DER codec and the `full-pki` validator, CRL and OCSP resolvers and guarded fetch are **internal**: each is reached through configuration (`cert-header-dialect`, `mode`, `full-pki.revocation`), not by import. The package's config defaults ship as HOCON in [`src/reference.conf`](src/reference.conf), exported as `@o3co/auth-provider-mtls/reference.conf`.
+
+## Source layout
+
+`src/` holds the mechanism ([`extractor.mts`](src/extractor.mts), the one entry the module builds), the module, and the narrow-mode pieces. `src/fullPki/` holds the `full-pki` arm: path validation delegated to `pkijs`, the four checks this package still owns, revocation (CRL and OCSP) and the fetch guard. The extractor reaches it through `createFullPkiValidator` ([`fullPki/validate.mts`](src/fullPki/validate.mts)), and the leaf-certificate profile is imported from the narrow mode rather than restated, so the two arms cannot disagree about a leaf.
 
 ## License
 

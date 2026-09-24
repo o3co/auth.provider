@@ -1,12 +1,36 @@
 # @o3co/auth-provider-webauthn
 
-Passkey (WebAuthn) credential lifecycle + authentication grant for [@o3co/auth-provider](https://github.com/o3co/auth.provider) — the toolkit's first Passkey slice, shipped in v0.7.0 (roadmap Wave 1). **AS-scope only**: no signup, no recovery, no email infrastructure (consumer's domain per the auth-provider scope discipline). Campaign identifiers in this README (S7–S12, T-series) resolve in [docs/design-campaign-index.md](../../docs/design-campaign-index.md).
+Last updated: 2026-09-24
+
+Passkey (WebAuthn) credential registration and an authentication grant for [`auth.provider`](../../README.md): a user enrolls a passkey from an authenticated session, and later exchanges a passkey assertion for tokens at `/oauth/token`.
+
+## Responsibility
+
+**Role.** Passkeys as a primary login at the authorization server. The package adds three ceremony routes under `/oauth/webauthn/` and the `urn:o3co:oauth:grant-type:webauthn` grant, which `/oauth/token` dispatches like any other grant.
+
+**Owns:**
+
+- the ceremonies: generating registration and authentication options, verifying the attestation and persisting the credential, verifying an assertion and its sign count, and minting tokens for it;
+- the WebAuthn configuration (`webauthnConfigSchema`, the `webauthnConfig` slot) and its defaults ([`config/reference.conf`](config/reference.conf), exported as `@o3co/auth-provider-webauthn/reference.conf`);
+- the algorithm set offered and accepted (`WEBAUTHN_ALGORITHM_IDS`), and the rate limit on the unauthenticated `authentication/options` route;
+- the boundary with `@simplewebauthn/server`, the WebAuthn library the verification runs on.
+
+**Does not own:**
+
+- the stores and their contracts — `WebAuthnCredentialStore`, `ChallengeStore` and `ChallengeCeremony` are core's ports (with core's memory implementations); a deployment wires a persistent credential store;
+- who the user is at registration: `req.webauthnSubject` is set by middleware the deployment writes (from its session or a bearer token); no package in this repository sets it;
+- scope decisions — the deployment's `grantPolicy`, which this grant requires;
+- signup, account recovery, email: the deployment's own flows, outside the authorization server.
+
+**Why a separate package.** Passkeys are optional, and the verification runs on a WebAuthn library pinned to an exact version, whose upgrades are security reviews of their own ([Dependency: SimpleWebAuthn](#dependency-simplewebauthn)). A deployment without passkeys installs none of it, and the library's version moves without touching core or oauth.
 
 ## Install
 
 ```sh
 pnpm add @o3co/auth-provider-webauthn @o3co/auth-provider-core
 ```
+
+The package declares `@o3co/auth-provider-core` as a dependency rather than a peer, pinned to the exact core release it was published with, and augments core's `ComponentMap` with the `webauthnConfig` slot. Install that same core version in your composition so that there is one copy of core; with two, the augmentation lands on the copy your app does not import.
 
 ## Bootstrap
 
@@ -31,9 +55,9 @@ const webauthnBootstrap = defineModule({
             rpId: "example.com",
             rpName: "Example App",
             origin: ["https://example.com"],
-            attestationPreference: "none",   // dogfood baseline: platform authenticators need no attestation chain (S11)
+            attestationPreference: "none",   // platform authenticators need no attestation chain
             userVerification: "preferred",
-            challengeTtlMs: 120_000,         // 120s survives slow mobile networks (spec §2.4.1 baseline)
+            challengeTtlMs: 120_000,         // 120s survives slow mobile networks
             allowCredentialsForKnownUser: false,  // enumeration-resistant (#281)
             rateLimit: {
                 authenticationOptions: { limit: 30, windowSeconds: 60 },
@@ -46,7 +70,7 @@ const app = await createApp({
     modules: [
         webauthnModule,
         webauthnBootstrap,
-        memoryWebAuthnCredentialStoreModule,   // dev only; swap for Redis/Postgres in prod
+        memoryWebAuthnCredentialStoreModule,   // dev only; wire a persistent WebAuthnCredentialStore in prod
         memoryChallengeStoreModule,
         defaultChallengeCeremonyModule,
         memoryReplaySeenSetModule,
@@ -129,17 +153,17 @@ Serving `/.well-known/assetlinks.json` on the `rpId` domain is what lets the
 app use the RP ID; it is an Android platform requirement and outside this
 package.
 
-The library ships safe defaults for `attestationPreference`, `userVerification`, `challengeTtlMs`, `allowCredentialsForKnownUser`, and `rateLimit.authenticationOptions` in `config/reference.conf` (resolved via composition-root `withFallback` chain per PR #171 discipline). Consumers MUST supply `rpId` / `rpName` / `origin` — these have no library defaults and the schema reports useful errors if missing (per ADR `packages/core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md`).
+The package ships defaults for `attestationPreference`, `userVerification`, `challengeTtlMs`, `allowCredentialsForKnownUser`, and `rateLimit.authenticationOptions` in [`config/reference.conf`](config/reference.conf), for the composition root's HOCON `withFallback` chain; the schema itself has no defaults. Consumers MUST supply `rpId` / `rpName` / `origin` — these have no library defaults and the schema reports useful errors if missing (per ADR [`2026-04-30-config-schema-strict-defaults-from-hocon.md`](../core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md)).
 
-## First-credential bootstrap (dogfood)
+## First-credential bootstrap
 
-WebAuthn registration requires an authenticated subject. For greenfield deployments, the canonical bootstrap path is **federation**: users first authenticate via `@o3co/auth-provider-federation-github` (or `-federation-google`), then enroll a passkey from the authenticated session. Both federation packages ship and are documented separately.
+WebAuthn registration requires an authenticated subject. For greenfield deployments, the usual path is **federation**: users first sign in through a federation package (Google, GitHub, any OpenID Connect IdP — see the [package list](../../README.md#packages)), then enroll a passkey from the authenticated session. The bridge from that session to `req.webauthnSubject` is middleware the deployment writes; this package does not ship one.
 
-For consumer-driven account flows (signup forms, magic-link, etc.) the consumer owns the first-credential trust establishment outside auth-provider scope (per the `feedback_auth_provider_scope_discipline` rule).
+For consumer-driven account flows (signup forms, magic-link, etc.) establishing trust in the first credential is the consumer's, outside the authorization server.
 
 ## Endpoints
 
-- `POST /oauth/webauthn/registration/options` — generates `PublicKeyCredentialCreationOptions`. Requires an authenticated subject (upstream session / bearer middleware sets `req.webauthnSubject`).
+- `POST /oauth/webauthn/registration/options` — generates `PublicKeyCredentialCreationOptions`. Requires an authenticated subject: `req.webauthnSubject`, set by the deployment's own upstream middleware (session or bearer).
 - `POST /oauth/webauthn/registration/verify` — verifies the attestation response and persists a `WebAuthnCredential`. Single-use challenge via `ChallengeCeremony`.
 - `POST /oauth/webauthn/authentication/options` — generates `PublicKeyCredentialRequestOptions`. Unauthenticated, rate-limited, and discoverable-credential only: the response never carries an `allowCredentials` list derived from the request. The allow-list flow is available behind `allowCredentialsForKnownUser` — see [SECURITY — `authentication/options` enumeration](#security--authenticationoptions-enumeration).
 - Grant: `urn:o3co:oauth:grant-type:webauthn` — exchanges a verified assertion for an access token, plus a refresh token when the authenticated client is allowed one. A sender-bound request produces sender-bound tokens. See [SECURITY — refresh-token issuance](#security--refresh-token-issuance) and [SECURITY — sender-constrained tokens](#security--sender-constrained-tokens).
@@ -153,7 +177,7 @@ const opaqueUserId = await deriveOpaqueHandle(realUserId);
 await store.registerCredential({ userId: opaqueUserId, /* ... */ });
 ```
 
-The bootstrap module's `webauthnSubject` should therefore expose the opaque handle as `userId`, not the email or username.
+The middleware that sets `req.webauthnSubject` should therefore expose the opaque handle as `userId`, not the email or username.
 
 The registration endpoints enforce a 1..64-byte length on `webauthnSubject.userId` (WebAuthn §5.4.3 user-handle constraint). Requests with a userId outside this range fail with 500 `server_error` — this is a consumer-misconfiguration check, not a runtime user error. `authentication/options` enforces the same bound on the `userId` a *caller* may supply, but as `400 invalid_request`: there the value is untrusted request data, not your configuration.
 
@@ -161,17 +185,17 @@ The registration endpoints enforce a 1..64-byte length on `webauthnSubject.userI
 
 The webauthn grant has **no library-side `allowedScopes` ceiling**. Client credentials and authorization code grants bind issued scope to `client.allowedScopes` at the handler level; webauthn cannot, because the passkey is the authentication event, not a scope authorization token.
 
-`grantPolicy` is the **only scope-bounding gate** for this grant. Policy invocation is unconditional whenever `grantPolicy` is wired — it is NOT gated on `oauth.resourceIndicator.enabled` (that flag controls only whether `body.resource` is forwarded to the policy, per Stage 1 RFC 8707 plumbing). This mirrors the `refresh_token` grant pattern.
+`grantPolicy` is the **only scope-bounding gate** for this grant. Policy invocation is unconditional whenever `grantPolicy` is wired — it is NOT gated on `oauth.resourceIndicator.enabled` (that flag controls only whether `body.resource` is forwarded to the policy). This mirrors the `refresh_token` grant pattern.
 
-**`grantPolicy` is REQUIRED at boot.** As of the Wave 1 post-merge security fix, wiring `webauthnModule` without a `grantPolicy` slot fails fast at `createApp(...)` with a clear error. There is no silent-allow-all path. Deployments that intentionally accept unbounded scope (NOT recommended for production) must wire an explicit no-op policy returning `{ outcome: "allow" }` — making the choice visible in the composition root.
+**`grantPolicy` is REQUIRED at boot.** Wiring `webauthnModule` without a `grantPolicy` slot fails fast at `createApp(...)` with a clear error. There is no silent-allow-all path. Deployments that intentionally accept unbounded scope (NOT recommended for production) must wire an explicit no-op policy returning `{ outcome: "allow" }` — making the choice visible in the composition root.
 
 ## SECURITY — refresh-token issuance
 
 A passkey is the primary login on a native app and the access token is short-lived, so without a refresh token a passkey-only user is sent back to the platform authenticator at every expiry. The grant issues one — but only for a client that is **named** for it.
 
-**The gate is deny-by-absence.** The refresh token is issued only when the request carried an authenticated client AND that client's `allowedGrantTypes` includes `refresh_token`. A registration that omits it, or declares no `allowedGrantTypes` at all, gets the access token alone — the response it got before this shipped. A refresh token is a standing credential with a lifetime measured in days; it is exactly the thing that must not be acquired by a registration written before the feature existed ([#268](https://github.com/o3co/auth.provider/issues/268) / [#311](https://github.com/o3co/auth.provider/issues/311) / [#326](https://github.com/o3co/auth.provider/issues/326)).
+**The gate is deny-by-absence.** The refresh token is issued only when the request carried an authenticated client AND that client's `allowedGrantTypes` includes `refresh_token`. A registration that omits it, or declares no `allowedGrantTypes` at all, gets the access token alone. A refresh token is a standing credential with a lifetime measured in days; it is exactly the thing that must not be acquired by omission ([#268](https://github.com/o3co/auth.provider/issues/268) / [#311](https://github.com/o3co/auth.provider/issues/311) / [#326](https://github.com/o3co/auth.provider/issues/326)).
 
-**Client authentication is required in practice.** In the client-less passkey-is-the-auth-event mode there is no `allowedGrantTypes` to consult, and the `refresh_token` grant refuses an unauthenticated caller and binds every refresh token to its issuing client via `azp` — so a token minted there could never be redeemed. Wire `clientAuthMw` in front of the grant if you want refresh tokens.
+**An authenticated client is what makes a refresh token possible.** `/oauth/token` as `oauthModule` mounts it authenticates the client before any grant runs — a public client by its `client_id` — so a request reaching this grant through it has one. The grant handler itself does not require a client (the passkey is the authentication event), which matters only to a composition that dispatches the grant from a route of its own without client authentication: there it has no `allowedGrantTypes` to consult, and the `refresh_token` grant refuses an unauthenticated caller and binds every refresh token to its issuing client via `azp` — so a token minted there could never be redeemed, and none is.
 
 **Rotation and replay detection are the shared ones.** The grant opens a refresh-token family through the `refreshTokenFamilyRotation` component, the same one the authorization-code grant registers its initial `rt+jwt` with: one active token per family, and a replayed token revokes the whole family (RFC 6819 §5.2.2.3). The lifetime comes from `oauth.refreshToken.expiresIn`. Registration is fail-closed, and a refresh token never leaves the grant unless its family was registered: if the family store cannot be reached, or the token's `jti` / `exp` cannot be read back to register it under (an unset `oauth.refreshToken.expiresIn` is one way to get there), the request answers `503 temporarily_unavailable` rather than serving a token with no replay detection behind it. Both the access and the refresh token carry the `family_id` claim, so revoking the family reaches the access token too.
 
@@ -185,23 +209,23 @@ A passkey is the primary login on a native app and the access token is short-liv
 
 **`token_type` says which kind was minted.** A DPoP-bound access token is announced as `DPoP` (RFC 9449 §5). An mTLS-bound one keeps `Bearer` — it travels as a bearer token and is checked against the TLS client certificate (RFC 8705 §3). An unbound request is answered exactly as before: `Bearer`, and no `cnf` on either token.
 
-**A client registered `senderConstrained` is refused before this grant runs.** The `/token` route's shared dispatch gate rejects a request that presents no binding with `401 invalid_client`, and one whose binding kind is not in the client's `methods` with `400 unauthorized_client` — for every `grant_type`, this one included. The grant handler holds no second copy of that rule. Until [#489](https://github.com/o3co/auth.provider/issues/489) the other half was missing: a request that *did* prove its key still received an unbound access token, so the proof bought the client nothing.
+**A client registered `senderConstrained` is refused before this grant runs.** The `/token` route's shared dispatch gate rejects a request that presents no binding with `401 invalid_client`, and one whose binding kind is not in the client's `methods` with `400 unauthorized_client` — for every `grant_type`, this one included. The grant handler holds no second copy of that rule; its part is the other half, above — a request that proves its key gets a token bound to it ([#489](https://github.com/o3co/auth.provider/issues/489)).
 
 ## SECURITY — token revocation limitations
 
-Webauthn access tokens are revocable via `POST /oauth/revoke` ONLY when the grant was invoked with an authenticated client. Without client auth, the AT carries no `client_id` / `azp` claim — the revoke endpoint's ownership check (`client_id ?? azp ?? aud` must match the revoking client) cannot match, and the request returns 200 with no denylist insertion (RFC 7009 fail-closed). Operators relying on AT revocation MUST require client auth on the webauthn grant path (e.g. wire `clientAuthMw` before the grant handler).
+Webauthn access tokens are revocable via `POST /oauth/revoke` ONLY when the grant was invoked with an authenticated client. The access token then carries the client's `client_id`. Without one it carries no `client_id` / `azp` claim — the revoke endpoint's ownership check (`client_id ?? azp ?? aud` must match the revoking client) cannot match, and the request returns 200 with no denylist insertion (RFC 7009 fail-closed). Through `oauthModule`'s `/oauth/token` the client is always authenticated; a composition that dispatches the grant from its own route must authenticate the client there too (`createClientAuthMiddleware` from `@o3co/auth-provider-oauth`) if it relies on access-token revocation.
 
 ## SECURITY — registration authorization strength
 
-The registration endpoints accept any authenticated subject. Deployments SHOULD enforce step-up reauthentication (NIST SP 800-63B): require recent `auth_time` OR MFA OR fresh federation login before allowing registration. The bare endpoint does not enforce this — wire your `grantPolicy` hook or an upstream Express middleware to gate registration to high-assurance sessions.
+The registration endpoints accept any authenticated subject. Deployments SHOULD enforce step-up reauthentication (NIST SP 800-63B): require recent `auth_time` OR MFA OR fresh federation login before allowing registration. The endpoints do not enforce this, and `grantPolicy` does not reach them — it gates the grant at `/oauth/token`, not registration. Gate registration in the upstream middleware that sets `req.webauthnSubject`: set it only for a session strong enough to enroll a credential.
 
 ## SECURITY — `authentication/options` enumeration
 
 `POST /oauth/webauthn/authentication/options` is unauthenticated by design — the passkey assertion *is* the authentication event. That makes its response body a public oracle, so the endpoint answers the same thing to everyone.
 
-**The response is always the discoverable-credential shape.** No `allowCredentials` member is derived from a body-supplied `userId`, the credential store is not consulted, and the body, its key set, and the work behind it are identical for a registered account, an unregistered one, and a request naming no account at all. Previously a supplied `userId` produced a populated `allowCredentials` for a real account and an empty/absent one otherwise — an unauthenticated "does this account exist, and how many passkeys does it have?" query for anyone who asked ([#281](https://github.com/o3co/auth.provider/issues/281)).
+**The response is always the discoverable-credential shape.** No `allowCredentials` member is derived from a body-supplied `userId`, the credential store is not consulted, and the body, its key set, and the work behind it are identical for a registered account, an unregistered one, and a request naming no account at all. A populated `allowCredentials` for a real account and an empty or absent one otherwise would be an unauthenticated "does this account exist, and how many passkeys does it have?" query for anyone who asked ([#281](https://github.com/o3co/auth.provider/issues/281)).
 
-**`allowCredentialsForKnownUser: true`** restores the old behaviour. Set it only for a deployment whose authenticators cannot do discoverable credentials — non-resident keys, typically an older security-key fleet — where the client genuinely needs to be told which credential ids to offer. It reinstates the enumeration oracle for that deployment; the `200`-for-everyone / no-error-shape mitigation is all that remains, and it is not enough on its own. Pair it with a tight `rateLimit.authenticationOptions` and, where you can, put an authenticated identifier-first step in front of the endpoint instead.
+**`allowCredentialsForKnownUser: true`** derives `allowCredentials` from a supplied `userId`. Set it only for a deployment whose authenticators cannot do discoverable credentials — non-resident keys, typically an older security-key fleet — where the client genuinely needs to be told which credential ids to offer. It reinstates the enumeration oracle for that deployment; the `200`-for-everyone / no-error-shape mitigation is all that remains, and it is not enough on its own. Pair it with a tight `rateLimit.authenticationOptions` and, where you can, put an authenticated identifier-first step in front of the endpoint instead.
 
 **`userId` is bounded before it reaches any store.** The optional body field must be an opaque handle of 1–64 UTF-8 bytes with no control characters (WebAuthn §5.4.3, the same bound the registration endpoint enforces on the session-derived handle). Anything else is `400 invalid_request` with a single fixed `error_description` that does not vary with what the server knows about the value.
 
@@ -217,14 +241,14 @@ Wire the `rateLimiter` ComponentMap slot (the Redis adapter in a scaled deployme
 
 ## SECURITY — `attestationPreference` default
 
-`attestationPreference` defaults to `"none"` — the dogfood baseline (S11): attestation chain verification adds nothing for the common platform-authenticator case. Dogfood deployments using platform authenticators (Touch ID, Windows Hello, Android biometrics) typically don't need attestation chain verification. Set `"direct"` only when:
+`attestationPreference` defaults to `"none"`: attestation chain verification adds nothing for the common platform-authenticator case. Deployments using platform authenticators (Touch ID, Windows Hello, Android biometrics) typically don't need attestation chain verification. Set `"direct"` only when:
 
 - Your threat model requires authenticator provenance verification (e.g. enterprise device fleet, FIDO2 metadata service consumer)
 - You have a curated trust anchor set (FIDO MDS root list) wired into your verifier
 
 Attestation root verification is partial, and which half you get depends on the format. `@simplewebauthn/server` ships default trust anchors for `apple`, `android-key` and `android-safetynet`, and validates the `x5c` chain against them. For `packed`, `tpm` and `fido-u2f` it holds no anchors and skips path validation entirely, so provenance for those formats remains your responsibility.
 
-Since 13.3.2 (GHSA-6hxq-p678-4hr2) the check for the anchored formats is fail-closed: a chain that does not actually terminate at a shipped anchor is now rejected where earlier versions accepted it. The library throws on a chain failure, and none of the reason regexes below match its message, so it surfaces from the verify endpoint as `400 {"error": "unknown"}` — there is no dedicated discriminant for it.
+For the anchored formats the check is fail-closed (the library's fix for GHSA-6hxq-p678-4hr2): a chain that does not actually terminate at a shipped anchor is rejected. The library throws on a chain failure, and none of the reason regexes below match its message, so it surfaces from the verify endpoint as `400 {"error": "unknown"}` — there is no dedicated discriminant for it.
 
 ## SECURITY — sign-count handling
 
@@ -232,29 +256,39 @@ The grant rejects sign-count regressions per WebAuthn §2.4 (clone detection). T
 
 ## Dependency: SimpleWebAuthn
 
-`@simplewebauthn/server` is pinned to `14.0.1` (S12). The verification helpers and options generators wrap this library; Dependabot tracks major bumps, so each one arrives as a deliberate security review.
+`@simplewebauthn/server` is pinned to exactly `14.0.1`. The verification helpers and options generators wrap this library; Dependabot tracks major bumps, so each one arrives as a deliberate security review.
 
-Pinned past `13.3.1` for GHSA-6hxq-p678-4hr2 — registration attestation certificate chains were not reliably checked against a trust anchor. Deployments on the `attestationPreference = "none"` default are unaffected: that path never inspects a certificate. See [`attestationPreference` default](#security--attestationpreference-default) for who is.
+The pin is past `13.3.1` for GHSA-6hxq-p678-4hr2 — registration attestation certificate chains were not reliably checked against a trust anchor. Deployments on the `attestationPreference = "none"` default are unaffected: that path never inspects a certificate. See [`attestationPreference` default](#security--attestationpreference-default) for who is.
 
-The caveat 13.3.2 and 13.3.3 carried — the rewritten path validation required every certificate in `x5c` to appear in the chain it built, so an `x5c` carrying a cross-signed certificate was rejected — is **resolved**: upstream fixed it in 14.0.0, which is what this package now runs. A deployment relying on Apple or Android attestation should still canary real authenticators when moving between these versions.
+14.x accepts an `x5c` carrying a cross-signed certificate, which 13.3.2 and 13.3.3 rejected (their path validation required every certificate in `x5c` to appear in the chain it built). A deployment relying on Apple or Android attestation should still canary real authenticators when moving between library versions.
 
-**The advertised algorithm set is this package's, not the library's.** `WEBAUTHN_ALGORITHM_IDS` — EdDSA (`-8`), ES256 (`-7`), RS256 (`-257`), most preferred first — is passed to both `generateRegistrationOptions()` and `verifyRegistrationResponse()`, so what an authenticator is offered and what is accepted back cannot drift apart. 14.0.0 keeps its own default in a mutable module-level array and prepends ML-DSA-44 to it whenever the runtime reports support, which would have made the offer depend on the Node build the provider happens to run on and changed it under a dependency bump. A credential outlives the process that registered it, so the set is stated here. It is exported (`import { WEBAUTHN_ALGORITHM_IDS } from "@o3co/auth-provider-webauthn"`) and frozen, and a registration whose credential uses an algorithm outside it is refused as `400 {"error":"algorithm_not_allowed"}` rather than `unknown`. Offering ML-DSA-44 on purpose is [#554](https://github.com/o3co/auth.provider/issues/554).
+**The advertised algorithm set is this package's, not the library's.** `WEBAUTHN_ALGORITHM_IDS` — EdDSA (`-8`), ES256 (`-7`), RS256 (`-257`), most preferred first — is passed to both `generateRegistrationOptions()` and `verifyRegistrationResponse()`, so what an authenticator is offered and what is accepted back cannot drift apart. The library keeps its own default in a mutable module-level array and prepends ML-DSA-44 to it whenever the runtime reports support, which would make the offer depend on the Node build the provider happens to run on and change it under a dependency bump. A credential outlives the process that registered it, so the set is stated here. It is exported (`import { WEBAUTHN_ALGORITHM_IDS } from "@o3co/auth-provider-webauthn"`) and frozen, and a registration whose credential uses an algorithm outside it is refused as `400 {"error":"algorithm_not_allowed"}` rather than `unknown`. Offering ML-DSA-44 on purpose is [#554](https://github.com/o3co/auth.provider/issues/554).
 
-## Wave 1 scope boundaries
+## Scope
 
-This package implements **Wave 1 first slice**:
+Implemented:
 
 - Primary-login passkeys
 - Registration + authentication ceremonies
 - Multi-origin support (`config.origin: string[]`), web and Android — see [Multi-origin](#multi-origin-one-rp-for-the-site-and-the-android-app)
-- RFC 8707 resource indicator opt-in plumbing (Stage 1, mirroring `client_credentials` / `refresh_token`)
-- Refresh-token issuance for allowed clients ([issue #480](https://github.com/o3co/auth.provider/issues/480))
+- RFC 8707 `resource` forwarded to `grantPolicy` when `oauth.resourceIndicator.enabled` is set
+- Refresh-token issuance for allowed clients ([#480](https://github.com/o3co/auth.provider/issues/480))
 
-Deferred to subsequent waves:
+Not implemented:
 
-- WebAuthn as MFA factor (Wave 3)
-- RFC 8707 audience derivation from `resource` for this grant — [#173](https://github.com/o3co/auth.provider/issues/173) delivered it for `client_credentials`, `refresh_token` and `/authorize` only. Here `resource` reaches the policy hook and nothing else; the audience a passkey token gets is the rule on `AuthenticatedClient.allowedAudiences` ([#520](https://github.com/o3co/auth.provider/issues/520))
-- Attestation root chain verification (Stage 2+)
+- WebAuthn as an MFA factor
+- Audience derivation from `resource` for this grant — `client_credentials`, `refresh_token` and `/authorize` derive it; here `resource` reaches the policy hook and nothing else, and the audience a passkey token gets is the rule on `AuthenticatedClient.allowedAudiences` ([#520](https://github.com/o3co/auth.provider/issues/520))
+- Attestation root verification for the formats the library ships no trust anchors for (`packed`, `tpm`, `fido-u2f`) — see [`attestationPreference` default](#security--attestationpreference-default)
+
+## Source layout
+
+- [`src/module.mts`](src/module.mts) — the assembly: the manifest, its required and optional slots, the three routes and the grant, the rate-limit guard and its replica-safety refusal.
+- [`src/grant.mts`](src/grant.mts) — the grant: assertion verification, the sign-count update, the policy call, and token minting.
+- `src/routes/` — the three ceremony handlers, one per endpoint.
+- `src/internal/` — the SimpleWebAuthn boundary (options generation and response verification, and the mapping of library failures onto this package's error codes), plus two helpers copied from `@o3co/auth-provider-oauth`'s grants rather than imported, because this package does not depend on oauth. The copies are not checked against the originals, and one differs: the `resource` extractor here keeps the empty entries of a repeated `resource` parameter (`resource=&resource=https://x` reaches `grantPolicy` as `["", "https://x"]`), where oauth's drops them.
+- [`src/config.mts`](src/config.mts) — the config schema and the `webauthnConfig` slot; [`src/request.mts`](src/request.mts) — the `req.webauthnSubject` augmentation.
+
+The ports these depend on (`WebAuthnCredentialStore`, `ChallengeCeremony`, `ChallengeStore`) are core's.
 
 ## License
 
