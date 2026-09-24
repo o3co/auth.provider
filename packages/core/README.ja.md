@@ -527,6 +527,8 @@ OIDC Discovery 1.0 メタデータエンドポイント。`config.oauth.jwt.issu
 
 [`src/logging/Logger.mts`](src/logging/Logger.mts) にある、pino 互換の構造的ロガー: `trace` / `debug` / `info` / `warn` / `error` / `fatal`（それぞれオブジェクト先頭・文字列先頭のどちらの呼び出しも受け付ける）と `child(bindings)`。pino のインスタンスはアダプターなしでこれを満たし、デフォルトは `consoleLogger`。任意の `logger` コンポーネントスロットでもある。
 
+[`loggableError(err)`](src/logging/loggableError.mts) は、他のシステムと話すライブラリから出てきたエラーの代わりに呼び出し箇所がロガーへ渡すもの: Error の name、message、code、status、OAuth の `error` コード、そして同じ形の Error である cause — プレーンなオブジェクトである cause は決して運ばない。そこは OAuth ライブラリが拒否した応答（トークン応答ならアクセストークンとリフレッシュトークン）を置く場所である。
+
 ## 関連
 
 - ルート [README](../../README.md) — アーキテクチャ概要、設定リファレンス、Docker セットアップ

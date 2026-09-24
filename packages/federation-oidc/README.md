@@ -295,4 +295,4 @@ linked:
 | [`at-hash.test.mts`](src/__tests__/at-hash.test.mts) | the `at_hash` check |
 | [`delegated.test.mts`](src/__tests__/delegated.test.mts) | `SupportsDelegatedAuthorization` |
 | [`oidc-module.test.mts`](src/__tests__/oidc-module.test.mts), [`oidc-module-boot.test.mts`](src/__tests__/oidc-module-boot.test.mts) | reading `type = "oidc"` sections, the module per instance, and boot |
-| [`session-routes.e2e.test.mts`](src/__tests__/session-routes.e2e.test.mts) | a login through the session routes, end to end |
+| [`session-routes.e2e.test.mts`](src/__tests__/session-routes.e2e.test.mts) | a login through the session routes, end to end, and that a failed exchange is logged without the token response the library carries on the error |

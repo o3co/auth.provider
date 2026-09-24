@@ -416,7 +416,12 @@ URL is exactly what the adapter returned.
 2. **`exchangeCode` throwing is `502 exchange_failed`.** Every refusal inside an
    adapter — a wrong `iss`, a bad id_token, a UserInfo mismatch — surfaces this
    way and never reaches the Store. A profile without `sub` is
-   `400 invalid_profile`.
+   `400 invalid_profile`. The `federation token exchange failed` warning
+   carries core's `loggableError(err)` — name, message, code, status, the
+   upstream's OAuth `error` and the Error causes — never the error itself: an
+   OAuth library puts the token response it refused, access and refresh token
+   included, on the error's cause chain, and a logger that serialises the
+   whole error would write them out.
 3. **The Store resolves the identity.** `<name>:<sub>` goes to
    `UserRepository.authenticateByToken`; a throw is `503 temporarily_unavailable`,
    `null` is `401 unknown_user` (unless the start asked to link).

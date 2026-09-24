@@ -528,6 +528,8 @@ The canonical event URI every `logout_token`'s `events` claim carries, `http://s
 
 The structural, pino-compatible logger in [`src/logging/Logger.mts`](src/logging/Logger.mts): `trace` / `debug` / `info` / `warn` / `error` / `fatal`, each accepting an object-first or a string-first call, plus `child(bindings)`. A pino instance satisfies it without an adapter, and `consoleLogger` is the default. It is also the optional `logger` component slot.
 
+[`loggableError(err)`](src/logging/loggableError.mts) is what a call site hands the logger instead of an error that came out of a library talking to another system: the Error's name, message, code, status and OAuth `error` code, and its Error causes the same way — never a cause that is a plain object, which is where an OAuth library puts the response it refused (a token response: access and refresh tokens).
+
 ## See Also
 
 - Root [README](../../README.md) — architecture overview, configuration reference, Docker setup
