@@ -115,12 +115,33 @@ describe("a seeded budget whose key is absent", () => {
 	});
 });
 
+describe("a seeded budget given as the strings HOCON substitutes", () => {
+	// An environment variable reaches the config as a string, and every
+	// schema that owns these keys coerces it. createApp parses neither the
+	// `rateLimit` nor the `webauthn` section, so a composition that hands it
+	// HOCON directly must boot on the budget written, not refuse it.
+	it("boots on rateLimit.login as numeric strings, and applies it", async () => {
+		const config = baseConfig();
+		config.rateLimit = { ...config.rateLimit, login: { windowMs: "900000", limit: "20" } };
+		expect(await limitOf(config, "login")).toBe(20);
+	});
+
+	it("boots on webauthn.rateLimit.authenticationOptions as numeric strings, and applies it", async () => {
+		const config = baseConfig();
+		config.webauthn = {
+			rateLimit: { authenticationOptions: { limit: "30", windowSeconds: "60" } },
+		};
+		expect(await limitOf(config, "webauthn-authentication-options")).toBe(30);
+	});
+});
+
 describe("a seeded budget whose key is present but not a spec a limiter can apply", () => {
 	it("refuses to boot on rateLimit.login, naming it and not the limiter", async () => {
 		for (const login of [
 			{ windowMs: 900_000, limit: 0 },
 			{ windowMs: 0, limit: 20 },
-			{ windowMs: 900_000, limit: "20" },
+			{ windowMs: 900_000, limit: "twenty" },
+			{ windowMs: 900_000, limit: "   " },
 			{ windowMs: 1e19, limit: 20 },
 			null,
 		]) {
@@ -160,7 +181,8 @@ describe("a seeded budget whose key is present but not a spec a limiter can appl
 		for (const authenticationOptions of [
 			{ limit: 30, windowSeconds: 0 },
 			{ limit: 1.5, windowSeconds: 60 },
-			{ limit: "30", windowSeconds: 60 },
+			{ limit: "thirty", windowSeconds: 60 },
+			{ limit: "", windowSeconds: 60 },
 			{ limit: 30, windowSeconds: 1e13 },
 		]) {
 			const config = baseConfig();

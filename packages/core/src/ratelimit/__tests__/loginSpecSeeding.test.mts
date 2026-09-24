@@ -76,7 +76,12 @@ describe("resolveLoginLimitSpec", () => {
 			{ windowMs: 900_000, limit: 1.5 },
 			{ windowMs: Number.NaN, limit: 20 },
 			{ windowMs: -900_000, limit: 20 },
-			{ windowMs: 900_000, limit: "20" },
+			{ windowMs: 900_000, limit: "twenty" },
+			{ windowMs: 900_000, limit: "" },
+			{ windowMs: "  ", limit: 20 },
+			{ windowMs: 900_000, limit: true },
+			{ windowMs: [900_000], limit: 20 },
+			{ windowMs: 900_000, limit: "1.5" },
 			null,
 			"20/900000",
 		]) {
@@ -85,5 +90,31 @@ describe("resolveLoginLimitSpec", () => {
 				JSON.stringify(login),
 			).toThrow(/^rateLimit\.login must be/);
 		}
+	});
+
+	it("reads the key as its schema does: a numeric string is its number", () => {
+		// HOCON substitutes an environment variable as a string, and
+		// CoreConfigSchema's `z.coerce.number()` takes it. A seed handed the
+		// same config without that parse must read it the same way, or a
+		// value the schema accepts refuses to boot.
+		expect(
+			resolveLoginLimitSpec({}, { rateLimit: { login: { windowMs: "900000", limit: "20" } } })
+				.login,
+		).toEqual({ limit: 20, windowSeconds: 900 });
+		expect(
+			resolveLoginLimitSpec({}, { rateLimit: { login: { windowMs: 900_000, limit: " 20 " } } })
+				.login,
+		).toEqual({ limit: 20, windowSeconds: 900 });
+	});
+
+	it("says what it was given, with each value's type", () => {
+		// `String()` printed "limit 20" for the string "20", which read as a
+		// refusal of a usable number.
+		expect(() =>
+			resolveLoginLimitSpec({}, { rateLimit: { login: { windowMs: 900_000, limit: "twenty" } } }),
+		).toThrow(/\(got windowMs 900000, limit "twenty"\)$/);
+		expect(() =>
+			resolveLoginLimitSpec({}, { rateLimit: { login: { windowMs: true, limit: 20 } } }),
+		).toThrow(/\(got windowMs true, limit 20\)$/);
 	});
 });

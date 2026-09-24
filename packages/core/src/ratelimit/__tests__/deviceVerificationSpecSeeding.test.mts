@@ -94,21 +94,36 @@ describe("resolveDeviceVerificationLimitSpec", () => {
 			[-1, 300],
 			[2.5, 300],
 			[5, 2.5],
-			["5", 300],
-			[5, "300"],
+			["five", 300],
+			[5, ""],
+			["  ", 300],
+			[true, 300],
+			[5, [300]],
+			["2.5", 300],
 			[5, 1e13],
 		]) {
 			expect(
 				() => resolveDeviceVerificationLimitSpec({}, configured(limit, windowSeconds)),
-				`limit=${String(limit)} windowSeconds=${String(windowSeconds)}`,
+				`limit=${JSON.stringify(limit)} windowSeconds=${JSON.stringify(windowSeconds)}`,
 			).toThrow(/^oauth\.deviceAuthorization\.rateLimit must be/);
 		}
+		expect(() => resolveDeviceVerificationLimitSpec({}, configured("five", 300))).toThrow(
+			/\(got limit "five", windowSeconds 300\)$/,
+		);
 		expect(() =>
 			resolveDeviceVerificationLimitSpec(
 				{},
 				{ oauth: { deviceAuthorization: { rateLimit: null } } },
 			),
 		).toThrow(/^oauth\.deviceAuthorization\.rateLimit must be/);
+	});
+
+	it("reads the key as core's schema does: a numeric string is its number", () => {
+		// Through createApp, CoreConfigSchema coerces this key; a hand-built
+		// config reaches the seed directly and gets the same reading.
+		expect(
+			resolveDeviceVerificationLimitSpec({}, configured("5", "300")).device_verification,
+		).toEqual({ limit: 5, windowSeconds: 300 });
 	});
 
 	it("does not mutate the limits it was handed", () => {

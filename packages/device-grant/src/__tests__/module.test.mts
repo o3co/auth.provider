@@ -1208,7 +1208,8 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	it.each([
 		["a zero limit", { limit: 0, windowSeconds: 300 }],
 		["a fractional window", { limit: 5, windowSeconds: 0.5 }],
-		["a string limit", { limit: "5", windowSeconds: 300 }],
+		["a non-numeric string limit", { limit: "five", windowSeconds: 300 }],
+		["a blank window", { limit: 5, windowSeconds: " " }],
 		// Refused here by name, rather than by the limiter's RangeError at
 		// construction naming its own `limits.device_verification`.
 		["a window past the Date range", { limit: 5, windowSeconds: 1e13 }],
@@ -1223,6 +1224,14 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 
 	it("mounts device/verification with a usable budget", () => {
 		const deps = withVerificationBudget({ limit: 5, windowSeconds: 300 });
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(deps)).not.toThrow();
+	});
+
+	it("mounts device/verification with the budget as numeric strings, as the seed reads it", () => {
+		// The seed and this refusal read the key the same way — as core's
+		// schema coerces it — so a budget the seed applies is one this accepts.
+		const deps = withVerificationBudget({ limit: "5", windowSeconds: "300" });
 		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory(deps)).not.toThrow();
 	});

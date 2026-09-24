@@ -121,7 +121,11 @@ describe("memoryRateLimiterModule", () => {
 				/oauth\.deviceAuthorization\.rateLimit must be/,
 			],
 			[
-				{ webauthn: { rateLimit: { authenticationOptions: { limit: "30", windowSeconds: 60 } } } },
+				{
+					webauthn: {
+						rateLimit: { authenticationOptions: { limit: "thirty", windowSeconds: 60 } },
+					},
+				},
 				/webauthn\.rateLimit\.authenticationOptions must be/,
 			],
 		];

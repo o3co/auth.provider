@@ -90,13 +90,33 @@ describe("resolveWebAuthnAuthenticationOptionsLimitSpec", () => {
 			[0, 60],
 			[30, 0],
 			[30, 1.5],
-			["30", 60],
+			["thirty", 60],
+			["", 60],
+			[30, "   "],
+			[false, 60],
+			[[30], 60],
+			["1.5", 60],
 			[30, 1e13],
 		]) {
 			expect(
 				() => resolveWebAuthnAuthenticationOptionsLimitSpec({}, configured(limit, windowSeconds)),
-				`limit=${String(limit)} windowSeconds=${String(windowSeconds)}`,
+				`limit=${JSON.stringify(limit)} windowSeconds=${JSON.stringify(windowSeconds)}`,
 			).toThrow(/^webauthn\.rateLimit\.authenticationOptions must be/);
 		}
+		expect(() =>
+			resolveWebAuthnAuthenticationOptionsLimitSpec({}, configured("thirty", 60)),
+		).toThrow(/\(got limit "thirty", windowSeconds 60\)$/);
+	});
+
+	it("reads the key as the WebAuthn schema does: a numeric string is its number", () => {
+		// reference.conf fills both from `${?WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT}`
+		// and `..._WINDOW_SECONDS`, which HOCON substitutes as strings, and
+		// `webauthnConfigSchema` coerces them. createApp does not parse this
+		// section, so the seed reads it as that schema would.
+		expect(
+			resolveWebAuthnAuthenticationOptionsLimitSpec({}, configured("30", "60"))[
+				WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX
+			],
+		).toEqual({ limit: 30, windowSeconds: 60 });
 	});
 });
