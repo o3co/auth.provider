@@ -111,7 +111,7 @@ jobs:
             exit 1
           fi
           echo "OK: all in-repo ComponentMap slot names are unnamespaced"
-      - name: No cross-project references
+      - name: No cross-project references or agent-workspace paths
         run: |
           set -euo pipefail
           # Forbid cross-project namespace references from leaking into auth.provider sources.
@@ -128,6 +128,31 @@ jobs:
             fi
           done
           echo "OK: no cross-project references in scanned paths"
+
+          # Nor a path into an agent's workspace: the hidden agent directory, its
+          # spec folder, an absolute macOS volume path. None of them is in this
+          # repository, so a link or a citation to one is dead for every reader —
+          # a CHANGELOG entry linked such a spec until it was caught by hand. So
+          # every tracked file is read, the CHANGELOG included; `git grep` reads
+          # tracked files only, never build output or node_modules. Assembled
+          # from parts, like the pattern above, so this file does not match itself.
+          WORKSPACE_PAT="$(printf '%s' '\.clau' 'de/|superpowers' '/specs|/Volu' 'mes/')"
+          set +e
+          HITS="$(git grep -nIE "$WORKSPACE_PAT")"
+          STATUS=$?
+          set -e
+          case "$STATUS" in
+            0)
+              echo "ERROR: a path into an agent workspace outside the repository — cite a PR or issue number instead:"
+              echo "$HITS"
+              exit 1
+              ;;
+            1) echo "OK: no agent-workspace paths in tracked files" ;;
+            *)
+              echo "ERROR: git grep failed (status ${STATUS}); nothing was scanned"
+              exit 1
+              ;;
+          esac
       - name: No cross-project references in PR commit messages
         if: github.event_name == 'pull_request'
         env:
