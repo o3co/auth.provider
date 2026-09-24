@@ -54,13 +54,15 @@
  *   err.message`, then `{ reason }`). The second rule below closes the
  *   common shapes of this by flagging the flattening itself, wherever it is,
  *   since the string it makes can travel into another file: `x.message`
- *   read behind an `instanceof Error` test — `x instanceof Error ?
- *   x.message`, `x instanceof Error && x.message`, `if (x instanceof Error)
- *   return x.message`, braced or not — and `(x as Error).message`. A bare
- *   `err.message` with no such test or cast is not one of them, and neither
- *   are `String(err)`, `` `${err}` `` and `err.toString()`: each also reads
- *   the message, but a regex cannot tell them from the same calls on a
- *   string or a number. Those are left to review;
+ *   read behind an `instanceof Error` test, or a subclass's
+ *   (`instanceof TypeError`) — `x instanceof Error ? x.message`,
+ *   `x instanceof Error && x.message`, `if (x instanceof Error) return
+ *   x.message`, braced or not — and `(x as Error).message` or
+ *   `(x as TypeError).message`. Not flagged, and left to review: a bare
+ *   `err.message` or `err?.message` with no such test or cast, a cast to a
+ *   structural type (`(x as { message: string }).message`), and
+ *   `String(err)`, `` `${err}` `` and `err.toString()` — each reads the
+ *   message, but a regex cannot tell it from the same read of a non-error;
  * - an error handed to a helper that logs it: `refuse(…, { err })`, a
  *   failure reporter. The call site is not a logger call, and the helper's
  *   own log line sees only its parameter (`{ reason, ...context }`), not a
@@ -78,6 +80,17 @@
  *   bound; a return type longer than 200 characters hides it too;
  * - bindings are per file, not per scope: a variable elsewhere in the file
  *   that shares a caught error's name is flagged too (rename it).
+ *
+ * A third rule reads each logger call's first argument. A call that opens
+ * with a string or template literal and passes anything after it is flagged
+ * in every source tree: pino, the standalone's logger, treats what follows a
+ * string as printf arguments and drops them when the message has no
+ * placeholder, so the error such a line carries never reaches the log. In
+ * the trees this change reworks (`STRING_FIRST_EVERYWHERE`) any string-first
+ * call is flagged, alone or not: a line there is object-first with an event
+ * name. `STRING_FIRST_ALLOWED` lists the calls that stay, with the reason. It
+ * sees only a literal: a message held in a variable or built by a call
+ * (`logger.warn(message)`, `logger.warn(describe(x))`) is not flagged.
  *
  * Where it looks is `SOURCE_ROOTS` below: every workspace package's `src`
  * and the standalone template's, tests (`__tests__`) left out. A package
@@ -145,9 +158,12 @@ const OTHER_PROJECTIONS: ReadonlyArray<{
 	})),
 ];
 
-/** A logger call: a level (or `child`) on `log`, `logger` or `….logger`, and `console`'s. */
+/**
+ * A logger call: a level (or `child`) on `log`, `logger` or `….logger`,
+ * `console`'s, and a level on `(opts.logger ?? console)`.
+ */
 const LOGGER_CALL =
-	/\b(?:(?:log|logger|(?:\w+\.)+logger)\??\.(?:trace|debug|info|warn|error|fatal|child)|console\.(?:log|trace|debug|info|warn|error))\(/g;
+	/(?:\b(?:(?:log|logger|(?:\w+\.)+logger)\??\.(?:trace|debug|info|warn|error|fatal|child)|console\.(?:log|trace|debug|info|warn|error))|\(\s*[\w$.]+\s*\?\?\s*console\s*\)\.(?:trace|debug|info|warn|error|fatal))\(/g;
 
 const IDENTIFIER = "[A-Za-z_$][\\w$]*";
 
@@ -406,10 +422,12 @@ function workspaceSourceTrees(): string[] {
  * text, which then travels as an ordinary string, often into another file,
  * and reaches a log line nobody would read as holding an error. Flagged:
  * `.message` (optionally chained, on a name or a member path) read right
- * after an `instanceof Error` test — as a ternary's `?`, after `&&`, or as
- * the `return` an `if` makes, braced or not — and `(x as Error).message`,
- * through any chain of `as` casts ending in `Error`. Not flagged, and not
- * distinguishable by a regex from the same calls on a non-error:
+ * after an `instanceof` test of `Error` or any `…Error` class — as a
+ * ternary's `?`, after `&&`, or as the `return` an `if` makes, braced or
+ * not — and `(x as Error).message` or `(x as TypeError).message`, through
+ * any chain of `as` casts ending in such a class. Not flagged, and not
+ * distinguishable by a regex from the same read of a non-error: a bare
+ * `err.message` or `err?.message`, `(x as { message: string }).message`,
  * `String(err)`, `` `${err}` ``, `err.toString()`.
  * Core's readiness runner did this: each failed probe's `err.message` went into
  * the report the readiness route logs. The flattening is the part a file can
@@ -419,7 +437,7 @@ function workspaceSourceTrees(): string[] {
  * sites in its file, so a new one fails and a removed one fails as stale.
  */
 const FLATTENED_ERROR_TEXT =
-	/\binstanceof\s+Error\s*\)?\s*(?:\?|&&|\{?\s*return)\s*(?:[A-Za-z_$][\w$]*\??\.)+message\b|\(\s*[A-Za-z_$][\w$.]*(?:\s+as\s+[\w$]+)*\s+as\s+Error\s*\)\s*\??\.message\b/g;
+	/\binstanceof\s+\w*Error\s*\)?\s*(?:\?|&&|\{?\s*return)\s*(?:[A-Za-z_$][\w$]*\??\.)+message\b|\(\s*[A-Za-z_$][\w$.]*(?:\s+as\s+[\w$]+)*\s+as\s+\w*Error\s*\)\s*\??\.message\b/g;
 
 const FLATTENING_ALLOWED: ReadonlyArray<{
 	readonly file: string;
@@ -488,6 +506,87 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 	},
 ];
 
+/**
+ * The trees this change reworks: every logger call in them is object-first.
+ * Elsewhere only the string-first call that passes more (the one pino loses
+ * the rest of) is flagged.
+ */
+const STRING_FIRST_EVERYWHERE: readonly string[] = [
+	"packages/core/src",
+	"packages/dpop/src",
+	"packages/oauth/src",
+	"packages/oauth-token-exchange/src",
+	"packages/webauthn/src",
+];
+
+/** The string-first calls that stay, each file's count exact, with why. */
+const STRING_FIRST_ALLOWED: ReadonlyArray<{
+	readonly file: string;
+	readonly sites: number;
+	readonly why: string;
+}> = [
+	{
+		file: "packages/core/src/boot/create-app.mts",
+		sites: 1,
+		why: "the boot-failure drain's `console.error`: no logger exists yet, and console prints every argument",
+	},
+	{
+		file: "packages/core/src/middleware/cors.mts",
+		sites: 1,
+		why: "a boot-time notice about a configured origin, with no error; the message is written whole",
+	},
+	...[
+		"packages/core/src/federation-grants/factory.mts",
+		"packages/core/src/federation-grants/intentFactory.mts",
+		"packages/core/src/federation-tokens/factory.mts",
+	].map((file) => ({
+		file,
+		sites: 1,
+		why: "a fixed dev/test-only notice when the in-memory adapter is built, with no error; the message is written whole",
+	})),
+];
+
+/** How many arguments a call's text holds, from its top-level commas; literals blanked first. */
+function argumentCount(args: string): number {
+	const code = literalsBlanked(args).trim().replace(/,$/, "");
+	if (code.length === 0) return 0;
+	let depth = 0;
+	let count = 1;
+	for (const c of code) {
+		if (c === "(" || c === "[" || c === "{") depth++;
+		else if (c === ")" || c === "]" || c === "}") depth--;
+		else if (c === "," && depth === 0) count++;
+	}
+	return count;
+}
+
+/**
+ * The line of every logger call in `original` that opens with a string or
+ * template literal — any such call when `everyStringFirst`, else only one
+ * that passes more after it.
+ */
+function stringFirstSitesIn(
+	original: string,
+	{ everyStringFirst }: { readonly everyStringFirst: boolean },
+): number[] {
+	return loggerCalls(withoutComments(original))
+		.filter(({ args }) => /^\s*["'`]/.test(args))
+		.filter(({ args }) => everyStringFirst || argumentCount(args) > 1)
+		.map(({ line }) => line);
+}
+
+function stringFirstSites(): Map<string, number[]> {
+	const sites = new Map<string, number[]>();
+	for (const root of SOURCE_ROOTS) {
+		const everyStringFirst = STRING_FIRST_EVERYWHERE.includes(root);
+		for (const file of sourceFiles(join(repoRoot, root))) {
+			const lines = stringFirstSitesIn(readFileSync(file, "utf8"), { everyStringFirst });
+			if (lines.length > 0) sites.set(relative(repoRoot, file), lines);
+		}
+	}
+	return sites;
+}
+
 function flatteningSites(): Map<string, number[]> {
 	const sites = new Map<string, number[]>();
 	for (const root of SOURCE_ROOTS) {
@@ -527,6 +626,8 @@ describe("a caught error is not flattened to text on its way to a log line", () 
 		["a short-circuit", "const text = err instanceof Error && err.message;"],
 		["a cast", "const text = (err as Error).message;"],
 		["a cast, optionally chained", "const text = (err as Error)?.message;"],
+		["a subclass test", "const text = err instanceof TypeError ? err.message : String(err);"],
+		["a cast to a subclass", "const text = (err as TypeError).message;"],
 	])("flags %s", (_label, source) => {
 		expect(source.match(FLATTENED_ERROR_TEXT)).not.toBeNull();
 	});
@@ -709,5 +810,45 @@ describe("a caught error reaches a logger only through loggableError", () => {
 			expect(sitesIn(source, ["unexpectedErrorFields"])).toEqual([]);
 			expect(sitesIn(source)).toEqual([1]);
 		});
+	});
+});
+
+describe("a logger call opens with an object, not a string (string-first rule)", () => {
+	it.each([
+		[
+			"a template message with the error after it",
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+			"try { x() } catch (err) { logger.warn(`POST /x/${name}: failed:`, loggableError(err)); }",
+			false,
+		],
+		["a string message with a value after it", `log.error("drain", obj);`, false],
+		["a string message alone, where the rule holds for every call", `logger.warn("notice");`, true],
+	])("flags %s", (_label, source, anywhere) => {
+		expect(stringFirstSitesIn(source, { everyStringFirst: true })).toEqual([1]);
+		expect(stringFirstSitesIn(source, { everyStringFirst: false })).toEqual(anywhere ? [] : [1]);
+	});
+
+	it.each([
+		["an object-first line", `logger.warn({ err: loggableError(err) }, "event");`],
+		["a call on something that is not a logger", `res.status(400).json("text");`],
+		["a message built elsewhere (a known gap)", `logger.warn(message, extra);`],
+	])("does not flag %s", (_label, source) => {
+		expect(stringFirstSitesIn(source, { everyStringFirst: true })).toEqual([]);
+	});
+
+	it(`in ${SOURCE_ROOTS.join(", ")}: every string-first call is one this file lists, with its reason`, () => {
+		const unexpected: string[] = [];
+		for (const [file, lines] of stringFirstSites()) {
+			const allowed = STRING_FIRST_ALLOWED.find((entry) => entry.file === file)?.sites ?? 0;
+			if (lines.length > allowed) unexpected.push(`${file}:${lines.join(",")}`);
+		}
+		expect(unexpected).toEqual([]);
+	});
+
+	it("has no stale entry in STRING_FIRST_ALLOWED", () => {
+		const sites = stringFirstSites();
+		for (const { file, sites: allowed, why } of STRING_FIRST_ALLOWED) {
+			expect(sites.get(file)?.length ?? 0, `${file} — ${why}`).toBe(allowed);
+		}
 	});
 });
