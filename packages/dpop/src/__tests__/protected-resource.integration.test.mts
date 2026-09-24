@@ -26,13 +26,12 @@
  */
 
 import type { Server } from "node:http";
-import { protectedResourceBindingMw } from "@o3co/auth-provider-core";
+import { createMemoryReplaySeenSet, protectedResourceBindingMw } from "@o3co/auth-provider-core";
 import express from "express";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import request from "supertest";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { computeAth } from "#/ath.mjs";
-import { createMemoryDPoPReplayStore } from "#/memory/replay-store.mjs";
 import { createDPoPNonceIssuer } from "#/nonce.mjs";
 import { computeJkt } from "#/thumbprint.mjs";
 import { createDPoPMechanism } from "#/verifier.mjs";
@@ -108,7 +107,7 @@ describe("DPoP at a protected resource (#264)", () => {
 
 		const mechanism = createDPoPMechanism({
 			issuer: `http://127.0.0.1:${port}`,
-			replayStore: createMemoryDPoPReplayStore(),
+			replaySeenSet: createMemoryReplaySeenSet(),
 			iatWindowSeconds: 60,
 		});
 
@@ -197,7 +196,7 @@ describe("DPoP at a protected resource — server-provided nonce (#530)", () => 
 		htu = `http://127.0.0.1:${port}${RESOURCE_PATH}`;
 		const mechanism = createDPoPMechanism({
 			issuer: `http://127.0.0.1:${port}`,
-			replayStore: createMemoryDPoPReplayStore(),
+			replaySeenSet: createMemoryReplaySeenSet(),
 			nonce: { required: "as+rs", issuer },
 		});
 		app.use(protectedResourceBindingMw({ mechanisms: [mechanism] }));

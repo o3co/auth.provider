@@ -14,12 +14,16 @@
  * limitations under the License.
  */
 
+import {
+	ChallengeStorageError,
+	createMemoryReplaySeenSet,
+	type ReplaySeenSet,
+} from "@o3co/auth-provider-core";
 import type { Request } from "express";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { computeAth } from "#/ath.mjs";
 import { DPoPError } from "#/errors.mjs";
-import { createMemoryDPoPReplayStore } from "#/memory/replay-store.mjs";
 import { createDPoPNonceIssuer } from "#/nonce.mjs";
 import { computeJkt } from "#/thumbprint.mjs";
 import { createDPoPMechanism } from "#/verifier.mjs";
@@ -111,14 +115,14 @@ const makeReq = (
 // ---------------------------------------------------------------------------
 
 describe("createDPoPMechanism", () => {
-	let replayStore: ReturnType<typeof createMemoryDPoPReplayStore>;
+	let replaySeenSet: ReturnType<typeof createMemoryReplaySeenSet>;
 	let mechanism: ReturnType<typeof createDPoPMechanism>;
 
 	beforeEach(() => {
-		replayStore = createMemoryDPoPReplayStore();
+		replaySeenSet = createMemoryReplaySeenSet();
 		mechanism = createDPoPMechanism({
 			issuer: ISSUER,
-			replayStore,
+			replaySeenSet,
 			iatWindowSeconds: 60,
 			algWhitelist: ["ES256", "ES384", "EdDSA", "RS256"],
 		});
@@ -165,7 +169,7 @@ describe("createDPoPMechanism", () => {
 		// Simplest approach: use custom mechanism with restricted whitelist.
 		const restrictedMechanism = createDPoPMechanism({
 			issuer: ISSUER,
-			replayStore: createMemoryDPoPReplayStore(),
+			replaySeenSet: createMemoryReplaySeenSet(),
 			algWhitelist: ["ES256"],
 		});
 		const { proof } = await mintProof({ alg: "ES384" });
@@ -174,7 +178,7 @@ describe("createDPoPMechanism", () => {
 		await expect(
 			createDPoPMechanism({
 				issuer: ISSUER,
-				replayStore: createMemoryDPoPReplayStore(),
+				replaySeenSet: createMemoryReplaySeenSet(),
 				algWhitelist: ["ES256"],
 			}).extract(makeReq(proof) as Request),
 		).rejects.toMatchObject({ reason: "alg_not_allowed" });
@@ -196,7 +200,7 @@ describe("createDPoPMechanism", () => {
 		const req = makeReq(proof);
 		await expect(mechanism.extract(req as Request)).rejects.toThrow(DPoPError);
 		await expect(
-			createDPoPMechanism({ issuer: ISSUER, replayStore: createMemoryDPoPReplayStore() }).extract(
+			createDPoPMechanism({ issuer: ISSUER, replaySeenSet: createMemoryReplaySeenSet() }).extract(
 				makeReq(proof) as Request,
 			),
 		).rejects.toMatchObject({ reason: "signature_invalid" });
@@ -218,7 +222,7 @@ describe("createDPoPMechanism", () => {
 		const req = makeReq(proof, "POST"); // proof says GET, request is POST
 		await expect(mechanism.extract(req as Request)).rejects.toThrow(DPoPError);
 		await expect(
-			createDPoPMechanism({ issuer: ISSUER, replayStore: createMemoryDPoPReplayStore() }).extract(
+			createDPoPMechanism({ issuer: ISSUER, replaySeenSet: createMemoryReplaySeenSet() }).extract(
 				req as Request,
 			),
 		).rejects.toMatchObject({ reason: "htm_mismatch" });
@@ -247,7 +251,7 @@ describe("createDPoPMechanism", () => {
 		const req = makeReq(proof, "POST", "/token", "as.example", "https");
 		await expect(mechanism.extract(req as Request)).rejects.toThrow(DPoPError);
 		await expect(
-			createDPoPMechanism({ issuer: ISSUER, replayStore: createMemoryDPoPReplayStore() }).extract(
+			createDPoPMechanism({ issuer: ISSUER, replaySeenSet: createMemoryReplaySeenSet() }).extract(
 				req as Request,
 			),
 		).rejects.toMatchObject({ reason: "htu_mismatch" });
@@ -300,7 +304,7 @@ describe("createDPoPMechanism", () => {
 		// which `req.originalUrl` already reports.
 		const prefixed = createDPoPMechanism({
 			issuer: "https://as.example/tenant-a",
-			replayStore: createMemoryDPoPReplayStore(),
+			replaySeenSet: createMemoryReplaySeenSet(),
 		});
 		const { proof } = await mintProof({ htu: "https://as.example/tenant-a/token" });
 		const req = makeReq(proof, "POST", "/tenant-a/token", "as.example", "https");
@@ -310,7 +314,7 @@ describe("createDPoPMechanism", () => {
 	it("carries a non-default issuer port into the expected htu", async () => {
 		const ported = createDPoPMechanism({
 			issuer: "https://as.example:8443",
-			replayStore: createMemoryDPoPReplayStore(),
+			replaySeenSet: createMemoryReplaySeenSet(),
 		});
 		const { proof } = await mintProof({ htu: "https://as.example:8443/token" });
 		const req = makeReq(proof, "POST", "/token", "as.example", "https");
@@ -352,7 +356,7 @@ describe("createDPoPMechanism", () => {
 		await expect(
 			createDPoPMechanism({
 				issuer: ISSUER,
-				replayStore: createMemoryDPoPReplayStore(),
+				replaySeenSet: createMemoryReplaySeenSet(),
 				iatWindowSeconds: 60,
 			}).extract(req as Request),
 		).rejects.toMatchObject({ reason: "iat_out_of_window" });
@@ -366,7 +370,7 @@ describe("createDPoPMechanism", () => {
 		await expect(
 			createDPoPMechanism({
 				issuer: ISSUER,
-				replayStore: createMemoryDPoPReplayStore(),
+				replaySeenSet: createMemoryReplaySeenSet(),
 				iatWindowSeconds: 60,
 			}).extract(req as Request),
 		).rejects.toMatchObject({ reason: "iat_out_of_window" });
@@ -443,7 +447,7 @@ describe("createDPoPMechanism", () => {
 		const { proof } = await mintProof({ alg: "ES256" });
 		const lowerCaseMechanism = createDPoPMechanism({
 			issuer: ISSUER,
-			replayStore: createMemoryDPoPReplayStore(),
+			replaySeenSet: createMemoryReplaySeenSet(),
 			algWhitelist: ["es256"], // operator typo: lowercase
 		});
 		await expect(lowerCaseMechanism.extract(makeReq(proof) as Request)).rejects.toMatchObject({
@@ -497,44 +501,123 @@ describe("createDPoPMechanism", () => {
 		});
 	});
 
-	// Narrow the replay-store catch so RangeError (programming/config bug)
-	// is NOT misclassified as `replay_store_unavailable` (availability
-	// fault). Operator triage signal must distinguish "fix the ttl config"
-	// from "check Redis health".
-	it("lets RangeError from replay store propagate (programmer/config bug, not transport)", async () => {
-		const rangingStore = {
-			seen: async (_jti: string, _jkt: string, ttlSeconds: number) => {
-				if (ttlSeconds <= 0) {
-					throw new RangeError(`ttlSeconds must be positive (got ${ttlSeconds})`);
-				}
-				return false;
+	// -------------------------------------------------------------------------
+	// The replay record lives in core's ReplaySeenSet
+	// -------------------------------------------------------------------------
+
+	it("records the proof's jti under its key's scope, until replayTtlSeconds from now", async () => {
+		// The seen-set is shared with private_key_jwt, ID-JAG and WebAuthn
+		// records, so the scope is DPoP's own and carries the key: the same
+		// `jti` under a different key is a different proof, and no other
+		// consumer's record can collide with this one.
+		const calls: { scope: string; key: string; expiresAtMs: number }[] = [];
+		const recording = createMemoryReplaySeenSet();
+		const spy = {
+			kind: "spy",
+			markSeen: async (scope: string, key: string, expiresAtMs: number) => {
+				calls.push({ scope, key, expiresAtMs });
+				return recording.markSeen(scope, key, expiresAtMs);
 			},
+			contains: recording.contains,
 		};
-		const rangingMechanism = createDPoPMechanism({
+		const spied = createDPoPMechanism({
 			issuer: ISSUER,
-			replayStore: rangingStore,
-			replayTtlSeconds: -1, // forces RangeError at the store layer
+			replaySeenSet: spy,
+			replayTtlSeconds: 300,
 		});
-		const { proof } = await mintProof();
-		// RangeError must surface as RangeError, NOT wrapped as DPoPError.
-		await expect(rangingMechanism.extract(makeReq(proof) as Request)).rejects.toThrow(RangeError);
+		const jti = crypto.randomUUID();
+		const { proof, jkt } = await mintProof({ jti });
+		const before = Date.now();
+		await spied.extract(makeReq(proof) as Request);
+		const after = Date.now();
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]).toMatchObject({ scope: `dpop-proof:${jkt}`, key: jti });
+		expect(calls[0]?.expiresAtMs).toBeGreaterThanOrEqual(before + 300_000);
+		expect(calls[0]?.expiresAtMs).toBeLessThanOrEqual(after + 300_000);
 	});
 
-	// I-2: pin that replay-store transport faults surface as the dedicated
+	it("does not read the same jti under a different key as a replay", async () => {
+		const jti = crypto.randomUUID();
+		const first = await mintProof({ jti });
+		const second = await mintProof({ jti });
+		expect(second.jkt).not.toBe(first.jkt);
+		await expect(mechanism.extract(makeReq(first.proof) as Request)).resolves.toMatchObject({
+			confirmation: { jkt: first.jkt },
+		});
+		await expect(mechanism.extract(makeReq(second.proof) as Request)).resolves.toMatchObject({
+			confirmation: { jkt: second.jkt },
+		});
+	});
+
+	it("refuses to construct with a replay TTL that is not a positive finite number", () => {
+		// The record's expiry is computed from it on every proof. A NaN would
+		// write a record that never expires in memory and a PX NaN to Redis;
+		// a non-positive one a record that is expired at issue. Both are a
+		// composition fault, so they are refused where they are made.
+		for (const bad of [-1, 0, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(() =>
+				createDPoPMechanism({
+					issuer: ISSUER,
+					replaySeenSet: createMemoryReplaySeenSet(),
+					replayTtlSeconds: bad,
+				}),
+			).toThrow(RangeError);
+		}
+	});
+
+	// The seen-set's one domain error is a contract fault, not an outage:
+	// misclassifying it as `replay_store_unavailable` would send operator
+	// triage to Redis health when the fix is in the composition.
+	it("lets a ChallengeStorageError from the seen-set propagate rather than calling it an outage", async () => {
+		const refusing = {
+			kind: "refusing",
+			markSeen: async () => {
+				throw new ChallengeStorageError({ reason: "expired-at-issue" });
+			},
+			contains: async () => false,
+		};
+		const refusingMechanism = createDPoPMechanism({ issuer: ISSUER, replaySeenSet: refusing });
+		const { proof } = await mintProof();
+		await expect(refusingMechanism.extract(makeReq(proof) as Request)).rejects.toThrow(
+			ChallengeStorageError,
+		);
+	});
+
+	// I-2: pin that seen-set transport faults surface as the dedicated
 	// `replay_store_unavailable` audit signal — not a raw Error that would
 	// otherwise propagate up to `tokenBindingMw` and lose operator triage.
-	it("wraps replay store transport errors as replay_store_unavailable (audit signal distinct from client-garbage)", async () => {
-		const failingStore = {
-			seen: async () => {
+	// Fail closed: the proof is refused, never accepted unchecked.
+	it("wraps seen-set transport errors as replay_store_unavailable (audit signal distinct from client-garbage)", async () => {
+		const errors: { obj: unknown; msg?: string }[] = [];
+		const failing = {
+			kind: "failing",
+			markSeen: async () => {
 				throw new Error("ECONNREFUSED — Redis down");
 			},
+			contains: async () => false,
 		};
-		const failingMechanism = createDPoPMechanism({ issuer: ISSUER, replayStore: failingStore });
+		const failingMechanism = createDPoPMechanism({
+			issuer: ISSUER,
+			replaySeenSet: failing,
+			logger: {
+				trace: () => {},
+				debug: () => {},
+				info: () => {},
+				warn: () => {},
+				error: (obj: unknown, msg?: string) => errors.push({ obj, msg }),
+				fatal: () => {},
+				child() {
+					return this;
+				},
+			} as never,
+		});
 		const { proof } = await mintProof();
 		await expect(failingMechanism.extract(makeReq(proof) as Request)).rejects.toMatchObject({
 			reason: "replay_store_unavailable",
 			code: "invalid_dpop_proof",
 		});
+		expect(errors.map((e) => e.msg)).toEqual(["dpop_replay_store_unavailable"]);
 	});
 });
 
@@ -577,7 +660,7 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 		const warns: { obj: unknown; msg?: string }[] = [];
 		createDPoPMechanism({
 			issuer: ISSUER,
-			replayStore: createMemoryDPoPReplayStore(),
+			replaySeenSet: createMemoryReplaySeenSet(),
 			iatWindowSeconds: 180,
 			// Satisfies the old "at least iatWindowSeconds" advice and is still
 			// short of the 361 the window actually needs.
@@ -600,7 +683,7 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 		const warns: { obj: unknown; msg?: string }[] = [];
 		createDPoPMechanism({
 			issuer: ISSUER,
-			replayStore: createMemoryDPoPReplayStore(),
+			replaySeenSet: createMemoryReplaySeenSet(),
 			iatWindowSeconds: 150,
 			replayTtlSeconds: 300,
 			logger: capturingLogger(warns),
@@ -619,7 +702,7 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 		const atBoundary: { obj: unknown; msg?: string }[] = [];
 		createDPoPMechanism({
 			issuer: ISSUER,
-			replayStore: createMemoryDPoPReplayStore(),
+			replaySeenSet: createMemoryReplaySeenSet(),
 			iatWindowSeconds: 150,
 			replayTtlSeconds: 301,
 			logger: capturingLogger(atBoundary),
@@ -630,7 +713,7 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 		const defaults: { obj: unknown; msg?: string }[] = [];
 		createDPoPMechanism({
 			issuer: ISSUER,
-			replayStore: createMemoryDPoPReplayStore(),
+			replaySeenSet: createMemoryReplaySeenSet(),
 			logger: capturingLogger(defaults),
 		});
 		expect(ttlWarnings(defaults)).toHaveLength(0);
@@ -642,12 +725,12 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 // ---------------------------------------------------------------------------
 
 describe("createDPoPMechanism — protected-resource profile (ath, RFC 9449 §7.1)", () => {
-	let replayStore: ReturnType<typeof createMemoryDPoPReplayStore>;
+	let replaySeenSet: ReturnType<typeof createMemoryReplaySeenSet>;
 	let mechanism: ReturnType<typeof createDPoPMechanism>;
 
 	beforeEach(() => {
-		replayStore = createMemoryDPoPReplayStore();
-		mechanism = createDPoPMechanism({ issuer: ISSUER, replayStore, iatWindowSeconds: 60 });
+		replaySeenSet = createMemoryReplaySeenSet();
+		mechanism = createDPoPMechanism({ issuer: ISSUER, replaySeenSet, iatWindowSeconds: 60 });
 	});
 
 	// The protected resources this middleware guards are the AS's own —
@@ -718,7 +801,7 @@ describe("createDPoPMechanism — the issuer is required at construction (#292)"
 	it("throws when no issuer is configured", () => {
 		expect(() =>
 			createDPoPMechanism({
-				replayStore: createMemoryDPoPReplayStore(),
+				replaySeenSet: createMemoryReplaySeenSet(),
 			} as unknown as Parameters<typeof createDPoPMechanism>[0]),
 		).toThrow(/oauth\.jwt\.issuer/);
 	});
@@ -729,14 +812,14 @@ describe("createDPoPMechanism — the issuer is required at construction (#292)"
 		expect(() =>
 			createDPoPMechanism({
 				issuer: "as.example:3000",
-				replayStore: createMemoryDPoPReplayStore(),
+				replaySeenSet: createMemoryReplaySeenSet(),
 			}),
 		).toThrow(/issuer/i);
 	});
 
 	it("throws when the issuer is empty", () => {
 		expect(() =>
-			createDPoPMechanism({ issuer: "", replayStore: createMemoryDPoPReplayStore() }),
+			createDPoPMechanism({ issuer: "", replaySeenSet: createMemoryReplaySeenSet() }),
 		).toThrow(/issuer/i);
 	});
 
@@ -744,7 +827,7 @@ describe("createDPoPMechanism — the issuer is required at construction (#292)"
 		expect(() =>
 			createDPoPMechanism({
 				issuer: "http://localhost:3000",
-				replayStore: createMemoryDPoPReplayStore(),
+				replaySeenSet: createMemoryReplaySeenSet(),
 			}),
 		).not.toThrow();
 	});
@@ -761,10 +844,13 @@ describe("createDPoPMechanism — server-provided nonce (#530)", () => {
 		ttlSeconds: 300,
 		now: () => t,
 	});
-	const build = (required: "as" | "as+rs", replayStore = createMemoryDPoPReplayStore()) =>
+	const build = (
+		required: "as" | "as+rs",
+		replaySeenSet: ReplaySeenSet = createMemoryReplaySeenSet(),
+	) =>
 		createDPoPMechanism({
 			issuer: ISSUER,
-			replayStore,
+			replaySeenSet,
 			iatWindowSeconds: 60,
 			nonce: { required, issuer },
 		});
@@ -840,19 +926,21 @@ describe("createDPoPMechanism — server-provided nonce (#530)", () => {
 	it("checks the nonce before the replay store is consulted", async () => {
 		// A proof refused for its nonce must not spend a replay entry: the
 		// client is about to retry the same jti with the nonce filled in.
-		const seen = vi.fn(async () => false);
+		const markSeen = vi.fn(async () => true);
 		const { proof } = await mintProof();
 		await expect(
-			build("as", { seen } as never).extract(makeReq(proof) as Request),
+			build("as", { kind: "spy", markSeen, contains: async () => false }).extract(
+				makeReq(proof) as Request,
+			),
 		).rejects.toMatchObject({ reason: "nonce_required" });
-		expect(seen).not.toHaveBeenCalled();
+		expect(markSeen).not.toHaveBeenCalled();
 	});
 
 	it("asks for nothing when no nonce policy is configured", async () => {
 		const { proof } = await mintProof();
 		const result = await createDPoPMechanism({
 			issuer: ISSUER,
-			replayStore: createMemoryDPoPReplayStore(),
+			replaySeenSet: createMemoryReplaySeenSet(),
 		}).extract(makeReq(proof) as Request);
 		expect(result).toMatchObject({ kind: "dpop" });
 		expect(result).not.toHaveProperty("responseHeaders");

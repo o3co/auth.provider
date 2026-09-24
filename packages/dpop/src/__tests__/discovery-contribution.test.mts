@@ -27,6 +27,7 @@
 import {
 	type BootstrapMap,
 	createApp,
+	createMemoryReplaySeenSet,
 	createSymmetricKeyStore,
 	defineModule,
 	type OidcDiscoveryContribution,
@@ -45,7 +46,6 @@ function dpopConfig(overrides: Record<string, unknown> = {}): unknown {
 				enabled: false,
 				"iat-window-seconds": 60,
 				"alg-whitelist": ["ES256", "ES384", "EdDSA", "RS256"],
-				"replay-store": "memory",
 				"replay-store-ttl-seconds": 300,
 				...overrides,
 			},
@@ -153,6 +153,8 @@ const bootWith = (dpop: Record<string, unknown>): BootstrapMap =>
 			oauth: { ...makeValidCoreConfig().oauth, dpop },
 		} as never,
 		pathResolver: (s: string) => s,
+		// An enabled mechanism records every proof in the seen-set.
+		replaySeenSet: createMemoryReplaySeenSet(),
 	}) satisfies Record<string, unknown> as BootstrapMap;
 
 describe("dpopModule — discovery metadata in the served document", () => {
@@ -163,7 +165,6 @@ describe("dpopModule — discovery metadata in the served document", () => {
 				enabled: true,
 				"iat-window-seconds": 60,
 				"alg-whitelist": ["ES256", "EdDSA"],
-				"replay-store": "memory",
 				"replay-store-ttl-seconds": 300,
 			}),
 		});
@@ -181,7 +182,6 @@ describe("dpopModule — discovery metadata in the served document", () => {
 				enabled: false,
 				"iat-window-seconds": 60,
 				"alg-whitelist": ["ES256", "ES384", "EdDSA", "RS256"],
-				"replay-store": "memory",
 				"replay-store-ttl-seconds": 300,
 			}),
 		});
