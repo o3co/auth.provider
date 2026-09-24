@@ -173,8 +173,14 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 
 			// Atomically consume code data from repository (replay attack prevention).
 			// A store that cannot answer is `503`, logged — not the terminal
-			// handler's `500`: the client did nothing wrong, and the code may
-			// still be redeemable once the store is back.
+			// handler's `500`: the client did nothing wrong. Whether a retry
+			// can redeem the code depends on where the failure fell. A store
+			// that never ran the consume leaves the code in place, and a retry
+			// once the store is back redeems it. A store that ran it and lost
+			// the reply (a `commandTimeout` after the delete) has spent the
+			// code: the retry gets `400 invalid_grant` and the user starts the
+			// authorization again, as single-use codes require. Nothing was
+			// issued either way, so there is nothing to revoke.
 			let codeData: Awaited<ReturnType<typeof codeRepository.consumeByCode>>;
 			try {
 				codeData = await codeRepository.consumeByCode(code);
