@@ -167,11 +167,14 @@ const credentialDatesAreDates = (credentials: FederationGrantCredentials): boole
 export function createMemoryFederationGrantStore(
 	options: MemoryFederationGrantStoreOptions = {},
 ): MemoryFederationGrantStore {
+	// Within the Date range, as the Redis store requires: past it a
+	// tombstone's horizon is no deadline a key can carry, and the two adapters
+	// give one answer to one setting.
 	const retentionMs =
 		options.tombstoneRetentionMs ?? DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS;
-	if (!Number.isFinite(retentionMs) || retentionMs < 0) {
+	if (!isStorableLifetime(retentionMs, { allowZero: true })) {
 		throw new RangeError(
-			"createMemoryFederationGrantStore: tombstoneRetentionMs must be a non-negative finite number",
+			"createMemoryFederationGrantStore: tombstoneRetentionMs must be a non-negative number of milliseconds that ends within the Date range",
 		);
 	}
 

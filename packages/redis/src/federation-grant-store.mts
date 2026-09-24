@@ -29,6 +29,9 @@ import {
 	type FederationGrantStore,
 	type FederationGrantUsage,
 	type FederationGrantWrite,
+	isStorableLifetime,
+	MAX_DURATION_MS,
+	MAX_DURATION_SECONDS,
 	type PendingFederationGrant,
 	type RevokedFederationGrant,
 	withinFederationGrantLifetimeCeiling,
@@ -351,17 +354,22 @@ export function createRedisFederationGrantStore(
 	if (keyPrefix.includes("{") || keyPrefix.includes("}")) {
 		throw new Error('federation grant store: keyPrefix may not contain "{" or "}"');
 	}
+	// Both must end within the Date range (core's `isStorableLifetime`). The
+	// scripts write a record or its subject-index entry and set the key's
+	// deadline last, so a deadline Redis refuses leaves what was written with no
+	// TTL; and a retention past 2^53 is written into a record that then does
+	// not read back, so every lodging fails and leaves its record behind.
 	const retentionMs =
 		options.tombstoneRetentionMs ?? DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS;
-	if (!Number.isFinite(retentionMs) || retentionMs < 0) {
+	if (!isStorableLifetime(retentionMs, { allowZero: true })) {
 		throw new Error(
-			"federation grant store: tombstoneRetentionMs must be a non-negative finite number",
+			"federation grant store: tombstoneRetentionMs must be a non-negative number of milliseconds that ends within the Date range",
 		);
 	}
 	const allowanceMs = options.listingAllowanceMs ?? DEFAULT_FEDERATION_GRANT_LISTING_ALLOWANCE_MS;
-	if (!Number.isFinite(allowanceMs) || allowanceMs < 0) {
+	if (!isStorableLifetime(allowanceMs, { allowZero: true })) {
 		throw new Error(
-			"federation grant store: listingAllowanceMs must be a non-negative finite number",
+			"federation grant store: listingAllowanceMs must be a non-negative number of milliseconds that ends within the Date range",
 		);
 	}
 	validateEncryptionMode("federation-grants", options.encryption.mode, options.guard ?? {});
@@ -844,7 +852,11 @@ const durationFromEnv = (bounds: z.ZodNumber) =>
 const moduleConfigSchema = z.object({
 	federationGrants: z
 		.object({
-			tombstoneRetention: durationFromEnv(z.number().int().nonnegative()).optional(),
+			// One year at most, as core's schema holds every duration an
+			// operator writes; the store's constructor is the second line.
+			tombstoneRetention: durationFromEnv(
+				z.number().int().nonnegative().max(MAX_DURATION_SECONDS),
+			).optional(),
 			encryptionMode: z.enum(["required", "allow-plaintext"]).optional(),
 			encryptionKeys: z
 				.array(z.object({ id: z.string().min(1), key: z.string().min(1) }))
@@ -854,7 +866,9 @@ const moduleConfigSchema = z.object({
 	redisFederationGrantStore: z
 		.object({
 			keyPrefix: z.string().default("fg:"),
-			listingAllowanceMs: durationFromEnv(z.number().int().nonnegative()).optional(),
+			listingAllowanceMs: durationFromEnv(
+				z.number().int().nonnegative().max(MAX_DURATION_MS),
+			).optional(),
 		})
 		.default({ keyPrefix: "fg:" }),
 	deployment: z.object({ mode: z.string().optional() }).optional(),

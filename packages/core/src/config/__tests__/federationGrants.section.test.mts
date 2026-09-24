@@ -23,9 +23,11 @@
 // Here there is a second reason: the Redis grant store reads the same block,
 // and it is installed whether or not the routes are.
 //
-// Presence-and-shape only. The real bounds are enforced where the values are
-// used (`assertFederationGrantRetrievalLimits`, the store's constructor), and
-// the defaults live in `config/reference.conf` beside every other section's.
+// Presence-and-shape only, but for the one-year ceiling on the tombstone
+// retention, which the stores are handed directly. The real bounds are
+// enforced where the values are used (`assertFederationGrantRetrievalLimits`,
+// the store's constructor), and the defaults live in `config/reference.conf`
+// beside every other section's.
 
 import { describe, expect, it } from "vitest";
 import { fullSectionsSchema } from "#/config/application.schema.mjs";

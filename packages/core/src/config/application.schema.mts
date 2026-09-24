@@ -1267,7 +1267,12 @@ export const fullSectionsSchema = z.object({
 			// Seconds. How long a record answers past the end of what it was
 			// authorized for (D16). Zero is a deployment that keeps no
 			// tombstones.
-			tombstoneRetention: durationFromEnv(z.number().int().nonnegative()).optional(),
+			// One year at most, the ceiling of every duration here. Past the
+			// Date range it is a deadline no store can keep, and the stores
+			// refuse it when they are built.
+			tombstoneRetention: durationFromEnv(
+				z.number().int().nonnegative().max(MAX_DURATION_SECONDS),
+			).optional(),
 			// Whether a subject-wide revocation may be ASKED to leave this
 			// subject's established grants standing (D13). An allowance and not
 			// an instruction: the caller still has to ask, what it asked for and
@@ -1768,7 +1773,8 @@ export const fullSectionsSchema = z.object({
 	redisFederationGrantStore: z
 		.object({
 			keyPrefix: z.string().optional(),
-			listingAllowanceMs: z.coerce.number().int().nonnegative().optional(),
+			// One year at most, as every duration here; see tombstoneRetention.
+			listingAllowanceMs: z.coerce.number().int().nonnegative().max(MAX_DURATION_MS).optional(),
 		})
 		.optional(),
 	redisFederationTokenStore: z
