@@ -118,6 +118,16 @@ export function runPendingConsentStoreContract(
 			expect(await store.consume("ch-1")).toBeNull();
 		});
 
+		it("refuses an expiry that is not a finite number, and parks nothing", async () => {
+			// NaN is never `<= now`: the memory store kept such a request for
+			// ever, and Redis was asked for a TTL of NaN after the record was
+			// written.
+			for (const expiresAt of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+				await expect(store.set(record({ expiresAt }))).rejects.toThrow(RangeError);
+				expect(await store.get("ch-1")).toBeNull();
+			}
+		});
+
 		it("keeps a record the caller mutates afterwards intact", async () => {
 			const scopes = ["read"];
 			await store.set(record({ scopes }));

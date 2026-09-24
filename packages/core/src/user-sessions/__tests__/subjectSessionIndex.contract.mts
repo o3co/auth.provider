@@ -102,6 +102,15 @@ export function runSubjectSessionIndexContract(factory: SubjectSessionIndexFacto
 			expect(await sids(index, "u1")).toEqual([]);
 		});
 
+		it("refuses an expiresAt that is not a valid date, and records nothing", async () => {
+			// An Invalid Date's time is NaN, which is never `<= now`: the memory
+			// index listed such a session for ever, and Redis was asked to score a
+			// member NaN. A caller fault.
+			const index = await factory();
+			await expect(index.addSid("u1", "s1", new Date(Number.NaN))).rejects.toThrow(RangeError);
+			expect(await sids(index, "u1")).toEqual([]);
+		});
+
 		it("expires each session on its own clock, not the subject's last write", async () => {
 			// Why this index is not built on the sid-keyed sorted-set primitive:
 			// that keeps ONE expiry per key, correct where every member shares a

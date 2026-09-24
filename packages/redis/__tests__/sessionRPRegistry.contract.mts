@@ -125,6 +125,15 @@ export function runSessionRPRegistryContract(
 			expect(list).toEqual([]);
 		});
 
+		it("registerRP refuses an expiresAt that is not a valid date, and records nothing", async () => {
+			// An Invalid Date's time is NaN, which is never `<= now`: the memory
+			// store kept such an entry for ever, and Redis wrote the entry and then
+			// refused `PEXPIREAT NaN`, leaving the key with no TTL. A caller fault.
+			const reg = await factory();
+			await expect(reg.registerRP("sid-1", RP(), new Date(Number.NaN))).rejects.toThrow(RangeError);
+			expect(await reg.listRPs("sid-1")).toEqual([]);
+		});
+
 		it("listRPs returns empty after expiresAt elapsed", async () => {
 			// Dated from, and waited out on, the store's own clock (see
 			// `aheadOfBoth`). A fixed 50 ms expiry and a 100 ms sleep on the host

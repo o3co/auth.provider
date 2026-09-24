@@ -90,6 +90,17 @@ export function runSessionFamilyIndexContract(
 			expect(list).toEqual([]);
 		});
 
+		it("addFamilyId refuses an expiresAt that is not a valid date, and records nothing", async () => {
+			// An Invalid Date's time is NaN, which is never `<= now`: the memory
+			// store kept such an entry for ever, and Redis wrote the entry and then
+			// refused `PEXPIREAT NaN`, leaving the key with no TTL. A caller fault.
+			const idx = await factory();
+			await expect(idx.addFamilyId("sid-1", "fam-A", new Date(Number.NaN))).rejects.toThrow(
+				RangeError,
+			);
+			expect(await idx.listFamilyIds("sid-1")).toEqual([]);
+		});
+
 		it("listFamilyIds returns empty after expiresAt elapsed", async () => {
 			// Dated from, and waited out on, the store's own clock (see
 			// `aheadOfBoth`). A fixed 50 ms expiry and a 100 ms sleep on the host

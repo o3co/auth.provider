@@ -137,6 +137,25 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 			expect(await store.find("u-1", "app")).toBeNull();
 		});
 
+		it("refuses an expiry that is not a finite number, and records nothing", async () => {
+			// NaN is never `<= now`: the memory store kept such a consent for
+			// ever, and Redis was asked for a TTL of NaN after the record was
+			// written. "Until revoked" is `undefined`; an infinite expiry is not
+			// another spelling of it.
+			for (const expiresAt of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+				await expect(
+					store.grant({
+						sub: "u-1",
+						clientId: "app",
+						scopes: ["read"],
+						grantedAt: Date.now(),
+						expiresAt,
+					}),
+				).rejects.toThrow(RangeError);
+				expect(await store.find("u-1", "app")).toBeNull();
+			}
+		});
+
 		it("does not carry the scopes of an expired record into a later grant", async () => {
 			// The union is with what the user has agreed to and still stands; a
 			// consent that has lapsed is not one of those.
