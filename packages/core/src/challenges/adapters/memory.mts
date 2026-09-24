@@ -44,6 +44,13 @@ export function createMemoryChallengeStore(): ChallengeStore {
 		kind: "memory",
 
 		async issue(scope, value, expiresAtMs) {
+			// NaN is never `<= now`, and ±Infinity is no expiry: without this the
+			// challenge would be kept forever.
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError(
+					`ChallengeStore.issue: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+				);
+			}
 			const nowMs = Date.now();
 			if (expiresAtMs <= nowMs) {
 				throw new ChallengeStorageError({ reason: "expired-at-issue" });

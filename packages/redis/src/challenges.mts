@@ -34,7 +34,9 @@ export interface RedisChallengeStoreOptions {
 
 /**
  * Redis-backed ChallengeStore. All three ops are 1-Redis-op atomic primitives:
- *   - issue:   SET <prefix><key> "1" PX <ttlMs> NX  → "OK" | null
+ *   - issue:   SET <prefix><key> "1" PX <ttlMs> NX  → "OK" | null. `PX` takes
+ *              whole milliseconds, so a fractional remaining life is rounded
+ *              up; a non-finite expiry is refused before Redis is asked.
  *   - find:    PTTL <prefix><key>                   → -2 absent, -1 no-TTL, ≥0 ms
  *   - consume: DEL <prefix><key>                    → count deleted
  *
@@ -55,11 +57,16 @@ export function createRedisChallengeStore(opts: RedisChallengeStoreOptions): Cha
 		kind: "redis",
 
 		async issue(scope, value, expiresAtMs) {
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError(
+					`ChallengeStore.issue: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+				);
+			}
 			const ttlMs = expiresAtMs - Date.now();
 			if (ttlMs <= 0) {
 				throw new ChallengeStorageError({ reason: "expired-at-issue" });
 			}
-			const result = await client.set(fullKey(scope, value), "1", "PX", ttlMs, "NX");
+			const result = await client.set(fullKey(scope, value), "1", "PX", Math.ceil(ttlMs), "NX");
 			if (result === null) {
 				throw new ChallengeStorageError({ reason: "duplicate" });
 			}

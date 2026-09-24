@@ -54,6 +54,10 @@ export interface ChallengeStore {
 	 *   has a non-expired entry.
 	 * @throws ChallengeStorageError({ reason: "expired-at-issue" }) when
 	 *   expiresAtMs <= now() at call time.
+	 * @throws RangeError when expiresAtMs is not a finite number (NaN,
+	 *   ±Infinity) — a caller fault, not the timing race above. Nothing is
+	 *   recorded. A fractional expiresAtMs is valid; the challenge lives at
+	 *   least until it.
 	 */
 	issue(scope: string, value: string, expiresAtMs: number): Promise<void>;
 
