@@ -456,67 +456,16 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// bearer replay for everyone else.
 			const issuedConfirmation = ownedConfirmation(ctx.tokenBinding);
 
-			// Fail-closed: the self-issued validator silently skips the family check
-			// when refreshTokenFamilyRevocation is absent, but Token Exchange must
-			// not issue tokens whose revocation cannot be observed (spec §7.2 state 1).
-			if (
-				subjectValidated.familyId &&
-				!deps.refreshTokenFamilyRevocation &&
-				subjectTokenType === ACCESS_TOKEN_TYPE
-			) {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription:
-							"refresh token family revocation not configured (revocation cannot be verified)",
-					},
-				};
-			}
-
-			// Revocation responsibility model (spec §7.2):
-			//   - The built-in self-issued validator accepts an OPTIONAL
-			//     refreshTokenFamilyRevocation as a convenience — but the
-			//     RECOMMENDED wiring (used by integration tests and README) leaves
-			//     the validator storeless and lets this handler own revocation.
-			//   - Handler-owned revocation has two benefits: (a) it can surface the
-			//     specific `family_revoked` errorDescription that RFC 8693 consumers
-			//     expect, and (b) it applies fail-closed semantics (spec §7.2 state 1)
-			//     when the slot is not wired at the grant level.
-			//   - If a consumer wires the slot into BOTH the validator AND the grant,
-			//     revocation is double-checked. Safe but wasteful — the validator's
-			//     early null short-circuits the handler's specific error reporting.
-			// Re-surface family_revoked for operators by consulting the slot directly
-			// when a family_id was present. isFamilyRevoked is idempotent and cheap.
-			if (
-				subjectValidated.familyId &&
-				deps.refreshTokenFamilyRevocation &&
-				subjectTokenType === ACCESS_TOKEN_TYPE
-			) {
-				let revoked: boolean;
-				try {
-					revoked = await deps.refreshTokenFamilyRevocation.isFamilyRevoked(
-						subjectValidated.familyId,
-					);
-				} catch {
-					return {
-						result: {
-							status: 503,
-							error: "temporarily_unavailable",
-							errorDescription: "refresh token store unavailable",
-						},
-					};
-				}
-				if (revoked) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "family_revoked",
-						},
-					};
-				}
-			}
+			// The refresh-token family rule — this grant's, not the validator's;
+			// see `familyRefusal`. After the matrices above, so a cheap refusal
+			// still short-circuits ahead of the store read.
+			const subjectFamilyRefusal = await familyRefusal(
+				deps.refreshTokenFamilyRevocation,
+				"subject",
+				subjectTokenType,
+				subjectValidated,
+			);
+			if (subjectFamilyRefusal) return subjectFamilyRefusal;
 
 			let actorValidated: typeof subjectValidated | null = null;
 			if (actorToken !== null && actorValidator) {
@@ -567,11 +516,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// approximating it with a rule that enforces nothing.
 			//
 			// Placed as early as the check can be: it needs the actor's claims,
-			// so it runs immediately after actor validation and ahead of
-			// `may_act`, the policy hook and the keystore signature. It is not
-			// ahead of *all* store I/O — validating the subject and the actor
-			// already consulted the family revocation store — because a `cnf`
-			// cannot be read out of a token that has not been verified yet.
+			// so it runs immediately after actor validation and ahead of the
+			// actor's family check, `may_act`, the policy hook and the keystore
+			// signature. It is not ahead of *all* store I/O — validating the
+			// subject and the actor already consulted the revocation stores, and
+			// the subject's family was checked above — because a `cnf` cannot be
+			// read out of a token that has not been verified yet.
 			if (actorValidated) {
 				const actorMatch = matchConfirmation(actorValidated.claims.cnf, ctx.tokenBinding);
 				if (actorMatch.status === "compound") {
@@ -608,6 +558,18 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 					};
 				}
+
+				// The subject's family rule, applied to the actor: the actor's
+				// identity is folded into the issued token's `act` claim, so a
+				// revoked actor credential must not be recorded as a live
+				// delegation any more than a revoked subject may be exchanged.
+				const actorFamilyRefusal = await familyRefusal(
+					deps.refreshTokenFamilyRevocation,
+					"actor",
+					actorTokenType,
+					actorValidated,
+				);
+				if (actorFamilyRefusal) return actorFamilyRefusal;
 
 				const subjectMayAct = subjectValidated.claims.may_act;
 				if (
@@ -1142,6 +1104,70 @@ function getMaxActorChainDepth(deps: TokenExchangeDependencies): number {
 		maxActorChainDepth > 0
 		? maxActorChainDepth
 		: 3;
+}
+
+/**
+ * The refresh-token family rule for a self-issued access token presented as
+ * `subject_token` or `actor_token`: the refusal to return, or `null` when the
+ * token passes.
+ *
+ * This grant owns the rule, for both tokens; the built-in validator does not
+ * read `refreshTokenFamilyRevocation`. A validator can only answer `null`,
+ * which the handler reports as `… validation failed`, whereas a revoked family
+ * has an answer of its own on `/oauth/token` — the refresh grant already gives
+ * `family_revoked` there — and it tells the client that re-authenticating, not
+ * retrying, is what helps. Owning it here also keeps its three outcomes in one
+ * place, checked once per token:
+ *
+ * - `family_id` present but no `refreshTokenFamilyRevocation` wired: refused.
+ *   The exchange would accept a credential whose revocation it cannot observe,
+ *   and the issued token inherits the subject's `family_id` (fail-closed).
+ * - The store throws: `503 temporarily_unavailable`, so an outage is never
+ *   reported as a revoked token.
+ * - The family is revoked: `invalid_grant` / `family_revoked`
+ *   (`actor_token family_revoked` for the actor).
+ *
+ * Only this provider's own access tokens carry a family: core's
+ * `ValidatedToken.familyId` is populated for them alone, so another token
+ * type's validator is not held to the rule.
+ */
+async function familyRefusal(
+	refreshTokenFamilyRevocation: TokenExchangeDependencies["refreshTokenFamilyRevocation"],
+	role: "subject" | "actor",
+	tokenType: string | null,
+	validated: ValidatedToken,
+): Promise<GrantHandlerResult | null> {
+	if (!validated.familyId || tokenType !== ACCESS_TOKEN_TYPE) return null;
+	if (!refreshTokenFamilyRevocation) {
+		return {
+			result: {
+				status: 400,
+				error: "invalid_grant",
+				errorDescription:
+					"refresh token family revocation not configured (revocation cannot be verified)",
+			},
+		};
+	}
+	let revoked: boolean;
+	try {
+		revoked = await refreshTokenFamilyRevocation.isFamilyRevoked(validated.familyId);
+	} catch {
+		return {
+			result: {
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "refresh token store unavailable",
+			},
+		};
+	}
+	if (!revoked) return null;
+	return {
+		result: {
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: role === "subject" ? "family_revoked" : "actor_token family_revoked",
+		},
+	};
 }
 
 function subjectAudienceBoundary(

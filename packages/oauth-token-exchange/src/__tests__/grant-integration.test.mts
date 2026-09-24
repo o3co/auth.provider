@@ -73,13 +73,9 @@ function makeStatefulStore(): RefreshTokenFamilyRevocation & { revokedFamilies: 
 
 function buildHandler(store: RefreshTokenFamilyRevocation) {
 	const registry = new ExchangeTokenValidatorRegistry();
-	// Validator has no refreshTokenFamilyRevocation so it returns a ValidatedToken with
-	// familyId set. The grant handler's re-surface block then consults
-	// deps.refreshTokenFamilyRevocation and emits the family_revoked errorDescription.
-	// This matches the unit-test pattern (validatorRefreshStore: null) and is
-	// required for the cascade test to observe "family_revoked" vs the opaque
-	// "subject_token validation failed" that would result if the validator
-	// absorbed the revocation check itself.
+	// The validator projects `familyId` and the grant checks it against
+	// `refreshTokenFamilyRevocation` — the same split `tokenExchangeModule`
+	// wires, which the createApp suite below boots for real.
 	registry.register(
 		ACCESS_TOKEN_TYPE,
 		createSelfIssuedAccessTokenValidator({
@@ -264,20 +260,18 @@ describe("token_exchange — integration", () => {
 	});
 
 	// Boot planner only injects keys listed in `requires` ∪ `optional` into
-	// contribution-factory `deps`. Both the grant handler (`grant.mts:212-266`,
-	// family_revoked re-surface) and the built-in self-issued validator
-	// (`module.mts:68`, family revocation check) read `deps.refreshTokenFamilyRevocation`.
-	// Without declaring it here, a composition root that wires the store
-	// will have it silently dropped: family-revocation observability turns
-	// off, and self-issued exchanges that carry a `family_id` are rejected
-	// as if the store were absent. RFC 8693 §7.2 state 1 requirement.
+	// contribution-factory `deps`. The grant handler reads
+	// `deps.refreshTokenFamilyRevocation` for its family rule (`familyRefusal`
+	// in grant.mts). Without declaring it here, a composition root that wires
+	// the store would have it silently dropped, and every self-issued exchange
+	// carrying a `family_id` would be refused as if the store were absent.
 	it("declares refreshTokenFamilyRevocation in optional so the family-revocation path receives it", async () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
 		expect(tokenExchangeModule.optional).toContain("refreshTokenFamilyRevocation");
 	});
 
 	// Symmetric to the refreshTokenFamilyRevocation guard above. The token-exchange grant
-	// reads `deps.grantPolicy` at grant.mts:339,362 to enforce CP-18 fail-
+	// reads `deps.grantPolicy` in grant.mts to enforce CP-18 fail-
 	// closed policy decisions on exchange requests. Other OAuth grants
 	// (createAuthorizationGrant / createRefreshTokenGrant) declare grantPolicy
 	// in oauthAuthorizationModule.optional; without declaring it here as well,

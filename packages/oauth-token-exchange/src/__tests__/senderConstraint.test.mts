@@ -84,7 +84,6 @@ const buildGrant = () => {
 		createSelfIssuedAccessTokenValidator({
 			keyStore,
 			issuer: ISSUER,
-			refreshTokenFamilyRevocation: store,
 		}),
 	);
 	return createTokenExchangeGrant({

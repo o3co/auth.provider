@@ -22,7 +22,6 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 	const validator = (overrides = {}) =>
 		createSelfIssuedAccessTokenValidator({
 			keyStore,
-			refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			issuer: ISSUER,
 			...overrides,
 		});
@@ -33,7 +32,6 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 			// for a caller the types cannot reach is what this asserts.
 			createSelfIssuedAccessTokenValidator({
 				keyStore,
-				refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			}),
 		).toThrow("issuer is required");
 	});
@@ -68,30 +66,30 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		expect(result).toBeNull();
 	});
 
-	it("returns null when family is revoked", async () => {
-		const token = await signSelfIssuedAccessToken({ family_id: "fam-revoked" });
+	it("does not consult a family store: the family rule is the grant's", async () => {
+		// Were the validator to refuse a revoked family, it would answer first
+		// with an opaque `null` and the grant's `family_revoked` would never
+		// reach a client — `grant-integration.test.mts` pins that answer through
+		// the booted module. So the option is gone, and a store smuggled past
+		// the types is ignored: the family is projected, never read.
 		const store = makeFamilyRevocation({
 			isFamilyRevoked: vi.fn().mockResolvedValue(true),
 		});
-		const v = validator({ refreshTokenFamilyRevocation: store });
-		expect(await v.validate(token, { role: "subject" })).toBeNull();
-		expect(store.isFamilyRevoked).toHaveBeenCalledWith("fam-revoked");
-	});
-
-	it("throws when isFamilyRevoked throws (runtime unavailable)", async () => {
-		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
-		const store = makeFamilyRevocation({
-			isFamilyRevoked: vi.fn().mockRejectedValue(new Error("redis down")),
+		const v = createSelfIssuedAccessTokenValidator({
+			keyStore,
+			issuer: ISSUER,
+			// @ts-expect-error — not an option: the grant owns the family check.
+			refreshTokenFamilyRevocation: store,
 		});
-		const v = validator({ refreshTokenFamilyRevocation: store });
-		await expect(v.validate(token, { role: "subject" })).rejects.toThrow("redis down");
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-revoked" });
+		const result = await v.validate(token, { role: "subject" });
+		expect(result?.familyId).toBe("fam-revoked");
+		expect(store.isFamilyRevoked).not.toHaveBeenCalled();
 	});
 
-	it("accepts a token without family_id claim (legacy) when refreshTokenFamilyRevocation is present", async () => {
+	it("accepts a token without a family_id claim, leaving familyId absent", async () => {
 		const token = await signSelfIssuedAccessToken({});
-		const store = makeFamilyRevocation();
-		const v = validator({ refreshTokenFamilyRevocation: store });
-		const result = await v.validate(token, { role: "subject" });
+		const result = await validator().validate(token, { role: "subject" });
 		expect(result).not.toBeNull();
 		expect(result?.familyId).toBeUndefined();
 	});

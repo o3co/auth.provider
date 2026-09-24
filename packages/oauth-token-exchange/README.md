@@ -11,8 +11,8 @@ Supports on-behalf-of, delegation (`act` claim), and scope / audience narrowing.
 
 **Owns:**
 
-- the exchange decision: which client may exchange ([note 14](#security-notes), [note 15](#security-notes)), the scope and audience ceilings, `may_act`, the actor chain and the `act` claim, the sender-constraint matrices, and the issued token's lifetime;
-- the built-in `access_token` validator in [`src/validator/`](./src/validator) (`createSelfIssuedAccessTokenValidator`), which verifies a token this provider issued and consults the revocation stores.
+- the exchange decision: which client may exchange ([note 14](#security-notes), [note 15](#security-notes)), the scope and audience ceilings, `may_act`, the actor chain and the `act` claim, the sender-constraint matrices, the refresh-token family check on the `subject_token` and the `actor_token` ([note 1](#security-notes)), and the issued token's lifetime;
+- the built-in `access_token` validator in [`src/validator/`](./src/validator) (`createSelfIssuedAccessTokenValidator`), which verifies a token this provider issued and consults the access-token denylist and the subject watermark. It reads a token's `family_id` but leaves the family check to the handler.
 
 **Does not own:**
 
@@ -72,7 +72,7 @@ Exported from [`src/index.mts`](./src/index.mts):
 
 - `tokenExchangeModule` — [`module.mts`](./src/module.mts). The module value to install.
 - `createTokenExchangeGrant`, `TokenExchangeDependencies`, `TOKEN_EXCHANGE_GRANT_TYPE`, `ACCESS_TOKEN_TYPE` — [`grant.mts`](./src/grant.mts). The handler itself, for a composition that dispatches it from its own route.
-- `createSelfIssuedAccessTokenValidator`, `CreateSelfIssuedAccessTokenValidatorOptions` — [`validator/selfIssuedAccessToken.mts`](./src/validator/selfIssuedAccessToken.mts). The built-in validator. `issuer` is required; the factory throws without a non-empty one, because without it an `at+jwt` signed by the same key store but naming another issuer could pass.
+- `createSelfIssuedAccessTokenValidator`, `CreateSelfIssuedAccessTokenValidatorOptions` — [`validator/selfIssuedAccessToken.mts`](./src/validator/selfIssuedAccessToken.mts). The built-in validator. `issuer` is required; the factory throws without a non-empty one, because without it an `at+jwt` signed by the same key store but naming another issuer could pass. It takes no `refreshTokenFamilyRevocation`: the family check is the handler's (note 1), so a composition that dispatches `createTokenExchangeGrant` itself gives that slot to the handler.
 
 The validator contract is not re-exported: import `ExchangeTokenValidator`, `ValidatedToken` and `ExchangeTokenValidationContext` from `@o3co/auth-provider-core`.
 
@@ -158,7 +158,13 @@ Two modules contributing a validator for the same token type is refused at boot.
 
 ## Security notes
 
-1. **Wire `refreshTokenFamilyRevocation`, or this provider's family-bearing access tokens cannot be exchanged.** A self-issued access token carrying `family_id` — every token the `authorization_code` and `refresh_token` grants mint — is exchangeable only when its family's revocation state can be read. With no `refreshTokenFamilyRevocation` in the module graph the handler answers `invalid_grant` / `refresh token family revocation not configured (revocation cannot be verified)` (fail-closed, RFC 8693 §7.2). Core's `defaultRefreshTokenFamilyRevocationModule` provides the slot over a refresh-token family store (see [Register the grant](#register-the-grant)). With it wired, a subject token whose family is revoked is `invalid_grant`: through `tokenExchangeModule` the built-in validator reads the slot too and refuses first, so the description is `subject_token validation failed`; the handler's own `family_revoked` description is reached only when `createTokenExchangeGrant` is given a validator built without the slot. A store that cannot answer is `503 temporarily_unavailable`.
+1. **Wire `refreshTokenFamilyRevocation`, or this provider's family-bearing access tokens cannot be exchanged.** A self-issued access token carrying `family_id` — every token the `authorization_code` and `refresh_token` grants mint — is accepted as `subject_token` or as `actor_token` only when its family's revocation state can be read. The handler owns this check, for both tokens; the built-in validator does not read the slot. The answers:
+
+   - **No `refreshTokenFamilyRevocation` in the module graph:** `invalid_grant` / `refresh token family revocation not configured (revocation cannot be verified)` (fail-closed). Core's `defaultRefreshTokenFamilyRevocationModule` provides the slot over a refresh-token family store (see [Register the grant](#register-the-grant)).
+   - **The family is revoked** (logout, refresh-token replay): `invalid_grant` / `family_revoked` for the `subject_token`, `actor_token family_revoked` for the `actor_token` — the description the `refresh_token` grant gives a revoked family on the same endpoint. A client seeing it needs the user to authenticate again; retrying the exchange will not help.
+   - **The store cannot answer:** `503 temporarily_unavailable` / `refresh token store unavailable`.
+
+   A token without `family_id` (a `client_credentials` token, say) has no family to check. The same answers hold for a composition that dispatches `createTokenExchangeGrant` itself: they depend only on the `refreshTokenFamilyRevocation` handed to the handler.
 
 2. **Scope is bounded by two ceilings, always.** `granted scope ⊆ subject_token.scope ∩ client.allowedScopes` is enforced unconditionally, and a `GrantPolicyHook` cannot bypass either **through the request parameter** (point 5 covers the policy-level override, which is re-checked against both). An explicitly requested scope outside either ceiling is refused with `invalid_scope` naming it; an omitted `scope` inherits the subject token's, clamped to the registration.
 
@@ -226,7 +232,7 @@ Sender-constrained exchange is supported: the handler enforces the DPoP and mTLS
 
 ## Tests
 
-[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest and the family cascade.
+[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest and the family answers of note 1, with `tokenExchangeModule` and core's refresh-token family modules booted through `createApp`.
 
 ## RFC references
 

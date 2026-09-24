@@ -68,8 +68,6 @@ function buildGrant(
 		clientRepository?: ClientRepository;
 		/** Pass `null` to explicitly omit the store from deps (fail-closed tests). */
 		refreshTokenFamilyRevocation?: ReturnType<typeof makeFamilyRevocation> | null;
-		/** Store wired into the validator (defaults to same as refreshTokenFamilyRevocation). */
-		validatorRefreshStore?: ReturnType<typeof makeFamilyRevocation> | null;
 		config?: AppConfig;
 		grantPolicy?: GrantPolicyHook;
 	} = {},
@@ -80,17 +78,12 @@ function buildGrant(
 		overrides.refreshTokenFamilyRevocation === null
 			? undefined
 			: (overrides.refreshTokenFamilyRevocation ?? makeFamilyRevocation());
-	// validatorRefreshStore defaults to same as grantStore unless explicitly overridden
-	const validatorStore =
-		"validatorRefreshStore" in overrides
-			? (overrides.validatorRefreshStore ?? undefined)
-			: (grantStore ?? undefined);
+	// The validator takes no family store: the grant owns the family check.
 	if (!overrides.validatorRegistry) {
 		registry.register(
 			ACCESS_TOKEN_TYPE,
 			createSelfIssuedAccessTokenValidator({
 				keyStore,
-				refreshTokenFamilyRevocation: validatorStore,
 				issuer: ISSUER,
 			}),
 		);
@@ -365,11 +358,9 @@ describe("createTokenExchangeGrant — token validation", () => {
 		const store = makeFamilyRevocation({
 			isFamilyRevoked: async (id) => id === "fam-bad",
 		});
-		// validatorRefreshStore: null → validator has no store, so it returns a
-		// ValidatedToken with familyId set (doesn't self-check revocation).
-		// The grant's re-surface block then consults `refreshTokenFamilyRevocation` and
-		// surfaces the `family_revoked` errorDescription.
-		const g = buildGrant({ refreshTokenFamilyRevocation: store, validatorRefreshStore: null });
+		// The validator projects `familyId`; the grant consults
+		// `refreshTokenFamilyRevocation` and answers `family_revoked`.
+		const g = buildGrant({ refreshTokenFamilyRevocation: store });
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-bad" });
 		const { result } = await g.handle(
 			ctx({
@@ -388,10 +379,8 @@ describe("createTokenExchangeGrant — token validation", () => {
 
 	it("returns invalid_grant when refreshTokenFamilyRevocation is not wired (fail-closed)", async () => {
 		// refreshTokenFamilyRevocation: null → deps.refreshTokenFamilyRevocation is undefined (absent).
-		// validatorRefreshStore: null → validator has no store, so it returns a
-		// ValidatedToken with familyId (doesn't self-check revocation).
 		// The grant's fail-closed check fires: familyId present + no store → 400.
-		const g = buildGrant({ refreshTokenFamilyRevocation: null, validatorRefreshStore: null });
+		const g = buildGrant({ refreshTokenFamilyRevocation: null });
 		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const { result } = await g.handle(
 			ctx({
@@ -404,7 +393,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
 	});
 
-	it("returns temporarily_unavailable (503) when validator throws (runtime store failure)", async () => {
+	it("returns temporarily_unavailable (503) when the family store throws (runtime store failure)", async () => {
 		const store = makeFamilyRevocation({
 			isFamilyRevoked: async () => {
 				throw new Error("redis down");
@@ -421,6 +410,33 @@ describe("createTokenExchangeGrant — token validation", () => {
 			}),
 		);
 		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+	});
+
+	it("returns temporarily_unavailable (503) when the family store throws on the actor_token's family", async () => {
+		// The subject's family answers; the actor's cannot be read. An outage is
+		// never reported as a revoked (or a live) actor.
+		const store = makeFamilyRevocation({
+			isFamilyRevoked: async (id) => {
+				if (id === "fam-actor") throw new Error("redis down");
+				return false;
+			},
+		});
+		const g = buildGrant({ refreshTokenFamilyRevocation: store });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-1" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", family_id: "fam-actor" }),
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "refresh token store unavailable",
+		});
 	});
 
 	it("returns invalid_grant when actor_token fails validation", async () => {

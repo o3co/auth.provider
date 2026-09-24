@@ -104,7 +104,6 @@ function buildGrant(
 		createSelfIssuedAccessTokenValidator({
 			keyStore,
 			issuer: ISSUER,
-			refreshTokenFamilyRevocation: store,
 		}),
 	);
 	if (overrides.stub) registry.register(STUB_TOKEN_TYPE, stubValidator(overrides.stub));
