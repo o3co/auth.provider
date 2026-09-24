@@ -33,7 +33,8 @@
  * a callback passed as an argument (node-style: `save((err) => …)`,
  * `get(key, function (err, value) …)`), the first parameter of an Express
  * error handler (`(err, req, res, next)`, whatever the names but the last's
- * `next`, typed or not — `Request<P, B>`, `(err?: unknown) => void`), and an
+ * `next`, typed or not — `Request<P, B>`, `(err?: unknown) => void` — and
+ * followed by an arrow or a body, so a call's arguments are not one), and an
  * error-named value awaited from a helper
  * (`const consumeErr = await …`) — used anywhere in the arguments of a
  * logger call (`log.`, `logger.`, `….logger.` with a level or `child`;
@@ -61,8 +62,11 @@
  *   a bound `const log = logger.warn.bind(logger)`), and an audit sink or a
  *   deployment's callback (`report`), which are not loggers;
  * - an Express error handler whose parameter list runs past 400
- *   characters, or holds a `<` that no `>` closes (a comparison in a
- *   default value): its first parameter is not bound;
+ *   characters, or whose default values hold what the bracket scan reads
+ *   as a bracket: a string, template or regex literal with a bracket or a
+ *   comma in it, a `<` comparison (it opens a bracket no `>` closes) or a
+ *   `>` comparison (it closes one early). Its first parameter is not
+ *   bound; a return type longer than 200 characters hides it too;
  * - bindings are per file, not per scope: a variable elsewhere in the file
  *   that shares a caught error's name is flagged too (rename it).
  *
@@ -165,14 +169,17 @@ const CATCH_BINDINGS = [
 const MAX_PARAMETER_LIST = 400;
 
 /**
- * The top-level parameters of the list that opens at `open`, split on the
+ * The top-level entries of the list that opens at `open`, split on the
  * commas outside every bracket — `()`, `[]`, `{}` and a type's `<>`, an
  * arrow's `=>` not closing one — so a parameter typed `Request<P, B>` or
- * `(err?: unknown) => void` stays whole. `null` when the list does not
- * close within {@link MAX_PARAMETER_LIST} characters: a comparison's `<`
- * leaves it open, and it is not a parameter list.
+ * `(err?: unknown) => void` stays whole, and where the list closes. `null`
+ * when it does not close within {@link MAX_PARAMETER_LIST} characters: a
+ * comparison's `<` leaves it open, and it is not a parameter list.
  */
-function parametersFrom(source: string, open: number): string[] | null {
+function parametersFrom(
+	source: string,
+	open: number,
+): { readonly parameters: string[]; readonly close: number } | null {
 	const parameters: string[] = [];
 	let depth = 0;
 	let start = open + 1;
@@ -183,7 +190,7 @@ function parametersFrom(source: string, open: number): string[] | null {
 		else if (c === ")" || c === "]" || c === "}" || (c === ">" && source[i - 1] !== "=")) {
 			if (--depth === 0) {
 				parameters.push(source.slice(start, i));
-				return parameters;
+				return { parameters, close: i };
 			}
 		} else if (c === "," && depth === 1) {
 			parameters.push(source.slice(start, i));
@@ -198,16 +205,27 @@ const parameterName = (parameter: string): string | undefined =>
 	new RegExp(String.raw`^\s*(${IDENTIFIER})\s*(?:[?:=]|$)`).exec(parameter)?.[1];
 
 /**
+ * What follows a parameter list: an arrow, or a function or method body,
+ * maybe after a return type (`: void`, `: Promise<void>`). A call's
+ * arguments are followed by anything else.
+ */
+const FUNCTION_AFTER_PARAMETERS = /^\s*(?::[^;{}=]*)?(?:=>|\{)/;
+
+/**
  * An Express error handler's first parameter, whatever it is called: a list
- * of four parameters whose last is `next` or `_next`, each maybe typed —
+ * of four parameters whose last is `next` or `_next`, each maybe typed, that
+ * is a function's (an arrow or a body follows it, not a call's `;` or `)`) —
  * read by {@link parametersFrom}, because the types hold commas and
  * parentheses a regex over the list cannot tell from its own.
  */
 function errorHandlerNames(source: string): string[] {
 	const names: string[] = [];
 	for (let open = source.indexOf("("); open >= 0; open = source.indexOf("(", open + 1)) {
-		const parameters = parametersFrom(source, open);
-		if (parameters?.length !== 4) continue;
+		const list = parametersFrom(source, open);
+		if (list === null) continue;
+		if (!FUNCTION_AFTER_PARAMETERS.test(source.slice(list.close + 1, list.close + 201))) continue;
+		const { parameters } = list;
+		if (parameters.length !== 4) continue;
 		if (!/^_?next$/.test(parameterName(parameters[3] ?? "") ?? "")) continue;
 		const first = parameterName(parameters[0] ?? "");
 		if (first !== undefined) names.push(first);
