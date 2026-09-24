@@ -1013,6 +1013,34 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		// An empty `grantedAudience` is no decision, as core's
 		// `boundPolicyAudience` reads it for every other grant: the request's
 		// audience stands.
+		// A `resource` is the request's too (RFC 8707): the issued audience must
+		// equal it, and that audience is either the client id or one both the
+		// registration and the subject token carry. A resource outside that set
+		// can never be represented, so it is refused before the policy runs —
+		// a policy that turns the resource into its granted audience must not
+		// convert the caller's 400 into a 500.
+		it("answers invalid_target for a resource no issued audience could equal, whatever the policy does with it", async () => {
+			const resourceEchoing = policyModule(async (request) => ({
+				outcome: "allow",
+				grantedAudience: request.resource,
+			}));
+			for (const modules of [[], [resourceEchoing]]) {
+				const { grant } = await boot(modules);
+				const { result } = await exchange(grant, {
+					subject_token: await signSelfIssuedAccessToken({ aud: "client-a" }),
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					resource: "https://elsewhere.example",
+				});
+				expect(result).toEqual({
+					status: 400,
+					error: "invalid_target",
+					errorDescription: "requested_resources_not_in_audience: https://elsewhere.example",
+				});
+				await handle?.dispose();
+				handle = undefined;
+			}
+		});
+
 		it("keeps the request's audience when the policy returns an empty grantedAudience", async () => {
 			const { grant } = await boot([deciding({ grantedAudience: [] })]);
 			const { result } = await exchange(grant, {
