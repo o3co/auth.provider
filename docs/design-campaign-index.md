@@ -56,7 +56,6 @@ roadmap waves 1/2 — waves 3/4 and 5a–c/e–f were never used).
 The pre-campaign feature plan. All six items shipped by v0.4.0.
 
 - **F-1** — plumbing: `UserSessionStore` + `FederationTokenStore` optional slots (memory/redis; AES-256-GCM for stored refresh_token); the all-or-none boot guard survives in validate-manifests [verified]
-- **F-2** — login wiring: federation callback creates the UserSession and writes `sid`; local login mirrored later [reconstructed]
 - **F-3** — cascading revocation: `family_id` + `sid` claims, introspect family-revoke fail-closed cascade, CodeData nonce/sid round-trip [verified]
 - **F-4** — OIDC id_token + `/userinfo` + scope-gated claim filter [verified]
 - **F-5** — logout: `end_session_endpoint`, back/front-channel metadata, logout helpers [verified]
