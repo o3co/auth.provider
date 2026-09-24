@@ -936,6 +936,8 @@ export interface RouteOrderTargetMissingDetails {
 	readonly referencedBy: string | null;
 	/** Filled when `referencedBy` is null — the referencing route's mountPath. */
 	readonly referencedByMountPath?: string;
+	/** The module that contributed the referencing route — where to look. */
+	readonly referencedByModule: string;
 	readonly direction: "before" | "after";
 }
 

@@ -958,6 +958,7 @@ describe("validateManifests — step 14: route-order-target-missing", () => {
 			if (err.details.reason === "route-order-target-missing") {
 				expect(err.details.id).toBe("does-not-exist");
 				expect(err.details.referencedBy).toBe("self");
+				expect(err.details.referencedByModule).toBe("r");
 				expect(err.details.direction).toBe("before");
 			}
 			return;

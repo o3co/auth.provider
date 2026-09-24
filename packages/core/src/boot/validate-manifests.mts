@@ -173,8 +173,9 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
  * A `modules` entry that is a function is a module factory listed without
  * being called — `deviceGrantModule` where `deviceGrantModule({ config })`
  * was meant, or `sessionStoreModuleFor` for `sessionStoreModuleFor(config)`.
- * Factories take different arguments, so the message does not guess them. `Module` requires only `name`, and a function has one, so the
- * compiler accepts the entry; every other check below would then read it as
+ * Factories take different arguments, so the message does not guess them.
+ * `Module` requires only `name`, and a function has one, so the compiler
+ * accepts the entry; every other check below would then read it as
  * a manifest that declares nothing, and boot would succeed with the module's
  * grants, routes and refusals all silently absent. Refused first, before any
  * check reads a field of it.
@@ -1515,6 +1516,7 @@ function checkRouteOrderEdges(rawModules: readonly Module[]): void {
 											reason: "route-order-target-missing",
 											id: token,
 											referencedBy: route.id,
+											referencedByModule: m.name,
 											direction,
 										}
 									: {
@@ -1522,6 +1524,7 @@ function checkRouteOrderEdges(rawModules: readonly Module[]): void {
 											id: token,
 											referencedBy: null,
 											referencedByMountPath: route.mountPath,
+											referencedByModule: m.name,
 											direction,
 										},
 						});

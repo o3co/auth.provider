@@ -250,6 +250,7 @@ describe("assembleApp — 4b. mount-order: a missing edge target names the modul
 			}
 			expect(thrown?.reason).toBe("route-order-target-missing");
 			expect(thrown?.message).toMatch(/module "ModA"/);
+			expect(thrown?.details).toMatchObject({ referencedByModule: "ModA" });
 		},
 	);
 });

@@ -226,6 +226,7 @@ function computeMountOrder(
 							id: targetId,
 							referencedBy: id ?? null,
 							...(id === undefined ? { referencedByMountPath: r.contribution.mountPath } : {}),
+							referencedByModule: r.contributedBy,
 							direction: "before",
 						},
 					});
@@ -253,6 +254,7 @@ function computeMountOrder(
 							id: targetId,
 							referencedBy: id ?? null,
 							...(id === undefined ? { referencedByMountPath: r.contribution.mountPath } : {}),
+							referencedByModule: r.contributedBy,
 							direction: "after",
 						},
 					});
