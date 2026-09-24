@@ -76,9 +76,19 @@ import { isLoopbackHostname } from "./loopback.mjs";
  *   - an array, which is what `application.conf` and a hand-built `AppConfig`
  *     carry, and
  *   - a comma-separated string, which is the only shape an environment
- *     variable can carry a list in (`${?CORS_ALLOWED_ORIGINS}`). Splitting on
- *     the comma cannot cut an entry in two: a serialized origin has none, and
- *     neither does the base64url body of an Android app origin.
+ *     variable can carry a list in (`${?CORS_ALLOWED_ORIGINS}`).
+ *
+ * The two are read differently. The string is split on commas, each entry
+ * trimmed, and the empty ones dropped — an exported-but-empty variable is no
+ * list at all. The array keeps every string entry, trimmed, empty ones
+ * included so the entry check refuses them by index, and drops an entry that
+ * is not a string.
+ *
+ * The split only ever yields entries the operator wrote, each of which the
+ * caller then checks. A comma is legal inside a special-scheme host
+ * (`https://a,b.example` parses), so the string spelling cannot express such
+ * an origin — it splits there, and the halves are refused — but it cannot
+ * admit one the array spelling would refuse.
  *
  * It lives here, beside {@link checkSerializedOrigin}, because the config
  * schema is not the only reader. `assembleApp` decides whether to mount the

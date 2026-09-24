@@ -1015,9 +1015,9 @@ describe("the configured top origins reach the verifier (#554 audit)", () => {
 	};
 
 	it("passes them through the module's own wiring, not just a hand-built deps bag", async () => {
-		// The module rebuilds `webauthnConfig` field by field, so a key it does
-		// not name is a key the grant never sees — an operator-facing knob that
-		// looks configured and does nothing. That is what happened here.
+		// A key the module failed to forward would be an operator-facing knob
+		// that looks configured and does nothing. This pins that the top
+		// origins arrive through the module's own wiring.
 		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
 
 		const handler = await throughTheModule({

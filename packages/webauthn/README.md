@@ -34,10 +34,24 @@ The package declares `@o3co/auth-provider-core` as a dependency rather than a pe
 
 ## Bootstrap
 
-Define a config-providing module and wire `webauthnModule` plus the required adapter modules:
+The WebAuthn settings live in your HOCON configuration under `webauthn`, beside everything else the composition root loads. Layer this package's [`config/reference.conf`](config/reference.conf) between your `application.conf` and core's own `reference.conf`: it carries the package's defaults and the `WEBAUTHN_*` environment variables that override them. Core's `AppConfigSchema` keeps the `webauthn` section as it found it ([#496](https://github.com/o3co/auth.provider/issues/496)), and a small module hands that section to `webauthnConfigSchema`, which owns the rules:
+
+```hocon
+# config/application.conf — what has no default
+webauthn {
+  rpId = "example.com"
+  rpName = "Example App"
+  origin = ["https://example.com"]
+  origin = ${?WEBAUTHN_ORIGIN}   # repeated, so the variable still wins over the line above
+}
+```
+
+A key your `application.conf` sets shadows the substitution `reference.conf` makes for it; repeat the `${?VAR}` line after your value, as above, to let the environment override it again.
 
 ```ts
+import { fileURLToPath } from "node:url";
 import {
+    AppConfigSchema,
     createApp,
     defineModule,
     memoryWebAuthnCredentialStoreModule,
@@ -46,23 +60,23 @@ import {
     memoryReplaySeenSetModule,
 } from "@o3co/auth-provider-core";
 import { webauthnModule, webauthnConfigSchema } from "@o3co/auth-provider-webauthn";
+import { parseFile } from "@o3co/ts.hocon";
+import { validate } from "@o3co/ts.hocon/zod";
+
+const shipped = (specifier: string) => parseFile(fileURLToPath(import.meta.resolve(specifier)));
+
+const config = validate(
+    parseFile("config/application.conf")
+        .withFallback(shipped("@o3co/auth-provider-webauthn/reference.conf"))
+        .withFallback(shipped("@o3co/auth-provider-core/reference.conf")),
+    AppConfigSchema,
+);
 
 const webauthnBootstrap = defineModule({
     name: "my-webauthn-config",
-    requires: [] as const,
+    requires: ["config"] as const,
     provides: {
-        webauthnConfig: () => webauthnConfigSchema.parse({
-            rpId: "example.com",
-            rpName: "Example App",
-            origin: ["https://example.com"],
-            attestationPreference: "none",   // platform authenticators need no attestation chain
-            userVerification: "preferred",
-            challengeTtlMs: 120_000,         // 120s survives slow mobile networks
-            allowCredentialsForKnownUser: false,  // enumeration-resistant (#281)
-            rateLimit: {
-                authenticationOptions: { limit: 30, windowSeconds: 60 },
-            },
-        }),
+        webauthnConfig: ({ config }) => webauthnConfigSchema.parse(config.webauthn),
     },
 });
 
@@ -77,9 +91,11 @@ const app = await createApp({
         grantPolicyModule,                     // required — see SECURITY — scope authorization
         // ... rest of your auth-provider stack (oauthAuthorizationModule, keyStore, etc.)
     ],
-    bootstrapComponents: { /* keystore, userRepository, clientRepository, ... */ },
+    bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
 ```
+
+A module that hard-codes the settings instead (`webauthnConfigSchema.parse({ rpId: …, … })`) works too, but then none of the `WEBAUTHN_*` variables below reaches the schema.
 
 ## Multi-origin: one RP for the site and the Android app
 
@@ -112,7 +128,10 @@ into `origin`) carries the same list comma-separated — the spelling
 `CORS_ALLOWED_ORIGINS` uses, read by the same function in core
 (`normalizeAllowedOrigins`): each entry is trimmed, empty entries are dropped,
 and every entry meets the rules in the table above exactly as it would in the
-list. A comma cannot occur inside an entry, so the split cannot cut one in two.
+list. Every entry the split yields is one you wrote, and each is validated, so
+the environment spelling cannot admit an origin the list would refuse. (A
+comma inside a host is legal URL syntax, and the environment spelling cannot
+express one: it splits there, and the halves are refused.)
 
 ```sh
 WEBAUTHN_ORIGIN=https://example.com,android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI
@@ -171,7 +190,7 @@ Serving `/.well-known/assetlinks.json` on the `rpId` domain is what lets the
 app use the RP ID; it is an Android platform requirement and outside this
 package.
 
-The package ships defaults for `attestationPreference`, `userVerification`, `challengeTtlMs`, `allowCredentialsForKnownUser`, and `rateLimit.authenticationOptions` in [`config/reference.conf`](config/reference.conf), for the composition root's HOCON `withFallback` chain; the schema itself has no defaults. Each of those defaults can be overridden by the environment variable `reference.conf` names beside it (`WEBAUTHN_CHALLENGE_TTL_MS`, `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`, …), and the schema takes the string such a variable delivers: a number as a number, a switch as `true` / `false` / `1` / `0` (empty reads as `false`, any other spelling fails the parse) — the same reading core gives its own switches. Consumers MUST supply `rpId` / `rpName` / `origin` — these have no library defaults and the schema reports useful errors if missing (per ADR [`2026-04-30-config-schema-strict-defaults-from-hocon.md`](../core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md)).
+The package ships defaults for `attestationPreference`, `userVerification`, `challengeTtlMs`, `allowCredentialsForKnownUser`, and `rateLimit.authenticationOptions` in [`config/reference.conf`](config/reference.conf), for the composition root's HOCON `withFallback` chain; the schema itself has no defaults. Each of those defaults can be overridden by the environment variable `reference.conf` names beside it (`WEBAUTHN_CHALLENGE_TTL_MS`, `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`, …), and the schema takes the string such a variable delivers: a number as a number, a switch as `true` / `false` / `1` / `0` in any case and with surrounding spaces ignored (empty reads as `false`; any other value fails the parse) — the same reading core gives its own switches. Consumers MUST supply `rpId` / `rpName` / `origin` — these have no library defaults and the schema reports useful errors if missing (per ADR [`2026-04-30-config-schema-strict-defaults-from-hocon.md`](../core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md)).
 
 ## First-credential bootstrap
 

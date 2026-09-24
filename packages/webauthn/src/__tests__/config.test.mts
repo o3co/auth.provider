@@ -314,9 +314,9 @@ describe("topOrigin — the origins this RP may be framed by (#554 audit)", () =
 // HOCON substitutes `${?WEBAUTHN_ORIGIN}` / `${?WEBAUTHN_TOP_ORIGIN}` as one
 // string, and an environment variable has no other way to carry a list. The
 // list therefore takes the spelling core gives `CORS_ALLOWED_ORIGINS`:
-// comma-separated, each entry trimmed, empty entries dropped. A serialized
-// origin cannot contain a comma, and neither can the base64url body of an
-// Android app origin, so the split cannot cut an entry in two.
+// comma-separated, each entry trimmed, empty entries dropped. Every entry the
+// split yields is one the operator wrote and is validated as in the list, so
+// the string cannot admit an origin the list would refuse.
 describe("origin lists from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIGIN)", () => {
 	const referenceConf = readFileSync(
 		fileURLToPath(new URL("../../config/reference.conf", import.meta.url)),

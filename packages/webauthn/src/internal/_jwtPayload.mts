@@ -15,8 +15,8 @@
  */
 
 // PARITY: keep in sync with packages/oauth/src/grants/_jwtPayload.mts
-// Consolidation candidate: the `resource` extractor this file used to sit
-// beside moved into core (grants/resourceIndicator.mts); this copy remains.
+// Consolidation candidate: a helper both grant packages need belongs in core,
+// where the RFC 8707 resource rules they share live (grants/resourceIndicator.mts).
 
 /**
  * Best-effort JWT payload decode without signature verification.
