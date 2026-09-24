@@ -356,3 +356,28 @@ describe("createGithubProvider", () => {
 		expect(url.href).toContain("https://github.com/logout");
 	});
 });
+
+describe("config.fetch — a proxy, or a test seam", () => {
+	it("sends the token request, /user and /user/emails through the configured fetch, never the global one", async () => {
+		// A deployment behind an egress proxy hands the adapter the fetch that
+		// reaches GitHub; the Google, Apple and OIDC adapters already take one.
+		const refused: string[] = [];
+		vi.stubGlobal("fetch", async (input: string | URL | Request) => {
+			refused.push(String(input instanceof Request ? input.url : input));
+			throw new Error("the global fetch must not be reached");
+		});
+		const own = createFakeGithub();
+		const profile = await createGithubProvider({ ...baseConfig, fetch: own.fetch }).exchangeCode({
+			code: "gh-code",
+			codeVerifier: VERIFIER,
+			redirectUri: baseConfig.callbackURL,
+		});
+		expect(profile.sub).toBe("12345");
+		expect(refused).toEqual([]);
+		expect(own.requests.map((r) => r.url.pathname)).toEqual([
+			"/login/oauth/access_token",
+			"/user",
+			"/user/emails",
+		]);
+	});
+});
