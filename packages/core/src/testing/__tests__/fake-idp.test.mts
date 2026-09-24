@@ -178,8 +178,32 @@ describe("createFakeIdp", () => {
 			).toBe(400);
 			const third = idp.authorize(request());
 			expect((await redeem(idp, third.code)).status).toBe(200);
-			// Spent: an unknown code again, answered the way the fake answers any.
-			expect((await (await redeem(idp, third.code)).json()).refresh_token).toBe("rt-1");
+			// Spent: a second exchange of the same code is refused, as RFC 6749
+			// §4.1.2 requires — never answered as a code the fake never issued.
+			const again = await redeem(idp, third.code);
+			expect(again.status).toBe(400);
+			expect(await again.json()).toEqual({ error: "invalid_grant" });
+		});
+
+		it("issues a distinct code for every authorization, including after one is exchanged", async () => {
+			const idp = await createFakeIdp(ENDPOINTS);
+			const first = idp.authorize(request());
+			expect((await redeem(idp, first.code)).status).toBe(200);
+			const second = idp.authorize(request());
+			expect(second.code).not.toBe(first.code);
+			expect((await redeem(idp, second.code)).status).toBe(200);
+		});
+
+		it("binds each code's id_token to the nonce of the authorization it came from", async () => {
+			// Two transactions in flight: A's code must not come back carrying
+			// B's nonce because B was authorized last.
+			const idp = await createFakeIdp(ENDPOINTS);
+			const a = idp.authorize(request({ nonce: "nonce-A" }));
+			const b = idp.authorize(request({ nonce: "nonce-B" }));
+			const tokenA = await (await redeem(idp, a.code)).json();
+			const tokenB = await (await redeem(idp, b.code)).json();
+			expect((await jwtVerify(tokenA.id_token, await jwks(idp))).payload.nonce).toBe("nonce-A");
+			expect((await jwtVerify(tokenB.id_token, await jwks(idp))).payload.nonce).toBe("nonce-B");
 		});
 
 		it("with refreshTokenOnlyOnConsent, issues a refresh token only for offline access on a consent screen", async () => {
