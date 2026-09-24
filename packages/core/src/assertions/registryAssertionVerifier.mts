@@ -17,6 +17,7 @@
 import { createLocalJWKSet, decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
 import { parseScopeTokens } from "../federations/scope.mjs";
 import { createRemoteKeySetCache } from "../jwks/remoteKeySet.mjs";
+import { malformedNumericDateClaim } from "../jwt/numericDate.mjs";
 import { isRecordableJti } from "../replay-seen-set/jti.mjs";
 import type { ReplaySeenSet } from "../replay-seen-set/types.mjs";
 import type { AssertionIssuerEntry, AssertionIssuerRegistry } from "./issuerRegistry.mjs";
@@ -168,7 +169,12 @@ const isRefusal = (err: unknown): boolean =>
  *    the entry admits (`allowedClients`; an unauthenticated presenter passes
  *    only when the entry names no list).
  * 3. Signature, `iss`, `aud`, `exp` (mandatory, RFC 7523 §3 item 4), `nbf` /
- *    `iat` when present, against the entry's keys and algorithms.
+ *    `iat` when present, against the entry's keys and algorithms — and each of
+ *    the three a NumericDate (core's `jwt/numericDate.mts`): jose checks only
+ *    that it is a number, so `exp: 1e400` (Infinity) would otherwise verify as
+ *    an assertion that never expires and reach the ID-JAG replay record,
+ *    whose store refuses an infinite lifetime with a `RangeError` the grant
+ *    answers `503`. A malformed date is the assertion's fault: `null`.
  * 4. `sub` must be one the entry admits (`allowedSubjects`), and the handle
  *    reader must find a handle.
  * 5. The result carries the entry's ceilings: the scope claim intersected
@@ -317,6 +323,9 @@ export function createRegistryAssertionVerifier(
 				if (isRefusal(err)) return null;
 				throw err;
 			}
+			// Before anything computes a lifetime from them — the replay
+			// record's expiry below, the grant's token lifetime after.
+			if (malformedNumericDateClaim(claims) !== undefined) return null;
 
 			if (idJag) {
 				// ID-JAG §3: aud is one issuer identifier, as a string or a
@@ -382,9 +391,10 @@ export function createRegistryAssertionVerifier(
 				issuer: entry.issuer,
 				...(scope === undefined ? {} : { scope }),
 				...(audienceCeiling === undefined ? {} : { audience: audienceCeiling }),
-				// Required and type-checked by jose above for both profiles. As
-				// the claim says — one inside the clock tolerance is already past,
-				// and the grant, not this verifier, refuses it (auth.proxy#90).
+				// Required by jose and a NumericDate (checked above) for both
+				// profiles. As the claim says — one inside the clock tolerance is
+				// already past, and the grant, not this verifier, refuses it
+				// (auth.proxy#90).
 				expiresAt: claims.exp as number,
 			};
 		},

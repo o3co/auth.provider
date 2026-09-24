@@ -21,6 +21,7 @@ import {
 	type Logger,
 	loggableError,
 	MAX_JTI_LENGTH,
+	malformedNumericDateClaim,
 	type PublicClient,
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
@@ -304,6 +305,23 @@ export function createClientAssertionVerifier(
 					err,
 					clientId: iss,
 				});
+			}
+
+			// `exp`, `iat` and `nbf` are NumericDates before anything below
+			// computes a lifetime or an age from them (core's
+			// `isNumericDate`): jose checks only that each is a number, and
+			// JSON's `1e400` parses to Infinity. The checks below happened to
+			// refuse an infinite `exp` or `iat` under reasons that describe a
+			// finite one, and let an infinite `nbf` through.
+			const malformedDate = malformedNumericDateClaim(payload);
+			if (malformedDate !== undefined) {
+				return refuse(
+					401,
+					"invalid_client",
+					`client assertion ${malformedDate} is not a NumericDate (RFC 7519 section 2)`,
+					"numeric_date",
+					{ clientId: iss },
+				);
 			}
 
 			const nowSeconds = Math.floor(now() / 1000);

@@ -378,6 +378,13 @@ export {
 	type RemoteKeySetCacheOptions,
 	type RemoteKeySetTuning,
 } from "./jwks/remoteKeySet.mjs";
+// A JWT's exp / iat / nbf, checked before anything computes an expiry from them.
+export type { NumericDateClaim } from "./jwt/numericDate.mjs";
+export {
+	isNumericDate,
+	MAX_NUMERIC_DATE_SECONDS,
+	malformedNumericDateClaim,
+} from "./jwt/numericDate.mjs";
 // JWT verifier (SF-1) — central verifyJwt with alg/iss/aud/typ pinning
 export type {
 	JwtRevocationSources,
