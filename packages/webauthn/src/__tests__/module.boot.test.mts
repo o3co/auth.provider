@@ -605,8 +605,8 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
  * The `createApp` boot pipeline mounts contributed routes via `handle.router`.
  * If the contributed router does NOT install `express.json()` before its POST
  * handler, then `req.body` is `undefined` in production (createApp installs no
- * global JSON parser — each contributed router installs its own, per the OAuth
- * routes pattern in routes.mts:215-216).
+ * global JSON parser, and oauthModule's router parses only its own routes'
+ * bodies — each contributed router installs its own).
  *
  * The test mounts `handle.router` on a bare express app (no global JSON parser)
  * and POSTs JSON to the authentication/options endpoint. Without the fix, zod

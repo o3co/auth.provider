@@ -183,8 +183,8 @@ export const webauthnModule = defineModule<
 		routes: [
 			// POST /oauth/webauthn/registration/options
 			// express.json() is installed at router level, not at the host app level —
-			// createApp installs no global JSON parser (each contributed router installs
-			// its own, per the oauthModule routes.mts:215-216 pattern).
+			// createApp installs no global JSON parser, and oauthModule's router parses
+			// only its own routes' bodies, so each contributed router installs its own.
 			// 100kb limit: realistic WebAuthn blobs are under 10KB; 100kb caps DoS.
 			// Cross-refs: Codex Round 4 P1
 			(deps) => {

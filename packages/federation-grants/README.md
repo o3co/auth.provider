@@ -675,10 +675,14 @@ this package's own:
 - **The body limit.** The 16 KiB bound is checked from `Content-Length` ahead
   of the parsers, so it holds whatever else is mounted; a body with no
   `Content-Length` is bounded by this package's own parsers.
-- **A malformed body.** A body that is not valid JSON is refused by this
-  package's parser and answered by it — `400 invalid_request`
-  (`malformed_body`), with this package's `x-request-id` and
-  `Cache-Control: no-store`, after its throttle.
+- **A body the parser refuses.** What body-parser marks as the caller's
+  mistake is answered by this package as a 4xx, with its `x-request-id` and
+  `Cache-Control: no-store`, after its throttle: too many form parameters is
+  `413 invalid_request` (`body_too_large`), a charset or `Content-Encoding`
+  it cannot decode is `415 invalid_request` (`unsupported_encoding`), and JSON
+  it cannot read or a compressed body that does not decompress is
+  `400 invalid_request` (`malformed_body`). Only a fault that is not the
+  caller's is `500 server_error` (`unexpected_error`).
 
 So the list order of `federationGrantsModules` and `oauthModule` does not
 matter. This package declares no ordering edge against the OAuth router — it

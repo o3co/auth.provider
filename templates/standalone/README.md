@@ -914,7 +914,7 @@ unready one.
 
 ## Adding Custom Modules
 
-To add a custom module, import it in `src/buildModules.mts` and add it to the array `buildModules` returns. The boot planner resolves dependencies by what modules `require` and `provide`, but it mounts routes and middleware in list order wherever no `before` / `after` says otherwise. So position matters for middleware that other routes depend on — the session store module, rule 1 of [Module Composition Order](#module-composition-order). A route under a prefix another module also uses, such as `/oauth`, needs no particular position (rule 2), provided it parses its own body: `oauthModule`'s router parses only its own routes'. A module that mounts nothing of the first kind can go at the end:
+To add a custom module, import it in `src/buildModules.mts` and add it to the array `buildModules` returns. The boot planner resolves dependencies by what modules `require` and `provide`, but it mounts routes and middleware in list order wherever no `before` / `after` says otherwise. So position matters for middleware that other routes depend on — the session store module, rule 1 of [Module Composition Order](#module-composition-order). A route under a prefix another module also uses, such as `/oauth`, needs no particular position (rule 2), provided it parses its own body and scopes its parsers to its own paths: `oauthModule`'s router parses only its own routes', and a parser that ran for every request under the prefix would read other modules' bodies for them. A module that mounts nothing of the first kind can go at the end:
 
 ```diff
  // src/buildModules.mts
