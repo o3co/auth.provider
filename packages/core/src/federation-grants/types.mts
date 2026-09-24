@@ -124,14 +124,21 @@ export interface FederationGrantUsage {
  */
 export type FederationGrantRefreshFailureKind = "unavailable" | "rate_limited" | "rejected";
 
-/** What a refresh reports of its failure. The store counts. */
+/**
+ * What a refresh reports of its failure. The store counts.
+ *
+ * The optional fields say `| undefined` so that a stored stamp, which names
+ * both (#626), is still accepted where a report is — as it was when the stamp
+ * extended this type — for a consumer compiling with
+ * `exactOptionalPropertyTypes`.
+ */
 export interface FederationGrantRefreshFailureInput {
 	readonly at: Date;
 	readonly kind: FederationGrantRefreshFailureKind;
 	/** The upstream's `Retry-After`, in seconds, as the classifier bounded it. */
-	readonly retryAfterSeconds?: number;
+	readonly retryAfterSeconds?: number | undefined;
 	/** For `rejected`: the error code, one this provider knows (D18). */
-	readonly upstreamCode?: string;
+	readonly upstreamCode?: string | undefined;
 }
 
 /**
