@@ -50,9 +50,10 @@ by default even when installed (`oauth.dpop.enabled = false`).
 ## Status
 
 Implemented: proof verification at the token endpoint, binding at protected
-resources (`ath`), and server-provided nonces at both. The in-process replay
-store takes part in `deployment.mode`: it is refused under `"multi"`, warns
-when the mode is unset, and is silent under `"single"` (see
+resources (`ath`), and server-provided nonces at both. With DPoP enabled and
+the `dpopReplayStore` slot empty, the in-process replay store it falls back to
+takes part in `deployment.mode`: it is refused under `"multi"`, warns when the
+mode is unset, and is silent under `"single"` (see
 [Operator requirements](#operator-requirements)). Not implemented: the
 `dpop_jkt` authorization-request parameter at `/authorize` (RFC 9449 §10).
 
@@ -143,8 +144,8 @@ The port is `DPoPReplayStore` ([`src/replay-store.mts`](src/replay-store.mts)): 
 
   | `deployment.mode` | What boot does |
   | --- | --- |
-  | `"multi"` | Refuses: a `replica-unsafe-adapter` `BootError` naming `dpop`, carried as the `cause` of `contribute-factory-failed`. Each replica would keep its own seen set, so a proof captured once could be replayed once against each replica while its `iat` is inside `iat-window-seconds`. |
+  | `"multi"` | Refuses: a `replica-unsafe-adapter` `BootError` naming `dpop`, carried as the `cause` of `contribute-factory-failed`. Each replica would keep its own seen set, so a proof captured once could be replayed once against each replica while its `iat` is within ±`iat-window-seconds` of that replica's clock (up to 121 s at the default 60). |
   | unset | Boots, and logs `dpop_replay_store_not_shared` (warn). |
   | `"single"` | Silent: one replica, so the in-process store is correct. |
 
-  The check runs in the mechanism factory rather than as `replicaSafety` on the manifest, because whether the store is per-process depends on whether the slot is filled, not on config — the same shape the per-process rate-limit fallbacks in session and webauthn use. So a store wired under `replay-store = "memory"` is used as wired and is not refused, and DPoP left disabled builds no store and is not refused either.
+  The check runs in the mechanism factory rather than as `replicaSafety` on the manifest, because whether the store is per-process depends on whether the slot is filled, not on config — the same shape the per-process rate-limit fallbacks in session and webauthn use. So a store wired under `replay-store = "memory"` is used as wired and is not refused, and DPoP left disabled builds no store and is not refused either. The check asks only whether the slot is filled, not what backs it: a per-process store handed into the slot — `createMemoryDPoPReplayStore` is exported — counts as wired and boots under `"multi"` without a warning.
