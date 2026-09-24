@@ -681,8 +681,15 @@ this package's own:
   `413 invalid_request` (`body_too_large`), a charset or `Content-Encoding`
   it cannot decode is `415 invalid_request` (`unsupported_encoding`), and JSON
   it cannot read or a compressed body that does not decompress is
-  `400 invalid_request` (`malformed_body`). Only a fault that is not the
-  caller's is `500 server_error` (`unexpected_error`).
+  `400 invalid_request` (`malformed_body`). A grant id in the path that
+  Express cannot percent-decode (`/oauth/federation-grants/%zz/token`) is
+  `400 invalid_request` (`malformed_path`). Only the parsers' errors, and
+  that one, are read as the caller's mistake: anything else that escapes
+  every handler is `500 server_error` (`unexpected_error`), logged as
+  `federation_grants_unexpected_error` with `event:
+  federation_grant.unexpected_error`, a `classification` and the error's
+  numeric `status` — nothing of the error's text, as for every report this
+  package writes.
 
 So the list order of `federationGrantsModules` and `oauthModule` does not
 matter. This package declares no ordering edge against the OAuth router — it
