@@ -980,4 +980,28 @@ describe("oauth routes — /oauth/revoke is rate limited too (#529 audit)", () =
 		expect(res.body.error).toBe("rate_limited");
 		expect(res.body.error_description).toBe("limit:revoke");
 	});
+
+	it("throttles /oauth/revoke only, not a route another module mounts beneath it", async () => {
+		// Mounted with `router.use("/revoke", guard)`, the guard matched every
+		// path beneath `/revoke`: a later module's `/oauth/revoke/custom` spent
+		// the revoke budget and was answered with the OAuth router's 429.
+		const checked: string[] = [];
+		const app = await buildApp({
+			rateLimiter: createStubRateLimiter((key) => {
+				checked.push(key);
+				return key.startsWith("revoke")
+					? { allowed: false, reason: "limit:revoke" }
+					: { allowed: true };
+			}),
+		});
+		app.post("/oauth/revoke/custom", (_req, res) => {
+			res.json({ served: true });
+		});
+
+		const res = await request(app).post("/oauth/revoke/custom").type("form").send({ token: "any" });
+
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ served: true });
+		expect(checked).toEqual([]);
+	});
 });
