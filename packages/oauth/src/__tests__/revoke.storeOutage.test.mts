@@ -60,8 +60,7 @@ const registration = (clientId: string) => ({
 });
 
 const clientRepository: ClientRepository = {
-	findById: async (id) =>
-		id === CLIENT_ID || id === OTHER_CLIENT_ID ? registration(id) : null,
+	findById: async (id) => (id === CLIENT_ID || id === OTHER_CLIENT_ID ? registration(id) : null),
 	authenticate: async (id, secret) =>
 		id === CLIENT_ID && secret === CLIENT_SECRET ? registration(CLIENT_ID) : null,
 };
@@ -71,7 +70,9 @@ const outage = (): Error =>
 	Object.assign(new Error("connect ECONNREFUSED 127.0.0.1:6379"), { code: "ECONNREFUSED" });
 
 /** A memory denylist whose writes fail, as a Redis-backed one does when Redis is down. */
-function denylistThatCannotWrite(): AccessTokenDenylist & { readonly add: ReturnType<typeof vi.fn> } {
+function denylistThatCannotWrite(): AccessTokenDenylist & {
+	readonly add: ReturnType<typeof vi.fn>;
+} {
 	const real = createMemoryAccessTokenDenylist();
 	return {
 		kind: real.kind,
@@ -156,7 +157,10 @@ describe("POST /oauth/revoke — a denylist that cannot be written", () => {
 			const app = appWith({ denylist, revocation: familyRevocation(false), logger });
 
 			const token = await accessToken(CLIENT_ID);
-			const res = await revoke(app, hint === undefined ? { token } : { token, token_type_hint: hint });
+			const res = await revoke(
+				app,
+				hint === undefined ? { token } : { token, token_type_hint: hint },
+			);
 
 			expect(denylist.add).toHaveBeenCalledTimes(1);
 			expect(res.status).toBe(503);
@@ -199,7 +203,10 @@ describe("POST /oauth/revoke — a refresh-token family store that cannot be wri
 			const app = appWith({ denylist: createMemoryAccessTokenDenylist(), revocation, logger });
 
 			const token = await refreshToken(CLIENT_ID);
-			const res = await revoke(app, hint === undefined ? { token } : { token, token_type_hint: hint });
+			const res = await revoke(
+				app,
+				hint === undefined ? { token } : { token, token_type_hint: hint },
+			);
 
 			expect(revocation.revokeFamily).toHaveBeenCalledWith("fam-1");
 			expect(res.status).toBe(503);

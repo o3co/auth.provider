@@ -401,6 +401,8 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 
 `POST /oauth/revoke` は RFC 7009。`/oauth/token` と同じく呼び出し元を認証し — public クライアントは自分のトークンを失効させてよいので（§2.1）それも含む — `token` が無ければ `400 invalid_request`、認識できない `token_type_hint` には `400 unsupported_token_type`、それ以外はトークンが存在したか・呼び出し元のものだったかに関係なく `200` を返す（§2.2）。トークンは発行先のクライアントに対してだけ失効される。
 
+サーバーが記録できなかった失効は `200` ではない。呼び出し元自身のトークンが検証を通り、その失効を記録するストア — `accessTokenDenylist` またはリフレッシュトークンのファミリーストア — が失敗したときは `503 temporarily_unavailable` を返し（§2.2.1: クライアントはトークンがまだ存在するとみなして再試行する）、`revoke_store_unavailable` を error レベルで、どちらのストアかを `store` に入れてログに残す。検証を通らないトークン、このサーバーが失効できないトークン、他のクライアントのトークンはストアに届かないので、障害中も `200` のままである。
+
 - **リフレッシュトークン**は `refreshTokenFamilyRevocation` でそのファミリーを失効させる。そのスロットが無ければリクエストは何もしない `200`。
 - **アクセストークン**は、`oauth.revocation.accessToken` が `"denylist"` のとき `accessTokenDenylist` に追加される。`"unsupported"` のときは、`token_type_hint=access_token` に対して何も失効しない `200` ではなく `400 unsupported_token_type` を返し、ヒントの無いトークンはリフレッシュトークンの経路だけを通る。
 
