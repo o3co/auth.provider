@@ -143,6 +143,10 @@ function expectOutageLogged(logger: MockLogger, store: string): void {
 	expect(lines).toHaveLength(1);
 	const [fields] = lines[0] as [Record<string, unknown>, string];
 	expect(fields.store).toBe(store);
+	// Which client's revocation was lost, so an operator can tell it to
+	// retry — the token itself never reaches the log.
+	expect(fields.clientId).toBe(CLIENT_ID);
+	expect(JSON.stringify(fields)).not.toMatch(/eyJ/);
 	// `loggableError`'s projection, never the error itself: a store's error can
 	// carry the command it refused, and a token is exactly such an argument.
 	expect(fields.err).not.toBeInstanceOf(Error);
