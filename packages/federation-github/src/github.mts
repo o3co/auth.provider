@@ -113,15 +113,27 @@ const getGithubJson = async (
 	}
 };
 
+/** A positive integer in decimal digits, no sign and no leading zero: what `String(n)` gives for one. */
+const DECIMAL_ID = /^[1-9][0-9]*$/;
+
 /**
  * The profile `sub` for GitHub's user object: a non-empty string `sub` when it
- * carries one, otherwise its `id` — GitHub's numeric user id as a string, or a
- * non-empty string as it is. `undefined` when neither is usable.
+ * carries one, otherwise its `id` — a positive safe integer as a decimal
+ * string, or a string of decimal digits (no sign, no leading zero) as it is.
+ * `undefined` when neither is usable.
+ *
+ * GitHub types `id` as an int64 integer. The identity handed to the Store is
+ * `github:<id>`, so an id that JSON cannot carry exactly is not one: above
+ * 2^53 two ids parse as the same number, and `1e400` parses as `Infinity`.
+ * Taken as they came, two GitHub users would sign in as one account. The
+ * string form is held to the digits `String(n)` would give, so one user
+ * cannot arrive under two spellings.
  */
 const githubSub = (user: Record<string, unknown>): string | undefined => {
 	if (typeof user.sub === "string" && user.sub !== "") return user.sub;
-	if (typeof user.id === "number") return String(user.id);
-	if (typeof user.id === "string" && user.id !== "") return user.id;
+	const id = user.id;
+	if (typeof id === "number") return Number.isSafeInteger(id) && id > 0 ? String(id) : undefined;
+	if (typeof id === "string") return DECIMAL_ID.test(id) ? id : undefined;
 	return undefined;
 };
 
@@ -195,11 +207,14 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			// no id_token `sub` to bind the user to (OIDC §5.3.2 applies only when
 			// an id_token is in scope). Do NOT mirror the Google PB-5 fix here.
 			const body = await getGithubJson(oidcConfig, tokens.access_token, GITHUB_USER_URL);
-			// An answer that is not a JSON object carries no user, so no id/sub.
+			// An answer that is not a JSON object carries no user, so no id/sub; an
+			// id githubSub will not take counts as none.
 			const user: Record<string, unknown> = isJsonObject(body) ? body : {};
 			const sub = githubSub(user);
 			if (sub === undefined) {
-				throw new Error(`GitHub federation "github" received a /user without id/sub`);
+				throw new Error(
+					`GitHub federation "github" received a /user without id/sub (an id must be a positive safe integer or a string of decimal digits)`,
+				);
 			}
 
 			// Fetch primary+verified email from /user/emails.

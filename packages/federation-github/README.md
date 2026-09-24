@@ -141,7 +141,7 @@ What `exchangeCode` returns:
 | Field | Value |
 | --- | --- |
 | `issuer` | `https://github.com` |
-| `sub` | a non-empty string `sub` when the user object carries one; otherwise its `id` — a number as a string, or a non-empty string as it is |
+| `sub` | a non-empty string `sub` when the user object carries one; otherwise its `id` — a positive safe integer (`Number.isSafeInteger`, above 0) as a decimal string, or a string of decimal digits with no sign and no leading zero as it is. Any other `id` fails the exchange like a missing one: GitHub sends an int64 integer, and one that JSON cannot carry exactly — above 2^53 − 1, where two ids parse as the same number, or `1e400`, which parses as `Infinity` — would sign two GitHub users in as one `github:<id>` |
 | `email`, `emailVerified` | the chosen address and `true`, or both absent |
 | `name` | `/user`'s `name`, when a string |
 | `picture` | `/user`'s `avatar_url`, when a string |
@@ -186,5 +186,5 @@ none — which answers with GitHub's own bodies and records every request.
 | Test file | Pins |
 | --- | --- |
 | [`github.test.mts`](src/__tests__/github.test.mts) | the authorization request, the token request (PKCE verifier, `client_secret_post`), the exchange without `iss`, the e-mail choice and a failed `/user/emails`, the scope rules, `expiresAt`, no refresh, `mapClaims` and `endSession` |
-| [`github.user.test.mts`](src/__tests__/github.user.test.mts) | how `/user` becomes the `sub`: GitHub's numeric `id` without a `sub`, the `sub` and string-`id` rules, and the refusals (a non-2xx answer, a body that is not JSON, no usable `id`) |
+| [`github.user.test.mts`](src/__tests__/github.user.test.mts) | how `/user` becomes the `sub`: GitHub's numeric `id` without a `sub`, the `sub` and `id` rules, and the refusals (a non-2xx answer, a body that is not JSON, no `id`, or one that is not a positive safe integer or a canonical digit string) |
 | [`github-module.test.mts`](src/__tests__/github-module.test.mts), [`github-module-boot.test.mts`](src/__tests__/github-module-boot.test.mts) | the module's contributions and boot with the session module |
