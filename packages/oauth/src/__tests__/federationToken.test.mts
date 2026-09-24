@@ -705,6 +705,92 @@ describe("POST /oauth/federation/:name/token", () => {
 		});
 	});
 
+	describe("refresh: the adapter's library refuses the refresh answer", () => {
+		it("logs the failure without the refresh answer the library carries on the error", async () => {
+			// What openid-client 6 throws for a token response it cannot parse:
+			// a ClientError ("invalid response encountered") whose cause is
+			// oauth4webapi's OperationProcessingError, whose own cause is
+			// `{ body }` — the refresh answer itself, rotated refresh token
+			// included (openid-client's `errorHandler`, oauth4webapi's
+			// `processGenericAccessTokenResponse`). Built by hand because this
+			// package does not depend on the library; the adapters' tests drive
+			// the real one to the same shape.
+			const body = {
+				access_token: "at-must-never-reach-a-log",
+				refresh_token: "rt-must-never-reach-a-log",
+				token_type: "bearer",
+				scope: 42,
+			};
+			const refused = Object.assign(
+				new Error("invalid response encountered", {
+					cause: Object.assign(
+						new Error('"response" body "scope" property must be a string', {
+							cause: { body },
+						}),
+						{ name: "OperationProcessingError", code: "OAUTH_INVALID_RESPONSE" },
+					),
+				}),
+				{ name: "ClientError", code: "OAUTH_INVALID_RESPONSE" },
+			);
+
+			// A logger that serialises every own property, `cause` included — a
+			// deployment is free to install one.
+			const lines: string[] = [];
+			const serialiseEverything = (value: unknown, seen = new WeakSet<object>()): unknown => {
+				if (typeof value !== "object" || value === null) return value;
+				if (seen.has(value)) return "[circular]";
+				seen.add(value);
+				const out: Record<string, unknown> = {};
+				for (const key of Object.getOwnPropertyNames(value)) {
+					out[key] = serialiseEverything((value as Record<string, unknown>)[key], seen);
+				}
+				return out;
+			};
+			const record =
+				(level: string) =>
+				(...args: unknown[]): void => {
+					lines.push(JSON.stringify({ level, args: serialiseEverything(args) }));
+				};
+			const logger: Logger = {
+				trace: record("trace"),
+				debug: record("debug"),
+				info: record("info"),
+				warn: record("warn"),
+				error: record("error"),
+				fatal: record("fatal"),
+				child: () => logger,
+			};
+
+			const expiredTokens = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+			const failingProvider: FederationProvider & {
+				refreshToken: (rt: string) => Promise<never>;
+			} = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockRejectedValue(refused),
+			};
+			const app = buildApp({
+				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expiredTokens) }),
+				getFederationProviders: () =>
+					new Map<string, FederationProvider>([["google", failingProvider]]),
+				logger,
+			});
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(500);
+			expect(res.body.error).toBe("refresh_failed");
+			const failure = lines.find((line) => line.includes("refreshToken failed"));
+			expect(failure).toBeDefined();
+			// What an operator needs is still there: the library's code and reason.
+			expect(failure).toContain("OAUTH_INVALID_RESPONSE");
+			expect(failure).toContain('\\"scope\\" property must be a string');
+			for (const line of lines) {
+				expect(line).not.toContain("at-must-never-reach-a-log");
+				expect(line).not.toContain("rt-must-never-reach-a-log");
+			}
+		});
+	});
+
 	// ---------------------------------------------------------------------------
 	// Lock paths
 	// ---------------------------------------------------------------------------
