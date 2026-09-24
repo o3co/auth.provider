@@ -83,12 +83,14 @@ const handle = await createApp({
     // that reads the session — without it the verification route answers every
     // request `401 login_required`.
     sessionStoreModuleFor(config),
-    // Built from the config createApp boots with. Ahead of oauthModule so that
-    // its 16 KiB limit also bounds a chunked body: see "Listing it beside oauthModule".
+    // Built from the config createApp boots with. Its place in the list is free:
+    // enabled, its routes mount ahead of oauthModule's router on their own.
     deviceGrantModule({ config }),
     oauthModule({ config }), // POST /oauth/token, where the device polls
-    // oauthModule serves the discovery document that advertises
-    // `device_authorization_endpoint`, and that document requires `jwks_uri`.
+    // Core's createApp serves the discovery document that advertises
+    // `device_authorization_endpoint`; oauthModule's contribution switches it
+    // on (it needs an issuer), and the document requires `jwks_uri`, which
+    // jwksModule contributes.
     jwksModule,
     // Signs the user in: `POST /session/login` (or the federation callback) puts
     // the authenticated user on the session the verification route reads. A
@@ -101,8 +103,9 @@ const handle = await createApp({
     memoryRateLimiterModule,
     // …the modules that provide what these require: clientRepository,
     // codeRepository, keyStore, the user repository, the session and
-    // federation-token stores, and an access-token denylist (or its declared
-    // absence) …
+    // federation-token stores, an access-token denylist (or its declared
+    // absence), and an audit sink or `audit.sink.type = "none"` — boot refuses
+    // without one …
   ],
   bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
@@ -110,20 +113,21 @@ const handle = await createApp({
 
 The verification route's CSRF guard is built from the `session.*` config slice — see [JSON only, behind the session CSRF guard](#post-oauthdeviceverification). [`composition.test.mts`](./src/__tests__/composition.test.mts) boots this composition through `createApp`, with the repositories stubbed and the rest real. The standalone template's [`buildModules.mts`](../../templates/standalone/src/buildModules.mts) shows the full order of a real composition root; it does not mount this grant.
 
-### Listing it beside `oauthModule`
+### Beside `oauthModule`
 
-`oauthModule` mounts its router at `/oauth`, and that router parses JSON and form bodies — with Express's default 100 KiB limit — for every request under `/oauth`, whichever route it is for. Routes mount in the order their modules are listed (this module declares no ordering edge), so with `oauthModule` listed first the device routes receive bodies that router has already parsed, and a body is not parsed twice. Neither rule this package keeps about a body depends on that:
+`oauthModule` mounts its router at `/oauth`, and that router parses JSON and form bodies — with Express's default 100 KiB limit — for every request under `/oauth`, whichever route it is for, and a body is not parsed twice. So with the grant enabled both device routes declare `before: ["oauth-endpoints"]`, the id of that router's route, and core mounts them ahead of it whatever order the modules are listed in. Their own middleware is the first to read a body, so nothing about what they accept depends on the list:
 
-- **What the verification route accepts.** The handler checks the media type itself and answers anything but `application/json` with `415 invalid_request` ([below](#post-oauthdeviceverification)).
-- **The 16 KiB body limit.** Both routes check a declared `Content-Length` ahead of any parser and answer a larger body `413 invalid_request` (`body_too_large`); exactly 16 KiB is accepted, as the parsers accept it. This is the check federation grants use for the same bound.
+- **The 16 KiB body limit.** Both routes answer a body over 16 KiB with `413 invalid_request` (`body_too_large`), whether it declares a `Content-Length` (checked before any of it is read, as federation grants check theirs) or arrives chunked (found by the parsers); exactly 16 KiB is accepted. On `/oauth/device_authorization` the per-IP throttle runs first, so an oversized request spends an attempt like any other.
+- **The media type.** The verification route parses JSON only, and its handler answers anything but `application/json` with `415 invalid_request` ([below](#post-oauthdeviceverification)).
+- **Where a CSRF token may come from.** A header, or a JSON body; a form carrying the token in a body field has none, so the guard refuses it.
 
-One case is still decided by the order: a body sent without a `Content-Length` (chunked) has no size to check up front, so it is bounded by whichever parser reads it first — this package's 16 KiB when it is listed first, `oauthModule`'s 100 KiB when that router is. So list `deviceGrantModule({ config })` ahead of `oauthModule({ config })`. Nothing else in the device routes depends on the order: `/oauth/device_authorization` carries its own body parsers and client authentication, and the grant reaches `/oauth/token` through the grant registry, not through mount order.
+The edge has one consequence: an enabled grant needs `oauthModule` in the same composition, and boot fails with `route-order-target-missing` without it — there would be no `/oauth/token` to poll. A disabled grant declares no edge and boots without `oauthModule`.
 
 ## Public API
 
 Exported from [`src/index.mts`](./src/index.mts); the linked file holds each definition:
 
-- `deviceGrantModule`, `deviceGrantConfigSchema` — [`module.mts`](./src/module.mts). The module factory to install — `deviceGrantModule({ config })`, given the config the composition root boots with; a boot whose config disagrees with it about `oauth.deviceAuthorization.enabled` is refused — and the `oauth.deviceAuthorization` schema it composes.
+- `deviceGrantModule`, `deviceGrantConfigSchema` — [`module.mts`](./src/module.mts). The module factory to install — `deviceGrantModule({ config })`, given the config the composition root boots with; a boot whose config disagrees with it about `oauth.deviceAuthorization.enabled` is refused, and so is the factory listed uncalled (`modules: [deviceGrantModule]`, which the compiler accepts) as `module-factory-not-called` — and the `oauth.deviceAuthorization` schema it composes.
 - `createDeviceAuthorizationHandler`, `DeviceAuthorizationEndpointOptions` — [`deviceAuthorizationEndpoint.mts`](./src/deviceAuthorizationEndpoint.mts); `createDeviceVerificationHandler`, `DeviceVerificationHandlerOptions` — [`verificationEndpoint.mts`](./src/verificationEndpoint.mts); `createDeviceCodeGrant`, `DeviceCodeGrantOptions` — [`grant.mts`](./src/grant.mts). The two handlers and the grant, for a composition root that mounts them itself; it then owns what the module otherwise applies around them — client authentication, the throttle, the CSRF guard and the body parsers. The verification handler's `415` for a body that is not `application/json` is the handler's own and comes with it.
 - `DEVICE_CODE_GRANT_TYPE`, `DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX`, `DEVICE_VERIFICATION_RATE_LIMIT_PREFIX`, `DeviceAuthorizationSettings`, `DeviceGrantDependencies` — [`types.mts`](./src/types.mts) (`DEVICE_VERIFICATION_RATE_LIMIT_PREFIX` is defined in core and re-exported there).
 
@@ -145,15 +149,17 @@ Requires an authenticated end-user session. Body: `{ action, user_code }`.
 | `approve` | `{ status: "approved", client_id }` | |
 | `deny` | `{ status: "denied", client_id }` | |
 
-Errors: `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `413 invalid_request` (`body_too_large`: a declared body over 16 KiB), `415 invalid_request` (a body that is not `application/json`), `429 slow_down`, `503 service_unavailable` (the limiter backend is down and `rateLimit.failMode = "closed"`).
+Errors: `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `413 invalid_request` (`body_too_large`: a body over 16 KiB), `415 invalid_request` (a body that is not `application/json`), `429 slow_down`, `503 service_unavailable` (the limiter backend is down and `rateLimit.failMode = "closed"`).
 
-**JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the endpoint accepts `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not): any other media type is `415 invalid_request`. The handler checks the media type itself rather than relying on no form parser having run, so the rule holds whichever module is listed first — `oauthModule`'s router parses form bodies for everything under `/oauth` ([Listing it beside `oauthModule`](#listing-it-beside-oauthmodule)). And the route runs the same `createCsrfGuard` as `POST /session/login`:
+**JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the endpoint accepts `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not): any other media type is `415 invalid_request`. The handler checks the media type itself rather than relying on no form parser having run, so the rule is the endpoint's wherever it is mounted ([Beside `oauthModule`](#beside-oauthmodule)). And the route runs the same `createCsrfGuard` as `POST /session/login`:
 
 - a foreign `Origin` / `Referer` is refused with `403 access_denied` and logged as `csrf_origin_rejected`;
 - the provider's own origin, or one listed in `session.csrf.trustedOrigins`, is accepted — a verification page served from another origin is declared there, on the same list the login form uses;
 - a request with no origin signal at all (a non-browser client) must present the signed double-submit token from `GET /session/csrf`: the `<session.name>.csrf` cookie echoed in the `x-csrf-token` header.
 
 The guard is built from the `session.*` config slice, so enabling the grant without one fails at boot. This is why the package depends on `@o3co/auth-provider-session`: one CSRF policy for the product, not a second origin check that can drift from it.
+
+**The checks run in this order:** the body size (`413`), the CSRF guard (`403 access_denied`), then, in the handler, the media type (`415`) and the session (`401 login_required`). So RFC 8628 §5.4's cross-site form is refused by the guard with `403` before its media type is looked at. `415` is what a request the guard lets through gets for a body that is not JSON — a same-origin form, or a POST with no body at all — and it comes before `401`: a non-JSON request with no session is `415`.
 
 The route reads the end user from the express-session (`isAuthenticated`, `user.id`), so `sessionStoreModule` must be mounted ahead of it and something must sign the user in; with no authenticated session every action is `401 login_required`.
 
