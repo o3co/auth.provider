@@ -61,21 +61,41 @@ function isNotInstalled(reason: unknown, name: string): boolean {
  */
 const INSTALL_COMMAND = "npm install redis@^6.2.1 connect-redis@^10.0.0";
 
-const messageOf = (reason: unknown): string =>
-	reason instanceof Error ? reason.message : String(reason);
+/**
+ * How much of each member's message the AggregateError's own message quotes:
+ * its first line, cut to this length. Two of them, the header and the prefix
+ * createApp adds (`Module "sessionStoreModule" route factory failed:
+ * AggregateError: `) fit in the 256 characters core's loggableError keeps of
+ * a message.
+ */
+const MEMBER_BRIEF_LENGTH = 60;
+
+const briefOf = (reason: unknown): string => {
+	const [line = ""] = (reason instanceof Error ? reason.message : String(reason)).split("\n");
+	return line.length > MEMBER_BRIEF_LENGTH ? `${line.slice(0, MEMBER_BRIEF_LENGTH - 1)}…` : line;
+};
 
 /**
  * Load `redis` and `connect-redis`, or fail without losing a failure:
  *
- * - A library that is not installed is named, with the install command, in one
- *   message for both — rather than the resolver's bare "Cannot find package",
- *   which says neither that the package is an optional peer of this one nor
- *   which setting asked for it. The resolver's error is the cause.
+ * - A library that is not installed is named, in one message for both —
+ *   rather than the resolver's bare "Cannot find package", which says neither
+ *   that the package is an optional peer of this one nor which setting asked
+ *   for it. The resolver's error is the cause.
  * - When the other library failed for a different reason, the message says so
  *   and that failure is the cause instead: the message already names what is
  *   missing, and the other failure is what it cannot restate.
  * - A single failure of any other kind is rethrown unchanged; two are thrown
- *   together as an `AggregateError`.
+ *   together as an `AggregateError`, whose message names each package with the
+ *   first line of its failure, cut short. The members themselves are its
+ *   `errors`, logged whole where core's loggableError projects them.
+ *
+ * What a message is for comes first: the names and the install command, then
+ * the explanation. createApp prefixes the route factory's error with
+ * `Module "sessionStoreModule" route factory failed: `, and a log line keeps
+ * 256 characters of a message (core's LOGGED_STRING_MAX_LENGTH); the install
+ * command and what failed are inside them for every combination
+ * (`redisStoreLibraries.test.mts`).
  *
  * @param imports — how each library is loaded; the default imports it.
  */
@@ -108,14 +128,14 @@ export async function loadRedisStoreLibraries(
 		const names = notInstalled.map(({ name }) => `"${name}"`).join(" and ");
 		const [otherFailure] = other;
 		throw new Error(
-			`session.storage.type is "redis", which needs "redis" and "connect-redis" — optional peer dependencies of @o3co/auth-provider-session, which it does not install — and ${names} ${notInstalled.length === 1 ? "is" : "are"} not installed.${otherFailure === undefined ? "" : ` Loading "${otherFailure.name}" failed as well, for another reason; that error is the cause.`} Install them beside @o3co/auth-provider-session: ${INSTALL_COMMAND}`,
+			`${names} ${notInstalled.length === 1 ? "is" : "are"} not installed: run ${INSTALL_COMMAND}${otherFailure === undefined ? "" : `; "${otherFailure.name}" failed to load as well, for another reason, which is this error's cause`} (session.storage.type is "redis", and redis and connect-redis are optional peer dependencies of @o3co/auth-provider-session, which does not install them)`,
 			{ cause: otherFailure === undefined ? firstMissing.reason : otherFailure.reason },
 		);
 	}
 	if (other.length > 1) {
 		throw new AggregateError(
 			other.map(({ reason }) => reason),
-			`loading the Redis session store's libraries failed: ${other.map(({ name, reason }) => `"${name}": ${messageOf(reason)}`).join("; ")}`,
+			`${other.map(({ name }) => `"${name}"`).join(" and ")} failed to load: ${other.map(({ name, reason }) => `${name}: ${briefOf(reason)}`).join("; ")}`,
 		);
 	}
 	throw other[0]?.reason;

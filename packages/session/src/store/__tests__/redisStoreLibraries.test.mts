@@ -94,9 +94,11 @@ describe("loadRedisStoreLibraries", () => {
 			],
 		])("missing: %s", async (_missing, over, missing) => {
 			const err = (await failure(over)) as Error;
+			expect(err.message.startsWith(`${missing}: run ${INSTALL} (`)).toBe(true);
 			expect(err.message).toContain('session.storage.type is "redis"');
-			expect(err.message).toContain(`and ${missing}.`);
-			expect(err.message).toContain(INSTALL);
+			expect(err.message).toContain(
+				"optional peer dependencies of @o3co/auth-provider-session, which does not install them",
+			);
 		});
 
 		it("keeps the resolver's error as the cause", async () => {
@@ -146,9 +148,11 @@ describe("loadRedisStoreLibraries", () => {
 					[missing === "redis" ? "redis" : "connectRedis"]: fails(packageNotFound(missing)),
 					[broken === "redis" ? "redis" : "connectRedis"]: fails(other),
 				})) as Error;
-				expect(err.message).toContain(`and "${missing}" is not installed.`);
-				expect(err.message).toContain(INSTALL);
-				expect(err.message).toContain(`Loading "${broken}" failed as well, for another reason`);
+				expect(
+					err.message.startsWith(
+						`"${missing}" is not installed: run ${INSTALL}; "${broken}" failed to load as well, for another reason, which is this error's cause (`,
+					),
+				).toBe(true);
 				expect(err.cause).toBe(other);
 			},
 		);
@@ -172,7 +176,9 @@ describe("loadRedisStoreLibraries", () => {
 				connectRedis: fails("connect-redis threw a string"),
 			})) as AggregateError;
 			expect(err.errors).toEqual([expect.any(TypeError), "connect-redis threw a string"]);
-			expect(err.message).toContain('"connect-redis": connect-redis threw a string');
+			expect(err.message).toBe(
+				'"redis" and "connect-redis" failed to load: redis: redis failed to evaluate; connect-redis: connect-redis threw a string',
+			);
 		});
 	});
 
