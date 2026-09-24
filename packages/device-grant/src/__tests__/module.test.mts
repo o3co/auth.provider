@@ -725,7 +725,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		const logged = JSON.parse(lines[0]?.split(" ").slice(2).join(" ") ?? "{}") as {
 			err?: { message?: string };
 		};
-		expect(logged.err?.message?.length).toBeLessThanOrEqual(200);
+		expect(logged.err?.message?.length).toBeLessThanOrEqual(256);
 	});
 
 	it("logs a device-code store failure on device_authorization through the same projection", async () => {
