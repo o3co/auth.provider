@@ -104,6 +104,24 @@ export function createSanitizedReporter(logger: Logger): (failure: SanitizedFail
 	};
 }
 
+/**
+ * What a log line may say about an error that escaped every handler — the
+ * routers' last error handler logs it. Its classification (from `name`, the
+ * closed set above) and, when it is a number, its `status`: nothing of the
+ * error's text, for the reason the reporter carries none. `event`,
+ * `classification` and `status` are all on `SAFE_FIELDS`.
+ */
+export const unexpectedErrorFields = (
+	error: unknown,
+): { readonly event: string; readonly classification: string; readonly status?: number } => {
+	const status = (error as { status?: unknown } | null)?.status;
+	return {
+		event: "federation_grant.unexpected_error",
+		classification: classify(error),
+		...(typeof status === "number" ? { status } : {}),
+	};
+};
+
 const scalar = (value: unknown): value is string | number | boolean =>
 	typeof value === "string" || typeof value === "number" || typeof value === "boolean";
 
