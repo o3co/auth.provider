@@ -361,7 +361,7 @@ describe("a keystore that cannot answer is 503 on every route that verifies a to
 				);
 				expect(line, "a token_verification_unavailable error line").toBeDefined();
 				expect(line?.[0]).toMatchObject({
-					reason: "key_unavailable",
+					reason: "verification_key_unavailable",
 					err: {
 						name: "JwtVerificationError",
 						cause: { name: "Error", code: "ECONNREFUSED" },

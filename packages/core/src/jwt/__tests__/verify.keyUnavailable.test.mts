@@ -84,18 +84,18 @@ const spyLogger = (): Logger => {
 };
 
 describe("verifyJwt — a keystore that cannot answer", () => {
-	it("refuses the token as key_unavailable, not kid_unknown", async () => {
+	it("refuses the token as verification_key_unavailable, not kid_unknown", async () => {
 		const keyStore = keyStoreWhoseLookupRejects(new Error("connect ECONNREFUSED 10.0.0.7:8200"));
 		await expect(verifyJwt(await mint(), keyStore, options)).rejects.toMatchObject({
 			name: "JwtVerificationError",
-			reason: "key_unavailable",
+			reason: "verification_key_unavailable",
 		});
 	});
 
 	it("reads a thrown value that is not an Error as an outage too", async () => {
 		const keyStore = keyStoreWhoseLookupRejects("timeout");
 		await expect(verifyJwt(await mint(), keyStore, options)).rejects.toMatchObject({
-			reason: "key_unavailable",
+			reason: "verification_key_unavailable",
 		});
 	});
 
@@ -111,14 +111,14 @@ describe("verifyJwt — a keystore that cannot answer", () => {
 		expect(loggableError(err).cause).toMatchObject({ name: "Error", code: "ECONNREFUSED" });
 	});
 
-	it("logs jwt_verify_rejected with reason key_unavailable", async () => {
+	it("logs jwt_verify_rejected with reason verification_key_unavailable", async () => {
 		const logger = spyLogger();
 		await verifyJwt(await mint(), keyStoreWhoseLookupRejects(new Error("down")), {
 			...options,
 			logger,
 		}).catch(() => undefined);
 		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ reason: "key_unavailable" }),
+			expect.objectContaining({ reason: "verification_key_unavailable" }),
 			"jwt_verify_rejected",
 		);
 	});
@@ -144,7 +144,9 @@ describe("verifyJwt — a keystore that cannot answer", () => {
 
 describe("isVerificationUnavailable — an outage, whichever dependency it was", () => {
 	it("is true for a keystore that could not answer and for a revocation store that could not", () => {
-		expect(isVerificationUnavailable(new JwtVerificationError("key_unavailable", "x"))).toBe(true);
+		expect(
+			isVerificationUnavailable(new JwtVerificationError("verification_key_unavailable", "x")),
+		).toBe(true);
 		expect(isVerificationUnavailable(new JwtVerificationError("revocation_unavailable", "x"))).toBe(
 			true,
 		);
@@ -165,14 +167,14 @@ describe("isVerificationUnavailable — an outage, whichever dependency it was",
 	});
 
 	it("is false for something that is not a verification error", () => {
-		expect(isVerificationUnavailable(new Error("key_unavailable"))).toBe(false);
-		expect(isVerificationUnavailable({ reason: "key_unavailable" })).toBe(false);
+		expect(isVerificationUnavailable(new Error("verification_key_unavailable"))).toBe(false);
+		expect(isVerificationUnavailable({ reason: "verification_key_unavailable" })).toBe(false);
 		expect(isVerificationUnavailable(undefined)).toBe(false);
 	});
 
 	it("names the dependency in a description a caller may put on the wire", () => {
 		expect(VERIFICATION_UNAVAILABLE_DESCRIPTION).toEqual({
-			key_unavailable: "verification key unavailable",
+			verification_key_unavailable: "verification key unavailable",
 			revocation_unavailable: "revocation store unavailable",
 		});
 	});

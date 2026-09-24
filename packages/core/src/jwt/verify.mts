@@ -59,7 +59,7 @@ export type JwtVerificationReason =
 	// the connection. An outage, like `revocation_unavailable`, and never
 	// `kid_unknown`: that reason says the header named a key nobody holds,
 	// and every caller answers it as the client's fault.
-	| "key_unavailable"
+	| "verification_key_unavailable"
 	// Wave 1 (§4.5) / #296: a revocation *finding*, or a fail-closed refusal
 	// when the watermark cannot be compared — the jti is on the
 	// AccessTokenDenylist (explicitly revoked via RFC 7009); the token's `iat`
@@ -85,7 +85,7 @@ export type JwtVerificationReason =
 	// therefore did not degrade the service, it force-logged-out every user who
 	// refreshed during it — while the same handler already answered family-store
 	// outages with `503 temporarily_unavailable`. Every caller now answers this
-	// reason and `key_unavailable` alike: `503`, with the token still refused
+	// reason and `verification_key_unavailable` alike: `503`, with the token still refused
 	// (`isVerificationUnavailable`).
 	| "revocation_unavailable";
 
@@ -110,11 +110,13 @@ export class JwtVerificationError extends Error {
  * The reasons that report an outage — a dependency the verifier could not
  * consult — rather than a finding about the token.
  */
-export type VerificationUnavailableReason = "key_unavailable" | "revocation_unavailable";
+export type VerificationUnavailableReason =
+	| "verification_key_unavailable"
+	| "revocation_unavailable";
 
 /**
  * Whether `err` is a {@link JwtVerificationError} reporting an outage: the
- * keystore could not answer the key lookup (`key_unavailable`), or a
+ * keystore could not answer the key lookup (`verification_key_unavailable`), or a
  * revocation store could not be consulted — the subject watermark (#408) or
  * the jti denylist (#459) (`revocation_unavailable`). One predicate for every
  * dependency: a caller that answers an outage differently from a finding must
@@ -139,7 +141,7 @@ export function isVerificationUnavailable(
 ): err is JwtVerificationError & { readonly reason: VerificationUnavailableReason } {
 	return (
 		err instanceof JwtVerificationError &&
-		(err.reason === "key_unavailable" || err.reason === "revocation_unavailable")
+		(err.reason === "verification_key_unavailable" || err.reason === "revocation_unavailable")
 	);
 }
 
@@ -151,7 +153,7 @@ export function isVerificationUnavailable(
 export const VERIFICATION_UNAVAILABLE_DESCRIPTION: Readonly<
 	Record<VerificationUnavailableReason, string>
 > = Object.freeze({
-	key_unavailable: "verification key unavailable",
+	verification_key_unavailable: "verification key unavailable",
 	revocation_unavailable: "revocation store unavailable",
 });
 
@@ -392,7 +394,7 @@ export const REVOCATION_RETENTION_ALLOWANCE_MS =
  *  3. resolves the verification key by `kid` via
  *     {@link KeyStore.getVerificationKey} (falls back to the current signing
  *     kid when the JWT has no `kid` header) — a keystore that cannot answer
- *     is `key_unavailable`, an outage, not `kid_unknown`,
+ *     is `verification_key_unavailable`, an outage, not `kid_unknown`,
  *  4. delegates to jose `jwtVerify` with explicit `algorithms`, `issuer`, and
  *     `audience` options — pinning all three at the security-critical layer,
  *  5. enforces `iat <= now + clockSkewMs` post-signature (jose does not
@@ -491,7 +493,7 @@ export async function verifyJwt(
 		// operator-rotation expiry apart from attacker-fabricated header
 		// values without coupling to message text. Anything else it throws
 		// is the keystore failing to answer, which says nothing about the
-		// token: `key_unavailable`, with what it threw kept as the cause so a
+		// token: `verification_key_unavailable`, with what it threw kept as the cause so a
 		// caller's log names the dependency.
 		if (cause instanceof ExpiredKidError || cause instanceof UnknownKidError) {
 			const reason: JwtVerificationReason =
@@ -501,7 +503,7 @@ export async function verifyJwt(
 			throw err;
 		}
 		const err = new JwtVerificationError(
-			"key_unavailable",
+			"verification_key_unavailable",
 			"verification key lookup failed (fail-closed)",
 			{ cause },
 		);
