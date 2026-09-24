@@ -208,14 +208,12 @@ describe("GET /oauth/userinfo", () => {
 		expect(res.body).not.toHaveProperty("email");
 	});
 
-	it("reads the token's scope claim by RFC 6749 §3.3's grammar: a tab separates, it does not join", async () => {
-		// The claim is this server's own record, read tolerantly
-		// (parseScopeTokens); split on a single space, "openid\temail" named no
-		// scope at all and the claims it granted were withheld.
-		const token = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid\temail" });
-
-		const res = await callUserinfo({
-			token,
+	it("never reads a scope claim wider than it was minted: a tab joins nothing, and runs of spaces are harmless", async () => {
+		// A token minted before requests were read strictly can carry
+		// `openid\temail` as one entry, which named no scope and released no
+		// claim. Split on the tab it would disclose the email claims to a token
+		// that was never granted them, so the entry is dropped instead.
+		const store = (): Omit<CallOptions, "token"> => ({
 			userSessionStore: {
 				kind: "memory",
 				get: vi.fn().mockResolvedValue(baseSession),
@@ -228,7 +226,13 @@ describe("GET /oauth/userinfo", () => {
 			},
 		});
 
-		expect(res.status).toBe(200);
+		const legacy = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid\temail" });
+		const joined = await callUserinfo({ token: legacy, ...store() });
+		expect(joined.status).toBe(200);
+		expect(joined.body).toEqual({ sub: "u-1" });
+
+		const spaced = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid  email" });
+		const res = await callUserinfo({ token: spaced, ...store() });
 		expect(res.body).toEqual({ sub: "u-1", email: "alice@example.com", email_verified: true });
 	});
 

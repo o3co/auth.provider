@@ -397,30 +397,38 @@ describe("createRefreshTokenGrant", () => {
 			});
 		});
 
-		it("reads the scope the refresh token carries by the grammar, and carries it on canonical", async () => {
-			// The token's own claim is this server's record, read tolerantly
-			// (parseScopeTokens): a tab in it is a delimiter, not part of a scope
-			// a narrowing request then fails to find, and a ragged claim is not
-			// passed on to the next pair of tokens as it is.
-			const token = await makeRefreshToken({ scope: "read\twrite" });
-			const handler = createRefreshTokenGrant(mockDeps);
-			const ctx = (body: Record<string, unknown>): GrantContext => ({
+		it("never carries a scope wider than the refresh token was minted with, and carries it on canonical", async () => {
+			// A token minted before requests were read strictly can carry
+			// `openid\temail` as one entry, which named no scope. Split on the tab
+			// it would put `email` into the next pair of tokens, so the entry is
+			// dropped: a narrowing request cannot find `email` in it, and the
+			// refreshed tokens carry no scope at all.
+			const ctx = (token: string, body: Record<string, unknown> = {}): GrantContext => ({
 				body: { refresh_token: token, ...body },
 				session: {},
 				issuer: "localhost",
 				metadata: {},
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			});
+			const handler = createRefreshTokenGrant(mockDeps);
+			const legacy = await makeRefreshToken({ scope: "openid\temail" });
 
-			const narrowed = (await handler.handle(ctx({ scope: "read" }))).result;
-			expect(narrowed.status).toBe(200);
-			if (!("tokens" in narrowed)) expect.fail("expected tokens");
-			expect(narrowed.tokens.scope).toBe("read");
+			const narrowed = (await handler.handle(ctx(legacy, { scope: "email" }))).result;
+			expect(narrowed.status).toBe(400);
+			expect("error" in narrowed && narrowed.error).toBe("invalid_scope");
 
-			const carried = (await handler.handle(ctx({}))).result;
+			const carried = (await handler.handle(ctx(legacy))).result;
 			if (!("tokens" in carried)) expect.fail("expected tokens");
-			expect(carried.tokens.scope).toBe("read write");
-			expect(decodeJwt(carried.tokens.refresh_token as string).scope).toBe("read write");
+			expect(carried.tokens.scope).toBeUndefined();
+			expect(decodeJwt(carried.tokens.refresh_token as string).scope).toBeUndefined();
+			expect(decodeJwt(carried.tokens.access_token).scope).toBeUndefined();
+
+			// Runs of spaces name the same scopes, carried on in canonical form.
+			const spaced = await makeRefreshToken({ scope: "read  write" });
+			const canonical = (await handler.handle(ctx(spaced))).result;
+			if (!("tokens" in canonical)) expect.fail("expected tokens");
+			expect(canonical.tokens.scope).toBe("read write");
+			expect(decodeJwt(canonical.tokens.refresh_token as string).scope).toBe("read write");
 		});
 
 		it("treats empty scope string as no scope change", async () => {

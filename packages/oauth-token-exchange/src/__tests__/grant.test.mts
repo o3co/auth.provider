@@ -695,28 +695,38 @@ describe("createTokenExchangeGrant — the scope grammar (RFC 6749 §3.3)", () =
 		});
 	});
 
-	it("reads the subject token's scope claim tolerantly: a tab in it separates, it does not join", async () => {
-		// The subject's claim is a validated token's record, read as #647 reads
-		// a recorded scope (parseScopeTokens), so a narrowing request can find
-		// a scope it names and an inheriting one gets it back canonical.
+	it("never reads a subject's scope wider than it was minted: a tab joins nothing", async () => {
+		// A subject token minted before requests were read strictly can carry
+		// `read\twrite` as one entry, which named no scope. Split on the tab,
+		// an exchange could ask for `write` — or inherit it — from a subject
+		// that was never granted it, so the entry is dropped.
 		const g = buildGrant();
-		const token = await signSelfIssuedAccessToken({ scope: "read\twrite", family_id: "fam-1" });
-		const exchange = (scope?: string) =>
+		const exchange = (subject: string, scope?: string) =>
 			g.handle(
 				ctx({
 					client_id: "client-a",
 					client_secret: "any",
-					subject_token: token,
+					subject_token: subject,
 					subject_token_type: ACCESS_TOKEN_TYPE,
 					...(scope === undefined ? {} : { scope }),
 				}),
 			);
-		const narrowed = (await exchange("read")).result;
-		expect(narrowed.status).toBe(200);
-		if (narrowed.status === 200) expect(narrowed.tokens.scope).toBe("read");
-		const inherited = (await exchange()).result;
+		const legacy = await signSelfIssuedAccessToken({ scope: "read\twrite", family_id: "fam-1" });
+
+		const asked = (await exchange(legacy, "write")).result;
+		expect(asked).toEqual({
+			status: 400,
+			error: "invalid_scope",
+			errorDescription: "scope 'write' is not in subject_token scope",
+		});
+		const inherited = (await exchange(legacy)).result;
 		expect(inherited.status).toBe(200);
-		if (inherited.status === 200) expect(inherited.tokens.scope).toBe("read write");
+		if (inherited.status === 200) expect(inherited.tokens.scope).toBeUndefined();
+
+		const spaced = await signSelfIssuedAccessToken({ scope: "read  write", family_id: "fam-1" });
+		const canonical = (await exchange(spaced)).result;
+		if (canonical.status === 200) expect(canonical.tokens.scope).toBe("read write");
+		else expect.fail(`expected 200, got ${canonical.status}`);
 	});
 });
 
