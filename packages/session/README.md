@@ -1,57 +1,256 @@
 # @o3co/auth-provider-session
 
-Session and federation routes module for [auth.provider](../../README.md).
+Last updated: 2026-09-24
 
-Handles username/password login, logout, and OAuth 2.0 federation. Concrete
-providers such as Google and GitHub live in separate provider packages and
-contribute their `FederationProvider` to this module via the manifest model
-(per-federation `defineModule(...)` — see
-[`@o3co/auth-provider-federation-google`](../federation-google/README.md) and
-[`@o3co/auth-provider-federation-github`](../federation-github/README.md)).
-Uses RFC 6749 authorization code flow internally.
+Browser login, logout and upstream-IdP federation routes for
+[auth.provider](../../README.md), the helpers every federation adapter package
+builds on, and the express-session store those routes — and every other route
+that reads `req.session` — run over.
+
+## Responsibility
+
+**Role.** The browser-facing half of authentication. Core owns the ports this
+package uses (`UserRepository`, `UserSessionStore`, `FederationTokenStore`,
+`SessionFederationIndex`, and the federation adapter contract) and implements no
+route; this package is the driver of those ports for a browser. It has three
+responsibilities:
+
+1. **The `/session` routes** — `sessionModule`: password login, logout, the CSRF
+   token route, and the federation start and callback routes. They turn a
+   password check or an upstream IdP's answer into a `UserSession` record and an
+   authenticated express session, and undo it at logout.
+2. **The federation-adapter toolkit** — what an adapter package imports so that
+   every adapter follows one rule: `codeChallenge` (PKCE S256),
+   `callbackUrlForExchange` (the RFC 9207 `iss` rule), `FederationClientSecret` /
+   `resolveClientSecret`, `createFederationRedirectPolicy` and the allowlist
+   rules it is built from, and `extractFederationSection`.
+3. **The browser session store** — `sessionStoreModule` / `sessionStoreModuleFor`
+   and `createSessionStoreFactory` / `registerBuiltinSessionStores`: the
+   express-session middleware, its cookie and its store (memory, or Redis through
+   `connect-redis`).
+
+**Owns:**
+
+- the `/session` routes and their answers; the CSRF policy for them
+  (`session.csrf.*`, and the exported guard `@o3co/auth-provider-device-grant`
+  reuses); the login rate-limit guard's wiring (`rateLimit.login`); the redirect
+  allowlists (`session.redirectAllowlist`, `federations.<name>.redirectAllowlist`);
+- how a federation is driven: `state`, PKCE and `nonce`, the `form_post`
+  transaction and its cookie, claim precedence, the `amr` a login records, and
+  what a callback writes to the stores;
+- the `federationRedirectPolicies` contribution kind and the
+  `federationRedirectPolicyResolver` slot it declares on core
+  ([`src/federations/contributes.mts`](src/federations/contributes.mts)), and
+  [`FederationResult`](src/federations/types.mts);
+- the express-session middleware, its cookie and its store (`session.*`,
+  `session.storage.*`).
+
+**Does not own:**
+
+- the federation adapter contract — `FederationProvider`, `FederationProfile`
+  and the capabilities — which is core's
+  ([`core/src/federations`](../core/src/federations/README.md));
+- any adapter: [`federation-google`](../federation-google/README.md),
+  [`federation-github`](../federation-github/README.md),
+  [`federation-apple`](../federation-apple/README.md),
+  [`federation-oidc`](../federation-oidc/README.md);
+- the stores it writes (core ports; memory adapters in core, Redis ones in
+  [`@o3co/auth-provider-redis`](../redis/README.md)) and who a user is (the
+  Store behind `UserRepository`, e.g.
+  [`@o3co/auth-provider-foundation`](../foundation/README.md));
+- token issuance, `POST /oauth/logout`'s cascade, upstream logout
+  (`SupportsLogout`) and federation token refresh (`SupportsRefresh`) —
+  [`@o3co/auth-provider-oauth`](../oauth/README.md);
+- delegated authorization (`SupportsDelegatedAuthorization`) —
+  [`@o3co/auth-provider-federation-grants`](../federation-grants/README.md);
+- any HTML: the login page and the account page are the deployment's.
+
+**Why a separate package.** From core: core is the contract every package
+depends on and implements no route, and a deployment that issues tokens without
+a browser login (client credentials, token exchange) installs no route it does
+not use. From `@o3co/auth-provider-oauth`: the two are siblings over core and
+neither imports the other, so a deployment can install either without the
+other's routes — though `oauth`'s `/authorize` reads `req.session`, so a
+deployment that uses it mounts an express-session middleware, normally this
+package's store module. What the split costs is stated in
+[What `POST /session/logout` invalidates](#what-post-sessionlogout-invalidates).
+
+**Why the three live together.** Each of the other two exists for the routes.
+
+- The toolkit: the redirect policy is a contribution kind this package declares
+  and its router consumes, and `extractFederationSection` reads the config shape
+  the router reads callback URLs from. The pure helpers — `codeChallenge`,
+  `callbackUrlForExchange`, the client-secret resolver — depend on nothing in
+  this package, and core's contract already tells adapters to use two of them;
+  they are here because the router and the adapters share them, and it is the
+  reason every adapter package takes this package as a peer dependency.
+- The store: it is what `req.session` is, and the routes here are what write it;
+  the federation router also keeps `form_post` transactions in it. It is a
+  module of its own, apart from `sessionModule`, because other packages read
+  `req.session` without these routes — `oauth`'s `/authorize`, consent and
+  logout, `device-grant`'s verification page, `federation-grants`' browser
+  routes — so a deployment with a login of its own installs the store alone.
+
+**Source layout.** [`src/routes/`](src/routes/) holds the two routers;
+[`src/federations/`](src/federations/) the toolkit and the router's federation
+parts (claim precedence, consented scope, the transaction store, the redirect
+policy); [`src/modules/`](src/modules/) and [`src/store/`](src/store/) the
+browser session store; [`src/internal/`](src/internal/) cookie reading and the
+claims read off a `User`; [`src/csrf.mts`](src/csrf.mts) the CSRF rule; and
+[`src/redirect-allowlist.mts`](src/redirect-allowlist.mts) the allowlist rule
+the login and federation routes share. What each file does is in its header
+comment.
 
 ## Install
 
-This package is **private** — it is not published to npm and is only available within the `auth.provider` monorepo.
-
-```jsonc
-// packages/*/package.json
-{
-  "dependencies": {
-    "@o3co/auth-provider-session": "workspace:*"
-  }
-}
+```sh
+npm install @o3co/auth-provider-session @o3co/auth-provider-core express express-session
 ```
 
-Peer dependencies (install separately in the workspace root):
+- Peer dependencies: `express@^5.0.0` and `express-session@^1.17.0`.
+- Installed with it: `@o3co/auth-provider-core`, and `connect-redis` and `redis`
+  for the Redis session store. Those two are always installed and loaded only
+  when `session.storage.type = "redis"`.
 
+## Composition
+
+```ts
+import { createApp } from "@o3co/auth-provider-core";
+import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { googleFederationModule } from "@o3co/auth-provider-federation-google";
+
+const handle = await createApp({
+  modules: [
+    sessionStoreModuleFor(config), // first, so every module after it can read req.session
+    sessionModule,                 // a const Module, not a factory
+    googleFederationModule,        // contributes federations.google + federationRedirectPolicies.google
+    // ... modules providing userRepository, userSessionStore, federationTokenStore,
+    //     sessionFederationIndex and googleFederationConfig
+  ],
+  bootstrapComponents: { config, pathResolver },
+});
 ```
-express@^5.0.0
-```
 
-## Public API
+The standalone template's
+[`buildModules.mts`](../../templates/standalone/src/buildModules.mts) is the
+complete composition.
 
-### `sessionModule`
+## Browser session store
 
-```typescript
-import { sessionModule } from "@o3co/auth-provider-session";
-// → sessionModule is a const Module (manifest), NOT a factory.
-// Add it to the manifest list passed to createApp / createTestApp.
-```
+`sessionStoreModuleFor(config)` — or the static `sessionStoreModule` — contributes
+one route, `session-middleware`, mounted at `/`: express-session with its cookie
+built from `session.*` (`HttpOnly`, `Path=/`, `session.secure`,
+`session.sameSite`, `session.domain`, `Max-Age` = `session.maxAge`) and its store
+built from `session.storage.*`. Every `req.session` in a deployment is this one.
+Defaults and environment variables are in
+[`reference.conf`](../core/config/reference.conf); `session.storage.type` is
+`redis` by default, `memory` is the alternative, and any other value fails boot.
 
-Const Module. Contributes two route bundles, both mounted at `/session`:
+What holds:
 
-| Method | Path                                              | Description                     |
-|--------|---------------------------------------------------|---------------------------------|
-| GET    | /session/csrf                                     | Issue a double-submit CSRF token |
-| POST   | /session/login                                    | Username / password login       |
-| POST   | /session/logout                                   | Session logout — see [what it invalidates](#what-postsessionlogout-invalidates) |
-| GET    | /session/oauth/federation/:name                   | Initiate OAuth federation flow  |
-| GET    | /session/oauth/federation/:name/callback          | Federation callback             |
+- **Mount order is list order, except where a route names this one.** The
+  route declares no `before` / `after`, because naming a route a deployment may
+  not include (an `oauth`-only deployment has no `sessionModule`) fails boot
+  with `route-order-target-missing`. So list it **ahead of every module that
+  reads `req.session`**; a module listed before it reads no session, and
+  nothing checks that at boot. The standalone template lists it first. The
+  exception is the other direction: when federation grants are enabled, their
+  browser route declares `after: ["session-middleware"]`, so it mounts after
+  this route wherever either is listed, and a composition without a route of
+  that id fails boot with `route-order-target-missing`.
+- **A `__Host-` cookie name needs `session.secure = true` and
+  `session.domain = null`**, or boot fails. `__Host-auth.session` is the default
+  name.
+- **`memory` is refused under `deployment.mode = "multi"`.** express-session's
+  `MemoryStore` forks per replica: a login served by one replica is unknown to
+  the others, logout clears only the replica it lands on, and a restart loses
+  every session. `sessionStoreModuleFor(config)` reads the storage type and
+  declares the module replica-unsafe when it is `memory`, so core's
+  replica-safety guard refuses it at boot by name with the other offenders,
+  warns when `deployment.mode` is unset, and says nothing under `"single"`. The
+  static `sessionStoreModule` cannot know the type, so the guard cannot name it;
+  its route factory refuses the same combination when it runs
+  (`replica-unsafe-adapter`) and never warns. Prefer `sessionStoreModuleFor`
+  wherever the config is in hand.
+- **The Redis store opens its own connection.** A `redis` (node-redis) client to
+  `session.storage.redis.url` (with `password` when set), under `connect-redis`'s
+  `RedisStore`. With a readiness registrar wired it registers the probe
+  `session-store` (a `PING`), so a replica that has lost Redis stops receiving
+  traffic; with a lifecycle registrar wired, `AppHandle.dispose()` quits the
+  client. Client `error` events are logged as `session_store_redis_error`
+  rather than crashing the process; reconnecting is node-redis's job. A missing
+  `url` fails boot.
+- **Federation transactions share the store**, under the `fedtx:` key prefix —
+  see [the transaction cookie](#the-transaction-cookie).
 
-The `:name` path parameter corresponds to the federation key in `config.federations` (e.g. `google`, `github`, `google-work`). Unknown names return `404`.
+**Not `@o3co/auth-provider-redis`.** That package's `UserSessionStore` holds the
+`UserSession` record behind a `sid` — what introspection, `/userinfo` and
+`/authorize` resolve — and its other adapters hold other core ports, through
+clients that package's modules create. This store holds express-session's own
+records: what this package's routes keep in the session (`isAuthenticated`,
+`user`, `sid`, the login's `redirectTo`, a `query` federation's in-flight
+envelope), what other packages keep there (`oauth` declares `client` and
+`code`), and the `fedtx:` federation transactions. They are different records
+over different connections, configured separately.
 
-#### What `POST /session/logout` invalidates
+**Another store.** The module registers only `memory` and `redis`. A composition
+that needs another express-session `Store` builds the middleware itself —
+`createSessionStoreFactory(ctx)`, `registerBuiltinSessionStores(factory)`,
+`factory.register("<type>", builder)` ([`src/store/factory.mts`](src/store/factory.mts))
+— mounts it first, and does not install the module. If it enables federation
+grants, it contributes that middleware as a route with the id
+`session-middleware`, or boot fails as above.
+
+## Routes
+
+`sessionModule` contributes two routers, both mounted at `/session`:
+
+| Method | Path | |
+| --- | --- | --- |
+| GET | `/session/csrf` | Issue a double-submit CSRF token |
+| POST | `/session/login` | Password login |
+| POST | `/session/logout` | End the browser session — see [what it invalidates](#what-post-sessionlogout-invalidates) |
+| GET | `/session/oauth/federation/:name` | Start a federation (`?redirect_to=`, `?link=1`) |
+| GET | `/session/oauth/federation/:name/callback` | Callback of a `query` federation; `405` (`Allow: POST`) for a `form_post` one |
+| POST | `/session/oauth/federation/:name/callback` | Callback of a `form_post` federation; `405` (`Allow: GET`) for a `query` one |
+
+`:name` is the federation's name; a name no module contributed is `404`.
+
+The manifest ([`src/module.mts`](src/module.mts)):
+
+- `requires`: `config`, `userRepository`, `userSessionStore`,
+  `federationTokenStore`, `sessionFederationIndex`, and the synthetic
+  `federationProviders` and `federationRedirectPolicyResolver`, which the boot
+  planner builds from per-federation modules' `federations.<name>` and
+  `federationRedirectPolicies.<name>` contributions. `sessionRPRegistry` and
+  `sessionFamilyIndex`, the other two session stores, are `oauth`'s.
+- `optional`: `logger`, `rateLimiter`, `auditSink`, `subjectSessionIndex`.
+  `auditSink` unwired must be declared with `audit.sink.type = "none"`, and
+  `subjectSessionIndex` unwired with `oauth.revocation.subject = "unsupported"`,
+  or boot refuses.
+
+### Password login
+
+`POST /session/login` takes `username` and `password` (JSON or form).
+
+- `400 invalid_request` when either is missing; `401 invalid_credentials` when
+  `UserRepository.authenticate` answers `null`; `503 temporarily_unavailable`
+  when it or the `UserSession` write throws.
+- On success it creates a `UserSession` (`amr: ["pwd"]`, lifetime
+  `session.maxAge`), records it in `subjectSessionIndex` when that is wired,
+  regenerates the express session, and answers `200` with a fresh CSRF cookie.
+- `redirect_to`, when sent, must be on `session.redirectAllowlist` (see
+  [Redirect allowlists](#redirect-allowlists)) and is stored as
+  `req.session.redirectTo`; nothing in this package redirects to it.
+- The brute-force guard runs on the shared `rateLimiter` (prefix `login`, keyed
+  by client IP) with `rateLimit.login`'s window and limit, answering `429` when
+  it denies and following `rateLimit.failMode` when the limiter fails. With no
+  `rateLimiter` wired the route falls back to a per-process limiter: boot is
+  refused under `deployment.mode = "multi"`, a `login_rate_limiter_not_shared`
+  warning is logged when the mode is unset, and nothing is said under
+  `"single"`.
+
+### What `POST /session/logout` invalidates
 
 This provider has **two** logout endpoints and they do not invalidate the same
 things. Pick by what the session holds.
@@ -62,7 +261,7 @@ successfully"}` and invalidates:
 
 | What | Effect |
 |------|--------|
-| the express-session cookie | destroyed |
+| the express session | destroyed |
 | the `UserSession` record for the session's `sid` | deleted — this is what makes `/oauth/introspect` report `active: false` and `/oauth/userinfo` refuse a token minted by the `session` grant |
 | the `subjectSessionIndex` entry | removed, so `revokeAllForSubject` stops enumerating a dead `sid` |
 | `federationTokenStore` + `sessionFederationIndex` entries for the `sid` | removed, so upstream-IdP tokens are not left at rest |
@@ -75,10 +274,10 @@ until it expires. Use `POST /oauth/logout` with an `id_token_hint` for that
 session — it runs the full cascade (refresh-family revoke, RP registry,
 federation, session delete) and ends the browser session too.
 
-The boundary is structural, not an oversight: the cascade
+The boundary is structural: the cascade
 (`packages/oauth/src/logout/cascadeLogout.mts`) needs
 `refreshTokenFamilyRevocation`, `sessionFamilyIndex` and `sessionRPRegistry`,
-which this module declares none of, and `@o3co/auth-provider-session` may not
+which this module declares none of, and `@o3co/auth-provider-session` does not
 import `@o3co/auth-provider-oauth` — they are siblings over core.
 
 The `session` grant issues no refresh token, so a deployment whose tokens all
@@ -88,26 +287,25 @@ sufficient on its own.
 **Failure modes.** Every store step is best-effort and logged, never
 propagated: a store outage must not turn a logout into a `5xx` that leaves the
 user holding a live cookie. The `UserSession` delete runs **first**, before the
-cookie is destroyed and before the best-effort hygiene, so a federation-store
-outage cannot prevent the invalidation that matters. Failures are logged as
-`logout_user_session_delete_failed`,
+express session is destroyed and before the best-effort hygiene, so a
+federation-store outage cannot prevent the invalidation that matters. Failures
+are logged as `logout_user_session_delete_failed`,
 `logout_subject_session_index_remove_failed`,
 `logout_federation_token_remove_failed` and
-`logout_session_federation_index_remove_failed` — alert on the first. If the
-cookie destroy itself fails the response is still `500 server_error` (unchanged),
-and by then the records are already gone, so `/authorize` refuses the surviving
-cookie on its own account. A composition wiring no `userSessionStore`, or a
-session carrying no `sid`, logs out exactly as before.
+`logout_session_federation_index_remove_failed` — alert on the first. If
+destroying the express session fails the response is `500 server_error`, and by
+then the records are already gone, so `/authorize` refuses the surviving cookie
+on its own account. A session carrying no `sid` has no records to invalidate
+and only the express session is destroyed.
 
-#### CSRF on the state-changing routes (#272)
+### CSRF on the state-changing routes
 
 `POST /session/login` and `POST /session/logout` accept a request that carries
 **either** a same-origin (or explicitly trusted) `Origin` / `Referer`, **or** a
 valid double-submit CSRF token. A request carrying neither is rejected with
-`403 access_denied` — previously a missing `Origin` header skipped the check
-entirely.
+`403 access_denied`.
 
-- **Browsers** need no change: the browser sets `Origin` on a same-origin
+- **Browsers** need nothing extra: the browser sets `Origin` on a same-origin
   `fetch` / form post, and that satisfies the check on its own.
 - **Header-less clients** (curl, server-side agents, test harnesses) call
   `GET /session/csrf`, which sets a JS-readable `<session.name>.csrf` cookie
@@ -118,495 +316,24 @@ entirely.
 - A successful login returns a **fresh** CSRF cookie, so the follow-up logout
   needs no extra round trip.
 
-The token is a signed, stateless HMAC over a random nonce and an expiry, keyed
-by an HKDF expansion of `session.secret` — a subdomain able to write the
-parent-domain cookie still cannot forge one. Cross-origin login UIs list their
-origin on `session.csrf.trustedOrigins`; `cors.allowedOrigins` no longer grants
-CSRF trust.
+The token is a signed, stateless HMAC over a random nonce and an expiry
+(`session.csrf.ttlSeconds`), keyed by an HKDF expansion of `session.secret` — a
+subdomain able to write the parent-domain cookie still cannot forge one.
+Cross-origin login UIs list their origin on `session.csrf.trustedOrigins`;
+`cors.allowedOrigins` grants no CSRF trust.
 
 `checkRequestOrigin`, `createCsrfProtection`, `createCsrfProtectionFromConfig`,
-`createCsrfGuard` and `createCsrfIssueHandler` are exported for compositions
-that mount their own login page or protect their own routes.
-
-`requires`: `userRepository`, `userSessionStore`, `federationTokenStore`,
-`sessionFederationIndex` (sibling stores), plus the synthetic keys
-`federationProviders` and `federationRedirectPolicyResolver` populated by the
-boot planner from per-federation modules. See
-[`@o3co/auth-provider-federation-google`](../federation-google/README.md) for an
-example federation module.
-
----
-
-### `extractFederationSection`
-
-```typescript
-function extractFederationSection(
-  federations: Record<string, unknown>,
-  name: string,
-): { type: string; [key: string]: unknown } | undefined;
-```
-
-Pure utility — normalizes a federation config slice into a flat credential
-object. Handles flat (`{ enabled, clientId, callbackURL }`), nested
-(`{ enabled, type, [type]: {...} }`), and shorthand (key serves as type)
-shapes; rejects mixed shapes; returns `undefined` for absent or
-`enabled !== true` entries. Used by per-federation modules to read their own
-config slice.
-
----
-
-> **Where this contract lives.** `FederationProvider`, `FederationProfile`,
-> the optional capabilities (`SupportsLogout`, `SupportsClaimMapping`,
-> `SupportsRefresh`, `SupportsDelegatedAuthorization`), their guards and the
-> response-mode vocabulary are exported by **`@o3co/auth-provider-core`** since
-> #626 P1, and are no longer re-exported here: the type a federation is
-> registered with has to be the type `oauth` and `federation-grants` read, and
-> a second export path is what kept it `unknown`. The sections below describe
-> the contract this package drives; import the names from core. What stays
-> here is the router, the redirect policy, the transaction store and
-> `FederationResult`.
-
-### `FederationProvider` (interface)
-
-```typescript
-interface FederationProvider {
-  readonly name: string;
-  readonly scope: readonly string[];
-  readonly responseMode?: "query" | "form_post";   // default "query"
-
-  buildAuthorizationUrl(params: {
-    readonly redirectUri: string;
-    readonly state: string;
-    readonly codeVerifier: string;
-    readonly nonce?: string;
-  }): URL;
-
-  exchangeCode(params: {
-    readonly code: string;
-    readonly codeVerifier: string;
-    readonly redirectUri: string;
-    readonly nonce?: string;
-    readonly callbackParams?: Readonly<Record<string, string>>;
-  }): Promise<FederationProfile>;
-}
-```
-
-Implement this interface to add a custom OAuth 2.0 / OIDC federation provider. Optionally mix in `SupportsLogout`, `SupportsClaimMapping`, `SupportsRefresh`, or `SupportsDelegatedAuthorization`.
-
-- `name` — unique provider identifier. Used as both the Map key in `federationProviders` and the route `:name` parameter.
-- `scope` — OAuth 2.0 scopes to request.
-- `buildAuthorizationUrl` — builds the RFC 6749 §4.1 + RFC 7636 authorization URL. Receives a pre-generated `codeVerifier` from the route layer; implementations should compute `code_challenge` via `codeChallenge(codeVerifier)`.
-- `exchangeCode` — exchanges an authorization code for a normalized `FederationProfile`. Must include `issuer` and `sub`; all other fields are optional.
-- `responseMode` — how the IdP delivers the authorization response. Optional, and absence means `"query"`, so every provider written before #479 is unaffected. See below.
-- `callbackParams` — the rest of the callback's parameters (query string or form body), string values only, **excluding `code` and `state`**. Those two are the framework's to bind and are already accounted for — `code` has its own field, `state` is what the route compared against the session — so they are not repeated in a generic bag where an adapter could read the unvalidated copy. What remains is present so an IdP that returns identity data *beside* the token response can be adapted: Sign in with Apple sends the end user's name once, in a `user` JSON field on the first authorization, and never in the id_token. **The values are relayed through the user agent and are not signed** — the `state` check binds them to the session and binds nothing else, so treat anything read here as self-asserted and let `mapClaims` + claim precedence decide where it may land.
-  Protocol response parameters travel here too, and one of them matters to every adapter: the RFC 9207 **`iss`**. An adapter built on an OAuth library hands it the authorization response as a URL, and has to rebuild that URL because the route passes `code` and the rest separately. Use **`callbackUrlForExchange({ redirectUri, code, callbackParams })`** for that: it sets `code`, forwards `iss` when the callback carried one, and forwards nothing else from the bag (an `error`, `response`, `id_token` or `token` on that URL would change how the library reads the response). Rebuilding the URL from `code` alone drops `iss`: the mix-up check then never runs, and every login fails against an issuer that advertises `authorization_response_iss_parameter_supported` (#595). Configure the library with the issuer the IdP actually publishes, or the comparison refuses every login.
-
-> **Note (A5 split, v0.5.0):** redirect URL handling — `validateRedirect` /
-> `resolveCallbackRedirect` — was moved off `FederationProvider` and onto a
-> dedicated `FederationRedirectPolicy` capability. Per-federation modules
-> contribute the policy via `federationRedirectPolicies.<name>`; built-ins
-> use `createFederationRedirectPolicy(...)`. Custom providers do not
-> implement these methods on `FederationProvider`.
-
----
-
-### Response mode: `query` and `form_post` (#479)
-
-Most IdPs redirect the browser back to the callback with the authorization response in the query string. Sign in with Apple does not: whenever the requested `scope` includes `name` or `email`, Apple **POSTs** an `application/x-www-form-urlencoded` body to the callback, because the first-authorization `user` field does not fit a redirect URL.
-
-A provider opts in by declaring one field:
-
-```typescript
-const appleProvider: FederationProvider = {
-  name: "apple",
-  scope: ["name", "email"],
-  responseMode: "form_post",
-  // …
-};
-```
-
-That single declaration changes three things in the route layer, and nothing in the adapter:
-
-1. **The start route appends `response_mode=form_post`** to the URL `buildAuthorizationUrl` returned. The parameter is written once, in the router, rather than in every adapter — and nothing at all is appended for the default mode, so a `"query"` federation's authorization URL is byte-for-byte what its adapter produced.
-2. **`POST /oauth/federation/<name>/callback` starts accepting the form body.** It is the *same handler* as the GET callback over a different parameter source: same envelope lookup, same `state` comparison, same consume-before-any-async-work reuse prevention, same PKCE verifier and nonce read from the stored envelope rather than from the request, same rollback ladder. One handler, but not one surface: **each response mode accepts exactly one method.** A provider that did not declare `form_post` answers `405 method_not_allowed` (with `Allow: GET`) to a POST, so no existing federation gains a POST surface; a `form_post` provider answers `405 method_not_allowed` (with `Allow: POST`) to a GET, since its IdP only ever posts and its transaction cookie is offered to every cross-site request that reaches the path ([#502](https://github.com/o3co/auth.provider/issues/502)).
-3. **That federation's ephemeral state moves out of the session** and into a *federation transaction* with a cookie of its own. The application session cookie is not modified.
-
-#### The `SameSite` consequence, and what actually carries the state
-
-A `form_post` callback arrives as a **cross-site POST** from the IdP's origin. A `SameSite=Lax` cookie — the deployment default, and the right default — is not sent on a cross-site POST, so a callback relying on the session cookie would land with no session: no `state` to compare against, no PKCE verifier. It fails closed, but it fails for everyone.
-
-The flow therefore needs *a* cookie that survives a cross-site POST. It does **not** need the session cookie to be that cookie, and making it one was [#494](https://github.com/o3co/auth.provider/issues/494): `GET /oauth/federation/<name>` requires no authentication, and a `SameSite=Lax` cookie **is** sent on a top-level GET, so any third party who caused one navigation permanently downgraded the victim's authenticated session cookie. Permanently, because express-session serialises `req.session.cookie` into the store and `Store.prototype.createSession` rebuilds it from there — with every own key — on every later request.
-
-So the cross-site part gets its own cookie and its own record:
-
-| | value |
-|---|---|
-| cookie name | `__Secure-<session.name, minus any prefix>.federation` — e.g. `__Host-auth.session` and `auth.session` both give `__Secure-auth.session.federation` |
-| attributes | `HttpOnly; Secure; SameSite=None`, `Path` scoped to that provider's callback URL, `Max-Age` = the transaction TTL (10 minutes by default) |
-| contents | an opaque 256-bit id, and nothing else |
-| record | `state`, `codeVerifier`, `nonce`, `redirectTo` and the provider name, in the session store under a `fedtx:` key prefix |
-
-The name is derived from `session.name` the way the CSRF cookie's is, so it inherits the operator's naming. The prefix is the one deviation, and it is applied **unconditionally** — a session cookie with no prefix still yields a `__Secure-` transaction cookie.
-
-`__Secure-` rather than `__Host-` because `__Host-` requires `Path=/`, and this cookie is deliberately path-scoped to the callback, so a `__Host-` name would be dropped by every browser. Unconditionally because, unlike the session cookie — whose `Secure` flag is the operator's `session.secure` to set — this cookie is `SameSite=None` and therefore always issued with `Secure` (every current browser drops a `SameSite=None` cookie that is not `Secure`; the pairing `application.schema.mts` already enforces for the config-level value, #282 — and Apple refuses a non-`https` redirect URI anyway). The prefix states that invariant where the browser will enforce it.
-
-That choice has a cost, and it is the one place the transaction is weaker than the cookie it replaced ([#502](https://github.com/o3co/auth.provider/issues/502)). `__Host-` is what pins a cookie to exactly one host; `__Secure-` only pins it to HTTPS. So a **related-domain attacker** — anyone who controls a sibling subdomain of the deployment's cookie domain, or can write a parent-domain cookie from one — can set `__Secure-<name>.federation` with `Domain=<parent>` in the victim's browser, while the session cookie, `__Host-` by default and enforced as such in `sessionStoreModule.mts`, cannot be planted that way.
-
-- **What the attacker needs:** control of any sibling subdomain (a forgotten staging host, a dangling DNS record, XSS on a lower-trust app, a shared-hosting neighbour). Nothing about this deployment, no session, no `state`.
-- **What it gets them:** they start their own federation flow, plant *their* transaction id, and auto-submit *their* `state` and `code` to the callback. The victim's browser is logged into the **attacker's** federated account, and whatever the victim does next is recorded against it. It does not read the victim's session, disclose credentials, or reach the victim's own account.
-- **Why signing the cookie would not help:** the attacker's transaction is genuinely theirs, so any value the server would accept from its own issuance is a value the attacker legitimately holds. This is inherent to path-scoping, not a defect in the binding.
-- **What to do:** treat every host under the cookie domain as part of the deployment's trust boundary — the same rule the CSRF section's signed token exists to survive, and the reason `session.domain` defaults to `null`. If a subdomain must host untrusted content, it does not belong under the domain the auth cookies are scoped to.
-
-**The application session cookie keeps the attributes the deployment configured**, on every session, whether or not it ever started a `form_post` federation — a deployment running Apple beside Google sees no difference on any Google login, and no difference on the Apple browser's own session either.
-
-The transaction is what binds the callback to the browser that started it, which is the property the session cookie used to provide. The `state` comparison is unchanged and still runs; the transaction cookie is an addition to it, never a replacement. A caller who presents a stolen `state` without the matching transaction cookie is refused before `state` is read at all.
-
-Both the record and the cookie are dropped on every callback exit that **judged** the transaction — success, `invalid_state`, `exchange_failed`, `unknown_user` alike.
-
-They are deliberately *not* dropped by a refusal that judged nothing ([#502](https://github.com/o3co/auth.provider/issues/502)). The rule is: **a refusal spends the transaction when the request made a claim about it, and leaves it alone when it made none.** A `state` is that claim. A callback carrying no `state` claims nothing and costs nothing (`400 invalid_request`, record untouched); a GET is refused with `405` before the cookie is read at all. A *wrong* `state` is different in kind — that is an attempt on this transaction, and it still spends it, so a guess gets no second try. The distinction matters because the cookie is `SameSite=None` by necessity, so it accompanies any cross-site request to the callback path: while every refusal consumed the record, a third party could destroy a victim's in-flight login with one `<img>` tag.
-
-That last row is `form_post`-only. A `query` federation keeps its envelope in the session and retires it only on the path that *matched* `state`, so a wrong `state` there leaves the envelope in place — deliberately, because the session cookie is `SameSite=Lax` and **is** sent on a top-level cross-site GET, so spending the envelope on a mismatch would hand a third party the same availability bug in the one branch that never had it. The guess it would defend against is not a real one: `state` is 128 bits from the CSPRNG. Only the "no `state`" rule is shared by both branches.
-
-An abandoned flow leaves only the short-lived cookie, and the record expires with it: the expiry is written into the record as `cookie.expires`, which is exactly what `MemoryStore` reaps on read and what `connect-redis` turns into the key's `EX`.
-
-##### What "single use" guarantees, and what enforces it
-
-Retiring the record is a `get` followed by a `destroy`, and those are two round trips. The express-session `Store` API is `get` / `set` / `destroy`: there is no compare-and-delete on it, and no atomic read-and-consume can be composed from the three. So the guarantee is worth stating exactly ([#502](https://github.com/o3co/auth.provider/issues/502)):
-
-| | |
-|---|---|
-| **Guaranteed** | A callback arriving *after* an earlier one completed its delete finds no record and is refused. That covers the replay this is for: a `code` and `state` lifted from a proxy log, the back button, a retried request. |
-| **Not guaranteed** | Callbacks that *overlap*. Two that both read the record before either deletes it both pass the `state` comparison and both reach `exchangeCode`. `MemoryStore` answers synchronously and happens to serialise them; a store with network latency does not. |
-| **What bounds the overlap** | The IdP. An authorization code is single-use at the IdP, racing callbacks necessarily carry the same one, and at most one exchange succeeds however many get that far — the rest get `502 exchange_failed`. PKCE binds that exchange to the verifier held in the record. |
-
-This is weaker than `DeviceCodeStore` (#298), which *is* an atomic read-and-consume with a racing conformance test. The difference is the API each works over: `DeviceCodeStore` owns its adapter and can push the consume into one Redis round trip, while a federation transaction deliberately shares the session store rather than adding a component slot of its own — a slot that would have to be declared in `AppConfigSchema` and configured in every deployment. Strict atomicity here means paying that, for a property the IdP already provides. `Federation.transactionConcurrency.test.mts` pins both halves so neither the code nor this table can drift from the other.
-
-A `"query"` federation is untouched by all of this. Its callback is a same-site top-level GET, its envelope stays in `req.session.federation`, and its authorization URL, cookies and error surface are byte-for-byte what they were.
-
----
-
-### Client secrets that rotate (#479)
-
-`clientSecret` was a `string` because most IdPs issue a long-lived opaque one. Apple's is an ES256 JWT the relying party signs itself, capped at six months, so a value would mean a deployment that silently stops authenticating half a year after it was configured.
-
-The contract widens to a union — one field, one meaning, with the callable form saying only that the secret is computed rather than stored:
-
-```typescript
-type FederationClientSecret = string | (() => string | Promise<string>);
-
-const secret = await resolveClientSecret(config.clientSecret);
-```
-
-- **The static form is unchanged.** `federations.google.clientSecret = "…"` in HOCON, and Google's / GitHub's provider config, keep working exactly as before — a config file can still only carry the string form.
-- **`resolveClientSecret` is called once per token exchange** (and per refresh) and deliberately does **not** cache. Only the adapter knows when its secret expires, so caching belongs there: `federation-apple` regenerates its JWT when it comes within 24 h of `exp`.
-- **An empty or non-string result is rejected locally**, rather than posted upstream as an empty `client_secret` and returned as an opaque `invalid_client`.
-
----
-
-### `SupportsLogout` (optional capability)
-
-Optional capability for providers whose IdP exposes an OIDC RP-Initiated Logout (end-session) endpoint.
-
-```ts
-interface EndSessionRequest {
-  idTokenHint?: string;
-  postLogoutRedirectUri?: string;
-  state?: string;
-}
-
-interface EndSessionResult {
-  url: URL;
-  method: "GET";
-}
-
-interface SupportsLogout {
-  endSession(req: EndSessionRequest): Promise<EndSessionResult>;
-}
-
-function supportsLogout(
-  provider: FederationProvider | undefined | null,
-): provider is FederationProvider & SupportsLogout;
-```
-
-Provider packages may implement `SupportsLogout` when the upstream IdP exposes
-an end-session endpoint. External integrations (Microsoft Entra ID, Auth0,
-Okta, etc.) can add the capability by mixing it into their custom provider.
-
-Minimum custom provider example:
-
-```ts
-import type {
-  FederationProvider,
-  SupportsLogout,
-  EndSessionRequest,
-  EndSessionResult,
-} from "@o3co/auth-provider-core";
-
-function createMyIdPProvider(): FederationProvider & SupportsLogout {
-  return {
-    name: "myidp",
-    scope: ["openid"],
-    buildAuthorizationUrl({ redirectUri, state, codeVerifier }) { /* ... */ },
-    async exchangeCode({ code, codeVerifier, redirectUri }) { /* ... */ },
-    async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
-      const url = new URL("https://myidp.example/oidc/logout");
-      if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
-      if (req.postLogoutRedirectUri) url.searchParams.set("post_logout_redirect_uri", req.postLogoutRedirectUri);
-      if (req.state) url.searchParams.set("state", req.state);
-      return { url, method: "GET" };
-    },
-  };
-}
-```
-
-Consumers detect the capability at the call site:
-
-```ts
-import { supportsLogout } from "@o3co/auth-provider-core";
-
-if (supportsLogout(provider)) {
-  const { url } = await provider.endSession({ idTokenHint, postLogoutRedirectUri, state });
-  res.redirect(url.toString());
-} else {
-  // fall back to local session destroy only
-}
-```
-
----
-
-### `SupportsClaimMapping` (optional capability)
-
-Optional capability for providers that can produce a normalized claim set from an OAuth profile.
-
-```ts
-interface MappedClaims {
-  readonly email?: string;
-  readonly emailVerified?: boolean;
-  readonly name?: string;
-  readonly picture?: string;
-  readonly groups?: ReadonlyArray<string>;
-  readonly [key: string]: unknown;   // non-standard IdP claims (e.g. Google's "hd")
-}
-
-interface FederationProfile {
-  readonly issuer: string;
-  readonly sub: string;             // OIDC sub — stable identifier at this IdP
-  readonly email?: string;
-  readonly emailVerified?: boolean;
-  readonly name?: string;
-  readonly picture?: string;
-  readonly accessToken?: string;
-  readonly refreshToken?: string;
-  readonly idToken?: string;
-  // absolute expiry of accessToken, or null when the provider issues no finite expiry
-  // (e.g. GitHub OAuth Apps classic tokens). Required; consumers MUST treat null as
-  // "do not refresh; reuse".
-  readonly expiresAt: Date | null;
-  readonly [key: string]: unknown;  // provider-specific extension claims
-}
-
-interface SupportsClaimMapping {
-  mapClaims(profile: FederationProfile): MappedClaims;
-}
-
-function supportsClaimMapping(
-  provider: FederationProvider | undefined | null,
-): provider is FederationProvider & SupportsClaimMapping;
-```
-
-Providers that implement `SupportsClaimMapping` translate a `FederationProfile` into OIDC-standard claim names. Custom providers can add it by exposing a `mapClaims` method:
-
-```ts
-import { supportsClaimMapping } from "@o3co/auth-provider-core";
-
-if (supportsClaimMapping(provider)) {
-  const claims = provider.mapClaims(profile);
-  // claims.email, claims.name, claims.picture …
-}
-```
-
-#### Claim precedence: local wins, federated is namespaced
-
-What `mapClaims` returns is an **assertion by an upstream IdP**, not a fact about this deployment. The federation callback route therefore never merges it into the session's claims envelope. It applies one rule (#279):
-
-- **The local record is authoritative.** Any claim `extractUserClaims` read off the `User` stands; a federated value never replaces it.
-- **Three claims may fill a gap** — `email`, `name`, `picture` (`PROMOTABLE_FEDERATED_CLAIMS`), and only where the local record left the field absent, and only when the federated value is a string.
-- **Everything else is namespaced** under `claims.federated[<providerName>]`, verbatim and complete — including values that were also promoted and values that lost to a local claim.
-
-So an IdP cannot contribute `groups` (nor a `roles` / `scope` / `permissions` an adapter invents): those reach `claims.federated[<providerName>]` and nothing else. `filterClaimsByScope` never emits provider-specific claims, so nothing under the namespace can appear in an id_token or `/userinfo` response by accident.
-
-**The `federated` claim is optional — read it with a presence check.** It is written only when the provider actually mapped at least one claim, so it is absent on a session whose provider implements no `SupportsClaimMapping`, and on one whose `mapClaims` returned `{}` or a non-object. The provider key is likewise not guaranteed: a session carries the one provider that authenticated it. Use `claims.federated?.[name]?.groups`, never `claims.federated[name].groups`. Absence rather than an empty `federated: {}` is deliberate — it says "this IdP asserted nothing" instead of only "a code path ran", the same absent-is-not-a-value discipline #297 established for `emailVerified`.
-
-`emailVerified` is excluded from promotion for the same reason. Since #297 it is Store-owned state that `oauth.requireEmailVerified` can read as a gate on token issuance, and an upstream IdP verifies an address *it* controls — the `provider:sub` linkage never forces that to be the local account's address. A deployment that wants to act on the assertion reads `claims.federated?.[<providerName>]?.emailVerified` and publishes the result on the `User`, which is where #297 put the field.
-
-```ts
-// user: { id, username, email: "alice@corp.example", groups: ["staff"] }
-// mapClaims → { email: "alice@gmail.example", picture: "https://…", groups: ["admin"] }
-{
-  email: "alice@corp.example",          // local wins
-  groups: ["staff"],                    // federated groups cannot reach here
-  picture: "https://…",                 // gap filled
-  federated: {
-    google: { email: "alice@gmail.example", picture: "https://…", groups: ["admin"] },
-  },
-}
-```
-
-#### `emailVerified` is a boolean here, whatever the IdP sent
-
-`MappedClaims.emailVerified` is `boolean | undefined`, and normalising to it is the **adapter's** job — the merge does not coerce, and nothing downstream does either.
-
-This is not a formality. Sign in with Apple sends `email_verified` as the *string* `"true"` on some responses and as a boolean on others, and `is_private_email` behaves the same way. `Boolean("false")` is `true`, so an adapter that passes the raw claim through — or coerces it — reports an unverified address as verified, on a claim that gates token issuance through `oauth.requireEmailVerified`. `federation-apple` reads `"true"` / `"false"` to their booleans and treats every other shape as **absent**, because absence is not `false` (#297); a new adapter for an IdP with the same habit should do likewise.
-
-A non-boolean that does reach `mapClaims`'s output is not promoted — `emailVerified` is not in `PROMOTABLE_FEDERATED_CLAIMS` at all — but it *is* recorded verbatim under `claims.federated[<providerName>]`, where a deployment reading it as a gate would then be reading a string.
-
-The merge is exported as `mergeFederatedClaims` for consumers that build a claims envelope of their own.
-
----
-
-### `SupportsRefresh` (optional capability)
-
-Optional capability for providers that can exchange a refresh token for a fresh access token.
-
-> **Note**: `SupportsRefresh`, `RefreshedTokens` and `supportsRefresh` are exported from `@o3co/auth-provider-core` (#626 P1).
-
-The interface shape is:
-
-```ts
-interface RefreshedTokens {
-  readonly issuer?: string;
-  readonly sub?: string;
-  readonly email?: string;
-  readonly emailVerified?: boolean;
-  readonly name?: string;
-  readonly picture?: string;
-  readonly accessToken?: string;
-  readonly refreshToken?: string;
-  readonly idToken?: string;
-  readonly expiresAt?: Date | null;
-  /** `expires_in` exactly as the token response carried it; `null` when it carried none. */
-  readonly expiresIn?: number | null;
-  /** `scope` as the token response carried it, space-delimited. */
-  readonly scope?: string;
-  /** `token_type` as the adapter's library reports it (oauth4webapi lower-cases it). */
-  readonly tokenType?: string;
-  readonly [key: string]: unknown;
-}
-
-interface SupportsRefresh {
-  refreshToken(refreshToken: string): Promise<RefreshedTokens>;
-}
-```
-
-The fields are named rather than derived from `FederationProfile`: `Omit` over a type with a string index signature keeps only the index signature, so until #593 a snapshot whose `accessToken` was a number type-checked. Every field is optional, so `{ issuer, sub }` still passes; a wrong type on a named field does not. An adapter that used `scope` or `tokenType` as an extension field of another type is now a type error.
-
-Providers implementing `SupportsRefresh` can keep federation tokens alive without user interaction. The `FederationTokenStore` (wired via `AppOptions`) stores the initial tokens; the refresh flow retrieves and updates them automatically.
-
----
-
-### `SupportsDelegatedAuthorization` (optional capability)
-
-The capability behind federation grants (#593): a provider that can send a user to authorize a *delegation* — a client holding the upstream's tokens without a session — exchange the code its callback brings back, and refresh those tokens without a session. Detected by **all three** methods being present.
-
-```ts
-interface DelegatedAuthorizationRequest {
-  readonly redirectUri: string;
-  readonly state: string;
-  readonly codeVerifier: string;
-  readonly nonce: string;                                  // required
-  readonly scopes: readonly string[];                      // the intent's, not the provider's
-  readonly resource?: string;                              // RFC 8707
-  readonly authorizationParams?: Readonly<Record<string, string>>;
-}
-
-interface DelegatedCodeExchangeRequest {
-  readonly code: string;
-  readonly codeVerifier: string;
-  readonly redirectUri: string;
-  readonly nonce: string;                                  // the one sent at authorization
-  readonly resource?: string;
-  readonly callbackParams?: Readonly<Record<string, string>>;  // what the callback carried, e.g. RFC 9207 `iss`
-  readonly signal?: AbortSignal;
-  readonly identityClaims?: readonly string[];             // the connection's, carried off the verified id_token
-}
-
-interface DelegatedAuthorizationResult {
-  readonly upstream: { readonly issuer: string; readonly subject: string; readonly claims: Readonly<Record<string, string>> };
-  readonly tokens: DelegatedTokens;
-}
-
-interface DelegatedRefreshRequest {
-  readonly refreshToken: string;
-  readonly scopes?: readonly string[];                     // RFC 6749 §6: no more than was granted
-  readonly resource?: string;
-  readonly signal?: AbortSignal;
-}
-
-interface DelegatedTokens {                                // every field optional: `{ refreshToken }` alone is a valid answer
-  readonly accessToken?: string;
-  readonly refreshToken?: string;
-  readonly expiresIn?: number | null;                      // seconds, exactly as issued
-  readonly expiresAt?: Date | null;                        // the adapter's own now + expiresIn
-  readonly scope?: string;
-  readonly tokenType?: string;
-}
-
-interface SupportsDelegatedAuthorization {
-  buildDelegatedAuthorizationUrl(params: DelegatedAuthorizationRequest): URL;
-  exchangeDelegatedCode(params: DelegatedCodeExchangeRequest): Promise<DelegatedAuthorizationResult>;
-  refreshDelegatedToken(params: DelegatedRefreshRequest): Promise<DelegatedTokens>;
-}
-
-function supportsDelegatedAuthorization(
-  provider: FederationProvider | undefined | null,
-): provider is FederationProvider & SupportsDelegatedAuthorization;
-```
-
-Rules an implementation keeps (the generic OIDC adapter does):
-
-- The scopes are the intent's, not the provider's login scopes; `nonce` is required; `resource` is sent as the RFC 8707 parameter at authorization and at refresh alike.
-- `authorizationParams` may not name a parameter the provider owns — `client_id`, `response_type`, `redirect_uri`, `state`, `code_challenge`, `code_challenge_method`, `nonce`, `scope`, `resource`, `request`, `request_uri`, `response_mode` — and the provider throws when one does: openid-client sets `client_id` and `response_type` only when absent, so a copied parameter would send the consent to another registration. `prompt=consent` is added when `offline_access` is asked for (OIDC Core §11); an operator's own `prompt` wins.
-- An answer the adapter's library did not accept — could not parse, or could not verify the id_token of, its JWKS unreachable — may still carry the rotated refresh token; the adapter answers `{ refreshToken }` rather than throwing, so that the only valid credential is not lost, and core treats it as after a malformed answer. An error the IdP answered with is thrown as the library throws it.
-- `expiresIn` is the raw `expires_in` as sent — a number or a string of digits; anything else withholds the access token and keeps the refresh token; `expiresAt` is dated when the answer arrived, before any verification the library does; `tokenType` is as the library reports it.
-
----
-
-### Provider package notes
-
-**`@o3co/auth-provider-federation-google`**
-
-- Requests `openid profile email` scope by default.
-- Uses stable Google OAuth/OIDC endpoints.
-- `FederationProfile.sub` is the Google numeric account ID.
-
-**`@o3co/auth-provider-federation-apple`**
-
-- Default scope is `["name", "email"]` — Apple's two documented values, and requesting either is what makes Apple POST the callback, so the module declares `responseMode: "form_post"`.
-- `FederationProfile.sub` is Apple's stable team-scoped opaque identifier.
-- The verified id_token is the only identity source (Apple publishes no `userinfo_endpoint`), `nonce` is required, and `email_verified` may arrive as the string `"true"` — see the note above.
-- `is_private_email` is surfaced as `isPrivateEmail` for Hide My Email relay addresses; it is namespaced, never promoted.
-- The user's display name arrives once, in the first authorization's POST `user` body, and never in the id_token.
-
-**`@o3co/auth-provider-federation-github`**
-
-- Default scope is `["read:user", "user:email"]`.
-- When the primary profile object omits an `email` field, the provider enriches the profile by calling the GitHub `/user/emails` API to retrieve the primary verified email.
-- `FederationProfile.sub` is the GitHub numeric user ID.
-- Federation token format: `${federationName}:${sub}` where `federationName` equals the configured `name` (e.g. `"github"` by default, or `"github-enterprise"` for a custom tenant).
-
-**`@o3co/auth-provider-federation-oidc`** (#524)
-
-- Any OpenID Connect provider, selected by `issuer`; `oidcFederationModule(<name>)` is a factory, one call per issuer, so several IdPs coexist in one deployment with their own callbacks.
-- Discovery runs at boot and a failure refuses boot; `discovery = false` plus `endpoints { ... }` runs from hand-typed values instead.
-- `client_secret_basic` (`clientSecret`, a string or a resolver) or `private_key_jwt` (`privateKey`, a PEM key) — exactly one.
-- Default scope is `["openid", "profile", "email"]`; `openid` is mandatory. The id_token is verified against the issuer's JWKS — `iss`, `aud`, `exp`, `iat`, `nonce`, and `at_hash` when present — and UserInfo, when the issuer publishes it, is bound to the id_token's `sub`.
-- `FederationProfile.sub` is whatever the issuer says: opaque and stable per issuer, never keyed on `email`. The Store decides who exists; an unlinked `<name>:<sub>` is a 401.
-
----
-
-### What a session records about the authentication (#481)
-
-Every session carries `authTime`, and since #481 `amr` — RFC 8176 values naming how the user authenticated — so `/authorize` can honour `max_age`, `prompt=login` and `acr_values`, and the id_token can say `auth_time`, `amr` and `acr` (the whole picture is in the [oauth package README](../oauth/README.md#step-up-and-re-authentication-481)):
+`createCsrfGuard` and `createCsrfIssueHandler` are exported
+([`src/csrf.mts`](src/csrf.mts)) for compositions that mount their own login
+page or protect their own routes; `@o3co/auth-provider-device-grant` guards its
+verification page with them.
+
+### What a session records about the authentication
+
+Every session carries `authTime` and `amr` — RFC 8176 values naming how the user
+authenticated — so `/authorize` can honour `max_age`, `prompt=login` and
+`acr_values`, and the id_token can say `auth_time`, `amr` and `acr` (the whole
+picture is in the [oauth package README](../oauth/README.md)):
 
 | login path | `amr` |
 | --- | --- |
@@ -615,7 +342,11 @@ Every session carries `authTime`, and since #481 `amr` — RFC 8176 values namin
 | a resumed MFA login (`POST /auth/mfa/verify`, composed by the deployment) | whatever the deployment's resume handler records: the first factor's value plus `mfa`, and the factor's own (`otp`, …). `CreateUserSessionInput.amr` is the seam. |
 | account linking (`?link=1`) | unchanged — a link is not a login |
 
-Re-authentication is a *new* session: `POST /session/login` and the federation callback always create one with a fresh `authTime`, which is what `max_age` and `prompt=login` measure. A login page that bounces an already-authenticated browser straight back to `/authorize` is answered `login_required` there, not looped.
+Re-authentication is a *new* session: `POST /session/login` and the federation
+callback always create one with a fresh `authTime`, which is what `max_age` and
+`prompt=login` measure. A login page that bounces an already-authenticated
+browser straight back to `/authorize` is answered `login_required` there, not
+looped.
 
 ### Account linking across federations (#482)
 
@@ -633,126 +364,376 @@ An account gains a second identity through an explicit, authenticated action:
 
 The transaction records the session that asked (`link: { sid }`), and the callback links to *that* session's account. A `form_post` federation's callback is a cross-site POST the application session cookie (`SameSite=Lax`) does not accompany, so the record is what binds it — Sign in with Apple links exactly as a `query` federation does — and a browser that presents a different authenticated session at the callback is refused `401 login_required`: the identity is never linked to whichever session the browser holds now. If attaching to the live session fails after the Store has linked, the half-attached federation is removed from the session best-effort (one the session already carried is left as it was) and the callback answers `503`; the Store's link stands, and the next login through that federation lands on the account.
 
-Without `link=1` nothing changes: an authenticated session that completes a federation whose identity the Store does not know is `401 unknown_user`, as before. **There is no implicit linking** — a session cookie plus a stray identity is the login-CSRF shape, and `link=1` on an authenticated session is what makes the action the user's.
+Without `link=1`, an authenticated session that completes a federation whose identity the Store does not know is `401 unknown_user`. **There is no implicit linking** — a session cookie plus a stray identity is the login-CSRF shape, and `link=1` on an authenticated session is what makes the action the user's.
 
 Two audit events: `federation.identity.linked` and `federation.identity.link_refused` (`details.reason`: `conflict` or `refused`), both with `subject` = the account.
 
 **What a Store must check before it links.** The seam receives `claims` as the provider mapped them — the IdP's assertions, nothing more:
 
-- **Never bind on an e-mail alone.** An address the IdP did not verify (`emailVerified !== true`, with the [#297 discipline](#emailverified-is-a-boolean-here-whatever-the-idp-sent): absent is not `false`, and a string is absent), a relay address (Apple's `@privaterelay.appleid.com`, surfaced as `isPrivateEmail`), or an IdP that lets a user change their address must never be matched against an existing account. The classic account takeover is exactly that match.
+- **Never bind on an e-mail alone.** An address the IdP did not verify (`emailVerified !== true` — [absent is not `false`, and a string is absent](#emailverified-is-a-boolean-whatever-the-idp-sent)), a relay address (Apple's `@privaterelay.appleid.com`, surfaced as `isPrivateEmail`), or an IdP that lets a user change their address must never be matched against an existing account. The classic account takeover is exactly that match.
 - The link request is already authenticated — that is what `link=1` on a live session guarantees — so a matching address is not what authorises the link; the session is. A Store may still refuse: one identity per provider per account, a maximum re-authentication age, a verified address required on the new identity.
 - `sub` is opaque and stable per issuer. Store `<provider>:<sub>` verbatim; never derive an identity from `email`.
 
-`@o3co/auth-provider-foundation`'s `HttpUserRepository` implements the seam when `linkFederatedIdentityUrl` is configured (`CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` in the scaffold): it POSTs `{ userId, provider, sub, token, claims }` and reads a `2xx` `User` as linked, `401` / `403` as refused and `409` as conflict. The in-memory repository links in memory only — development, not persistence.
+`@o3co/auth-provider-foundation`'s `HttpUserRepository` implements the seam when `linkFederatedIdentityUrl` is configured (`CLIENT_USER_LINK_FEDERATED_IDENTITY_URL`): see [its README](../foundation/README.md) for the wire contract. Core's in-memory repository links in memory only — development, not persistence.
 
-### `FederationResult<T>` (type)
+## Driving a federation adapter
 
-```typescript
-type FederationResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; status: number; error: string; errorDescription: string };
+The adapter contract — `FederationProvider`, `FederationProfile`, the optional
+capabilities and their guards, the response-mode vocabulary — is defined and
+documented in core: [`core/src/federations/README.md`](../core/src/federations/README.md),
+with the definitions in [`types.mts`](../core/src/federations/types.mts) and
+[`response-mode.mts`](../core/src/federations/response-mode.mts). Import those
+names from `@o3co/auth-provider-core`; this package does not re-export them.
+This section is what the session router does with an adapter.
+
+Of the contract, the router drives `buildAuthorizationUrl`, `exchangeCode`,
+`responseMode` and `SupportsClaimMapping`. The other capabilities are driven
+elsewhere: `SupportsLogout` by `oauth`'s `/oauth/logout` and
+`POST /oauth/federation/:name/logout`, `SupportsRefresh` by `oauth`'s
+`POST /oauth/federation/:name/token`, and `SupportsDelegatedAuthorization` by
+`federation-grants`.
+
+### The start leg
+
+`GET /session/oauth/federation/:name` mints `state` (128 bits), a PKCE
+`codeVerifier` and a `nonce` (128 bits) for every federation, whether or not its
+IdP uses a nonce, and persists them — with `redirect_to` and the link intent —
+**before** redirecting: in the express session for a `query` federation, in a
+[federation transaction](#the-transaction-cookie) for a `form_post` one. A store
+that cannot persist them answers `500 server_error` and redirects nobody. The
+`redirect_uri` handed to `buildAuthorizationUrl` is the federation's
+`callbackURL` from config. For a `form_post` federation the router appends
+`response_mode=form_post` to the URL the adapter returned; for a `query` one the
+URL is exactly what the adapter returned.
+
+### What the callback does with the profile
+
+1. **The adapter sees `callbackParams`** — the callback's string parameters
+   minus `code` and `state`, which the router has already bound. They are
+   relayed through the user agent and unsigned; an adapter forwards the RFC 9207
+   `iss` from them through `callbackUrlForExchange`.
+2. **`exchangeCode` throwing is `502 exchange_failed`.** Every refusal inside an
+   adapter — a wrong `iss`, a bad id_token, a UserInfo mismatch — surfaces this
+   way and never reaches the Store. A profile without `sub` is
+   `400 invalid_profile`.
+3. **The Store resolves the identity.** `<name>:<sub>` goes to
+   `UserRepository.authenticateByToken`; a throw is `503 temporarily_unavailable`,
+   `null` is `401 unknown_user` (unless the start asked to link).
+4. **Claims** are the local `User`'s, merged with `mapClaims` under
+   [claim precedence](#claim-precedence-local-wins-federated-is-namespaced); `amr`
+   is `profile.amr` plus `fed`.
+5. **The session** is a new `UserSession` (lifetime `session.maxAge`), a
+   `subjectSessionIndex` entry when that is wired, a `sessionFederationIndex`
+   entry, and a regenerated express session. A `UserSession` or
+   `sessionFederationIndex` write that fails is `503 temporarily_unavailable`; a
+   failure regenerating or saving the session, or attaching the tokens below, is
+   `500 session_create_failed`. Either way what was written is rolled back
+   best-effort, in reverse order. A `subjectSessionIndex` write that fails is
+   logged and the login proceeds.
+6. **Tokens** are attached to `federationTokenStore` under the new `sid` only
+   when the profile carries an `accessToken`:
+   - `accessToken`, `refreshToken`, `idToken` and `expiresAt` as the adapter
+     returned them — `expiresAt: null` is stored as `null` ("do not refresh"),
+     and the router never invents an expiry;
+   - `scope` and `grantedScope`: `profile.scope` when the adapter returned one
+     (an empty or unusable string names nothing), otherwise the provider's
+     requested `scope` — RFC 6749 §3.3 reads an absent answer as "as requested"
+     ([`src/federations/consented-scope.mts`](src/federations/consented-scope.mts));
+   - `tokenType`: `profile.tokenType` verbatim, `""` when it is not a string,
+     `undefined` when the adapter returned none (`oauth` reads that as `Bearer`).
+
+   `profile.expiresIn` is not read here.
+7. **The redirect** is the federation's redirect policy's
+   `resolveCallbackRedirect`. The default policy answers its `authCallbackUrl`
+   with `redirect_to` appended when the start carried one, otherwise its
+   `clientUrl`.
+
+### Response modes: `query` and `form_post`
+
+Most IdPs redirect the browser back with the authorization response in the
+query string. Sign in with Apple does not: whenever the requested `scope`
+includes `name` or `email`, Apple **POSTs** an
+`application/x-www-form-urlencoded` body to the callback. A provider declares
+this with `responseMode: "form_post"` (absent means `query`), and the
+declaration changes three things in the router and nothing in the adapter:
+
+1. **The start route appends `response_mode=form_post`.** The parameter is
+   written once, in the router, rather than in every adapter.
+2. **`POST /session/oauth/federation/<name>/callback` accepts the form body.** It
+   is the same handler as the GET callback over a different parameter source:
+   same envelope lookup, same `state` comparison, same retire-before-any-async-work
+   reuse prevention, same PKCE verifier and nonce read from the stored envelope
+   rather than from the request, same rollback. **Each response mode accepts
+   exactly one method**: a `query` federation answers a POST with
+   `405 method_not_allowed` (`Allow: GET`), so no `query` federation has a POST
+   surface, and a `form_post` federation answers a GET with
+   `405 method_not_allowed` (`Allow: POST`) before its transaction cookie is
+   read, so a third party's `<img src=".../callback">` cannot reach the flow.
+3. **That federation's ephemeral state lives in a federation transaction**, with
+   a cookie of its own, instead of in the session.
+
+#### The transaction cookie
+
+A `form_post` callback arrives as a **cross-site POST** from the IdP's origin,
+and a `SameSite=Lax` cookie — the deployment default, and the right default — is
+not sent on one, so a callback relying on the session cookie would arrive with
+no `state` to compare and no PKCE verifier. The flow needs *a* cookie that
+survives a cross-site POST; it must not be the session cookie. The start route is
+unauthenticated and a `SameSite=Lax` cookie **is** sent on a top-level GET, so
+anything the start leg changed about the session cookie would be changeable by
+any third party who could make a browser follow a link there — permanently,
+because express-session serialises `req.session.cookie` into the store and
+rebuilds it from there on every later request.
+
+So the cross-site part has its own cookie and its own record:
+
+| | value |
+|---|---|
+| cookie name | `__Secure-<session.name, minus any prefix>.federation` — e.g. `__Host-auth.session` and `auth.session` both give `__Secure-auth.session.federation` |
+| attributes | `HttpOnly; Secure; SameSite=None`, `Path` scoped to that provider's callback URL, `Max-Age` = the transaction lifetime (10 minutes) |
+| contents | an opaque 256-bit id, and nothing else |
+| record | `state`, `codeVerifier`, `nonce`, `redirectTo`, the link intent and the provider name, in the express-session store under a `fedtx:` key prefix |
+
+The name is derived from `session.name` the way the CSRF cookie's is. The prefix
+is the one deviation, and it is applied **unconditionally**: `__Secure-` rather
+than `__Host-` because `__Host-` requires `Path=/` and this cookie is
+path-scoped to the callback, so a `__Host-` name would be dropped by every
+browser; and unconditionally because this cookie is `SameSite=None` and
+therefore always `Secure` (browsers drop a `SameSite=None` cookie that is not).
+A deployment with a `form_post` federation therefore serves the callback over
+HTTPS — which Apple requires of its return URL anyway.
+
+**The application session cookie keeps the attributes the deployment
+configured**, on every session, whether or not it ever started a `form_post`
+federation; `session.sameSite` is never touched.
+
+The transaction binds the callback to the browser that started it. The `state`
+comparison still runs; the transaction cookie is an addition to it, never a
+replacement. A caller who presents a stolen `state` without the matching
+transaction cookie is refused (`400 invalid_session`) before `state` is read.
+
+If no express-session store is reachable on the request — the store module is
+missing or mounted after `sessionModule` — a `form_post` start answers
+`500 misconfiguration` instead of starting a flow it could not finish.
+
+An abandoned flow leaves only the short-lived cookie, and the record expires with
+it: the expiry is written into the record as `cookie.expires`, which is what
+`MemoryStore` reaps on read and what `connect-redis` turns into the key's `EX`.
+
+#### Every host on the auth host's registrable domain is inside the trust boundary
+
+`__Host-` is what pins a cookie to exactly one host; `__Secure-` only requires
+HTTPS. The transaction cookie is issued host-only (no `Domain` attribute), but
+its `__Secure-` name does not stop another host from setting a cookie of the
+same name with a `Domain` that covers the auth host, and the browser sends that
+one to the callback too. So the transaction cookie is the one place a
+`form_post` flow is weaker than the session cookie, which is `__Host-` by
+default — host-only, and checked as such at boot.
+
+- **What an attacker needs:** control of any host that can set a cookie for the
+  auth host — for `auth.example.com`, any host under its registrable domain
+  `example.com`: `blog.example.com`, a forgotten staging host, a dangling DNS
+  record, XSS on a lower-trust app next door, a shared-hosting neighbour.
+  Nothing from this deployment: no session, no `state`, no account.
+- **What it gets them:** from that host they set `__Secure-<name>.federation`
+  with `Domain=example.com` in a victim's browser, start their own federation
+  flow, plant *their* transaction id, and auto-submit
+  *their* `state` and `code` to the callback. The victim's browser ends up
+  logged into the **attacker's** federated account, and whatever the victim does
+  next is recorded against it. It does not read the victim's session, expose
+  credentials or reach the victim's own account — identity confusion, not
+  account takeover.
+- **Why signing the cookie would not help:** the attacker's transaction is
+  genuinely theirs, so anything the server would accept as its own issuance is
+  something they legitimately hold. It is inherent to a path-scoped cookie.
+- **What to do:** treat every host under the auth host's registrable domain —
+  every `*.example.com` for `auth.example.com` — as inside the deployment's trust
+  boundary, and run no untrusted or lower-trust content on any of them.
+  `session.domain = null` (the `__Host-` default) protects the session cookie,
+  not the transaction cookie; it does nothing against this. That is the rule the
+  signed CSRF token exists to survive on the login routes; here there is no
+  session to bind to, so the rule is the whole mitigation.
+
+#### When a transaction is spent
+
+Both the record and the cookie are dropped on every callback exit that
+**judged** the transaction — success, `invalid_state`, `exchange_failed`,
+`unknown_user` alike — and are deliberately *not* dropped by a refusal that
+judged nothing. The rule: **a refusal spends the transaction when the request
+made a claim about it, and leaves it alone when it made none.** A `state` is
+that claim. A callback carrying no `state` — checked once the record has resolved to this provider — claims nothing and costs nothing
+(`400 invalid_request`, record untouched); a GET is refused with `405` before
+the cookie is read. A *wrong* `state` is an attempt on this transaction, and it
+still spends it, so a guess gets no second try; so does a transaction id that
+resolves to no record or to another provider's (`400 invalid_session`), and a
+store read that fails spends it best-effort (`500`). The distinction matters because
+the cookie is `SameSite=None` by necessity and accompanies any cross-site
+request to the callback path: if every refusal consumed the record, a third
+party could destroy a victim's in-flight login with one `<img>` tag.
+
+That rule is `form_post`-only. A `query` federation keeps its envelope in the
+session and retires it only on the path that *matched* `state`, so a wrong
+`state` leaves the envelope in place — because the session cookie is
+`SameSite=Lax` and **is** sent on a top-level cross-site GET, so spending the
+envelope on a mismatch would give a third party the same availability attack.
+The guess it would defend against is not a real one: `state` is 128 bits from
+the CSPRNG. Only the "no `state`" rule is shared by both modes.
+
+#### What "single use" guarantees
+
+Retiring the record is a `get` followed by a `destroy`, two round trips. The
+express-session `Store` API is `get` / `set` / `destroy`: there is no
+compare-and-delete on it, and no atomic read-and-consume can be composed from
+the three.
+
+| | |
+|---|---|
+| **Guaranteed** | A callback arriving *after* an earlier one completed its delete finds no record and is refused. That covers the replay this is for: a `code` and `state` lifted from a proxy log, the back button, a retried request. |
+| **Not guaranteed** | Callbacks that *overlap*. Two that both read the record before either deletes it both pass the `state` comparison and both reach `exchangeCode`. `MemoryStore` answers synchronously and happens to serialise them; a store with network latency does not. |
+| **What bounds the overlap** | The IdP. An authorization code is single-use at the IdP, racing callbacks necessarily carry the same one, and at most one exchange succeeds however many get that far — the rest get `502 exchange_failed`. PKCE binds that exchange to the verifier held in the record. |
+
+If the record cannot be deleted at all, the callback stops with `500` rather
+than exchanging the code. This is weaker than `DeviceCodeStore`, which *is* an
+atomic read-and-consume: that store owns its adapter and can push the consume
+into one Redis round trip, while a federation transaction shares the session
+store rather than adding a component slot every deployment would have to
+configure — for a property the IdP already provides.
+[`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts)
+pins both halves of the table.
+
+A `query` federation is untouched by all of this: its callback is a same-site
+top-level GET, its envelope stays in `req.session.federation`, and its
+authorization URL is exactly what its adapter produced.
+
+### Claim precedence: local wins, federated is namespaced
+
+What `mapClaims` returns is an **assertion by an upstream IdP**, not a fact about
+this deployment. The callback never merges it into the session's claims envelope
+wholesale; it applies one rule
+([`src/federations/claim-precedence.mts`](src/federations/claim-precedence.mts),
+exported as `mergeFederatedClaims`):
+
+- **The local record is authoritative.** Any claim read off the `User`
+  (`email`, `emailVerified`, `name`, `picture`, `groups`) stands; a federated
+  value never replaces it.
+- **Three claims may fill a gap** — `email`, `name`, `picture`
+  (`PROMOTABLE_FEDERATED_CLAIMS`) — only where the local record left the field
+  absent, and only when the federated value is a string.
+- **Everything else is namespaced** under `claims.federated[<providerName>]`,
+  verbatim and complete — including values that were also promoted and values
+  that lost to a local claim.
+
+So an IdP cannot contribute `groups` (nor a `roles` / `scope` / `permissions` an
+adapter invents): those reach `claims.federated[<providerName>]` and nothing
+else. `filterClaimsByScope` never emits provider-specific claims, so nothing
+under the namespace can appear in an id_token or `/userinfo` response by
+accident.
+
+**The `federated` claim is optional — read it with a presence check.** It is
+written only when the provider mapped at least one claim, so it is absent on a
+session whose provider implements no `SupportsClaimMapping`, and on one whose
+`mapClaims` returned `{}` or a non-object. The provider key is likewise not
+guaranteed: a session carries the one provider that authenticated it. Use
+`claims.federated?.[name]?.groups`, never `claims.federated[name].groups`.
+
+`emailVerified` is not promotable. It is Store-owned state that
+`oauth.requireEmailVerified` can read as a gate on token issuance, and an
+upstream IdP verifies an address *it* controls — the `provider:sub` linkage
+never forces that to be the local account's address. A deployment that wants to
+act on the assertion reads `claims.federated?.[<providerName>]?.emailVerified`
+and publishes the result on the `User`.
+
+```ts
+// user: { id, username, email: "alice@corp.example", groups: ["staff"] }
+// mapClaims → { email: "alice@gmail.example", picture: "https://…", groups: ["admin"] }
+{
+  email: "alice@corp.example",          // local wins
+  groups: ["staff"],                    // federated groups cannot reach here
+  picture: "https://…",                 // gap filled
+  federated: {
+    google: { email: "alice@gmail.example", picture: "https://…", groups: ["admin"] },
+  },
+}
 ```
 
-Discriminated union returned by `FederationProvider` methods. Check `ok` before accessing `value`.
+#### `emailVerified` is a boolean, whatever the IdP sent
 
-## Usage Example
+`MappedClaims.emailVerified` is `boolean | undefined`, and normalising to it is
+the **adapter's** job — the merge does not coerce, and nothing downstream does
+either. Sign in with Apple sends `email_verified` as the *string* `"true"` on
+some responses; `Boolean("false")` is `true`, so an adapter that coerces reports
+an unverified address as verified. Read `"true"` / `"false"` to their booleans
+and treat every other shape as **absent** — absence is not `false`. A
+non-boolean that does reach `mapClaims`'s output is not promoted, but it *is*
+recorded verbatim under `claims.federated[<providerName>]`, where a deployment
+reading it as a gate would be reading a string.
 
-### Basic usage
+### Configuring federations
 
-```typescript
-import { createApp } from "@o3co/auth-provider-core";
-import { sessionModule } from "@o3co/auth-provider-session";
-import { googleFederationModule } from "@o3co/auth-provider-federation-google";
-
-const handle = await createApp({
-  modules: [
-    sessionModule,                 // const — no factory call
-    googleFederationModule,        // contributes federations.google + federationRedirectPolicies.google
-    // ... composition-root modules that supply userRepository, the four-store split, etc.
-  ],
-  bootstrapComponents: { config, pathResolver },
-});
-```
-
-The boot planner aggregates `federations.<name>` and
-`federationRedirectPolicies.<name>` contributions from per-federation modules
-into the synthetic `federationProviders` and `federationRedirectPolicyResolver`
-ComponentMap entries that `sessionModule`'s federation routes consume. The
-planner enforces the pairing invariant **between contribution kinds**: every
-contributed `federations.<name>` MUST have a paired
-`federationRedirectPolicies.<name>` and vice versa, otherwise boot fails with
-`BootError({ reason: "federation-redirect-policy-unpaired" })`.
-
-The planner does NOT cross-check `config.federations` against contributions —
-if a federation is enabled in config but no module contributes its provider
-pair, boot still succeeds and `/session/oauth/federation/:name` returns `404`
-at request time. Composition roots that want fail-fast on misconfiguration
-should add the matching per-federation module (or a config-bootstrap module
-that throws when its federation slice is enabled but no provider package is
-installed). `sessionModule` does enforce one config-derived invariant at boot:
-every enabled federation in `config.federations` must declare a `callbackURL`,
-otherwise boot fails (the same fail-fast invariant the v0.4.x module
-enforced at `init()` time).
-
-### HOCON federation configuration
-
-**Shorthand (key name = provider type):**
+`federations.<name>` names a federation; `extractFederationSection`
+([`src/federations/extract-federation-section.mts`](src/federations/extract-federation-section.mts))
+normalises a section for the module that reads it. Three shapes are accepted:
 
 ```hocon
 federations {
+  # Shorthand: the key names the type (here "google").
   google {
     enabled = true
     clientId = ${FEDERATIONS_GOOGLE_CLIENT_ID}
     clientSecret = ${FEDERATIONS_GOOGLE_CLIENT_SECRET}
     callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
+    clientUrl = "https://app.example.com/"
   }
 
-  github {
+  # Flat with an explicit type.
+  okta {
     enabled = true
-    clientId = ${FEDERATIONS_GITHUB_CLIENT_ID}
-    clientSecret = ${FEDERATIONS_GITHUB_CLIENT_SECRET}
-    callbackURL = "https://auth.example.com/session/oauth/federation/github/callback"
-  }
-}
-```
-
-**Explicit multi-tenant (two Google instances):**
-
-```hocon
-federations {
-  google-personal {
-    enabled = true
-    type = "google"
-    google {
-      clientId = ${FEDERATIONS_GOOGLE_PERSONAL_CLIENT_ID}
-      clientSecret = ${FEDERATIONS_GOOGLE_PERSONAL_CLIENT_SECRET}
-      callbackURL = "https://auth.example.com/session/oauth/federation/google-personal/callback"
-    }
+    type = "oidc"
+    issuer = "https://dev-123.okta.com"
+    # …
   }
 
-  google-work {
+  # Nested: the credentials under a sub-section named by the type.
+  keycloak {
     enabled = true
-    type = "google"
-    google {
-      clientId = ${FEDERATIONS_GOOGLE_WORK_CLIENT_ID}
-      clientSecret = ${FEDERATIONS_GOOGLE_WORK_CLIENT_SECRET}
-      callbackURL = "https://auth.example.com/session/oauth/federation/google-work/callback"
+    type = "oidc"
+    oidc {
+      issuer = "https://sso.example.com/realms/staff"
+      # …
     }
   }
 }
 ```
 
-Mixed shape — top-level fields alongside a nested sub-section — is rejected with a clear error at startup.
+A nested section that also sets `clientId`, `clientSecret` or `callbackURL` at
+its top level fails boot; any other top-level field is kept beside the
+sub-section, and one the sub-section also sets is overridden by it. A section
+without `enabled = true` is ignored. The Google, GitHub and Apple
+modules are single-tenant — each registers its provider under a fixed name
+(`google`, `github`, `apple`) — so a deployment has at most one of each;
+`type = "oidc"` sections
+([`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md)) are one
+federation per section.
 
-`type = "oidc"` selects the generic OpenID Connect provider from
-`@o3co/auth-provider-federation-oidc` (#524) — any issuer, one section per IdP,
-each with its own callback; its fields are in that package's README.
+Boot rules:
 
-### Redirect allowlist (`redirectAllowlist`)
+- Every enabled section must have a `callbackURL`, or `sessionModule` fails boot.
+  The federation router hands exactly that value to the adapter as `redirect_uri`.
+- Every `federations.<name>` contribution must be paired with a
+  `federationRedirectPolicies.<name>` one and vice versa, or boot fails with
+  `federation-redirect-policy-unpaired`.
+- `sessionModule` does not cross-check config against contributions. A
+  federation enabled in config that no module contributes boots, and its routes
+  answer `404`; a federation contributed without an enabled section has no
+  callback URL, and its start answers `500 misconfiguration`. A composition that
+  wants either to fail boot adds the check itself.
 
-`GET /session/oauth/federation/:name` accepts a `redirect_to` query parameter
-naming where the browser lands after the callback. Every value it may name has
-to be listed:
+### Redirect allowlists
+
+`GET /session/oauth/federation/:name?redirect_to=…` and `POST /session/login`'s
+`redirect_to` name where the browser goes afterwards. Every value either may name
+has to be listed: `federations.<name>.redirectAllowlist` for a federation (read
+by its redirect policy), `session.redirectAllowlist` for the login.
 
 ```hocon
 federations {
@@ -773,7 +754,8 @@ federations {
 }
 ```
 
-Four rules are worth knowing before writing the list:
+The rule, shared by both lists
+([`src/redirect-allowlist.mts`](src/redirect-allowlist.mts)):
 
 - **Matching is exact.** Scheme, host, port, path, query and fragment all
   count. Only case, the default port, `..` segments and percent-encoding are
@@ -781,172 +763,114 @@ Four rules are worth knowing before writing the list:
   entry does not admit its own siblings, and a target that carries dynamic
   query parameters cannot be listed as a family. Make it a fixed path and carry
   the variable part in the session.
-- **An absent or empty list refuses every `redirect_to`.** That is the right
-  setting for a deployment that does not use the parameter; it is not a way to
-  allow everything. Before #278 an unset allowlist accepted any http(s) URL,
-  which made the endpoint an open redirect — nothing falls back to that now.
+- **An absent or empty list refuses every `redirect_to`**, with
+  `400 invalid_redirect`. That is the right setting for a deployment that does
+  not use the parameter; it is not a way to allow everything.
 - **`https` is required, except on loopback.** `localhost`, `127.0.0.0/8` and
   `[::1]` may use `http://`, which is what lets a local development front-end
   and a native client's loopback listener work without a certificate. The port
   is still matched, so list the port the client binds — RFC 8252 §7.3's
   port-agnostic loopback comparison is not implemented here.
-- **`sessionDomain`, when set, constrains the list itself.** Every non-loopback
-  entry must be inside it, checked when the policy is built, so an entry outside
-  it fails startup rather than sitting in the config looking effective. Unset
+- **A cookie domain, when set, constrains the list itself.** Every non-loopback
+  entry must be inside `sessionDomain` (federation) or `session.domain` (login),
+  checked when the policy is built, so an entry outside it fails boot rather
+  than sitting in the config looking effective. Unset a federation's
   `sessionDomain` if a cross-domain redirect target is genuinely intended.
 
 `authCallbackUrl` and `clientUrl` are read by `resolveCallbackRedirect`, not by
 the allowlist: the former is the bridge page a `redirect_to` is handed to, the
-latter the fallback for a callback that carries none.
+latter the fallback for a callback whose start carried none. A callback that
+needs one of them and finds it unset is answered `500 misconfiguration` — after
+the session has been saved. So every federation needs `clientUrl` unless every
+start carries a `redirect_to`, and a start that carries one needs
+`authCallbackUrl`.
 
-### Custom federation provider
+`FederationRedirectPolicy` ([`src/federations/redirect-policy.mts`](src/federations/redirect-policy.mts))
+is the replacement point: a module may contribute its own policy for a
+federation, and must fail closed. `createFederationRedirectPolicy` is the
+default; `checkRedirectShape`, `createRedirectAllowlistValidator`,
+`describeRedirectRejection` and `isLoopbackHostname` are exported so a custom
+policy reuses the same rules and rejection vocabulary. The policy's methods
+answer with a [`FederationResult`](src/federations/types.mts): `ok` with a value,
+or a status, an OAuth error code and a description to send as they are.
 
-Custom federations are added by writing a per-federation `defineModule(...)`
-that contributes both `federations.<name>` (the `FederationProvider`) and
-`federationRedirectPolicies.<name>` (the redirect policy). The const-Module
-pattern with a typed `ComponentMap` config slot is the recommended shape — see
-[`@o3co/auth-provider-federation-google`'s `google.mts`](../federation-google/src/google.mts)
-for the reference implementation. The minimal sketch:
+### Writing an adapter
 
-```typescript
+For an IdP that publishes an OpenID Connect discovery document, write no code:
+a `type = "oidc"` section of
+[`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md) is the
+adapter. Otherwise an adapter is a module that contributes both
+`federations.<name>` (the `FederationProvider`) and
+`federationRedirectPolicies.<name>`, with its config on a typed `ComponentMap`
+slot that a small bridge module fills from `extractFederationSection`:
+
+```ts
 import { defineModule, type FederationProvider } from "@o3co/auth-provider-core";
-import {
-  codeChallenge,
-  createFederationRedirectPolicy,
-} from "@o3co/auth-provider-session";
+import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 
 declare module "@o3co/auth-provider-core" {
   interface ComponentMap {
-    readonly microsoftFederationConfig?: { clientId: string; callbackURL: string };
+    readonly exampleFederationConfig?: ExampleConfig;
   }
 }
 
-export const microsoftFederationModule = defineModule({
-  name: "federation:microsoft",
-  requires: ["microsoftFederationConfig"] as const,
+export const exampleFederationModule = defineModule({
+  name: "federation:example",
+  requires: ["exampleFederationConfig"] as const,
   contributes: {
     federations: {
-      microsoft: (deps) => buildMicrosoftProvider(deps.microsoftFederationConfig),
+      example: (deps): FederationProvider => createExampleProvider(deps.exampleFederationConfig),
     },
     federationRedirectPolicies: {
-      microsoft: (deps) => createFederationRedirectPolicy(deps.microsoftFederationConfig),
+      example: (deps) => createFederationRedirectPolicy(deps.exampleFederationConfig),
     },
   },
 });
-
-function buildMicrosoftProvider(cfg: { clientId: string; callbackURL: string }): FederationProvider {
-  return {
-    name: "microsoft",
-    scope: ["openid", "profile", "email"],
-    buildAuthorizationUrl({ redirectUri, state, codeVerifier }) {
-      const url = new URL("https://login.microsoftonline.com/common/oauth2/v2.0/authorize");
-      url.searchParams.set("client_id", cfg.clientId);
-      url.searchParams.set("redirect_uri", redirectUri);
-      url.searchParams.set("state", state);
-      url.searchParams.set("code_challenge", codeChallenge(codeVerifier));
-      url.searchParams.set("code_challenge_method", "S256");
-      url.searchParams.set("scope", "openid profile email");
-      return url;
-    },
-    async exchangeCode({ code, codeVerifier, redirectUri, callbackParams }) {
-      // With an OAuth library: hand it callbackUrlForExchange({ redirectUri, code, callbackParams }),
-      // so the RFC 9207 `iss` reaches its issuer check. By hand: compare
-      // callbackParams?.iss with the issuer yourself before spending the code.
-      // Then POST to the token endpoint + optional userinfo; normalize to FederationProfile.
-      return { issuer: "https://login.microsoftonline.com/common/v2.0", sub: "...", expiresAt: null };
-    },
-  };
-}
 ```
 
-The composition root supplies `microsoftFederationConfig` via a small
-config-bootstrap module that runs `extractFederationSection(config.federations,
-"microsoft")` and surfaces the credentials on the typed slot. The session
-module's federation routes consume the aggregated `federationProviders` map
-and route by `:name`.
+The contract's own rules are in [core's README](../core/src/federations/README.md)
+and the doc comments of [`types.mts`](../core/src/federations/types.mts). What
+the toolkit gives the provider half:
 
-## TODO-F-3 changes
+- `codeChallenge(codeVerifier)` — the S256 challenge for the verifier the router
+  minted ([`src/federations/pkce.mts`](src/federations/pkce.mts)).
+- `callbackUrlForExchange({ redirectUri, code, callbackParams })` — the URL to
+  hand an OAuth library for the code exchange: `code`, the RFC 9207 `iss` when
+  the callback carried one, and nothing else from the bag. Rebuilding the URL
+  from `code` alone drops `iss`, so the mix-up check never runs and every login
+  fails against an issuer that advertises
+  `authorization_response_iss_parameter_supported`. Configure the library with
+  the issuer the IdP actually publishes, or the comparison refuses every login
+  ([`src/federations/callback-url.mts`](src/federations/callback-url.mts)).
+- `FederationClientSecret` / `resolveClientSecret` — a `client_secret` that is a
+  string or a resolver (`() => string | Promise<string>`). The adapter calls
+  `resolveClientSecret` on every token request, and it caches nothing, so an
+  adapter whose secret rotates (Apple's ES256 JWT) owns its caching. An empty or non-string result is refused
+  locally rather than posted upstream
+  ([`src/federations/client-secret.mts`](src/federations/client-secret.mts)).
 
-- **Local login session tracking.** `POST /session/login` now creates a `UserSession` record via `userSessionStore.create()` and writes the resulting `sid` into `req.session.sid` when `AppOptions.userSessionStore` is wired. This mirrors the federation-callback session-creation path established in F-2 and ensures that tokens issued after a local login carry a valid `sid` claim.
+The bundled adapters are the worked examples — for instance
+[`google.mts`](../federation-google/src/google.mts) in `federation-google`.
 
-## Migrating from v0.3.x to v0.4.0
+## Tests that pin these rules
 
-v0.4.0 removes passport as a direct dependency from this package.
+| Test file | Pins |
+| --- | --- |
+| [`src/__tests__/module.test.mts`](src/__tests__/module.test.mts) | the manifest's slots and absence policies, the two routers at `/session`, and the `callbackURL` boot rule |
+| [`src/__tests__/sessionStoreModule.test.mts`](src/__tests__/sessionStoreModule.test.mts) | the middleware route at `/`, the cookie name, the `__Host-` rule, and the replica-safety declaration and refusal |
+| [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | the two built-in stores, the `session-store` readiness probe, and the Redis client's error listener |
+| [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | the signed token, the origin check and the guard's acceptance rule |
+| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, and the login rate-limit guard |
+| [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, `amr` |
+| [`Federation.formPost.test.mts`](src/routes/__tests__/Federation.formPost.test.mts), [`Federation.applicationCookie.test.mts`](src/routes/__tests__/Federation.applicationCookie.test.mts), [`Federation.transactionFailures.test.mts`](src/routes/__tests__/Federation.transactionFailures.test.mts), [`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) | response modes, the transaction cookie, the untouched session cookie, the transaction's failure paths and what single use guarantees |
+| [`src/federations/__tests__/`](src/federations/__tests__/) | the toolkit and the router's federation parts |
 
-### Breaking changes
+## See also
 
-1. **`FederationProviderBase` renamed to `FederationProvider`.** If you implement custom providers, rename the interface in your imports.
-2. **`setupPassportStrategy(passport, ctx)` removed.** Implement `buildAuthorizationUrl({ redirectUri, state, codeVerifier }): URL` and `exchangeCode({ code, codeVerifier, redirectUri }): Promise<FederationProfile>` instead. The new interface is vendor-agnostic — no passport types leak into the signature.
-3. **`FederationProfile.raw` removed.** OIDC-standard claims are first-class fields (`sub`, `email`, `emailVerified`, `name`, `picture`, `accessToken`, `refreshToken`, `idToken`, `expiresAt`). Provider-specific claims (Google `hd`, Microsoft `tid`) are carried by the index signature `[key: string]: unknown`.
-4. **`FederationProfile.id` renamed to `sub`, `expiresIn: number` replaced with `expiresAt: Date | null` (required).** Adapters MUST make an explicit decision: return a `Date` when the provider issues a finite expiry, `null` when it does not (e.g. GitHub OAuth Apps classic tokens). The route layer no longer invents a fallback expiry — `null` signals "do not refresh; reuse until the provider invalidates". `FederationTokens.expiresAt` on `FederationTokenStore` follows the same contract.
-5. **`createPassport()` and `SetupPassportContext` removed from the public API.** State (CSRF) and PKCE are managed by the route layer internally; providers are pure functions.
-6. **`UserSessionStore` and `FederationTokenStore` are now required** (previously optional with legacy fallback). They are now declared in `sessionModule.requires`; the boot planner rejects with `BootError(reason: 'missing-required-component')` if no module provides them.
-7. **`/login` error responses** follow RFC 6749 §5.2 shape: `{ error, error_description }`. If your client parses the old `{ message: "..." }` format, update accordingly.
-8. **`SupportsRefresh.refreshToken`** returns `RefreshedTokens` (new type), an interface of named optional fields since #593 — see its definition above; it was `Omit<FederationProfile, "issuer"|"sub"> & { issuer?: string; sub?: string }`, which checked nothing. Google/GitHub refresh responses legitimately omit `sub`; the route layer preserves stored identity.
-
-### Custom provider migration example
-
-**Before (v0.3.x, passport-based):**
-
-```ts
-class CustomProvider implements FederationProviderBase {
-  name = "custom";
-  scope = ["openid"];
-  async setupPassportStrategy(passport, ctx) {
-    passport.use(this.name, new CustomStrategy({...}, (accessToken, refreshToken, profile, done) => {
-      done(null, { id: profile.id, raw: profile });
-    }));
-  }
-  validateRedirect(url) { /* ... */ }
-  resolveCallbackRedirect(session) { /* ... */ }
-}
-```
-
-**After (v0.4.0, pure-function interface):**
-
-```ts
-import { codeChallenge } from "@o3co/auth-provider-session";
-
-class CustomProvider implements FederationProvider, SupportsClaimMapping {
-  readonly name = "custom";
-  readonly scope = ["openid"] as const;
-  buildAuthorizationUrl({ redirectUri, state, codeVerifier }) {
-    const url = new URL("https://idp.example.com/authorize");
-    url.searchParams.set("response_type", "code");
-    url.searchParams.set("client_id", this.clientId);
-    url.searchParams.set("redirect_uri", redirectUri);
-    url.searchParams.set("state", state);
-    url.searchParams.set("code_challenge", codeChallenge(codeVerifier));
-    url.searchParams.set("code_challenge_method", "S256");
-    url.searchParams.set("scope", this.scope.join(" "));
-    return url;
-  }
-  async exchangeCode({ code, codeVerifier, redirectUri }) {
-    // POST to token endpoint + optional userinfo; normalize to FederationProfile
-    return {
-      issuer: "https://idp.example.com",
-      sub: userId,
-      email,
-      accessToken,
-      refreshToken,
-      expiresAt,
-    };
-  }
-  mapClaims(profile) { return { email: profile.email }; }
-  validateRedirect(url) { /* unchanged */ }
-  resolveCallbackRedirect(session) { /* unchanged */ }
-}
-```
-
-### Module wiring
-
-In v0.5.0 `sessionModule` is a const Module (no factory call). Its
-`requires` declares the dependencies the boot planner must supply:
-`userRepository`, the four-store split (`userSessionStore`,
-`federationTokenStore`, `sessionFederationIndex`), and the synthetic keys
-`federationProviders` + `federationRedirectPolicyResolver`.
-
-## See Also
-
-- [`@o3co/auth-provider-oauth`](../oauth/README.md) — OAuth 2.0 token and authorization routes
-- [`@o3co/auth-provider-core`](../core/README.md) — shared types (`Module`, `UserRepository`, `PathResolver`, `AppConfig`)
+- [`@o3co/auth-provider-core`](../core/README.md) — the ports this package drives,
+  and the [federation adapter contract](../core/src/federations/README.md)
+- [`@o3co/auth-provider-oauth`](../oauth/README.md) — token issuance, `/oauth/logout`,
+  and the federation token and logout routes
+- [`@o3co/auth-provider-redis`](../redis/README.md) — Redis adapters for the session
+  stores (`UserSessionStore` and the rest), distinct from the browser session store
+  above

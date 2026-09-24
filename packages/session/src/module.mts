@@ -83,15 +83,16 @@ function deriveProviderCallbackUrls(
  *
  * Two route contributions, both mounted at `/session` (intentional named-route
  * bundle per Codex Session 06 Q6):
- *   - "session-routes"    — POST /session/login, POST /session/logout
+ *   - "session-routes"    — GET /session/csrf, POST /session/login,
+ *                           POST /session/logout
  *   - "federation-routes" — GET  /session/oauth/federation/:name (+ callback)
  *
  * `requires` (Amendment 5):
  *   - "config", "userRepository" — bootstrap / DI
  *   - "userSessionStore", "federationTokenStore", "sessionFederationIndex" —
  *     three sibling stores actually consumed by these routes (NOT the four-store
- *     superset; `sessionRPRegistry` and `sessionFamilyIndex` are oauth-package
- *     concerns per `module.mts:84` / `:248` audit pre-conversion).
+ *     superset; `sessionRPRegistry` and `sessionFamilyIndex` are the oauth
+ *     package's concerns).
  *   - "federationProviders" — synthetic (planner-derived from per-federation
  *     `federations.<name>` contributions).
  *   - "federationRedirectPolicyResolver" — synthetic per A5 §7 (planner-derived
@@ -176,11 +177,11 @@ export const sessionModule = defineModule<
 			},
 			(deps) => {
 				const config = deps.config as AppConfig;
-				// Cast bridges core's placeholder `FederationProvider = unknown`
-				// (contributes-map.mts:47) to this package's structural
-				// `FederationProvider` interface. Same shape at runtime; the cast
-				// is the one-way bridge from the planner's typed-but-erased view
-				// to the consumer's structurally-typed view.
+				// This cast is a no-op: core types the `federationProviders` slot
+				// as `ReadonlyMap<string, FederationProvider>` with the same
+				// `FederationProvider` this file imports (core's
+				// `modules/manifest/synthetic-keys.mts`), so there is nothing to
+				// bridge, and the code type-checks without it.
 				const federationProviders = deps.federationProviders as ReadonlyMap<
 					string,
 					FederationProvider

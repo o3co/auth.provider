@@ -136,20 +136,22 @@ there is no value that file could default to that would not silently trust one
 you never chose. Put it in `.env` (there is an empty `HTTP_TRUST_PROXY=` in
 `.env.example`) as your edge's address or CIDR range, not `true`.
 
-It also leaves you the **cookie domain's trust boundary**. `__Host-auth.session`
-cannot be set by any other host, but a `form_post` federation (Sign in with
-Apple) additionally issues a path-scoped transaction cookie — `session.name`
-with any `__Host-` / `__Secure-` prefix stripped, then `__Secure-` and
-`.federation` applied, so the default `__Host-auth.session` yields
-`__Secure-auth.session.federation` — and `__Secure-` does not stop a sibling
-subdomain setting it with `Domain=<parent>`. A related-domain attacker — a
-forgotten staging host, a dangling DNS record, XSS on a lower-trust app next
-door — can use that to log a victim's browser into the attacker's own federated
-account. It reaches no session and no credential, and there is nothing to
-configure: the mitigation is that no untrusted content runs under the domain
-your auth cookies are scoped to, and that `session.domain` stays `null`. Stated in full, with what the attacker
-needs and what it gets them, in
-[`packages/federation-apple/README.md`](../packages/federation-apple/README.md)
+It also leaves you the **trust boundary of the auth host's registrable
+domain**. `__Host-auth.session` cannot be set by any other host, but a
+`form_post` federation (Sign in with Apple) additionally issues a path-scoped
+transaction cookie — `session.name` with any `__Host-` / `__Secure-` prefix
+stripped, then `__Secure-` and `.federation` applied, so the default
+`__Host-auth.session` yields `__Secure-auth.session.federation` — and
+`__Secure-` does not stop another host under the same registrable domain (for
+`auth.example.com`, any `*.example.com`) setting a cookie of that name with
+`Domain=example.com`. A related-domain attacker — a forgotten staging host, a
+dangling DNS record, XSS on a lower-trust app next door — can use that to log a
+victim's browser into the attacker's own federated account. It reaches no
+session and no credential, and there is nothing to configure: the mitigation is
+that no untrusted content runs on any host under the auth host's registrable
+domain. `session.domain = null` protects the session cookie, not this one.
+Stated in full, with what the attacker needs and what it gets them, in
+[`packages/session/README.md`](../packages/session/README.md#every-host-on-the-auth-hosts-registrable-domain-is-inside-the-trust-boundary)
 (#502).
 
 ### Inputs with no default

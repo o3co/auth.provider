@@ -143,15 +143,6 @@ const stringArray = (value: unknown): readonly string[] | undefined =>
 		: undefined;
 
 /**
- * The authorization parameters this provider owns (#593, D17). An operator's
- * `authorizationParams` may not name them: openid-client sets `client_id` and
- * `response_type` only when absent, so a copied parameter would send the
- * consent to another registration or select a flow the callback cannot
- * consume; `scope` is the intent's; `resource` is a field of its own, so that
- * authorization and refresh never disagree about it; a request object or a
- * response mode would change what comes back to the callback.
- */
-/**
  * What a delegated refresh hands its fetch, for the duration of one library
  * call: the caller's signal, and a place for the token endpoint's raw body.
  * openid-client takes no per-call signal, and reads the body before it
@@ -446,6 +437,15 @@ export async function createOidcProvider(
 			);
 		}
 		const extra = params.authorizationParams ?? {};
+		// The authorization parameters this provider owns (#593, D17; the set is
+		// core's `RESERVED_DELEGATED_AUTHORIZATION_PARAMS`). An operator's
+		// `authorizationParams` may not name them: openid-client sets `client_id`
+		// and `response_type` only when absent, so a copied parameter would send
+		// the consent to another registration or select a flow the callback
+		// cannot consume; `scope` is the intent's; `resource` is a field of its
+		// own, so that authorization and refresh never disagree about it; a
+		// request object or a response mode would change what comes back to the
+		// callback.
 		for (const [key, value] of Object.entries(extra)) {
 			if (RESERVED_DELEGATED_AUTHORIZATION_PARAMS.has(key)) {
 				throw new Error(
@@ -529,8 +529,8 @@ export async function createOidcProvider(
 	 * receipt — and none of the login exchange's profile work: no UserInfo, no
 	 * claim mapping. The identity is the verified id_token's, and only that.
 	 *
-	 * What it does NOT share with the refresh is the salvage. A refresh keeps a
-	 * rotated refresh token out of an answer the library refused to parse,
+	 * What it does NOT share with the refresh is the salvage. A refresh recovers
+	 * a rotated refresh token from an answer the library refused to parse,
 	 * because the grant it rotates already exists. An acquisition whose answer
 	 * could not be verified has no grant, and no identity to bind one to; the
 	 * failure is thrown whole.
