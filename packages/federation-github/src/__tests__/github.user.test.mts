@@ -50,6 +50,10 @@ afterEach(() => {
 	vi.unstubAllGlobals();
 });
 
+/** The refusal names what an id must be. */
+const UNUSABLE_ID =
+	/GitHub federation "github" received a \/user without id\/sub \(an id must be a positive safe integer, or a string of decimal digits with no sign or leading zero\)/;
+
 const exchange = () =>
 	createGithubProvider(CONFIG).exchangeCode({
 		code: "gh-code",
@@ -107,9 +111,10 @@ describe("GitHub /user becomes the profile's sub", () => {
 	});
 
 	// GitHub types `id` as an int64 integer. The identity handed to the Store
-	// is `github:<id>`, so an id JSON cannot carry exactly must not become one:
-	// two users would read as the same account. Each body is sent as raw JSON
-	// text so the adapter sees the number exactly as `JSON.parse` reads it.
+	// is `github:<id>`, so an id that `Response.json()` cannot turn into a
+	// JavaScript number exactly must not become one: two users would read as
+	// the same account. Each body is sent as raw JSON text so the adapter sees
+	// the number exactly as `JSON.parse` reads it.
 	it.each([
 		["zero", "0"],
 		["negative", "-12345"],
@@ -119,10 +124,10 @@ describe("GitHub /user becomes the profile's sub", () => {
 	])("refuses a numeric id that is %s", async (_label, idText) => {
 		github.user.raw = `{"login":"octocat","id":${idText}}`;
 
-		await expect(exchange()).rejects.toThrow(/GitHub federation "github".*without id\/sub/);
+		await expect(exchange()).rejects.toThrow(UNUSABLE_ID);
 	});
 
-	it("does not read two users above 2^53 as one", async () => {
+	it("does not read two users at or above 2^53 as one", async () => {
 		// Unchecked, both of these became `github:9007199254740992`.
 		const outcome = async (idText: string): Promise<string> => {
 			github.user.raw = `{"login":"octocat","id":${idText}}`;
@@ -153,7 +158,7 @@ describe("GitHub /user becomes the profile's sub", () => {
 	])("refuses a string id with %s", async (_label, id) => {
 		github.user.body = { ...githubUser(), id };
 
-		await expect(exchange()).rejects.toThrow(/GitHub federation "github".*without id\/sub/);
+		await expect(exchange()).rejects.toThrow(UNUSABLE_ID);
 	});
 
 	it.each([

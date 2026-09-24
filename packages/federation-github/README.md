@@ -145,7 +145,7 @@ What `exchangeCode` returns:
 | Field | Value |
 | --- | --- |
 | `issuer` | `https://github.com` |
-| `sub` | a non-empty string `sub` when the user object carries one; otherwise its `id` — a positive safe integer (`Number.isSafeInteger`, above 0) as a decimal string, or a string of decimal digits with no sign and no leading zero as it is. Any other `id` fails the exchange like a missing one: GitHub sends an int64 integer, and one that JSON cannot carry exactly — above 2^53 − 1, where two ids parse as the same number, or `1e400`, which parses as `Infinity` — would sign two GitHub users in as one `github:<id>` |
+| `sub` | a non-empty string `sub` when the user object carries one; otherwise its `id` — a positive safe integer (`Number.isSafeInteger`, above 0) as a decimal string, or a string of decimal digits with no sign and no leading zero as it is. Any other `id` fails the exchange like a missing one: GitHub sends an int64 integer, and one that `Response.json()` cannot turn into a JavaScript number exactly — above 2^53 − 1, where two ids parse as the same number, or `1e400`, which parses as `Infinity` — would sign two GitHub users in as one `github:<id>` |
 | `email`, `emailVerified` | the chosen address and `true`, or both absent |
 | `name` | `/user`'s `name`, when a string |
 | `picture` | `/user`'s `avatar_url`, when a string |

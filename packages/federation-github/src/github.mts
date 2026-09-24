@@ -143,9 +143,10 @@ const DECIMAL_ID = /^[1-9][0-9]*$/;
  * `undefined` when neither is usable.
  *
  * GitHub types `id` as an int64 integer. The identity handed to the Store is
- * `github:<id>`, so an id that JSON cannot carry exactly is not one: above
- * 2^53 two ids parse as the same number, and `1e400` parses as `Infinity`.
- * Taken as they came, two GitHub users would sign in as one account. The
+ * `github:<id>`, so an id that `Response.json()` (`JSON.parse`) cannot turn
+ * into a JavaScript number exactly is not one: at 2^53 or above, two ids parse
+ * as the same number, and `1e400` parses as `Infinity`. Taken as they came,
+ * two GitHub users would sign in as one account. The
  * string form is held to the digits `String(n)` would give, so one user
  * cannot arrive under two spellings.
  */
@@ -233,7 +234,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			const sub = githubSub(user);
 			if (sub === undefined) {
 				throw new Error(
-					`GitHub federation "github" received a /user without id/sub (an id must be a positive safe integer or a string of decimal digits)`,
+					`GitHub federation "github" received a /user without id/sub (an id must be a positive safe integer, or a string of decimal digits with no sign or leading zero)`,
 				);
 			}
 
