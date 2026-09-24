@@ -34,15 +34,39 @@ describe("in-memory FederationTokenStore", () => {
 
 	it("attach + get returns same tokens (including refreshToken in clear)", async () => {
 		await store.attach("sid-1", "google", tokens);
-		expect(await store.get("sid-1", "google")).toEqual(tokens);
+		expect(await store.get("sid-1", "google")).toStrictEqual(tokens);
 	});
+
+	it.each([
+		["attach", "attach"],
+		["update", "update"],
+	] as const)(
+		"names every field it has no value for on %s, rather than leaving it out (#626)",
+		async (_label, write) => {
+			// Every optional field unset at once: the fixture above sets
+			// `refreshToken` and `idToken`, so a copy that dropped either when
+			// `undefined` would pass it.
+			const bare: FederationTokens = {
+				accessToken: "at",
+				expiresAt: null,
+				refreshToken: undefined,
+				idToken: undefined,
+				tokenType: undefined,
+				scope: undefined,
+				grantedScope: undefined,
+			};
+			if (write === "update") await store.attach("sid-1", "google", tokens);
+			await store[write]("sid-1", "google", bare);
+			expect(await store.get("sid-1", "google")).toStrictEqual(bare);
+		},
+	);
 
 	it("keeps grantedScope through the defensive copy (#647)", async () => {
 		// The copy is field by field, so a field it forgets is silently dropped —
 		// and this one is the ceiling a refresh is bounded by.
 		const withCeiling = { ...tokens, scope: "openid", grantedScope: "openid email" };
 		await store.attach("sid-1", "google", withCeiling);
-		expect(await store.get("sid-1", "google")).toEqual(withCeiling);
+		expect(await store.get("sid-1", "google")).toStrictEqual(withCeiling);
 	});
 
 	it.each([
@@ -78,7 +102,7 @@ describe("in-memory FederationTokenStore", () => {
 			grantedScope: undefined,
 		};
 		await store.update("sid-1", "google", next);
-		expect(await store.get("sid-1", "google")).toEqual(next);
+		expect(await store.get("sid-1", "google")).toStrictEqual(next);
 	});
 
 	it("removeBySid removes all federation entries for sid", async () => {
@@ -88,7 +112,7 @@ describe("in-memory FederationTokenStore", () => {
 		await store.removeBySid("sid-1");
 		expect(await store.get("sid-1", "google")).toBeNull();
 		expect(await store.get("sid-1", "github")).toBeNull();
-		expect(await store.get("sid-2", "google")).toEqual(tokens);
+		expect(await store.get("sid-2", "google")).toStrictEqual(tokens);
 	});
 
 	it("delete removes a single (sid, name) only", async () => {
@@ -96,7 +120,7 @@ describe("in-memory FederationTokenStore", () => {
 		await store.attach("sid-1", "github", tokens);
 		await store.delete("sid-1", "google");
 		expect(await store.get("sid-1", "google")).toBeNull();
-		expect(await store.get("sid-1", "github")).toEqual(tokens);
+		expect(await store.get("sid-1", "github")).toStrictEqual(tokens);
 	});
 
 	it("removeBySid / delete are idempotent", async () => {

@@ -129,7 +129,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		const raw = values[0] as string;
 		expect(raw).not.toContain("rt-secret");
 		// round-trip
-		expect(await store.get("sid-1", "google")).toEqual(tokens);
+		expect(await store.get("sid-1", "google")).toStrictEqual(tokens);
 	});
 
 	it("round-trips grantedScope, and a record written without one (#647)", async () => {
@@ -141,7 +141,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		});
 		const withCeiling = { ...tokens, scope: "openid", grantedScope: "openid email" };
 		await store.attach("sid-1", "google", withCeiling);
-		expect(await store.get("sid-1", "google")).toEqual(withCeiling);
+		expect(await store.get("sid-1", "google")).toStrictEqual(withCeiling);
 
 		await store.attach("sid-2", "google", tokens);
 		const legacy = await store.get("sid-2", "google");
@@ -159,7 +159,7 @@ describe("redis FederationTokenStore (encryption = required)", () => {
 		await store.removeBySid("sid-1");
 		expect(await store.get("sid-1", "google")).toBeNull();
 		expect(await store.get("sid-1", "github")).toBeNull();
-		expect(await store.get("sid-2", "google")).toEqual(tokens);
+		expect(await store.get("sid-2", "google")).toStrictEqual(tokens);
 	});
 
 	it("missing encryption key throws at construction", () => {
@@ -248,7 +248,7 @@ describe("redis FederationTokenStore (encryption = allow-plaintext)", () => {
 		expect(values).toHaveLength(1);
 		const raw = values[0] as string;
 		expect(raw).toContain("rt-secret");
-		expect(await store.get("sid-1", "google")).toEqual(tokens);
+		expect(await store.get("sid-1", "google")).toStrictEqual(tokens);
 	});
 
 	it("get() self-heals corrupt JSON by deleting the key (Copilot round 3 #5)", async () => {
@@ -762,7 +762,7 @@ describe("#293 — mode=required stores one ciphertext over the whole envelope",
 	it("round-trips every field", async () => {
 		const store = requiredStore();
 		await store.attach("sid-1", "google", fullTokens);
-		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
+		expect(await store.get("sid-1", "google")).toStrictEqual(fullTokens);
 	});
 
 	it("update() writes the same shape and round-trips too", async () => {
@@ -774,7 +774,7 @@ describe("#293 — mode=required stores one ciphertext over the whole envelope",
 			unknown
 		>;
 		expect(Object.keys(record).sort()).toEqual(["c", "v"]);
-		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
+		expect(await store.get("sid-1", "google")).toStrictEqual(fullTokens);
 	});
 
 	it("round-trips expiresAt: null inside the encrypted envelope", async () => {
@@ -838,7 +838,7 @@ describe("#293 — mode=required stores one ciphertext over the whole envelope",
 		expect(redis.data.has("ft:sid-1:github")).toBe(false);
 
 		// The record under its own key is untouched by all of that.
-		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
+		expect(await store.get("sid-1", "google")).toStrictEqual(fullTokens);
 	});
 
 	it("the binding is to the full Redis key, keyPrefix included", async () => {
@@ -867,7 +867,7 @@ describe("#293 — mode=allow-plaintext keeps the envelope as plain JSON (develo
 	it("round-trips every field, expiresAt: null included", async () => {
 		const store = plaintextStore();
 		await store.attach("sid-1", "google", fullTokens);
-		expect(await store.get("sid-1", "google")).toEqual(fullTokens);
+		expect(await store.get("sid-1", "google")).toStrictEqual(fullTokens);
 		await store.attach("sid-gh", "github", { ...fullTokens, expiresAt: null });
 		expect((await store.get("sid-gh", "github"))?.expiresAt).toBeNull();
 	});
@@ -976,9 +976,15 @@ describe("#293 — a v2 record with a malformed inner envelope self-heals like c
 			it("still reads the minimal valid envelope — optional fields may be absent", async () => {
 				const store = storeFor(mode);
 				writeV2(mode, "ft:sid-1:google", '{"accessToken":"at","expiresAtMs":null}');
-				expect(await store.get("sid-1", "google")).toEqual({
+				// Absent from the envelope, but named on the record it reads to (#626).
+				expect(await store.get("sid-1", "google")).toStrictEqual({
 					accessToken: "at",
 					expiresAt: null,
+					refreshToken: undefined,
+					idToken: undefined,
+					tokenType: undefined,
+					scope: undefined,
+					grantedScope: undefined,
 				});
 				expect(redis.data.has("ft:sid-1:google")).toBe(true);
 			});

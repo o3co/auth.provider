@@ -61,7 +61,7 @@ export function runSessionRPRegistryContract(factory: SessionRPRegistryFactory):
 			});
 			await reg.registerRP("sid-rt", rp, FUTURE());
 
-			expect((await reg.listRPs("sid-rt"))[0]).toEqual(rp);
+			expect((await reg.listRPs("sid-rt"))[0]).toStrictEqual(rp);
 		});
 
 		it("same clientId upserts — replaces earlier registration", async () => {
@@ -160,10 +160,12 @@ export function runSessionRPRegistryContract(factory: SessionRPRegistryFactory):
 			const list = await reg.listRPs("sid-1");
 			expect(list).toHaveLength(1);
 			const rp = list[0];
-			expect(rp?.backchannelLogoutUri).toBeUndefined();
-			expect(rp?.backchannelLogoutSessionRequired).toBeUndefined();
-			expect(rp?.frontchannelLogoutUri).toBeUndefined();
-			expect(rp?.frontchannelLogoutSessionRequired).toBeUndefined();
+			// Named, not left out (#626): `toHaveProperty(key, undefined)` fails
+			// on a missing key as well as on a value.
+			expect(rp).toHaveProperty("backchannelLogoutUri", undefined);
+			expect(rp).toHaveProperty("backchannelLogoutSessionRequired", undefined);
+			expect(rp).toHaveProperty("frontchannelLogoutUri", undefined);
+			expect(rp).toHaveProperty("frontchannelLogoutSessionRequired", undefined);
 		});
 
 		it("readonly kind field present", async () => {

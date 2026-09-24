@@ -53,6 +53,26 @@ export function runUserSessionStoreContract(factory: UserSessionStoreContractFac
 			expect(await store.get("sid-plain")).toHaveProperty("amr", undefined);
 		});
 
+		it("returns the session whole, as plain data: what was written, and when it was created (#626)", async () => {
+			// Strictly: a key too many, one left out, or a class instance in place
+			// of plain data fails here, where the field-by-field checks above pass.
+			const store = await factory();
+			const input = INPUT({
+				sid: "sid-whole",
+				authTime: new Date(Date.now() - 1_000),
+				claims: { email: "user@example.com", groups: ["alpha"] },
+				amr: ["pwd"],
+			});
+			await store.create(input);
+			expect(await store.get("sid-whole")).toStrictEqual({ ...input, createdAt: expect.any(Date) });
+			const plain = INPUT({ sid: "sid-whole-plain" });
+			await store.create(plain);
+			expect(await store.get("sid-whole-plain")).toStrictEqual({
+				...plain,
+				createdAt: expect.any(Date),
+			});
+		});
+
 		it("create rejects duplicate sid", async () => {
 			const store = await factory();
 			await store.create(INPUT({ sid: "dup" }));

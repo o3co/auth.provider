@@ -171,7 +171,9 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 			it("admits a record and hands back a copy that is not the stored one", async () => {
 				const record = await lodge();
 				const read = await store.getIntent(record.handle, at(MIN));
-				expect(read).toEqual(record);
+				// Strictly: `resource` and `upstreamSubject`, unset here, come back
+				// named `undefined` rather than left out (#626).
+				expect(read).toStrictEqual(record);
 				expect(read).not.toBe(record);
 				if (read === null) throw new Error("unreachable");
 
@@ -179,7 +181,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 				// does one that changes what it wrote.
 				(read as { clientId: string }).clientId = "someone-else";
 				(read.scopes as string[]).push("admin");
-				expect(await store.getIntent(record.handle, at(MIN))).toEqual(intent());
+				expect(await store.getIntent(record.handle, at(MIN))).toStrictEqual(intent());
 			});
 
 			it("hands back every field with its own value, and so does the transaction's snapshot (#626)", async () => {
@@ -264,7 +266,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 					outcome: "refused",
 					reason: "collision",
 				});
-				expect(await store.getIntent("h-1", at(MIN))).toEqual(intent());
+				expect(await store.getIntent("h-1", at(MIN))).toStrictEqual(intent());
 				expect(await factory.reservations(store, "agent", "u-2")).toBe(0);
 			});
 
@@ -613,7 +615,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 					answer,
 					now: at(2 * MIN),
 				});
-				expect(result).toEqual({
+				expect(result).toStrictEqual({
 					outcome: "accepted",
 					transaction: {
 						state: answer.state,
@@ -649,7 +651,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 					answer: deny,
 					now: at(2 * MIN),
 				});
-				expect(result).toEqual({ outcome: "denied", intent: record });
+				expect(result).toStrictEqual({ outcome: "denied", intent: record });
 				expect(await factory.reservations(store, "agent", "u-1")).toBe(0);
 				expect(await store.getIntent(record.handle, at(3 * MIN))).toBeNull();
 				expect(await factory.consentResident(store, "challenge-1")).toBe(false);
@@ -800,7 +802,7 @@ export function runFederationGrantIntentStoreContract<S extends FederationGrantI
 					connection: record.connection,
 					now: at(3 * MIN),
 				});
-				expect(consumed).toEqual(transaction);
+				expect(consumed).toStrictEqual(transaction);
 				expect(await factory.transactionResident(store, answer.state)).toBe(false);
 				expect(
 					await store.consumeTransaction({

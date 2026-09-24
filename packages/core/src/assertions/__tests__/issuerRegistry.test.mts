@@ -111,6 +111,23 @@ describe("createMemoryAssertionIssuerRegistry — the admin surface (#525)", () 
 			].sort(),
 		);
 		expect(found?.allowedClients).toBeUndefined();
+		// And whole, against an entry written out here rather than the same
+		// registry's other answer: a class instance, or a key too many, fails.
+		// `list()` answers with the same shape.
+		const whole = {
+			issuer: "https://devices.example",
+			keys: { type: "key", key: publicKey },
+			algorithms: ["EdDSA"],
+			allowedSubjects: undefined,
+			allowedScopes: undefined,
+			allowedAudiences: undefined,
+			allowedClients: undefined,
+			expiresAt: undefined,
+			profile: undefined,
+			clockToleranceSeconds: undefined,
+		};
+		expect(found).toStrictEqual(whole);
+		expect(await registry.list()).toStrictEqual([whole]);
 	});
 
 	it("round-trips list() into add() on another registry", async () => {
@@ -122,7 +139,7 @@ describe("createMemoryAssertionIssuerRegistry — the admin surface (#525)", () 
 		const to = createMemoryAssertionIssuerRegistry();
 		for (const listed of await from.list()) await to.add(listed);
 
-		expect(await to.findIssuer("https://devices.example")).toEqual(
+		expect(await to.findIssuer("https://devices.example")).toStrictEqual(
 			await from.findIssuer("https://devices.example"),
 		);
 	});

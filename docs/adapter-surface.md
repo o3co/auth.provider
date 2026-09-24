@@ -218,19 +218,39 @@ out-of-tree adapter can import and run:
 | `ConsentStore` | `packages/core/src/consents/__tests__/adapters.contract.mts` |
 | `DeviceCodeStore` | `packages/core/src/device-authorization/__tests__/adapters.contract.mts` |
 | `FederationGrantStore` | `packages/core/src/federation-grants/__tests__/store.contract.mts` |
+| `FederationGrantIntentStore` | `packages/core/src/federation-grants/__tests__/intentStore.contract.mts` |
 | `PendingConsentStore` | `packages/core/src/consents/__tests__/pending.contract.mts` |
 | `ReplaySeenSet` | `packages/core/src/replay-seen-set/__tests__/adapters.contract.mts` |
 | `RefreshTokenFamilyStore` | `packages/core/src/refresh-token-family/__tests__/adapters.contract.mts` |
 | `WebAuthnCredentialStore` | `packages/core/src/webauthn-credentials/__tests__/adapters.contract.mts` |
-| `UserSessionStore` | `packages/redis/__tests__/userSessionStore.contract.mts` |
-| `SessionRPRegistry` | `packages/redis/__tests__/sessionRPRegistry.contract.mts` |
-| `SessionFamilyIndex` | `packages/redis/__tests__/sessionFamilyIndex.contract.mts` |
-| `SessionFederationIndex` | `packages/redis/__tests__/sessionFederationIndex.contract.mts` |
+| `UserSessionStore` | `packages/core/src/user-sessions/__tests__/userSessionStore.contract.mts` |
+| `SessionRPRegistry` | `packages/core/src/user-sessions/__tests__/sessionRPRegistry.contract.mts` |
+| `SessionFamilyIndex` | `packages/core/src/user-sessions/__tests__/sessionFamilyIndex.contract.mts` |
+| `SessionFederationIndex` | `packages/core/src/user-sessions/__tests__/sessionFederationIndex.contract.mts` |
 
 Each is run against every in-repo implementation of its port, which is what makes
-it a description of the contract rather than of one adapter. Some live in
-`packages/redis/__tests__/` because a contract file cannot be imported across a
-package boundary — those are duplicated from the core copy, differing only in
-how they import the port's type. A new port should
-gain one; "typed and swappable" means an implementer can prove they got it right,
-not that they read the interface carefully.
+it a description of the contract rather than of one adapter. There is one
+exception: the Redis `AccessTokenDenylist`, whose expiry is Redis's own key TTL
+and cannot follow the suite's fake clock. Its own tests cover the same cases
+against a real Redis. A contract file
+cannot be imported across a package boundary, so `packages/redis/__tests__/`
+runs copies of the core suites. A copy may differ from its core suite only
+above the first `export`, in comments and imports. The `*-parity.test.mts`
+tests there fail on any other difference, and on a copy nothing runs. A new
+port should gain a suite: "typed and swappable" means an implementer can prove
+they got it right, not only that they read the interface carefully.
+
+What the suites hold an adapter to:
+
+- **Records come back whole, as plain data.** A port that returns one of the
+  records whose fields are all required keys (#626) has a suite that compares
+  whole records with `toStrictEqual`. A field with no value must come back
+  named, as `undefined`, not left out. An extra key, or a class instance in
+  place of a plain object, also fails. `CodeRepository`, `FederationTokenStore`
+  and `AssertionIssuerRegistry` return such records but ship no suite yet; the
+  bundled adapters' own tests hold them to the same rule.
+- **Only the inputs the port's types allow.** How an adapter treats a value
+  outside them, such as a `null` or `""` from an untyped caller, is up to the
+  adapter, and its own tests cover it. For example, the bundled device-code
+  stores' tests cover a falsy `requestedScope`, which the device-code suite
+  does not.

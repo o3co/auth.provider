@@ -87,22 +87,29 @@ export function runPendingConsentStoreContract(
 		it("returns a parked record intact, keyed by its challenge, and reading does not spend it", async () => {
 			const parked = record();
 			await store.set(parked);
-			expect(await store.get("ch-1")).toEqual(parked);
+			expect(await store.get("ch-1")).toStrictEqual(parked);
 			// The page reads what is being asked before it answers, possibly
 			// more than once. Only the answer spends the record.
-			expect(await store.get("ch-1")).toEqual(parked);
+			expect(await store.get("ch-1")).toStrictEqual(parked);
 			expect(await store.get("ch-2")).toBeNull();
 		});
 
 		it("consume returns the record and removes it in the same step, so a second answer finds nothing", async () => {
 			const parked = record();
 			await store.set(parked);
-			expect(await store.consume("ch-1")).toEqual(parked);
+			expect(await store.consume("ch-1")).toStrictEqual(parked);
 			// This is the property the port exists for: two answers to one
 			// challenge cannot both be applied, because only one of them can be
 			// handed the record.
 			expect(await store.consume("ch-1")).toBeNull();
 			expect(await store.get("ch-1")).toBeNull();
+		});
+
+		it("names a state the request did not carry as undefined, rather than leaving it out (#626)", async () => {
+			const parked = record({ state: undefined });
+			await store.set(parked);
+			expect(await store.get("ch-1")).toStrictEqual(parked);
+			expect(await store.consume("ch-1")).toStrictEqual(parked);
 		});
 
 		it("keeps records for different challenges apart", async () => {

@@ -26,10 +26,11 @@
 // So the only difference allowed is the import block. When the core suite
 // changes, copy it again and re-run.
 
-import { readdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { callersOf, prologueDeclarations, prologueImports } from "./contract-parity.helpers.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CORE = join(here, "../../core/src/user-sessions/__tests__/userSessionStore.contract.mts");
@@ -59,53 +60,32 @@ describe("the UserSessionStore contract suite, in both copies", () => {
 	});
 
 	it("imports the port from the package rather than from core's source", () => {
-		const copy = readFileSync(COPY, "utf8");
-		expect(copy).toContain('from "@o3co/auth-provider-core"');
-		// Core's relative and `#/` paths do not resolve from this package; a copy
-		// that kept one would fail to load rather than drift.
-		const prologue = copy.slice(0, copy.indexOf(FIRST_EXPORT));
-		expect(prologue).not.toContain('"#/');
-		expect(prologue).not.toContain('"../types.mjs"');
+		const imports = prologueImports(COPY, readFileSync(COPY, "utf8").indexOf(FIRST_EXPORT));
+		expect(imports).toContain("@o3co/auth-provider-core");
+		// A copy imports core as a package. Core's `#/` alias does not resolve
+		// from here, and a relative or absolute path would reach into core's
+		// source rather than what the package publishes.
+		for (const specifier of imports) {
+			expect(specifier, specifier).not.toMatch(/^(#\/|\.|\/)/);
+		}
 	});
 
 	it("has nothing but comments and imports above that line, in either copy", () => {
 		// A declaration there — a shadowed `it`, a rebound `expect` — would change
 		// what the suite runs while the bodies still compare equal.
+		// Read as a syntax tree, so a declaration sharing a line with an import
+		// is still a declaration (#626).
 		for (const path of [CORE, COPY]) {
-			const text = readFileSync(path, "utf8");
-			let inComment = false;
-			let inImport = false;
-			for (const [index, line] of text.slice(0, text.indexOf(FIRST_EXPORT)).split("\n").entries()) {
-				const trimmed = line.trim();
-				if (trimmed.length === 0) continue;
-				if (inComment) {
-					if (trimmed.includes("*/")) inComment = false;
-					continue;
-				}
-				if (trimmed.startsWith("/*")) {
-					if (!trimmed.includes("*/")) inComment = true;
-					continue;
-				}
-				if (trimmed.startsWith("//")) continue;
-				if (inImport) {
-					if (trimmed.startsWith("}")) inImport = false;
-					continue;
-				}
-				if (trimmed.startsWith("import ")) {
-					if (trimmed.endsWith("{")) inImport = true;
-					continue;
-				}
-				expect.fail(`${path}:${index + 1} is neither a comment nor an import: ${trimmed}`);
-			}
+			const from = readFileSync(path, "utf8").indexOf(FIRST_EXPORT);
+			expect(from, `${path}: the suite's first export`).toBeGreaterThan(0);
+			expect(prologueDeclarations(path, from), path).toEqual([]);
 		}
 	});
 
 	it("is run by something: a copy nothing calls cannot fail", () => {
-		const callers = readdirSync(here).filter(
-			(name) =>
-				name.endsWith(".test.mts") &&
-				readFileSync(join(here, name), "utf8").includes("runUserSessionStoreContract("),
+		// A call in the syntax tree, so a commented-out call does not count.
+		expect(callersOf(here, "runUserSessionStoreContract")).toContain(
+			"redis.userSessionStore.test.mts",
 		);
-		expect(callers).toContain("redis.userSessionStore.test.mts");
 	});
 });

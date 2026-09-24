@@ -283,3 +283,42 @@ describe("memory DeviceCodeStore — eviction and decision edge cases", () => {
 		});
 	});
 });
+
+const FALSY_NOW = Date.now();
+const falsySeed = {
+	deviceCode: "dc-falsy",
+	userCode: "BCDFGHJK",
+	clientId: "tv",
+	requestedScope: undefined,
+	expiresAtMs: FALSY_NOW + 10 * 60_000,
+	intervalSeconds: 5,
+};
+
+/**
+ * What this adapter does with an untyped caller's falsy `requestedScope`: the
+ * scopeless request it was before #626 made the field a required key, which
+ * both bundled stores keep by testing it for truthiness. It is outside the
+ * port's types, so it is this adapter's behaviour and not the contract's — a
+ * third-party store owes nothing for it (#626).
+ */
+describe("memory DeviceCodeStore — an untyped caller's falsy requestedScope", () => {
+	it.each([
+		["null", null],
+		["an empty string", ""],
+		["false", false],
+		["zero", 0],
+	])("reads %s as no scope, and still approves", async (_label, value) => {
+		const store = createMemoryDeviceCodeStore();
+		await store.create({ ...falsySeed, requestedScope: value as unknown as undefined });
+		expect(
+			(await store.findPendingByUserCode(falsySeed.userCode, FALSY_NOW))?.requestedScope,
+		).toBeUndefined();
+		const decided = await store.approve({
+			userCode: falsySeed.userCode,
+			subject: "user-1",
+			nowMs: FALSY_NOW,
+		});
+		expect(decided.status).toBe("ok");
+		if (decided.status === "ok") expect(decided.authorization.grantedScope).toEqual([]);
+	});
+});
