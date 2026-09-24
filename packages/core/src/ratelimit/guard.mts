@@ -15,6 +15,7 @@
  */
 
 import type { Request, RequestHandler, Response } from "express";
+import { auditedError } from "../audit/auditedError.mjs";
 import { emitAuditEvent } from "../audit/factory.mjs";
 import type { AuditSink } from "../audit/types.mjs";
 import { type ErrorEnvelope, errorEnvelope } from "../errors/envelope.mjs";
@@ -136,11 +137,13 @@ export const checkWithFailMode = async (
 	try {
 		return { status: "decided", decision: await limiter.check(key, ctx) };
 	} catch (cause) {
-		// A string, as the log line and the audit event have always carried —
-		// but the projection's: a limiter's error is a store's (a Redis reply
-		// echoes the command it refused), so its message is read through
-		// loggableError, and a thrown non-Error says what kind it was, not what
-		// it held.
+		// A string, as the log line has always carried — but the projection's:
+		// a limiter's error is a store's (a Redis reply echoes the command it
+		// refused), so its message is read through loggableError, and a thrown
+		// non-Error says what kind it was, not what it held. The audit event
+		// keeps less: the error's name and code (`auditedError`), because a
+		// sink is a record other systems read, and the message is still a
+		// store's words.
 		const projected = loggableError(cause);
 		const reported = projected.detail ?? projected.name;
 		const ip = ctx.ip ?? "unknown";
@@ -155,7 +158,7 @@ export const checkWithFailMode = async (
 			userAgent: ctx.userAgent,
 			details: {
 				tag,
-				error: reported,
+				error: auditedError(cause),
 			},
 		});
 		return { status: "unavailable", failMode };

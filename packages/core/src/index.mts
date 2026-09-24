@@ -66,6 +66,9 @@ export type {
 	AssertionVerificationResult,
 	AssertionVerifier,
 } from "./assertions/types.mjs";
+// What an audit event may carry of an error: its name and code, never its
+// message (a store's or an IdP's words).
+export { type AuditedError, auditedError } from "./audit/auditedError.mjs";
 export {
 	createAuditSinkFactory,
 	emitAuditEvent,

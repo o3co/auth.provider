@@ -19,6 +19,7 @@ import {
 	type AppConfig,
 	type AuditSink,
 	auditErrorText,
+	auditedError,
 	type ClientRepository,
 	type CodeRepository,
 	type ConsentStore,
@@ -844,10 +845,10 @@ export const createOAuthRouter = async (
 								type: "introspect.store_unavailable",
 								ip: req.ip,
 								userAgent: req.get("user-agent"),
-								details: {
-									family_id: familyId,
-									error: cause instanceof Error ? cause.message : String(cause),
-								},
+								// The error's name and code, never its message: the store's
+								// words (a Redis reply quotes the command it refused) are not
+								// the audit trail's to keep.
+								details: { family_id: familyId, error: auditedError(cause) },
 							});
 							return res.status(200).json({ active: false });
 						}
@@ -909,10 +910,7 @@ export const createOAuthRouter = async (
 								type: "introspect.store_unavailable",
 								ip: req.ip,
 								userAgent: req.get("user-agent"),
-								details: {
-									sid,
-									error: cause instanceof Error ? cause.message : String(cause),
-								},
+								details: { sid, error: auditedError(cause) },
 							});
 							return res.status(200).json({ active: false });
 						}

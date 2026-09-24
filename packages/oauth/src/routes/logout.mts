@@ -29,6 +29,7 @@ import type {
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	auditedError,
 	emitAuditEvent,
 	loggableError,
 	sanitizeErrorText,
@@ -510,10 +511,9 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 						subject: sub ?? undefined,
 						ip: req.ip,
 						userAgent: req.get("user-agent"),
-						details: {
-							federation: name,
-							error: error instanceof Error ? error.message : String(error),
-						},
+						// The error's name and code, never its message: an IdP's
+						// refusal carries the IdP's own words.
+						details: { federation: name, error: auditedError(error) },
 					});
 					return res.status(200).json({ disconnected: true });
 				}
