@@ -548,10 +548,11 @@ export function createClientIdMetadataDocumentResolver(
 		} catch (err) {
 			const rejected = err instanceof DocumentRejected;
 			// The rejection's own text, or a fetch failure's projection: never a
-			// thrown value as it came (loggableError).
+			// thrown value as it came (loggableError). `err` beside it carries
+			// what `reason` cannot — a fetch failure's cause code.
 			const projected = loggableError(err);
 			logger?.warn(
-				{ clientId, reason: projected.message ?? projected.name },
+				{ clientId, reason: projected.message ?? projected.name, err: projected },
 				rejected ? "cimd_document_rejected" : "cimd_document_fetch_failed",
 			);
 			if (rejected) {
