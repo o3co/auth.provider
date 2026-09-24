@@ -30,7 +30,7 @@
  * and these tests are the contract the issue said was missing.
  */
 
-import type { Server } from "node:http";
+import { createServer, type Server } from "node:http";
 import type { Logger } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -85,16 +85,53 @@ const makeLogger = () => {
 	return spy satisfies Logger;
 };
 
+/**
+ * A logger that serialises every own property of what it is handed, `cause`
+ * and non-enumerable fields included — a deployment is free to install one.
+ * `lines` is what it wrote; its levels are spies.
+ */
+const serialiseEverythingLogger = () => {
+	const lines: string[] = [];
+	const walk = (value: unknown, seen = new WeakSet<object>()): unknown => {
+		if (typeof value !== "object" || value === null) return value;
+		if (seen.has(value)) return "[circular]";
+		seen.add(value);
+		const out: Record<string, unknown> = {};
+		for (const key of Object.getOwnPropertyNames(value)) {
+			out[key] = walk((value as Record<string, unknown>)[key], seen);
+		}
+		return out;
+	};
+	const record = (level: string) =>
+		vi.fn((...args: unknown[]): void => {
+			lines.push(JSON.stringify({ level, args: walk(args) }));
+		});
+	const logger = {
+		trace: record("trace"),
+		debug: record("debug"),
+		info: record("info"),
+		warn: record("warn"),
+		error: record("error"),
+		fatal: record("fatal"),
+		child: vi.fn(() => logger as unknown as Logger),
+	};
+	return { logger: logger satisfies Logger, lines };
+};
+
+/** A logged projection's `stack`: frames only, from the first. */
+const FRAMES = expect.stringMatching(/^ {4}at /);
+
 /** Drive one shutdown without touching the real `process` or exiting. */
 function install(
 	opts: {
 		cleanup?: () => void | Promise<void>;
 		drainTimeoutMs?: number;
 		cleanupTimeoutMs?: number;
+		logger?: ReturnType<typeof makeLogger>;
 	} = {},
 ) {
 	const { server, spies, finishDraining, failClose } = makeServer();
-	const logger = makeLogger();
+	const logger = opts.logger ?? makeLogger();
 	const exit = vi.fn();
 	const signals = new Map<string, () => void>();
 
@@ -193,21 +230,45 @@ describe("installGracefulShutdown (#290)", () => {
 		}
 	});
 
-	it("reports a cleanup failure through the app logger, not console", async () => {
+	it("reports a cleanup failure through the app logger, not console, as loggableError's projection", async () => {
 		// Every other line this service emits is NDJSON through pino; a bare
 		// console.error on the shutdown path is the one a log pipeline drops.
-		const { logger, exit, signals, finishDraining } = install({
+		// What `handle.dispose()` rejects with is an AggregateError of every
+		// cleanup's own error — among them a store write that failed while
+		// the federation-grant drain waited on it, whose ioredis reply error
+		// carries the write, a rotated upstream credential included. The line
+		// carries the projection, never those.
+		const refused = Object.assign(new Error("READONLY You can't write against a read only replica."), {
+			name: "ReplyError",
+			command: {
+				name: "set",
+				args: ["fg:credential:grant-1", '{"refresh_token":"1//0g-UPSTREAM-S3CRET"}'],
+			},
+		});
+		const { logger, lines } = serialiseEverythingLogger();
+		const { exit, signals, finishDraining } = install({
+			logger,
 			cleanup: () => {
-				throw new Error("redis quit failed");
+				throw new AggregateError(
+					[refused],
+					"AppHandle.dispose: 1 cleanup error (federation-grants:federationGrantRegistry)",
+				);
 			},
 		});
 		signals.get("SIGTERM")?.();
 		finishDraining();
 		await vi.waitFor(() => expect(exit).toHaveBeenCalled());
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ err: expect.any(Error) }),
-			expect.stringContaining("cleanup"),
+			{
+				err: {
+					name: "AggregateError",
+					message: "AppHandle.dispose: 1 cleanup error (federation-grants:federationGrantRegistry)",
+					stack: FRAMES,
+				},
+			},
+			"graceful shutdown: cleanup failed",
 		);
+		for (const line of lines) expect(line).not.toContain("UPSTREAM-S3CRET");
 	});
 
 	it("still exits when cleanup throws — a failed dispose must not wedge the process", async () => {
@@ -221,19 +282,37 @@ describe("installGracefulShutdown (#290)", () => {
 		await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1));
 	});
 
-	it("does not report a failed close as a clean drain", async () => {
+	it("does not report a failed close as a clean drain, and logs the failure as loggableError's projection", async () => {
 		// `server.close` reports through its callback -- "Server is not running"
 		// is the common one, but any listener teardown failure lands there.
 		// Exiting 0 on it would tell an orchestrator the listener came down
-		// when it did not.
-		const { exit, logger, signals, failClose } = install();
+		// when it did not. A real server that is not listening gives Node's
+		// own error; the line keeps its name, message, code and frames.
+		const server = createServer();
+		const { logger, lines } = serialiseEverythingLogger();
+		const exit = vi.fn();
+		const signals = new Map<string, () => void>();
+		installGracefulShutdown(server, {
+			logger,
+			exit,
+			onSignal: (name, handler) => signals.set(name, handler),
+			offSignal: (name) => signals.delete(name),
+		});
 		signals.get("SIGTERM")?.();
-		failClose(new Error("Server is not running"));
 		await vi.waitFor(() => expect(exit).toHaveBeenCalledWith(1));
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ err: expect.any(Error) }),
-			expect.stringContaining("close"),
+			{
+				err: {
+					name: "Error",
+					message: "Server is not running.",
+					code: "ERR_SERVER_NOT_RUNNING",
+					stack: FRAMES,
+				},
+			},
+			"graceful shutdown: server close failed",
 		);
+		// The frames, never the header line that repeats the message.
+		for (const line of lines) expect(line).not.toContain("Error [ERR_SERVER_NOT_RUNNING]");
 	});
 
 	it("still runs cleanup when close reports a failure", async () => {
