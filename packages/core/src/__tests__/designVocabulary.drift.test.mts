@@ -260,7 +260,7 @@ const POLICY_EVALUATE_EXEMPTIONS: Readonly<Record<string, { calls: number; reaso
 	"packages/oauth-token-exchange/src/grant.mts": {
 		calls: 1,
 		reason:
-			"RFC 8693's contract: the ceiling is the subject token, a widening is `invalid_target`, and `access_denied` is 403",
+			"the ceilings are the subject token's, not the request's, and `access_denied` is 403; a policy scope past them is `policyOutOfBounds` like the rest, an audience past them RFC 8693 §2.2.2's `invalid_target`",
 	},
 };
 
