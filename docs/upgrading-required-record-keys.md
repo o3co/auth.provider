@@ -75,7 +75,7 @@ Write `undefined` where you have nothing. That makes "no expiry", "no state" or 
 
 ## What is observable at runtime, not only in the types
 
-**JSON is unchanged, except for `rawParams`.** `JSON.stringify` leaves out a key whose value is `undefined`, so the bytes the Redis stores write are what they were, and records written before these changes read back as they did. The exception is `FederationTokens.rawParams`, covered below.
+**JSON is unchanged, except for `rawParams`.** `JSON.stringify` leaves out a key whose value is `undefined`, so the bytes the Redis stores write are what they were. A record written before these changes reads back with the same values, though not always the same keys: the key-presence change below applies to it too. The exception is `FederationTokens.rawParams`, covered below.
 
 **Key presence is not unchanged.** Anything that looks at keys rather than values can see a difference:
 
