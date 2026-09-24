@@ -184,7 +184,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 `userRepository` か `assertionVerifier` の無い状態で jwt-bearer を有効にすると boot が失敗する — [jwt-bearer](#jwt-bearer-信頼する発行者-525) を参照。
 
-**トークンの有効期間はグラントの構築時に読む。** ここのすべてのグラントは `oauth.accessToken` を core の `resolveAccessTokenLifetime` で、`authorization_code` と `refresh_token` は `oauth.refreshToken.expiresIn` を `resolveRefreshTokenLifetime` で、ファクトリーの中で一度だけ読む。それらのリゾルバーが拒否する config — スキーマが同じ値を起動時に拒否するので、手組みのものでしかあり得ない — ではファクトリーがキーを名指しした `RangeError` を投げ、グラントは登録されない。リクエストがそれに出会うことはない: 応答を発行できない config のために、認可コードも ID-JAG の `jti` もリフレッシュトークンも消費されない。
+**トークンの有効期間はグラントの構築時に読む。** ここのすべてのグラントは `oauth.accessToken` を core の `resolveAccessTokenLifetime` で、`authorization_code` と `refresh_token` は `oauth.refreshToken.expiresIn` を `resolveRefreshTokenLifetime` で、ファクトリーの中で一度だけ読む。それらのリゾルバーが拒否する config — スキーマが同じ値を起動時に拒否するので、手組みのものでしかあり得ない — ではファクトリーがキーを名指しした `RangeError` を投げ、グラントは登録されない。リクエストがそれに出会うことはない: 応答を発行できない config のために、認可コードも ID-JAG の `jti` もリフレッシュトークンも消費されない。一度だけ読むことの裏返しとして、グラントは構築時の有効期間で発行するので、起動後に config オブジェクトの `oauth.accessToken.*` や `oauth.refreshToken.expiresIn` を変えても、グラントを作り直すまで効果は無い — 他の設定変更と同じく再起動する。
 
 ### `authorization_code`: セッション、`sid`、`family_id` と id_token
 

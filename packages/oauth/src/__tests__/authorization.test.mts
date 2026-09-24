@@ -181,6 +181,47 @@ describe("createAuthorizationGrant — the lifetimes it mints with", () => {
 	}
 });
 
+describe("createAuthorizationGrant — lifetimes are fixed when it is built", () => {
+	it("mints the lifetimes it was built with, whatever the configuration object says afterwards", async () => {
+		// Read once, in the factory: changing `oauth.*.expiresIn` on the object
+		// after boot does nothing until the grant is built again. The README
+		// says so; this pins it.
+		const config = {
+			oauth: {
+				...mockConfig.oauth,
+				accessToken: { expiresIn: 600 },
+				refreshToken: { expiresIn: 7200 },
+			},
+		} as unknown as {
+			oauth: { accessToken: { expiresIn: number }; refreshToken: { expiresIn: number } };
+		};
+		const handler = createAuthorizationGrant({
+			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
+			config: config as unknown as GrantDependencies["config"],
+		});
+		config.oauth.accessToken.expiresIn = 60;
+		config.oauth.refreshToken.expiresIn = 120;
+
+		const { result } = await handler.handle({
+			body: {
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_verifier: CODE_VERIFIER,
+			},
+			session: { user: { id: "u1" } },
+			issuer: "localhost",
+			metadata: {},
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		});
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${result.status}`);
+		const at = decodeJwt(result.tokens.access_token);
+		const rt = decodeJwt(result.tokens.refresh_token as string);
+		expect((at.exp as number) - (at.iat as number)).toBe(600);
+		expect((rt.exp as number) - (rt.iat as number)).toBe(7200);
+	});
+});
+
 describe("createAuthorizationGrant", () => {
 	describe("handle", () => {
 		it("returns 400 when code is missing", async () => {
