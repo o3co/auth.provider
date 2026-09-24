@@ -75,9 +75,11 @@ the slot mandatory in every mode (`packages/dpop/README.md` "Operator
 requirements"). A store wired under `replay-store = "memory"` is used as wired
 and is not refused, and DPoP left disabled builds no store. Because the
 refusal comes from the module's factory (stage `applyContributions`), it
-follows the stage-1 guard: under `multi` with other offenders wired, those are
-refused first, and the DPoP refusal appears on the next boot once they are
-fixed — as the #474 rate-limit refusals do.
+follows the stage-1 guard: under `multi` with offenders from the table above
+wired, those are refused first, and the DPoP refusal appears on the next boot
+once they are fixed. The #474 rate-limit refusals come from factories in the
+same stage, so which of them and DPoP's is reported first depends on module
+order.
 
 Three things the guard cannot do:
 

@@ -36,11 +36,14 @@
  *                          replay-store warning; core's `consoleLogger` when
  *                          absent, so neither is dropped.
  *   - `dpopReplayStore`  — consumer-wired shared (Redis) store for production.
- *                          When absent, falls back to a per-process store, which
- *                          forks per replica: boot is refused under
+ *                          When absent under `replay-store = "redis"`, boot is
+ *                          refused in every mode. When absent under `"memory"`
+ *                          (the default), falls back to a per-process store,
+ *                          which forks per replica: boot is refused under
  *                          `deployment.mode = "multi"`, warns
  *                          (`dpop_replay_store_not_shared`) when the mode is
- *                          unset, and is silent under `"single"`.
+ *                          unset, and is silent under `"single"`. When wired,
+ *                          it is used whatever `replay-store` says.
  *
  * The `dpopReplayStore` optional slot is declared here via ComponentMap
  * augmentation so consumers (e.g. `@o3co/auth-provider-redis`) can provide
@@ -71,10 +74,12 @@ import { createDPoPMechanism, type DPoPMechanismOptions } from "./verifier.mjs";
 // ---------------------------------------------------------------------------
 
 /**
- * Optional ComponentMap slot for the DPoP replay store. When absent,
- * `dpopModule` falls back to the in-memory adapter, which one process alone
- * can use correctly: under `deployment.mode = "multi"` that fallback refuses
- * to boot. Production deployments wire the Redis-backed implementation via:
+ * Optional ComponentMap slot for the DPoP replay store. When absent under
+ * `replay-store = "memory"` (the default), `dpopModule` falls back to the
+ * in-memory adapter, which one process alone can use correctly, and under
+ * `deployment.mode = "multi"` boot is refused; under `"redis"` an absent slot
+ * is refused in every mode. Production deployments wire the Redis-backed
+ * implementation via:
  *
  * ```ts
  * import { createRedisDPoPReplayStore } from "@o3co/auth-provider-redis/dpop";
@@ -92,7 +97,7 @@ import { createDPoPMechanism, type DPoPMechanismOptions } from "./verifier.mjs";
  */
 declare module "@o3co/auth-provider-core" {
 	interface ComponentMap {
-		/** Optional DPoP replay store. Defaults to in-memory when absent. */
+		/** Optional DPoP replay store. In-memory when absent under `replay-store = "memory"`. */
 		readonly dpopReplayStore?: DPoPReplayStore;
 	}
 }
@@ -124,7 +129,11 @@ export const dpopConfigSchema = z.object({
 				"iat-window-seconds": z.number().int().positive().default(60),
 				/** JOSE algorithm allowlist. Default: ES256, ES384, EdDSA, RS256. */
 				"alg-whitelist": z.array(z.string()).default(["ES256", "ES384", "EdDSA", "RS256"]),
-				/** Replay store backend selector. "memory" is per-process: one replica only. */
+				/**
+				 * What an empty `dpopReplayStore` slot means. "redis": boot is refused.
+				 * "memory": a per-process store, correct for one replica only. A wired
+				 * slot is used whichever this says.
+				 */
 				"replay-store": z.enum(["memory", "redis"]).default("memory"),
 				/** TTL for replay entries in seconds. Default: 300. */
 				"replay-store-ttl-seconds": z.number().int().positive().default(300),
