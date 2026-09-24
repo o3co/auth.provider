@@ -50,6 +50,7 @@ import {
 } from "../federations/transaction.mjs";
 import { readCookie } from "../internal/cookies.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
+import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 
 declare module "express-session" {
 	interface SessionData {
@@ -539,11 +540,9 @@ export const createRouter = (
 		}
 		const redirect = policy.resolveCallbackRedirect({ redirectTo });
 		if (!redirect.ok) {
-			// A policy's refusal, in its words: core's envelope holds the code and
-			// the text to RFC 6749's characters.
-			return res
-				.status(redirect.status)
-				.json(errorEnvelope(redirect.error, redirect.errorDescription));
+			// A policy's refusal, in its words, held to RFC 6749's characters, and
+			// a client error kept one (`refusalEnvelope`).
+			return res.status(redirect.status).json(refusalEnvelope(redirect, logger));
 		}
 		return res.redirect(redirect.value);
 	};
@@ -1041,9 +1040,7 @@ export const createRouter = (
 			}
 			const redirectResult = callbackPolicy.resolveCallbackRedirect({ redirectTo });
 			if (!redirectResult.ok) {
-				return res
-					.status(redirectResult.status)
-					.json(errorEnvelope(redirectResult.error, redirectResult.errorDescription));
+				return res.status(redirectResult.status).json(refusalEnvelope(redirectResult, logger));
 			}
 
 			return res.redirect(redirectResult.value);
@@ -1198,9 +1195,7 @@ export const createRouter = (
 				}
 				const validation = policy.validateRedirect(redirect_to);
 				if (!validation.ok) {
-					return res
-						.status(validation.status)
-						.json(errorEnvelope(validation.error, validation.errorDescription));
+					return res.status(validation.status).json(refusalEnvelope(validation, logger));
 				}
 				redirectTo = redirect_to;
 			}
