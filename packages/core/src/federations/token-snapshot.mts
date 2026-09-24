@@ -72,9 +72,11 @@ const nonEmpty = (value: string | undefined): value is string =>
  *   `POST /oauth/federation/:name/token` already stores for a refresh that
  *   states nothing.
  * - **Scope.** Present exactly when the response carried one, an empty one
- *   included: the session route reads an absent scope as "as requested" (RFC
- *   6749 §3.3), so an answer that named nothing must not flatten into
- *   silence (#647).
+ *   included, and `""` for one that is not a string: the session route reads
+ *   an absent scope as "as requested" (RFC 6749 §3.3), so an answer that
+ *   named nothing usable must not flatten into silence (#647). The bundled
+ *   adapters' library refuses a non-string scope first; this holds for any
+ *   other caller.
  * - **Refresh token and id_token** only when they are non-empty strings; an
  *   empty one is not a credential.
  * - **Token type** as the library reported it, which is what
@@ -92,7 +94,11 @@ export function federationTokenSnapshot(
 		...(nonEmpty(response.id_token) ? { idToken: response.id_token } : {}),
 		expiresAt: expiresIn === null ? null : new Date(receivedAt + expiresIn * 1000),
 		expiresIn,
-		...(typeof response.scope === "string" ? { scope: response.scope } : {}),
+		// Absent only when the answer named none. One present but not a string
+		// is an answer that names nothing usable — "" — never silence.
+		...(response.scope === undefined
+			? {}
+			: { scope: typeof response.scope === "string" ? response.scope : "" }),
 		tokenType: response.token_type,
 	};
 }
