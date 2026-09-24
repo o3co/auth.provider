@@ -42,7 +42,7 @@ Each is installed explicitly: none of them registers another.
 ## Install
 
 ```sh
-pnpm add @o3co/auth-provider-oauth @o3co/auth-provider-core express express-session
+npm install @o3co/auth-provider-oauth @o3co/auth-provider-core express express-session
 ```
 
 Peer dependencies: `@o3co/auth-provider-core`, `express@^5.0.0` and `express-session@^1.17.0`. Core is a peer so that a composition holds one copy of it: the one your composition root imports `createApp` from, which every other package's `declare module` augmentation of core extends. express-session is a peer because the router reads and augments the browser session (`/authorize`, the `session` grant, logout); a composition that serves browser flows mounts it through `@o3co/auth-provider-session`'s `sessionStoreModuleFor(config)`, as below. The package depends on `accepts`, `jose` and `zod`.

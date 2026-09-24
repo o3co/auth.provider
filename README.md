@@ -1,6 +1,6 @@
 # auth.provider
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 [![CI](https://github.com/o3co/auth.provider/actions/workflows/ci.yml/badge.svg)](https://github.com/o3co/auth.provider/actions/workflows/ci.yml)
 [![npm](https://img.shields.io/npm/v/@o3co/auth-provider-core)](https://www.npmjs.com/package/@o3co/auth-provider-core)
@@ -95,6 +95,9 @@ and [create-app](create-app/README.md) says what the scaffolder generates.
 ## Architecture
 
 Every package under `packages/` depends on `core`, and `core` on none of them.
+A package names each sibling it depends on as a peer dependency, never as a
+dependency of its own, so a deployment installs one copy of each
+([release runbook](docs/release-runbook.md#pnpm-version-rewrites-only-version)).
 The dependency direction:
 
 ```text
@@ -105,7 +108,7 @@ core                          contracts, module system, config, tokens, keys
 ├── session                   /session/*
 │   └── federation-*          one package per upstream identity provider
 ├── dpop · mtls · webauthn · oauth-token-exchange
-├── redis                     (dpop is an optional peer)
+├── redis                     (ioredis is an optional peer)
 └── foundation
 templates/standalone          composes the packages above; create-app copies it
 ```

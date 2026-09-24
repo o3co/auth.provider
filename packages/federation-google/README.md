@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-google
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 Google federation provider for `auth.provider`: sign-in with a Google account
 through Google's OpenID Connect endpoints, with token refresh, upstream logout
@@ -51,7 +51,7 @@ core's toolkit, used by both, so little duplication is left to remove.
 ## Install
 
 ```sh
-npm install @o3co/auth-provider-federation-google
+npm install @o3co/auth-provider-federation-google @o3co/auth-provider-core @o3co/auth-provider-session
 ```
 
 Peer dependencies: `@o3co/auth-provider-core` and

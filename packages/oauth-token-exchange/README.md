@@ -28,10 +28,14 @@ The resolver the grant reads is the one core's boot planner builds; the package 
 ## Install
 
 ```bash
-pnpm add @o3co/auth-provider-oauth-token-exchange
+npm install @o3co/auth-provider-oauth-token-exchange @o3co/auth-provider-core @o3co/auth-provider-oauth express express-session
 ```
 
-Peer dependency: `@o3co/auth-provider-core`.
+Peer dependency: `@o3co/auth-provider-core`. The package depends on `zod`.
+`@o3co/auth-provider-oauth` is not a dependency of either kind — the package
+does not import it — but its `POST /oauth/token` is what serves the grant, so
+the composition below installs it, with its own peers `express` and
+`express-session`.
 
 ## Register the grant
 
