@@ -370,6 +370,21 @@ describe("loggableError — what a log line may carry of an error", () => {
 			const revoked = Object.assign(new Error("outer"), { errors: revocable.proxy });
 			expect(shape(revoked)).toEqual({ name: "Error", detail: "outer" });
 		});
+
+		it.each([
+			["a string", "1"],
+			["a fraction", 1.5],
+			["a negative count", -1],
+			["NaN", Number.NaN],
+		])("keeps no members of an `errors` array whose `length` reads as %s", (_label, length) => {
+			// Array.isArray says yes to a Proxy over an array, whose `length`
+			// can then answer anything; only a count is one.
+			const lying = new Proxy([new Error("member")], {
+				get: (target, key) => (key === "length" ? length : Reflect.get(target, key)),
+			});
+			const outer = Object.assign(new Error("outer"), { errors: lying });
+			expect(shape(outer)).toEqual({ name: "Error", detail: "outer" });
+		});
 	});
 
 	describe("a budget for one line", () => {
@@ -559,12 +574,32 @@ describe("loggableError — what a log line may carry of an error", () => {
 			]);
 		});
 
-		it("never throws on an error whose own keys cannot be listed", () => {
+		it("never throws on an error whose own keys cannot be listed, and keeps what it can read", () => {
+			// A Proxy over an Error whose own-key traps throw: `reason`'s
+			// own-ness and the `<word>Status` fields' listing both ask them.
+			// Where the runtime has Error.isError (Node 24+) a Proxy is not an
+			// Error and projects as a NonError; on Node 22, the engines floor,
+			// the fallback's `instanceof` counts it, and the projection reaches
+			// those questions.
 			const trap = () => {
 				throw new Error("trap");
 			};
-			const hostile = new Proxy(new Error("m"), { ownKeys: trap, getOwnPropertyDescriptor: trap });
-			expect(() => loggableError(hostile)).not.toThrow();
+			const hostile = () =>
+				new Proxy(Object.assign(new Error("m"), { reason: "unreachable", storeStatus: 503 }), {
+					ownKeys: trap,
+					getOwnPropertyDescriptor: trap,
+				});
+			expect(() => loggableError(hostile())).not.toThrow();
+			const brand = Object.getOwnPropertyDescriptor(Error, "isError");
+			delete (Error as { isError?: unknown }).isError;
+			try {
+				const projected = loggableError(hostile());
+				expect(projected).toMatchObject({ name: "Error", detail: "m" });
+				expect(projected).not.toHaveProperty("reason");
+				expect(projected).not.toHaveProperty("storeStatus");
+			} finally {
+				if (brand) Object.defineProperty(Error, "isError", brand);
+			}
 		});
 	});
 
