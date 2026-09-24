@@ -1436,7 +1436,6 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 					"consent_required",
 					"account_selection_required",
 				] as const;
-				const later = at(DAY + MIN);
 				const incoming: Array<Partial<FederationGrantRefreshFailureInput>> = [
 					{ kind: "unavailable" },
 					{ kind: "rate_limited", retryAfterSeconds: 30 },
@@ -1446,6 +1445,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 
 				for (const code of INTERACTION) {
 					it(`does not replace ${code} with another failure, later or not, and bumps nothing`, async () => {
+						const later = at(DAY + MIN);
 						const grant = await activated();
 						const marked = await note(grant.version, { kind: "rejected", upstreamCode: code });
 						expect(marked).toMatchObject({
@@ -1476,6 +1476,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				}
 
 				it("is a refusal and nothing else: a stamp of another kind carrying the same string is replaced like any", async () => {
+					const later = at(DAY + MIN);
 					const grant = await activated();
 					await note(grant.version, { kind: "unavailable", upstreamCode: "consent_required" });
 					expect(
@@ -1491,6 +1492,7 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 				});
 
 				it("is cleared by what clears any stamp: a credential replacement, the destructive transition", async () => {
+					const later = at(DAY + MIN);
 					const grant = await activated();
 					await note(grant.version, { kind: "rejected", upstreamCode: "consent_required" });
 					const replaced = await store.replaceCredentials({
