@@ -15,8 +15,10 @@
  */
 
 /**
- * A `SessionRPRegistry` cannot hand back an RP that has lost how to reach it
- * at logout.
+ * A `SessionRPRegistry`'s copy of an RP cannot leave out how to reach it at
+ * logout and still compile — for a copy built as an object literal of the
+ * record type; not for one behind a cast or one that names a field with the
+ * wrong value.
  *
  * A registry copies the record field by field — both bundled ones do — and a
  * field it forgets is dropped without a sound. For `RegisteredRP` that is the

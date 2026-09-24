@@ -15,7 +15,9 @@
  */
 
 /**
- * An intent store cannot hand back an intent that has lost a field (#626).
+ * An intent store's copy of an intent cannot leave a field out and still
+ * compile (#626) — for a copy built as an object literal of the record type;
+ * not for one behind a cast or one that names a field with the wrong value.
  *
  * The intent is what every later step of an acquisition is judged against
  * (D6), and both bundled stores copy it field by field — the memory one on
@@ -26,8 +28,9 @@
  *   exchange, without the RFC 8707 audience the connection narrows it to, and
  *   the grant is activated without it.
  * - `upstreamSubject` gone: the callback no longer checks that the upstream
- *   account is the one the client said to expect, and links whichever one the
- *   user signed in with.
+ *   account is the one the client said to expect. What it still checks — the
+ *   issuer, a renewal's existing account, and the identity lookup where one
+ *   is configured — stays; this one check is what is lost.
  *
  * So every field is a REQUIRED key, holding `undefined` where there is none; a
  * copy that forgets one fails to compile.

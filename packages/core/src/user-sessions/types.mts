@@ -75,9 +75,10 @@ export interface UserSession {
 	 * nothing (a session written before #481).
 	 *
 	 * A required key (#626): both stores copy the session field by field, and
-	 * a copy that forgot `amr` would hide the step-up the user performed —
-	 * every `acr_values` request asking them to sign in again — without an
-	 * error. On the input, it makes a login path say what it knows.
+	 * a copy that forgot `amr` would hide the step-up the user performed
+	 * without an error — `/authorize` answering a request whose `acr_values`
+	 * needs it `unmet_authentication_requirements`, and the id_token carrying
+	 * no `amr`. On the input, it makes a login path say what it knows.
 	 */
 	readonly amr: readonly string[] | undefined;
 }
@@ -104,9 +105,10 @@ export interface CreateUserSessionInput {
 	 * nothing of how the user authenticated.
 	 *
 	 * A required key (#626): both stores copy the session field by field, and
-	 * a copy that forgot `amr` would hide the step-up the user performed —
-	 * every `acr_values` request asking them to sign in again — without an
-	 * error. On the input, it makes a login path say what it knows.
+	 * a copy that forgot `amr` would hide the step-up the user performed
+	 * without an error — `/authorize` answering a request whose `acr_values`
+	 * needs it `unmet_authentication_requirements`, and the id_token carrying
+	 * no `amr`. On the input, it makes a login path say what it knows.
 	 */
 	readonly amr: readonly string[] | undefined;
 }

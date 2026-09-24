@@ -791,8 +791,10 @@ export interface ConsentRecordFields {
 	readonly grantedAt: string;
 	/**
 	 * Epoch milliseconds; `undefined` when the hash holds none — until revoked.
-	 * A required key (#626): a client that forgot to pass the field on would
-	 * turn every consent it read into one until revoked.
+	 * A required key (#626): a client whose `find` forgot to pass the field on
+	 * would have the adapter read a consent meant to lapse as one until revoked
+	 * — unless, as `makeIoredisClients`' script does, `find` already refuses a
+	 * record past its expiry.
 	 */
 	readonly expiresAt: string | undefined;
 }
@@ -1063,9 +1065,10 @@ export interface NoteFederationGrantRefreshFailureInput {
 	readonly rowMs: number;
 	/**
 	 * `undefined` when the upstream gave no `Retry-After`. A required key (#626),
-	 * as `upstreamCode` is: a store that forgot to pass one would stamp a
-	 * backoff shorter than the upstream asked for, or lose the code that says
-	 * the user has to come back.
+	 * as `upstreamCode` is: a store that forgot to pass one would leave a
+	 * `rate_limited` stamp with the default backoff where the upstream's
+	 * `Retry-After` was longer (both held to the ceiling), or lose the code
+	 * that says the user has to come back.
 	 *
 	 * Both keys are always present now, so a client tells "none" by the value
 	 * (`=== undefined`), as `makeIoredisClients` does — not by whether the key

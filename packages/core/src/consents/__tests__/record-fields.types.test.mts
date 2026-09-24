@@ -15,14 +15,18 @@
  */
 
 /**
- * A consent store cannot hand back a record that has lost a field (#626).
+ * A consent store's copy of a record cannot leave a field out and still
+ * compile (#626) — for a copy built as an object literal of the record type;
+ * not for one behind a cast or one that names a field with the wrong value.
  *
- * Both records are copied field by field wherever a store reads them back,
- * and a field a copy forgets is dropped without a sound:
+ * The Redis store copies both records field by field when it reads them back
+ * (the memory store keeps and returns the record it was given), and a field
+ * such a copy forgets is dropped without a sound:
  *
- * - `ConsentRecord.expiresAt` gone reads as "until revoked", so a consent
- *   that was meant to lapse never does — the one field whose absence WIDENS
- *   what the record grants.
+ * - `ConsentRecord.expiresAt` gone reads as "until revoked" — the one field
+ *   whose absence WIDENS what the record grants. Dropped on the way in, a
+ *   consent meant to lapse is written without an expiry; on the way out, it
+ *   is treated as one by a store that judges expiry from what it returns.
  * - `PendingConsentRecord.state` gone takes `state` off the denial redirect,
  *   and the client's CSRF check refuses the user's own "no" (RFC 6749
  *   §4.1.2.1: `state` is REQUIRED there when the request carried one).

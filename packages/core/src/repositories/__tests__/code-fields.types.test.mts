@@ -15,14 +15,17 @@
  */
 
 /**
- * A code repository cannot hand back a code that has lost a field (#626).
+ * A code repository's copy of a code cannot leave a field out and still
+ * compile (#626) — for a copy built as an object literal of the record type;
+ * not for one behind a cast or one that names a field with the wrong value.
  *
  * `/authorize` decides everything a code carries, and `/token` reads it back
  * without deciding again — evaluate-once-at-authorize is the contract. Both
  * bundled repositories copy the record field by field, and a field a copy
  * forgets is dropped without a sound: `nonce` gone mints an id_token the RP
  * cannot bind to its request, `acr` gone mints one that no longer attests
- * the step-up the user performed, `sid` gone leaves the RP nothing to match
+ * the step-up the user performed, `sid` gone makes `/token` refuse the code
+ * where a session store is wired and otherwise leaves the RP nothing to match
  * a logout against, `grantedAudience` gone falls back to the client as the
  * audience. v0.5.1 shipped exactly this bug on the Redis path (IH-2 / TS-1).
  *

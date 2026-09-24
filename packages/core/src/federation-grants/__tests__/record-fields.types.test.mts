@@ -15,21 +15,30 @@
  */
 
 /**
- * A grant store cannot hand back a grant that has lost a field (#626).
+ * A grant store's copy of a grant cannot leave a field out and still compile
+ * (#626) — for a copy built as an object literal of the record type; not for
+ * one behind a cast, one that names a field with the wrong value, or a write
+ * that spreads the old record and forgets to clear one.
  *
- * Both bundled stores rebuild the record field by field — the memory one in
- * each write, the Redis one from its HASH and the canonical authorization —
- * and a field a copy forgot was dropped with no error. Three of them widen
- * what the grant does when lost:
+ * Both bundled stores copy these fields — the memory one field by field for
+ * the authorization, the credentials and the marker on each write, and by a
+ * spread that names what it clears for the rest; the Redis one from its HASH
+ * and the canonical authorization — and a field a copy forgot was dropped
+ * with no error. Three of them widen what the grant does when lost:
  *
  * - `resource` gone: the upstream is asked for a token without the RFC 8707
- *   audience the connection narrows it to.
+ *   audience the connection narrows it to — whether it then issues a wider
+ *   token, applies its own default or refuses is the upstream's call.
  * - `ineligible` gone: a grant whose upstream keeps issuing tokens that cannot
- *   be disclosed takes the lock and rotates the refresh token on every
- *   request again (D5).
- * - `refreshFailure` gone — or its `retryAfterSeconds` — a failing upstream is
- *   asked again at once instead of after its backoff (D12), and a stamp that
- *   says the user has to come back stops saying it (#616).
+ *   be disclosed is refreshed whenever a refresh is otherwise due, instead of
+ *   once the marker's interval has passed — a lock and a refresh-token
+ *   rotation on each such request (D5).
+ * - `refreshFailure` gone: a failing upstream is asked again whenever a
+ *   refresh is otherwise due, instead of after its backoff (D12), and a stamp
+ *   that says the user has to come back stops saying it (#616). Its
+ *   `retryAfterSeconds` alone gone, on a `rate_limited` stamp: the default
+ *   backoff applies instead of the longer of it and the upstream's
+ *   `Retry-After`, both held to the ceiling.
  *
  * So every field of the authorization, the usage, the failure stamp and the
  * credentials is a REQUIRED key, holding `undefined` where there is none; a

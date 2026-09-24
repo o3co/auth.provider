@@ -15,13 +15,16 @@
  */
 
 /**
- * A session store cannot hand back a session that has lost its `amr` (#626).
+ * A session store's copy of a session cannot leave `amr` out and still
+ * compile (#626) — for a copy built as an object literal of the record type;
+ * not for one behind a cast or one that names it with the wrong value.
  *
  * Both bundled stores copy the session field by field on the way in and on
  * the way out, and `amr` is the one field a copy could forget without an
- * error. Gone, `/authorize` can no longer see the step-up the user performed
- * — every `acr_values` request asks them to sign in again — and the id_token
- * and the refresh chain carry no `amr`.
+ * error. Gone, `/authorize` can no longer see the step-up the user performed:
+ * a request whose `acr_values` needs it is answered
+ * `unmet_authentication_requirements` — what the RP does next is its own
+ * call — and the id_token and the refresh chain carry no `amr`.
  *
  * So `amr` is a REQUIRED key on the session and on what creates one, holding
  * `undefined` where the login path recorded nothing: a store's copy that
