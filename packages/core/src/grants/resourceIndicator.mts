@@ -15,9 +15,19 @@
  */
 
 /**
- * File-internal helper for extracting the RFC 8707 `resource` parameter from
- * a request body. Internal to grants/ — NOT exported from the package barrel.
- * The leading underscore signals file-internal status to sibling modules.
+ * RFC 8707 resource indicators — the shared reading of the `resource` parameter,
+ * the audience a request derives from it, and the check that an issued
+ * audience represents it.
+ *
+ * Read by the oauth package's `client_credentials`, `refresh_token`,
+ * `authorization_code` and jwt-bearer grants and `/authorize`, and by the
+ * WebAuthn grant, which forwards `resource` to `grantPolicy`. Those packages
+ * do not depend on one another, so the rule lives in core rather than in a
+ * copy per package. The home is mapped in `docs/design-vocabulary.md` and
+ * guarded by `designVocabulary.drift.test.mts`; the one grant that still reads
+ * `resource` its own way, token exchange, is named there.
+ *
+ * Pure functions over a parsed parameter bag: no HTTP, no Express.
  *
  * No comma-splitting is performed: RFC 8707 §5.4 treats each `resource`
  * value as a URI and URIs may legally contain commas, so splitting would
@@ -25,12 +35,14 @@
  */
 
 /**
- * Extracts the `resource` parameter from a token request body per RFC 8707.
+ * Extracts the `resource` parameter per RFC 8707 from a request's parameters —
+ * a token request body, or the `/authorize` query or form.
  *
  * Returns `null` when the parameter is absent, null, or an empty string.
- * A single string is normalised to a one-element array. An array is returned
- * as-is only when every element is a string; otherwise returns `null`
- * (defensive against malformed / injected input).
+ * A single string is normalised to a one-element array. An array whose every
+ * element is a string is returned without its empty entries, and `null` when
+ * none is left; any other array returns `null` (defensive against malformed /
+ * injected input).
  */
 export function extractResourceParam(body: Record<string, unknown>): readonly string[] | null {
 	const v = body.resource;
@@ -84,9 +96,9 @@ export function deriveAudienceFromResources(
  * RFC 8707 §2 requires the access token's audience to be the resource
  * indicator(s) the client asked for; when the AS cannot bind the token to
  * them, the response is `invalid_target`. This helper is the shared decision
- * for that check across `client_credentials`, `refresh_token`, and
- * `authorization_code`, generalising the enforcement the token-exchange grant
- * has carried since v0.5.3 (IH-8).
+ * for that check across `client_credentials`, `refresh_token`,
+ * `authorization_code`, jwt-bearer and `/authorize`, generalising the
+ * enforcement the token-exchange grant has carried since v0.5.3 (IH-8).
  *
  * `generateToken` emits a SINGLE `aud`, so "represented" is string equality
  * against that one value. Two consequences worth stating, because both look

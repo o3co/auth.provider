@@ -57,6 +57,12 @@ interface VocabularyRow {
 	readonly home: string;
 	readonly definition: RegExp;
 	/**
+	 * What the home itself must define, when that is narrower than what no
+	 * other file may: a row that refuses a concept under either of two names
+	 * still requires the home to keep the one it has.
+	 */
+	readonly homeDefinition?: RegExp;
+	/**
 	 * How many times `definition` may match inside the home itself. Absent,
 	 * the home only has to match once; set, a second definition or literal
 	 * added beside the first — in the home — fails too.
@@ -64,6 +70,11 @@ interface VocabularyRow {
 	readonly homeMatches?: number;
 }
 
+// One row per symbol, so the home has to define each of them: an
+// alternation would pass a home that kept one and lost the others. Two rows
+// still match one concept in two forms, and each pins the form the home must
+// keep: the entropy floor's two spellings (with `homeDefinition`), and the
+// WebAuthn algorithm pin's const or literal (with `homeMatches`).
 const VOCABULARY: readonly VocabularyRow[] = [
 	{
 		concept: "loopback hostname (#364)",
@@ -71,9 +82,14 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isLoopbackHostname\b/,
 	},
 	{
-		concept: "trusted-proxy address vocabulary (#292)",
+		concept: "trusted-proxy address vocabulary — one entry (#292)",
 		home: "packages/core/src/net/trusted-proxy.mts",
-		definition: /(?:function|const)\s+(?:checkTrustedProxyEntry|createTrustedProxyMatcher)\b/,
+		definition: /(?:function|const)\s+checkTrustedProxyEntry\b/,
+	},
+	{
+		concept: "trusted-proxy address vocabulary — the matcher (#292)",
+		home: "packages/core/src/net/trusted-proxy.mts",
+		definition: /(?:function|const)\s+createTrustedProxyMatcher\b/,
 	},
 	{
 		concept: "canonical request URL (#292, #356)",
@@ -101,32 +117,81 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+checkSerializedOrigin\b/,
 	},
 	{
+		concept: "serialized origin — the spelling of a list of them (#500)",
+		home: "packages/core/src/net/origin.mts",
+		definition: /(?:function|const)\s+normalizeAllowedOrigins\b/,
+	},
+	{
 		concept: "device-verification budget shape (#448)",
 		home: "packages/core/src/ratelimit/deviceVerificationSpec.mts",
 		definition: /(?:function|const)\s+isDeviceVerificationRateLimitSpec\b/,
 	},
 	{
-		concept: "authentication claims a token may carry (#481)",
+		concept: "authentication claims a token may carry — amr (#481)",
 		home: "packages/core/src/grants/authenticationClaims.mts",
-		definition: /(?:function|const)\s+(?:wellFormedAmr|wellFormedAcr)\b/,
+		definition: /(?:function|const)\s+wellFormedAmr\b/,
 	},
 	{
-		concept: "secret entropy floor (#282)",
+		concept: "authentication claims a token may carry — acr (#481)",
+		home: "packages/core/src/grants/authenticationClaims.mts",
+		definition: /(?:function|const)\s+wellFormedAcr\b/,
+	},
+	{
+		concept: "secret entropy floor — measuring a secret (#282)",
 		home: "packages/core/src/keys/secretEntropy.mts",
-		definition:
-			/(?:function|const)\s+(?:measureSecretEntropyBytes|assertSecretEntropy|describeWeakSecret|MIN_SECRET(?:_ENTROPY)?_BYTES)\b/,
+		definition: /(?:function|const)\s+measureSecretEntropyBytes\b/,
+	},
+	{
+		concept: "secret entropy floor — asserting it (#282)",
+		home: "packages/core/src/keys/secretEntropy.mts",
+		definition: /(?:function|const)\s+assertSecretEntropy\b/,
+	},
+	{
+		concept: "secret entropy floor — describing a weak secret (#282)",
+		home: "packages/core/src/keys/secretEntropy.mts",
+		definition: /(?:function|const)\s+describeWeakSecret\b/,
+	},
+	{
+		// Either spelling of the constant: the home defines the long one, and a
+		// short `MIN_SECRET_BYTES` elsewhere is the same floor restated.
+		concept: "secret entropy floor — the floor itself (#282)",
+		home: "packages/core/src/keys/secretEntropy.mts",
+		definition: /(?:function|const)\s+MIN_SECRET(?:_ENTROPY)?_BYTES\b/,
+		homeDefinition: /(?:function|const)\s+MIN_SECRET_ENTROPY_BYTES\b/,
+	},
+	{
+		concept: "remote JSON Web Key Set — the cache (#484, #525)",
+		home: "packages/core/src/jwks/remoteKeySet.mts",
+		definition: /(?:function|const)\s+createRemoteKeySetCache\b/,
 	},
 	{
 		// The call is the signature: a second `createRemoteJWKSet(` is a second
-		// memo with its own tuning and its own (or no) fetch seam.
-		concept: "remote JSON Web Key Set (#484, #525)",
+		// memo with its own tuning and its own (or no) fetch seam — in the home
+		// as anywhere else.
+		concept: "remote JSON Web Key Set — the one jose key set it builds (#484, #525)",
 		home: "packages/core/src/jwks/remoteKeySet.mts",
-		definition: /(?:function|const)\s+createRemoteKeySetCache\b|\bcreateRemoteJWKSet\s*\(/,
+		definition: /\bcreateRemoteJWKSet\s*\(/,
+		homeMatches: 1,
 	},
 	{
 		concept: "special-use address (#529)",
 		home: "packages/core/src/net/special-use.mts",
 		definition: /(?:function|const)\s+isSpecialUseAddress\b/,
+	},
+	{
+		concept: "RFC 8707 resource indicator — reading `resource` (#172, #173)",
+		home: "packages/core/src/grants/resourceIndicator.mts",
+		definition: /(?:function|const)\s+extractResourceParam\b/,
+	},
+	{
+		concept: "RFC 8707 resource indicator — the audience derived from it (#173)",
+		home: "packages/core/src/grants/resourceIndicator.mts",
+		definition: /(?:function|const)\s+deriveAudienceFromResources\b/,
+	},
+	{
+		concept: "RFC 8707 resource indicator — the invalid_target check (#173)",
+		home: "packages/core/src/grants/resourceIndicator.mts",
+		definition: /(?:function|const)\s+unrepresentedResources\b/,
 	},
 	{
 		concept: "WebAuthn algorithm pin (#516)",
@@ -137,10 +202,19 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		homeMatches: 1,
 	},
 	{
-		concept: "fail-closed grant-policy evaluation and its bounds (#441, #520)",
+		concept: "fail-closed grant-policy evaluation (#441)",
 		home: "packages/core/src/grants/grantPolicy.mts",
-		definition:
-			/(?:function|const)\s+(?:evaluateGrantPolicy|boundPolicyAudience|policyOutOfBounds)\b/,
+		definition: /(?:function|const)\s+evaluateGrantPolicy\b/,
+	},
+	{
+		concept: "fail-closed grant-policy evaluation — the audience bound (#520)",
+		home: "packages/core/src/grants/grantPolicy.mts",
+		definition: /(?:function|const)\s+boundPolicyAudience\b/,
+	},
+	{
+		concept: "fail-closed grant-policy evaluation — the out-of-bounds answer (#441, #520)",
+		home: "packages/core/src/grants/grantPolicy.mts",
+		definition: /(?:function|const)\s+policyOutOfBounds\b/,
 	},
 ];
 
@@ -239,7 +313,7 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 			const home = join(repoRoot, row.home);
 			const homeSource = readFileSync(home, "utf8");
 			expect(
-				row.definition.test(homeSource),
+				(row.homeDefinition ?? row.definition).test(homeSource),
 				`${row.home} must define the concept it is mapped as the home of`,
 			).toBe(true);
 			if (row.homeMatches !== undefined) {

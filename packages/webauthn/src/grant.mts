@@ -87,14 +87,13 @@
  *
  * RFC 8707 (Wave 1 §5.3):
  *   - resource forwarded to grantPolicy when resourceIndicator.enabled === true
+ *   - read by core's `extractResourceParam`, the reading the oauth grants and
+ *     /authorize use: each value kept whole, empty entries of a repeated
+ *     parameter dropped, and an all-empty parameter read as none requested.
  *   - No audience is derived from `resource` here. #173 landed that for
  *     client_credentials, refresh_token and /authorize and did not cover this
  *     grant; a policy that wants to honour `resource` narrows within
  *     `allowedAudiences`.
- *
- * extractResourceParam: duplicated from packages/oauth/src/grants/_resourceIndicator.mts
- * because the webauthn package does not depend on @o3co/auth-provider-oauth and that
- * helper is explicitly NOT barrel-exported. Consolidation candidate for Wave 2.
  *
  * Cross-refs: Plan T30 / spec §2.4 / PR #172 W1P3 patterns / Codex Round 3 P1
  */
@@ -103,8 +102,8 @@ import { randomUUID } from "node:crypto";
 
 import {
 	boundPolicyAudience,
-	type ChallengeCeremony,
 	evaluateGrantPolicy,
+	extractResourceParam,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -112,13 +111,12 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isGrantTypeAllowed,
+	type ProviderDeps,
 	resolveAccessTokenLifetime,
 	type Token,
-	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { decodeJwtPayload } from "./internal/_jwtPayload.mjs";
-import { extractResourceParam } from "./internal/_resourceIndicator.mjs";
 import { verifyWebAuthnAssertion } from "./internal/verification.mjs";
 
 // ---------------------------------------------------------------------------
@@ -138,18 +136,31 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 // ---------------------------------------------------------------------------
 
 /**
- * Dependencies for the WebAuthn grant handler.
+ * What the WebAuthn grant reads (#626 P2), declared the way the oauth grants
+ * declare theirs: the shared grant slots it uses — `config` and `keyStore` to
+ * mint, `grantPolicy` to bound scope, `refreshTokenFamilyRotation` to open a
+ * refresh-token family — plus the credential store and the challenge ceremony
+ * only this grant reads, and the RP fields of `webauthnConfig` the assertion
+ * check needs.
  *
- * `webauthnCredentialStore` and `challengeCeremony` are required for the
- * WebAuthn assertion flow; `webauthnConfig` carries the RP config (rpId,
- * allowed origins) needed for verifyWebAuthnAssertion.
+ * `webauthnModule` hands its deps over whole and checks, with `satisfies`,
+ * that every key here is a slot it declares. A slot read here without the
+ * module declaring it — optional or not — is therefore a compile error at
+ * that call rather than an `undefined` at runtime, and a slot the module
+ * declares cannot be dropped on the way. That check stops at slots: that the
+ * `webauthnConfig` fields read here are all fields of `WebAuthnConfig` is
+ * pinned by `grant.types.test.mts`, which `pnpm run typecheck` compiles.
  *
- * All other slots mirror the standard GrantDependencies shape (config, keyStore,
- * optional grantPolicy).
+ * `grantPolicy` stays optional in this type although `webauthnModule` refuses
+ * to boot without it (H-2): a handler built directly, as the unit tests do,
+ * still runs without one.
  */
-export interface WebAuthnGrantDeps extends GrantDependencies {
-	readonly webauthnCredentialStore: WebAuthnCredentialStore;
-	readonly challengeCeremony: ChallengeCeremony;
+export interface WebAuthnGrantDeps
+	extends Pick<
+			GrantDependencies,
+			"config" | "keyStore" | "grantPolicy" | "refreshTokenFamilyRotation"
+		>,
+		ProviderDeps<"webauthnCredentialStore" | "challengeCeremony"> {
 	readonly webauthnConfig: {
 		readonly rpId: string;
 		readonly origin: readonly string[];
@@ -595,7 +606,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
  * exists to prevent rather than a variant of it.
  */
 async function registerRefreshTokenFamily(
-	rotation: NonNullable<GrantDependencies["refreshTokenFamilyRotation"]>,
+	rotation: NonNullable<WebAuthnGrantDeps["refreshTokenFamilyRotation"]>,
 	refreshTokenValue: string,
 	familyId: string,
 ): Promise<boolean> {

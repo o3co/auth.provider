@@ -17,6 +17,7 @@ import crypto from "node:crypto";
 
 import {
 	constantTimeStringEqual,
+	extractResourceParam,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -28,12 +29,12 @@ import {
 	resolveAccessTokenLifetime,
 	type Token,
 	type UserSession,
+	unrepresentedResources,
 	wellFormedAcr,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
 import { decodeJwtPayload } from "./_jwtPayload.mjs";
-import { extractResourceParam, unrepresentedResources } from "./_resourceIndicator.mjs";
 import { PKCE_METHOD_S256, pkceMethodsForClient } from "./pkce.mjs";
 
 /**

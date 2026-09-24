@@ -34,10 +34,24 @@ The package declares `@o3co/auth-provider-core` as a dependency rather than a pe
 
 ## Bootstrap
 
-Define a config-providing module and wire `webauthnModule` plus the required adapter modules:
+The WebAuthn settings live in your HOCON configuration under `webauthn`, beside everything else the composition root loads. Layer this package's [`config/reference.conf`](config/reference.conf) between your `application.conf` and core's own `reference.conf`: it carries the package's defaults and the `WEBAUTHN_*` environment variables that override them. Core's `AppConfigSchema` passes through the `webauthn` keys it names — every key `webauthnConfigSchema` reads, which `config.test.mts` pins ([#496](https://github.com/o3co/auth.provider/issues/496)) — checking little more than their types, and a small module hands that section to `webauthnConfigSchema`, which owns the rules:
+
+```hocon
+# config/application.conf — what has no default
+webauthn {
+  rpId = "example.com"
+  rpName = "Example App"
+  origin = ["https://example.com"]
+  origin = ${?WEBAUTHN_ORIGIN}   # repeated, so the variable still wins over the line above
+}
+```
+
+A key your `application.conf` sets shadows the substitution `reference.conf` makes for it; repeat the `${?VAR}` line after your value, as above, to let the environment override it again.
 
 ```ts
+import { fileURLToPath } from "node:url";
 import {
+    AppConfigSchema,
     createApp,
     defineModule,
     memoryWebAuthnCredentialStoreModule,
@@ -46,23 +60,23 @@ import {
     memoryReplaySeenSetModule,
 } from "@o3co/auth-provider-core";
 import { webauthnModule, webauthnConfigSchema } from "@o3co/auth-provider-webauthn";
+import { parseFile } from "@o3co/ts.hocon";
+import { validate } from "@o3co/ts.hocon/zod";
+
+const shipped = (specifier: string) => parseFile(fileURLToPath(import.meta.resolve(specifier)));
+
+const config = validate(
+    parseFile("config/application.conf")
+        .withFallback(shipped("@o3co/auth-provider-webauthn/reference.conf"))
+        .withFallback(shipped("@o3co/auth-provider-core/reference.conf")),
+    AppConfigSchema,
+);
 
 const webauthnBootstrap = defineModule({
     name: "my-webauthn-config",
-    requires: [] as const,
+    requires: ["config"] as const,
     provides: {
-        webauthnConfig: () => webauthnConfigSchema.parse({
-            rpId: "example.com",
-            rpName: "Example App",
-            origin: ["https://example.com"],
-            attestationPreference: "none",   // platform authenticators need no attestation chain
-            userVerification: "preferred",
-            challengeTtlMs: 120_000,         // 120s survives slow mobile networks
-            allowCredentialsForKnownUser: false,  // enumeration-resistant (#281)
-            rateLimit: {
-                authenticationOptions: { limit: 30, windowSeconds: 60 },
-            },
-        }),
+        webauthnConfig: ({ config }) => webauthnConfigSchema.parse(config.webauthn),
     },
 });
 
@@ -74,11 +88,14 @@ const app = await createApp({
         memoryChallengeStoreModule,
         defaultChallengeCeremonyModule,
         memoryReplaySeenSetModule,
+        grantPolicyModule,                     // required — see SECURITY — scope authorization
         // ... rest of your auth-provider stack (oauthAuthorizationModule, keyStore, etc.)
     ],
-    bootstrapComponents: { /* keystore, userRepository, clientRepository, ... */ },
+    bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
 ```
+
+A module that hard-codes the settings instead (`webauthnConfigSchema.parse({ rpId: …, … })`) works only if it supplies every required field, the ones `reference.conf` defaults included — the schema has no defaults of its own — and then none of the `WEBAUTHN_*` variables below reaches the schema.
 
 ## Multi-origin: one RP for the site and the Android app
 
@@ -90,9 +107,9 @@ as the client sends it.
 
 | Client | Entry | Notes |
 |---|---|---|
-| Browser | `https://example.com` | Literal origin: scheme + host + optional port. **No trailing slash** — `https://example.com/` never matches. |
+| Browser | `https://example.com` | Bare serialized origin: scheme + host + a port only when it is not the default. **No trailing slash**, path or uppercase host — such an entry would never match, so the schema refuses it at boot and names the origin it should have been. |
 | Browser, sub-domain | `https://app.example.com:8443` | Sharing one `rpId` across sub-domains means listing each origin. |
-| Browser, local dev | `http://localhost:3000` | `http:` is accepted for loopback only (`localhost`, `127.0.0.1`, `[::1]`). |
+| Browser, local dev | `http://localhost:3000` | `http:` is accepted for `localhost` only. An IP address — `127.0.0.1`, `[::1]`, any other — is refused: WebAuthn needs the origin's host to be a domain (W3C WebAuthn §5.1.3), so no browser runs a ceremony on one. |
 | Android app | `android:apk-key-hash:<base64url>` | What Credential Manager sends in place of an origin ([#497](https://github.com/o3co/auth.provider/issues/497)). |
 
 ```hocon
@@ -106,6 +123,25 @@ webauthn {
 }
 ```
 
+**From the environment**, `WEBAUTHN_ORIGIN` (which `reference.conf` substitutes
+into `origin`) carries the same list comma-separated — the spelling
+`CORS_ALLOWED_ORIGINS` uses, read by the same function in core
+(`normalizeAllowedOrigins`): each entry is trimmed, empty entries are dropped,
+and every entry meets the rules in the table above exactly as it would in the
+list. The split yields only pieces of what you wrote, each checked as a list
+entry would be, so the environment spelling cannot admit an origin the list
+would refuse. (A comma inside a host is legal URL syntax, and the environment
+spelling cannot express one: `https://a,b.example` splits into `https://a`,
+which is a valid origin, and `b.example`, which has no scheme — so the whole
+list is refused.)
+
+```sh
+WEBAUTHN_ORIGIN=https://example.com,android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI
+```
+
+An empty `WEBAUTHN_ORIGIN` leaves the relying party with no origin, which the
+schema refuses at boot.
+
 ### Being framed: `topOrigin`
 
 `origin` is where the ceremony runs. `topOrigin` is the page it runs *inside*,
@@ -118,6 +154,9 @@ webauthn {
   topOrigin = ["https://partner.example"]
 }
 ```
+
+From the environment, `WEBAUTHN_TOP_ORIGIN` is comma-separated the same way,
+and an exported-but-empty one reads as unset.
 
 Absent, a reported cross-origin authentication is refused, which is the right
 answer for a deployment that never meant to be embedded — and the refusal is
@@ -143,17 +182,20 @@ keytool -exportcert -alias <alias> -keystore <keystore> \
 ```
 
 The schema validates the shape only — the lowercase `android:apk-key-hash:`
-prefix plus a non-empty base64url body, with nothing after it. It cannot check
-that the hash is *your* app's, so an entry pasted from the wrong build is a
-ceremony that fails at runtime rather than a boot error. Standard-base64 `+`
-and `/` are refused: Credential Manager emits the URL-safe alphabet, so those
-characters are a transcription error every time.
+prefix and exactly the value the command above prints: 43 characters of
+unpadded base64url, the length of a SHA-256, with nothing after it. It refuses
+padding, a truncated value, and the hex fingerprint `keytool -list` shows (64
+characters once the colons are gone, and every one of them happens to be
+base64url). It cannot check that the hash is *your* app's, so an entry pasted
+from the wrong build is a ceremony that fails at runtime rather than a boot
+error. Standard-base64 `+` and `/` are refused: Credential Manager emits the
+URL-safe alphabet, so those characters are a transcription error every time.
 
 Serving `/.well-known/assetlinks.json` on the `rpId` domain is what lets the
 app use the RP ID; it is an Android platform requirement and outside this
 package.
 
-The package ships defaults for `attestationPreference`, `userVerification`, `challengeTtlMs`, `allowCredentialsForKnownUser`, and `rateLimit.authenticationOptions` in [`config/reference.conf`](config/reference.conf), for the composition root's HOCON `withFallback` chain; the schema itself has no defaults. Consumers MUST supply `rpId` / `rpName` / `origin` — these have no library defaults and the schema reports useful errors if missing (per ADR [`2026-04-30-config-schema-strict-defaults-from-hocon.md`](../core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md)).
+The package ships defaults for `attestationPreference`, `userVerification`, `challengeTtlMs`, `allowCredentialsForKnownUser`, and `rateLimit.authenticationOptions` in [`config/reference.conf`](config/reference.conf), for the composition root's HOCON `withFallback` chain; the schema itself has no defaults. Each of those defaults can be overridden by the environment variable `reference.conf` names beside it (`WEBAUTHN_CHALLENGE_TTL_MS`, `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`, …), and the schema takes the string such a variable delivers: a number as a number, a switch as `true` / `false` / `1` / `0` in any case and with surrounding spaces ignored (empty reads as `false`; any other value fails the parse) — the same reading core gives its own switches. Consumers MUST supply `rpId` / `rpName` / `origin` — these have no library defaults and the schema reports useful errors if missing (per ADR [`2026-04-30-config-schema-strict-defaults-from-hocon.md`](../core/docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md)).
 
 ## First-credential bootstrap
 
@@ -188,6 +230,26 @@ The webauthn grant has **no library-side `allowedScopes` ceiling**. Client crede
 `grantPolicy` is the **only scope-bounding gate** for this grant. Policy invocation is unconditional whenever `grantPolicy` is wired — it is NOT gated on `oauth.resourceIndicator.enabled` (that flag controls only whether `body.resource` is forwarded to the policy). This mirrors the `refresh_token` grant pattern.
 
 **`grantPolicy` is REQUIRED at boot.** Wiring `webauthnModule` without a `grantPolicy` slot fails fast at `createApp(...)` with a clear error. There is no silent-allow-all path. Deployments that intentionally accept unbounded scope (NOT recommended for production) must wire an explicit no-op policy returning `{ outcome: "allow" }` — making the choice visible in the composition root.
+
+**The policy is yours to write.** No package ships a `GrantPolicyHook`; the interface is exported by `@o3co/auth-provider-core` (defined in core's [`src/policy/types.mts`](../core/src/policy/types.mts)). Fill the `grantPolicy` component slot with your implementation, from a module or from `createApp`'s `bootstrapComponents`:
+
+```ts
+import { defineModule, type GrantPolicyHook } from "@o3co/auth-provider-core";
+
+const grantPolicy: GrantPolicyHook = {
+    kind: "my-policy",
+    async evaluate(request) {
+        // request.grantType, request.subject, request.requestedScope, request.resource, ...
+        return { outcome: "allow", grantedScope: scopesFor(request.subject, request.requestedScope) };
+    },
+};
+
+const grantPolicyModule = defineModule({
+    name: "my-grant-policy",
+    provides: { grantPolicy: () => grantPolicy },
+});
+// or: createApp({ modules, bootstrapComponents: { config, pathResolver, grantPolicy } })
+```
 
 ## SECURITY — refresh-token issuance
 
@@ -271,7 +333,7 @@ Implemented:
 - Primary-login passkeys
 - Registration + authentication ceremonies
 - Multi-origin support (`config.origin: string[]`), web and Android — see [Multi-origin](#multi-origin-one-rp-for-the-site-and-the-android-app)
-- RFC 8707 `resource` forwarded to `grantPolicy` when `oauth.resourceIndicator.enabled` is set
+- RFC 8707 `resource` forwarded to `grantPolicy` when `oauth.resourceIndicator.enabled` is set, read by core's `extractResourceParam` exactly as the oauth grants read it: each value whole, the empty entries of a repeated parameter dropped (`resource=&resource=https://x` reaches the policy as `["https://x"]`), and an all-empty parameter as no resource
 - Refresh-token issuance for allowed clients ([#480](https://github.com/o3co/auth.provider/issues/480))
 
 Not implemented:
@@ -285,7 +347,7 @@ Not implemented:
 - [`src/module.mts`](src/module.mts) — the assembly: the manifest, its required and optional slots, the three routes and the grant, the rate-limit guard and its replica-safety refusal.
 - [`src/grant.mts`](src/grant.mts) — the grant: assertion verification, the sign-count update, the policy call, and token minting.
 - `src/routes/` — the three ceremony handlers, one per endpoint.
-- `src/internal/` — the SimpleWebAuthn boundary (options generation and response verification, and the mapping of library failures onto this package's error codes), plus two helpers copied from `@o3co/auth-provider-oauth`'s grants rather than imported, because this package does not depend on oauth. The copies are not checked against the originals, and one differs: the `resource` extractor here keeps the empty entries of a repeated `resource` parameter (`resource=&resource=https://x` reaches `grantPolicy` as `["", "https://x"]`), where oauth's drops them.
+- `src/internal/` — the SimpleWebAuthn boundary (options generation and response verification, and the mapping of library failures onto this package's error codes), plus one helper copied from `@o3co/auth-provider-oauth`'s grants rather than imported, because this package does not depend on oauth: the unverified payload decode the grant reads its own freshly minted refresh token with, to register its family. The copy is not checked against the original.
 - [`src/config.mts`](src/config.mts) — the config schema and the `webauthnConfig` slot; [`src/request.mts`](src/request.mts) — the `req.webauthnSubject` augmentation.
 
 The ports these depend on (`WebAuthnCredentialStore`, `ChallengeCeremony`, `ChallengeStore`) are core's.

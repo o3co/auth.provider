@@ -25,18 +25,16 @@ import type {
 } from "@o3co/auth-provider-core";
 import {
 	boundPolicyAudience,
+	deriveAudienceFromResources,
 	evaluateGrantPolicy,
+	extractResourceParam,
 	generateToken,
 	generateTokenResponse,
 	isEmailVerified,
 	resolveAccessTokenLifetime,
+	unrepresentedResources,
 } from "@o3co/auth-provider-core";
 import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
-import {
-	deriveAudienceFromResources,
-	extractResourceParam,
-	unrepresentedResources,
-} from "./_resourceIndicator.mjs";
 
 /** RFC 7523 §2.1. */
 export const JWT_BEARER_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:jwt-bearer";

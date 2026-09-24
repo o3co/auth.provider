@@ -590,11 +590,11 @@ describe("createWebAuthnGrant — DPoP-bound refresh tokens (#480)", () => {
 // Module wiring
 //
 // The grant can only register a family if the composition root's rotation
-// component reaches it. `webauthnModule` builds its grant deps field by field
-// rather than forwarding the whole bag, so a slot it does not name is a slot
-// the grant never sees — replay detection would be silently absent in every
-// real deployment while every grant-level test above still passed. That is the
-// same wiring class as the C1 `grantPolicy` bypass (PR #172).
+// component reaches it. `webauthnModule` hands the grant its deps whole, so a
+// declared slot cannot be dropped on the way; this pins the end result, since
+// a slot that did go missing would leave replay detection silently absent in
+// every real deployment while every grant-level test above still passed — the
+// wiring class of the C1 `grantPolicy` bypass (PR #172).
 // ---------------------------------------------------------------------------
 
 describe("webauthnModule — refresh-token family wiring (#480)", () => {

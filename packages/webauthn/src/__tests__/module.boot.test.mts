@@ -35,7 +35,10 @@
  * Cross-refs: Plan T31 / spec §2.4.1
  */
 
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
+	AppConfigSchema,
 	createApp,
 	createMemoryWebAuthnCredentialStore,
 	createSymmetricKeyStore,
@@ -53,7 +56,7 @@ import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import supertest from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import type { WebAuthnConfig } from "../config.mjs";
+import { type WebAuthnConfig, webauthnConfigSchema } from "../config.mjs";
 import { WEBAUTHN_GRANT_TYPE } from "../grant.mjs";
 import { webauthnModule } from "../module.mjs";
 
@@ -118,8 +121,8 @@ const webauthnConfigModule = defineModule({
 });
 
 /** Bootstrap module: provides a permit-all GrantPolicy. Required by webauthnModule's
- * H-2 fail-fast invariant. Test fixtures wire this; production deployments wire a
- * real GrantPolicyHook from @o3co/auth-provider-policy. */
+ * H-2 fail-fast invariant. Test fixtures wire this; a production deployment fills
+ * the `grantPolicy` slot with a GrantPolicyHook of its own — no package ships one. */
 const noopGrantPolicyModule = defineModule({
 	name: "test:webauthn-noop-grant-policy",
 	provides: {
@@ -274,6 +277,83 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 				bootstrapComponents: minBoot,
 			}),
 		).rejects.toThrow(/webauthn grant requires `grantPolicy`/);
+	});
+
+	it("H-2 fail-fast: the refusal says how to fill the slot, and names only packages that exist", async () => {
+		const error = await createApp({
+			modules: [
+				webauthnModule,
+				webauthnConfigModule,
+				keyStoreModule,
+				memoryChallengeStoreModule,
+				memoryReplaySeenSetModule,
+				defaultChallengeCeremonyModule,
+				memoryWebAuthnCredentialStoreModule,
+				activatorModule,
+			],
+			bootstrapComponents: minBoot,
+		}).then(
+			() => undefined,
+			(e: unknown) => e,
+		);
+		// The planner wraps a throwing grant factory; the module's own words are the cause.
+		const cause = (error as { cause?: unknown } | undefined)?.cause;
+		expect(cause).toBeInstanceOf(Error);
+		const message = (cause as Error).message;
+
+		// An operator told to install a package that was never published is
+		// sent nowhere. Every package the message names is one this workspace
+		// builds.
+		const packagesDir = fileURLToPath(new URL("../../../", import.meta.url));
+		const packageName = (dir: string): string =>
+			(JSON.parse(readFileSync(`${packagesDir}${dir}/package.json`, "utf8")) as { name: string })
+				.name;
+		// A directory without a package.json is not a package — AGENTS.md warns of
+		// stale untracked build output under packages/ (the old DID package).
+		const workspacePackages = new Set(
+			readdirSync(packagesDir, { withFileTypes: true })
+				.filter(
+					(entry) => entry.isDirectory() && existsSync(`${packagesDir}${entry.name}/package.json`),
+				)
+				.map((entry) => packageName(entry.name)),
+		);
+		// A dot inside a name (`ts.hocon`) is part of it; one ending a sentence is not.
+		const named = message.match(/@o3co\/[a-z0-9-]+(?:\.[a-z0-9-]+)*/g) ?? [];
+		expect(named.length).toBeGreaterThan(0);
+		for (const name of named) {
+			expect(workspacePackages, `${name} is named by the boot error`).toContain(name);
+		}
+
+		// The two ways a composition fills a component slot.
+		expect(message).toContain("provides: { grantPolicy");
+		expect(message).toContain("bootstrapComponents");
+		expect(message).toContain("GrantPolicyHook");
+	});
+
+	it("H-2 fail-fast: the second way the refusal names — bootstrapComponents.grantPolicy — boots", async () => {
+		// The first (`provides`) is how every other test here wires the policy.
+		const policy: GrantPolicyHook = {
+			kind: "test-bootstrap-policy",
+			evaluate: async () => ({ outcome: "allow" }) as const,
+		};
+		const handle = await createApp({
+			modules: [
+				webauthnModule,
+				webauthnConfigModule,
+				keyStoreModule,
+				memoryChallengeStoreModule,
+				memoryReplaySeenSetModule,
+				defaultChallengeCeremonyModule,
+				memoryWebAuthnCredentialStoreModule,
+				activatorModule,
+			],
+			bootstrapComponents: { ...(minBoot as object), grantPolicy: policy } as never,
+		});
+		const resolver = (handle.components as Record<string, unknown>).grantHandlerResolver as
+			| GrantHandlerResolver
+			| undefined;
+		expect(resolver?.get(WEBAUTHN_GRANT_TYPE)).toBeDefined();
+		await handle.dispose();
 	});
 
 	/**
@@ -449,6 +529,68 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 		// evaluateSpy NOT called here because credential lookup fails first.
 		// The unit-level policy-gate invocation tests live in grant.test.mts.
 
+		await handle.dispose();
+	});
+});
+
+/**
+ * The operator's path for `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN`: the
+ * composition root parses its resolved HOCON with core's `AppConfigSchema`,
+ * and the bootstrap module this package's README describes hands
+ * `config.webauthn` to `webauthnConfigSchema`.
+ *
+ * `hoconWebauthn` is the `webauthn` section as the shipped reference.conf
+ * resolves with these variables set: its literals keep their types, every
+ * `${?VAR}` arrives as a string. That the section reaches the composition root
+ * in exactly this shape — the origin list still one comma-separated string
+ * after `AppConfigSchema` — is pinned against the real HOCON resolution in
+ * core's `reference-conf-drift.test.mts`, which has the HOCON library this
+ * package does not depend on.
+ */
+describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIGIN)", () => {
+	const ANDROID = "android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI";
+	const hoconWebauthn = {
+		challengeTtlMs: 120000,
+		attestationPreference: "none",
+		userVerification: "preferred",
+		allowCredentialsForKnownUser: false,
+		rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 } },
+		rpId: "example.com",
+		rpName: "Example App",
+		origin: `https://example.com,${ANDROID}`,
+		topOrigin: "https://partner.example",
+	};
+
+	it("boots with both origins and the top origin the variables name", async () => {
+		const config = AppConfigSchema.parse({ ...coreConfig, webauthn: hoconWebauthn });
+		// AppConfigSchema passes the origin list on as the one string it is.
+		expect(config.webauthn?.origin).toBe(`https://example.com,${ANDROID}`);
+
+		const handle = await createApp({
+			modules: [
+				webauthnModule,
+				defineModule({
+					name: "test:webauthn-config-from-app-config",
+					requires: ["config"] as const,
+					provides: {
+						webauthnConfig: ({ config }) => webauthnConfigSchema.parse(config.webauthn),
+					},
+				}),
+				keyStoreModule,
+				memoryChallengeStoreModule,
+				memoryReplaySeenSetModule,
+				defaultChallengeCeremonyModule,
+				memoryWebAuthnCredentialStoreModule,
+				noopGrantPolicyModule,
+				activatorModule,
+			],
+			bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+		});
+		const resolved = (handle.components as Record<string, unknown>).webauthnConfig as
+			| WebAuthnConfig
+			| undefined;
+		expect(resolved?.origin).toEqual(["https://example.com", ANDROID]);
+		expect(resolved?.topOrigin).toEqual(["https://partner.example"]);
 		await handle.dispose();
 	});
 });

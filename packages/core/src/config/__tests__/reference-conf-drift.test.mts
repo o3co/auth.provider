@@ -287,3 +287,32 @@ describe("core's reference.conf declares the operator keys a composition layerin
 		expect(parsed.oauth?.authorize?.acrValues).toEqual({});
 	});
 });
+
+describe("the WebAuthn origin lists reach the composition root as the string the environment set", () => {
+	// An environment variable carries a list only as one string, so
+	// `WEBAUTHN_ORIGIN=https://a.example,https://b.example` has to survive
+	// HOCON resolution and `AppConfigSchema` intact for
+	// `webauthnConfigSchema` — which decides the list's shape, as it does for
+	// `CORS_ALLOWED_ORIGINS` here — to split it. The webauthn package's
+	// `module.boot.test.mts` boots from exactly this section; this is the half
+	// that needs the HOCON library, which that package does not depend on.
+	const WEBAUTHN_CONF_PATH = join(REPO_ROOT, "packages/webauthn/config/reference.conf");
+
+	it("keeps WEBAUTHN_ORIGIN and WEBAUTHN_TOP_ORIGIN as one comma-separated string each", () => {
+		const env = {
+			...REQUIRED_ENV,
+			WEBAUTHN_RP_ID: "example.com",
+			WEBAUTHN_RP_NAME: "Example App",
+			WEBAUTHN_ORIGIN: "https://a.example,https://b.example",
+			WEBAUTHN_TOP_ORIGIN: "https://partner.example",
+		};
+		const chained = parseFile(WEBAUTHN_CONF_PATH, { env }).withFallback(
+			parseFile(REFERENCE_CONF_PATH, { env }),
+		);
+		const parsed = validate(chained, AppConfigSchema) as {
+			webauthn?: Record<string, unknown>;
+		};
+		expect(parsed.webauthn?.origin).toBe("https://a.example,https://b.example");
+		expect(parsed.webauthn?.topOrigin).toBe("https://partner.example");
+	});
+});

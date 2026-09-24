@@ -66,7 +66,12 @@ import { isLoopbackHostname } from "./loopback.mjs";
  */
 
 /**
- * Read `cors.allowedOrigins` from whatever shape it arrived in.
+ * Read a configured origin allowlist from whatever shape it arrived in:
+ * `cors.allowedOrigins` here. The WebAuthn package reads the environment
+ * spelling of `webauthn.origin` / `webauthn.topOrigin` (`${?WEBAUTHN_ORIGIN}` /
+ * `${?WEBAUTHN_TOP_ORIGIN}`) with it too, which is why it is on the package
+ * barrel; that package reads a list itself and refuses a non-string entry
+ * rather than dropping it.
  *
  * Two shapes are legitimate and both have to work at every reader:
  *
@@ -74,6 +79,19 @@ import { isLoopbackHostname } from "./loopback.mjs";
  *     carry, and
  *   - a comma-separated string, which is the only shape an environment
  *     variable can carry a list in (`${?CORS_ALLOWED_ORIGINS}`).
+ *
+ * The two are read differently. The string is split on commas, each entry
+ * trimmed, and the empty ones dropped — an exported-but-empty variable is no
+ * list at all. The array keeps every string entry, trimmed, empty ones
+ * included so the entry check refuses them by index, and drops an entry that
+ * is not a string.
+ *
+ * The split only yields pieces of what the operator wrote, and the caller
+ * checks each piece as it would an array entry, so the string spelling cannot
+ * admit an origin the array spelling would refuse. A comma is legal inside a
+ * special-scheme host (`https://a,b.example` parses), and the string spelling
+ * cannot express such an origin: it splits there, the piece after the comma
+ * has no scheme, and the list is refused.
  *
  * It lives here, beside {@link checkSerializedOrigin}, because the config
  * schema is not the only reader. `assembleApp` decides whether to mount the
@@ -87,9 +105,11 @@ import { isLoopbackHostname } from "./loopback.mjs";
  * stop being.
  *
  * Only the shape is normalised here. Each entry is still checked with
- * {@link checkSerializedOrigin} by both the schema (which fails boot naming
- * the index) and the middleware (which drops it with a warning), so this
- * cannot widen an allowlist — it can only stop one being dropped whole.
+ * {@link checkSerializedOrigin}: for CORS by both the schema (which fails
+ * boot naming the index) and the middleware (which drops it with a warning);
+ * for WebAuthn by `webauthnConfigSchema`, which adds that the host must be a
+ * domain and admits the Android app form in `origin`. So this cannot widen an
+ * allowlist; it can only stop one being dropped whole.
  *
  * Anything that is neither an array nor a string yields no origins; the caller
  * decides whether that shape deserves a warning.

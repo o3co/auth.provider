@@ -15,8 +15,8 @@
  */
 
 // PARITY: keep in sync with packages/oauth/src/grants/_jwtPayload.mts
-// Consolidation candidate for Wave 2 — the same follow-up that owns
-// _resourceIndicator.mts.
+// Consolidation candidate: a helper both grant packages need belongs in core,
+// where the RFC 8707 resource rules they share live (grants/resourceIndicator.mts).
 
 /**
  * Best-effort JWT payload decode without signature verification.
@@ -27,10 +27,9 @@
  * received from a caller: an unverified decode trusts whatever the caller
  * sent.
  *
- * Duplicated from packages/oauth/src/grants/_jwtPayload.mts for the same
- * reason `_resourceIndicator.mts` is: the webauthn package does not depend on
- * @o3co/auth-provider-oauth, and that file is file-internal to oauth/grants/
- * rather than barrel-exported.
+ * Duplicated from packages/oauth/src/grants/_jwtPayload.mts: the webauthn
+ * package does not depend on @o3co/auth-provider-oauth, and that file is
+ * file-internal to oauth/grants/ rather than barrel-exported.
  *
  * Returns an empty object on any parse error; callers must treat missing
  * fields as normal.

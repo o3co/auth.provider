@@ -70,6 +70,10 @@ A module declares its grants in `contributes.grants`, keyed by grant type. Wheth
 
 A `GrantHandler.cleanup?()` is never called. `AppHandle.dispose()` runs each provided component's `lifecycle[K].cleanup` in reverse-topological order, then `Symbol.asyncDispose` on module-provided values that declared none, then the `LifecycleRegistrar` drain — and never touches the registry. A module that holds a resource on a handler's behalf releases it through its own `lifecycle[K].cleanup`; see [`src/grants/README.md`](src/grants/README.md).
 
+#### Resource indicators (RFC 8707)
+
+A grant that honours `resource` reads it with `extractResourceParam`, derives the audience it names with `deriveAudienceFromResources`, and refuses an issued `aud` that does not represent it with `unrepresentedResources` — [`src/grants/resourceIndicator.mts`](src/grants/resourceIndicator.mts). Each value is kept whole (a URI may contain a comma), the empty entries of a repeated parameter are dropped, and an all-empty parameter means none was requested. The oauth grants, `/authorize` and the WebAuthn grant all read it there, so a custom grant that does the same gives the same answer.
+
 ### Token Utilities
 
 `generateToken(data, options)`, `generateTokenResponse(tokens, options?)` and `formatObject` are in [`src/grants/token.mts`](src/grants/token.mts), with `Token`, `TokenResponse` and `GenerateTokenOptions` beside them.
@@ -243,6 +247,8 @@ The two discovery rows are the same document: OIDC Discovery 1.0 appends its suf
 ### Origins
 
 Entries are validated at boot by `checkSerializedOrigin` (`src/net/origin.mts`) and refused by index, because matching is exact string equality: a trailing slash, an explicit `:443`, an uppercase host, a path, or a wildcard is an allowlist that admits nobody with nothing anywhere to say so. `https` is required except for a loopback host, through the shared `isLoopbackHostname` home. `corsMw` re-applies the same check and warns on anything it drops, so a hand-built `AppConfig` that never passed the schema cannot install an entry the schema would have refused.
+
+The list takes two spellings. The comma-separated string an environment variable carries (`CORS_ALLOWED_ORIGINS`) is split on commas, each entry trimmed and empty entries dropped, so an empty variable is no list. An array keeps its string entries, trimmed, and an empty one is refused by the check above; a non-string entry is dropped. `normalizeAllowedOrigins` in the same file reads both and is exported; the WebAuthn package reads `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN` with it, so every origin list set from the environment is spelled alike.
 
 ## Usage Example
 

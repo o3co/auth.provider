@@ -22,7 +22,9 @@ import {
 	type CodeRepository,
 	type ConsentStore,
 	consentCovers,
+	deriveAudienceFromResources,
 	emitAuditEvent,
+	extractResourceParam,
 	type GrantPolicyHook,
 	isEmailVerified,
 	isGrantTypeAllowed,
@@ -32,13 +34,9 @@ import {
 	type PublicClient,
 	type UserSession,
 	type UserSessionStore,
+	unrepresentedResources,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
-import {
-	deriveAudienceFromResources,
-	extractResourceParam,
-	unrepresentedResources,
-} from "../grants/_resourceIndicator.mjs";
 import {
 	PKCE_METHOD_ABSENT_DEFAULT,
 	PKCE_METHOD_S256,

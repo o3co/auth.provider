@@ -70,6 +70,10 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 
 `GrantHandler.cleanup?()` が呼ばれることはありません。`AppHandle.dispose()` は、提供された各コンポーネントの `lifecycle[K].cleanup` を reverse-topological 順で実行し、次に宣言を持たないモジュール提供値の `Symbol.asyncDispose` を、最後に `LifecycleRegistrar` の drain を行い — レジストリには触れません。ハンドラーのためにリソースを保持するモジュールは、自分の `lifecycle[K].cleanup` でそれを解放します。[`src/grants/README.md`](src/grants/README.md) を参照してください。
 
+#### リソースインジケーター（RFC 8707）
+
+`resource` を扱うグラントは、`extractResourceParam` でそれを読み、それが名指す audience を `deriveAudienceFromResources` で導き、発行する `aud` がそれを表さなければ `unrepresentedResources` で拒否します — [`src/grants/resourceIndicator.mts`](src/grants/resourceIndicator.mts)。各値は分割せずにそのまま扱い（URI はカンマを含みうる）、繰り返されたパラメーターの空のエントリーは捨て、すべて空なら要求されなかったものとして扱います。oauth のグラント、`/authorize`、WebAuthn グラントはすべてここで読むので、同じことをするカスタムグラントも同じ答えになります。
+
 ### トークンユーティリティ
 
 `generateToken(data, options)`、`generateTokenResponse(tokens, options?)`、`formatObject` は [`src/grants/token.mts`](src/grants/token.mts) にあり、`Token`、`TokenResponse`、`GenerateTokenOptions` がその隣にあります。
@@ -243,6 +247,8 @@ core が自分でマウントするもの（この順）: `cors.allowedOrigins` 
 ### オリジン
 
 エントリーは boot 時に `checkSerializedOrigin`（`src/net/origin.mts`）で検証され、インデックスを示して拒否されます。一致判定は文字列の完全一致なので、末尾のスラッシュ、明示的な `:443`、大文字のホスト、パス、ワイルドカードは、誰も通さずそのことをどこにも言わない許可リストになるからです。loopback ホストを除き `https` が必須で、判定は共有の `isLoopbackHostname` に拠ります。`corsMw` は同じ検査をもう一度適用し、落としたものを警告するので、スキーマを通っていない手組みの `AppConfig` でも、スキーマなら拒否したエントリーは入りません。
+
+リストの書き方は 2 通りあります。環境変数が運べる唯一の形であるカンマ区切りの文字列（`CORS_ALLOWED_ORIGINS`）はカンマで分割され、各エントリーは前後の空白を除かれ、空のエントリーは捨てられるので、空の変数はリストなしになります。配列は文字列のエントリーを前後の空白を除いて保ち、空のエントリーは上の検査で拒否され、文字列でないエントリーは捨てられます。両方を読むのは同じファイルの `normalizeAllowedOrigins` で、export されています。WebAuthn パッケージは `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN` をこれで読むので、環境変数から設定するオリジンのリストはどれも同じ書き方になります。
 
 ## 使い方
 

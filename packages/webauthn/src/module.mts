@@ -69,7 +69,7 @@ import {
 	type RateLimitSpec,
 } from "@o3co/auth-provider-core";
 import express from "express";
-import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "./grant.mjs";
+import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE, type WebAuthnGrantDeps } from "./grant.mjs";
 import {
 	createAuthenticationOptionsHandler,
 	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
@@ -152,44 +152,32 @@ export const webauthnModule = defineModule<
 				// (no client → no client.allowedScopes); grantPolicy is the sole
 				// scope gate. Booting without it silently accepts unbounded scope.
 				if (!deps.grantPolicy) {
+					// No package ships a GrantPolicyHook: the policy is the deployment's
+					// own, so the message says how to fill the slot rather than what to
+					// install.
 					throw new Error(
 						"webauthn grant requires `grantPolicy` to be wired. " +
 							"Unlike client_credentials (client.allowedScopes ceiling) and " +
 							"authorization_code (narrowed at /authorize), the webauthn grant " +
 							"has no library-side scope ceiling — without grantPolicy the grant " +
-							"issues whatever scope the caller requests. Wire a GrantPolicyHook " +
-							"via @o3co/auth-provider-policy or your own implementation. If you " +
+							"issues whatever scope the caller requests. Implement a " +
+							"GrantPolicyHook (the interface is exported by @o3co/auth-provider-core; " +
+							"no package ships one) and fill the `grantPolicy` component slot with it: " +
+							"from a module, `defineModule({ name, provides: { grantPolicy: () => hook } })`, " +
+							"or `createApp({ bootstrapComponents: { grantPolicy: hook, ... } })`. If you " +
 							"intentionally accept unbounded scope (NOT recommended for " +
-							"production), wire a no-op policy returning { outcome: 'allow' }. " +
-							"See packages/webauthn/README.md SECURITY — scope authorization.",
+							"production), provide a policy whose evaluate returns { outcome: 'allow' }. " +
+							"See the @o3co/auth-provider-webauthn README, SECURITY — scope authorization.",
 					);
 				}
-				return createWebAuthnGrant({
-					config: deps.config,
-					keyStore: deps.keyStore,
-					webauthnCredentialStore: deps.webauthnCredentialStore,
-					challengeCeremony: deps.challengeCeremony,
-					grantPolicy: deps.grantPolicy,
-					// #480: without this the grant would mint refresh tokens whose
-					// family was never registered — no replay detection, and no
-					// symptom. The deps bag is built field by field here, so an
-					// unnamed slot is a dropped slot (the C1 `grantPolicy` bypass).
-					refreshTokenFamilyRotation: deps.refreshTokenFamilyRotation,
-					webauthnConfig: {
-						rpId: deps.webauthnConfig.rpId,
-						origin: deps.webauthnConfig.origin,
-						// #554 audit: the frames this RP accepts being embedded in. This
-						// object is rebuilt field by field, so a key not named here is a
-						// key the grant never sees — the same shape as the dropped-slot
-						// note above.
-						...(deps.webauthnConfig.topOrigin === undefined
-							? {}
-							: { topOrigin: deps.webauthnConfig.topOrigin }),
-						// Forward userVerification so the grant enforces it via SimpleWebAuthn.
-						// Cross-refs: Codex Round 2 P1-1
-						userVerification: deps.webauthnConfig.userVerification,
-					},
-				});
+				// Handed over whole, as the oauth module hands its grants theirs.
+				// A bag built here field by field is how a declared slot went
+				// missing twice — the C1 `grantPolicy` bypass, and #480's
+				// refresh-token family — with nothing to say so. The `satisfies`
+				// holds the other direction: every slot the grant reads is one
+				// this module declares, optional ones included, which plain
+				// assignability would let through as a permanent `undefined`.
+				return createWebAuthnGrant(deps satisfies Pick<typeof deps, keyof WebAuthnGrantDeps>);
 			},
 		},
 		routes: [

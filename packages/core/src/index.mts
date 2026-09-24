@@ -269,6 +269,14 @@ export {
 	type GenerateLogoutTokenOptions,
 	generateLogoutToken,
 } from "./grants/logoutToken.mjs";
+// RFC 8707 resource indicators (#172, #173): the one reading of `resource`,
+// the audience derived from it, and the `invalid_target` check — shared by the
+// oauth grants, `/authorize` and the WebAuthn grant.
+export {
+	deriveAudienceFromResources,
+	extractResourceParam,
+	unrepresentedResources,
+} from "./grants/resourceIndicator.mjs";
 export type { SenderConstraint } from "./grants/senderConstraint.mjs";
 // Grant types and interfaces.
 //
@@ -485,13 +493,18 @@ export {
 // Exported so consumers import or re-export it rather than defining a copy;
 // the designVocabulary drift guard fails any second definition.
 export { isLoopbackHostname } from "./net/loopback.mjs";
-// The serialized-origin vocabulary (#500) — what `cors.allowedOrigins` may
-// carry. Enforced by the config schema at boot and re-applied by `corsMw`;
-// exported so a consumer assembling its own CORS policy holds origins to the
-// same rules and refuses in the same words.
+// The serialized-origin vocabulary (#500) — what a configured browser origin
+// may be. Enforced on `cors.allowedOrigins` by the config schema at boot and
+// re-applied by `corsMw`, and on every web entry of the WebAuthn package's
+// `origin` / `topOrigin`; exported so a consumer assembling its own policy
+// holds origins to the same rules and refuses in the same words.
+// `normalizeAllowedOrigins` reads an origin list in both its spellings — an
+// array, or the comma-separated string an environment variable carries — for
+// `cors.allowedOrigins`; the WebAuthn package hands it only that string.
 export {
 	checkSerializedOrigin,
 	describeSerializedOriginRejection,
+	normalizeAllowedOrigins,
 	type SerializedOriginRejection,
 } from "./net/origin.mjs";
 // The registered-redirect-URI shape vocabulary (#395) — enforced by
