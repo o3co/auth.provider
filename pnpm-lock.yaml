@@ -486,13 +486,6 @@ importers:
         version: 5.0.0(@opentelemetry/api@1.9.1)(@types/node@26.5.1)(@vitest/coverage-v8@5.0.0)(msw@2.15.0(@types/node@26.5.1)(typescript@6.0.3))(vite@8.0.11(@types/node@26.5.1)(esbuild@0.28.2)(tsx@4.23.13)(yaml@2.9.0))
 
   packages/session:
-    dependencies:
-      connect-redis:
-        specifier: ^10.0.0
-        version: 10.0.0(express-session@1.19.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
-      redis:
-        specifier: ^6.2.1
-        version: 6.2.1(@opentelemetry/api@1.9.1)
     devDependencies:
       '@o3co/auth-provider-core':
         specifier: workspace:*
@@ -509,12 +502,18 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^5.0.0
         version: 5.0.0(vitest@5.0.0)
+      connect-redis:
+        specifier: ^10.0.0
+        version: 10.0.0(express-session@1.19.0)(redis@6.2.1(@opentelemetry/api@1.9.1))
       express:
         specifier: ^5.2.1
         version: 5.2.1
       express-session:
         specifier: ^1.18.0
         version: 1.19.0
+      redis:
+        specifier: ^6.2.1
+        version: 6.2.1(@opentelemetry/api@1.9.1)
       supertest:
         specifier: ^7.2.2
         version: 7.2.2
