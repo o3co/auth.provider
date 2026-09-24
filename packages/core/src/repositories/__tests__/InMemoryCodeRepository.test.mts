@@ -163,6 +163,30 @@ describe("InMemoryCodeRepository", () => {
 			expect(found).toBeNull();
 		});
 
+		it("refuses a lifetime that is not a positive number of seconds, and stores nothing", async () => {
+			// NaN is never `>= now`: a code minted with a NaN lifetime was
+			// redeemable for ever, and no sweep ever reclaimed it. An infinite
+			// one is no lifetime either, and zero or less is a code that is dead
+			// on arrival — which the Redis repository cannot store at all.
+			repo = new InMemoryCodeRepository();
+			for (const expiresIn of [
+				Number.NaN,
+				Number.POSITIVE_INFINITY,
+				Number.NEGATIVE_INFINITY,
+				0,
+				-1,
+			]) {
+				await expect(repo.createCode({ ...minimalParams, expiresIn })).rejects.toThrow(RangeError);
+			}
+			expect((repo as unknown as { codes: Map<string, unknown> }).codes.size).toBe(0);
+		});
+
+		it("refuses a default lifetime that is not a positive number of seconds, when it is built", () => {
+			for (const defaultExpiresIn of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1]) {
+				expect(() => new InMemoryCodeRepository({ defaultExpiresIn })).toThrow(RangeError);
+			}
+		});
+
 		it("consumeByCode refuses an expired code, and burns it on the way out", async () => {
 			// The expiry checks on `findByCode` and `consumeByCode` are separate
 			// guards and only the former was pinned — but `consumeByCode` is the

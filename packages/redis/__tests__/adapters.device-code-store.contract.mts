@@ -97,6 +97,41 @@ export const runDeviceCodeStoreContract = (
 			});
 		});
 
+		it("refuses an expiry that is not a finite number, and records nothing", async () => {
+			// NaN is never `<= now`: the memory adapter answered `pending` for such
+			// a record until a sweep found it, and the Redis script wrote the pair
+			// before `PEXPIREAT NaN` failed, leaving both keys with no TTL. A
+			// non-finite expiry is a caller fault.
+			await withStore(async (store) => {
+				for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+					await expect(store.create({ ...seed, expiresAtMs: bad })).rejects.toThrow(RangeError);
+					expect(await store.findPendingByUserCode(seed.userCode, NOW)).toBeNull();
+					expect(await store.poll(seed.deviceCode, NOW)).toEqual({ status: "not_found" });
+				}
+				// Nothing was recorded, so neither code collides.
+				await store.create(seed);
+				expect(await store.poll(seed.deviceCode, NOW)).toEqual({ status: "pending" });
+			});
+		});
+
+		it("accepts a fractional expiry, and holds the authorization until exactly it", async () => {
+			// A code lifetime in fractional seconds makes one. Redis's PEXPIREAT
+			// takes whole milliseconds, so the keys' deadline is rounded up; the
+			// record's own expiry — what `poll` answers from — is the one asked for.
+			await withStore(async (store) => {
+				const expiresAtMs = seed.expiresAtMs + 0.5;
+				await store.create({ ...seed, expiresAtMs });
+				expect(await store.findPendingByUserCode(seed.userCode, NOW)).toMatchObject({
+					expiresAtMs,
+					status: "pending",
+				});
+				expect(await store.poll(seed.deviceCode, expiresAtMs - 0.25)).toEqual({
+					status: "pending",
+				});
+				expect(await store.poll(seed.deviceCode, expiresAtMs)).toEqual({ status: "expired" });
+			});
+		});
+
 		it("does not surface an expired authorization to the verification page", async () => {
 			// Displaying a code that can no longer be approved invites the user
 			// to approve nothing and wonder why the device never proceeds.

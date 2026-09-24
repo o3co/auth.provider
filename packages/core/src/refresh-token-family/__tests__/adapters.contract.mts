@@ -264,6 +264,67 @@ export function runRefreshTokenFamilyStoreContract(
 			});
 		});
 
+		it("registerFamily refuses an expiry that is not a finite number, and records nothing", async () => {
+			// NaN is never `<= now`, so it slipped past the expired-at-issue check:
+			// the memory adapter kept the family for ever, and Redis was sent
+			// `PX NaN`. A non-finite expiry is a caller fault, not the timing race
+			// `expired-at-issue` names.
+			const store = await factory();
+			for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+				await expect(store.registerFamily(FAMILY({ expiresAtMs: bad }))).rejects.toThrow(
+					RangeError,
+				);
+				expect(await store.findFamily("fam-1")).toBeNull();
+			}
+			// Nothing was recorded, so this is not a duplicate.
+			await store.registerFamily(FAMILY());
+			expect(await store.findFamily("fam-1")).not.toBeNull();
+		});
+
+		it("registerFamily accepts a fractional expiry, and keeps the family at least until it", async () => {
+			// A lifetime configured in fractional seconds makes one. Redis's PX
+			// takes whole milliseconds, so an adapter rounds the family's life up,
+			// never down — and reads back what it wrote.
+			const store = await factory();
+			const expiresAtMs = Date.now() + 60_000.5;
+			await store.registerFamily(FAMILY({ expiresAtMs }));
+			const found = await store.findFamily("fam-1");
+			expect(found?.familyId).toBe("fam-1");
+			expect(found?.expiresAtMs).toBeGreaterThan(Date.now() + 59_000);
+		});
+
+		it("updateFamily refuses a committed expiry that is not a finite number, and changes nothing", async () => {
+			const store = await factory();
+			const fam = FAMILY();
+			await store.registerFamily(fam);
+			for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+				await expect(
+					store.updateFamily(fam.familyId, (current) => ({
+						action: "commit",
+						family: { ...current, activeJti: "jti-bad", expiresAtMs: bad },
+					})),
+				).rejects.toThrow(RangeError);
+			}
+			const after = await store.findFamily(fam.familyId);
+			expect(after?.activeJti).toBe(fam.activeJti);
+			expect(Number.isFinite(after?.expiresAtMs)).toBe(true);
+		});
+
+		it("updateFamily accepts a fractional expiry, and keeps the family at least until it", async () => {
+			const store = await factory();
+			const fam = FAMILY();
+			await store.registerFamily(fam);
+			const expiresAtMs = Date.now() + 30_000.5;
+			const result = await store.updateFamily(fam.familyId, (current) => ({
+				action: "commit",
+				family: { ...current, activeJti: "jti-rotated", expiresAtMs },
+			}));
+			expect(result.outcome).toBe("committed");
+			const after = await store.findFamily(fam.familyId);
+			expect(after?.activeJti).toBe("jti-rotated");
+			expect(after?.expiresAtMs).toBeGreaterThan(Date.now() + 29_000);
+		});
+
 		it("concurrent registerFamily for same familyId: exactly one success, N-1 duplicate-family", async () => {
 			const store = await factory();
 			const N = 50;

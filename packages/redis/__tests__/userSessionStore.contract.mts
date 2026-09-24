@@ -84,6 +84,20 @@ export function runUserSessionStoreContract(factory: UserSessionStoreContractFac
 			await expect(store.create(INPUT({ expiresAt: PAST() }))).rejects.toThrow();
 		});
 
+		it("create refuses an expiresAt that is not a valid date, and records nothing", async () => {
+			// An Invalid Date's `getTime()` is NaN, which is never `<= now`: the
+			// memory store kept such a session for ever, and Redis was sent
+			// `PX NaN`. A caller fault, and a RangeError, not a session.
+			const store = await factory();
+			await expect(
+				store.create(INPUT({ sid: "sid-invalid", expiresAt: new Date(Number.NaN) })),
+			).rejects.toThrow(RangeError);
+			expect(await store.get("sid-invalid")).toBeNull();
+			// Nothing was recorded, so this is not a duplicate.
+			await store.create(INPUT({ sid: "sid-invalid" }));
+			expect(await store.get("sid-invalid")).not.toBeNull();
+		});
+
 		it("get returns null for unknown sid", async () => {
 			const store = await factory();
 			expect(await store.get("ghost")).toBeNull();
