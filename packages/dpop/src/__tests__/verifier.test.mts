@@ -584,6 +584,38 @@ describe("createDPoPMechanism", () => {
 		);
 	});
 
+	// The seen-set refuses a non-finite expiry with RangeError (a caller
+	// fault). Construction rules that out here, so one arriving means a
+	// broken seen-set, not an outage: it must not raise the outage alarm.
+	it("lets a RangeError from the seen-set propagate rather than calling it an outage", async () => {
+		const errors: string[] = [];
+		const refusing = {
+			kind: "refusing",
+			markSeen: async () => {
+				throw new RangeError("markSeen: expiresAtMs must be a finite number");
+			},
+			contains: async () => false,
+		};
+		const refusingMechanism = createDPoPMechanism({
+			issuer: ISSUER,
+			replaySeenSet: refusing,
+			logger: {
+				trace: () => {},
+				debug: () => {},
+				info: () => {},
+				warn: () => {},
+				error: (_obj: unknown, msg?: string) => errors.push(String(msg)),
+				fatal: () => {},
+				child() {
+					return this;
+				},
+			} as never,
+		});
+		const { proof } = await mintProof();
+		await expect(refusingMechanism.extract(makeReq(proof) as Request)).rejects.toThrow(RangeError);
+		expect(errors).toEqual([]);
+	});
+
 	// I-2: pin that seen-set transport faults surface as the dedicated
 	// `replay_store_unavailable` audit signal — not a raw Error that would
 	// otherwise propagate up to `tokenBindingMw` and lose operator triage.
