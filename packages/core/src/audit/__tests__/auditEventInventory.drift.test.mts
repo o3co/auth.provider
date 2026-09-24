@@ -213,6 +213,11 @@ describe("built-in audit event inventory (#369)", () => {
  * name, or a call to `auditErrorText` / `String`), and `details.cause` as a
  * call to `auditedError`. `AuditEvent`'s type says the same
  * (`audit-details.types.test.mts`); this catches what a cast would let by.
+ *
+ * The gap: a name or a property access counts as string-shaped whatever it
+ * holds, because this reads syntax, not types. An `any`-typed `err` under
+ * `details.error` passes this check and `tsc` alike; review is what catches
+ * that one.
  */
 function detailsShapeViolations(file: string, source: string): string[] {
 	const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
