@@ -71,6 +71,39 @@ describe("createRedisRateLimiter on ioredis — a window no key can carry", () =
 	});
 });
 
+describe("both limiters — a spec neither can apply as written", () => {
+	it("is refused by each when it is built: a zero, NaN, fractional or negative window or limit", () => {
+		// The Redis limiter served its default in such a spec's place and the
+		// in-process one kept it, so one configuration meant two budgets.
+		const client = makeIoredisClients(redis).rateLimiterClient;
+		const SANE = { limit: 60, windowSeconds: 60 };
+		for (const bad of [0, Number.NaN, 1.5, -1]) {
+			for (const spec of [
+				{ limit: 5, windowSeconds: bad },
+				{ limit: bad, windowSeconds: 60 },
+			]) {
+				const label = `${String(spec.limit)} per ${String(spec.windowSeconds)} s`;
+				expect(
+					() => createRedisRateLimiter({ client, limits: { tbad: spec }, defaultLimit: SANE }),
+					`redis: ${label}`,
+				).toThrow(RangeError);
+				expect(
+					() => createMemoryRateLimiter({ limits: { tbad: spec }, defaultLimit: SANE }),
+					`memory: ${label}`,
+				).toThrow(RangeError);
+				expect(
+					() => createRedisRateLimiter({ client, defaultLimit: spec }),
+					`redis default: ${label}`,
+				).toThrow(RangeError);
+				expect(
+					() => createMemoryRateLimiter({ limits: {}, defaultLimit: spec }),
+					`memory default: ${label}`,
+				).toThrow(RangeError);
+			}
+		}
+	});
+});
+
 describe("createRedisRateLimiter on ioredis — resetAt (#458)", () => {
 	it("reports a resetAt inside the window, from the counter key's PTTL", async () => {
 		const limiter = createRedisRateLimiter({

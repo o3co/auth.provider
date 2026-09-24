@@ -84,46 +84,59 @@ describe("createRedisRateLimiter — atomicity (#269)", () => {
 		expect(redis.ttls.get("login.ip:1.2.3.4")).toBe(900);
 	});
 
-	it("uses defaultLimit when a limit spec has a non-positive window", async () => {
-		// `EXPIRE key 0` deletes the key, so a zero window would make the
-		// limiter count to one forever and never limit anything. The builder
-		// path does not go through the zod schema, so the guard lives here.
+	/**
+	 * A spec no limiter can apply as written. `EXPIRE key 0` deletes the key,
+	 * so a zero window counts to one for ever and never limits anything; a
+	 * limit of zero or less denies everything; NaN and fractions are not
+	 * budgets. The builder path does not go through the zod schema, so the
+	 * guard lives in the adapter.
+	 */
+	const UNUSABLE = [0, Number.NaN, 1.5, -1];
+
+	it("refuses a spec whose window or limit is not a positive whole number when it is built — never its default in its place", () => {
+		// It used to drop the spec and serve its default (60 per 60 s): a
+		// budget of 5 silently became 60, where the in-process limiter kept
+		// what was written. Refused, the composition fails instead.
 		const redis = fakeRedis();
-		const limiter = createRedisRateLimiter({
-			client: redis,
-			limits: { "login.ip": { limit: 2, windowSeconds: 0 } },
-			defaultLimit: { limit: 1, windowSeconds: 60 },
-		});
-		await limiter.check("login.ip:1.2.3.4", { ip: "1.2.3.4" });
-		expect(redis.ttls.get("login.ip:1.2.3.4")).toBe(60);
-		expect((await limiter.check("login.ip:1.2.3.4", { ip: "1.2.3.4" })).allowed).toBe(false);
+		for (const bad of UNUSABLE) {
+			for (const spec of [
+				{ limit: 5, windowSeconds: bad },
+				{ limit: bad, windowSeconds: 60 },
+			]) {
+				const label = `${String(spec.limit)} per ${String(spec.windowSeconds)} s`;
+				expect(
+					() => createRedisRateLimiter({ client: redis, limits: { "login.ip": spec } }),
+					`limits: ${label}`,
+				).toThrow(RangeError);
+				expect(
+					() => createRedisRateLimiter({ client: redis, defaultLimit: spec }),
+					`defaultLimit: ${label}`,
+				).toThrow(RangeError);
+			}
+		}
+		expect(redis.calls).toBe(0);
 	});
 
-	it("falls back rather than throwing when defaultLimit is null or malformed", async () => {
+	it("refuses a default that is not a spec at all, rather than serving its own", () => {
 		// `redisRateLimiterBuilder` accepts a config object that never passed the
 		// zod schema, so `defaultLimit` can arrive as null or as a non-object.
-		// Dereferencing it would crash the limiter at construction — the one
-		// component whose job is to stay up while things go wrong.
-		for (const bad of [null, undefined, "nonsense", 42, {}]) {
-			const redis = fakeRedis();
-			const limiter = createRedisRateLimiter({
-				client: redis,
-				defaultLimit: bad as never,
-			});
-			const decision = await limiter.check("anything:foo", { ip: "1.2.3.4" });
-			expect(decision.allowed).toBe(true);
-			expect(redis.ttls.get("anything:foo")).toBe(60);
+		// It is refused by name at construction, not read as "use 60 per 60 s".
+		for (const bad of [null, "nonsense", 42, {}, { limit: "5", windowSeconds: "60" }]) {
+			expect(
+				() => createRedisRateLimiter({ client: fakeRedis(), defaultLimit: bad as never }),
+				JSON.stringify(bad),
+			).toThrow(RangeError);
 		}
 	});
 
-	it("uses defaultLimit when a limit spec has a non-positive limit", async () => {
+	it("applies its own default when none is given at all", async () => {
+		// Nothing configured is not a configured budget loosened: the adapter's
+		// documented 60 per 60 s applies.
 		const redis = fakeRedis();
-		const limiter = createRedisRateLimiter({
-			client: redis,
-			limits: { "login.ip": { limit: 0, windowSeconds: 60 } },
-			defaultLimit: { limit: 3, windowSeconds: 60 },
-		});
-		expect((await limiter.check("login.ip:1.2.3.4", { ip: "1.2.3.4" })).remaining).toBe(2);
+		const limiter = createRedisRateLimiter({ client: redis });
+		const decision = await limiter.check("anything:foo", { ip: "1.2.3.4" });
+		expect(decision).toMatchObject({ allowed: true, limit: 60, remaining: 59 });
+		expect(redis.ttls.get("anything:foo")).toBe(60);
 	});
 });
 

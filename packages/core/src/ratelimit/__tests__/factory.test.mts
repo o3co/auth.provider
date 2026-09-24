@@ -72,6 +72,49 @@ describe("memory rate limiter — a window past the Date range", () => {
 	});
 });
 
+describe("memory rate limiter — a spec it cannot apply as written", () => {
+	// The Redis adapter refuses the same set, by the same predicate: one
+	// configuration, one budget, whichever adapter is mounted.
+	const UNUSABLE = [0, Number.NaN, 1.5, -1];
+	const SANE = { limit: 60, windowSeconds: 60 };
+	const specs = UNUSABLE.flatMap((bad) => [
+		{ limit: 5, windowSeconds: bad },
+		{ limit: bad, windowSeconds: 60 },
+	]);
+	const label = (spec: { limit: number; windowSeconds: number }) =>
+		`${String(spec.limit)} per ${String(spec.windowSeconds)} s`;
+
+	it("refuses a zero, NaN, fractional or negative window or limit when it is built", () => {
+		for (const spec of specs) {
+			expect(
+				() => createMemoryRateLimiter({ limits: { big: spec }, defaultLimit: SANE }),
+				`limits: ${label(spec)}`,
+			).toThrow(RangeError);
+			expect(
+				() => createMemoryRateLimiter({ limits: {}, defaultLimit: spec }),
+				`defaultLimit: ${label(spec)}`,
+			).toThrow(RangeError);
+		}
+	});
+
+	it("refuses them through the factory too, which used to drop a spec or put its own default in", async () => {
+		const factory = createRateLimiterFactory();
+		registerBuiltinRateLimiters(factory);
+		for (const spec of [...specs, { limit: "5", windowSeconds: "60" }]) {
+			await expect(
+				(async () => factory.create({ type: "memory", limits: { big: spec } }))(),
+				`limits: ${JSON.stringify(spec)}`,
+			).rejects.toThrow(RangeError);
+		}
+		for (const bad of [null, "nonsense", 42, {}, { limit: 5, windowSeconds: Number.NaN }]) {
+			await expect(
+				(async () => factory.create({ type: "memory", defaultLimit: bad }))(),
+				`defaultLimit: ${String(bad)}`,
+			).rejects.toThrow(RangeError);
+		}
+	});
+});
+
 describe("registerBuiltinRateLimiters (memory)", () => {
 	it("memory sink respects limit and window", async () => {
 		vi.useFakeTimers();
@@ -151,28 +194,23 @@ describe("registerBuiltinRateLimiters (memory)", () => {
 		}
 	});
 
-	it("eviction makes progress even when bucket resetAt is non-finite (misconfigured windowSeconds)", async () => {
-		// Regression: a misconfigured spec with NaN windowSeconds produces
-		// NaN resetAt. evictEarliestResetBucket previously used `<` against
-		// POSITIVE_INFINITY, and `NaN < x` is false, so when every bucket
-		// had NaN resetAt no key was selected and the caller's
-		// `while (buckets.size >= maxBuckets)` loop pinned the event loop.
-		// This test would hang forever before the fix; vitest's default
-		// timeout makes the regression visible as a failure.
+	it("never holds a bucket with a non-finite reset: a NaN window is refused when it is built", async () => {
+		// Regression: a misconfigured spec with NaN windowSeconds produced NaN
+		// resetAt, and evictEarliestResetBucket, comparing with `<`, selected
+		// no key when every bucket had one — the caller's
+		// `while (buckets.size >= maxBuckets)` loop pinned the event loop. The
+		// eviction still makes progress on such a bucket, but none can exist
+		// now: the spec is refused before the limiter holds anything.
 		const factory = createRateLimiterFactory();
 		registerBuiltinRateLimiters(factory);
-		const limiter = await factory.create({
-			type: "memory",
-			defaultLimit: { limit: 1, windowSeconds: Number.NaN },
-			maxBuckets: 2,
-		});
-
-		// Fill: both buckets get resetAt = now + NaN*1000 = NaN.
-		await limiter.check("nan:A", {});
-		await limiter.check("nan:B", {});
-		// Trigger eviction: must return rather than spin-loop.
-		const result = await limiter.check("nan:C", {});
-		expect(result.allowed).toBe(true);
+		await expect(
+			(async () =>
+				factory.create({
+					type: "memory",
+					defaultLimit: { limit: 1, windowSeconds: Number.NaN },
+					maxBuckets: 2,
+				}))(),
+		).rejects.toThrow(RangeError);
 	});
 });
 
