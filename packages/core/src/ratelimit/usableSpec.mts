@@ -50,6 +50,28 @@ const described = (spec: unknown): string => {
 };
 
 /**
+ * The budget a configuration gives under `key`, or a `RangeError` naming
+ * `key` when it is given but is not a spec a limiter can apply.
+ *
+ * For a seed and anything else that reads a budget from its own config key
+ * (`oauth.deviceAuthorization.rateLimit`,
+ * `webauthn.rateLimit.authenticationOptions`). A key that was given is a
+ * configuration someone wrote, a hand-built one included, so it is refused
+ * rather than skipped: skipped, the route ran on the limiter's default
+ * instead. The message names the key and says what it must be, not which
+ * limiter would have refused it. A key that was not given is the caller's
+ * to handle: it is not a refusal.
+ */
+export function requireUsableConfiguredRateLimitSpec(key: string, value: unknown): RateLimitSpec {
+	if (!isUsableRateLimitSpec(value)) {
+		throw new RangeError(
+			`${key} must be { limit, windowSeconds } as positive whole numbers, with a window that ends within the Date range (got ${described(value)})`,
+		);
+	}
+	return { limit: value.limit, windowSeconds: value.windowSeconds };
+}
+
+/**
  * Refuses, when a limiter is built, every spec it was given that
  * {@link isUsableRateLimitSpec} does not accept: each entry of `limits`, and
  * `defaultLimit`. `undefined` is "not given", and nothing else is.

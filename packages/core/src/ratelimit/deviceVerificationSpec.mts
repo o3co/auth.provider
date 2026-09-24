@@ -15,7 +15,7 @@
  */
 
 import type { RateLimitSpec } from "./types.mjs";
-import { isUsableRateLimitSpec } from "./usableSpec.mjs";
+import { isUsableRateLimitSpec, requireUsableConfiguredRateLimitSpec } from "./usableSpec.mjs";
 
 /**
  * The key prefix `POST /oauth/device/verification` limits under
@@ -31,14 +31,14 @@ export const DEVICE_VERIFICATION_RATE_LIMIT_PREFIX = "device_verification";
  * Date range?
  *
  * It is `isUsableRateLimitSpec` itself, the predicate every limiter adapter
- * judges a spec by, under the name #448 gave it. The seed below answers
- * "leave the adapter's default in place" for anything else, and
- * `deviceGrantModule` answers "refuse to boot" for anything else; with two
- * definitions those two answers could be given for different inputs, and
- * the gap between them is a deployment whose boot refusal reasons from five
- * attempts while the limiter applies sixty. A second definition here was that
- * gap for a window past the Date range: the module mounted, and the limiter
- * refused the seeded spec under its own name rather than this key's.
+ * judges a spec by, under the name #448 gave it. The seed below and
+ * `deviceGrantModule` both refuse anything else, with the one message
+ * `requireUsableConfiguredRateLimitSpec` gives; with two definitions they
+ * could answer differently for the same input, and the gap between them is a
+ * deployment whose boot refusal reasons from five attempts while the limiter
+ * applies sixty. A second definition here was that gap for a window past the
+ * Date range: the module mounted, and the limiter refused the seeded spec
+ * under its own name rather than this key's.
  * `docs/design-vocabulary.md` maps the concept, and the drift guard keeps a
  * second definition from appearing.
  *
@@ -69,10 +69,14 @@ export const isDeviceVerificationRateLimitSpec: (value: unknown) => value is Rat
  * prefix explicitly — an explicit `limits.device_verification` is a statement
  * about this adapter and wins.
  *
- * The values are screened with `isDeviceVerificationRateLimitSpec` even
- * though the device-grant schema validates them: a hand-built config never
- * passed that schema, and a limit invented from `0` or `"5"` is worse than
- * the adapter's own default.
+ * A key that is not given (the section absent, the device-grant package not
+ * loaded) seeds nothing. A key that is given is judged by the one predicate
+ * even though the device-grant schema validates it: a hand-built config never
+ * passed that schema, and it is still a configuration someone wrote. One the
+ * predicate refuses (`0`, `"5"`, a window past the Date range) is a
+ * `RangeError` naming `oauth.deviceAuthorization.rateLimit`, whether or not an
+ * explicit entry would have won; it used to be skipped, and the route ran on
+ * the adapter's default instead.
  *
  * @param limits  The adapter's own configured limits.
  * @param config  The full application config (only
@@ -83,15 +87,13 @@ export const resolveDeviceVerificationLimitSpec = (
 	config: unknown,
 ): Record<string, RateLimitSpec> => {
 	const result: Record<string, RateLimitSpec> = { ...limits };
+	const given = (
+		config as { oauth?: { deviceAuthorization?: { rateLimit?: unknown } } } | undefined
+	)?.oauth?.deviceAuthorization?.rateLimit;
+	if (given === undefined) return result;
+	const spec = requireUsableConfiguredRateLimitSpec("oauth.deviceAuthorization.rateLimit", given);
 	if (result[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX] !== undefined) return result;
 
-	const spec = (config as { oauth?: { deviceAuthorization?: { rateLimit?: unknown } } } | undefined)
-		?.oauth?.deviceAuthorization?.rateLimit;
-	if (!isDeviceVerificationRateLimitSpec(spec)) return result;
-
-	result[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX] = {
-		limit: spec.limit,
-		windowSeconds: spec.windowSeconds,
-	};
+	result[DEVICE_VERIFICATION_RATE_LIMIT_PREFIX] = spec;
 	return result;
 };

@@ -15,7 +15,7 @@
  */
 
 import type { RateLimitSpec } from "./types.mjs";
-import { isUsableRateLimitSpec } from "./usableSpec.mjs";
+import { requireUsableConfiguredRateLimitSpec } from "./usableSpec.mjs";
 
 /**
  * The key prefix `POST /oauth/webauthn/authentication/options` limits under
@@ -42,9 +42,12 @@ export const WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX = "webauthn-authe
  * `resolveDeviceVerificationLimitSpec` (#448): one config key is the source
  * of truth, seeded into each adapter unless the operator declared the prefix
  * explicitly. An explicit entry is a statement about this adapter and wins.
- * A spec the one predicate (`isUsableRateLimitSpec`) does not accept is not
- * seeded, as the other two seeds do not seed one; the WebAuthn schema refuses
- * it at the config boundary.
+ * A key that is not given (no `webauthn` section, the package not loaded)
+ * seeds nothing. A key that is given but that the one predicate refuses is a
+ * `RangeError` naming `webauthn.rateLimit.authenticationOptions`, as the
+ * other two seeds refuse theirs: the WebAuthn schema refuses it at the config
+ * boundary, and a hand-built config that never passed it is still a
+ * configuration someone wrote.
  *
  * @param limits  The adapter's own configured limits.
  * @param config  The full application config (only
@@ -55,16 +58,16 @@ export const resolveWebAuthnAuthenticationOptionsLimitSpec = (
 	config: unknown,
 ): Record<string, RateLimitSpec> => {
 	const result: Record<string, RateLimitSpec> = { ...limits };
-	if (result[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX] !== undefined) return result;
-
-	const spec = (
+	const given = (
 		config as { webauthn?: { rateLimit?: { authenticationOptions?: unknown } } } | undefined
 	)?.webauthn?.rateLimit?.authenticationOptions;
-	if (!isUsableRateLimitSpec(spec)) return result;
+	if (given === undefined) return result;
+	const spec = requireUsableConfiguredRateLimitSpec(
+		"webauthn.rateLimit.authenticationOptions",
+		given,
+	);
+	if (result[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX] !== undefined) return result;
 
-	result[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX] = {
-		limit: spec.limit,
-		windowSeconds: spec.windowSeconds,
-	};
+	result[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX] = spec;
 	return result;
 };

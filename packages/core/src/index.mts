@@ -649,7 +649,11 @@ export type {
 	RateLimiterFactory,
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";
-export { assertUsableRateLimitSpecs, isUsableRateLimitSpec } from "./ratelimit/usableSpec.mjs";
+export {
+	assertUsableRateLimitSpecs,
+	isUsableRateLimitSpec,
+	requireUsableConfiguredRateLimitSpec,
+} from "./ratelimit/usableSpec.mjs";
 export {
 	resolveWebAuthnAuthenticationOptionsLimitSpec,
 	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX,
