@@ -705,6 +705,119 @@ describe("POST /oauth/federation/:name/token", () => {
 		});
 	});
 
+	describe("refresh: the token store refuses to write the refreshed record", () => {
+		/**
+		 * What ioredis rejects a store write with: a ReplyError carrying the
+		 * command it refused as `command: { name, args }`. Under
+		 * `encryption.mode = "allow-plaintext"` the SET's arguments are the
+		 * refreshed token record.
+		 */
+		const storeWriteError = (): Error =>
+			Object.assign(new Error("OOM command not allowed when used memory > 'maxmemory'."), {
+				name: "ReplyError",
+				command: {
+					name: "set",
+					args: [
+						"federation-token:sid-1:google",
+						JSON.stringify({
+							accessToken: "at-must-never-reach-a-log",
+							refreshToken: "rt-must-never-reach-a-log",
+						}),
+					],
+				},
+			});
+
+		const recordingLogger = () => {
+			const lines: string[] = [];
+			const walk = (value: unknown, seen = new WeakSet<object>()): unknown => {
+				if (typeof value !== "object" || value === null) return value;
+				if (seen.has(value)) return "[circular]";
+				seen.add(value);
+				const out: Record<string, unknown> = {};
+				for (const key of Object.getOwnPropertyNames(value)) {
+					out[key] = walk((value as Record<string, unknown>)[key], seen);
+				}
+				return out;
+			};
+			const record =
+				(level: string) =>
+				(...args: unknown[]): void => {
+					lines.push(JSON.stringify({ level, args: walk(args) }));
+				};
+			const logger: Logger = {
+				trace: record("trace"),
+				debug: record("debug"),
+				info: record("info"),
+				warn: record("warn"),
+				error: record("error"),
+				fatal: record("fatal"),
+				child: () => logger,
+			};
+			return { logger, lines };
+		};
+
+		const expired = { ...baseFedTokens, expiresAt: new Date(Date.now() - 1000) };
+
+		it("logs a failed update of a refreshed record without the store's command", async () => {
+			const { logger, lines } = recordingLogger();
+			const provider: FederationProvider & {
+				refreshToken: (rt: string) => Promise<{ accessToken: string; expiresAt: Date }>;
+			} = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({
+					accessToken: "at-must-never-reach-a-log",
+					refreshToken: "rt-must-never-reach-a-log",
+					expiresAt: new Date(Date.now() + 3_600_000),
+				}),
+			};
+			const app = buildApp({
+				fedTokenStore: makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expired),
+					update: vi.fn().mockRejectedValue(storeWriteError()),
+				}),
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+				logger,
+			});
+			const res = await postFedToken(app, "google", await mintAccessToken());
+			expect(res.status).toBe(503);
+			const failure = lines.find((line) => line.includes("federationTokenStore.update failed"));
+			expect(failure).toContain("ReplyError");
+			for (const line of lines) {
+				expect(line).not.toContain("at-must-never-reach-a-log");
+				expect(line).not.toContain("rt-must-never-reach-a-log");
+			}
+		});
+
+		it("logs a failed update that was keeping a rotated refresh token without the store's command", async () => {
+			const { logger, lines } = recordingLogger();
+			// A refresh that answers no usable access token but rotates the
+			// refresh token: the route keeps the rotated one, and that write fails.
+			const provider: FederationProvider & {
+				refreshToken: (rt: string) => Promise<{ refreshToken: string }>;
+			} = {
+				...federationBase("google"),
+				refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rt-must-never-reach-a-log" }),
+			};
+			const app = buildApp({
+				fedTokenStore: makeFedTokenStore({
+					get: vi.fn().mockResolvedValue(expired),
+					update: vi.fn().mockRejectedValue(storeWriteError()),
+				}),
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+				logger,
+			});
+			await postFedToken(app, "google", await mintAccessToken());
+			const failure = lines.find((line) =>
+				line.includes("federationTokenStore.update failed while keeping a rotated refresh token"),
+			);
+			expect(failure).toContain("ReplyError");
+			for (const line of lines) {
+				expect(line).not.toContain("at-must-never-reach-a-log");
+				expect(line).not.toContain("rt-must-never-reach-a-log");
+			}
+		});
+	});
+
 	describe("refresh: the adapter's library refuses the refresh answer", () => {
 		it("logs the failure without the refresh answer the library carries on the error", async () => {
 			// What openid-client 6 throws for a token response it cannot parse:
