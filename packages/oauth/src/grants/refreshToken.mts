@@ -496,7 +496,11 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				let session: Awaited<ReturnType<typeof deps.userSessionStore.get>>;
 				try {
 					session = await deps.userSessionStore.get(sid);
-				} catch {
+				} catch (err) {
+					logger?.error(
+						{ store: "user_session", err: loggableError(err) },
+						"refresh_token_store_unavailable",
+					);
 					return {
 						result: {
 							status: 503,
@@ -648,7 +652,17 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						newFamilyId,
 						newRefreshExp * 1000,
 					);
-				} catch {
+				} catch (err) {
+					logger?.error(
+						{
+							store: "refresh_token_family",
+							step: "rotate",
+							familyId: newFamilyId,
+							clientId: authenticatedClientId,
+							err: loggableError(err),
+						},
+						"refresh_token_store_unavailable",
+					);
 					return {
 						result: {
 							status: 503,
@@ -738,7 +752,17 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 							}
 							try {
 								await deps.refreshTokenFamilyRevocation.revokeFamily(newFamilyId);
-							} catch {
+							} catch (err) {
+								logger?.error(
+									{
+										store: "refresh_token_family",
+										step: "revoke",
+										familyId: newFamilyId,
+										clientId: authenticatedClientId,
+										err: loggableError(err),
+									},
+									"refresh_token_store_unavailable",
+								);
 								return {
 									result: {
 										status: 503,
