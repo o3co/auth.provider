@@ -40,6 +40,16 @@
  * `user-sessions/retention.mts`, for the same reason: a revocation boundary
  * that expires while what it revoked is still accepted is not one.
  *
+ * The allowance also bounds a race: the check-then-mint window. A grant finds
+ * the family live — a token exchange's family check, a refresh's rotation —
+ * and then mints. If the revocation commits in between, the token's `exp` is
+ * measured from the grant's now, not the revocation's. The verifier's
+ * tolerance is spent on that token's own `exp`, so what covers the gap is
+ * `DEFAULT_SUBJECT_REVOCATION_SKEW_MS` plus the rounding second. The record
+ * still outlives a token minted up to about two seconds after the
+ * revocation committed. A grant slower than that between its check and its
+ * mint leaves its token accepted past the record, by the difference.
+ *
  * What this cannot know is what was issued before an operator lowered the
  * access-token maximum; a deployment that lowers it keeps revoked families
  * for the old one only as long as the old tokens could live. Nor can it

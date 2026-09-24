@@ -381,6 +381,13 @@ grant_type=client_credentials
 
 その集合の外の audience、未知または期限切れのトークン、jti の denylist かサブジェクトのウォーターマークで失効したトークン、別の issuer のトークンは、どれも `active: false` になる。判定できなかったトークン — キーストア、denylist、ウォーターマークが答えなかった — は、どちらの経路でも代わりに `503 temporarily_unavailable` になる。`active: false` はトークンがアクティブでないと言い、そう告げられたリソースサーバーはクライアントを `invalid_token` で拒否し、まったく問題ないかもしれないトークンを取り替えさせるからである。503 は何も保証せず、それでもフェイルクローズである。`introspect.store_unavailable` として監査し、`token_verification_unavailable` としてログに出す。**Bearer の自己イントロスペクション**経路 — ボディの `token` と同じ値を `Authorization: Bearer <token>` で送る — は呼び出し元クライアントの ID を確立しないので、固定する集合が無い。検証器は集合をでっち上げずに、その欠落を `jwt_verify_aud_skipped` として記録する。
 
+**イントロスペクションを呼ぶリソースサーバーやプロキシ**は、`200` 以外の答え — この `503`、ほかの 5xx、タイムアウト — を `active: false` ではなく「不明」として読むべきである:
+
+- **キャッシュしない。** キャッシュした否定は障害より長く残り、肯定はそもそも返されていない。
+- **自分のクライアントには 5xx（`502` か `503`）で答える。** `401 invalid_token` ではない。トークンはまったく問題ないかもしれず、`401` はクライアントにそれを捨ててやり直させる。
+
+[auth.proxy](https://github.com/o3co/auth.proxy) の validation モードはすでにそう振る舞う。2xx でないイントロスペクションの答えはキャッシュされず、クライアントには `502 Bad Gateway` が返る。このリリースより前は障害が `200 active: false` で返り、auth.proxy はそれを最大 30 秒キャッシュして `401` で答えていた。
+
 ### 予約文字を含む `client_id` は HTTP Basic でパーセントエンコードする
 
 RFC 6749 §2.3.1 は、`id:secret` の組を `Authorization: Basic` ヘッダーへ base64 エンコードする**前に**、クライアント ID と秘密を `application/x-www-form-urlencoded` でエンコードすることを求めている。リソース URI はこれを細かい話ではなく必須にするケースである: `:` と `/` を含み、`:` はヘッダーを分割するフィールド区切りである。

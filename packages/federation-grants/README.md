@@ -289,8 +289,10 @@ alongside it wherever the failure has a reason to give — `grant_not_found`,
 carry the code alone. Both fields are **identifiers, not prose**, for every
 answer **this package** owns: a client may switch on them, and the wording may
 be improved without breaking one. What these routes inherit — client
-authentication's `401`s and the shared rate limiter's `503` — still carries
-that middleware's own wording, and it is the same wording every other
+authentication's `401`s, its `503 temporarily_unavailable` with "client
+repository unavailable" when the client repository cannot answer (not a
+`401`: the client did nothing wrong), and the shared rate limiter's `503` —
+still carries that middleware's own wording, and it is the same wording every other
 throttled, client-authenticated route in this provider gives; rewriting it
 here would make one failure read two ways depending on which route met it.
 

@@ -387,6 +387,13 @@ The rule matters the moment RFC 8707 resource indicators are in use. Every acces
 
 An audience outside that set, an unknown or expired token, one revoked through the jti denylist or the subject watermark, and one from another issuer all answer `active: false`. A token that could not be judged — the keystore, the denylist or the watermark did not answer — is `503 temporarily_unavailable` instead, on both paths: `active: false` says the token is not active, and a resource server told so refuses its client with `invalid_token`, which sends it to replace a token that may be perfectly good. The 503 vouches for nothing and is still fail-closed; it is audited as `introspect.store_unavailable` and logged as `token_verification_unavailable`. The **bearer self-introspection** path — `Authorization: Bearer <token>` where the body `token` is that same value — establishes no calling-client identity, so there is no set to pin against; the verifier records the gap as `jwt_verify_aud_skipped` rather than inventing one.
 
+**A resource server or proxy that introspects** should read any answer other than `200` — this `503`, another 5xx, a timeout — as *unknown*, never as `active: false`:
+
+- **Do not cache it.** A cached negative would outlast the outage, and a cached positive was never given.
+- **Answer your own client with a 5xx** (`502` or `503`), not `401 invalid_token`. The token may be perfectly good, and a `401` sends the client to throw it away and start again.
+
+[auth.proxy](https://github.com/o3co/auth.proxy) already behaves this way in validation mode. A non-2xx introspection answer is not cached, and its client gets `502 Bad Gateway`. Before this release, an outage came back as `200 active: false`, which auth.proxy cached for up to 30 seconds and answered with `401`.
+
 ### A `client_id` with reserved characters must be percent-encoded in HTTP Basic
 
 RFC 6749 §2.3.1 requires the client id and secret to be `application/x-www-form-urlencoded`-encoded **before** the `id:secret` pair is base64-encoded into the `Authorization: Basic` header. A resource URI is the case that makes this mandatory rather than pedantic: it contains `:` and `/`, and `:` is the field separator the header is split on.
