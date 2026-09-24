@@ -172,6 +172,21 @@ describe("createGithubProvider", () => {
 		expect(profile.expiresAt).toBeNull();
 	});
 
+	it("reports GitHub's token type, and no lifetime for an OAuth App token", async () => {
+		// The same reading every bundled adapter gives through core's
+		// federationTokenSnapshot: the lifetime as sent, `null` when none was.
+		const profile = await exchange();
+		expect(profile.tokenType).toBe("bearer");
+		expect(profile.expiresIn).toBeNull();
+	});
+
+	it("reports the lifetime GitHub sent for an expiring user token", async () => {
+		github.token.body = { ...githubTokenResponse(), expires_in: 28800 };
+		const profile = await exchange();
+		expect(profile.expiresIn).toBe(28800);
+		expect(profile.tokenType).toBe("bearer");
+	});
+
 	it("returns expiresAt from expires_in, and still no refresh token, for an expiring user token", async () => {
 		github.token.body = {
 			...githubTokenResponse(),

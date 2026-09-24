@@ -94,6 +94,21 @@ describe("createFakeIdp", () => {
 		expect(await refused.json()).toEqual({ error: "invalid_client" });
 	});
 
+	it("lays codeAnswer and refreshAnswer over their answers, removing what they set to undefined", async () => {
+		const idp = await createFakeIdp(ENDPOINTS);
+		idp.codeAnswer = { expires_in: undefined, scope: "openid email" };
+		idp.refreshAnswer = { refresh_token: undefined, token_type: "DPoP" };
+		const code = await (await idp.fetch(ENDPOINTS.tokenEndpoint, post({}))).json();
+		expect("expires_in" in code).toBe(false);
+		expect(code.scope).toBe("openid email");
+		const refresh = await (
+			await idp.fetch(ENDPOINTS.tokenEndpoint, post({ grant_type: "refresh_token" }))
+		).json();
+		expect("refresh_token" in refresh).toBe(false);
+		expect(refresh.token_type).toBe("DPoP");
+		expect(refresh.expires_in).toBe(1800);
+	});
+
 	it("leaves the id_token out when told to", async () => {
 		const idp = await createFakeIdp(ENDPOINTS);
 		idp.omitIdToken = true;

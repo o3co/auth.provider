@@ -532,18 +532,6 @@ describe("exchangeCode", () => {
 		await expect(p.exchangeCode(exchangeArgs)).rejects.toThrow(/sub/i);
 	});
 
-	it("falls back to a one-hour expiry when Apple sends no expires_in", async () => {
-		mockAuthorizationCodeGrant.mockResolvedValueOnce({
-			...appleTokenResponse(),
-			expires_in: undefined,
-		});
-		const p = createAppleProvider(baseConfig);
-		const profile = await p.exchangeCode(exchangeArgs);
-		const seconds = Math.round(((profile.expiresAt as Date).getTime() - Date.now()) / 1000);
-		expect(seconds).toBeGreaterThan(3500);
-		expect(seconds).toBeLessThanOrEqual(3600);
-	});
-
 	it("leaves isPrivateEmail absent when there is neither a marker nor an email to judge", async () => {
 		mockAuthorizationCodeGrant.mockResolvedValueOnce(
 			appleTokenResponse({ email: undefined, is_private_email: undefined }),

@@ -73,12 +73,29 @@ export interface FakeIdp {
 	userinfoClaims: Record<string, unknown>;
 	tokenStatus: number;
 	accessToken: string;
+	/**
+	 * Laid over the code exchange's answer; a value of `undefined` removes the
+	 * field. Lets a test make the answer omit `expires_in`, carry a `scope`,
+	 * or carry a field of the wrong shape.
+	 */
+	codeAnswer: Record<string, unknown>;
+	/** Laid over the refresh answer, as `codeAnswer` is over the code exchange's. */
+	refreshAnswer: Record<string, unknown>;
 	/** Replace the signing key; the JWKS then holds only the new one. */
 	rotateKey(): Promise<string>;
 	currentKid(): string;
 	/** Requests to an endpoint, compared on origin and path (a query string is ignored). */
 	requestsTo(endpoint: string): FakeIdpRequest[];
 }
+
+/** The defaults with the overlay laid over them, and every field the overlay set to `undefined` gone. */
+const overlaid = (
+	defaults: Record<string, unknown>,
+	overlay: Record<string, unknown>,
+): Record<string, unknown> =>
+	Object.fromEntries(
+		Object.entries({ ...defaults, ...overlay }).filter(([, value]) => value !== undefined),
+	);
 
 function json(body: unknown, status = 200): Response {
 	return new Response(JSON.stringify(body), {
@@ -130,6 +147,8 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		userinfoClaims: {},
 		tokenStatus: 200,
 		accessToken: "at-1",
+		codeAnswer: {},
+		refreshAnswer: {},
 		fetch: undefined as unknown as typeof fetch,
 		rotateKey: newKey,
 		currentKid: () => signer.kid,
@@ -192,21 +211,31 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 			if (body?.get("grant_type") === "refresh_token") {
 				// Google and Apple both return a fresh id_token on refresh; the
 				// library verifies it like the login's when it is there.
-				return json({
-					access_token: "at-refreshed",
-					token_type: "Bearer",
-					expires_in: 1800,
-					refresh_token: "rt-2",
-					...(idp.omitIdToken ? {} : { id_token: await mintIdToken({ nonce: false }) }),
-				});
+				return json(
+					overlaid(
+						{
+							access_token: "at-refreshed",
+							token_type: "Bearer",
+							expires_in: 1800,
+							refresh_token: "rt-2",
+							...(idp.omitIdToken ? {} : { id_token: await mintIdToken({ nonce: false }) }),
+						},
+						idp.refreshAnswer,
+					),
+				);
 			}
-			return json({
-				access_token: idp.accessToken,
-				token_type: "Bearer",
-				expires_in: 3600,
-				refresh_token: "rt-1",
-				...(idp.omitIdToken ? {} : { id_token: await mintIdToken() }),
-			});
+			return json(
+				overlaid(
+					{
+						access_token: idp.accessToken,
+						token_type: "Bearer",
+						expires_in: 3600,
+						refresh_token: "rt-1",
+						...(idp.omitIdToken ? {} : { id_token: await mintIdToken() }),
+					},
+					idp.codeAnswer,
+				),
+			);
 		}
 		if (endpoints.userinfo !== undefined && where === endpoints.userinfo) {
 			return json({

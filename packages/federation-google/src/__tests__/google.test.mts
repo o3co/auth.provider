@@ -95,7 +95,8 @@ describe("createGoogleProvider on openid-client", () => {
 		// Forwarded verbatim: what matters downstream is that the field is there.
 		["an explicitly empty scope, which `optionalString` would drop", "", ""],
 		["nothing usable, which is still an answer", "  ", "  "],
-		["a non-string, which is still an answer", 42, ""],
+		// A scope that is not a string never reaches the adapter: openid-client
+		// refuses the answer first (google.token-snapshot.test.mts).
 		["no scope field at all", undefined, undefined],
 	])("forwards what Google says about scope: %s (#647)", async (_label, answered, expected) => {
 		// The route reads an ABSENT scope as "as requested" (RFC 6749 section 3.3)
