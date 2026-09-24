@@ -454,6 +454,14 @@ describe("a caught error reaches a logger only through loggableError", () => {
 				`app.use((failure: unknown, _req: Request<{ id: string }, unknown>, res: Response<unknown, Record<string, unknown>>, next: (err?: unknown) => void) => { console.error(failure); });`,
 			],
 			[
+				"an Express error handler with a return type",
+				`app.use((failure, req, res, next): void => { logger.error({ err: failure }, "unhandled"); });`,
+			],
+			[
+				"an Express error handler written as a method",
+				`class Handler { handle(failure: unknown, req: Request, res: Response, next: NextFunction) { logger.error({ err: failure }, "unhandled"); } }`,
+			],
+			[
 				"a projection accepted in another file",
 				`try { x() } catch (err) { log.error(unexpectedErrorFields(err), "unexpected"); }`,
 			],
@@ -510,6 +518,14 @@ describe("a caught error reaches a logger only through loggableError", () => {
 			[
 				"an Express error handler with generic parameter types, projected",
 				`app.use((err: unknown, req: Request<P, B>, res: Response, next: NextFunction) => { logger.error({ err: loggableError(err) }, "unhandled"); });`,
+			],
+			[
+				"a four-argument call whose last argument is `next`, which binds nothing",
+				`const chain = compose(first, second, third, next); logger.info({ first }, "composed");`,
+			],
+			[
+				"a four-argument call with a type argument, which binds nothing",
+				`const chain = compose<Request, Response>(first, second, third, next); logger.info({ first }, "composed");`,
 			],
 			[
 				"a middleware's request, which is not an error",
