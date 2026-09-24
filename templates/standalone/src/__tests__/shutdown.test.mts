@@ -238,13 +238,16 @@ describe("installGracefulShutdown (#290)", () => {
 		// the federation-grant drain waited on it, whose ioredis reply error
 		// carries the write, a rotated upstream credential included. The line
 		// carries the projection, never those.
-		const refused = Object.assign(new Error("READONLY You can't write against a read only replica."), {
-			name: "ReplyError",
-			command: {
-				name: "set",
-				args: ["fg:credential:grant-1", '{"refresh_token":"1//0g-UPSTREAM-S3CRET"}'],
+		const refused = Object.assign(
+			new Error("READONLY You can't write against a read only replica."),
+			{
+				name: "ReplyError",
+				command: {
+					name: "set",
+					args: ["fg:credential:grant-1", '{"refresh_token":"1//0g-UPSTREAM-S3CRET"}'],
+				},
 			},
-		});
+		);
 		const { logger, lines } = serialiseEverythingLogger();
 		const { exit, signals, finishDraining } = install({
 			logger,
