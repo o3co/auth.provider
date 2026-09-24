@@ -5,6 +5,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	createMemoryReplaySeenSet,
+	DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS,
 	DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL,
 } from "../adapters/memory.mjs";
 import { runReplaySeenSetContract } from "./adapters.contract.mjs";
@@ -147,6 +148,87 @@ describe("createMemoryReplaySeenSet — bounded growth", () => {
 			// The default interval applied: the thousandth write swept.
 			expect(set.size).toBe(1);
 			vi.useRealTimers();
+		}
+	});
+});
+
+/*
+ * A sweep scans the whole map, and a write count alone does not bound how
+ * often that happens: DPoP writes a record on every request at every
+ * protected resource, so at 1000 requests a second a 1000-write interval
+ * is one full scan a second — of about 300,000 records at the default
+ * 300-second replay TTL. A time floor caps the scans at one per interval
+ * whatever the write rate, for a resident set larger by at most the
+ * records that expire within it.
+ */
+describe("createMemoryReplaySeenSet — sweeps are also bounded in time", () => {
+	const fill = async (
+		set: ReturnType<typeof createMemoryReplaySeenSet>,
+		count: number,
+		ttlMs: number,
+		prefix: string,
+	) => {
+		for (let i = 0; i < count; i += 1) {
+			await set.markSeen("scope-A", `${prefix}-${i}`, Date.now() + ttlMs);
+		}
+	};
+
+	it("sweeps at most once per minSweepIntervalMs, however fast the writes come", async () => {
+		vi.useFakeTimers();
+		const set = createMemoryReplaySeenSet({ sweepInterval: 5, minSweepIntervalMs: 1_000 });
+		// The fifth write sweeps (nothing has expired yet).
+		await fill(set, 5, 10, "early");
+		vi.advanceTimersByTime(20);
+		// Five more writes reach the interval again, but inside the floor: the
+		// five expired records are still resident.
+		await fill(set, 5, 600_000, "burst");
+		expect(set.size).toBe(10);
+		// Once the floor has passed, the next write sweeps them.
+		vi.advanceTimersByTime(1_000);
+		await set.markSeen("scope-A", "late", Date.now() + 600_000);
+		expect(set.size).toBe(6);
+	});
+
+	it("keeps counting writes through the floor, so the first write after it sweeps", async () => {
+		vi.useFakeTimers();
+		const set = createMemoryReplaySeenSet({ sweepInterval: 3, minSweepIntervalMs: 1_000 });
+		await fill(set, 3, 10, "a"); // sweeps at the third write
+		vi.advanceTimersByTime(20);
+		await fill(set, 7, 600_000, "b"); // interval reached twice over, inside the floor
+		expect(set.size).toBe(10);
+		vi.advanceTimersByTime(1_000);
+		await set.markSeen("scope-A", "c", Date.now() + 600_000);
+		expect(set.size).toBe(8);
+	});
+
+	it("has a default floor of ten seconds", async () => {
+		expect(DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS).toBe(10_000);
+		vi.useFakeTimers();
+		const set = createMemoryReplaySeenSet({ sweepInterval: 2 });
+		await fill(set, 2, 10, "a"); // first sweep
+		vi.advanceTimersByTime(9_000);
+		await fill(set, 2, 600_000, "b");
+		expect(set.size).toBe(4);
+		vi.advanceTimersByTime(1_000);
+		await set.markSeen("scope-A", "c", Date.now() + 600_000);
+		expect(set.size).toBe(3);
+	});
+
+	it("takes a floor of zero as no floor, and ignores a nonsensical one", async () => {
+		vi.useFakeTimers();
+		const unfloored = createMemoryReplaySeenSet({ sweepInterval: 2, minSweepIntervalMs: 0 });
+		await fill(unfloored, 2, 10, "a");
+		vi.advanceTimersByTime(20);
+		await fill(unfloored, 2, 600_000, "b");
+		expect(unfloored.size).toBe(2);
+
+		for (const bad of [-1, 1.5, Number.NaN]) {
+			const set = createMemoryReplaySeenSet({ sweepInterval: 2, minSweepIntervalMs: bad });
+			await fill(set, 2, 10, "a");
+			vi.advanceTimersByTime(20);
+			await fill(set, 2, 600_000, "b");
+			// The default ten-second floor applied: the expired two remain.
+			expect(set.size).toBe(4);
 		}
 	});
 });
