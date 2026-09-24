@@ -44,7 +44,7 @@ import { GrantRegistry } from "@o3co/auth-provider-core/testing";
 import express, { type ErrorRequestHandler, type RequestHandler, type Router } from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { createOAuthRouter } from "#/routes.mjs";
+import { createOAuthRouter, oauthRoutePaths } from "#/routes.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const config = {
@@ -181,6 +181,12 @@ describe("the OAuth router's body parsing", () => {
 		);
 		const router = await routerWith(surfaces);
 		const mounted = new Set(routePaths(router));
+		// The list the parsers are scoped to is exactly the mounted set: a
+		// path left in it without its route — a stale entry — fails here.
+		const on = surfaces === "all";
+		expect(new Set(oauthRoutePaths({ logout: on, federationToken: on, consent: on }))).toEqual(
+			mounted,
+		);
 		if (surfaces === "none") {
 			for (const conditional of ["/logout", "/consent", "/federation/:name/token"]) {
 				expect(mounted.has(conditional), conditional).toBe(false);
@@ -212,5 +218,29 @@ describe("the OAuth router's body parsing", () => {
 				expect(res.body, path).toEqual({ raw: "a=1", parsedBefore: null });
 			}
 		}
+	});
+
+	it("mounts neither the consent route nor its parser when a JS caller passes null for both stores", async () => {
+		// `null` is not a store. Treating it as wired would scope the parser to
+		// /consent while the route itself is not mounted, and a deployment's
+		// own /oauth/consent would receive a body the OAuth router had read.
+		const { router } = await createOAuthRouter(express, {
+			registry: new GrantRegistry(),
+			config,
+			clientRepository,
+			codeRepository,
+			keyStore: createSymmetricKeyStore("body-parsing-secret.at-least-32-bytes"),
+			consentStore: null as never,
+			pendingConsentStore: null as never,
+			logger: createMockLogger(),
+		});
+		expect(routePaths(router)).not.toContain("/consent");
+
+		const app = express();
+		app.use("/oauth", router);
+		app.post("/oauth/consent", readsItsOwnBody);
+		const res = await request(app).post("/oauth/consent").type("form").send("a=1");
+		expect(res.status).toBe(200);
+		expect(res.body).toEqual({ raw: "a=1", parsedBefore: null });
 	});
 });
