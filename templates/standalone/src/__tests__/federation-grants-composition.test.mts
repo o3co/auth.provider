@@ -257,9 +257,10 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 		);
 		expect(installed).not.toContain("redis-federation-grant-store");
 		expect(installed).not.toContain("redis-federation-grant-intent-store");
-		// The routes precede oauthModule's body parsers (the package README's
-		// mounting-order rule), and the browser half sits after the session
-		// middleware by its own `after`.
+		// Listed ahead of oauthModule, as the template writes them — the
+		// template's choice, since each module parses its own bodies and the
+		// order no longer changes that; the browser half sits after the
+		// session middleware by its own `after`.
 		expect(installed.indexOf("federation-grants")).toBeLessThan(installed.indexOf("oauth"));
 
 		handleRef = await boot(config, true);

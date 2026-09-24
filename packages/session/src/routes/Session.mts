@@ -345,8 +345,10 @@ export const createRouter = (
 	};
 
 	router
-		.use(express.json())
-		.use(express.urlencoded({ extended: false }))
+		// This router's own paths, exactly: it is mounted at `/session`, a prefix
+		// other modules mount routes under too, and a `.use` parser would read
+		// their bodies as well.
+		.all(["/csrf", "/login", "/logout"], express.json(), express.urlencoded({ extended: false }))
 		// Where a browser gets its first token. Safe method, so it is not itself
 		// behind the guard — it mints material, it does not act on any.
 		.get("/csrf", createCsrfIssueHandler(csrfProtection))

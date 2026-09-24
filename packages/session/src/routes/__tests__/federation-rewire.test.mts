@@ -21,6 +21,9 @@ const stubRouter = {
 	use(..._args: unknown[]) {
 		return this;
 	},
+	all(..._args: unknown[]) {
+		return this;
+	},
 	get(..._args: unknown[]) {
 		return this;
 	},
