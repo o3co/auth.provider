@@ -26,7 +26,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSubjectSessionIndex } from "../src/subjectSessionIndex.mjs";
 import { runSubjectSessionIndexContract } from "./subjectSessionIndex.contract.mjs";
-import { serverClock, testRedis } from "./support/redis.mjs";
+import { aheadOfServer, serverPasses, testRedis } from "./support/redis.mjs";
 
 let raw: Redis;
 
@@ -49,23 +49,13 @@ runSubjectSessionIndexContract(async () => {
 	});
 });
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/** The server's clock: what the prune in `listSids` compares scores against. */
-const serverNow = serverClock(() => raw);
-
 /**
- * An expiry a second ahead of whichever clock is later: the host's, which
- * `addSid` checks it against, and the server's, which ages it out. The read
- * that follows the write lands well inside it however loaded the run is.
+ * An expiry a second ahead of whichever clock is later — the host's, which
+ * `addSid` checks it against, and the server's, which the prune in `listSids`
+ * ages it out by — and the bounded wait for the server's clock to pass it.
  */
-const aheadOfBoth = async (): Promise<Date> =>
-	new Date(Math.max(Date.now(), await serverNow()) + 1_000);
-
-/** Resolves once the server's clock has passed `at` — waited out there, not slept on the host. */
-const serverPasses = async (at: Date): Promise<void> => {
-	while ((await serverNow()) <= at.getTime()) await sleep(20);
-};
+const aheadOfBoth = aheadOfServer(() => raw);
+const serverPassed = (at: Date): Promise<void> => serverPasses(() => raw)(at.getTime());
 
 describe("SubjectSessionIndex — Redis-specific behaviour (#321)", () => {
 	const index = (prefix: string) =>
@@ -86,7 +76,7 @@ describe("SubjectSessionIndex — Redis-specific behaviour (#321)", () => {
 		await idx.addSid("u1", "short", expiresAt);
 		await idx.addSid("u1", "long", new Date(expiresAt.getTime() + 600_000));
 		expect([...(await idx.listSids("u1"))].sort()).toEqual(["long", "short"]);
-		await serverPasses(expiresAt);
+		await serverPassed(expiresAt);
 		expect(await idx.listSids("u1")).toEqual(["long"]);
 	});
 
@@ -96,7 +86,7 @@ describe("SubjectSessionIndex — Redis-specific behaviour (#321)", () => {
 		const idx = index("t321i:reclaim:");
 		const expiresAt = await aheadOfBoth();
 		await idx.addSid("u2", "s1", expiresAt);
-		await serverPasses(expiresAt);
+		await serverPassed(expiresAt);
 		expect(await idx.listSids("u2")).toEqual([]);
 		expect(await raw.exists("t321i:reclaim:u2")).toBe(0);
 	});
