@@ -42,7 +42,8 @@
  * What it does not see (known holes, left to review):
  * - an error that reaches a log call under a name none of those bound in
  *   that file: a callback parameter or an awaited value not named like an
- *   error (`(failure) => …`, `const outcome = await …`), a re-bound value
+ *   error (`(failure) => …`, `(e) => …` outside a `.catch` or an `error`
+ *   listener, `const outcome = await …`), a re-bound value
  *   (`const failure = err`), an `allSettled` result's `reason`, a helper's
  *   parameter that it logs;
  * - an error flattened into a value before the call (`const reason =
@@ -76,8 +77,12 @@ const LOGGER_CALL =
 
 const IDENTIFIER = "[A-Za-z_$][\\w$]*";
 
-/** A name that reads as an error: what a node-style callback or an awaited helper's result is called. */
-const ERROR_NAME = "(?:err|error|e|[a-z][A-Za-z]*Err|[a-z][A-Za-z]*Error)";
+/**
+ * A name that reads as an error: what a node-style callback's first parameter
+ * is called. Not a bare `e`, which `.map((e) => …)` and `.filter((e) => …)`
+ * use for an element; `catch (e)` and `.catch((e) => …)` bind any name.
+ */
+const ERROR_NAME = "(?:err|error|[a-z][A-Za-z]*Err|[a-z][A-Za-z]*Error)";
 
 /**
  * Where a caught error is bound: `catch (x)`, `.catch(…x…)`,
