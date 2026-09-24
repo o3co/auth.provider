@@ -26,6 +26,7 @@ import type {
 	BootstrapMap,
 	ClientRepository,
 	DeviceCodeStore,
+	Module,
 	RateLimiter,
 	RateLimitSpec,
 } from "@o3co/auth-provider-core";
@@ -140,6 +141,22 @@ const ENABLED = {
 };
 
 describe("deviceGrantModule — boot", () => {
+	it("refuses the factory listed uncalled — the pre-factory form, `modules: [deviceGrantModule]`", async () => {
+		// The compiler does not catch it: a function has a `name`, the one
+		// field `Module` requires. Listed that way the module contributed
+		// nothing and boot succeeded, with no grant, no route and none of the
+		// refusals below. Core refuses any such entry.
+		await expect(
+			createApp({
+				modules: [deviceGrantModule as unknown as Module],
+				bootstrapComponents: makeBoot({ deviceAuthorization: ENABLED }),
+			}),
+		).rejects.toMatchObject({
+			reason: "module-factory-not-called",
+			message: expect.stringMatching(/deviceGrantModule\(\{ config \}\)/),
+		});
+	});
+
 	it("boots disabled without any of the required settings", async () => {
 		// Installing the package must not turn on a grant, and a deployment
 		// that leaves it off must never trip settings it does not use.
