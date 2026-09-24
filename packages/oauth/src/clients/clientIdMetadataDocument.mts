@@ -81,6 +81,7 @@ import {
 	isLoopbackHostname,
 	isSpecialUseAddress,
 	type Logger,
+	loggableError,
 	type PublicClient,
 } from "@o3co/auth-provider-core";
 
@@ -546,8 +547,11 @@ export function createClientIdMetadataDocumentResolver(
 			return client;
 		} catch (err) {
 			const rejected = err instanceof DocumentRejected;
+			// The rejection's own text, or a fetch failure's projection: never a
+			// thrown value as it came (loggableError).
+			const projected = loggableError(err);
 			logger?.warn(
-				{ clientId, reason: err instanceof Error ? err.message : String(err) },
+				{ clientId, reason: projected.message ?? projected.name },
 				rejected ? "cimd_document_rejected" : "cimd_document_fetch_failed",
 			);
 			if (rejected) {

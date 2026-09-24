@@ -22,6 +22,7 @@ import type {
 	SessionRPRegistry,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
+import { loggableError } from "@o3co/auth-provider-core";
 
 export interface CascadeLogoutOptions {
 	readonly sid: string;
@@ -111,7 +112,7 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 			stepTwoFailures.push(error);
 			logger.warn(
 				`cascadeLogout: refreshTokenFamilyRevocation.revokeFamily(${familyId}) failed (continuing tally):`,
-				error,
+				loggableError(error),
 			);
 		}
 	}
@@ -122,7 +123,7 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 		stepTwoFailures.push(error);
 		logger.warn(
 			`cascadeLogout: federationTokenStore.removeBySid(${opts.sid}) failed (continuing tally):`,
-			error,
+			loggableError(error),
 		);
 	}
 
@@ -133,13 +134,22 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 	// §6.2 Step 3: reverse-index cleanup. Best-effort — log + continue, never
 	// halt. Orphan reverse-index entries are bounded by TTL.
 	await opts.sessionRPRegistry.removeBySid(opts.sid).catch((error) => {
-		logger.warn(`cascadeLogout: sessionRPRegistry.removeBySid(${opts.sid}) failed:`, error);
+		logger.warn(
+			`cascadeLogout: sessionRPRegistry.removeBySid(${opts.sid}) failed:`,
+			loggableError(error),
+		);
 	});
 	await opts.sessionFamilyIndex.removeBySid(opts.sid).catch((error) => {
-		logger.warn(`cascadeLogout: sessionFamilyIndex.removeBySid(${opts.sid}) failed:`, error);
+		logger.warn(
+			`cascadeLogout: sessionFamilyIndex.removeBySid(${opts.sid}) failed:`,
+			loggableError(error),
+		);
 	});
 	await opts.sessionFederationIndex.removeBySid(opts.sid).catch((error) => {
-		logger.warn(`cascadeLogout: sessionFederationIndex.removeBySid(${opts.sid}) failed:`, error);
+		logger.warn(
+			`cascadeLogout: sessionFederationIndex.removeBySid(${opts.sid}) failed:`,
+			loggableError(error),
+		);
 	});
 
 	// §6.2 Step 4: primary invalidation — must succeed.
@@ -162,7 +172,7 @@ export async function cascadeLogout(opts: CascadeLogoutOptions): Promise<Cascade
 	await opts.sessionFamilyIndex.removeBySid(opts.sid).catch((error) => {
 		logger.warn(
 			`cascadeLogout: post-delete sessionFamilyIndex.removeBySid(${opts.sid}) failed:`,
-			error,
+			loggableError(error),
 		);
 	});
 

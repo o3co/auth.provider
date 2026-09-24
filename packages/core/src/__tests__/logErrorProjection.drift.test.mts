@@ -29,7 +29,7 @@
  * `String(...)` of it.
  *
  * What counts as passing the error: an object property `err` / `error`
- * (shorthand or not) whose value is not `loggableError(...)`; a bare
+ * that is shorthand or holds an error-named identifier as it is; a bare
  * identifier that names an error (`err`, `error`, `e`, `cause`, `*Err`,
  * `*Error`) as a positional argument after the message; and `<err>.message`
  * or `String(<err>)` anywhere in the arguments. Comments are ignored.
@@ -43,7 +43,7 @@ import { describe, expect, it } from "vitest";
 const repoRoot = fileURLToPath(new URL("../../../..", import.meta.url));
 const PACKAGES = ["core", "session", "oauth"] as const;
 
-const ERROR_NAME = String.raw`(?:err|error|e|cause|[a-z][A-Za-z]*Err|[a-z][A-Za-z]*Error)`;
+const ERROR_NAME = "(?:err|error|e|cause|[a-z][A-Za-z]*Err|[a-z][A-Za-z]*Error)";
 const LOGGER_CALL =
 	/\b(?:log|logger|(?:\w+\.)+logger)\??\.(?:trace|debug|info|warn|error|fatal)\(/g;
 
@@ -106,8 +106,10 @@ function topLevelArguments(text: string): string[] {
 }
 
 const RAW_PROPERTY = /[{,]\s*(?:err|error)\s*(?=[,}])/;
-/** `""` is a blanked string literal: `{ error: "invalid_grant" }` names no caught error. */
-const PROPERTY_NOT_PROJECTED = /\b(?:err|error)\s*:(?!\s*(?:loggableError\(|""))/;
+/** `err` / `error` holding an error-named identifier as it is, not a call on or a read of it. */
+const PROPERTY_NOT_PROJECTED = new RegExp(
+	String.raw`\b(?:err|error)\s*:\s*${ERROR_NAME}\b(?!\s*[(.])`,
+);
 const BARE_ERROR_ARGUMENT = new RegExp(`^${ERROR_NAME}$`);
 const MESSAGE_OR_STRING = new RegExp(
 	String.raw`\b${ERROR_NAME}\.message\b|\bString\(\s*${ERROR_NAME}\s*\)`,
@@ -165,5 +167,6 @@ describe("a caught error reaches a logger only through loggableError", () => {
 		expect(probe(`log.warn({ err: loggableError(err) }, "failed")`)).toBe(false);
 		expect(probe("logger.warn(`failed:`, loggableError(error))")).toBe(false);
 		expect(probe(`log.warn({ reason: "typ", site: "x" }, "rejected")`)).toBe(false);
+		expect(probe(`log.warn({ error: "invalid_grant" }, "refused")`)).toBe(false);
 	});
 });

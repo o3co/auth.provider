@@ -14,6 +14,7 @@
  */
 
 import type { Logger } from "@o3co/auth-provider-core";
+import { loggableError } from "@o3co/auth-provider-core";
 
 export interface FrontchannelRP {
 	readonly clientId: string;
@@ -121,7 +122,7 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 			} catch (err) {
 				logger.warn(
 					`renderFrontchannelLogoutHtml: failed to build iframe for RP ${rp.clientId} (skipping):`,
-					err,
+					loggableError(err),
 				);
 				return ""; // skipped; filtered out below
 			}

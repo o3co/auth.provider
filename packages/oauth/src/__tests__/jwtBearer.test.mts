@@ -314,8 +314,9 @@ describe("jwt-bearer grant — outage is not refusal (#301)", () => {
 				},
 			}),
 		}).handle(ctx());
+		// The cause, as core's projection of it: logged, and never as it came.
 		expect(error).toHaveBeenCalledWith(
-			expect.objectContaining({ err: expect.any(Error) }),
+			expect.objectContaining({ err: { name: "Error", message: "boom" } }),
 			expect.stringContaining("assertion_verifier_unavailable"),
 		);
 	});

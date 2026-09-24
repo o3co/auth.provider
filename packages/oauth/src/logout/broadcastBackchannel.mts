@@ -13,7 +13,12 @@
  * limitations under the License.
  */
 
-import { generateLogoutToken, type KeyStore, type Logger } from "@o3co/auth-provider-core";
+import {
+	generateLogoutToken,
+	type KeyStore,
+	type Logger,
+	loggableError,
+} from "@o3co/auth-provider-core";
 
 export interface BroadcastRP {
 	readonly clientId: string;
@@ -90,13 +95,16 @@ export async function broadcastBackchannelLogout(
 				} catch (err) {
 					logger.warn(
 						`broadcastBackchannelLogout: RP ${rp.clientId} POST to ${rp.backchannelLogoutUri} failed:`,
-						err,
+						loggableError(err),
 					);
 				} finally {
 					clearTimeout(timer);
 				}
 			} catch (err) {
-				logger.warn(`broadcastBackchannelLogout: RP ${rp.clientId} broadcast failed:`, err);
+				logger.warn(
+					`broadcastBackchannelLogout: RP ${rp.clientId} broadcast failed:`,
+					loggableError(err),
+				);
 			}
 		});
 

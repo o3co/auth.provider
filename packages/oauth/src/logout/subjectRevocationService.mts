@@ -37,6 +37,7 @@ import {
 	type FederationGrantAuditEvent,
 	fullSectionsSchema,
 	type Logger,
+	loggableError,
 	type ProviderDeps,
 	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantKeepPolicy,
@@ -146,7 +147,7 @@ const auditor = (
 			.then(() => sink.record(mapped))
 			.catch((err: unknown) => {
 				logger?.error(
-					{ err, grantId: event.grantId, correlationId: event.correlationId },
+					{ err: loggableError(err), grantId: event.grantId, correlationId: event.correlationId },
 					"federation_grant_audit_failed",
 				);
 			});

@@ -31,6 +31,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isEmailVerified,
+	loggableError,
 	resolveAccessTokenLifetime,
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
@@ -191,7 +192,10 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 					clientId: ctx.authenticatedClient?.clientId,
 				});
 			} catch (err) {
-				deps.logger?.error({ err }, "jwt_bearer_assertion_verifier_unavailable");
+				deps.logger?.error(
+					{ err: loggableError(err) },
+					"jwt_bearer_assertion_verifier_unavailable",
+				);
 				return {
 					result: {
 						status: 503,
@@ -214,7 +218,7 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 			try {
 				user = await userRepository.authenticateByToken(verified.subjectHandle);
 			} catch (err) {
-				deps.logger?.error({ err }, "jwt_bearer_user_repository_unavailable");
+				deps.logger?.error({ err: loggableError(err) }, "jwt_bearer_user_repository_unavailable");
 				return {
 					result: {
 						status: 503,

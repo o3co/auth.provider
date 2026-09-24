@@ -18,6 +18,7 @@ import {
 	consoleLogger,
 	createRemoteKeySetCache,
 	type Logger,
+	loggableError,
 	type PublicClient,
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
@@ -248,7 +249,10 @@ export function createClientAssertionVerifier(
 				keys = keySetFor(client);
 			} catch (err) {
 				keys = undefined;
-				logger.error({ err, clientId: iss }, "client_assertion_jwks_uri_invalid");
+				logger.error(
+					{ err: loggableError(err), clientId: iss },
+					"client_assertion_jwks_uri_invalid",
+				);
 			}
 			if (!keys) {
 				return refuse(

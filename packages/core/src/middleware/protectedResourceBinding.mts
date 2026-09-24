@@ -51,6 +51,7 @@ import { errorEnvelope } from "../errors/envelope.mjs";
 import { BINDING_PROFILES, matchConfirmation } from "../grants/confirmationMatch.mjs";
 import type { TokenBinding } from "../grants/tokenBinding.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { loggableError } from "../logging/loggableError.mjs";
 import type { TokenBindingMechanism } from "./tokenBinding.mjs";
 
 import "./express.mjs"; // ensure ambient Express.Request augmentation is loaded
@@ -175,7 +176,7 @@ export const protectedResourceBindingMw = ({
 					return;
 				}
 				logger?.warn(
-					{ mechanism: mechanism.kind, err },
+					{ mechanism: mechanism.kind, err: loggableError(err) },
 					"protected_resource_binding_proof_invalid",
 				);
 				const retryInstruction = retryInstructionOf(err);

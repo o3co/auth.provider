@@ -20,6 +20,7 @@ import type { AuditSink } from "../audit/types.mjs";
 import { type ErrorEnvelope, errorEnvelope } from "../errors/envelope.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { loggableError } from "../logging/loggableError.mjs";
 import type { RateLimitContext, RateLimitDecision, RateLimiter, RateLimitSpec } from "./types.mjs";
 
 /**
@@ -135,10 +136,16 @@ export const checkWithFailMode = async (
 	try {
 		return { status: "decided", decision: await limiter.check(key, ctx) };
 	} catch (cause) {
-		const errorMessage = cause instanceof Error ? cause.message : String(cause);
+		// A string, as the log line and the audit event have always carried —
+		// but the projection's: a limiter's error is a store's (a Redis reply
+		// echoes the command it refused), so its message is read through
+		// loggableError, and a thrown non-Error says what kind it was, not what
+		// it held.
+		const projected = loggableError(cause);
+		const reported = projected.message ?? projected.name;
 		const ip = ctx.ip ?? "unknown";
 		logger.error(
-			{ error: errorMessage, mode: failMode, tag, ip },
+			{ error: reported, mode: failMode, tag, ip },
 			failMode === "open" ? "rate_limiter_failed_open" : "rate_limiter_failed_closed",
 		);
 		emitAuditEvent(auditSink, {
@@ -148,7 +155,7 @@ export const checkWithFailMode = async (
 			userAgent: ctx.userAgent,
 			details: {
 				tag,
-				error: errorMessage,
+				error: reported,
 			},
 		});
 		return { status: "unavailable", failMode };

@@ -18,6 +18,7 @@ import {
 	type ClientRepository,
 	consoleLogger,
 	type Logger,
+	loggableError,
 	type PublicClient,
 	type ReplaySeenSet,
 	sanitizeErrorText,
@@ -344,7 +345,7 @@ export function createClientAuthMiddleware(
 			client = await clientRepository.findById(clientId);
 		} catch (err) {
 			// Fail-closed: repository unavailability must not grant access.
-			logger.warn({ err }, "client lookup failed");
+			logger.warn({ err: loggableError(err) }, "client lookup failed");
 			if (basic.kind === "ok") {
 				rejectBasic(res, 401);
 			} else {
@@ -418,7 +419,7 @@ export function createClientAuthMiddleware(
 		try {
 			authenticated = await clientRepository.authenticate(clientId, secret);
 		} catch (err) {
-			logger.warn({ err }, "client credential lookup failed");
+			logger.warn({ err: loggableError(err) }, "client credential lookup failed");
 			if (basic.kind === "ok") {
 				rejectBasic(res, 401);
 			} else {

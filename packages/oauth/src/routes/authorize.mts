@@ -31,6 +31,7 @@ import {
 	isGrantTypeAllowed,
 	isWellFormedErrorCode,
 	type Logger,
+	loggableError,
 	matchesRegisteredRedirectUri,
 	type PendingConsentStore,
 	type PublicClient,
@@ -141,7 +142,7 @@ const readLiveSession = async (
 		const session = await store.get(sid);
 		return { live: session != null, session };
 	} catch (err) {
-		opts.logger.warn({ err, sid }, "authorize_session_liveness_unavailable");
+		opts.logger.warn({ err: loggableError(err), sid }, "authorize_session_liveness_unavailable");
 		return { live: false, session: null };
 	}
 };
@@ -427,7 +428,10 @@ const checkConsent = async (
 	} catch (err) {
 		// An outage is not a decision either way: neither a code nor a refusal
 		// the user could act on. The same rule the session-liveness read applies.
-		ctx.opts.logger.error({ err, clientId: ctx.clientId }, "authorize_consent_store_unavailable");
+		ctx.opts.logger.error(
+			{ err: loggableError(err), clientId: ctx.clientId },
+			"authorize_consent_store_unavailable",
+		);
 		redirectError(ctx, "temporarily_unavailable", "consent store unavailable");
 		return false;
 	}
@@ -478,7 +482,7 @@ const checkConsent = async (
 		// The same rule as the consent-store read above: an outage is not a
 		// decision either way.
 		ctx.opts.logger.error(
-			{ err, clientId: ctx.clientId },
+			{ err: loggableError(err), clientId: ctx.clientId },
 			"authorize_pending_consent_store_unavailable",
 		);
 		redirectError(ctx, "temporarily_unavailable", "consent store unavailable");
@@ -804,7 +808,7 @@ const evaluateReauthentication = async (
 		} catch (err) {
 			// The same rule the session-liveness read applies: an outage is not
 			// a decision either way.
-			ctx.opts.logger.error({ err }, "authorize_reauth_ask_store_unavailable");
+			ctx.opts.logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
 			redirectError(ctx, "temporarily_unavailable", "session store unavailable");
 			return "answered";
 		}
@@ -1481,7 +1485,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 					request: askRequest,
 				});
 			} catch (err) {
-				opts.logger.error({ err }, "authorize_reauth_ask_store_unavailable");
+				opts.logger.error({ err: loggableError(err) }, "authorize_reauth_ask_store_unavailable");
 				redirectError(ctx, "temporarily_unavailable", "session store unavailable");
 				return;
 			}

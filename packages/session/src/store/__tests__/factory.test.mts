@@ -204,6 +204,8 @@ describe("redis session client error handling", () => {
 		expect(error).toHaveBeenCalledTimes(1);
 		const [payload, msg] = error.mock.calls[0] as [Record<string, unknown>, string];
 		expect(msg).toBe("session_store_redis_error");
-		expect(String((payload as { err?: unknown }).err)).toContain("ECONNRESET");
+		// The projection, not the client's error: a Redis error is a store's,
+		// and what it carries (a refused command's arguments) is not logged.
+		expect((payload as { err?: unknown }).err).toEqual({ name: "Error", message: "ECONNRESET" });
 	});
 });
