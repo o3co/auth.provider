@@ -29,7 +29,7 @@ import {
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { tokenExchangeModule } from "#/module.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
@@ -439,7 +439,61 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			status: 400,
 			error: "invalid_grant",
 			errorDescription:
-				"refresh token family revocation not configured (revocation cannot be verified)",
+				"actor_token refresh token family revocation not configured (revocation cannot be verified)",
+		});
+	});
+
+	// The family rule keys on the family a validator asserts, not on the token
+	// type it was registered for: the issued token inherits the subject's
+	// `family_id` whichever validator produced it. Here the built-in validator
+	// is registered a second time, under the `jwt` token type, the way a
+	// composition accepting its own access tokens under that type would.
+	describe("a validator registered for another token type that asserts a family", () => {
+		const JWT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt";
+		const selfIssuedAsJwt = defineModule({
+			name: "test:self-issued-as-jwt",
+			requires: ["keyStore"],
+			contributes: {
+				tokenExchangeValidators: {
+					[JWT_TOKEN_TYPE]: (deps) =>
+						createSelfIssuedAccessTokenValidator({ keyStore: deps.keyStore, issuer: ISSUER }),
+				},
+			},
+		});
+
+		it("answers invalid_grant / family_revoked once the family is revoked", async () => {
+			const { grant, components } = await boot([
+				memoryRefreshTokenFamilyStoreModule,
+				defaultRefreshTokenFamilyRevocationModule,
+				selfIssuedAsJwt,
+			]);
+			await liveFamily(components, "fam-jwt");
+			const body = {
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-jwt" }),
+				subject_token_type: JWT_TOKEN_TYPE,
+			};
+			expect((await exchange(grant, body)).result.status).toBe(200);
+
+			await revoke(components, "fam-jwt");
+			expect((await exchange(grant, body)).result).toMatchObject({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "family_revoked",
+			});
+		});
+
+		it("refuses the family-bearing token when no refreshTokenFamilyRevocation is wired", async () => {
+			const { grant } = await boot([selfIssuedAsJwt]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-jwt" }),
+				subject_token_type: JWT_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription:
+					"refresh token family revocation not configured (revocation cannot be verified)",
+			});
 		});
 	});
 
@@ -542,6 +596,102 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				status: 400,
 				error: "invalid_grant",
 				errorDescription: "subject_token validation failed",
+			});
+		});
+
+		it("answers 503 temporarily_unavailable when the subject watermark cannot be read for the actor_token", async () => {
+			const { grant } = await boot(
+				[
+					defineModule({
+						name: "test:subject-revocation",
+						provides: {
+							subjectRevocation: () => ({
+								kind: "test",
+								revokeBefore: async () => {},
+								revokedBefore: async (sub: string) => {
+									if (sub === "svc-a") throw new Error("watermark backend unreachable");
+									return null;
+								},
+							}),
+						},
+					}),
+				],
+				{ accessToken: "unsupported", subject: "watermark" },
+			);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({}),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: await signSelfIssuedAccessToken({ sub: "svc-a" }),
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "actor_token validation store unavailable",
+			});
+		});
+
+		// The family store is the grant's (`familyRefusal`), so its outage is
+		// answered and logged there — with the role, never the token.
+		const unreachableFamilyRevocation = (failFor: (familyId: string) => boolean) =>
+			defineModule({
+				name: "test:refresh-token-family-revocation",
+				provides: {
+					refreshTokenFamilyRevocation: () => ({
+						revokeFamily: async () => {},
+						isFamilyRevoked: async (familyId: string) => {
+							if (failFor(familyId)) throw new Error("family store unreachable");
+							return false;
+						},
+					}),
+				},
+			});
+		const spyLogger = () => {
+			const logger = {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				fatal: vi.fn(),
+				child: () => logger,
+			};
+			return logger;
+		};
+
+		it("answers 503 and logs the outage when the family store cannot be read for the subject_token", async () => {
+			const logger = spyLogger();
+			const { grant } = await boot([
+				unreachableFamilyRevocation(() => true),
+				defineModule({ name: "test:logger", provides: { logger: () => logger } }),
+			]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-subject" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "refresh token store unavailable",
+			});
+			expect(logger.error).toHaveBeenCalledWith(
+				{ err: expect.any(Error), role: "subject" },
+				"token_exchange_family_store_unavailable",
+			);
+		});
+
+		it("answers 503 naming the actor when the family store cannot be read for the actor_token", async () => {
+			const { grant } = await boot([unreachableFamilyRevocation((id) => id === "fam-actor")]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-subject" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", family_id: "fam-actor" }),
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "actor_token refresh token store unavailable",
 			});
 		});
 	});
