@@ -217,12 +217,14 @@ deployment that then has a connection under `"required"` is refused at boot.
   them.
 - **Answer without redirecting.** No request follows a redirect, so a
   password, a token, a link request or an identity goes only to the configured
-  URL — the one the `https` rule below checks. A `3xx` from any of the four
-  endpoints throws like any other unexpected status (the session routes and
-  the jwt-bearer grant answer `503 temporarily_unavailable`, the grants
-  callback `temporarily_unavailable`), so a Store behind a URL that redirects —
-  `http` to `https`, an added trailing slash, a moved path — fails every call.
-  Configure each URL as the endpoint that answers, not one that redirects.
+  URL — the one the `https` rule below checks — and no answer from anywhere
+  else is taken as the user, the link or the lookup's answer. A `3xx` from any
+  of the four endpoints throws like any other unexpected status (the session
+  routes and the jwt-bearer grant answer `503 temporarily_unavailable`, the
+  grants callback `temporarily_unavailable`), so a Store behind a URL that
+  redirects — a host alias redirecting to the canonical host, an added
+  trailing slash, a moved path — fails every call. Configure each URL as the
+  endpoint that answers, not one that redirects.
 
 ## Constructor validation
 
@@ -233,9 +235,9 @@ fails at boot rather than at the first login attempt.
 password on `authenticateUrl`, a token on `authenticateByTokenUrl`, a verified
 upstream identity on `findSubjectByFederatedIdentityUrl` — so an
 `http://` URL does not merely weaken the connection, it publishes the credential
-to every hop on the path. The URL checked here is the only place a request goes:
-no request follows a redirect, so a `307` or `308` cannot re-send the body to a
-`Location` this rule never saw.
+to every hop on the path. The URL checked here is the only place a request goes
+and the only one whose answer is taken: no request follows a redirect, so a
+`307` or `308` cannot re-send the body to a `Location` this rule never saw.
 
 **The one carve-out is loopback:** `http://` is accepted when the host is
 `localhost`, an address in `127.0.0.0/8`, or `[::1]`. That traffic never leaves
@@ -283,7 +285,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | Test file | Pins |
 | --- | --- |
 | [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | authentication and its answers, the `User` shape check, the https rule, the timeout and the response cap, linking, and the identity lookup's presence, probe and wire |
-| [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | against real HTTP servers: the identity lookup releasing a refused answer's connection, and a redirect from the Store reaching nothing on authentication, token resolution and linking |
+| [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | against real HTTP servers: the identity lookup releasing a refused answer's connection, and a redirect refused on each of the four requests — to another origin, to the same origin, or with no `Location` — with nothing sent after it |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | the `"http"` builder, its defaults and string coercion, and configuration refused at build time |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | the https-or-loopback rule |
 

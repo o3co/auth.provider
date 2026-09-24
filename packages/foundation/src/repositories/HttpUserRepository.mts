@@ -309,9 +309,10 @@ function isAbortError(err: unknown): boolean {
  * password (#285). `http://` is accepted for loopback hosts only — see
  * `src/endpointUrl.mts` for the carve-out and its rationale.
  *
- * No request follows a redirect, so a URL checked there is the only place its
- * body is ever sent: a `3xx` from the Store is an upstream failure, thrown like
- * any other unexpected status, and its `Location` is never contacted.
+ * No request follows a redirect, so a URL that passed that check is the only
+ * place its body is ever sent and the only one whose answer is taken: a `3xx`
+ * from the Store is an upstream failure, thrown like any other unexpected
+ * status, and its `Location` is never contacted.
  */
 export class HttpUserRepository implements UserRepository {
 	private authenticateUrl: string;
@@ -599,10 +600,11 @@ export class HttpUserRepository implements UserRepository {
 				signal: controller.signal,
 				// Never followed: a 307 or 308 would re-send the body — a password,
 				// a token, a link request — to a `Location` the https rule never
-				// checked. Node's fetch hands the 3xx back as it is (a browser-spec
-				// runtime would hand back an opaque redirect, status 0); either way
-				// it is not a 2xx, 401, 403 or 409, so it throws below as an
-				// unexpected status.
+				// checked, and after any redirect the answer from there would be
+				// taken as the user. Node's fetch hands the 3xx back as it is (a
+				// browser-spec runtime would hand back an opaque redirect, status
+				// 0); either way it is not a 2xx, 401, 403 or 409, so it throws
+				// below as an unexpected status.
 				redirect: "manual",
 			});
 

@@ -106,13 +106,13 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 
 - **誰が呼べるか。** `HttpUserRepository` は自分の資格情報を何も送らない: 各リクエストが持つのは `Content-Type: application/json` だけで、ヘッダーを足すオプションも無く、`user:password@` を含む URL は拒否される。`authenticateByToken` と紐付けが運ぶものも秘密ではない — フェデレーションのコールバックの `<provider>:<sub>` は識別子である。したがって `authenticateByTokenUrl` に届く者は誰でも既知の ID をそのユーザーに解決でき、開いた `linkFederatedIdentityUrl` に届く者は誰でも任意の ID を任意の `userId` に結びつけられる。これらの呼び出しは auth.provider からだけ受け付ける: ネットワークポリシーやプライベートネットワーク、または Store の前段でプラットフォームが提供する相互 TLS で。
 - **URL に秘密を入れない。** クエリ文字列のトークンは秘密のままではいられない: このアダプターが投げるエラーは URL 全体を示し、セッションルートはそれをログに出す。
-- **リダイレクトせずに応答する。** どのリクエストもリダイレクトを追わないので、パスワード、トークン、リンクのリクエスト、ID は設定された URL — 下の `https` の規則が検査する URL — にだけ届く。四つのエンドポイントのどれからの `3xx` も、他の想定外のステータスと同じく例外になる（セッションルートと jwt-bearer グラントは `503 temporarily_unavailable`、grants のコールバックは `temporarily_unavailable` を返す）ので、リダイレクトする URL — `http` から `https` へ、末尾スラッシュの付加、パスの移動 — の背後にある Store はすべての呼び出しで失敗する。各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する。
+- **リダイレクトせずに応答する。** どのリクエストもリダイレクトを追わないので、パスワード、トークン、リンクのリクエスト、ID は設定された URL — 下の `https` の規則が検査する URL — にだけ届き、それ以外のどこからの応答もユーザー、リンク、照会の答えとして受け取られない。四つのエンドポイントのどれからの `3xx` も、他の想定外のステータスと同じく例外になる（セッションルートと jwt-bearer グラントは `503 temporarily_unavailable`、grants のコールバックは `temporarily_unavailable` を返す）ので、リダイレクトする URL — 正規のホストへリダイレクトするホストの別名、末尾スラッシュの付加、パスの移動 — の背後にある Store はすべての呼び出しで失敗する。各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する。
 
 ## コンストラクタでの検証
 
 すべてのオプションは **コンストラクタ** で検証されるので、設定を誤ったデプロイは最初のログイン試行ではなく起動時に失敗する。
 
-**すべての URL は `https://` でなければならない**（リンクと照会のエンドポイントも含む）。これらは平文のユーザー資格情報 — `authenticateUrl` にはパスワード、`authenticateByTokenUrl` にはトークン、`findSubjectByFederatedIdentityUrl` には検証済みの上流 ID — を運ぶので、`http://` の URL は接続を弱めるだけでなく、経路上のすべてのホップに資格情報を公開する。ここで検査される URL がリクエストの唯一の行き先である: どのリクエストもリダイレクトを追わないので、`307` や `308` がこの規則の見ていない `Location` へボディを送り直すことはない。
+**すべての URL は `https://` でなければならない**（リンクと照会のエンドポイントも含む）。これらは平文のユーザー資格情報 — `authenticateUrl` にはパスワード、`authenticateByTokenUrl` にはトークン、`findSubjectByFederatedIdentityUrl` には検証済みの上流 ID — を運ぶので、`http://` の URL は接続を弱めるだけでなく、経路上のすべてのホップに資格情報を公開する。ここで検査される URL がリクエストの唯一の行き先であり、応答を受け取る唯一の相手である: どのリクエストもリダイレクトを追わないので、`307` や `308` がこの規則の見ていない `Location` へボディを送り直すことはない。
 
 **唯一の例外はループバック:** ホストが `localhost`、`127.0.0.0/8` 内のアドレス、`[::1]` のいずれかなら `http://` を受け付ける。その通信はマシンの外に出ないので、ローカル開発とプロセス内のテストフィクスチャに証明書は要らない。それ以外のホストは **プライベートレンジのアドレスやコンテナネットワークのサービス名も含めて** `https://` が必須（`http://10.0.0.5/…`、`http://user-service/…` は拒否される）: それらはデプロイが端から端まで制御していないネットワークを越えるものであり、「内部」は「暗号化済み」の同義語ではない。資格情報を埋め込んだ URL（`https://user:pass@…`）も拒否する。
 
@@ -136,7 +136,7 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 | テストファイル | 固定するもの |
 | --- | --- |
 | [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | 認証とその応答、`User` の形の検査、https の規則、タイムアウトとレスポンス上限、リンク、ID の照会の有無・probe・ワイヤ |
-| [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | 実際の HTTP サーバーに対して: ID の照会が拒否した応答の接続を解放すること、認証・トークンの解決・リンクで Store のリダイレクトがどこにも届かないこと |
+| [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | 実際の HTTP サーバーに対して: ID の照会が拒否した応答の接続を解放すること、四つのリクエストそれぞれでリダイレクト — 別のオリジンへ、同じオリジンへ、`Location` 無し — が拒否され、その後に何も送られないこと |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | `"http"` のビルダー、そのデフォルトと文字列の変換、組み立て時に拒否される設定 |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | https またはループバックの規則 |
 
