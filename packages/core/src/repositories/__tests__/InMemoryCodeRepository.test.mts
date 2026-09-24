@@ -144,13 +144,19 @@ describe("InMemoryCodeRepository", () => {
 
 	describe("expiration", () => {
 		it("expires codes after defaultExpiresIn", async () => {
-			repo = new InMemoryCodeRepository({ defaultExpiresIn: 0.05 }); // 50ms
-			const created = await repo.createCode(minimalParams);
-
-			await new Promise((r) => setTimeout(r, 100));
-
-			const found = await repo.findByCode(created.code);
-			expect(found).toBeNull();
+			// On the fake clock, and a whole second: the default is whole seconds,
+			// as the Redis repository's is.
+			vi.useFakeTimers();
+			try {
+				repo = new InMemoryCodeRepository({ defaultExpiresIn: 1 });
+				const created = await repo.createCode(minimalParams);
+				vi.advanceTimersByTime(999);
+				expect(await repo.findByCode(created.code)).not.toBeNull();
+				vi.advanceTimersByTime(1);
+				expect(await repo.findByCode(created.code)).toBeNull();
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 
 		it("respects per-code expiresIn override", async () => {
@@ -181,8 +187,11 @@ describe("InMemoryCodeRepository", () => {
 			expect((repo as unknown as { codes: Map<string, unknown> }).codes.size).toBe(0);
 		});
 
-		it("refuses a default lifetime that is not a positive number of seconds, when it is built", () => {
-			for (const defaultExpiresIn of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1]) {
+		it("refuses a default lifetime that is not a positive whole number of seconds, when it is built", () => {
+			// The Redis repository's rule for its default, so the two agree on
+			// what a configuration may say. A per-call lifetime may still be
+			// fractional in both.
+			for (const defaultExpiresIn of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 1.5, 0.05]) {
 				expect(() => new InMemoryCodeRepository({ defaultExpiresIn })).toThrow(RangeError);
 			}
 		});
@@ -194,15 +203,19 @@ describe("InMemoryCodeRepository", () => {
 			// expired authorization code is still redeemable. A code past its
 			// TTL must not be exchangeable for tokens no matter how it is
 			// presented.
-			repo = new InMemoryCodeRepository({ defaultExpiresIn: 0.05 }); // 50ms
-			const created = await repo.createCode(minimalParams);
+			vi.useFakeTimers();
+			try {
+				repo = new InMemoryCodeRepository({ defaultExpiresIn: 1 });
+				const created = await repo.createCode(minimalParams);
+				vi.advanceTimersByTime(1_000);
 
-			await new Promise((r) => setTimeout(r, 100));
-
-			expect(await repo.consumeByCode(created.code)).toBeNull();
-			// Deleted before the expiry verdict, so a replay of an expired code
-			// is indistinguishable from a replay of a consumed one.
-			expect(await repo.consumeByCode(created.code)).toBeNull();
+				expect(await repo.consumeByCode(created.code)).toBeNull();
+				// Deleted before the expiry verdict, so a replay of an expired code
+				// is indistinguishable from a replay of a consumed one.
+				expect(await repo.consumeByCode(created.code)).toBeNull();
+			} finally {
+				vi.useRealTimers();
+			}
 		});
 
 		it("sweeps expired codes that were never presented", async () => {

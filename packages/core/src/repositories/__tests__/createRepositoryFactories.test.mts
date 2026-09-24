@@ -140,27 +140,34 @@ describe("createRepositoryFactories", () => {
 			const { codeFactory } = createRepositoryFactories();
 			await expect(
 				codeFactory.create({ type: "memory", defaultExpiresIn: "not-a-number" }),
-			).rejects.toThrow('"defaultExpiresIn" must be a finite positive number');
+			).rejects.toThrow('"defaultExpiresIn" must be a positive whole number of seconds');
 		});
 
 		it("rejects Infinity defaultExpiresIn", async () => {
 			const { codeFactory } = createRepositoryFactories();
 			await expect(
 				codeFactory.create({ type: "memory", defaultExpiresIn: Infinity }),
-			).rejects.toThrow('"defaultExpiresIn" must be a finite positive number');
+			).rejects.toThrow('"defaultExpiresIn" must be a positive whole number of seconds');
 		});
 
 		it("rejects negative defaultExpiresIn", async () => {
 			const { codeFactory } = createRepositoryFactories();
 			await expect(codeFactory.create({ type: "memory", defaultExpiresIn: -1 })).rejects.toThrow(
-				'"defaultExpiresIn" must be a finite positive number',
+				'"defaultExpiresIn" must be a positive whole number of seconds',
+			);
+		});
+
+		it("rejects a fractional defaultExpiresIn, as the Redis repository does", async () => {
+			const { codeFactory } = createRepositoryFactories();
+			await expect(codeFactory.create({ type: "memory", defaultExpiresIn: 1.5 })).rejects.toThrow(
+				'"defaultExpiresIn" must be a positive whole number of seconds',
 			);
 		});
 
 		it("rejects zero defaultExpiresIn", async () => {
 			const { codeFactory } = createRepositoryFactories();
 			await expect(codeFactory.create({ type: "memory", defaultExpiresIn: 0 })).rejects.toThrow(
-				'"defaultExpiresIn" must be a finite positive number',
+				'"defaultExpiresIn" must be a positive whole number of seconds',
 			);
 		});
 
