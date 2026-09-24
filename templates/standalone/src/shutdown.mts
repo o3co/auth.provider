@@ -54,9 +54,10 @@ import { type Logger, loggableError } from "@o3co/auth-provider-core";
  *    and the process exits **non-zero** — an orchestrator that only ever sees
  *    `0` cannot tell a clean drain from one that ran out of time.
  * 5. **`cleanup` runs after draining, before exit**, and its failure is logged
- *    through the app logger and reflected in the exit code. It never wedges the
- *    process: a dispose that throws still exits, and one that never settles is
- *    cut off at `cleanupTimeoutMs`.
+ *    through the app logger — as core's `loggableError` projection, never the
+ *    error, which holds every cleanup's own error — and reflected in the exit
+ *    code. It never wedges the process: a dispose that throws still exits, and
+ *    one that never settles is cut off at `cleanupTimeoutMs`.
  * 6. **A `close` that fails is not reported as a clean drain.** `server.close`
  *    reports through its callback, and treating that as success would tell an
  *    orchestrator the listener came down when it did not.
