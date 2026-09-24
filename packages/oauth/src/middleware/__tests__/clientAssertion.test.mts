@@ -489,6 +489,16 @@ describe("createClientAssertionVerifier (#484)", () => {
 				}
 			});
 
+			it(`refuses an iat older than the ceiling plus the tolerance (${tolerance} s), saying the ceiling applied`, async () => {
+				const iat = nowSeconds - MAX_CLIENT_ASSERTION_LIFETIME_SECONDS - tolerance - 1;
+				const outcome = refused(
+					await at(tolerance).verify(body(await mint({ iat, exp: nowSeconds + 60 })), findClient()),
+				);
+				expect(outcome.description).toBe(
+					`client assertion iat is too old (at most ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + tolerance} seconds: ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} plus the ${tolerance} s clock tolerance)`,
+				);
+			});
+
 			it(`refuses exp past the ceiling plus the tolerance (${tolerance} s), and logs why`, async () => {
 				const warn = vi.fn();
 				const exp = nowSeconds + MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + tolerance + 1;
@@ -496,7 +506,12 @@ describe("createClientAssertionVerifier (#484)", () => {
 					await at(tolerance, { ...silent, warn }).verify(body(await mint({ exp })), findClient()),
 				);
 				expect(outcome).toMatchObject({ status: 401, error: "invalid_client" });
-				expect(outcome.description).toMatch(/exp/);
+				// The ceiling actually applied, not the bare hour: a client told
+				// "at most 3600 seconds" whose 3610-second assertion was accepted
+				// yesterday would be told something false.
+				expect(outcome.description).toBe(
+					`client assertion exp is too far ahead (at most ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + tolerance} seconds: ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} plus the ${tolerance} s clock tolerance)`,
+				);
 				expect(warn).toHaveBeenCalledWith(
 					expect.objectContaining({
 						reason: "lifetime",

@@ -181,6 +181,16 @@ export function createClientAssertionVerifier(
 	 * is checked, so they are recorded through `auditErrorText` (sanitised,
 	 * capped).
 	 */
+	/**
+	 * The ceiling a lifetime refusal applied, as the client is told it: the
+	 * hour plus this verifier's clock tolerance — the number the comparison
+	 * used, not the bare hour, which an assertion a few seconds past it
+	 * satisfies. Digits, letters and `:()` only: within RFC 6749's error-text
+	 * characters.
+	 */
+	const describeCeiling = (maxSeconds: number): string =>
+		`at most ${maxSeconds} seconds: ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} plus the ${clockTolerance} s clock tolerance`;
+
 	const refuse = (
 		status: 400 | 401 | 500 | 503,
 		error: "invalid_request" | "invalid_client" | "server_error" | "temporarily_unavailable",
@@ -380,7 +390,7 @@ export function createClientAssertionVerifier(
 				return refuse(
 					401,
 					"invalid_client",
-					`client assertion exp is too far ahead (at most ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} seconds)`,
+					`client assertion exp is too far ahead (${describeCeiling(lifetime.maxLifetimeSeconds)})`,
 					"lifetime",
 					{
 						clientId: iss,
@@ -408,7 +418,7 @@ export function createClientAssertionVerifier(
 					return refuse(
 						401,
 						"invalid_client",
-						`client assertion iat is too old (at most ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} seconds)`,
+						`client assertion iat is too old (${describeCeiling(MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + clockTolerance)})`,
 						"iat_stale",
 						{ clientId: iss },
 					);
