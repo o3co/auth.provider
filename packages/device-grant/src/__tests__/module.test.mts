@@ -214,16 +214,12 @@ describe("deviceGrantModule — boot", () => {
 		).rejects.toThrow(/enabled = true requires a deviceCodeStore component/);
 	});
 
-	it("refuses to boot enabled without oauthModule, whose router its routes mount ahead of", async () => {
-		// Enabled, both routes declare `before: ["oauth-endpoints"]` so they
-		// mount ahead of the OAuth router whatever the module order. Without
-		// that router there is no `/oauth/token` to poll either, so the
-		// missing edge target is the refusal. Everything else is wired: the
-		// full composition boots in composition.test.mts.
-		await expect(boot({ deviceAuthorization: ENABLED })).rejects.toMatchObject({
-			reason: "route-order-target-missing",
-			message: expect.stringMatching(/oauth-endpoints/),
-		});
+	it("boots with everything wired, without oauthModule", async () => {
+		// The routes declare no ordering edge — each module under `/oauth`
+		// parses its own body — so nothing here needs another module's route
+		// to exist. The composition beside oauthModule is composition.test.mts.
+		const handle = await boot({ deviceAuthorization: ENABLED });
+		await handle.dispose();
 	});
 
 	it.each([

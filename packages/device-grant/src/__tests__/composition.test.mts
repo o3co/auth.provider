@@ -48,7 +48,7 @@ import {
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { oauthModule } from "@o3co/auth-provider-oauth";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
-import express from "express";
+import express, { type RequestHandler } from "express";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { deviceGrantModule } from "#/module.mjs";
@@ -500,4 +500,58 @@ describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () =>
 			}
 		},
 	);
+});
+
+describe("a route of another module under /oauth, listed after oauthModule", () => {
+	// What enabling this grant must not change. The route has no parser of
+	// its own and reads the request stream itself: whatever oauthModule's
+	// router or this package's routes do, the body has to reach it unread.
+	const readsItsOwnBody: RequestHandler = (req, res) => {
+		const parsedBefore = (req as { body?: unknown }).body ?? null;
+		if (req.readableEnded) {
+			res.json({ raw: null, parsedBefore });
+			return;
+		}
+		let raw = "";
+		req.setEncoding("utf8");
+		req.on("data", (chunk: string) => {
+			raw += chunk;
+		});
+		req.on("end", () => {
+			res.json({ raw, parsedBefore });
+		});
+	};
+
+	const elsewhereModule = defineModule({
+		name: "test:elsewhere-under-oauth",
+		contributes: {
+			routes: [
+				() => {
+					const router = express.Router();
+					router.post("/", readsItsOwnBody);
+					return { id: "elsewhere", mountPath: "/oauth/elsewhere", handler: router };
+				},
+			],
+		},
+	});
+
+	it.each([
+		["the grant enabled", ENABLED],
+		["the grant disabled", { enabled: false }],
+	] as const)("receives its body unread, with %s", async (_label, deviceAuthorization) => {
+		const config = makeConfig(deviceAuthorization);
+		const { handle, app } = await bootWith(config, [
+			sessionStoreModuleFor(config),
+			oauthModule({ config }),
+			elsewhereModule,
+			deviceGrantModule({ config }),
+		]);
+		try {
+			const res = await request(app).post("/oauth/elsewhere").type("form").send("a=1");
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ raw: "a=1", parsedBefore: null });
+		} finally {
+			await handle.dispose();
+		}
+	});
 });
