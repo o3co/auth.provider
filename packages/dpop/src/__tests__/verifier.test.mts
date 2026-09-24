@@ -566,55 +566,56 @@ describe("createDPoPMechanism", () => {
 		}
 	});
 
-	// The seen-set's one domain error is a contract fault, not an outage:
-	// misclassifying it as `replay_store_unavailable` would send operator
-	// triage to Redis health when the fix is in the composition.
-	it("lets a ChallengeStorageError from the seen-set propagate rather than calling it an outage", async () => {
-		const refusing = {
-			kind: "refusing",
-			markSeen: async () => {
-				throw new ChallengeStorageError({ reason: "expired-at-issue" });
-			},
-			contains: async () => false,
-		};
-		const refusingMechanism = createDPoPMechanism({ issuer: ISSUER, replaySeenSet: refusing });
-		const { proof } = await mintProof();
-		await expect(refusingMechanism.extract(makeReq(proof) as Request)).rejects.toThrow(
-			ChallengeStorageError,
-		);
-	});
-
-	// The seen-set refuses a non-finite expiry with RangeError (a caller
-	// fault). Construction rules that out here, so one arriving means a
-	// broken seen-set, not an outage: it must not raise the outage alarm.
-	it("lets a RangeError from the seen-set propagate rather than calling it an outage", async () => {
-		const errors: string[] = [];
-		const refusing = {
-			kind: "refusing",
-			markSeen: async () => {
-				throw new RangeError("markSeen: expiresAtMs must be a finite number");
-			},
-			contains: async () => false,
-		};
-		const refusingMechanism = createDPoPMechanism({
-			issuer: ISSUER,
-			replaySeenSet: refusing,
-			logger: {
-				trace: () => {},
-				debug: () => {},
-				info: () => {},
-				warn: () => {},
-				error: (_obj: unknown, msg?: string) => errors.push(String(msg)),
-				fatal: () => {},
-				child() {
-					return this;
+	// A seen-set that answers with its own contract error — `expired-at-issue`
+	// for a record computed from a positive TTL, or RangeError for a
+	// non-finite expiry, both ruled out at construction — is broken, and that
+	// is the server's fault, not the proof's. It used to be rethrown, which
+	// core's dispatcher answered `400 invalid_dpop_proof` and logged only as a
+	// failed proof: the client was told its proof was bad, and the operator
+	// saw nothing that named the fault. It takes the outage path's wire
+	// answer (503, fail closed) under an audit reason and a log event of its
+	// own, so triage is not sent to Redis health.
+	it.each([
+		["a ChallengeStorageError", () => new ChallengeStorageError({ reason: "expired-at-issue" })],
+		["a RangeError", () => new RangeError("markSeen: expiresAtMs must be a finite number")],
+	])(
+		"answers %s from the seen-set as a server fault, logged as one — not as a bad proof or an outage",
+		async (_label, make) => {
+			const errors: { obj: unknown; msg?: string }[] = [];
+			const fault = make();
+			const broken = {
+				kind: "broken",
+				markSeen: async () => {
+					throw fault;
 				},
-			} as never,
-		});
-		const { proof } = await mintProof();
-		await expect(refusingMechanism.extract(makeReq(proof) as Request)).rejects.toThrow(RangeError);
-		expect(errors).toEqual([]);
-	});
+				contains: async () => false,
+			};
+			const brokenMechanism = createDPoPMechanism({
+				issuer: ISSUER,
+				replaySeenSet: broken,
+				logger: {
+					trace: () => {},
+					debug: () => {},
+					info: () => {},
+					warn: () => {},
+					error: (obj: unknown, msg?: string) => errors.push({ obj, msg }),
+					fatal: () => {},
+					child() {
+						return this;
+					},
+				} as never,
+			});
+			const { proof } = await mintProof();
+			await expect(brokenMechanism.extract(makeReq(proof) as Request)).rejects.toMatchObject({
+				name: "DPoPError",
+				reason: "replay_store_fault",
+				code: "temporarily_unavailable",
+				unavailable: expect.any(String),
+			});
+			expect(errors.map((e) => e.msg)).toEqual(["dpop_replay_store_fault"]);
+			expect(errors[0]?.obj).toMatchObject({ err: fault });
+		},
+	);
 
 	// I-2: pin that seen-set transport faults surface as the dedicated
 	// `replay_store_unavailable` audit signal — not a raw Error that would

@@ -806,6 +806,30 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 		await handle.dispose();
 	});
 
+	it("answers 503 at the token endpoint when the seen-set breaks its own contract, and logs the fault", async () => {
+		const logger = spyLogger();
+		const broken: ReplaySeenSet = {
+			kind: "broken",
+			markSeen: async () => {
+				throw new RangeError("markSeen: expiresAtMs must be a finite number");
+			},
+			contains: async () => false,
+		};
+		const { handle, app } = await bootReplica({ mode: "single", seenSet: broken, logger });
+
+		const { proof } = await mintProof();
+		const res = await request(app).post("/oauth/token").set("DPoP", proof).send({});
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ err: expect.any(RangeError) }),
+			"dpop_replay_store_fault",
+		);
+		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), "token_binding_proof_invalid");
+
+		await handle.dispose();
+	});
+
 	it("reports a replay TTL below 2W + 1 on the console when no logger is wired", async () => {
 		// `reference.conf` points operators at this warning. The mechanism's
 		// warnings must not be the ones that vanish in a composition that
