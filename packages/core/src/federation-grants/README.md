@@ -1,19 +1,21 @@
 # federation-grants
 
+Last updated: 2026-09-24
+
 ## Responsibility
 
 Session-independent delegated access to an upstream API (#593). A *federation grant* is one user's recorded consent that one confidential client may obtain upstream access tokens through one connection, within stated scopes, until a stated time — and it survives logout. This directory owns the record and its lifecycle, the two store ports, the in-process adapters with their bundled modules, and the domain rules: lifetime (D3), connection revisions (D4), token eligibility (D5), lodging an intent (D6), effective status (D1, D13), retrieval with a coordinated refresh (D10–D12), revocation and listing (D13), the wiring a deployment must have before a grant may outlive a session, audit metadata (D18), and the operator settings.
 
-The design record is the ADR [2026-09-17-federation-grants-offline-delegation.md](../../docs/adr/2026-09-17-federation-grants-offline-delegation.md); every rule here cites its D-number, and this README does not restate the reasons. Not here: the HTTP routes and the consent page (`packages/federation-grants`), the upstream calls (the federation adapters in `packages/session`, reached through the structural `FederationGrantRefresher`), the Redis adapters (`packages/redis`), and the session-bound token path ([`../federation-tokens/`](../federation-tokens/)), which logout deletes and this directory never touches. "Grant" here is never an OAuth grant type ([`../grants/`](../grants/README.md)), which is why every export says `FederationGrant`.
+The design record is the ADR [2026-09-17-federation-grants-offline-delegation.md](../../docs/adr/2026-09-17-federation-grants-offline-delegation.md); every rule here cites its D-number, and this README does not restate the reasons. Not here: the HTTP routes and the consent page (`packages/federation-grants`), the upstream calls (a federation adapter package implementing `SupportsDelegatedAuthorization`, reached through the structural `FederationGrantRefresher`), the Redis adapters (`packages/redis`), and the session-bound token path ([`../federation-tokens/`](../README.md#federation-tokens)), which logout deletes and this directory never touches. That lifetime is why this is its own directory: a grant survives logout and a session-bound token does not, so the two share only the refresh-error classifier. "Grant" here is never an OAuth grant type ([`../grants/`](../grants/README.md)), which is why every export says `FederationGrant`.
 
 State ownership: `FederationGrantStore` holds the record, the sealed credential and the refresh lock; `FederationGrantIntentStore` holds what an acquisition remembers (the intent, the consent challenge, the connect transaction, the per-`(client, subject)` bound); the subject boundary lives in [`../user-sessions/`](../user-sessions/README.md). No operation spans both ports; core orders the two writes once, in `lodge.mts`.
 
 ## Public contract
 
-- [`types.mts`](./types.mts) — the `FederationGrant` union, `FederationGrantConnection`, `EffectiveFederationGrantStatus`, `FederationGrantDenial`, `FederationGrantTokenResult`, `FederationGrantCredentials`.
-- [`store.mts`](./store.mts) — `FederationGrantStore`, `FederationGrantWrite`, `FederationGrantLockResult`; slot `federationGrantStore`. [`intentStore.mts`](./intentStore.mts) — `FederationGrantIntentStore`, `FEDERATION_GRANT_FLOW_BUDGET_MS`, `FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT`; slot `federationGrantIntentStore`.
-- Adapters and wiring: [`memory.mts`](./memory.mts), [`intentMemory.mts`](./intentMemory.mts), [`factory.mts`](./factory.mts), [`intentFactory.mts`](./intentFactory.mts), [`module.mts`](./module.mts) (`memoryFederationGrantStoreModule`, `memoryFederationGrantIntentStoreModule`), [`revocationWiring.mts`](./revocationWiring.mts).
-- Rules: [`lifetime.mts`](./lifetime.mts), [`revision.mts`](./revision.mts), [`eligibility.mts`](./eligibility.mts), [`effective-status.mts`](./effective-status.mts), [`lodge.mts`](./lodge.mts), [`retrieve.mts`](./retrieve.mts), [`revoke.mts`](./revoke.mts), [`settings.mts`](./settings.mts), [`allowlist.mts`](./allowlist.mts), [`auditMetadata.mts`](./auditMetadata.mts).
+- The record types (the `FederationGrant` union, its connection, effective status, denial and token result) are in [`types.mts`](./types.mts).
+- The two ports, with their `ComponentMap` slots, are [`store.mts`](./store.mts) (`federationGrantStore`) and [`intentStore.mts`](./intentStore.mts) (`federationGrantIntentStore`, with the acquisition budget and the per-`(client, subject)` bound).
+- The operations a package calls live in [`lodge.mts`](./lodge.mts) (lodging an intent or a reauthorization), [`retrieve.mts`](./retrieve.mts) (`retrieveFederationGrantToken`), [`revoke.mts`](./revoke.mts) (revocation and listing) and the wiring rule `requireFederationGrantSubjectRevocation` ([`revocationWiring.mts`](./revocationWiring.mts)). The structural refresher and the audit-event shape a caller supplies are declared in `retrieve.mts`.
+- The bundled memory modules are in [`module.mts`](./module.mts).
 - All of it is exported from the root barrel, `FederationGrant` in every name — [`../__tests__/index.barrel.test.mts`](../__tests__/index.barrel.test.mts).
 
 ## Inputs and outputs
@@ -27,8 +29,9 @@ State ownership: `FederationGrantStore` holds the record, the sealed credential 
 
 ## Dependencies
 
-- Imports: `../user-sessions/types` (`SubjectRevocation` and its capability guard, in `revocationWiring.mts`), `../federation-tokens/refresh-error` (the classifier both token paths share), `../net/redirect-uri`, `../security/timingSafe`, `../jwt/verify` (the skew constant), `../config/application.schema` (the module's schema projection), `../modules/index` (`defineModule`), `../adapters/AdapterFactory`, `../logging/*`; `node:crypto`, `zod`.
-- Imported by: `../user-sessions/{revokeAllForSubject,subjectRevocationService,retention}`, `../repositories/InMemoryClientRepository.mts` (the reserved-parameter check), `../boot/replica-safety.mts`, the root barrel; downstream `packages/federation-grants`, `redis`, `oauth`.
+- Depends on: `user-sessions/` (the `SubjectRevocation` type and its capability guard, for the wiring rule), `federations/` (the bearer token-type rule and the `DelegatedTokens` type a refresh answers with), `federation-tokens/` (the refresh-error classifier both token paths share), `net/`, `security/`, `jwt/` (the clock-skew constant), `config/` (the module's schema projection), `modules/`, `adapters/`, `logging/`; `node:crypto`, `zod`.
+- Depended on by: `user-sessions/` (subject-wide revocation and the retention horizon), `repositories/` (the reserved-parameter check on a registered redirect URI), `boot/` (replica safety), the root barrel; downstream `packages/federation-grants`, `redis`, `oauth`.
+- This directory and `user-sessions/` depend on each other at run time, and no import cycle crosses the two directories — see [the directory map](../README.md#where-a-boundary-is-a-judgement-call).
 - Must never import `boot/`, `middleware/`, `routes/`, a federation adapter or `packages/session`, or `testing/`.
 
 ## Invariants

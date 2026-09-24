@@ -14,6 +14,14 @@
  * limitations under the License.
  */
 
+/*
+ * RFC 6749's `token_type`: `BEARER_TOKEN_TYPE`, `canonicalTokenType` (whether
+ * a value is a `token-type` at all, per §A.13 — a `type-name` or a URI
+ * reference, checked against RFC 3986's grammar including its structure) and
+ * `isBearerTokenType` (§5.1's case-insensitive comparison). What an upstream
+ * token may be handed on as, asked by both routes that hand one on. No state.
+ */
+
 import { isIPv6 } from "node:net";
 
 /**

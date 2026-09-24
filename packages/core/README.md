@@ -1,8 +1,14 @@
 # @o3co/auth-provider-core
 
-Module system, token service, repository interfaces, and app config for auth.provider. This package defines the core abstractions that all other packages build on.
+Last updated: 2026-09-24
 
-Vocabulary: **the Store** is auth.provider's term for the consumer's upstream user service — the system of record for identity, credentials, and email-verification state. Defined on the `User` doc in `src/repositories/types.mts`; auth.provider reads Store-published state and never writes it. Design-campaign identifiers cited in this README (A2-β/γ, A3, A4, AS-*, …) resolve in [docs/design-campaign-index.md](../../docs/design-campaign-index.md).
+## Responsibility
+
+`@o3co/auth-provider-core` is the package every other auth.provider package builds on: the module system and the boot planner (`createApp`), the grant-handler contract and the token helpers every grant mints with, the repository and store ports with in-process adapters for a single replica, the key store, and the configuration schema. It sits under every other package and imports none of them. That is why it is a package of its own: a contract several packages share lives here, because those packages do not all depend on one another — `session` and `oauth` are independent, and `oauth-token-exchange` and `webauthn` implement grants without depending on `oauth` — so core is the one place they all depend on.
+
+It owns no grant type and no `/oauth/*` endpoint (`@o3co/auth-provider-oauth` and the grant packages): the only route core mounts itself is the discovery document, and its JWKS, health and readiness routers are installed by a composition root. It owns no durable adapter (`@o3co/auth-provider-redis`), no federation adapter (the `@o3co/auth-provider-federation-*` packages), no login or browser session (`@o3co/auth-provider-session`) and no Store client (`@o3co/auth-provider-foundation`). Which directory inside owns what, and why each is separate, is [src/README.md](src/README.md).
+
+Vocabulary: **the Store** is auth.provider's term for the consumer's upstream user service — the system of record for identity, credentials, and email-verification state. Defined on the `User` doc in [`src/repositories/types.mts`](src/repositories/types.mts); auth.provider reads Store-published state and never writes it. Design-campaign identifiers cited in this package's sources resolve in [docs/design-campaign-index.md](../../docs/design-campaign-index.md).
 
 ## Install
 
@@ -30,25 +36,25 @@ So the schema declares every configuration section owned by a module in this rep
 
 A module from **outside** this repository is not covered by that check. If one reads its own config section, extend the schema before parsing — `AppConfigSchema.extend({ mySection: … })` — or hand `createApp` the unparsed configuration and let the composed module schemas validate it.
 
-Top-level fields (the sections every deployment carries; module-owned sections are documented by the package that owns them):
+Defaults live in [`config/reference.conf`](config/reference.conf), not in the schema. Top-level fields (the sections every deployment carries; module-owned sections are documented by the package that owns them):
 
 | Field | Description |
 | --- | --- |
 | `http.port` | HTTP listen port |
 | `http.trustProxy` | Express `trust proxy`: `false`, an address list (IPs, CIDR ranges, or the named ranges `loopback` / `linklocal` / `uniquelocal`), a hop count, or `true`. Entries are validated at boot. Prefer naming the proxy over `true`, which believes a forwarded client address from anyone who can reach the process |
-| `oauth.jwt` | JWT signing config — issuer, signingKey (provider + per-provider sub-section) |
+| `oauth.jwt` | JWT signing config — `issuer`, `signingKey` (a `provider` plus its sub-section), `jwksPath`, `jwksCacheMaxAge` |
 | `oauth.accessToken.defaultExpiresIn` | Access token lifetime, in seconds, that every grant mints when the request asks for none. Only token exchange lets a request ask (its `expires_in` parameter); every other grant ignores that parameter. Read the lifetime with `resolveAccessTokenLifetime(config)` |
 | `oauth.accessToken.maxExpiresIn` | The most a token-exchange `expires_in` can obtain; a larger request is clamped to it. Unset means the default, so nothing is extended unless you opt in. A default above it fails boot naming both keys |
-| `oauth.accessToken.expiresIn` | **Deprecated** alias of `defaultExpiresIn`, read only while that key is unset (`reference.conf` keeps the shipped `3600` here). The parsed config still carries the resolved default under this name for readers written before the split |
+| `oauth.accessToken.expiresIn` | **Deprecated** alias of `defaultExpiresIn`, read only while that key is unset (`reference.conf` keeps the shipped `3600` here). The parsed config also carries the resolved default under this name |
 | `oauth.refreshToken.expiresIn` | Refresh token lifetime |
-| `oauth.grants` | Per-grant-type config (`session`, `authorization`, `refresh_token`, and custom keys) |
-| `session` | Express session — secret, maxAge, secure, sameSite, domain, storage, csrf |
-| `session.csrf` | CSRF policy for the state-changing session routes — `trustedOrigins`, `ttlSeconds` (#272) |
-| `rateLimit` | Rate limit config for `login`, `token`, and `authorize` endpoints |
-| `federations` | Federation providers — `z.record(string, { enabled, type?, ...passthrough })`. Built-in types: `"google"`, `"github"`. |
-| `repositories` | Repository config for clients, users, and codes |
-| `endpoints` | Path overrides for `login`, `client`, and `authCallback` routes |
-| `cors.allowedOrigins` | Browser origins allowed to read the token, userinfo, revocation and discovery/JWKS responses — see [CORS](#cors). Empty (the default) means CORS is off. Since #272 this does **not** grant CSRF trust — use `session.csrf.trustedOrigins`. |
+| `oauth.grants` | Per-grant-type config, keyed by grant type. The `oauth` package reads `enabled` for the grants it registers — `session`, `authorization_code`, `refresh_token`, `client_credentials` and the jwt-bearer URN — and registers each only when it is true. The other grant packages do not read this key: token exchange and WebAuthn register their grant whenever their module is installed, and the device grant registers a handler either way, which refuses the grant while `oauth.deviceAuthorization.enabled` is false |
+| `session` | The browser session cookie and its store — `secret`, `name`, `maxAge`, `secure`, `sameSite`, `domain`, `redirectAllowlist`, `storage`, `csrf` |
+| `session.csrf` | CSRF policy for the state-changing session routes — `trustedOrigins`, `ttlSeconds` |
+| `rateLimit` | `login`: the `/session/login` budget (`windowMs`, `limit`) both bundled limiters seed from. `failMode`: what the OAuth-endpoint limiter does when its backend fails — `closed` answers `503`, `open` lets the request through and logs an error. The OAuth-endpoint limits themselves are the limiter module's (`memoryRateLimiter.*` / `redisRateLimiter.*`) |
+| `federations` | Federation providers, keyed by name: `{ enabled, type?, … }`. Core reads `enabled` (the federation-stores wiring check at boot); `type` and the rest of the entry belong to the adapter package that reads it — the adapter packages are listed in the [root README](../../README.md) |
+| `repositories` | Repository config for clients, users, and codes — each a `type` plus its sub-section |
+| `endpoints` | `login.url`: the deployment's login page. `consent.url`: its consent page for clients that are not first-party (default `/consent`) |
+| `cors.allowedOrigins` | Browser origins allowed to read the token, userinfo, revocation and discovery/JWKS responses — see [CORS](#cors). Empty (the default) means CORS is off. It grants no CSRF trust — use `session.csrf.trustedOrigins` |
 
 ### Grant System
 
@@ -56,15 +62,13 @@ The grant system is the extension point for OAuth 2.0 grant types. Each grant ty
 
 #### Interfaces and types
 
-The authoritative definitions are in [`src/grants/types.mts`](src/grants/types.mts): `GrantHandler`, `GrantContext`, `SessionData`, `AuthenticatedClient`, `GrantHandlerResult`, `GrantDependencies`, `GrantFactory`, `GrantModule`. They are not transcribed here: an earlier copy of `SessionData` kept listing `code_client_id` and `granted_scopes` after v0.5.1 had removed them (D-1 moved identity binding onto the code record, `CodeData.client_id` / `redirect_uri`). What a handler may trust (`authenticatedClient`, never `body.client_id`) and what it must not do is documented on the fields themselves; the directory's responsibility map is [`src/grants/README.md`](src/grants/README.md).
+The definitions are in [`src/grants/types.mts`](src/grants/types.mts): `GrantHandler`, `GrantContext`, `SessionData`, `AuthenticatedClient`, `GrantHandlerResult`, `GrantDependencies`, `GrantFactory`. What a handler may trust (`authenticatedClient`, never `body.client_id`) and what it must not do is documented on the fields themselves; the directory's responsibility map is [`src/grants/README.md`](src/grants/README.md).
 
 #### Grant registration
 
-Grant handlers are wired into the boot planner via `contributes.grants` on a module's `defineModule` manifest (see A2-γ §3.3). The boot planner instantiates each `GrantFactory`, registers the resulting handler, and (after `addModule` for all modules) calls `freeze()` so post-boot mutation throws loudly.
+A module declares its grants in `contributes.grants`, keyed by grant type. Whether a grant is contributed at all is the module's decision: the `oauth` package's modules contribute each of their grants only when `oauth.grants.<name>.enabled` is true, while token exchange and WebAuthn contribute theirs whenever their module is installed, and the device grant contributes its handler either way and refuses the grant while `oauth.deviceAuthorization.enabled` is false. Boot runs each factory, registers the handler under its grant type — two modules contributing the same grant type refuse boot — and freezes the registry at stage 5, so a registration after boot throws. Consumer code never imports or builds the registry: `GrantRegistry` is internal and not exported from the package root.
 
-Consumer code does NOT need to import or instantiate any registry class. A `GrantHandler.cleanup?()` is not called by `handle.dispose()`: `AppHandle.dispose()` runs each provided component's `lifecycle[K].cleanup` in reverse-topological order (A2-β §8.1), then `Symbol.asyncDispose` on module-provided values that declared none, then the `LifecycleRegistrar` drain — and never touches the registry (`GrantRegistry.cleanup()` has no caller). A module that holds a resource on a handler's behalf releases it through its own `lifecycle[K].cleanup`; see [`src/grants/README.md`](src/grants/README.md).
-
-> **Removed**: the `GrantRegistry` and `GrantRegistryError` classes (deprecated as public re-exports in v0.5.1 per AS-8) are no longer exported from `@o3co/auth-provider-core`. They remain as internal implementation detail of the boot planner. Existing consumers of the v0.4.x `new GrantRegistry()` pattern should migrate to module-based `contributes.grants` declarations. See CHANGELOG for the release that performed this removal.
+A `GrantHandler.cleanup?()` is never called. `AppHandle.dispose()` runs each provided component's `lifecycle[K].cleanup` in reverse-topological order, then `Symbol.asyncDispose` on module-provided values that declared none, then the `LifecycleRegistrar` drain — and never touches the registry. A module that holds a resource on a handler's behalf releases it through its own `lifecycle[K].cleanup`; see [`src/grants/README.md`](src/grants/README.md).
 
 ### Token Utilities
 
@@ -74,90 +78,19 @@ Consumer code does NOT need to import or instantiate any registry class. A `Gran
 
 ### Key Store
 
-The `KeyStore` interface abstracts over symmetric (HS256) and asymmetric (RS256, ES256, EdDSA) signing keys, including key rotation. Rotation is shape-specific: asymmetric algorithms use `previousKeys` (kid + publicKey + expiresAt), and HS256 uses `previousSecrets` (kid + secret + expiresAt). `getVerificationKey(kid)` resolves the key by kid — the keystore returns the matching key directly, never trial-verifies across keys. `sign(options)` returns a compact JWT; the KeyStore self-injects the `alg` and `kid` protected header fields, so callers cannot override them. This contract lets remote-sign adapters (KMS/HSM) implement `sign()` without exposing private key material. `getSigningKidFallback()` is a cheap accessor returning the current signing kid for verifying legacy/malformed tokens that lack a `kid` header. Do not use it for rotation-safe lookup.
+The `KeyStore` interface abstracts over symmetric (HS256) and asymmetric (RS256, ES256, EdDSA) signing keys, including key rotation. Rotation is shape-specific: asymmetric algorithms use `previousKeys` (kid + public key + expiry), and HS256 uses `previousSecrets` (kid + secret + expiry). `getVerificationKey(kid)` resolves the key by kid — the keystore returns the matching key directly, never trial-verifies across keys — and throws `UnknownKidError` for a kid it does not hold and `ExpiredKidError` for one whose `expiresAt` has passed, so a caller can tell a fabricated kid from a retired one. `sign(options)` returns a compact JWT; the KeyStore self-injects the `alg` and `kid` protected header fields, so callers cannot override them. This contract lets remote-sign adapters (KMS/HSM) implement `sign()` without exposing private key material. `getSigningKidFallback()` is a cheap accessor returning the current signing kid for verifying legacy/malformed tokens that lack a `kid` header. Do not use it for rotation-safe lookup.
 
-```typescript
-type KeyLike = CryptoKey | KeyObject | Uint8Array;
-
-interface ManagedKey {
-  kid: string;
-  publicKey: KeyLike;
-  expiresAt?: Date;
-}
-
-interface JWTPayload {
-  iss?: string;
-  sub?: string;
-  aud?: string | string[];
-  jti?: string;
-  nbf?: number;
-  exp?: number;
-  iat?: number;
-  [propName: string]: unknown;
-}
-
-interface SignJwtOptions {
-  claims: JWTPayload;      // RFC 7519 claims
-  header?: { typ?: string }; // alg / kid are KeyStore-injected; caller cannot override
-}
-
-interface KeyStore {
-  readonly algorithm: "HS256" | "RS256" | "ES256" | "EdDSA";
-  sign(options: SignJwtOptions): Promise<string>;
-  getSigningKidFallback(): string;
-  getVerificationKeys(): Promise<ManagedKey[]>;
-  getVerificationKey(kid: string): Promise<KeyLike>;
-}
-
-interface AsymmetricKeyStoreOptions {
-  algorithm: "RS256" | "ES256" | "EdDSA";
-  kid: string;
-  privateKeyPem: string;
-  publicKeyPem: string;
-  previousKeys?: Array<{ kid: string; publicKeyPem: string; expiresAt: Date }>;
-}
-
-type KeyStoreFactory = AdapterFactory<KeyStore>;
-
-interface SymmetricPreviousSecret {
-  kid: string;
-  secret: string;
-  expiresAt: Date;
-}
-
-function createAsymmetricKeyStore(options: AsymmetricKeyStoreOptions): Promise<KeyStore>;
-function createSymmetricKeyStore(
-  secret: string,
-  kid?: string,
-  previousSecrets?: ReadonlyArray<SymmetricPreviousSecret>,
-): KeyStore;
-```
+The definitions — `KeyStore`, `SignJwtOptions`, `JWTPayload`, `ManagedKey`, `KeyLike`, the two errors, `AsymmetricKeyStoreOptions`, `SymmetricPreviousSecret`, `createAsymmetricKeyStore` and `createSymmetricKeyStore` — are in [`src/keys/KeyStore.mts`](src/keys/KeyStore.mts).
 
 #### Signing without holding the private key (KMS / HSM / Vault)
 
-`createRemoteSigningKeyStore` is a `KeyStore` whose private key never enters this process. The whole seam is one method:
-
-```typescript
-interface RemoteSigner {
-  // Signature in JWS form (RFC 7515 §3.3), not the provider's native encoding.
-  sign(kid: string, data: Uint8Array): Promise<Uint8Array>;
-}
-
-function createRemoteSigningKeyStore(options: {
-  algorithm: "RS256" | "ES256" | "EdDSA";
-  kid: string;
-  signer: RemoteSigner;
-  publicKeyPem: string;              // public material only
-  previousKeys?: ReadonlyArray<{ kid: string; publicKeyPem: string; expiresAt: Date }>;
-  verifyOnConstruction?: boolean;    // default true
-}): Promise<KeyStore>;
-```
+`createRemoteSigningKeyStore` is a `KeyStore` whose private key never enters this process. The whole seam is one method, `RemoteSigner.sign(kid, data)`, which answers the signature in JWS form (RFC 7515 §3.3), not the provider's native encoding. Its options carry public key material only, and `verifyOnConstruction` defaults to `true`; the definitions are in [`src/keys/remoteSigning.mts`](src/keys/remoteSigning.mts).
 
 Everything else a `KeyStore` owes — building the protected header, base64url encoding, assembling the compact JWT, rotation bookkeeping, publishing JWKS — is done for you, so an integrator writes the provider call and nothing else.
 
 **No vendor is bundled.** Wire AWS KMS, PKCS#11, or a Vault transit key by supplying `signer`; `core` stays free of any of their SDKs. There is no `remote` entry in the key-store factory for the same reason a `RemoteSigner` is a function: build the store in your composition root and supply it as the `keyStore` component.
 
-**`ES256` returns DER from almost every provider, and JWS does not accept it.** AWS KMS, PKCS#11 and OpenSSL all return an ASN.1 `SEQUENCE`; JWS wants the raw `R || S` concatenation. `derToJoseEcdsaSignature(der)` converts it. Getting this wrong produces signatures that fail at the relying party while the signer reports success, which is why the store signs one token at construction and verifies it against `publicKeyPem` — a signer returning the wrong form fails boot with a message naming both likely causes. Pass `verifyOnConstruction: false` only where a provider call at boot is itself the problem.
+**`ES256` returns DER from almost every provider, and JWS does not accept it.** AWS KMS, PKCS#11 and OpenSSL all return an ASN.1 `SEQUENCE`; JWS wants the raw `R || S` concatenation. `derToJoseEcdsaSignature(der)` converts it. Getting this wrong produces signatures that fail at the relying party while the signer reports success, which is why the store signs one token at construction and verifies it against the public key — a signer returning the wrong form fails boot with a message naming both likely causes. Pass `verifyOnConstruction: false` only where a provider call at boot is itself the problem.
 
 **There is no `HS256` variant, deliberately.** A shared secret has no public half, so "the key never leaves the boundary" cannot be true of it — every verifier needs the same bytes the signer has. Offering it here would let a deployment believe it had moved key material out of reach when it had not.
 
@@ -181,14 +114,9 @@ const store = await createRemoteSigningKeyStore({
 });
 ```
 
-```typescript
-function createKeyStoreFactory(): KeyStoreFactory;
-function registerBuiltinKeyStores(factory: KeyStoreFactory): void;
-```
+`createKeyStoreFactory()` creates a new factory with no registered types. `registerBuiltinKeyStores(factory)` registers the built-in `"local"` provider, which dispatches to `createAsymmetricKeyStore` or `createSymmetricKeyStore` based on `algorithm`. Both are in [`src/keys/factory.mts`](src/keys/factory.mts). The factory follows the same `AdapterFactory<T>` contract as the `ClientRepository`, `UserRepository`, and `CodeRepository` factories.
 
-`createKeyStoreFactory` creates a new factory with no registered types. `registerBuiltinKeyStores` registers the built-in `"local"` provider, which dispatches to `createAsymmetricKeyStore` or `createSymmetricKeyStore` based on `algorithm`. The factory pattern follows the same `AdapterFactory<T>` contract as `ClientRepository`, `UserRepository`, and `CodeRepository` factories.
-
-#### Algorithm default and key requirements (#282)
+#### Algorithm default and key requirements
 
 `reference.conf` ships `algorithm = "EdDSA"` (`DEFAULT_SIGNING_ALGORITHM`). Asymmetric by default because HS256 leaves a relying party with two bad options: verify nothing (there is no public key to publish) or hold the shared secret — which also lets it **mint** tokens.
 
@@ -202,7 +130,7 @@ Entropy is measured on the **decoded** value, taking the smallest plausible read
 
 Note that the floor lives in the **builder and the schema** — the config boundaries. `createSymmetricKeyStore` is the low-level primitive and does not enforce it, so a composition root calling it directly owns the check.
 
-#### HS256 key rotation (IH-9)
+#### HS256 key rotation
 
 To rotate an HS256 signing key without a maintenance window:
 
@@ -236,42 +164,17 @@ Repository interfaces define the data access contract. Built-in in-memory implem
 
 #### Interfaces and types
 
-The ports are [`src/repositories/ClientRepository.mts`](src/repositories/ClientRepository.mts) (`findById`, `authenticate`; `PublicClient` is `Client` without `clientSecret`), [`src/repositories/UserRepository.mts`](src/repositories/UserRepository.mts) (`authenticate`, `authenticateByToken`, and the optional federated-identity link and lookup methods of #482 / #611) and [`src/repositories/CodeRepository.mts`](src/repositories/CodeRepository.mts) (`createCode`, `findByCode`, `consumeByCode` — the atomic single-use gate — and `removeByCode`). The records — `Client`, `User`, `CodeData`, `Code`, `TokenEndpointAuthMethod` — are in [`src/repositories/types.mts`](src/repositories/types.mts), where a field's semantics are documented once, on the field — except the three logout URI fields, which carry no doc there: `postLogoutRedirectUris` takes the registered-redirect-URI grammar of `allowedRedirectUris`, custom schemes included (#498), while `backchannelLogoutUri` and `frontchannelLogoutUri` are http/https only; that note sits beside the schema in [`src/repositories/InMemoryClientRepository.mts`](src/repositories/InMemoryClientRepository.mts). Since v0.5.1 `createCode` requires `client_id` and `redirect_uri`, and `Client.tokenEndpointAuthMethod` is required. Every other `Code` field is a required key holding `undefined` where nothing was recorded, and `createCode` takes `CreateCodeInput`, in which only `expiresIn` may be left out (#626). The directory's responsibility map is [`src/repositories/README.md`](src/repositories/README.md).
+The ports are [`src/repositories/ClientRepository.mts`](src/repositories/ClientRepository.mts) (`findById`, `authenticate`; `PublicClient` is `Client` without `clientSecret`), [`src/repositories/UserRepository.mts`](src/repositories/UserRepository.mts) (`authenticate`, `authenticateByToken`, and the optional federated-identity link and lookup methods) and [`src/repositories/CodeRepository.mts`](src/repositories/CodeRepository.mts) (`createCode`, `findByCode`, `consumeByCode` — the atomic single-use gate — and `removeByCode`). The records — `Client`, `User`, `CodeData`, `Code`, `TokenEndpointAuthMethod` — are in [`src/repositories/types.mts`](src/repositories/types.mts), where a field's semantics are documented once, on the field — except the three logout URI fields, which carry no doc there: `postLogoutRedirectUris` takes the registered-redirect-URI grammar of `allowedRedirectUris`, custom schemes included, while `backchannelLogoutUri` and `frontchannelLogoutUri` are http/https only; that note sits beside the schema in [`src/repositories/InMemoryClientRepository.mts`](src/repositories/InMemoryClientRepository.mts).
+
+`createCode` requires `client_id` and `redirect_uri`, and `Client.tokenEndpointAuthMethod` is required. Every other `Code` field is a required key holding `undefined` where nothing was recorded, and `createCode` takes `CreateCodeInput`, in which only `expiresIn` may be left out (the repository's default then applies). `nonce` and `sid` carry the OIDC nonce and the session id from `/authorize` to `/token`; `grantedScope` / `grantedAudience` are the grant policy's decision at `/authorize`, which the `authorization_code` grant reads instead of evaluating the policy again. The directory's responsibility map is [`src/repositories/README.md`](src/repositories/README.md).
 
 #### Built-in implementations
 
-```typescript
-class InMemoryClientRepository implements ClientRepository {
-  constructor(clients: Map<string, ClientEntry>);
-}
-
-class InMemoryUserRepository implements UserRepository {
-  constructor(users: Map<string, UserEntry>);
-}
-
-class InMemoryCodeRepository implements CodeRepository {
-  constructor(options?: { defaultExpiresIn?: number });
-  dispose(): void; // clears internal timers
-}
-```
-
-#### YAML-backed initialization
-
-```typescript
-const ClientEntrySchema: z.ZodObject<...>;
-const UserEntrySchema: z.ZodObject<...>;
-
-function loadYamlMap<T extends z.ZodTypeAny>(
-  filePath: string,
-  schema: T
-): Map<string, z.infer<T>>;
-```
-
-`loadYamlMap` reads a YAML file whose top-level keys are record IDs and validates each entry against `schema`. Pass the result directly to `InMemoryClientRepository` or `InMemoryUserRepository`.
+`InMemoryClientRepository` and `InMemoryUserRepository` take a `Map` of entries validated by `ClientEntrySchema` / `UserEntrySchema`; `InMemoryCodeRepository` takes an optional `defaultExpiresIn` and runs a GC timer that its `dispose()` clears. `loadYamlMap(filePath, schema)` ([`src/repositories/loadYamlMap.mts`](src/repositories/loadYamlMap.mts)) reads a YAML file whose top-level keys are record IDs and validates each entry against `schema`; pass the result to `InMemoryClientRepository` or `InMemoryUserRepository` — see [Loading clients and users from YAML](#loading-clients-and-users-from-yaml).
 
 #### Adapter factory primitives
 
-`createAdapterFactory<T>(kind, ctx?)`, `AdapterFactory<T>` (`register`, `replace`, `create`, `registeredTypes`), `AdapterBuilder<T>` (a function of the config section and a read-only `BuilderContext`), `BuilderContext` (`lifecycle?`, `readiness?`, `logger?` — every field optional, additions additive-only), `LifecycleRegistrar` and `AdapterFactoryError` are defined in [`src/adapters/AdapterFactory.mts`](src/adapters/AdapterFactory.mts). `createRepositoryFactories(ctx?)` in [`src/repositories/RepositoryFactory.mts`](src/repositories/RepositoryFactory.mts) returns the client, user and code factories.
+`createAdapterFactory<T>(kind, ctx?)`, `AdapterFactory<T>`, `AdapterBuilder<T>` (a function of the config section and a read-only `BuilderContext`, whose fields are all optional and only ever added to), `LifecycleRegistrar` and `AdapterFactoryError` are defined in [`src/adapters/AdapterFactory.mts`](src/adapters/AdapterFactory.mts). `createRepositoryFactories(ctx?)` in [`src/repositories/RepositoryFactory.mts`](src/repositories/RepositoryFactory.mts) returns the client, user and code factories.
 
 Key contract properties:
 
@@ -284,15 +187,9 @@ Key contract properties:
 
 ### Module System
 
-Modules extend the app with additional routes, grant handlers, or DI-graph
-components. v0.5.0 modules are declarative manifests authored via
-`defineModule({...})` — they declare `requires` / `optional` (typed
-`ProviderDeps` keys) and contribute to `ContributesMap` slots like
-`grants`, `routes`, `federations`.
+Modules extend the app with routes, grant handlers and DI-graph components. A module is a declarative manifest written with `defineModule({...})`: it declares `requires` / `optional` (typed `ProviderDeps` keys), `provides` components, and contributes to `ContributesMap` kinds such as `grants`, `routes` and `federations`. The boot planner injects the typed deps into every factory; a module never mutates shared state. The vocabulary is [`src/modules/manifest/`](src/modules/manifest/README.md), also published as the `@o3co/auth-provider-core/modules/manifest` subpath.
 
 ```typescript
-type PathResolver = (specifier: string) => string;
-
 const myModule = defineModule({
   name: "my-module",
   requires: ["config", "clientRepository"] as const,
@@ -304,30 +201,23 @@ const myModule = defineModule({
 });
 ```
 
-> Note: the v0.4.x `LegacyModule` / `ModuleContext` shape (a function
-> returning `{ name, init(context) }`) was removed in Phase 9 of the
-> v0.5.0 redesign. The boot planner injects typed deps directly into the
-> contribution lambdas; modules no longer mutate a shared `ModuleContext`.
-
 ### App Factory
 
-`createApp(options): Promise<AppHandle>` is the boot planner in [`src/boot/`](src/boot/README.md). `CreateAppOptions` (`modules`, `bootstrapComponents`, and the optional `contributionKinds` and `overrideComponents`) and `AppHandle` (`router`, `listen`, `dispose`, `components`, `routes`, `readinessProbes`) are defined in [`src/boot/types.mts`](src/boot/types.mts).
+`createApp(options): Promise<AppHandle>` is the boot planner in [`src/boot/`](src/boot/README.md). `CreateAppOptions` and `AppHandle` are defined in [`src/boot/types.mts`](src/boot/types.mts).
 
 `createApp` validates the manifests, composes and parses the configuration, materialises the component graph, applies every contribution, freezes the world and mounts the routes. The returned `router` is ready to mount (`app.use(handle.router)`) or to serve through `handle.listen(port)`; `handle.dispose()` runs every cleanup in reverse-topological order and rejects with an `AggregateError` carrying every failure. There is no separate `init()` step.
 
 What core mounts on its own, in this order: `corsMw` when `cors.allowedOrigins` is non-empty, the single `tokenBindingMw` composed from the contributed mechanisms when at least one was contributed, the protected-resource sender-constraint check (always), the `grantMiddleware` contributions ahead of grant dispatch, and the OIDC discovery route when an issuer is configured and a module declares `providerRoot`. Everything else — JWKS (`jwksModule`), liveness and readiness (`createHealthcheckRouter`, `createReadinessRouter`), the OAuth and session routes — is a module or a router the composition root installs.
 
-`express` is an optional peer dependency: `createApp` loads it lazily (`await import("express")`, with `createRequire` as the fallback) to build the router, and `handle.listen()` also needs the `express()` factory to wrap the router in an app.
+`express` is an optional peer dependency, loaded lazily: `createApp` imports it (`await import("express")`) to build the router, and boot also requires it (`createRequire`) for the `express()` factory `handle.listen()` wraps the router in — and for the router, if the import failed.
 
 ## CORS
 
-`cors.allowedOrigins` is consumed by `corsMw` (`src/middleware/cors.mts`), which `assembleApp` mounts **first** — ahead of every other middleware and every route contribution. An empty list (the default) mounts nothing at all, so a deployment that has not opted in behaves exactly as it did before the middleware existed: no headers, no `Vary`.
-
-Until [#500](https://github.com/o3co/auth.provider/issues/500) the key was declared here, shipped in every `reference.conf`, and read by nothing — a cross-origin preflight to `/oauth/token` got no `Access-Control-Allow-Origin`, so a browser SPA on any origin but the provider's could not use the provider at all, and an operator who set the key had no way to find out.
+`cors.allowedOrigins` is consumed by `corsMw` (`src/middleware/cors.mts`), which `assembleApp` mounts **first** — ahead of every other middleware and every route contribution. An empty list (the default) mounts nothing: no CORS headers and no `Vary`.
 
 ### Surface
 
-`browserFacingCorsRoutes(config)` is the table, and it is an **allowlist** — the opposite polarity to the sender-constraint mount beside it. That one guards a credential and must therefore cover routes core has never heard of ([#327](https://github.com/o3co/auth.provider/issues/327)); this one *grants* a cross-origin read, so a route core has never heard of is exactly the one that must not silently acquire it.
+`browserFacingCorsRoutes(config)` is the table, and it is an **allowlist** — the opposite polarity to the sender-constraint mount beside it. That one guards a credential and must therefore cover routes core has never heard of; this one *grants* a cross-origin read, so a route core has never heard of is exactly the one that must not silently acquire it.
 
 | Path | Methods |
 |---|---|
@@ -338,7 +228,7 @@ Until [#500](https://github.com/o3co/auth.provider/issues/500) the key was decla
 | `/.well-known/oauth-authorization-server` | `GET` |
 | `oauth.jwt.jwksPath` (default `/.well-known/jwks.json`) | `GET` |
 
-The two discovery rows are the same document ([#528](https://github.com/o3co/auth.provider/issues/528)): OIDC Discovery 1.0 appends its suffix to the issuer, RFC 8414 inserts its well-known string between host and path, and `discoveryPathsFor` (`src/discovery/wellKnownPaths.mts`) forms both for the configured issuer — for `https://as.example/tenant-a` that is `/tenant-a/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server/tenant-a` — so the route, its advertisement and this table cannot drift.
+The two discovery rows are the same document: OIDC Discovery 1.0 appends its suffix to the issuer, RFC 8414 inserts its well-known string between host and path, and `discoveryPathsFor` (`src/discovery/wellKnownPaths.mts`) forms both for the configured issuer — for `https://as.example/tenant-a` that is `/tenant-a/.well-known/openid-configuration` and `/.well-known/oauth-authorization-server/tenant-a` — so the route, its advertisement and this table cannot drift.
 
 `/oauth/introspect` is off the list because it is server-to-server and already refuses public clients; `/oauth/authorize` because it is a top-level navigation, not a `fetch`. The `/oauth/*` paths are coupled to the bundled `oauthModule`'s mountPath, like the `/oauth/token` mounts in `boot/assemble-app.mts` — a downstream that re-mounts the OAuth router elsewhere builds its own table and passes it to `corsMw`.
 
@@ -352,7 +242,7 @@ The two discovery rows are the same document ([#528](https://github.com/o3co/aut
 
 ### Origins
 
-Entries are validated at boot by `checkSerializedOrigin` (`src/net/origin.mts`) and refused by index, because matching is exact string equality: a trailing slash, an explicit `:443`, an uppercase host, a path, or a wildcard is an allowlist that admits nobody with nothing anywhere to say so. `https` is required except for a loopback host, through the shared `isLoopbackHostname` home ([#364](https://github.com/o3co/auth.provider/issues/364)). `corsMw` re-applies the same check and warns on anything it drops, so a hand-built `AppConfig` that never passed the schema cannot install an entry the schema would have refused.
+Entries are validated at boot by `checkSerializedOrigin` (`src/net/origin.mts`) and refused by index, because matching is exact string equality: a trailing slash, an explicit `:443`, an uppercase host, a path, or a wildcard is an allowlist that admits nobody with nothing anywhere to say so. `https` is required except for a loopback host, through the shared `isLoopbackHostname` home. `corsMw` re-applies the same check and warns on anything it drops, so a hand-built `AppConfig` that never passed the schema cannot install an entry the schema would have refused.
 
 ## Usage Example
 
@@ -425,8 +315,12 @@ server.listen(config.http.port);
 ### Implementing a custom grant type
 
 ```typescript
-import { defineModule } from "@o3co/auth-provider-core";
-import type { GrantFactory, GrantHandler } from "@o3co/auth-provider-core";
+import {
+  defineModule,
+  type GrantFactory,
+  generateToken,
+  generateTokenResponse,
+} from "@o3co/auth-provider-core";
 
 const myGrantFactory: GrantFactory = (deps) => ({
   async handle(ctx) {
@@ -443,14 +337,14 @@ const myGrantFactory: GrantFactory = (deps) => ({
 
 const myGrantModule = defineModule({
   name: "my-grant",
-  requires: ["keyStore"],
+  requires: ["config", "keyStore"],
   contributes: {
     grants: { my_grant: myGrantFactory },
   },
 });
 ```
 
-Add `myGrantModule` to the `modules` array passed to `createApp`. The boot planner registers the grant through the `contributes.grants` projection per A2-γ Amendment 3 (`grantHandlerResolver` synthetic key).
+Add `myGrantModule` to the `modules` array passed to `createApp`. A `GrantFactory` receives `GrantDependencies`, whose required slots are `config` and `keyStore`, so the module requires both. The boot planner registers the grant under `my_grant`, and `/oauth/token` dispatches to it through the `grantHandlerResolver` synthetic key.
 
 ### Loading clients and users from YAML
 
@@ -470,16 +364,17 @@ const clientRepo = new InMemoryClientRepository(clients);
 const userRepo = new InMemoryUserRepository(users);
 ```
 
-### Extension points (v0.4.0)
+### Extension points
 
-Five extension points introduced in v0.4.0.
+Five optional extension points: a slot or contribution kind a composition root fills, or leaves empty.
 
 #### MFA
 
-- `MfaProvider`, optional `SupportsEnrollment` / `SupportsRevocation` capabilities
-- Factory: `createMfaProviderFactory()`, type guards `supportsEnrollment()` / `supportsRevocation()`
-- Flow: `/oauth/authorize` + `/auth/federation/callback` consult `MfaCoordinator.listEnrolled(userId)`; on MFA required, transaction saved via `MfaTransactionStore`, user posts to `POST /auth/mfa/verify { transaction_id, proof }`, core dispatches via `providerKind`
-- No factor is bundled in core, and none of the TOTP / backup-code factors the v0.4.0 text anticipated exists in this repository; `@o3co/auth-provider-webauthn` ships passkeys as a grant (`contributes.grants`), not as an `mfaFactors` contribution
+- `MfaProvider`, with the optional `SupportsEnrollment` / `SupportsRevocation` capabilities, the guards `supportsEnrollment()` / `supportsRevocation()`, and the `MfaCoordinator` / `MfaTransactionStore` types — [`src/mfa/types.mts`](src/mfa/types.mts); the factory `createMfaProviderFactory()` — [`src/mfa/factory.mts`](src/mfa/factory.mts).
+- `createMfaRouter(express, deps)` builds `POST /auth/mfa/verify { transaction_id, proof }`: it loads the pending transaction from the `MfaTransactionStore`, verifies the proof with the provider of the transaction's `providerKind`, and hands the resumed flow to the `onAuthorizeResume` / `onFederationResume` / `onLoginResume` callbacks you supply.
+- Core provides the port and the router and nothing that uses them. No route in this repository consults MFA: `/oauth/authorize`, the session login and the federation callback never call `MfaCoordinator.listEnrolled` or start a transaction, nothing mounts `createMfaRouter`, and no product code reads the `mfaFactors` contributions boot collects. A composition root that wants MFA starts the transaction in its own login flow, mounts the router and supplies the callbacks.
+- Boot refuses a composition that provides `mfaCoordinator` without both `mfaProviderFactory` and `mfaTransactionStore` (`mfa-partial-wiring`).
+- No factor is bundled; `@o3co/auth-provider-webauthn` ships passkeys as a grant (`contributes.grants`), not as an `mfaFactors` contribution.
 
 #### Audit
 
@@ -493,11 +388,11 @@ Five extension points introduced in v0.4.0.
 - Factory: `createRateLimiterFactory()`; `registerBuiltinRateLimiters()` registers `"memory"` only. The `"redis"` backend is `@o3co/auth-provider-redis` (`redisRateLimiterBuilder`, or the declarative `redisRateLimiterModule`); `ratelimit/__tests__/factory.test.mts` asserts it is not registered here
 - 429 + `Retry-After` emitted by core on denial
 
-#### RefreshTokenStore (RFC 6819 §5.2.2.3 replay detection)
+#### Refresh-token families (RFC 6819 §5.2.2.3 replay detection)
 
-- The port is `RefreshTokenFamilyRotation` / `RefreshTokenFamilyRevocation` in [`src/refresh-token-family/types.mts`](src/refresh-token-family/types.mts); the v0.4.x `RefreshTokenStoreBase` is gone
-- All `rt+jwt` tokens carry `family_id` claim (always emitted, backward-compatible)
-- Optional: provide the `refreshTokenFamilyRotation` / `refreshTokenFamilyRevocation` slots (`memoryRefreshTokenFamilyStoreModule`, or the Redis adapter) to enable replay detection + family revocation
+- The port is `RefreshTokenFamilyRotation` / `RefreshTokenFamilyRevocation` in [`src/refresh-token-family/types.mts`](src/refresh-token-family/types.mts)
+- Every `rt+jwt` carries a `family_id` claim
+- Provide the `refreshTokenFamilyRotation` / `refreshTokenFamilyRevocation` slots (`memoryRefreshTokenFamilyStoreModule`, or the Redis adapter) to enable replay detection and family revocation
 
 #### GrantPolicyHook (scope / audience / token exchange policy)
 
@@ -505,22 +400,18 @@ Five extension points introduced in v0.4.0.
 - `/oauth/authorize` evaluates once; `/oauth/token` re-uses `grantedScope` / `grantedAudience` persisted on the Code record (no re-evaluation for `authorization_code`)
 - Other grants (refresh / client_credentials / token-exchange) evaluate at the token endpoint
 
-All five adapters are optional. The audit sink carries an absence policy (`AUDIT_SINK_ABSENCE_POLICY`): when nothing fills the slot, the config must declare it absent (`audit.sink.type = "none"`) or boot refuses. The other four are simply off when absent.
+All five are optional. The audit sink carries an absence policy (`AUDIT_SINK_ABSENCE_POLICY`): when nothing fills the slot, the config must declare it absent (`audit.sink.type = "none"`) or boot refuses. The other four are simply off when absent.
 
-### Token-binding mechanisms (Wave 2)
+### Token-binding mechanisms
 
-Sender-constrained token binding is a first-class extension surface. The
-`tokenBindingMechanisms` contribution slot lets a module ship a custom
-`TokenBindingMechanism` without forking core. See [ADR
-2026-05-20-token-binding-first-class-abstraction.md](docs/adr/2026-05-20-token-binding-first-class-abstraction.md)
-for the full design rationale.
+Sender-constrained token binding is a first-class extension surface. The `tokenBindingMechanisms` contribution slot lets a module ship a custom `TokenBindingMechanism` without forking core. See [ADR 2026-05-20-token-binding-first-class-abstraction.md](docs/adr/2026-05-20-token-binding-first-class-abstraction.md) for the design rationale.
 
 #### Public types
 
-- `TokenBinding` ([`src/grants/tokenBinding.mts`](src/grants/tokenBinding.mts)) — the cross-cutting binding shape: a `kind`, the `confirmation`, and since #530 the optional `responseHeaders` a mechanism asks the response to carry (`DPoP-Nonce`). `kind` is open so downstream mechanisms can extend additively.
-- `Confirmation` — narrow union `{ readonly jkt: string } | { readonly "x5t#S256": string }`. RFC 7800 cnf claim payload; adding a new variant is a core semver-minor change.
-- `TokenBindingMechanism` — `{ kind, intentExplicit, extract(req) }`. The verb-side abstraction; `intentExplicit: true` for header-driven mechanisms (DPoP), `false` for ambient ones (mTLS).
-- `TokenBindingMechanismFactory<Deps>` — `(deps) => TokenBindingMechanism | null`. The contribution-slot entry shape; return `null` when the module is disabled by config (secure-default opt-in).
+- `TokenBinding` ([`src/grants/tokenBinding.mts`](src/grants/tokenBinding.mts)) — the cross-cutting binding shape: a `kind`, the `confirmation`, and the optional `responseHeaders` a mechanism asks the response to carry (`DPoP-Nonce`). `kind` is open so downstream mechanisms can extend additively.
+- `Confirmation` ([`src/grants/confirmation.mts`](src/grants/confirmation.mts)) — the RFC 7800 `cnf` claim payload, a closed union of `jkt` and `x5t#S256`; adding a variant is a core semver-minor change.
+- `TokenBindingMechanism` ([`src/middleware/tokenBinding.mts`](src/middleware/tokenBinding.mts)) — the verb-side abstraction: a `kind`, `intentExplicit` (`true` for header-driven mechanisms such as DPoP, `false` for ambient ones such as mTLS) and `extract(req)`.
+- `TokenBindingMechanismFactory<Deps>` ([`src/modules/manifest/contributes-map.mts`](src/modules/manifest/contributes-map.mts)) — the contribution-slot entry: it answers a mechanism, or `null` when the module is disabled by config (secure-default opt-in).
 
 #### Built-in mechanism packages
 
@@ -542,52 +433,41 @@ Env override: `OAUTH_TOKEN_BINDING_DISPATCH_POLICY`.
 
 The grants in `@o3co/auth-provider-oauth` emit `cnf`-bound RTs only for mechanisms in an explicit allowlist (`bindingIsDpop || bindingIsMtls`). Adding a new mechanism to bound-RT issuance MUST land its refresh-time enforcement matrix in the same PR — see [`packages/oauth`](../oauth/) for the §9.2 matrix pattern.
 
-### UserSessionStore / FederationTokenStore (TODO-F)
+### Session stores and federation tokens
 
-Two optional component slots for federation + OIDC support, provided by a module (`memorySessionStoresModule`, `memoryFederationTokenStoreModule`) or by the Redis adapters:
+Two groups of optional slots for federation and OIDC support, provided by a module (`memorySessionStoresModule`, `memoryFederationTokenStoreModule`) or by the Redis adapters:
 
-- `userSessionStore`: sid-keyed session metadata (auth_time, active RPs, family IDs, OIDC claims). Built-in adapters: `memory`, `redis`.
-- `federationTokenStore`: `(sid, federationName)`-keyed upstream IdP tokens. Built-in adapters: `memory`, `redis` (with mandatory AES-256-GCM encryption of refresh_token; `allow-plaintext` is opt-in and emits a warning).
+- `userSessionStore` and its sid- and subject-keyed siblings: session metadata (auth_time, active RPs, family IDs, OIDC claims), the logout fan-out indexes, and subject-wide revocation — [`src/user-sessions/README.md`](src/user-sessions/README.md).
+- `federationTokenStore`: `(sid, federationName)`-keyed upstream IdP tokens, deleted at logout. The Redis adapter encrypts `refresh_token` with AES-256-GCM; `allow-plaintext` is opt-in and emits a warning. A store must round-trip every field of `FederationTokens` — `expiresAt: null` included, and `undefined`, never `null`, for a field with nothing recorded. The port contract, field by field, is in [src/README.md](src/README.md#federation-tokens), and what a store implementer changes for the required keys is [docs/upgrading-required-record-keys.md](../../docs/upgrading-required-record-keys.md).
 
-Both stores are consumed by cascading revocation (F-3), id_token + `/userinfo` (F-4), logout (F-5) and `POST /oauth/federation/:name/token` (F-6) in `@o3co/auth-provider-oauth`. See the exported type signatures in `@o3co/auth-provider-core` (`UserSessionStore`, `FederationTokenStore`) for the full interface; the redis adapter's encryption contract is documented inline at its construction site.
+`@o3co/auth-provider-oauth` consumes both: logout and cascading revocation, id_token and `/userinfo`, and `POST /oauth/federation/:name/token`. When any `federations.<name>.enabled` is true, boot refuses a composition missing any of `userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`, `federationTokenStore` and `refreshTokenFamilyRevocation` (`federation-stores-incomplete`).
 
-**F-3 consumers activated.** `CodeData` carries two fields wired by the login paths, each a required key that holds `undefined` when there is nothing to carry (#626):
+- `SupportsLock` — optional capability on `FederationTokenStore` for per-`(sid, federationName)` advisory locks, which keep concurrent refreshes from stampeding the upstream. Both bundled stores implement it; detect it with the `supportsLock(store)` guard. The lock implementations behind them — core's `createInProcessLock` (`src/federation-tokens/lock/memory.mts`) and `@o3co/auth-provider-redis`'s `createRedisLock` — are internal and not exported; a custom store that needs locking exposes `SupportsLock` instead.
+- `Client.allowedAzpForFederationToken` — opt-in flag on the `Client` record; absent means `false`. A client that consumes `POST /oauth/federation/:name/token` must set it to `true`.
 
-- `nonce` — OIDC nonce forwarded from the authorization request, persisted on the code record for later `id_token`/`userinfo` use.
-- `sid` — Session ID (`UserSession.sid`) written by the login handler and used to bind minted tokens to the session.
-
-`CodeRepository.createCode` (its `CreateCodeInput`) and `InMemoryCodeRepository` take `nonce`, `sid`, and `grantedScope` in the same call. Consumers (the `authorization_code` grant) read `codeData.grantedScope` (set by `GrantPolicyHook` at `/oauth/authorize`) as the authoritative scope for token minting instead of `session.granted_scopes`.
-
-### OIDC id_token + claim filter (TODO-F-4)
+### OIDC id_token and claim filter
 
 Two low-level helpers used by the `authorization_code` grant and the `/oauth/userinfo` endpoint.
 
 #### `generateIdToken`
 
-`generateIdToken(opts)` is in [`src/grants/idToken.mts`](src/grants/idToken.mts) with `GenerateIdTokenOptions` beside it: `sub`, `aud`, `authTime`, `sid`, `scopes`, `userClaims`, `keyStore`, `issuer`, and the optional `azp`, `nonce`, `expiresIn` (default 3600 s), `amr` and `acr` (#481).
+`generateIdToken(opts)` is in [`src/grants/idToken.mts`](src/grants/idToken.mts), with its options, `GenerateIdTokenOptions`, beside it; `expiresIn` defaults to 3600 s.
 
 Signs and returns an OIDC id_token JWT (OIDC Core §2). Claim composition:
 
 - `iss`, `sub`, `aud`, `exp`, `iat`, `jti` — standard JWT claims
 - `auth_time` — seconds since epoch, from `opts.authTime`
-- `sid` — session identifier for back-channel logout (TODO-F-5)
+- `sid` — session identifier for back-channel logout
 - `azp` — authorized party, included when provided
 - `nonce` — reflected verbatim from the authorization request when provided
-- `amr`, `acr` — when the session recorded them (#481); an empty `amr` is omitted, not emitted as `[]`
+- `amr`, `acr` — when the session recorded them; an empty `amr` is omitted, not emitted as `[]`
 - scope-filtered user claims via `filterClaimsByScope`
 
-Header uses `typ: "JWT"` (#394) — the standard spelling, kept deliberately disjoint from RFC 9068's `at+jwt` so an id_token can never pass an access-token surface. Tokens minted before #394 carry `id+jwt`; #394 accepted that spelling alongside `JWT` for a migration window, and #402 closed it — `id+jwt` is now refused as an ordinary `typ` mismatch.
+Header uses `typ: "JWT"` — the standard spelling, kept deliberately disjoint from RFC 9068's `at+jwt` so an id_token can never pass an access-token surface. An id_token carrying `id+jwt` is refused as an ordinary `typ` mismatch.
 
 #### `filterClaimsByScope`
 
-```typescript
-function filterClaimsByScope(
-  claims: UserSessionClaims,
-  scopes: ReadonlyArray<string>,
-): Record<string, unknown>;
-```
-
-Maps `UserSessionClaims` to the JWT-shaped claim subset that the granted scopes authorize. Strict whitelist — only the mappings in the table below are emitted; any other `UserSessionClaims` fields (e.g. provider-specific fields like `hd`) are never forwarded.
+`filterClaimsByScope(claims, scopes)` ([`src/grants/claimFilter.mts`](src/grants/claimFilter.mts)) maps `UserSessionClaims` to the JWT-shaped claim subset that the granted scopes authorize. Strict whitelist — only the mappings in the table below are emitted; any other `UserSessionClaims` fields (e.g. provider-specific fields like `hd`) are never forwarded.
 
 | Scope | Emitted claims |
 | --- | --- |
@@ -598,78 +478,47 @@ Maps `UserSessionClaims` to the JWT-shaped claim subset that the granted scopes 
 
 #### `/.well-known/openid-configuration`
 
-OIDC Discovery 1.0 metadata endpoint. Synthesized and mounted by core when `config.oauth.jwt.issuer` is configured AND a module declares the provider surface (`oauthModule` sets `providerRoot: true` on its `discoveryMetadata` contribution). Core aggregates every module's `discoveryMetadata` slice — `oauthModule` contributes the endpoints + capabilities, `jwksModule` contributes `jwks_uri` — into one document advertising:
+OIDC Discovery 1.0 metadata endpoint. Synthesized and mounted by core when `config.oauth.jwt.issuer` is configured AND a module declares the provider surface (`oauthModule` sets `providerRoot: true` on its `discoveryMetadata` contribution). Core aggregates every module's `discoveryMetadata` slice into one document. `issuer` and `id_token_signing_alg_values_supported` are core's own, and a module may not set them; a document missing a field OIDC Discovery requires refuses boot (`discovery-document-invalid`). The slices the bundled modules contribute are below — `oauthModule`'s is defined in [`packages/oauth/src/module.mts`](../oauth/src/module.mts), `jwksModule` contributes `jwks_uri`:
 
 - `issuer`, `authorization_endpoint`, `token_endpoint`, `userinfo_endpoint`, `introspection_endpoint`
-- `jwks_uri` — always advertised (contributed by `jwksModule`); an issuer-configured composition MUST install `jwksModule` or boot fails fast with `DiscoveryDocumentError`. The route never publishes an empty key set (#282): an HS256 deployment answers `404 jwks_not_published`, and an asymmetric keystore that yields no exportable public key answers `503 jwks_unavailable`, both with `Cache-Control: no-store`. The symmetric secret is never published either way. A `200` from this route always carries at least one key.
-- `revocation_endpoint` — advertised when `POST /oauth/revoke` can revoke **anything at all**. Two arms, resolved the way the route resolves them: the refresh arm is a wired `refreshTokenFamilyRevocation`; the access arm is a wired `accessTokenDenylist` **and** `oauth.revocation.accessToken` not being `"unsupported"` (an explicit `"unsupported"` disables that path however the composition is wired — see #277). Either arm suffices: RFC 7009 §2.2.1 defines `unsupported_token_type` precisely so an AS may revoke one token type and not the other, so a refresh-only endpoint is a revocation endpoint, and withholding the URL would leave a client that wants to revoke a refresh token at logout unable to revoke anything. With **neither** arm the route still answers RFC 7009's mandatory `200` and revokes nothing, so advertising it would restate the #277 failure as metadata. Which *token types* it revokes is still not derivable from discovery — RFC 7009 / RFC 8414 define no per-type metadata field, and the access-token answer surfaces at the endpoint itself as `unsupported_token_type`.
+- `jwks_uri` — always advertised (contributed by `jwksModule`); an issuer-configured composition MUST install `jwksModule` or boot fails fast with `DiscoveryDocumentError`. The route never publishes an empty key set: an HS256 deployment answers `404 jwks_not_published`, and an asymmetric keystore that yields no exportable public key answers `503 jwks_unavailable`, both with `Cache-Control: no-store`. The symmetric secret is never published either way. A `200` from this route always carries at least one key.
+- `revocation_endpoint` — advertised when `POST /oauth/revoke` can revoke **anything at all**. Two arms, resolved the way the route resolves them: the refresh arm is a wired `refreshTokenFamilyRevocation`; the access arm is a wired `accessTokenDenylist` **and** `oauth.revocation.accessToken` not being `"unsupported"` (an explicit `"unsupported"` disables that path however the composition is wired). Either arm suffices: RFC 7009 §2.2.1 defines `unsupported_token_type` precisely so an AS may revoke one token type and not the other, so a refresh-only endpoint is a revocation endpoint, and withholding the URL would leave a client that wants to revoke a refresh token at logout unable to revoke anything. With **neither** arm the route still answers RFC 7009's mandatory `200` and revokes nothing, so advertising it would promise a revocation that does not happen. Which *token types* it revokes is still not derivable from discovery — RFC 7009 / RFC 8414 define no per-type metadata field, and the access-token answer surfaces at the endpoint itself as `unsupported_token_type`.
 - `response_types_supported: ["code"]`
+- `request_uri_parameter_supported: false` — OIDC Discovery reads an omitted field as `true`, and `/authorize` refuses `request_uri`
+- `client_id_metadata_document_supported: true` — only when `oauth.clientIdMetadataDocuments.enabled` is true and a consent store is wired; see the [oauth package README](../oauth/README.md)
 - `subject_types_supported: ["public"]`
 - `id_token_signing_alg_values_supported` — derived from the configured `KeyStore.algorithm`
 - `scopes_supported: ["openid", "profile", "email", "groups"]`
-- `grant_types_supported` — read off the grant-handler registry `/oauth/token` dispatches against, so it lists exactly the grants this composition registered (each gated by `oauth.grants.<name>.enabled`) and nothing else. Emitted even when empty: RFC 8414 §2 reads an **omitted** `grant_types_supported` as `["authorization_code", "implicit"]`, which advertised an `implicit` flow this AS has never implemented.
-- `token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]`, plus `private_key_jwt` when a `replaySeenSet` is wired — since #484 a client registered with `jwks` / `jwksUri` presents a JWT it signed (RFC 7523 §2.2), verified under those keys, with `iss = sub = client_id`, `aud` the issuer or the token endpoint, `exp` at most an hour out and a single-use `jti` recorded in the `replaySeenSet`. **That store is the condition**: without it the verifier answers `500 server_error` rather than accepting an unchecked `jti`, so the method is advertised only where it can be honoured — the same "on and completable" rule as `revocation_endpoint` above. See the [oauth package README](../oauth/README.md#client-authentication-private_key_jwt-rfc-7523-22).
+- `grant_types_supported` — read off the grant-handler registry `/oauth/token` dispatches against, so it lists exactly the grants this composition registered and nothing else. Emitted even when empty: RFC 8414 §2 reads an **omitted** `grant_types_supported` as `["authorization_code", "implicit"]`, which would advertise an `implicit` flow this AS does not implement.
+- `token_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]`, plus `private_key_jwt` when a `replaySeenSet` is wired. A client registered with `jwks` / `jwksUri` presents a JWT it signed (RFC 7523 §2.2), verified under those keys, with `iss = sub = client_id`, `aud` the issuer or the token endpoint, `exp` at most an hour out and a single-use `jti` recorded in the `replaySeenSet`. **That store is the condition**: without it the verifier answers `500 server_error` rather than accepting an unchecked `jti`, so the method is advertised only where it can be honoured — the same "on and completable" rule as `revocation_endpoint` above. See the [oauth package README](../oauth/README.md#client-authentication-private_key_jwt-rfc-7523-22).
 - `token_endpoint_auth_signing_alg_values_supported` — the assertion algorithms, asymmetric only (`RS*`, `PS*`, `ES*`, `EdDSA`); the same list is emitted for the introspection and revocation endpoints as `*_endpoint_auth_signing_alg_values_supported`. All three travel with the method: when no `replaySeenSet` is wired they are omitted along with it, because algorithms for a method that is not offered say nothing a client can act on.
 - `introspection_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post"]`, plus `private_key_jwt` on the same condition — no `none`: `/oauth/introspect` refuses public clients per RFC 7662 §2.1. Two things the metadata cannot say, and an operator needs: (a) RFC 6749 §2.3.1 requires the `client_id` and secret to be form-urlencoded **before** base64 for `client_secret_basic`, so a `client_id` holding reserved characters — a resource URI, whose `:` would otherwise read as the Basic field separator — must be percent-encoded (`https%3A%2F%2Fapi.example.com`); (b) an authenticated caller may introspect tokens whose `aud` is in that client's `allowedAudiences` ∪ `{client_id}`, which is what lets a resource server introspect the tokens issued for its resource URI under RFC 8707. Both are stated in full in the [oauth package README](../oauth/README.md#introspection-which-tokens-a-caller-may-ask-about).
 - `revocation_endpoint_auth_methods_supported: ["client_secret_basic", "client_secret_post", "none"]`, plus `private_key_jwt` on the same condition — alongside `revocation_endpoint`; `none` is present because RFC 7009 §2.1 lets a public client revoke its own tokens
-- `acr_values_supported` — the keys of `oauth.authorize.acrValues` (#481), when the table is non-empty: the Authentication Context Class References `/authorize` can satisfy from a session's recorded `amr`. Omitted when there is no table, and `acr_values` is then `unmet_authentication_requirements`.
+- `acr_values_supported` — the keys of `oauth.authorize.acrValues`, when the table is non-empty: the Authentication Context Class References `/authorize` can satisfy from a session's recorded `amr`. Omitted when there is no table, and `acr_values` is then `unmet_authentication_requirements`.
 - `code_challenge_methods_supported: ["S256"]` — `S256` only, and deliberately **not** derived from `oauth.grants.authorization_code.pkce.supportedMethods`. This array is server-wide metadata: every client that reads it concludes "I may use any of these". `plain` never satisfies that (`/authorize` refuses it outright for public clients per RFC 9700 §2.1.1), so it stays out — a per-client exception does not belong in a server-wide array in either direction.
 - `dpop_signing_alg_values_supported` — contributed by `@o3co/auth-provider-dpop` when `oauth.dpop.enabled = true`, carrying that module's `alg-whitelist` verbatim (RFC 9449 §5.1)
 - `tls_client_certificate_bound_access_tokens: true` — contributed by `@o3co/auth-provider-mtls` when `oauth.mtls.enabled = true` (RFC 8705 §3.3). Omitted otherwise, which the RFC already defines as `false`. Independent of `oauth.mtls.source`: both the TLS-layer and the trusted-proxy header path produce the same `cnf["x5t#S256"]` on the token, and this flag describes the token.
-- `end_session_endpoint` — added in TODO-F-5
-- `backchannel_logout_supported: true` — added in TODO-F-5
-- `backchannel_logout_session_supported: true` — added in TODO-F-5
-- `frontchannel_logout_supported: true` — added in TODO-F-5
-- `frontchannel_logout_session_supported: true` — added in TODO-F-5
+- `end_session_endpoint`, and `backchannel_logout_supported`, `backchannel_logout_session_supported`, `frontchannel_logout_supported`, `frontchannel_logout_session_supported` (all `true`) — when every store the logout cascade needs is wired: `userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`, `federationTokenStore` and `refreshTokenFamilyRevocation`
 
-### Logout helpers (TODO-F-5)
+### Logout helpers
 
-Low-level helpers used by `POST /oauth/logout` in `@o3co/auth-provider-oauth`.
+Low-level helpers used by `POST /oauth/logout` in `@o3co/auth-provider-oauth`, in [`src/grants/logoutToken.mts`](src/grants/logoutToken.mts).
 
 #### `generateLogoutToken`
 
-```typescript
-interface GenerateLogoutTokenOptions {
-  readonly issuer: string;
-  readonly sub: string;
-  readonly aud: string | string[];
-  readonly sid?: string;
-  readonly includeSid?: boolean; // default true
-  readonly keyStore: KeyStore;
-  readonly expiresIn?: number; // default 300 s
-}
-
-function generateLogoutToken(opts: GenerateLogoutTokenOptions): Promise<Token>;
-```
-
-Generates a signed `logout_token` JWT (OIDC Back-Channel Logout 1.0 §2.4). Header `typ: logout+jwt`. Claim composition: `iss`, `sub`, `aud`, `iat`, `exp`, `jti`, and `events` carrying `{ [BACKCHANNEL_LOGOUT_EVENT_URI]: {} }`. The `sid` claim is included by default; set `includeSid: false` for RPs registered with `backchannel_logout_session_required: false`. Default TTL is 300 s. The `nonce` claim is never included (spec §2.4 requirement).
+`generateLogoutToken(opts)` takes `GenerateLogoutTokenOptions`, defined beside it; `includeSid` defaults to `true` and `expiresIn` to 300 s. It generates a signed `logout_token` JWT (OIDC Back-Channel Logout 1.0 §2.4). Header `typ: logout+jwt`. Claim composition: `iss`, `sub`, `aud`, `iat`, `exp`, `jti`, and `events` carrying `{ [BACKCHANNEL_LOGOUT_EVENT_URI]: {} }`. The `sid` claim is included by default; set `includeSid: false` for RPs registered with `backchannel_logout_session_required: false`. The `nonce` claim is never included (spec §2.4 requirement).
 
 #### `BACKCHANNEL_LOGOUT_EVENT_URI`
 
-```typescript
-const BACKCHANNEL_LOGOUT_EVENT_URI: "http://schemas.openid.net/event/backchannel-logout";
-```
+The canonical event URI every `logout_token`'s `events` claim carries, `http://schemas.openid.net/event/backchannel-logout`. Exported so downstream code and tests can reference it without re-literalizing.
 
-The canonical event URI required in every `logout_token`'s `events` claim. Exported so downstream code and tests can reference it without re-literalizing.
+### Logger
 
-#### `Logger`
-
-The structural, pino-compatible logger in [`src/logging/Logger.mts`](src/logging/Logger.mts): `trace` / `debug` / `info` / `warn` / `error` / `fatal`, each accepting an object-first or a string-first call, plus `child(bindings)`. A pino instance satisfies it without an adapter, and `consoleLogger` is the default. It is also the optional `logger` component slot. The one-method `{ warn }` shape documented before v0.5.1 (D-4) is gone.
-
-### Federation token capabilities (TODO-F-6)
-
-Low-level building blocks used by `POST /oauth/federation/:name/token` in `@o3co/auth-provider-oauth`.
-
-The lock primitives below are **internal implementation details** of the built-in adapters: `createInProcessLock` is core's (`src/federation-tokens/lock/memory.mts`) and is not exported from the public entrypoint; `createRedisLock` is `@o3co/auth-provider-redis`'s (`src/internal/lock.mts`), not core's. Custom stores that need locking should expose the public `SupportsLock` capability rather than depending on these internal helpers.
-
-- `SupportsLock` — optional capability on `FederationTokenStore` for per-`(sid, federationName)` advisory locks. Used to prevent concurrent-refresh thundering herds. Built-in memory and redis adapters both implement this capability. Consumers detect it via the `supportsLock(store)` type guard.
-- `createInProcessLock()` — internal in-memory lock implementation used by the built-in memory adapter. Not exported from `@o3co/auth-provider-core`'s public entrypoint.
-- `createRedisLock({ client, keyPrefix })` — internal redis-backed lock implementation in `@o3co/auth-provider-redis`, used by that package's federation token store. Not exported from core. Custom stores that need locking should expose the public `SupportsLock` capability rather than depending on this internal helper.
-- `Client.allowedAzpForFederationToken` — opt-in flag on the `Client` interface; default `false`. Clients that consume `POST /oauth/federation/:name/token` must set this to `true`.
+The structural, pino-compatible logger in [`src/logging/Logger.mts`](src/logging/Logger.mts): `trace` / `debug` / `info` / `warn` / `error` / `fatal`, each accepting an object-first or a string-first call, plus `child(bindings)`. A pino instance satisfies it without an adapter, and `consoleLogger` is the default. It is also the optional `logger` component slot.
 
 ## See Also
 
 - Root [README](../../README.md) — architecture overview, configuration reference, Docker setup
 - [`@o3co/auth-provider-oauth`](../oauth/README.md) — OAuth 2.0 endpoints (authorization, token, introspection)
 - [`@o3co/auth-provider-session`](../session/README.md) — session-based login flow
-- [`@o3co/auth-provider-foundation`](../foundation/README.md) — shared middleware and utilities
+- [`@o3co/auth-provider-foundation`](../foundation/README.md) — the HTTP user-repository adapter (the Store client), registered as the `"http"` user adapter type

@@ -39,7 +39,7 @@ import type { FederationProvider } from "./types.mjs";
  *
  * The application session cookie keeps the attributes the deployment
  * configured, on every session, whether or not it ever started a `form_post`
- * federation. It has to: `GET /oauth/federation/:name` requires no
+ * federation. It has to: `GET /session/oauth/federation/:name` requires no
  * authentication, a `SameSite=Lax` cookie IS sent on a top-level GET, and
  * express-session serialises `req.session.cookie` into the store and rebuilds
  * it from there on every later request — so a start leg that wrote to that
