@@ -1098,10 +1098,11 @@ export const createOAuthRouter = async (
 	// not: RFC 7009 §2.1 lets a public client revoke its own tokens, so this
 	// is an unauthenticated entry point that reaches the client repository on
 	// every attempt — and with Client ID Metadata Documents on, that
-	// repository performs an outbound document fetch. Mounted as a
-	// path-scoped guard ahead of the router, because `createRevokeRouter`
-	// owns the `/revoke` path itself.
-	router.use("/revoke", rateLimitGuard("revoke"));
+	// repository performs an outbound document fetch. Mounted as a guard
+	// route ahead of the router, because `createRevokeRouter` owns the
+	// `/revoke` path itself — `router.all`, matching `/revoke` exactly, not
+	// `router.use`, which would throttle every path beneath it too.
+	router.all("/revoke", rateLimitGuard("revoke"));
 	router.use(
 		createRevokeRouter(express, {
 			clientRepository,
