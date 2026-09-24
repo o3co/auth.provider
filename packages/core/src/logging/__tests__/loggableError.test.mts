@@ -895,6 +895,76 @@ describe("loggableError — what a log line may carry of an error", () => {
 		expect(projected).not.toStrictEqual(sameFields);
 	});
 
+	describe("under pino, the line is the projection — every field, every level", () => {
+		/**
+		 * A request failure caused by a Store failure caused by a parse
+		 * failure: the fields at each level that pino's err serializer drops
+		 * when it takes the projection for an Error — it folds a `cause` into
+		 * the outer message and stack and writes none of its fields, and it
+		 * writes the error's name over the projection's own `type`.
+		 */
+		const layered = (): Error => {
+			let parse: unknown;
+			try {
+				JSON.parse('{"a":1,');
+			} catch (err) {
+				parse = err;
+			}
+			const store = Object.assign(new Error("the Store could not be read", { cause: parse }), {
+				name: "StoreTransportError",
+				code: "ECONNREFUSED",
+				reason: "unreachable",
+				storeStatus: 503,
+			});
+			return Object.assign(new Error("request failed", { cause: store }), {
+				type: "upstream.failed",
+				status: 502,
+			});
+		};
+
+		/** The `err` of the one line pino wrote for `{ err: projected }`, parsed. */
+		const loggedBy = (options: pino.LoggerOptions, projected: LoggableError): unknown => {
+			const lines: string[] = [];
+			const log = pino(
+				{ base: null, timestamp: false, ...options },
+				{
+					write(line: string) {
+						lines.push(line);
+					},
+				},
+			);
+			log.error({ err: projected }, "failed");
+			return (JSON.parse(lines[0] ?? "{}") as { err: unknown }).err;
+		};
+
+		it.each([
+			["pino's default serializers", {}],
+			[
+				"an explicit `err: stdSerializers.err`, as the standalone template sets it",
+				{
+					serializers: { err: pino.stdSerializers.err },
+				},
+			],
+			["`errWithCause`", { serializers: { err: pino.stdSerializers.errWithCause } }],
+		] as const)("with %s", (_label, options) => {
+			const projected = loggableError(layered());
+			const err = loggedBy(options, projected);
+			// Exactly the projection's own JSON: nothing dropped, nothing added.
+			expect(err).toEqual(JSON.parse(JSON.stringify(projected)));
+			expect(err).toMatchObject({
+				type: "upstream.failed",
+				status: 502,
+				cause: {
+					name: "StoreTransportError",
+					code: "ECONNREFUSED",
+					reason: "unreachable",
+					storeStatus: 503,
+					cause: { name: "SyntaxError", position: 7 },
+				},
+			});
+		});
+	});
+
 	it("reaches pino as the error's name for `type` and its frames for `stack`", () => {
 		const lines: string[] = [];
 		const log = pino(
