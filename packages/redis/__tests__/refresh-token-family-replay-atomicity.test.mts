@@ -86,7 +86,10 @@ const tally = (settled: PromiseSettledResult<RefreshTokenFamilyRotationOutcome>[
 describe("refresh-replay detection and family revocation are one Redis write (#274)", () => {
 	it("revokes the family in the same WATCH/MULTI/EXEC that detects the replay", async () => {
 		const store = freshStore();
-		const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore: store,
+			accessTokenHorizonMs: 3_600_000,
+		});
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		await rotation.rotate("jti-1", "jti-2", "fam-1", FUTURE()); // legitimate rotation
 
@@ -106,7 +109,10 @@ describe("refresh-replay detection and family revocation are one Redis write (#2
 
 	it("N concurrent redemptions of the SAME refresh token: exactly one rotates, family ends revoked", async () => {
 		const store = freshStore();
-		const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore: store,
+			accessTokenHorizonMs: 3_600_000,
+		});
 		await rotation.register("jti-1", "fam-1", FUTURE());
 
 		const N = 20;
@@ -140,7 +146,10 @@ describe("refresh-replay detection and family revocation are one Redis write (#2
 		const ROUNDS = 25;
 		for (let round = 0; round < ROUNDS; round++) {
 			const store = freshStore();
-			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+			const rotation = createRefreshTokenFamilyRotation({
+				refreshTokenFamilyStore: store,
+				accessTokenHorizonMs: 3_600_000,
+			});
 			const familyId = `fam-race-${round}`;
 			await rotation.register("jti-1", familyId, FUTURE());
 			await rotation.rotate("jti-1", "jti-2", familyId, FUTURE());
@@ -171,7 +180,10 @@ describe("refresh-replay detection and family revocation are one Redis write (#2
 
 	it("once a replay has revoked the family, every later redemption is refused", async () => {
 		const store = freshStore();
-		const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore: store,
+			accessTokenHorizonMs: 3_600_000,
+		});
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		await rotation.rotate("jti-1", "jti-2", "fam-1", FUTURE());
 		await rotation.rotate("jti-1", "jti-evil", "fam-1", FUTURE()); // replay → revoke

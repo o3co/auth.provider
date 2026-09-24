@@ -294,13 +294,13 @@ describe("/authorize — A-1 pre-redirect validation (400/500 JSON)", () => {
 		});
 	});
 
-	it("answers 500 server_error when the client repository is down", async () => {
+	it("answers 503 temporarily_unavailable when the client repository is down", async () => {
 		const { app } = await makeApp({ findByIdThrows: true });
 		const res = await authorize(app, baseQuery);
-		expect(res.status).toBe(500);
+		expect(res.status).toBe(503);
 		expect(res.body).toEqual({
-			error: "server_error",
-			error_description: "Failed to fetch client",
+			error: "temporarily_unavailable",
+			error_description: "client repository unavailable",
 		});
 	});
 
@@ -749,13 +749,29 @@ describe("/authorize — resource indicator without allowedAudiences (RFC 8707)"
 });
 
 describe("/authorize — code issuance failure", () => {
-	it("redirects server_error when the code repository is down", async () => {
-		const { app } = await makeApp({ createCodeThrows: true });
+	it("redirects temporarily_unavailable when the code repository is down, and logs it once at error level", async () => {
+		// RFC 6749 §4.1.2.1 defines `temporarily_unavailable` for exactly this:
+		// the authorization server cannot handle the request because of a
+		// temporary condition. `server_error` says the server is broken.
+		const logger = createMockLogger();
+		const { app } = await makeApp({ createCodeThrows: true, logger });
 		const res = await authorize(app, baseQuery);
 		const params = redirectParams(res);
-		expect(params.get("error")).toBe("server_error");
-		expect(params.get("error_description")).toBe("Failed to create authorization code");
+		expect(params.get("error")).toBe("temporarily_unavailable");
+		expect(params.get("error_description")).toBe("authorization code store unavailable");
 		expect(params.get("code")).toBeNull();
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				store: "authorization_code",
+				step: "create",
+				clientId: CLIENT_ID,
+				err: expect.objectContaining({ name: "Error" }),
+			},
+			"authorize_store_unavailable",
+		);
+		expect(logger.error.mock.calls[0]?.[0].err).not.toBeInstanceOf(Error);
 	});
 });
 
@@ -1136,16 +1152,32 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 
 		const res = await authorize(app, baseQuery);
 
+		// The documented fail-closed step: the user can act on a login page,
+		// and the login path reports its own outage.
 		expect(res.status).toBe(302);
 		expect(res.headers.location).toContain("/login");
 		expect(createCode).not.toHaveBeenCalled();
-		expect(logger.warn).toHaveBeenCalled();
+		// The outage is logged once, at error level, with the store and the
+		// projection — not a warn.
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ store: "user_session", sid: liveSid, err: expect.objectContaining({ name: "Error" }) },
+			"authorize_session_liveness_unavailable",
+		);
+		expect(logger.error.mock.calls[0]?.[0].err).not.toBeInstanceOf(Error);
 	});
 
-	it("fails closed to login_required for prompt=none when the store is unreachable", async () => {
+	it("answers prompt=none with temporarily_unavailable when the store is unreachable, not login_required", async () => {
+		// `login_required` would tell the relying party the user is not signed
+		// in — a verdict the outage cannot make. RFC 6749 §4.1.2.1's
+		// `temporarily_unavailable` says what is true, and OIDC Core allows it
+		// as an authentication error response.
+		const logger = createMockLogger();
 		const createCode = vi.fn();
 		const { app } = await makeApp({
 			createCode,
+			logger,
 			userSessionStore: makeStore(async () => {
 				throw new Error("redis down");
 			}),
@@ -1154,8 +1186,15 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 
 		const params = redirectParams(await authorize(app, { ...baseQuery, prompt: "none" }));
 
-		expect(params.get("error")).toBe("login_required");
+		expect(params.get("error")).toBe("temporarily_unavailable");
+		expect(params.get("error_description")).toBe("session store unavailable");
 		expect(createCode).not.toHaveBeenCalled();
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ store: "user_session", sid: liveSid, err: expect.objectContaining({ name: "Error" }) },
+			"authorize_session_liveness_unavailable",
+		);
 	});
 
 	it("mints unchanged when no session store is wired", async () => {

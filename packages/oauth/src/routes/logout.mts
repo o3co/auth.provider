@@ -29,8 +29,11 @@ import type {
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	auditErrorText,
 	auditedError,
 	emitAuditEvent,
+	isVerificationUnavailable,
+	JwtVerificationError,
 	loggableError,
 	sanitizeErrorText,
 	supportsLogout,
@@ -42,6 +45,7 @@ import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
 import { broadcastBackchannelLogout } from "../logout/broadcastBackchannel.mjs";
 import { cascadeLogout } from "../logout/cascadeLogout.mjs";
 import { renderFrontchannelLogoutHtml } from "../logout/renderFrontchannel.mjs";
+import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -259,12 +263,45 @@ export interface LogoutRouterOptions {
 export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): Router {
 	const router = express.Router();
 
+	// Every store a logout route reads or writes that cannot answer is `503`,
+	// logged once at error level — `federation_logout_store_unavailable` for
+	// the federation logout, `logout_store_unavailable` for RP-initiated
+	// logout — `store` naming which and `step` the operation, with the error's
+	// projection, never the error: a store's error carries the command it
+	// refused.
+	const federationLogoutStoreUnavailable = (
+		logger: EventLogger,
+		federation: string,
+		store: "user_session" | "session_federation_index" | "federation_token",
+		step: "get" | "list" | "delete" | "remove",
+		error: unknown,
+	): void => {
+		logger.error(
+			{ federation, store, step, err: loggableError(error) },
+			"federation_logout_store_unavailable",
+		);
+	};
+	const logoutStoreUnavailable = (
+		logger: EventLogger,
+		store: "user_session" | "session_rp_registry" | "session_federation_index",
+		step: "get" | "list",
+		error: unknown,
+		/** A second store that failed in the same read, already projected. */
+		also: { readonly alsoUnavailable?: { readonly store: string; readonly err: unknown } } = {},
+	): void => {
+		logger.error({ store, step, err: loggableError(error), ...also }, "logout_store_unavailable");
+	};
+
 	// POST /federation/:name/logout — mounted under /oauth → POST /oauth/federation/:name/logout
 	router.post(
 		"/federation/:name/logout",
 		express.urlencoded({ extended: false }),
 		async (req: Request, res: Response) => {
 			const { name } = req.params as { name: string };
+			// The path parameter is the caller's text, logged before any membership
+			// check: every log line and every audit event carries it sanitised and
+			// capped, as a client id is.
+			const federation = auditErrorText(name);
 			const { post_logout_redirect_uri: postLogoutRedirectUri, state } = req.body as Record<
 				string,
 				string | undefined
@@ -313,9 +350,24 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				});
 				payload = verified.payload as Record<string, unknown>;
 			} catch (error) {
-				// Log the reason at warn level — keep minimal (don't log the token itself,
-				// since this path can be attacker-driven).
-				logger.warn(`/oauth/federation/${name}/logout: jwtVerify failed:`, loggableError(error));
+				// The keystore did not answer: the server's outage, not a verdict
+				// on the token (`isVerificationUnavailable`).
+				if (isVerificationUnavailable(error)) {
+					return refuseVerificationUnavailable(res, error, logger, "federation_logout");
+				}
+				// The verifier's reason alone, never the token: this path can be
+				// attacker-driven, and the verifier's message quotes what the token
+				// carries (the `typ` header, read before the signature is checked,
+				// and claims). The verifier has already logged its own
+				// `jwt_verify_rejected`. `verifyJwt` throws nothing but its verdict;
+				// anything else would be logged as its projection.
+				const verdict = error instanceof JwtVerificationError ? error.reason : undefined;
+				logger.warn(
+					verdict === undefined
+						? { federation, err: loggableError(error) }
+						: { federation, reason: verdict },
+					"federation_logout_jwt_verify_failed",
+				);
 				res.setHeader(
 					"WWW-Authenticate",
 					'Bearer error="invalid_token", error_description="invalid token"',
@@ -331,19 +383,22 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			const sid = typeof payload.sid === "string" ? payload.sid : null;
 			const sub = typeof payload.sub === "string" ? payload.sub : null;
 
-			// Step 4: Check family revocation. Fail-closed: any throw → 401.
+			// Step 4: Check family revocation. Fail-closed: a throw → 503, the
+			// outage it is — as the session store's below — never `401
+			// invalid_token` (RFC 6750 §3.1 describes the token, and nobody
+			// could judge it).
 			if (familyId !== null) {
 				let revoked: boolean;
 				try {
 					revoked = await opts.refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
 				} catch (error) {
-					logger.warn(
-						`/oauth/federation/${name}/logout: isFamilyRevoked failed (refresh store outage):`,
-						loggableError(error),
+					logger.error(
+						{ federation, store: "refresh_token_family", err: loggableError(error) },
+						"federation_logout_store_unavailable",
 					);
-					return res.status(401).json({
-						error: "invalid_token",
-						error_description: "revocation check unavailable",
+					return res.status(503).json({
+						error: "temporarily_unavailable",
+						error_description: "refresh token store unavailable",
 					});
 				}
 				if (revoked) {
@@ -383,10 +438,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			try {
 				session = await opts.userSessionStore.get(sid);
 			} catch (error) {
-				logger.warn(
-					`/oauth/federation/${name}/logout: userSessionStore.get failed:`,
-					loggableError(error),
-				);
+				federationLogoutStoreUnavailable(logger, federation, "user_session", "get", error);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "session store unavailable",
@@ -409,9 +461,12 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			try {
 				federations = await opts.sessionFederationIndex.listFederations(sid);
 			} catch (error) {
-				logger.warn(
-					`/oauth/federation/${name}/logout: sessionFederationIndex.listFederations failed:`,
-					loggableError(error),
+				federationLogoutStoreUnavailable(
+					logger,
+					federation,
+					"session_federation_index",
+					"list",
+					error,
 				);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
@@ -433,10 +488,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			try {
 				fedTokens = await opts.federationTokenStore.get(sid, name);
 			} catch (error) {
-				logger.warn(
-					`/oauth/federation/${name}/logout: federationTokenStore.get failed:`,
-					loggableError(error),
-				);
+				federationLogoutStoreUnavailable(logger, federation, "federation_token", "get", error);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "federation token store unavailable",
@@ -447,10 +499,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			try {
 				await opts.federationTokenStore.delete(sid, name);
 			} catch (error) {
-				logger.warn(
-					`/oauth/federation/${name}/logout: federationTokenStore.delete failed:`,
-					loggableError(error),
-				);
+				federationLogoutStoreUnavailable(logger, federation, "federation_token", "delete", error);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "federation token store unavailable",
@@ -461,9 +510,12 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			try {
 				await opts.sessionFederationIndex.removeFederation(sid, name);
 			} catch (error) {
-				logger.warn(
-					`/oauth/federation/${name}/logout: sessionFederationIndex.removeFederation failed:`,
-					loggableError(error),
+				federationLogoutStoreUnavailable(
+					logger,
+					federation,
+					"session_federation_index",
+					"remove",
+					error,
 				);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
@@ -495,15 +547,15 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 						subject: sub ?? undefined,
 						ip: req.ip,
 						userAgent: req.get("user-agent"),
-						details: { federation: name, redirected_to_idp: true },
+						details: { federation, redirected_to_idp: true },
 					});
 					return res.redirect(303, endSessionResult.url.toString());
 				} catch (error) {
 					// Best-effort: IdP logout failed but local state is already cleared.
 					// Log at warn — "orphan IdP session" case, critical for operators.
 					logger.warn(
-						`/oauth/federation/${name}/logout: provider.endSession failed (orphan IdP session):`,
-						loggableError(error),
+						{ federation, err: loggableError(error) },
+						"federation_logout_end_session_failed",
 					);
 					emitAuditEvent(opts.auditSink, {
 						timestamp: new Date(),
@@ -513,7 +565,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 						userAgent: req.get("user-agent"),
 						// The error's name and code, never its message: an IdP's
 						// refusal carries the IdP's own words.
-						details: { federation: name, cause: auditedError(error) },
+						details: { federation, cause: auditedError(error) },
 					});
 					return res.status(200).json({ disconnected: true });
 				}
@@ -526,7 +578,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				subject: sub ?? undefined,
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
-				details: { federation: name, redirected_to_idp: false },
+				details: { federation, redirected_to_idp: false },
 			});
 			return res.status(200).json({ disconnected: true });
 		},
@@ -569,7 +621,14 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				logger: opts.logger,
 			});
 			payload = verified.payload as Record<string, unknown>;
-		} catch {
+		} catch (err) {
+			// The keystore did not answer: the server's outage, not a verdict
+			// on the hint (`isVerificationUnavailable`). A confirmation page
+			// would carry a hint that fails again the same way, so GET gets the
+			// 503 too.
+			if (isVerificationUnavailable(err)) {
+				return refuseVerificationUnavailable(res, err, opts.logger ?? console, "logout");
+			}
 			// Invalid signature / iss / typ. The POST verifier uses identical
 			// options, so a hint that fails GET verification will deterministically
 			// fail POST verification too — rendering a confirmation page with
@@ -635,8 +694,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		try {
 			session = await opts.userSessionStore.get(sid);
 		} catch (err) {
-			const logger = opts.logger ?? console;
-			logger.warn(`${req.method} /oauth/logout: userSessionStore.get failed`, loggableError(err));
+			logoutStoreUnavailable(opts.logger ?? console, "user_session", "get", err);
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "session store unavailable",
@@ -655,21 +713,45 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		//   - rps: needed by broadcastBackchannelLogout (best-effort, before cascade)
 		//   - federations: needed for IdP endSession redirect (route handler step 5)
 		// familyIds is read internally by cascadeLogout per §6.2 Step 1.
-		let rps: Awaited<ReturnType<typeof opts.sessionRPRegistry.listRPs>>;
-		let federations: ReadonlyArray<string>;
-		try {
-			[rps, federations] = await Promise.all([
-				opts.sessionRPRegistry.listRPs(sid),
-				opts.sessionFederationIndex.listFederations(sid),
-			]);
-		} catch (err) {
-			const logger = opts.logger ?? console;
-			logger.warn(`${req.method} /oauth/logout: reverse-index read failed`, loggableError(err));
+		// Both read together, and one line for the outage: `store` names the
+		// relying-party registry when it failed, else the federation index.
+		// When both failed, the federation index's failure rides on the same
+		// line as `alsoUnavailable` — one outage, one line, nothing dropped.
+		const [rpsRead, federationsRead] = await Promise.allSettled([
+			opts.sessionRPRegistry.listRPs(sid),
+			opts.sessionFederationIndex.listFederations(sid),
+		]);
+		if (rpsRead.status === "rejected" || federationsRead.status === "rejected") {
+			if (rpsRead.status === "rejected") {
+				logoutStoreUnavailable(
+					opts.logger ?? console,
+					"session_rp_registry",
+					"list",
+					rpsRead.reason,
+					federationsRead.status === "rejected"
+						? {
+								alsoUnavailable: {
+									store: "session_federation_index",
+									err: loggableError(federationsRead.reason),
+								},
+							}
+						: {},
+				);
+			} else if (federationsRead.status === "rejected") {
+				logoutStoreUnavailable(
+					opts.logger ?? console,
+					"session_federation_index",
+					"list",
+					federationsRead.reason,
+				);
+			}
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "session store unavailable",
 			});
 		}
+		const rps = rpsRead.value;
+		const federations: ReadonlyArray<string> = federationsRead.value;
 
 		// Step 4: Broadcast Back-Channel Logout (best-effort — never throws).
 		if (sub) {
@@ -697,8 +779,20 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					try {
 						const tokens = await opts.federationTokenStore.get(sid, firstFederation);
 						idTokenHintForIdP = tokens?.idToken ?? undefined;
-					} catch {
-						// Best-effort: if we can't get the federation token, proceed without idTokenHint
+					} catch (err) {
+						// Best effort: the logout proceeds, and the upstream end-session
+						// call goes without `id_token_hint` — the IdP may then ask the
+						// user to confirm, or choose the account itself. Said once, at
+						// warn: the route answers as it would have, not a 503.
+						(opts.logger ?? console).warn(
+							{
+								federation: auditErrorText(firstFederation),
+								store: "federation_token",
+								step: "get",
+								err: loggableError(err),
+							},
+							"logout_federation_token_read_failed",
+						);
 					}
 					const result = await provider.endSession({
 						idTokenHint: idTokenHintForIdP,
@@ -708,11 +802,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					});
 					endSessionUri = result.url.toString();
 				} catch (err) {
-					// Best-effort: log and proceed without IdP redirect
-					const logger = opts.logger ?? console;
-					logger.warn(
-						`${req.method} /oauth/logout: federation ${firstFederation} endSession failed`,
-						loggableError(err),
+					// Best-effort: log and proceed without the IdP redirect.
+					(opts.logger ?? console).warn(
+						{ federation: auditErrorText(firstFederation), err: loggableError(err) },
+						"logout_federation_end_session_failed",
 					);
 				}
 			}
@@ -731,6 +824,19 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		});
 
 		if (cascade.outcome === "failed") {
+			// The outage's one error-level line. Which step stopped the cascade,
+			// and how many operations failed there; the first failure's
+			// projection (each step-2 failure also has its own structured warn
+			// line from `cascadeLogout`).
+			(opts.logger ?? console).error(
+				{
+					store: "logout_cascade",
+					cascadeStep: cascade.step,
+					failures: cascade.errors.length,
+					err: loggableError(cascade.errors[0]),
+				},
+				"logout_store_unavailable",
+			);
 			emitAuditEvent(opts.auditSink, {
 				timestamp: new Date(),
 				type: "logout.cascade_failed",

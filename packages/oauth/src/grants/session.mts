@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import {
+	auditErrorText,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -21,6 +22,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isEmailVerified,
+	loggableError,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	wellFormedAmr,
@@ -45,7 +47,10 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
  * after removing the read; #331 removed it.
  */
 /** What the session grant reads (#626 P2); see `AuthorizationGrantDeps`. */
-export type SessionGrantDeps = Pick<GrantDependencies, "config" | "keyStore" | "userSessionStore">;
+export type SessionGrantDeps = Pick<
+	GrantDependencies,
+	"config" | "keyStore" | "userSessionStore" | "logger"
+>;
 
 export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 	const { config, keyStore } = deps;
@@ -137,7 +142,17 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 					}
 					userId = tracked.sub;
 					trackedAmr = wellFormedAmr(tracked.amr);
-				} catch {
+				} catch (err) {
+					// The outage's one line: error level, the error's projection.
+					deps.logger?.error(
+						{
+							store: "user_session",
+							step: "get",
+							clientId: auditErrorText(ctx.authenticatedClient?.clientId),
+							err: loggableError(err),
+						},
+						"session_grant_store_unavailable",
+					);
 					return {
 						result: {
 							status: 503,

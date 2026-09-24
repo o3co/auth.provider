@@ -65,6 +65,7 @@ import {
 	type ConsentStore,
 	emitAuditEvent,
 	type Logger,
+	logClientRepositoryUnavailable,
 	loggableError,
 	type PendingConsentRecord,
 	type PendingConsentStore,
@@ -210,21 +211,35 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 	};
 
 	/**
-	 * Whether the cookie's session is still the live one. The same read
-	 * `/authorize` does before it mints a code: a `sid` the store no longer
-	 * knows is a session someone revoked, and an answer given through it is
-	 * not the user's. A store that cannot answer fails closed, because the
-	 * alternative is recording a consent on an unknown session.
+	 * Whether the cookie's session is still the live one, `true` when it is;
+	 * otherwise the refusal has been sent. The same read `/authorize` does
+	 * before it mints a code: a `sid` the store no longer knows is a session
+	 * someone revoked, and an answer given through it is not the user's —
+	 * `401 login_required`.
+	 *
+	 * A store that cannot answer fails closed, because the alternative is
+	 * showing or recording a consent on an unknown session — but as an
+	 * outage, `503 temporarily_unavailable`, not `login_required`: the store
+	 * said nothing about whether the user is signed in, and the parked request
+	 * stays parked for a retry. Logged once at error level with the store,
+	 * the `sid` and the projection, as `/authorize` logs its own read.
 	 */
-	const sessionIsLive = async (req: Request): Promise<boolean> => {
+	const refuseUnlessLive = async (req: Request, res: Response): Promise<boolean> => {
 		const sid = typeof req.session?.sid === "string" ? req.session.sid : undefined;
 		if (!userSessionStore || sid === undefined) return true;
+		let live: boolean;
 		try {
-			return (await userSessionStore.get(sid)) != null;
+			live = (await userSessionStore.get(sid)) != null;
 		} catch (err) {
-			logger.warn({ err: loggableError(err), sid }, "consent_session_liveness_unavailable");
+			logger.error(
+				{ store: "user_session", sid, err: loggableError(err) },
+				"consent_session_liveness_unavailable",
+			);
+			jsonError(res, 503, "temporarily_unavailable", "session store unavailable");
 			return false;
 		}
+		if (!live) jsonError(res, 401, "login_required", "the session is no longer active");
+		return live;
 	};
 
 	/**
@@ -257,9 +272,11 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		try {
 			client = await clientRepository.findById(pending.clientId);
 		} catch (err) {
-			logger.error(
-				{ err: loggableError(err), clientId: pending.clientId },
-				"consent_client_repository_unavailable",
+			// The line every client lookup writes, through core's helper.
+			logClientRepositoryUnavailable(
+				logger,
+				{ site: "consent", step: "find", clientId: pending.clientId },
+				err,
 			);
 			jsonError(res, 503, "temporarily_unavailable", "client registry unavailable");
 			return null;
@@ -286,9 +303,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		const found = await pendingFor(req, res, req.query.challenge);
 		if (found === null) return;
 		const pending = found.record;
-		if (!(await sessionIsLive(req))) {
-			return jsonError(res, 401, "login_required", "the session is no longer active");
-		}
+		if (!(await refuseUnlessLive(req, res))) return;
 		// Registered when the request was parked, gone now: nothing to ask
 		// about, and the parked request is dropped with it.
 		const client = await clientFor(res, pending);
@@ -317,9 +332,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		const found = await pendingFor(req, res, body.challenge);
 		if (found === null) return;
 		const { record: peeked, sub } = found;
-		if (!(await sessionIsLive(req))) {
-			return jsonError(res, 401, "login_required", "the session is no longer active");
-		}
+		if (!(await refuseUnlessLive(req, res))) return;
 		const decision = body.decision;
 		if (decision !== "accept" && decision !== "deny") {
 			return jsonError(res, 400, "invalid_request", "decision must be 'accept' or 'deny'");

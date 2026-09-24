@@ -21,6 +21,7 @@ import { federationGrantRedirectUriReservedParameter } from "../federation-grant
 import { isLoopbackHostname } from "../net/loopback.mjs";
 import { checkRedirectUri, describeRedirectUriRejection } from "../net/redirect-uri.mjs";
 import type { ClientRepository, PublicClient } from "./ClientRepository.mjs";
+import { assertRegistrableClientIds } from "./clientId.mjs";
 
 /**
  * Validates that a URL string uses only `http:` or `https:` schemes.
@@ -386,6 +387,9 @@ export class InMemoryClientRepository implements ClientRepository {
 	private clients: Map<string, ClientEntry>;
 
 	constructor(clients: Map<string, ClientEntry>) {
+		// A client registered under an id no request can name could never be
+		// used: every route screens `client_id` first (`clientId.mts`).
+		assertRegistrableClientIds("InMemoryClientRepository", clients.keys());
 		// Parse each entry through the schema to enforce defaults (e.g. backchannelLogoutSessionRequired
 		// and frontchannelLogoutSessionRequired default to `true`).
 		this.clients = new Map(

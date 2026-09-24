@@ -264,7 +264,7 @@ describe("GET /oauth/userinfo", () => {
 		expect(res.body).toEqual({ sub: "u-1" });
 	});
 
-	it("returns 401 invalid_token when userSessionStore.get throws (fail-closed)", async () => {
+	it("returns 503 temporarily_unavailable when userSessionStore.get throws — no claims, and no verdict on the token", async () => {
 		const token = await mintAT({ family_id: "fam-1", sid: "sid-1", scope: "openid email" });
 
 		const res = await callUserinfo({
@@ -281,10 +281,12 @@ describe("GET /oauth/userinfo", () => {
 			},
 		});
 
-		expect(res.status).toBe(401);
-		expect(res.body.error).toBe("invalid_token");
-		expect(res.body.error_description).toBe("session lookup unavailable");
-		expect(res.headers["www-authenticate"]).toMatch(/^Bearer/);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(res.headers["www-authenticate"]).toBeUndefined();
 	});
 
 	it("rejects refresh_token (typ: rt+jwt) presented as Bearer (security)", async () => {

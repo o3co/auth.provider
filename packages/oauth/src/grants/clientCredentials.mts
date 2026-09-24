@@ -49,7 +49,7 @@ const GRANT_TYPE = "client_credentials";
 /** What the client_credentials grant reads (#626 P2); see `AuthorizationGrantDeps`. */
 export type ClientCredentialsGrantDeps = Pick<
 	GrantDependencies,
-	"config" | "keyStore" | "grantPolicy"
+	"config" | "keyStore" | "grantPolicy" | "logger"
 >;
 
 export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): GrantHandler => {
@@ -142,6 +142,7 @@ export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): 
 					},
 					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
 					effectiveScopes,
+					{ logger: deps.logger },
 				);
 				if (!policy.ok) return { result: policy.result };
 				effectiveScopes = policy.scopes;

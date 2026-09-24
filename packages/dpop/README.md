@@ -22,7 +22,10 @@ contributes the DPoP mechanism to both.
 
 - verifying a DPoP proof — structure, the `alg` allowlist, the signature over
   the embedded key, `htm` / `htu`, the `iat` window, `jti` replay — and the
-  proof's `ath` when it accompanies an access token;
+  proof's `ath` when it accompanies an access token. `iat`, and an `exp` or
+  `nbf` the proof carries, must be a NumericDate (core's `isNumericDate`:
+  finite and within the Date range, a fraction allowed); JSON's `1e400` is a
+  `malformed_proof`, not a clock outside the window;
 - the key thumbprint that becomes the token's `cnf.jkt`;
 - server-provided nonces (`use_dpop_nonce`, `DPoP-Nonce`);
 - what a proof's replay record is: its `jti`, under a seen-set scope of its
@@ -184,14 +187,20 @@ So of two requests carrying one proof, exactly one is accepted.
 - **When the store fails.** A seen-set that cannot be reached refuses the
   request as the server's fault, not the proof's: `503 temporarily_unavailable`
   at the token endpoint and at a protected resource, with no
-  `WWW-Authenticate` challenge, and `dpop_replay_store_unavailable` logged
-  (reason `replay_store_unavailable`). A seen-set that answers with its own
-  contract error (a `RangeError`, or `expired-at-issue`) is broken rather than
-  down: the same 503, logged `dpop_replay_store_fault` with the error (reason
-  `replay_store_fault`), because the fix is in the composition, not in Redis.
-  Either line carries core's [`loggableError`](../core/README.md#logger)
-  projection of the store's error, never the error: ioredis puts the refused
-  write — the record's key — on it. A proof the signature step refuses is
+  `WWW-Authenticate` challenge (reason `replay_store_unavailable`). A seen-set
+  that answers with its own contract error (a `RangeError`, or
+  `expired-at-issue`) is broken rather than down: the same 503, with reason
+  `replay_store_fault`, because the fix is in the composition, not in Redis.
+  Either way the mechanism hands the store's error upward as the refusal's
+  `cause` and logs nothing itself: core's dispatcher that answers the 503
+  writes the outage's one line at error level — `token_binding_unavailable`
+  at the token endpoint, `protected_resource_binding_unavailable` at a
+  protected resource — with `mechanism: "dpop"`, the `reason`, and core's
+  [`loggableError`](../core/README.md#logger) projection of the store's
+  error, never the error: ioredis puts the refused write — the record's key —
+  on it. (These replace the mechanism's own `dpop_replay_store_unavailable`
+  and `dpop_replay_store_fault` lines, which logged the same outage a second
+  time.) A proof the signature step refuses is
   logged `dpop_signature_invalid` the same way, because jose puts the proof's
   whole payload on a claim failure. A proof is never accepted unrecorded,
   and it is not called invalid either — RFC 9449 keeps `invalid_dpop_proof`

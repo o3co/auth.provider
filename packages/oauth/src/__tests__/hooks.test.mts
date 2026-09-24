@@ -802,6 +802,15 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 		it("redirects temporarily_unavailable when grantPolicy throws at /authorize (CP-18)", async () => {
 			const { app, clientRepo, codeRepo } = buildAuthorizeApp({});
+			const logger = {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				fatal: vi.fn(),
+				child: vi.fn(),
+			};
 			const grantPolicy: GrantPolicyHook = {
 				kind: "throwing",
 				async evaluate() {
@@ -816,6 +825,7 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 				codeRepository: codeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 				grantPolicy,
+				logger,
 			});
 			app.use("/oauth", router);
 
@@ -830,6 +840,17 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 
 			expect(res.status).toBe(302);
 			expect(res.headers.location).toContain("error=temporarily_unavailable");
+			// The outage's one line: error level, object-first, the projection.
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				{
+					site: "authorize",
+					grantType: "authorization_code",
+					policy: "throwing",
+					err: expect.objectContaining({ name: "Error" }),
+				},
+				"grant_policy_unavailable",
+			);
 		});
 
 		it("persists undefined grantedScope on Code when policy narrows to empty (CP-14)", async () => {

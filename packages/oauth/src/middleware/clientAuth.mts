@@ -17,8 +17,9 @@
 import {
 	type ClientRepository,
 	consoleLogger,
+	isWellFormedClientId,
 	type Logger,
-	loggableError,
+	logClientRepositoryUnavailable,
 	type PublicClient,
 	type ReplaySeenSet,
 	sanitizeErrorText,
@@ -181,8 +182,26 @@ function parseBasicAuthHeader(authHeader: string | undefined): BasicParseResult 
  *
  * On failure: responds with 400/401, JSON body
  * `{ error: "invalid_client", error_description?: string }`, and (when
- * applicable) `WWW-Authenticate`. The repository-throw path intentionally omits
- * `error_description` so that internal store details do not leak to callers.
+ * applicable) `WWW-Authenticate`.
+ *
+ * A client repository that cannot answer — `findById` or `authenticate`
+ * throws — is not a failed authentication: the request is refused, but as
+ * `503 temporarily_unavailable` ("client repository unavailable") with no
+ * challenge, and logged at error level as `client_repository_unavailable`
+ * with the error's projection. `invalid_client` says "client authentication
+ * failed" (RFC 6749 §5.2), which a client reads as a bad secret or a revoked
+ * registration; an outage is neither. The description names only the
+ * dependency, never what the store said.
+ *
+ * A `client_id` that cannot name a client — a control character, or longer
+ * than `MAX_CLIENT_ID_LENGTH` (core's `isWellFormedClientId`) — is refused
+ * like an unknown client, `401 invalid_client`, before the repository is
+ * asked. Now that a repository that throws is an outage, a client must not be
+ * able to make one throw: a SQL driver refusing a NUL byte would otherwise
+ * turn `client_id=%00` into the server's `503`. The id a
+ * `client_repository_unavailable` line records is the client's input, so it
+ * goes through `auditErrorText` (sanitised, capped), in core's
+ * `logClientRepositoryUnavailable` — the one line every client lookup writes.
  */
 export function createClientAuthMiddleware(
 	clientRepository: ClientRepository,
@@ -237,6 +256,17 @@ export function createClientAuthMiddleware(
 	}
 	function rejectAs(res: Response, status: number, error: string, errorDescription?: string): void {
 		res.status(status).json(errorBody(error, errorDescription));
+	}
+	// The repository did not answer: refused as the server's outage, never as
+	// a failed authentication (see the JSDoc above).
+	function repositoryUnavailable(
+		res: Response,
+		step: "find" | "authenticate",
+		clientId: string,
+		cause: unknown,
+	): void {
+		logClientRepositoryUnavailable(logger, { step, clientId }, cause);
+		rejectAs(res, 503, "temporarily_unavailable", "client repository unavailable");
 	}
 
 	return async (req, res, next) => {
@@ -323,6 +353,17 @@ export function createClientAuthMiddleware(
 			return;
 		}
 
+		// A client_id no client can have is answered like an unknown one — and
+		// never handed to the repository, which may throw on it (see the JSDoc).
+		if (!isWellFormedClientId(clientId)) {
+			if (basic.kind === "ok") {
+				rejectBasic(res, 401, "Invalid client credentials");
+			} else {
+				rejectPlain(res, 401, "Unknown client");
+			}
+			return;
+		}
+
 		// Codex M1 selector: which transport did the caller actually use? We
 		// have to derive this BEFORE looking up the client so the wrong-method
 		// branch can return without burning a credential lookup on a known-bad
@@ -344,13 +385,9 @@ export function createClientAuthMiddleware(
 		try {
 			client = await clientRepository.findById(clientId);
 		} catch (err) {
-			// Fail-closed: repository unavailability must not grant access.
-			logger.warn({ err: loggableError(err) }, "client lookup failed");
-			if (basic.kind === "ok") {
-				rejectBasic(res, 401);
-			} else {
-				rejectPlain(res, 401);
-			}
+			// Fail-closed: repository unavailability must not grant access — and
+			// is not the client's fault either.
+			repositoryUnavailable(res, "find", clientId, err);
 			return;
 		}
 
@@ -419,12 +456,7 @@ export function createClientAuthMiddleware(
 		try {
 			authenticated = await clientRepository.authenticate(clientId, secret);
 		} catch (err) {
-			logger.warn({ err: loggableError(err) }, "client credential lookup failed");
-			if (basic.kind === "ok") {
-				rejectBasic(res, 401);
-			} else {
-				rejectPlain(res, 401);
-			}
+			repositoryUnavailable(res, "authenticate", clientId, err);
 			return;
 		}
 

@@ -33,9 +33,9 @@ describe("defaultRefreshTokenFamilyRotationModule", () => {
 		);
 	});
 
-	it("requires refreshTokenFamilyStore and provides refreshTokenFamilyRotation", () => {
+	it("requires refreshTokenFamilyStore and config, and provides refreshTokenFamilyRotation", () => {
 		expect(new Set(defaultRefreshTokenFamilyRotationModule.requires ?? [])).toEqual(
-			new Set(["refreshTokenFamilyStore"]),
+			new Set(["refreshTokenFamilyStore", "config"]),
 		);
 		expect(
 			typeof defaultRefreshTokenFamilyRotationModule.provides?.refreshTokenFamilyRotation,
@@ -50,9 +50,9 @@ describe("defaultRefreshTokenFamilyRevocationModule", () => {
 		);
 	});
 
-	it("requires refreshTokenFamilyStore and provides refreshTokenFamilyRevocation", () => {
+	it("requires refreshTokenFamilyStore and config, and provides refreshTokenFamilyRevocation", () => {
 		expect(new Set(defaultRefreshTokenFamilyRevocationModule.requires ?? [])).toEqual(
-			new Set(["refreshTokenFamilyStore"]),
+			new Set(["refreshTokenFamilyStore", "config"]),
 		);
 		expect(
 			typeof defaultRefreshTokenFamilyRevocationModule.provides?.refreshTokenFamilyRevocation,

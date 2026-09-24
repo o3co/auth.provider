@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import {
 	createMemoryReplaySeenSet,
 	type Logger,
+	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
 	type PublicClient,
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
@@ -186,7 +187,7 @@ describe("createClientAssertionVerifier (#484)", () => {
 			});
 		});
 
-		it("refuses an unknown client, and fails closed when the lookup throws", async () => {
+		it("refuses an unknown client, and fails closed — as an outage — when the lookup throws", async () => {
 			expect(refused(await build().verify(body(await mint()), findClient(null)))).toMatchObject({
 				status: 401,
 				error: "invalid_client",
@@ -195,8 +196,8 @@ describe("createClientAssertionVerifier (#484)", () => {
 				throw new Error("store down");
 			});
 			expect(refused(await build().verify(body(await mint()), throwing))).toMatchObject({
-				status: 401,
-				error: "invalid_client",
+				status: 503,
+				error: "temporarily_unavailable",
 			});
 		});
 
@@ -450,6 +451,80 @@ describe("createClientAssertionVerifier (#484)", () => {
 		});
 	});
 
+	describe("the exp ceiling allows the clock tolerance, as the ID-JAG ceiling does", () => {
+		// Both are held to core's MAX_ASSERTION_LIFETIME_SECONDS. A client whose
+		// clock runs a little ahead mints an hour-long assertion whose exp is a
+		// little past an hour from this server's now; refusing it made the
+		// refusal depend on how the two clocks happened to sit that second.
+		// A fixed `now` keeps the boundary exact.
+		const fixedNowMs = Date.now();
+		const nowSeconds = Math.floor(fixedNowMs / 1000);
+		const at = (tolerance: number, logger: Logger = silent) =>
+			build({ now: () => fixedNowMs, clockToleranceSeconds: tolerance, logger });
+
+		// NaN and Infinity switch every comparison off, jose's `exp` check
+		// included; "30s" would concatenate onto the ceiling. Refused when the
+		// verifier is built, like an issuer entry's.
+		for (const [label, tolerance] of [
+			["NaN", Number.NaN],
+			["Infinity", Number.POSITIVE_INFINITY],
+			["negative", -1],
+			["past the bound", MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS + 1],
+			['the string "30s"', "30s"],
+		] as const) {
+			it(`refuses to be built with a clock tolerance that is ${label}`, () => {
+				expect(() => build({ clockToleranceSeconds: tolerance as number })).toThrow(
+					/clockToleranceSeconds/,
+				);
+			});
+		}
+
+		for (const tolerance of [30, 120]) {
+			it(`accepts exp up to the ceiling plus the tolerance (${tolerance} s)`, async () => {
+				for (const ahead of [tolerance - 1, tolerance]) {
+					const exp = nowSeconds + MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + ahead;
+					expect(await at(tolerance).verify(body(await mint({ exp })), findClient())).toMatchObject(
+						{ kind: "ok" },
+					);
+				}
+			});
+
+			it(`refuses an iat older than the ceiling plus the tolerance (${tolerance} s), saying the ceiling applied`, async () => {
+				const iat = nowSeconds - MAX_CLIENT_ASSERTION_LIFETIME_SECONDS - tolerance - 1;
+				const outcome = refused(
+					await at(tolerance).verify(body(await mint({ iat, exp: nowSeconds + 60 })), findClient()),
+				);
+				expect(outcome.description).toBe(
+					`client assertion iat is too old (at most ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + tolerance} seconds: ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} plus the ${tolerance} s clock tolerance)`,
+				);
+			});
+
+			it(`refuses exp past the ceiling plus the tolerance (${tolerance} s), and logs why`, async () => {
+				const warn = vi.fn();
+				const exp = nowSeconds + MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + tolerance + 1;
+				const outcome = refused(
+					await at(tolerance, { ...silent, warn }).verify(body(await mint({ exp })), findClient()),
+				);
+				expect(outcome).toMatchObject({ status: 401, error: "invalid_client" });
+				// The ceiling actually applied, not the bare hour: a client told
+				// "at most 3600 seconds" whose 3610-second assertion was accepted
+				// yesterday would be told something false.
+				expect(outcome.description).toBe(
+					`client assertion exp is too far ahead (at most ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + tolerance} seconds: ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} plus the ${tolerance} s clock tolerance)`,
+				);
+				expect(warn).toHaveBeenCalledWith(
+					expect.objectContaining({
+						reason: "lifetime",
+						clientId: CLIENT_ID,
+						lifetimeSeconds: MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + tolerance + 1,
+						maxLifetimeSeconds: MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + tolerance,
+					}),
+					"client_assertion_refused",
+				);
+			});
+		}
+	});
+
 	describe("what a refusal logs: a caught error's projection, never the error", () => {
 		/**
 		 * A logger that serialises every own property of what it is handed,
@@ -524,9 +599,10 @@ describe("createClientAssertionVerifier (#484)", () => {
 			});
 			const { logger, lines } = recordingLogger();
 			const outcome = await build({ logger }).verify(body(await mint()), lookup);
-			expect(refused(outcome)).toMatchObject({ status: 401, error: "invalid_client" });
+			// An outage, not a failed authentication (the client did nothing wrong).
+			expect(refused(outcome)).toMatchObject({ status: 503, error: "temporarily_unavailable" });
 			expect(lines).toHaveLength(1);
-			expect(lines[0]).toContain("lookup_failed");
+			expect(lines[0]).toContain("client_repository_unavailable");
 			expect(lines[0]).not.toContain("body-must-never-reach-a-log");
 		});
 

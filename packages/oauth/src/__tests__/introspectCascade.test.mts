@@ -145,7 +145,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 		expect(res.body.active).toBe(false);
 	});
 
-	it("returns active:false (fail-closed) when isFamilyRevoked throws", async () => {
+	it("returns 503 (fail-closed, not a verdict on the token) when isFamilyRevoked throws", async () => {
 		const familyId = "fam-error";
 		const token = await makeAccessToken({ family_id: familyId });
 
@@ -157,8 +157,11 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 		const app = await buildApp(refreshTokenFamilyRevocation);
 		const res = await introspect(app, token);
 
-		expect(res.status).toBe(200);
-		expect(res.body.active).toBe(false);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "refresh token store unavailable",
+		});
 	});
 
 	it("emits introspect.store_unavailable audit event when isFamilyRevoked throws", async () => {
@@ -180,8 +183,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 		const app = await buildApp(refreshTokenFamilyRevocation, auditSink);
 		const res = await introspect(app, token);
 
-		expect(res.status).toBe(200);
-		expect(res.body.active).toBe(false);
+		expect(res.status).toBe(503);
 		const storeEvent = events.find((e) => e.type === "introspect.store_unavailable");
 		expect(storeEvent).toBeDefined();
 		expect((storeEvent?.details as Record<string, unknown>)?.family_id).toBe(familyId);
@@ -216,7 +218,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 		const app = await buildApp(refreshTokenFamilyRevocation, auditSink);
 		const res = await introspect(app, token);
 
-		expect(res.body.active).toBe(false);
+		expect(res.status).toBe(503);
 		const storeEvent = events.find((e) => e.type === "introspect.store_unavailable");
 		expect(storeEvent?.details).toEqual({
 			family_id: "fam-reply-error",

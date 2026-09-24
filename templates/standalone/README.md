@@ -298,7 +298,7 @@ fail fast rather than silently falling back to defaults.
 | `OAUTH_CIMD_STALE_IF_ERROR_MS` | `300000` | How long a registration already validated is still served after a revalidation that failed for a reason that is not the document's (a DNS blip, a 5xx, a timeout) — an outage should not break a working client. A document that was *rejected* is dropped immediately. `0` disables it. |
 | `OAUTH_CIMD_NEGATIVE_CACHE_MS` | `60000` | How long a refusal is remembered, so the same `client_id` is not resolved and fetched again on every request. Short, so a client that fixes its document is not locked out. |
 | `OAUTH_CIMD_MAX_CONCURRENT_FETCHES` | `8` | How many documents may be in flight at once, across every `client_id`. Bounds what an unauthenticated caller can make this server dial. |
-| `OAUTH_JWT_KID` | `v0` | Key ID included in the JWT header |
+| `OAUTH_JWT_KID` | `v0` | Key ID included in the JWT header. 1 to 256 characters with no control character; anything else fails boot, including a variable exported but empty (which used to sign under the kid `""`; tokens issued that way are refused once it is corrected, so their users sign in again) |
 | `OAUTH_JWT_PRIVATE_KEY` | — | PEM-encoded private key (asymmetric algorithms) |
 | `OAUTH_JWT_PRIVATE_KEY_PATH` | — | Path to PEM private key file |
 | `OAUTH_JWT_PUBLIC_KEY` | — | PEM-encoded public key |
@@ -893,7 +893,8 @@ changing the image.
 ```
 
 The failure's *reason* is deliberately absent from the body and goes to the log
-instead (`readiness_probe_failed`, with the full per-check detail). A driver
+instead (`readiness_probe_failed`, with each failing check's error as core's
+`loggableError` projection). A driver
 error reads `connect ECONNREFUSED 10.0.3.14:6379` — an internal host and port —
 and this endpoint is unauthenticated because an orchestrator has no credentials
 to present. Set `includeErrorDetail: true` on `createReadinessRouter` only when

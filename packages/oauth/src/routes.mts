@@ -36,10 +36,12 @@ import {
 	type GrantHandlerResult,
 	type GrantPolicyHook,
 	isGrantTypeAllowed,
+	isVerificationUnavailable,
 	isWellFormedErrorCode,
 	JwtVerificationError,
 	type KeyStore,
 	type Logger,
+	loggableError,
 	type PendingConsentStore,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
@@ -81,6 +83,7 @@ import {
 	type IntrospectResponse,
 	isCompoundConfirmation,
 } from "./types/introspect.mjs";
+import { refuseVerificationUnavailable } from "./verificationUnavailable.mjs";
 
 /**
  * The `reason` of a grant handler's `token.issued.failure`: its
@@ -374,6 +377,70 @@ export const createOAuthRouter = async (
 		// wires no store, and the endpoint behaves exactly as it did.
 		userSessionStore,
 	});
+
+	/**
+	 * Introspection that could not verify the token because the keystore or a
+	 * revocation store did not answer. RFC 7662 §2.2's `active: false` is a
+	 * statement about the token — "not active" — and an outage is not one: a
+	 * resource server told the token is inactive refuses its client with
+	 * `invalid_token`, and the client discards a credential that may be
+	 * perfectly good. So the answer is HTTP's own `503`, which vouches for
+	 * nothing and is still fail-closed — a resource server cannot read it as
+	 * `active: true`. Audited as `introspect.store_unavailable`, the event
+	 * this endpoint already raises for a store outage.
+	 */
+	const answerIntrospectionUnavailable = (
+		req: Request,
+		res: Response,
+		err: Parameters<typeof refuseVerificationUnavailable>[1],
+	): Response => {
+		emitAuditEvent(auditSink, {
+			timestamp: new Date(),
+			type: "introspect.store_unavailable",
+			ip: req.ip,
+			userAgent: req.get("user-agent"),
+			details: { reason: err.reason, cause: auditedError(err) },
+		});
+		return refuseVerificationUnavailable(res, err, logger, "introspect");
+	};
+
+	/**
+	 * Introspection whose family or session check could not be made because
+	 * the store did not answer: the same `503` as a verification outage, for
+	 * the same reason, logged as `introspect_store_unavailable` with the
+	 * error's projection — never the error, which can carry what the store
+	 * was sent — and audited as `introspect.store_unavailable`, whose `cause`
+	 * is core's `auditedError` (the error's name and code, never its message);
+	 * the log line carries the rest.
+	 */
+	const answerStoreUnavailable = (
+		req: Request,
+		res: Response,
+		outage: {
+			readonly store: "refresh_token_family" | "user_session";
+			readonly details: Readonly<Record<string, string>>;
+			readonly cause: unknown;
+		},
+	): Response => {
+		logger.error(
+			{ store: outage.store, err: loggableError(outage.cause) },
+			"introspect_store_unavailable",
+		);
+		emitAuditEvent(auditSink, {
+			timestamp: new Date(),
+			type: "introspect.store_unavailable",
+			ip: req.ip,
+			userAgent: req.get("user-agent"),
+			details: { ...outage.details, cause: auditedError(outage.cause) },
+		});
+		return res.status(503).json({
+			error: "temporarily_unavailable",
+			error_description:
+				outage.store === "user_session"
+					? "session store unavailable"
+					: "refresh token store unavailable",
+		});
+	};
 
 	// Federation endpoints — mount conditionally based on available stores and config.
 	// federationTokenStore is required for both POST /oauth/federation/:name/logout and
@@ -756,6 +823,12 @@ export const createOAuthRouter = async (
 						});
 						return next();
 					} catch (cause) {
+						// A keystore or revocation store that could not answer says
+						// nothing about the token: 503, never `active: false` — see
+						// `answerIntrospectionUnavailable` above.
+						if (isVerificationUnavailable(cause)) {
+							return answerIntrospectionUnavailable(req, res, cause);
+						}
 						// SF-8: distinguish non-access-token typ rejections so SIEM
 						// can spot a refresh / id token presented as a Bearer
 						// credential. RFC 7662 §2.2 forbids leaking the typ to the
@@ -834,23 +907,15 @@ export const createOAuthRouter = async (
 						try {
 							revoked = await refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
 						} catch (cause) {
-							// Fail-closed: RFC 7662 §2.2 defines `active: false` for revoked/invalid tokens.
-							// When we cannot determine family revocation state, prefer inactive over active
-							// (and over a 5xx) — introspect's response shape has no "temporarily_unavailable"
-							// equivalent, so inactive keeps resource servers on the safe side of the scope gate.
-							// Note: Tasks 3/4 use 503 temporarily_unavailable for store failures, but RFC 7662
-							// has no such slot for introspect responses — inactive is the only safe fallback.
-							emitAuditEvent(auditSink, {
-								timestamp: new Date(),
-								type: "introspect.store_unavailable",
-								ip: req.ip,
-								userAgent: req.get("user-agent"),
-								// The error's name and code, never its message: the store's
-								// words (a Redis reply quotes the command it refused) are not
-								// the audit trail's to keep.
-								details: { family_id: familyId, cause: auditedError(cause) },
+							// Fail-closed, as the outage it is: 503, not `active: false`
+							// — see `answerIntrospectionUnavailable` for why a verdict
+							// on the token is the wrong answer to a store that did not
+							// answer.
+							return answerStoreUnavailable(req, res, {
+								store: "refresh_token_family",
+								details: { family_id: familyId },
+								cause,
 							});
-							return res.status(200).json({ active: false });
 						}
 						if (revoked) {
 							emitAuditEvent(auditSink, {
@@ -896,8 +961,7 @@ export const createOAuthRouter = async (
 					// wires no `userSessionStore`.
 					//
 					// Fail-closed on a store throw, for the reason the family
-					// check states: RFC 7662 has no `temporarily_unavailable`
-					// slot, so `active: false` is the only safe answer available.
+					// check states: 503, the outage it is, never `active: false`.
 					const rawSid = (payload as Record<string, unknown>).sid;
 					const sid = typeof rawSid === "string" && rawSid.length > 0 ? rawSid : null;
 					if (sid !== null && userSessionStore) {
@@ -905,14 +969,11 @@ export const createOAuthRouter = async (
 						try {
 							userSession = await userSessionStore.get(sid);
 						} catch (cause) {
-							emitAuditEvent(auditSink, {
-								timestamp: new Date(),
-								type: "introspect.store_unavailable",
-								ip: req.ip,
-								userAgent: req.get("user-agent"),
-								details: { sid, cause: auditedError(cause) },
+							return answerStoreUnavailable(req, res, {
+								store: "user_session",
+								details: { sid },
+								cause,
 							});
-							return res.status(200).json({ active: false });
 						}
 						if (!userSession) {
 							emitAuditEvent(auditSink, {
@@ -975,6 +1036,9 @@ export const createOAuthRouter = async (
 					};
 					return res.status(200).json(formatObject(response));
 				} catch (cause) {
+					if (isVerificationUnavailable(cause)) {
+						return answerIntrospectionUnavailable(req, res, cause);
+					}
 					// SF-8: same non-access-token signal as the bearer path above.
 					// `active: false` is required by RFC 7662 §2.2 regardless of
 					// rejection reason; audit log carries the typ-mismatch signal.

@@ -106,9 +106,9 @@ export const normalizeHtu = (raw: string): string => {
 	// gives userinfo no meaning at the token endpoint; reject loudly so
 	// the verifier surfaces a `malformed_proof` audit signal.
 	if (url.username !== "" || url.password !== "") {
-		throw new Error(
-			`normalizeHtu: htu must not contain userinfo (got "${url.username}:***" prefix)`,
-		);
+		// Not the userinfo itself: it is the client's text, and this error
+		// travels on as a refusal's cause.
+		throw new Error("normalizeHtu: htu must not contain userinfo");
 	}
 	// Strip query and fragment (rules from spec §7 / RFC 3986 §6.2.2).
 	url.search = "";

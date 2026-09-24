@@ -137,7 +137,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 **クライアント認証。**
 
-- `createClientAuthMiddleware(clientRepository, options)` と `ClientAuthMiddlewareOptions` — [`middleware/clientAuth.mts`](./src/middleware/clientAuth.mts)。`client_secret_basic`、`client_secret_post`、`private_key_jwt`（1 リクエストに 1 方式）でクライアントを認証し、`allowPublicClients` が指定されたときだけ public クライアントを受け入れ、認証済みクライアントを `req.oauthClient` に載せる（型はグローバルな Express の拡張で提供）。拒否は RFC 6749 §5.2 の `{ error, error_description }`。
+- `createClientAuthMiddleware(clientRepository, options)` と `ClientAuthMiddlewareOptions` — [`middleware/clientAuth.mts`](./src/middleware/clientAuth.mts)。`client_secret_basic`、`client_secret_post`、`private_key_jwt`（1 リクエストに 1 方式）でクライアントを認証し、`allowPublicClients` が指定されたときだけ public クライアントを受け入れ、認証済みクライアントを `req.oauthClient` に載せる（型はグローバルな Express の拡張で提供）。拒否は RFC 6749 §5.2 の `{ error, error_description }`。答えられないクライアントリポジトリは認証の失敗ではない: リクエストはチャレンジ無しの `503 temporarily_unavailable`（"client repository unavailable"）で拒否され、`client_repository_unavailable` としてエラーレベルでログに出る。未知のクライアントや誤った secret は引き続き `401 invalid_client`。クライアントを指し得ない `client_id`（制御文字を含む、または 256 文字を超える — core の `isWellFormedClientId`、`MAX_CLIENT_ID_LENGTH`）は、リポジトリに問い合わせる前に未知のクライアントと同じく拒否される。そのような入力で例外を投げるリポジトリでも `503` を返させられない。`/authorize` も同じく `client_id` を検査し、答えられないリポジトリには JSON で `503 temporarily_unavailable` を返し、`site: "authorize"` 付きで同じくログに出す。
 - `createClientAssertionVerifier`、`CLIENT_ASSERTION_ALGORITHMS`、`JWT_BEARER_CLIENT_ASSERTION_TYPE`、`MAX_CLIENT_ASSERTION_LIFETIME_SECONDS` と型 `ClientAssertionVerifier`、`ClientAssertionVerifierOptions`、`ClientAssertionOutcome` — [`middleware/clientAssertion.mts`](./src/middleware/clientAssertion.mts)。ミドルウェアが使う `private_key_jwt` の検証器。[`private_key_jwt`](#クライアント認証-private_key_jwt-rfc-7523-22) を参照。
 
 **Client ID Metadata Documents。** `createClientIdMetadataDocumentResolver`、`withClientIdMetadataDocuments`（登録済みクライアントを先に、ドキュメントを後に答える `ClientRepository`）、`isClientIdMetadataDocumentUrl`、`isClientIdMetadataDocumentClient` と型 `ClientIdMetadataDocumentOptions`、`ClientIdMetadataDocumentResolver` — [`clients/clientIdMetadataDocument.mts`](./src/clients/clientIdMetadataDocument.mts)。[Client ID Metadata Documents](#client-id-metadata-documents-529) を参照。
@@ -156,7 +156,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 | ディレクトリ | 責務 |
 |---|---|
-| `src/`（ルート） | 組み立て: `oauthModule`、`oauthAuthorizationModule`、`oauthSessionModule`（4 つ目の `subjectRevocationServiceModule` は、それが配線するカスケードと並んで `logout/` にある）、`createOAuthRouter`（下のすべてのルートを組み合わせる）、オプションの解決、core のアクセストークンヘッダーパーサーの再 export。 |
+| `src/`（ルート） | 組み立て: `oauthModule`、`oauthAuthorizationModule`、`oauthSessionModule`（4 つ目の `subjectRevocationServiceModule` は、それが配線するカスケードと並んで `logout/` にある）、`createOAuthRouter`（下のすべてのルートを組み合わせる）、オプションの解決、core のアクセストークンヘッダーパーサーの再 export、そして依存先が落ちていて検証できなかったトークンに全ルートが返す 1 つの答え（`verificationUnavailable.mts`）。 |
 | [`routes/`](./src/routes) | エンドポイント群ごとのルーターまたはハンドラー — authorize、consent、logout、federation token、revoke、userinfo。ルートは `grants/`、`logout/`、`middleware/`、`clients/` を使ってよいが、それらのどれもルートを import しない。`routes/authorize.mts` は grant のヘルパーを 1 つ（クライアントごとの PKCE 方式の規則）も読む。`/authorize` は PKCE を `/token` と同じやり方で検証するからである。両者が読む RFC 8707 `resource` の規則は core のもの（[`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)）で、WebAuthn グラントと共有している。 |
 | [`grants/`](./src/grants) | グラントハンドラー: core のグラント契約の上での、リクエストからトークンへの純粋な判断。HTTP を持たない。 |
 | [`middleware/`](./src/middleware) | クライアント認証。兄弟パッケージが再利用する。 |
@@ -206,6 +206,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - **ローテーションは何かに署名する前に予約される。** 新しいリフレッシュトークンの `jti` と、その有効期間を測り始める時刻が先に決まり、`RefreshTokenFamilyRotation.rotate` でファミリーストアにコミットされ、そのコミットが成立してから署名される。したがって競合に負けたリクエスト — リプレイ、失効済みファミリー、`reject` 下の未知のファミリー — は署名を 1 つも生まずに返る。署名のたびに課金されるリモート呼び出しになる KMS バックエンドの `SigningKeyProvider` ではこれが効く。発行されるトークンは予約されたとおりの `jti` を持ち、`exp` はストアがコミットした上限 — `RefreshTokenFamilyRotationOutcome.cappedExpiresAtMs` から、その契約が記す前方ドリフトのための 1 秒のマージンを引き、秒に切り捨てたもの — を超えない。したがってリフレッシュトークンが、そのリプレイを捕まえるファミリーレコードより長く生きることはない。有効期間が残らない上限は、期限切れのリフレッシュトークンを載せた `200` ではなく `400 invalid_grant`（"refresh token family has reached its lifetime"）になる。
 - **その順序の代償。** `rotate` がコミットした時点で、提示されたトークンは使用済みになる。その後に署名器が失敗すると — KMS の障害 — 誰もトークンを持たないローテーションが残る: グラントは `503 temporarily_unavailable` を返し、ファミリー ID・使用済みの `jti`・予約された `jti` を付けて `refresh_token_rotation_orphaned` をログに出す。これはストアが実際にローテーションをコミットしたときだけで、ローテーションを配線していない構成や、`unknownFamilyPolicy` で受け入れた未知のファミリーは通常の署名器の振る舞いのままである。クライアントの再試行は古いトークンを提示し、それは今やリプレイとして読まれるので、ファミリーは失効し、ユーザーは再認証する。
 - **リプレイはファミリーを失効させる**（RFC 6819 §5.2.2）。モジュールがローテーションと並べて `refreshTokenFamilyRevocation` を読むのはそのためである。また `iat` がサブジェクトの失効ウォーターマーク以前のリフレッシュトークンは `invalid_grant` になる。
+- **依存先が落ちていて検証できなかったトークンは `invalid_grant` ではなく `503 temporarily_unavailable`** — キーストア（"verification key unavailable"）やサブジェクトのウォーターマーク（"revocation store unavailable"）が答えない場合で、`site: "refresh_token"` 付きの `token_verification_unavailable` としてログに出す。RFC 6749 §5.2 の `invalid_grant` はクライアントにリフレッシュトークンを捨てさせるので、障害にそれで答えると、その間にリフレッシュした全員をログアウトさせてしまう。キーストアが持たない kid は引き続き `invalid_grant`。ファミリーストアやセッションストアの障害も `503` で、ストアと段階（`rotate`、またはリプレイが必要とする `revoke`）を付けて `refresh_token_store_unavailable` としてログに出す。
 
 ### `session`
 
@@ -244,7 +245,7 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 
 **未実装:** `claims` パラメーターと、既定以外の `response_mode`。`claims_parameter_supported` と `request_parameter_supported` は省略時の既定が `false` なので、ディスカバリードキュメントは何も言わないことでそれらについて真実を述べている。
 
-**`/authorize` はコードを発行する前にセッションを再確認する。** 認証済みのブラウザーセッションの `sid` がもう `UserSessionStore` で解決できなければ、死んだ `sid` を載せたコードを発行する代わりにログインページへ送る（`prompt=none` なら `login_required`）。答えられないストアも同じくフェイルクローズになる。
+**`/authorize` はコードを発行する前にセッションを再確認する。** 認証済みのブラウザーセッションの `sid` がもう `UserSessionStore` で解決できなければ、死んだ `sid` を載せたコードを発行する代わりにログインページへ送る（`prompt=none` なら `login_required`）。答えられないストアもフェイルクローズになるが、それを判定としては扱わない: 対話的なリクエストはこれまでどおりログインページへ送り（ユーザーはそこで行動でき、ログイン経路は自分の障害を自分で報告する）、`prompt=none` のリクエストには `redirect_uri` で `temporarily_unavailable`（"session store unavailable"、RFC 6749 §4.1.2.1）を返す。`login_required` は誰もサインインしていないと RP に告げることになるが、障害にはそれが分からない。どちらの場合も障害は error レベルで 1 行、`authorize_session_liveness_unavailable` として `store: "user_session"`、`sid`、エラーの射影とともにログに出る。
 
 ## ステップアップと再認証 (#481)
 
@@ -286,9 +287,9 @@ oauth.authorize.acrValues {
 
 **リクエスト。** フォームボディに `client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer` と `client_assertion=<JWT>`、そして認証に関わるものは他に何も付けない: Basic ヘッダーやボディの `client_secret` と並んだアサーションは、どちらも調べる前に拒否される（RFC 6749 §2.3、1 リクエストに 1 方式）。ボディの `client_id` があれば、アサーションと一致しなければならない。
 
-**アサーション。** `iss` と `sub` はどちらも `client_id` と等しい。`aud` は issuer かトークンエンドポイントの URL を名指す（RFC 7523 §3 — どちらの形でもよいので、どちらを使うクライアントライブラリでも動く）。`exp` は必須で、最大 1 時間先まで（`MAX_CLIENT_ASSERTION_LIFETIME_SECONDS`）。`jti` は必須で、seen-set のキーとして保持されるので 256 文字以内（core の `MAX_JTI_LENGTH`）、かつ 1 回限りで、アサーションが期限切れになるまで構成の `replaySeenSet` に `client-assertion:<client_id>` として記録される。署名は非対称アルゴリズム（`RS*`、`PS*`、`ES*`、`EdDSA` — `token_endpoint_auth_signing_alg_values_supported` が列挙する。`HS*` と `none` は JWKS に対して決して受け入れない）。`nbf` はあれば検証し、`iat` はあればサーバー時計より 30 秒の許容を超えて未来であってはならず、有効期間の上限より古くてもならない。
+**アサーション。** `iss` と `sub` はどちらも `client_id` と等しい。`aud` は issuer かトークンエンドポイントの URL を名指す（RFC 7523 §3 — どちらの形でもよいので、どちらを使うクライアントライブラリでも動く）。`exp` は必須で、最大 1 時間（`MAX_CLIENT_ASSERTION_LIFETIME_SECONDS`）に時計の許容幅（`clockToleranceSeconds`、既定 30 秒、最大 300 — それ以外で構築した検証器は拒否される）を足した先まで — ID-JAG と同じ上限で、core の `assertionLifetime` で比べる。拒否は `client_assertion_refused` として `reason: "lifetime"`、`lifetimeSeconds`、`maxLifetimeSeconds` とともにログに出る。`jti` は必須で、seen-set のキーとして保持されるので 256 文字以内（core の `MAX_JTI_LENGTH`）、かつ 1 回限りで、アサーションが期限切れになるまで構成の `replaySeenSet` に `client-assertion:<client_id>` として記録される。署名は非対称アルゴリズム（`RS*`、`PS*`、`ES*`、`EdDSA` — `token_endpoint_auth_signing_alg_values_supported` が列挙する。`HS*` と `none` は JWKS に対して決して受け入れない）。`nbf` はあれば検証し、`iat` はあればサーバー時計より 30 秒の許容を超えて未来であってはならず、有効期間の上限より古くてもならない。
 
-**拒否**は `401 invalid_client` — リプレイされた、空の、または長すぎる `jti`、誤った `aud`、期限切れまたは長すぎるアサーション、JWKS に無い鍵での署名、公開されていない `kid`、別の方式で登録されたクライアント、未知のクライアント、取得できない `jwks_uri`（フェイルクローズ、理由付きで `client_assertion_refused` としてログ出力）。`replaySeenSet` を配線していない構成での `private_key_jwt` リクエストは `500 server_error`: 記録できない `jti` はリプレイされ得るものなので、未検査で認証するのではなく拒否する。standalone テンプレートはそれを配線する（`REPLAY_SEEN_SET_ADAPTER`、既定は Redis。メモリーアダプターは `DEPLOYMENT_MODE=multi` では拒否される。捕獲されたアサーションがレプリカごとに 1 回ずつリプレイできてしまうからである）。
+**拒否**は `401 invalid_client` — リプレイされた、空の、または長すぎる `jti`、誤った `aud`、期限切れまたは長すぎるアサーション、NumericDate でない `exp`・`iat`・`nbf`（JSON の `1e400` のような有限でない値や、Date の範囲を超える値。小数は構わない — `numeric_date` としてログ出力）、JWKS に無い鍵での署名、公開されていない `kid`、別の方式で登録されたクライアント、未知のクライアントやクライアントを指し得ない `iss`（制御文字を含む、または 256 文字を超える — 理由 `malformed_client_id`、リポジトリには問い合わせない）、取得できない `jwks_uri`（フェイルクローズ、理由付きで `client_assertion_refused` としてログ出力）。答えられないクライアントリポジトリは代わりに `503 temporarily_unavailable`（理由 `client_repository_unavailable`）: クライアントは何も間違えていない。`replaySeenSet` を配線していない構成での `private_key_jwt` リクエストは `500 server_error`: 記録できない `jti` はリプレイされ得るものなので、未検査で認証するのではなく拒否する。standalone テンプレートはそれを配線する（`REPLAY_SEEN_SET_ADAPTER`、既定は Redis。メモリーアダプターは `DEPLOYMENT_MODE=multi` では拒否される。捕獲されたアサーションがレプリカごとに 1 回ずつリプレイできてしまうからである）。
 
 **提供しないもの: `client_secret_jwt`。** これにはリポジトリのインターフェースが生の秘密を HMAC 鍵としてミドルウェアに渡す必要がある — `authenticate(clientId, secret)` は比較するだけで明かさない — し、テンプレートが推奨する bcrypt でハッシュした `clientSecret` はそもそも鍵になり得ない。そのケースはデプロイが既に持つ秘密ベースの方式で足り、非対称の方式こそがこの機能の目的である。
 
@@ -323,7 +324,7 @@ grant_type=client_credentials
 3. ページは **`GET /oauth/consent?challenge=<id>`**（セッション Cookie、キャッシュ不可）を呼び、`client_id`、`client_id_host`（Client ID Metadata Document から解決したクライアントの場合のみ — 下記参照）、`client_name`、`client_uri`（登録から）、`scopes`（要求されているもの）、`granted_scopes`（ユーザーが既に同意したもの。ページが差分を強調できるように）、`redirect_uri`（ホストを表示すること — コードの送り先）、`expires_in` を受け取る。
 4. ページは `{ "challenge": "<id>", "decision": "accept" | "deny" }`（JSON かフォーム）で **`/oauth/consent` に `POST`** する。`accept` は付与済みと要求中の和集合を記録し、`consent.granted` を出し、保留中の `/authorize` URL への `303` を返す — そこでレコードが見つかり、コードが発行される。`deny` は `consent.denied` を出し、`error=access_denied` と `state` を付けてクライアントの `redirect_uri` への `303` を返す。どちらの場合もチャレンジは消費される。
 
-チャレンジはリクエストを保留したセッションに結び付けられ、ページにはクロスサイトのページが読めないリダイレクト URL 経由でのみ届く。一致する値を持つ POST は同一オリジンのコードが組み立てたものである（シンクロナイザートークンパターンで、セッションがシンクロナイザー）。他者の・リプレイされた・期限切れ（10 分）のチャレンジは `400`。回答は保留レコードを 1 ステップで**消費する**（`PendingConsentStore.consume`）ので、1 つのチャレンジに同時に 2 つの回答 — 複製したタブ、二重送信 — があっても適用されるのはちょうど 1 つで、もう一方には保留中の同意が無いと告げる。`/authorize` での同意ストアの障害は `temporarily_unavailable` であり、コードにもユーザーが対処できる拒否にもならない。オペレーターはレコードを削除して同意を取り消す（`consentStore.revoke(sub, clientId)`）。次にそのクライアントの `/authorize` が来たら改めて尋ねる。
+チャレンジはリクエストを保留したセッションに結び付けられ、ページにはクロスサイトのページが読めないリダイレクト URL 経由でのみ届く。一致する値を持つ POST は同一オリジンのコードが組み立てたものである（シンクロナイザートークンパターンで、セッションがシンクロナイザー）。他者の・リプレイされた・期限切れ（10 分）のチャレンジは `400`。回答は保留レコードを 1 ステップで**消費する**（`PendingConsentStore.consume`）ので、1 つのチャレンジに同時に 2 つの回答 — 複製したタブ、二重送信 — があっても適用されるのはちょうど 1 つで、もう一方には保留中の同意が無いと告げる。`/authorize` での同意ストアの障害は `temporarily_unavailable` であり、コードにもユーザーが対処できる拒否にもならない。`userSessionStore` が配線されていれば、同意の両メソッドはまず `/authorize` と同じく Cookie の裏のセッションがまだ生きているかを確かめる: 失効していれば `401 login_required`、答えられないストアは `503 temporarily_unavailable`（"session store unavailable"）で、error レベルで 1 行、`consent_session_liveness_unavailable` として `store: "user_session"`、`sid`、エラーの射影とともにログに出る。何も表示も記録もせず、保留中のリクエストは保留されたままなので、ストアが戻れば回答を再試行できる。オペレーターはレコードを削除して同意を取り消す（`consentStore.revoke(sub, clientId)`）。次にそのクライアントの `/authorize` が来たら改めて尋ねる。
 
 ページが表示するものを登録すること: クライアントレコードの `clientName`（RFC 7591 `client_name`）と `clientUri`（`client_uri`）。ループバックの `redirect_uri` を持つネイティブクライアントは、MCP 認可仕様がページに警告を求めるケースである — `redirect_uri` が応答にあるのはまさにそのためである。
 
@@ -378,7 +379,14 @@ grant_type=client_credentials
 }
 ```
 
-その集合の外の audience、未知または期限切れのトークン、jti の denylist かサブジェクトのウォーターマークで失効したトークン、別の issuer のトークンは、どれも `active: false` になる。**Bearer の自己イントロスペクション**経路 — ボディの `token` と同じ値を `Authorization: Bearer <token>` で送る — は呼び出し元クライアントの ID を確立しないので、固定する集合が無い。検証器は集合をでっち上げずに、その欠落を `jwt_verify_aud_skipped` として記録する。
+その集合の外の audience、未知または期限切れのトークン、jti の denylist かサブジェクトのウォーターマークで失効したトークン、別の issuer のトークンは、どれも `active: false` になる。判定できなかったトークン — キーストア、denylist、ウォーターマークが答えなかった — は、どちらの経路でも代わりに `503 temporarily_unavailable` になる。`active: false` はトークンがアクティブでないと言い、そう告げられたリソースサーバーはクライアントを `invalid_token` で拒否し、まったく問題ないかもしれないトークンを取り替えさせるからである。503 は何も保証せず、それでもフェイルクローズである。`introspect.store_unavailable` として監査し、`token_verification_unavailable` としてログに出す。**Bearer の自己イントロスペクション**経路 — ボディの `token` と同じ値を `Authorization: Bearer <token>` で送る — は呼び出し元クライアントの ID を確立しないので、固定する集合が無い。検証器は集合をでっち上げずに、その欠落を `jwt_verify_aud_skipped` として記録する。
+
+**イントロスペクションを呼ぶリソースサーバーやプロキシ**は、`200` 以外の答え — この `503`、ほかの 5xx、タイムアウト — を `active: false` ではなく「不明」として読むべきである:
+
+- **キャッシュしない。** キャッシュした否定は障害より長く残り、肯定はそもそも返されていない。
+- **自分のクライアントには 5xx（`502` か `503`）で答える。** `401 invalid_token` ではない。トークンはまったく問題ないかもしれず、`401` はクライアントにそれを捨ててやり直させる。
+
+[auth.proxy](https://github.com/o3co/auth.proxy) の validation モードはすでにそう振る舞う。2xx でないイントロスペクションの答えはキャッシュされず、クライアントには `502 Bad Gateway` が返る。このリリースより前は障害が `200 active: false` で返り、auth.proxy はそれを最大 30 秒キャッシュして `401` で答えていた。
 
 ### 予約文字を含む `client_id` は HTTP Basic でパーセントエンコードする
 
@@ -396,8 +404,8 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 
 ### 失効したファミリーと終了したセッション
 
-- **リフレッシュトークンファミリー。** `family_id` を持つトークンは、`refreshTokenFamilyRevocation` が配線されていれば `isFamilyRevoked` で確認される: 失効済みのファミリーは `active: false` を返して `introspect.family_revoked` を出す。答えられないストアも `active: false` を返す（`introspect.store_unavailable` を出す）。RFC 7662 はこのエンドポイントに `temporarily_unavailable` を定義しておらず、inactive が唯一のフェイルクローズな答えだからである。`family_id` の無いトークンは署名と失効ストアだけで検証される。
-- **セッションの生存。** `sid` クレームを持つトークンは `UserSessionStore` で確認される — `/oauth/userinfo` と同じ読み取り。ログアウトした・期限切れの・帯域外で削除されたセッションは `active: false` を返して `introspect.session_invalid` を出し、ストアの障害は `active: false` を返して `introspect.store_unavailable` を出す。`sid` の無いトークン（client credentials、jwt-bearer）はこの読み取りのコストを払わず、`userSessionStore` を配線しない構成も払わない。
+- **リフレッシュトークンファミリー。** `family_id` を持つトークンは、`refreshTokenFamilyRevocation` が配線されていれば `isFamilyRevoked` で確認される: 失効済みのファミリーは `active: false` を返して `introspect.family_revoked` を出す。答えられないストアは `503 temporarily_unavailable`（"refresh token store unavailable"）で、`introspect.store_unavailable` として監査し `introspect_store_unavailable` としてログに出す — 上と同じ理由で障害である。`family_id` の無いトークンは署名と失効ストアだけで検証される。失効したファミリーは、それが発行し得た最後のアクセストークンが受け入れられなくなるまで記憶されるので、ファミリー自身のリフレッシュトークンが期限切れになっても答えは戻らない（core の `refresh-token-family/retention.mts`）。
+- **セッションの生存。** `sid` クレームを持つトークンは `UserSessionStore` で確認される — `/oauth/userinfo` と同じ読み取り。ログアウトした・期限切れの・帯域外で削除されたセッションは `active: false` を返して `introspect.session_invalid` を出し、ストアの障害は `503 temporarily_unavailable`（"session store unavailable"）で、ファミリーストアと同じく監査しログに出す。`sid` の無いトークン（client credentials、jwt-bearer）はこの読み取りのコストを払わず、`userSessionStore` を配線しない構成も払わない。
 
 これらは問い合わせる呼び出し元にしか効かない: JWT を署名と `exp` だけでオフライン検証するリソースサーバーは失効を見ず、期限まで受け入れ続ける。
 
@@ -408,7 +416,8 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 サーバーが記録できなかった失効は `200` ではない。呼び出し元自身のトークンが検証を通り、その失効を記録するストア — `accessTokenDenylist` またはリフレッシュトークンのファミリーストア — が失敗したときは `503 temporarily_unavailable` を返し（§2.2.1: クライアントはトークンがまだ存在するとみなして再試行する）、`revoke_store_unavailable` を error レベルで、どちらのストアかを `store` に、失効を記録できなかったクライアントを `clientId` に入れてログに残す。検証を通らないトークン、このサーバーが失効できないトークン、他のクライアントのトークンはストアに届かないので、障害中も `200` のままである。
 
 - **リフレッシュトークン**は `refreshTokenFamilyRevocation` でそのファミリーを失効させる。そのスロットが無ければリクエストは何もしない `200`。
-- **アクセストークン**は、`oauth.revocation.accessToken` が `"denylist"` のとき `accessTokenDenylist` に追加され、`exp` に検証が許す 5 分の時計の許容（`DEFAULT_CLOCK_SKEW_MS`）を足した時刻まで — まだ検証を通りうる間 — 拒否される。それすら過ぎたトークンはこのプロバイダーでは検証を通らないので、失効させてもストアには問い合わせず `200` を返す。この denylist を使って `verifyJwt` を呼ぶ独自のリソースサーバーが既定より大きい `clockSkewMs` を渡すと、失効したトークンをその差の分だけ受け入れるので、そこでは既定値のままにすること。`"unsupported"` のときは、`token_type_hint=access_token` に対して何も失効しない `200` ではなく `400 unsupported_token_type` を返し、ヒントの無いトークンはリフレッシュトークンの経路だけを通る。
+- **アクセストークン**は、`oauth.revocation.accessToken` が `"denylist"` のとき `accessTokenDenylist` に追加され、`exp` に core の `REVOCATION_RETENTION_ALLOWANCE_MS` — 検証が許す 5 分の時計の許容（`DEFAULT_CLOCK_SKEW_MS`）、レプリカ間の許容、丸めの 1 秒 — を足した時刻まで — まだ検証を通りうる間 — 拒否される。それすら過ぎたトークンはこのプロバイダーでは検証を通らないので、失効させてもストアには問い合わせず `200` を返す。この denylist を使って `verifyJwt` を呼ぶ独自のリソースサーバーが既定より大きい `clockSkewMs` を渡すと、失効したトークンをその差の分だけ受け入れるので、そこでは既定値のままにすること。`"unsupported"` のときは、`token_type_hint=access_token` に対して何も失効しない `200` ではなく `400 unsupported_token_type` を返し、ヒントの無いトークンはリフレッシュトークンの経路だけを通る。
+- **キーストアが答えず検証できなかったトークン**は `503 temporarily_unavailable` — 要求を処理できないサーバーのための RFC 7009 §2.2.1 の答えで、クライアントはトークンがまだ存在するとみなして再試行する — で、`token_verification_unavailable` としてログに出す。そこで `200` を返すと、何も触れていないトークンを失効済みと告げることになる。キーストアが持たない kid は引き続き黙った `200`。
 
 ディスカバリーは、2 つのうち少なくとも一方が何かを失効できるときだけ `revocation_endpoint` を広告する。エンドポイントの完全な振る舞いは [`routes/revoke.mts`](./src/routes/revoke.mts) の doc コメントにある。
 
@@ -426,11 +435,13 @@ OIDC Core §5.3。`GET` と `POST` で受け付ける。永続化された `User
 | Bearer トークン未指定または形式不正 | `401`（`WWW-Authenticate: Bearer realm="userinfo"` 付き） |
 | JWT 署名検証失敗 | `401 invalid_token` |
 | トークンの `family_id` が失効済み | `401 invalid_token` |
-| セッション未発見またはストアエラー | `401 invalid_token`（フェイルクローズ） |
+| セッション未発見 | `401 invalid_token` |
+| キーストア、jti の denylist、サブジェクトのウォーターマークが答えない | `503 temporarily_unavailable`（"verification key unavailable" / "revocation store unavailable"）、チャレンジなし。`token_verification_unavailable` としてログ出力 |
+| リフレッシュトークンファミリーストアかセッションストアが答えない | `503 temporarily_unavailable`（"refresh token store unavailable" / "session store unavailable"）、チャレンジなし。`userinfo_store_unavailable` としてログ出力 |
 | `userSessionStore` 未配線、または `sid` クレームなし | `200 { sub }`（sub のみ、永続クレームなし） |
 | セッションがアクティブ | `200 { sub, ...スコープで絞ったクレーム }` |
 
-すべてのレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける（RFC 6750 §5.3）。
+すべてのレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける（RFC 6750 §5.3）。障害は拒否される — クレームは返さない — が、`invalid_token` としてではない。RFC 6750 §3.1 はそれをトークンについての記述（"expired, revoked, malformed, or invalid"）と定義しており、クライアントにトークンを取り替えさせるからである。
 
 スコープ→クレームの対応（OIDC Core §5.4 の標準スコープ）。id_token と共通:
 
@@ -493,10 +504,12 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 `id_token_hint` の発行から 24 時間を超えた `GET` には、ログアウトする代わりに確認ページを返す。そのフォームはヒントと `state` をこのエンドポイントへ POST で送り返し、`post_logout_redirect_uri` はクライアントのアローリストにある場合だけ送り返す。
 
+検証できない `id_token_hint` は `400 invalid_token`、キーストアが答えず検証できなかったものは `GET` でも `POST` でも `503 temporarily_unavailable`。
+
 フロー: `id_token_hint` を検証 → セッションを読む → `backchannelLogoutUri` を持つすべての RP に OIDC Back-Channel Logout 1.0 の `logout_token` を送る（ベストエフォート。POST の失敗はログアウトを止めない） → ストアカスケードを実行 → 次のいずれかで応答:
 
 - `frontchannelLogoutUri` を持つ RP ごとの `<iframe>` を含む `text/html` ページ（q 値付きネゴシエーションで `Accept: text/html` が勝った場合）
-- 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）
+- 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添える。フェデレーショントークンのレコードが読めなければ添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
 - `post_logout_redirect_uri` への `303`（クライアントのアローリストに一致する場合）
 - `200 {"logged_out": true}`（フォールバック）
 
@@ -507,7 +520,7 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 3. セッションの逆引きインデックスのエントリー（RP、ファミリー、フェデレーション）を削除する — ベストエフォートで、ログに出し、TTL で上限がある。
 4. 最後に `UserSession` を削除する。失敗したらカスケードはそこで止まる。
 
-止まったカスケードは `503 {"error": "temporarily_unavailable"}` を返し、同じログアウトの再試行は安全である。
+止まったカスケードは `503 {"error": "temporarily_unavailable"}` を返し、同じログアウトの再試行は安全である。error レベルで 1 回、`store: "logout_cascade"`、`cascadeStep`、失敗した数 `failures` 付きの `logout_store_unavailable` としてログに出し、失敗した各操作は `logout_cascade_operation_failed`（warn）としても出す。カスケード前にセッションストアを読めなかったときも同じイベントで、`store` がそのストア（`user_session`、`session_rp_registry`、`session_federation_index`）を名指す。
 
 成功時のどの形でも — そして既に無くなっているセッションへの何もしない応答でも — エンドポイントは**ブラウザー自身の express-session も終わらせる**。ただしそのセッションの `sid` がログアウト対象のものであるときだけである。RP-Initiated Logout は誰でもどのセッションについても行えるリクエストなので、別の `sid` を名指す Cookie や何も名指さない Cookie は、無関係なユーザーをサインアウトさせないよう手を付けない。これが無いと、ストアが空になった後も Cookie が `/authorize` で `req.session.isAuthenticated` を満たし続ける。セッションストアが完了できない破棄はログに出し、成功したカスケードを `503` にはしない。`/authorize` はいずれにせよ自分の判断で死んだ `sid` を拒否する（[OIDC の対応範囲](#oidc-の対応範囲-284)を参照）。`503` は意図して Cookie を残すので、再試行は引き続きそのセッションを名指せる。
 
@@ -519,7 +532,9 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 IdP の end-session 呼び出しが例外を投げた場合、ローカルの状態は既にクリア済みなので、応答は `200 {"disconnected": true}` で、オペレーター向けに監査イベント `federation.logout.idp_unreachable` を出す。
 
-指定のフェデレーションがセッションに無ければ `404 {"error": "federation_not_linked"}` を返す。
+答えられないキーストアやストア — ファミリーの確認を含む — は `401 invalid_token` ではなく `503 temporarily_unavailable` になる。
+
+指定のフェデレーションがセッションに無ければ `404 {"error": "federation_not_linked"}` を返す。答えられないストアは `503 temporarily_unavailable` で、`store` と `step` 付きの `federation_logout_store_unavailable` として error レベルで 1 回だけログに出す。
 
 ### ディスカバリーメタデータ
 
@@ -636,13 +651,13 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 | 429 | `rate_limited` | 上流 IdP のレート制限超過（`status: 429` または `error: "too_many_requests"`）。後で再試行する |
 | 500 | `refresh_failed` | IdP リフレッシュ経路の分類できないエラー、またはこのルートが読めない応答。SIEM は監査の `details.reason` フィールドでグループ化すること |
 | 502 | `upstream_token_ineligible` | 上流のトークンがこのプロバイダーの渡せないもの。理由は `error_description` が名乗る — `token_type_unsupported` だけである。`Retry-After: 300` を付ける |
-| 503 | `refresh_not_supported` | プロバイダーが `SupportsRefresh` を実装していない |
-| 503 | `lock_timeout` | 待機ウィンドウ内に advisory lock を取得できなかった |
-| 503 | `temporarily_unavailable` | ストア障害、IdP の 5xx、または上流のネットワーク障害（ECONNREFUSED / ENOTFOUND / ETIMEDOUT — fetch の TypeError の `error.cause.code` に包まれたコードを含む） |
+| 503 | `refresh_not_supported` | プロバイダーが `SupportsRefresh` を実装していない。デプロイ側で直すべきものとして `federation_token_refresh_unsupported` を error レベルでログに出す |
+| 503 | `lock_timeout` | 待機ウィンドウ内に advisory lock を取得できなかった。続く競合が見えるよう、`federation`、`clientId`、`sid` 付きの `federation_token_lock_timeout` として warn でログに出す |
+| 503 | `temporarily_unavailable` | ストア障害（リフレッシュトークンファミリーの確認を含む）、アクセストークンの検証中に答えられないキーストアや失効ストア、IdP の 5xx、または上流のネットワーク障害（ECONNREFUSED / ENOTFOUND / ETIMEDOUT — fetch の TypeError の `error.cause.code` に包まれたコードを含む）。それぞれ error レベルで 1 回だけログに出す: ストアは `store` と `step` 付きの `federation_token_store_unavailable`、クライアントの検索は `client_repository_unavailable`（`site: "federation_token"`）、上流は `federation_token_upstream_unavailable`。503 でない上流の拒否は `federation_token_refresh_failed`（warn） |
 
 すべてのエラーレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける。401 レスポンスには RFC 6750 に従い `WWW-Authenticate: Bearer error="invalid_token"` を含める。
 
-このルートがログに書く失敗はすべて core の `loggableError(err)` を運び、エラーそのものは運ばない — 警告 `refreshToken failed (reason: …)` も含めて。アダプターのライブラリは拒否したリフレッシュ応答を、ローテーションされたリフレッシュトークンを含めてエラーの cause の連鎖に載せ、Redis ストアのエラーは拒否されたコマンドの引数（`allow-plaintext` ならトークンレコード）を運ぶ。射影はそれらを捨て、失敗を見分けるもの — ライブラリのコード、HTTP ステータスと content type、上流の OAuth `error`、そして core がそのために定める規則（最初の行、トークンの形の連なりを含む語の頭で切る）の下での `error_description` — を残し、メッセージが相手側を引用する既知の二つの形（JSON パーサーの入力、Redis が反復する引数）を取り除く。相手側がメッセージに書いたそれ以外のテキストは残る。何が残るかは core の README が正確に述べる。このパッケージの他のログも同じ規則に従う。
+このルートがログに書く失敗はすべて core の `loggableError(err)` を運び、エラーそのものは運ばない — 警告 `federation_token_refresh_failed` も含めて。アダプターのライブラリは拒否したリフレッシュ応答を、ローテーションされたリフレッシュトークンを含めてエラーの cause の連鎖に載せ、Redis ストアのエラーは拒否されたコマンドの引数（`allow-plaintext` ならトークンレコード）を運ぶ。射影はそれらを捨て、失敗を見分けるもの — ライブラリのコード、HTTP ステータスと content type、上流の OAuth `error`、そして core がそのために定める規則（最初の行、トークンの形の連なりを含む語の頭で切る）の下での `error_description` — を残し、メッセージが相手側を引用する既知の二つの形（JSON パーサーの入力、Redis が反復する引数）を取り除く。相手側がメッセージに書いたそれ以外のテキストは残る。何が残るかは core の README が正確に述べる。このパッケージの他のログも同じ規則に従う。
 
 ### Opt-in: `allowedAzpForFederationToken`
 
@@ -660,6 +675,8 @@ clients:
 設計の意図: フェデレーションのアクセストークンはユーザーの外部リソース（Google Drive、GitHub API など）へのアクセスを与える。認証だけが目的の一般的な OAuth クライアント登録で誤って露出しないよう、既定で拒否する。
 
 ### 監査イベント
+
+これらのイベントやフェデレーションのログアウトルートのイベント（`federation.logout.success`、`federation.logout.idp_unreachable`）が `details.federation` を持つとき、その値はログ行と同じ形である: パスの名前をサニタイズし 200 文字で切ったもの。`federation.token.forbidden` はフェデレーションがセッションに紐付いているかをルートが確かめる前に出るので、そこでの名前は呼び出し元がパスに入れたものそのものである。
 
 - `federation.token.success` — トークン発行時（詳細の `refreshed: boolean` で保存済みトークンかリフレッシュ経路かを区別する）
 - `federation.token.forbidden` — 403 のとき（クライアントがオプトインしていない）
@@ -708,7 +725,8 @@ const assertionVerifier = createRegistryAssertionVerifier({
 エントリーが言うことと、それが `/oauth/token` で意味すること:
 
 - **鍵**は、1 つの公開鍵（`type: "key"`）、静的な JWK セット（`type: "jwks"`）、または JWKS エンドポイント（`type: "jwks_uri"`、ループバック以外では `https` 必須）から来る。リモートのセットは初回使用時に取得してキャッシュし（既定 10 分。エントリーの `cacheMaxAgeMs`、`cooldownMs`、`timeoutMs` で調整）、未知の `kid` は再取得を起こすので、発行者側のローテーションは再起動無しで拾われる。取得には検証器の `fetch` オプションがあればそれ — エグレスプロキシ — を使い、`private_key_jwt` クライアントの `jwksUri` と同じである。どちらも core の `createRemoteKeySetCache`。エンドポイントが落ちていれば障害である: グラントは `invalid_grant` ではなく `503` を返す。
-- **登録されていない `iss` は署名の処理より前に拒否される。** 誰も登録していない発行者については、鍵も取得せず署名も確認しない。「A が署名し、B を名乗る」ものは B の鍵で失敗する。
+- **`exp`・`iat`・`nbf` は NumericDate でなければならない**（core の `isNumericDate`）: `1e400`（JSON では Infinity）や Date の範囲を超える値を持つアサーションは `invalid_grant` で、ID-JAG の `jti` を記録する前に拒否される — 以前は replay seen-set に届いて `503` として返っていた。小数は構わない。
+- **登録されていない `iss` は署名の処理より前に拒否される。** 誰も登録していない発行者については、鍵も取得せず署名も確認しない。「A が署名し、B を名乗る」ものは B の鍵で失敗する。発行者を指し得ない `iss`（256 文字を超える、または制御文字を含む — `client_id` と同じ規則）は、レジストリに問い合わせる前に拒否される。自前のストアに裏打ちされたレジストリにそのような値が渡ることはないので、それで例外を投げさせられることもない。そのような名前で登録しようとしたエントリーは追加時に拒否される。`findIssuer` は未知の発行者に `null` で答え、例外を投げてはならない。
 - **`allowedClients`** は発行者のアサーションを提示してよい者を制限する。リストがあれば未認証の提示者は拒否される。無ければ誰でもよい。
 - **`allowedScopes`** はアサーション自身の `scope` クレームとの共通部分をとり（アサーションが何も名指さなければ単独で）、リクエストとクライアント登録がさらに絞るスコープの上限になる。
 - **`allowedAudiences`** は、何が選んだかに関係なく発行される `aud` を抑える — `grantPolicy`、RFC 8707 の `resource`、クライアント登録（その `allowedAudiences` を発行者のものに絞ったもの、クライアント ID は発行者が認める場合だけ）。認証済みクライアントが無ければそれがソースにもなる: トークンはこのサーバーではなく発行者の最初の audience を名指す。共通の audience を 1 つも認めないクライアントと発行者の組は `invalid_grant` で、`jwt_bearer_issuer_audience_mismatch` をログに出す。
@@ -765,10 +783,11 @@ const assertionVerifier = createRegistryAssertionVerifier({
   audience: "https://auth.example",
   issuerIdentifier: "https://auth.example", // the only aud an ID-JAG may name
   replaySeenSet,                             // each jti is accepted once
+  logger,                                    // says why an assertion was refused
 });
 ```
 
-レジストリのチェックに加えて、ID-JAG は `typ: oauth-id-jag+jwt`、このサーバーの issuer 識別子とちょうど等しい `aud`（トークンエンドポイントの URL は別名にならない）、認証済みクライアントを名指す `client_id`（未認証の提示者は拒否）、そして `jti`、`iat`、`sub` を持たなければならない — `iat` は `private_key_jwt` と同じく 1 時間以内。各 `jti` はアサーションの有効期間中に 1 回だけ受け付け、256 文字（`MAX_JTI_LENGTH`）を超えるものは記録する前に拒否する。`scope` と `resource` はクレームとして運ばれる: スコープの上限はクレーム ∩ `allowedScopes`、audience の上限は `resource` ∩ `allowedAudiences`（エントリーが認めないリソースは拒否）で、グラントはさらにその両方をクライアントの登録で抑える。Store に渡すハンドルは `<iss>#<sub>`（または `<iss>#<tenant>#<sub>`） — `sub` は発行者の中でしか一意でない — で、Store が紐付けていない ID はそこで拒否される。リフレッシュトークンは発行しない: アサーションがリフレッシュの仕組みであり、アクセストークンはそれより長く生きない（下記）。
+レジストリのチェックに加えて、ID-JAG は `typ: oauth-id-jag+jwt`、このサーバーの issuer 識別子とちょうど等しい `aud`（トークンエンドポイントの URL は別名にならない）、認証済みクライアントを名指す `client_id`（未認証の提示者は拒否）、そして `jti`、`iat`、`sub` を持たなければならない — `private_key_jwt` と同じく（core の `MAX_ASSERTION_LIFETIME_SECONDS`）、`iat` は 1 時間以内、`exp` は 1 時間先まで。どちらも時計が進んでいる IdP のために、エントリーの時計の許容幅（`clockToleranceSeconds`、既定 60）を認める。許容幅は 0〜300 秒（core の `MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS`）の有限の数でなければならない。`NaN`、`Infinity`、文字列は時刻チェックを無効にしてしまうので、そのようなエントリーは追加時に拒否され、ストア型のレジストリが検証器に渡したときにも再び拒否される。各 `jti` はアサーションの有効期間中に 1 回だけ受け付けるので、それより長く生きる ID-JAG は `invalid_grant` で、`jti` を記録する前に拒否される。256 文字（`MAX_JTI_LENGTH`）を超える `jti` も同じく記録する前に拒否する。グラントの応答はどの拒否でも同じだが、検証器に `logger` を渡すと、理由を warn で `jwt_bearer_assertion_refused` として、エントリーの `issuer` と `reason` — `lifetime`（`lifetimeSeconds` と `maxLifetimeSeconds` 付き）または `numeric_date`（`claim` 付き）— とともにログに出す（`issuer` の無い `malformed_issuer` もある）。`scope` と `resource` はクレームとして運ばれる: スコープの上限はクレーム ∩ `allowedScopes`、audience の上限は `resource` ∩ `allowedAudiences`（エントリーが認めないリソースは拒否）で、グラントはさらにその両方をクライアントの登録で抑える。Store に渡すハンドルは `<iss>#<sub>`（または `<iss>#<tenant>#<sub>`） — `sub` は発行者の中でしか一意でない — で、Store が紐付けていない ID はそこで拒否される。リフレッシュトークンは発行しない: アサーションがリフレッシュの仕組みであり、アクセストークンはそれより長く生きない（下記）。
 
 ### 発行するトークンはアサーションより長く生きない
 

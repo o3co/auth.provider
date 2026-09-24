@@ -371,14 +371,60 @@ describe("protectedResourceBindingMw — a server-side outage", () => {
 			error_description: "the replay store cannot be read; retry later",
 		});
 		expect(res.headers["WWW-Authenticate"]).toBeUndefined();
-		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ mechanism: "dpop" }),
+		// The layer that answers the 503 owns its one error-level line.
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ mechanism: "dpop", code: "temporarily_unavailable" },
 			"protected_resource_binding_unavailable",
 		);
-		expect(logger.warn).not.toHaveBeenCalledWith(
-			expect.anything(),
-			"protected_resource_binding_proof_invalid",
+	});
+
+	it("logs the refusal's cause and reason, projected, when the mechanism gives them", async () => {
+		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT } });
+		const storeError = Object.assign(
+			new Error("READONLY You can't write against a read only replica."),
+			{
+				name: "ReplyError",
+				command: { name: "set", args: ["dpop-proof:jkt", "refused-command-marker"] },
+			},
 		);
+		const err = Object.assign(new Error("replay store down", { cause: storeError }), {
+			code: "temporarily_unavailable",
+			unavailable: "the replay store cannot be read; retry later",
+			reason: "replay_store_unavailable",
+		});
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child() {
+				return this;
+			},
+		};
+		const { res } = await run(
+			protectedResourceBindingMw({
+				mechanisms: [throwingMechanism("dpop", err)],
+				logger: logger as never,
+			}),
+			`DPoP ${token}`,
+		);
+		expect(res.statusCode).toBe(503);
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [line, event] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(event).toBe("protected_resource_binding_unavailable");
+		expect(line).toMatchObject({
+			mechanism: "dpop",
+			code: "temporarily_unavailable",
+			reason: "replay_store_unavailable",
+			err: { name: "ReplyError", command: { name: "set" } },
+		});
+		expect(line.err).not.toBeInstanceOf(Error);
+		expect(JSON.stringify(logger.error.mock.calls)).not.toContain("refused-command-marker");
 	});
 
 	it("reads a bare code as a failed proof: only the mechanism can say it was an outage", async () => {

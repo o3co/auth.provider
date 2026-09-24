@@ -22,8 +22,9 @@
  * implementations omit `options` parameter and remain valid when Wave 2 adds DPoP `cnf` binding.
  *
  * `add` keeps the jti denied until `expiresAtMs` — the revoke route passes the
- * token's `exp` plus the verification clock tolerance, the time it stops
- * verifying:
+ * token's `exp` plus `REVOCATION_RETENTION_ALLOWANCE_MS` (the verification
+ * clock tolerance, a replica allowance and a rounding second), the time it
+ * stops verifying and then some:
  * a fractional value is valid (a JWT NumericDate may be non-integer) and the
  * entry lives at least until it; a value that is not a finite instant within
  * the Date range (`isStorableExpiry`) is a RangeError and records nothing. An `expiresAtMs` already past is not an

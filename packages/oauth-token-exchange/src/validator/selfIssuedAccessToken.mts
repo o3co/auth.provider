@@ -18,7 +18,7 @@ import {
 	type AccessTokenDenylist,
 	type ExchangeTokenValidationContext,
 	type ExchangeTokenValidator,
-	isRevocationUnavailable,
+	isVerificationUnavailable,
 	type KeyStore,
 	type Logger,
 	type SubjectRevocation,
@@ -100,8 +100,8 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  * missing/empty sub, expired, issuer mismatch, a denylisted or watermarked
  * token — and the grant answers `invalid_request` / `subject_token validation
  * failed` (`actor_token …` for the actor). It throws when the answer is
- * not knowable: a revocation store the central verifier could not consult
- * (`isRevocationUnavailable`), which the grant answers with
+ * not knowable: a keystore or a revocation store the central verifier could
+ * not consult (`isVerificationUnavailable`), which the grant answers with
  * `503 temporarily_unavailable`. The token is refused either way.
  */
 export function createSelfIssuedAccessTokenValidator(
@@ -146,12 +146,13 @@ export function createSelfIssuedAccessTokenValidator(
 				});
 				payload = verified.payload as Record<string, unknown>;
 			} catch (err) {
-				// An unreachable denylist or subject watermark is an outage, not a
-				// finding about the token: rethrown, so the grant answers 503 rather
-				// than a refusal that tells the client to discard a credential
-				// that may be perfectly good. The refresh grant makes the
-				// same split. Every other verification failure is the token's.
-				if (isRevocationUnavailable(err)) throw err;
+				// An unreachable keystore, denylist or subject watermark is an
+				// outage, not a finding about the token: rethrown, so the grant
+				// answers 503 rather than a refusal that tells the client to
+				// discard a credential that may be perfectly good. The refresh
+				// grant makes the same split. Every other verification failure —
+				// a kid nobody holds included — is the token's.
+				if (isVerificationUnavailable(err)) throw err;
 				return null;
 			}
 

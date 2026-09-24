@@ -96,13 +96,24 @@ export class DPoPError extends Error {
 	 */
 	readonly unavailable?: string;
 
+	/**
+	 * @param options.cause For the two outage reasons: the replay store's error
+	 *   that stopped the verdict — core's `TokenBindingRefusal.cause`. The
+	 *   dispatcher that answers the 503 logs its projection; this package does
+	 *   not log the outage itself. For a `malformed_proof` a library refused
+	 *   (jose's `JWKInvalid`, the `htu` canonicalization): that library's error.
+	 *   `message` stays this package's own fixed text either way, so a library's
+	 *   words — which can quote what the client sent — are never flattened into
+	 *   it; a logger reaches them only through a projection of the cause.
+	 */
 	constructor(
 		reason: DPoPReasonCode,
 		message: string,
 		detail?: Record<string, unknown>,
 		responseHeaders?: Readonly<Record<string, string>>,
+		options?: ErrorOptions,
 	) {
-		super(message);
+		super(message, options);
 		this.name = "DPoPError";
 		this.reason = reason;
 		const nonceRefusal = reason === "nonce_required" || reason === "nonce_invalid";

@@ -29,8 +29,11 @@ import {
 	type GrantPolicyHook,
 	isEmailVerified,
 	isGrantTypeAllowed,
+	isWellFormedClientId,
 	isWellFormedErrorCode,
 	type Logger,
+	logClientRepositoryUnavailable,
+	logGrantPolicyUnavailable,
 	loggableError,
 	matchesRegisteredRedirectUri,
 	type PendingConsentStore,
@@ -117,9 +120,13 @@ export interface AuthorizeHandlerOptions {
  * deployment.
  *
  * A store that cannot answer fails CLOSED. Minting a code is an authorization
- * decision, and an outage is not a reason to make it: the caller lands on the
- * login page (or gets `login_required`), which is recoverable, rather than
- * holding a code bound to a session nobody can vouch for.
+ * decision, and an outage is not a reason to make it. An interactive request
+ * lands on the login page, where the user can act and the login path reports
+ * its own outage. A `prompt=none` request is answered
+ * `temporarily_unavailable` (RFC 6749 §4.1.2.1), not `login_required`:
+ * that would tell the relying party the user is not signed in, a verdict the
+ * outage cannot make. Either way the outage is logged once at error level as
+ * `authorize_session_liveness_unavailable`, with the store and the projection.
  *
  * Callers MUST short-circuit on `isAuthenticated` first, so a genuinely
  * unauthenticated request still answers without touching any repository
@@ -136,7 +143,12 @@ export interface AuthorizeHandlerOptions {
 const readLiveSession = async (
 	req: Request,
 	opts: AuthorizeHandlerOptions,
-): Promise<{ readonly live: boolean; readonly session: UserSession | null }> => {
+): Promise<{
+	readonly live: boolean;
+	readonly session: UserSession | null;
+	/** The store could not answer: not live, and not a verdict either. */
+	readonly unavailable?: true;
+}> => {
 	const store = opts.userSessionStore;
 	const sid = typeof req.session?.sid === "string" ? req.session.sid : undefined;
 	if (!store || sid === undefined) return { live: true, session: null };
@@ -144,8 +156,11 @@ const readLiveSession = async (
 		const session = await store.get(sid);
 		return { live: session != null, session };
 	} catch (err) {
-		opts.logger.warn({ err: loggableError(err), sid }, "authorize_session_liveness_unavailable");
-		return { live: false, session: null };
+		opts.logger.error(
+			{ store: "user_session", sid, err: loggableError(err) },
+			"authorize_session_liveness_unavailable",
+		);
+		return { live: false, session: null, unavailable: true };
 	}
 };
 
@@ -213,7 +228,14 @@ const auditFailure = (ctx: AuthorizeContext, details: Record<string, unknown>): 
 /**
  * RFC 6749 §4.1.1 identification: `client_id` / `redirect_uri` presence, the
  * client lookup, and the `redirect_uri` allowlist. Everything here fails as
- * 400/500 JSON (A-1) because no trusted redirect target exists yet.
+ * 400/503 JSON (A-1) because no trusted redirect target exists yet.
+ *
+ * A `client_id` that cannot name a client (core's `isWellFormedClientId`: a
+ * control character, or longer than `MAX_CLIENT_ID_LENGTH`) is answered like
+ * an unknown one and never reaches the repository, which may throw on it. A
+ * repository that throws cannot answer: `503 temporarily_unavailable`
+ * ("client repository unavailable"), logged at error level as
+ * `client_repository_unavailable` — as client authentication answers it.
  *
  * Returns `null` when a response has been sent.
  */
@@ -237,11 +259,25 @@ const resolveClientAndRedirectUri = async (
 		return null;
 	}
 
+	if (!isWellFormedClientId(client_id)) {
+		res.status(400).json({ error: "invalid_client", error_description: "client not found" });
+		return null;
+	}
+
 	let client: PublicClient | null;
 	try {
 		client = await opts.clientRepository.findById(client_id);
-	} catch {
-		res.status(500).json({ error: "server_error", error_description: "Failed to fetch client" });
+	} catch (err) {
+		// The client's id is its own input: recorded sanitised and capped.
+		logClientRepositoryUnavailable(
+			opts.logger,
+			{ site: "authorize", step: "find", clientId: client_id },
+			err,
+		);
+		res.status(503).json({
+			error: "temporarily_unavailable",
+			error_description: "client repository unavailable",
+		});
 		return null;
 	}
 	if (!client) {
@@ -1157,7 +1193,14 @@ const applyGrantPolicy = async (
 					issuer: ctx.opts.issuer,
 				},
 			);
-		} catch {
+		} catch (err) {
+			// The redirect is the outage's answer at this endpoint; the line is
+			// its log, as every grant that consults the policy writes it.
+			logGrantPolicyUnavailable(
+				ctx.opts.logger,
+				{ site: "authorize", grantType: "authorization_code", policy: grantPolicy.kind },
+				err,
+			);
 			redirectError(ctx, "temporarily_unavailable", "policy evaluation unavailable");
 			return null;
 		}
@@ -1293,7 +1336,12 @@ const resolveAudienceForPersist = (
 	return { audienceForPersist };
 };
 
-/** RFC 6749 §4.1.2 code issuance, or `null` after a `server_error` redirect. */
+/**
+ * RFC 6749 §4.1.2 code issuance, or `null` after a `temporarily_unavailable`
+ * redirect: a code store that cannot answer is the condition §4.1.2.1 names
+ * `temporarily_unavailable` for, not `server_error`. Logged once at error
+ * level as `authorize_store_unavailable`.
+ */
 const mintCode = async (
 	ctx: AuthorizeContext,
 	params: {
@@ -1319,8 +1367,17 @@ const mintCode = async (
 			sid: typeof ctx.req.session?.sid === "string" ? ctx.req.session.sid : undefined,
 			acr: params.acr,
 		});
-	} catch {
-		redirectError(ctx, "server_error", "Failed to create authorization code");
+	} catch (err) {
+		ctx.opts.logger.error(
+			{
+				store: "authorization_code",
+				step: "create",
+				clientId: ctx.clientId,
+				err: loggableError(err),
+			},
+			"authorize_store_unavailable",
+		);
+		redirectError(ctx, "temporarily_unavailable", "authorization code store unavailable");
 		return null;
 	}
 	return { code: issue.code };
@@ -1472,6 +1529,13 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		const prompt = resolvePrompt(ctx);
 		if (prompt === null) return;
 		if (prompt.silent && !authenticated) {
+			// A store that could not say whether the session lives says
+			// nothing about the user: `temporarily_unavailable`, not a
+			// `login_required` that tells the RP nobody is signed in.
+			if ("unavailable" in liveSession && liveSession.unavailable === true) {
+				redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+				return;
+			}
 			// OIDC Core §3.1.2.6. Now that `redirect_uri` is validated this
 			// reaches the RP's own listener rather than a login page it cannot
 			// use.

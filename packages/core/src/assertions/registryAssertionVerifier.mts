@@ -17,9 +17,18 @@
 import { createLocalJWKSet, decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
 import { parseScopeTokens } from "../federations/scope.mjs";
 import { createRemoteKeySetCache } from "../jwks/remoteKeySet.mjs";
+import { malformedNumericDateClaim } from "../jwt/numericDate.mjs";
+import type { Logger } from "../logging/Logger.mjs";
 import { isRecordableJti } from "../replay-seen-set/jti.mjs";
 import type { ReplaySeenSet } from "../replay-seen-set/types.mjs";
+import { isWellFormedIdentifier } from "../security/identifier.mjs";
 import type { AssertionIssuerEntry, AssertionIssuerRegistry } from "./issuerRegistry.mjs";
+import {
+	assertionLifetime,
+	describeInvalidAssertionClockTolerance,
+	isValidAssertionClockTolerance,
+	MAX_ASSERTION_LIFETIME_SECONDS,
+} from "./lifetime.mjs";
 import type {
 	AssertionVerificationContext,
 	AssertionVerificationResult,
@@ -28,9 +37,6 @@ import type {
 
 /** The `typ` an Identity Assertion JWT Authorization Grant MUST carry (ID-JAG §3). */
 export const ID_JAG_TYP = "oauth-id-jag+jwt";
-
-/** How long ago an ID-JAG may have been issued (`iat`), before clock tolerance. */
-const ID_JAG_MAX_AGE_SECONDS = 3600;
 
 export interface RegistryAssertionVerifierOptions {
 	readonly registry: AssertionIssuerRegistry;
@@ -59,6 +65,20 @@ export interface RegistryAssertionVerifierOptions {
 	readonly kind?: string;
 	/** The fetch a `jwks_uri` entry's key set uses. An egress proxy, or a test seam. */
 	readonly fetch?: typeof fetch;
+	/**
+	 * Where a refusal says why. The grant answers every refusal the same
+	 * `invalid_grant`, so without this an operator cannot tell an IdP minting
+	 * over-long ID-JAGs from a bad signature. Logged at warn as
+	 * `jwt_bearer_assertion_refused` with the entry's `issuer` and a `reason`:
+	 * `lifetime` (an ID-JAG past `MAX_ASSERTION_LIFETIME_SECONDS` and the
+	 * entry's clock tolerance; with `lifetimeSeconds` and
+	 * `maxLifetimeSeconds`) or `numeric_date` (with the `claim`) — and,
+	 * without an `issuer`, as `malformed_issuer` for an `iss` that cannot name
+	 * one (refused before the registry is asked; the value is the client's and
+	 * is not logged). Other refusals are not logged here. Absent, nothing is
+	 * logged.
+	 */
+	readonly logger?: Logger;
 	/**
 	 * How an entry's claims are read — code, so it lives here rather than on
 	 * the entry a store holds. Called per verification with the entry found;
@@ -168,7 +188,12 @@ const isRefusal = (err: unknown): boolean =>
  *    the entry admits (`allowedClients`; an unauthenticated presenter passes
  *    only when the entry names no list).
  * 3. Signature, `iss`, `aud`, `exp` (mandatory, RFC 7523 §3 item 4), `nbf` /
- *    `iat` when present, against the entry's keys and algorithms.
+ *    `iat` when present, against the entry's keys and algorithms — and each of
+ *    the three a NumericDate (core's `jwt/numericDate.mts`): jose checks only
+ *    that it is a number, so `exp: 1e400` (Infinity) would otherwise verify as
+ *    an assertion that never expires and reach the ID-JAG replay record,
+ *    whose store refuses an infinite lifetime with a `RangeError` the grant
+ *    answers `503`. A malformed date is the assertion's fault: `null`.
  * 4. `sub` must be one the entry admits (`allowedSubjects`), and the handle
  *    reader must find a handle.
  * 5. The result carries the entry's ceilings: the scope claim intersected
@@ -192,7 +217,12 @@ const isRefusal = (err: unknown): boolean =>
  *   authentication is required for this grant;
  * - `jti`, `iat` and `sub` are required, and each `jti` is accepted **once**
  *   for the assertion's lifetime, recorded in `replaySeenSet` per issuer; a
- *   `jti` longer than `MAX_JTI_LENGTH` (256) is refused before it is recorded;
+ *   `jti` longer than `MAX_JTI_LENGTH` (256) is refused before it is recorded,
+ *   and so is an assertion with a lifetime of more than
+ *   `MAX_ASSERTION_LIFETIME_SECONDS` past now (plus the entry's clock
+ *   tolerance, as every other time check here allows), or an `iat` more than
+ *   that old (`lifetime.mts`, the ceiling `private_key_jwt` holds a client
+ *   assertion to) — logged as such (`logger`);
  * - `scope` and `resource` travel as claims, not request parameters: the
  *   scope ceiling is the claim intersected with `allowedScopes`, and the
  *   audience ceiling is the `resource` claim intersected with
@@ -203,14 +233,31 @@ const isRefusal = (err: unknown): boolean =>
  *   with the Store — an unlinked one is refused there.
  *
  * Every refusal is the same `null`. Distinguishing them would let a caller
- * probe for which issuers are registered or which subjects are admitted.
+ * probe for which issuers are registered or which subjects are admitted —
+ * the reason goes to the server's log only (`logger`).
  * Replay within `exp` is detected for ID-JAG only; a plain RFC 7523 issuer
  * should mint short-lived assertions.
  */
 export function createRegistryAssertionVerifier(
 	options: RegistryAssertionVerifierOptions,
 ): AssertionVerifier {
-	const { registry, audience, issuerIdentifier, replaySeenSet, kind = "jwt-registry" } = options;
+	const {
+		registry,
+		audience,
+		issuerIdentifier,
+		replaySeenSet,
+		kind = "jwt-registry",
+		logger,
+	} = options;
+	// A refusal the grant cannot tell apart from any other, said in the log.
+	// Every field is the registry's or a number, never the assertion's text.
+	const refused = (
+		entry: AssertionIssuerEntry,
+		fields: { readonly reason: "lifetime" | "numeric_date" } & Record<string, unknown>,
+	): null => {
+		logger?.warn({ kind, issuer: entry.issuer, ...fields }, "jwt_bearer_assertion_refused");
+		return null;
+	};
 	const audiences = typeof audience === "string" ? [audience] : [...audience];
 	if (audiences.length === 0 || audiences.some((a) => a.length === 0)) {
 		throw new Error(
@@ -257,7 +304,14 @@ export function createRegistryAssertionVerifier(
 			} catch {
 				return null;
 			}
-			if (typeof unverified.iss !== "string" || unverified.iss.length === 0) return null;
+			// The `iss` is the client's input, handed to a registry a deployment
+			// may back with its own store: one that cannot name an issuer (core's
+			// identifier rule, as for `client_id`) is refused without a lookup,
+			// so it cannot make the registry throw — an outage — either.
+			if (!isWellFormedIdentifier(unverified.iss)) {
+				logger?.warn({ kind, reason: "malformed_issuer" }, "jwt_bearer_assertion_refused");
+				return null;
+			}
 
 			// A registry outage propagates: it is not a refusal.
 			const entry = await registry.findIssuer(unverified.iss);
@@ -293,12 +347,22 @@ export function createRegistryAssertionVerifier(
 				if (context.clientId === undefined) return null;
 			}
 
+			const clockTolerance = entry.clockToleranceSeconds ?? 60;
+			// A store-backed registry's rows are not validated on the way out,
+			// and a tolerance of NaN, Infinity or a string switches jose's exp
+			// check and the lifetime ceiling off. A composition fault, not a
+			// refusal: thrown, so the grant answers 503 and logs it.
+			if (!isValidAssertionClockTolerance(clockTolerance)) {
+				throw new Error(
+					`createRegistryAssertionVerifier: entry ${entry.issuer}: ${describeInvalidAssertionClockTolerance(clockTolerance)}.`,
+				);
+			}
 			let claims: JWTPayload;
 			try {
 				({ payload: claims } = await jwtVerify(assertion, keyFor(entry) as never, {
 					issuer: entry.issuer,
 					audience: idJag ? (issuerIdentifier as string) : audiences,
-					clockTolerance: entry.clockToleranceSeconds ?? 60,
+					clockTolerance,
 					algorithms: [...entry.algorithms],
 					// RFC 7523 §3 item 4: `exp` is mandatory. jose validates it only
 					// when present, so without naming it an assertion that omits it
@@ -310,12 +374,18 @@ export function createRegistryAssertionVerifier(
 					// remembered until `exp`, so an old assertion with a distant `exp`
 					// is a stale grant and a long-lived replay record at once. The
 					// same hour the `private_key_jwt` verifier allows.
-					...(idJag ? { maxTokenAge: ID_JAG_MAX_AGE_SECONDS } : {}),
+					...(idJag ? { maxTokenAge: MAX_ASSERTION_LIFETIME_SECONDS } : {}),
 					...(idJag ? { typ: ID_JAG_TYP } : {}),
 				}));
 			} catch (err) {
 				if (isRefusal(err)) return null;
 				throw err;
+			}
+			// Before anything computes a lifetime from them — the replay
+			// record's expiry below, the grant's token lifetime after.
+			const malformedClaim = malformedNumericDateClaim(claims);
+			if (malformedClaim !== undefined) {
+				return refused(entry, { reason: "numeric_date", claim: malformedClaim });
 			}
 
 			if (idJag) {
@@ -328,6 +398,20 @@ export function createRegistryAssertionVerifier(
 				// kept until `exp`, so the issuer's claim does not decide its size.
 				const jti = claims.jti;
 				if (!isRecordableJti(jti)) return null;
+				// At most an hour past now (`lifetime.mts`), refused before the
+				// jti is recorded: the record lives until `exp`, so an unbounded
+				// `exp` would be a replay record with no bound either. The clock
+				// tolerance is allowed here as in every other time check — an
+				// IdP whose clock runs ahead mints an hour-long ID-JAG a little
+				// past an hour from this server's now.
+				const { exceeded, lifetimeSeconds, maxLifetimeSeconds } = assertionLifetime(
+					claims.exp as number,
+					Math.floor(Date.now() / 1000),
+					clockTolerance,
+				);
+				if (exceeded) {
+					return refused(entry, { reason: "lifetime", lifetimeSeconds, maxLifetimeSeconds });
+				}
 				// Accepted once for its lifetime. `exp` verified above; the floor
 				// keeps a within-tolerance assertion from reading as expired at
 				// issue in the store.
@@ -382,9 +466,10 @@ export function createRegistryAssertionVerifier(
 				issuer: entry.issuer,
 				...(scope === undefined ? {} : { scope }),
 				...(audienceCeiling === undefined ? {} : { audience: audienceCeiling }),
-				// Required and type-checked by jose above for both profiles. As
-				// the claim says — one inside the clock tolerance is already past,
-				// and the grant, not this verifier, refuses it (auth.proxy#90).
+				// Required by jose and a NumericDate (checked above) for both
+				// profiles. As the claim says — one inside the clock tolerance is
+				// already past, and the grant, not this verifier, refuses it
+				// (auth.proxy#90).
 				expiresAt: claims.exp as number,
 			};
 		},

@@ -35,7 +35,13 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/logout.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
-import { expectProjectedWarn, storeReplyError } from "./_helpers/projectedLog.mjs";
+import {
+	expectBestEffortWarn,
+	expectOutageLine,
+	REFUSED_COMMAND_MARKER,
+	serialisedCalls,
+	storeReplyError,
+} from "./_helpers/projectedLog.mjs";
 
 /**
  * A federation that satisfies the contract, with whatever capability the case
@@ -691,6 +697,37 @@ describe("POST /oauth/logout", () => {
 			expect(res.headers.location).toContain("accounts.google.com");
 			expect(mockProvider.endSession).toHaveBeenCalledOnce();
 		});
+
+		it("goes to the upstream without the id_token hint when the token record cannot be read, and says so once", async () => {
+			// Best effort: the logout proceeds, and the upstream end-session call
+			// goes without `id_token_hint`, so the IdP may ask the user to
+			// confirm, or pick the account itself.
+			const endSession = vi.fn().mockResolvedValue({
+				url: new URL("https://accounts.google.com/logout"),
+				method: "GET",
+			});
+			const provider = { ...federationBase("google"), endSession } as unknown as FederationProvider;
+			const logger = createMockLogger();
+			const app = buildApp({
+				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) }),
+				sessionFederationIndex: makeSessionFederationIndex({
+					listFederations: vi.fn(async () => ["google"]),
+				}),
+				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockRejectedValue(storeReplyError()) }),
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+				logger,
+			});
+
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+
+			expect(res.status).toBe(303);
+			expect(endSession).toHaveBeenCalledWith(expect.objectContaining({ idTokenHint: undefined }));
+			expectBestEffortWarn(logger, "logout_federation_token_read_failed", {
+				federation: "google",
+				store: "federation_token",
+				step: "get",
+			});
+		});
 	});
 
 	describe("id_token_hint missing entirely", () => {
@@ -717,6 +754,17 @@ describe("POST /oauth/logout", () => {
 			expect(res.status).toBe(503);
 			expect(res.body.error).toBe("temporarily_unavailable");
 		});
+
+		it("logs it once, at error level, as logout_store_unavailable", async () => {
+			const logger = createMockLogger();
+			const app = buildApp({
+				sessionStore: makeSessionStore({ get: vi.fn().mockRejectedValue(storeReplyError()) }),
+				logger,
+			});
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+			expect(res.status).toBe(503);
+			expectOutageLine(logger, "logout_store_unavailable", { store: "user_session", step: "get" });
+		});
 	});
 
 	describe("reverse-index pre-fetch throws (fail-closed)", () => {
@@ -733,6 +781,130 @@ describe("POST /oauth/logout", () => {
 
 			expect(res.status).toBe(503);
 			expect(res.body.error).toBe("temporarily_unavailable");
+		});
+
+		for (const [store, override] of [
+			[
+				"session_rp_registry",
+				{
+					sessionRPRegistry: makeSessionRPRegistry({
+						listRPs: vi.fn().mockRejectedValue(storeReplyError()),
+					}),
+				},
+			],
+			[
+				"session_federation_index",
+				{
+					sessionFederationIndex: makeSessionFederationIndex({
+						listFederations: vi.fn().mockRejectedValue(storeReplyError()),
+					}),
+				},
+			],
+		] as const) {
+			it(`logs a ${store} that cannot answer once, at error level, naming it`, async () => {
+				const logger = createMockLogger();
+				const app = buildApp({ ...override, logger });
+				const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+				expect(res.status).toBe(503);
+				expectOutageLine(logger, "logout_store_unavailable", { store, step: "list" });
+			});
+		}
+	});
+
+	describe("both reverse-index reads fail", () => {
+		it("logs one error line naming the registry, the federation index's failure carried beside it", async () => {
+			const logger = createMockLogger();
+			const federationIndexDown = Object.assign(new Error("connect ECONNREFUSED 10.0.0.8:6379"), {
+				code: "ECONNREFUSED",
+			});
+			const app = buildApp({
+				sessionRPRegistry: makeSessionRPRegistry({
+					listRPs: vi.fn().mockRejectedValue(storeReplyError()),
+				}),
+				sessionFederationIndex: makeSessionFederationIndex({
+					listFederations: vi.fn().mockRejectedValue(federationIndexDown),
+				}),
+				logger,
+			});
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+			expect(res.status).toBe(503);
+			const line = expectOutageLine(logger, "logout_store_unavailable", {
+				store: "session_rp_registry",
+				step: "list",
+			});
+			// Not dropped: the second store's failure, projected, on the same line.
+			expect(line.alsoUnavailable).toEqual({
+				store: "session_federation_index",
+				err: expect.objectContaining({ name: "Error", code: "ECONNREFUSED" }),
+			});
+			expect((line.alsoUnavailable as { err: unknown }).err).not.toBeInstanceOf(Error);
+		});
+	});
+
+	describe("the logout cascade fails (fail-closed)", () => {
+		for (const [label, override, cascadeStep] of [
+			[
+				"its fanout context cannot be read (step 1)",
+				{
+					sessionFamilyIndex: makeSessionFamilyIndex({
+						listFamilyIds: vi.fn().mockRejectedValue(storeReplyError()),
+					}),
+				},
+				1,
+			],
+			[
+				"the session record cannot be deleted (step 4)",
+				{
+					sessionStore: makeSessionStore({ delete: vi.fn().mockRejectedValue(storeReplyError()) }),
+				},
+				4,
+			],
+		] as const) {
+			it(`logs it once, at error level, when ${label}`, async () => {
+				const logger = createMockLogger();
+				const app = buildApp({ ...override, logger });
+				const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+				expect(res.status).toBe(503);
+				expect(res.body.error_description).toBe("logout cascade failed");
+				expectOutageLine(logger, "logout_store_unavailable", {
+					store: "logout_cascade",
+					cascadeStep,
+					failures: 1,
+				});
+			});
+		}
+
+		it("logs a fanout failure (step 2) once at error level, each failed operation structured at warn", async () => {
+			const logger = createMockLogger();
+			const app = buildApp({
+				refreshFamilyRevocation: makeFamilyRevocation({
+					revokeFamily: vi.fn().mockRejectedValue(storeReplyError()),
+				}),
+				logger,
+			});
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+			expect(res.status).toBe(503);
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				expect.objectContaining({
+					store: "logout_cascade",
+					cascadeStep: 2,
+					failures: 1,
+					err: expect.objectContaining({ name: "ReplyError" }),
+				}),
+				"logout_store_unavailable",
+			);
+			// The per-operation detail: object-first, never a template string.
+			expect(logger.warn.mock.calls.filter(([first]) => typeof first === "string")).toEqual([]);
+			expect(logger.warn).toHaveBeenCalledWith(
+				expect.objectContaining({
+					operation: "revoke_family",
+					familyId: "fam-1",
+					err: expect.objectContaining({ name: "ReplyError" }),
+				}),
+				"logout_cascade_operation_failed",
+			);
+			expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
 		});
 	});
 
@@ -876,6 +1048,12 @@ describe("POST /oauth/logout", () => {
 				expect(res.status).toBe(200);
 				expect(warnSpy).toHaveBeenCalled();
 				expect(consoleWarnSpy).not.toHaveBeenCalled();
+				expectBestEffortWarn(
+					logger,
+					"logout_federation_end_session_failed",
+					{ federation: "google" },
+					"Error",
+				);
 			} finally {
 				consoleWarnSpy.mockRestore();
 			}
@@ -1372,6 +1550,47 @@ describe("POST /oauth/federation/:name/logout", () => {
 			expect(res.body).toEqual({ disconnected: true });
 			expect(res.headers["cache-control"]).toBe("no-store");
 		});
+
+		it("logs the orphan IdP session once, structured, with the error's projection", async () => {
+			const provider = {
+				...federationBase("google"),
+				endSession: vi.fn().mockRejectedValue(new Error("IdP unreachable")),
+			} as unknown as FederationProvider;
+			const logger = createMockLogger();
+			const app = buildFedLogoutApp({
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+				logger,
+			});
+
+			const res = await postFedLogout(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expectBestEffortWarn(
+				logger,
+				"federation_logout_end_session_failed",
+				{ federation: "google" },
+				"Error",
+			);
+		});
+	});
+
+	describe("a refused access token is logged by the verifier's reason", () => {
+		it("logs the reason alone, nothing the token carries", async () => {
+			const logger = createMockLogger();
+			const res = await postFedLogout(
+				buildFedLogoutApp({ logger }),
+				"google",
+				await mintTypMarkerToken(),
+			);
+			expect(res.status).toBe(401);
+			const line = expectBestEffortWarn(
+				logger,
+				"federation_logout_jwt_verify_failed",
+				{ federation: "google" },
+				null,
+			);
+			expect(line).toEqual({ federation: "google", reason: "typ" });
+		});
 	});
 
 	describe("getFederationProviders returns undefined (no federation configured)", () => {
@@ -1469,10 +1688,49 @@ describe("POST /oauth/federation/:name/logout", () => {
 				"google",
 				await mintAccessToken(),
 			);
-			expect(res.status).toBe(401);
-			expect(res.body.error_description).toBe("revocation check unavailable");
-			expectProjectedWarn(logger, /isFamilyRevoked failed/);
+			expect(res.status).toBe(503);
+			expect(res.body.error_description).toBe("refresh token store unavailable");
+			// An outage line like every other: error level, object-first, the
+			// store error's projection and never the error.
+			expect(logger.error).toHaveBeenCalledWith(
+				{
+					federation: "google",
+					store: "refresh_token_family",
+					err: expect.objectContaining({ name: "ReplyError" }),
+				},
+				"federation_logout_store_unavailable",
+			);
+			const line = logger.error.mock.calls.find(
+				([, event]) => event === "federation_logout_store_unavailable",
+			);
+			expect(line?.[0].err).not.toBeInstanceOf(Error);
+			expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
 		});
+
+		for (const [label, raw] of [
+			["a control character", "goo\u0007gle"],
+			["more than 200 characters", "g".repeat(300)],
+		] as const) {
+			it(`records a federation name carrying ${label} sanitised and capped`, async () => {
+				const logger = createMockLogger();
+				const res = await postFedLogout(
+					buildFedLogoutApp({
+						sessionStore: makeSessionStore({ get: vi.fn().mockRejectedValue(storeReplyError()) }),
+						logger,
+					}),
+					encodeURIComponent(raw),
+					await mintAccessToken(),
+				);
+				expect(res.status).toBe(503);
+				const line = expectOutageLine(logger, "federation_logout_store_unavailable", {
+					store: "user_session",
+				});
+				const logged = String(line.federation);
+				expect(logged.length).toBeLessThanOrEqual(200);
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+				expect(logged).not.toMatch(/[\u0000-\u001f\u007f]/);
+			});
+		}
 
 		it("the session read", async () => {
 			const logger = createMockLogger();
@@ -1485,7 +1743,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(503);
-			expectProjectedWarn(logger, /userSessionStore\.get failed/);
+			expectOutageLine(logger, "federation_logout_store_unavailable", {
+				federation: "google",
+				store: "user_session",
+				step: "get",
+			});
 		});
 
 		it("the federation index read", async () => {
@@ -1501,7 +1763,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(503);
-			expectProjectedWarn(logger, /listFederations failed/);
+			expectOutageLine(logger, "federation_logout_store_unavailable", {
+				federation: "google",
+				store: "session_federation_index",
+				step: "list",
+			});
 		});
 
 		it("the token store's read", async () => {
@@ -1515,7 +1781,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(503);
-			expectProjectedWarn(logger, /federationTokenStore\.get failed/);
+			expectOutageLine(logger, "federation_logout_store_unavailable", {
+				federation: "google",
+				store: "federation_token",
+				step: "get",
+			});
 		});
 
 		it("the token store's delete", async () => {
@@ -1531,7 +1801,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(503);
-			expectProjectedWarn(logger, /federationTokenStore\.delete failed/);
+			expectOutageLine(logger, "federation_logout_store_unavailable", {
+				federation: "google",
+				store: "federation_token",
+				step: "delete",
+			});
 		});
 
 		it("the federation link's removal", async () => {
@@ -1548,7 +1822,11 @@ describe("POST /oauth/federation/:name/logout", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(503);
-			expectProjectedWarn(logger, /removeFederation failed/);
+			expectOutageLine(logger, "federation_logout_store_unavailable", {
+				federation: "google",
+				store: "session_federation_index",
+				step: "remove",
+			});
 		});
 	});
 
@@ -1709,6 +1987,38 @@ describe("audit events", () => {
 				}),
 			);
 		});
+
+		for (const [label, raw] of [
+			["a control character", "goo\u0007gle"],
+			["more than 200 characters", "g".repeat(300)],
+		] as const) {
+			it(`audits a federation name carrying ${label} sanitised and capped`, async () => {
+				// The linked-federation check compares the path's name with the
+				// session's; what the audit event records is the log lines' form of it.
+				const auditSink: AuditSink = {
+					kind: "mock",
+					record: vi.fn().mockResolvedValue(undefined),
+				};
+				const app = buildApp({
+					auditSink,
+					sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) }),
+					sessionFederationIndex: makeSessionFederationIndex({
+						listFederations: vi.fn(async () => [raw]),
+					}),
+					getFederationProviders: () => new Map<string, FederationProvider>(),
+				});
+				const res = await postFedLogout(app, encodeURIComponent(raw), await mintAccessToken());
+				expect(res.status).toBe(200);
+				const event = vi
+					.mocked(auditSink.record)
+					.mock.calls.map(([recorded]) => recorded)
+					.find((recorded) => recorded.type === "federation.logout.success");
+				const audited = String(event?.details?.federation);
+				expect(audited.length).toBeLessThanOrEqual(200);
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be audited.
+				expect(audited).not.toMatch(/[\u0000-\u001f\u007f]/);
+			});
+		}
 	});
 
 	describe("logout.success", () => {
@@ -1968,3 +2278,17 @@ describe("POST /oauth/logout — browser session (R1a)", () => {
 		expect(browserSession.destroyed).toBe(false);
 	});
 });
+
+/**
+ * A token whose `typ` header is text the verifier reads before the signature
+ * and quotes in its refusal's message. A route's own line about the refusal
+ * carries the verifier's reason and nothing of the token.
+ */
+const TYP_MARKER = "typ-must-never-reach-a-route-line";
+const mintTypMarkerToken = (): Promise<string> =>
+	new SignJWT({ sub: "u-1", sid: "sid-1", azp: "client-1", family_id: "fam-1" })
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: TYP_MARKER })
+		.setExpirationTime("1h")
+		.setIssuedAt()
+		.setIssuer("https://auth.example.com")
+		.sign(secretKey);

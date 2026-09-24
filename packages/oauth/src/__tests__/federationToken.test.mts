@@ -34,7 +34,13 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/federationToken.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
-import { expectProjectedWarn, storeReplyError } from "./_helpers/projectedLog.mjs";
+import {
+	expectBestEffortWarn,
+	expectOutageLine,
+	REFUSED_COMMAND_MARKER,
+	serialisedCalls,
+	storeReplyError,
+} from "./_helpers/projectedLog.mjs";
 
 /**
  * A federation that satisfies the contract, with whatever capability the case
@@ -413,7 +419,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	describe("isFamilyRevoked throws (fail-closed)", () => {
-		it("returns 401 when revocation check throws", async () => {
+		it("returns 503 temporarily_unavailable — an outage, not an invalid token", async () => {
 			const refreshFamilyRevocation = makeFamilyRevocation({
 				isFamilyRevoked: vi.fn().mockRejectedValue(new Error("redis down")),
 			});
@@ -422,9 +428,12 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			const res = await postFedToken(app, "google", token);
 
-			expect(res.status).toBe(401);
-			expect(res.body.error).toBe("invalid_token");
-			expect(res.body.error_description).toMatch(/revocation/);
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "refresh token store unavailable",
+			});
+			expect(res.headers["www-authenticate"]).toBeUndefined();
 		});
 	});
 
@@ -491,6 +500,44 @@ describe("POST /oauth/federation/:name/token", () => {
 				}),
 			);
 		});
+
+		for (const [label, raw] of [
+			["a control character", "goo\u0007gle"],
+			["more than 200 characters", "g".repeat(300)],
+		] as const) {
+			it(`audits a federation name carrying ${label} sanitised and capped`, async () => {
+				// `federation.token.forbidden` fires before the linked-federation
+				// check, so the name is whatever the caller put in the path. An
+				// audit event is kept longer than a log line and read by more
+				// systems: it carries the name as the log lines do.
+				const auditSink: AuditSink = {
+					kind: "mock",
+					record: vi.fn().mockResolvedValue(undefined),
+				};
+				const clientRepo = makeClientRepo({
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client-1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+						allowedAzpForFederationToken: false,
+					}),
+				});
+				const res = await postFedToken(
+					buildApp({ clientRepo, auditSink }),
+					encodeURIComponent(raw),
+					await mintAccessToken(),
+				);
+				expect(res.status).toBe(403);
+				const event = vi
+					.mocked(auditSink.record)
+					.mock.calls.map(([recorded]) => recorded)
+					.find((recorded) => recorded.type === "federation.token.forbidden");
+				const audited = String(event?.details?.federation);
+				expect(audited.length).toBeLessThanOrEqual(200);
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be audited.
+				expect(audited).not.toMatch(/[\u0000-\u001f\u007f]/);
+			});
+		}
 
 		it("returns 403 when client is null (not found)", async () => {
 			const clientRepo = makeClientRepo({
@@ -799,7 +846,8 @@ describe("POST /oauth/federation/:name/token", () => {
 			});
 			const res = await postFedToken(app, "google", await mintAccessToken());
 			expect(res.status).toBe(503);
-			const failure = lines.find((line) => line.includes("federationTokenStore.update failed"));
+			const failure = lines.find((line) => line.includes('"federation_token_store_unavailable"'));
+			expect(failure).toContain('"level":"error"');
 			expect(failure).toContain("ReplyError");
 			for (const line of lines) {
 				expect(line).not.toContain("at-must-never-reach-a-log");
@@ -826,9 +874,8 @@ describe("POST /oauth/federation/:name/token", () => {
 				logger,
 			});
 			await postFedToken(app, "google", await mintAccessToken());
-			const failure = lines.find((line) =>
-				line.includes("federationTokenStore.update failed while keeping a rotated refresh token"),
-			);
+			const failure = lines.find((line) => line.includes('"federation_token_keep_rotated_failed"'));
+			expect(failure).toContain('"step":"update"');
 			expect(failure).toContain("ReplyError");
 			for (const line of lines) {
 				expect(line).not.toContain("at-must-never-reach-a-log");
@@ -911,7 +958,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(500);
 			expect(res.body.error).toBe("refresh_failed");
-			const failure = lines.find((line) => line.includes("refreshToken failed"));
+			const failure = lines.find((line) => line.includes('"federation_token_refresh_failed"'));
 			expect(failure).toBeDefined();
 			// What an operator needs is still there: the library's code and reason.
 			expect(failure).toContain("OAUTH_INVALID_RESPONSE");
@@ -940,10 +987,12 @@ describe("POST /oauth/federation/:name/token", () => {
 				...federationBase("google"),
 				refreshToken: vi.fn(),
 			};
+			const logger = createMockLogger();
 			const app = buildApp({
 				fedTokenStore: lockingStore,
 				getFederationProviders: () =>
 					new Map<string, FederationProvider>([["google", refreshProvider]]),
+				logger,
 			});
 			const token = await mintAccessToken();
 
@@ -951,6 +1000,18 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(503);
 			expect(res.body.error).toBe("lock_timeout");
+			// Contention, not an outage: warn, structured, once — so contention
+			// that persists is visible. Who waited, never a token or a secret.
+			expect(logger.error).not.toHaveBeenCalled();
+			const lines = logger.warn.mock.calls.filter(
+				([, event]) => event === "federation_token_lock_timeout",
+			);
+			expect(lines).toEqual([
+				[
+					{ federation: "google", clientId: "client-1", sid: "sid-1" },
+					"federation_token_lock_timeout",
+				],
+			]);
 		});
 	});
 
@@ -2262,6 +2323,60 @@ describe("POST /oauth/federation/:name/token", () => {
 					["google", { ...federationBase("google"), refreshToken } as FederationProvider],
 				]);
 
+		it("the family revocation check — an outage line, at error level", async () => {
+			const logger = createMockLogger();
+			const refreshFamilyRevocation = makeFamilyRevocation({
+				isFamilyRevoked: vi.fn().mockRejectedValue(storeReplyError()),
+			});
+			const res = await postFedToken(
+				buildApp({ refreshFamilyRevocation, logger }),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expect(res.body.error_description).toBe("refresh token store unavailable");
+			expect(logger.error).toHaveBeenCalledWith(
+				{
+					federation: "google",
+					store: "refresh_token_family",
+					err: expect.objectContaining({ name: "ReplyError" }),
+				},
+				"federation_token_store_unavailable",
+			);
+			const line = logger.error.mock.calls.find(
+				([, event]) => event === "federation_token_store_unavailable",
+			);
+			expect(line?.[0].err).not.toBeInstanceOf(Error);
+			expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
+		});
+
+		for (const [label, raw] of [
+			["a control character", "goo\u0007gle"],
+			["more than 200 characters", "g".repeat(300)],
+		] as const) {
+			it(`records a federation name carrying ${label} sanitised and capped`, async () => {
+				// The path parameter is the caller's text, logged before any
+				// membership check: any holder of a valid access token chooses it.
+				const logger = createMockLogger();
+				const refreshFamilyRevocation = makeFamilyRevocation({
+					isFamilyRevoked: vi.fn().mockRejectedValue(storeReplyError()),
+				});
+				const res = await postFedToken(
+					buildApp({ refreshFamilyRevocation, logger }),
+					encodeURIComponent(raw),
+					await mintAccessToken(),
+				);
+				expect(res.status).toBe(503);
+				const line = expectOutageLine(logger, "federation_token_store_unavailable", {
+					store: "refresh_token_family",
+				});
+				const logged = String(line.federation);
+				expect(logged.length).toBeLessThanOrEqual(200);
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+				expect(logged).not.toMatch(/[\u0000-\u001f\u007f]/);
+			});
+		}
+
 		it("the client lookup", async () => {
 			const logger = createMockLogger();
 			const clientRepo = makeClientRepo({ findById: vi.fn().mockRejectedValue(storeReplyError()) });
@@ -2272,7 +2387,47 @@ describe("POST /oauth/federation/:name/token", () => {
 			);
 			expect(res.status).toBe(503);
 			expect(res.body.error_description).toBe("client repository unavailable");
-			expectProjectedWarn(logger, /clientRepository\.findById failed/);
+			expectOutageLine(logger, "client_repository_unavailable", {
+				site: "federation_token",
+				step: "find",
+				clientId: "client-1",
+			});
+		});
+
+		it("the session store", async () => {
+			const logger = createMockLogger();
+			const sessionStore = makeSessionStore({ get: vi.fn().mockRejectedValue(storeReplyError()) });
+			const res = await postFedToken(
+				buildApp({ sessionStore, logger }),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expect(res.body.error_description).toBe("session store unavailable");
+			expectOutageLine(logger, "federation_token_store_unavailable", {
+				federation: "google",
+				store: "user_session",
+				step: "get",
+			});
+		});
+
+		it("the session's federation index", async () => {
+			const logger = createMockLogger();
+			const sessionFederationIndex = makeSessionFederationIndex({
+				listFederations: vi.fn().mockRejectedValue(storeReplyError()),
+			});
+			const res = await postFedToken(
+				buildApp({ sessionFederationIndex, logger }),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expect(res.body.error_description).toBe("session store unavailable");
+			expectOutageLine(logger, "federation_token_store_unavailable", {
+				federation: "google",
+				store: "session_federation_index",
+				step: "list",
+			});
 		});
 
 		it("the token store's read", async () => {
@@ -2286,7 +2441,11 @@ describe("POST /oauth/federation/:name/token", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(503);
-			expectProjectedWarn(logger, /federationTokenStore\.get failed/);
+			expectOutageLine(logger, "federation_token_store_unavailable", {
+				federation: "google",
+				store: "federation_token",
+				step: "get",
+			});
 		});
 
 		it("the dangling link's self-heal", async () => {
@@ -2301,7 +2460,11 @@ describe("POST /oauth/federation/:name/token", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(404);
-			expectProjectedWarn(logger, /removeFederation self-heal failed/);
+			expectBestEffortWarn(logger, "federation_token_index_self_heal_failed", {
+				federation: "google",
+				store: "session_federation_index",
+				step: "remove",
+			});
 		});
 
 		it("the refresh lock", async () => {
@@ -2320,7 +2483,11 @@ describe("POST /oauth/federation/:name/token", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(503);
-			expectProjectedWarn(logger, /acquireLock failed/);
+			expectOutageLine(logger, "federation_token_store_unavailable", {
+				federation: "google",
+				store: "federation_token",
+				step: "acquire_lock",
+			});
 		});
 
 		it("the read after the lock", async () => {
@@ -2343,7 +2510,87 @@ describe("POST /oauth/federation/:name/token", () => {
 			);
 			expect(res.status).toBe(503);
 			expect(release).toHaveBeenCalled();
-			expectProjectedWarn(logger, /post-lock re-read\) failed/);
+			expectOutageLine(logger, "federation_token_store_unavailable", {
+				federation: "google",
+				store: "federation_token",
+				step: "get_after_lock",
+			});
+		});
+
+		it("the write of the refreshed token", async () => {
+			const logger = createMockLogger();
+			const fedTokenStore = makeFedTokenStore({
+				get: vi.fn().mockResolvedValue(expired()),
+				update: vi.fn().mockRejectedValue(storeReplyError()),
+			});
+			const res = await postFedToken(
+				buildApp({
+					fedTokenStore,
+					logger,
+					getFederationProviders: refreshingGoogle(
+						vi.fn().mockResolvedValue({
+							accessToken: "new-at",
+							expiresAt: new Date(Date.now() + 3_600_000),
+						}),
+					),
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expect(res.body.error_description).toBe("federation token store unavailable");
+			expectOutageLine(logger, "federation_token_store_unavailable", {
+				federation: "google",
+				store: "federation_token",
+				step: "update",
+			});
+		});
+
+		it("an upstream provider that cannot be reached", async () => {
+			const logger = createMockLogger();
+			const unreachable = Object.assign(new Error("connect ECONNREFUSED 10.0.0.9:443"), {
+				name: "ReplyError",
+				code: "ECONNREFUSED",
+			});
+			const res = await postFedToken(
+				buildApp({
+					fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expired()) }),
+					logger,
+					getFederationProviders: refreshingGoogle(vi.fn().mockRejectedValue(unreachable)),
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expect(res.body.error_description).toBe(
+				"upstream federation provider temporarily unavailable",
+			);
+			expectOutageLine(logger, "federation_token_upstream_unavailable", {
+				federation: "google",
+				reason: "network",
+			});
+		});
+
+		it("a provider that cannot refresh, which the deployment has to fix", async () => {
+			const logger = createMockLogger();
+			const res = await postFedToken(
+				buildApp({
+					fedTokenStore: makeFedTokenStore({ get: vi.fn().mockResolvedValue(expired()) }),
+					logger,
+					getFederationProviders: () =>
+						new Map<string, FederationProvider>([["google", federationBase("google")]]),
+				}),
+				"google",
+				await mintAccessToken(),
+			);
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("refresh_not_supported");
+			expect(logger.warn.mock.calls.filter(([first]) => typeof first === "string")).toEqual([]);
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				{ federation: "google" },
+				"federation_token_refresh_unsupported",
+			);
 		});
 
 		it("both cleanups after invalid_grant", async () => {
@@ -2368,8 +2615,16 @@ describe("POST /oauth/federation/:name/token", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(410);
-			expectProjectedWarn(logger, /federationTokenStore\.delete cleanup failed/);
-			expectProjectedWarn(logger, /removeFederation cleanup failed/);
+			expectBestEffortWarn(logger, "federation_token_cleanup_failed", {
+				federation: "google",
+				store: "federation_token",
+				step: "delete",
+			});
+			expectBestEffortWarn(logger, "federation_token_cleanup_failed", {
+				federation: "google",
+				store: "session_federation_index",
+				step: "remove",
+			});
 		});
 
 		it("the lock's release", async () => {
@@ -2394,7 +2649,11 @@ describe("POST /oauth/federation/:name/token", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(200);
-			expectProjectedWarn(logger, /lock release failed/);
+			expectBestEffortWarn(logger, "federation_token_lock_release_failed", {
+				federation: "google",
+				store: "federation_token",
+				step: "release_lock",
+			});
 		});
 	});
 
@@ -3142,5 +3401,117 @@ describe("POST /oauth/federation/:name/token", () => {
 			// Only the credential was salvaged — not the token that cannot be used.
 			expect(written(fedTokenStore).accessToken).toBe(baseFedTokens.accessToken);
 		});
+	});
+});
+
+describe("POST /oauth/federation/:name/token — keeping a rotated refresh token is logged, structured", () => {
+	// A refresh that answers no usable access token but rotates the refresh
+	// token: the route answers 500 refresh_failed and, best effort, re-reads
+	// the record and keeps the rotated token. Whatever happens there is one
+	// object-first warn: the route answers the refusal it would anyway, not a
+	// 503, so none of it is an error-level outage line.
+	const expiredTokens = (): FederationTokens => ({
+		...baseFedTokens,
+		expiresAt: new Date(Date.now() - 1000),
+		refreshToken: "original-rt",
+	});
+	const rotatingProvider = () =>
+		({
+			...federationBase("google"),
+			refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" }),
+		}) as unknown as FederationProvider;
+	const run = async (store: Partial<FederationTokenStore>) => {
+		const logger = createMockLogger();
+		const fedTokenStore = makeFedTokenStore(store);
+		const app = buildApp({
+			fedTokenStore,
+			getFederationProviders: () =>
+				new Map<string, FederationProvider>([["google", rotatingProvider()]]),
+			logger,
+		});
+		const res = await postFedToken(app, "google", await mintAccessToken());
+		expect(res.status).toBe(500);
+		expect(res.body.error).toBe("refresh_failed");
+		return { logger, fedTokenStore };
+	};
+
+	it("logs a failed re-read once, with the store, the step and the projection", async () => {
+		const { logger, fedTokenStore } = await run({
+			get: vi.fn().mockResolvedValueOnce(expiredTokens()).mockRejectedValue(storeReplyError()),
+		});
+		expect(fedTokenStore.update).not.toHaveBeenCalled();
+		expectBestEffortWarn(logger, "federation_token_keep_rotated_failed", {
+			federation: "google",
+			store: "federation_token",
+			step: "get",
+		});
+	});
+
+	it("logs a failed write once, with the store, the step and the projection", async () => {
+		const { logger } = await run({
+			get: vi.fn().mockResolvedValue(expiredTokens()),
+			update: vi.fn().mockRejectedValue(storeReplyError()),
+		});
+		expectBestEffortWarn(logger, "federation_token_keep_rotated_failed", {
+			federation: "google",
+			store: "federation_token",
+			step: "update",
+		});
+	});
+
+	it("says why it kept nothing when a concurrent logout removed the record", async () => {
+		const { logger } = await run({
+			get: vi.fn().mockResolvedValueOnce(expiredTokens()).mockResolvedValue(null),
+		});
+		expectBestEffortWarn(
+			logger,
+			"federation_token_keep_rotated_skipped",
+			{ federation: "google", store: "federation_token", reason: "record_gone" },
+			null,
+		);
+	});
+
+	it("says why it kept nothing when a concurrent refresh rotated the connection", async () => {
+		const { logger } = await run({
+			get: vi
+				.fn()
+				.mockResolvedValueOnce(expiredTokens())
+				.mockResolvedValue({ ...expiredTokens(), refreshToken: "concurrent-rt" }),
+		});
+		expectBestEffortWarn(
+			logger,
+			"federation_token_keep_rotated_skipped",
+			{ federation: "google", store: "federation_token", reason: "rotated_concurrently" },
+			null,
+		);
+	});
+});
+
+/**
+ * A token whose `typ` header is text the verifier reads before the signature
+ * and quotes in its refusal's message. A route's own line about the refusal
+ * carries the verifier's reason and nothing of the token.
+ */
+const TYP_MARKER = "typ-must-never-reach-a-route-line";
+const mintTypMarkerToken = (): Promise<string> =>
+	new SignJWT({ sub: "u-1", sid: "sid-1", azp: "client-1", family_id: "fam-1" })
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: TYP_MARKER })
+		.setExpirationTime("1h")
+		.setIssuedAt()
+		.setIssuer("https://auth.example.com")
+		.sign(secretKey);
+
+describe("POST /oauth/federation/:name/token — a refused access token is logged by the verifier's reason", () => {
+	it("logs the reason alone, nothing the token carries", async () => {
+		const logger = createMockLogger();
+		const res = await postFedToken(buildApp({ logger }), "google", await mintTypMarkerToken());
+		expect(res.status).toBe(401);
+		const line = expectBestEffortWarn(
+			logger,
+			"federation_token_jwt_verify_failed",
+			{ federation: "google" },
+			null,
+		);
+		expect(line).toEqual({ federation: "google", reason: "typ" });
 	});
 });

@@ -2730,3 +2730,227 @@ describe("F6 PR2 patch coverage — SF-3 corrupt code records + PKCE branches", 
 		expect([...admissible].sort()).toEqual(["S256", "plain"]);
 	});
 });
+
+// ---------------------------------------------------------------------------
+// Every store outage the grant answers 503 is logged once, at error level.
+// ---------------------------------------------------------------------------
+
+describe("createAuthorizationGrant — a store that cannot answer is logged, not only answered 503", () => {
+	const liveSession = (sid: string) => ({
+		sid,
+		sub: "u1",
+		authTime: new Date(),
+		createdAt: new Date(),
+		expiresAt: new Date(Date.now() + 3600_000),
+		claims: {},
+	});
+	const outage = (): Error =>
+		Object.assign(new Error("READONLY You can't write against a read only replica."), {
+			name: "ReplyError",
+			command: { name: "set", args: ["key", "refused-command-marker"] },
+		});
+	const exchange = (handler: ReturnType<typeof createAuthorizationGrant>) =>
+		handler.handle({
+			body: {
+				code: "abc",
+				client_id: "client1",
+				redirect_uri: RP_URI,
+				code_verifier: CODE_VERIFIER,
+			},
+			session: {
+				code: "abc",
+				code_client_id: "client1",
+				granted_scopes: ["read"],
+				user: { id: "u1" },
+			},
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: DEFAULT_AUTH_CLIENT,
+		});
+	const expectOutageLine = (
+		logger: ReturnType<typeof createMockLogger>,
+		event: string,
+		fields: Record<string, unknown>,
+	) => {
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [line, name] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(name).toBe(event);
+		expect(line).toMatchObject(fields);
+		expect(line.err).toMatchObject({ name: "ReplyError" });
+		expect(line.err).not.toBeInstanceOf(Error);
+		expect(JSON.stringify(logger.error.mock.calls)).not.toContain("refused-command-marker");
+	};
+	const sessionStore = (get: () => Promise<unknown>) => ({
+		kind: "spy",
+		async create() {},
+		get,
+		async delete() {},
+	});
+
+	it("the code store's consume: 503, not the terminal handler's 500", async () => {
+		const logger = createMockLogger();
+		const handler = createAuthorizationGrant({
+			...makeDeps(vi.fn().mockRejectedValue(outage())),
+			logger,
+		} as Parameters<typeof createAuthorizationGrant>[0]);
+		const { result } = await exchange(handler);
+		expect(result).toMatchObject({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "authorization code store unavailable",
+		});
+		expectOutageLine(logger, "authorization_grant_store_unavailable", {
+			store: "authorization_code",
+			step: "consume",
+			clientId: "client1",
+		});
+	});
+
+	it("the session read before any token is signed", async () => {
+		const logger = createMockLogger();
+		const handler = createAuthorizationGrant({
+			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
+			userSessionStore: sessionStore(async () => {
+				throw outage();
+			}),
+			logger,
+		} as Parameters<typeof createAuthorizationGrant>[0]);
+		const { result } = await exchange(handler);
+		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+		expectOutageLine(logger, "authorization_grant_store_unavailable", {
+			store: "user_session",
+			step: "get",
+			clientId: "client1",
+		});
+	});
+
+	it("records the client id capped at 200 characters, as every client-id field is", async () => {
+		const logger = createMockLogger();
+		const longId = "c".repeat(256);
+		const handler = createAuthorizationGrant({
+			...makeDeps(
+				vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode, client_id: longId }),
+			),
+			userSessionStore: sessionStore(async () => {
+				throw outage();
+			}),
+			logger,
+		} as Parameters<typeof createAuthorizationGrant>[0]);
+		const { result } = await handler.handle({
+			body: { code: "abc", client_id: longId, redirect_uri: RP_URI, code_verifier: CODE_VERIFIER },
+			session: {
+				code: "abc",
+				code_client_id: longId,
+				granted_scopes: ["read"],
+				user: { id: "u1" },
+			},
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: { ...DEFAULT_AUTH_CLIENT, clientId: longId },
+		});
+		expect(result).toMatchObject({ status: 503 });
+		const [line] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(String(line.clientId).length).toBeLessThanOrEqual(200);
+	});
+
+	it("the refresh-token family registration", async () => {
+		const logger = createMockLogger();
+		const handler = createAuthorizationGrant({
+			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
+			refreshTokenFamilyRotation: {
+				register: async () => {
+					throw outage();
+				},
+				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
+			},
+			logger,
+		} as Parameters<typeof createAuthorizationGrant>[0]);
+		const { result } = await exchange(handler);
+		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+		expectOutageLine(logger, "authorization_grant_store_unavailable", {
+			store: "refresh_token_family",
+			step: "register",
+			clientId: "client1",
+		});
+	});
+
+	it("the session re-read before the family is linked", async () => {
+		const logger = createMockLogger();
+		let reads = 0;
+		const handler = createAuthorizationGrant({
+			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
+			userSessionStore: sessionStore(async () => {
+				reads++;
+				if (reads === 1) return liveSession("sid-1");
+				throw outage();
+			}),
+			sessionFamilyIndex: makeSessionFamilyIndex(),
+			sessionRPRegistry: makeSessionRPRegistry(),
+			logger,
+		} as Parameters<typeof createAuthorizationGrant>[0]);
+		const { result } = await exchange(handler);
+		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+		expectOutageLine(logger, "authorization_grant_store_unavailable", {
+			store: "user_session",
+			step: "revalidate",
+		});
+	});
+
+	it("the client lookup for logout metadata, as client_repository_unavailable", async () => {
+		const logger = createMockLogger();
+		const handler = createAuthorizationGrant({
+			...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode }), {
+				findById: vi.fn().mockRejectedValue(outage()),
+				authenticate: vi.fn(),
+			}),
+			userSessionStore: sessionStore(async () => liveSession("sid-1")),
+			sessionFamilyIndex: makeSessionFamilyIndex(),
+			sessionRPRegistry: makeSessionRPRegistry(),
+			logger,
+		} as Parameters<typeof createAuthorizationGrant>[0]);
+		const { result } = await exchange(handler);
+		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+		expectOutageLine(logger, "client_repository_unavailable", {
+			site: "authorization_code",
+			step: "find",
+			clientId: "client1",
+		});
+	});
+
+	for (const [store, step, stores] of [
+		[
+			"session_family_index",
+			"add",
+			{
+				sessionFamilyIndex: makeSessionFamilyIndex({
+					addFamilyId: vi.fn().mockRejectedValue(outage()),
+				}),
+				sessionRPRegistry: makeSessionRPRegistry(),
+			},
+		],
+		[
+			"session_rp_registry",
+			"register",
+			{
+				sessionFamilyIndex: makeSessionFamilyIndex(),
+				sessionRPRegistry: makeSessionRPRegistry({
+					registerRP: vi.fn().mockRejectedValue(outage()),
+				}),
+			},
+		],
+	] as const) {
+		it(`linking the family to the session: ${store}`, async () => {
+			const logger = createMockLogger();
+			const handler = createAuthorizationGrant({
+				...makeDeps(vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode })),
+				userSessionStore: sessionStore(async () => liveSession("sid-1")),
+				...stores,
+				logger,
+			} as Parameters<typeof createAuthorizationGrant>[0]);
+			const { result } = await exchange(handler);
+			expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+			expectOutageLine(logger, "authorization_grant_store_unavailable", { store, step });
+		});
+	}
+});

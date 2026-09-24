@@ -440,6 +440,7 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 		// creates, not of a stub written to agree with it.
 		const rotation = createRefreshTokenFamilyRotation({
 			refreshTokenFamilyStore: createMemoryRefreshTokenFamilyStore(),
+			accessTokenHorizonMs: 3_600_000,
 		});
 
 		const tokens = await issue(

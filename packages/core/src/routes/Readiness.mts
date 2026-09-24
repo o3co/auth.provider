@@ -93,7 +93,17 @@ export function createRouter(
 		if (!report.ready) {
 			// The log keeps the full detail the body drops — the operator reading
 			// it is already inside the deployment.
-			opts.logger?.warn({ checks: report.checks.filter((c) => !c.ok) }, "readiness_probe_failed");
+			// Each failed check's projection, never its message as text. At warn:
+			// a 503 here is the signal to the orchestrator, not a refusal of a
+			// client.
+			opts.logger?.warn(
+				{
+					checks: report.checks
+						.filter((c) => !c.ok)
+						.map(({ name, durationMs, err }) => ({ name, durationMs, err })),
+				},
+				"readiness_probe_failed",
+			);
 		}
 
 		res.status(report.ready ? 200 : 503).json({

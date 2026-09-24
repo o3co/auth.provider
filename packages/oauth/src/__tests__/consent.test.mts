@@ -49,6 +49,7 @@ import { PENDING_CONSENT_TTL_MS } from "#/routes/consent.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { expectOutageLine } from "./_helpers/projectedLog.mjs";
 
 const CLIENT_ID = "third-party-chat";
 const REDIRECT_URI = "https://chat.example/cb";
@@ -117,6 +118,7 @@ const makeApp = async (opts: {
 	// cast: a test that reads it off a store without one fails, not passes.
 	const pending: PendingConsentStore & { readonly size?: number } =
 		opts.pendingConsentStore ?? createMemoryPendingConsentStore();
+	const logger = createMockLogger();
 	const { router } = await createOAuthRouter(express, {
 		registry: new GrantRegistry(),
 		config: makeConfig(opts.consentUrl),
@@ -130,7 +132,7 @@ const makeApp = async (opts: {
 			: { pendingConsentStore: pending }),
 		...(opts.auditSink ? { auditSink: opts.auditSink } : {}),
 		...(opts.userSessionStore ? { userSessionStore: opts.userSessionStore } : {}),
-		logger: createMockLogger(),
+		logger,
 	});
 	// One session object for the whole test, so what `/authorize` parks is
 	// what `/oauth/consent` finds — the way express-session persists it.
@@ -145,7 +147,7 @@ const makeApp = async (opts: {
 		next();
 	});
 	app.use("/oauth", router);
-	return { app, session, createCode, pending };
+	return { app, session, createCode, pending, logger };
 };
 
 /** The registered third-party client, for a test that supplies its own registry. */
@@ -688,6 +690,13 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 		const res = await request(harness.app).get("/oauth/consent").query({ challenge });
 		expect(res.status).toBe(503);
 		expect(res.body.error).toBe("temporarily_unavailable");
+		// The same line as every other client lookup, through core's helper.
+		expectOutageLine(
+			harness.logger,
+			"client_repository_unavailable",
+			{ site: "consent", step: "find", clientId: CLIENT_ID },
+			"Error",
+		);
 	});
 
 	it("drops the parked request when the client is no longer registered", async () => {
@@ -720,9 +729,12 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 		expect(res.body.error_description).toMatch(/names no subject/);
 	});
 
-	it("fails closed when the session store cannot answer", async () => {
-		// `/authorize` reads the same store, so it has to answer while the
-		// request is being parked and fail only afterwards.
+	/**
+	 * A parked request whose session store then goes down: `/authorize` reads
+	 * the same store, so it has to answer while the request is being parked
+	 * and fail only afterwards.
+	 */
+	const parkedThenDown = async () => {
 		let down = false;
 		const flaky = {
 			kind: "memory",
@@ -740,14 +752,59 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 			}),
 			delete: vi.fn(async () => {}),
 		} as unknown as UserSessionStore;
-		const { app, challenge } = await parkedWith({
+		const harness = await parkedWith({
 			session: { isAuthenticated: true, sid: "sid-1", user: { id: "user-1" } } as Session,
 			userSessionStore: flaky,
 		});
 		down = true;
+		return harness;
+	};
+
+	/** The outage's one line: error level, the store, the sid and the projection — never a warn. */
+	const expectLivenessOutageLogged = (logger: ReturnType<typeof createMockLogger>) => {
+		const lines = logger.error.mock.calls.filter(
+			([, event]) => event === "consent_session_liveness_unavailable",
+		);
+		expect(lines).toEqual([
+			[
+				{ store: "user_session", sid: "sid-1", err: expect.objectContaining({ name: "Error" }) },
+				"consent_session_liveness_unavailable",
+			],
+		]);
+		expect(lines[0]?.[0].err).not.toBeInstanceOf(Error);
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
+			"consent_session_liveness_unavailable",
+		);
+	};
+
+	it("answers the page 503 when the session store cannot answer, not login_required", async () => {
+		// An outage says nothing about whether the user is signed in: the page
+		// must not send them to log in again for the server's fault.
+		const { app, challenge, logger } = await parkedThenDown();
 		const res = await request(app).get("/oauth/consent").query({ challenge });
-		expect(res.status).toBe(401);
-		expect(res.body.error).toBe("login_required");
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expectLivenessOutageLogged(logger);
+	});
+
+	it("answers the answer 503 too, records nothing, and keeps the request parked for a retry", async () => {
+		const { app, challenge, consentStore, pending, logger } = await parkedThenDown();
+		const res = await request(app)
+			.post("/oauth/consent")
+			.type("form")
+			.send({ challenge, decision: "accept" });
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(await consentStore.find("user-1", CLIENT_ID)).toBeNull();
+		expect(await pending.get(challenge)).not.toBeNull();
+		expectLivenessOutageLogged(logger);
 	});
 
 	it("carries a repeated resource parameter into the parked URL", async () => {

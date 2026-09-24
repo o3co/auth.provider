@@ -13,7 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { isRecordableJti, MAX_JTI_LENGTH } from "@o3co/auth-provider-core";
+import {
+	isRecordableJti,
+	MAX_JTI_LENGTH,
+	malformedNumericDateClaim,
+} from "@o3co/auth-provider-core";
 import { decodeJwt, decodeProtectedHeader, type JWK } from "jose";
 import { DPoPError } from "./errors.mjs";
 import { computeJkt } from "./thumbprint.mjs";
@@ -74,6 +78,7 @@ export interface DPoPProof {
  *   Step 7: jwk is public-only (no private material — name-screened)
  *   Step 9: required claims present + correct types       ← runs BEFORE step 8
  *           (and a `jti` of at most `MAX_JTI_LENGTH` characters)
+ *           (`iat`, and any `exp` / `nbf`, a NumericDate — not merely a number)
  *   Step 8: jkt computed via RFC 7638 SHA-256 thumbprint  ← runs LAST
  *
  * Step 8 is moved AFTER step 9 because `computeJkt` is the only cryptographic
@@ -100,7 +105,10 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 
 	// Step 4 (spec §6): typ must be exactly "dpop+jwt"
 	if (header.typ !== "dpop+jwt") {
-		throw new DPoPError("typ_mismatch", `expected typ=dpop+jwt, got ${String(header.typ)}`);
+		// The value is the client's: described by its type unless it is a
+		// string, since `String({"toString": null})` itself throws.
+		const got = typeof header.typ === "string" ? header.typ : `(${typeof header.typ})`;
+		throw new DPoPError("typ_mismatch", `expected typ=dpop+jwt, got ${got}`);
 	}
 
 	// Step 5 (spec §6): alg must be present as a non-empty string
@@ -164,6 +172,15 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 		);
 	}
 
+	// `iat` — and an `exp` or `nbf` the proof carries — must be a NumericDate
+	// (core's `isNumericDate`), not merely a number: JSON's `1e400` parses to
+	// Infinity, which the iat window would report as a drift of Infinity and
+	// which jose accepts as an `exp` that never passes. Either is a malformed
+	// proof, not a clock difference.
+	if (malformedNumericDateClaim(claims) !== undefined) {
+		throw new DPoPError("malformed_proof", "invalid claim types");
+	}
+
 	// `ath` is optional at this layer but must not be silently dropped when
 	// present-and-wrong-typed: dropping it would downgrade a proof the client
 	// meant to bind to a specific access token into an unbound one, which is
@@ -187,7 +204,8 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 	try {
 		jkt = await computeJkt(jwk as JWK);
 	} catch (err) {
-		throw new DPoPError("malformed_proof", `invalid JWK: ${(err as Error).message}`);
+		// Fixed text: jose's error is the cause, not part of the message.
+		throw new DPoPError("malformed_proof", "invalid JWK", undefined, undefined, { cause: err });
 	}
 
 	return {

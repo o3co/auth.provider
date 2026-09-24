@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { loggableError } from "../logging/loggableError.mjs";
 import type { ProbeResult, ReadinessProbe, ReadinessReport } from "./types.mjs";
 
 export interface RunReadinessOptions {
@@ -42,9 +43,15 @@ export interface RunReadinessOptions {
 	readonly inFlight?: Map<string, Promise<unknown>>;
 }
 
-function describeError(err: unknown): string {
-	if (err instanceof Error) return err.message;
-	return String(err);
+/**
+ * The failure's text, for the opt-in response body only (`ProbeResult.error`);
+ * the log gets the projection (`ProbeResult.err`), never this. A driver that
+ * rejects with a bare string is named by it, as the body always did.
+ */
+function bodyTextOf(err: unknown): string {
+	if (typeof err === "string") return err;
+	const projected = loggableError(err);
+	return projected.detail ?? projected.name;
 }
 
 /**
@@ -99,7 +106,8 @@ async function runOne(
 			name: probe.name,
 			ok: false,
 			durationMs: Date.now() - started,
-			error: describeError(err),
+			error: bodyTextOf(err),
+			err: loggableError(err),
 		};
 	} finally {
 		// Always clear: on the success path the timer is still armed, and an

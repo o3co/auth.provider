@@ -1,6 +1,6 @@
 # repositories
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 ## Responsibility
 
@@ -14,12 +14,15 @@ It is separate because the Store's data model is read by `oauth`, `session`, `fo
 
 - The ports are [`ClientRepository.mts`](./ClientRepository.mts), [`UserRepository.mts`](./UserRepository.mts) and [`CodeRepository.mts`](./CodeRepository.mts); each declaration-merges its `ComponentMap` slot (`clientRepository`, `userRepository`, `codeRepository`).
 - [`types.mts`](./types.mts) — the records. Each field's semantics are documented once, on the field: deny-by-absence for `defaultScopes`, `allowedFederationGrantConnections`, `federationGrantRedirectUris` and `allowedAzpForFederationToken`; strict `=== true` for `firstParty` and `allowPlainPkce`; the `allowedAudiences` fallbacks. `allowedGrantTypes` is the exception and reads the other way: absent admits every grant type, while a list admits exactly the entries it names and nothing else, so an empty one admits none — unless `oauth.requireGrantTypeAllowlist` is on, or the handler declares `requiresExplicitGrantAllowlist` (#326), either of which turns absence into a denial at dispatch. See the invariant below and [`allowedGrantTypes.mts`](./allowedGrantTypes.mts).
+- [`clientRepositoryUnavailable.mts`](./clientRepositoryUnavailable.mts) — `logClientRepositoryUnavailable`: the one line, `client_repository_unavailable` at error level, every client lookup writes when the repository throws and it answers `503` — `step`, a `site` where it is not client authentication, the client id sanitised and capped, the error's projection.
+- [`clientId.mts`](./clientId.mts) — `isWellFormedClientId` and `MAX_CLIENT_ID_LENGTH` (256): what a `client_id` from a request must look like before a `ClientRepository` is asked for it (no control character, at most 256 characters; core's identifier rule in `../security/identifier.mts`). The oauth routes screen with it, so a client cannot make a repository throw — which they answer as an outage — with a malformed id. `assertRegistrableClientIds` holds registered ids to the same rule: `InMemoryClientRepository` (and so the `yaml` / `static` adapters) refuses at construction an id no request could name, reporting its position rather than the id itself; a custom repository can call it over its own registrations.
 - The bundled registration schemas (`ClientEntrySchema`, `UserEntrySchema`) sit beside the in-memory adapters that read them; the factories are [`RepositoryFactory.mts`](./RepositoryFactory.mts).
 - Package README: [Repositories](../../README.md#repositories).
 
 ## Inputs and outputs
 
 - Ports answer public projections: `PublicClient` omits `clientSecret`; a `User` from the bundled adapter omits `password`. Lookups are fail-soft (`null`); `authenticate` on a public client (`tokenEndpointAuthMethod: "none"`) returns `null` rather than throwing.
+- A `ClientRepository` throws only when its store cannot answer: an unknown client and a wrong secret are `null`. Client authentication and `/authorize` in `packages/oauth` answer a throw `503 temporarily_unavailable`, so a repository that throws for a finding turns the client's mistake into an outage. The `clientId` it is handed is the client's input — screened by `isWellFormedClientId` first, but otherwise any character — so an adapter binds it as a parameter and never interpolates it. The contract is written on the port in [`ClientRepository.mts`](./ClientRepository.mts).
 - `Client.clientSecret` is optional: required for `client_secret_basic` / `client_secret_post`, forbidden for `none`; `private_key_jwt` takes exactly one of `jwks` / `jwksUri`, public keys only.
 - `createCode` requires `client_id` and `redirect_uri` — the code exchange's identity binding — and `consumeByCode` is its single-use authenticity gate. `grantedScope` / `grantedAudience` on the code record are what the token endpoint reads.
 - Every field of `Code` is a required key, `undefined` where `/authorize` recorded nothing, and `createCode` takes `CreateCodeInput` — the same keys but `code`, with only `expiresIn` optional (#626). A repository's copy that forgets a field, or an `/authorize` that forgets to pass one, fails to compile.
@@ -29,7 +32,7 @@ It is separate because the Store's data model is read by `oauth`, `session`, `fo
 
 ## Dependencies
 
-- Depends on: `adapters/`, `net/` (loopback and the redirect-URI grammar), `grants/` (`SenderConstraint`, type-only) and `federation-grants/` (one value: the reserved-parameter check on a registered federation-grant redirect URI, which loads the lodging module with it — a judgement call recorded in [the directory map](../README.md#where-a-boundary-is-a-judgement-call)); `bcrypt`, `js-yaml`, `zod`, `node:crypto`, `node:fs`.
+- Depends on: `adapters/`, `net/` (loopback and the redirect-URI grammar), `security/` (the identifier rule), `errors/` and `logging/` (the `client_repository_unavailable` line), `grants/` (`SenderConstraint`, type-only) and `federation-grants/` (one value: the reserved-parameter check on a registered federation-grant redirect URI, which loads the lodging module with it — a judgement call recorded in [the directory map](../README.md#where-a-boundary-is-a-judgement-call)); `bcrypt`, `js-yaml`, `zod`, `node:crypto`, `node:fs`.
 - Depended on by: `grants/` (type-only) and the root barrel; downstream, `packages/oauth`, `session`, `foundation`, `redis` and `federation-grants`.
 - Must never import `boot/`, `middleware/`, `routes/`, `testing/`, or an adapter package. The `grants` edge is type-only in both directions.
 
@@ -40,6 +43,7 @@ It is separate because the Store's data model is read by `oauth`, `session`, `fo
 - `ClientEntrySchema` refuses private or symmetric JWK members, a secret beside `private_key_jwt`, `defaultScopes` outside `allowedScopes` and a `javascript:` redirect URI, and reports every bad entry — [`ClientEntrySchema.test.mts`](./__tests__/ClientEntrySchema.test.mts).
 - Every `Client` / `User` field round-trips through its entry schema, and a new optional field fails typecheck until the fixture covers it (#343) — [`entrySchemaConformance.test.mts`](./__tests__/entrySchemaConformance.test.mts) (typecheck-included).
 - The federation-grant fields are absent by default, exact-spelled, refused for public clients, and reach both projections — [`federationGrantClientFields.test.mts`](./__tests__/federationGrantClientFields.test.mts).
+- `isWellFormedClientId` admits an id at 256 characters and non-ASCII, and refuses one past 256, an empty one, and any C0, DEL or C1 control character — [`clientId.test.mts`](./__tests__/clientId.test.mts). The bundled repository and the yaml adapter refuse to register such an id, naming its position and never echoing a control character — [`registeredClientIds.test.mts`](./__tests__/registeredClientIds.test.mts).
 - `isGrantTypeAllowed`: absent → allowed unless `requireAllowlist`; `[]` → denied; exact string match — [`allowedGrantTypes.test.mts`](./__tests__/allowedGrantTypes.test.mts).
 - The bundled user adapter runs a bcrypt compare for unknown users and on the plain-text path, never returns `password`, and its identity lookup covers no registration and changes nothing — [`InMemoryUserRepository.test.mts`](./__tests__/InMemoryUserRepository.test.mts).
 - Factories: `register` throws on a duplicate type, an unregistered type is `AdapterFactoryError`, the `memory` code builder validates `defaultExpiresIn` — [`createRepositoryFactories.test.mts`](./__tests__/createRepositoryFactories.test.mts); `loadYamlMap` refuses non-mapping YAML and invalid entries — [`loadYamlMap.test.mts`](./__tests__/loadYamlMap.test.mts).
@@ -47,7 +51,7 @@ It is separate because the Store's data model is read by `oauth`, `session`, `fo
 
 ## Failure and lifecycle
 
-- Absence is `null`; a malformed registration throws at construction (schema), so a bad entry refuses boot rather than a request. A Store that cannot answer `findSubjectByFederatedIdentity`, or whose data names more than one owner, throws: an arbitrary pick is worse than an outage.
+- Absence is `null`; a malformed registration throws at construction (schema, and the client-id rule), so a bad entry refuses boot rather than a request. A Store that cannot answer `findSubjectByFederatedIdentity`, or whose data names more than one owner, throws: an arbitrary pick is worse than an outage.
 - `InMemoryCodeRepository` owns a GC interval; the `memory` builder registers `dispose()` with `BuilderContext.lifecycle` so `AppHandle.dispose()` clears it. `InMemoryUserRepository` links are process-local and lost on restart.
 - Nothing here retries, waits or times out.
 

@@ -59,6 +59,7 @@ import {
 	applyResponseHeaders,
 	oauthErrorCodeOf,
 	retryInstructionOf,
+	unavailableLogFields,
 	unavailableOf,
 } from "./_responseHeaders.mjs";
 
@@ -168,8 +169,11 @@ export const protectedResourceBindingMw = ({
 					// fine, and the refresh it prompts meets the same outage at the
 					// token endpoint. RFC 6750 §3.1's codes describe request and
 					// token faults; a server that cannot answer says 503.
-					logger?.warn(
-						{ mechanism: mechanism.kind, code, err: loggableError(err) },
+					// This layer answers the 503, so it owns the outage's one line:
+					// the mechanism's reason and the cause's projection, when it
+					// gave them.
+					logger?.error(
+						{ mechanism: mechanism.kind, code, ...unavailableLogFields(err) },
 						"protected_resource_binding_unavailable",
 					);
 					res.status(503).json(errorEnvelope(code, unavailable));

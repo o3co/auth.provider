@@ -58,6 +58,14 @@ export type {
 } from "./assertions/jwtAssertionVerifier.mjs";
 export { createJwtAssertionVerifier } from "./assertions/jwtAssertionVerifier.mjs";
 export {
+	type AssertionLifetime,
+	assertionLifetime,
+	describeInvalidAssertionClockTolerance,
+	isValidAssertionClockTolerance,
+	MAX_ASSERTION_CLOCK_TOLERANCE_SECONDS,
+	MAX_ASSERTION_LIFETIME_SECONDS,
+} from "./assertions/lifetime.mjs";
+export {
 	type AssertionClaimReaders,
 	createRegistryAssertionVerifier,
 	ID_JAG_TYP,
@@ -294,9 +302,11 @@ export { isEmailVerified } from "./grants/emailVerifiedGate.mjs";
 // path gives a policy that throws, denies, or exceeds its ceiling.
 export {
 	boundPolicyAudience,
+	type EvaluateGrantPolicyOptions,
 	evaluateGrantPolicy,
 	type GrantPolicyAllow,
 	type GrantPolicyOutcome,
+	logGrantPolicyUnavailable,
 	type PolicyAudienceOutcome,
 	type PolicyScopeCeiling,
 	policyOutOfBounds,
@@ -378,16 +388,30 @@ export {
 	type RemoteKeySetCacheOptions,
 	type RemoteKeySetTuning,
 } from "./jwks/remoteKeySet.mjs";
+// A JWT's exp / iat / nbf, checked before anything computes an expiry from them.
+export type { NumericDateClaim } from "./jwt/numericDate.mjs";
+export {
+	isNumericDate,
+	MAX_NUMERIC_DATE_SECONDS,
+	malformedNumericDateClaim,
+} from "./jwt/numericDate.mjs";
 // JWT verifier (SF-1) — central verifyJwt with alg/iss/aud/typ pinning
 export type {
 	JwtRevocationSources,
 	JwtType,
 	JwtVerificationReason,
 	JwtVerifyOptions,
+	VerificationUnavailableReason,
 	VerifiedJwt,
 	VerifyRevocation,
 } from "./jwt/verify.mjs";
-export { isRevocationUnavailable, JwtVerificationError, verifyJwt } from "./jwt/verify.mjs";
+export {
+	isVerificationUnavailable,
+	JwtVerificationError,
+	REVOCATION_RETENTION_ALLOWANCE_MS,
+	VERIFICATION_UNAVAILABLE_DESCRIPTION,
+	verifyJwt,
+} from "./jwt/verify.mjs";
 export type { KeyStoreFactory } from "./keys/factory.mjs";
 export {
 	createKeyStoreFactory,
@@ -410,6 +434,9 @@ export {
 	ExpiredKidError,
 	UnknownKidError,
 } from "./keys/KeyStore.mjs";
+// The one rule for a kid a keystore is built with and a kid header verifyJwt
+// looks up, so a token this server signed always carries a kid it will look up.
+export { isWellFormedKid, MAX_KID_LENGTH } from "./keys/kid.mjs";
 // #303: the KeyStore whose private key never enters this process. Wired by a
 // composition root rather than selected in config — a `RemoteSigner` is a
 // function, and there is no HOCON spelling for one.
@@ -671,6 +698,15 @@ export { isGrantTypeAllowed } from "./repositories/allowedGrantTypes.mjs";
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
 export type { CodeRepository, CreateCodeInput } from "./repositories/CodeRepository.mjs";
 export {
+	assertRegistrableClientIds,
+	isWellFormedClientId,
+	MAX_CLIENT_ID_LENGTH,
+} from "./repositories/clientId.mjs";
+export {
+	type ClientRepositoryOutage,
+	logClientRepositoryUnavailable,
+} from "./repositories/clientRepositoryUnavailable.mjs";
+export {
 	type ClientEntry,
 	ClientEntrySchema,
 	InMemoryClientRepository,
@@ -851,7 +887,12 @@ export {
 } from "./refresh-token-family/module.mjs";
 export { withReason } from "./refresh-token-family/reason.mjs";
 export {
+	resolveFamilyAccessTokenHorizonMs,
+	revokedFamilyExpiresAtMs,
+} from "./refresh-token-family/retention.mjs";
+export {
 	createRefreshTokenFamilyRevocation,
+	REVOKED_WITHOUT_RECORD_JTI,
 	type RefreshTokenFamilyRevocationDeps,
 } from "./refresh-token-family/revocation.mjs";
 export {

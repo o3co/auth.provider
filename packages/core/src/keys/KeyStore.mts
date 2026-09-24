@@ -15,6 +15,7 @@
  */
 import { createSecretKey, type KeyObject, type webcrypto } from "node:crypto";
 import { importPKCS8, importSPKI, SignJWT } from "jose";
+import { assertWellFormedKids } from "./kid.mjs";
 
 /**
  * JWT claims per RFC 7519. Standard claims are typed; custom claims are
@@ -59,15 +60,26 @@ export interface ManagedKey {
 export type Algorithm = "HS256" | "RS256" | "ES256" | "EdDSA";
 
 /**
+ * A `kid` as text for an error message, whatever a caller hands over: a kid
+ * is the client's header value, and a finding error that could not be built
+ * from it would be thrown as a TypeError instead — which the verifier would
+ * read as the keystore failing to answer. Long values are cut.
+ */
+const describeKid = (kid: unknown): string =>
+	typeof kid !== "string" ? `(${typeof kid})` : kid.length > 64 ? `${kid.slice(0, 64)}...` : kid;
+
+/**
  * Thrown by {@link KeyStore.getVerificationKey} when the requested `kid` is
  * not registered in the keystore. Callers (notably the SF-1 central JWT
- * verifier) `instanceof`-check this so SIEM pipelines can distinguish
- * attacker-fabricated kids from operator-rotation expiry.
+ * verifier) check for it — by class, or by this `name` when a composition
+ * holds two copies of the package — so SIEM pipelines can distinguish
+ * attacker-fabricated kids from operator-rotation expiry, and neither from a
+ * keystore that cannot answer. Building one never throws, whatever `kid` is.
  */
 export class UnknownKidError extends Error {
 	override readonly name = "UnknownKidError";
 	constructor(readonly kid: string) {
-		super(`Unknown kid: ${kid}`);
+		super(`Unknown kid: ${describeKid(kid)}`);
 	}
 }
 
@@ -75,7 +87,9 @@ export class UnknownKidError extends Error {
  * Thrown by {@link KeyStore.getVerificationKey} when the requested `kid` is
  * registered but its `expiresAt` has passed. Distinct from
  * {@link UnknownKidError} so audit pipelines can page differently on
- * rotation-window expiry vs. attacker-fabricated header values.
+ * rotation-window expiry vs. attacker-fabricated header values. Recognised
+ * by class or by this `name`, like {@link UnknownKidError}, and building one
+ * never throws.
  */
 export class ExpiredKidError extends Error {
 	override readonly name = "ExpiredKidError";
@@ -83,7 +97,7 @@ export class ExpiredKidError extends Error {
 		readonly kid: string,
 		readonly expiredAt: Date,
 	) {
-		super(`Expired kid: ${kid}`);
+		super(`Expired kid: ${describeKid(kid)}`);
 	}
 }
 
@@ -103,12 +117,36 @@ export interface KeyStore {
 	 *
 	 * **MUST be synchronous and cheap**. Remote-sign adapters (KMS/HSM)
 	 * must cache the current kid locally and return it without any remote
-	 * call. Never exposes private key material.
+	 * call. Never exposes private key material. A throw here is read the way
+	 * a throw from `getVerificationKey` is: the keystore cannot answer
+	 * (`verification_key_unavailable`).
 	 */
 	getSigningKidFallback(): string;
 	/** Active verification keys for JWKS endpoint. Remote adapters may fetch + cache. */
 	getVerificationKeys(): Promise<ManagedKey[]>;
-	/** Specific kid's public key. Throws on unknown or expired kid. */
+	/**
+	 * Specific kid's public key.
+	 *
+	 * The contract the central verifier (`verifyJwt`) relies on:
+	 *
+	 * - A `kid` this keystore does not hold MUST be refused with
+	 *   {@link UnknownKidError}, and a retired one with {@link ExpiredKidError}.
+	 *   Those are findings about the token — refused `kid_unknown` /
+	 *   `kid_expired`, as the client's fault.
+	 * - Any other throw means the keystore cannot answer. The verifier reports
+	 *   it as `verification_key_unavailable`, which every route answers `503
+	 *   temporarily_unavailable` and logs as an outage — so throwing anything
+	 *   else for a kid that merely looks wrong turns the client's token into
+	 *   the server's outage.
+	 * - `kid` is untrusted input: the token's own header value, read before any
+	 *   signature is checked. The verifier hands over only a string of at most
+	 *   `MAX_KID_LENGTH` characters with no control character, but any other
+	 *   character may be in it — a `/`, a `?`, a `..`. An adapter
+	 *   that looks keys up remotely (a KMS, an HSM, a JWKS endpoint) MUST
+	 *   check it against its own key naming before it reaches that system —
+	 *   never interpolated unchecked into a URL, a path or a query — and
+	 *   answer one that fails the check with {@link UnknownKidError}.
+	 */
 	getVerificationKey(kid: string): Promise<KeyLike>;
 }
 
@@ -128,6 +166,11 @@ export async function createAsymmetricKeyStore(
 	options: AsymmetricKeyStoreOptions,
 ): Promise<KeyStore> {
 	const { algorithm, kid, privateKeyPem, publicKeyPem, previousKeys = [] } = options;
+	// A kid verifyJwt would refuse makes every token signed under it fail.
+	assertWellFormedKids("createAsymmetricKeyStore", [
+		["kid", kid],
+		...previousKeys.map((prev, i) => [`previousKeys[${i}].kid`, prev.kid] as const),
+	]);
 
 	// Validate kid uniqueness
 	const allKids = [kid, ...previousKeys.map((k) => k.kid)];
@@ -215,6 +258,11 @@ export function createSymmetricKeyStore(
 	kid = "v0",
 	previousSecrets: ReadonlyArray<SymmetricPreviousSecret> = [],
 ): KeyStore {
+	// A kid verifyJwt would refuse makes every token signed under it fail.
+	assertWellFormedKids("createSymmetricKeyStore", [
+		["kid", kid],
+		...previousSecrets.map((prev, i) => [`previousSecrets[${i}].kid`, prev.kid] as const),
+	]);
 	const secretKey: KeyObject = createSecretKey(Buffer.from(secret));
 
 	const allKids = [kid, ...previousSecrets.map((p) => p.kid)];

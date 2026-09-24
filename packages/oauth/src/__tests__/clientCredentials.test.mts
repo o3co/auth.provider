@@ -20,7 +20,7 @@ import {
 	type GrantDependencies,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 
 const SECRET = "test-secret-at-least-32-chars!!";
@@ -543,5 +543,49 @@ describe("createClientCredentialsGrant — grantPolicy scope ceiling (Codex Roun
 		const payload = decodeJwt(result.tokens.access_token) as Record<string, unknown>;
 		// After policy strip, scope claim should be absent or empty string.
 		expect(payload.scope ?? "").toBe("");
+	});
+});
+
+describe("createClientCredentialsGrant — a grant policy that cannot answer is logged, not only answered 503", () => {
+	it("logs it once, at error level, as grant_policy_unavailable", async () => {
+		const error = vi.fn();
+		const warn = vi.fn();
+		const handler = createClientCredentialsGrant({
+			...baseDeps,
+			// The policy is consulted here under RFC 8707 resource indicators.
+			config: {
+				oauth: { ...baseDeps.config.oauth, resourceIndicator: { enabled: true } },
+			} as unknown as GrantDependencies["config"],
+			grantPolicy: {
+				kind: "decision-service",
+				evaluate: async () => {
+					throw Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:8181"), {
+						code: "ECONNREFUSED",
+					});
+				},
+			},
+			logger: {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn,
+				error,
+				fatal: vi.fn(),
+				child: vi.fn(),
+			},
+		});
+		const { result } = await handler.handle(makeCtx(makeClient()));
+		expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+		expect(warn).not.toHaveBeenCalled();
+		expect(error).toHaveBeenCalledTimes(1);
+		expect(error).toHaveBeenCalledWith(
+			{
+				grantType: "client_credentials",
+				policy: "decision-service",
+				err: expect.objectContaining({ name: "Error", code: "ECONNREFUSED" }),
+			},
+			"grant_policy_unavailable",
+		);
+		expect(error.mock.calls[0]?.[0].err).not.toBeInstanceOf(Error);
 	});
 });

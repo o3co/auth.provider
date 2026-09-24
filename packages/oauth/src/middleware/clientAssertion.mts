@@ -15,12 +15,19 @@
  */
 
 import {
+	assertionLifetime,
+	auditErrorText,
 	consoleLogger,
 	createRemoteKeySetCache,
+	describeInvalidAssertionClockTolerance,
 	isRecordableJti,
+	isValidAssertionClockTolerance,
+	isWellFormedClientId,
 	type Logger,
 	loggableError,
+	MAX_ASSERTION_LIFETIME_SECONDS,
 	MAX_JTI_LENGTH,
+	malformedNumericDateClaim,
 	type PublicClient,
 	type ReplaySeenSet,
 } from "@o3co/auth-provider-core";
@@ -71,12 +78,16 @@ export const CLIENT_ASSERTION_ALGORITHMS = [
 ] as const;
 
 /**
- * How far ahead `exp` may be. RFC 7523 requires `exp` but bounds nothing;
- * client libraries mint assertions that live a minute or ten, and an hour
- * leaves room for a client whose clock runs ahead while keeping the
- * replay record — which lives until `exp` — small.
+ * How far ahead `exp` may be, and how old `iat`: core's
+ * `MAX_ASSERTION_LIFETIME_SECONDS`, the one ceiling for every assertion whose
+ * `jti` this server records — an ID-JAG is held to it too. RFC 7523 requires
+ * `exp` but bounds nothing; client libraries mint assertions that live a
+ * minute or ten, and an hour leaves room for a client whose clock runs ahead
+ * while keeping the replay record — which lives until `exp` — small. Both
+ * limits allow the verifier's clock tolerance on top, as the ID-JAG ceiling
+ * does: `exp − now` is compared through core's `assertionLifetime`.
  */
-export const MAX_CLIENT_ASSERTION_LIFETIME_SECONDS = 3600;
+export const MAX_CLIENT_ASSERTION_LIFETIME_SECONDS = MAX_ASSERTION_LIFETIME_SECONDS;
 
 /** The replay-record scope is per client: `client-assertion:<client_id>`. */
 export const CLIENT_ASSERTION_REPLAY_SCOPE_PREFIX = "client-assertion:";
@@ -89,7 +100,12 @@ export interface ClientAssertionVerifierOptions {
 	/** Where `jti` values are spent. Absent → assertions are answered `server_error`. */
 	readonly replaySeenSet?: ReplaySeenSet;
 	readonly logger?: Logger;
-	/** Clock tolerance on `exp` / `nbf` / `iat`, in seconds. Default 30. `iat` is also held to the lifetime ceiling. */
+	/**
+	 * Clock tolerance on `exp` / `nbf` / `iat`, in seconds. Default 30. Also
+	 * allowed on top of the lifetime ceiling, both ways: `exp − now` and the
+	 * `iat` age may each be at most `MAX_CLIENT_ASSERTION_LIFETIME_SECONDS`
+	 * plus this.
+	 */
 	readonly clockToleranceSeconds?: number;
 	/** The fetch used for `jwksUri`. A proxy, or a test seam. */
 	readonly fetch?: typeof fetch;
@@ -129,6 +145,13 @@ export function createClientAssertionVerifier(
 ): ClientAssertionVerifier {
 	const logger = options.logger ?? consoleLogger;
 	const clockTolerance = options.clockToleranceSeconds ?? 30;
+	// NaN, Infinity or a string would switch jose's exp check and the
+	// lifetime ceiling off.
+	if (!isValidAssertionClockTolerance(clockTolerance)) {
+		throw new Error(
+			`createClientAssertionVerifier: ${describeInvalidAssertionClockTolerance(clockTolerance)}.`,
+		);
+	}
 	const now = options.now ?? Date.now;
 	const audiences = [options.issuer, options.tokenEndpoint].filter(
 		(value): value is string => typeof value === "string" && value.length > 0,
@@ -148,12 +171,25 @@ export function createClientAssertionVerifier(
 	};
 
 	/**
+	 * The ceiling a lifetime refusal applied, as the client is told it: the
+	 * hour plus this verifier's clock tolerance — the number the comparison
+	 * used, not the bare hour, which an assertion a few seconds past it
+	 * satisfies. Digits, letters and `:()` only: within RFC 6749's error-text
+	 * characters.
+	 */
+	const describeCeiling = (maxSeconds: number): string =>
+		`at most ${maxSeconds} seconds: ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} plus the ${clockTolerance} s clock tolerance`;
+
+	/**
 	 * Log a refusal and say how to answer it. A caught error handed over as
 	 * `err` reaches the log as `loggableError(err)`, never as itself: a replay
 	 * store's ioredis error carries the refused command's arguments, a client
 	 * lookup's library error its own fields, and jose's claim errors the
 	 * assertion's claims as `payload`. The context is typed, so nothing else
-	 * reaches the log beside the client id and an unsupported assertion type.
+	 * reaches the log beside the client id and an unsupported assertion type
+	 * — and both of those are the client's input, read before any signature
+	 * is checked, so they are recorded through `auditErrorText` (sanitised,
+	 * capped).
 	 */
 	const refuse = (
 		status: 400 | 401 | 500 | 503,
@@ -164,12 +200,21 @@ export function createClientAssertionVerifier(
 			readonly clientId?: string;
 			readonly assertionType?: string;
 			readonly err?: unknown;
+			/** A `lifetime` refusal's numbers: `exp − now` and the most it may be. */
+			readonly lifetimeSeconds?: number;
+			readonly maxLifetimeSeconds?: number;
 		} = {},
 	): ClientAssertionOutcome => {
 		const log = status >= 500 ? logger.error.bind(logger) : logger.warn.bind(logger);
-		const { err, ...fields } = context;
+		const { err, clientId, assertionType, lifetimeSeconds, maxLifetimeSeconds } = context;
 		log(
-			{ reason, ...fields, ...("err" in context ? { err: loggableError(err) } : {}) },
+			{
+				reason,
+				...(clientId !== undefined ? { clientId: auditErrorText(clientId) } : {}),
+				...(assertionType !== undefined ? { assertionType: auditErrorText(assertionType) } : {}),
+				...(lifetimeSeconds !== undefined ? { lifetimeSeconds, maxLifetimeSeconds } : {}),
+				...("err" in context ? { err: loggableError(err) } : {}),
+			},
 			"client_assertion_refused",
 		);
 		return { kind: "refused", status, error, description };
@@ -238,16 +283,29 @@ export function createClientAssertionVerifier(
 					{ clientId: iss },
 				);
 			}
+			// An iss no client can have is refused like an unknown one, before
+			// the repository is asked — a repository may throw on it, and that
+			// would read as the server's outage (core's `isWellFormedClientId`).
+			if (!isWellFormedClientId(iss)) {
+				return refuse(401, "invalid_client", "Unknown client", "malformed_client_id", {
+					clientId: iss,
+				});
+			}
 
 			let client: PublicClient | null;
 			try {
 				client = await findClient(iss);
 			} catch (err) {
-				// Fail closed, as the secret-based path does.
-				return refuse(401, "invalid_client", "Client lookup failed", "lookup_failed", {
-					err,
-					clientId: iss,
-				});
+				// Fail closed, as the secret-based path does — as the server's
+				// outage, not a failed authentication: the client did nothing
+				// wrong, and `invalid_client` would tell it its credential is bad.
+				return refuse(
+					503,
+					"temporarily_unavailable",
+					"client repository unavailable",
+					"client_repository_unavailable",
+					{ err, clientId: iss },
+				);
 			}
 			if (!client) {
 				return refuse(401, "invalid_client", "Unknown client", "unknown_client", { clientId: iss });
@@ -306,15 +364,39 @@ export function createClientAssertionVerifier(
 				});
 			}
 
-			const nowSeconds = Math.floor(now() / 1000);
-			const exp = payload.exp as number;
-			if (exp - nowSeconds > MAX_CLIENT_ASSERTION_LIFETIME_SECONDS) {
+			// `exp`, `iat` and `nbf` are NumericDates before anything below
+			// computes a lifetime or an age from them (core's
+			// `isNumericDate`): jose checks only that each is a number, and
+			// JSON's `1e400` parses to Infinity. The checks below happened to
+			// refuse an infinite `exp` or `iat` under reasons that describe a
+			// finite one, and let an infinite `nbf` through.
+			const malformedDate = malformedNumericDateClaim(payload);
+			if (malformedDate !== undefined) {
 				return refuse(
 					401,
 					"invalid_client",
-					`client assertion exp is too far ahead (at most ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} seconds)`,
-					"lifetime",
+					`client assertion ${malformedDate} is not a NumericDate (RFC 7519 section 2)`,
+					"numeric_date",
 					{ clientId: iss },
+				);
+			}
+
+			const nowSeconds = Math.floor(now() / 1000);
+			const exp = payload.exp as number;
+			// The ceiling the ID-JAG verifier holds its assertions to, with the
+			// same allowance for a client whose clock runs ahead.
+			const lifetime = assertionLifetime(exp, nowSeconds, clockTolerance);
+			if (lifetime.exceeded) {
+				return refuse(
+					401,
+					"invalid_client",
+					`client assertion exp is too far ahead (${describeCeiling(lifetime.maxLifetimeSeconds)})`,
+					"lifetime",
+					{
+						clientId: iss,
+						lifetimeSeconds: lifetime.lifetimeSeconds,
+						maxLifetimeSeconds: lifetime.maxLifetimeSeconds,
+					},
 				);
 			}
 			// RFC 7523 §3 (6): `iat`, when present, must not be unreasonably far in
@@ -336,7 +418,7 @@ export function createClientAssertionVerifier(
 					return refuse(
 						401,
 						"invalid_client",
-						`client assertion iat is too old (at most ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} seconds)`,
+						`client assertion iat is too old (${describeCeiling(MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + clockTolerance)})`,
 						"iat_stale",
 						{ clientId: iss },
 					);

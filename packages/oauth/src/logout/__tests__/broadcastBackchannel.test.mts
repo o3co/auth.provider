@@ -17,7 +17,7 @@ import { createSymmetricKeyStore } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createMockLogger } from "#/__tests__/_helpers/mockLogger.mjs";
-import { expectProjectedWarn, storeReplyError } from "#/__tests__/_helpers/projectedLog.mjs";
+import { expectBestEffortWarn, storeReplyError } from "#/__tests__/_helpers/projectedLog.mjs";
 import { broadcastBackchannelLogout } from "#/logout/broadcastBackchannel.mjs";
 
 const keyStore = createSymmetricKeyStore("test-secret-32-chars-xxxxxxxxxx");
@@ -177,6 +177,14 @@ describe("broadcastBackchannelLogout", () => {
 			}),
 		).resolves.toBeUndefined();
 		expect(logger.warn).toHaveBeenCalled();
+		// The status, not the RP's own words for it.
+		expectBestEffortWarn(
+			logger,
+			"logout_backchannel_rejected",
+			{ clientId: "rp1", status: 500 },
+			null,
+		);
+		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("Internal Server Error");
 	});
 
 	it("uses opts.logger over console.warn when provided", async () => {
@@ -220,6 +228,14 @@ describe("broadcastBackchannelLogout", () => {
 			}),
 		).resolves.toBeUndefined();
 		expect(logger.warn).toHaveBeenCalledTimes(2);
+		for (const clientId of ["rp1", "rp2"]) {
+			expectBestEffortWarn(
+				logger,
+				"logout_backchannel_failed",
+				{ clientId, step: "post" },
+				"Error",
+			);
+		}
 	});
 
 	it("logs a logout token it could not sign as the error's projection, and skips that RP's POST", async () => {
@@ -240,6 +256,29 @@ describe("broadcastBackchannelLogout", () => {
 			logger,
 		});
 		expect(fetchMock).not.toHaveBeenCalled();
-		expectProjectedWarn(logger, /RP rp1 broadcast failed/);
+		expectBestEffortWarn(logger, "logout_backchannel_failed", {
+			clientId: "rp1",
+			step: "logout_token",
+		});
+	});
+
+	it("caps the client id it logs", async () => {
+		const fetchMock = vi.fn(async () => ({ ok: false, status: 400, statusText: "" }));
+		const logger = createMockLogger();
+		await broadcastBackchannelLogout({
+			rps: [{ clientId: "r".repeat(300), backchannelLogoutUri: "https://rp.example/bc" }],
+			issuer: "iss",
+			sub: "u",
+			sid: "sid",
+			keyStore,
+			fetchImpl: fetchMock as unknown as typeof fetch,
+			logger,
+		});
+		const [line] = logger.warn.mock.calls[0] ?? [];
+		const logged = (line as { clientId?: unknown } | string).valueOf();
+		expect(typeof logged).toBe("object");
+		const { clientId } = logged as { clientId?: unknown };
+		expect(typeof clientId).toBe("string");
+		expect(String(clientId).length).toBeLessThanOrEqual(200);
 	});
 });

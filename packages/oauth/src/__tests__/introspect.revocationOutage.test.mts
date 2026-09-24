@@ -26,12 +26,15 @@
  * named it `revocation_unavailable`; this pins the denylist on the same reason
  * at the endpoints a resource server actually asks.
  *
- * What does NOT change here, deliberately: the wire answer. Introspection has
- * no `temporarily_unavailable` slot — RFC 7662 §2.2 defines `active: false`
- * for any token the AS declines to vouch for — and #408 kept the watermark
- * outage on `active: false` for exactly that reason. The denylist outage
- * answers the same: parity, and still fail-closed. The refresh grant, the one
- * surface #408 remaps to 503, has no denylist slot at all
+ * The wire answer is `503 temporarily_unavailable`, at introspection and at
+ * userinfo alike, for either store. #408 and #459 kept both on a verdict —
+ * `active: false`, `401 invalid_token` — on the theory that introspection has
+ * no outage slot and a protected resource's refusal costs the caller nothing.
+ * Both verdicts describe the token (RFC 7662 §2.2 "not active", RFC 6750 §3.1
+ * "expired, revoked, malformed, or invalid"), and both send the client to
+ * replace a credential that may be perfectly good, which meets the same outage
+ * at the token endpoint. HTTP's `503` vouches for nothing and is still
+ * fail-closed. The refresh grant has no denylist slot at all
  * (`GrantDependencies`), so there is no token-endpoint counterpart to pin.
  */
 
@@ -181,18 +184,24 @@ describe("#459 — a denylist outage at /oauth/introspect", () => {
 			.type("form")
 			.send({ token });
 
-	it("answers active:false on the client-authenticated path — still fail-closed", async () => {
+	it("answers 503 on the client-authenticated path — refused, and not judged inactive", async () => {
 		const app = await buildApp({ denylist: outageDenylist() });
 		const res = await introspectAsClient(app, await mintAT("j-1"));
-		expect(res.status).toBe(200);
-		expect(res.body).toEqual({ active: false });
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "revocation store unavailable",
+		});
 	});
 
-	it("answers active:false on the bearer path — a token cannot vouch for itself during an outage", async () => {
+	it("answers 503 on the bearer path — a token cannot vouch for itself during an outage", async () => {
 		const app = await buildApp({ denylist: outageDenylist() });
 		const res = await introspectAsBearer(app, await mintAT("j-2"));
-		expect(res.status).toBe(200);
-		expect(res.body).toEqual({ active: false });
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "revocation store unavailable",
+		});
 	});
 
 	it("keeps Cache-Control: no-store and Pragma: no-cache on the refusal", async () => {
@@ -235,7 +244,7 @@ describe("#459 — a denylist outage at /oauth/introspect", () => {
 		);
 		expect(viaDenylist.status).toBe(viaWatermark.status);
 		expect(viaDenylist.body).toEqual(viaWatermark.body);
-		expect(viaDenylist.body).toEqual({ active: false });
+		expect(viaDenylist.status).toBe(503);
 	});
 
 	it("keeps a genuine denylist hit logged as revoked", async () => {
@@ -279,16 +288,19 @@ describe("#459 — a denylist outage at /oauth/userinfo", () => {
 	const userinfo = (app: express.Express, token: string) =>
 		request(app).get("/oauth/userinfo").set("Authorization", `Bearer ${token}`);
 
-	it("answers 401 invalid_token — a bearer surface stays fail-closed, as for a watermark outage", async () => {
+	it("answers 503 with no invalid_token challenge — refused, as the server's outage", async () => {
 		const at = await mintAT("j-8");
-		// The same token is served while the denylist is healthy, so the 401
+		// The same token is served while the denylist is healthy, so the 503
 		// below is the outage and not some other check.
 		expect((await userinfo(buildApp(createMemoryAccessTokenDenylist()), at)).status).toBe(200);
 
 		const res = await userinfo(buildApp(outageDenylist()), at);
-		expect(res.status).toBe(401);
-		expect(res.body.error).toBe("invalid_token");
-		expect(res.headers["www-authenticate"]).toContain('error="invalid_token"');
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "revocation store unavailable",
+		});
+		expect(res.headers["www-authenticate"]).toBeUndefined();
 	});
 
 	it("logs jwt_verify_rejected with reason=revocation_unavailable", async () => {

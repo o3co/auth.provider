@@ -18,7 +18,7 @@ import { SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createMemoryAccessTokenDenylist } from "#/access-token-denylist/memory.mjs";
 import type { AccessTokenDenylist } from "#/access-token-denylist/types.mjs";
-import { isRevocationUnavailable, verifyJwt } from "#/jwt/verify.mjs";
+import { isVerificationUnavailable, verifyJwt } from "#/jwt/verify.mjs";
 import { createSymmetricKeyStore, type KeyStore } from "#/keys/KeyStore.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 
@@ -150,6 +150,35 @@ describe("verifyJwt with AccessTokenDenylist", () => {
 			message: expect.stringContaining("denylist consult failed"),
 		});
 	});
+
+	it("keeps the store's error as the cause, never its text in the verdict's message", async () => {
+		// A caught error reaches a log only through loggableError. Folded into
+		// the message, the store's text rode past the projection as the
+		// verdict's own words; kept as `cause`, a caller's log projects it.
+		const outage = Object.assign(
+			new Error("READONLY You can't write against a read only replica."),
+			{
+				name: "ReplyError",
+			},
+		);
+		const throwingDenylist: AccessTokenDenylist = {
+			kind: "throwing",
+			add: async () => {},
+			has: async () => {
+				throw outage;
+			},
+		};
+		const { token } = await mintAccessToken();
+		const err = await verifyJwt(token, testKeyStore(), {
+			type: "access_token",
+			expectedIssuer: TEST_ISSUER,
+			expectedAudience: TEST_AUDIENCE,
+			revocation: { denylist: throwingDenylist },
+		}).catch((e: unknown) => e);
+		expect(err).toMatchObject({ reason: "revocation_unavailable" });
+		expect((err as Error).cause).toBe(outage);
+		expect((err as Error).message).not.toContain("READONLY");
+	});
 });
 
 /*
@@ -215,12 +244,12 @@ describe("verifyJwt — denylist backend outage (#459)", () => {
 		});
 	});
 
-	it("is covered by isRevocationUnavailable — one predicate for both stores", async () => {
+	it("is covered by isVerificationUnavailable — one predicate for both stores", async () => {
 		// A caller that answers 503 for a watermark outage (#408) must not
 		// have to know which store was down to give the denylist outage the
 		// same answer.
 		const err = await rejectionOf(verifyWith(outageDenylist()));
-		expect(isRevocationUnavailable(err)).toBe(true);
+		expect(isVerificationUnavailable(err)).toBe(true);
 	});
 
 	it("still fails closed — the token is refused either way", async () => {
@@ -263,6 +292,6 @@ describe("verifyJwt — denylist backend outage (#459)", () => {
 			}),
 		);
 		expect(err).toMatchObject({ reason: "revoked" });
-		expect(isRevocationUnavailable(err)).toBe(false);
+		expect(isVerificationUnavailable(err)).toBe(false);
 	});
 });

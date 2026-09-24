@@ -338,7 +338,17 @@ describe("cascadeLogout (A4 §6.2)", () => {
 				logger: Object.assign(createMockLogger(), { warn: loggerWarn }),
 			});
 			expect(loggerWarn).toHaveBeenCalledTimes(1);
-			expect(loggerWarn.mock.calls[0]?.[0]).toMatch(/cascadeLogout/);
+			// Object-first, the operation and the error's projection — not a
+			// template string.
+			expect(loggerWarn).toHaveBeenCalledWith(
+				expect.objectContaining({
+					operation: "revoke_family",
+					sid: "s",
+					familyId: "f",
+					err: expect.objectContaining({ name: "Error" }),
+				}),
+				"logout_cascade_operation_failed",
+			);
 			expect(consoleWarnSpy).not.toHaveBeenCalled();
 		} finally {
 			consoleWarnSpy.mockRestore();

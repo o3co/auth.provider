@@ -17,7 +17,7 @@
 import { createSecretKey } from "node:crypto";
 import type { Request, Response, Router } from "express";
 import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_JWKS_CACHE_MAX_AGE, resolveJwksCacheMaxAge } from "#/jwks/cache.mjs";
 import { DEFAULT_JWKS_PATH, resolveJwksPath } from "#/jwks/path.mjs";
 import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
@@ -234,9 +234,10 @@ describe("JWKS Cache-Control", () => {
 		expect(res.getHeader("Cache-Control")).toBe("public, max-age=300");
 	});
 
-	it("does NOT set Cache-Control when key export fails (no cacheable 5xx)", async () => {
+	it("never makes a keystore failure cacheable: its 503 is no-store", async () => {
 		// A failing remote/KMS keystore must not produce a cacheable error: the
-		// header is set only after getVerificationKeys()/exportJWK() succeed.
+		// success headers are set only after getVerificationKeys()/exportJWK()
+		// succeed, and the outage's own answer says `no-store`.
 		const failingKeyStore = {
 			algorithm: "ES256" as const,
 			getVerificationKeys: async () => {
@@ -246,10 +247,10 @@ describe("JWKS Cache-Control", () => {
 		const express = createMockExpress();
 		createRouter(express, failingKeyStore);
 		const res = createMockRes();
-		await expect(
-			express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response),
-		).rejects.toThrow("kms unavailable");
-		expect(res.getHeader("Cache-Control")).toBeUndefined();
+		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
+		expect(res.getStatusCode()).toBe(503);
+		expect(res.getHeader("Cache-Control")).toBe("no-store");
+		expect(res.getHeader("ETag")).toBeUndefined();
 	});
 });
 
@@ -308,6 +309,54 @@ describe("JWKS endpoint — never publishes an empty key set (#282)", () => {
 		expect(body.error).toBe("jwks_unavailable");
 		expect(body.keys).toBeUndefined();
 		expect(res.getHeader("Cache-Control")).toBe("no-store");
+	});
+
+	it("logs a keystore that yields zero publishable keys once, at error level", async () => {
+		const emptyKeyStore = {
+			algorithm: "ES256" as const,
+			getVerificationKeys: async () => [],
+		} as unknown as Parameters<typeof createRouter>[1];
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const express = createMockExpress();
+		createRouter(express, emptyKeyStore, { logger });
+		const res = createMockRes();
+		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
+		expect(res.getStatusCode()).toBe(503);
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith({ algorithm: "ES256", keys: 0 }, "jwks_unavailable");
+	});
+
+	it("answers a keystore that throws like one with no key: 503 jwks_unavailable, logged once with the projection", async () => {
+		// A remote key service that times out: a relying party retries a 503,
+		// and reads a 500 as a broken server.
+		const failure = Object.assign(new Error("connect ECONNREFUSED 10.0.0.7:8200"), {
+			code: "ECONNREFUSED",
+		});
+		const throwingKeyStore = {
+			algorithm: "ES256" as const,
+			getVerificationKeys: async () => {
+				throw failure;
+			},
+		} as unknown as Parameters<typeof createRouter>[1];
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const express = createMockExpress();
+		createRouter(express, throwingKeyStore, { logger });
+		const res = createMockRes();
+		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
+		expect(res.getStatusCode()).toBe(503);
+		expect(res.getBody()).toMatchObject({ error: "jwks_unavailable" });
+		expect(res.getHeader("Cache-Control")).toBe("no-store");
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				algorithm: "ES256",
+				err: expect.objectContaining({ name: "Error", code: "ECONNREFUSED" }),
+			},
+			"jwks_unavailable",
+		);
+		expect(logger.error.mock.calls[0]?.[0].err).not.toBeInstanceOf(Error);
 	});
 
 	it("returns JWK set for ES256", async () => {

@@ -267,23 +267,26 @@ describe("DPoP at a protected resource — a replay store that cannot be read", 
 			},
 			contains: async () => false,
 		};
+		// One logger for the mechanism and the dispatcher, as a composition
+		// wires them, so the test sees every line the outage produces.
+		const logger = {
+			trace: () => {},
+			debug: () => {},
+			info: () => {},
+			warn: () => {},
+			error: (_obj: unknown, msg?: string) => errors.push(String(msg)),
+			fatal: () => {},
+			child() {
+				return this;
+			},
+		} as never;
 		const mechanism = createDPoPMechanism({
 			issuer: `http://127.0.0.1:${port}`,
 			replaySeenSet: down,
 			iatWindowSeconds: 60,
-			logger: {
-				trace: () => {},
-				debug: () => {},
-				info: () => {},
-				warn: () => {},
-				error: (_obj: unknown, msg?: string) => errors.push(String(msg)),
-				fatal: () => {},
-				child() {
-					return this;
-				},
-			} as never,
+			logger,
 		});
-		app.use(protectedResourceBindingMw({ mechanisms: [mechanism] }));
+		app.use(protectedResourceBindingMw({ mechanisms: [mechanism], logger }));
 		app.get(RESOURCE_PATH, (req, res) => {
 			res.status(200).json({ binding: req.tokenBinding ?? null });
 		});
@@ -301,6 +304,98 @@ describe("DPoP at a protected resource — a replay store that cannot be read", 
 		expect(res.status).toBe(503);
 		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 		expect(res.headers["www-authenticate"]).toBeUndefined();
-		expect(errors).toEqual(["dpop_replay_store_unavailable"]);
+		// One line, from the dispatcher that answered the 503.
+		expect(errors).toEqual(["protected_resource_binding_unavailable"]);
+	});
+});
+
+describe("DPoP at a protected resource — what a refused proof puts in the log", () => {
+	// The resource logs a refused proof's projection. The refusal's message
+	// is fixed text; a library's error rides as its `cause`, and what the
+	// client wrote into the proof reaches no log line.
+	let server: Server;
+	let key: ClientKey;
+	let accessToken: string;
+	let origin: string;
+	const lines: Array<{ readonly level: string; readonly obj: unknown; readonly msg?: string }> = [];
+
+	beforeEach(async () => {
+		key = await makeClientKey();
+		accessToken = await mintBoundAccessToken(key.jkt);
+		lines.length = 0;
+		const app = express();
+		server = await new Promise<Server>((resolve) => {
+			const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+		});
+		const address = server.address();
+		const port = typeof address === "object" && address !== null ? address.port : 0;
+		origin = `127.0.0.1:${port}`;
+		const record =
+			(level: string) =>
+			(obj: unknown, msg?: string): void => {
+				lines.push({ level, obj, msg });
+			};
+		const logger = {
+			trace: record("trace"),
+			debug: record("debug"),
+			info: record("info"),
+			warn: record("warn"),
+			error: record("error"),
+			fatal: record("fatal"),
+			child() {
+				return this;
+			},
+		} as never;
+		const mechanism = createDPoPMechanism({
+			issuer: `http://${origin}`,
+			replaySeenSet: createMemoryReplaySeenSet(),
+			iatWindowSeconds: 60,
+			logger,
+		});
+		app.use(protectedResourceBindingMw({ mechanisms: [mechanism], logger }));
+		app.get(RESOURCE_PATH, (req, res) => {
+			res.status(200).json({ binding: req.tokenBinding ?? null });
+		});
+	});
+
+	afterEach(async () => {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	const refusedLine = () => {
+		const refused = lines.filter((line) => line.msg === "protected_resource_binding_proof_invalid");
+		expect(refused).toHaveLength(1);
+		return refused[0]?.obj as { err: { detail?: string; cause?: { name?: unknown } } };
+	};
+
+	it("logs an htu userinfo refusal in fixed words, without the userinfo", async () => {
+		const proof = await mintProof(key, {
+			htu: `http://s3cret-user:pw@${origin}${RESOURCE_PATH}`,
+			ath: await computeAth(accessToken),
+		});
+		const res = await request(server)
+			.get(RESOURCE_PATH)
+			.set({ Authorization: `DPoP ${accessToken}`, DPoP: proof });
+		expect(res.status).toBe(401);
+		expect(JSON.stringify(res.body)).not.toContain("s3cret-user");
+		expect(refusedLine().err.detail).toBe("DPoP htu canonicalization failed");
+		for (const line of lines) expect(JSON.stringify(line)).not.toContain("s3cret-user");
+	});
+
+	it("logs an invalid JWK refusal in fixed words, with jose's error as the cause", async () => {
+		const proof = await mintProof(key, { htu: `http://${origin}${RESOURCE_PATH}` });
+		const [header, payload, sig] = proof.split(".");
+		const { jwk, ...rest } = JSON.parse(Buffer.from(header ?? "", "base64url").toString()) as {
+			jwk: Record<string, unknown>;
+		};
+		const { crv: _crv, ...badJwk } = jwk;
+		const crafted = `${Buffer.from(JSON.stringify({ ...rest, jwk: badJwk })).toString("base64url")}.${payload}.${sig}`;
+		const res = await request(server)
+			.get(RESOURCE_PATH)
+			.set({ Authorization: `DPoP ${accessToken}`, DPoP: crafted });
+		expect(res.status).toBe(401);
+		const { err } = refusedLine();
+		expect(err.detail).toBe("invalid JWK");
+		expect(typeof err.cause?.name).toBe("string");
 	});
 });

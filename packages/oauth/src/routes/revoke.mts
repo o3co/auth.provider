@@ -18,10 +18,12 @@ import {
 	type AccessTokenDenylist,
 	type AccessTokenRevocationMode,
 	type ClientRepository,
-	DEFAULT_CLOCK_SKEW_MS,
+	isVerificationUnavailable,
+	type JwtVerificationError,
 	type KeyStore,
 	type Logger,
 	loggableError,
+	REVOCATION_RETENTION_ALLOWANCE_MS,
 	type RefreshTokenFamilyRevocation,
 	type ReplaySeenSet,
 	verifyJwt,
@@ -87,6 +89,11 @@ export interface RevokeRouterOptions {
  *   `revoke_store_unavailable` with the store and the client. The client is
  *   told to assume the token still exists and retry, never that it was
  *   revoked.
+ * - Returns the same 503 when the token cannot be verified because the
+ *   keystore did not answer (core's `isVerificationUnavailable`), logged at
+ *   error level as `token_verification_unavailable` with `site: "revoke"`.
+ *   A 200 there would tell the client the token was revoked while nothing
+ *   was touched.
  * - Returns 200 for every other outcome (RFC 7009 §2.2 no-info-leak):
  *   the token was revoked, or it did not verify, was not one this server
  *   could use, or belonged to another client. None of those reaches a store.
@@ -110,10 +117,12 @@ export interface RevokeRouterOptions {
  * (see `.github/workflows/ci.yml` step `Restrict ignoreExpiration use-site`).
  * - Extracts `jti`, `exp`, `client_id` (or `azp` fallback) from payload.
  * - Verifies client ownership; mismatch → silent 200.
- * - Calls `denylist.add(jti, exp * 1000 + DEFAULT_CLOCK_SKEW_MS)` — denied for
- *   as long as the token can still verify — or, when even that has passed,
- *   asks no store and answers 200: there is nothing left to deny. A
- *   rejection from the store is the 503 above.
+ * - Calls `denylist.add(jti, exp * 1000 + REVOCATION_RETENTION_ALLOWANCE_MS)` —
+ *   denied for as long as the token can still verify: the verifier's clock
+ *   tolerance past `exp`, plus the replica allowance and a rounding second,
+ *   each counted once — or, when even that has passed, asks no store and
+ *   answers 200: there is nothing left to deny. A rejection from the store is
+ *   the 503 above.
  *
  * Access-token path (`accessTokenRevocation: "unsupported"`):
  * - `token_type_hint = access_token` → 400 `unsupported_token_type`
@@ -258,9 +267,27 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
  *   there is nothing left to deny. RFC 7009 §2.2 answers it 200, and the caller extends the
  *   search to the other type.
  * - `unavailable` — the token was this client's, and the store that records
- *   the revocation failed. Already logged; the caller answers 503.
+ *   the revocation failed; or the token could not be verified at all because
+ *   the keystore did not answer. Already logged, each as its own event; the
+ *   caller answers 503.
  */
 type RevocationAttempt = "revoked" | "not_located" | "unavailable";
+
+/**
+ * A token that could not be verified because the verifier could not consult
+ * the keystore (core's `isVerificationUnavailable`): the server's outage, not
+ * a finding about the token. Logged; the caller answers 503.
+ */
+function verificationUnavailable(
+	outage: JwtVerificationError,
+	opts: RevokeRouterOptions,
+): RevocationAttempt {
+	opts.logger.error(
+		{ site: "revoke", reason: outage.reason, err: loggableError(outage) },
+		"token_verification_unavailable",
+	);
+	return "unavailable";
+}
 
 /**
  * Records a revocation in its store, or reports the store's failure. Only a
@@ -334,10 +361,11 @@ async function tryRevokeRefreshToken(
 			// Wrong owner — silent 200 (RFC 7009 §2.2 no-info-leak).
 			return "not_located";
 		}
-	} catch {
-		// Invalid signature / wrong type / wrong issuer → silent 200. With
-		// `revocation: "none"`, `verifyJwt` throws only its own verification
-		// errors, so nothing caught here is a store outage.
+	} catch (err) {
+		// A keystore that could not answer → 503. With `revocation: "none"`
+		// that is the only outage `verifyJwt` can report here.
+		if (isVerificationUnavailable(err)) return verificationUnavailable(err, opts);
+		// Invalid signature / wrong type / wrong issuer → silent 200.
 		opts.logger?.debug?.(
 			{ scope: "oauth.revoke.refresh" },
 			"refresh token revoke skipped (verification failed)",
@@ -364,7 +392,8 @@ async function tryRevokeRefreshToken(
  * request-time recovery from it.
  *
  * Always resolves (never throws): a token that cannot be revoked is
- * `not_located`, and a denylist that fails is `unavailable`, logged.
+ * `not_located`, and a denylist that fails, or a keystore that could not
+ * answer, is `unavailable`, logged.
  * `ignoreExpiration: true` is intentional and is the ONLY legitimate call site
  * for this option in production code (CI guardrail T7 enforces this).
  */
@@ -429,22 +458,26 @@ async function tryRevokeAccessToken(
 			);
 			return "not_located";
 		}
-	} catch {
-		// Invalid signature / wrong type / wrong issuer → silent 200. Nothing
-		// caught here is a store outage: see the refresh-token path.
+	} catch (err) {
+		// A keystore that could not answer → 503; see the refresh-token path.
+		if (isVerificationUnavailable(err)) return verificationUnavailable(err, opts);
+		// Invalid signature / wrong type / wrong issuer → silent 200.
 		opts.logger.debug({ scope: "oauth.revoke.access" }, "AT revoke skipped (verification failed)");
 		return "not_located";
 	}
 
 	// Denied for as long as the token can still verify: `verifyJwt` accepts
-	// one up to DEFAULT_CLOCK_SKEW_MS past its `exp` (the default; no verifier in
-	// this provider passes another), so an entry that lapsed at `exp` would let a revoked
-	// token verify again for that long — the same extension the
-	// subject-revocation horizon applies. Once even that has passed there is
-	// nothing left to deny, and the store is not asked: a store holding a TTL
-	// may refuse an expiry already past, which must not turn RFC 7009 §2.1's
-	// legal revocation of an expired token into a 503.
-	const deniedUntilMs = exp * 1000 + DEFAULT_CLOCK_SKEW_MS;
+	// one up to DEFAULT_CLOCK_SKEW_MS past its `exp` (the default; no verifier
+	// in this provider passes another), so an entry that lapsed at `exp` would
+	// let a revoked token verify again for that long. Core's
+	// REVOCATION_RETENTION_ALLOWANCE_MS is that tolerance plus the replica
+	// allowance and a rounding second — the allowance a revoked refresh-token
+	// family and the subject-revocation horizon are kept for — so the
+	// tolerance is counted once. Once even that has passed there is nothing
+	// left to deny, and the store is not asked: a store holding a TTL may
+	// refuse an expiry already past, which must not turn RFC 7009 §2.1's legal
+	// revocation of an expired token into a 503.
+	const deniedUntilMs = exp * 1000 + REVOCATION_RETENTION_ALLOWANCE_MS;
 	if (deniedUntilMs <= Date.now()) {
 		opts.logger.debug({ scope: "oauth.revoke.access" }, "AT revoke skipped: already expired");
 		return "not_located";

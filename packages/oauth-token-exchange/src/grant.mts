@@ -33,7 +33,10 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isGrantTypeAllowed,
+	isWellFormedClientId,
 	isWellFormedErrorCode,
+	logClientRepositoryUnavailable,
+	logGrantPolicyUnavailable,
 	loggableError,
 	matchConfirmation,
 	ownedConfirmation,
@@ -188,7 +191,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 				try {
 					client = await clientRepository.findById(ctx.authenticatedClient.clientId);
-				} catch {
+				} catch (err) {
+					logClientRepositoryUnavailable(
+						deps.logger,
+						{ site: "token_exchange", step: "find", clientId: ctx.authenticatedClient.clientId },
+						err,
+					);
 					return {
 						result: {
 							status: 503,
@@ -212,9 +220,27 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 					};
 				}
+				// A client_id no client can have is refused as the client's, and
+				// never handed to the repository: a repository that throws is an
+				// outage (503), and one may throw on it — a SQL driver refusing a
+				// NUL byte (core's `isWellFormedClientId`).
+				if (!isWellFormedClientId(clientId)) {
+					return {
+						result: {
+							status: 401,
+							error: "invalid_client",
+							errorDescription: "client authentication failed",
+						},
+					};
+				}
 				try {
 					client = await clientRepository.authenticate(clientId, clientSecret);
-				} catch {
+				} catch (err) {
+					logClientRepositoryUnavailable(
+						deps.logger,
+						{ site: "token_exchange", step: "authenticate", clientId },
+						err,
+					);
 					return {
 						result: {
 							status: 503,
@@ -296,7 +322,15 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			let subjectValidated: ValidatedToken | null;
 			try {
 				subjectValidated = await subjectValidator.validate(subjectToken, { role: "subject" });
-			} catch {
+			} catch (err) {
+				// A validator throws only when it cannot reach an answer — a
+				// keystore or a revocation store down (core's
+				// `ExchangeTokenValidator` contract). The server's fault, so a
+				// logged 503, never a verdict on the token.
+				deps.logger?.error(
+					{ role: "subject", err: loggableError(err) },
+					"token_exchange_validation_unavailable",
+				);
 				return {
 					result: {
 						status: 503,
@@ -398,7 +432,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			if (actorToken !== null && actorValidator) {
 				try {
 					actorValidated = await actorValidator.validate(actorToken, { role: "actor" });
-				} catch {
+				} catch (err) {
+					deps.logger?.error(
+						{ role: "actor", err: loggableError(err) },
+						"token_exchange_validation_unavailable",
+					);
 					return {
 						result: {
 							status: 503,
@@ -777,7 +815,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				let decision: GrantPolicyDecision;
 				try {
 					decision = await deps.grantPolicy.evaluate(policyRequest, policyContext);
-				} catch {
+				} catch (err) {
+					logGrantPolicyUnavailable(
+						deps.logger,
+						{ grantType: GRANT_TYPE, policy: deps.grantPolicy.kind },
+						err,
+					);
 					return {
 						result: {
 							status: 503,

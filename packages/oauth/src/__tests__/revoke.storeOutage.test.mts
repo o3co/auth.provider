@@ -33,9 +33,14 @@ import {
 	type AccessTokenDenylist,
 	type ClientRepository,
 	createMemoryAccessTokenDenylist,
+	createRefreshTokenFamilyRevocation,
 	createSymmetricKeyStore,
 	DEFAULT_CLOCK_SKEW_MS,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+	REVOCATION_RETENTION_ALLOWANCE_MS,
 	type RefreshTokenFamilyRevocation,
+	type RefreshTokenFamilyStore,
+	RefreshTokenStorageError,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
 import express from "express";
@@ -290,7 +295,14 @@ describe("POST /oauth/revoke — an access token with nothing left to deny", () 
 		).rejects.toMatchObject({ reason: "revoked" });
 	});
 
-	it("keeps a live token denied until it can no longer verify: its exp plus the clock tolerance", async () => {
+	it("keeps a live token denied until it can no longer verify: its exp plus the retention allowance, the clock tolerance counted once", async () => {
+		// The allowance core keeps every revocation record past the last moment
+		// what it revoked verifies: the verifier's clock tolerance, plus the
+		// replica allowance and a rounding second — the tolerance once, not
+		// added again on top.
+		expect(REVOCATION_RETENTION_ALLOWANCE_MS).toBe(
+			DEFAULT_CLOCK_SKEW_MS + DEFAULT_SUBJECT_REVOCATION_SKEW_MS + 1_000,
+		);
 		const denylist = strictDenylist();
 		const app = appWith({
 			denylist,
@@ -301,7 +313,10 @@ describe("POST /oauth/revoke — an access token with nothing left to deny", () 
 
 		await revoke(app, { token: await accessTokenWith({ exp, jti: "at-until" }) });
 
-		expect(denylist.add).toHaveBeenCalledWith("at-until", exp * 1000 + DEFAULT_CLOCK_SKEW_MS);
+		expect(denylist.add).toHaveBeenCalledWith(
+			"at-until",
+			exp * 1000 + REVOCATION_RETENTION_ALLOWANCE_MS,
+		);
 	});
 
 	it("still records a live token of the client's", async () => {
@@ -389,5 +404,48 @@ describe("POST /oauth/revoke — a refresh-token family store that cannot be wri
 		expect(res.status).toBe(200);
 		expect(revocation.revokeFamily).not.toHaveBeenCalled();
 		expect(logger.error).not.toHaveBeenCalled();
+	});
+});
+
+describe("POST /oauth/revoke — a family revocation that could not be recorded (conflict-exhausted)", () => {
+	it("answers 503, logged, when the real revocation gives up on a record that keeps colliding", async () => {
+		// Core's revocation, over a store where the family has no record and
+		// every registration of a revoked one collides with a record the next
+		// pass cannot find: `revokeFamily` rejects with `conflict-exhausted`.
+		// The revocation is not known to be recorded, so the route must not
+		// answer 200 as if it were.
+		const store: RefreshTokenFamilyStore = {
+			kind: "colliding",
+			registerFamily: vi.fn(async () => {
+				throw new RefreshTokenStorageError({ reason: "duplicate-family" });
+			}),
+			findFamily: vi.fn(async () => null),
+			updateFamily: vi.fn(async () => ({ outcome: "not-found" as const })),
+		};
+		const revocation = createRefreshTokenFamilyRevocation({
+			refreshTokenFamilyStore: store,
+			accessTokenHorizonMs: 3_600_000,
+		});
+		const logger = createMockLogger();
+		const app = appWith({ denylist: createMemoryAccessTokenDenylist(), revocation, logger });
+
+		const res = await revoke(app, {
+			token: await refreshToken(CLIENT_ID, "fam-colliding"),
+			token_type_hint: "refresh_token",
+		});
+
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
+		expect(store.updateFamily).toHaveBeenCalledTimes(2);
+		expect(store.registerFamily).toHaveBeenCalledTimes(2);
+		const lines = logger.error.mock.calls.filter(
+			([, event]) => event === "revoke_store_unavailable",
+		);
+		expect(lines).toHaveLength(1);
+		expect(lines[0]?.[0]).toMatchObject({
+			store: "refreshTokenFamilyRevocation",
+			clientId: CLIENT_ID,
+			err: { name: "RefreshTokenStorageError", reason: "conflict-exhausted" },
+		});
 	});
 });
