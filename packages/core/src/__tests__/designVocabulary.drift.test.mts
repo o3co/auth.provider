@@ -57,6 +57,12 @@ interface VocabularyRow {
 	readonly home: string;
 	readonly definition: RegExp;
 	/**
+	 * What the home itself must define, when that is narrower than what no
+	 * other file may: a row that refuses a concept under either of two names
+	 * still requires the home to keep the one it has.
+	 */
+	readonly homeDefinition?: RegExp;
+	/**
 	 * How many times `definition` may match inside the home itself. Absent,
 	 * the home only has to match once; set, a second definition or literal
 	 * added beside the first — in the home — fails too.
@@ -65,9 +71,10 @@ interface VocabularyRow {
 }
 
 // One row per symbol, so the home has to define each of them: an
-// alternation would pass a home that kept one and lost the others. The
-// exceptions match one concept in two forms — a constant's two spellings, a
-// definition or a call, a const or a literal (with `homeMatches`).
+// alternation would pass a home that kept one and lost the others. Two rows
+// still match one concept in two forms, and each pins the form the home must
+// keep: the entropy floor's two spellings (with `homeDefinition`), and the
+// WebAuthn algorithm pin's const or literal (with `homeMatches`).
 const VOCABULARY: readonly VocabularyRow[] = [
 	{
 		concept: "loopback hostname (#364)",
@@ -150,13 +157,21 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		concept: "secret entropy floor — the floor itself (#282)",
 		home: "packages/core/src/keys/secretEntropy.mts",
 		definition: /(?:function|const)\s+MIN_SECRET(?:_ENTROPY)?_BYTES\b/,
+		homeDefinition: /(?:function|const)\s+MIN_SECRET_ENTROPY_BYTES\b/,
+	},
+	{
+		concept: "remote JSON Web Key Set — the cache (#484, #525)",
+		home: "packages/core/src/jwks/remoteKeySet.mts",
+		definition: /(?:function|const)\s+createRemoteKeySetCache\b/,
 	},
 	{
 		// The call is the signature: a second `createRemoteJWKSet(` is a second
-		// memo with its own tuning and its own (or no) fetch seam.
-		concept: "remote JSON Web Key Set (#484, #525)",
+		// memo with its own tuning and its own (or no) fetch seam — in the home
+		// as anywhere else.
+		concept: "remote JSON Web Key Set — the one jose key set it builds (#484, #525)",
 		home: "packages/core/src/jwks/remoteKeySet.mts",
-		definition: /(?:function|const)\s+createRemoteKeySetCache\b|\bcreateRemoteJWKSet\s*\(/,
+		definition: /\bcreateRemoteJWKSet\s*\(/,
+		homeMatches: 1,
 	},
 	{
 		concept: "special-use address (#529)",
@@ -298,7 +313,7 @@ describe("design-vocabulary map (docs/design-vocabulary.md)", () => {
 			const home = join(repoRoot, row.home);
 			const homeSource = readFileSync(home, "utf8");
 			expect(
-				row.definition.test(homeSource),
+				(row.homeDefinition ?? row.definition).test(homeSource),
 				`${row.home} must define the concept it is mapped as the home of`,
 			).toBe(true);
 			if (row.homeMatches !== undefined) {
