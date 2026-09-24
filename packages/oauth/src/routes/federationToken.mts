@@ -459,9 +459,9 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		try {
 			revoked = await opts.refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
 		} catch (error) {
-			logger.warn(
-				`POST /oauth/federation/${name}/token: isFamilyRevoked failed (refresh store outage):`,
-				loggableError(error),
+			logger.error(
+				{ federation: name, store: "refresh_token_family", err: loggableError(error) },
+				"federation_token_store_unavailable",
 			);
 			return res.status(503).json({
 				error: "temporarily_unavailable",

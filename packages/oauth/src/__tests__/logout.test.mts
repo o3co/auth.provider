@@ -35,7 +35,12 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/logout.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
-import { expectProjectedWarn, storeReplyError } from "./_helpers/projectedLog.mjs";
+import {
+	expectProjectedWarn,
+	REFUSED_COMMAND_MARKER,
+	serialisedCalls,
+	storeReplyError,
+} from "./_helpers/projectedLog.mjs";
 
 /**
  * A federation that satisfies the contract, with whatever capability the case
@@ -1471,7 +1476,21 @@ describe("POST /oauth/federation/:name/logout", () => {
 			);
 			expect(res.status).toBe(503);
 			expect(res.body.error_description).toBe("refresh token store unavailable");
-			expectProjectedWarn(logger, /isFamilyRevoked failed/);
+			// An outage line like every other: error level, object-first, the
+			// store error's projection and never the error.
+			expect(logger.error).toHaveBeenCalledWith(
+				{
+					federation: "google",
+					store: "refresh_token_family",
+					err: expect.objectContaining({ name: "ReplyError" }),
+				},
+				"federation_logout_store_unavailable",
+			);
+			const line = logger.error.mock.calls.find(
+				([, event]) => event === "federation_logout_store_unavailable",
+			);
+			expect(line?.[0].err).not.toBeInstanceOf(Error);
+			expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
 		});
 
 		it("the session read", async () => {

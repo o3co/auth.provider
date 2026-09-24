@@ -347,9 +347,9 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				try {
 					revoked = await opts.refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
 				} catch (error) {
-					logger.warn(
-						`/oauth/federation/${name}/logout: isFamilyRevoked failed (refresh store outage):`,
-						loggableError(error),
+					logger.error(
+						{ federation: name, store: "refresh_token_family", err: loggableError(error) },
+						"federation_logout_store_unavailable",
 					);
 					return res.status(503).json({
 						error: "temporarily_unavailable",
