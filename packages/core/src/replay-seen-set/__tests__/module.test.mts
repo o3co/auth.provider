@@ -21,9 +21,9 @@ describe("memoryReplaySeenSetModule", () => {
 		// The reason is quoted verbatim into the refused boot message, so it is
 		// what an operator reads. The consumers are the WebAuthn challenge
 		// ceremony, the jwt-bearer registry verifier, `private_key_jwt` client
-		// assertions and — once it records its proofs here — DPoP. DPoP is named
-		// as conditional on being enabled: an operator with no DPoP module must
-		// not read DPoP as why their boot failed.
+		// assertions and DPoP, which records every proof it accepts here. DPoP
+		// is named as conditional on being enabled: an operator with no DPoP
+		// module must not read DPoP as why their boot failed.
 		const reason = memoryReplaySeenSetModule.replicaSafety?.unsafe
 			? memoryReplaySeenSetModule.replicaSafety.reason
 			: "";

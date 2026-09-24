@@ -87,7 +87,7 @@ export interface DPoPMechanismOptions {
 	 * Where each accepted proof's `jti` is recorded, so the same proof is
 	 * accepted once — core's `ReplaySeenSet`, the slot `private_key_jwt`,
 	 * ID-JAG and WebAuthn record their single-use values in. Records are
-	 * scoped `dpop-proof:<jkt>` ({@link DPOP_PROOF_REPLAY_SCOPE_PREFIX}): the
+	 * scoped `dpop-proof:<jkt>`: the
 	 * same `jti` under another key is a different proof, and no other
 	 * consumer's scope can collide with one. A per-process set is correct for
 	 * one replica only; replicas refuse each other's proofs only when they
@@ -164,8 +164,12 @@ const DEFAULT_REPLAY_TTL_SECONDS = 300;
  * (`client-assertion:<client_id>`, `jwt-bearer:id-jag:<issuer>`,
  * `webauthn:*`), and its canonical key is length-prefixed, so no record of
  * theirs can collide with one of these.
+ *
+ * Not exported, as no other seen-set scope is from its package: the scope
+ * is part of the stored key an operator can see in Redis, and the tests pin
+ * the literal rather than this name.
  */
-export const DPOP_PROOF_REPLAY_SCOPE_PREFIX = "dpop-proof:";
+const DPOP_PROOF_REPLAY_SCOPE_PREFIX = "dpop-proof:";
 
 // ---------------------------------------------------------------------------
 // Internal helpers
