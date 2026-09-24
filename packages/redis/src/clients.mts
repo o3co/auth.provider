@@ -722,7 +722,9 @@ export interface DeviceCodeStoreClient {
 	 * `expiresAtMs` — atomically. Resolves `false` when either key already
 	 * exists, and writes nothing in that case: a collision is a generator
 	 * failure, and overwriting would hand a new device the previous one's
-	 * pending approval.
+	 * pending approval. `false` is the collision signal the endpoint re-draws
+	 * for, so a client that cannot tell which happened — a reply it does not
+	 * understand — rejects instead, and the endpoint answers an outage.
 	 */
 	create(keys: DeviceCodeKeyspace, input: CreateDeviceCodeRecordInput): Promise<boolean>;
 	/**
