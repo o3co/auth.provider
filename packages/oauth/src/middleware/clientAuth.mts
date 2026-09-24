@@ -23,6 +23,7 @@ import {
 	type TokenEndpointAuthMethod,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler, Response } from "express";
+import { sanitizeErrorDescription } from "../errorDescription.mjs";
 import { createClientAssertionVerifier, hasClientAssertion } from "./clientAssertion.mjs";
 
 // Module augmentation: expose `req.oauthClient` for consumers who compose this
@@ -212,22 +213,29 @@ export function createClientAuthMiddleware(
 		fetch: opts.fetch,
 	});
 
+	// Every refusal is written by these three. This middleware answers on
+	// `/oauth/token`, `/oauth/introspect` (RFC 7662 §2.3) and `/oauth/revoke`
+	// (RFC 7009 §2.2.1), all in RFC 6749 §5.2's error format, so each
+	// description — its own and the assertion verifier's, which can quote a
+	// configured `tokenEndpointAuthMethod` — is held to that section's
+	// character set here rather than trusted at each call site.
+	function errorBody(error: string, errorDescription?: string) {
+		const body: { error: string; error_description?: string } = { error };
+		if (errorDescription !== undefined)
+			body.error_description = sanitizeErrorDescription(errorDescription);
+		return body;
+	}
+
 	function rejectBasic(res: Response, status: number, errorDescription?: string): void {
 		res.set("WWW-Authenticate", wwwAuth);
-		const body: { error: string; error_description?: string } = { error: "invalid_client" };
-		if (errorDescription !== undefined) body.error_description = errorDescription;
-		res.status(status).json(body);
+		res.status(status).json(errorBody("invalid_client", errorDescription));
 	}
 
 	function rejectPlain(res: Response, status: number, errorDescription?: string): void {
-		const body: { error: string; error_description?: string } = { error: "invalid_client" };
-		if (errorDescription !== undefined) body.error_description = errorDescription;
-		res.status(status).json(body);
+		res.status(status).json(errorBody("invalid_client", errorDescription));
 	}
 	function rejectAs(res: Response, status: number, error: string, errorDescription?: string): void {
-		const body: { error: string; error_description?: string } = { error };
-		if (errorDescription !== undefined) body.error_description = errorDescription;
-		res.status(status).json(body);
+		res.status(status).json(errorBody(error, errorDescription));
 	}
 
 	return async (req, res, next) => {
@@ -268,7 +276,7 @@ export function createClientAuthMiddleware(
 				rejectPlain(
 					res,
 					401,
-					"Only one client authentication method per request (RFC 6749 §2.3): a client_assertion cannot be combined with Basic credentials or client_secret",
+					"Only one client authentication method per request (RFC 6749 section 2.3): a client_assertion cannot be combined with Basic credentials or client_secret",
 				);
 				return;
 			}
@@ -362,7 +370,7 @@ export function createClientAuthMiddleware(
 			const description =
 				usedMethod === "none"
 					? "Client authentication is required for confidential clients"
-					: `tokenEndpointAuthMethod mismatch: client is configured for "${client.tokenEndpointAuthMethod}"`;
+					: `tokenEndpointAuthMethod mismatch: client is configured for '${client.tokenEndpointAuthMethod}'`;
 			if (basic.kind === "ok") {
 				rejectBasic(res, 401, description);
 			} else {

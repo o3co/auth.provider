@@ -21,9 +21,13 @@
  * endpoint's error redirect) both define `error_description` as
  * `%x20-21 / %x23-5B / %x5D-7E`: printable ASCII without `"` and `\`.
  * Descriptions are written by many hands — every grant a composition
- * installs, and the routes themselves — and several quote what the client
- * sent (a grant type, a scope, an audience, a token type, a
- * `response_type`), so the routes apply this where they write the field
+ * installs, the routes themselves, and client authentication (whose errors
+ * on `/oauth/introspect` and `/oauth/revoke` use the same format, RFC 7662
+ * §2.3 and RFC 7009 §2.2.1) — and several quote what the client sent (a
+ * grant type, a scope, an audience, a token type, a `response_type`) or a
+ * configured value (a client's `tokenEndpointAuthMethod`). So the token
+ * route, the authorization endpoint's error redirect and the
+ * client-authentication middleware apply this where they write the field,
  * rather than trusting each author to escape. Descriptions quote a value
  * with `'`, which the set allows.
  */
