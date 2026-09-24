@@ -199,6 +199,85 @@ describe("POST /oauth/revoke — a denylist that cannot be written", () => {
 	});
 });
 
+describe("POST /oauth/revoke — an access token with nothing left to deny", () => {
+	/** A denylist that refuses an expiry already past, as a store holding a TTL would. */
+	function strictDenylist(): AccessTokenDenylist & { readonly add: ReturnType<typeof vi.fn> } {
+		const real = createMemoryAccessTokenDenylist();
+		return {
+			kind: "strict",
+			has: (jti) => real.has(jti),
+			add: vi.fn(async (jti: string, expiresAtMs: number) => {
+				if (expiresAtMs <= Date.now()) {
+					throw new RangeError(`expiry ${expiresAtMs} is already past`);
+				}
+				await real.add(jti, expiresAtMs);
+			}),
+		};
+	}
+
+	/** An access token of this client's, with the given `exp` (seconds) and `jti`. */
+	async function accessTokenWith(claims: { exp: number; jti?: string }): Promise<string> {
+		return new SignJWT({
+			sub: "u1",
+			scope: "read",
+			client_id: CLIENT_ID,
+			...(claims.jti === undefined ? {} : { jti: claims.jti }),
+			exp: claims.exp,
+		})
+			.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "at+jwt" })
+			.setIssuer(ISSUER)
+			.setAudience(CLIENT_ID)
+			.setIssuedAt(Math.max(0, claims.exp - 3600))
+			.sign(secretKey);
+	}
+
+	const now = () => Math.floor(Date.now() / 1000);
+
+	for (const [label, claims] of [
+		["expired an hour ago", { exp: now() - 3600, jti: "at-expired" }],
+		["with exp 0, the epoch", { exp: 0, jti: "at-epoch" }],
+		["with no jti", { exp: now() + 3600 }],
+	] as const) {
+		it(`answers 200 for a token ${label}, and never asks the store`, async () => {
+			// RFC 7009 §2.1: revoking an expired token is harmless, and the
+			// route verifies with `ignoreExpiration` so the client that does
+			// not know gets its 200. There is nothing to deny: past `exp` the
+			// token fails verification on its own claims. So the store is not
+			// asked — one that refuses a past expiry must not turn a legal
+			// request into a 503.
+			const denylist = strictDenylist();
+			const logger = createMockLogger();
+			const app = appWith({ denylist, revocation: familyRevocation(false), logger });
+
+			for (const hint of ["access_token", undefined] as const) {
+				const token = await accessTokenWith(claims);
+				const res = await revoke(
+					app,
+					hint === undefined ? { token } : { token, token_type_hint: hint },
+				);
+				expect(res.status, `hint ${hint ?? "absent"}`).toBe(200);
+			}
+			expect(denylist.add).not.toHaveBeenCalled();
+			expect(logger.error).not.toHaveBeenCalled();
+		});
+	}
+
+	it("still records a live token of the client's", async () => {
+		const denylist = strictDenylist();
+		const app = appWith({
+			denylist,
+			revocation: familyRevocation(false),
+			logger: createMockLogger(),
+		});
+
+		const res = await revoke(app, { token: await accessToken(CLIENT_ID, "at-live") });
+
+		expect(res.status).toBe(200);
+		expect(denylist.add).toHaveBeenCalledTimes(1);
+		expect(await denylist.has("at-live")).toBe(true);
+	});
+});
+
 describe("POST /oauth/revoke — a refresh-token family store that cannot be written", () => {
 	for (const hint of ["refresh_token", "access_token", undefined] as const) {
 		it(`answers 503 temporarily_unavailable, not 200, for the client's own refresh token (hint ${hint ?? "absent"})`, async () => {
