@@ -609,6 +609,10 @@ describe("replayTtlSeconds must cover the whole iat acceptance window", () => {
 		const matched = ttlWarnings(warns);
 		expect(matched).toHaveLength(1);
 		expect(matched[0]?.obj).toMatchObject({ requiredTtlSeconds: 301 });
+		// The text must state the requirement it fires on. "below 2x" is false
+		// here — the TTL is exactly 2x — and would read as a spurious warning.
+		expect(matched[0]?.msg).toContain("below 2 × iatWindowSeconds + 1 (requiredTtlSeconds)");
+		expect(matched[0]?.msg).not.toMatch(/below 2x iatWindowSeconds;/);
 	});
 
 	it("does not warn at 2x + 1, nor for the defaults", () => {

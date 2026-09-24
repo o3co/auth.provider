@@ -591,7 +591,9 @@ interface ReplicaBootOptions {
 	readonly replayStore: "memory" | "redis";
 	readonly enabled?: boolean;
 	readonly wired?: DPoPReplayStore;
-	readonly logger: Logger;
+	/** Omitted: the composition wires no `logger` component. */
+	readonly logger?: Logger;
+	readonly replayTtlSeconds?: number;
 }
 
 const bootReplica = async (opts: ReplicaBootOptions) => {
@@ -607,13 +609,13 @@ const bootReplica = async (opts: ReplicaBootOptions) => {
 					"iat-window-seconds": 60,
 					"alg-whitelist": ["ES256"],
 					"replay-store": opts.replayStore,
-					"replay-store-ttl-seconds": 300,
+					"replay-store-ttl-seconds": opts.replayTtlSeconds ?? 300,
 				},
 				tokenBinding: { "dispatch-policy": "intent-explicit" },
 			},
 		},
 		pathResolver: (s: string) => s,
-		logger: opts.logger,
+		...(opts.logger === undefined ? {} : { logger: opts.logger }),
 		...(opts.wired === undefined ? {} : { dpopReplayStore: opts.wired }),
 	} as never as BootstrapMap;
 
@@ -753,6 +755,35 @@ describe("dpopModule — replay store under deployment.mode (replica safety)", (
 		expect([...shared.seen].some((key) => key.startsWith(`${jkt}:`))).toBe(true);
 
 		await handle.dispose();
+	});
+
+	it("reports a replay TTL below 2W + 1 on the console when no logger is wired", async () => {
+		// `reference.conf` points operators at this warning, and the replay
+		// store's own `dpop_replay_store_not_shared` falls back to
+		// `consoleLogger`. The mechanism's warnings must not be the ones that
+		// vanish in a composition that wires no `logger` component.
+		const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const { handle } = await bootReplica({
+				mode: "single",
+				replayStore: "memory",
+				// The default 60s window needs 121.
+				replayTtlSeconds: 120,
+			});
+
+			expect(consoleWarn).toHaveBeenCalledWith(
+				expect.objectContaining({
+					reason: "replay_ttl_below_iat_window",
+					replayTtlSeconds: 120,
+					requiredTtlSeconds: 121,
+				}),
+				expect.any(String),
+			);
+
+			await handle.dispose();
+		} finally {
+			consoleWarn.mockRestore();
+		}
 	});
 
 	it('boots under "multi" with DPoP installed but disabled: no replay store is built', async () => {
