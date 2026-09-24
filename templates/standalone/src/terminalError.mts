@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { errorEnvelope, type Logger } from "@o3co/auth-provider-core";
+import { errorEnvelope, type Logger, loggableError } from "@o3co/auth-provider-core";
 import type { ErrorRequestHandler } from "express";
 
 /**
@@ -30,6 +30,12 @@ import type { ErrorRequestHandler } from "express";
  * their own 4xx `status` and are the client's fault: keep the status, wrap it
  * in the shared envelope, and do not log them as server errors. Everything
  * else is logged with the request path and answered `500 server_error`.
+ *
+ * What is logged is core's `loggableError` projection of the error, never
+ * the error: an error a route let through can carry what an upstream said —
+ * an OAuth library puts the token answer it refused on the cause chain, an
+ * ioredis reply the command it answered — and a logger that serialises the
+ * error writes all of it out.
  *
  * Mount it AFTER every route (`app.use(handle.router)` included) — Express
  * routes errors only to handlers registered later.
@@ -54,7 +60,7 @@ export const createTerminalErrorHandler = (logger: Logger): ErrorRequestHandler 
 			res.status(httpStatus).json(errorEnvelope("invalid_request", description));
 			return;
 		}
-		logger.error({ err, endpoint: req.path }, "unhandled_request_error");
+		logger.error({ err: loggableError(err), endpoint: req.path }, "unhandled_request_error");
 		res.status(500).json(errorEnvelope("server_error", "Internal server error"));
 	};
 };

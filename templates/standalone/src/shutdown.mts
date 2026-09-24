@@ -15,7 +15,7 @@
  */
 
 import type { Server } from "node:http";
-import type { Logger } from "@o3co/auth-provider-core";
+import { type Logger, loggableError } from "@o3co/auth-provider-core";
 
 /**
  * Graceful shutdown for the scaffolded server (#290).
@@ -234,8 +234,10 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 			// Through the app logger, not `console.error`: a shutdown that
 			// failed to release its Redis connections is exactly the line an
 			// operator needs to find later, and a bare write is the one their
-			// pipeline drops.
-			logger.error({ err }, "graceful shutdown: cleanup failed");
+			// pipeline drops. The projection, not the error: `dispose()`
+			// rejects with every cleanup's own error on `errors`, a store's
+			// write — and what it wrote — among them.
+			logger.error({ err: loggableError(err) }, "graceful shutdown: cleanup failed");
 			exitCode = 1;
 			outcome = "cleanup-failed";
 		}
@@ -269,7 +271,7 @@ export function installGracefulShutdown(server: Server, options: GracefulShutdow
 				// here. Reporting "drained" and exiting 0 on it would tell an
 				// orchestrator the shutdown went cleanly when the listener did
 				// not actually come down.
-				logger.error({ err }, "graceful shutdown: server close failed");
+				logger.error({ err: loggableError(err) }, "graceful shutdown: server close failed");
 				void finish(1, "close-failed");
 				return;
 			}

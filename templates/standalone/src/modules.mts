@@ -30,6 +30,7 @@ import {
 	defineModule,
 	type LifecycleRegistrar,
 	type Logger,
+	loggableError,
 	type Module,
 	type ReadinessRegistrar,
 	registerBuiltinAuditSinks,
@@ -696,9 +697,11 @@ function getOrCreateClients(
 
 	// Attach an error handler so unhandled "error" events do not crash the
 	// process. Initial connection failures surface here; downstream adapter
-	// operations then fail visibly.
+	// operations then fail visibly. It logs the projection: ioredis puts the
+	// command a reply answered on the error, and for a refused handshake that
+	// is `AUTH` with the configured password.
 	io.on("error", (err: unknown) => {
-		logger.error({ err }, "standalone_redis_clients_error");
+		logger.error({ err: loggableError(err) }, "standalone_redis_clients_error");
 	});
 
 	lifecycleRegistrar?.register(async () => {

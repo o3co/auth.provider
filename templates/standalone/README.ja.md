@@ -1,6 +1,6 @@
 # @o3co/auth-provider-standalone
 
-最終更新: 2026-09-24
+最終更新: 2026-09-25
 
 auth.provider のデプロイ可能なサーバーテンプレート。これは composition root であり、設定を読み込み、モジュールをロードし、Express サーバーを起動する。`@o3co/create-auth-provider` で生成される。
 
@@ -13,7 +13,7 @@ auth.provider のデプロイ可能なサーバーテンプレート。これは
 - どのモジュールをどの順序で合成し、各ストアスロットをどのアダプターで埋めるか — [`src/buildModules.mts`](src/buildModules.mts)（[モジュール合成順序](#モジュール合成順序) を参照）
 - この scaffold だけが持つモジュール — 署名鍵ストア、クライアントリポジトリとユーザーリポジトリ、監査 sink、共有される唯一の Redis 接続、in-memory のユーザーセッションストア・コードリポジトリ・フェデレーショントークンストア、そしてフェデレーションの config bridge — [`src/modules.mts`](src/modules.mts)。これらがパッケージではなく scaffold 側にあるのは、どれもこのテンプレートの設定セクションから自分のコンポーネントを組み立てるためである。別のソースを使いたいデプロイは、同じ形のモジュールを自前で配線する
 - 設定をどこから読み、そのレイヤーをどう重ねるか — [`src/configPath.mts`](src/configPath.mts) と [`config/`](config/)
-- ホストプロセス: Express アプリ、そのセキュリティヘッダー、health / readiness / metrics の各ルート、起動処理、終端のエラーハンドラー — [`src/app.mts`](src/app.mts)
+- ホストプロセス: Express アプリ、そのセキュリティヘッダー、health / readiness / metrics の各ルート、起動処理、終端のエラーハンドラー — [`src/app.mts`](src/app.mts)。このコードがログに出すエラー — 処理されなかったリクエストのエラー、共有 Redis 接続の `error` イベント、失敗したシャットダウン — はすべて core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影としてログに出し、エラーそのものは出さない。エラーは上流や Redis が言ったことを運びうるためである（サーバーが接続を拒否したとき、接続のエラーは `AUTH` のハンドシェイクをパスワードごと運ぶ）
 - 具体的な logger と監査ストリーム（pino） — [`src/logger.mts`](src/logger.mts) — およびメトリクス（[`src/metrics.mts`](src/metrics.mts)）
 - プロセスのライフサイクル: drain の deadline 付きのシグナル処理 — [`src/shutdown.mts`](src/shutdown.mts)
 - パッケージング: `Dockerfile`、compose ファイル群、`Makefile`
@@ -657,7 +657,7 @@ probe は接続を開いた builder が登録するため、リストはこの�
 2. **新規接続は即座に停止**し、idle な keep-alive ソケットは解放される — これらは背後にリクエストの無いままサーバーを開いたままにするため、解放しなければ、閑散としたサーバーが deadline 全体を無駄に待つことになる。
 3. **in-flight リクエストには `drainTimeoutMs`**（デフォルト **10 秒**）が与えられ、その間に完了する。
 4. **deadline を過ぎると残りの接続は切断され、プロセスは非ゼロで終了する。** 常に `0` しか見ない orchestrator には、正常な drain と時間切れになった drain を区別できない。
-5. **`cleanup` は drain の後、終了の前に実行される** — `handle.dispose()`、すなわち逆トポロジカル順のコンポーネント cleanup と Redis／タイマーの drain である。そこでの失敗はこのサービス自身の logger（他のすべての行と同じ NDJSON）でログに出力され、終了コードにも反映される。throw した dispose でもプロセスは終了し、プロセスが固まることはない。
+5. **`cleanup` は drain の後、終了の前に実行される** — `handle.dispose()`、すなわち逆トポロジカル順のコンポーネント cleanup と Redis／タイマーの drain である。そこでの失敗はこのサービス自身の logger（他のすべての行と同じ NDJSON）でログに出力され、終了コードにも反映される。throw した dispose でもプロセスは終了し、プロセスが固まることはない。その行が運ぶのは失敗の core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影であり、エラーそのものではない: `dispose()` はすべての cleanup 自身のエラーを `errors` に載せて reject し、その中には失敗したストアへの書き込み — 書き込もうとしていた内容ごと — が含まれうる。
 
 6. **フェデレーショングラントが有効なら、`cleanup` には最長の refresh の尻尾に余裕を加えた時間が与えられる**（`src/shutdown.mts` の `cleanupAllowanceFor`）: `federationGrants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 秒で、45 秒を下回ることはない — 同梱の予算（25 + 3 + 5 + 12）ではちょうど 45 秒 — これは drain の 10 秒を継承するのではない。dispose が、ローテーションされた上流資格情報の書き込みを待つためである。予算を上げれば allowance もそれに応じて増えるので、orchestrator の grace もそれに合わせて上げること。無効なら、cleanup の予算は drain のものと同じままである。
 
