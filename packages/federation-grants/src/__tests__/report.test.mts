@@ -199,7 +199,7 @@ describe("createSanitizedLogger", () => {
 		expect(JSON.stringify(error.mock.calls[0])).not.toContain(SENTINEL);
 	});
 
-	it("carries an audited error under cause, and redacts any other value there", () => {
+	it("carries an audited error under cause, and redacts any other value there to one", () => {
 		// Core's `rate_limit.unavailable` names the limiter's error as
 		// `details.cause`, `auditedError`'s `{ name, code?, cause? }` — bounded
 		// and free of the error's text, so the trail keeps it. Anything else
@@ -231,7 +231,9 @@ describe("createSanitizedLogger", () => {
 		});
 		expect((recorded[1] as { details: Record<string, unknown> }).details).toEqual({
 			tag: "federation_grants",
-			cause: "[redacted]",
+			// Still an audited error: a sink that fixes the field's type on
+			// first sight must not see it change to a string here.
+			cause: { name: "[redacted]" },
 		});
 		expect(JSON.stringify(recorded)).not.toContain(SENTINEL);
 	});
@@ -257,7 +259,9 @@ describe("createSanitizedLogger", () => {
 		});
 		expect((recorded[0] as { details: Record<string, unknown> }).details).toEqual({
 			tag: "federation_grants",
-			cause: "[redacted]",
+			// Still an audited error: a sink that fixes the field's type on
+			// first sight must not see it change to a string here.
+			cause: { name: "[redacted]" },
 		});
 	});
 

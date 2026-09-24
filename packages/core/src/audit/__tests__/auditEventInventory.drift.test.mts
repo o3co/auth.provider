@@ -208,11 +208,17 @@ describe("built-in audit event inventory (#369)", () => {
  * (an OAuth code, a reason) wherever it appears; an error an event reports
  * travels as `details.cause`, always core's `auditedError(…)` projection.
  *
- * Read from the source, at every emission whose event is an object literal:
+ * Read from the source, at every emission whose event is an object literal
+ * (a `details` anywhere inside it, a conditional spread's included):
  * `details.error` has to be written as a string (a literal, a template, a
  * name, or a call to `auditErrorText` / `String`), and `details.cause` as a
- * call to `auditedError`. `AuditEvent`'s type says the same
- * (`audit-details.types.test.mts`); this catches what a cast would let by.
+ * call to `auditedError`. Where the details are built by a function in the
+ * same file (`details: sanitizeAuditDetails(event.details)`, a relaying
+ * sink), no `cause` that function writes may be a string: no string or
+ * template literal, `String(…)`, `auditErrorText(…)` or `.message` on any
+ * arm of `??`, `||` or `?:`, following same-file consts. `AuditEvent`'s type
+ * says the same (`audit-details.types.test.mts`); this catches what a cast
+ * would let by.
  *
  * The gap: a name or a property access counts as string-shaped whatever it
  * holds, because this reads syntax, not types. An `any`-typed `err` under
@@ -262,6 +268,94 @@ function detailsShapeViolations(file: string, source: string): string[] {
 			}
 		}
 	};
+	// Same-file consts and functions, for the helper that builds a relayed
+	// event's details.
+	const constants = new Map<string, ts.Expression>();
+	const functions = new Map<string, ts.Node>();
+	const collect = (node: ts.Node): void => {
+		if (ts.isFunctionDeclaration(node) && node.name !== undefined && node.body !== undefined) {
+			functions.set(node.name.text, node.body);
+		}
+		if (
+			ts.isVariableDeclaration(node) &&
+			ts.isIdentifier(node.name) &&
+			node.initializer !== undefined
+		) {
+			const init = node.initializer;
+			if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) {
+				functions.set(node.name.text, init.body);
+			} else {
+				constants.set(node.name.text, init);
+			}
+		}
+		ts.forEachChild(node, collect);
+	};
+	collect(sf);
+	/** Whether any arm of `value` writes a string: what `details.cause` may never be. */
+	const stringArm = (value: ts.Expression, seen: ReadonlySet<string> = new Set()): boolean => {
+		if (
+			ts.isStringLiteral(value) ||
+			ts.isNoSubstitutionTemplateLiteral(value) ||
+			ts.isTemplateExpression(value)
+		)
+			return true;
+		if (ts.isParenthesizedExpression(value) || ts.isAsExpression(value)) {
+			return stringArm(value.expression, seen);
+		}
+		if (ts.isConditionalExpression(value)) {
+			return stringArm(value.whenTrue, seen) || stringArm(value.whenFalse, seen);
+		}
+		if (ts.isBinaryExpression(value))
+			return stringArm(value.left, seen) || stringArm(value.right, seen);
+		if (ts.isPropertyAccessExpression(value) && value.name.text === "message") return true;
+		if (ts.isCallExpression(value) && ts.isIdentifier(value.expression)) {
+			return ["String", "auditErrorText", "sanitizeErrorText"].includes(value.expression.text);
+		}
+		if (ts.isIdentifier(value) && !seen.has(value.text)) {
+			const bound = constants.get(value.text);
+			return bound !== undefined && stringArm(bound, new Set([...seen, value.text]));
+		}
+		return false;
+	};
+	const checkHelper = (body: ts.Node): void => {
+		const walk = (node: ts.Node): void => {
+			if (ts.isObjectLiteralExpression(node)) {
+				for (const property of node.properties) {
+					if (
+						ts.isPropertyAssignment(property) &&
+						ts.isIdentifier(property.name) &&
+						property.name.text === "cause" &&
+						stringArm(property.initializer)
+					) {
+						found.push(
+							`${at(property)} details.cause can be a string: ${property.initializer.getText(sf)}`,
+						);
+					}
+				}
+			}
+			ts.forEachChild(node, walk);
+		};
+		walk(body);
+	};
+	const checkEvent = (event: ts.ObjectLiteralExpression): void => {
+		const walk = (node: ts.Node): void => {
+			if (
+				ts.isPropertyAssignment(node) &&
+				ts.isIdentifier(node.name) &&
+				node.name.text === "details"
+			) {
+				const value = node.initializer;
+				if (ts.isObjectLiteralExpression(value)) checkDetails(value);
+				if (ts.isCallExpression(value) && ts.isIdentifier(value.expression)) {
+					const helper = functions.get(value.expression.text);
+					if (helper !== undefined) checkHelper(helper);
+				}
+				return;
+			}
+			ts.forEachChild(node, walk);
+		};
+		walk(event);
+	};
 	const visit = (node: ts.Node): void => {
 		if (ts.isCallExpression(node)) {
 			const callee = node.expression.getText(sf);
@@ -271,18 +365,7 @@ function detailsShapeViolations(file: string, source: string): string[] {
 					: /(^|\.)sink\??\.record$/.test(callee)
 						? node.arguments[0]
 						: undefined;
-			if (event !== undefined && ts.isObjectLiteralExpression(event)) {
-				for (const property of event.properties) {
-					if (
-						ts.isPropertyAssignment(property) &&
-						ts.isIdentifier(property.name) &&
-						property.name.text === "details" &&
-						ts.isObjectLiteralExpression(property.initializer)
-					) {
-						checkDetails(property.initializer);
-					}
-				}
-			}
+			if (event !== undefined && ts.isObjectLiteralExpression(event)) checkEvent(event);
 		}
 		ts.forEachChild(node, visit);
 	};
@@ -312,5 +395,13 @@ describe("audit details keep one type per key", () => {
 				`emitAuditEvent(sink, { type: "x", details: { error: code, reason: "r", cause: auditedError(err) } });`,
 			),
 		).toBe(0);
+		// A relaying sink whose helper builds the details.
+		const relay = (fallback: string): string =>
+			`const REDACTED = { name: "[redacted]" };
+			const relayed = (details) => ({ ...rest(details), ...(details.cause === undefined ? {} : { cause: shape(details.cause) ?? ${fallback} }) });
+			sink.record({ ...event, ...(event.details === undefined ? {} : { details: relayed(event.details) }) });`;
+		expect(flagged(relay(`"[redacted]"`))).toBe(1);
+		expect(flagged(relay("String(details.cause)"))).toBe(1);
+		expect(flagged(relay("REDACTED"))).toBe(0);
 	});
 });
