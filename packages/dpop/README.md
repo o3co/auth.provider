@@ -147,9 +147,9 @@ Every accepted proof is recorded in core's `ReplaySeenSet` — the
 and consumed WebAuthn challenges are recorded in
 ([`core/src/replay-seen-set/types.mts`](../core/src/replay-seen-set/types.mts)).
 The check is one `markSeen`, which records the value and answers whether this
-call was the first to, as one atomic step: a check followed by a separate write
-would let two concurrent requests both accept the same proof. So of two
-requests carrying one proof, exactly one is accepted.
+call was the first to record it, as one atomic step: a check followed by a
+separate write would let two concurrent requests both accept the same proof.
+So of two requests carrying one proof, exactly one is accepted.
 
 - **Key.** The proof's `jti`, under the scope `dpop-proof:<jkt>`. The same
   `jti` under another key is a different proof, not a replay, and the scope

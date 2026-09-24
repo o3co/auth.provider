@@ -428,7 +428,10 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 			// the call that wrote the record, so of two concurrent requests
 			// carrying the same proof exactly one is accepted. Kept for
 			// `replayTtlSeconds` from now, which the iat window above bounds
-			// (see `DPoPMechanismOptions.replayTtlSeconds`).
+			// (see `DPoPMechanismOptions.replayTtlSeconds`). The deadline is
+			// absolute: an adapter turns it into a remaining life when it writes
+			// (Redis sends `PX` = deadline − its own now), so time spent reaching
+			// the store does not shorten the record below the window.
 			//
 			// Wrapped so that transport faults (Redis ECONNREFUSED, etc.)
 			// surface as `replay_store_unavailable` rather than leaking a raw
