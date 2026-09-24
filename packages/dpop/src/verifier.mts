@@ -216,7 +216,7 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				replayTtlSeconds,
 				requiredTtlSeconds,
 			},
-			"replayTtlSeconds is below 2x iatWindowSeconds; a proof can outlive its replay entry and be replayed while still inside its acceptance window",
+			"replayTtlSeconds is below 2 × iatWindowSeconds + 1 (requiredTtlSeconds); a proof can outlive its replay entry and be replayed while still inside its acceptance window",
 		);
 	}
 
