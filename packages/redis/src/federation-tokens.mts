@@ -259,9 +259,10 @@ export function createRedisFederationTokenStore(
 	const ttlSeconds = opts.ttl ?? DEFAULT_TTL_SECONDS;
 	// Its end, measured from now, must be within the Date range: past it the
 	// PX is no number Redis can take, and the index write it pairs with is
-	// refused after the SADD.
+	// refused after the SADD. A RangeError, as the shared expiry rule refuses
+	// every lifetime.
 	if (!isStorableLifetime(ttlSeconds * 1000)) {
-		throw new Error(
+		throw new RangeError(
 			"FederationTokenStore redis: ttl must be a positive finite number of seconds that ends within the Date range",
 		);
 	}
