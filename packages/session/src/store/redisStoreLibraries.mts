@@ -54,10 +54,28 @@ function isNotInstalled(reason: unknown, name: string): boolean {
 }
 
 /**
- * Load `redis` and `connect-redis`, or fail naming each one that is not
- * installed and what to install — rather than with the resolver's bare
- * "Cannot find package", which says neither that the package is an optional
- * peer of this one nor which setting asked for it.
+ * The install command a not-installed message gives: the peer ranges this
+ * package's manifest declares, so it cannot install a major the package does
+ * not support. `redisStoreLibraries.test.mts` holds it, and both READMEs, to
+ * the manifest.
+ */
+const INSTALL_COMMAND = "npm install redis@^6.2.1 connect-redis@^10.0.0";
+
+const messageOf = (reason: unknown): string =>
+	reason instanceof Error ? reason.message : String(reason);
+
+/**
+ * Load `redis` and `connect-redis`, or fail without losing a failure:
+ *
+ * - A library that is not installed is named, with the install command, in one
+ *   message for both — rather than the resolver's bare "Cannot find package",
+ *   which says neither that the package is an optional peer of this one nor
+ *   which setting asked for it. The resolver's error is the cause.
+ * - When the other library failed for a different reason, the message says so
+ *   and that failure is the cause instead: the message already names what is
+ *   missing, and the other failure is what it cannot restate.
+ * - A single failure of any other kind is rethrown unchanged; two are thrown
+ *   together as an `AggregateError`.
  *
  * @param imports — how each library is loaded; the default imports it.
  */
@@ -65,22 +83,40 @@ export async function loadRedisStoreLibraries(
 	imports: RedisStoreLibraryImports = IMPORTS,
 ): Promise<RedisStoreLibraries> {
 	const [redis, connectRedis] = await Promise.allSettled([imports.redis(), imports.connectRedis()]);
-	const notInstalled = [
-		...(redis.status === "rejected" && isNotInstalled(redis.reason, "redis")
-			? [{ name: "redis", reason: redis.reason as unknown }]
-			: []),
-		...(connectRedis.status === "rejected" && isNotInstalled(connectRedis.reason, "connect-redis")
-			? [{ name: "connect-redis", reason: connectRedis.reason as unknown }]
-			: []),
-	];
-	if (notInstalled.length > 0) {
+	if (redis.status === "fulfilled" && connectRedis.status === "fulfilled") {
+		return { createClient: redis.value.createClient, RedisStore: connectRedis.value.RedisStore };
+	}
+	const failures = [
+		{ name: "redis", result: redis },
+		{ name: "connect-redis", result: connectRedis },
+	].flatMap(({ name, result }) =>
+		result.status === "rejected"
+			? [
+					{
+						name,
+						reason: result.reason as unknown,
+						notInstalled: isNotInstalled(result.reason, name),
+					},
+				]
+			: [],
+	);
+	const notInstalled = failures.filter((failure) => failure.notInstalled);
+	const other = failures.filter((failure) => !failure.notInstalled);
+
+	const [firstMissing] = notInstalled;
+	if (firstMissing !== undefined) {
 		const names = notInstalled.map(({ name }) => `"${name}"`).join(" and ");
+		const [otherFailure] = other;
 		throw new Error(
-			`session.storage.type is "redis", which needs "redis" and "connect-redis" — optional peer dependencies of @o3co/auth-provider-session, which it does not install — and ${names} ${notInstalled.length === 1 ? "is" : "are"} not installed. Install them beside @o3co/auth-provider-session: npm install redis connect-redis`,
-			{ cause: notInstalled[0]?.reason },
+			`session.storage.type is "redis", which needs "redis" and "connect-redis" — optional peer dependencies of @o3co/auth-provider-session, which it does not install — and ${names} ${notInstalled.length === 1 ? "is" : "are"} not installed.${otherFailure === undefined ? "" : ` Loading "${otherFailure.name}" failed as well, for another reason; that error is the cause.`} Install them beside @o3co/auth-provider-session: ${INSTALL_COMMAND}`,
+			{ cause: otherFailure === undefined ? firstMissing.reason : otherFailure.reason },
 		);
 	}
-	if (redis.status === "rejected") throw redis.reason;
-	if (connectRedis.status === "rejected") throw connectRedis.reason;
-	return { createClient: redis.value.createClient, RedisStore: connectRedis.value.RedisStore };
+	if (other.length > 1) {
+		throw new AggregateError(
+			other.map(({ reason }) => reason),
+			`loading the Redis session store's libraries failed: ${other.map(({ name, reason }) => `"${name}": ${messageOf(reason)}`).join("; ")}`,
+		);
+	}
+	throw other[0]?.reason;
 }

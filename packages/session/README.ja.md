@@ -42,7 +42,7 @@
 ```sh
 npm install @o3co/auth-provider-session @o3co/auth-provider-core express express-session
 # session.storage.type = "redis"（core の reference.conf のデフォルト）なら、さらに:
-npm install redis connect-redis
+npm install redis@^6.2.1 connect-redis@^10.0.0
 ```
 
 - peer dependencies: `@o3co/auth-provider-core`、`express@^5.0.0`、`express-session@^1.17.0`。core が peer なのは、このパッケージが core を拡張する（`federationRedirectPolicies` の contribution 種別とそのスロット）からで、拡張は自分が解決した core にしか届かない。peer であれば、それは構成が持つ唯一の core になる。

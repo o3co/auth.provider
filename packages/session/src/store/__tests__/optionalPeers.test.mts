@@ -94,7 +94,7 @@ describe("the Redis session store's libraries are optional peers", () => {
 			expect(outcome.message).toContain(
 				`${missing} ${hidden.length === 1 ? "is" : "are"} not installed`,
 			);
-			expect(outcome.message).toContain("npm install redis connect-redis");
+			expect(outcome.message).toContain("npm install redis@^6.2.1 connect-redis@^10.0.0");
 		},
 	);
 });

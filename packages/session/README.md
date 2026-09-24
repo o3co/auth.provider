@@ -107,7 +107,7 @@ comment.
 ```sh
 npm install @o3co/auth-provider-session @o3co/auth-provider-core express express-session
 # and, for session.storage.type = "redis" (the default in core's reference.conf):
-npm install redis connect-redis
+npm install redis@^6.2.1 connect-redis@^10.0.0
 ```
 
 - Peer dependencies: `@o3co/auth-provider-core`, `express@^5.0.0` and
