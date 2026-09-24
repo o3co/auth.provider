@@ -90,11 +90,10 @@
  * `application/json` with `415 invalid_request` before it reads a field.
  *
  * It checks the media type itself rather than relying on no form parser
- * having run. Routes under `/oauth` share the prefix with `oauthModule`'s
- * router, which parses form bodies for every request beneath it; the route
- * `deviceGrantModule` mounts is placed ahead of that router, but a
- * composition that mounts this handler by hand may not be, and the rule is
- * the endpoint's either way.
+ * having run. In the route `deviceGrantModule` mounts none has — it mounts
+ * JSON only, and `oauthModule`'s router beside it parses its own routes
+ * only — but a composition that mounts this handler by hand may put one in
+ * front of it, and the rule is the endpoint's either way.
  *
  * ### The origin check is the module's, and runs first
  *
