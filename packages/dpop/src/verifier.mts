@@ -328,9 +328,14 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 				expectedHtu = normalizeHtu(buildCanonicalRequestUrl(issuerOrigin, req.originalUrl));
 				presentedHtu = normalizeHtu(proof.claims.htu);
 			} catch (err) {
+				// Fixed text: the canonicalization's error is the cause, not part
+				// of the message.
 				throw new DPoPError(
 					"malformed_proof",
-					`DPoP htu canonicalization failed: ${(err as Error).message}`,
+					"DPoP htu canonicalization failed",
+					undefined,
+					undefined,
+					{ cause: err },
 				);
 			}
 			if (expectedHtu !== presentedHtu) {

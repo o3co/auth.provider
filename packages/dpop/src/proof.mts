@@ -204,7 +204,8 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 	try {
 		jkt = await computeJkt(jwk as JWK);
 	} catch (err) {
-		throw new DPoPError("malformed_proof", `invalid JWK: ${(err as Error).message}`);
+		// Fixed text: jose's error is the cause, not part of the message.
+		throw new DPoPError("malformed_proof", "invalid JWK", undefined, undefined, { cause: err });
 	}
 
 	return {

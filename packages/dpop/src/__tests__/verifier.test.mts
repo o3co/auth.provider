@@ -289,6 +289,23 @@ describe("createDPoPMechanism", () => {
 		expect(result).not.toBeNull();
 	});
 
+	it("refuses an htu carrying a userinfo in fixed words, keeping what the client wrote out of the message", async () => {
+		// The userinfo is the client's own text. It used to reach the refusal's
+		// message through normalizeHtu's, and from there a protected resource's log.
+		const { proof } = await mintProof({ htu: "https://s3cret-user:pw@as.example/token" });
+		const refusal: unknown = await mechanism
+			.extract(makeReq(proof) as Request)
+			.catch((err: unknown) => err);
+		expect(refusal).toBeInstanceOf(DPoPError);
+		const { reason, message, cause } = refusal as DPoPError;
+		expect(reason).toBe("malformed_proof");
+		expect(message).toBe("DPoP htu canonicalization failed");
+		expect(cause).toBeInstanceOf(Error);
+		expect(JSON.stringify({ message, cause: (cause as Error).message })).not.toContain(
+			"s3cret-user",
+		);
+	});
+
 	it("rejects a proof whose htu names the spoofed forwarded origin", async () => {
 		const { proof } = await mintProof({ htu: "http://attacker.example/token" });
 		const req = makeReq(proof, "POST", "/token", "attacker.example", "http");
@@ -497,7 +514,8 @@ describe("createDPoPMechanism", () => {
 		await expect(mechanism.extract(makeReq(proof) as Request)).rejects.toMatchObject({
 			reason: "malformed_proof",
 			code: "invalid_dpop_proof",
-			message: expect.stringContaining("userinfo"),
+			// The reason is on the cause; the message is fixed text.
+			cause: expect.objectContaining({ message: expect.stringContaining("userinfo") }),
 		});
 	});
 

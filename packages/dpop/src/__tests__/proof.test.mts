@@ -181,6 +181,32 @@ describe("parseProof — structural validation only (no signature check)", () =>
 		});
 	});
 
+	// The library's text is not flattened into the refusal's message: a
+	// protected resource logs the refusal's projection, and the message is
+	// what any caller of `parseProof` prints. jose's error rides as `cause`,
+	// where a projection bounds it.
+	it("says 'invalid JWK' in fixed words and carries jose's error as the cause", async () => {
+		const { privateKey, publicKey } = await generateKeyPair("ES256");
+		const pubJwk = await exportJWK(publicKey);
+		const legitProof = await new SignJWT({ htm: "POST", htu: "https://as/token", iat: 1, jti: "z" })
+			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk: pubJwk })
+			.sign(privateKey);
+		const [_hdr, payload, sig] = legitProof.split(".");
+		const { crv: _crv, ...badJwk } = pubJwk as Record<string, unknown> & { crv?: unknown };
+		const fakeHeader = Buffer.from(
+			JSON.stringify({ typ: "dpop+jwt", alg: "ES256", jwk: badJwk }),
+		).toString("base64url");
+		const refusal: unknown = await parseProof(`${fakeHeader}.${payload}.${sig}`).catch(
+			(err: unknown) => err,
+		);
+		expect(refusal).toBeInstanceOf(DPoPError);
+		const { message, cause } = refusal as DPoPError;
+		expect(message).toBe("invalid JWK");
+		expect(cause).toBeInstanceOf(Error);
+		expect((cause as Error).message.length).toBeGreaterThan(0);
+		expect(message).not.toContain((cause as Error).message);
+	});
+
 	// Step 9: required claims
 	it("throws missing_claim when htm is absent", async () => {
 		const { privateKey, publicKey } = await generateKeyPair("ES256");
