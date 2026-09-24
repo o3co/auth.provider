@@ -133,8 +133,8 @@ Both forms must be non-empty, not `.` or `..`, and ≤ 214 characters.
 
 The generated project is a complete copy of
 [`templates/standalone`](../templates/standalone) (without `node_modules/` and
-`dist/`) plus the two files steps 6 and 7 write, `pnpm-workspace.yaml` and
-`pnpm-lock.yaml`. The template's README describes its layout — which file is
+`dist/`) plus `pnpm-workspace.yaml` (step 6) and, unless `--no-lockfile` was
+given or the lockfile step failed, `pnpm-lock.yaml` (step 7). The template's README describes its layout — which file is
 the composition, which is the host process, and what the scaffold owns.
 
 ## Programmatic API

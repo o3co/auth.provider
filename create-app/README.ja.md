@@ -132,8 +132,8 @@ CI は [`scripts/check-versions-json.mjs`](scripts/check-versions-json.mjs) を
 ## 生成される構造
 
 生成されるプロジェクトは [`templates/standalone`](../templates/standalone) の
-完全なコピー（`node_modules/` と `dist/` を除く）に、手順 6 と 7 が書き出す
-2 ファイル `pnpm-workspace.yaml` と `pnpm-lock.yaml` を加えたものです。どの
+完全なコピー（`node_modules/` と `dist/` を除く）に、`pnpm-workspace.yaml`（手順 6）と、
+`--no-lockfile` を指定せず lockfile の手順が失敗しなかった場合は `pnpm-lock.yaml`（手順 7）を加えたものです。どの
 ファイルがモジュール構成で、どれがホストプロセスで、スキャフォールドが何を
 持つかは、テンプレートの README に記述されています。
 
