@@ -13,8 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import { isStorableExpiry } from "../../adapters/expiry.mjs";
 import { canonicalKey } from "../../challenges/canonical-key.mjs";
 import { ChallengeStorageError } from "../../challenges/errors.mjs";
+import { type AmortizedSweepOptions, createAmortizedSweep } from "../../challenges/sweep.mjs";
 import type { ReplaySeenSet } from "../types.mjs";
 
 /**
@@ -42,20 +45,12 @@ export const DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL = 1_000;
  */
 export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS = 10_000;
 
-export interface MemoryReplaySeenSetOptions {
-	/**
-	 * Writing `markSeen` calls between sweeps. Lower trades work for memory.
-	 * A non-integer or non-positive value falls back to the default rather
-	 * than disabling the sweep.
-	 */
-	readonly sweepInterval?: number;
-	/**
-	 * The least time between two sweeps, in milliseconds. `0` sweeps on the
-	 * write interval alone. A negative or non-integer value falls back to
-	 * the default rather than being read as no floor.
-	 */
-	readonly minSweepIntervalMs?: number;
-}
+/**
+ * How the sweep is paced: `sweepInterval` writing `markSeen` calls, and at
+ * least `minSweepIntervalMs` between two sweeps (see
+ * {@link AmortizedSweepOptions}).
+ */
+export type MemoryReplaySeenSetOptions = AmortizedSweepOptions;
 
 /** In-process seen-set, with the record count exposed for observability. */
 export interface MemoryReplaySeenSet extends ReplaySeenSet {
@@ -80,25 +75,22 @@ export interface MemoryReplaySeenSet extends ReplaySeenSet {
  * nothing bounds it but time, and the sweep has to be its own step.
  *
  * Amortized on the writing `markSeen` rather than on a timer, as the
- * access-token denylist's is: a background interval would need lifecycle
- * registration to avoid holding the process open, and a write is the only
- * operation that grows the map. A replay is refused without writing and
- * pays nothing. A sweep runs once `sweepInterval` writes have accumulated
- * and at least `minSweepIntervalMs` has passed since the last one — the
- * count bounds the work per write, the floor bounds the scans per second.
- * The floor is measured on the monotonic clock (`performance.now()`), so a
- * wall clock stepped back cannot stall sweeps; which records are expired is
- * judged on the wall clock, as their `expiresAtMs` is.
- * Writes keep counting through the floor, so the first write after it
- * sweeps. The guarantee is bounded growth, not zero-lag reclamation: an
- * expired record is dropped within an interval, and `markSeen` / `contains`
- * keep answering correctly for one that has not been swept yet.
+ * access-token denylist's is, and paced by the schedule the memory
+ * ChallengeStore shares (`challenges/sweep.mts`): once `sweepInterval`
+ * writes have accumulated and at least `minSweepIntervalMs` has passed on the
+ * monotonic clock since the last sweep. A replay is refused without writing
+ * and pays nothing. The guarantee is bounded growth, not zero-lag
+ * reclamation: an expired record is dropped within an interval, and
+ * `markSeen` / `contains` keep answering correctly for one that has not been
+ * swept yet.
  *
  * The `getLive` helper is deliberately duplicated rather than shared with
  * the memory ChallengeStore — three similar lines is preferable to a
  * premature abstraction here, since the two stores have semantically
  * distinct contracts (`issue` throws on duplicate; `markSeen` returns false
- * on duplicate).
+ * on duplicate). The sweep's pacing is shared, because there the two are the
+ * same rule and its edge cases — the floor, the monotonic clock — are where a
+ * copy would drift.
  *
  * Per A1 §7.1.
  */
@@ -106,23 +98,10 @@ export function createMemoryReplaySeenSet(
 	options: MemoryReplaySeenSetOptions = {},
 ): MemoryReplaySeenSet {
 	const map = new Map<string, { expiresAtMs: number }>();
-	const sweepInterval =
-		typeof options.sweepInterval === "number" &&
-		Number.isInteger(options.sweepInterval) &&
-		options.sweepInterval > 0
-			? options.sweepInterval
-			: DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL;
-	const minSweepIntervalMs =
-		typeof options.minSweepIntervalMs === "number" &&
-		Number.isInteger(options.minSweepIntervalMs) &&
-		options.minSweepIntervalMs >= 0
-			? options.minSweepIntervalMs
-			: DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS;
-	let writesSinceSweep = 0;
-	// Monotonic (`performance.now()`), not wall-clock: the floor is an
-	// interval, and a wall clock stepped back would read as a negative one and
-	// stall sweeps until it caught up. Record expiry stays wall-clock.
-	let lastSweepAtMonotonicMs = Number.NEGATIVE_INFINITY;
+	const schedule = createAmortizedSweep(options, {
+		sweepInterval: DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL,
+		minSweepIntervalMs: DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS,
+	});
 
 	function getLive(key: string, nowMs: number): { expiresAtMs: number } | undefined {
 		const entry = map.get(key);
@@ -150,9 +129,9 @@ export function createMemoryReplaySeenSet(
 		async markSeen(scope, key, expiresAtMs) {
 			// NaN is never `<= now`, and ±Infinity is no expiry: without this the
 			// record would be kept forever (the sweep never drops it either).
-			if (!Number.isFinite(expiresAtMs)) {
+			if (!isStorableExpiry(expiresAtMs)) {
 				throw new RangeError(
-					`ReplaySeenSet.markSeen: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+					`ReplaySeenSet.markSeen: expiresAtMs must be a finite instant within the Date range (got ${String(expiresAtMs)})`,
 				);
 			}
 			const nowMs = Date.now();
@@ -164,15 +143,7 @@ export function createMemoryReplaySeenSet(
 				return false;
 			}
 			map.set(k, { expiresAtMs });
-			writesSinceSweep += 1;
-			if (writesSinceSweep >= sweepInterval) {
-				const monotonicMs = performance.now();
-				if (monotonicMs - lastSweepAtMonotonicMs >= minSweepIntervalMs) {
-					writesSinceSweep = 0;
-					lastSweepAtMonotonicMs = monotonicMs;
-					sweep(nowMs);
-				}
-			}
+			if (schedule.wrote()) sweep(nowMs);
 			return true;
 		},
 

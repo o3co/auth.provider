@@ -23,7 +23,6 @@
  */
 
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSubjectRevocation } from "../src/subjectRevocation.mjs";
@@ -31,24 +30,18 @@ import {
 	runSessionsOnlyRevocationContract,
 	runSubjectRevocationContract,
 } from "./subjectRevocation.contract.mjs";
+import { aheadOfServer, serverDeadlines, serverPasses, testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let raw: Redis;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	const at = await testRedis();
+	raw = new Redis(at);
+});
 
 afterAll(async () => {
 	raw?.disconnect();
-	await container?.stop();
 });
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 let suiteCounter = 0;
 runSubjectRevocationContract(
@@ -60,7 +53,7 @@ runSubjectRevocationContract(
 			keyPrefix: `t321r:${suiteCounter}:`,
 		});
 	},
-	{ waitPastExpiry: sleep },
+	{ expiry: serverDeadlines(() => raw) },
 );
 
 // #593, D13: the bundled adapter claims the capability, so it owes its
@@ -74,7 +67,7 @@ runSessionsOnlyRevocationContract(
 			keyPrefix: `t593c:${suiteCounter}:`,
 		});
 	},
-	{ waitPastExpiry: sleep },
+	{ expiry: serverDeadlines(() => raw) },
 );
 
 describe("SubjectRevocation — Redis-specific behaviour (#321)", () => {
@@ -85,18 +78,24 @@ describe("SubjectRevocation — Redis-specific behaviour (#321)", () => {
 		});
 
 	it("expires the watermark on the server's clock", async () => {
+		// Dated from, and waited out on, that clock (a `PXAT` deadline), not a
+		// 60 ms expiry and a 150 ms host sleep: on a loaded run the first read
+		// landed after the expiry.
 		const s = store("t321r:exp:");
-		await s.revokeBefore("u1", new Date(1_000), new Date(Date.now() + 60));
+		const at = await aheadOfServer(() => raw)();
+		await s.revokeBefore("u1", new Date(1_000), at);
 		expect((await s.revokedBefore("u1"))?.getTime()).toBe(1_000);
-		await sleep(150);
+		await serverPasses(() => raw)(at.getTime());
 		expect(await s.revokedBefore("u1")).toBeNull();
 	});
 
 	it("starts a fresh watermark after the previous one expired", async () => {
 		// The monotonic guard must not resurrect an expired entry's larger value.
 		const s = store("t321r:fresh:");
-		await s.revokeBefore("u2", new Date(9_000_000), new Date(Date.now() + 60));
-		await sleep(150);
+		const at = await aheadOfServer(() => raw)();
+		await s.revokeBefore("u2", new Date(9_000_000), at);
+		expect((await s.revokedBefore("u2"))?.getTime()).toBe(9_000_000);
+		await serverPasses(() => raw)(at.getTime());
 		await s.revokeBefore("u2", new Date(1_000), new Date(Date.now() + 600_000));
 		expect((await s.revokedBefore("u2"))?.getTime()).toBe(1_000);
 	});
@@ -116,13 +115,14 @@ describe("SubjectRevocation — Redis-specific behaviour (#321)", () => {
 	});
 
 	it("never truncates an in-force watermark's TTL under a shorter write", async () => {
+		// Read back as the absolute deadline (`PEXPIRETIME`), which no clock
+		// moves, rather than two PTTL readings taken a round-trip apart.
 		const s = store("t321r:ttl:");
-		await s.revokeBefore("u4", new Date(1_000), new Date(Date.now() + 600_000));
-		const afterLong = await raw.pttl("t321r:ttl:u4");
+		const long = new Date(Date.now() + 600_000);
+		await s.revokeBefore("u4", new Date(1_000), long);
+		expect(await raw.pexpiretime("t321r:ttl:u4")).toBe(long.getTime());
 		await s.revokeBefore("u4", new Date(2_000), new Date(Date.now() + 5_000));
-		const afterShort = await raw.pttl("t321r:ttl:u4");
-		expect(afterShort).toBeGreaterThan(5_000);
-		expect(Math.abs(afterShort - afterLong)).toBeLessThan(2_000);
+		expect(await raw.pexpiretime("t321r:ttl:u4")).toBe(long.getTime());
 	});
 });
 

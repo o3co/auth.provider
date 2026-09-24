@@ -15,7 +15,6 @@
  */
 import type { AccessTokenDenylist } from "@o3co/auth-provider-core";
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	createRedisAccessTokenDenylist,
@@ -23,25 +22,18 @@ import {
 	redisAccessTokenDenylistModule,
 } from "../src/access-token-denylist.mjs";
 import type { AccessTokenDenylistClient } from "../src/clients.mjs";
+import { relativeDeadline, serverPasses, testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let client: Redis;
 let keyCounter = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	client = new Redis({
-		host: container.getHost(),
-		port: container.getMappedPort(6379),
-	});
-}, 90_000);
+	const at = await testRedis();
+	client = new Redis(at);
+});
 
 afterAll(async () => {
 	await client?.quit();
-	await container?.stop();
 });
 
 function freshStore(): AccessTokenDenylist {
@@ -71,18 +63,36 @@ describe("createRedisAccessTokenDenylist", () => {
 		// The entry's TTL is the access token's remaining lifetime: past that the
 		// token fails verification on its `exp` anyway, so keeping the jti would
 		// only grow the keyspace forever.
+		//
+		// Waited out to the latest instant the key can live to on the server's
+		// clock (`relativeDeadline`): its PX runs from when the SET reached the
+		// server, so a 250 ms host sleep after a 150 ms life was outlasted by a
+		// command queued behind a loaded run.
 		const store = freshStore();
-		await store.add("j2", Date.now() + 150);
+		const exp = Date.now() + 1_000;
+		const end = await relativeDeadline(
+			() => client,
+			() => store.add("j2", exp),
+			(before) => exp - before,
+		);
 		expect(await store.has("j2")).toBe(true);
-		await new Promise((r) => setTimeout(r, 250));
+		await serverPasses(() => client)(end);
 		expect(await store.has("j2")).toBe(false);
 	});
 
 	it("last add() wins on the expiry", async () => {
+		// Past the latest instant the first add's key could have lived to, on
+		// the server's clock, the jti is still denied: the second add's expiry
+		// is the one in force.
 		const store = freshStore();
-		await store.add("j3", Date.now() + 100);
-		await store.add("j3", Date.now() + 5_000);
-		await new Promise((r) => setTimeout(r, 250));
+		const first = Date.now() + 1_000;
+		const firstEnd = await relativeDeadline(
+			() => client,
+			() => store.add("j3", first),
+			(before) => first - before,
+		);
+		await store.add("j3", Date.now() + 600_000);
+		await serverPasses(() => client)(firstEnd);
 		expect(await store.has("j3")).toBe(true);
 	});
 

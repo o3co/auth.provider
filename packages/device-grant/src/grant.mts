@@ -48,6 +48,18 @@
  * approval. The check reads the authenticated client identity rather than the
  * body — the body is attacker-controlled, and reading it here would be the
  * same defect the session grant fixed in #295.
+ *
+ * ### A store outage is 503, not a verdict
+ *
+ * A `poll` that throws is the device-code store failing, which the handler
+ * answers as every grant answers a store outage: `503
+ * temporarily_unavailable`, logged at error as
+ * `device_code_grant_store_unavailable` (`storeOutage.mts`). None of RFC
+ * 8628's four codes would be true of it, and a thrown error reached the host
+ * app's error handler as a `500`. It does not say the approval is still
+ * waiting: `poll` consumes an approval in the same script that reads it, and
+ * one whose reply was lost is gone — the device's retry is then answered
+ * `invalid_grant`, and the device starts again.
  */
 
 import type {
@@ -58,6 +70,7 @@ import type {
 	KeyStore,
 } from "@o3co/auth-provider-core";
 import { generateToken, generateTokenResponse, isLifetimeSeconds } from "@o3co/auth-provider-core";
+import { DEVICE_CODE_STORE_UNAVAILABLE, reportDeviceCodeStoreOutage } from "./storeOutage.mjs";
 
 export interface DeviceCodeGrantOptions {
 	readonly store: DeviceCodeStore;
@@ -65,6 +78,8 @@ export interface DeviceCodeGrantOptions {
 	readonly accessTokenExpiresIn: number;
 	readonly logger?: {
 		warn(obj: Record<string, unknown>, msg: string): void;
+		/** Where a store outage is reported; without it, core's console logger. */
+		error?(obj: Record<string, unknown>, msg: string): void;
 	};
 	readonly now?: () => number;
 }
@@ -100,7 +115,19 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 				return error(400, "invalid_request", "device_code is required");
 			}
 
-			const outcome = await options.store.poll(deviceCode, now());
+			let outcome: Awaited<ReturnType<DeviceCodeStore["poll"]>>;
+			try {
+				outcome = await options.store.poll(deviceCode, now());
+			} catch (err) {
+				reportDeviceCodeStoreOutage(options.logger, "device_code_grant_store_unavailable", err, {
+					clientId: client.clientId,
+				});
+				return error(
+					503,
+					DEVICE_CODE_STORE_UNAVAILABLE.error,
+					DEVICE_CODE_STORE_UNAVAILABLE.description,
+				);
+			}
 
 			switch (outcome.status) {
 				case "not_found":

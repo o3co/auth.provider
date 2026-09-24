@@ -27,29 +27,23 @@ import {
 	type FederationGrantIntentStore,
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisFederationGrantIntentStore } from "../src/federation-grant-intent-store.mjs";
 import { federationGrantIntentPairText } from "../src/internal/federation-grant-intent-codec.mjs";
 import { makeIoredisFederationGrantIntentStoreClient } from "../src/ioredis.mjs";
 import { runFederationGrantIntentStoreContract } from "./adapters.federation-grant-intent-store.contract.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let connections: Redis[] = [];
 let run = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	const at = { host: container.getHost(), port: container.getMappedPort(6379) };
+	const at = await testRedis();
 	connections = [new Redis(at), new Redis(at)];
-}, 90_000);
+});
 
 afterAll(async () => {
 	await Promise.all(connections.map((connection) => connection.quit()));
-	await container?.stop();
 });
 
 /** How the adapter spells a value inside a key — looked at from outside, as the probes must. */
@@ -331,5 +325,44 @@ describe("the Redis intent store, where the contract cannot look", () => {
 			}),
 		).toEqual({ outcome: "empty" });
 		await sweep();
+	});
+});
+
+describe("a reservation allowance whose deadline no clock reaches (the Date range)", () => {
+	it("is refused when the store is built, so no admission leaves the reservation index without a TTL", async () => {
+		// The admission's script reserves the place and sets the index's
+		// deadline last; 1e21 ms is sent as `1e+21`, which Redis refuses, and
+		// the reservation it had just written was left with no TTL.
+		run += 1;
+		prefix = `fgd${run}:`;
+		let refusal: unknown;
+		try {
+			const store = createRedisFederationGrantIntentStore({
+				client: makeIoredisFederationGrantIntentStoreClient(first()),
+				keyPrefix: prefix,
+				reservationAllowanceMs: 1e21,
+			});
+			await store.putIntent(fixture(), new Date()).catch(() => undefined);
+		} catch (err) {
+			refusal = err;
+		}
+		const keys = await first().keys(`${prefix}*`);
+		const withoutTtl: string[] = [];
+		for (const name of keys) if ((await first().pttl(name)) < 0) withoutTtl.push(name);
+		await sweep();
+		expect(withoutTtl).toEqual([]);
+		expect(refusal).toBeInstanceOf(RangeError);
+	});
+
+	it("is refused however far past it is, and one that ends inside it is taken", () => {
+		const build = (reservationAllowanceMs: number) => () =>
+			createRedisFederationGrantIntentStore({
+				client: makeIoredisFederationGrantIntentStoreClient(first()),
+				reservationAllowanceMs,
+			});
+		for (const bad of [8_640_000_000_000_001, 1e20, 1e21]) {
+			expect(build(bad), String(bad)).toThrow(RangeError);
+		}
+		expect(build(31_536_000_000)).not.toThrow();
 	});
 });

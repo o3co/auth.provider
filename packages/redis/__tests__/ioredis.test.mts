@@ -15,8 +15,10 @@
 // Lua atomicity (which is closed by construction at the Redis server).
 
 import { EventEmitter } from "node:events";
+import { DeviceCodeStoreError } from "@o3co/auth-provider-core";
 import type { Redis } from "ioredis";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createRedisDeviceCodeStore } from "../src/device-code-store.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 
 interface FakeIoredis {
@@ -507,6 +509,65 @@ describe("makeIoredisClients deviceCodeStoreClient — EVALSHA-first with NOSCRI
 			"devauth:{devauth}:code:dc",
 			"devauth:{devauth}:user:BCDFGHJK",
 		]);
+	});
+});
+
+describe("makeIoredisClients deviceCodeStoreClient.create — the script's reply, read strictly", () => {
+	const keys = {
+		codeKeyPrefix: "devauth:{devauth}:code:",
+		userKeyPrefix: "devauth:{devauth}:user:",
+	};
+	const input = {
+		deviceCode: "dc",
+		userCode: "BCDFGHJK",
+		expiresAtMs: 5_000,
+		fields: {
+			userCode: "BCDFGHJK",
+			clientId: "tv",
+			expiresAtMs: "5000",
+			intervalSeconds: "5",
+			status: "pending" as const,
+		},
+	};
+	const replying = (reply: unknown) =>
+		makeIoredisClients(
+			makeFakeIoredis({
+				evalsha: vi.fn().mockResolvedValue(reply),
+				eval: vi.fn().mockResolvedValue(reply),
+			}),
+		).deviceCodeStoreClient;
+
+	it("answers true for 1 (written) and false for 0 (a key already there)", async () => {
+		expect(await replying(1).create(keys, input)).toBe(true);
+		expect(await replying(0).create(keys, input)).toBe(false);
+	});
+
+	it("throws on any other reply, rather than reading it as a collision", async () => {
+		// `reply === 1` read everything else as "a key already exists": a
+		// proxy's "OK", a nil, a changed script's array — each became a
+		// collision, re-drawn five times and answered 500, when the store had
+		// said something this client does not understand.
+		for (const reply of [null, "OK", 2, "1", [1], { ok: 1 }]) {
+			await expect(replying(reply).create(keys, input), JSON.stringify(reply)).rejects.toThrow(
+				/unexpected reply/,
+			);
+		}
+	});
+
+	it("so the store reports it as a failure, not as the collision signal the endpoint re-draws for", async () => {
+		const store = createRedisDeviceCodeStore({ client: replying("OK"), keyPrefix: "devauth:" });
+		const refused = await store
+			.create({
+				deviceCode: "dc",
+				userCode: "BCDFGHJK",
+				clientId: "tv",
+				requestedScope: undefined,
+				expiresAtMs: Date.now() + 60_000,
+				intervalSeconds: 5,
+			})
+			.catch((err: unknown) => err);
+		expect(refused).toBeInstanceOf(Error);
+		expect(refused).not.toBeInstanceOf(DeviceCodeStoreError);
 	});
 });
 

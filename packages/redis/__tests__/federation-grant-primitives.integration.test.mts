@@ -23,28 +23,23 @@
 // what happens when two writers interleave inside one millisecond.
 
 import { Redis } from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { FederationGrantStoreClient } from "../src/clients.mjs";
 import { makeIoredisFederationGrantStoreClient } from "../src/ioredis.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let redis: Redis;
 let client: FederationGrantStoreClient;
 let run = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	redis = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
+	const at = await testRedis();
+	redis = new Redis(at);
 	client = makeIoredisFederationGrantStoreClient(redis);
-}, 90_000);
+});
 
 afterAll(async () => {
 	await redis?.quit();
-	await container?.stop();
 });
 
 const MIN = 60_000;

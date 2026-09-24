@@ -15,7 +15,7 @@
  */
 
 import { randomBytes } from "node:crypto";
-import type { FederationGrantLockResult } from "@o3co/auth-provider-core";
+import { type FederationGrantLockResult, isStorableLifetime } from "@o3co/auth-provider-core";
 
 /** What the lock needs from a connection: take it if nobody holds it, and free the one this caller holds. */
 export interface FederationGrantLockClient {
@@ -92,10 +92,12 @@ export function createFederationGrantLock(options: FederationGrantLockOptions): 
 			// A TTL of NaN compares as already expired: exclusion would be
 			// silently off, and two refreshes would present one refresh token
 			// (D12). An infinite one is not a lease.
-			if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+			// And each must end within the Date range: a lease or a wait past it
+			// is one no clock reaches the end of, and no PX Redis can take.
+			if (!isStorableLifetime(ttlMs)) {
 				throw new RangeError("acquireRefreshLock: ttlMs must be a positive finite number");
 			}
-			if (!Number.isFinite(waitForMs) || waitForMs < 0) {
+			if (!isStorableLifetime(waitForMs, { allowZero: true })) {
 				throw new RangeError("acquireRefreshLock: waitForMs must be a non-negative finite number");
 			}
 			const key = lockKey(grantId);

@@ -65,6 +65,8 @@ describe("oauth.deviceAuthorization.rateLimit — schema boundary", () => {
 		["a negative limit", { limit: -5, windowSeconds: 300 }],
 		["a fractional limit", { limit: 2.5, windowSeconds: 300 }],
 		["a fractional window", { limit: 5, windowSeconds: 0.5 }],
+		["a window longer than a year", { limit: 5, windowSeconds: 31_536_001 }],
+		["a window past the Date range", { limit: 5, windowSeconds: 1e13 }],
 		["a missing field", { limit: 5 }],
 	])("refuses %s at the config boundary", (_label, rateLimit) => {
 		// A zero here is not "no limit" — it is what an empty environment

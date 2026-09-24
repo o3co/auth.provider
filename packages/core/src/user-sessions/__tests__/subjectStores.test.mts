@@ -24,11 +24,7 @@ runSubjectSessionIndexContract(async () => createInMemorySubjectSessionIndex());
 runSubjectRevocationContract(async () => createInMemorySubjectRevocation());
 
 // #593, D13: the bundled adapter claims the capability, so it owes its contract.
-runSessionsOnlyRevocationContract(async () => createInMemorySubjectRevocation(), {
-	waitPastExpiry: async (ms) => {
-		await new Promise((r) => setTimeout(r, ms));
-	},
-});
+runSessionsOnlyRevocationContract(async () => createInMemorySubjectRevocation());
 
 const FUTURE = new Date(Date.now() + 3_600_000);
 

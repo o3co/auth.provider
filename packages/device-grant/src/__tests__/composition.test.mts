@@ -29,12 +29,17 @@
 import http from "node:http";
 import type {
 	AppConfig,
+	AuditEvent,
+	AuditSink,
 	ClientRepository,
 	CodeRepository,
+	DeviceCodeStore,
+	Logger,
 	UserRepository,
 } from "@o3co/auth-provider-core";
 import {
 	createApp,
+	createMemoryDeviceCodeStore,
 	createSymmetricKeyStore,
 	defineModule,
 	jwksModule,
@@ -50,7 +55,7 @@ import { oauthModule } from "@o3co/auth-provider-oauth";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 import express, { type RequestHandler } from "express";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { deviceGrantModule } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 
@@ -124,20 +129,34 @@ const ENABLED = {
  * the access-token denylist the fixture's `oauth.revocation.accessToken`
  * declares, and the repositories and key store.
  */
-const bootWith = async (config: AppConfig, ordered: readonly Module[]) => {
+const bootWith = async (
+	config: AppConfig,
+	ordered: readonly Module[],
+	// What a case swaps in: the device-code store, and the logger and audit sink it reads.
+	swap: {
+		readonly deviceCodeStore?: Module;
+		readonly logger?: Logger;
+		readonly auditSink?: AuditSink;
+	} = {},
+) => {
 	const handle = await createApp({
 		modules: [
 			...ordered,
 			jwksModule,
 			sessionModule,
-			memoryDeviceCodeStoreModule,
+			swap.deviceCodeStore ?? memoryDeviceCodeStoreModule,
 			memoryRateLimiterModule,
 			memorySessionStoresModule,
 			memoryFederationTokenStoreModule,
 			memoryAccessTokenDenylistModule,
 			deploymentProviders,
 		],
-		bootstrapComponents: { config, pathResolver: (s: string) => s },
+		bootstrapComponents: {
+			config,
+			pathResolver: (s: string) => s,
+			...(swap.logger ? { logger: swap.logger } : {}),
+			...(swap.auditSink ? { auditSink: swap.auditSink } : {}),
+		},
 	});
 	const app = express();
 	app.use(handle.router);
@@ -218,6 +237,9 @@ const postChunked = (
 			req.end(body.slice(half));
 		});
 	});
+
+/** A user code as the store keys it: upper case, separator dropped. */
+const normalised = (userCode: string): string => userCode.replace(/[^A-Za-z]/g, "").toUpperCase();
 
 /** A device starts the flow; returns the code a person would type. */
 const startDevice = async (app: express.Express): Promise<string> => {
@@ -717,6 +739,215 @@ describe("a route of another module beneath the device routes' paths", () => {
 				const json = await request(app).post(path).type("json").send('{"a":1}');
 				expect(json.status).toBe(200);
 				expect(json.body).toEqual({ raw: '{"a":1}', parsedBefore: null });
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
+});
+
+describe("deviceGrantModule beside oauthModule — a device-code store outage is 503 temporarily_unavailable", () => {
+	// The store can be down after the device asked for its codes: the human's
+	// lookup and decision and the device's poll then each reach a store that
+	// answers with a transport error. That is an outage, which the product
+	// answers 503 temporarily_unavailable and logs at error — never a 500, and
+	// never an answer about the code, which nobody could read.
+	const UNAVAILABLE = {
+		error: "temporarily_unavailable",
+		error_description: "the device authorization store is unavailable; retry later",
+	};
+
+	/** A reply a Redis client gives a command it could not send. */
+	const transportError = (): Error =>
+		Object.assign(new Error("Connection is closed."), { name: "Error", code: "ECONNRESET" });
+
+	/**
+	 * The memory store, with a switch: while `down`, every operation but
+	 * `create` rejects as a store whose connection has gone. `calls` records
+	 * each operation asked while down, so a case can say it was asked once.
+	 */
+	const storeWithOutage = () => {
+		const inner = createMemoryDeviceCodeStore();
+		const state = { down: false, calls: [] as string[] };
+		const guarded =
+			<A extends unknown[], R>(name: string, op: (...args: A) => Promise<R>) =>
+			(...args: A): Promise<R> => {
+				if (!state.down) return op(...args);
+				state.calls.push(name);
+				return Promise.reject(transportError());
+			};
+		const store: DeviceCodeStore = {
+			kind: "outage",
+			create: (input) => inner.create(input),
+			findPendingByUserCode: guarded("findPendingByUserCode", inner.findPendingByUserCode),
+			approve: guarded("approve", inner.approve),
+			deny: guarded("deny", inner.deny),
+			poll: guarded("poll", inner.poll),
+			remove: guarded("remove", inner.remove),
+		};
+		return {
+			state,
+			module: defineModule({
+				name: "test:device-code-store-with-outage",
+				provides: { deviceCodeStore: () => store },
+			}),
+		};
+	};
+
+	const recordingLogger = () => ({
+		warn: vi.fn(),
+		info: vi.fn(),
+		error: vi.fn(),
+		debug: vi.fn(),
+	});
+
+	it.each(orders)(
+		"answers the verification page's lookup, approval and denial with 503, logs each at error, and audits a decision whose outcome is unknown (%s)",
+		async (_label, ordered) => {
+			const config = makeConfig(ENABLED);
+			const outage = storeWithOutage();
+			const logger = recordingLogger();
+			const events: AuditEvent[] = [];
+			const { handle, app } = await bootWith(
+				config,
+				[sessionStoreModuleFor(config), ...ordered(config)],
+				{
+					deviceCodeStore: outage.module,
+					logger: logger as unknown as Logger,
+					auditSink: {
+						kind: "recording",
+						record: async (event) => {
+							events.push(event);
+						},
+					},
+				},
+			);
+			try {
+				const userCode = await startDevice(app);
+				const agent = request.agent(app);
+				await signIn(agent);
+				const { header, token } = await csrfToken(agent);
+
+				outage.state.down = true;
+				for (const action of ["lookup", "approve", "deny"] as const) {
+					const res = await agent
+						.post("/oauth/device/verification")
+						.set(header, token)
+						.set("User-Agent", "verification-page/1.0")
+						.send({ action, user_code: userCode });
+					expect(res.status, action).toBe(503);
+					expect(res.body, action).toEqual(UNAVAILABLE);
+					expect(res.headers["cache-control"], action).toContain("no-store");
+				}
+				// Each request asked the store once, and nothing else was tried.
+				expect(outage.state.calls).toEqual(["findPendingByUserCode", "approve", "deny"]);
+				expect(logger.error).toHaveBeenCalledTimes(3);
+				for (const [line, event] of logger.error.mock.calls) {
+					expect(event).toBe("device_verification_store_unavailable");
+					expect(line).toMatchObject({ err: { name: "Error", code: "ECONNRESET" } });
+					expect((line as { err: unknown }).err).not.toBeInstanceOf(Error);
+				}
+				expect(logger.error).not.toHaveBeenCalledWith(
+					expect.anything(),
+					"device_route_unexpected_error",
+				);
+
+				// An approval or a denial whose reply was lost may already be
+				// recorded — the store's script can run before the connection goes
+				// — and the device's poll can then mint tokens that no
+				// `device.approved` accounts for. So each is audited as an outcome
+				// nobody knows, naming the action; a lookup decides nothing and is
+				// not. It is attributed as the decision would have been — the
+				// signed-in subject — and the client cannot be known: the record
+				// could not be read.
+				const unknown = events.filter((event) => event.type === "device.decision_outcome_unknown");
+				expect(unknown.map((event) => event.details)).toEqual([
+					{ action: "approve" },
+					{ action: "deny" },
+				]);
+				for (const event of unknown) {
+					expect(event.subject).toBe("user-1");
+					expect(event.clientId).toBeUndefined();
+					expect(event.timestamp).toBeInstanceOf(Date);
+					expect(JSON.stringify(event)).not.toContain(normalised(userCode));
+				}
+				expect(events.some((event) => event.type === "device.approved")).toBe(false);
+
+				// Every other answer is what it was: back up, the same code is
+				// still pending, and the approval goes through.
+				outage.state.down = false;
+				const approved = await agent
+					.post("/oauth/device/verification")
+					.set(header, token)
+					.set("User-Agent", "verification-page/1.0")
+					.send({ action: "approve", user_code: userCode });
+				expect(approved.status).toBe(200);
+				expect(approved.body.status).toBe("approved");
+
+				// The unknown outcomes carry the attribution the decision event
+				// carries: the same subject, address and user agent.
+				const decided = events.find((event) => event.type === "device.approved");
+				expect(decided?.ip).toEqual(expect.any(String));
+				expect(decided?.userAgent).toBe("verification-page/1.0");
+				for (const event of unknown) {
+					expect({ subject: event.subject, ip: event.ip, userAgent: event.userAgent }).toEqual({
+						subject: decided?.subject,
+						ip: decided?.ip,
+						userAgent: decided?.userAgent,
+					});
+				}
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
+
+	it.each(orders)(
+		"answers the device's poll at /oauth/token with 503 temporarily_unavailable, and logs it at error (%s)",
+		async (_label, ordered) => {
+			const config = makeConfig(ENABLED);
+			const outage = storeWithOutage();
+			const logger = recordingLogger();
+			const { handle, app } = await bootWith(
+				config,
+				[sessionStoreModuleFor(config), ...ordered(config)],
+				{
+					deviceCodeStore: outage.module,
+					logger: logger as unknown as Logger,
+				},
+			);
+			try {
+				const started = await request(app)
+					.post("/oauth/device_authorization")
+					.type("form")
+					.send({ client_id: CLIENT_ID });
+				expect(started.status).toBe(200);
+				const poll = () =>
+					request(app).post("/oauth/token").type("form").send({
+						grant_type: DEVICE_CODE_GRANT_TYPE,
+						client_id: CLIENT_ID,
+						device_code: started.body.device_code,
+					});
+
+				outage.state.down = true;
+				const res = await poll();
+				// Written by oauth's token route, as every grant's error is.
+				expect(res.status).toBe(503);
+				expect(res.body).toEqual(UNAVAILABLE);
+				expect(outage.state.calls).toEqual(["poll"]);
+				expect(logger.error).toHaveBeenCalledWith(
+					expect.objectContaining({
+						clientId: CLIENT_ID,
+						err: expect.objectContaining({ name: "Error", code: "ECONNRESET" }),
+					}),
+					"device_code_grant_store_unavailable",
+				);
+
+				// Back up, the device is told what it was always told: keep polling.
+				outage.state.down = false;
+				const pending = await poll();
+				expect(pending.status).toBe(400);
+				expect(pending.body.error).toBe("authorization_pending");
 			} finally {
 				await handle.dispose();
 			}

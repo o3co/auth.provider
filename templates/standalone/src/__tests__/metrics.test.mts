@@ -138,13 +138,26 @@ describe("GET /metrics", () => {
 		// `close` fires without `finish` when a client or proxy gives up
 		// mid-handler, and those are disproportionately the slow and failing
 		// requests RED metrics exist to surface.
+		//
+		// Sequenced on the server's own events, never on a fixed wait: the abort
+		// goes out once the handler holds the request, and /metrics is read once
+		// the response has closed. A 30 ms sleep either side raced a loaded
+		// machine — an abort sent before the request reached its route was
+		// counted as `unmatched`, or not at all, and one whose close had not yet
+		// been processed was read as nothing.
 		const metrics = createMetrics();
 		const app = express();
 		app.use(metrics.middleware);
 		app.use(metrics.route(express, { probes: [], probeTimeoutMs: 100 }));
+		const handling = Promise.withResolvers<void>();
+		const closed = Promise.withResolvers<void>();
 		app.get("/slow", (_req, res) => {
-			// Never responds; the test aborts the socket instead.
-			void res;
+			// Never responds; the test aborts the socket instead. This listener is
+			// added after the metrics middleware's, and a response emits `close`
+			// to its listeners in the order they were added, so once it runs the
+			// request has been observed.
+			res.once("close", () => closed.resolve());
+			handling.resolve();
 		});
 
 		const server = await listenOnLoopback(app);
@@ -154,17 +167,19 @@ describe("GET /metrics", () => {
 			const pending = fetch(`http://127.0.0.1:${port}/slow`, {
 				signal: controller.signal,
 			}).catch(() => undefined);
-			await new Promise((resolve) => setTimeout(resolve, 30));
+			await handling.promise;
 			controller.abort();
 			await pending;
-			await new Promise((resolve) => setTimeout(resolve, 30));
+			await closed.promise;
 
 			const res = await request(app).get("/metrics");
 			const slow = res.text
 				.split("\n")
 				.filter((l) => l.startsWith("http_request_duration_seconds_count"))
 				.filter((l) => l.includes('route="/slow"'));
-			expect(slow.length).toBeGreaterThan(0);
+			// One request, counted once, under the route it had reached.
+			expect(slow).toHaveLength(1);
+			expect(slow[0]?.trim().endsWith(" 1")).toBe(true);
 		} finally {
 			server.close();
 		}

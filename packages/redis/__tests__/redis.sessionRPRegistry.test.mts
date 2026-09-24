@@ -15,37 +15,35 @@
  */
 
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSessionRPRegistry } from "../src/sessionRPRegistry.mjs";
 import { runSessionRPRegistryContract } from "./sessionRPRegistry.contract.mjs";
+import { serverDeadlines, testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let raw: Redis;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	const at = await testRedis();
+	raw = new Redis(at);
+});
 
 afterAll(async () => {
 	raw?.disconnect();
-	await container?.stop();
 });
 
 let suiteCounter = 0;
-runSessionRPRegistryContract(async () => {
-	suiteCounter += 1;
-	const { sessionRPRegistryClient } = makeIoredisClients(raw);
-	return createRedisSessionRPRegistry({
-		client: sessionRPRegistryClient,
-		keyPrefix: `t15:${suiteCounter}:`,
-	});
-});
+runSessionRPRegistryContract(
+	async () => {
+		suiteCounter += 1;
+		const { sessionRPRegistryClient } = makeIoredisClients(raw);
+		return createRedisSessionRPRegistry({
+			client: sessionRPRegistryClient,
+			keyPrefix: `t15:${suiteCounter}:`,
+		});
+	},
+	{ expiry: serverDeadlines(() => raw) },
+);
 
 // ---------------------------------------------------------------------------
 // Concurrency cases

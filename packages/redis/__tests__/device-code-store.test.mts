@@ -16,27 +16,22 @@
  */
 
 import { Redis } from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisDeviceCodeStore } from "#/device-code-store.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { runDeviceCodeStoreContract } from "./adapters.device-code-store.contract.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let raw: Redis;
 let keyCounter = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	const at = await testRedis();
+	raw = new Redis(at);
+});
 
 afterAll(async () => {
 	await raw?.quit();
-	await container?.stop();
 });
 
 /** Per-test prefix isolation, so the racing cases never share a record. */
@@ -86,6 +81,17 @@ describe("createRedisDeviceCodeStore — what is Redis-specific (#433)", () => {
 			`${prefix}{devauth}:code:${seed.deviceCode}`,
 			`${prefix}{devauth}:user:${seed.userCode}`,
 		]);
+	});
+
+	it("refuses a finite expiry past the Date range before the script writes anything", async () => {
+		// `1e20` is sent as a decimal PEXPIREAT Redis cannot take, and `1e21` as
+		// `1e+21`: either way the script had already written the record and its
+		// index, and both were left with no TTL at all.
+		for (const expiresAtMs of [8_640_000_000_000_001, 1e20, 1e21]) {
+			const prefix = freshPrefix();
+			await expect(storeAt(prefix).create({ ...seed, expiresAtMs })).rejects.toThrow(RangeError);
+			expect(await raw.keys(`${prefix}*`)).toEqual([]);
+		}
 	});
 
 	it("gives both keys the authorization's own expiry as their TTL", async () => {

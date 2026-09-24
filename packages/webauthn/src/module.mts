@@ -67,6 +67,7 @@ import {
 	defineModule,
 	type RateLimiter,
 	type RateLimitSpec,
+	readConfiguredRateLimitSpec,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE, type WebAuthnGrantDeps } from "./grant.mjs";
@@ -269,6 +270,39 @@ export const webauthnModule = defineModule<
 								tag: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
 							},
 							"webauthn_authentication_options_rate_limiter_not_shared",
+						);
+					}
+				} else {
+					// A shared limiter applies what its module seeded from the app
+					// config's `webauthn.rateLimit.authenticationOptions`, not this
+					// slot: the bundled limiter modules read config, and this slot
+					// may be hard-coded (`webauthnConfigSchema.parse({…})`). Without
+					// the key the route runs on the limiter's default; with a
+					// different one the limiter applies the key. Either way the
+					// budget in force is not the one this slot states, so boot says
+					// so, once, with both values and the key to set. The key is read
+					// as the seed reads it, so numeric strings agree with numbers. An
+					// explicit `limits.webauthn-authentication-options` in the
+					// limiter's own section, which it applies over both, is not
+					// visible here and is not compared.
+					const configured = (
+						deps.config as {
+							webauthn?: { rateLimit?: { authenticationOptions?: unknown } };
+						}
+					).webauthn?.rateLimit?.authenticationOptions;
+					const seeded = readConfiguredRateLimitSpec(configured);
+					if (
+						seeded === undefined ||
+						seeded.limit !== spec.limit ||
+						seeded.windowSeconds !== spec.windowSeconds
+					) {
+						logger.warn(
+							{
+								key: "webauthn.rateLimit.authenticationOptions",
+								configured: configured ?? null,
+								webauthnConfig: spec,
+							},
+							"webauthn_authentication_options_budget_mismatch",
 						);
 					}
 				}

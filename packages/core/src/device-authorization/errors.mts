@@ -24,13 +24,15 @@
  *   simply be made again. The device authorization endpoint answers it
  *   without re-drawing a code, because the store refused the slot, not the
  *   code.
- *
- * A code collision is deliberately *not* a reason here. The port lets any
- * adapter refuse a collision however it likes — the conformance suite asks
- * only that `create` rejects — and the endpoint treats every error that is
- * not `"full"` as one to re-draw for.
+ * - `"collision"` — `create` found a live record under the device code or the
+ *   user code it was handed. A generator failure, not traffic: the device
+ *   authorization endpoint re-draws both codes for this reason and for no
+ *   other. Every other error a store throws is an outage, answered
+ *   `503 temporarily_unavailable` without a retry — re-drawing cannot reach
+ *   a store that is down, so the collision has to be told apart, and an
+ *   adapter MUST signal it with this reason.
  */
-export type DeviceCodeStoreErrorReason = "full";
+export type DeviceCodeStoreErrorReason = "full" | "collision";
 
 /**
  * Single discriminated-reason error class for `DeviceCodeStore` adapters.

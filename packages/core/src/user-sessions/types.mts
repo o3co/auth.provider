@@ -130,6 +130,12 @@ export interface CreateUserSessionInput {
  */
 export interface UserSessionStore {
 	readonly kind: string;
+	/**
+	 * Record a new session. Rejects when `sid` already has one, when
+	 * `expiresAt` is already past, and — with a `RangeError`, recording
+	 * nothing — when `expiresAt` is an Invalid Date or `authTime` is an
+	 * Invalid Date or before the epoch.
+	 */
 	create(input: CreateUserSessionInput): Promise<void>;
 	get(sid: string): Promise<UserSession | null>;
 	delete(sid: string): Promise<void>;
@@ -146,7 +152,8 @@ export interface UserSessionStore {
  *
  * TTL contract: every `registerRP` MUST be called with the session's
  * `expiresAt`; the adapter writes the storage entry with TTL synced to
- * `expiresAt`.
+ * `expiresAt`. An Invalid Date — as `expiresAt` or as the RP's
+ * `registeredAt` — is a `RangeError`, and nothing is recorded.
  */
 export interface SessionRPRegistry {
 	readonly kind: string;
@@ -168,7 +175,7 @@ export interface SessionRPRegistry {
  * removeBySid. Per-family removal is not exposed.
  *
  * TTL contract: every `addFamilyId` MUST be called with the session's
- * `expiresAt`.
+ * `expiresAt`. An Invalid Date is a `RangeError`, and nothing is recorded.
  */
 export interface SessionFamilyIndex {
 	readonly kind: string;
@@ -197,7 +204,7 @@ export interface SessionFamilyIndex {
  * full cleanup via `removeBySid`.
  *
  * TTL contract: every `addFederation` MUST be called with the session's
- * `expiresAt`.
+ * `expiresAt`. An Invalid Date is a `RangeError`, and nothing is recorded.
  */
 export interface SessionFederationIndex {
 	readonly kind: string;
@@ -231,7 +238,7 @@ export interface SessionFederationIndex {
  *
  * TTL contract: every `addSid` MUST be called with the session's `expiresAt`,
  * so an abandoned session ages out of the index rather than accumulating
- * against a long-lived user.
+ * against a long-lived user. An Invalid Date is a `RangeError`, and nothing is recorded.
  */
 export interface SubjectSessionIndex {
 	readonly kind: string;

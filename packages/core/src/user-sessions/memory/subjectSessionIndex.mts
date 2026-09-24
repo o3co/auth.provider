@@ -59,6 +59,11 @@ export function createInMemorySubjectSessionIndex(): SubjectSessionIndex {
 
 		async addSid(subject, sid, expiresAt) {
 			const expiresAtMs = expiresAt.getTime();
+			// An Invalid Date's time is NaN, which is never `<= now`: the entry
+			// would never expire. A caller fault, refused before anything is kept.
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError("SubjectSessionIndex.addSid: expiresAt must be a valid date");
+			}
 			// An already-expired session is not worth indexing; it would only be
 			// pruned on the next read.
 			if (expiresAtMs <= Date.now()) return;

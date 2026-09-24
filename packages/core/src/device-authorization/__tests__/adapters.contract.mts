@@ -47,6 +47,23 @@ const seed = {
 	intervalSeconds: 5,
 };
 
+/**
+ * Expiries no store may be handed: not finite (NaN, from an Invalid Date or an
+ * unset setting; ±Infinity), or outside ECMAScript's Date range (±8.64e15 ms).
+ * NaN is never `<= now`, so it slipped past every past-expiry check; one past
+ * the Date range is a number Redis cannot take as a deadline (`1e21` is sent
+ * as `1e+21`) and a Date cannot hold, and a script that writes its record
+ * before setting the deadline left the record with no TTL at all.
+ */
+const UNSTORABLE_EXPIRIES = [
+	Number.NaN,
+	Number.POSITIVE_INFINITY,
+	Number.NEGATIVE_INFINITY,
+	8_640_000_000_000_001,
+	1e21,
+	-1e21,
+];
+
 export const runDeviceCodeStoreContract = (
 	name: string,
 	factory: DeviceCodeStoreContractFactory,
@@ -75,19 +92,62 @@ export const runDeviceCodeStoreContract = (
 			});
 		});
 
-		it("refuses to create a second record for the same device code", async () => {
+		it("refuses to create a second record for the same device code, saying it collided", async () => {
 			// A collision is a generator failure. Overwriting would hand the new
-			// device the old one's pending approval.
+			// device the old one's pending approval. It is signalled as one — the
+			// endpoint re-draws for that and for nothing else, so a store that
+			// cannot be reached is not mistaken for an unlucky draw.
 			await withStore(async (store) => {
 				await store.create(seed);
-				await expect(store.create({ ...seed, userCode: "MNPQRSTV" })).rejects.toThrow();
+				await expect(store.create({ ...seed, userCode: "MNPQRSTV" })).rejects.toMatchObject({
+					name: "DeviceCodeStoreError",
+					reason: "collision",
+				});
 			});
 		});
 
-		it("refuses to create a second record for the same user code", async () => {
+		it("refuses to create a second record for the same user code, saying it collided", async () => {
 			await withStore(async (store) => {
 				await store.create(seed);
-				await expect(store.create({ ...seed, deviceCode: "dc-bbbb" })).rejects.toThrow();
+				await expect(store.create({ ...seed, deviceCode: "dc-bbbb" })).rejects.toMatchObject({
+					name: "DeviceCodeStoreError",
+					reason: "collision",
+				});
+			});
+		});
+
+		it("refuses an expiry that is not a finite number within the Date range, and records nothing", async () => {
+			// NaN is never `<= now`: the memory adapter answered `pending` for such
+			// a record until a sweep found it, and the Redis script wrote the pair
+			// before `PEXPIREAT NaN` failed, leaving both keys with no TTL. A
+			// non-finite expiry is a caller fault.
+			await withStore(async (store) => {
+				for (const bad of UNSTORABLE_EXPIRIES) {
+					await expect(store.create({ ...seed, expiresAtMs: bad })).rejects.toThrow(RangeError);
+					expect(await store.findPendingByUserCode(seed.userCode, NOW)).toBeNull();
+					expect(await store.poll(seed.deviceCode, NOW)).toEqual({ status: "not_found" });
+				}
+				// Nothing was recorded, so neither code collides.
+				await store.create(seed);
+				expect(await store.poll(seed.deviceCode, NOW)).toEqual({ status: "pending" });
+			});
+		});
+
+		it("accepts a fractional expiry, and holds the authorization until exactly it", async () => {
+			// A code lifetime in fractional seconds makes one. Redis's PEXPIREAT
+			// takes whole milliseconds, so the keys' deadline is rounded up; the
+			// record's own expiry — what `poll` answers from — is the one asked for.
+			await withStore(async (store) => {
+				const expiresAtMs = seed.expiresAtMs + 0.5;
+				await store.create({ ...seed, expiresAtMs });
+				expect(await store.findPendingByUserCode(seed.userCode, NOW)).toMatchObject({
+					expiresAtMs,
+					status: "pending",
+				});
+				expect(await store.poll(seed.deviceCode, expiresAtMs - 0.25)).toEqual({
+					status: "pending",
+				});
+				expect(await store.poll(seed.deviceCode, expiresAtMs)).toEqual({ status: "expired" });
 			});
 		});
 

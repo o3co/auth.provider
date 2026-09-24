@@ -17,6 +17,23 @@ export interface AccessTokenDenylistContractFactory {
  * call this and MUST pass identically (parity is the whole point of having
  * two adapters share one contract).
  */
+/**
+ * Expiries no store may be handed: not finite (NaN, from an Invalid Date or an
+ * unset setting; ±Infinity), or outside ECMAScript's Date range (±8.64e15 ms).
+ * NaN is never `<= now`, so it slipped past every past-expiry check; one past
+ * the Date range is a number Redis cannot take as a deadline (`1e21` is sent
+ * as `1e+21`) and a Date cannot hold, and a script that writes its record
+ * before setting the deadline left the record with no TTL at all.
+ */
+const UNSTORABLE_EXPIRIES = [
+	Number.NaN,
+	Number.POSITIVE_INFINITY,
+	Number.NEGATIVE_INFINITY,
+	8_640_000_000_000_001,
+	1e21,
+	-1e21,
+];
+
 export function runAccessTokenDenylistContract(
 	name: string,
 	factory: AccessTokenDenylistContractFactory,
@@ -55,11 +72,11 @@ export function runAccessTokenDenylistContract(
 			expect(await store.has("j2")).toBe(false);
 		});
 
-		it("add refuses an expiry that is not a finite number, and records nothing", async () => {
+		it("add refuses an expiry that is not a finite number within the Date range, and records nothing", async () => {
 			// NaN is never `<= now`: the memory adapter kept such a jti denied
 			// forever, beyond the reach of its own sweep, and Redis was sent
 			// `PX NaN`. A non-finite expiry is a caller fault.
-			for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+			for (const bad of UNSTORABLE_EXPIRIES) {
 				await expect(store.add("j-bad", bad)).rejects.toThrow(RangeError);
 				expect(await store.has("j-bad")).toBe(false);
 			}

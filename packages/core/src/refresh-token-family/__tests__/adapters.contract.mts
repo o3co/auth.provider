@@ -27,6 +27,41 @@ export type RefreshTokenFamilyStoreContractFactory = () => Promise<RefreshTokenF
 const FUTURE = (): number => Date.now() + 60_000;
 const PAST = (): number => Date.now() - 1;
 
+/**
+ * How a test reaches an entry's expiry on the store's own terms.
+ *
+ * An in-process store judges expiry on this process's clock. A Redis key
+ * expires on the server's, which sits to either side of the host's, and a
+ * relative `PX` runs from when the command reached the server; a loaded run
+ * also reaches its next line late. A fixed sleep after a short expiry therefore
+ * either read an entry the store had already dropped, or checked one it had
+ * not dropped yet. The default is this process's clock; a Redis runner passes
+ * one that reads the server's `TIME`, or waits for the keys to be gone.
+ */
+export interface ExpiryClock {
+	/** Epoch milliseconds on the clock the store expires entries by. */
+	now(): Promise<number>;
+	/** Resolves once the store has let everything expiring at `at` go. */
+	passed(at: Date): Promise<void>;
+}
+
+const hostExpiry: ExpiryClock = {
+	now: async () => Date.now(),
+	passed: async (at) => {
+		while (Date.now() <= at.getTime()) {
+			await new Promise((r) => setTimeout(r, at.getTime() - Date.now() + 1));
+		}
+	},
+};
+
+/**
+ * An expiry a second ahead of whichever clock is later — the host's, which a
+ * write checks it against, and the store's, which expires it — so a read that
+ * follows the write lands well inside it however loaded the run is.
+ */
+const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
+	new Date(Math.max(Date.now(), await clock.now()) + 1_000);
+
 const FAMILY = (overrides: Partial<RefreshTokenFamily> = {}): RefreshTokenFamily => ({
 	familyId: overrides.familyId ?? "fam-1",
 	activeJti: overrides.activeJti ?? "jti-initial",
@@ -34,10 +69,30 @@ const FAMILY = (overrides: Partial<RefreshTokenFamily> = {}): RefreshTokenFamily
 	expiresAtMs: overrides.expiresAtMs ?? FUTURE(),
 });
 
+/**
+ * Expiries no store may be handed: not finite (NaN, from an Invalid Date or an
+ * unset setting; ±Infinity), or outside ECMAScript's Date range (±8.64e15 ms).
+ * NaN is never `<= now`, so it slipped past every past-expiry check; one past
+ * the Date range is a number Redis cannot take as a deadline (`1e21` is sent
+ * as `1e+21`) and a Date cannot hold, and a script that writes its record
+ * before setting the deadline left the record with no TTL at all.
+ */
+const UNSTORABLE_EXPIRIES = [
+	Number.NaN,
+	Number.POSITIVE_INFINITY,
+	Number.NEGATIVE_INFINITY,
+	8_640_000_000_000_001,
+	1e21,
+	-1e21,
+];
+
 export function runRefreshTokenFamilyStoreContract(
 	factory: RefreshTokenFamilyStoreContractFactory,
+	options: { readonly expiry?: ExpiryClock } = {},
 ): void {
 	describe("RefreshTokenFamilyStore contract", () => {
+		const expiry = options.expiry ?? hostExpiry;
+
 		it("registerFamily then findFamily returns the family", async () => {
 			const store = await factory();
 			const fam = FAMILY();
@@ -225,18 +280,24 @@ export function runRefreshTokenFamilyStoreContract(
 		});
 
 		it("findFamily returns null for expired family (lazy GC)", async () => {
+			// Dated from, and waited out on, the store's own clock (see
+			// `ExpiryClock`), not a 50 ms expiry and a 100 ms sleep.
 			const store = await factory();
-			const fam = FAMILY({ expiresAtMs: Date.now() + 50 });
+			const expiresAt = await aheadOf(expiry);
+			const fam = FAMILY({ expiresAtMs: expiresAt.getTime() });
 			await store.registerFamily(fam);
-			await new Promise((r) => setTimeout(r, 100));
+			expect(await store.findFamily(fam.familyId)).not.toBeNull();
+			await expiry.passed(expiresAt);
 			expect(await store.findFamily(fam.familyId)).toBeNull();
 		});
 
 		it("updateFamily returns not-found for expired family", async () => {
 			const store = await factory();
-			const fam = FAMILY({ expiresAtMs: Date.now() + 50 });
+			const expiresAt = await aheadOf(expiry);
+			const fam = FAMILY({ expiresAtMs: expiresAt.getTime() });
 			await store.registerFamily(fam);
-			await new Promise((r) => setTimeout(r, 100));
+			expect(await store.findFamily(fam.familyId)).not.toBeNull();
+			await expiry.passed(expiresAt);
 			const result = await store.updateFamily(fam.familyId, (cur) => ({
 				action: "commit",
 				family: cur,
@@ -262,6 +323,67 @@ export function runRefreshTokenFamilyStoreContract(
 				name: "RefreshTokenStorageError",
 				reason: "expired-at-issue",
 			});
+		});
+
+		it("registerFamily refuses an expiry that is not a finite number within the Date range, and records nothing", async () => {
+			// NaN is never `<= now`, so it slipped past the expired-at-issue check:
+			// the memory adapter kept the family for ever, and Redis was sent
+			// `PX NaN`. A non-finite expiry is a caller fault, not the timing race
+			// `expired-at-issue` names.
+			const store = await factory();
+			for (const bad of UNSTORABLE_EXPIRIES) {
+				await expect(store.registerFamily(FAMILY({ expiresAtMs: bad }))).rejects.toThrow(
+					RangeError,
+				);
+				expect(await store.findFamily("fam-1")).toBeNull();
+			}
+			// Nothing was recorded, so this is not a duplicate.
+			await store.registerFamily(FAMILY());
+			expect(await store.findFamily("fam-1")).not.toBeNull();
+		});
+
+		it("registerFamily accepts a fractional expiry, and keeps the family at least until it", async () => {
+			// A lifetime configured in fractional seconds makes one. Redis's PX
+			// takes whole milliseconds, so an adapter rounds the family's life up,
+			// never down — and reads back what it wrote.
+			const store = await factory();
+			const expiresAtMs = Date.now() + 60_000.5;
+			await store.registerFamily(FAMILY({ expiresAtMs }));
+			const found = await store.findFamily("fam-1");
+			expect(found?.familyId).toBe("fam-1");
+			expect(found?.expiresAtMs).toBeGreaterThan(Date.now() + 59_000);
+		});
+
+		it("updateFamily refuses a committed expiry that is not a finite number within the Date range, and changes nothing", async () => {
+			const store = await factory();
+			const fam = FAMILY();
+			await store.registerFamily(fam);
+			for (const bad of UNSTORABLE_EXPIRIES) {
+				await expect(
+					store.updateFamily(fam.familyId, (current) => ({
+						action: "commit",
+						family: { ...current, activeJti: "jti-bad", expiresAtMs: bad },
+					})),
+				).rejects.toThrow(RangeError);
+			}
+			const after = await store.findFamily(fam.familyId);
+			expect(after?.activeJti).toBe(fam.activeJti);
+			expect(Number.isFinite(after?.expiresAtMs)).toBe(true);
+		});
+
+		it("updateFamily accepts a fractional expiry, and keeps the family at least until it", async () => {
+			const store = await factory();
+			const fam = FAMILY();
+			await store.registerFamily(fam);
+			const expiresAtMs = Date.now() + 30_000.5;
+			const result = await store.updateFamily(fam.familyId, (current) => ({
+				action: "commit",
+				family: { ...current, activeJti: "jti-rotated", expiresAtMs },
+			}));
+			expect(result.outcome).toBe("committed");
+			const after = await store.findFamily(fam.familyId);
+			expect(after?.activeJti).toBe("jti-rotated");
+			expect(after?.expiresAtMs).toBeGreaterThan(Date.now() + 29_000);
 		});
 
 		it("concurrent registerFamily for same familyId: exactly one success, N-1 duplicate-family", async () => {

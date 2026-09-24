@@ -22,6 +22,41 @@ export type UserSessionStoreContractFactory = () => Promise<UserSessionStore>;
 const FUTURE = () => new Date(Date.now() + 60_000);
 const PAST = () => new Date(Date.now() - 1);
 
+/**
+ * How a test reaches an entry's expiry on the store's own terms.
+ *
+ * An in-process store judges expiry on this process's clock. A Redis key
+ * expires on the server's, which sits to either side of the host's, and a
+ * relative `PX` runs from when the command reached the server; a loaded run
+ * also reaches its next line late. A fixed sleep after a short expiry therefore
+ * either read an entry the store had already dropped, or checked one it had
+ * not dropped yet. The default is this process's clock; a Redis runner passes
+ * one that reads the server's `TIME`, or waits for the keys to be gone.
+ */
+export interface ExpiryClock {
+	/** Epoch milliseconds on the clock the store expires entries by. */
+	now(): Promise<number>;
+	/** Resolves once the store has let everything expiring at `at` go. */
+	passed(at: Date): Promise<void>;
+}
+
+const hostExpiry: ExpiryClock = {
+	now: async () => Date.now(),
+	passed: async (at) => {
+		while (Date.now() <= at.getTime()) {
+			await new Promise((r) => setTimeout(r, at.getTime() - Date.now() + 1));
+		}
+	},
+};
+
+/**
+ * An expiry a second ahead of whichever clock is later — the host's, which a
+ * write checks it against, and the store's, which expires it — so a read that
+ * follows the write lands well inside it however loaded the run is.
+ */
+const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
+	new Date(Math.max(Date.now(), await clock.now()) + 1_000);
+
 const INPUT = (overrides: Partial<CreateUserSessionInput> = {}): CreateUserSessionInput => ({
 	sid: overrides.sid ?? "sid-1",
 	sub: overrides.sub ?? "user-1",
@@ -31,8 +66,13 @@ const INPUT = (overrides: Partial<CreateUserSessionInput> = {}): CreateUserSessi
 	amr: overrides.amr,
 });
 
-export function runUserSessionStoreContract(factory: UserSessionStoreContractFactory): void {
+export function runUserSessionStoreContract(
+	factory: UserSessionStoreContractFactory,
+	options: { readonly expiry?: ExpiryClock } = {},
+): void {
 	describe("UserSessionStore contract", () => {
+		const expiry = options.expiry ?? hostExpiry;
+
 		it("create then get returns the session with claims", async () => {
 			const store = await factory();
 			await store.create(INPUT());
@@ -84,18 +124,52 @@ export function runUserSessionStoreContract(factory: UserSessionStoreContractFac
 			await expect(store.create(INPUT({ expiresAt: PAST() }))).rejects.toThrow();
 		});
 
+		it("create refuses an expiresAt that is not a valid date, and records nothing", async () => {
+			// An Invalid Date's `getTime()` is NaN, which is never `<= now`: the
+			// memory store kept such a session for ever, and Redis was sent
+			// `PX NaN`. A caller fault, and a RangeError, not a session.
+			const store = await factory();
+			await expect(
+				store.create(INPUT({ sid: "sid-invalid", expiresAt: new Date(Number.NaN) })),
+			).rejects.toThrow(RangeError);
+			expect(await store.get("sid-invalid")).toBeNull();
+			// Nothing was recorded, so this is not a duplicate.
+			await store.create(INPUT({ sid: "sid-invalid" }));
+			expect(await store.get("sid-invalid")).not.toBeNull();
+		});
+
+		it("create refuses an authTime that is not a valid date, or is before 1970, and records nothing", async () => {
+			// The memory store kept either and handed it back — an Invalid Date as
+			// the id_token's `auth_time`. The Redis store wrote either (NaN as JSON
+			// `null`) and then read the session back as corrupt: the user was
+			// logged out by their own login. Neither is a login time, so neither
+			// is a session.
+			const store = await factory();
+			for (const authTime of [new Date(Number.NaN), new Date(-1)]) {
+				await expect(store.create(INPUT({ sid: "sid-bad-auth", authTime }))).rejects.toThrow(
+					RangeError,
+				);
+				expect(await store.get("sid-bad-auth")).toBeNull();
+			}
+			// The epoch itself is a valid instant, and round-trips.
+			await store.create(INPUT({ sid: "sid-bad-auth", authTime: new Date(0) }));
+			expect((await store.get("sid-bad-auth"))?.authTime.getTime()).toBe(0);
+		});
+
 		it("get returns null for unknown sid", async () => {
 			const store = await factory();
 			expect(await store.get("ghost")).toBeNull();
 		});
 
 		it("get returns null after expiresAt elapsed", async () => {
+			// Dated from, and waited out on, the store's own clock (see
+			// `ExpiryClock`), not a 50 ms expiry and a 100 ms sleep: on a loaded
+			// run the first read landed after the expiry.
 			const store = await factory();
-			// Widen timing margins (per T2/T3 review note about CI flake on loaded runners).
-			const soon = new Date(Date.now() + 50);
-			await store.create(INPUT({ sid: "soon", expiresAt: soon }));
+			const expiresAt = await aheadOf(expiry);
+			await store.create(INPUT({ sid: "soon", expiresAt }));
 			expect(await store.get("soon")).not.toBeNull();
-			await new Promise((r) => setTimeout(r, 100));
+			await expiry.passed(expiresAt);
 			expect(await store.get("soon")).toBeNull();
 		});
 

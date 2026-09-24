@@ -15,6 +15,7 @@
  */
 
 import crypto from "node:crypto";
+import { isStorableLifetime } from "../adapters/expiry.mjs";
 import type { CodeRepository, CreateCodeInput } from "./CodeRepository.mjs";
 import type { Code } from "./types.mjs";
 
@@ -22,13 +23,38 @@ interface StoredCode extends Code {
 	expiresAt: number;
 }
 
+/**
+ * A code's lifetime, in seconds, is a positive finite number whose end is
+ * within the Date range (`adapters/expiry.mts`), or the code is refused. NaN is never `>= now`, so a code minted with it was redeemable for
+ * ever and outlived every sweep; ±Infinity is no lifetime; zero or less is a
+ * code dead on arrival, which the Redis repository cannot store at all.
+ */
+const requireLifetime = (seconds: number, what: string): number => {
+	if (!isStorableLifetime(seconds * 1000)) {
+		throw new RangeError(
+			`InMemoryCodeRepository: ${what} must be a positive finite number of seconds that ends within the Date range (got ${String(seconds)})`,
+		);
+	}
+	return seconds;
+};
+
 export class InMemoryCodeRepository implements CodeRepository {
 	private codes = new Map<string, StoredCode>();
 	private readonly defaultExpiresIn: number;
 	private cleanupInterval: ReturnType<typeof setInterval>;
 
 	constructor(options?: { defaultExpiresIn?: number }) {
-		this.defaultExpiresIn = options?.defaultExpiresIn ?? 600;
+		// Before the timer, so a refused default leaves nothing running. Whole
+		// seconds, as `RedisCodeRepository` requires of its default: the two
+		// read the same configuration and must refuse the same values. A
+		// per-call `expiresIn` may still be fractional in both.
+		const defaultExpiresIn = options?.defaultExpiresIn ?? 600;
+		if (!Number.isInteger(defaultExpiresIn)) {
+			throw new RangeError(
+				`InMemoryCodeRepository: defaultExpiresIn must be a positive whole number of seconds (got ${String(defaultExpiresIn)})`,
+			);
+		}
+		this.defaultExpiresIn = requireLifetime(defaultExpiresIn, "defaultExpiresIn");
 
 		this.cleanupInterval = setInterval(() => {
 			const now = Date.now();
@@ -39,8 +65,8 @@ export class InMemoryCodeRepository implements CodeRepository {
 	}
 
 	async createCode(params: CreateCodeInput): Promise<Code> {
+		const expiresIn = requireLifetime(params.expiresIn ?? this.defaultExpiresIn, "expiresIn");
 		const code = crypto.randomBytes(32).toString("base64url");
-		const expiresIn = params.expiresIn ?? this.defaultExpiresIn;
 		const stored: StoredCode = {
 			code,
 			client_id: params.client_id,

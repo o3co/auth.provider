@@ -62,6 +62,7 @@ import {
 	type FederationGrantIntentStore,
 	type FederationGrantIntentWrite,
 	federationGrantConsentExpiry,
+	isStorableLifetime,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { FederationGrantIntentStoreClient } from "./clients.mjs";
@@ -118,9 +119,14 @@ export function createRedisFederationGrantIntentStore(
 		// would stop sharing a slot — which is what every script here depends on.
 		throw RANGE("keyPrefix must not contain a brace");
 	}
+	// It must end within the Date range (core's `isStorableLifetime`): the
+	// admission's script reserves the place and sets the index's deadline last,
+	// so a deadline Redis refuses leaves the reservation index with no TTL.
 	const allowance = options.reservationAllowanceMs ?? FEDERATION_GRANT_RESERVATION_ALLOWANCE_MS;
-	if (!Number.isFinite(allowance) || allowance < 0) {
-		throw RANGE("reservationAllowanceMs must be a non-negative finite number");
+	if (!isStorableLifetime(allowance, { allowZero: true })) {
+		throw RANGE(
+			"reservationAllowanceMs must be a non-negative number of milliseconds that ends within the Date range",
+		);
 	}
 	const prefix = `${keyPrefix}{intents}:`;
 	const client = options.client;

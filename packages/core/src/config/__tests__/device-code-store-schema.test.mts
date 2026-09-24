@@ -77,6 +77,22 @@ describe("oauth.deviceAuthorization survives AppConfigSchema (#472)", () => {
 		});
 	});
 
+	it("refuses a verification window longer than a year", () => {
+		for (const windowSeconds of [31_536_001, 1e13]) {
+			expect(
+				() =>
+					AppConfigSchema.parse({
+						...base,
+						oauth: {
+							...base.oauth,
+							deviceAuthorization: { rateLimit: { limit: 5, windowSeconds } },
+						},
+					}),
+				String(windowSeconds),
+			).toThrow();
+		}
+	});
+
 	it("keeps the declared-absence spelling for the store slot (#363)", () => {
 		const parsed = AppConfigSchema.parse({
 			...base,

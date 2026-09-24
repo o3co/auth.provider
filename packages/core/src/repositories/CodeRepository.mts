@@ -25,6 +25,12 @@ import type { Code } from "./types.mjs";
  * reason the record's own fields are: a writer that forgot `nonce` or `acr`
  * would issue a code whose id_token lacks it. `expiresIn` alone may be left out: absent,
  * the repository's configured default applies.
+ *
+ * `expiresIn` is in seconds and must be a positive finite number whose end is
+ * within the Date range (`isStorableLifetime`) — fractional is fine, and a
+ * store that keeps whole milliseconds rounds it up. Anything else is a
+ * `RangeError` from `createCode`, and no code is stored. A repository's
+ * configured default is whole seconds.
  */
 export type CreateCodeInput = Omit<Code, "code" | "expiresIn"> & {
 	readonly expiresIn?: number | undefined;

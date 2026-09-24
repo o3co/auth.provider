@@ -1765,7 +1765,14 @@ export function makeIoredisClients(
 				[keys.codeKeyPrefix + input.deviceCode, keys.userKeyPrefix + input.userCode],
 				[input.deviceCode, String(input.expiresAtMs), ...fields],
 			);
-			return reply === 1;
+			// 1 written, 0 a key already there — and nothing else. Any other
+			// reply is not the collision signal: read as one, it had the endpoint
+			// re-draw five times against a store it could not understand.
+			if (reply === 1) return true;
+			if (reply === 0) return false;
+			throw new Error(
+				`deviceCodeStoreClient.create: unexpected reply from the create script (${typeof reply})`,
+			);
 		},
 		async findPending(keys, userCode, nowMs) {
 			const reply = await runScript(

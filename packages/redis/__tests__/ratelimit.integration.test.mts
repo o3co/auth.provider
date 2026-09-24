@@ -14,26 +14,94 @@
  * `Retry-After` because the adapter reported no reset time at all.
  */
 
+import { createMemoryRateLimiter } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisRateLimiter } from "../src/ratelimit.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let redis: Redis;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	redis = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	const at = await testRedis();
+	redis = new Redis(at);
+});
 
 afterAll(async () => {
 	await redis?.quit();
-	await container?.stop();
+});
+
+describe("createRedisRateLimiter on ioredis — a window no key can carry", () => {
+	// 1e13 s is 1e16 ms, past the Date range from any today; 1e17 s is a window
+	// the script's EXPIRE refuses after its INCR has run — the #269 shape, a
+	// counter with no TTL and a client 429'd for ever.
+	const PAST_THE_DATE_RANGE = [1e13, 1e17];
+
+	it("is refused when the limiter is built, and never replaced by a looser default", async () => {
+		// Dropping the spec let the default (60 per 60 s) apply where the
+		// operator wrote 5: a budget silently twelve times looser — and on the
+		// device verification route, the budget RFC 8628 §5.1 sizes the user
+		// code against. Refused, it fails the composition instead.
+		const client = makeIoredisClients(redis).rateLimiterClient;
+		for (const windowSeconds of PAST_THE_DATE_RANGE) {
+			expect(
+				() => createRedisRateLimiter({ client, limits: { tbig: { limit: 5, windowSeconds } } }),
+				String(windowSeconds),
+			).toThrow(RangeError);
+			expect(
+				() => createRedisRateLimiter({ client, defaultLimit: { limit: 5, windowSeconds } }),
+				String(windowSeconds),
+			).toThrow(RangeError);
+		}
+		expect(await redis.keys("tbig:*")).toEqual([]);
+	});
+
+	it("is refused by the in-process limiter too, so the two adapters give one answer", () => {
+		for (const windowSeconds of PAST_THE_DATE_RANGE) {
+			expect(
+				() =>
+					createMemoryRateLimiter({
+						limits: { tbig: { limit: 5, windowSeconds } },
+						defaultLimit: { limit: 60, windowSeconds: 60 },
+					}),
+				String(windowSeconds),
+			).toThrow(RangeError);
+		}
+	});
+});
+
+describe("both limiters — a spec neither can apply as written", () => {
+	it("is refused by each when it is built: a zero, NaN, fractional or negative window or limit", () => {
+		// The Redis limiter served its default in such a spec's place and the
+		// in-process one kept it, so one configuration meant two budgets.
+		const client = makeIoredisClients(redis).rateLimiterClient;
+		const SANE = { limit: 60, windowSeconds: 60 };
+		for (const bad of [0, Number.NaN, 1.5, -1]) {
+			for (const spec of [
+				{ limit: 5, windowSeconds: bad },
+				{ limit: bad, windowSeconds: 60 },
+			]) {
+				const label = `${String(spec.limit)} per ${String(spec.windowSeconds)} s`;
+				expect(
+					() => createRedisRateLimiter({ client, limits: { tbad: spec }, defaultLimit: SANE }),
+					`redis: ${label}`,
+				).toThrow(RangeError);
+				expect(
+					() => createMemoryRateLimiter({ limits: { tbad: spec }, defaultLimit: SANE }),
+					`memory: ${label}`,
+				).toThrow(RangeError);
+				expect(
+					() => createRedisRateLimiter({ client, defaultLimit: spec }),
+					`redis default: ${label}`,
+				).toThrow(RangeError);
+				expect(
+					() => createMemoryRateLimiter({ limits: {}, defaultLimit: spec }),
+					`memory default: ${label}`,
+				).toThrow(RangeError);
+			}
+		}
+	});
 });
 
 describe("createRedisRateLimiter on ioredis — resetAt (#458)", () => {

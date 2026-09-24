@@ -61,22 +61,8 @@ import {
 	checkTrustedProxyEntry,
 	describeTrustedProxyEntryRejection,
 } from "../net/trusted-proxy.mjs";
+import { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./durations.mjs";
 import { type RemovedKey, withRemovedKeys } from "./removed-keys.mjs";
-
-/**
- * Sanity ceiling for a duration expressed in whole seconds: one year.
- *
- * Not a policy — a deployment wanting a 400-day refresh token is a different
- * conversation — but a typo guard. The pairing with `.positive()` is what
- * actually matters (see `readinessTimeoutMs` for the same reasoning): HOCON
- * substitutes an exported-but-empty environment variable as `""`, and
- * `z.coerce.number()` turns `""` into `0`. A zero token lifetime mints tokens
- * that are already expired.
- */
-const MAX_DURATION_SECONDS = 31_536_000;
-
-/** The same one-year ceiling for the settings expressed in milliseconds. */
-const MAX_DURATION_MS = 31_536_000_000;
 
 /**
  * The one coercion every env-overridable boolean in this file goes through
@@ -163,7 +149,9 @@ const rateLimitSchema = z.object({
 
 const rateLimitSpecSchema = z.object({
 	limit: z.coerce.number().int().positive(),
-	windowSeconds: z.coerce.number().int().positive(),
+	// One year at most, the ceiling of every duration here: a window past the
+	// Date range is one the limiter adapters refuse when they are built.
+	windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
 });
 
 // IH-9: HS256 key rotation is symmetric — `previousSecrets` carries
@@ -925,7 +913,7 @@ export const CoreConfigSchema = z.object({
 				rateLimit: z
 					.object({
 						limit: z.coerce.number().int().positive(),
-						windowSeconds: z.coerce.number().int().positive(),
+						windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
 					})
 					.optional(),
 				// #363: the declared-absence spelling for the `deviceCodeStore`
@@ -1279,7 +1267,12 @@ export const fullSectionsSchema = z.object({
 			// Seconds. How long a record answers past the end of what it was
 			// authorized for (D16). Zero is a deployment that keeps no
 			// tombstones.
-			tombstoneRetention: durationFromEnv(z.number().int().nonnegative()).optional(),
+			// One year at most, the ceiling of every duration here. Past the
+			// Date range it is a deadline no store can keep, and the stores
+			// refuse it when they are built.
+			tombstoneRetention: durationFromEnv(
+				z.number().int().nonnegative().max(MAX_DURATION_SECONDS),
+			).optional(),
 			// Whether a subject-wide revocation may be ASKED to leave this
 			// subject's established grants standing (D13). An allowance and not
 			// an instruction: the caller still has to ask, what it asked for and
@@ -1780,7 +1773,8 @@ export const fullSectionsSchema = z.object({
 	redisFederationGrantStore: z
 		.object({
 			keyPrefix: z.string().optional(),
-			listingAllowanceMs: z.coerce.number().int().nonnegative().optional(),
+			// One year at most, as every duration here; see tombstoneRetention.
+			listingAllowanceMs: z.coerce.number().int().nonnegative().max(MAX_DURATION_MS).optional(),
 		})
 		.optional(),
 	redisFederationTokenStore: z

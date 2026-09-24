@@ -26,6 +26,41 @@ export type SubjectRevocationFactoryForContract = () => Promise<SubjectRevocatio
 const LONG = () => new Date(Date.now() + 600_000);
 
 /**
+ * How a test reaches an entry's expiry on the store's own terms.
+ *
+ * An in-process store judges expiry on this process's clock. A Redis key
+ * expires on the server's, which sits to either side of the host's, and a
+ * relative `PX` runs from when the command reached the server; a loaded run
+ * also reaches its next line late. A fixed sleep after a short expiry therefore
+ * either read an entry the store had already dropped, or checked one it had
+ * not dropped yet. The default is this process's clock; a Redis runner passes
+ * one that reads the server's `TIME`, or waits for the keys to be gone.
+ */
+export interface ExpiryClock {
+	/** Epoch milliseconds on the clock the store expires entries by. */
+	now(): Promise<number>;
+	/** Resolves once the store has let everything expiring at `at` go. */
+	passed(at: Date): Promise<void>;
+}
+
+const hostExpiry: ExpiryClock = {
+	now: async () => Date.now(),
+	passed: async (at) => {
+		while (Date.now() <= at.getTime()) {
+			await new Promise((r) => setTimeout(r, at.getTime() - Date.now() + 1));
+		}
+	},
+};
+
+/**
+ * An expiry a second ahead of whichever clock is later — the host's, which a
+ * write checks it against, and the store's, which expires it — so a read that
+ * follows the write lands well inside it however loaded the run is.
+ */
+const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
+	new Date(Math.max(Date.now(), await clock.now()) + 1_000);
+
+/**
  * Behaviour every {@link SubjectRevocation} adapter owes its callers (#321).
  *
  * The load-bearing property is **monotonicity**. Two credential changes in
@@ -41,13 +76,13 @@ const LONG = () => new Date(Date.now() + 600_000);
  *
  * Expiry-over-time cases are left to each adapter's own suite — a distributed
  * adapter's clock is the server's, which fake timers cannot move — but the
- * post-expiry *semantics* (a fresh watermark is not blocked by the expired
- * one's larger value) are pinned here, expressed with a TTL short enough to
- * wait out.
+ * post-expiry *semantics* (a truncated expiry would have lapsed) are pinned
+ * here, with an expiry a second out, waited out on the store's own clock
+ * (`ExpiryClock`).
  */
 export function runSubjectRevocationContract(
 	factory: SubjectRevocationFactoryForContract,
-	options: { readonly waitPastExpiry?: (ms: number) => Promise<void> } = {},
+	options: { readonly expiry?: ExpiryClock } = {},
 ): void {
 	describe("SubjectRevocation contract", () => {
 		it("returns null for a subject with no watermark", async () => {
@@ -86,10 +121,12 @@ export function runSubjectRevocationContract(
 			// Shortening an in-force watermark would retire the line while tokens
 			// it must kill are still presentable. Asserted through the surviving
 			// value: a truncated entry would have expired by the time it is read.
+			const expiry = options.expiry ?? hostExpiry;
 			const store = await factory();
 			await store.revokeBefore("u1", new Date(1_000), LONG());
-			await store.revokeBefore("u1", new Date(2_000), new Date(Date.now() + 50));
-			if (options.waitPastExpiry) await options.waitPastExpiry(150);
+			const short = await aheadOf(expiry);
+			await store.revokeBefore("u1", new Date(2_000), short);
+			await expiry.passed(short);
 			expect((await store.revokedBefore("u1"))?.getTime()).toBe(2_000);
 		});
 
@@ -113,7 +150,7 @@ export function runSubjectRevocationContract(
  */
 export function runSessionsOnlyRevocationContract(
 	factory: SubjectRevocationFactoryForContract,
-	options: { readonly waitPastExpiry?: (ms: number) => Promise<void> } = {},
+	options: { readonly expiry?: ExpiryClock } = {},
 ): void {
 	const capable = async (): Promise<SubjectRevocation & SupportsSessionsOnlyRevocation> => {
 		const store = await factory();
@@ -197,22 +234,23 @@ export function runSessionsOnlyRevocationContract(
 			// anchored to the boundary rather than to a clock reading: what it
 			// has to outlive is every grant consented BEFORE that instant, and a
 			// boundary dated 1970 plus a year covers grants that do not exist.
-			const wait = options.waitPastExpiry;
-			if (wait === undefined) return;
+			const expiry = options.expiry ?? hostExpiry;
 			const store = await capable();
 			const before = new Date();
-			await store.revokeBefore("c-u7", before, new Date(Date.now() + 1_000));
-			await wait(1_500);
+			const asked = await aheadOf(expiry);
+			await store.revokeBefore("c-u7", before, asked);
+			await expiry.passed(asked);
 			expect((await store.revokedBefore("c-u7"))?.getTime()).toBe(before.getTime());
 			expect((await store.grantsRevokedBefore("c-u7"))?.getTime()).toBe(before.getTime());
 		});
 
 		it("still lets a sessions-only stamp lapse on the expiry it was given", async () => {
-			const wait = options.waitPastExpiry;
-			if (wait === undefined) return;
+			const expiry = options.expiry ?? hostExpiry;
 			const store = await capable();
-			await store.revokeSessionsBefore("c-u8", new Date(1_000_000), new Date(Date.now() + 1_000));
-			await wait(1_500);
+			const asked = await aheadOf(expiry);
+			await store.revokeSessionsBefore("c-u8", new Date(1_000_000), asked);
+			expect((await store.revokedBefore("c-u8"))?.getTime()).toBe(1_000_000);
+			await expiry.passed(asked);
 			expect(await store.revokedBefore("c-u8")).toBeNull();
 		});
 	});

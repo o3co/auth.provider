@@ -77,8 +77,45 @@ describe("redisRateLimiter survives AppConfigSchema (#495)", () => {
 		).toThrow();
 	});
 
+	it("refuses a window longer than a year, the ceiling of every duration an operator writes", () => {
+		// A typo guard: 1e13 seconds is a window no Redis key can carry and no
+		// Date can end, and the adapter refusing it at boot is the second line.
+		for (const section of ["redisRateLimiter", "memoryRateLimiter"] as const) {
+			for (const spec of [
+				{ defaultLimit: { limit: 5, windowSeconds: 31_536_001 } },
+				{ limits: { token: { limit: 5, windowSeconds: 1e13 } } },
+			]) {
+				expect(
+					() => AppConfigSchema.parse({ ...base, [section]: spec }),
+					`${section} ${JSON.stringify(spec)}`,
+				).toThrow();
+			}
+			expect(
+				AppConfigSchema.parse({
+					...base,
+					[section]: { defaultLimit: { limit: 5, windowSeconds: 31_536_000 } },
+				})[section]?.defaultLimit,
+			).toEqual({ limit: 5, windowSeconds: 31_536_000 });
+		}
+	});
+
 	it("is absent when omitted — the default lives in the module", () => {
 		expect(AppConfigSchema.parse(base).redisRateLimiter).toBeUndefined();
+	});
+});
+
+describe("redisFederationGrantStore's listing allowance", () => {
+	it("is held to a year, the ceiling of every duration an operator writes", () => {
+		// Past the Date range it is a deadline Redis refuses after the script
+		// has reserved the grant in its subject's index, which is left with no
+		// TTL; the store refuses it too, as the second line.
+		const allowance = (listingAllowanceMs: unknown) =>
+			AppConfigSchema.parse({ ...base, redisFederationGrantStore: { listingAllowanceMs } })
+				.redisFederationGrantStore?.listingAllowanceMs;
+		expect(allowance(31_536_000_000)).toBe(31_536_000_000);
+		for (const value of [31_536_000_001, 1e21]) {
+			expect(() => allowance(value), String(value)).toThrow();
+		}
 	});
 });
 

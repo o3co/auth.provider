@@ -44,6 +44,7 @@ export const BUILT_IN_AUDIT_EVENT_TYPES = [
 	"consent.denied",
 	"consent.granted",
 	"device.approved",
+	"device.decision_outcome_unknown",
 	"device.denied",
 	"device.rate_limited",
 	// #593: offline delegation. Emitted by `retrieveFederationGrantToken` and

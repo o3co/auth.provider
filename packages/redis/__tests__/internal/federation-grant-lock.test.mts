@@ -22,10 +22,32 @@
 // and no other's. A real Redis proves exclusion — the shared contract suite
 // does that — and would prove none of these deterministically.
 
-import { describe, expect, it, vi } from "vitest";
-import { createFederationGrantLock } from "../../src/internal/federation-grant-lock.mjs";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { createFederationGrantLock } from "#/internal/federation-grant-lock.mjs";
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+afterEach(() => {
+	vi.useRealTimers();
+});
+
+/**
+ * Runs `body` on vitest's fake clock — `setTimeout` and `performance.now()`
+ * both — and drives every timer it sets to completion.
+ *
+ * What these cases assert is arithmetic on elapsed time: how long the lock
+ * says it waited, when it sent each attempt. Measured on the real clock the
+ * numbers carried whatever the machine was doing besides — a 5 ms poll that
+ * a loaded event loop ran 100 ms late read as a 143 ms wait — so the bounds
+ * had to be loose and still failed under load. On the fake clock, time moves
+ * only when a timer the lock or the stub set fires, so every number is exact.
+ */
+const onFakeClock = async <T,>(body: () => Promise<T>): Promise<T> => {
+	vi.useFakeTimers();
+	const pending = body();
+	await vi.runAllTimersAsync();
+	return pending;
+};
 
 interface Attempt {
 	readonly token: string;
@@ -71,17 +93,18 @@ const lock = (client: { tryLock: unknown; unlock: unknown }) =>
 	});
 
 describe("the refresh lock over a connection (#593, D12)", () => {
-	it("takes it on the first attempt and says it waited all but nothing", async () => {
-		// Not exactly zero, and not asserted to be: what is reported is what
-		// elapsed before the attempt was SENT, which on a loaded process is the
-		// millisecond or two this call itself took. That is honest — it is time
-		// the lease had not started for — and the rule that it excludes the
+	it("takes it on the first attempt and says it waited nothing", async () => {
+		// What is reported is what elapsed before the attempt was SENT — on a
+		// real process the millisecond or two this call itself took, which is
+		// honest: time the lease had not started for. On a clock that only
+		// timers move, that is nothing at all. The rule that it excludes the
 		// ANSWER's travel is what the next case pins.
 		const { client, attempts } = stub([true]);
-		const taken = await lock(client).acquire("g-1", { ttlMs: 30_000, waitForMs: 5_000 });
+		const taken = await onFakeClock(() =>
+			lock(client).acquire("g-1", { ttlMs: 30_000, waitForMs: 5_000 }),
+		);
 		expect(taken.acquired).toBe(true);
-		expect(taken.acquired && taken.waitedMs).toBeGreaterThanOrEqual(0);
-		expect(taken.acquired && taken.waitedMs).toBeLessThan(50);
+		expect(taken.acquired && taken.waitedMs).toBe(0);
 		expect(attempts).toHaveLength(1);
 		expect(attempts[0]?.ttlMs).toBe(30_000);
 	});
@@ -91,14 +114,16 @@ describe("the refresh lock over a connection (#593, D12)", () => {
 		// acknowledgement's own travel is spent too — core measures that part
 		// itself. A `waitedMs` that included it would say the lease started later
 		// than it did, which is the one direction that is unsafe.
-		const { client } = stub([false, true], 40);
-		const result = await lock(client).acquire("g-1", { ttlMs: 30_000, waitForMs: 5_000 });
+		const { client, attempts } = stub([false, true], 40);
+		const result = await onFakeClock(() =>
+			lock(client).acquire("g-1", { ttlMs: 30_000, waitForMs: 5_000 }),
+		);
 		expect(result.acquired).toBe(true);
 		if (!result.acquired) return;
-		// One refused attempt (40 ms) plus the poll interval, and not the second
-		// attempt's own 40 ms.
-		expect(result.waitedMs).toBeGreaterThanOrEqual(40);
-		expect(result.waitedMs).toBeLessThan(80);
+		// One refused attempt (40 ms) plus the 5 ms poll interval, and not the
+		// second attempt's own 40 ms — which is when that attempt was sent.
+		expect(result.waitedMs).toBe(45);
+		expect(attempts.map((attempt) => attempt.at - (attempts[0]?.at ?? 0))).toStrictEqual([0, 45]);
 	});
 
 	it("rounds the wait DOWN to a whole millisecond: a lower bound is never overstated", async () => {
@@ -135,23 +160,28 @@ describe("the refresh lock over a connection (#593, D12)", () => {
 
 	it("gives up when the wait is spent, and never asks again after the deadline", async () => {
 		const { client, attempts } = stub([false, false, false, false, false, false, false, false]);
-		const started = performance.now();
-		const result = await lock(client).acquire("g-1", { ttlMs: 30_000, waitForMs: 20 });
+		let started = 0;
+		const result = await onFakeClock(() => {
+			started = performance.now();
+			return lock(client).acquire("g-1", { ttlMs: 30_000, waitForMs: 20 });
+		});
 		expect(result).toStrictEqual({ acquired: false, reason: "timeout" });
-		const spent = performance.now() - started;
-		expect(spent).toBeLessThan(200);
-		for (const attempt of attempts) {
-			expect(attempt.at - started).toBeLessThanOrEqual(20 + 5);
-		}
+		// Every 5 ms from the start, and none at or past the 20 ms deadline: the
+		// deadline is looked at before each further attempt is sent.
+		expect(attempts.map((attempt) => attempt.at - started)).toStrictEqual([0, 5, 10, 15]);
+		expect(performance.now() - started).toBe(20);
 	});
 
 	it("asks exactly once when told to wait for nothing, and does not sleep", async () => {
 		const { client, attempts } = stub([false]);
-		const started = performance.now();
-		const result = await lock(client).acquire("g-1", { ttlMs: 30_000, waitForMs: 0 });
+		let started = 0;
+		const result = await onFakeClock(() => {
+			started = performance.now();
+			return lock(client).acquire("g-1", { ttlMs: 30_000, waitForMs: 0 });
+		});
 		expect(result).toStrictEqual({ acquired: false, reason: "timeout" });
 		expect(attempts).toHaveLength(1);
-		expect(performance.now() - started).toBeLessThan(50);
+		expect(performance.now() - started).toBe(0);
 	});
 
 	it("frees its own lock once, however many times it is asked to", async () => {

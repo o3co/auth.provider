@@ -660,7 +660,15 @@ export interface DeviceCodeRecordFields {
 export interface CreateDeviceCodeRecordInput {
 	readonly deviceCode: string;
 	readonly userCode: string;
-	/** The deadline both keys expire at, in epoch milliseconds. */
+	/**
+	 * The deadline both keys expire at, in whole epoch milliseconds within the
+	 * Date range. The script writes the pair before its `PEXPIREAT`, so a
+	 * deadline Redis refused there would leave both keys with no TTL:
+	 * `createRedisDeviceCodeStore` therefore refuses an expiry outside the
+	 * Date range before calling `create`, and rounds the one it passes up to a
+	 * whole millisecond. A client called some other way must hold to the same.
+	 * The record's own `fields.expiresAtMs` stays the exact expiry.
+	 */
 	readonly expiresAtMs: number;
 	readonly fields: DeviceCodeRecordFields;
 }
@@ -714,7 +722,9 @@ export interface DeviceCodeStoreClient {
 	 * `expiresAtMs` — atomically. Resolves `false` when either key already
 	 * exists, and writes nothing in that case: a collision is a generator
 	 * failure, and overwriting would hand a new device the previous one's
-	 * pending approval.
+	 * pending approval. `false` is the collision signal the endpoint re-draws
+	 * for, so a client that cannot tell which happened — a reply it does not
+	 * understand — rejects instead, and the endpoint answers an outage.
 	 */
 	create(keys: DeviceCodeKeyspace, input: CreateDeviceCodeRecordInput): Promise<boolean>;
 	/**

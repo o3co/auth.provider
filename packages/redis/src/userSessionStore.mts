@@ -143,7 +143,8 @@ const fromEnvelope = (e: Envelope): UserSession => ({
  *
  * Atomicity:
  *  - `create` uses SET NX PX — atomic insert-only, same primitive as A1
- *    ChallengeStore.issue and A3 registerFamily.
+ *    ChallengeStore.issue and A3 registerFamily. The PX is whole milliseconds
+ *    because a Date is; an Invalid Date is a RangeError before Redis is asked.
  *  - `get` is a read-only GET (no PTTL round-trip needed; expiresAtMs is
  *    embedded in the JSON envelope and the SET PX TTL eventually deletes
  *    the key).
@@ -154,7 +155,23 @@ export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions):
 	return {
 		kind: "redis",
 		async create(input) {
-			const ttlMs = input.expiresAt.getTime() - Date.now();
+			const expiresAtMs = input.expiresAt.getTime();
+			// An Invalid Date's time is NaN, and `NaN <= 0` is false: without this
+			// it reached Redis as `PX NaN`. A caller fault, not a session.
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError(`UserSession ${input.sid}: expiresAt must be a valid date`);
+			}
+			// `isValidEnvelope` reads back a non-negative timestamp only, so an
+			// Invalid Date (stored as JSON `null`) or a pre-epoch authTime was
+			// written and then read as corrupt: the session vanished on its first
+			// read. Refused before Redis is asked.
+			const authTimeMs = input.authTime.getTime();
+			if (!Number.isFinite(authTimeMs) || authTimeMs < 0) {
+				throw new RangeError(
+					`UserSession ${input.sid}: authTime must be a valid date at or after the epoch`,
+				);
+			}
+			const ttlMs = expiresAtMs - Date.now();
 			if (ttlMs <= 0) {
 				throw new Error(`UserSession ${input.sid}: expiresAt is in the past`);
 			}

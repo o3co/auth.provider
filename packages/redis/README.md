@@ -279,6 +279,49 @@ above); a composition that wires a module without providing its client slot
 fails stage-1 boot with `missing-required-component` — named at boot, not at
 the first command.
 
+## Expiries and key TTLs
+
+Every adapter in this package that hands Redis a deadline — each one in the
+table below — turns the expiry or lifetime it is given into a key TTL by one
+rule, and the core ports state the same refusals, so the in-process adapters
+give the same answers:
+
+- **Whole milliseconds, rounded up.** `PX` and `PEXPIREAT` take whole
+  milliseconds and Redis refuses anything else. A fractional expiry — a JWT
+  `NumericDate` times 1000, a lifetime in fractional seconds — is rounded up,
+  so a key outlives the instant it was asked to live until by under a
+  millisecond rather than dying before it.
+- **An expiry outside the Date range is refused before Redis is asked**, with
+  a `RangeError`: NaN (an Invalid Date, an unset setting), ±Infinity, or a
+  finite number past ±8.64e15 ms (core's `isStorableExpiry`; a lifetime must
+  end inside it, `isStorableLifetime`). `NaN <= now` is false, so NaN slipped
+  past every "already expired" check; past the Date range a number is no
+  deadline Redis can take (`1e21` is sent as `1e+21`). Where a script writes
+  its record before it sets the deadline, a refused deadline left the record
+  with no TTL at all.
+
+| Adapter | Refused | Sent to Redis |
+| --- | --- | --- |
+| `ChallengeStore.issue`, `ReplaySeenSet.markSeen`, `AccessTokenDenylist.add` | an `expiresAtMs` outside the Date range | `PX` = the remaining life, rounded up |
+| `RefreshTokenFamilyStore.registerFamily`, `updateFamily` | an `expiresAtMs` outside the Date range, registered or committed | `PX` = the remaining life, rounded up; the stored `expiresAtMs` is the rounded expiry, since the reader takes whole milliseconds only |
+| `DeviceCodeStore.create` | an `expiresAtMs` outside the Date range | `PEXPIREAT` = the expiry rounded up; the record keeps the exact expiry `poll` answers from |
+| `CodeRepository.createCode` | an `expiresIn` that is not a positive number of seconds ending within the Date range; a default that is not whole seconds (at construction) | `PX` = `expiresIn` × 1000, rounded up |
+| `FederationTokenStore` | a `ttl` that is not a positive number of seconds ending within the Date range (at construction) | `PX` and the index TTL = `ttl` × 1000, rounded up |
+| The federation-token lock (`acquireLock`) and the federation-grant refresh lock | a TTL that is not a positive lifetime, or a wait that is not a non-negative one, ending within the Date range | `PX` = the TTL, rounded up |
+| `UserSessionStore.create` | an Invalid Date `expiresAt`; an `authTime` that is an Invalid Date or before the epoch (the stored envelope reads back neither) | `PX` = the remaining life (a `Date` is whole milliseconds, and always within the range) |
+| `SessionRPRegistry.registerRP`, `SessionFamilyIndex.addFamilyId`, `SessionFederationIndex.addFederation`, `SubjectSessionIndex.addSid` | an Invalid Date `expiresAt` (and, for `registerRP`, an Invalid Date `registeredAt`) | `PEXPIREAT` = the session's `expiresAt` |
+| `ConsentStore.grant`, `PendingConsentStore.set` | an `expiresAt` outside the Date range (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
+| `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is an Invalid Date | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor for a full revocation — never lowered |
+| `FederationGrantStore`, `FederationGrantIntentStore` | a caller's clock that is an Invalid Date (`RangeError`); an intent or authorization expiry that is not a date writes nothing (`{ ok: false }`, as the port says); a `tombstoneRetentionMs`, `listingAllowanceMs` or `reservationAllowanceMs` that ends past the Date range, at construction. The scripts set a key's deadline after writing it, so a deadline Redis refused left the key with no TTL, and a retention past 2^53 left records that do not read back. The config schemas hold the retention and the listing allowance to one year | `PEXPIREAT` = the record's expiry plus its retention or listing allowance, rounded up (`math.ceil`) inside the script that writes it |
+| `RateLimiter` | at construction, any spec, `defaultLimit` included, that is not a positive whole `limit` and a positive whole `windowSeconds` ending within the Date range: zero, NaN, a fraction, a negative number, or a window past the range. Core's `assertUsableRateLimitSpecs` does the check, and the in-process limiter applies the same one. Such a spec is refused, never dropped: the adapter used to serve its default in its place, a looser budget than the operator wrote. Only a `defaultLimit` nobody gave is the built-in 60 per 60 s. The config schemas refuse the same values, and hold a window to one year | `EXPIRE` = `windowSeconds`, set in the same script as the `INCR` |
+
+[`px-rounding.test.mts`](__tests__/px-rounding.test.mts) pins both halves for
+each adapter with a recording client: the contract suites cannot tell
+`Math.ceil` from `Math.round` against a real Redis, where the difference is
+under a millisecond. The device-code, consent and rate-limiter cases past the
+Date range also run against a real Redis, where they check that no key is
+left behind.
+
 ## Federation-token keys and logout
 
 **Read this before assuming logout stopped scanning: out of the box, it has
@@ -417,9 +460,10 @@ like the others in this package), so `poll` reads the status and consumes an
 approval indivisibly — the conformance suite's "two polls racing for the
 same approval" case runs against a real Redis in this package's tests, and
 that is the case a `HGETALL`-then-`DEL` implementation fails. Both keys
-carry the authorization's `expiresAtMs` as their TTL so Redis reclaims them,
-but `poll` still answers `expired` from the timestamp: a record inside its
-TTL whose deadline has passed on the caller's clock expires, and is dropped.
+carry the authorization's `expiresAtMs`, rounded up to a whole millisecond,
+as their deadline so Redis reclaims them, but `poll` still answers `expired`
+from the record's own exact timestamp: a record inside its TTL whose deadline
+has passed on the caller's clock expires, and is dropped.
 
 ## Consent records and parked requests
 
@@ -471,7 +515,15 @@ at all, including when an earlier grant for the pair had one.
 ## Contract tests
 
 Each adapter whose port has a core conformance suite is run through that
-suite against a real Redis (Testcontainers) in [`__tests__/`](__tests__/). A
+suite against a real Redis (Testcontainers) in [`__tests__/`](__tests__/). One
+container serves the whole run, started before any test file by
+[`__tests__/support/redis-container.global.mts`](__tests__/support/redis-container.global.mts),
+and each file takes a logical database of its own from
+[`__tests__/support/redis.mts`](__tests__/support/redis.mts) — one container
+per file paid Testcontainers' fixed ten-second port-binding wait once per file,
+and a loaded machine failed files on it. A test that waits for something to
+expire in Redis waits on the server's clock (`serverClock` there), not on a
+sleep on the host's. A
 contract file cannot be imported across a package boundary, so the suites
 there are copies of core's; [`contract-copies-parity.test.mts`](__tests__/contract-copies-parity.test.mts)
 and the per-port `*-parity.test.mts` tests fail when a copy differs from its

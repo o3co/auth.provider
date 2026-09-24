@@ -15,6 +15,7 @@
  */
 
 import type { RateLimitSpec } from "./types.mjs";
+import { configuredNumber, isUsableRateLimitSpec, shownConfigValue } from "./usableSpec.mjs";
 
 /** The key prefix `/session/login` limits under. See `RateLimiter.check`. */
 const LOGIN_PREFIX = "login";
@@ -36,7 +37,15 @@ const LOGIN_PREFIX = "login";
  * agree, which is the drift bug rather than a fix for it.
  *
  * An operator-declared `limits.login` wins: that is an explicit statement about
- * this adapter, and overwriting it would discard what they wrote. The tradeoff
+ * this adapter, and overwriting it would discard what they wrote.
+ *
+ * A `rateLimit.login` that is not given seeds nothing. One that is given is
+ * read as `AppConfigSchema`'s `rateLimit` section coerces it (a numeric
+ * string is its number) and judged by the one predicate every limiter uses,
+ * after the conversion to whole seconds, and one it refuses is a `RangeError`
+ * naming `rateLimit.login` — a hand-built config that never passed that
+ * schema is still a configuration someone wrote. It used to be
+ * skipped, and `/session/login` ran on the adapter's default instead. The tradeoff
  * is that an operator reading `limits` alone sees no `login` entry while login
  * *is* limited — `reference.conf` documents this beside both `limits` blocks
  * and beside `rateLimit.login`.
@@ -49,24 +58,31 @@ export const resolveLoginLimitSpec = (
 	config: unknown,
 ): Record<string, RateLimitSpec> => {
 	const result: Record<string, RateLimitSpec> = { ...limits };
-	if (result[LOGIN_PREFIX] !== undefined) return result;
+	const login = (config as { rateLimit?: { login?: unknown } } | undefined)?.rateLimit?.login;
+	if (login === undefined) return result;
 
-	const login = (
-		config as { rateLimit?: { login?: { windowMs?: unknown; limit?: unknown } } } | undefined
-	)?.rateLimit?.login;
-	const windowMs = login?.windowMs;
-	const limit = login?.limit;
-	// A hand-built config that never passed `CoreConfigSchema` can carry
-	// anything. Leaving the adapter's own default in place beats inventing a
-	// limit from a value the operator did not really supply.
-	if (typeof windowMs !== "number" || !Number.isFinite(windowMs) || windowMs <= 0) return result;
-	if (typeof limit !== "number" || !Number.isInteger(limit) || limit <= 0) return result;
-
-	result[LOGIN_PREFIX] = {
-		limit,
+	const { windowMs, limit } =
+		typeof login === "object" && login !== null
+			? (login as { windowMs?: unknown; limit?: unknown })
+			: { windowMs: undefined, limit: undefined };
+	// Read as the schema's `z.coerce.number()` reads them: HOCON substitutes
+	// an environment variable as a string, and createApp parses `rateLimit`
+	// only when `sessionModule` (whose schema picks it) is mounted, so a
+	// composition without it hands this the string.
+	const ms = configuredNumber(windowMs);
+	const spec = {
+		limit: configuredNumber(limit),
 		// Specs are whole seconds; a sub-second window would round down to 0,
 		// and a zero window is not a window.
-		windowSeconds: Math.max(1, Math.ceil(windowMs / 1000)),
+		windowSeconds: ms !== undefined && ms > 0 ? Math.max(1, Math.ceil(ms / 1000)) : Number.NaN,
 	};
+	if (!isUsableRateLimitSpec(spec)) {
+		throw new RangeError(
+			`rateLimit.login must be { windowMs, limit }: windowMs a positive number of milliseconds and limit a positive whole number, with a window that ends within the Date range (got windowMs ${shownConfigValue(windowMs)}, limit ${shownConfigValue(limit)})`,
+		);
+	}
+	if (result[LOGIN_PREFIX] !== undefined) return result;
+
+	result[LOGIN_PREFIX] = { limit: spec.limit, windowSeconds: spec.windowSeconds };
 	return result;
 };

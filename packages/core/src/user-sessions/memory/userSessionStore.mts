@@ -68,6 +68,20 @@ export function createInMemoryUserSessionStore(): UserSessionStore {
 	return {
 		kind: "memory",
 		async create(input: CreateUserSessionInput) {
+			// An Invalid Date's time is NaN, which is never `<= now`: such a
+			// session would be live for ever. Refused as the Redis store refuses it.
+			if (!Number.isFinite(input.expiresAt.getTime())) {
+				throw new RangeError(`UserSession ${input.sid}: expiresAt must be a valid date`);
+			}
+			// A login time, handed back as the id_token's `auth_time`: an Invalid
+			// Date is none, and one before the epoch is none the Redis store can
+			// read back. Refused as there.
+			const authTimeMs = input.authTime.getTime();
+			if (!Number.isFinite(authTimeMs) || authTimeMs < 0) {
+				throw new RangeError(
+					`UserSession ${input.sid}: authTime must be a valid date at or after the epoch`,
+				);
+			}
 			if (input.expiresAt.getTime() <= Date.now()) {
 				throw new Error(`UserSession ${input.sid}: expiresAt is in the past`);
 			}

@@ -349,7 +349,7 @@ refresh grant takes care to answer `503` for outages.
 | **Client repository** lookup throws | client authentication on `/oauth/token`, `/oauth/introspect`, `/oauth/revoke`, device authorization | `401` — repository unavailability never admits a client (`packages/oauth/src/middleware/clientAuth.mts`) | `client lookup failed` / `client credential lookup failed` (warn) | the repository's own I/O |
 | **`grantPolicy` hook** throws | every grant; `/oauth/authorize` | `503 temporarily_unavailable` "policy evaluation unavailable" (`packages/core/src/grants/grantPolicy.mts`); redirect `error=temporarily_unavailable` at `/authorize` | — | the hook's own |
 | Shared Redis down — **consent step** (`CONSENT_STORE_ADAPTER=redis`) | `GET/POST /oauth/authorize` for a client that is not first-party; `GET/POST /oauth/consent` | `/authorize` redirects with `error=temporarily_unavailable` "consent store unavailable" — never a code, never a refusal the user could act on (`packages/oauth/src/routes/authorize.mts`); `/oauth/consent` answers `503 temporarily_unavailable` "consent store unavailable" (`packages/oauth/src/routes/consent.mts`) | `authorize_consent_store_unavailable`, `authorize_pending_consent_store_unavailable`, `pending_consent_store_unavailable`, `consent_store_unavailable` (error) | `commandTimeout` |
-| Shared Redis down — **device-code store** (`redisDeviceCodeStoreModule`, `packages/redis/src/device-code-store.mts`; the in-memory adapter has no outage mode, and `multi` refuses it) | `POST /oauth/device_authorization`; `POST /oauth/device/verification`; the device polling `/oauth/token` | `/oauth/device_authorization`: `500 server_error` "could not allocate a device authorization code" once its retries are spent (`packages/device-grant/src/deviceAuthorizationEndpoint.mts`); `/oauth/device/verification`: `500 server_error` `unexpected_error` (`packages/device-grant/src/module.mts`); `/oauth/token`: the grant's error reaches the host's error handler | `device_authorization_code_collision` (warn); `device_route_unexpected_error` (error) | `commandTimeout` |
+| Shared Redis down — **device-code store** (`redisDeviceCodeStoreModule`, `packages/redis/src/device-code-store.mts`; the in-memory adapter has no outage mode, and `multi` refuses it) | `POST /oauth/device_authorization`; `POST /oauth/device/verification`; the device polling `/oauth/token` | `503 temporarily_unavailable` "the device authorization store is unavailable; retry later" on all three, at once: `/oauth/device_authorization` re-draws only on the store's own collision signal (`packages/device-grant/src/deviceAuthorizationEndpoint.mts`); `/oauth/device/verification` (`verificationEndpoint.mts`) — an approval or a denial may already be recorded, so a retry can answer `409 already_decided`, audited as `device.decision_outcome_unknown`; the device's poll at `/oauth/token` is answered by the grant (`grant.mts`), as every grant answers a store outage — an approval it read may already be consumed, and the device's retry is then `invalid_grant` | `device_authorization_store_unavailable`, `device_verification_store_unavailable`, `device_code_grant_store_unavailable` (error) | `commandTimeout` |
 
 Two cross-cutting facts about these rows:
 
@@ -585,6 +585,7 @@ stream — its level is fixed at `info`.
 | `readiness_probe_failed` (warn), sustained; `auth_dependency_up == 0` | `core/src/routes/Readiness.mts`, `templates/standalone/src/metrics.mts` | a replica is out of rotation |
 | `unhandled_request_error` (error) | `templates/standalone/src/terminalError.mts` | a `500` you did not plan for — includes a signer (KMS) failure and a cookie-store failure |
 | `device_route_unexpected_error`, `federation_grants_unexpected_error` (error) | `device-grant/src/module.mts`, `federation-grants/src/routes.mts` | a `500` on the device-grant or federation-grants routes. Answered inside those routers, so `unhandled_request_error` does not fire for them — an alert on that event alone misses these |
+| `device_authorization_store_unavailable`, `device_verification_store_unavailable`, `device_code_grant_store_unavailable` (error) | `device-grant/src/deviceAuthorizationEndpoint.mts`, `verificationEndpoint.mts`, `grant.mts` | the device-code store is down or timed out: the device could not start (`device_authorization`, no code re-drawn), the user's lookup, approval or denial got no answer (`device/verification`), or the device's poll got none (`/oauth/token`). Each answered `503 temporarily_unavailable`. The same outage as the shared-Redis row above. An approval or a denial may nonetheless have been recorded before the reply was lost: a retry then answers `409 already_decided`, and the audit event `device.decision_outcome_unknown` marks the attempt. A poll's approval may likewise have been consumed, and the device's retry answers `invalid_grant`; the device starts again |
 | `refresh_token_revocation_store_unavailable` (error) | `oauth/src/grants/refreshToken.mts` | refreshes are answering `503` because the watermark store is unreachable |
 | `token_exchange_family_store_unavailable` (error) | `oauth-token-exchange/src/grant.mts` | token exchanges are answering `503` because the refresh-token family store is unreachable; `role` says whether the `subject_token`'s or the `actor_token`'s family could not be read |
 | `revoke_all_for_subject_incomplete`, `revoke_all_watermark_failed`, `revoke_all_list_sids_failed`, `revoke_all_cascade_failed`, `revoke_all_remove_sid_failed` (error) | `core/src/user-sessions/revokeAllForSubject.mts` | a credential change did **not** fully invalidate what was issued. `incomplete` means a store was not wired (composition gap); the others mean a wired store threw (outage — retry) |
@@ -613,6 +614,7 @@ stream — its level is fixed at `info`.
 | Event | Where | Meaning |
 | --- | --- | --- |
 | audit `device.rate_limited`; log `device_verification_rate_limited` (warn) | `device-grant/src/verificationEndpoint.mts` | an **account** (the key is the authenticated subject) is guessing device codes |
+| audit `device.decision_outcome_unknown` | `device-grant/src/verificationEndpoint.mts` | an approval or a denial met a device-code store outage and was answered `503`, but the store may have recorded it before the reply was lost. It carries the subject who decided and the `action`, but no client: the record could not be read. Read beside `device_verification_store_unavailable`: a device polling afterwards may have received tokens that no `device.approved` accounts for |
 | `jwt_verify_rejected` (warn) by `reason` | `core/src/jwt/verify.mts` | `kid_unknown` = a fabricated key id; `kid_expired` = a token signed with a key whose overlap window closed (see [§6](#6-key-rotation)); `revoked` = a revocation finding, or a fail-closed refusal when the watermark cannot be compared: a denylist hit, a token predating the subject's watermark, or a token with no `iat` while a watermark is in force (#376); `revocation_unavailable` = the denylist or the watermark store was unreachable — an outage, not a finding (#408 / #459); `signature` / `alg` / `iss` / `aud` / `typ` = malformed or foreign tokens |
 | `jwt_bearer_assertion_expired` (info) | `oauth/src/grants/jwtBearer.mts` | a jwt-bearer assertion verified but had no whole second of lifetime left when its token would have been minted — past its `exp` inside the issuer entry's `clockToleranceSeconds` (default 60), or run out while the Store answered. Devices get `invalid_grant`. The issued access token **never outlives the assertion**: `expires_in` is `min(oauth.accessToken.defaultExpiresIn, exp − now)`, so a short-lived assertion gives a short-lived token — an ID-JAG's `iat` is at most an hour old and it often lives minutes — and, with no refresh token issued, the client re-exchanges a fresh assertion. A steady rate from one `issuer` is that issuer's clock running behind this server's, or clients presenting assertions at the last moment (auth.proxy#90) |
 | `csrf_origin_rejected`, `csrf_token_rejected` (warn) | `session/src/csrf.mts` | cross-site POSTs to login/logout/device verification, or a UI on an origin you forgot to list in `session.csrf.trustedOrigins` |
@@ -629,6 +631,7 @@ stream — its level is fixed at `info`.
 | --- | --- | --- |
 | `replica_unsafe_adapters` (warn) | `core/src/boot/replica-safety.mts` | `deployment.mode` is unset; set it |
 | `login_rate_limiter_not_shared`, `webauthn_authentication_options_rate_limiter_not_shared` (warn) | `session/src/routes/Session.mts`, `webauthn/src/module.mts` | no shared `rateLimiter` and `deployment.mode` unset; the guard is per-process (`"multi"` refuses boot instead, `"single"` is silent — #474) |
+| `webauthn_authentication_options_budget_mismatch` (warn) | `webauthn/src/module.mts` | a shared `rateLimiter` is wired, and the app config's `webauthn.rateLimit.authenticationOptions` (what the limiter module seeded) is missing or differs from the `webauthnConfig` slot (what the per-process fallback is built from, and what backs the `RateLimit-*` headers only for an adapter that reports no `limit`). The route runs on an explicit `limits.webauthn-authentication-options` in the limiter's section if there is one, otherwise on the key's values, otherwise on the limiter's default. The warning compares the key with the slot only; an explicit `limits` entry is not compared. Set the key to the slot's values (the line names both) |
 | `pkce_config_ignored_s256_is_mandatory` (warn) | `oauth/src/grants/pkce.mts` | a retired PKCE key (or `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) is still set; delete it |
 | `jwt_verify_aud_skipped`, `jwt_verify_iss_skipped` (warn, once per logger) | `core/src/jwt/verify.mts` | a verification surface is not pinning `aud`/`iss` |
 | `jwt_verify_legacy_typ` (warn) | `core/src/jwt/verify.mts` | `OAUTH_JWT_LEGACY_TYP_ACCEPT=true` is admitting typ-less tokens; close the window |
@@ -659,7 +662,8 @@ is the complete list. This is a copy of it for reading; the test does not
 check this page, so when the two disagree, the constant is right:
 
 `authorize.granted`, `authorize.rejected`, `consent.denied`, `consent.granted`,
-`device.approved`, `device.denied`, `device.rate_limited`,
+`device.approved`, `device.decision_outcome_unknown`, `device.denied`,
+`device.rate_limited`,
 `federation.grant.authorization_failed`, `federation.grant.authorized`,
 `federation.grant.reauthorization_required`, `federation.grant.reauthorized`,
 `federation.grant.refresh_failed`, `federation.grant.refresh_persist_failed`,
@@ -791,6 +795,13 @@ authorization's deadline (`oauth.deviceAuthorization.code-lifetime-seconds`,
 default 600 s) and all on one Cluster slot (`packages/redis/src/device-code-store.mts`).
 The memory adapter instead caps itself at 10 000 records "at a few hundred
 bytes each" (`packages/core/src/device-authorization/memory.mts`).
+
+Core's in-process challenge store and replay seen-set, on a single replica,
+hold their live entries plus at most those that expired since the last sweep:
+each sweeps on its writes, at most once per 1000 writes and once per ten
+seconds (`packages/core/src/challenges/sweep.mts`), so a WebAuthn ceremony
+the user abandons, or an options request repeated in a loop, costs an entry
+for its lifetime and not until the process restarts.
 
 ### Failure timing on the shared socket
 

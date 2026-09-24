@@ -31,29 +31,24 @@ import {
 	hasFederationGrantAuthorization,
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRedisFederationGrantStore,
 	type FederationGrantKey,
 } from "../src/federation-grant-store.mjs";
 import { makeIoredisFederationGrantStoreClient } from "../src/ioredis.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let redis: Redis;
 let run = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	redis = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	const at = await testRedis();
+	redis = new Redis(at);
+});
 
 afterAll(async () => {
 	await redis?.quit();
-	await container?.stop();
 });
 
 const MIN = 60_000;
@@ -860,5 +855,98 @@ describe("plaintext, where an operator has allowed it (#593, D16)", () => {
 				encryption: { mode: "required", keys: [{ id: "k", key: Buffer.alloc(16, 1) }] },
 			}),
 		).toThrow(/32 bytes/);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// What the store refuses to be built with. The scripts write a record or its
+// subject-index entry and set the key's deadline last, so a deadline Redis
+// refuses leaves what was written with no TTL at all. A retention past 2^53
+// fails differently: the record it is written into does not read back.
+// ---------------------------------------------------------------------------
+
+describe("a retention or allowance whose deadline no clock reaches (the Date range)", () => {
+	// 1e20 ms runs past ECMAScript's Date range from any today. Through
+	// configuration it is `tombstoneRetention = 1e17` seconds, or a listing
+	// allowance with a few zeros too many: typos nothing bounded.
+	const PAST_THE_DATE_RANGE = 1e20;
+
+	/** The store these options build, or the refusal — which is what they should get. */
+	const attempt = (
+		options: Partial<Parameters<typeof createRedisFederationGrantStore>[0]>,
+	): { store: FederationGrantStore } | { refusal: unknown } => {
+		try {
+			return {
+				store: createRedisFederationGrantStore({
+					client: makeIoredisFederationGrantStoreClient(redis),
+					keyPrefix: prefix,
+					encryption: { mode: "required", keys: [KEY_A] },
+					...options,
+				}),
+			};
+		} catch (refusal) {
+			return { refusal };
+		}
+	};
+
+	/** Every key of this case that Redis holds with no deadline. */
+	const withoutTtl = async (): Promise<string[]> => {
+		const keys = await redis.keys(`${prefix}*`);
+		const found: string[] = [];
+		for (const name of keys) if ((await redis.pttl(name)) < 0) found.push(name);
+		if (keys.length > 0) await redis.del(...keys);
+		return found;
+	};
+
+	const lodge = (held: FederationGrantStore) =>
+		held.createPending({
+			id: "g-1",
+			subject: "u-1",
+			clientId: "agent",
+			connection: "okta-calendar",
+			intent: { handle: "h-g-1", expiresAt: at(10 * MIN) },
+			now: T0,
+		});
+
+	it("refuses a tombstone retention past it when built, so no lodging fails and leaves its record behind", async () => {
+		// Every record carries the retention it was written with, and one past
+		// 2^53 does not read back. Such a store answered every lodging
+		// `{ ok: false }`, and left the record and its index entry it had just
+		// written behind — a store no grant could ever be made in, saying so
+		// only as a refusal each client took for its own.
+		const built = attempt({ tombstoneRetentionMs: PAST_THE_DATE_RANGE });
+		const lodged = "store" in built ? await lodge(built.store) : "not built";
+		const left = await redis.keys(`${prefix}*`);
+		if (left.length > 0) await redis.del(...left);
+		expect({ lodged, left }).toEqual({ lodged: "not built", left: [] });
+		expect("refusal" in built && built.refusal).toBeInstanceOf(RangeError);
+	});
+
+	it("refuses a listing allowance past it when built, so no lodging leaves the subject's index without a TTL", async () => {
+		const built = attempt({ listingAllowanceMs: PAST_THE_DATE_RANGE });
+		if ("store" in built) {
+			// What such a store did: the lodging reserved the grant in its
+			// subject's index, and then Redis refused the index's deadline.
+			await lodge(built.store).catch(() => undefined);
+		}
+		expect(await withoutTtl()).toEqual([]);
+		expect("refusal" in built && built.refusal).toBeInstanceOf(RangeError);
+	});
+
+	it("refuses either past it when built, however far past, and takes one that ends inside it", () => {
+		// A RangeError, as the in-process store refuses its retention and as
+		// the shared expiry rule refuses every lifetime: one setting, one class,
+		// whichever adapter a composition builds.
+		for (const bad of [8_640_000_000_000_001, PAST_THE_DATE_RANGE, 1e21, -1, Number.NaN]) {
+			for (const option of ["tombstoneRetentionMs", "listingAllowanceMs"] as const) {
+				const built = attempt({ [option]: bad });
+				expect(built, `${option} ${String(bad)}`).toHaveProperty("refusal");
+				expect("refusal" in built && built.refusal, `${option} ${String(bad)}`).toBeInstanceOf(
+					RangeError,
+				);
+			}
+		}
+		expect(attempt({ tombstoneRetentionMs: 365 * DAY })).toHaveProperty("store");
+		expect(attempt({ listingAllowanceMs: 365 * DAY })).toHaveProperty("store");
 	});
 });

@@ -63,6 +63,7 @@ import {
 	checkSerializedOrigin,
 	coerceBooleanFromEnv,
 	describeSerializedOriginRejection,
+	MAX_DURATION_SECONDS,
 	normalizeAllowedOrigins,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
@@ -328,11 +329,13 @@ export const webauthnConfigSchema = z.object({
 		 * `z.coerce` because HOCON env substitution
 		 * (`${?WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT}`) yields strings —
 		 * matching `rateLimitSpecSchema` in core's application schema, which
-		 * this shape feeds as a `RateLimitSpec`.
+		 * this shape feeds as a `RateLimitSpec`. The window is held to one
+		 * year, as core's is: past the Date range it is one no limiter can
+		 * apply, and refusing it here names this key.
 		 */
 		authenticationOptions: z.object({
 			limit: z.coerce.number().int().positive(),
-			windowSeconds: z.coerce.number().int().positive(),
+			windowSeconds: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
 		}),
 	}),
 });

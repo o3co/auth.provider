@@ -23,9 +23,11 @@
 // Here there is a second reason: the Redis grant store reads the same block,
 // and it is installed whether or not the routes are.
 //
-// Presence-and-shape only. The real bounds are enforced where the values are
-// used (`assertFederationGrantRetrievalLimits`, the store's constructor), and
-// the defaults live in `config/reference.conf` beside every other section's.
+// Presence-and-shape only, but for the one-year ceiling on the tombstone
+// retention, which the stores are handed directly. The real bounds are
+// enforced where the values are used (`assertFederationGrantRetrievalLimits`,
+// the store's constructor), and the defaults live in `config/reference.conf`
+// beside every other section's.
 
 import { describe, expect, it } from "vitest";
 import { fullSectionsSchema } from "#/config/application.schema.mjs";
@@ -119,6 +121,15 @@ describe("the federationGrants section (#593)", () => {
 			expect(() => parse({ maxExpiresIn: value }), JSON.stringify(value)).toThrow();
 		}
 		for (const value of [null, true, [], "1e3"]) {
+			expect(() => parse({ tombstoneRetention: value }), JSON.stringify(value)).toThrow();
+		}
+	});
+
+	it("holds the tombstone retention to a year, the ceiling of every duration here", () => {
+		// Past the Date range it is a deadline no store can keep; a year is the
+		// typo guard every duration an operator writes has.
+		expect(parse({ tombstoneRetention: 31_536_000 })?.tombstoneRetention).toBe(31_536_000);
+		for (const value of [31_536_001, 1e18, "31536001"]) {
 			expect(() => parse({ tombstoneRetention: value }), JSON.stringify(value)).toThrow();
 		}
 	});

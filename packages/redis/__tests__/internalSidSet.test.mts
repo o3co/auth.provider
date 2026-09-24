@@ -23,28 +23,23 @@
 // them: these run through `makeIoredisClients`.
 
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { RedisSidSetClient } from "../src/internal/redisSidSet.mjs";
 import { createRedisSidSet } from "../src/internal/redisSidSet.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
+import { relativeDeadline, serverPasses, testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let raw: Redis;
 let client: RedisSidSetClient;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
+	const at = await testRedis();
+	raw = new Redis(at);
 	client = makeIoredisClients(raw).federationTokenStoreClient;
-}, 90_000);
+});
 
 afterAll(async () => {
 	raw?.disconnect();
-	await container?.stop();
 });
 
 const prefix = (s: string) => `t291:${s}:`;
@@ -103,10 +98,18 @@ describe("createRedisSidSet", () => {
 	});
 
 	it("the key expires on its own once the TTL elapses", async () => {
+		// A relative PX runs from when the command reached the server, so the
+		// wait is to the latest instant the key can live to on the server's
+		// clock — not a 300 ms host sleep after a 200 ms TTL, which a command
+		// queued behind a loaded run outlasts.
 		const s = createRedisSidSet({ client, keyPrefix: prefix("ttl-expire") });
-		await s.add("sid-1", "google", 200);
+		const end = await relativeDeadline(
+			() => raw,
+			() => s.add("sid-1", "google", 1_000),
+			() => 1_000,
+		);
 		expect(await collect(s.members("sid-1"))).toEqual(["google"]);
-		await new Promise((r) => setTimeout(r, 300));
+		await serverPasses(() => raw)(end);
 		expect(await collect(s.members("sid-1"))).toEqual([]);
 	});
 

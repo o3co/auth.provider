@@ -13,6 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
+import { isStorableExpiry } from "../adapters/expiry.mjs";
 import type { AccessTokenDenylist } from "./types.mjs";
 
 /**
@@ -96,9 +98,9 @@ export function createMemoryAccessTokenDenylist(
 		async add(jti, expiresAtMs) {
 			// NaN is never `<= now`: the jti would stay denied forever and the
 			// sweep would never drop it. ±Infinity is no expiry either.
-			if (!Number.isFinite(expiresAtMs)) {
+			if (!isStorableExpiry(expiresAtMs)) {
 				throw new RangeError(
-					`AccessTokenDenylist.add: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+					`AccessTokenDenylist.add: expiresAtMs must be a finite instant within the Date range (got ${String(expiresAtMs)})`,
 				);
 			}
 			entries.set(jti, expiresAtMs);

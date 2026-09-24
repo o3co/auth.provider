@@ -37,6 +37,23 @@ export interface ConsentStoreContractFactory {
  * adapter runs this in-tree; a Redis adapter runs the same suite against a
  * real Redis, so the two cannot disagree about what a record means.
  */
+/**
+ * Expiries no store may be handed: not finite (NaN, from an Invalid Date or an
+ * unset setting; ±Infinity), or outside ECMAScript's Date range (±8.64e15 ms).
+ * NaN is never `<= now`, so it slipped past every past-expiry check; one past
+ * the Date range is a number Redis cannot take as a deadline (`1e21` is sent
+ * as `1e+21`) and a Date cannot hold, and a script that writes its record
+ * before setting the deadline left the record with no TTL at all.
+ */
+const UNSTORABLE_EXPIRIES = [
+	Number.NaN,
+	Number.POSITIVE_INFINITY,
+	Number.NEGATIVE_INFINITY,
+	8_640_000_000_000_001,
+	1e21,
+	-1e21,
+];
+
 export function runConsentStoreContract(name: string, factory: ConsentStoreContractFactory): void {
 	describe(`ConsentStore contract — ${name}`, () => {
 		let store: ConsentStore;
@@ -135,6 +152,25 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 			expect(await store.find("u-1", "app")).toStrictEqual(record);
 			vi.setSystemTime(new Date(expiresAt + 1));
 			expect(await store.find("u-1", "app")).toBeNull();
+		});
+
+		it("refuses an expiry that is not a finite number within the Date range, and records nothing", async () => {
+			// NaN is never `<= now`: the memory store kept such a consent for
+			// ever, and Redis was asked for a TTL of NaN after the record was
+			// written. "Until revoked" is `undefined`; an infinite expiry is not
+			// another spelling of it.
+			for (const expiresAt of UNSTORABLE_EXPIRIES) {
+				await expect(
+					store.grant({
+						sub: "u-1",
+						clientId: "app",
+						scopes: ["read"],
+						grantedAt: Date.now(),
+						expiresAt,
+					}),
+				).rejects.toThrow(RangeError);
+				expect(await store.find("u-1", "app")).toBeNull();
+			}
 		});
 
 		it("does not carry the scopes of an expired record into a later grant", async () => {

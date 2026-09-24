@@ -110,12 +110,13 @@ import {
 	DEVICE_CODE_STORE_ABSENCE_POLICY,
 	defineModule,
 	guardedRead,
-	isDeviceVerificationRateLimitSpec,
 	loggableError,
+	MAX_DURATION_SECONDS,
 	type Module,
 	type ProviderDeps,
 	type RateLimitFailMode,
 	type RateLimitSpec,
+	requireUsableConfiguredRateLimitSpec,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { createClientAuthMiddleware } from "@o3co/auth-provider-oauth";
@@ -140,13 +141,16 @@ import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
  * user code against. `.int().positive()` is load-bearing: `0` is what an
  * empty environment variable coerces to, and a zero-attempt budget locks
  * every user out while a zero window is not a window. Core's
- * `isDeviceVerificationRateLimitSpec` states the same bounds structurally
- * for configs that never passed this schema; the limiter-module seed and
- * `requireVerificationRateLimit` below both read that one definition (#448).
+ * `isUsableRateLimitSpec` states the same bounds structurally for configs
+ * that never passed this schema, and the limiter-module seed and
+ * `requireVerificationRateLimit` below both refuse by it, through
+ * `requireUsableConfiguredRateLimitSpec`, with one message (#448).
  */
 const rateLimitSpecSchema = z.object({
 	limit: z.number().int().positive(),
-	windowSeconds: z.number().int().positive(),
+	// One year at most, as core's schema holds every duration an operator
+	// writes: a window past the Date range is one the limiter refuses anyway.
+	windowSeconds: z.number().int().positive().max(MAX_DURATION_SECONDS),
 });
 
 /** §5.1's worked example: "only allow 5 attempts"; five minutes is half the default code lifetime. */
@@ -579,28 +583,29 @@ const requireDeviceCodeStore = (
  *
  * The limiter applies five attempts to `device_verification:` only because
  * its adapter module seeded that prefix from
- * `oauth.deviceAuthorization.rateLimit`, and the seed leaves the adapter's
- * 60/60s default in place — deliberately — when the key is missing or
- * unusable. A composition booted through `createApp` cannot reach here
- * without the key, because the schema defaults it; a hand-built config never
- * passed the schema, and its verification endpoint ran on twelve times the
- * budget the `rateLimiter` requirement argues from, with no symptom. The
- * check is the seed's own predicate, so what this refuses and what the seed
- * declines to apply are the same set of inputs.
+ * `oauth.deviceAuthorization.rateLimit`, and the seed seeds nothing when the
+ * key is not given. A composition booted through `createApp` cannot reach
+ * here without the key, because the schema defaults it; a hand-built config
+ * never passed the schema, and its verification endpoint ran on twelve times
+ * the budget the `rateLimiter` requirement argues from, with no symptom.
+ *
+ * A key that is given but unusable is refused by core's
+ * `requireUsableConfiguredRateLimitSpec`, the same call the seed makes, so
+ * the same budget gets the same message whichever of the two meets it first.
  */
 const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): RateLimitSpec => {
 	const spec = slice.rateLimit;
-	if (!isDeviceVerificationRateLimitSpec(spec)) {
+	if (spec === undefined) {
 		throw new Error(
 			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
-				"oauth.deviceAuthorization.rateLimit { limit, windowSeconds } as positive " +
-				"integers. It is the budget RFC 8628 §5.1 sizes the user code against and " +
-				"the value the limiter adapter seeds `device_verification` from; without " +
-				"it POST /oauth/device/verification would run on the adapter's default " +
-				"budget, which is not the number the rateLimiter requirement reasons from.",
+				"oauth.deviceAuthorization.rateLimit { limit, windowSeconds }. It is the budget " +
+				"RFC 8628 §5.1 sizes the user code against and the value the limiter adapter " +
+				"seeds `device_verification` from; without it POST /oauth/device/verification " +
+				"would run on the adapter's default budget, which is not the number the " +
+				"rateLimiter requirement reasons from.",
 		);
 	}
-	return spec;
+	return requireUsableConfiguredRateLimitSpec("oauth.deviceAuthorization.rateLimit", spec);
 };
 
 /**

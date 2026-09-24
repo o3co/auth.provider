@@ -19,7 +19,6 @@
 import type { PendingConsentRecord } from "@o3co/auth-provider-core";
 import { PENDING_CONSENT_PER_SESSION_LIMIT } from "@o3co/auth-provider-core";
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	CONSENT_EXPIRY_SLACK_MS,
@@ -29,26 +28,22 @@ import {
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { runConsentStoreContract } from "./adapters.consent-store.contract.mjs";
 import { runPendingConsentStoreContract } from "./adapters.pending-consent-store.contract.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let raw: Redis;
 /** A second connection, so the racing cases are not serialised by one socket's pipeline. */
 let other: Redis;
 let keyCounter = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-	other = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	const at = await testRedis();
+	raw = new Redis(at);
+	other = new Redis(at);
+});
 
 afterAll(async () => {
 	await raw?.quit();
 	await other?.quit();
-	await container?.stop();
 });
 
 /** Per-test prefix isolation, so no case sees another's records. */
@@ -68,6 +63,35 @@ const pendingStoreAt = (keyPrefix: string, io: Redis = raw) =>
 
 runConsentStoreContract("redis", { create: async () => consentStoreAt(freshPrefix()) });
 runPendingConsentStoreContract("redis", { create: async () => pendingStoreAt(freshPrefix()) });
+
+describe("consent stores on Redis — an expiry past the Date range", () => {
+	// The scripts write the record before they set its TTL, and Redis refuses a
+	// TTL it cannot hold (`1e21` arrives as `1e+21`) — after the write. The
+	// record was left with no TTL; a consent that should lapse never did.
+	it("is refused by grant before the script writes anything", async () => {
+		for (const expiresAt of [8_640_000_000_000_001, 1e20, 1e21]) {
+			const prefix = freshPrefix();
+			await expect(
+				consentStoreAt(prefix).grant({
+					sub: "u-1",
+					clientId: "app",
+					scopes: ["read"],
+					grantedAt: Date.now(),
+					expiresAt,
+				}),
+			).rejects.toThrow(RangeError);
+			expect(await raw.keys(`${prefix}*`)).toEqual([]);
+		}
+	});
+
+	it("is refused by a parked request before the script writes anything", async () => {
+		for (const expiresAt of [8_640_000_000_000_001, 1e20, 1e21]) {
+			const prefix = freshPrefix();
+			await expect(pendingStoreAt(prefix).set(parked({ expiresAt }))).rejects.toThrow(RangeError);
+			expect(await raw.keys(`${prefix}*`)).toEqual([]);
+		}
+	});
+});
 
 const parked = (overrides: Partial<PendingConsentRecord> = {}): PendingConsentRecord => ({
 	challenge: "ch-1",

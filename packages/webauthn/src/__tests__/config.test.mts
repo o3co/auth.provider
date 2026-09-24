@@ -121,6 +121,21 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 				).toBe(false);
 			}
 		});
+
+		it("holds the window to a year, the ceiling of every duration an operator writes", () => {
+			// Past the Date range it reached the per-process limiter, which
+			// refused it when the route was built, under its own name. Refused
+			// here, the error names this key, before anything is built.
+			const window = (windowSeconds: unknown) =>
+				webauthnConfigSchema.safeParse({
+					...VALID,
+					rateLimit: { authenticationOptions: { limit: 30, windowSeconds } },
+				}).success;
+			expect(window(31_536_000)).toBe(true);
+			for (const bad of [31_536_001, 1e13, "31536001"]) {
+				expect(window(bad), String(bad)).toBe(false);
+			}
+		});
 	});
 
 	// HOCON substitutes `${?VAR}` as a string, always, so an operator who sets

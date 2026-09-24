@@ -60,6 +60,36 @@ describe("in-process FederationToken lock", () => {
 		if (b.acquired) await b.release();
 	});
 
+	it("refuses a ttlMs that is not a positive number, or a waitForMs that is not a number, and takes nothing", async () => {
+		// A TTL of NaN compares as already expired, so the lock was never held
+		// and exclusion was silently off; an infinite one was held for ever. A
+		// wait of NaN is a deadline no clock reaches, so a held lock was waited
+		// on for ever. The Redis lock refuses the same values.
+		const lock = createInProcessLock();
+		// 1e16 ms from now ends past the Date range: a lease no clock reaches the end of.
+		for (const ttlMs of [
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			Number.NEGATIVE_INFINITY,
+			0,
+			-5,
+			1e16,
+		]) {
+			await expect(lock.acquireLock({ sid: "s", federationName: "google", ttlMs })).rejects.toThrow(
+				RangeError,
+			);
+		}
+		for (const waitForMs of [Number.NaN, Number.POSITIVE_INFINITY, -1, 1e16]) {
+			await expect(
+				lock.acquireLock({ sid: "s", federationName: "google", waitForMs }),
+			).rejects.toThrow(RangeError);
+		}
+		// None of the refusals took the lock.
+		const held = await lock.acquireLock({ sid: "s", federationName: "google", waitForMs: 0 });
+		expect(held.acquired).toBe(true);
+		if (held.acquired) await held.release();
+	});
+
 	it("separate (sid, federationName) pairs don't block each other", async () => {
 		const lock = createInProcessLock();
 		const a = await lock.acquireLock({ sid: "s1", federationName: "google", ttlMs: 5_000 });

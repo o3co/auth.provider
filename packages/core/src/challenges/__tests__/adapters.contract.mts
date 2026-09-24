@@ -14,6 +14,41 @@ export interface ChallengeStoreContractFactory {
 }
 
 /**
+ * How a test reaches an entry's expiry on the store's own terms.
+ *
+ * An in-process store judges expiry on this process's clock. A Redis key
+ * expires on the server's, which sits to either side of the host's, and a
+ * relative `PX` runs from when the command reached the server; a loaded run
+ * also reaches its next line late. A fixed sleep after a short expiry therefore
+ * either read an entry the store had already dropped, or checked one it had
+ * not dropped yet. The default is this process's clock; a Redis runner passes
+ * one that reads the server's `TIME`, or waits for the keys to be gone.
+ */
+export interface ExpiryClock {
+	/** Epoch milliseconds on the clock the store expires entries by. */
+	now(): Promise<number>;
+	/** Resolves once the store has let everything expiring at `at` go. */
+	passed(at: Date): Promise<void>;
+}
+
+const hostExpiry: ExpiryClock = {
+	now: async () => Date.now(),
+	passed: async (at) => {
+		while (Date.now() <= at.getTime()) {
+			await new Promise((r) => setTimeout(r, at.getTime() - Date.now() + 1));
+		}
+	},
+};
+
+/**
+ * An expiry a second ahead of whichever clock is later — the host's, which a
+ * write checks it against, and the store's, which expires it — so a read that
+ * follows the write lands well inside it however loaded the run is.
+ */
+const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
+	new Date(Math.max(Date.now(), await clock.now()) + 1_000);
+
+/**
  * Adapter contract suite for ChallengeStore. Memory + Redis adapters both
  * call this and MUST pass identically (parity is the whole point of having
  * two adapters share one contract).
@@ -21,9 +56,27 @@ export interface ChallengeStoreContractFactory {
  * Per A1 §13.1 + master roadmap §3.6 (concurrency wording: assert single-
  * winner only; equal-expiry only).
  */
+/**
+ * Expiries no store may be handed: not finite (NaN, from an Invalid Date or an
+ * unset setting; ±Infinity), or outside ECMAScript's Date range (±8.64e15 ms).
+ * NaN is never `<= now`, so it slipped past every past-expiry check; one past
+ * the Date range is a number Redis cannot take as a deadline (`1e21` is sent
+ * as `1e+21`) and a Date cannot hold, and a script that writes its record
+ * before setting the deadline left the record with no TTL at all.
+ */
+const UNSTORABLE_EXPIRIES = [
+	Number.NaN,
+	Number.POSITIVE_INFINITY,
+	Number.NEGATIVE_INFINITY,
+	8_640_000_000_000_001,
+	1e21,
+	-1e21,
+];
+
 export function runChallengeStoreContract(
 	factoryName: string,
 	factory: ChallengeStoreContractFactory,
+	options: { readonly expiry?: ExpiryClock } = {},
 ): void {
 	describe(`ChallengeStore contract — ${factoryName}`, () => {
 		const future = (): number => Date.now() + 60_000;
@@ -70,13 +123,13 @@ export function runChallengeStoreContract(
 			});
 		});
 
-		it("issue refuses an expiry that is not a finite number, and records nothing", async () => {
+		it("issue refuses an expiry that is not a finite number within the Date range, and records nothing", async () => {
 			// NaN is never `<= now`, so it slipped past the expired-at-issue check:
 			// the memory adapter kept the challenge forever (and `find` answered
 			// `expiresAtMs: NaN`), and Redis was sent `PX NaN`. A non-finite expiry
 			// is a caller fault, not the timing race `expired-at-issue` names.
 			await withStore(async (store) => {
-				for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+				for (const bad of UNSTORABLE_EXPIRIES) {
 					await expect(store.issue("scope-A", "v-bad", bad)).rejects.toThrow(RangeError);
 					expect(await store.find("scope-A", "v-bad")).toBeNull();
 				}
@@ -114,10 +167,14 @@ export function runChallengeStoreContract(
 		});
 
 		it("expired entries are treated as nonexistent (find=null, consume=false)", async () => {
+			// Dated from, and waited out on, the store's own clock (see
+			// `ExpiryClock`), not a 50 ms expiry and a 100 ms sleep.
+			const expiry = options.expiry ?? hostExpiry;
 			await withStore(async (store) => {
-				const soon = Date.now() + 50;
-				await store.issue("scope-A", "ttl", soon);
-				await new Promise((r) => setTimeout(r, 100));
+				const soon = await aheadOf(expiry);
+				await store.issue("scope-A", "ttl", soon.getTime());
+				expect(await store.find("scope-A", "ttl")).not.toBeNull();
+				await expiry.passed(soon);
 				expect(await store.find("scope-A", "ttl")).toBeNull();
 				expect(await store.consume("scope-A", "ttl")).toBe(false);
 			});

@@ -79,6 +79,11 @@ export function createRedisSidHash(opts: RedisSidHashOptions): RedisSidHash {
 	return {
 		async setField(sid, id, jsonValue, expiresAt) {
 			const expiresAtMs = expiresAt.getTime();
+			// `PEXPIREAT NaN` fails inside the MULTI after `HSET` has run, leaving
+			// the key with no TTL. Refused before Redis is asked.
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError("expiresAt must be a valid date");
+			}
 			if (expiresAtMs <= Date.now()) return;
 			const pipeline = opts.client.multi();
 			pipeline.hSet(k(sid), id, jsonValue);

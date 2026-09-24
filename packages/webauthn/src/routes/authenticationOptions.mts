@@ -53,7 +53,11 @@
  * Cross-refs: Plan T29 / spec §2.4 / issue #281
  */
 
-import type { ChallengeStore, WebAuthnCredentialStore } from "@o3co/auth-provider-core";
+import {
+	type ChallengeStore,
+	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX,
+	type WebAuthnCredentialStore,
+} from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import type { WebAuthnConfig } from "../config.mjs";
@@ -72,8 +76,13 @@ import { generateAuthenticationOptionsForUser } from "../internal/options.mjs";
  * `memoryRateLimiter.limits` / `redisRateLimiter.limits` to override the
  * per-endpoint spec. Contains no `:` — the memory adapter derives the spec
  * key by splitting on the first colon.
+ *
+ * Core's name, not a copy of it: both bundled limiter modules seed this
+ * prefix from `webauthn.rateLimit.authenticationOptions`, so a shared limiter
+ * applies the configured budget rather than its own default.
  */
-export const WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG = "webauthn-authentication-options";
+export const WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG =
+	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX;
 
 // ---------------------------------------------------------------------------
 // Body schema

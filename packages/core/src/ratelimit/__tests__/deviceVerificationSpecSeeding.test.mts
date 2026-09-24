@@ -36,6 +36,7 @@ import {
 	resolveDeviceVerificationLimitSpec,
 } from "#/ratelimit/deviceVerificationSpec.mjs";
 import { resolveSeededLimitSpecs } from "#/ratelimit/seededSpecs.mjs";
+import { isUsableRateLimitSpec } from "#/ratelimit/usableSpec.mjs";
 
 const configured = (limit: unknown, windowSeconds: unknown) => ({
 	oauth: { deviceAuthorization: { rateLimit: { limit, windowSeconds } } },
@@ -70,28 +71,59 @@ describe("resolveDeviceVerificationLimitSpec", () => {
 		expect(limits.device_verification).toEqual({ limit: 5, windowSeconds: 300 });
 	});
 
-	it("does not seed when the config carries no usable spec", () => {
-		// A hand-built config that never passed the schema: better to leave
-		// the adapter's own default in place than to invent a limit.
+	it("does not seed when the config does not give the budget at all", () => {
+		// Absent: a config without the section, or without the key — the
+		// device-grant package not loaded. The adapter's default applies.
 		expect(resolveDeviceVerificationLimitSpec({}, {}).device_verification).toBeUndefined();
 		expect(
 			resolveDeviceVerificationLimitSpec({}, { oauth: {} }).device_verification,
 		).toBeUndefined();
+		expect(
+			resolveDeviceVerificationLimitSpec({}, { oauth: { deviceAuthorization: {} } })
+				.device_verification,
+		).toBeUndefined();
+	});
+
+	it("refuses a budget that is given but unusable, naming the key", () => {
+		// A hand-built config that never passed the schema is still a
+		// configuration someone wrote; skipped, the route ran on the adapter's
+		// 60 per 60 s default instead of it.
 		for (const [limit, windowSeconds] of [
 			[0, 300],
 			[5, 0],
 			[-1, 300],
 			[2.5, 300],
 			[5, 2.5],
-			["5", 300],
-			[5, "300"],
+			["five", 300],
+			[5, ""],
+			["  ", 300],
+			[true, 300],
+			[5, [300]],
+			["2.5", 300],
+			[5, 1e13],
 		]) {
 			expect(
-				resolveDeviceVerificationLimitSpec({}, configured(limit, windowSeconds))
-					.device_verification,
-				`limit=${String(limit)} windowSeconds=${String(windowSeconds)}`,
-			).toBeUndefined();
+				() => resolveDeviceVerificationLimitSpec({}, configured(limit, windowSeconds)),
+				`limit=${JSON.stringify(limit)} windowSeconds=${JSON.stringify(windowSeconds)}`,
+			).toThrow(/^oauth\.deviceAuthorization\.rateLimit must be/);
 		}
+		expect(() => resolveDeviceVerificationLimitSpec({}, configured("five", 300))).toThrow(
+			/\(got limit "five", windowSeconds 300\)$/,
+		);
+		expect(() =>
+			resolveDeviceVerificationLimitSpec(
+				{},
+				{ oauth: { deviceAuthorization: { rateLimit: null } } },
+			),
+		).toThrow(/^oauth\.deviceAuthorization\.rateLimit must be/);
+	});
+
+	it("reads the key as core's schema does: a numeric string is its number", () => {
+		// Through createApp, CoreConfigSchema coerces this key; a hand-built
+		// config reaches the seed directly and gets the same reading.
+		expect(
+			resolveDeviceVerificationLimitSpec({}, configured("5", "300")).device_verification,
+		).toEqual({ limit: 5, windowSeconds: 300 });
 	});
 
 	it("does not mutate the limits it was handed", () => {
@@ -109,11 +141,13 @@ describe("resolveSeededLimitSpecs", () => {
 			{},
 			{
 				rateLimit: { login: { windowMs: 900_000, limit: 20 } },
+				webauthn: { rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 } } },
 				...configured(5, 300),
 			},
 		);
 		expect(limits.login).toEqual({ limit: 20, windowSeconds: 900 });
 		expect(limits.device_verification).toEqual({ limit: 5, windowSeconds: 300 });
+		expect(limits["webauthn-authentication-options"]).toEqual({ limit: 30, windowSeconds: 60 });
 	});
 });
 
@@ -124,6 +158,13 @@ describe("isDeviceVerificationRateLimitSpec", () => {
 	// budget is defined once, here, and this is its specification.
 	it("accepts a positive-integer limit and window", () => {
 		expect(isDeviceVerificationRateLimitSpec({ limit: 5, windowSeconds: 300 })).toBe(true);
+	});
+
+	it("is the one predicate every limiter judges a spec by", () => {
+		// The seed, the device-grant boot refusal and both adapters' refusal at
+		// construction answer the same question; a second definition is how
+		// they came to answer it differently for a window past the Date range.
+		expect(isDeviceVerificationRateLimitSpec).toBe(isUsableRateLimitSpec);
 	});
 
 	it.each([
@@ -139,6 +180,7 @@ describe("isDeviceVerificationRateLimitSpec", () => {
 		["a string window", { limit: 5, windowSeconds: "300" }],
 		["a missing window", { limit: 5 }],
 		["a missing limit", { windowSeconds: 300 }],
+		["a window past the Date range", { limit: 5, windowSeconds: 1e13 }],
 	])("refuses %s", (_label, value) => {
 		// `0` is what an empty environment variable coerces to, and a budget
 		// invented from it is worse than the adapter's own default.

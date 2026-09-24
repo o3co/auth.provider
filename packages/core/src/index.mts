@@ -31,6 +31,11 @@ export {
 	createAdapterFactory,
 	type LifecycleRegistrar,
 } from "./adapters/AdapterFactory.mjs";
+export {
+	isStorableExpiry,
+	isStorableLifetime,
+	MAX_STORABLE_EXPIRY_MS,
+} from "./adapters/expiry.mjs";
 // App factory — v0.5.0 boot planner. Re-exports from ./boot/index.mjs through
 // ./app.mjs for backwards-compatible import-path stability.
 export { createApp } from "./app.mjs";
@@ -160,6 +165,7 @@ export {
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 } from "./config/application.schema.mjs";
+export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
 // OIDC discovery aggregation — modules contribute `discoveryMetadata`
 // (OidcDiscoveryContributionFactory above) and core synthesizes the
 // `/.well-known/openid-configuration` document via `buildDiscoveryDocument`.
@@ -643,6 +649,16 @@ export type {
 	RateLimiterFactory,
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";
+export {
+	assertUsableRateLimitSpecs,
+	isUsableRateLimitSpec,
+	readConfiguredRateLimitSpec,
+	requireUsableConfiguredRateLimitSpec,
+} from "./ratelimit/usableSpec.mjs";
+export {
+	resolveWebAuthnAuthenticationOptionsLimitSpec,
+	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX,
+} from "./ratelimit/webauthnSpec.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
 export type {
 	ProbeResult,
@@ -762,7 +778,13 @@ export { SUBJECT_REVOCATION_ABSENCE_POLICY } from "./user-sessions/types.mjs";
 // ---------------------------------------------------------------------------
 
 // Memory adapters (re-exported so consumers can construct without going through modules)
-export { createMemoryChallengeStore } from "./challenges/adapters/memory.mjs";
+export {
+	createMemoryChallengeStore,
+	DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS,
+	DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL,
+	type MemoryChallengeStore,
+	type MemoryChallengeStoreOptions,
+} from "./challenges/adapters/memory.mjs";
 // Canonical key helper (exported for integrators writing their own adapters
 // to preserve cross-adapter parity per A1 §7.3)
 export { canonicalKey as canonicalChallengeKey } from "./challenges/canonical-key.mjs";

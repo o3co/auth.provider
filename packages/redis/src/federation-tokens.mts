@@ -56,6 +56,7 @@ import {
 	defineModule,
 	type FederationTokenStore,
 	type FederationTokens,
+	isStorableLifetime,
 	type SupportsLock,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
@@ -87,7 +88,9 @@ export interface RedisFederationTokenStoreOptions {
 	 * access_token expiry is kept inside the envelope for F-6 to consult at
 	 * retrieval time, but the record itself lives until this store TTL elapses.
 	 *
-	 * Default: 86400 seconds (24 hours). Spec Section 5.2.
+	 * Default: 86400 seconds (24 hours). Spec Section 5.2. A positive finite
+	 * number, or construction throws; a fractional one is rounded up to a whole
+	 * millisecond, since `PX` takes nothing else.
 	 */
 	ttl?: number;
 	/**
@@ -254,10 +257,18 @@ export function createRedisFederationTokenStore(
 	}
 	const prefix = opts.keyPrefix ?? "ft:";
 	const ttlSeconds = opts.ttl ?? DEFAULT_TTL_SECONDS;
-	if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
-		throw new Error("FederationTokenStore redis: ttl must be a positive finite number of seconds");
+	// Its end, measured from now, must be within the Date range: past it the
+	// PX is no number Redis can take, and the index write it pairs with is
+	// refused after the SADD. A RangeError, as the shared expiry rule refuses
+	// every lifetime.
+	if (!isStorableLifetime(ttlSeconds * 1000)) {
+		throw new RangeError(
+			"FederationTokenStore redis: ttl must be a positive finite number of seconds that ends within the Date range",
+		);
 	}
-	const storeTtlMs = ttlSeconds * 1000;
+	// Whole milliseconds, rounded up: a fractional `PX` is a Redis error, and
+	// the index write it pairs with would be refused the same way.
+	const storeTtlMs = Math.ceil(ttlSeconds * 1000);
 	const scanFallback = opts.scanFallback ?? true;
 	const k = (sid: string, name: string) => `${prefix}${sid}:${name}`;
 

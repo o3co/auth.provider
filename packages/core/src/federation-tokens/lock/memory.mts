@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { isStorableLifetime } from "../../adapters/expiry.mjs";
 import type { AcquireLockOptions, LockResult, SupportsLock } from "../types.mjs";
 
 const lockKey = (sid: string, name: string) => `${sid}\u0000${name}`;
@@ -50,6 +51,20 @@ export function createInProcessLock(): Pick<SupportsLock, "acquireLock"> {
 			const key = lockKey(opts.sid, opts.federationName);
 			const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
 			const waitForMs = opts.waitForMs ?? DEFAULT_WAIT_MS;
+			// A TTL of NaN compares as already expired, so the lock would never be
+			// held and exclusion would be silently off; an infinite one would be
+			// held for ever. A wait of NaN is a deadline no clock reaches. Refused
+			// as the Redis lock refuses them.
+			if (!isStorableLifetime(ttlMs)) {
+				throw new RangeError(
+					`acquireLock: ttlMs must be a positive finite number that ends within the Date range (got ${String(ttlMs)})`,
+				);
+			}
+			if (!isStorableLifetime(waitForMs, { allowZero: true })) {
+				throw new RangeError(
+					`acquireLock: waitForMs must be a non-negative finite number that ends within the Date range (got ${String(waitForMs)})`,
+				);
+			}
 			const deadline = Date.now() + waitForMs;
 
 			while (true) {

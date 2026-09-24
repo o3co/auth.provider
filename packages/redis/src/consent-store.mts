@@ -80,6 +80,7 @@ import {
 	type ConsentStore,
 	canonicalChallengeKey,
 	defineModule,
+	isStorableExpiry,
 	PENDING_CONSENT_PER_SESSION_LIMIT,
 	type PendingConsentRecord,
 	type PendingConsentStore,
@@ -256,6 +257,14 @@ export function createRedisConsentStore(opts: RedisConsentStoreOptions): Consent
 		},
 
 		async grant(record) {
+			// The script writes the record before it sets the TTL, so a NaN or
+			// infinite expiry left a consent with no TTL that no read could age
+			// out. "Until revoked" is `undefined`, not Infinity.
+			if (record.expiresAt !== undefined && !isStorableExpiry(record.expiresAt)) {
+				throw new RangeError(
+					`ConsentStore.grant: expiresAt must be undefined or a finite instant within the Date range (got ${String(record.expiresAt)})`,
+				);
+			}
 			const nowMs = Date.now();
 			await client.grant(key(record.sub, record.clientId), {
 				nowMs,
@@ -297,6 +306,13 @@ export function createRedisPendingConsentStore(
 		kind: "redis",
 
 		async set(record) {
+			// Refused before the script writes the request it would then fail to
+			// expire.
+			if (!isStorableExpiry(record.expiresAt)) {
+				throw new RangeError(
+					`PendingConsentStore.set: expiresAt must be a finite instant within the Date range (got ${String(record.expiresAt)})`,
+				);
+			}
 			const nowMs = Date.now();
 			await client.set(keys, {
 				challenge: record.challenge,

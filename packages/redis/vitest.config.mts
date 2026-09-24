@@ -10,10 +10,13 @@ export default defineConfig({
 		...WORKSPACE_TEST_TIMEOUTS,
 		// #556: supertest's server binds the loopback address it dials — see vitest.shared.mts.
 		...WORKSPACE_TEST_SETUP,
-		// Raises the #357 workspace floor (never lowers it): testcontainers
-		// boot + Redis warm-up takes time on first run.
+		// Raises the #357 workspace floor (never lowers it): Redis-backed
+		// cases run against a real server over a loaded host.
 		testTimeout: 30_000,
 		hookTimeout: 30_000,
+		// One Redis container for the run, each file on a database of its own
+		// — see the file for why not one container per file.
+		globalSetup: ["./__tests__/support/redis-container.global.mts"],
 		typecheck: {
 			enabled: true,
 			// tsconfig.test.json, not the build config: the build config holds

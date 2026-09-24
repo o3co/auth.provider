@@ -75,6 +75,10 @@ export interface ConsentStore {
 	 *
 	 * An adapter over a store with a compare-and-set or a set type should use
 	 * it; the union is the contract, not the read-modify-write.
+	 *
+	 * An `expiresAt` that is not a finite instant within the Date range
+	 * (`isStorableExpiry`) is a `RangeError`, and nothing is recorded: "until
+	 * revoked" is `undefined`, never Infinity.
 	 */
 	grant(record: ConsentRecord): Promise<void>;
 	/** @returns whether a record was removed. */
@@ -178,7 +182,9 @@ export interface PendingConsentStore {
 	readonly kind: string;
 	/**
 	 * Parks `record` under its challenge, replacing one already parked there,
-	 * and holds its session to {@link PENDING_CONSENT_PER_SESSION_LIMIT}.
+	 * and holds its session to {@link PENDING_CONSENT_PER_SESSION_LIMIT}. An
+	 * `expiresAt` that is not a finite instant within the Date range
+	 * (`isStorableExpiry`) is a `RangeError`, and nothing is parked.
 	 */
 	set(record: PendingConsentRecord): Promise<void>;
 	/** The record, or `null` when there is none or it has expired. Does not spend it. */

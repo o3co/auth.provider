@@ -17,6 +17,7 @@
 import { resolveDeviceVerificationLimitSpec } from "./deviceVerificationSpec.mjs";
 import { resolveLoginLimitSpec } from "./loginSpec.mjs";
 import type { RateLimitSpec } from "./types.mjs";
+import { resolveWebAuthnAuthenticationOptionsLimitSpec } from "./webauthnSpec.mjs";
 
 /**
  * Every per-endpoint spec that lives in its own config slice, seeded into an
@@ -26,11 +27,17 @@ import type { RateLimitSpec } from "./types.mjs";
  * `@o3co/auth-provider-redis`) call this rather than each seed individually,
  * so a spec seeded into one adapter cannot be forgotten in the other — which
  * is how `device_verification` went unseeded in both while `login` was
- * seeded in each. An operator-declared entry for any prefix still wins; see
- * the individual resolvers.
+ * seeded in each. The prefixes: `login` (`rateLimit.login`),
+ * `device_verification` (`oauth.deviceAuthorization.rateLimit`) and
+ * `webauthn-authentication-options` (`webauthn.rateLimit.authenticationOptions`).
+ * An operator-declared entry for any prefix still wins; see the individual
+ * resolvers.
  */
 export const resolveSeededLimitSpecs = (
 	limits: Readonly<Record<string, RateLimitSpec>>,
 	config: unknown,
 ): Record<string, RateLimitSpec> =>
-	resolveDeviceVerificationLimitSpec(resolveLoginLimitSpec(limits, config), config);
+	resolveWebAuthnAuthenticationOptionsLimitSpec(
+		resolveDeviceVerificationLimitSpec(resolveLoginLimitSpec(limits, config), config),
+		config,
+	);
