@@ -141,9 +141,13 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
  * mint, `grantPolicy` to bound scope, `refreshTokenFamilyRotation` to open a
  * refresh-token family — plus the credential store and the challenge ceremony
  * only this grant reads, and the RP fields of `webauthnConfig` the assertion
- * check needs. `webauthnModule` declares every one of these slots, so a slot
- * read here without the module declaring it is a compile error rather than
- * an `undefined` at runtime.
+ * check needs.
+ *
+ * `webauthnModule` hands its deps over whole and checks, with `satisfies`,
+ * that every key here is a slot it declares. A slot read here without the
+ * module declaring it — optional or not — is therefore a compile error at
+ * that call rather than an `undefined` at runtime, and a slot the module
+ * declares cannot be dropped on the way.
  *
  * `grantPolicy` stays optional in this type although `webauthnModule` refuses
  * to boot without it (H-2): a handler built directly, as the unit tests do,
