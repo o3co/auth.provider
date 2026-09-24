@@ -30,11 +30,17 @@
  * `401` without one — or any `401` when no token is configured — keeps the
  * meaning the wire contract gives it.
  *
+ * A transport failure — a peer that reflects the request into a response the
+ * parser rejects, a refused connection — is thrown with a fixed message
+ * naming the endpoint and at most a transport code: never the transport's own
+ * error, which quotes the bytes it choked on.
+ *
  * Without msw: what is asserted is the header that reaches the socket, and an
  * interceptor is one more thing between the two.
  */
 
 import { createServer, type Server } from "node:http";
+import { createServer as createNetServer, type Server as NetServer } from "node:net";
 import { inspect } from "node:util";
 import {
 	createAdapterFactory,
@@ -42,7 +48,7 @@ import {
 	type UserRepository,
 } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it } from "vitest";
-import { registerBuiltinAdapters } from "#/index.mjs";
+import { registerBuiltinAdapters, StoreCredentialRefusedError } from "#/index.mjs";
 import { HttpUserRepository } from "#/repositories/HttpUserRepository.mjs";
 
 /** 32 bytes of key material, hex — what `openssl rand -hex 32` prints. */
@@ -64,15 +70,27 @@ const LINK: FederatedIdentityLink = {
 };
 
 let httpServers: Server[] = [];
+let netServers: NetServer[] = [];
 afterEach(async () => {
-	await Promise.all(
-		httpServers.map((server) => {
+	await Promise.all([
+		...httpServers.map((server) => {
 			server.closeAllConnections();
 			return new Promise<void>((resolve) => server.close(() => resolve()));
 		}),
-	);
+		...netServers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
+	]);
 	httpServers = [];
+	netServers = [];
 });
+
+/** A loopback origin nothing listens on: bound, then closed. */
+const closedOrigin = async (): Promise<string> => {
+	const server = createServer();
+	await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+	const { port } = server.address() as { port: number };
+	await new Promise<void>((resolve) => server.close(() => resolve()));
+	return `http://127.0.0.1:${port}`;
+};
 
 /** Starts a server on its own loopback port and returns its origin. */
 const serve = async (handler: Parameters<typeof createServer>[1]): Promise<string> => {
@@ -243,15 +261,6 @@ describe("a token the constructor would not stand behind is refused at construct
 });
 
 describe("the token is in nothing the repository throws, and in no inspection of it", () => {
-	/** A loopback port nothing listens on: bound, then closed. */
-	const closedPort = async (): Promise<string> => {
-		const server = createServer();
-		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-		const { port } = server.address() as { port: number };
-		await new Promise<void>((resolve) => server.close(() => resolve()));
-		return `http://127.0.0.1:${port}`;
-	};
-
 	const answering =
 		(status: number, body: string): Parameters<typeof createServer>[1] =>
 		(req, res) => {
@@ -269,7 +278,7 @@ describe("the token is in nothing the repository throws, and in no inspection of
 			"a 2xx that is neither a User nor an answer": () =>
 				serve(answering(200, JSON.stringify({ status: "ok" }))),
 			"a redirect": () => serve(answering(307, "")),
-			"a refused connection": closedPort,
+			"a refused connection": closedOrigin,
 			"a Store that never answers": () =>
 				serve((req) => {
 					req.resume();
@@ -315,11 +324,11 @@ describe("a Store that refuses this deployment's credential", () => {
 	 * header lines (none when empty) and a body that says why — which nothing
 	 * thrown may repeat.
 	 */
-	const refusingStore = (challenges: readonly string[]) =>
+	const refusingStore = (challenges: readonly string[], status: 401 | 403 = 401) =>
 		serve((req, res) => {
 			req.resume();
 			req.on("end", () => {
-				res.writeHead(401, {
+				res.writeHead(status, {
 					"Content-Type": "application/json",
 					...(challenges.length === 0 ? {} : { "WWW-Authenticate": [...challenges] }),
 				});
@@ -328,9 +337,18 @@ describe("a Store that refuses this deployment's credential", () => {
 		});
 
 	const INVALID_TOKEN = 'Bearer error="invalid_token", error_description="who are you"';
+	/** RFC 6750 §3.1's other refusal of the token itself: valid, and not enough. */
+	const INSUFFICIENT_SCOPE = 'Bearer error="insufficient_scope", error_description="who are you"';
 
-	/** What the four answer a `401` that is not a refused credential: the wire contract, unchanged. */
-	const expectWireMeaningOf401 = async (repo: HttpUserRepository, origin: string) => {
+	/**
+	 * What the four answer a `401` or `403` that is not a refused credential:
+	 * the wire contract, unchanged.
+	 */
+	const expectWireMeaningOf = async (
+		status: 401 | 403,
+		repo: HttpUserRepository,
+		origin: string,
+	) => {
 		await expect(repo.authenticate("alice", "pass")).resolves.toBeNull();
 		await expect(repo.authenticateByToken("apple:a1")).resolves.toBeNull();
 		await expect(repo.linkFederatedIdentity?.("u1", LINK)).resolves.toEqual({
@@ -338,55 +356,79 @@ describe("a Store that refuses this deployment's credential", () => {
 			reason: "refused",
 		});
 		await expect(repo.findSubjectByFederatedIdentity?.(IDENTITY)).rejects.toThrow(
-			`HttpUserRepository: identity lookup at ${origin}/lookup answered HTTP 401`,
+			`HttpUserRepository: identity lookup at ${origin}/lookup answered HTTP ${status}`,
 		);
 	};
 
 	it.each(calls)(
-		"%s: a 401 with a Bearer challenge is an outage that names the refused credential, never the token or the Store's words",
+		"%s: a 401 or a 403 with a Bearer challenge is an outage that names the refused credential, never the token or the Store's words",
 		async (_name, path, call) => {
 			// Read as "no such user", a token the Store does not accept — a typo,
-			// a half-finished rotation — would fail every login as a wrong
-			// password and every link as a policy refusal, with nothing logged.
-			const origin = await refusingStore([INVALID_TOKEN]);
-			const repo = new HttpUserRepository({ ...urls(origin), bearerToken: TOKEN, timeout: 5000 });
+			// a half-finished rotation, a token without the rights the Store
+			// wants — would fail every login as a wrong password and every link
+			// as a policy refusal, with nothing logged.
+			for (const [status, challenge] of [
+				[401, INVALID_TOKEN],
+				[403, INSUFFICIENT_SCOPE],
+			] as const) {
+				const origin = await refusingStore([challenge], status);
+				const repo = new HttpUserRepository({
+					...urls(origin),
+					bearerToken: TOKEN,
+					timeout: 5000,
+				});
 
-			const outcome = await Promise.resolve(call(repo)).then(
-				(value) => ({ resolved: value }),
-				(error: unknown) => ({ rejected: error }),
-			);
+				const outcome = await Promise.resolve(call(repo)).then(
+					(value) => ({ resolved: value }),
+					(error: unknown) => ({ rejected: error }),
+				);
 
-			expect(outcome).toHaveProperty("rejected");
-			const error = (outcome as { rejected: unknown }).rejected;
-			expect(error).toBeInstanceOf(Error);
-			expect((error as Error).message).toContain(`${origin}${path}`);
-			expect((error as Error).message).toMatch(/refused this deployment's credential/);
-			expect((error as Error).message).toMatch(/CLIENT_USER_BEARER_TOKEN/);
-			expect(surfaced(error)).not.toContain(TOKEN);
-			expect(surfaced(error)).not.toContain("who are you");
+				expect(outcome, `HTTP ${status}`).toHaveProperty("rejected");
+				const error = (outcome as { rejected: unknown }).rejected;
+				// A class of its own, so a caller that reports by name — the grants
+				// callback's sanitized reporter — can say what happened.
+				expect(error).toBeInstanceOf(StoreCredentialRefusedError);
+				expect((error as Error).name).toBe("StoreCredentialRefusedError");
+				expect((error as Error).message).toContain(`${origin}${path}`);
+				expect((error as Error).message).toContain(`HTTP ${status} with a Bearer challenge`);
+				expect((error as Error).message).toMatch(/refused this deployment's credential/);
+				expect((error as Error).message).toMatch(/CLIENT_USER_BEARER_TOKEN/);
+				expect(surfaced(error)).not.toContain(TOKEN);
+				expect(surfaced(error)).not.toContain("who are you");
+			}
 		},
 	);
 
-	it("a 401 without a Bearer challenge keeps its wire meaning, with a token configured or not", async () => {
-		for (const challenges of [[], ['Basic realm="store"']]) {
-			const origin = await refusingStore(challenges);
-			await expectWireMeaningOf401(
-				new HttpUserRepository({ ...urls(origin), bearerToken: TOKEN, timeout: 5000 }),
-				origin,
-			);
-			await expectWireMeaningOf401(
+	it("a 401 or a 403 without a Bearer challenge keeps its wire meaning, with a token configured or not", async () => {
+		for (const status of [401, 403] as const) {
+			for (const challenges of [[], ['Basic realm="store"']]) {
+				const origin = await refusingStore(challenges, status);
+				await expectWireMeaningOf(
+					status,
+					new HttpUserRepository({ ...urls(origin), bearerToken: TOKEN, timeout: 5000 }),
+					origin,
+				);
+				await expectWireMeaningOf(
+					status,
+					new HttpUserRepository({ ...urls(origin), timeout: 5000 }),
+					origin,
+				);
+			}
+		}
+	});
+
+	it("a Bearer challenge changes nothing when no token was sent — a Store whose stack challenges every refusal is unaffected", async () => {
+		for (const [status, challenge] of [
+			[401, INVALID_TOKEN],
+			[403, INSUFFICIENT_SCOPE],
+		] as const) {
+			const origin = await refusingStore([challenge], status);
+			await expectWireMeaningOf(
+				status,
 				new HttpUserRepository({ ...urls(origin), timeout: 5000 }),
 				origin,
 			);
 		}
-	});
-
-	it("a Bearer challenge changes nothing when no token was sent — a Store whose stack challenges every 401 is unaffected", async () => {
-		const origin = await refusingStore([INVALID_TOKEN]);
-		await expectWireMeaningOf401(
-			new HttpUserRepository({ ...urls(origin), timeout: 5000 }),
-			origin,
-		);
 	});
 
 	it("finds the Bearer challenge in any case, among others and on its own header line — and not inside another's parameter", async () => {
@@ -424,6 +466,92 @@ describe("a Store that refuses this deployment's credential", () => {
 			})),
 			...notBearer.map((challenges) => ({ challenges, user: null })),
 		]);
+	});
+});
+
+describe("a transport failure carries nothing the request carried", () => {
+	/**
+	 * A peer that answers by reflecting the request's `Authorization` into a
+	 * response the HTTP parser rejects — a broken proxy, a debugging echo —
+	 * where the transport's own error quotes the bytes it choked on.
+	 */
+	const reflecting = async (answer: (authorization: string) => string): Promise<string> => {
+		const server = createNetServer((socket) => {
+			let head = "";
+			socket.on("data", (chunk: Buffer) => {
+				head += chunk.toString("latin1");
+				if (!head.includes("\r\n\r\n")) return;
+				const authorization = /\r\nauthorization: ([^\r]*)/i.exec(head)?.[1] ?? "";
+				socket.end(answer(authorization), "latin1");
+			});
+		});
+		netServers.push(server);
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const { port } = server.address() as { port: number };
+		return `http://127.0.0.1:${port}`;
+	};
+
+	const REFLECTIONS = {
+		"the status line": (auth: string) => `HTTP/1.1 ${auth} nope\r\n\r\n`,
+		"a header line": (auth: string) =>
+			`HTTP/1.1 401 Unauthorized\r\nBad Header Line ${auth}\r\n\r\n`,
+		"a chunked body": (auth: string) =>
+			"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nTransfer-Encoding: chunked\r\n\r\n" +
+			`ZZ ${auth}\r\n`,
+	} as const;
+
+	it.each(calls)(
+		"%s: a peer that reflects the token into a malformed response surfaces none of it — not in the message, not in a cause",
+		async (_name, path, call) => {
+			// fetch rejects with `TypeError: fetch failed` whose cause, an
+			// HTTPParserError, carries the offending bytes as `data`; a body that
+			// breaks mid-read does the same through the stream. A logger that
+			// inspects the error — core's console logger does — prints it.
+			const seen: Record<string, unknown> = {};
+			for (const [where, answer] of Object.entries(REFLECTIONS)) {
+				const origin = await reflecting(answer);
+				const repo = new HttpUserRepository({
+					...urls(origin),
+					bearerToken: TOKEN,
+					timeout: 5000,
+				});
+				const error = await Promise.resolve(call(repo)).then(
+					() => undefined,
+					(thrown: unknown) => thrown,
+				);
+				seen[where] = {
+					thrown: error instanceof Error,
+					namesTheEndpoint: error instanceof Error && error.message.includes(`${origin}${path}`),
+					cause: (error as { cause?: unknown } | undefined)?.cause,
+					carriesTheToken: surfaced(error).includes(TOKEN),
+				};
+			}
+			expect(seen).toEqual(
+				Object.fromEntries(
+					Object.keys(REFLECTIONS).map((where) => [
+						where,
+						{ thrown: true, namesTheEndpoint: true, cause: undefined, carriesTheToken: false },
+					]),
+				),
+			);
+		},
+	);
+
+	it("names a transport code an operator can act on — and nothing else of the failure", async () => {
+		const origin = await closedOrigin();
+		const repo = new HttpUserRepository({ ...urls(origin), bearerToken: TOKEN, timeout: 5000 });
+		for (const call of [
+			() => repo.authenticate("alice", "pass"),
+			() => repo.findSubjectByFederatedIdentity?.(IDENTITY),
+		]) {
+			const error = await Promise.resolve(call()).then(
+				() => undefined,
+				(thrown: unknown) => thrown as Error & { code?: unknown },
+			);
+			expect(error?.message).toMatch(/could not be reached \(ECONNREFUSED\)$/);
+			expect(error?.code).toBe("ECONNREFUSED");
+			expect(error?.cause).toBeUndefined();
+		}
 	});
 });
 
