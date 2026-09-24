@@ -33,7 +33,8 @@
  * a callback passed as an argument (node-style: `save((err) => …)`,
  * `get(key, function (err, value) …)`), the first parameter of an Express
  * error handler (`(err, req, res, next)`, whatever the names but the last's
- * `next`), and an error-named value awaited from a helper
+ * `next`, typed or not — `Request<P, B>`, `(err?: unknown) => void`), and an
+ * error-named value awaited from a helper
  * (`const consumeErr = await …`) — used anywhere in the arguments of a
  * logger call (`log.`, `logger.`, `….logger.` with a level or `child`;
  * `console.`) other than as an object key, as the argument of
@@ -59,8 +60,9 @@
  * - a logger reached some other way (a destructured `warn`, `logger[level]`,
  *   a bound `const log = logger.warn.bind(logger)`), and an audit sink or a
  *   deployment's callback (`report`), which are not loggers;
- * - an Express error handler whose parameter types hold a comma or a
- *   parenthesis (`Request<P, B>`): its first parameter is not bound;
+ * - an Express error handler whose parameter list runs past 400
+ *   characters, or holds a `<` that no `>` closes (a comparison in a
+ *   default value): its first parameter is not bound;
  * - bindings are per file, not per scope: a variable elsewhere in the file
  *   that shares a caught error's name is flagged too (rename it).
  *
@@ -136,11 +138,10 @@ const ERROR_NAME = "(?:err|error|[a-z][A-Za-z]*Err|[a-z][A-Za-z]*Error)";
  * Where a caught error is bound: `catch (x)`, `.catch(…x…)`,
  * `.on("error", …x…)`; the error-named first parameter of a callback passed
  * as an argument — node-style, `save((err) => …)`, `get(key, function (err,
- * value) …)`, `save(err => …)`; an error-named value awaited from a
+ * value) …)`, `save(err => …)`; and an error-named value awaited from a
  * helper — `const consumeErr = await …`, which is also what a promise
- * wrapping a node-style callback resolves; and an Express error handler's
- * first parameter — `(err, req, res, next) => …`, returned or assigned as
- * often as passed.
+ * wrapping a node-style callback resolves. An Express error handler's first
+ * parameter is bound by {@link errorHandlerNames}.
  */
 const CATCH_BINDINGS = [
 	new RegExp(String.raw`\bcatch\s*\(\s*(?:async\s*)?\(?\s*(${IDENTIFIER})\s*[):,=]`, "g"),
@@ -158,17 +159,65 @@ const CATCH_BINDINGS = [
 	),
 	new RegExp(String.raw`[(,]\s*(?:async\s+)?(${ERROR_NAME})\s*=>`, "g"),
 	/\b(?:const|let)\s+([a-z][\w$]*(?:Err|Error))\s*(?::[^=]*)?=\s*await\b/g,
-	// An Express error handler's first parameter, whatever it is called:
-	// four parameters, the last `next` or `_next`, each maybe typed.
-	new RegExp(
-		String.raw`\(\s*(${IDENTIFIER})\s*(?::[^,()]*)?,\s*${IDENTIFIER}\s*(?::[^,()]*)?,\s*${IDENTIFIER}\s*(?::[^,()]*)?,\s*_?next\s*(?::[^,()]*)?\)`,
-		"g",
-	),
 ];
+
+/** How far a parameter list is read before it is taken for something else. */
+const MAX_PARAMETER_LIST = 400;
+
+/**
+ * The top-level parameters of the list that opens at `open`, split on the
+ * commas outside every bracket — `()`, `[]`, `{}` and a type's `<>`, an
+ * arrow's `=>` not closing one — so a parameter typed `Request<P, B>` or
+ * `(err?: unknown) => void` stays whole. `null` when the list does not
+ * close within {@link MAX_PARAMETER_LIST} characters: a comparison's `<`
+ * leaves it open, and it is not a parameter list.
+ */
+function parametersFrom(source: string, open: number): string[] | null {
+	const parameters: string[] = [];
+	let depth = 0;
+	let start = open + 1;
+	const end = Math.min(source.length, open + MAX_PARAMETER_LIST);
+	for (let i = open; i < end; i++) {
+		const c = source[i];
+		if (c === "(" || c === "[" || c === "{" || c === "<") depth++;
+		else if (c === ")" || c === "]" || c === "}" || (c === ">" && source[i - 1] !== "=")) {
+			if (--depth === 0) {
+				parameters.push(source.slice(start, i));
+				return parameters;
+			}
+		} else if (c === "," && depth === 1) {
+			parameters.push(source.slice(start, i));
+			start = i + 1;
+		}
+	}
+	return null;
+}
+
+/** The name a parameter binds — `err` of `err: unknown` or `err = x` — when it is a plain one. */
+const parameterName = (parameter: string): string | undefined =>
+	new RegExp(String.raw`^\s*(${IDENTIFIER})\s*(?:[?:=]|$)`).exec(parameter)?.[1];
+
+/**
+ * An Express error handler's first parameter, whatever it is called: a list
+ * of four parameters whose last is `next` or `_next`, each maybe typed —
+ * read by {@link parametersFrom}, because the types hold commas and
+ * parentheses a regex over the list cannot tell from its own.
+ */
+function errorHandlerNames(source: string): string[] {
+	const names: string[] = [];
+	for (let open = source.indexOf("("); open >= 0; open = source.indexOf("(", open + 1)) {
+		const parameters = parametersFrom(source, open);
+		if (parameters?.length !== 4) continue;
+		if (!/^_?next$/.test(parameterName(parameters[3] ?? "") ?? "")) continue;
+		const first = parameterName(parameters[0] ?? "");
+		if (first !== undefined) names.push(first);
+	}
+	return names;
+}
 
 /** Every name the file binds as a caught error. */
 function caughtNames(source: string): ReadonlySet<string> {
-	const names = new Set<string>();
+	const names = new Set<string>(errorHandlerNames(source));
 	for (const binding of CATCH_BINDINGS) {
 		for (const match of source.matchAll(binding)) {
 			const name = match[1];
