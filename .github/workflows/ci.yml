@@ -369,37 +369,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run build
 
-      - name: Assert sibling peer ranges are workspace:^
-        run: |
-          set -euo pipefail
-          # Sibling packages must be declared as `workspace:^` in peerDependencies.
-          # release.yml sets the version with `pnpm version`, which rewrites only the
-          # `version` field — a literal range such as `^0.0.0` is published verbatim,
-          # and `^0.0.0` means `<0.0.1`, which no released sibling satisfies (pnpm
-          # warns, npm 7+ fails ERESOLVE). `workspace:^` is rewritten by `pnpm pack` /
-          # `pnpm publish` to `^<version>` of the sibling at pack time, so the range
-          # tracks the release without a second rewrite step. The tarball assertion
-          # below cannot catch this on its own: at 0.0.0 a literal `^0.0.0` and a
-          # rewritten `workspace:^` produce the same manifest.
-          node - <<'EOF'
-          const fs = require("node:fs");
-          const failures = [];
-          for (const dir of fs.readdirSync("packages")) {
-            const path = `packages/${dir}/package.json`;
-            if (!fs.existsSync(path)) continue;
-            const pkg = JSON.parse(fs.readFileSync(path, "utf8"));
-            for (const [name, range] of Object.entries(pkg.peerDependencies ?? {})) {
-              if (!name.startsWith("@o3co/auth-provider-")) continue;
-              if (range !== "workspace:^") failures.push(`${path}: peerDependencies["${name}"] is "${range}"`);
-            }
-          }
-          if (failures.length > 0) {
-            console.error("::error::sibling peer ranges must be \"workspace:^\" so pnpm rewrites them to ^<version> at pack time:");
-            for (const f of failures) console.error(`  ${f}`);
-            process.exit(1);
-          }
-          console.log("OK: every @o3co/auth-provider-* peer range is workspace:^");
-          EOF
+      - name: Assert every sibling is a workspace:^ peer, never a dependency
+        # Read on the source manifests: a sibling @o3co/auth-provider-* package
+        # is a `workspace:^` peer with a `workspace:*` devDependency, and never a
+        # `dependencies` entry (a second copy of core is one that `declare module`
+        # augmentation does not reach). The script says why each rule holds; the
+        # packed-manifest step below asserts what pnpm rewrote.
+        run: .github/scripts/check-sibling-deps.sh
 
       - name: Pack every package the release publishes
         run: |

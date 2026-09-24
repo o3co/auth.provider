@@ -262,3 +262,5 @@ pnpm -r exec pnpm version 0.0.0-check --no-git-tag-version --no-commit-hooks
 tar -xzOf /tmp/tarballs/o3co-auth-provider-dpop-0.0.0-check.tgz package/package.json | jq .peerDependencies
 git checkout -- ':(glob)**/package.json'
 ```
+
+A sibling is always a peer, never a `dependencies` entry — core included. A dependency is the dependent's own copy, which the package manager installs a second time whenever its range and the deployment's differ; a `declare module "@o3co/auth-provider-core"` augmentation, or an `instanceof` against one of core's error classes, then reaches only one of the two copies. The source-spec half of the check is [`.github/scripts/check-sibling-deps.sh`](../.github/scripts/check-sibling-deps.sh): it fails on a sibling in `dependencies` or `optionalDependencies`, a sibling peer range other than `workspace:^`, and a sibling peer without its `workspace:*` devDependency.
