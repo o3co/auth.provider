@@ -1718,6 +1718,21 @@ describe("the consent, when the world fails or moves", () => {
 		expect((await w.page(challenge, "b-1")).status).toBe(200);
 	});
 
+	it("answers a callback path Express cannot decode as JSON 400 malformed_path", async () => {
+		// Decoding fails before the callback's own checks run, so the answer is
+		// the routers' last handler's — JSON, not the callback's plain pages.
+		const w = world();
+		const response = await request(w.app).get(
+			`${FEDERATION_GRANTS_BROWSER_MOUNT_PATH}/callback/%zz`,
+		);
+		expect(response.status).toBe(400);
+		expect(response.headers["content-type"]).toMatch(/^application\/json/);
+		expect(response.body).toEqual({
+			error: "invalid_request",
+			error_description: "malformed_path",
+		});
+	});
+
 	it("answers a body it cannot parse, and one too large, as the JSON routes do", async () => {
 		const w = world();
 		const path = `${FEDERATION_GRANTS_BROWSER_MOUNT_PATH}/consent`;

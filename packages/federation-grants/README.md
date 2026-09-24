@@ -489,6 +489,11 @@ Where the upstream returns the browser: each connection's `callbackURL`
 points here. Query mode only — a `form_post` federation is refused at boot,
 because that callback arrives without the session cookie.
 
+A `:connection` segment Express cannot percent-decode (`/callback/%zz`) never
+reaches the checks below: it is answered by the router's last error handler
+as JSON `400 invalid_request` (`malformed_path`), not as one of the callback's
+plain pages.
+
 It checks, in this order:
 
 1. **The transaction** — the `state` is one this provider issued, for THIS
