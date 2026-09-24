@@ -19,8 +19,9 @@
  * compile (#626) — for a copy built as an object literal of the record type;
  * not for one behind a cast or one that names a field with the wrong value.
  *
- * Both records are copied field by field wherever a store reads them back,
- * and a field a copy forgets is dropped without a sound:
+ * The Redis store copies both records field by field when it reads them back,
+ * as a store over any other backend will, and a field such a copy forgets is
+ * dropped without a sound:
  *
  * - `ConsentRecord.expiresAt` gone reads as "until revoked" — the one field
  *   whose absence WIDENS what the record grants. Dropped on the way in, a

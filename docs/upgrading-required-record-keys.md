@@ -75,24 +75,21 @@ Write `undefined` where you have nothing. That makes "no expiry", "no state" or 
 
 ## What is observable at runtime, not only in the types
 
-**JSON is unchanged.** `JSON.stringify` leaves out a key whose value is `undefined`. The bytes the Redis stores write are what they were, and records written before these changes read back as they did.
+**JSON is unchanged, except for `rawParams`.** `JSON.stringify` leaves out a key whose value is `undefined`, so the bytes the Redis stores write are what they were, and records written before these changes read back as they did. The exception is `FederationTokens.rawParams`, covered below.
 
 **Key presence is not unchanged.** Anything that looks at keys rather than values can see a difference:
 
-- **Records the bundled stores return** now carry the key with `undefined` where they used to leave it out. This applies to the returned types in the table, from the memory store and, where there is one, the Redis store:
-  - `FederationTokens`;
+- **Records the bundled stores return** now carry the key with `undefined` where they used to leave it out. This applies to these returned types, from the memory store and, where there is one, the Redis store:
   - `AssertionIssuerEntry`;
-  - `RegisteredRP`;
   - `ConsentRecord` and `PendingConsentRecord`, and the `ConsentRecordFields` the Redis consent client returns;
-  - `Code`;
   - `DeviceAuthorization`;
   - `FederationGrantIntent`;
   - a federation grant's authorization, usage and credentials;
   - `UserSession`.
 
-  The input types in the table are not read back; the next item covers them.
+  `FederationTokens`, `RegisteredRP` and `Code` were already returned with every key named. For them only the types changed, apart from `rawParams`. The input types in the table are not read back; the next item covers them.
 
-  `"k" in record`, `Object.keys` / `Object.entries`, `structuredClone` and `toStrictEqual` see the key. A spread that merges defaults *underneath* a record, `{ ...defaults, ...record }`, now lets an `undefined` override the default.
+  `"k" in record`, `Object.keys` / `Object.entries`, `structuredClone` and `toStrictEqual` see the key. A spread that merges defaults *underneath* a record, `{ ...defaults, ...record }`, now lets an `undefined` override the default. Fill a default with `record.k ?? fallback` instead.
 - **Inputs the library hands to ports you implement** now carry these keys, `undefined` included:
   - `ConsentStore.grant` gets `expiresAt` (`POST /oauth/consent`);
   - `PendingConsentStore.set` gets `state` (`/authorize`);
@@ -103,9 +100,9 @@ Write `undefined` where you have nothing. That makes "no expiry", "no state" or 
   - `FederationGrantStore.activate` gets `authorization.resource` (the grant callback);
   - `FederationGrantStore.replaceCredentials` gets `credentials.accessToken` (a refresh).
 
-  An implementation that fills defaults with `{ expiresAt: policyExpiry, ...record }` now gets `undefined` for `expiresAt`. Put the defaults last, or use `record.expiresAt ?? policyExpiry`.
-- **`FederationTokens.rawParams` is gone.** The library no longer writes it. A Redis envelope that still carries it is read, and the field ignored.
-- **The Redis RP registry treats a stored RP record with a wrong-typed logout field as corrupt.** It drops the record with a `shape_invalid` warning, as it already did for a bad `clientId` (#653).
+  An implementation that fills defaults with `{ expiresAt: policyExpiry, ...record }` now gets `undefined` for `expiresAt`. Use `{ ...record, expiresAt: record.expiresAt ?? policyExpiry }`. Putting the default after the spread instead would override an expiry the record does carry.
+- **`FederationTokens.rawParams` is gone.** The library no longer writes it, so an envelope written from tokens that carried it now has different bytes. A Redis envelope that still carries it is read, and the field is ignored. That includes one whose `rawParams` is malformed, which was refused before.
+- **The Redis RP registry treats a stored RP record with a wrong-typed logout field as corrupt.** `listRPs` leaves the record out, with a `shape_invalid` warning when a logger is configured, as it already did for a bad `clientId` (#653). The stored record is not deleted.
 
 The behaviour of the library itself is otherwise unchanged. For example, a device authorization created by an untyped caller with a `null`, `""`, `false` or `0` `requestedScope` is still a request with no scope, as before.
 

@@ -24,7 +24,8 @@
  * bundled repositories copy the record field by field, and a field a copy
  * forgets is dropped without a sound: `nonce` gone mints an id_token the RP
  * cannot bind to its request, `acr` gone mints one that no longer attests
- * the step-up the user performed, `sid` gone leaves the RP nothing to match
+ * the step-up the user performed, `sid` gone makes `/token` refuse the code
+ * where a session store is wired and otherwise leaves the RP nothing to match
  * a logout against, `grantedAudience` gone falls back to the client as the
  * audience. v0.5.1 shipped exactly this bug on the Redis path (IH-2 / TS-1).
  *

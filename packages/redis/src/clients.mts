@@ -1065,9 +1065,10 @@ export interface NoteFederationGrantRefreshFailureInput {
 	readonly rowMs: number;
 	/**
 	 * `undefined` when the upstream gave no `Retry-After`. A required key (#626),
-	 * as `upstreamCode` is: a store that forgot to pass one would stamp the
-	 * default backoff where the upstream's `Retry-After` was longer, or lose
-	 * the code that says the user has to come back.
+	 * as `upstreamCode` is: a store that forgot to pass one would leave a
+	 * `rate_limited` stamp with the default backoff where the upstream's
+	 * `Retry-After` was longer (both held to the ceiling), or lose the code
+	 * that says the user has to come back.
 	 *
 	 * Both keys are always present now, so a client tells "none" by the value
 	 * (`=== undefined`), as `makeIoredisClients` does — not by whether the key

@@ -142,10 +142,12 @@ export interface AssertionIssuerEntryInput {
  * Every field beyond `issuer`, `keys` and `algorithms` restricts the issuer,
  * and most of them are ceilings a registry that loses one WIDENS — it fails
  * open. `clockToleranceSeconds` is the exception that can go either way:
- * gone, the default applies, looser or stricter than what was configured. `allowedClients` gone admits any presenter, an unauthenticated
- * one included; `expiresAt` gone trusts the issuer for ever; `profile:
- * "id-jag"` gone falls back to plain RFC 7523, and with it the `jti` replay
- * check, the `typ` check and the exact-`aud` check. A registry over a store —
+ * gone, the default applies, looser or stricter than what was configured.
+ * `allowedClients` gone admits any presenter (an unauthenticated one too,
+ * unless the entry is an ID-JAG one, whose presenter must authenticate);
+ * `expiresAt` gone trusts the issuer for ever; `profile: "id-jag"` gone falls
+ * back to plain RFC 7523, and with it the `jti` replay check, the `typ` check
+ * and the exact-`aud` check. A registry over a store —
  * this port's documented way to survive a restart — reads each row back into
  * this shape. Built as an object literal of THIS type, naming every field, a
  * read-back that forgets a key fails to compile rather than dropping the

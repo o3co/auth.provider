@@ -29,8 +29,8 @@
  *   the grant is activated without it.
  * - `upstreamSubject` gone: the callback no longer checks that the upstream
  *   account is the one the client said to expect. What it still checks — the
- *   issuer, a renewal's existing account, the identity lookup — stays; this
- *   one check is what is lost.
+ *   issuer, a renewal's existing account, and the identity lookup where one
+ *   is configured — stays; this one check is what is lost.
  *
  * So every field is a REQUIRED key, holding `undefined` where there is none; a
  * copy that forgets one fails to compile.

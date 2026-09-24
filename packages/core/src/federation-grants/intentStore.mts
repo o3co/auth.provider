@@ -119,8 +119,8 @@ export const FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT = 16;
  * field, and a copy that lost either widened the flow — the upstream asked
  * without the audience the connection narrows it to, or the callback no
  * longer checking that the upstream account is the one the client said to
- * expect (the issuer, a renewal's existing account and the identity lookup
- * are still checked). Naming the key makes that copy a compile error.
+ * expect (the issuer and a renewal's existing account are still checked, and
+ * the identity lookup where one is configured). Naming the key makes that copy a compile error.
  */
 export interface FederationGrantIntent {
 	/** Opaque, single-use, 256 bits. Addresses this record and nothing else. */

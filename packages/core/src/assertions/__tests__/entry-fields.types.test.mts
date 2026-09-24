@@ -27,7 +27,8 @@
  * for the ceilings a registry that loses one WIDENS it — fails open.
  * `clockToleranceSeconds` can go either way: gone, the default applies,
  * looser or stricter than what was configured. `allowedClients` gone admits
- * any presenter, an unauthenticated one included; `expiresAt` gone trusts the
+ * any presenter (an unauthenticated one too, unless the entry is an ID-JAG
+ * one, whose presenter must authenticate); `expiresAt` gone trusts the
  * issuer for ever; `profile: "id-jag"` gone falls back to plain RFC 7523 and
  * with it the `jti` replay check, the `typ` check and the exact-`aud` check. A
  * registry over a store — which this port documents as the way to survive a
