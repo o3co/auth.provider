@@ -214,6 +214,27 @@ describe("createMemoryReplaySeenSet — sweeps are also bounded in time", () => 
 		expect(set.size).toBe(3);
 	});
 
+	it("measures the floor on a monotonic clock, so a backward wall-clock jump does not stall sweeps", async () => {
+		// Record expiry is wall-clock (the callers' `expiresAtMs`), but the floor
+		// is only "how long since the last sweep". Measured on `Date.now()`, a
+		// wall clock stepped back an hour (NTP, a restored VM) reads as a
+		// negative interval, and sweeps stop until wall time catches up with
+		// the last one. vitest's fake timers drive `performance.now()` too, and
+		// leave it untouched by `setSystemTime` — as the real monotonic clock is
+		// by a wall-clock step.
+		vi.useFakeTimers();
+		const set = createMemoryReplaySeenSet({ sweepInterval: 2, minSweepIntervalMs: 1_000 });
+		await fill(set, 2, 600_000, "before"); // first sweep
+		vi.setSystemTime(Date.now() - 3_600_000);
+		await fill(set, 2, 10, "after-jump"); // inside the floor: no sweep
+		expect(set.size).toBe(4);
+		vi.advanceTimersByTime(1_000);
+		await set.markSeen("scope-A", "trigger", Date.now() + 600_000);
+		// A second of monotonic time has passed: the two records that expired on
+		// the (jumped) wall clock are gone; the live ones stay.
+		expect(set.size).toBe(3);
+	});
+
 	it("takes a floor of zero as no floor, and ignores a nonsensical one", async () => {
 		vi.useFakeTimers();
 		const unfloored = createMemoryReplaySeenSet({ sweepInterval: 2, minSweepIntervalMs: 0 });
