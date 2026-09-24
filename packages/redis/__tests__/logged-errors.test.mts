@@ -16,22 +16,25 @@
 
 /**
  * What the Redis adapters write to a log when a stored value cannot be read
- * back, against a real Redis.
+ * back or a connection fails, against a real Redis.
  *
  * A value read back from Redis is data this process stored, and a JSON
- * parser quotes the text it could not parse in its message. So a log line
- * carries core's `loggableError` projection of the error, never the error:
- * the logger here serialises every own property of what it is handed, as a
- * deployment's logger may.
+ * parser quotes the text it could not parse in its message; a reply error
+ * ioredis raises carries the command it answered, arguments included, on
+ * `command.args`. So a log line carries core's `loggableError` projection of
+ * the error, never the error: the logger here serialises every own property
+ * of what it is handed, as a deployment's logger may.
  */
 
 import { randomUUID } from "node:crypto";
 import type { Logger } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
 import { GenericContainer, type StartedTestContainer } from "testcontainers";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { RedisCodeRepository } from "#/code-repository.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
+import { createRedisSessionRPRegistry } from "#/sessionRPRegistry.mjs";
+import { createRedisUserSessionStore } from "#/userSessionStore.mjs";
 
 let container: StartedTestContainer;
 let raw: Redis;
@@ -140,4 +143,128 @@ describe("RedisCodeRepository: a stored record it cannot parse", () => {
 			}
 		},
 	);
+});
+
+describe("a stored session envelope it cannot parse", () => {
+	it("is logged by the user-session store as a SyntaxError's projection, never the claims V8 quotes", async () => {
+		const keyPrefix = `logged-errors:us:${randomUUID()}:`;
+		const { userSessionStoreClient } = makeIoredisClients(raw);
+		const { logger, lines, calls } = serialiseEverythingLogger();
+		const store = createRedisUserSessionStore({
+			client: userSessionStoreClient,
+			keyPrefix,
+			logger,
+		});
+		// An envelope whose claims a broken writer left unquoted: V8's message
+		// quotes the text around the failure — here the user's e-mail address.
+		const envelope = `{"sid":"sid-1","sub":"user-1","claims":{"email":alice@example.com}}`;
+		await raw.set(`${keyPrefix}sid-1`, envelope);
+		const quoted = parseMessageOf(envelope);
+		expect(quoted).toContain("alice@exa");
+
+		expect(await store.get("sid-1")).toBeNull();
+
+		expect(calls).toEqual([
+			{
+				level: "warn",
+				args: [
+					{ sid: "sid-1", reason: "json_parse", cause: { name: "SyntaxError", stack: FRAMES } },
+					"user_session_corrupt_envelope: JSON.parse failed",
+				],
+			},
+		]);
+		for (const line of lines) {
+			expect(line).not.toContain("alice@exa");
+			expect(line).not.toContain(quoted);
+		}
+	});
+
+	it("is logged by the RP registry as a SyntaxError's projection, never the record V8 quotes", async () => {
+		const keyPrefix = `logged-errors:rp:${randomUUID()}:`;
+		const { sessionRPRegistryClient } = makeIoredisClients(raw);
+		const { logger, lines, calls } = serialiseEverythingLogger();
+		const registry = createRedisSessionRPRegistry({
+			client: sessionRPRegistryClient,
+			keyPrefix,
+			logger,
+		});
+		const envelope = `{"clientId":"rp-1","backchannelLogoutUri":https://rp.example/bc-logout}`;
+		await raw.hset(`${keyPrefix}sid-1`, "rp-1", envelope);
+		const quoted = parseMessageOf(envelope);
+		expect(quoted).toContain("https://rp");
+
+		expect(await registry.listRPs("sid-1")).toEqual([]);
+
+		expect(calls).toEqual([
+			{
+				level: "warn",
+				args: [
+					{ sid: "sid-1", reason: "json_parse", cause: { name: "SyntaxError", stack: FRAMES } },
+					"session_rp_registry_corrupt_envelope: JSON.parse failed",
+				],
+			},
+		]);
+		for (const line of lines) {
+			expect(line).not.toContain("https://rp");
+			expect(line).not.toContain(quoted);
+		}
+	});
+});
+
+describe("a refresh rotation's own connection, refused by the server", () => {
+	/** What the deployment configured, and the server no longer accepts: rotated away. */
+	const STALE_PASSWORD = "stale-s3cret-redis-password";
+	let secured: StartedTestContainer;
+
+	beforeAll(async () => {
+		secured = await new GenericContainer("redis:7.2-alpine")
+			.withCommand(["redis-server", "--requirepass", "the-current-password"])
+			.withExposedPorts(6379)
+			.withStartupTimeout(60_000)
+			.start();
+	}, 90_000);
+
+	afterAll(async () => {
+		await secured?.stop();
+	});
+
+	it("logs the error its connection raises as loggableError's projection, never the AUTH arguments ioredis puts on it", async () => {
+		// ioredis raises the server's WRONGPASS reply on the connection's
+		// `error` event, with the AUTH command it sent — the password — on
+		// `command.args`.
+		const parent = new Redis({
+			host: secured.getHost(),
+			port: secured.getMappedPort(6379),
+			password: STALE_PASSWORD,
+			lazyConnect: true,
+			maxRetriesPerRequest: 0,
+			retryStrategy: () => null,
+		});
+		const { logger, lines, calls } = serialiseEverythingLogger();
+		const { refreshTokenFamilyClient } = makeIoredisClients(parent, { logger });
+		const rotation = refreshTokenFamilyClient.duplicate();
+		try {
+			await expect(rotation.get("family")).rejects.toThrow(/WRONGPASS/);
+			await vi.waitFor(() => expect(calls.length).toBeGreaterThan(0));
+		} finally {
+			await rotation[Symbol.asyncDispose]();
+			parent.disconnect();
+		}
+
+		expect(calls).toEqual([
+			{
+				level: "error",
+				args: [
+					{
+						err: expect.objectContaining({
+							name: "ReplyError",
+							message: expect.stringMatching(/^WRONGPASS /),
+						}),
+					},
+					"redis_duplicate_connection_error",
+				],
+			},
+		]);
+		for (const line of lines) expect(line).not.toContain(STALE_PASSWORD);
+	});
 });
