@@ -372,6 +372,29 @@ export const DEFAULT_CLOCK_SKEW_MS = 300_000;
 export const DEFAULT_SUBJECT_REVOCATION_SKEW_MS = 1_000;
 
 /**
+ * The longest `kid` header the verifier hands a keystore. RFC 7515 §4.1.4
+ * makes `kid` a case-sensitive string and bounds nothing; the kids this
+ * server issues are short, operator-chosen names (`oauth.jwt.signingKey`'s
+ * `kid`, `v0` by default). A kid that is not a string, or longer than this,
+ * names no key this server issued and is refused as `kid_unknown` before any
+ * keystore sees it — so a keystore of your own never receives an unbounded,
+ * attacker-chosen value to look up remotely, and a value that cannot even be
+ * turned into text never reaches a message built from it.
+ */
+export const MAX_KID_LENGTH = 256;
+
+/**
+ * Whether `cause` is the finding `name` names: an instance of the class, or —
+ * when a composition holds two copies of this package, a keystore built
+ * against one and the verifier from the other — an object carrying that
+ * `name`. The finding errors set `name` to their own class name, and nothing
+ * else in this package uses those names.
+ */
+const isFinding = (cause: unknown, cls: abstract new (...args: never[]) => Error, name: string) =>
+	cause instanceof cls ||
+	(typeof cause === "object" && cause !== null && (cause as { name?: unknown }).name === name);
+
+/**
  * How long past a token's `exp` a record that revokes it must still be kept:
  * the tolerance with which this verifier accepts an expired token
  * ({@link DEFAULT_CLOCK_SKEW_MS}), the cross-replica allowance
@@ -452,7 +475,15 @@ export async function verifyJwt(
 	// failing here keeps the audit log honest about *why*).
 	const effectiveExpectedTyp = expectedTyp === undefined ? DEFAULT_TYP_BY_TYPE[type] : expectedTyp;
 	if (effectiveExpectedTyp !== null) {
-		const headerTyp = header.typ;
+		// The header is the client's JSON: `typ` may be any value. One that is
+		// not a string is refused before any message is built from it — a
+		// `{"toString": null}` would otherwise throw a TypeError here.
+		const headerTyp: unknown = header.typ;
+		if (headerTyp !== undefined && typeof headerTyp !== "string") {
+			const err = new JwtVerificationError("typ", "JWT typ header is not a string");
+			emitRejection(logger, err, undefined, header);
+			throw err;
+		}
 		if (headerTyp === undefined) {
 			if (legacyTypAccept) {
 				logger?.warn(
@@ -483,7 +514,25 @@ export async function verifyJwt(
 
 	// kid resolution — fall back to current signing kid when the JWT has no
 	// kid header (back-compat with tokens signed before kid was emitted).
-	const requestedKid = header.kid ?? keyStore.getSigningKidFallback();
+	//
+	// The client's input is judged first, and only then is the keystore asked:
+	// a `kid` that is not a string, or longer than `MAX_KID_LENGTH`, names no
+	// key this server issued and is `kid_unknown` here. What the keystore then
+	// throws is about the keystore, never about the shape of the input — which
+	// is what lets anything but its two findings mean it could not answer.
+	const headerKid: unknown = header.kid;
+	if (
+		headerKid !== undefined &&
+		(typeof headerKid !== "string" || headerKid.length > MAX_KID_LENGTH)
+	) {
+		const err = new JwtVerificationError(
+			"kid_unknown",
+			`JWT kid header is not a string of at most ${MAX_KID_LENGTH} characters`,
+		);
+		emitRejection(logger, err, undefined, header);
+		throw err;
+	}
+	const requestedKid = headerKid ?? keyStore.getSigningKidFallback();
 	let verificationKey: Awaited<ReturnType<KeyStore["getVerificationKey"]>>;
 	try {
 		verificationKey = await keyStore.getVerificationKey(requestedKid);
@@ -491,14 +540,16 @@ export async function verifyJwt(
 		// KeyStore distinguishes the two findings via typed errors
 		// (ExpiredKidError / UnknownKidError) so SIEM pipelines can tell
 		// operator-rotation expiry apart from attacker-fabricated header
-		// values without coupling to message text. Anything else it throws
-		// is the keystore failing to answer, which says nothing about the
-		// token: `verification_key_unavailable`, with what it threw kept as the cause so a
-		// caller's log names the dependency.
-		if (cause instanceof ExpiredKidError || cause instanceof UnknownKidError) {
-			const reason: JwtVerificationReason =
-				cause instanceof ExpiredKidError ? "kid_expired" : "kid_unknown";
-			const err = new JwtVerificationError(reason, cause.message);
+		// values without coupling to message text — by class, or by `name`
+		// when the keystore came from another copy of this package. Anything
+		// else it throws is the keystore failing to answer, which says
+		// nothing about the token: `verification_key_unavailable`, with what it
+		// threw kept as the cause so a caller's log names the dependency.
+		const expired = isFinding(cause, ExpiredKidError, "ExpiredKidError");
+		if (expired || isFinding(cause, UnknownKidError, "UnknownKidError")) {
+			const err = expired
+				? new JwtVerificationError("kid_expired", "JWT kid names a retired key")
+				: new JwtVerificationError("kid_unknown", "JWT kid names no key this keystore holds");
 			emitRejection(logger, err, undefined, header);
 			throw err;
 		}
@@ -820,7 +871,8 @@ function emitRejection(
 			jti: payload?.jti,
 			sub: payload?.sub,
 			iss: payload?.iss,
-			typ: header?.typ,
+			// The client's header: logged only as the string it should be.
+			typ: typeof header?.typ === "string" ? header.typ : undefined,
 		},
 		"jwt_verify_rejected",
 	);

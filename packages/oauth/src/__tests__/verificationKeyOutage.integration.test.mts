@@ -232,6 +232,27 @@ const refreshToken = (kid?: "v0" | "fabricated") =>
 	mint("rt+jwt", { aud: CLIENT_ID, azp: CLIENT_ID, family_id: FAMILY, jti: "rt-1" }, kid);
 const idTokenHint = (kid?: "v0" | "fabricated") => mint("JWT", { aud: CLIENT_ID, sid: SID }, kid);
 
+/**
+ * `token` with its protected header's `kid` replaced by `kid`, as written:
+ * the header is re-encoded, the payload and signature are kept. The kid is
+ * refused before the signature would be checked, so it need not match.
+ */
+const withHeaderKid = (token: string, kid: unknown): string => {
+	const [header, payload, signature] = token.split(".");
+	const decoded = JSON.parse(Buffer.from(header ?? "", "base64url").toString("utf8"));
+	const rebuilt = Buffer.from(JSON.stringify({ ...decoded, kid })).toString("base64url");
+	return `${rebuilt}.${payload}.${signature}`;
+};
+
+/** Kids a client can put in a header that no keystore of this server issued. */
+const MALFORMED_KIDS: ReadonlyArray<readonly [string, unknown]> = [
+	["an object whose toString is null", { toString: null }],
+	["an object with neither conversion", { toString: 1, valueOf: 1 }],
+	["a number", 123],
+	["an array", []],
+	["a 300-character string", "k".repeat(300)],
+];
+
 type Call = (app: express.Express, token: string) => request.Test;
 
 /** /oauth/revoke words every 503 alike: RFC 7009 §2.2.1's "retry later". */
@@ -378,6 +399,25 @@ describe("a keystore that cannot answer is 503 on every route that verifies a to
 					expect(res.body).toMatchObject(route.unknownKid.body as object);
 				}
 			});
+
+			// A `kid` that is not a string, or is too long to be one this
+			// server issued, is the client's malformed token: it must never
+			// reach the keystore, and never read as the keystore failing.
+			for (const [label, kid] of MALFORMED_KIDS) {
+				it(`answers a kid that is ${label} as the client's fault, with no outage line`, async () => {
+					const { app, logger } = await buildApp("up");
+					const res = await route.call(app, withHeaderKid(await route.token(), kid));
+					expect(res.status).toBe(route.unknownKid.status);
+					if (route.unknownKid.body !== undefined) {
+						expect(res.body).toMatchObject(route.unknownKid.body as object);
+					}
+					expect(
+						logger.error.mock.calls.filter(
+							([, event]) => event === "token_verification_unavailable",
+						),
+					).toEqual([]);
+				});
+			}
 		});
 	}
 

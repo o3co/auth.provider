@@ -399,6 +399,7 @@ export type {
 export {
 	isVerificationUnavailable,
 	JwtVerificationError,
+	MAX_KID_LENGTH,
 	REVOCATION_RETENTION_ALLOWANCE_MS,
 	VERIFICATION_UNAVAILABLE_DESCRIPTION,
 	verifyJwt,

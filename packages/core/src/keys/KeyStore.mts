@@ -59,15 +59,26 @@ export interface ManagedKey {
 export type Algorithm = "HS256" | "RS256" | "ES256" | "EdDSA";
 
 /**
+ * A `kid` as text for an error message, whatever a caller hands over: a kid
+ * is the client's header value, and a finding error that could not be built
+ * from it would be thrown as a TypeError instead — which the verifier would
+ * read as the keystore failing to answer. Long values are cut.
+ */
+const describeKid = (kid: unknown): string =>
+	typeof kid !== "string" ? `(${typeof kid})` : kid.length > 64 ? `${kid.slice(0, 64)}...` : kid;
+
+/**
  * Thrown by {@link KeyStore.getVerificationKey} when the requested `kid` is
  * not registered in the keystore. Callers (notably the SF-1 central JWT
- * verifier) `instanceof`-check this so SIEM pipelines can distinguish
- * attacker-fabricated kids from operator-rotation expiry.
+ * verifier) check for it — by class, or by this `name` when a composition
+ * holds two copies of the package — so SIEM pipelines can distinguish
+ * attacker-fabricated kids from operator-rotation expiry, and neither from a
+ * keystore that cannot answer. Building one never throws, whatever `kid` is.
  */
 export class UnknownKidError extends Error {
 	override readonly name = "UnknownKidError";
 	constructor(readonly kid: string) {
-		super(`Unknown kid: ${kid}`);
+		super(`Unknown kid: ${describeKid(kid)}`);
 	}
 }
 
@@ -75,7 +86,9 @@ export class UnknownKidError extends Error {
  * Thrown by {@link KeyStore.getVerificationKey} when the requested `kid` is
  * registered but its `expiresAt` has passed. Distinct from
  * {@link UnknownKidError} so audit pipelines can page differently on
- * rotation-window expiry vs. attacker-fabricated header values.
+ * rotation-window expiry vs. attacker-fabricated header values. Recognised
+ * by class or by this `name`, like {@link UnknownKidError}, and building one
+ * never throws.
  */
 export class ExpiredKidError extends Error {
 	override readonly name = "ExpiredKidError";
@@ -83,7 +96,7 @@ export class ExpiredKidError extends Error {
 		readonly kid: string,
 		readonly expiredAt: Date,
 	) {
-		super(`Expired kid: ${kid}`);
+		super(`Expired kid: ${describeKid(kid)}`);
 	}
 }
 

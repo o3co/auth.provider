@@ -32,10 +32,16 @@ import {
 	isVerificationUnavailable,
 	JwtVerificationError,
 	type JwtVerifyOptions,
+	MAX_KID_LENGTH,
 	VERIFICATION_UNAVAILABLE_DESCRIPTION,
 	verifyJwt,
 } from "#/jwt/verify.mjs";
-import { createSymmetricKeyStore, ExpiredKidError, type KeyStore } from "#/keys/KeyStore.mjs";
+import {
+	createSymmetricKeyStore,
+	ExpiredKidError,
+	type KeyStore,
+	UnknownKidError,
+} from "#/keys/KeyStore.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import { loggableError } from "#/logging/loggableError.mjs";
 
@@ -177,5 +183,138 @@ describe("isVerificationUnavailable — an outage, whichever dependency it was",
 			verification_key_unavailable: "verification key unavailable",
 			revocation_unavailable: "revocation store unavailable",
 		});
+	});
+});
+
+/*
+ * A header the client made up is the client's, never an outage.
+ *
+ * `kid` and `typ` come from the token and were used without a type check: the
+ * bundled keystores build `Unknown kid: ${kid}`, so a `kid` of
+ * `{"toString": null}` threw a TypeError inside `UnknownKidError`'s
+ * constructor, and that TypeError — raised while handling the client's input —
+ * was classified as the keystore failing to answer. An unauthenticated caller
+ * could turn any verifying route into a 503 and an error-level outage line,
+ * before a signature was checked. The same held for `typ`, whose message
+ * interpolated the header value.
+ */
+describe("verifyJwt — a kid or typ the client made up", () => {
+	const b64 = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+	/** A token whose protected header carries `header` as written; the signature is never reached. */
+	const crafted = (header: Record<string, unknown>) => {
+		const now = Math.floor(Date.now() / 1000);
+		return `${b64({ alg: "HS256", typ: "at+jwt", ...header })}.${b64({ iss: ISSUER, sub: "u", iat: now, exp: now + 60 })}.AAAA`;
+	};
+	/** The working keystore, with its key lookups counted. */
+	const countingKeyStore = () => {
+		const real = createSymmetricKeyStore(SECRET, "v0");
+		const lookups: unknown[] = [];
+		const keyStore: KeyStore = {
+			algorithm: real.algorithm,
+			sign: (o) => real.sign(o),
+			getSigningKidFallback: () => real.getSigningKidFallback(),
+			getVerificationKeys: () => real.getVerificationKeys(),
+			getVerificationKey: async (kid) => {
+				lookups.push(kid);
+				return real.getVerificationKey(kid);
+			},
+		};
+		return { keyStore, lookups };
+	};
+
+	// A header is JSON, so a `toString` that throws arrives as one that is not
+	// callable: `{"toString": null}` and `{"toString": 1, "valueOf": 1}` make
+	// every conversion to a string throw. A `toString` that throws when called
+	// can only come from code — a custom keystore — and is pinned on the
+	// finding errors' constructors below.
+	const MALFORMED_KIDS: ReadonlyArray<readonly [string, unknown]> = [
+		["an object whose toString is null", { toString: null }],
+		["an object with neither conversion", { toString: 1, valueOf: 1 }],
+		["a number", 123],
+		["an array", []],
+		["an object", { a: 1 }],
+		["a string longer than MAX_KID_LENGTH", "k".repeat(MAX_KID_LENGTH + 1)],
+	];
+
+	for (const [label, kid] of MALFORMED_KIDS) {
+		it(`refuses ${label} as kid_unknown, before the keystore is asked`, async () => {
+			const { keyStore, lookups } = countingKeyStore();
+			const err = await verifyJwt(crafted({ kid }), keyStore, options).catch((e: unknown) => e);
+			expect(err).toMatchObject({ name: "JwtVerificationError", reason: "kid_unknown" });
+			expect(isVerificationUnavailable(err)).toBe(false);
+			expect(lookups).toEqual([]);
+		});
+	}
+
+	it("still looks up a kid at the length bound", async () => {
+		const { keyStore, lookups } = countingKeyStore();
+		const err = await verifyJwt(
+			crafted({ kid: "k".repeat(MAX_KID_LENGTH) }),
+			keyStore,
+			options,
+		).catch((e: unknown) => e);
+		expect(err).toMatchObject({ reason: "kid_unknown" });
+		expect(lookups).toHaveLength(1);
+	});
+
+	for (const [label, typ] of [
+		["an object whose toString is null", { toString: null }],
+		["an object with neither conversion", { toString: 1, valueOf: 1 }],
+		["a number", 7],
+	] as const) {
+		it(`refuses a typ that is ${label} as typ`, async () => {
+			const { keyStore, lookups } = countingKeyStore();
+			const err = await verifyJwt(crafted({ typ, kid: "v0" }), keyStore, options).catch(
+				(e: unknown) => e,
+			);
+			expect(err).toMatchObject({ name: "JwtVerificationError", reason: "typ" });
+			expect(lookups).toEqual([]);
+		});
+	}
+});
+
+/*
+ * The keystore's own findings are recognised by name as well as by class, so
+ * a composition that ends up with two copies of core — a custom keystore
+ * built against one, the verifier from another — does not read "no such kid"
+ * as an outage.
+ */
+describe("verifyJwt — a keystore's findings from another copy of core", () => {
+	const named = (name: string) => Object.assign(new Error(`${name} from elsewhere`), { name });
+
+	it("reads an error named UnknownKidError as kid_unknown", async () => {
+		const err = await verifyJwt(
+			await mint(),
+			keyStoreWhoseLookupRejects(named("UnknownKidError")),
+			options,
+		).catch((e: unknown) => e);
+		expect(err).toMatchObject({ reason: "kid_unknown" });
+		expect(isVerificationUnavailable(err)).toBe(false);
+	});
+
+	it("reads an error named ExpiredKidError as kid_expired", async () => {
+		const err = await verifyJwt(
+			await mint(),
+			keyStoreWhoseLookupRejects(named("ExpiredKidError")),
+			options,
+		).catch((e: unknown) => e);
+		expect(err).toMatchObject({ reason: "kid_expired" });
+	});
+});
+
+describe("the keystore's finding errors cannot fail to be built", () => {
+	it("builds UnknownKidError and ExpiredKidError from any kid a custom keystore hands them", () => {
+		const throwing = {
+			toString() {
+				throw new Error("boom");
+			},
+		};
+		for (const kid of [{ toString: null }, throwing, 1, undefined, "k".repeat(10_000)]) {
+			expect(new UnknownKidError(kid as never)).toMatchObject({ name: "UnknownKidError" });
+			expect(new ExpiredKidError(kid as never, new Date(0))).toMatchObject({
+				name: "ExpiredKidError",
+			});
+		}
+		expect(new UnknownKidError("k".repeat(10_000)).message.length).toBeLessThanOrEqual(300);
 	});
 });

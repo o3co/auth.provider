@@ -101,7 +101,10 @@ export const parseProof = async (raw: string): Promise<DPoPProof> => {
 
 	// Step 4 (spec §6): typ must be exactly "dpop+jwt"
 	if (header.typ !== "dpop+jwt") {
-		throw new DPoPError("typ_mismatch", `expected typ=dpop+jwt, got ${String(header.typ)}`);
+		// The value is the client's: described by its type unless it is a
+		// string, since `String({"toString": null})` itself throws.
+		const got = typeof header.typ === "string" ? header.typ : `(${typeof header.typ})`;
+		throw new DPoPError("typ_mismatch", `expected typ=dpop+jwt, got ${got}`);
 	}
 
 	// Step 5 (spec §6): alg must be present as a non-empty string
