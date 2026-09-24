@@ -64,9 +64,23 @@ const DAY = 86_400_000;
  * TTL on a stored deadline, and a fixture dated in the past would be reclaimed
  * partway through the suite. Not on a whole second, so that an adapter
  * truncating an instant to seconds does not hand every fixture back unchanged.
+ *
+ * Not set until the first test starts, and `at` refuses to read it before
+ * then: a date taken while the suite is collected — in a `describe` body
+ * rather than a test — is dated from the import, not from the test that uses
+ * it, and next to that test's own dates it is off by however long the suite
+ * took to get there. The FederationGrantStore contract lost a test to exactly
+ * that, and only on a slow enough run.
  */
-let T0 = new Date(Math.floor(Date.now() / 1000) * 1000 + 137);
-const at = (ms: number): Date => new Date(T0.getTime() + ms);
+let T0 = new Date(Number.NaN);
+const at = (ms: number): Date => {
+	if (Number.isNaN(T0.getTime())) {
+		throw new Error(
+			"at() is dated from the test's clock: call it inside a test, not a describe body",
+		);
+	}
+	return new Date(T0.getTime() + ms);
+};
 const INVALID = new Date(Number.NaN);
 
 /** Never handed out by reference: a fixture that shared it would hide a store that does too. */
