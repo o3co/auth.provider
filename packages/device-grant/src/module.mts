@@ -39,9 +39,10 @@
  * every client as supported. Disabled, the module contributes no grant — the
  * token endpoint answers `unsupported_grant_type` as it does for any grant
  * nobody registered — no discovery field, and the two routes answer `404`.
- * The routes and the discovery field are built from the config `createApp`
- * validated, and a boot where that config disagrees with the factory's is
- * refused (`settingsFor`), so the two cannot split one grant in half.
+ * The grant, the routes and the discovery field are built from the config
+ * `createApp` validated, and a boot where that config disagrees with the
+ * factory's is refused (`settingsFor`), first of anything each of them
+ * checks, so the two cannot split one grant in half.
  *
  * ### Two settings with no defaults
  *
@@ -554,13 +555,18 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 			...(enabled
 				? {
 						grants: {
-							[DEVICE_CODE_GRANT_TYPE]: (deps: DeviceGrantModuleDeps) =>
-								createDeviceCodeGrant({
+							[DEVICE_CODE_GRANT_TYPE]: (deps: DeviceGrantModuleDeps) => {
+								// Name-keyed contributions run before the routes, so the
+								// disagreement check comes first here too — ahead of the
+								// store the booted config may rightly say it lacks.
+								settingsFor(enabled, deps);
+								return createDeviceCodeGrant({
 									store: requireDeviceCodeStore(deps),
 									keyStore: deps.keyStore,
 									accessTokenExpiresIn: resolveAccessTokenLifetime(deps.config).defaultExpiresIn,
 									logger: deps.logger,
-								}),
+								});
+							},
 						},
 					}
 				: {}),
