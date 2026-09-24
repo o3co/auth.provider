@@ -94,5 +94,5 @@ export {
 	DEFAULT_MAX_RESPONSE_BYTES,
 	type FederatedIdentityLookupCoverage,
 	HttpUserRepository,
-	StoreCredentialRefusedError,
 } from "./repositories/HttpUserRepository.mjs";
+export { StoreCredentialRefusedError } from "./repositories/storeErrors.mjs";
