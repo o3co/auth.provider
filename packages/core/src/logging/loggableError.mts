@@ -141,7 +141,7 @@ const TOKEN_RUN = /[A-Za-z0-9._~+/=-]{20,}/;
  */
 const descriptionOf = (value: unknown): string | undefined => {
 	if (typeof value !== "string") return undefined;
-	const firstLine = value.split(/\r?\n/, 1)[0] ?? "";
+	const firstLine = value.replace(/\r?\n[\s\S]*$/, "");
 	if (!OAUTH_ERROR_TEXT.test(firstLine)) return undefined;
 	const run = TOKEN_RUN.exec(firstLine);
 	const wordStart = run === null ? firstLine.length : firstLine.lastIndexOf(" ", run.index) + 1;

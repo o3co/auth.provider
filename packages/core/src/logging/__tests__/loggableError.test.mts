@@ -332,6 +332,27 @@ describe("loggableError — what a log line may carry of an error", () => {
 		expect(loggableError(own).response).toEqual({ status: 401, contentType: "application/json" });
 	});
 
+	it("reads a Response structurally, and keeps of it only what it can read", () => {
+		const onCause = (cause: unknown) =>
+			loggableError(new Error("unexpected HTTP response status code", { cause })).response;
+		// A Response without a content type: the status alone.
+		expect(onCause(new Response(null, { status: 503 }))).toEqual({ status: 503 });
+		// Not a Response: headers that are not an object, or have no `get`.
+		expect(onCause({ status: 503, headers: "text/html" })).toBeUndefined();
+		expect(onCause({ status: 503, headers: {} })).toBeUndefined();
+		// A `get` that throws: the status, and no content type.
+		expect(
+			onCause({
+				status: 503,
+				headers: {
+					get() {
+						throw new Error("headers trap");
+					},
+				},
+			}),
+		).toEqual({ status: 503 });
+	});
+
 	it("caps every string it keeps at 256 characters", () => {
 		const long = Object.assign(new Error("m".repeat(1000)), {
 			name: "N".repeat(1000),
@@ -363,8 +384,18 @@ describe("loggableError — what a log line may carry of an error", () => {
 		delete (Error as { isError?: unknown }).isError;
 		try {
 			expect(shape(hostile)).toEqual({ name: "NonError", thrown: "object" });
-			// And the fallback still counts a real error.
+			// And the fallback still counts a real error, one from another realm
+			// by its tag, and neither null nor an object tagged otherwise.
 			expect(shape(new Error("kept"))).toEqual({ name: "Error", message: "kept" });
+			expect(shape(runInNewContext('new TypeError("other realm")'))).toEqual({
+				name: "TypeError",
+				message: "other realm",
+			});
+			expect(shape(null)).toEqual({ name: "NonError", thrown: "null" });
+			expect(shape({ name: "Error", message: "shaped like one" })).toEqual({
+				name: "NonError",
+				thrown: "object",
+			});
 		} finally {
 			if (brand) Object.defineProperty(Error, "isError", brand);
 		}
