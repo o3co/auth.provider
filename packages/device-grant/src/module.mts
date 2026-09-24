@@ -636,7 +636,14 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 						return disabledRoute("device-authorization", "/oauth/device_authorization");
 					}
 					const router = express.Router();
-					router.use(noStore);
+					// Every middleware on both device routes is a route on `/` — the
+					// endpoint's own path — not `router.use`: core mounts this router on
+					// its path by prefix, so a `use` mount would run for a later module's
+					// `/oauth/device_authorization/custom` too, throttling, parsing and
+					// refusing a request that is not this endpoint's. The error handlers
+					// stay `router.use`: Express skips routes while an error is pending, and
+					// an error here can only come from this router's own layers.
+					router.all("/", noStore);
 					// Throttled like every other public entry point (#325), and
 					// AHEAD of client authentication — the token endpoint's D-6
 					// ordering — so repeated unauthenticated hits are bounded before
@@ -646,7 +653,8 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// by that prefix and falls back to its default. Ahead of the
 					// size check too, as federation-grants places it: an oversized
 					// request spends an attempt like any other.
-					router.use(
+					router.all(
+						"/",
 						createRateLimitGuard({
 							limiter: requireRateLimiter(deps),
 							tag: DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
@@ -658,9 +666,9 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// Router-level body parsing, matching `oauthModule` and the
 					// WebAuthn routes: `createApp` installs no global parser. A
 					// declared oversized body is refused before it is read.
-					router.use(withinBodyLimit);
-					router.use(express.json({ limit: BODY_LIMIT }));
-					router.use(express.urlencoded({ extended: false, limit: BODY_LIMIT }));
+					router.all("/", withinBodyLimit);
+					router.all("/", express.json({ limit: BODY_LIMIT }));
+					router.all("/", express.urlencoded({ extended: false, limit: BODY_LIMIT }));
 					router.use(parserRefusals);
 					// RFC 8628 §3.1 applies RFC 6749 §3.2.1's client-authentication
 					// requirements to this endpoint, and §5.6 expects device clients
@@ -669,7 +677,8 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// one must still present its secret. The same middleware and the
 					// same option `/oauth/token` uses, so there is one notion of
 					// client authentication rather than two that can drift.
-					router.use(
+					router.all(
+						"/",
 						createClientAuthMiddleware(deps.clientRepository, {
 							issuer: deps.config.oauth.jwt.issuer,
 							allowPublicClients: true,
@@ -709,7 +718,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 						return disabledRoute("device-verification", "/oauth/device/verification");
 					}
 					const router = express.Router();
-					router.use(noStore);
+					router.all("/", noStore);
 					// JSON only, deliberately — see the file header. A form body is
 					// a "simple" request a browser sends cross-site with the
 					// victim's cookie and no preflight; JSON is not. No form parser
@@ -718,8 +727,8 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// handler still checks the media type itself and answers
 					// anything else `415`: the rule belongs to the endpoint, not to
 					// what is mounted around it.
-					router.use(withinBodyLimit);
-					router.use(express.json({ limit: BODY_LIMIT }));
+					router.all("/", withinBodyLimit);
+					router.all("/", express.json({ limit: BODY_LIMIT }));
 					router.use(parserRefusals);
 					// The session guard, verbatim: foreign origin refused, same
 					// origin or `session.csrf.trustedOrigins` accepted, no origin
