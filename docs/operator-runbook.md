@@ -65,14 +65,18 @@ standalone) is what lets replicas refuse each other's proofs. With DPoP enabled
 and no seen-set wired at all, `dpopModule` refuses to boot in every mode
 (`packages/dpop/src/module.mts`); there is no per-process fallback.
 
-A seen-set wired for DPoP is wired for everything else that records in it.
-Its presence alone makes `@o3co/auth-provider-oauth` advertise
-`private_key_jwt` (token, introspection and revocation endpoint lists, with
-their signing algorithms), accept client assertions from clients registered
-with `jwks` / `jwksUri` (refused `500 server_error` without one), and verify
-ID-JAG entries in the jwt-bearer trust registry (`503` without one)
-(`packages/oauth/src/module.mts`, `oauth/src/middleware/clientAssertion.mts`,
-`core/src/assertions/registryAssertionVerifier.mts`).
+A seen-set wired for DPoP is wired for `private_key_jwt` too: the slot is
+where a client assertion's `jti` is recorded, so filling it is what makes
+the method work. With the slot filled, a client registered with `jwks` /
+`jwksUri` can authenticate with an assertion — it was refused
+`500 server_error` without one — at `/oauth/token`, `/oauth/introspect` and
+`/oauth/revoke` (`packages/oauth/src/module.mts`, which also starts
+advertising the method and its signing algorithms in discovery), at
+`POST /oauth/device_authorization` (`packages/device-grant/src/module.mts`),
+and on every client route under `/oauth/federation-grants` — `POST
+/:grantId/token`, `/:grantId/status`, `/:grantId/revoke`, and with
+acquisition on `POST /` and `/:grantId/reauthorize`
+(`packages/federation-grants/src/routes.mts`).
 
 Three things the guard cannot do:
 
@@ -327,7 +331,7 @@ refresh grant takes care to answer `503` for outages.
 | | `grant_type=authorization_code` | `503 temporarily_unavailable` "session store unavailable" when the code's session cannot be read (`packages/oauth/src/grants/authorization.mts`) | — | `commandTimeout` |
 | Shared Redis down — **user session stores at login** | `POST /session/login` | `503 temporarily_unavailable` "Session store temporarily unavailable" when `userSessionStore.create` fails. If only the subject index write fails, the login **succeeds** and that session is invisible to a later credential-change cascade (`packages/session/src/routes/Session.mts`) | `subject_session_index_write_failed` (error) | `commandTimeout` |
 | Shared Redis down — **denylist / watermark at verification** | every surface that accepts an access token; introspection | verification fails closed. Introspection answers `200 {"active": false}` (RFC 7662 has no outage slot); a family-revocation lookup failure there is audited (`packages/oauth/src/routes.mts`) | `jwt_verify_rejected` with `reason: "revocation_unavailable"` for either store — a denylist failure and a watermark failure are the same outage, and neither is reported as `revoked` (`packages/core/src/jwt/verify.mts`, #408 / #459); audit `introspect.store_unavailable` | `commandTimeout` |
-| Shared Redis down — **replay seen-set** (`REPLAY_SEEN_SET_ADAPTER=redis`) | a DPoP proof at `/oauth/token` or at a protected resource; a `private_key_jwt` client assertion (token, introspection, revocation, device authorization); an ID-JAG assertion (`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`) | `503 temporarily_unavailable`, with no `WWW-Authenticate` challenge at a protected resource: the proof or assertion is refused unrecorded, not judged invalid, so the client keeps its tokens and retries (`packages/dpop/src/verifier.mts`, `packages/core/src/middleware/tokenBinding.mts`, `protectedResourceBinding.mts`, `packages/oauth/src/middleware/clientAssertion.mts`, `packages/oauth/src/grants/jwtBearer.mts`) | `dpop_replay_store_unavailable` (error) and `token_binding_unavailable` / `protected_resource_binding_unavailable` (warn) for DPoP; `client_assertion_refused` (error, `reason: "replay_store_unavailable"`); `jwt_bearer_assertion_verifier_unavailable` (error) | `commandTimeout` |
+| Shared Redis down — **replay seen-set** (`REPLAY_SEEN_SET_ADAPTER=redis`) | a DPoP proof at `/oauth/token` or at a protected resource; a `private_key_jwt` client assertion (`/oauth/token`, `/oauth/introspect`, `/oauth/revoke`, `/oauth/device_authorization`, and the federation-grant client routes — `/oauth/federation-grants/:grantId/token`, `/status`, `/revoke`, and with acquisition on `POST /oauth/federation-grants` and `/:grantId/reauthorize`); an ID-JAG assertion (`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`) when the composition hands the jwt-bearer verifier this seen-set | `503 temporarily_unavailable`, with no `WWW-Authenticate` challenge at a protected resource: the proof or assertion is refused unrecorded, not judged invalid, so the client keeps its tokens and retries (`packages/dpop/src/verifier.mts`, `packages/core/src/middleware/tokenBinding.mts`, `protectedResourceBinding.mts`, `packages/oauth/src/middleware/clientAssertion.mts`, `packages/oauth/src/grants/jwtBearer.mts`) | `dpop_replay_store_unavailable` (error) and `token_binding_unavailable` / `protected_resource_binding_unavailable` (warn) for DPoP; `client_assertion_refused` (error, `reason: "replay_store_unavailable"`); `jwt_bearer_assertion_verifier_unavailable` (error) | `commandTimeout` |
 | | the WebAuthn ceremony — `grant_type=urn:o3co:oauth:grant-type:webauthn` and `POST /oauth/webauthn/registration/verify` | the ceremony's `contains` / `markSeen` error is not caught on the way out (`packages/core/src/challenges/ceremony.mts`), so the request ends in the terminal handler: `500 server_error` in the standalone (`templates/standalone/src/terminalError.mts`). A `markSeen` failure comes after the challenge was consumed, so the user starts the ceremony again | `unhandled_request_error` (error) | `commandTimeout` |
 | **Cookie session store** (connect-redis, its own node-redis client) down | every browser-session route | express-session hands a store error to `next(err)`, which the standalone's terminal handler answers as `500 server_error` (`templates/standalone/src/terminalError.mts`); the federation start/callback session saves answer `500 server_error` "Session store unavailable" themselves (`packages/session/src/routes/Federation.mts`) | `session_store_redis_error` (error) on every client error event, including during reconnect (`packages/session/src/store/factory.mts`); `readiness_probe_failed` for `session-store` | node-redis reconnects on its own; the provider no longer crashes on the `error` event |
 | **KMS / remote signer** unavailable | any mint: `/oauth/token`, id tokens, logout tokens | nothing between `keyStore.sign` (`packages/core/src/grants/token.mts`) and the route catches a signer error, so it surfaces as `500 server_error` with `unhandled_request_error` — **except the `refresh_token` grant when a rotation was committed** (#449): there it is `503 temporarily_unavailable` plus a `refresh_token_rotation_orphaned` error log naming the family, and the client's retry presents a token that now reads as a replay, so that family is revoked and the user re-authenticates. Verification and `/.well-known/jwks.json` are **unaffected**: the public halves are imported at construction and served from memory (`packages/core/src/keys/remoteSigning.mts`) | `unhandled_request_error` | whatever timeout your `RemoteSigner` applies — the store applies none. Boot itself needs one signer call for the self-check unless `verifyOnConstruction: false` |
@@ -589,7 +593,7 @@ stream — its level is fixed at `info`.
 | `jwt_bearer_policy_audience_refused` (warn) | `oauth/src/grants/jwtBearer.mts` | your `grantPolicy` returned an audience outside the client's `allowedAudiences`, or one with no authenticated client to supply that ceiling. Devices get `500 server_error`; the policy, not the device, is what to fix (#520, #521) |
 | `jwt_bearer_issuer_audience_mismatch` (warn) | `oauth/src/grants/jwtBearer.mts` | the presenting client's `allowedAudiences` and the assertion issuer's `allowedAudiences` (its trust-registry entry) admit no audience in common, so no token could name one both stand behind. Devices get `invalid_grant`; compare the two registrations (#525) |
 | `cimd_document_rejected`, `cimd_document_fetch_failed`, `cimd_host_not_allowed` (warn) | `oauth/src/clients/clientIdMetadataDocument.mts` | a Client ID Metadata Document client (#529) was refused: the reason names what failed (a redirect, a byte cap, a special-use address, a document that does not match its URL). The client sees `invalid_client`; a steady rate from one host is a misconfigured client or a probe |
-| `dpop_replay_store_unavailable` (error); `token_binding_unavailable`, `protected_resource_binding_unavailable` (warn) | `dpop/src/verifier.mts`, `core/src/middleware/*.mts` | DPoP proofs cannot be checked for replay: the seen-set is unreachable, and DPoP requests at `/oauth/token` and at protected resources are answering `503 temporarily_unavailable` |
+| `dpop_replay_store_unavailable` (error); `token_binding_unavailable`, `protected_resource_binding_unavailable` (warn) | `dpop/src/verifier.mts`, `core/src/middleware/*.mts` | DPoP proofs cannot be checked for replay, and DPoP requests at `/oauth/token` and at protected resources are answering `503 temporarily_unavailable`. `dpop_replay_store_unavailable` means the seen-set is unreachable; the two `*_unavailable` warnings fire for that and for a broken seen-set (`dpop_replay_store_fault`, next row) alike |
 | `dpop_replay_store_fault` (error) | `dpop/src/verifier.mts` | the seen-set answered DPoP with its own contract error (a `RangeError` or `expired-at-issue`) — a broken or hand-built seen-set, not an outage. DPoP requests answer `503` as above; the fix is in the composition, not in Redis |
 | `graceful shutdown: drain deadline exceeded, closing remaining connections`, `graceful shutdown: cleanup failed`, `graceful shutdown: cleanup timed out`, `graceful shutdown: server close failed` (error) + non-zero exit | `templates/standalone/src/shutdown.mts` | a replica did not drain within `drainTimeoutMs` (default 10 s), its cleanup did not finish within the allowance (45 s or more with federation grants on — a rotated upstream credential may be unwritten), or it could not release its connections |
 
@@ -982,32 +986,47 @@ before you flip — and a relying party holding the secret can also mint.
    | `oauth.refreshToken.legacyTokenCompat` | removed | `oauth.refreshToken.legacyTokenCompat was removed in v0.6.0 (Phase G / M4); see CHANGELOG.` |
    | `oauth.authorize.allowUnmarkedClients` (and the env tombstone `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, any value) | removed | boot error with migration instructions: mark every client `firstParty: true`, then delete the key and the variable |
    | `oauth.dpop.replay-store` (any value) | removed | `oauth.dpop.replay-store was removed in …`: DPoP records its proofs in the `replaySeenSet` component, whose module chooses the backend (`replaySeenSet.adapter` in the standalone); delete the key. A `dpopReplayStore` bootstrap component is no longer read either — see the DPoP note below |
+   | `oauth.refreshToken.legacyRtPolicy = "accept-with-warning"` | enum shrunk to `"reject"` | Zod `invalid_enum_value` naming the survivors |
+   | flat `oauth.jwt.algorithm` / `kid` / `secret` / key fields | moved | `oauth.jwt has legacy flat fields (…). Migrate to nested shape: oauth.jwt.signingKey.local.<field>` |
+   | `oauth.grants.authorization_code.pkce.*` (and `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) | warn and ignore | one `pkce_config_ignored_s256_is_mandatory` line; S256 is mandatory regardless (`packages/oauth/src/grants/pkce.mts`) |
+   | `repositories.code.type = "redis"` | deprecated alias of `oauth.code.adapter` | a `[buildModules] … is deprecated` console line at boot |
+   | `oauth.accessToken.expiresIn` (and `OAUTH_ACCESS_TOKEN_EXPIRES_IN`) | deprecated alias of `oauth.accessToken.defaultExpiresIn`, read only while that key is unset — set both and the new key wins | the standalone prints a `[buildModules] … is deprecated` console line at boot when the old key carries anything but the shipped `3600`; `resolveAccessTokenLifetime` is the reader for every composition |
 
    **DPoP moving onto the replay seen-set.** DPoP's Redis records move from
    `dpop:replay:<jkt>:<jti>` to the seen-set's `replay:…dpop-proof:<jkt>…`
    keys, and neither release reads the other's. While both serve against one
    Redis, a captured proof can be accepted once by an old replica and once by
-   a new one — for the whole overlap, plus up to
-   `2 × oauth.dpop.iat-window-seconds + 1` seconds after the last old replica
-   stops (121 s at the default 60), because a proof that replica accepted
-   stays acceptable that long. To avoid the window, either cut over
-   stop-then-start with the new release starting at least `2W + 1` seconds
-   after the old one stopped, or lower `oauth.dpop.iat-window-seconds` on the
-   old release for the roll (5 s makes the window 11 s) and restore it after —
-   clients whose clocks are off by more than the lowered window are refused
-   meanwhile. The leftover `dpop:replay:*` keys expire by themselves within
+   a new one. Each replica bounds a replay by its own
+   `oauth.dpop.iat-window-seconds` (W), so a proof the old release accepted
+   can still be accepted by the new one for up to `W_old + W_new + 1` seconds
+   after the last old replica stops (121 s at the default 60 on both), plus
+   the largest clock skew between replicas. To avoid the window, either:
+
+   - cut over stop-then-start, starting the new release at least
+     `W_old + W_new + 1` seconds plus that skew after the last old replica
+     stopped. No replica serves in the gap: at least 121 s of downtime at the
+     defaults, for every request, DPoP or not; or
+   - run a lowered W on **both** releases for the roll — restart the old
+     release with it first, then deploy the new release with it. At W = 5 on
+     both, a proof has 11 s in which it can be replayed across releases, and
+     the window closes 11 s after the last old replica stops. Lowering it on
+     the old release alone is not enough: a replay to a new replica is
+     bounded by the new release's W, so at 5 and 60 the window stays open
+     66 s after the last old replica stops. Restore the full W on the new
+     release no earlier than `W_low + W_full + 1` seconds after the last old
+     replica stopped (66 s at 5 and 60); sooner reopens the window for
+     proofs the old release accepted. Clients whose clocks are off by more
+     than the lowered W are refused while it is lowered.
+
+   The leftover `dpop:replay:*` keys expire by themselves within
    `oauth.dpop.replay-store-ttl-seconds` (300 s by default); nothing reads
    them. Order: delete `oauth.dpop.replay-store` from the config **first** —
    the old release reads its absence as `"memory"`, under which a wired
    `dpopReplayStore` is still the store it uses, and the new release refuses
    to boot while it is set — then deploy the new release with a seen-set
    installed (`REPLAY_SEEN_SET_ADAPTER=redis` in the standalone). Installing
-   one also turns on `private_key_jwt` and ID-JAG verification ([§1](#1-deployment-shapes)).
-   | `oauth.refreshToken.legacyRtPolicy = "accept-with-warning"` | enum shrunk to `"reject"` | Zod `invalid_enum_value` naming the survivors |
-   | flat `oauth.jwt.algorithm` / `kid` / `secret` / key fields | moved | `oauth.jwt has legacy flat fields (…). Migrate to nested shape: oauth.jwt.signingKey.local.<field>` |
-   | `oauth.grants.authorization_code.pkce.*` (and `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) | warn and ignore | one `pkce_config_ignored_s256_is_mandatory` line; S256 is mandatory regardless (`packages/oauth/src/grants/pkce.mts`) |
-   | `repositories.code.type = "redis"` | deprecated alias of `oauth.code.adapter` | a `[buildModules] … is deprecated` console line at boot |
-   | `oauth.accessToken.expiresIn` (and `OAUTH_ACCESS_TOKEN_EXPIRES_IN`) | deprecated alias of `oauth.accessToken.defaultExpiresIn`, read only while that key is unset — set both and the new key wins | the standalone prints a `[buildModules] … is deprecated` console line at boot when the old key carries anything but the shipped `3600`; `resolveAccessTokenLifetime` is the reader for every composition |
+   one also turns on `private_key_jwt` wherever client authentication runs
+   ([§1](#1-deployment-shapes)).
 
 3. Note the migration windows that are **still open** at `v0.11.0`, each of
    which you should be able to close after the upgrade rather than leave on:

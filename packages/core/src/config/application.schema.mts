@@ -307,10 +307,10 @@ const REMOVED_DPOP_FIELDS: readonly RemovedKey[] = [
 		removedIn: "this release (follows #669)",
 		note:
 			"Every accepted DPoP proof is now recorded in the replaySeenSet component — the " +
-			"seen-set private_key_jwt, ID-JAG and WebAuthn record in — and the dpopReplayStore " +
-			"slot is gone. Choose the backend there: redisReplaySeenSetModule shares it across " +
-			'replicas (replaySeenSet.adapter = "redis" in the standalone template), and ' +
-			'deployment.mode = "multi" refuses the memory one.',
+			"seen-set private_key_jwt client authentication and WebAuthn record in — and the " +
+			"dpopReplayStore slot is gone. Choose the backend there: redisReplaySeenSetModule " +
+			'shares it across replicas (replaySeenSet.adapter = "redis" in the standalone ' +
+			'template), and deployment.mode = "multi" refuses the memory one.',
 	},
 ];
 

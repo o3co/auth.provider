@@ -79,7 +79,7 @@ Each one implements a port core declares; the slot name is in parentheses.
 
 - `ChallengeStore` (`challengeStore`)
 - `ReplaySeenSet` (`replaySeenSet`) — single-use records: `private_key_jwt`
-  and ID-JAG `jti`s, consumed WebAuthn challenges, and every proof
+  `jti`s, consumed WebAuthn challenges, and every proof
   `@o3co/auth-provider-dpop` accepts (under `dpop-proof:<jkt>`). The
   in-process alternative forks per replica, so a captured assertion or proof
   replays once against each; core refuses that one under

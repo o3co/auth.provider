@@ -506,10 +506,10 @@ describe("createDPoPMechanism", () => {
 	// -------------------------------------------------------------------------
 
 	it("records the proof's jti under its key's scope, until replayTtlSeconds from now", async () => {
-		// The seen-set is shared with private_key_jwt, ID-JAG and WebAuthn
-		// records, so the scope is DPoP's own and carries the key: the same
-		// `jti` under a different key is a different proof, and no other
-		// consumer's record can collide with this one.
+		// The seen-set may be shared with other consumers' records
+		// (private_key_jwt, WebAuthn), so the scope is DPoP's own and carries
+		// the key: the same `jti` under a different key is a different proof,
+		// and no other consumer's record can collide with this one.
 		const calls: { scope: string; key: string; expiresAtMs: number }[] = [];
 		const recording = createMemoryReplaySeenSet();
 		const spy = {

@@ -85,13 +85,12 @@ export interface DPoPMechanismOptions {
 	readonly issuer: string;
 	/**
 	 * Where each accepted proof's `jti` is recorded, so the same proof is
-	 * accepted once — core's `ReplaySeenSet`, the slot `private_key_jwt`,
-	 * ID-JAG and WebAuthn record their single-use values in. Records are
-	 * scoped `dpop-proof:<jkt>`: the
-	 * same `jti` under another key is a different proof, and no other
-	 * consumer's scope can collide with one. A per-process set is correct for
-	 * one replica only; replicas refuse each other's proofs only when they
-	 * share the set.
+	 * accepted once — core's `ReplaySeenSet`, the slot `private_key_jwt`
+	 * client authentication and WebAuthn record their single-use values in.
+	 * Records are scoped `dpop-proof:<jkt>`: the same `jti` under another key
+	 * is a different proof, and no other consumer's scope can collide with
+	 * one. A per-process set is correct for one replica only; replicas refuse
+	 * each other's proofs only when they share the set.
 	 */
 	readonly replaySeenSet: ReplaySeenSet;
 	/**
@@ -161,9 +160,10 @@ const DEFAULT_REPLAY_TTL_SECONDS = 300;
 /**
  * The seen-set scope a proof's `jti` is recorded under, per key:
  * `dpop-proof:<jkt>`. The seen-set is shared with other consumers
- * (`client-assertion:<client_id>`, `jwt-bearer:id-jag:<issuer>`,
- * `webauthn:*`), and its canonical key is length-prefixed, so no record of
- * theirs can collide with one of these.
+ * (`client-assertion:<client_id>`, `webauthn:*`, and
+ * `jwt-bearer:id-jag:<issuer>` where a composition hands the jwt-bearer
+ * verifier the same set), and its canonical key is length-prefixed, so no
+ * record of theirs can collide with one of these.
  *
  * Not exported, as no other seen-set scope is from its package: the scope
  * is part of the stored key an operator can see in Redis, and the tests pin

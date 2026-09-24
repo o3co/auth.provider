@@ -286,10 +286,10 @@ describe("dpopModule — integration via createApp", () => {
 	});
 
 	it("when enabled: records each proof in the replaySeenSet slot, scoped by the proof's key", async () => {
-		// The seen-set is core's, shared with private_key_jwt, ID-JAG and
-		// WebAuthn. DPoP's records carry a scope of their own that names the
-		// key, so the same jti under another key is not a replay and no other
-		// consumer's record can collide with one.
+		// The seen-set is core's, shared with private_key_jwt client
+		// authentication and WebAuthn. DPoP's records carry a scope of their own
+		// that names the key, so the same jti under another key is not a replay
+		// and no other consumer's record can collide with one.
 		const calls: { scope: string; key: string; expiresAtMs: number }[] = [];
 		const backing = createMemoryReplaySeenSet();
 		const spy: ReplaySeenSet = {
