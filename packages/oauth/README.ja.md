@@ -652,7 +652,7 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 | 500 | `refresh_failed` | IdP リフレッシュ経路の分類できないエラー、またはこのルートが読めない応答。SIEM は監査の `details.reason` フィールドでグループ化すること |
 | 502 | `upstream_token_ineligible` | 上流のトークンがこのプロバイダーの渡せないもの。理由は `error_description` が名乗る — `token_type_unsupported` だけである。`Retry-After: 300` を付ける |
 | 503 | `refresh_not_supported` | プロバイダーが `SupportsRefresh` を実装していない。デプロイ側で直すべきものとして `federation_token_refresh_unsupported` を error レベルでログに出す |
-| 503 | `lock_timeout` | 待機ウィンドウ内に advisory lock を取得できなかった |
+| 503 | `lock_timeout` | 待機ウィンドウ内に advisory lock を取得できなかった。続く競合が見えるよう、`federation`、`clientId`、`sid` 付きの `federation_token_lock_timeout` として warn でログに出す |
 | 503 | `temporarily_unavailable` | ストア障害（リフレッシュトークンファミリーの確認を含む）、アクセストークンの検証中に答えられないキーストアや失効ストア、IdP の 5xx、または上流のネットワーク障害（ECONNREFUSED / ENOTFOUND / ETIMEDOUT — fetch の TypeError の `error.cause.code` に包まれたコードを含む）。それぞれ error レベルで 1 回だけログに出す: ストアは `store` と `step` 付きの `federation_token_store_unavailable`、クライアントの検索は `client_repository_unavailable`（`site: "federation_token"`）、上流は `federation_token_upstream_unavailable`。503 でない上流の拒否は `federation_token_refresh_failed`（warn） |
 
 すべてのエラーレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける。401 レスポンスには RFC 6750 に従い `WWW-Authenticate: Bearer error="invalid_token"` を含める。

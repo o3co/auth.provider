@@ -950,10 +950,12 @@ describe("POST /oauth/federation/:name/token", () => {
 				...federationBase("google"),
 				refreshToken: vi.fn(),
 			};
+			const logger = createMockLogger();
 			const app = buildApp({
 				fedTokenStore: lockingStore,
 				getFederationProviders: () =>
 					new Map<string, FederationProvider>([["google", refreshProvider]]),
+				logger,
 			});
 			const token = await mintAccessToken();
 
@@ -961,6 +963,15 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(503);
 			expect(res.body.error).toBe("lock_timeout");
+			// Contention, not an outage: warn, structured, once — so contention
+			// that persists is visible. Who waited, never a token or a secret.
+			expect(logger.error).not.toHaveBeenCalled();
+			const lines = logger.warn.mock.calls.filter(
+				([, event]) => event === "federation_token_lock_timeout",
+			);
+			expect(lines).toEqual([
+				[{ federation: "google", clientId: "client-1", sid: "sid-1" }, "federation_token_lock_timeout"],
+			]);
 		});
 	});
 

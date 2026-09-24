@@ -659,7 +659,7 @@ Both bundled stores meet these and are pinned on them.
 | 500 | `refresh_failed` | Unclassified error from the IdP refresh path, or an answer this route could not read; SIEM should group on the `details.reason` audit field |
 | 502 | `upstream_token_ineligible` | The upstream's token is one this provider may not hand on. `error_description` names the reason — `token_type_unsupported` is the only one. Carries `Retry-After: 300` |
 | 503 | `refresh_not_supported` | Provider doesn't implement `SupportsRefresh`; logged at error level as `federation_token_refresh_unsupported` — the deployment's to fix |
-| 503 | `lock_timeout` | Advisory lock could not be acquired within the wait window |
+| 503 | `lock_timeout` | Advisory lock could not be acquired within the wait window; logged at warn as `federation_token_lock_timeout` with `federation`, `clientId` and `sid`, so contention that persists is seen |
 | 503 | `temporarily_unavailable` | Store outage — the refresh-token family check included — a keystore or revocation store that cannot answer while the access token is verified, IdP 5xx, or upstream network failure (ECONNREFUSED / ENOTFOUND / ETIMEDOUT — including codes wrapped on `error.cause.code` of a fetch TypeError). Each is logged once at error level: a store as `federation_token_store_unavailable` with `store` and `step`, the client lookup as `client_repository_unavailable` (`site: "federation_token"`), the upstream as `federation_token_upstream_unavailable`; an upstream refusal that is not a 503 is `federation_token_refresh_failed` (warn) |
 
 All error responses set `Cache-Control: no-store` and `Pragma: no-cache`. 401 responses include `WWW-Authenticate: Bearer error="invalid_token"` per RFC 6750.

@@ -677,6 +677,10 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				});
 			}
 			if (!lockResult.acquired) {
+				// Contention, not an outage: another refresh of this record holds
+				// the lock. Warn, so contention that persists is seen — who waited
+				// (the federation, the client, the session), never a token.
+				logger.warn({ federation: name, clientId: azp, sid }, "federation_token_lock_timeout");
 				return res.status(503).json({
 					error: "lock_timeout",
 					error_description: "could not acquire refresh lock, try again",
