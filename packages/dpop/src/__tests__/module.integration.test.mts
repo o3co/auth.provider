@@ -671,8 +671,14 @@ describe("dpopModule — replay store under deployment.mode (replica safety)", (
 		// Names the thing, what it costs, and both ways out.
 		const message = String(refusal?.cause?.message);
 		expect(message).toMatch(/deployment\.mode is "multi"/);
-		expect(message).toMatch(/dpopReplayStore/);
+		// It says what the check tests — an empty slot — and not "no shared
+		// store": a per-process store handed into the slot counts as wired.
+		expect(message).toMatch(/no dpopReplayStore wired/);
+		expect(message).not.toMatch(/no shared dpopReplayStore/);
 		expect(message).toMatch(/replayed once against each replica/);
+		// The verifier accepts |floor(now) - iat| <= 60, i.e. from iat - 60
+		// until iat + 61: the span a replay has on each replica.
+		expect(message).toMatch(/within ±60s of that replica's clock \(up to 121s\)/);
 		expect(message).toMatch(/replay-store = "redis"/);
 		expect(message).toMatch(/deployment\.mode = "single"/);
 	});
@@ -681,10 +687,9 @@ describe("dpopModule — replay store under deployment.mode (replica safety)", (
 		const logger = spyLogger();
 		const { handle, app } = await bootReplica({ replayStore: "memory", logger });
 
-		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ replayStore: "memory" }),
-			NOT_SHARED_EVENT,
-		);
+		const notShared = logger.warn.mock.calls.filter((call) => call[1] === NOT_SHARED_EVENT);
+		expect(notShared).toHaveLength(1);
+		expect(notShared[0]?.[0]).toMatchObject({ replayStore: "memory", iatWindowSeconds: 60 });
 
 		// The fallback is weak protection, not absent protection: one replica
 		// still refuses a proof it has already seen.
@@ -699,9 +704,17 @@ describe("dpopModule — replay store under deployment.mode (replica safety)", (
 
 	it('is silent under "single": the operator has declared one replica', async () => {
 		const logger = spyLogger();
-		const { handle } = await bootReplica({ mode: "single", replayStore: "memory", logger });
+		const { handle, app } = await bootReplica({ mode: "single", replayStore: "memory", logger });
 
-		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), NOT_SHARED_EVENT);
+		expect(logger.warn).not.toHaveBeenCalled();
+
+		// Silent, not unguarded: the in-process store is the correct one for a
+		// single replica, and it refuses a proof it has already seen.
+		const { proof } = await mintProof();
+		expect((await request(app).post("/oauth/token").set("DPoP", proof).send({})).status).toBe(200);
+		const replay = await request(app).post("/oauth/token").set("DPoP", proof).send({});
+		expect(replay.status).toBe(400);
+		expect(replay.body).toMatchObject({ error: "invalid_dpop_proof" });
 
 		await handle.dispose();
 	});
@@ -726,14 +739,18 @@ describe("dpopModule — replay store under deployment.mode (replica safety)", (
 
 	it('boots under "multi" with replay-store = "memory" when a store is wired anyway: the wired slot wins', async () => {
 		const logger = spyLogger();
-		const { handle } = await bootReplica({
+		const shared = makeSharedStore();
+		const { handle, app } = await bootReplica({
 			mode: "multi",
 			replayStore: "memory",
-			wired: makeSharedStore().store,
+			wired: shared.store,
 			logger,
 		});
 
 		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), NOT_SHARED_EVENT);
+		const { proof, jkt } = await mintProof();
+		expect((await request(app).post("/oauth/token").set("DPoP", proof).send({})).status).toBe(200);
+		expect([...shared.seen].some((key) => key.startsWith(`${jkt}:`))).toBe(true);
 
 		await handle.dispose();
 	});
