@@ -33,7 +33,9 @@ import type { AcquireLockOptions, LockResult, SupportsLock } from "@o3co/auth-pr
  *   when creation was skipped because the key already exists. The lock treats
  *   any non-null return as acquire-success.
  *
- * - `PX` is in **milliseconds** (matching the redis native option).
+ * - `PX` is in **milliseconds** (matching the redis native option), and is
+ *   always a positive integer: `acquireLock` refuses a `ttlMs` that is not a
+ *   positive finite number, and rounds a fractional one up.
  *
  * - `compareAndDelete(key, expectedValue)` MUST atomically delete the key only
  *   when its stored value equals `expectedValue`. Implementations MUST NOT
@@ -88,11 +90,27 @@ export function createRedisLock(opts: RedisLockOptions): Pick<SupportsLock, "acq
 			const key = k(a.sid, a.federationName);
 			const ttlMs = a.ttlMs ?? DEFAULT_TTL_MS;
 			const waitForMs = a.waitForMs ?? DEFAULT_WAIT_MS;
+			// The rule the federation-grant lock keeps: a TTL of NaN is `PX NaN`,
+			// and an infinite one is not a lease; a wait of NaN is a deadline no
+			// clock reaches, so a held lock would be polled for ever.
+			if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+				throw new RangeError(
+					`acquireLock: ttlMs must be a positive finite number (got ${String(ttlMs)})`,
+				);
+			}
+			if (!Number.isFinite(waitForMs) || waitForMs < 0) {
+				throw new RangeError(
+					`acquireLock: waitForMs must be a non-negative finite number (got ${String(waitForMs)})`,
+				);
+			}
+			// Rounded up: `PX` takes whole milliseconds, and a lease rounded down
+			// would end before the holder was told it would.
+			const px = Math.ceil(ttlMs);
 			const deadline = Date.now() + waitForMs;
 			const token = randomUUID();
 
 			while (true) {
-				const result = await opts.client.set(key, token, { PX: ttlMs, NX: true });
+				const result = await opts.client.set(key, token, { PX: px, NX: true });
 				if (result !== null) {
 					return {
 						acquired: true,

@@ -22,13 +22,29 @@ interface StoredCode extends Code {
 	expiresAt: number;
 }
 
+/**
+ * A code's lifetime, in seconds, is a positive finite number, or the code is
+ * refused. NaN is never `>= now`, so a code minted with it was redeemable for
+ * ever and outlived every sweep; ±Infinity is no lifetime; zero or less is a
+ * code dead on arrival, which the Redis repository cannot store at all.
+ */
+const requireLifetime = (seconds: number, what: string): number => {
+	if (!Number.isFinite(seconds) || seconds <= 0) {
+		throw new RangeError(
+			`InMemoryCodeRepository: ${what} must be a positive finite number of seconds (got ${String(seconds)})`,
+		);
+	}
+	return seconds;
+};
+
 export class InMemoryCodeRepository implements CodeRepository {
 	private codes = new Map<string, StoredCode>();
 	private readonly defaultExpiresIn: number;
 	private cleanupInterval: ReturnType<typeof setInterval>;
 
 	constructor(options?: { defaultExpiresIn?: number }) {
-		this.defaultExpiresIn = options?.defaultExpiresIn ?? 600;
+		// Before the timer, so a refused default leaves nothing running.
+		this.defaultExpiresIn = requireLifetime(options?.defaultExpiresIn ?? 600, "defaultExpiresIn");
 
 		this.cleanupInterval = setInterval(() => {
 			const now = Date.now();
@@ -39,8 +55,8 @@ export class InMemoryCodeRepository implements CodeRepository {
 	}
 
 	async createCode(params: CreateCodeInput): Promise<Code> {
+		const expiresIn = requireLifetime(params.expiresIn ?? this.defaultExpiresIn, "expiresIn");
 		const code = crypto.randomBytes(32).toString("base64url");
-		const expiresIn = params.expiresIn ?? this.defaultExpiresIn;
 		const stored: StoredCode = {
 			code,
 			client_id: params.client_id,

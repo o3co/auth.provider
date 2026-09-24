@@ -50,6 +50,20 @@ export function createInProcessLock(): Pick<SupportsLock, "acquireLock"> {
 			const key = lockKey(opts.sid, opts.federationName);
 			const ttlMs = opts.ttlMs ?? DEFAULT_TTL_MS;
 			const waitForMs = opts.waitForMs ?? DEFAULT_WAIT_MS;
+			// A TTL of NaN compares as already expired, so the lock would never be
+			// held and exclusion would be silently off; an infinite one would be
+			// held for ever. A wait of NaN is a deadline no clock reaches. Refused
+			// as the Redis lock refuses them.
+			if (!Number.isFinite(ttlMs) || ttlMs <= 0) {
+				throw new RangeError(
+					`acquireLock: ttlMs must be a positive finite number (got ${String(ttlMs)})`,
+				);
+			}
+			if (!Number.isFinite(waitForMs) || waitForMs < 0) {
+				throw new RangeError(
+					`acquireLock: waitForMs must be a non-negative finite number (got ${String(waitForMs)})`,
+				);
+			}
 			const deadline = Date.now() + waitForMs;
 
 			while (true) {

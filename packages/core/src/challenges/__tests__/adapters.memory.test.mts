@@ -163,9 +163,9 @@ describe("createMemoryChallengeStore — bounded growth", () => {
 
 /*
  * A sweep scans the whole map, and a write count alone does not bound how
- * often that happens: WebAuthn options are unauthenticated requests, so a
- * client that asks for them fast enough would make every issue pay for a
- * full scan. A time floor caps the scans at one per interval whatever the
+ * often that happens: WebAuthn authentication options are asked for without
+ * a credential, so a client that asks fast enough would make every issue pay
+ * for a full scan. A time floor caps the scans at one per interval whatever the
  * issue rate, for a resident set larger by at most the challenges that expire
  * within it.
  */

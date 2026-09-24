@@ -187,16 +187,15 @@ export const createMemoryDeviceCodeStore = (
 	};
 
 	/**
-	 * Drop every record that can no longer be approved, plus any whose expiry
-	 * is not a finite number: `NaN` and `Infinity` never satisfy
-	 * `expiresAtMs <= now`, so without this they would sit in the map until
-	 * process exit and, under a cap that refuses rather than evicts, hold a
-	 * slot forever. A record that can never expire is the one least entitled
-	 * to stay.
+	 * Drop every record that can no longer be approved. Every resident expiry
+	 * is a finite number — `create` refuses any other, since `NaN` and
+	 * `Infinity` never satisfy `expiresAtMs <= now` and such a record would sit
+	 * in the map until process exit, holding a slot under a cap that refuses
+	 * rather than evicts.
 	 */
 	const sweep = (nowMs: number): void => {
 		for (const entry of [...byDeviceCode.values()]) {
-			if (!Number.isFinite(entry.expiresAtMs) || entry.expiresAtMs <= nowMs) drop(entry);
+			if (entry.expiresAtMs <= nowMs) drop(entry);
 		}
 	};
 
@@ -225,6 +224,14 @@ export const createMemoryDeviceCodeStore = (
 		},
 
 		create: async (input: CreateDeviceAuthorizationInput) => {
+			// NaN is never `<= now`: such a record read as pending, and held a
+			// slot under the cap, until a sweep found it. A caller fault, and
+			// refused here so that no resident record can carry one.
+			if (!Number.isFinite(input.expiresAtMs)) {
+				throw new RangeError(
+					`DeviceCodeStore.create: expiresAtMs must be a finite number (got ${String(input.expiresAtMs)})`,
+				);
+			}
 			// A collision here is a generator failure, not traffic. Overwriting
 			// would silently detach a device from the code its user is about to
 			// approve — and hand the *new* device the old one's approval.

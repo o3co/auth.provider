@@ -251,15 +251,15 @@ describe("memory DeviceCodeStore — eviction and decision edge cases", () => {
 		requestedScope: undefined,
 	});
 
-	it("drops a record with a non-finite expiry on sight when the cap is reached", async () => {
+	it("never lets a record with a non-finite expiry take a slot under the cap", async () => {
 		// `NaN` and `Infinity` never satisfy `expiresAtMs <= now`, so a record
 		// carrying one would sit in the map until process exit and, under a
 		// cap that refuses rather than evicts (#445), hold a slot forever. It
-		// is the record least entitled to stay, so the sweep reclaims it
-		// alongside the expired ones and the newcomer is admitted.
+		// is refused at `create`, so the slot stays free and the next record
+		// is admitted.
 		const base = Date.now();
 		const store = createMemoryDeviceCodeStore({ maxEntries: 1 });
-		await store.create(record(1, Number.POSITIVE_INFINITY));
+		await expect(store.create(record(1, Number.POSITIVE_INFINITY))).rejects.toThrow(RangeError);
 		await store.create(record(2, base + 100_000));
 
 		expect(store.size()).toBe(1);

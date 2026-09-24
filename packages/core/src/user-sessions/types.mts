@@ -130,6 +130,11 @@ export interface CreateUserSessionInput {
  */
 export interface UserSessionStore {
 	readonly kind: string;
+	/**
+	 * Record a new session. Rejects when `sid` already has one, when
+	 * `expiresAt` is already past, and — with a `RangeError`, recording
+	 * nothing — when `expiresAt` is an Invalid Date.
+	 */
 	create(input: CreateUserSessionInput): Promise<void>;
 	get(sid: string): Promise<UserSession | null>;
 	delete(sid: string): Promise<void>;

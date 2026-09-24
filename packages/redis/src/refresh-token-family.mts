@@ -50,6 +50,28 @@ const serialize = (fam: RefreshTokenFamily): string =>
 	JSON.stringify(fam satisfies SerializedFamily);
 
 /**
+ * A family's expiry as this adapter stores it: refused when it is not a
+ * finite number, and otherwise rounded up to a whole epoch millisecond.
+ *
+ * `PX` takes whole milliseconds and Redis refuses anything else, so a
+ * lifetime configured in fractional seconds made every registration fail. Up,
+ * never down: the family lives at least until the instant the caller asked
+ * for. And the rounded value is what goes into the stored JSON too, because
+ * {@link SerializedFamilySchema} reads back whole milliseconds only — a
+ * fractional one written there would turn the family into `corrupt-data` on
+ * its first read. NaN is never `<= now`, so without the finite check it
+ * reached Redis as `PX NaN`.
+ */
+const storedExpiry = (expiresAtMs: number, operation: string): number => {
+	if (!Number.isFinite(expiresAtMs)) {
+		throw new RangeError(
+			`RefreshTokenFamilyStore.${operation}: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+		);
+	}
+	return Math.ceil(expiresAtMs);
+};
+
+/**
  * Runtime schema for `SerializedFamily`. `.strict()` rejects extra fields so
  * a future schema migration that adds keys is detected as `corrupt-data`
  * rather than silently dropped. Forward-compat callers that need to
@@ -111,6 +133,11 @@ const deserialize = (raw: string): RefreshTokenFamily => {
  * RefreshTokenFamilyClient surface narrow (no HSET/HGETALL needed) and
  * matches A1's single-key SET-NX pattern.
  *
+ * Expiry: `PX` is the family's remaining life rounded up to a whole
+ * millisecond, and the stored `expiresAtMs` is rounded up with it; a
+ * non-finite expiry, registered or committed, is a RangeError before Redis is
+ * asked (see `storedExpiry`).
+ *
  * Atomicity:
  *   - registerFamily uses `SET key value PX ttlMs NX` — atomic insert-only,
  *     same primitive as A1's ChallengeStore.issue.
@@ -159,13 +186,14 @@ export function createRedisRefreshTokenFamilyStore(
 		kind: "redis",
 
 		async registerFamily(family) {
-			const ttlMs = family.expiresAtMs - Date.now();
+			const expiresAtMs = storedExpiry(family.expiresAtMs, "registerFamily");
+			const ttlMs = expiresAtMs - Date.now();
 			if (ttlMs <= 0) {
 				throw new RefreshTokenStorageError({ reason: "expired-at-issue" });
 			}
 			const result = await client.set(
 				fullKey(family.familyId),
-				serialize(family),
+				serialize({ ...family, expiresAtMs }),
 				"PX",
 				ttlMs,
 				"NX",
@@ -230,8 +258,15 @@ export function createRedisRefreshTokenFamilyStore(
 					return { outcome: "aborted", ...withReason(decision.reason) };
 				}
 
-				const next = decision.family;
-				const newTtlMs = next.expiresAtMs - Date.now();
+				let expiresAtMs: number;
+				try {
+					expiresAtMs = storedExpiry(decision.family.expiresAtMs, "updateFamily");
+				} catch (err) {
+					await conn.unwatch();
+					throw err;
+				}
+				const next = { ...decision.family, expiresAtMs };
+				const newTtlMs = expiresAtMs - Date.now();
 				if (newTtlMs <= 0) {
 					// Updater returned past expiresAtMs — fail-closed parity with
 					// memory adapter (and symmetric with registerFamily's

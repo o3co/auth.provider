@@ -660,7 +660,12 @@ export interface DeviceCodeRecordFields {
 export interface CreateDeviceCodeRecordInput {
 	readonly deviceCode: string;
 	readonly userCode: string;
-	/** The deadline both keys expire at, in epoch milliseconds. */
+	/**
+	 * The deadline both keys expire at, in whole epoch milliseconds —
+	 * `createRedisDeviceCodeStore` rounds the authorization's expiry up to one,
+	 * so `PEXPIREAT` never refuses it after the pair is written. The record's
+	 * own `fields.expiresAtMs` stays the exact expiry.
+	 */
 	readonly expiresAtMs: number;
 	readonly fields: DeviceCodeRecordFields;
 }

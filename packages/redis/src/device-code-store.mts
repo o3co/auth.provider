@@ -53,6 +53,13 @@
  * is the safety net for a record nobody asks about again, not the source of
  * truth.
  *
+ * So the two may differ, and do for a fractional expiry: `PEXPIREAT` takes
+ * whole milliseconds, so the keys' deadline is the expiry rounded up, while
+ * the record keeps the exact one `poll` answers from. The script writes the
+ * pair before it sets their deadline, so a deadline Redis refuses — a
+ * fractional or NaN one — would leave both keys with no TTL; `create` refuses
+ * an expiry that is not a finite number before the script runs.
+ *
  * ### The record
  *
  * One hash per authorization, every field a string; the scope lists are JSON
@@ -161,6 +168,14 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 		kind: "redis",
 
 		async create(input: CreateDeviceAuthorizationInput) {
+			// NaN is never `<= now`, so such a record would read as pending until
+			// Redis reclaimed it — which, with `PEXPIREAT NaN` refused after the
+			// pair was written, it never would.
+			if (!Number.isFinite(input.expiresAtMs)) {
+				throw new RangeError(
+					`DeviceCodeStore.create: expiresAtMs must be a finite number (got ${String(input.expiresAtMs)})`,
+				);
+			}
 			const fields: DeviceCodeRecordFields = {
 				userCode: input.userCode,
 				clientId: input.clientId,
@@ -181,7 +196,9 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 			const created = await client.create(keys, {
 				deviceCode: input.deviceCode,
 				userCode: input.userCode,
-				expiresAtMs: input.expiresAtMs,
+				// Rounded up, so the keys outlive the record's own expiry rather
+				// than die a fraction of a millisecond before it.
+				expiresAtMs: Math.ceil(input.expiresAtMs),
 				fields,
 			});
 			// A collision here is a generator failure, not traffic. The script

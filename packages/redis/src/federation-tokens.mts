@@ -87,7 +87,9 @@ export interface RedisFederationTokenStoreOptions {
 	 * access_token expiry is kept inside the envelope for F-6 to consult at
 	 * retrieval time, but the record itself lives until this store TTL elapses.
 	 *
-	 * Default: 86400 seconds (24 hours). Spec Section 5.2.
+	 * Default: 86400 seconds (24 hours). Spec Section 5.2. A positive finite
+	 * number, or construction throws; a fractional one is rounded up to a whole
+	 * millisecond, since `PX` takes nothing else.
 	 */
 	ttl?: number;
 	/**
@@ -257,7 +259,9 @@ export function createRedisFederationTokenStore(
 	if (!Number.isFinite(ttlSeconds) || ttlSeconds <= 0) {
 		throw new Error("FederationTokenStore redis: ttl must be a positive finite number of seconds");
 	}
-	const storeTtlMs = ttlSeconds * 1000;
+	// Whole milliseconds, rounded up: a fractional `PX` is a Redis error, and
+	// the index write it pairs with would be refused the same way.
+	const storeTtlMs = Math.ceil(ttlSeconds * 1000);
 	const scanFallback = opts.scanFallback ?? true;
 	const k = (sid: string, name: string) => `${prefix}${sid}:${name}`;
 

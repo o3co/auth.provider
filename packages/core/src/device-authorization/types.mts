@@ -143,6 +143,10 @@ export interface DeviceCodeStore {
 	 * adapter refuses rather than evicts here: what it holds is a human's
 	 * answer in flight, and the caller can ask again while the user cannot
 	 * re-approve what they never saw fail.
+	 * @throws `RangeError`, recording nothing, when `expiresAtMs` is not a
+	 * finite number (NaN, ±Infinity): such a record would never expire. A
+	 * fractional `expiresAtMs` is valid, and is the instant the record
+	 * expires at.
 	 */
 	create(input: CreateDeviceAuthorizationInput): Promise<void>;
 

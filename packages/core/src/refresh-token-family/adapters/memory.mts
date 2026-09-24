@@ -39,9 +39,25 @@ interface Entry {
  *     memory adapter therefore never throws "conflict-exhausted".
  *
  * Lazy GC: an expired entry is removed on the next access via getLive().
+ * An expiry that is not a finite number is refused on the way in (see
+ * `requireFiniteExpiry`), since NaN is never `<= now` and such a family would
+ * be live for ever.
  *
  * Per A3 §7.1.
  */
+/**
+ * NaN is never `<= now`, so a family registered or committed with one would
+ * never expire and never be reclaimed; ±Infinity is no expiry either. A
+ * caller fault, refused with the RangeError the Redis adapter throws for it.
+ */
+const requireFiniteExpiry = (expiresAtMs: number, operation: string): void => {
+	if (!Number.isFinite(expiresAtMs)) {
+		throw new RangeError(
+			`RefreshTokenFamilyStore.${operation}: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+		);
+	}
+};
+
 export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 	const families = new Map<string, Entry>();
 
@@ -59,6 +75,7 @@ export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 		kind: "memory",
 
 		async registerFamily(family) {
+			requireFiniteExpiry(family.expiresAtMs, "registerFamily");
 			if (family.expiresAtMs <= Date.now()) {
 				throw new RefreshTokenStorageError({ reason: "expired-at-issue" });
 			}
@@ -93,6 +110,7 @@ export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 				return { outcome: "aborted", ...withReason(decision.reason) };
 			}
 			const next = decision.family;
+			requireFiniteExpiry(next.expiresAtMs, "updateFamily");
 			// Fail-closed parity with registerFamily: an updater that commits a
 			// family with expiresAtMs <= now() would store a dead-on-arrival entry
 			// (lazy-GC'd on next read) and silently diverge from the Redis

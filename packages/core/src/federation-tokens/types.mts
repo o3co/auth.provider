@@ -183,11 +183,16 @@ declare module "@o3co/auth-provider-core" {
 /**
  * Input for acquireLock — identifies the lock by (sid, federationName) pair
  * and provides timeout knobs.
+ *
+ * `acquireLock` rejects with a `RangeError`, taking nothing, when `ttlMs` is
+ * not a positive finite number or `waitForMs` is not a non-negative finite
+ * one: a NaN TTL would leave the lock never held (or, in Redis, be refused),
+ * and a NaN wait would never end.
  */
 export interface AcquireLockOptions {
 	readonly sid: string;
 	readonly federationName: string;
-	/** Lock TTL in milliseconds. Defaults to 5000. */
+	/** Lock TTL in milliseconds. Defaults to 5000. Rounded up to a whole millisecond where the store needs one. */
 	readonly ttlMs?: number;
 	/** Max wait for acquisition in milliseconds. Defaults to 4000 (just under ttlMs). */
 	readonly waitForMs?: number;

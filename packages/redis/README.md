@@ -279,6 +279,39 @@ above); a composition that wires a module without providing its client slot
 fails stage-1 boot with `missing-required-component` — named at boot, not at
 the first command.
 
+## Expiries and key TTLs
+
+Every adapter turns the expiry or lifetime it is handed into a key TTL by one
+rule, and the core ports state the same refusals so the in-process adapters
+give the same answers:
+
+- **Whole milliseconds, rounded up.** `PX` and `PEXPIREAT` take whole
+  milliseconds and Redis refuses anything else. A fractional expiry — a JWT
+  `NumericDate` times 1000, a lifetime configured in fractional seconds — is
+  rounded up, so a key outlives the instant it was asked to live until by
+  under a millisecond rather than dying before it.
+- **A non-finite expiry is refused before Redis is asked**, with a
+  `RangeError`: NaN (an Invalid Date, an unset setting) or ±Infinity.
+  `NaN <= now` is false, so such a value slipped past every "already expired"
+  check and reached Redis as `PX NaN` — and where a script writes its record
+  before it sets the deadline, a refused deadline left the record with no TTL
+  at all.
+
+| Adapter | Refused with a `RangeError` | Sent to Redis |
+| --- | --- | --- |
+| `ChallengeStore.issue`, `ReplaySeenSet.markSeen`, `AccessTokenDenylist.add` | a non-finite `expiresAtMs` | `PX` = the remaining life, rounded up |
+| `RefreshTokenFamilyStore.registerFamily`, `updateFamily` | a non-finite `expiresAtMs`, registered or committed | `PX` = the remaining life, rounded up; the stored `expiresAtMs` is the rounded expiry, since the reader takes whole milliseconds only |
+| `DeviceCodeStore.create` | a non-finite `expiresAtMs` | `PEXPIREAT` = the expiry rounded up; the record keeps the exact expiry `poll` answers from |
+| `CodeRepository.createCode` | an `expiresIn` that is not a positive finite number of seconds | `PX` = `expiresIn` × 1000, rounded up |
+| `FederationTokenStore` | a `ttl` that is not a positive finite number (at construction) | `PX` and the index TTL = `ttl` × 1000, rounded up |
+| The federation-token lock (`acquireLock`) | a `ttlMs` that is not a positive finite number, a `waitForMs` that is not a non-negative finite one | `PX` = `ttlMs`, rounded up |
+| `UserSessionStore.create` | an Invalid Date `expiresAt` | `PX` = the remaining life (a `Date` is whole milliseconds) |
+
+[`px-rounding.test.mts`](__tests__/px-rounding.test.mts) pins both halves for
+each adapter with a recording client: the contract suites cannot tell
+`Math.ceil` from `Math.round` against a real Redis, where the difference is
+under a millisecond.
+
 ## Federation-token keys and logout
 
 **Read this before assuming logout stopped scanning: out of the box, it has
@@ -417,9 +450,10 @@ like the others in this package), so `poll` reads the status and consumes an
 approval indivisibly — the conformance suite's "two polls racing for the
 same approval" case runs against a real Redis in this package's tests, and
 that is the case a `HGETALL`-then-`DEL` implementation fails. Both keys
-carry the authorization's `expiresAtMs` as their TTL so Redis reclaims them,
-but `poll` still answers `expired` from the timestamp: a record inside its
-TTL whose deadline has passed on the caller's clock expires, and is dropped.
+carry the authorization's `expiresAtMs`, rounded up to a whole millisecond,
+as their deadline so Redis reclaims them, but `poll` still answers `expired`
+from the record's own exact timestamp: a record inside its TTL whose deadline
+has passed on the caller's clock expires, and is dropped.
 
 ## Consent records and parked requests
 

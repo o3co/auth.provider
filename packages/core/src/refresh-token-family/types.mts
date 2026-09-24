@@ -127,6 +127,12 @@ export interface RefreshTokenFamilyStore {
 	 * MUST throw `RefreshTokenStorageError({ reason: "expired-at-issue" })`
 	 * if `family.expiresAtMs <= now()` at call time.
 	 *
+	 * MUST throw `RangeError`, recording nothing, when `family.expiresAtMs` is
+	 * not a finite number (NaN, ±Infinity) — a caller fault, not the timing
+	 * race above. A fractional `expiresAtMs` is valid: the family lives at
+	 * least until it, and an adapter that stores whole milliseconds rounds it
+	 * up.
+	 *
 	 * Concurrency contract: N concurrent calls with the same `familyId`
 	 * MUST result in exactly one success and N-1 throws of
 	 * `"duplicate-family"`.
@@ -197,6 +203,10 @@ export interface RefreshTokenFamilyStore {
 	 *     symmetric with `registerFamily` and prevents committing a
 	 *     dead-on-arrival entry. Callers shrinking TTL during rotation
 	 *     should compute the new `expiresAtMs` from a forward window.
+	 *   - A committed `expiresAtMs` that is not a finite number is a
+	 *     `RangeError`, and nothing is written — as for `registerFamily`. A
+	 *     fractional one is valid and may come back rounded up to a whole
+	 *     millisecond.
 	 *
 	 * Return value:
 	 *   - `{ outcome: "committed", family, reason? }` — CAS succeeded; family
