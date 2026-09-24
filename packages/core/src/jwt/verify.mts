@@ -370,6 +370,18 @@ export const DEFAULT_CLOCK_SKEW_MS = 300_000;
 export const DEFAULT_SUBJECT_REVOCATION_SKEW_MS = 1_000;
 
 /**
+ * How long past a token's `exp` a record that revokes it must still be kept:
+ * the tolerance with which this verifier accepts an expired token
+ * ({@link DEFAULT_CLOCK_SKEW_MS}), the cross-replica allowance
+ * ({@link DEFAULT_SUBJECT_REVOCATION_SKEW_MS}) and a whole second for the
+ * rounding of `exp` to seconds. A denylist entry kept only until `exp`, or a
+ * revoked refresh-token family kept only until its last token's `exp`,
+ * leaves exactly that window in which the revoked token is accepted again.
+ */
+export const REVOCATION_RETENTION_ALLOWANCE_MS =
+	DEFAULT_CLOCK_SKEW_MS + DEFAULT_SUBJECT_REVOCATION_SKEW_MS + 1_000;
+
+/**
  * Centralized JWT verification with alg / iss / aud / typ pinning.
  *
  * The verifier:

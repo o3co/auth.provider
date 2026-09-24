@@ -15,12 +15,18 @@
  */
 import { defineModule } from "../modules/manifest/define-module.mjs";
 import { createMemoryRefreshTokenFamilyStore } from "./adapters/memory.mjs";
+import { resolveFamilyAccessTokenHorizonMs } from "./retention.mjs";
 import { createRefreshTokenFamilyRevocation } from "./revocation.mjs";
 import { createRefreshTokenFamilyRotation } from "./rotation.mjs";
 
 /**
  * Memory-backed RefreshTokenFamilyStore module. Test + dev only — no
  * persistence across restarts. Ships in @o3co/auth-provider-core.
+ *
+ * A restart forgets every family, revoked ones included: an access token of
+ * a family revoked before the restart passes the family check afterwards
+ * until it expires. Inherent to a store in process memory, and one more
+ * reason it is declared replica-unsafe.
  *
  * Per A3 §8.1.
  */
@@ -30,7 +36,7 @@ export const memoryRefreshTokenFamilyStoreModule = defineModule({
 	replicaSafety: {
 		unsafe: true,
 		reason:
-			"refresh-token families fork per replica — rotation replay detection and cascade revoke see only this replica's history",
+			"refresh-token families fork per replica — rotation replay detection and cascade revoke see only this replica's history, and a restart forgets every revoked family while its access tokens are still valid",
 	},
 	provides: {
 		refreshTokenFamilyStore: () => createMemoryRefreshTokenFamilyStore(),
@@ -49,28 +55,33 @@ export const memoryRefreshTokenFamilyStoreModule = defineModule({
  */
 export const defaultRefreshTokenFamilyRotationModule = defineModule({
 	name: "core-default-refresh-token-family-rotation",
-	requires: ["refreshTokenFamilyStore"] as const,
+	// `config` for the access-token maximum that sizes how long a family
+	// revoked on replay is remembered (`retention.mts`).
+	requires: ["refreshTokenFamilyStore", "config"] as const,
 	provides: {
 		refreshTokenFamilyRotation: (deps) =>
 			createRefreshTokenFamilyRotation({
 				refreshTokenFamilyStore: deps.refreshTokenFamilyStore,
+				accessTokenHorizonMs: resolveFamilyAccessTokenHorizonMs(deps.config),
 			}),
 	},
 });
 
 /**
  * Default RefreshTokenFamilyRevocation wrapper module. Composes the
- * storage primitive into the idempotent revoke + read-only check.
+ * storage primitive into the idempotent revoke + read-only check, keeping a
+ * revoked record for the configured access-token maximum (`retention.mts`).
  *
  * Per A3 §8.1.
  */
 export const defaultRefreshTokenFamilyRevocationModule = defineModule({
 	name: "core-default-refresh-token-family-revocation",
-	requires: ["refreshTokenFamilyStore"] as const,
+	requires: ["refreshTokenFamilyStore", "config"] as const,
 	provides: {
 		refreshTokenFamilyRevocation: (deps) =>
 			createRefreshTokenFamilyRevocation({
 				refreshTokenFamilyStore: deps.refreshTokenFamilyStore,
+				accessTokenHorizonMs: resolveFamilyAccessTokenHorizonMs(deps.config),
 			}),
 	},
 });

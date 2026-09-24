@@ -18,6 +18,7 @@ const seed = async () => {
 	const store = createMemoryRefreshTokenFamilyStore();
 	const revocation = createRefreshTokenFamilyRevocation({
 		refreshTokenFamilyStore: store,
+		accessTokenHorizonMs: 3_600_000,
 	});
 	await store.registerFamily({
 		familyId: "fam-1",
@@ -42,9 +43,12 @@ describe("createRefreshTokenFamilyRevocation", () => {
 		await expect(revocation.revokeFamily("fam-1")).resolves.toBeUndefined();
 	});
 
-	it("revokeFamily for non-existent family is a no-op success", async () => {
+	it("revokeFamily for a family with no record succeeds, and records it as revoked", async () => {
+		// The record may have run out while an access token it minted is still
+		// live; the revocation has to reach that token (`retention.mts`).
 		const { revocation } = await seed();
 		await expect(revocation.revokeFamily("ghost-id")).resolves.toBeUndefined();
+		expect(await revocation.isFamilyRevoked("ghost-id")).toBe(true);
 	});
 
 	it("isFamilyRevoked returns false initially", async () => {
@@ -98,6 +102,7 @@ describe("createRefreshTokenFamilyRevocation", () => {
 		};
 		const revocation = createRefreshTokenFamilyRevocation({
 			refreshTokenFamilyStore: stubStore,
+			accessTokenHorizonMs: 3_600_000,
 		});
 		await revocation.revokeFamily("fam-1");
 		expect(captured).not.toBeNull();

@@ -398,6 +398,7 @@ export type {
 export {
 	isVerificationUnavailable,
 	JwtVerificationError,
+	REVOCATION_RETENTION_ALLOWANCE_MS,
 	VERIFICATION_UNAVAILABLE_DESCRIPTION,
 	verifyJwt,
 } from "./jwt/verify.mjs";
@@ -864,7 +865,12 @@ export {
 } from "./refresh-token-family/module.mjs";
 export { withReason } from "./refresh-token-family/reason.mjs";
 export {
+	resolveFamilyAccessTokenHorizonMs,
+	revokedFamilyExpiresAtMs,
+} from "./refresh-token-family/retention.mjs";
+export {
 	createRefreshTokenFamilyRevocation,
+	REVOKED_WITHOUT_RECORD_JTI,
 	type RefreshTokenFamilyRevocationDeps,
 } from "./refresh-token-family/revocation.mjs";
 export {

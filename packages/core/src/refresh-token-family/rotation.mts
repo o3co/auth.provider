@@ -13,6 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { assertAccessTokenHorizonMs, revokedFamilyExpiresAtMs } from "./retention.mjs";
 import type {
 	RefreshTokenFamily,
 	RefreshTokenFamilyRotation,
@@ -25,6 +26,14 @@ import type {
  */
 export interface RefreshTokenFamilyRotationDeps {
 	readonly refreshTokenFamilyStore: RefreshTokenFamilyStore;
+	/**
+	 * The longest an access token carrying a family's id can live, in
+	 * milliseconds — `resolveFamilyAccessTokenHorizonMs(config)`. A replay
+	 * revokes the family, and the revoked record is kept until the last
+	 * access token it could have minted stops being accepted
+	 * (`retention.mts`). Required for the reason the revocation wrapper's is.
+	 */
+	readonly accessTokenHorizonMs: number;
 }
 
 /**
@@ -55,8 +64,10 @@ const REASON_ALREADY_REVOKED = "family-already-revoked";
  * sibling token could complete its rotation and walk away with a fresh access
  * token, which is most of what the family-revoke defence exists to stop.
  *
- * So the replay branch now COMMITS `{ ...current, revoked: true }` and tags
- * the decision `REASON_REPLAY_REVOKED`. The store's compare-and-swap does the
+ * So the replay branch now COMMITS `{ ...current, revoked: true }` — kept, as
+ * every revoked record is, until the last access token the family could have
+ * minted stops being accepted (`retention.mts`) — and tags the decision
+ * `REASON_REPLAY_REVOKED`. The store's compare-and-swap does the
  * rest: the revocation is applied to exactly the state that was inspected, or
  * the CAS loses and re-reads. A sibling rotation is therefore ordered either
  * strictly before the replay was classified (in which case it was a
@@ -84,6 +95,10 @@ const REASON_ALREADY_REVOKED = "family-already-revoked";
 export function createRefreshTokenFamilyRotation(
 	deps: RefreshTokenFamilyRotationDeps,
 ): RefreshTokenFamilyRotation {
+	const horizonMs = assertAccessTokenHorizonMs(
+		deps.accessTokenHorizonMs,
+		"createRefreshTokenFamilyRotation",
+	);
 	return {
 		async register(newJti, familyId, expiresAtMs) {
 			const family: RefreshTokenFamily = Object.freeze({
@@ -96,6 +111,7 @@ export function createRefreshTokenFamilyRotation(
 		},
 
 		async rotate(previousJti, newJti, familyId, expiresAtMs) {
+			const nowMs = Date.now();
 			const result = await deps.refreshTokenFamilyStore.updateFamily(familyId, (current) => {
 				if (current.revoked) {
 					// Nothing to write — the end state this branch wants is
@@ -111,7 +127,11 @@ export function createRefreshTokenFamilyRotation(
 					// that says their token was the live one.
 					return {
 						action: "commit",
-						family: Object.freeze({ ...current, revoked: true }),
+						family: Object.freeze({
+							...current,
+							revoked: true,
+							expiresAtMs: revokedFamilyExpiresAtMs(current, nowMs, horizonMs),
+						}),
 						reason: REASON_REPLAY_REVOKED,
 					};
 				}

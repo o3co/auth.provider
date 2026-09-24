@@ -37,7 +37,10 @@ const counting = (
 describe("createRefreshTokenFamilyRotation", () => {
 	it("register then findFamily shows the new family", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore: store,
+			accessTokenHorizonMs: 3_600_000,
+		});
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		const fam = await store.findFamily("fam-1");
 		expect(fam).not.toBeNull();
@@ -47,7 +50,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 
 	it("register throws duplicate-family on second call", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore: store,
+			accessTokenHorizonMs: 3_600_000,
+		});
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		await expect(rotation.register("jti-2", "fam-1", FUTURE())).rejects.toMatchObject({
 			name: "RefreshTokenStorageError",
@@ -57,7 +63,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 
 	it("register throws expired-at-issue when expiresAt is past", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore: store,
+			accessTokenHorizonMs: 3_600_000,
+		});
 		await expect(rotation.register("jti-1", "fam-1", Date.now() - 1)).rejects.toBeInstanceOf(
 			RefreshTokenStorageError,
 		);
@@ -65,7 +74,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 
 	it("rotate returns 'rotated' when previousJti matches and family is healthy", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore: store,
+			accessTokenHorizonMs: 3_600_000,
+		});
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		const out = await rotation.rotate("jti-1", "jti-2", "fam-1", FUTURE());
 		expect(out.outcome).toBe("rotated");
@@ -75,7 +87,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 
 	it("rotate returns 'replayed' when previousJti does NOT match the active jti", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore: store,
+			accessTokenHorizonMs: 3_600_000,
+		});
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		// Try to rotate using a stale previousJti.
 		const out = await rotation.rotate("jti-stale", "jti-2", "fam-1", FUTURE());
@@ -101,7 +116,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 		it("revokes the family in the SAME updateFamily call that detects the replay", async () => {
 			const store = createMemoryRefreshTokenFamilyStore();
 			const probe = counting(store);
-			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: probe.store });
+			const rotation = createRefreshTokenFamilyRotation({
+				refreshTokenFamilyStore: probe.store,
+				accessTokenHorizonMs: 3_600_000,
+			});
 			await rotation.register("jti-1", "fam-1", FUTURE());
 			probe.reset();
 
@@ -121,7 +139,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 
 		it("reports familyRevoked on the replayed outcome so the caller can skip its own revoke", async () => {
 			const store = createMemoryRefreshTokenFamilyStore();
-			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+			const rotation = createRefreshTokenFamilyRotation({
+				refreshTokenFamilyStore: store,
+				accessTokenHorizonMs: 3_600_000,
+			});
 			await rotation.register("jti-1", "fam-1", FUTURE());
 
 			const out = await rotation.rotate("jti-stale", "jti-2", "fam-1", FUTURE());
@@ -138,7 +159,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 			// an attacker can drive.
 			const store = createMemoryRefreshTokenFamilyStore();
 			const probe = counting(store);
-			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: probe.store });
+			const rotation = createRefreshTokenFamilyRotation({
+				refreshTokenFamilyStore: probe.store,
+				accessTokenHorizonMs: 3_600_000,
+			});
 			await rotation.register("jti-1", "fam-1", FUTURE());
 			await rotation.rotate("jti-stale", "jti-2", "fam-1", FUTURE()); // revokes
 			const revokedAt = await store.findFamily("fam-1");
@@ -160,7 +184,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 			// the store serialises them in, exactly one may succeed and the
 			// family MUST be revoked once the loser is classified.
 			const store = createMemoryRefreshTokenFamilyStore();
-			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+			const rotation = createRefreshTokenFamilyRotation({
+				refreshTokenFamilyStore: store,
+				accessTokenHorizonMs: 3_600_000,
+			});
 			await rotation.register("jti-1", "fam-1", FUTURE());
 
 			const [a, b] = await Promise.all([
@@ -174,7 +201,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 
 		it("N concurrent redemptions of the same token: exactly one rotates, the rest are rejected, family revoked", async () => {
 			const store = createMemoryRefreshTokenFamilyStore();
-			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+			const rotation = createRefreshTokenFamilyRotation({
+				refreshTokenFamilyStore: store,
+				accessTokenHorizonMs: 3_600_000,
+			});
 			await rotation.register("jti-1", "fam-1", FUTURE());
 
 			const N = 20;
@@ -201,7 +231,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 			// classification (and is a legitimate rotation) or sees a revoked
 			// family. It can never land in between.
 			const store = createMemoryRefreshTokenFamilyStore();
-			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+			const rotation = createRefreshTokenFamilyRotation({
+				refreshTokenFamilyStore: store,
+				accessTokenHorizonMs: 3_600_000,
+			});
 			await rotation.register("jti-1", "fam-1", FUTURE());
 			await rotation.rotate("jti-1", "jti-2", "fam-1", FUTURE()); // legitimate rotation
 
@@ -218,7 +251,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 
 	it("rotate returns 'revoked' when family is revoked (regardless of previousJti match)", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore: store,
+			accessTokenHorizonMs: 3_600_000,
+		});
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		await store.updateFamily("fam-1", (cur) => ({
 			action: "commit",
@@ -230,14 +266,20 @@ describe("createRefreshTokenFamilyRotation", () => {
 
 	it("rotate returns 'unknown_family' when family does not exist", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore: store,
+			accessTokenHorizonMs: 3_600_000,
+		});
 		const out = await rotation.rotate("jti-x", "jti-y", "ghost-fam", FUTURE());
 		expect(out.outcome).toBe("unknown_family");
 	});
 
 	it("outcome objects are frozen at runtime", async () => {
 		const store = createMemoryRefreshTokenFamilyStore();
-		const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+		const rotation = createRefreshTokenFamilyRotation({
+			refreshTokenFamilyStore: store,
+			accessTokenHorizonMs: 3_600_000,
+		});
 		await rotation.register("jti-1", "fam-1", FUTURE());
 		const rotated = await rotation.rotate("jti-1", "jti-2", "fam-1", FUTURE());
 		expect(Object.isFrozen(rotated)).toBe(true);
@@ -264,7 +306,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 	describe("IH-13: absolute expiry cap (no sliding window)", () => {
 		it("does not extend family expiresAtMs on rotation when caller requests later expiry", async () => {
 			const store = createMemoryRefreshTokenFamilyStore();
-			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+			const rotation = createRefreshTokenFamilyRotation({
+				refreshTokenFamilyStore: store,
+				accessTokenHorizonMs: 3_600_000,
+			});
 
 			const ceiling = Date.now() + 60_000; // 60s ceiling — CI-safe; see describe block comment
 			await rotation.register("jti-1", "fam-1", ceiling);
@@ -282,7 +327,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 
 		it("rotated outcome carries cappedExpiresAtMs equal to the committed family ceiling", async () => {
 			const store = createMemoryRefreshTokenFamilyStore();
-			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+			const rotation = createRefreshTokenFamilyRotation({
+				refreshTokenFamilyStore: store,
+				accessTokenHorizonMs: 3_600_000,
+			});
 
 			const ceiling = Date.now() + 60_000;
 			await rotation.register("jti-1", "fam-1", ceiling);
@@ -306,7 +354,10 @@ describe("createRefreshTokenFamilyRotation", () => {
 			// to shrink the TTL — e.g., session-bound RT). This test guards
 			// against an over-eager `Math.max` swap during refactor.
 			const store = createMemoryRefreshTokenFamilyStore();
-			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore: store });
+			const rotation = createRefreshTokenFamilyRotation({
+				refreshTokenFamilyStore: store,
+				accessTokenHorizonMs: 3_600_000,
+			});
 
 			const ceiling = Date.now() + 86_400_000; // 1 day
 			await rotation.register("jti-1", "fam-1", ceiling);

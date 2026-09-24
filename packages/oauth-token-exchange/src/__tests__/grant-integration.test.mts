@@ -425,6 +425,43 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 	});
 
+	it("still refuses a revoked family's subject_token after the family's own lifetime has run out", async () => {
+		// A family's record expires with its refresh tokens; an access token
+		// minted from it late in its life outlives that. The revocation has
+		// to be remembered until the last such token has expired, or the
+		// family check forgets it and the token is exchangeable again.
+		vi.useFakeTimers({ toFake: ["Date"] });
+		try {
+			const { grant, components } = await boot([
+				memoryRefreshTokenFamilyStoreModule,
+				defaultRefreshTokenFamilyRevocationModule,
+			]);
+			const store = components.refreshTokenFamilyStore;
+			if (!store) throw new Error("the boot did not provide refreshTokenFamilyStore");
+			// Ten minutes of the family left; the access token lives an hour.
+			await store.registerFamily({
+				familyId: "fam-late",
+				activeJti: "rt-late",
+				revoked: false,
+				expiresAtMs: Date.now() + 10 * 60_000,
+			});
+			const body = {
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-late" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			};
+			await revoke(components, "fam-late");
+
+			vi.setSystemTime(Date.now() + 11 * 60_000);
+			expect((await exchange(grant, body)).result).toMatchObject({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "family_revoked",
+			});
+		} finally {
+			vi.useRealTimers();
+		}
+	});
+
 	it("refuses a family-bearing subject_token when no refreshTokenFamilyRevocation is wired", async () => {
 		const { grant } = await boot([]);
 		const { result } = await exchange(grant, {

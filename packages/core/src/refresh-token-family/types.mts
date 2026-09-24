@@ -29,6 +29,13 @@
  * Object.freeze cannot defend against — a caller holding a reference to
  * a Date object could call setTime(0) and corrupt store state.
  *
+ * For a live family it is the family's lifetime, which caps its refresh
+ * tokens' `exp`. For a revoked one it is how long the revocation is
+ * remembered: the revoking write moves it to the later of that lifetime and
+ * the moment the last access token the family could have minted stops being
+ * accepted (`retention.mts`), since the record is what `isFamilyRevoked`
+ * answers from.
+ *
  * Per A3 §5.1.
  */
 export interface RefreshTokenFamily {
@@ -363,9 +370,14 @@ export interface RefreshTokenFamilyRevocation {
 	 * Mark a refresh-token family as revoked. Idempotent:
 	 *   - family exists, not revoked → set revoked: true, commit
 	 *   - family exists, already revoked → no-op success
-	 *   - family does not exist → no-op success (target was already GC'd or
-	 *     never existed; admin tools / logout cascade should not fail in
-	 *     that case)
+	 *   - family does not exist → record it as revoked (its record may have
+	 *     run out while an access token it minted is still live); success
+	 *
+	 * The revoked record MUST be kept until the last access token the family
+	 * could have minted stops being accepted — `isFamilyRevoked` answers
+	 * `false` for a family with no record. The shipped
+	 * `createRefreshTokenFamilyRevocation` sizes that from the configured
+	 * access-token maximum (`retention.mts`).
 	 *
 	 * Per A3 §5.3.
 	 */
@@ -375,7 +387,9 @@ export interface RefreshTokenFamilyRevocation {
 	 * Read-only check whether a family is revoked.
 	 *
 	 * Returns `true` iff a family record exists AND its `revoked` flag is
-	 * set. Returns `false` if the family does not exist OR is not revoked.
+	 * set. Returns `false` if the family does not exist OR is not revoked —
+	 * which is why `revokeFamily` keeps a revoked record for as long as the
+	 * family's tokens can be accepted.
 	 *
 	 * Hot-path operation (called per request from token-validation routes).
 	 *
