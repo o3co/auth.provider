@@ -402,13 +402,11 @@ describe("loggableError — what a log line may carry of an error", () => {
 	});
 
 	/*
-	 * The shared `stack` vectors. device-grant's copy of this rule
-	 * (`packages/device-grant/src/loggableError.mts`) passes the same list;
-	 * keep the two in step, so that replacing that copy by this one stays an
-	 * import swap. Each vector needs only `loggableError`, the helpers inside
+	 * The `stack` vectors, against errors Node and V8 really throw and stacks
+	 * assigned by hand. Each needs only `loggableError`, the helpers inside
 	 * this block and Node's own globals and built-ins.
 	 */
-	describe("stack — the shared vectors", () => {
+	describe("stack — the vectors", () => {
 		const stackOf = (thrown: unknown): string | undefined =>
 			(loggableError(thrown) as { stack?: string }).stack;
 		/** What the function under inspection threw. */
@@ -573,6 +571,28 @@ describe("loggableError — what a log line may carry of an error", () => {
 			const stack = stackOf(thrownBy(fn));
 			expect(stack).toMatch(/^ {4}at /);
 			expect(stack).not.toContain(header);
+		});
+
+		it("AbortSignal.timeout's TimeoutError: its frames, and not its header", async () => {
+			const signal = AbortSignal.timeout(0);
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			expect(signal.aborted).toBe(true);
+			const stack = stackOf(signal.reason);
+			expect(stack).toMatch(/^ {4}at /);
+			expect(stack).not.toContain("TimeoutError");
+		});
+
+		it("a subclass that names itself: its frames, and not its header", () => {
+			class MyError extends Error {
+				override name = "MyError";
+			}
+			const stack = stackOf(
+				thrownBy(() => {
+					throw new MyError("boom");
+				}),
+			);
+			expect(stack).toMatch(/^ {4}at /);
+			expect(stack).not.toContain("MyError");
 		});
 
 		it("an fs ENOENT: its frames, and not its header", async () => {

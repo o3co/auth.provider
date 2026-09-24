@@ -69,10 +69,10 @@ import {
 	generateDeviceCode,
 	generateUserCode,
 	isGrantTypeAllowed,
+	loggableError,
 	normaliseUserCode,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
-import { loggableError } from "./loggableError.mjs";
 import { DEVICE_CODE_GRANT_TYPE, type DeviceGrantDependencies } from "./types.mjs";
 
 interface OAuthErrorBody {

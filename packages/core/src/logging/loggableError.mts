@@ -228,8 +228,7 @@ const headerEnd = (stack: string, name: string, code: unknown, message: string):
 
 /**
  * The frames of an error's `stack`, and nothing of the header ahead of them
- * — the rule device-grant's copy shares, pinned by the shared vectors in
- * `__tests__/loggableError.test.mts`:
+ * — pinned by the `stack` vectors in `__tests__/loggableError.test.mts`:
  *
  * 1. `stack` or `message` not a string (or its read threw): no stack.
  * 2. The header is what V8 writes from the error's `name` (a non-string one

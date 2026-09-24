@@ -109,7 +109,9 @@ import {
 	createRateLimitGuard,
 	DEVICE_CODE_STORE_ABSENCE_POLICY,
 	defineModule,
+	guardedRead,
 	isDeviceVerificationRateLimitSpec,
+	loggableError,
 	type Module,
 	type ProviderDeps,
 	type RateLimitFailMode,
@@ -126,7 +128,6 @@ import express, { type ErrorRequestHandler, type RequestHandler, type Response }
 import { z } from "zod";
 import { createDeviceAuthorizationHandler } from "./deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "./grant.mjs";
-import { guardedRead, loggableError } from "./loggableError.mjs";
 import { DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX, DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
@@ -360,8 +361,9 @@ const withinBodyLimit: RequestHandler = (req, res, next) => {
  * 500 and an error line for them would let anyone fill the error log at
  * will. `null` for anything else — including an error one of whose three
  * fields throws when read (a getter, a Proxy's trap). The reads go through
- * `guardedRead`: a throw here would be `parserRefusals` throwing, and
- * Express would hand `unexpectedErrors` that throw in place of the error.
+ * core's `guardedRead`, the read `loggableError` is built on: a throw here
+ * would be `parserRefusals` throwing, and Express would hand
+ * `unexpectedErrors` that throw in place of the error.
  */
 const callerMistake = (
 	error: unknown,
@@ -406,8 +408,10 @@ const parserRefusals: ErrorRequestHandler = (error, _req, res, next) => {
 
 /**
  * The last error handler on either route: every error that reaches it is a
- * `500 server_error` (`unexpected_error`), with `loggableError`'s projection
- * of it in the log. RFC 8628 §3.2 gives `/oauth/device_authorization` RFC
+ * `500 server_error` (`unexpected_error`), with core's `loggableError`
+ * projection of it in the log — never the error, whose `body` (a parser's)
+ * or `command.args` (an ioredis reply's) is what the request or the store
+ * said. RFC 8628 §3.2 gives `/oauth/device_authorization` RFC
  * 6749 §5.2's JSON error response, and the verification API answers in JSON
  * throughout, so nothing falls through to the host app's error page.
  */
