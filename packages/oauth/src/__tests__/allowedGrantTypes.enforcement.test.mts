@@ -261,6 +261,10 @@ describe("allowedGrantTypes — /authorize enforcement (#268)", () => {
 		const location = new URL(res.headers.location as string);
 		expect(location.origin + location.pathname).toBe(REDIRECT_URI);
 		expect(location.searchParams.get("error")).toBe("unauthorized_client");
+		// The token endpoint's words for the same refusal.
+		expect(location.searchParams.get("error_description")).toBe(
+			"client is not authorized for grant_type 'authorization_code'",
+		);
 		expect(location.searchParams.get("state")).toBe("xyz");
 	});
 
@@ -348,6 +352,9 @@ describe("requireGrantTypeAllowlist — deployment-wide deny-by-absence (#311)",
 		const location = new URL(res.headers.location as string);
 		expect(location.origin + location.pathname).toBe(REDIRECT_URI);
 		expect(location.searchParams.get("error")).toBe("unauthorized_client");
+		expect(location.searchParams.get("error_description")).toBe(
+			"client is not authorized for grant_type 'authorization_code'",
+		);
 		expect(location.searchParams.get("state")).toBe("xyz");
 	});
 
