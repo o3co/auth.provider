@@ -382,6 +382,30 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(second.headers["retry-after"]).toBeDefined();
 	});
 
+	it("counts an oversized device_authorization request against the per-IP budget", async () => {
+		// federation-grants' order: the throttle ahead of the size check, so a
+		// caller cannot send oversized bodies without spending attempts. With
+		// the check first, the 413 was free and the next request still found
+		// the whole budget.
+		const app = mountContributedRoute(
+			0,
+			enabledDeps({ limits: { device_authorization: { limit: 1, windowSeconds: 60 } } }),
+		);
+
+		const oversized = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({ padding: "x".repeat(40_000) });
+		expect(oversized.status).toBe(413);
+		expect(oversized.headers["ratelimit-limit"]).toBe("1");
+
+		const next = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({});
+		expect(next.status).toBe(429);
+	});
+
 	it("refuses to mount device_authorization without the outage policy, rateLimit.failMode", () => {
 		// The guard's fail-open / fail-closed choice is the product's, made
 		// once in config. Defaulting it here would be a second policy.
