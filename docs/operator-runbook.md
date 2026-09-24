@@ -65,6 +65,15 @@ standalone) is what lets replicas refuse each other's proofs. With DPoP enabled
 and no seen-set wired at all, `dpopModule` refuses to boot in every mode
 (`packages/dpop/src/module.mts`); there is no per-process fallback.
 
+A seen-set wired for DPoP is wired for everything else that records in it.
+Its presence alone makes `@o3co/auth-provider-oauth` advertise
+`private_key_jwt` (token, introspection and revocation endpoint lists, with
+their signing algorithms), accept client assertions from clients registered
+with `jwks` / `jwksUri` (refused `500 server_error` without one), and verify
+ID-JAG entries in the jwt-bearer trust registry (`503` without one)
+(`packages/oauth/src/module.mts`, `oauth/src/middleware/clientAssertion.mts`,
+`core/src/assertions/registryAssertionVerifier.mts`).
+
 Three things the guard cannot do:
 
 - **It cannot notice that you scaled without setting the mode.** A process
@@ -971,7 +980,28 @@ before you flip — and a relying party holding the secret can also mint.
    | --- | --- | --- |
    | `oauth.refreshToken.legacyTokenCompat` | removed | `oauth.refreshToken.legacyTokenCompat was removed in v0.6.0 (Phase G / M4); see CHANGELOG.` |
    | `oauth.authorize.allowUnmarkedClients` (and the env tombstone `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, any value) | removed | boot error with migration instructions: mark every client `firstParty: true`, then delete the key and the variable |
-   | `oauth.dpop.replay-store` (any value) | removed | `oauth.dpop.replay-store was removed in …`: DPoP records its proofs in the `replaySeenSet` component, whose module chooses the backend (`replaySeenSet.adapter` in the standalone); delete the key. A `dpopReplayStore` bootstrap component is no longer read either |
+   | `oauth.dpop.replay-store` (any value) | removed | `oauth.dpop.replay-store was removed in …`: DPoP records its proofs in the `replaySeenSet` component, whose module chooses the backend (`replaySeenSet.adapter` in the standalone); delete the key. A `dpopReplayStore` bootstrap component is no longer read either — see the DPoP note below |
+
+   **DPoP moving onto the replay seen-set.** DPoP's Redis records move from
+   `dpop:replay:<jkt>:<jti>` to the seen-set's `replay:…dpop-proof:<jkt>…`
+   keys, and neither release reads the other's. While both serve against one
+   Redis, a captured proof can be accepted once by an old replica and once by
+   a new one — for the whole overlap, plus up to
+   `2 × oauth.dpop.iat-window-seconds + 1` seconds after the last old replica
+   stops (121 s at the default 60), because a proof that replica accepted
+   stays acceptable that long. To avoid the window, either cut over
+   stop-then-start with the new release starting at least `2W + 1` seconds
+   after the old one stopped, or lower `oauth.dpop.iat-window-seconds` on the
+   old release for the roll (5 s makes the window 11 s) and restore it after —
+   clients whose clocks are off by more than the lowered window are refused
+   meanwhile. The leftover `dpop:replay:*` keys expire by themselves within
+   `oauth.dpop.replay-store-ttl-seconds` (300 s by default); nothing reads
+   them. Order: delete `oauth.dpop.replay-store` from the config **first** —
+   the old release reads its absence as `"memory"`, under which a wired
+   `dpopReplayStore` is still the store it uses, and the new release refuses
+   to boot while it is set — then deploy the new release with a seen-set
+   installed (`REPLAY_SEEN_SET_ADAPTER=redis` in the standalone). Installing
+   one also turns on `private_key_jwt` and ID-JAG verification ([§1](#1-deployment-shapes)).
    | `oauth.refreshToken.legacyRtPolicy = "accept-with-warning"` | enum shrunk to `"reject"` | Zod `invalid_enum_value` naming the survivors |
    | flat `oauth.jwt.algorithm` / `kid` / `secret` / key fields | moved | `oauth.jwt has legacy flat fields (…). Migrate to nested shape: oauth.jwt.signingKey.local.<field>` |
    | `oauth.grants.authorization_code.pkce.*` (and `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) | warn and ignore | one `pkce_config_ignored_s256_is_mandatory` line; S256 is mandatory regardless (`packages/oauth/src/grants/pkce.mts`) |
@@ -1005,7 +1035,10 @@ before you flip — and a relying party holding the secret can also mint.
   period (`templates/standalone/src/shutdown.mts`).
 - Under `DEPLOYMENT_MODE=multi`, a mixed fleet during the roll is fine for
   every Redis-backed store — the schemas below are what decide whether the
-  *older* release can read what the *newer* one wrote.
+  *older* release can read what the *newer* one wrote. The one exception is
+  the release that moves DPoP onto the replay seen-set: its replay records
+  change keys, so a mixed fleet opens a replay window (see the DPoP note in
+  [Before you upgrade](#before-you-upgrade)).
 
 ### Rolling back — state written by a newer release
 

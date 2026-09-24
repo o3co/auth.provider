@@ -198,3 +198,16 @@ both run it ([docs/adapter-surface.md](../../docs/adapter-surface.md)).
   | `"single"` | Silent: one replica, so the memory seen-set is correct. |
 
   The check reads the modules that are installed, so a per-process seen-set handed in as a bootstrap component (`createMemoryReplaySeenSet()`) is not seen by it and boots under `"multi"` without a warning. DPoP left disabled records nothing and needs no seen-set.
+
+- **Installing a seen-set turns on more than DPoP.** The seen-set is shared, and its presence is also what switches on the other single-use records that live in it. With a `replaySeenSet` wired, `@o3co/auth-provider-oauth`:
+  - advertises `private_key_jwt`, with its signing algorithms, in `token_endpoint_auth_methods_supported` and in the introspection and revocation lists;
+  - lets a client registered with `jwks` / `jwksUri` authenticate with a client assertion, where without a seen-set it was refused `500 server_error`;
+  - verifies ID-JAG entries in the jwt-bearer trust registry, where without a seen-set they failed as `503`.
+
+  A composition that relied on DPoP's own store before this release, and now installs a seen-set for DPoP, gets all three. None of them is reachable without a client or registry entry that asks for it, but the discovery document changes on its own, so check what it now offers.
+
+- **Upgrading from a release with `oauth.dpop.replay-store`.** DPoP's Redis records move from `dpop:replay:<jkt>:<jti>` to the seen-set's `replay:…dpop-proof:<jkt>…` keys, and neither release reads the other's. While both serve against one Redis, a captured proof can be accepted once by an old replica and once by a new one. That lasts for the whole overlap plus up to `2 × iat-window-seconds + 1` seconds after the last old replica stops (121 s at the default window), since a proof the last old replica accepted stays acceptable that long. To avoid it:
+  - cut over stop-then-start, and start the new release at least `2 × iat-window-seconds + 1` seconds after the old one stopped; or
+  - lower `oauth.dpop.iat-window-seconds` on the old release for the roll (5 s shrinks the window to 11 s), and put it back afterwards. Clients whose clocks are off by more than the lowered window are refused while it is lowered.
+
+  The leftover `dpop:replay:*` keys expire by themselves within `replay-store-ttl-seconds` (300 s by default); nothing reads them and nothing needs deleting. Delete `oauth.dpop.replay-store` from the config **before** deploying: the new release refuses to boot while the key is set, and the old release reads its absence as its default `"memory"`, under which a wired `dpopReplayStore` is still the store it uses. Then deploy the new release with a seen-set module installed (`redisReplaySeenSetModule` for several replicas) and without the `dpopReplayStore` component, which is no longer read.
