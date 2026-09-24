@@ -74,10 +74,10 @@ const codeRepository: CodeRepository = {
 
 /**
  * The router with every optional surface mounted — logout, federation
- * token, consent — so every route it can own is present. The stores are
- * never called: only construction and body parsing are exercised.
+ * token, consent — or with none of them. The stores are never called: only
+ * construction and body parsing are exercised.
  */
-const fullRouter = async (): Promise<Router> => {
+const routerWith = async (surfaces: "all" | "none"): Promise<Router> => {
 	const unused = {} as never;
 	const { router } = await createOAuthRouter(express, {
 		registry: new GrantRegistry(),
@@ -85,18 +85,24 @@ const fullRouter = async (): Promise<Router> => {
 		clientRepository,
 		codeRepository,
 		keyStore: createSymmetricKeyStore("body-parsing-secret.at-least-32-bytes"),
-		userSessionStore: unused as UserSessionStore,
-		sessionRPRegistry: unused as SessionRPRegistry,
-		sessionFamilyIndex: unused as SessionFamilyIndex,
-		sessionFederationIndex: unused as SessionFederationIndex,
-		federationTokenStore: unused as FederationTokenStore,
-		refreshTokenFamilyRevocation: unused as RefreshTokenFamilyRevocation,
-		consentStore: unused as ConsentStore,
-		pendingConsentStore: unused as PendingConsentStore,
+		...(surfaces === "all"
+			? {
+					userSessionStore: unused as UserSessionStore,
+					sessionRPRegistry: unused as SessionRPRegistry,
+					sessionFamilyIndex: unused as SessionFamilyIndex,
+					sessionFederationIndex: unused as SessionFederationIndex,
+					federationTokenStore: unused as FederationTokenStore,
+					refreshTokenFamilyRevocation: unused as RefreshTokenFamilyRevocation,
+					consentStore: unused as ConsentStore,
+					pendingConsentStore: unused as PendingConsentStore,
+				}
+			: {}),
 		logger: createMockLogger(),
 	});
 	return router;
 };
+
+const fullRouter = () => routerWith("all");
 
 /** Every route path registered on `router`, its sub-routers' included. */
 const routePaths = (router: Router): string[] =>
@@ -148,12 +154,19 @@ describe("the OAuth router's body parsing", () => {
 		},
 	);
 
-	it("parses the body of every route it owns — each refuses a malformed JSON body at its parser", async () => {
-		// The routes are discovered from the router rather than listed here,
-		// so a route added later is covered without touching this test.
-		const router = await fullRouter();
-		const paths = routePaths(router);
-		expect(paths).toEqual(
+	it.each([
+		["every optional surface mounted", "all"],
+		["no optional surface mounted", "none"],
+	] as const)("parses exactly the routes it mounts, with %s", async (_label, surfaces) => {
+		// Both directions. Every route the router mounts is parsed — a
+		// malformed JSON body is refused by its parser. Every path it could
+		// own but has not mounted — /logout, /consent and the federation
+		// routes without their stores — reaches a route mounted after it
+		// with the body unread, so a deployment's own route there parses
+		// its own. The candidate paths are discovered from the router
+		// with everything mounted, so a route added later is covered.
+		const candidates = new Set(routePaths(await fullRouter()));
+		expect([...candidates]).toEqual(
 			expect.arrayContaining([
 				"/token",
 				"/introspect",
@@ -166,21 +179,38 @@ describe("the OAuth router's body parsing", () => {
 				"/consent",
 			]),
 		);
+		const router = await routerWith(surfaces);
+		const mounted = new Set(routePaths(router));
+		if (surfaces === "none") {
+			for (const conditional of ["/logout", "/consent", "/federation/:name/token"]) {
+				expect(mounted.has(conditional), conditional).toBe(false);
+			}
+		}
 
+		const concrete = (path: string) => `/oauth${path.replace(":name", "example")}`;
 		const recordParserError: ErrorRequestHandler = (error, _req, res, _next) => {
 			res.status(599).json({ type: (error as { type?: unknown }).type ?? null });
 		};
 		const app = express();
 		app.use("/oauth", router);
+		for (const path of candidates) {
+			if (!mounted.has(path)) app.post(concrete(path), readsItsOwnBody);
+		}
 		app.use(recordParserError);
 
-		for (const path of new Set(paths)) {
-			const res = await request(app)
-				.post(`/oauth${path.replace(":name", "example")}`)
-				.set("Content-Type", "application/json")
-				.send("{not json");
-			expect(res.status, path).toBe(599);
-			expect(res.body, path).toEqual({ type: "entity.parse.failed" });
+		for (const path of candidates) {
+			if (mounted.has(path)) {
+				const res = await request(app)
+					.post(concrete(path))
+					.set("Content-Type", "application/json")
+					.send("{not json");
+				expect(res.status, path).toBe(599);
+				expect(res.body, path).toEqual({ type: "entity.parse.failed" });
+			} else {
+				const res = await request(app).post(concrete(path)).type("form").send("a=1");
+				expect(res.status, path).toBe(200);
+				expect(res.body, path).toEqual({ raw: "a=1", parsedBefore: null });
+			}
 		}
 	});
 });
