@@ -71,20 +71,15 @@ const BODY_LIMIT_BYTES = 16 * 1024;
 /**
  * The body limit, restated ahead of the parsers.
  *
- * These routes live under `/oauth`, and `oauthModule` mounts its own router
- * there whose first two middlewares are `express.json()` and
- * `express.urlencoded()` with the library's defaults. Whenever that router is
- * mounted ahead of this one, those parsers run first — and `body-parser` does
- * not parse a body twice, so the `limit` below is simply skipped and a body up
- * to the default 100 KiB arrives here. Checking `Content-Length` first is the
- * one form of this bound that holds whatever else is mounted, and in whatever
- * order.
- *
- * It does not make this package independent of mounting order: a malformed
- * body is still rejected by whichever parser reaches it first, and that
- * refusal carries neither this package's correlation nor its cache
- * directives. See the README — a composition root that wants those installs
- * `federationGrantsModules` ahead of `oauthModule`.
+ * These routes live under `/oauth`, beside `oauthModule`'s router, which
+ * parses the bodies of its own routes only — so in a composition with it,
+ * these routes' own parsers are the first to read their bodies, whatever the
+ * module order. The bound is still checked from `Content-Length` first: it
+ * refuses a declared oversized body before any of it is read, and it holds
+ * even if some other module mounts a parser under `/oauth` that runs for
+ * every request beneath it (`body-parser` does not parse a body twice, so the
+ * `limit` below would then be skipped). A body with no `Content-Length` is
+ * bounded by the parsers below.
  */
 const withinBodyLimit: RequestHandler = (req, res, next) => {
 	const declared = Number(req.headers["content-length"]);
