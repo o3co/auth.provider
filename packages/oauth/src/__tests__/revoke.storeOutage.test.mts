@@ -116,7 +116,8 @@ async function refreshToken(clientId: string, familyId = "fam-1"): Promise<strin
 
 function appWith(opts: {
 	denylist?: AccessTokenDenylist;
-	revocation: RefreshTokenFamilyRevocation;
+	/** Absent: the composition wires no refresh-token family revocation. */
+	revocation?: RefreshTokenFamilyRevocation;
 	logger: MockLogger;
 }): express.Express {
 	const app = express();
@@ -125,7 +126,7 @@ function appWith(opts: {
 		createRevokeRouter(express, {
 			clientRepository,
 			keyStore,
-			refreshTokenFamilyRevocation: opts.revocation,
+			...(opts.revocation === undefined ? {} : { refreshTokenFamilyRevocation: opts.revocation }),
 			...(opts.denylist === undefined
 				? { accessTokenRevocation: "unsupported" as const }
 				: { accessTokenDenylist: opts.denylist }),
@@ -316,6 +317,33 @@ describe("POST /oauth/revoke — an access token with nothing left to deny", () 
 		expect(res.status).toBe(200);
 		expect(denylist.add).toHaveBeenCalledTimes(1);
 		expect(await denylist.has("at-live")).toBe(true);
+	});
+});
+
+describe("POST /oauth/revoke — a composition with a denylist and no family revocation", () => {
+	// The refresh-token half is unwired, so its attempt finds nothing to revoke
+	// with; the search goes on to the access-token half, whatever the hint.
+	const app = (denylist: AccessTokenDenylist) => appWith({ denylist, logger: createMockLogger() });
+
+	it("revokes an access token under any hint", async () => {
+		for (const hint of ["refresh_token", "access_token", undefined] as const) {
+			const denylist = createMemoryAccessTokenDenylist();
+			const token = await accessToken(CLIENT_ID, `at-${hint ?? "none"}`);
+			const res = await revoke(
+				app(denylist),
+				hint === undefined ? { token } : { token, token_type_hint: hint },
+			);
+			expect(res.status, `hint ${hint ?? "absent"}`).toBe(200);
+			expect(await denylist.has(`at-${hint ?? "none"}`)).toBe(true);
+		}
+	});
+
+	it("answers 200 for a refresh token it has nothing to revoke with", async () => {
+		const denylist = createMemoryAccessTokenDenylist();
+		const add = vi.spyOn(denylist, "add");
+		const res = await revoke(app(denylist), { token: await refreshToken(CLIENT_ID) });
+		expect(res.status).toBe(200);
+		expect(add).not.toHaveBeenCalled();
 	});
 });
 

@@ -131,7 +131,11 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 	// combination that cannot be honoured.
 	const accessTokenRevocation: AccessTokenRevocationMode =
 		opts.accessTokenRevocation ?? (opts.accessTokenDenylist ? "denylist" : "unsupported");
-	if (accessTokenRevocation === "denylist" && !opts.accessTokenDenylist) {
+	// What the access-token path writes to: present exactly when the mode is
+	// "denylist", which the refusal below guarantees. Resolved here, once, so
+	// the path takes it as a value rather than re-reading an optional slot.
+	const denylist = accessTokenRevocation === "denylist" ? opts.accessTokenDenylist : undefined;
+	if (accessTokenRevocation === "denylist" && !denylist) {
 		throw new Error(
 			'createRevokeRouter: accessTokenRevocation is "denylist" but no `accessTokenDenylist` was ' +
 				"supplied. RFC 7009 requires POST /oauth/revoke to answer 200, so without a denylist an " +
@@ -200,7 +204,7 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 		// unverifiable, not this client's). A store that fails is not that: it
 		// ends the search as `unavailable`, answered 503 below.
 		let outcome: RevocationAttempt;
-		if (accessTokenRevocation === "unsupported") {
+		if (denylist === undefined) {
 			// #277: the capability is declared absent. An explicit AT hint gets the
 			// RFC 7009 §2.2.1 answer for exactly this situation rather than a 200
 			// that means nothing. An unhinted request is still a legitimate
@@ -214,7 +218,7 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 		} else if (token_type_hint === "access_token") {
 			// Hint says AT — try AT first; if it is not one, fall back to RT. This
 			// covers the caller that passed hint=access_token with an actual RT.
-			outcome = await tryRevokeAccessToken(token, client.clientId, opts);
+			outcome = await tryRevokeAccessToken(token, client.clientId, denylist, opts);
 			if (outcome === "not_located") {
 				outcome = await tryRevokeRefreshToken(token, client.clientId, opts);
 			}
@@ -222,7 +226,7 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 			// hint=refresh_token or no hint — try RT first, then extend to AT.
 			outcome = await tryRevokeRefreshToken(token, client.clientId, opts);
 			if (outcome === "not_located") {
-				outcome = await tryRevokeAccessToken(token, client.clientId, opts);
+				outcome = await tryRevokeAccessToken(token, client.clientId, denylist, opts);
 			}
 		}
 
@@ -353,11 +357,11 @@ async function tryRevokeRefreshToken(
  * Attempt to revoke an access token by adding its jti to the denylist.
  *
  * Only reached when `accessTokenRevocation` is `"denylist"`, which
- * `createRevokeRouter` refuses to enter without a denylist (#277) — hence
- * `denylist` below is a guaranteed value, not an optional one. The unwired
- * branch this function used to carry was the silent no-op the issue was filed
- * about; it is gone rather than moved, because there is no request-time
- * recovery from it.
+ * `createRevokeRouter` refuses to enter without a denylist (#277) — so the
+ * router hands the denylist over as a value, and there is no unwired branch
+ * here. The one this function used to carry was the silent no-op the issue
+ * was filed about; it is gone rather than moved, because there is no
+ * request-time recovery from it.
  *
  * Always resolves (never throws): a token that cannot be revoked is
  * `not_located`, and a denylist that fails is `unavailable`, logged.
@@ -367,14 +371,9 @@ async function tryRevokeRefreshToken(
 async function tryRevokeAccessToken(
 	token: string,
 	requestingClientId: string,
+	denylist: AccessTokenDenylist,
 	opts: RevokeRouterOptions,
 ): Promise<RevocationAttempt> {
-	const denylist = opts.accessTokenDenylist;
-	if (!denylist) {
-		// Unreachable via createRevokeRouter, which refuses this composition at
-		// construction. Kept as a typed narrowing, not as a fallback behaviour.
-		return "not_located";
-	}
 	let jti: string;
 	let exp: number;
 	try {
