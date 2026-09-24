@@ -32,10 +32,10 @@
  *   Step 12: iat window
  *   Step 14: Replay check — one atomic `markSeen` on core's `ReplaySeenSet`
  *            under `dpop-proof:<jkt>`, kept for `replayTtlSeconds`. A store
- *            that cannot be read refuses the proof as an outage
- *            (`replay_store_unavailable`, answered 503
- *            `temporarily_unavailable`), never as an invalid proof and
- *            never by leaking a raw Redis error.
+ *            that cannot be read (`replay_store_unavailable`) or breaks its
+ *            own contract (`replay_store_fault`) refuses the proof as the
+ *            server's fault — answered 503 `temporarily_unavailable` — never
+ *            as an invalid proof and never by leaking a raw Redis error.
  *   Step 15: Return TokenBinding
  *
  * The verifier relies on `parseProof` (Sub-PR 2a) for steps 3–9 + 13 and
@@ -443,22 +443,25 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 					Date.now() + replayTtlSeconds * 1000,
 				);
 			} catch (err) {
-				// Narrow the catch so only TRANSPORT / availability faults
-				// surface as `replay_store_unavailable`. Contract faults
-				// propagate as-is:
-				//   - DPoPError: a future refactor might shape seen-set errors
-				//     directly as DPoPError; preserve that classification.
-				//   - ChallengeStorageError: the seen-set's one domain error
-				//     (`expired-at-issue`), which a record computed from a
-				//     positive TTL cannot earn.
-				//   - RangeError: the seen-set's refusal of a non-finite expiry,
-				//     which construction already rules out.
-				// Misclassifying either as `replay_store_unavailable` would send
-				// operator triage to Redis health when the fault is in the
-				// composition.
+				// A DPoPError keeps its classification: a future refactor might
+				// shape seen-set errors directly as one.
 				if (err instanceof DPoPError) throw err;
-				if (err instanceof ChallengeStorageError) throw err;
-				if (err instanceof RangeError) throw err;
+				// The seen-set's own contract errors — `expired-at-issue`, which a
+				// record computed from a positive TTL cannot earn, and RangeError
+				// for a non-finite expiry, which construction rules out — mean the
+				// set is broken. That is the server's fault, not the proof's, so
+				// it takes the outage's wire answer (503, the proof refused
+				// unrecorded) rather than a rethrow, which core's dispatcher would
+				// answer `400 invalid_dpop_proof` and log only as a failed proof.
+				// Its own audit reason and error-level log event keep operator
+				// triage off Redis health: the fix is in the composition.
+				if (err instanceof ChallengeStorageError || err instanceof RangeError) {
+					logger?.error({ err, jti: proof.claims.jti }, "dpop_replay_store_fault");
+					throw new DPoPError(
+						"replay_store_fault",
+						"DPoP replay store broke its own contract; cannot determine replay status",
+					);
+				}
 				logger?.error({ err, jti: proof.claims.jti }, "dpop_replay_store_unavailable");
 				throw new DPoPError(
 					"replay_store_unavailable",

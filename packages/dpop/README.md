@@ -164,7 +164,11 @@ requests carrying one proof, exactly one is accepted.
   request as the server's fault, not the proof's: `503 temporarily_unavailable`
   at the token endpoint and at a protected resource, with no
   `WWW-Authenticate` challenge, and `dpop_replay_store_unavailable` logged
-  (reason `replay_store_unavailable`). A proof is never accepted unrecorded,
+  (reason `replay_store_unavailable`). A seen-set that answers with its own
+  contract error (a `RangeError`, or `expired-at-issue`) is broken rather than
+  down: the same 503, logged `dpop_replay_store_fault` with the error (reason
+  `replay_store_fault`), because the fix is in the composition, not in Redis.
+  A proof is never accepted unrecorded,
   and it is not called invalid either — RFC 9449 keeps `invalid_dpop_proof`
   for a proof that failed its checks (§5, §7.1), and a resource's
   `401 invalid_token` would send the client to replace a token that is fine.
