@@ -711,7 +711,7 @@ describe("account linking across federations (#482)", () => {
 			// Absent is the ONLY reading the disclosure point takes as Bearer:
 			// RFC 6749 §5.1 makes `token_type` REQUIRED, so silence is an adapter
 			// written before the field rather than an upstream meaning something
-			// else. Every bundled adapter but `federation-oidc` is one of those.
+			// else. Every bundled adapter names one; a third-party adapter may not.
 			const untyped = makeFakeProvider({
 				exchangeCode: vi.fn(async () => ({
 					issuer: "https://idp.example.com",

@@ -191,8 +191,9 @@ export type {
 export { supportsLock } from "./federation-tokens/types.mjs";
 // The federation adapter toolkit: the pure helpers every adapter builds its
 // requests with — the PKCE S256 challenge, the URL its library exchanges the
-// code at (RFC 9207 `iss` and nothing else from the callback), and a
-// `client_secret` that may be computed per request.
+// code at (RFC 9207 `iss` and nothing else from the callback), a
+// `client_secret` that may be computed per request — and the one reading of
+// the token response it answers with.
 export { callbackUrlForExchange } from "./federations/callback-url.mjs";
 export type { FederationClientSecret } from "./federations/client-secret.mjs";
 export { resolveClientSecret } from "./federations/client-secret.mjs";
@@ -206,6 +207,11 @@ export {
 // RFC 6749 §3.3's scope grammar, in one place. Three packages had their own
 // copy before #647 and all three were wrong about whitespace in the same way.
 export { canonicalScope, isScopeToken, parseScopeTokens } from "./federations/scope.mjs";
+export type {
+	FederationTokenResponse,
+	FederationTokenSnapshot,
+} from "./federations/token-snapshot.mjs";
+export { federationTokenSnapshot } from "./federations/token-snapshot.mjs";
 // RFC 6749's `token_type`, in one place: what an upstream token may be handed
 // on as, and the case-insensitive comparison (§5.1) that decides it (#645).
 export {

@@ -31,8 +31,8 @@ describe("federationTokenSnapshot — one reading of a token response for every 
 
 	it("reads an absent expires_in as no stated lifetime: null on both, never an assumed hour", () => {
 		// Google and Apple once assumed 3600 here while GitHub and OIDC said
-		// null. The session's refresh route stores null for an adapter that
-		// says nothing, and a lifetime nobody stated is not one to invent.
+		// null. oauth's federation token route stores null for a refresh that
+		// states nothing, and a lifetime nobody stated is not one to invent.
 		const snapshot = federationTokenSnapshot({ access_token: "at", token_type: "bearer" });
 		expect(snapshot.expiresIn).toBeNull();
 		expect(snapshot.expiresAt).toBeNull();

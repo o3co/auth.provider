@@ -22,6 +22,7 @@ import {
 	type EndSessionResult,
 	type FederationProfile,
 	type FederationProvider,
+	federationTokenSnapshot,
 	type MappedClaims,
 	type RefreshedTokens,
 	type SupportsClaimMapping,
@@ -199,6 +200,8 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				expectedState: oidc.skipStateCheck,
 				expectedNonce: params.nonce,
 			});
+			// The token's lifetime is dated from here, not after UserInfo.
+			const receivedAt = Date.now();
 
 			// PB-5: bind UserInfo response sub against the verified id_token sub (OIDC §5.3.2).
 			// Google id_tokens always carry a non-empty string sub. If the claim is absent,
@@ -212,8 +215,6 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 			}
 			const userInfo = await oidc.fetchUserInfo(oidcConfig, tokens.access_token, idTokenSub);
 
-			const expiresIn = typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
-
 			// Extension claims: anything beyond first-class fields lands on the profile
 			// via the index signature — no `raw` wrapper needed.
 			const profile: FederationProfile = {
@@ -224,22 +225,10 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 					typeof userInfo.email_verified === "boolean" ? userInfo.email_verified : undefined,
 				name: typeof userInfo.name === "string" ? userInfo.name : undefined,
 				picture: typeof userInfo.picture === "string" ? userInfo.picture : undefined,
-				accessToken: tokens.access_token,
-				refreshToken: typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
-				idToken: typeof tokens.id_token === "string" ? tokens.id_token : undefined,
-				// RFC 6749 §5.1: the upstream states its scope whenever it differs
-				// from the request, so what it says here is what it granted. Dropping
-				// it left the route to infer consent from the request instead (#647).
-				// `undefined` only when the field is absent: an answer that names
-				// nothing usable is still an answer, and flattening it into silence
-				// would have the route fall back to the requested list (#647).
-				scope:
-					tokens.scope === undefined
-						? undefined
-						: typeof tokens.scope === "string"
-							? tokens.scope
-							: "",
-				expiresAt: new Date(Date.now() + expiresIn * 1000),
+				// The tokens as Google stated them: the lifetime as sent or none,
+				// the scope as sent (what it granted, RFC 6749 §5.1, #647), and the
+				// token type — core's one reading for every adapter.
+				...federationTokenSnapshot(tokens, receivedAt),
 			};
 
 			// Carry through known extension claims (e.g. Google hd).
@@ -251,27 +240,8 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 		},
 
 		async refreshToken(refreshTokenValue: string): Promise<RefreshedTokens> {
-			const tokens = await oidc.refreshTokenGrant(oidcConfig, refreshTokenValue);
-			const expiresIn = typeof tokens.expires_in === "number" ? tokens.expires_in : 3600;
-			return {
-				accessToken: tokens.access_token,
-				refreshToken: typeof tokens.refresh_token === "string" ? tokens.refresh_token : undefined,
-				idToken: typeof tokens.id_token === "string" ? tokens.id_token : undefined,
-				// RFC 6749 §5.1: the upstream states its scope whenever it differs
-				// from the request, so what it says here is what it granted. Dropping
-				// it left the route to infer consent from the request instead (#647).
-				// `undefined` only when the field is absent: an answer that names
-				// nothing usable is still an answer, and flattening it into silence
-				// would have the route fall back to the requested list (#647).
-				scope:
-					tokens.scope === undefined
-						? undefined
-						: typeof tokens.scope === "string"
-							? tokens.scope
-							: "",
-				expiresAt: new Date(Date.now() + expiresIn * 1000),
-				// sub / issuer intentionally absent — callers reuse stored identity.
-			};
+			// sub / issuer intentionally absent — callers reuse stored identity.
+			return federationTokenSnapshot(await oidc.refreshTokenGrant(oidcConfig, refreshTokenValue));
 		},
 
 		async endSession(req: EndSessionRequest): Promise<EndSessionResult> {

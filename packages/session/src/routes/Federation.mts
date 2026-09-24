@@ -489,9 +489,9 @@ export const createRouter = (
 					// rather than judged here: a login does not need the access token,
 					// so a type this provider cannot hand on must not cost the user
 					// their sign-in. The route that discloses it is where that is
-					// decided. `undefined` only when the adapter named nothing at all,
-					// which is every bundled adapter but `federation-oidc` — and
-					// written as a key either way, because `FederationTokens`
+					// decided. `undefined` only when the adapter named nothing at all
+					// — an adapter written before the field; every bundled one names
+					// it — and written as a key either way, because `FederationTokens`
 					// requires it: a store copying the record field by field cannot
 					// forget a field the type makes it name.
 					tokenType,
