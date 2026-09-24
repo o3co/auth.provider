@@ -162,11 +162,47 @@ export interface DeviceAuthorizationEndpointOptions extends DeviceGrantDependenc
 /** How many times to re-draw when a generated code collides with a live one. */
 const CODE_COLLISION_RETRIES = 5;
 
+/**
+ * The bounds on the two device-code settings, in whole seconds: what
+ * `deviceGrantModule`'s schema holds `oauth.deviceAuthorization.*` to, and
+ * what this handler holds settings handed over as numbers to. RFC 8628 §5.4
+ * wants a code "long enough … to be useable" and "sufficiently short to limit
+ * the usability of a code obtained for phishing"; the interval is advertised
+ * and enforced by the store.
+ */
+export const DEVICE_CODE_LIFETIME_SECONDS = { min: 30, max: 3600 } as const;
+export const DEVICE_POLLING_INTERVAL_SECONDS = { min: 1, max: 60 } as const;
+
+const requireWholeSeconds = (
+	name: string,
+	value: number,
+	bounds: { readonly min: number; readonly max: number },
+): void => {
+	if (!(Number.isInteger(value) && value >= bounds.min && value <= bounds.max)) {
+		throw new RangeError(
+			`createDeviceAuthorizationHandler: ${name} must be a whole number of seconds from ${bounds.min} to ${bounds.max} (got ${String(value)})`,
+		);
+	}
+};
+
 export const createDeviceAuthorizationHandler = (
 	options: DeviceAuthorizationEndpointOptions,
 ): RequestHandler => {
 	const now = options.now ?? Date.now;
 	const { settings } = options;
+	// Refused where the handler is built: read per request, a hand-built value
+	// reached `expiresAtMs` arithmetic and the wire's `expires_in` / `interval`
+	// on every request instead of failing the composition once.
+	requireWholeSeconds(
+		"settings.codeLifetimeSeconds",
+		settings.codeLifetimeSeconds,
+		DEVICE_CODE_LIFETIME_SECONDS,
+	);
+	requireWholeSeconds(
+		"settings.pollingIntervalSeconds",
+		settings.pollingIntervalSeconds,
+		DEVICE_POLLING_INTERVAL_SECONDS,
+	);
 
 	return async (req: Request, res: Response): Promise<void> => {
 		const body = (req.body ?? {}) as Record<string, unknown>;

@@ -154,6 +154,7 @@ export {
 	coerceBooleanFromEnv,
 	composeConfigSchema,
 	fullSectionsSchema,
+	isLifetimeSeconds,
 	type RefreshTokenLifetimeSource,
 	readAccessTokenRevocationMode,
 	resolveAccessTokenLifetime,

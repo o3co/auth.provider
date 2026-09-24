@@ -447,7 +447,15 @@ const ACCESS_TOKEN_LIFETIME_KEYS = ["defaultExpiresIn", "maxExpiresIn", "expires
 
 type AccessTokenLifetimeKey = (typeof ACCESS_TOKEN_LIFETIME_KEYS)[number];
 
-const isLifetimeSeconds = (value: unknown): value is number =>
+/**
+ * Whether a value is a token lifetime this provider accepts: a whole number of
+ * seconds from 1 to the one-year ceiling (`MAX_DURATION_SECONDS`). The rule
+ * `resolveAccessTokenLifetime` and `resolveRefreshTokenLifetime` apply, and
+ * the one to hold a lifetime handed over as a number — rather than read from
+ * configuration — to, so that building a grant by hand and through its module
+ * accept the same values.
+ */
+export const isLifetimeSeconds = (value: unknown): value is number =>
 	typeof value === "number" &&
 	Number.isInteger(value) &&
 	value > 0 &&
