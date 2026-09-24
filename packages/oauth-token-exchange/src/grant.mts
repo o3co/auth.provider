@@ -459,12 +459,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// The refresh-token family rule — this grant's, not the validator's;
 			// see `familyRefusal`. After the matrices above, so a cheap refusal
 			// still short-circuits ahead of the store read.
-			const subjectFamilyRefusal = await familyRefusal(
-				deps.refreshTokenFamilyRevocation,
-				"subject",
-				subjectTokenType,
-				subjectValidated,
-			);
+			const subjectFamilyRefusal = await familyRefusal(deps, "subject", subjectValidated);
 			if (subjectFamilyRefusal) return subjectFamilyRefusal;
 
 			let actorValidated: typeof subjectValidated | null = null;
@@ -563,12 +558,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// identity is folded into the issued token's `act` claim, so a
 				// revoked actor credential must not be recorded as a live
 				// delegation any more than a revoked subject may be exchanged.
-				const actorFamilyRefusal = await familyRefusal(
-					deps.refreshTokenFamilyRevocation,
-					"actor",
-					actorTokenType,
-					actorValidated,
-				);
+				const actorFamilyRefusal = await familyRefusal(deps, "actor", actorValidated);
 				if (actorFamilyRefusal) return actorFamilyRefusal;
 
 				const subjectMayAct = subjectValidated.claims.may_act;
@@ -1107,56 +1097,65 @@ function getMaxActorChainDepth(deps: TokenExchangeDependencies): number {
 }
 
 /**
- * The refresh-token family rule for a self-issued access token presented as
- * `subject_token` or `actor_token`: the refusal to return, or `null` when the
- * token passes.
+ * The refresh-token family rule for a token presented as `subject_token` or
+ * `actor_token`: the refusal to return, or `null` when the token passes.
  *
  * This grant owns the rule, for both tokens; the built-in validator does not
  * read `refreshTokenFamilyRevocation`. A validator can only answer `null`,
  * which the handler reports as `… validation failed`, whereas a revoked family
  * has an answer of its own on `/oauth/token` — the refresh grant already gives
  * `family_revoked` there — and it tells the client that re-authenticating, not
- * retrying, is what helps. Owning it here also keeps its three outcomes in one
- * place, checked once per token:
+ * retrying, is what helps.
  *
- * - `family_id` present but no `refreshTokenFamilyRevocation` wired: refused.
- *   The exchange would accept a credential whose revocation it cannot observe,
- *   and the issued token inherits the subject's `family_id` (fail-closed).
- * - The store throws: `503 temporarily_unavailable`, so an outage is never
- *   reported as a revoked token.
- * - The family is revoked: `invalid_grant` / `family_revoked`
- *   (`actor_token family_revoked` for the actor).
+ * The rule keys on the family a validator asserts (`familyId`), not on the
+ * token type the validator was registered for: the built-in validator can be
+ * registered under any type, and whichever produced the subject, the issued
+ * token inherits its `family_id`. Its outcomes, checked once per token:
  *
- * Only this provider's own access tokens carry a family: core's
- * `ValidatedToken.familyId` is populated for them alone, so another token
- * type's validator is not held to the rule.
+ * - A family but no `refreshTokenFamilyRevocation` wired: refused
+ *   (fail-closed). A subject's family would pass to the issued token with
+ *   nothing able to observe its revocation; an actor would be recorded in the
+ *   issued token's `act` claim on a credential whose revocation cannot be
+ *   checked.
+ * - The store throws: `503 temporarily_unavailable`, logged as
+ *   `token_exchange_family_store_unavailable`, so an outage is never reported
+ *   as a revoked token.
+ * - The family is revoked: `invalid_grant` / `family_revoked`.
+ *
+ * The actor's descriptions carry the `actor_token ` prefix the handler's other
+ * actor answers carry.
  */
 async function familyRefusal(
-	refreshTokenFamilyRevocation: TokenExchangeDependencies["refreshTokenFamilyRevocation"],
+	deps: Pick<TokenExchangeDependencies, "refreshTokenFamilyRevocation" | "logger">,
 	role: "subject" | "actor",
-	tokenType: string | null,
 	validated: ValidatedToken,
 ): Promise<GrantHandlerResult | null> {
-	if (!validated.familyId || tokenType !== ACCESS_TOKEN_TYPE) return null;
-	if (!refreshTokenFamilyRevocation) {
+	const { familyId } = validated;
+	if (!familyId) return null;
+	const forRole = (description: string) =>
+		role === "actor" ? `actor_token ${description}` : description;
+	const revocation = deps.refreshTokenFamilyRevocation;
+	if (!revocation) {
 		return {
 			result: {
 				status: 400,
 				error: "invalid_grant",
-				errorDescription:
+				errorDescription: forRole(
 					"refresh token family revocation not configured (revocation cannot be verified)",
+				),
 			},
 		};
 	}
 	let revoked: boolean;
 	try {
-		revoked = await refreshTokenFamilyRevocation.isFamilyRevoked(validated.familyId);
-	} catch {
+		revoked = await revocation.isFamilyRevoked(familyId);
+	} catch (err) {
+		deps.logger?.error({ err, role }, "token_exchange_family_store_unavailable");
 		return {
 			result: {
 				status: 503,
 				error: "temporarily_unavailable",
-				errorDescription: "refresh token store unavailable",
+				errorDescription: forRole("refresh token store unavailable"),
 			},
 		};
 	}
@@ -1165,7 +1164,7 @@ async function familyRefusal(
 		result: {
 			status: 400,
 			error: "invalid_grant",
-			errorDescription: role === "subject" ? "family_revoked" : "actor_token family_revoked",
+			errorDescription: forRole("family_revoked"),
 		},
 	};
 }

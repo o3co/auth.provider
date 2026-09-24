@@ -424,7 +424,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 		expect(result).toMatchObject({
 			status: 503,
 			error: "temporarily_unavailable",
-			errorDescription: "refresh token store unavailable",
+			errorDescription: "actor_token refresh token store unavailable",
 		});
 	});
 
