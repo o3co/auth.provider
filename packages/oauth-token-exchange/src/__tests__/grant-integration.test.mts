@@ -280,10 +280,10 @@ describe("token_exchange — integration", () => {
 // handler is the one the boot planner puts in `grantHandlerResolver` — the
 // resolver `/oauth/token` dispatches through — invoked the way dispatch
 // invokes it, after client authentication has set `authenticatedClient`.
-// Nothing here is hand-wired: whether the validator or the grant reads
-// `refreshTokenFamilyRevocation` is decided by the module's own manifest, so
-// these tests see the answer a deployment returns.
-describe("tokenExchangeModule booted through createApp — refresh-token family revocation", () => {
+// Nothing here is hand-wired: which revocation store the validator or the
+// grant reads, and what each does when it cannot answer, is decided by the
+// module's own manifest, so these tests see the answer a deployment returns.
+describe("tokenExchangeModule booted through createApp — revocation", () => {
 	const authenticatedClient: NonNullable<GrantContext["authenticatedClient"]> = {
 		clientId: client.clientId,
 		tokenEndpointAuthMethod: "client_secret_basic",
@@ -302,12 +302,22 @@ describe("tokenExchangeModule booted through createApp — refresh-token family 
 		handle = undefined;
 	});
 
-	async function boot(familyModules: readonly Module[]) {
+	type RevocationDeclaration = {
+		readonly accessToken: "denylist" | "unsupported";
+		readonly subject: "watermark" | "unsupported";
+	};
+
+	// `revocation` declares which of the denylist and the subject watermark a
+	// test leaves unwired (the #277 / #406 boot guard); by default both.
+	async function boot(
+		modules: readonly Module[],
+		revocation: RevocationDeclaration = { accessToken: "unsupported", subject: "unsupported" },
+	) {
 		const base = makeValidAppConfig();
 		handle = await createApp({
 			modules: [
 				tokenExchangeModule,
-				...familyModules,
+				...modules,
 				defineModule({
 					name: "test:client-repository",
 					provides: { clientRepository: () => confidentialClientRepository },
@@ -320,9 +330,7 @@ describe("tokenExchangeModule booted through createApp — refresh-token family 
 					oauth: {
 						...base.oauth,
 						jwt: { ...base.oauth.jwt, issuer: ISSUER },
-						// Not about the denylist or the subject watermark: both
-						// declared absent, as the manifest test above does.
-						revocation: { accessToken: "unsupported" as const, subject: "unsupported" as const },
+						revocation,
 					},
 				},
 				pathResolver: (s: string) => s,
@@ -432,6 +440,109 @@ describe("tokenExchangeModule booted through createApp — refresh-token family 
 			error: "invalid_grant",
 			errorDescription:
 				"refresh token family revocation not configured (revocation cannot be verified)",
+		});
+	});
+
+	// Core's ExchangeTokenValidator contract: `null` means the token is not
+	// acceptable (the grant answers `invalid_grant`), a throw means the answer
+	// is not knowable (`503 temporarily_unavailable`). A revocation store that
+	// cannot be read is the second: the token is still refused — the verifier
+	// fails closed — but a client told `invalid_grant` discards a credential
+	// that may be perfectly good, so an outage must not be reported as a
+	// finding. The refresh grant makes the same split for the same reason.
+	describe("a revocation store that cannot answer", () => {
+		const unreachableDenylist = (failFor: (jti: string) => boolean, revoked = new Set<string>()) =>
+			defineModule({
+				name: "test:access-token-denylist",
+				provides: {
+					accessTokenDenylist: () => ({
+						kind: "test",
+						add: async () => {},
+						has: async (jti: string) => {
+							if (failFor(jti)) throw new Error("denylist backend unreachable");
+							return revoked.has(jti);
+						},
+					}),
+				},
+			});
+		const denylistWired = { accessToken: "denylist", subject: "unsupported" } as const;
+
+		it("answers 503 temporarily_unavailable when the denylist cannot be read for the subject_token", async () => {
+			const { grant } = await boot([unreachableDenylist(() => true)], denylistWired);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ jti: "at-subject" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "subject_token validation store unavailable",
+			});
+		});
+
+		it("answers 503 temporarily_unavailable when the denylist cannot be read for the actor_token", async () => {
+			const { grant } = await boot(
+				[unreachableDenylist((jti) => jti === "at-actor")],
+				denylistWired,
+			);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ jti: "at-subject" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", jti: "at-actor" }),
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "actor_token validation store unavailable",
+			});
+		});
+
+		it("answers 503 temporarily_unavailable when the subject watermark cannot be read", async () => {
+			const { grant } = await boot(
+				[
+					defineModule({
+						name: "test:subject-revocation",
+						provides: {
+							subjectRevocation: () => ({
+								kind: "test",
+								revokeBefore: async () => {},
+								revokedBefore: async () => {
+									throw new Error("watermark backend unreachable");
+								},
+							}),
+						},
+					}),
+				],
+				{ accessToken: "unsupported", subject: "watermark" },
+			);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({}),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "subject_token validation store unavailable",
+			});
+		});
+
+		it("still answers invalid_grant for a subject_token the denylist does hold", async () => {
+			// The other half of the split: a store that answers "revoked" is a
+			// finding about the token, not an outage.
+			const { grant } = await boot(
+				[unreachableDenylist(() => false, new Set(["at-revoked"]))],
+				denylistWired,
+			);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ jti: "at-revoked" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "subject_token validation failed",
+			});
 		});
 	});
 });
