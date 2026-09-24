@@ -398,50 +398,22 @@ jobs:
           console.log("OK: every @o3co/auth-provider-* peer range is workspace:^");
           EOF
 
-      - name: Pack all @o3co/auth-provider-* packages
+      - name: Pack every package the release publishes
         run: |
           set -euo pipefail
-          # Simulate the post-publish state by tarballing every workspace
-          # package and exercising the standalone template against the
-          # tarballs (rather than the workspace:* resolution that local
-          # builds use). Catches
-          # "template references symbols not in the published tarball"
-          # before tag push.
+          # Simulate the post-publish state by tarballing every package
+          # `pnpm -r publish` would publish, and exercise the standalone
+          # template against the tarballs (rather than the workspace:*
+          # resolution that local builds use). Catches "template references
+          # symbols not in the published tarball" before tag push.
           #
-          # Use `pnpm pack` (not `npm pack`): npm pack does not rewrite
-          # `workspace:*` ranges, so the tarball's package.json would still
-          # carry workspace: protocol — which npm install in the scratch
-          # dir cannot resolve (EUNSUPPORTEDPROTOCOL). pnpm pack rewrites
-          # workspace:* to the resolved version (0.0.0 in this repo).
-          mkdir -p /tmp/tarballs
-          for pkg in packages/*/; do
-            name=$(node -p "require('./${pkg}package.json').name")
-            case "$name" in
-              @o3co/auth-provider-*)
-                pushd "$pkg" >/dev/null
-                pnpm pack --pack-destination /tmp/tarballs
-                popd >/dev/null
-                ;;
-              *)
-                echo "skipping $name (not @o3co/auth-provider-*)"
-                ;;
-            esac
-          done
+          # The same script packs for release.yml, so CI checks the set the
+          # release publishes — create-app included — and not a list of its
+          # own. It packs with `pnpm pack` (npm pack leaves `workspace:`
+          # ranges in place, which npm install in the scratch dir cannot
+          # resolve), and with each pack's stdin closed.
+          .github/scripts/pack-published.sh /tmp/tarballs
           ls -la /tmp/tarballs
-
-      - name: Pack create-app
-        run: |
-          set -euo pipefail
-          # @o3co/create-auth-provider is published alongside @o3co/auth-provider-*
-          # via `pnpm -r publish` in release.yml. Pack it into the same tarball
-          # destination so the assertion step below covers it too.
-          # The tarball filename (`o3co-create-auth-provider-*.tgz`) is distinct
-          # from the packages tarballs (`o3co-auth-provider-*-*.tgz`).
-          pushd create-app >/dev/null
-          pnpm pack --pack-destination /tmp/tarballs
-          popd >/dev/null
-          echo "create-app tarball:"
-          ls -la /tmp/tarballs/o3co-create-auth-provider-*.tgz
 
       - name: Assert no __tests__ in published tarballs
         run: |
