@@ -44,12 +44,18 @@
  *   that file: a callback parameter or an awaited value not named like an
  *   error (`(failure) => …`, `(e) => …` outside a `.catch` or an `error`
  *   listener, `const outcome = await …`), a re-bound value
- *   (`const failure = err`), an `allSettled` result's `reason`, a helper's
- *   parameter that it logs;
+ *   (`const failure = err`), an `allSettled` result's `reason`;
  * - an error flattened into a value before the call (`const reason =
  *   err.message`, then `{ reason }`);
- * - a logger reached some other way (a destructured `warn`, `logger[level]`),
- *   and an audit sink, which is not a logger;
+ * - an error handed to a helper that logs it: `refuse(…, { err })`, a
+ *   failure reporter. The call site is not a logger call, and the helper's
+ *   own log line sees only its parameter (`{ reason, ...context }`), not a
+ *   caught error — so such a helper projects what it is handed itself, as
+ *   oauth's client-assertion `refuse()` does, with a context typed to the
+ *   fields it may log;
+ * - a logger reached some other way (a destructured `warn`, `logger[level]`,
+ *   a bound `const log = logger.warn.bind(logger)`), and an audit sink or a
+ *   deployment's callback (`report`), which are not loggers;
  * - bindings are per file, not per scope: a variable elsewhere in the file
  *   that shares a caught error's name is flagged too (rename it).
  *
