@@ -270,6 +270,46 @@ describe("what the body parsers reject, and what escapes every handler", () => {
 		expect(JSON.stringify(log.error.mock.calls)).not.toContain("SENTINEL");
 	});
 
+	/** `error` with a getter on `key` that throws when read. */
+	const throwingOn = <E extends object>(error: E, key: string): E =>
+		Object.defineProperty(error, key, {
+			get() {
+				throw new Error("getter");
+			},
+		});
+
+	it.each([
+		["a `name` getter that throws", () => throwingOn(new Error("m"), "name")],
+		["a `status` getter that throws", () => throwingOn(new Error("m"), "status")],
+		["a URIError whose `status` getter throws", () => throwingOn(new URIError("m"), "status")],
+		[
+			"a Proxy whose prototype cannot be read",
+			() =>
+				new Proxy(
+					{},
+					{
+						getPrototypeOf() {
+							throw new Error("trap");
+						},
+					},
+				),
+		],
+	])("answers and logs an error with %s — the handlers never throw", (_label, make) => {
+		// A throw inside the last handler reaches Express's own, which answers
+		// HTML and logs nothing of ours.
+		for (const handled of [run(make()), last(make())]) {
+			expect(handled.state.status).toBe(500);
+			expect(handled.state.body).toEqual({
+				error: "server_error",
+				error_description: "unexpected_error",
+			});
+			expect(handled.log.error).toHaveBeenCalledWith(
+				{ event: "federation_grant.unexpected_error", classification: "unknown" },
+				"federation_grants_unexpected_error",
+			);
+		}
+	});
+
 	it("answers a path Express could not decode as 400 malformed_path, wherever it surfaces", () => {
 		const undecodable = Object.assign(new URIError("Failed to decode param '%zz'"), {
 			status: 400,
