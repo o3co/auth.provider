@@ -408,7 +408,7 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 サーバーが記録できなかった失効は `200` ではない。呼び出し元自身のトークンが検証を通り、その失効を記録するストア — `accessTokenDenylist` またはリフレッシュトークンのファミリーストア — が失敗したときは `503 temporarily_unavailable` を返し（§2.2.1: クライアントはトークンがまだ存在するとみなして再試行する）、`revoke_store_unavailable` を error レベルで、どちらのストアかを `store` に、失効を記録できなかったクライアントを `clientId` に入れてログに残す。検証を通らないトークン、このサーバーが失効できないトークン、他のクライアントのトークンはストアに届かないので、障害中も `200` のままである。
 
 - **リフレッシュトークン**は `refreshTokenFamilyRevocation` でそのファミリーを失効させる。そのスロットが無ければリクエストは何もしない `200`。
-- **アクセストークン**は、`oauth.revocation.accessToken` が `"denylist"` のとき `accessTokenDenylist` に追加され、`exp` に検証が許す 5 分の時計の許容（`DEFAULT_CLOCK_SKEW_MS`）を足した時刻まで — まだ検証を通りうる間 — 拒否される。それすら過ぎたトークンはどこでも検証を通らないので、失効させてもストアには問い合わせず `200` を返す。`"unsupported"` のときは、`token_type_hint=access_token` に対して何も失効しない `200` ではなく `400 unsupported_token_type` を返し、ヒントの無いトークンはリフレッシュトークンの経路だけを通る。
+- **アクセストークン**は、`oauth.revocation.accessToken` が `"denylist"` のとき `accessTokenDenylist` に追加され、`exp` に検証が許す 5 分の時計の許容（`DEFAULT_CLOCK_SKEW_MS`）を足した時刻まで — まだ検証を通りうる間 — 拒否される。それすら過ぎたトークンはこのプロバイダーでは検証を通らないので、失効させてもストアには問い合わせず `200` を返す。この denylist を使って `verifyJwt` を呼ぶ独自のリソースサーバーが既定より大きい `clockSkewMs` を渡すと、失効したトークンをその差の分だけ受け入れるので、そこでは既定値のままにすること。`"unsupported"` のときは、`token_type_hint=access_token` に対して何も失効しない `200` ではなく `400 unsupported_token_type` を返し、ヒントの無いトークンはリフレッシュトークンの経路だけを通る。
 
 ディスカバリーは、2 つのうち少なくとも一方が何かを失効できるときだけ `revocation_endpoint` を広告する。エンドポイントの完全な振る舞いは [`routes/revoke.mts`](./src/routes/revoke.mts) の doc コメントにある。
 

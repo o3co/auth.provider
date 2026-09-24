@@ -254,8 +254,8 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
  * - `revoked` — the token was this client's and its store recorded it.
  * - `not_located` — the token is not one this attempt can revoke: it does
  *   not verify as this type, carries no revocable identity, belongs to
- *   another client, or can no longer verify anywhere, so there is nothing
- *   left to deny. RFC 7009 §2.2 answers it 200, and the caller extends the
+ *   another client, or is past even the default verification tolerance, so
+ *   there is nothing left to deny. RFC 7009 §2.2 answers it 200, and the caller extends the
  *   search to the other type.
  * - `unavailable` — the token was this client's, and the store that records
  *   the revocation failed. Already logged; the caller answers 503.
@@ -437,8 +437,8 @@ async function tryRevokeAccessToken(
 	}
 
 	// Denied for as long as the token can still verify: `verifyJwt` accepts
-	// one up to DEFAULT_CLOCK_SKEW_MS past its `exp` (no verifier here passes
-	// another tolerance), so an entry that lapsed at `exp` would let a revoked
+	// one up to DEFAULT_CLOCK_SKEW_MS past its `exp` (the default; no verifier in
+	// this provider passes another), so an entry that lapsed at `exp` would let a revoked
 	// token verify again for that long — the same extension the
 	// subject-revocation horizon applies. Once even that has passed there is
 	// nothing left to deny, and the store is not asked: a store holding a TTL
