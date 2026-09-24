@@ -685,6 +685,31 @@ describe("createRegistryAssertionVerifier — the ID-JAG profile (#526)", () => 
 		expect(await make().verify(await idJag({ sub: undefined }), asApp)).toBeNull();
 	});
 
+	it("refuses a jti longer than 256 characters without recording it", async () => {
+		// The jti is a seen-set key kept until the assertion expires. Bounded as
+		// DPoP proofs and client assertions are, so an issuer's claim cannot
+		// decide how large each record is.
+		const recorded: string[] = [];
+		const backing = createMemoryReplaySeenSet();
+		const verifier = make([idJagEntry()], {
+			replaySeenSet: {
+				kind: "spy",
+				markSeen: async (scope, key, expiresAtMs) => {
+					recorded.push(key);
+					return backing.markSeen(scope, key, expiresAtMs);
+				},
+				contains: (scope, key) => backing.contains(scope, key),
+			},
+		});
+
+		expect(await verifier.verify(await idJag({ jti: "j".repeat(257) }), asApp)).toBeNull();
+		expect(recorded).toEqual([]);
+
+		const atTheBound = "j".repeat(256);
+		expect(await verifier.verify(await idJag({ jti: atTheBound }), asApp)).not.toBeNull();
+		expect(recorded).toEqual([atTheBound]);
+	});
+
 	it("accepts each jti once — a replay within its lifetime is refused, per issuer", async () => {
 		const seen = createMemoryReplaySeenSet();
 		const second = generateKeyPairSync("ed25519");
