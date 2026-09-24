@@ -56,8 +56,10 @@
  * POST types it for them.
  *
  * So the route the module mounts is JSON-only — a form body is a "simple"
- * request the browser sends without a preflight, `application/json` is not —
- * and sits behind the same `createCsrfGuard` `/session/login` runs (#272):
+ * request the browser sends without a preflight, `application/json` is not;
+ * the handler refuses any other media type itself, so the rule holds even
+ * when `oauthModule`'s router has already parsed the body — and sits behind
+ * the same `createCsrfGuard` `/session/login` runs (#272):
  * a foreign `Origin` / `Referer` is refused outright, the server's own origin
  * or one on `session.csrf.trustedOrigins` is accepted, and a request with no
  * origin signal must carry the session's signed double-submit token. That is
@@ -510,9 +512,12 @@ export const deviceGrantModule = defineModule<Requires, Optional>({
 				const router = express.Router();
 				// JSON only, deliberately — see the file header. A form body is
 				// a "simple" request a browser sends cross-site with the
-				// victim's cookie and no preflight; JSON is not. With no form
-				// parser mounted, a forged form POST carries no `action` even
-				// if it reached the handler.
+				// victim's cookie and no preflight; JSON is not. No form parser
+				// is mounted here, but that is not what enforces the rule:
+				// `oauthModule`'s router parses form bodies for every request
+				// under `/oauth`, and when it is listed first it has done so
+				// before this router runs. The handler checks the media type
+				// itself and answers anything else `415`.
 				router.use(express.json({ limit: "16kb" }));
 				// The session guard, verbatim: foreign origin refused, same
 				// origin or `session.csrf.trustedOrigins` accepted, no origin

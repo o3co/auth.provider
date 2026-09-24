@@ -80,12 +80,26 @@
  * user code or the device code: one is the value being brute-forced and the
  * other is a bearer credential.
  *
- * ### Cross-site requests are the module's problem, and it handles them
+ * ### JSON only, whatever parsed the body
  *
- * This handler never sees a body parser or an origin check; the router
- * `deviceGrantModule` mounts is JSON-only and runs the session package's
- * CSRF guard ahead of it (RFC 8628 §5.4 — see `module.mts`). A composition
- * that mounts this handler by hand must do the same.
+ * A form body — `application/x-www-form-urlencoded`, `multipart/form-data`,
+ * `text/plain` — is a CORS "simple" request: a browser sends it cross-site
+ * with the user's session cookie and no preflight, which is RFC 8628 §5.4's
+ * remote-phishing attack in one auto-submitting form. `application/json` is
+ * preflighted. So this handler answers anything that is not
+ * `application/json` with `415 invalid_request` before it reads a field.
+ *
+ * It checks the media type itself rather than relying on no form parser
+ * having run: routes under `/oauth` share the prefix with `oauthModule`'s
+ * router, which parses form bodies for every request beneath it, so whether a
+ * form arrived parsed depended on which module the composition listed first.
+ *
+ * ### The origin check is the module's
+ *
+ * This handler runs no body parser and no origin check. The router
+ * `deviceGrantModule` mounts parses JSON and runs the session package's CSRF
+ * guard ahead of it (see `module.mts`); a composition that mounts this
+ * handler by hand must do the same.
  */
 
 import type {
@@ -181,6 +195,17 @@ export const createDeviceVerificationHandler = (
 	};
 
 	return async (req: Request, res: Response): Promise<void> => {
+		// JSON only — see the file header. Checked on the request's media
+		// type rather than inferred from whether `req.body` has fields, so
+		// the rule holds whatever parsed the body before this handler ran.
+		if (!req.is("application/json")) {
+			respond(res, 415, {
+				error: "invalid_request",
+				error_description: "the request body must be application/json",
+			});
+			return;
+		}
+
 		const subject = subjectOf(req);
 		if (subject === null) {
 			respond(res, 401, {

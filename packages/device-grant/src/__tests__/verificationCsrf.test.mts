@@ -25,11 +25,13 @@
  * the victim's access token. `verification_uri_complete = false` exists to
  * keep the user typing the code; a forged POST types it for them.
  *
- * Two layers, both observable only through the router the module mounts —
- * the handler alone never sees a body parser or a guard:
+ * Two layers, exercised here through the router the module mounts:
  *
  *   1. JSON only. A form-encoded POST is a "simple" request the browser
- *      sends without a preflight; `application/json` is not.
+ *      sends without a preflight; `application/json` is not. The handler
+ *      refuses any other media type itself, so the rule does not depend on
+ *      what else is mounted under `/oauth` — composition.test.mts boots it
+ *      beside `oauthModule` in both orders.
  *   2. The same CSRF guard `/session/login` runs (#272): a foreign `Origin` /
  *      `Referer` is refused outright, same-origin or `session.csrf.trustedOrigins`
  *      is accepted, and a request with no origin signal at all must carry the
@@ -266,10 +268,9 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 		expect(res.body.status).toBe("approved");
 	});
 
-	it("does not parse a form body even from the same origin — the endpoint is JSON-only", async () => {
-		// Layer one on its own: with no form parser mounted, a form body
-		// carries no `action`, so nothing is decided even when the origin arm
-		// would have let it through.
+	it("refuses a form body even from the same origin — the endpoint is JSON-only", async () => {
+		// Layer one on its own: the origin arm would let this through, and
+		// the media type alone refuses it, so nothing is decided.
 		const { deps, store } = makeDeps();
 		await seedPending(store);
 		const app = mountVerification(deps);
@@ -281,7 +282,7 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 			.type("form")
 			.send(`action=approve&user_code=${DISPLAYED_CODE}`);
 
-		expect(res.status).toBe(400);
+		expect(res.status).toBe(415);
 		expect(res.body.error).toBe("invalid_request");
 		expect(await isStillPending(store)).toBe(true);
 	});
