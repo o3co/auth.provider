@@ -597,7 +597,8 @@ stream — its level is fixed at `info`.
 | `jwt_bearer_assertion_verifier_unavailable`, `jwt_bearer_user_repository_unavailable` (error) | `oauth/src/grants/jwtBearer.mts` | the attestation service or the Store is down (`503` to devices) |
 | `jwt_bearer_policy_audience_refused` (warn) | `oauth/src/grants/jwtBearer.mts` | your `grantPolicy` returned an audience outside the client's `allowedAudiences`, or one with no authenticated client to supply that ceiling. Devices get `500 server_error`; the policy, not the device, is what to fix (#520, #521) |
 | `token_error_code_malformed`, `authorize_policy_deny_error_malformed`, `token_exchange_policy_deny_error_malformed` (warn) | `oauth/src/routes.mts`, `oauth/src/routes/authorize.mts`, `oauth-token-exchange/src/grant.mts` | a grant, or your `grantPolicy`'s deny, returned an `error` code outside RFC 6749's `1*NQSCHAR` (empty, or carrying `"`, `\`, a control or non-ASCII character). Clients get `invalid_request` from `/oauth/token` and `access_denied` from `/oauth/authorize` instead; the logged `error` is the code, sanitised and capped at 200 characters. Fix the code |
-| `error_envelope_code_malformed`, `error_envelope_uri_malformed` (warn, through the console logger) | `core/src/errors/envelope.mts` | a module handed core's `errorEnvelope` an `error` code outside RFC 6749's `1*NQSCHAR` (empty, or carrying `"`, `\`, a control or non-ASCII character), or an `error_uri` that is not a well-formed URI-reference in RFC 6749's `error_uri` characters. The client got `server_error` with the status the module chose, or the answer without `error_uri`; the logged value is sanitised and capped at 200 characters. Nothing in this repository sends either, so the module is a contributed one or a custom composition's: fix what it answers with |
+| `error_envelope_code_malformed`, `error_envelope_uri_malformed` (warn, through the console logger) | `core/src/errors/envelope.mts` | a module handed core's `errorEnvelope` an `error` code outside RFC 6749's `1*NQSCHAR` (empty, or carrying `"`, `\`, a control or non-ASCII character), or an `error_uri` that is neither an `http(s)` URI nor a relative reference RFC 3986's grammar parses. The client got `server_error` with the status the module chose, or the answer without `error_uri`; the logged value is sanitised and capped at 200 characters. Nothing in this repository sends either, so the module is a contributed one or a custom composition's: fix what it answers with |
+| `redirect_policy_error_malformed` (warn) | `session/src/internal/refusalEnvelope.mts` | a federation redirect policy refused a `redirect_to` with a 4xx and an `error` code outside RFC 6749's `1*NQSCHAR`. The client got `invalid_request` with the policy's status and description; the logged `error` is the code, sanitised and capped. Fix the code your contributed policy answers with |
 | `token_exchange_policy_scope_refused`, `token_exchange_policy_audience_refused` (warn) | `oauth-token-exchange/src/grant.mts` | your `grantPolicy` returned, for a token exchange, a scope outside the subject token's scope and the client's `allowedScopes`, or an audience outside the subject token's audience and the client's `allowedAudiences`. Clients get `500 server_error`; the policy, not the client, is what to fix. A client asking for such an audience itself is `400 invalid_target`, logged as `token_exchange_audience_widening_rejected` |
 | `jwt_bearer_issuer_audience_mismatch` (warn) | `oauth/src/grants/jwtBearer.mts` | the presenting client's `allowedAudiences` and the assertion issuer's `allowedAudiences` (its trust-registry entry) admit no audience in common, so no token could name one both stand behind. Devices get `invalid_grant`; compare the two registrations (#525) |
 | `cimd_document_rejected`, `cimd_document_fetch_failed`, `cimd_host_not_allowed` (warn) | `oauth/src/clients/clientIdMetadataDocument.mts` | a Client ID Metadata Document client (#529) was refused: the reason names what failed (a redirect, a byte cap, a special-use address, a document that does not match its URL). The client sees `invalid_client`; a steady rate from one host is a misconfigured client or a probe |
@@ -680,11 +681,20 @@ None of the device events carries the user code or the device code
 
 The three events that report an error — `rate_limit.unavailable`,
 `introspect.store_unavailable`, `federation.logout.idp_unreachable` — carry it
-as `details.error = { name, code? }`, and never its message: a store's or an
-IdP's message is their text (a Redis reply quotes the command it refused, a
-JSON parse error its input). The message is in the paired log line, read
-through `loggableError`. Group outages by `details.error.name` and
-`details.error.code`.
+as `details.cause = { name, code?, cause?: { name, code? } }`, and never its
+message: a store's or an IdP's message is their text (a Redis reply quotes the
+command it refused, a JSON parse error its input). The message is in the
+paired log line, read through `loggableError`. Group outages by
+`details.cause.name` and `details.cause.code`, or `details.cause.cause.code`
+for a wrapped network error (`fetch failed` over `ECONNREFUSED`).
+
+Every `details` key keeps one type across events, so a sink that fixes a
+field's type on first sight (Elasticsearch / OpenSearch dynamic mapping, a
+BigQuery schema, a Datadog facet) never drops an event for disagreeing:
+`details.error` is a string wherever it appears — an OAuth code on
+`token.issued.failure` — and the codes inside `details.cause` are strings.
+`AuditEventDetails` (`packages/core/src/audit/types.mts`) types both keys, and
+the inventory's drift test reads every emission for them.
 
 ---
 

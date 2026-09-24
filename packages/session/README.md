@@ -814,8 +814,11 @@ answer with a [`FederationResult`](src/federations/types.mts): `ok` with a value
 or a status, an OAuth error code and a description to send. The route sends the
 status as given and the code and description through core's `errorEnvelope`,
 which holds them to RFC 6749's characters (printable ASCII without `"` and `\`):
-a description character outside them goes out as `?`, and a malformed code as
-`server_error`. `describeRedirectRejection`'s text is already inside them.
+a description character outside them goes out as `?`. A malformed code goes
+out as `invalid_request` under a 4xx — the refusal is still the client's, and
+`400 server_error` would contradict itself — logged as
+`redirect_policy_error_malformed`, and as `server_error` under any other
+status. `describeRedirectRejection`'s text is already inside them.
 
 ### Writing an adapter
 
