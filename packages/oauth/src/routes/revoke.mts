@@ -130,10 +130,12 @@ export function createRevokeRouter(express: ExpressLike, opts: RevokeRouterOptio
 	}
 
 	const router = express.Router();
-	// Scoped to the one path this router serves: it is mounted without a
-	// path inside the OAuth router, so an unscoped parser would read the body
-	// of every request under `/oauth` that reached it — other modules' too.
-	router.use("/revoke", express.urlencoded({ extended: false }));
+	// Scoped to exactly the one path this router serves: it is mounted
+	// without a path inside the OAuth router, so an unscoped parser would
+	// read the body of every request under `/oauth` that reached it — other
+	// modules' too. A route (`router.all`) rather than `router.use`, which
+	// would match every path beneath `/revoke` as well.
+	router.all("/revoke", express.urlencoded({ extended: false }));
 
 	const clientAuth = createClientAuthMiddleware(opts.clientRepository, {
 		issuer: opts.issuer,
