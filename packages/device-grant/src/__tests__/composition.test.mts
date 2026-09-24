@@ -833,6 +833,7 @@ describe("deviceGrantModule beside oauthModule — a device-code store outage is
 					const res = await agent
 						.post("/oauth/device/verification")
 						.set(header, token)
+						.set("User-Agent", "verification-page/1.0")
 						.send({ action, user_code: userCode });
 					expect(res.status, action).toBe(503);
 					expect(res.body, action).toEqual(UNAVAILABLE);
@@ -856,15 +857,17 @@ describe("deviceGrantModule beside oauthModule — a device-code store outage is
 				// — and the device's poll can then mint tokens that no
 				// `device.approved` accounts for. So each is audited as an outcome
 				// nobody knows, naming the action; a lookup decides nothing and is
-				// not. The subject is left out, and the client cannot be known: the
-				// record could not be read.
+				// not. It is attributed as the decision would have been — the
+				// signed-in subject — and the client cannot be known: the record
+				// could not be read.
 				const unknown = events.filter((event) => event.type === "device.decision_outcome_unknown");
 				expect(unknown.map((event) => event.details)).toEqual([
 					{ action: "approve" },
 					{ action: "deny" },
 				]);
 				for (const event of unknown) {
-					expect(event.subject).toBeUndefined();
+					expect(event.subject).toBe("user-1");
+					expect(event.clientId).toBeUndefined();
 					expect(event.timestamp).toBeInstanceOf(Date);
 					expect(JSON.stringify(event)).not.toContain(normalised(userCode));
 				}
@@ -876,9 +879,23 @@ describe("deviceGrantModule beside oauthModule — a device-code store outage is
 				const approved = await agent
 					.post("/oauth/device/verification")
 					.set(header, token)
+					.set("User-Agent", "verification-page/1.0")
 					.send({ action: "approve", user_code: userCode });
 				expect(approved.status).toBe(200);
 				expect(approved.body.status).toBe("approved");
+
+				// The unknown outcomes carry the attribution the decision event
+				// carries: the same subject, address and user agent.
+				const decided = events.find((event) => event.type === "device.approved");
+				expect(decided?.ip).toEqual(expect.any(String));
+				expect(decided?.userAgent).toBe("verification-page/1.0");
+				for (const event of unknown) {
+					expect({ subject: event.subject, ip: event.ip, userAgent: event.userAgent }).toEqual({
+						subject: decided?.subject,
+						ip: decided?.ip,
+						userAgent: decided?.userAgent,
+					});
+				}
 			} finally {
 				await handle.dispose();
 			}
