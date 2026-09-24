@@ -466,6 +466,34 @@ describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () =>
 	);
 
 	it.each(orders)(
+		"refuses a malformed JSON body at both routes with 400 malformed_body (%s)",
+		async (_label, ordered) => {
+			// RFC 8628 §3.2 → RFC 6749 §5.2: the error is JSON, like every
+			// other answer these routes give — not the host's error page. The
+			// parser refuses it before anything else is asked, so nothing is
+			// signed in.
+			const config = makeConfig(ENABLED);
+			const { handle, app } = await bootWith(config, [
+				sessionStoreModuleFor(config),
+				...ordered(config),
+			]);
+			try {
+				for (const path of ["/oauth/device_authorization", "/oauth/device/verification"]) {
+					const res = await request(app).post(path).type("json").send("{not json");
+					expect(res.status, path).toBe(400);
+					expect(res.headers["content-type"], path).toMatch(/^application\/json/);
+					expect(res.body, path).toEqual({
+						error: "invalid_request",
+						error_description: "malformed_body",
+					});
+				}
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
+
+	it.each(orders)(
 		"accepts a body of exactly 16 KiB at both routes, as the parsers it stands in for do (%s)",
 		async (_label, ordered) => {
 			// `express.json({ limit: "16kb" })` accepts exactly 16384 bytes. A

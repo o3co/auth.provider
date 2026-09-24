@@ -41,7 +41,7 @@ import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-
 import express from "express";
 import { decodeJwt, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { deviceGrantModule } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 
@@ -520,6 +520,38 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			expect(res.body.error).toBe(error);
 		},
 	);
+
+	it("answers an unexpected failure on the mounted device/verification route with JSON 500, and logs it", async () => {
+		// RFC 8628 §3.2 → RFC 6749 §5.2: this API answers in JSON, a failure
+		// included. A store that throws is the host's outage, not the
+		// caller's business: a fixed description, and the error in the log.
+		const deps = enabledDeps();
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const app = mountVerificationRoute({
+			...deps,
+			logger,
+			deviceCodeStore: {
+				...deps.deviceCodeStore,
+				findPendingByUserCode: async () => {
+					throw new Error("store down");
+				},
+			},
+		});
+
+		const res = await request(app)
+			.post("/oauth/device/verification")
+			.set("Host", "as.example.test")
+			.set("Origin", "http://as.example.test")
+			.send({ action: "lookup", user_code: "BCDF-GHJK" });
+
+		expect(res.status).toBe(500);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ err: expect.any(Error) }),
+			"device_route_unexpected_error",
+		);
+	});
 
 	/** `enabledDeps()` with `oauth.deviceAuthorization.rateLimit` replaced. */
 	const withVerificationBudget = (rateLimit: unknown) => {
