@@ -609,6 +609,53 @@ const spyLogger = (): Logger & {
 	};
 };
 
+/**
+ * A logger that serialises every own property of what it is handed, `cause`
+ * and non-enumerable fields included — a deployment is free to install one.
+ * `lines` is what it wrote; its levels are spies, so a call can be asserted.
+ */
+const serialiseEverythingLogger = () => {
+	const lines: string[] = [];
+	const walk = (value: unknown, seen = new WeakSet<object>()): unknown => {
+		if (typeof value !== "object" || value === null) return value;
+		if (seen.has(value)) return "[circular]";
+		seen.add(value);
+		const out: Record<string, unknown> = {};
+		for (const key of Object.getOwnPropertyNames(value)) {
+			out[key] = walk((value as Record<string, unknown>)[key], seen);
+		}
+		return out;
+	};
+	const record = (level: string) =>
+		vi.fn((...args: unknown[]): void => {
+			lines.push(JSON.stringify({ level, args: walk(args) }));
+		});
+	const logger = {
+		trace: record("trace"),
+		debug: record("debug"),
+		info: record("info"),
+		warn: record("warn"),
+		error: record("error"),
+		fatal: record("fatal"),
+		child: () => logger,
+	};
+	return { logger: logger as typeof logger & Logger, lines };
+};
+
+/** A logged projection's `stack`: frames only, from the first. */
+const FRAMES = expect.stringMatching(/^ {4}at /);
+
+/**
+ * What ioredis rejects a store write with: a ReplyError carrying the command
+ * it refused as `command: { name, args }` — for the seen-set's write, the
+ * record's key and value.
+ */
+const replyErrorFor = (args: readonly string[]): Error =>
+	Object.assign(new Error("READONLY You can't write against a read only replica."), {
+		name: "ReplyError",
+		command: { name: "set", args },
+	});
+
 /** The event core's replica-safety guard logs when the mode is unset. */
 const REPLICA_UNSAFE_EVENT = "replica_unsafe_adapters";
 /** The event DPoP logged for its own per-process fallback, which is gone. */
@@ -783,31 +830,41 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 		// final. The token endpoint answers store outages elsewhere in this
 		// repository with 503 temporarily_unavailable too (private_key_jwt's
 		// replay record, the refresh-token family, the revocation stores).
-		const logger = spyLogger();
+		// What it logs is the store error's projection: ioredis puts the write
+		// it refused — the record's key and value — on the error.
+		const { logger, lines } = serialiseEverythingLogger();
 		const down: ReplaySeenSet = {
 			kind: "down",
-			markSeen: async () => {
-				throw new Error("ECONNREFUSED 127.0.0.1:6379");
+			markSeen: async (scope, key, expiresAtMs) => {
+				throw replyErrorFor([`${scope}${key}`, "1", "PX", String(expiresAtMs), "NX"]);
 			},
 			contains: async () => false,
 		};
 		const { handle, app } = await bootReplica({ mode: "single", seenSet: down, logger });
 
-		const { proof } = await mintProof();
+		const { proof, jti } = await mintProof();
 		const res = await request(app).post("/oauth/token").set("DPoP", proof).send({});
 		expect(res.status).toBe(503);
 		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 		expect(res.headers["www-authenticate"]).toBeUndefined();
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ err: expect.any(Error) }),
+			{
+				err: {
+					name: "ReplyError",
+					message: "READONLY You can't write against a read only replica.",
+					stack: FRAMES,
+				},
+				jti,
+			},
 			"dpop_replay_store_unavailable",
 		);
+		for (const line of lines) expect(line).not.toContain("dpop-proof:");
 
 		await handle.dispose();
 	});
 
 	it("answers 503 at the token endpoint when the seen-set breaks its own contract, and logs the fault", async () => {
-		const logger = spyLogger();
+		const { logger, lines } = serialiseEverythingLogger();
 		const broken: ReplaySeenSet = {
 			kind: "broken",
 			markSeen: async () => {
@@ -817,15 +874,65 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 		};
 		const { handle, app } = await bootReplica({ mode: "single", seenSet: broken, logger });
 
-		const { proof } = await mintProof();
+		const { proof, jti } = await mintProof();
 		const res = await request(app).post("/oauth/token").set("DPoP", proof).send({});
 		expect(res.status).toBe(503);
 		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ err: expect.any(RangeError) }),
+			{
+				err: {
+					name: "RangeError",
+					message: "markSeen: expiresAtMs must be a finite number",
+					stack: FRAMES,
+				},
+				jti,
+			},
 			"dpop_replay_store_fault",
 		);
+		// The frames, never the header line that repeats the message.
+		for (const line of lines) expect(line).not.toContain("RangeError: markSeen");
 		expect(logger.warn).not.toHaveBeenCalledWith(expect.anything(), "token_binding_proof_invalid");
+
+		await handle.dispose();
+	});
+
+	it("logs a proof the signature step refuses as the error's projection, never the claims jose puts on it", async () => {
+		// jose verifies the signature, then the registered claims: a proof
+		// whose `exp` has passed is refused with a JWTExpired that carries
+		// the proof's whole payload — its `ath`, the hash of the access token
+		// it is presented with, included.
+		const { logger, lines } = serialiseEverythingLogger();
+		const { handle, app } = await bootReplica({ mode: "single", seenSet: "module", logger });
+		const { publicKey, privateKey } = await generateKeyPair("ES256");
+		const jwk = await exportJWK(publicKey);
+		const ath = "fUHyO2r2Z3DZ53EsNrWBb0xWXoaNy59IiKCAqksmQEo";
+		const now = Math.floor(Date.now() / 1000);
+		const expired = await new SignJWT({
+			htm: "POST",
+			htu: `${ISSUER_ORIGIN}/oauth/token`,
+			iat: now,
+			exp: now - 60,
+			jti: crypto.randomUUID(),
+			ath,
+		})
+			.setProtectedHeader({ typ: "dpop+jwt", alg: "ES256", jwk })
+			.sign(privateKey);
+
+		const res = await request(app).post("/oauth/token").set("DPoP", expired).send({});
+		expect(res.status).toBe(400);
+		expect(res.body).toMatchObject({ error: "invalid_dpop_proof" });
+		expect(logger.warn).toHaveBeenCalledWith(
+			{
+				err: {
+					name: "JWTExpired",
+					message: '"exp" claim timestamp check failed',
+					code: "ERR_JWT_EXPIRED",
+					stack: FRAMES,
+				},
+			},
+			"dpop_signature_invalid",
+		);
+		for (const line of lines) expect(line).not.toContain(ath);
 
 		await handle.dispose();
 	});
