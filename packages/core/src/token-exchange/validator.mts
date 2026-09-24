@@ -69,8 +69,9 @@ export interface ExchangeTokenValidator {
  *
  * Invariant: structured fields are projections of `claims`. When both are
  * present they MUST be equal. Validators are responsible for enforcing this.
- * `familyId` is populated only for self-issued access_tokens that carry a
- * `family_id` claim (used for cascading revoke inheritance).
+ * `familyId` is populated for a token carrying one of this provider's
+ * refresh-token families in its `family_id` claim, whatever token type the
+ * validator is registered for; see the field list below.
  *
  * Required fields:
  *   - `sub`: mandatory. Used as the subject of the newly issued token.
@@ -80,8 +81,13 @@ export interface ExchangeTokenValidator {
  * Optional fields (populate when known):
  *   - `scope`: enables scope narrowing. Absent means no declared scope.
  *   - `aud`: enables aud propagation for single-aud subjects.
- *   - `familyId`: enables cascading revoke inheritance. Only meaningful for
- *     self-issued access_tokens.
+ *   - `familyId`: the token's refresh-token family, for a token this
+ *     provider issued under one. The grant handler checks it against this
+ *     provider's family store (refusing the token when none is wired) and
+ *     copies it into the issued token, so a later family revocation reaches
+ *     that token too. A family left only in `claims` is neither checked nor
+ *     inherited. Leave it unset for foreign tokens, whose families this
+ *     provider's store does not hold; an empty string counts as unset.
  *   - `act`: nested actor chain from a prior exchange. The grant handler
  *     preserves this when applicable (RFC 8693 §4.1).
  *   - `may_act`: structured delegation constraint from the subject token. The

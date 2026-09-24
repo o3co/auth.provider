@@ -68,11 +68,10 @@ const tokenExchangeConfigSchema = z.object({
  * longer a factory taking validatorRegistry / clientRepository — both flow
  * through the typed DI graph.
  *
- * The mutable ExchangeTokenValidatorRegistry class is no longer part of
- * the public exports (per §3.3 "REMOVED"); core's boot planner collects the
- * contributions and projects a TokenExchangeValidatorResolver view at
- * activation time. The class survives in `validator/registry.mts` for this
- * package's tests only.
+ * There is no mutable validator registry (the v0.4.x
+ * ExchangeTokenValidatorRegistry was removed per §3.3); core's boot planner
+ * collects the contributions and projects a TokenExchangeValidatorResolver
+ * view at activation time.
  *
  * Theme B (one responsibility per module: grant + built-in validator),
  * Theme C (no synthetic-key redeclaration; planner registers contributions),
@@ -86,12 +85,13 @@ const REQUIRES = [
 	"config",
 ] as const;
 const OPTIONAL = [
-	// The token-exchange grant (grant.mts family_revoked re-surface) AND
-	// the built-in self-issued validator (createSelfIssuedAccessTokenValidator
-	// below) both read deps.refreshTokenFamilyRevocation for the read-only
-	// isFamilyRevoked check (A3 spec §5.3). RFC 8693 §7.2 state 1 demands
-	// family revocation be observable; the grant handler fail-closes when
-	// this slot is absent.
+	// Read by the grant alone, which owns the refresh-token family rule for
+	// the subject_token and the actor_token (`familyRefusal` in grant.mts):
+	// a revoked family answers `family_revoked`, and a family-bearing token
+	// is refused when this slot is absent. The built-in validator below is
+	// deliberately not handed the slot — when it was, it refused a revoked
+	// family first with an opaque `null`, and the grant's answer never
+	// reached a deployment.
 	"refreshTokenFamilyRevocation",
 	// The token-exchange grant reads deps.grantPolicy to enforce the CP-18
 	// fail-closed policy gate. Sibling grants (auth-code, refresh-token)
@@ -153,7 +153,8 @@ export const tokenExchangeModule: Module = defineModule<Requires, Optional>({
 				createSelfIssuedAccessTokenValidator({
 					keyStore: deps.keyStore,
 					issuer: deps.config.oauth.jwt.issuer,
-					refreshTokenFamilyRevocation: deps.refreshTokenFamilyRevocation,
+					// No `refreshTokenFamilyRevocation`: the grant owns the family
+					// check — see the optional-keys comment above.
 					// #367: revocation stores, forwarded like every other
 					// token-accepting surface. See the optional-keys comment above.
 					accessTokenDenylist: deps.accessTokenDenylist,

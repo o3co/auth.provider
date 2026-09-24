@@ -34,7 +34,6 @@ import type {
 import { decodeJwt } from "jose";
 import { describe, expect, it } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
-import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
 
@@ -78,21 +77,16 @@ const clientRepository: ClientRepository = {
 
 const buildGrant = () => {
 	const store = makeFamilyRevocation();
-	const registry = new ExchangeTokenValidatorRegistry();
-	registry.register(
-		ACCESS_TOKEN_TYPE,
-		createSelfIssuedAccessTokenValidator({
-			keyStore,
-			issuer: ISSUER,
-			refreshTokenFamilyRevocation: store,
-		}),
-	);
+	// The resolver the grant reads is `get` alone, which a Map provides.
+	const validators = new Map([
+		[ACCESS_TOKEN_TYPE, createSelfIssuedAccessTokenValidator({ keyStore, issuer: ISSUER })],
+	]);
 	return createTokenExchangeGrant({
 		keyStore,
 		config: mockConfig,
 		clientRepository,
 		refreshTokenFamilyRevocation: store,
-		tokenExchangeValidatorResolver: registry,
+		tokenExchangeValidatorResolver: validators,
 	} as never);
 };
 

@@ -18,9 +18,9 @@ import {
 	type AccessTokenDenylist,
 	type ExchangeTokenValidationContext,
 	type ExchangeTokenValidator,
+	isRevocationUnavailable,
 	type KeyStore,
 	type Logger,
-	type RefreshTokenFamilyRevocation,
 	type SubjectRevocation,
 	type ValidatedToken,
 	verifyJwt,
@@ -34,7 +34,6 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 
 export interface CreateSelfIssuedAccessTokenValidatorOptions {
 	keyStore: KeyStore;
-	refreshTokenFamilyRevocation?: RefreshTokenFamilyRevocation;
 	/**
 	 * #367: a subject_token is an access token presented as a credential —
 	 * the exchange mints a NEW token from it, so accepting a revoked one is
@@ -57,6 +56,13 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
 	 */
 	legacyTypAccept?: boolean;
 	logger?: Logger;
+	/**
+	 * Not an option: the grant checks the refresh-token family (see the
+	 * factory's JSDoc). Typed `never` so a deps object spread into these
+	 * options fails to compile; present at runtime, even as `undefined`, it
+	 * makes the factory throw.
+	 */
+	refreshTokenFamilyRevocation?: never;
 }
 
 /**
@@ -67,13 +73,21 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  *     when signed by the same KeyStore — prevents token-type-confusion)
  *   - Standard claims (exp via jose)
  *   - Issuer match (always — `issuer` is a required option)
- *   - When refreshTokenFamilyRevocation is wired: family_id cascading revoke
+ *   - The access-token denylist and the subject watermark, when wired (#367)
  *
- * When refreshTokenFamilyRevocation is absent, the family revoke check is silently
- * skipped here; the grant handler is responsible for detecting this
- * misconfiguration and responding with invalid_grant (spec §7.2 state 1:
- * "not wired"). The validator alone is NOT fail-closed against store
- * misconfiguration.
+ * It does NOT check the refresh-token family. It projects `family_id` as
+ * `familyId`, and `createTokenExchangeGrant` checks it against
+ * `refreshTokenFamilyRevocation` for the subject_token and the actor_token
+ * alike — refusing a revoked family with `family_revoked`, and a
+ * family-bearing token outright when the slot is not wired. A family check
+ * here would answer first with an opaque `null` and hide that answer, which is
+ * what `tokenExchangeModule` did while it handed the slot to both. A caller
+ * that uses this validator outside `createTokenExchangeGrant` must check
+ * `familyId` itself, and refuse the token when it has no family store.
+ *
+ * Passing `refreshTokenFamilyRevocation` anyway throws at construction, even
+ * with no value: a caller that still expects the validator to check the
+ * family must find out, not lose the check silently.
  *
  * `issuer` is required; the constructor throws synchronously when it is
  * missing or an empty string. Without an issuer to compare against, an
@@ -81,22 +95,24 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  * claim could be accepted — exactly the token-type-confusion gap Copilot
  * flagged on PR #100.
  *
- * Throws on infrastructure failures (store unavailable during runtime).
- * Returns null on validation failures (bad signature, wrong typ, missing/empty sub,
- * expired, revoked, issuer mismatch).
+ * `validate` follows core's ExchangeTokenValidator contract. It returns
+ * null when the token is not acceptable — bad signature, wrong typ,
+ * missing/empty sub, expired, issuer mismatch, a denylisted or watermarked
+ * token — and the grant answers `invalid_grant`. It throws when the answer is
+ * not knowable: a revocation store the central verifier could not consult
+ * (`isRevocationUnavailable`), which the grant answers with
+ * `503 temporarily_unavailable`. The token is refused either way.
  */
 export function createSelfIssuedAccessTokenValidator(
 	options: CreateSelfIssuedAccessTokenValidatorOptions,
 ): ExchangeTokenValidator {
-	const {
-		keyStore,
-		refreshTokenFamilyRevocation,
-		accessTokenDenylist,
-		subjectRevocation,
-		issuer,
-		legacyTypAccept,
-		logger,
-	} = options;
+	const { keyStore, accessTokenDenylist, subjectRevocation, issuer, legacyTypAccept, logger } =
+		options;
+	if ("refreshTokenFamilyRevocation" in options) {
+		throw new Error(
+			"createSelfIssuedAccessTokenValidator: refreshTokenFamilyRevocation is not an option. The validator does not check the refresh-token family; createTokenExchangeGrant does, given refreshTokenFamilyRevocation in its own dependencies. A caller using this validator outside createTokenExchangeGrant must check ValidatedToken.familyId itself and refuse the token when it has no family store.",
+		);
+	}
 	if (typeof issuer !== "string" || issuer.length === 0) {
 		throw new Error(
 			"createSelfIssuedAccessTokenValidator: issuer is required (a non-empty string). Without an issuer to compare against, an at+jwt signed by the same KeyStore but with a different `iss` claim could be accepted.",
@@ -128,7 +144,13 @@ export function createSelfIssuedAccessTokenValidator(
 					logger,
 				});
 				payload = verified.payload as Record<string, unknown>;
-			} catch {
+			} catch (err) {
+				// An unreachable denylist or subject watermark is an outage, not a
+				// finding about the token: rethrown, so the grant answers 503 rather
+				// than an `invalid_grant` that tells the client to discard a
+				// credential that may be perfectly good. The refresh grant makes the
+				// same split. Every other verification failure is the token's.
+				if (isRevocationUnavailable(err)) throw err;
 				return null;
 			}
 
@@ -136,13 +158,9 @@ export function createSelfIssuedAccessTokenValidator(
 				return null;
 			}
 
+			// Projected, not checked: the grant owns the family rule (see the
+			// factory's JSDoc), so a revoked family gets the grant's answer.
 			const familyId = typeof payload.family_id === "string" ? payload.family_id : undefined;
-
-			if (familyId && refreshTokenFamilyRevocation) {
-				// Throws on runtime failure — grant handler converts to 503.
-				const revoked = await refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
-				if (revoked) return null;
-			}
 			const mayAct =
 				isRecord(payload.may_act) ||
 				(Array.isArray(payload.may_act) && payload.may_act.every(isRecord))

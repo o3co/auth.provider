@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { isRevocationUnavailable } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
@@ -22,7 +23,6 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 	const validator = (overrides = {}) =>
 		createSelfIssuedAccessTokenValidator({
 			keyStore,
-			refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			issuer: ISSUER,
 			...overrides,
 		});
@@ -33,7 +33,6 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 			// for a caller the types cannot reach is what this asserts.
 			createSelfIssuedAccessTokenValidator({
 				keyStore,
-				refreshTokenFamilyRevocation: makeFamilyRevocation(),
 			}),
 		).toThrow("issuer is required");
 	});
@@ -68,30 +67,60 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		expect(result).toBeNull();
 	});
 
-	it("returns null when family is revoked", async () => {
-		const token = await signSelfIssuedAccessToken({ family_id: "fam-revoked" });
+	it("refuses a refreshTokenFamilyRevocation option rather than ignoring it", () => {
+		// The family rule is the grant's: were the validator to refuse a revoked
+		// family, it would answer first with an opaque `null` and the grant's
+		// `family_revoked` would never reach a client (`grant-integration.test.mts`
+		// pins that answer through the booted module). So the option is gone —
+		// and ignored silently, a caller that relied on it from JavaScript, an
+		// options object built as a variable or a cast would lose the family
+		// check with no signal. Its presence is refused at construction, even
+		// with no value, since the caller still expected the check.
 		const store = makeFamilyRevocation({
 			isFamilyRevoked: vi.fn().mockResolvedValue(true),
 		});
-		const v = validator({ refreshTokenFamilyRevocation: store });
-		expect(await v.validate(token, { role: "subject" })).toBeNull();
-		expect(store.isFamilyRevoked).toHaveBeenCalledWith("fam-revoked");
+		expect(() =>
+			createSelfIssuedAccessTokenValidator({
+				keyStore,
+				issuer: ISSUER,
+				// @ts-expect-error — not an option: the grant owns the family check.
+				refreshTokenFamilyRevocation: store,
+			}),
+		).toThrow(/refreshTokenFamilyRevocation is not an option/);
+
+		const optionsBuiltElsewhere: Record<string, unknown> = {
+			keyStore,
+			issuer: ISSUER,
+			refreshTokenFamilyRevocation: undefined,
+		};
+		expect(() =>
+			createSelfIssuedAccessTokenValidator(
+				optionsBuiltElsewhere as unknown as Parameters<
+					typeof createSelfIssuedAccessTokenValidator
+				>[0],
+			),
+		).toThrow(/refreshTokenFamilyRevocation is not an option/);
+		expect(store.isFamilyRevoked).not.toHaveBeenCalled();
 	});
 
-	it("throws when isFamilyRevoked throws (runtime unavailable)", async () => {
-		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
-		const store = makeFamilyRevocation({
-			isFamilyRevoked: vi.fn().mockRejectedValue(new Error("redis down")),
-		});
-		const v = validator({ refreshTokenFamilyRevocation: store });
-		await expect(v.validate(token, { role: "subject" })).rejects.toThrow("redis down");
+	it("does not compile a deps bag carrying refreshTokenFamilyRevocation spread into its options", () => {
+		// `refreshTokenFamilyRevocation?: never` in the options type: the likely
+		// way to pass the removed option by accident — spreading a deps object
+		// into the options — fails to compile, ahead of the runtime refusal a
+		// JavaScript caller still gets.
+		const deps: { keyStore: typeof keyStore; refreshTokenFamilyRevocation: unknown } = {
+			keyStore,
+			refreshTokenFamilyRevocation: makeFamilyRevocation(),
+		};
+		expect(() =>
+			// @ts-expect-error — the spread carries `refreshTokenFamilyRevocation`, typed `never`.
+			createSelfIssuedAccessTokenValidator({ ...deps, issuer: ISSUER }),
+		).toThrow(/refreshTokenFamilyRevocation is not an option/);
 	});
 
-	it("accepts a token without family_id claim (legacy) when refreshTokenFamilyRevocation is present", async () => {
+	it("accepts a token without a family_id claim, leaving familyId absent", async () => {
 		const token = await signSelfIssuedAccessToken({});
-		const store = makeFamilyRevocation();
-		const v = validator({ refreshTokenFamilyRevocation: store });
-		const result = await v.validate(token, { role: "subject" });
+		const result = await validator().validate(token, { role: "subject" });
 		expect(result).not.toBeNull();
 		expect(result?.familyId).toBeUndefined();
 	});
@@ -183,5 +212,28 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		};
 		const v = validator({ subjectRevocation });
 		expect(await v.validate(token, { role: "subject" })).toBeNull();
+	});
+
+	it("throws, rather than returning null, when a revocation store cannot be read", async () => {
+		// Core's contract: null is a verdict on the token (→ invalid_grant), a
+		// throw is an answer that is not knowable (→ 503). An outage is the
+		// second — the verifier's `revocation_unavailable` — for either store.
+		const token = await signSelfIssuedAccessToken({ jti: "at-1" });
+		const unreachable = async () => {
+			throw new Error("backend unreachable");
+		};
+		const denylist = { kind: "stub", add: async () => {}, has: unreachable };
+		await expect(
+			validator({ accessTokenDenylist: denylist }).validate(token, { role: "subject" }),
+		).rejects.toSatisfy(isRevocationUnavailable);
+
+		const subjectRevocation = {
+			kind: "stub",
+			revokeBefore: async () => {},
+			revokedBefore: unreachable,
+		};
+		await expect(
+			validator({ subjectRevocation }).validate(token, { role: "actor" }),
+		).rejects.toSatisfy(isRevocationUnavailable);
 	});
 });

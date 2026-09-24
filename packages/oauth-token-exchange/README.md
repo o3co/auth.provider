@@ -11,8 +11,8 @@ Supports on-behalf-of, delegation (`act` claim), and scope / audience narrowing.
 
 **Owns:**
 
-- the exchange decision: which client may exchange ([note 14](#security-notes), [note 15](#security-notes)), the scope and audience ceilings, `may_act`, the actor chain and the `act` claim, the sender-constraint matrices, and the issued token's lifetime;
-- the built-in `access_token` validator in [`src/validator/`](./src/validator) (`createSelfIssuedAccessTokenValidator`), which verifies a token this provider issued and consults the revocation stores.
+- the exchange decision: which client may exchange ([note 14](#security-notes), [note 15](#security-notes)), the scope and audience ceilings, `may_act`, the actor chain and the `act` claim, the sender-constraint matrices, the refresh-token family check on the `subject_token` and the `actor_token` ([note 1](#security-notes)), and the issued token's lifetime;
+- the built-in `access_token` validator in [`src/validator/`](./src/validator) (`createSelfIssuedAccessTokenValidator`), which verifies a token this provider issued and consults the access-token denylist and the subject watermark. It reads a token's `family_id` but leaves the family check to the handler.
 
 **Does not own:**
 
@@ -23,7 +23,7 @@ Supports on-behalf-of, delegation (`act` claim), and scope / audience narrowing.
 
 **Why a separate package.** Token exchange is optional, and not installing the module is how it is disabled; keeping it out of `@o3co/auth-provider-oauth` keeps a deployment that does not exchange tokens from carrying the grant at all. It depends on core alone — the handler and the validator need only core's grant and validator contracts — so it does not import the oauth package, and a sibling can contribute further validators without depending on either.
 
-`src/validator/registry.mts` (`ExchangeTokenValidatorRegistry`) is not part of the package's runtime: nothing but tests imports it, and the resolver the grant reads at runtime is the one core's boot planner builds.
+The resolver the grant reads is the one core's boot planner builds; the package keeps no validator registry of its own. Everything under `src/` outside `__tests__` is reached from `src/index.mts` and is published; test scaffolding stays under `__tests__`.
 
 ## Install
 
@@ -72,7 +72,7 @@ Exported from [`src/index.mts`](./src/index.mts):
 
 - `tokenExchangeModule` — [`module.mts`](./src/module.mts). The module value to install.
 - `createTokenExchangeGrant`, `TokenExchangeDependencies`, `TOKEN_EXCHANGE_GRANT_TYPE`, `ACCESS_TOKEN_TYPE` — [`grant.mts`](./src/grant.mts). The handler itself, for a composition that dispatches it from its own route.
-- `createSelfIssuedAccessTokenValidator`, `CreateSelfIssuedAccessTokenValidatorOptions` — [`validator/selfIssuedAccessToken.mts`](./src/validator/selfIssuedAccessToken.mts). The built-in validator. `issuer` is required; the factory throws without a non-empty one, because without it an `at+jwt` signed by the same key store but naming another issuer could pass.
+- `createSelfIssuedAccessTokenValidator`, `CreateSelfIssuedAccessTokenValidatorOptions` — [`validator/selfIssuedAccessToken.mts`](./src/validator/selfIssuedAccessToken.mts). The built-in validator. `issuer` is required; the factory throws without a non-empty one, because without it an `at+jwt` signed by the same key store but naming another issuer could pass. It takes no `refreshTokenFamilyRevocation`: the options type declares the key `never`, so a deps object spread into them does not compile, and the factory throws if the key is present, even as `undefined`. The family check is the handler's (note 1), so a composition that dispatches `createTokenExchangeGrant` itself gives that slot to the handler. The validator does not check the family: a caller using it outside `createTokenExchangeGrant` must check `familyId` itself, and refuse the token when it has no family store.
 
 The validator contract is not re-exported: import `ExchangeTokenValidator`, `ValidatedToken` and `ExchangeTokenValidationContext` from `@o3co/auth-provider-core`.
 
@@ -156,9 +156,17 @@ const handle = await createApp({
 
 Two modules contributing a validator for the same token type is refused at boot.
 
+**`familyId` is how a validator tells the handler about a refresh-token family.** A validator that accepts this provider's own family-bearing tokens — under any token type — must fill `ValidatedToken.familyId` from the token's `family_id`: the handler checks it against this provider's family store, refuses the token when none is wired, and copies it into the issued token so a later family revocation reaches that token too (Security notes 1 and 10). A family left only in `claims` is neither checked nor inherited. A validator of foreign tokens, whose families this provider's store does not hold, leaves `familyId` unset. An empty string counts as unset.
+
 ## Security notes
 
-1. **Wire `refreshTokenFamilyRevocation`, or this provider's family-bearing access tokens cannot be exchanged.** A self-issued access token carrying `family_id` — every token the `authorization_code` and `refresh_token` grants mint — is exchangeable only when its family's revocation state can be read. With no `refreshTokenFamilyRevocation` in the module graph the handler answers `invalid_grant` / `refresh token family revocation not configured (revocation cannot be verified)` (fail-closed, RFC 8693 §7.2). Core's `defaultRefreshTokenFamilyRevocationModule` provides the slot over a refresh-token family store (see [Register the grant](#register-the-grant)). With it wired, a subject token whose family is revoked is `invalid_grant`: through `tokenExchangeModule` the built-in validator reads the slot too and refuses first, so the description is `subject_token validation failed`; the handler's own `family_revoked` description is reached only when `createTokenExchangeGrant` is given a validator built without the slot. A store that cannot answer is `503 temporarily_unavailable`.
+1. **Wire `refreshTokenFamilyRevocation`, or this provider's family-bearing access tokens cannot be exchanged.** A self-issued access token carrying `family_id` — every token the `authorization_code` and `refresh_token` grants mint — is accepted as `subject_token` or as `actor_token` only when its family's revocation state can be read. The handler owns this check, for both tokens; the built-in validator does not read the slot. The answers (for the `actor_token`, each description is prefixed `actor_token `):
+
+   - **No `refreshTokenFamilyRevocation` in the module graph:** `invalid_grant` / `refresh token family revocation not configured (revocation cannot be verified)` (fail-closed). Core's `defaultRefreshTokenFamilyRevocationModule` provides the slot over a refresh-token family store (see [Register the grant](#register-the-grant)).
+   - **The family is revoked** (logout, refresh-token replay): `invalid_grant` / `family_revoked` (`actor_token family_revoked`) — the description the `refresh_token` grant gives a revoked family on the same endpoint. A client seeing it needs the user to authenticate again; retrying the exchange will not help.
+   - **The store cannot answer:** `503 temporarily_unavailable` / `refresh token store unavailable`, logged as `token_exchange_family_store_unavailable` with the role.
+
+   The check keys on the family the validator reports (`ValidatedToken.familyId`), not on the token type: the built-in validator registered under another type, or a validator of your own that reports a family, is held to the same answers, because the issued token inherits the subject's `family_id` whichever validator produced it. A token without a family (a `client_credentials` token, say; an empty `familyId` counts as none) has nothing to check. The answers depend only on the `refreshTokenFamilyRevocation` handed to the handler, so they hold as well for a composition that dispatches `createTokenExchangeGrant` itself.
 
 2. **Scope is bounded by two ceilings, always.** `granted scope ⊆ subject_token.scope ∩ client.allowedScopes` is enforced unconditionally, and a `GrantPolicyHook` cannot bypass either **through the request parameter** (point 5 covers the policy-level override, which is re-checked against both). An explicitly requested scope outside either ceiling is refused with `invalid_scope` naming it; an omitted `scope` inherits the subject token's, clamped to the registration.
 
@@ -194,6 +202,8 @@ Two modules contributing a validator for the same token type is refused at boot.
 
 10. **Family cascade.** Issued access_tokens inherit the subject's `family_id` claim. Revoking the subject's family (e.g. on logout) automatically invalidates every token exchanged from it. This is the same mechanism auth.provider's introspect and userinfo endpoints use.
 
+    The cascade follows the subject only. Revoking an **actor's** family refuses that actor_token in later exchanges (note 1), but does not reach tokens it already acted on: a delegated token carries the subject's `family_id` alone, and the actor appears only in its `act` claim, whose family nothing checks. When that token is exchanged again, the earlier actor becomes a nested `act`, which RFC 8693 §4.1 makes informational only.
+
 11. **Refresh / ID tokens are never issued.** Per RFC 8693 §4.2.2 the handler only returns an access_token. The response always carries `issued_token_type: "urn:ietf:params:oauth:token-type:access_token"`.
 
 12. **Missing subject claim rejection.** Self-issued access_tokens without a `sub` claim (or with an empty-string `sub`) are rejected with `invalid_grant`. This prevents a silently-anonymous token from reaching downstream services.
@@ -216,6 +226,8 @@ Two modules contributing a validator for the same token type is refused at boot.
 
 19. **`oauth.accessToken.maxExpiresIn` bounds the offline-revocation window of an exchanged token.** Revoking the subject's family (note 10) stops an exchanged token wherever the family is consulted — introspection, userinfo, a verifier that checks revocation. A resource server that validates the JWT offline, by signature and `exp` alone, cannot observe that and keeps accepting the token until it expires. The longest that can be is the issued lifetime, and the longest a token-exchange request can make the issued lifetime is `maxExpiresIn`. Unset, it equals `defaultExpiresIn`, so the window is the default lifetime. Raise it only as far as you accept an exchanged token outliving its revocation at such a resource server.
 
+20. **A revoked access token cannot be exchanged, and a revocation store that cannot answer is `503 temporarily_unavailable`, not `invalid_grant`.** The built-in validator consults the access-token denylist (by `jti`) and the subject watermark for the `subject_token` and the `actor_token`, as userinfo and introspection do, so revoking an access token also stops it being exchanged: a denylisted or watermarked token is `invalid_grant` / `subject_token validation failed` (`actor_token validation failed` for the actor). When either store cannot be read, the token is still refused, but the answer is `503 temporarily_unavailable` / `subject_token validation store unavailable` (`actor_token …` for the actor): an outage says nothing about the token, and `invalid_grant` would tell the client to discard a credential that may be perfectly good. The validator follows core's `ExchangeTokenValidator` contract — `null` for a token that is not acceptable, a throw for an answer that is not knowable — and tells the two apart with core's `isRevocationUnavailable`, as the `refresh_token` grant does. The family store's answers are note 1's.
+
 ## What it does not do
 
 - `saml1` / `saml2` subject token types.
@@ -226,7 +238,7 @@ Sender-constrained exchange is supported: the handler enforces the DPoP and mTLS
 
 ## Tests
 
-[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest and the family cascade.
+[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest, the family answers of note 1 and the store-outage answers of note 20, with `tokenExchangeModule` booted through `createApp`. [`published-files.test.mts`](./src/__tests__/published-files.test.mts) holds that every source file the build publishes is reached from the entry point.
 
 ## RFC references
 

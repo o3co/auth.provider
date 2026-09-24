@@ -14,16 +14,24 @@
  * limitations under the License.
  */
 
-import type {
-	ClientRepository,
-	GrantContext,
-	PublicClient,
-	RefreshTokenFamilyRevocation,
+import {
+	type AppHandle,
+	type ClientRepository,
+	createApp,
+	defaultRefreshTokenFamilyRevocationModule,
+	defineModule,
+	type GrantContext,
+	type GrantHandler,
+	type Module,
+	memoryRefreshTokenFamilyStoreModule,
+	type PublicClient,
+	type RefreshTokenFamilyRevocation,
 } from "@o3co/auth-provider-core";
+import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { decodeJwt } from "jose";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
-import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
+import { tokenExchangeModule } from "#/module.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import { ISSUER, keyStore, signSelfIssuedAccessToken } from "./fixtures.mjs";
 
@@ -63,25 +71,13 @@ function makeStatefulStore(): RefreshTokenFamilyRevocation & { revokedFamilies: 
 }
 
 function buildHandler(store: RefreshTokenFamilyRevocation) {
-	const registry = new ExchangeTokenValidatorRegistry();
-	// Validator has no refreshTokenFamilyRevocation so it returns a ValidatedToken with
-	// familyId set. The grant handler's re-surface block then consults
-	// deps.refreshTokenFamilyRevocation and emits the family_revoked errorDescription.
-	// This matches the unit-test pattern (validatorRefreshStore: null) and is
-	// required for the cascade test to observe "family_revoked" vs the opaque
-	// "subject_token validation failed" that would result if the validator
-	// absorbed the revocation check itself.
-	registry.register(
-		ACCESS_TOKEN_TYPE,
-		createSelfIssuedAccessTokenValidator({
-			keyStore,
-			issuer: ISSUER,
-		}),
-	);
-	// ExchangeTokenValidatorRegistry is structurally compatible with
-	// TokenExchangeValidatorResolver (both expose .get); A2-γ §3.3 removed
-	// the registry from the public surface but the class remains for
-	// test scaffolding.
+	// The validator projects `familyId` and the grant checks it against
+	// `refreshTokenFamilyRevocation` — the same split `tokenExchangeModule`
+	// wires, which the createApp suite below boots for real. The resolver the
+	// grant reads is `get` alone, which a Map provides.
+	const validators = new Map([
+		[ACCESS_TOKEN_TYPE, createSelfIssuedAccessTokenValidator({ keyStore, issuer: ISSUER })],
+	]);
 	return createTokenExchangeGrant({
 		config: {
 			oauth: {
@@ -94,7 +90,7 @@ function buildHandler(store: RefreshTokenFamilyRevocation) {
 		} as any,
 		keyStore,
 		refreshTokenFamilyRevocation: store,
-		tokenExchangeValidatorResolver: registry,
+		tokenExchangeValidatorResolver: validators,
 		clientRepository,
 	});
 }
@@ -255,20 +251,18 @@ describe("token_exchange — integration", () => {
 	});
 
 	// Boot planner only injects keys listed in `requires` ∪ `optional` into
-	// contribution-factory `deps`. Both the grant handler (`grant.mts:212-266`,
-	// family_revoked re-surface) and the built-in self-issued validator
-	// (`module.mts:68`, family revocation check) read `deps.refreshTokenFamilyRevocation`.
-	// Without declaring it here, a composition root that wires the store
-	// will have it silently dropped: family-revocation observability turns
-	// off, and self-issued exchanges that carry a `family_id` are rejected
-	// as if the store were absent. RFC 8693 §7.2 state 1 requirement.
+	// contribution-factory `deps`. The grant handler reads
+	// `deps.refreshTokenFamilyRevocation` for its family rule (`familyRefusal`
+	// in grant.mts). Without declaring it here, a composition root that wires
+	// the store would have it silently dropped, and every self-issued exchange
+	// carrying a `family_id` would be refused as if the store were absent.
 	it("declares refreshTokenFamilyRevocation in optional so the family-revocation path receives it", async () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
 		expect(tokenExchangeModule.optional).toContain("refreshTokenFamilyRevocation");
 	});
 
 	// Symmetric to the refreshTokenFamilyRevocation guard above. The token-exchange grant
-	// reads `deps.grantPolicy` at grant.mts:339,362 to enforce CP-18 fail-
+	// reads `deps.grantPolicy` in grant.mts to enforce CP-18 fail-
 	// closed policy decisions on exchange requests. Other OAuth grants
 	// (createAuthorizationGrant / createRefreshTokenGrant) declare grantPolicy
 	// in oauthAuthorizationModule.optional; without declaring it here as well,
@@ -277,6 +271,509 @@ describe("token_exchange — integration", () => {
 	it("declares grantPolicy in optional so CP-18 enforcement reaches token-exchange", async () => {
 		const { tokenExchangeModule } = await import("#/module.mjs");
 		expect(tokenExchangeModule.optional).toContain("grantPolicy");
+	});
+});
+
+// The deployment the README's "Register the grant" section documents, booted
+// for real: `tokenExchangeModule` beside core's memory refresh-token family
+// store and its default revocation wrapper, through core's `createApp`. The
+// handler is the one the boot planner puts in `grantHandlerResolver` — the
+// resolver `/oauth/token` dispatches through — invoked the way dispatch
+// invokes it, after client authentication has set `authenticatedClient`.
+// Nothing here is hand-wired: which revocation store the validator or the
+// grant reads, and what each does when it cannot answer, is decided by the
+// module's own manifest, so these tests see the answer a deployment returns.
+describe("tokenExchangeModule booted through createApp — revocation", () => {
+	const authenticatedClient: NonNullable<GrantContext["authenticatedClient"]> = {
+		clientId: client.clientId,
+		tokenEndpointAuthMethod: "client_secret_basic",
+		allowedScopes: client.allowedScopes,
+		allowedGrantTypes: client.allowedGrantTypes,
+	};
+	const confidentialClientRepository: ClientRepository = {
+		findById: async (id) =>
+			id === client.clientId ? { ...client, tokenEndpointAuthMethod: "client_secret_basic" } : null,
+		authenticate: async () => null,
+	};
+
+	let handle: AppHandle | undefined;
+	afterEach(async () => {
+		await handle?.dispose();
+		handle = undefined;
+	});
+
+	type RevocationDeclaration = {
+		readonly accessToken: "denylist" | "unsupported";
+		readonly subject: "watermark" | "unsupported";
+	};
+
+	// `revocation` declares which of the denylist and the subject watermark a
+	// test leaves unwired (the #277 / #406 boot guard); by default both.
+	async function boot(
+		modules: readonly Module[],
+		revocation: RevocationDeclaration = { accessToken: "unsupported", subject: "unsupported" },
+	) {
+		const base = makeValidAppConfig();
+		handle = await createApp({
+			modules: [
+				tokenExchangeModule,
+				...modules,
+				defineModule({
+					name: "test:client-repository",
+					provides: { clientRepository: () => confidentialClientRepository },
+				}),
+				defineModule({ name: "test:key-store", provides: { keyStore: () => keyStore } }),
+			],
+			bootstrapComponents: {
+				config: {
+					...base,
+					oauth: {
+						...base.oauth,
+						jwt: { ...base.oauth.jwt, issuer: ISSUER },
+						revocation,
+					},
+				},
+				pathResolver: (s: string) => s,
+			},
+		});
+		const grant: GrantHandler | undefined =
+			handle.components.grantHandlerResolver?.get(TOKEN_EXCHANGE_GRANT_TYPE);
+		if (!grant) throw new Error("the boot did not register the token-exchange grant");
+		return { grant, components: handle.components };
+	}
+
+	const exchange = (grant: GrantHandler, body: Record<string, unknown>) =>
+		grant.handle({ body, session: {}, issuer: ISSUER, metadata: {}, authenticatedClient });
+
+	async function liveFamily(components: AppHandle["components"], familyId: string): Promise<void> {
+		const store = components.refreshTokenFamilyStore;
+		if (!store) throw new Error("the boot did not provide refreshTokenFamilyStore");
+		await store.registerFamily({
+			familyId,
+			activeJti: `rt-${familyId}`,
+			revoked: false,
+			expiresAtMs: Date.now() + 3_600_000,
+		});
+	}
+
+	async function revoke(components: AppHandle["components"], familyId: string): Promise<void> {
+		const revocation = components.refreshTokenFamilyRevocation;
+		if (!revocation) throw new Error("the boot did not provide refreshTokenFamilyRevocation");
+		await revocation.revokeFamily(familyId);
+	}
+
+	it("answers invalid_grant / family_revoked for a subject_token whose family was revoked", async () => {
+		const { grant, components } = await boot([
+			memoryRefreshTokenFamilyStoreModule,
+			defaultRefreshTokenFamilyRevocationModule,
+		]);
+		await liveFamily(components, "fam-subject");
+		const subjectToken = await signSelfIssuedAccessToken({ family_id: "fam-subject" });
+		const body = { subject_token: subjectToken, subject_token_type: ACCESS_TOKEN_TYPE };
+
+		// While the family is live the token is exchangeable — the family store
+		// is wired, so the family can be read.
+		expect((await exchange(grant, body)).result.status).toBe(200);
+
+		// Logout revokes the family; the same subject_token is now refused, and
+		// the answer names why.
+		await revoke(components, "fam-subject");
+		expect((await exchange(grant, body)).result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "family_revoked",
+		});
+	});
+
+	it("answers invalid_grant / actor_token family_revoked for an actor_token whose family was revoked", async () => {
+		const { grant, components } = await boot([
+			memoryRefreshTokenFamilyStoreModule,
+			defaultRefreshTokenFamilyRevocationModule,
+		]);
+		await liveFamily(components, "fam-subject");
+		await liveFamily(components, "fam-actor");
+		const body = {
+			subject_token: await signSelfIssuedAccessToken({ family_id: "fam-subject" }),
+			subject_token_type: ACCESS_TOKEN_TYPE,
+			actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", family_id: "fam-actor" }),
+			actor_token_type: ACCESS_TOKEN_TYPE,
+		};
+
+		expect((await exchange(grant, body)).result.status).toBe(200);
+
+		// The actor's identity is folded into the issued token's `act` claim, so
+		// a revoked actor credential is refused exactly as a revoked subject is.
+		await revoke(components, "fam-actor");
+		expect((await exchange(grant, body)).result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription: "actor_token family_revoked",
+		});
+	});
+
+	it("refuses a family-bearing subject_token when no refreshTokenFamilyRevocation is wired", async () => {
+		const { grant } = await boot([]);
+		const { result } = await exchange(grant, {
+			subject_token: await signSelfIssuedAccessToken({ family_id: "fam-subject" }),
+			subject_token_type: ACCESS_TOKEN_TYPE,
+		});
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription:
+				"refresh token family revocation not configured (revocation cannot be verified)",
+		});
+	});
+
+	it("refuses a family-bearing actor_token when no refreshTokenFamilyRevocation is wired", async () => {
+		const { grant } = await boot([]);
+		// A subject without `family_id` (a client_credentials token, say) passes
+		// the subject's family rule, so the refusal below is the actor's.
+		const { result } = await exchange(grant, {
+			subject_token: await signSelfIssuedAccessToken({}),
+			subject_token_type: ACCESS_TOKEN_TYPE,
+			actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", family_id: "fam-actor" }),
+			actor_token_type: ACCESS_TOKEN_TYPE,
+		});
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_grant",
+			errorDescription:
+				"actor_token refresh token family revocation not configured (revocation cannot be verified)",
+		});
+	});
+
+	// The family rule keys on the family a validator asserts, not on the token
+	// type it was registered for: the issued token inherits the subject's
+	// `family_id` whichever validator produced it. Here the built-in validator
+	// is registered a second time, under the `jwt` token type, the way a
+	// composition accepting its own access tokens under that type would.
+	describe("a validator registered for another token type that asserts a family", () => {
+		const JWT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt";
+		const selfIssuedAsJwt = defineModule({
+			name: "test:self-issued-as-jwt",
+			requires: ["keyStore"],
+			contributes: {
+				tokenExchangeValidators: {
+					[JWT_TOKEN_TYPE]: (deps) =>
+						createSelfIssuedAccessTokenValidator({ keyStore: deps.keyStore, issuer: ISSUER }),
+				},
+			},
+		});
+
+		it("answers invalid_grant / family_revoked once the family is revoked", async () => {
+			const { grant, components } = await boot([
+				memoryRefreshTokenFamilyStoreModule,
+				defaultRefreshTokenFamilyRevocationModule,
+				selfIssuedAsJwt,
+			]);
+			await liveFamily(components, "fam-jwt");
+			const body = {
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-jwt" }),
+				subject_token_type: JWT_TOKEN_TYPE,
+			};
+			expect((await exchange(grant, body)).result.status).toBe(200);
+
+			await revoke(components, "fam-jwt");
+			expect((await exchange(grant, body)).result).toMatchObject({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "family_revoked",
+			});
+		});
+
+		it("refuses the family-bearing token when no refreshTokenFamilyRevocation is wired", async () => {
+			const { grant } = await boot([selfIssuedAsJwt]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-jwt" }),
+				subject_token_type: JWT_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription:
+					"refresh token family revocation not configured (revocation cannot be verified)",
+			});
+		});
+
+		// The actor half: the actor_token goes through the same rule whatever
+		// actor_token_type named its validator.
+		it("answers actor_token family_revoked for an actor_token of that type once its family is revoked", async () => {
+			const { grant, components } = await boot([
+				memoryRefreshTokenFamilyStoreModule,
+				defaultRefreshTokenFamilyRevocationModule,
+				selfIssuedAsJwt,
+			]);
+			await liveFamily(components, "fam-subject");
+			await liveFamily(components, "fam-actor-jwt");
+			const body = {
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-subject" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", family_id: "fam-actor-jwt" }),
+				actor_token_type: JWT_TOKEN_TYPE,
+			};
+			expect((await exchange(grant, body)).result.status).toBe(200);
+
+			await revoke(components, "fam-actor-jwt");
+			expect((await exchange(grant, body)).result).toMatchObject({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "actor_token family_revoked",
+			});
+		});
+
+		it("refuses a family-bearing actor_token of that type when no refreshTokenFamilyRevocation is wired", async () => {
+			const { grant } = await boot([selfIssuedAsJwt]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({}),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", family_id: "fam-actor-jwt" }),
+				actor_token_type: JWT_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription:
+					"actor_token refresh token family revocation not configured (revocation cannot be verified)",
+			});
+		});
+
+		// An empty `familyId` names no family: there is nothing to check, and
+		// nothing for the issued token to inherit — not a `family_id: ""` that
+		// no revocation could ever reach.
+		it("treats an empty familyId as no family: nothing checked, nothing inherited", async () => {
+			const EMPTY_FAMILY_TOKEN_TYPE = "urn:example:params:oauth:token-type:empty-family";
+			const { grant } = await boot([
+				defineModule({
+					name: "test:empty-family-validator",
+					contributes: {
+						tokenExchangeValidators: {
+							[EMPTY_FAMILY_TOKEN_TYPE]: () => ({
+								validate: async () => ({
+									sub: "user-1",
+									claims: { sub: "user-1", family_id: "" },
+									familyId: "",
+								}),
+							}),
+						},
+					},
+				}),
+			]);
+			const { result } = await exchange(grant, {
+				subject_token: "opaque-subject-token",
+				subject_token_type: EMPTY_FAMILY_TOKEN_TYPE,
+			});
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) return;
+			expect(decodeJwt(result.tokens.access_token)).not.toHaveProperty("family_id");
+		});
+	});
+
+	// Core's ExchangeTokenValidator contract: `null` means the token is not
+	// acceptable (the grant answers `invalid_grant`), a throw means the answer
+	// is not knowable (`503 temporarily_unavailable`). A revocation store that
+	// cannot be read is the second: the token is still refused — the verifier
+	// fails closed — but a client told `invalid_grant` discards a credential
+	// that may be perfectly good, so an outage must not be reported as a
+	// finding. The refresh grant makes the same split for the same reason.
+	describe("a revocation store that cannot answer", () => {
+		const unreachableDenylist = (failFor: (jti: string) => boolean, revoked = new Set<string>()) =>
+			defineModule({
+				name: "test:access-token-denylist",
+				provides: {
+					accessTokenDenylist: () => ({
+						kind: "test",
+						add: async () => {},
+						has: async (jti: string) => {
+							if (failFor(jti)) throw new Error("denylist backend unreachable");
+							return revoked.has(jti);
+						},
+					}),
+				},
+			});
+		const denylistWired = { accessToken: "denylist", subject: "unsupported" } as const;
+
+		it("answers 503 temporarily_unavailable when the denylist cannot be read for the subject_token", async () => {
+			const { grant } = await boot([unreachableDenylist(() => true)], denylistWired);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ jti: "at-subject" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "subject_token validation store unavailable",
+			});
+		});
+
+		it("answers 503 temporarily_unavailable when the denylist cannot be read for the actor_token", async () => {
+			const { grant } = await boot(
+				[unreachableDenylist((jti) => jti === "at-actor")],
+				denylistWired,
+			);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ jti: "at-subject" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", jti: "at-actor" }),
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "actor_token validation store unavailable",
+			});
+		});
+
+		it("answers 503 temporarily_unavailable when the subject watermark cannot be read", async () => {
+			const { grant } = await boot(
+				[
+					defineModule({
+						name: "test:subject-revocation",
+						provides: {
+							subjectRevocation: () => ({
+								kind: "test",
+								revokeBefore: async () => {},
+								revokedBefore: async () => {
+									throw new Error("watermark backend unreachable");
+								},
+							}),
+						},
+					}),
+				],
+				{ accessToken: "unsupported", subject: "watermark" },
+			);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({}),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "subject_token validation store unavailable",
+			});
+		});
+
+		it("still answers invalid_grant for a subject_token the denylist does hold", async () => {
+			// The other half of the split: a store that answers "revoked" is a
+			// finding about the token, not an outage.
+			const { grant } = await boot(
+				[unreachableDenylist(() => false, new Set(["at-revoked"]))],
+				denylistWired,
+			);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ jti: "at-revoked" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 400,
+				error: "invalid_grant",
+				errorDescription: "subject_token validation failed",
+			});
+		});
+
+		it("answers 503 temporarily_unavailable when the subject watermark cannot be read for the actor_token", async () => {
+			const { grant } = await boot(
+				[
+					defineModule({
+						name: "test:subject-revocation",
+						provides: {
+							subjectRevocation: () => ({
+								kind: "test",
+								revokeBefore: async () => {},
+								revokedBefore: async (sub: string) => {
+									if (sub === "svc-a") throw new Error("watermark backend unreachable");
+									return null;
+								},
+							}),
+						},
+					}),
+				],
+				{ accessToken: "unsupported", subject: "watermark" },
+			);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({}),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: await signSelfIssuedAccessToken({ sub: "svc-a" }),
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "actor_token validation store unavailable",
+			});
+		});
+
+		// The family store is the grant's (`familyRefusal`), so its outage is
+		// answered and logged there — with the role, never the token.
+		const unreachableFamilyRevocation = (failFor: (familyId: string) => boolean) =>
+			defineModule({
+				name: "test:refresh-token-family-revocation",
+				provides: {
+					refreshTokenFamilyRevocation: () => ({
+						revokeFamily: async () => {},
+						isFamilyRevoked: async (familyId: string) => {
+							if (failFor(familyId)) throw new Error("family store unreachable");
+							return false;
+						},
+					}),
+				},
+			});
+		const spyLogger = () => {
+			const logger = {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				fatal: vi.fn(),
+				child: () => logger,
+			};
+			return logger;
+		};
+
+		it("answers 503 and logs the outage when the family store cannot be read for the subject_token", async () => {
+			const logger = spyLogger();
+			const { grant } = await boot([
+				unreachableFamilyRevocation(() => true),
+				defineModule({ name: "test:logger", provides: { logger: () => logger } }),
+			]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-subject" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "refresh token store unavailable",
+			});
+			expect(logger.error).toHaveBeenCalledWith(
+				{ err: expect.any(Error), role: "subject" },
+				"token_exchange_family_store_unavailable",
+			);
+		});
+
+		it("answers 503 naming the actor, and logs the actor's role, when the family store cannot be read for the actor_token", async () => {
+			const logger = spyLogger();
+			const { grant } = await boot([
+				unreachableFamilyRevocation((id) => id === "fam-actor"),
+				defineModule({ name: "test:logger", provides: { logger: () => logger } }),
+			]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ family_id: "fam-subject" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				actor_token: await signSelfIssuedAccessToken({ sub: "svc-a", family_id: "fam-actor" }),
+				actor_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toMatchObject({
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: "actor_token refresh token store unavailable",
+			});
+			expect(logger.error).toHaveBeenCalledWith(
+				{ err: expect.any(Error), role: "actor" },
+				"token_exchange_family_store_unavailable",
+			);
+		});
 	});
 });
 
