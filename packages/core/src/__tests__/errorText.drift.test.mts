@@ -27,10 +27,13 @@
  * crept in over and over, because they are what prose reaches for; this
  * guard refuses them where they are written.
  *
- * What it reads, in every package's source (tests excluded): the static text
- * of the string and template literals written as error text —
+ * What it reads, in every package's source and the standalone template's
+ * (tests excluded; `create-app`'s copy is generated from the template): the
+ * static text of the string and template literals written as error text —
  * - the value of an `error_description` or `errorDescription` property, and
- *   of a `description` property beside an `error` in the same object;
+ *   of a `description` property beside an `error` whose value is a string
+ *   literal (an OAuth code: `{ ok: false, error: "invalid_scope",
+ *   description }`);
  * - the value of an `error` property beside any of those (the code);
  * - `errorEnvelope(code, description)`'s arguments;
  * - `searchParams.set` / `.append("error" | "error_description", text)`;
@@ -40,6 +43,19 @@
  * following a name to a `const` declared in the same file, both arms of
  * `?:`, `??` and `||`, both sides of `+`, and the argument of
  * `sanitizeErrorText(…)` / `auditErrorText(…)`.
+ *
+ * A code is checked whole when it is written whole — non-empty, `1*NQSCHAR` —
+ * and by its characters alone when it is a piece of a template or a
+ * concatenation (`${prefix}_denied`), because a piece may be empty. An object
+ * literal handed to a logger (`log.`, `logger.`, `….logger.`, `console.` with
+ * a level) is a log payload, not a response, and is not read; neither is a
+ * `description` beside an `error` that is not a literal
+ * (`{ error: err, description }`).
+ *
+ * These are heuristics about shape, not a proof: a non-OAuth object that
+ * happens to pair `error: "…"` with `description`, or names a key
+ * `error_description` outside a log call, is read as error text. Rename the
+ * key, or keep its text in the same characters.
  *
  * What it does not see (left to review, and to `errorEnvelope` at run time):
  * - text returned by another function (`describeRedirectRejection`), or a
@@ -65,7 +81,15 @@ type Kind = "code" | "description";
 interface Written {
 	readonly kind: Kind;
 	readonly text: string;
+	/** The whole literal, rather than a piece of a template or a concatenation. */
+	readonly whole: boolean;
 	readonly line: number;
+}
+
+/** A piece of static text, and whether it is a literal written whole. */
+interface Piece {
+	readonly text: string;
+	readonly whole: boolean;
 }
 
 const DESCRIPTION_KEYS = new Set(["error_description", "errorDescription"]);
@@ -101,16 +125,42 @@ function keysOf(literal: ts.ObjectLiteralExpression): ReadonlySet<string> {
 	return keys;
 }
 
+/** Whether the object literal's `error` is written as a string literal: an OAuth code. */
+function literalErrorIn(literal: ts.ObjectLiteralExpression): boolean {
+	return literal.properties.some(
+		(property) =>
+			ts.isPropertyAssignment(property) &&
+			propertyName(property.name) === "error" &&
+			(ts.isStringLiteral(property.initializer) ||
+				ts.isNoSubstitutionTemplateLiteral(property.initializer)),
+	);
+}
+
 /** What a property of an object literal is written as, if it is error text. */
-function kindOfProperty(key: string, siblings: ReadonlySet<string>): Kind | undefined {
+function kindOfProperty(
+	key: string,
+	siblings: ReadonlySet<string>,
+	literalError: boolean,
+): Kind | undefined {
 	if (DESCRIPTION_KEYS.has(key)) return "description";
-	if (key === "description" && siblings.has("error")) return "description";
+	if (key === "description" && literalError) return "description";
 	if (
 		key === "error" &&
-		(siblings.has("description") || [...DESCRIPTION_KEYS].some((k) => siblings.has(k)))
+		((siblings.has("description") && literalError) ||
+			[...DESCRIPTION_KEYS].some((k) => siblings.has(k)))
 	)
 		return "code";
 	return undefined;
+}
+
+/** A logger call: a level on `log`, `logger`, `….logger` or `console`. */
+function isLoggerCall(call: ts.CallExpression, file: ts.SourceFile): boolean {
+	const callee = call.expression;
+	if (!ts.isPropertyAccessExpression(callee)) return false;
+	if (!["trace", "debug", "info", "warn", "error", "fatal", "log"].includes(callee.name.text)) {
+		return false;
+	}
+	return /(^|\.)(log|logger|console)$/.test(callee.expression.getText(file).replace(/\?/g, ""));
 }
 
 /** Every piece of literal error text in `source`. */
@@ -146,12 +196,15 @@ function writtenErrorText(fileName: string, source: string): Written[] {
 	collect(file);
 
 	/** The static text an expression writes, as pieces. */
-	const piecesOf = (expression: ts.Expression, seen: ReadonlySet<string> = new Set()): string[] => {
+	const piecesOf = (expression: ts.Expression, seen: ReadonlySet<string> = new Set()): Piece[] => {
 		if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
-			return [expression.text];
+			return [{ text: expression.text, whole: true }];
 		}
 		if (ts.isTemplateExpression(expression)) {
-			return [expression.head.text, ...expression.templateSpans.map((span) => span.literal.text)];
+			return [
+				expression.head.text,
+				...expression.templateSpans.map((span) => span.literal.text),
+			].map((text) => ({ text, whole: false }));
 		}
 		if (
 			ts.isParenthesizedExpression(expression) ||
@@ -165,13 +218,19 @@ function writtenErrorText(fileName: string, source: string): Written[] {
 		}
 		if (
 			ts.isBinaryExpression(expression) &&
-			[
-				ts.SyntaxKind.QuestionQuestionToken,
-				ts.SyntaxKind.BarBarToken,
-				ts.SyntaxKind.PlusToken,
-			].includes(expression.operatorToken.kind)
+			[ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken].includes(
+				expression.operatorToken.kind,
+			)
 		) {
 			return [...piecesOf(expression.left, seen), ...piecesOf(expression.right, seen)];
+		}
+		if (
+			ts.isBinaryExpression(expression) &&
+			expression.operatorToken.kind === ts.SyntaxKind.PlusToken
+		) {
+			return [...piecesOf(expression.left, seen), ...piecesOf(expression.right, seen)].map(
+				({ text }) => ({ text, whole: false }),
+			);
 		}
 		if (
 			ts.isCallExpression(expression) &&
@@ -189,7 +248,9 @@ function writtenErrorText(fileName: string, source: string): Written[] {
 
 	const written: Written[] = [];
 	const record = (kind: Kind, expression: ts.Expression, at: ts.Node): void => {
-		for (const text of piecesOf(expression)) written.push({ kind, text, line: lineOf(at) });
+		for (const { text, whole } of piecesOf(expression)) {
+			written.push({ kind, text, whole, line: lineOf(at) });
+		}
 	};
 
 	/**
@@ -198,15 +259,19 @@ function writtenErrorText(fileName: string, source: string): Written[] {
 	 */
 	const writerSites = (node: ts.Node, visit: (kind: Kind, expression: ts.Expression) => void) => {
 		const walk = (n: ts.Node): void => {
+			// A log payload is not a response.
+			if (ts.isCallExpression(n) && isLoggerCall(n, file)) return;
 			if (ts.isObjectLiteralExpression(n)) {
 				const siblings = keysOf(n);
+				const literalError = literalErrorIn(n);
 				for (const property of n.properties) {
 					if (ts.isPropertyAssignment(property)) {
 						const key = propertyName(property.name);
-						const kind = key === undefined ? undefined : kindOfProperty(key, siblings);
+						const kind =
+							key === undefined ? undefined : kindOfProperty(key, siblings, literalError);
 						if (kind !== undefined) visit(kind, property.initializer);
 					} else if (ts.isShorthandPropertyAssignment(property)) {
-						const kind = kindOfProperty(property.name.text, siblings);
+						const kind = kindOfProperty(property.name.text, siblings, literalError);
 						if (kind !== undefined) visit(kind, property.name);
 					}
 				}
@@ -274,13 +339,21 @@ function writtenErrorText(fileName: string, source: string): Written[] {
 	return written;
 }
 
-/** Whether a piece of text may be sent: `1*NQSCHAR` for a code, NQSCHARs for a description. */
-const conforms = ({ kind, text }: Written): boolean =>
-	kind === "code" ? isWellFormedErrorCode(text) : sanitizeErrorText(text) === text;
+/**
+ * Whether a piece of text may be sent: NQSCHARs, and for a code written whole
+ * `1*NQSCHAR` — non-empty. A piece of a template or a concatenation may be
+ * empty (`${prefix}_denied`'s head); the whole code is what must not be.
+ */
+const conforms = ({ kind, text, whole }: Written): boolean =>
+	kind === "code" && whole ? isWellFormedErrorCode(text) : sanitizeErrorText(text) === text;
 
-function everyPackageSource(): { file: string; source: string }[] {
-	return readdirSync(join(repoRoot, "packages")).flatMap((pkg) => {
-		const src = join(repoRoot, "packages", pkg, "src");
+/** Every package's source and the standalone template's; `create-app`'s copy is generated from it. */
+function everyShippedSource(): { file: string; source: string }[] {
+	const roots = [
+		...readdirSync(join(repoRoot, "packages")).map((pkg) => join(repoRoot, "packages", pkg, "src")),
+		join(repoRoot, "templates", "standalone", "src"),
+	];
+	return roots.flatMap((src) => {
 		try {
 			statSync(src);
 		} catch {
@@ -291,7 +364,7 @@ function everyPackageSource(): { file: string; source: string }[] {
 }
 
 describe("error text written in this repository's own words (RFC 6749 Appendix A.7, A.8)", () => {
-	const sources = everyPackageSource();
+	const sources = everyShippedSource();
 	const written = sources.flatMap(({ file, source }) =>
 		writtenErrorText(file, source).map((piece) => ({
 			...piece,
