@@ -88,10 +88,72 @@ describe("GitHub /user becomes the profile's sub", () => {
 		expect((await exchange()).sub).toBe("12345");
 	});
 
-	it("reads an id that arrives as a non-empty string as it is", async () => {
+	it("reads an id that arrives as a string of digits as it is", async () => {
 		github.user.body = { ...githubUser(), id: "12345" };
 
 		expect((await exchange()).sub).toBe("12345");
+	});
+
+	it("reads the largest safe integer id exactly", async () => {
+		github.user.raw = `{"login":"octocat","id":${Number.MAX_SAFE_INTEGER}}`;
+
+		expect((await exchange()).sub).toBe("9007199254740991");
+	});
+
+	it("reads a string id above 2^53 exactly as sent — a string is never rounded", async () => {
+		github.user.body = { ...githubUser(), id: "9007199254740993" };
+
+		expect((await exchange()).sub).toBe("9007199254740993");
+	});
+
+	// GitHub types `id` as an int64 integer. The identity handed to the Store
+	// is `github:<id>`, so an id JSON cannot carry exactly must not become one:
+	// two users would read as the same account. Each body is sent as raw JSON
+	// text so the adapter sees the number exactly as `JSON.parse` reads it.
+	it.each([
+		["zero", "0"],
+		["negative", "-12345"],
+		["a fraction", "12345.5"],
+		["above 2^53 — 9007199254740993 parses as 9007199254740992", "9007199254740993"],
+		["too large to be finite — 1e400 parses as Infinity", "1e400"],
+	])("refuses a numeric id that is %s", async (_label, idText) => {
+		github.user.raw = `{"login":"octocat","id":${idText}}`;
+
+		await expect(exchange()).rejects.toThrow(/GitHub federation "github".*without id\/sub/);
+	});
+
+	it("does not read two users above 2^53 as one", async () => {
+		// Unchecked, both of these became `github:9007199254740992`.
+		const outcome = async (idText: string): Promise<string> => {
+			github.user.raw = `{"login":"octocat","id":${idText}}`;
+			try {
+				return (await exchange()).sub;
+			} catch {
+				return "refused";
+			}
+		};
+
+		const first = await outcome("9007199254740992");
+		const second = await outcome("9007199254740993");
+
+		expect([first, second]).toEqual(["refused", "refused"]);
+	});
+
+	it.each([
+		["a leading zero", "012345"],
+		["zero", "0"],
+		["a minus sign", "-12345"],
+		["a plus sign", "+12345"],
+		["a fraction", "12345.5"],
+		["an exponent", "1e5"],
+		["surrounding whitespace", " 12345 "],
+		["letters", "octocat"],
+		["a hex prefix", "0x3039"],
+		["non-ASCII digits", "١٢٣٤٥"],
+	])("refuses a string id with %s", async (_label, id) => {
+		github.user.body = { ...githubUser(), id };
+
+		await expect(exchange()).rejects.toThrow(/GitHub federation "github".*without id\/sub/);
 	});
 
 	it.each([
