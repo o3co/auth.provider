@@ -236,7 +236,10 @@ export const createMemoryDeviceCodeStore = (
 			// would silently detach a device from the code its user is about to
 			// approve — and hand the *new* device the old one's approval.
 			if (byDeviceCode.has(input.deviceCode) || byUserCode.has(input.userCode)) {
-				throw new Error("device authorization code collision");
+				throw new DeviceCodeStoreError({
+					reason: "collision",
+					message: "device authorization code collision",
+				});
 			}
 			createsSinceSweep += 1;
 			// At most one O(n) pass per create (Copilot on #451). The amortized

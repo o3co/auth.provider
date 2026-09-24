@@ -870,12 +870,18 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		});
 		expect(res.headers["cache-control"]).toContain("no-store");
 		expect(creates).toBe(1);
+		// The projection, not the error: named, and without the command
+		// arguments (asserted on the serialised lines below). Which field holds
+		// the text is the projection's own business.
 		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({
-				err: { name: "ReplyError", detail: "ERR unknown command 'evalsha'", stack: FRAMES },
+				clientId: CONFIDENTIAL_ID,
+				err: expect.objectContaining({ name: "ReplyError" }),
 			}),
 			"device_authorization_store_unavailable",
 		);
+		const [logged] = logger.error.mock.calls[0] ?? [];
+		expect((logged as { err?: unknown } | undefined)?.err).not.toBeInstanceOf(Error);
 		expect(logger.warn).not.toHaveBeenCalledWith(
 			expect.anything(),
 			"device_authorization_code_collision",

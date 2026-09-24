@@ -250,9 +250,11 @@ export const createDeviceAuthorizationHandler = (
 		const expiresAtMs = issuedAtMs + settings.codeLifetimeSeconds * 1000;
 
 		// A collision means two live authorizations would share a code. The
-		// store refuses it rather than overwriting, and the honest response to
-		// that is to draw again — not to hand the caller an error for a
-		// condition it did not cause and cannot fix.
+		// store refuses it rather than overwriting, says so with
+		// `DeviceCodeStoreError { reason: "collision" }`, and the honest response
+		// to that is to draw again — not to hand the caller an error for a
+		// condition it did not cause and cannot fix. That reason, and only it,
+		// is retried.
 		//
 		// A full store is the other refusal, and the opposite response (#445):
 		// the store is at its cap with every record live and keeps those
@@ -261,6 +263,11 @@ export const createDeviceAuthorizationHandler = (
 		// `temporarily_unavailable` — "temporary overloading" — is exactly
 		// the condition; the per-IP guard mounted ahead of this handler
 		// bounds how often one caller can be told so.
+		//
+		// Anything else is the store failing — an outage, a timeout, a store
+		// that broke its own contract — and is answered as an outage: 503, at
+		// once, logged. Re-drawing cannot reach a store that is down, and a 500
+		// after five attempts blamed the server for it.
 		let created: { deviceCode: string; userCode: string } | null = null;
 		let lastError: unknown = null;
 		for (let attempt = 0; attempt < CODE_COLLISION_RETRIES; attempt++) {
@@ -290,6 +297,21 @@ export const createDeviceAuthorizationHandler = (
 					fail(res, 503, {
 						error: "temporarily_unavailable",
 						error_description: "no capacity for a new device authorization; retry later",
+					});
+					return;
+				}
+				if (!(err instanceof DeviceCodeStoreError && err.reason === "collision")) {
+					// At error: an outage is what an operator pages on. A warn-only
+					// logger still gets the line rather than losing it.
+					const line = { clientId: client.clientId, err: loggableError(err) };
+					if (options.logger?.error) {
+						options.logger.error(line, "device_authorization_store_unavailable");
+					} else {
+						options.logger?.warn(line, "device_authorization_store_unavailable");
+					}
+					fail(res, 503, {
+						error: "temporarily_unavailable",
+						error_description: "the device authorization store is unavailable; retry later",
 					});
 					return;
 				}

@@ -134,10 +134,13 @@ export interface DeviceCodeStore {
 	/**
 	 * Register a new pending authorization.
 	 *
-	 * @throws when `deviceCode` or `userCode` already has a live record. A
+	 * @throws `DeviceCodeStoreError` with `reason: "collision"` when
+	 * `deviceCode` or `userCode` already has a live record, writing nothing. A
 	 * collision is a generator failure, not a routine condition, and silently
 	 * overwriting would detach a device from the code its user is about to
-	 * approve.
+	 * approve. It MUST be signalled with this reason: the endpoint re-draws for
+	 * it and for nothing else, and answers any other error as a store outage
+	 * (`503`).
 	 * @throws `DeviceCodeStoreError` with `reason: "full"` when a bounded
 	 * adapter is at its cap with every resident record live (#445). An
 	 * adapter refuses rather than evicts here: what it holds is a human's

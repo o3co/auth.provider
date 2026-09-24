@@ -76,6 +76,7 @@ import {
 	type CreateDeviceAuthorizationInput,
 	type DeviceAuthorization,
 	type DeviceCodeStore,
+	DeviceCodeStoreError,
 	type DeviceDecisionOutcome,
 	type DevicePollOutcome,
 	defineModule,
@@ -204,7 +205,12 @@ export function createRedisDeviceCodeStore(opts: RedisDeviceCodeStoreOptions): D
 			// A collision here is a generator failure, not traffic. The script
 			// wrote nothing, so the device that holds the existing code keeps
 			// the approval its user is about to give.
-			if (!created) throw new Error("device authorization code collision");
+			if (!created) {
+				throw new DeviceCodeStoreError({
+					reason: "collision",
+					message: "device authorization code collision",
+				});
+			}
 		},
 
 		async findPendingByUserCode(userCode, nowMs) {
