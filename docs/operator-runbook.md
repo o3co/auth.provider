@@ -46,7 +46,7 @@ Core's own in-memory modules declare it as follows
 | `memorySessionStores` | user sessions, RP registrations, family indexes and the subject-level revocation pair — back-channel logout reaches only the replica that received it; a credential change watermarks only the replica that handled it |
 | `core-rate-limiter-memory` | rate-limit counters — every limit is multiplied by the replica count and resets on each deploy |
 | `core-access-token-denylist-memory` | access-token revocation — a revoked token keeps working on every replica that did not receive the revocation |
-| `core-replay-seen-set-memory` | single-use records — a `private_key_jwt` client assertion, the `jti` of an ID-JAG (jwt-bearer) assertion, or a consumed WebAuthn challenge (the ceremony marks it seen here) captured once can be replayed once against each replica |
+| `core-replay-seen-set-memory` | single-use records — a `private_key_jwt` client assertion, the `jti` of an ID-JAG (jwt-bearer) assertion, a consumed WebAuthn challenge (the ceremony marks it seen here) or, with DPoP enabled, a DPoP proof captured once can be replayed once against each replica |
 | `core-refresh-token-family-store-memory` | refresh-token families — rotation replay detection and cascade revoke see only this replica's history |
 | `core-challenge-store-memory` | WebAuthn challenges — a ceremony started on one replica cannot finish on another |
 | `core-webauthn-credential-store-memory` | registered passkeys — a passkey registered on one replica does not exist on the others |
@@ -57,29 +57,13 @@ Core's own in-memory modules declare it as follows
 | `core-federation-grant-intent-store-memory` | federation grant acquisition — an intent lodged on one replica is unknown to every other, so the consent page and the upstream callback answer as if the flow had expired whenever they land elsewhere, and the bound on live intents is counted per replica instead of per (client, subject). Established grants and revocations are unaffected, so this adapter beside a durable grant store is a single-replica configuration rather than a broken one |
 | `sessionStoreModule` (only with `session.storage.type = "memory"`, `SESSION_STORAGE_TYPE=memory`; #474) | the express-session store — a login served by one replica is unknown to the others, so a browser whose next request lands elsewhere is logged out, and every session is lost on restart |
 
-DPoP is not in this table, but its in-process replay store is refused under
-`multi` all the same. It keeps proofs in a replay store of its own
-(`dpopReplayStore`), not in the seen-set above, and whether that store is
-per-process depends on whether the slot is filled — which the manifest cannot
-say — so `dpopModule` declares no `replicaSafety` and applies the three states
-itself when it falls back (`packages/dpop/src/module.mts`). With DPoP enabled,
-`oauth.dpop.replay-store = "memory"` (the default) and no `dpopReplayStore`
-wired, `multi` refuses to boot
-(`replica-unsafe-adapter`, as the `cause` of `contribute-factory-failed`):
-each replica would keep its own seen set, so a DPoP proof captured once could
-be replayed once against each replica while its `iat` is within
-±`oauth.dpop.iat-window-seconds` of that replica's clock (up to 121 s at the
-default 60). Unset warns `dpop_replay_store_not_shared`; `single` is silent.
-Wire a shared store and set `oauth.dpop.replay-store = "redis"`, which makes
-the slot mandatory in every mode (`packages/dpop/README.md` "Operator
-requirements"). A store wired under `replay-store = "memory"` is used as wired
-and is not refused, and DPoP left disabled builds no store. Because the
-refusal comes from the module's factory (stage `applyContributions`), it
-follows the stage-1 guard: under `multi` with offenders from the table above
-wired, those are refused first, and the DPoP refusal appears on the next boot
-once they are fixed. The #474 rate-limit refusals come from factories in the
-same stage, so which of them and DPoP's is reported first depends on module
-order.
+DPoP keeps no store of its own: every accepted proof is recorded in the
+seen-set above (`dpop-proof:<jkt>`), so `core-replay-seen-set-memory` is what
+refuses a DPoP deployment under `multi` and names it in the unset-mode
+warning, and `redisReplaySeenSetModule` (`REPLAY_SEEN_SET_ADAPTER=redis` in the
+standalone) is what lets replicas refuse each other's proofs. With DPoP enabled
+and no seen-set wired at all, `dpopModule` refuses to boot in every mode
+(`packages/dpop/src/module.mts`); there is no per-process fallback.
 
 Three things the guard cannot do:
 
@@ -95,13 +79,10 @@ Three things the guard cannot do:
   so `multi` refuses them by name; before #455 they booted. Three more joined
   them in #474 and are refused the same way: express-session's own store under
   `SESSION_STORAGE_TYPE=memory`, and the login and WebAuthn-options rate
-  limiters when no shared `rateLimiter` is wired. DPoP's replay store fallback
-  is refused the way the rate limiters are, when DPoP is enabled and no
-  `dpopReplayStore` is wired. With the mode **unset** express-session's store
-  joins the single `replica_unsafe_adapters` warning, and the two rate limiters
-  and the DPoP replay store warn on their own (`login_rate_limiter_not_shared`,
-  `webauthn_authentication_options_rate_limiter_not_shared`,
-  `dpop_replay_store_not_shared`, [§4](#4-alerts)).
+  limiters when no shared `rateLimiter` is wired. With the mode **unset**
+  express-session's store joins the single `replica_unsafe_adapters` warning,
+  and the two rate limiters warn on their own (`login_rate_limiter_not_shared`,
+  `webauthn_authentication_options_rate_limiter_not_shared`, [§4](#4-alerts)).
 - **It does not see state inside a component you build and hand in.** The
   jwt-bearer trust registry is one: `createMemoryAssertionIssuerRegistry` lives
   inside the `assertionVerifier` you pass as a bootstrap component, not in a
@@ -112,10 +93,11 @@ Three things the guard cannot do:
   other replica. A restart does not converge them: it rebuilds the registry
   from the composition's entries, which puts the revoked issuer back on that
   replica too. Under `multi`, change the entry list and redeploy, or implement
-  `AssertionIssuerRegistry` over a shared store. The DPoP replay store is
-  another: its check asks only whether `dpopReplayStore` is filled, so a
-  per-process store handed into the slot — `createMemoryDPoPReplayStore` is
-  exported — counts as wired and boots under `multi` without a word.
+  `AssertionIssuerRegistry` over a shared store. A seen-set handed in the same
+  way is another: `createMemoryReplaySeenSet()` passed as the `replaySeenSet`
+  bootstrap component, rather than installed as `memoryReplaySeenSetModule`,
+  is per-process and boots under `multi` without a word — for every consumer
+  of the seen-set, DPoP included.
 
 In the standalone, `DEPLOYMENT_MODE=multi` therefore boots only once every
 store is on Redis: `USER_SESSION_STORES_ADAPTER=redis`,
@@ -236,7 +218,7 @@ Module-level messages that arrive wrapped in a factory failure:
   it is put back; the rotation procedure below says when a key may leave.
 - Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs a `CRITICAL` line on every boot (`packages/redis/src/federation-tokens.mts`).
 - Per-process rate-limit fallbacks under `deployment.mode = "multi"` (#474): `deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login` and the same for `POST /oauth/webauthn/authentication/options` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `rateLimiter.adapter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`).
-- DPoP replay store under `deployment.mode = "multi"`: `deployment.mode is "multi" but DPoP is enabled with no dpopReplayStore wired` — a `replica-unsafe-adapter` BootError as the `cause`. Wire a shared `dpopReplayStore` and set `oauth.dpop.replay-store = "redis"`, or set `single`. Separately, `oauth.dpop.replay-store = "redis"` with the slot empty is refused in every mode, by a message naming the slot (`packages/dpop/src/module.mts`).
+- DPoP with no seen-set: `dpopModule: oauth.dpop.enabled = true requires a replaySeenSet component`, in every `deployment.mode`. Install `memoryReplaySeenSetModule` (one replica) or `redisReplaySeenSetModule`, or leave DPoP disabled (`packages/dpop/src/module.mts`). Under `multi` the memory one is then refused by the replica-safety guard, as `core-replay-seen-set-memory`.
 - Device grant: the six refusals for `verification-uri`, the `session` slice, `rateLimit.failMode`, a `rateLimiter` component, a usable `oauth.deviceAuthorization.rateLimit` budget (#448), and — with the grant enabled — a `deviceCodeStore` component, which `oauth.deviceAuthorization.store = "unsupported"` does not stand in for (#626) (`packages/device-grant/src/module.mts`).
 - mTLS: `source = "header"` with empty `trusted-proxies`; `mode = "pki"`/`"full-pki"` with empty `trusted-cas`; `mode = "pki"` with `source = "tls-layer"`; `full-pki` without `revocation.mode` + `on-unavailable`; `revocation.mode` ∈ `"crl"` / `"ocsp"` / `"both"` with empty `allowed-hosts` (`packages/mtls/README.md` "Boot-time fail-loud invariants", `packages/mtls/src/module.mts`).
 - Remote signing: `the signer's output does not verify against publicKeyPem for kid "…"` — the boot self-check in `createRemoteSigningKeyStore` (`packages/core/src/keys/remoteSigning.mts`).
@@ -620,7 +602,6 @@ stream — its level is fixed at `info`.
 | --- | --- | --- |
 | `replica_unsafe_adapters` (warn) | `core/src/boot/replica-safety.mts` | `deployment.mode` is unset; set it |
 | `login_rate_limiter_not_shared`, `webauthn_authentication_options_rate_limiter_not_shared` (warn) | `session/src/routes/Session.mts`, `webauthn/src/module.mts` | no shared `rateLimiter` and `deployment.mode` unset; the guard is per-process (`"multi"` refuses boot instead, `"single"` is silent — #474) |
-| `dpop_replay_store_not_shared` (warn) | `dpop/src/module.mts` | DPoP is enabled under `oauth.dpop.replay-store = "memory"` (the default) with no `dpopReplayStore` wired and `deployment.mode` unset; replay protection is per-process, so a proof can be replayed once against each replica (`"multi"` refuses boot instead, `"single"` is silent) |
 | `pkce_config_ignored_s256_is_mandatory` (warn) | `oauth/src/grants/pkce.mts` | a retired PKCE key (or `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) is still set; delete it |
 | `jwt_verify_aud_skipped`, `jwt_verify_iss_skipped` (warn, once per logger) | `core/src/jwt/verify.mts` | a verification surface is not pinning `aud`/`iss` |
 | `jwt_verify_legacy_typ` (warn) | `core/src/jwt/verify.mts` | `OAUTH_JWT_LEGACY_TYP_ACCEPT=true` is admitting typ-less tokens; close the window |
@@ -723,8 +704,7 @@ can share a database (`REDIS_SESSION_STORES_KEY_PREFIX`,
 | `ft:<sid>:<federation>` | string, AES-256-GCM-encrypted envelope | `redisFederationTokenStore.ttl` (default 86400 s) — the store lifetime, deliberately **not** the upstream access token's expiry | `packages/redis/src/federation-tokens.mts` |
 | `ft:idx:<sid>` | set of federation names | same, raised with each write | same |
 | `ft:lock:<sid>:<federation>` | string, advisory lock token | the lock's own | `packages/redis/src/internal/lock.mts` |
-| `chal:…`, `replay:…` | strings `"1"` | the challenge / replay window, `SET … PX … NX` | `packages/redis/src/challenges.mts`, `replay-seen-set.mts` |
-| `dpop:replay:<jkt>:<jti>` | string `"1"` | the proof's `ttlSeconds` | `packages/redis/src/dpop-replay-store.mts` |
+| `chal:…`, `replay:…` | strings `"1"` | the challenge / replay window, `SET … PX … NX`. A DPoP proof's record is `replay:<len>:dpop-proof:<jkt>\|<len>:<jti>`, kept `oauth.dpop.replay-store-ttl-seconds` (default 300 s) | `packages/redis/src/challenges.mts`, `replay-seen-set.mts`, `packages/dpop/src/verifier.mts` |
 | `consent:rec:<len>:<sub>\|<len>:<clientId>` | hash `{scopes (JSON array), grantedAt, expiresAt?}` | **none** for a consent recorded until revoked — which is what `POST /oauth/consent` writes; for a record carrying `expiresAt`, that expiry plus 5 minutes' slack (`CONSENT_EXPIRY_SLACK_MS`). Expiry is judged by `expiresAt` on the reading replica's clock; the TTL only reclaims records nobody reads again | `packages/redis/src/consent-store.mts`, `ioredis.mts` (`LUA_CONSENT_GRANT`) |
 | `consent:{pending}:ch:<challenge>` | hash `{record (JSON), sessionId, expiresAt}` | the parked request's `expiresAt` (10 minutes, `PENDING_CONSENT_TTL_MS`) plus the same slack; consumed with its index entry in one script | `packages/redis/src/consent-store.mts`, `ioredis.mts` (`LUA_PENDING_CONSENT_*`) |
 | `consent:{pending}:sess:<sessionId>` | sorted set of challenges, score = the order they were parked | raised to its longest-lived member's; at most `PENDING_CONSENT_PER_SESSION_LIMIT` (16) members, the first-parked evicted past it. `{pending}` is a Cluster hash tag: every parked request shares one slot | same |
@@ -989,6 +969,7 @@ before you flip — and a relying party holding the secret can also mint.
    | --- | --- | --- |
    | `oauth.refreshToken.legacyTokenCompat` | removed | `oauth.refreshToken.legacyTokenCompat was removed in v0.6.0 (Phase G / M4); see CHANGELOG.` |
    | `oauth.authorize.allowUnmarkedClients` (and the env tombstone `OAUTH_AUTHORIZE_ALLOW_UNMARKED_CLIENTS`, any value) | removed | boot error with migration instructions: mark every client `firstParty: true`, then delete the key and the variable |
+   | `oauth.dpop.replay-store` (any value) | removed | `oauth.dpop.replay-store was removed in …`: DPoP records its proofs in the `replaySeenSet` component, whose module chooses the backend (`replaySeenSet.adapter` in the standalone); delete the key. A `dpopReplayStore` bootstrap component is no longer read either |
    | `oauth.refreshToken.legacyRtPolicy = "accept-with-warning"` | enum shrunk to `"reject"` | Zod `invalid_enum_value` naming the survivors |
    | flat `oauth.jwt.algorithm` / `kid` / `secret` / key fields | moved | `oauth.jwt has legacy flat fields (…). Migrate to nested shape: oauth.jwt.signingKey.local.<field>` |
    | `oauth.grants.authorization_code.pkce.*` (and `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) | warn and ignore | one `pkce_config_ignored_s256_is_mandatory` line; S256 is mandatory regardless (`packages/oauth/src/grants/pkce.mts`) |
