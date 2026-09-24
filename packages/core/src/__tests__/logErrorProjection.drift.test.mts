@@ -28,8 +28,11 @@
  * never the error, nor anything read off it.
  *
  * What it flags, per file: a name bound as a caught error — `catch (x)`,
- * `.catch((x) => …)` / `.catch(x => …)` / `.catch(function (x) …)`, and
- * `.on("error", (x) => …)` / `.once(…)` — used anywhere in the arguments of
+ * `.catch((x) => …)` / `.catch(x => …)` / `.catch(function (x) …)`,
+ * `.on("error", (x) => …)` / `.once(…)`, the error-named first parameter of
+ * a callback passed as an argument (node-style: `save((err) => …)`,
+ * `get(key, function (err, value) …)`), and an error-named value awaited
+ * from a helper (`const consumeErr = await …`) — used anywhere in the arguments of
  * a logger call (`log.`, `logger.`, `….logger.` with a level or `child`;
  * `console.`) other than as an object key, as the argument of
  * `loggableError(...)`, or as another object's field (`result.err`); inside
@@ -37,10 +40,11 @@
  * a policy's `error` code — is not flagged.
  *
  * What it does not see (known holes, left to review):
- * - an error that reaches a log call under a name no `catch` / `.catch` /
- *   `.on("error")` bound in that file: a node-style callback parameter
- *   (`session.save((err) => …)`), a re-bound value (`const failure = err`),
- *   an `allSettled` result's `reason`, a helper's parameter that it logs;
+ * - an error that reaches a log call under a name none of those bound in
+ *   that file: a callback parameter or an awaited value not named like an
+ *   error (`(failure) => …`, `const outcome = await …`), a re-bound value
+ *   (`const failure = err`), an `allSettled` result's `reason`, a helper's
+ *   parameter that it logs;
  * - an error flattened into a value before the call (`const reason =
  *   err.message`, then `{ reason }`);
  * - a logger reached some other way (a destructured `warn`, `logger[level]`),
@@ -72,17 +76,33 @@ const LOGGER_CALL =
 
 const IDENTIFIER = "[A-Za-z_$][\\w$]*";
 
-/** Where a caught error is bound: `catch (x)`, `.catch(…x…)`, `.on("error", …x…)`. */
+/** A name that reads as an error: what a node-style callback or an awaited helper's result is called. */
+const ERROR_NAME = "(?:err|error|e|[a-z][A-Za-z]*Err|[a-z][A-Za-z]*Error)";
+
+/**
+ * Where a caught error is bound: `catch (x)`, `.catch(…x…)`,
+ * `.on("error", …x…)`; the error-named first parameter of a callback passed
+ * as an argument — node-style, `save((err) => …)`, `get(key, function (err,
+ * value) …)`, `save(err => …)`; and an error-named value awaited from a
+ * helper — `const consumeErr = await …`, which is also what a promise
+ * wrapping a node-style callback resolves.
+ */
 const CATCH_BINDINGS = [
 	new RegExp(String.raw`\bcatch\s*\(\s*(?:async\s*)?\(?\s*(${IDENTIFIER})\s*[):,=]`, "g"),
 	new RegExp(
-		String.raw`\.catch\(\s*(?:async\s+)?function\s*${IDENTIFIER}?\s*\(\s*(${IDENTIFIER})`,
+		String.raw`\.catch\(\s*(?:async\s+)?function\s*(?:${IDENTIFIER})?\s*\(\s*(${IDENTIFIER})`,
 		"g",
 	),
 	new RegExp(
-		String.raw`\.(?:on|once)\(\s*["'\x60]error["'\x60]\s*,\s*(?:async\s*)?(?:function\s*${IDENTIFIER}?\s*)?\(?\s*(${IDENTIFIER})`,
+		String.raw`\.(?:on|once)\(\s*["'\x60]error["'\x60]\s*,\s*(?:async\s*)?(?:function\s*(?:${IDENTIFIER})?\s*)?\(?\s*(${IDENTIFIER})`,
 		"g",
 	),
+	new RegExp(
+		String.raw`[(,]\s*(?:async\s+)?(?:function\s*(?:${IDENTIFIER})?\s*)?\(\s*(${ERROR_NAME})\s*(?::[^,)]*)?[,)]`,
+		"g",
+	),
+	new RegExp(String.raw`[(,]\s*(?:async\s+)?(${ERROR_NAME})\s*=>`, "g"),
+	/\b(?:const|let)\s+([a-z][\w$]*(?:Err|Error))\s*(?::[^=]*)?=\s*await\b/g,
 ];
 
 /** Every name the file binds as a caught error. */
