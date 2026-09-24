@@ -74,6 +74,7 @@ const app = await createApp({
         memoryChallengeStoreModule,
         defaultChallengeCeremonyModule,
         memoryReplaySeenSetModule,
+        grantPolicyModule,                     // required — see SECURITY — scope authorization
         // ... rest of your auth-provider stack (oauthAuthorizationModule, keyStore, etc.)
     ],
     bootstrapComponents: { /* keystore, userRepository, clientRepository, ... */ },
@@ -188,6 +189,26 @@ The webauthn grant has **no library-side `allowedScopes` ceiling**. Client crede
 `grantPolicy` is the **only scope-bounding gate** for this grant. Policy invocation is unconditional whenever `grantPolicy` is wired — it is NOT gated on `oauth.resourceIndicator.enabled` (that flag controls only whether `body.resource` is forwarded to the policy). This mirrors the `refresh_token` grant pattern.
 
 **`grantPolicy` is REQUIRED at boot.** Wiring `webauthnModule` without a `grantPolicy` slot fails fast at `createApp(...)` with a clear error. There is no silent-allow-all path. Deployments that intentionally accept unbounded scope (NOT recommended for production) must wire an explicit no-op policy returning `{ outcome: "allow" }` — making the choice visible in the composition root.
+
+**The policy is yours to write.** No package ships a `GrantPolicyHook`; the interface is exported by `@o3co/auth-provider-core` (defined in core's [`src/policy/types.mts`](../core/src/policy/types.mts)). Fill the `grantPolicy` component slot with your implementation, from a module or from `createApp`'s `bootstrapComponents`:
+
+```ts
+import { defineModule, type GrantPolicyHook } from "@o3co/auth-provider-core";
+
+const grantPolicy: GrantPolicyHook = {
+    kind: "my-policy",
+    async evaluate(request) {
+        // request.grantType, request.subject, request.requestedScope, request.resource, ...
+        return { outcome: "allow", grantedScope: scopesFor(request.subject, request.requestedScope) };
+    },
+};
+
+const grantPolicyModule = defineModule({
+    name: "my-grant-policy",
+    provides: { grantPolicy: () => grantPolicy },
+});
+// or: createApp({ modules, bootstrapComponents: { config, pathResolver, grantPolicy } })
+```
 
 ## SECURITY — refresh-token issuance
 

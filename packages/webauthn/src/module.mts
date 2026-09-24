@@ -152,16 +152,22 @@ export const webauthnModule = defineModule<
 				// (no client → no client.allowedScopes); grantPolicy is the sole
 				// scope gate. Booting without it silently accepts unbounded scope.
 				if (!deps.grantPolicy) {
+					// No package ships a GrantPolicyHook: the policy is the deployment's
+					// own, so the message says how to fill the slot rather than what to
+					// install.
 					throw new Error(
 						"webauthn grant requires `grantPolicy` to be wired. " +
 							"Unlike client_credentials (client.allowedScopes ceiling) and " +
 							"authorization_code (narrowed at /authorize), the webauthn grant " +
 							"has no library-side scope ceiling — without grantPolicy the grant " +
-							"issues whatever scope the caller requests. Wire a GrantPolicyHook " +
-							"via @o3co/auth-provider-policy or your own implementation. If you " +
+							"issues whatever scope the caller requests. Implement a " +
+							"GrantPolicyHook (the interface is exported by @o3co/auth-provider-core; " +
+							"no package ships one) and fill the `grantPolicy` component slot with it: " +
+							"from a module, `defineModule({ name, provides: { grantPolicy: () => hook } })`, " +
+							"or `createApp({ bootstrapComponents: { grantPolicy: hook, ... } })`. If you " +
 							"intentionally accept unbounded scope (NOT recommended for " +
-							"production), wire a no-op policy returning { outcome: 'allow' }. " +
-							"See packages/webauthn/README.md SECURITY — scope authorization.",
+							"production), provide a policy whose evaluate returns { outcome: 'allow' }. " +
+							"See the @o3co/auth-provider-webauthn README, SECURITY — scope authorization.",
 					);
 				}
 				return createWebAuthnGrant({

@@ -325,6 +325,32 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 		expect(message).toContain("GrantPolicyHook");
 	});
 
+	it("H-2 fail-fast: the second way the refusal names — bootstrapComponents.grantPolicy — boots", async () => {
+		// The first (`provides`) is how every other test here wires the policy.
+		const policy: GrantPolicyHook = {
+			kind: "test-bootstrap-policy",
+			evaluate: async () => ({ outcome: "allow" }) as const,
+		};
+		const handle = await createApp({
+			modules: [
+				webauthnModule,
+				webauthnConfigModule,
+				keyStoreModule,
+				memoryChallengeStoreModule,
+				memoryReplaySeenSetModule,
+				defaultChallengeCeremonyModule,
+				memoryWebAuthnCredentialStoreModule,
+				activatorModule,
+			],
+			bootstrapComponents: { ...(minBoot as object), grantPolicy: policy } as never,
+		});
+		const resolver = (handle.components as Record<string, unknown>).grantHandlerResolver as
+			| GrantHandlerResolver
+			| undefined;
+		expect(resolver?.get(WEBAUTHN_GRANT_TYPE)).toBeDefined();
+		await handle.dispose();
+	});
+
 	/**
 	 * C1 regression — grantPolicy bypass (Codex P1 / PR #172 security fix).
 	 *
