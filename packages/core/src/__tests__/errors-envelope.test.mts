@@ -14,13 +14,13 @@
  * limitations under the License.
  */
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	auditErrorText,
 	errorEnvelope,
 	isWellFormedErrorCode,
 	sanitizeErrorText,
-} from "../errors/envelope.mjs";
+} from "#/errors/envelope.mjs";
 
 describe("AS-1/AS-2 errorEnvelope helper (RFC 6749 §5.2)", () => {
 	it("includes error_description and error_uri when provided", () => {
@@ -58,6 +58,55 @@ describe("AS-1/AS-2 errorEnvelope helper (RFC 6749 §5.2)", () => {
 		expect(e).toEqual({ error: "rate_limited" });
 		expect(e).not.toHaveProperty("error_description");
 		expect(e).not.toHaveProperty("error_uri");
+	});
+
+	// The rule lives in the envelope, so every writer that goes through it —
+	// core's middleware, the session routes, a contributed module — conforms
+	// without having to remember to.
+	describe("RFC 6749 characters (Appendix A.7, A.8)", () => {
+		afterEach(() => {
+			vi.restoreAllMocks();
+		});
+
+		it("replaces every description character outside 1*NQSCHAR with '?'", () => {
+			expect(errorEnvelope("rate_limited", 'quota "exceeded" \\ §3 — café\r\n')).toEqual({
+				error: "rate_limited",
+				error_description: "quota ?exceeded? ? ?3 ? caf???",
+			});
+		});
+
+		it("omits a description that is not a string rather than coercing it", () => {
+			// A JavaScript caller — a limiter adapter, a mechanism — can pass
+			// anything; `{}` on the wire is not a description.
+			const e = errorEnvelope("rate_limited", { toString: () => "x" } as unknown as string);
+			expect(e).toEqual({ error: "rate_limited" });
+		});
+
+		it("answers a malformed code as server_error, and logs the code it replaced", () => {
+			// The code came from server-side code, never from the client, so the
+			// fault is the server's: `server_error` is the one code that is true
+			// whatever status the caller answers with.
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const e = errorEnvelope('bad "code"', "refused");
+			expect(e).toEqual({ error: "server_error", error_description: "refused" });
+			expect(warn).toHaveBeenCalledWith({ error: "bad ?code?" }, "error_envelope_code_malformed");
+		});
+
+		it.each([
+			["the empty string", ""],
+			["non-ASCII", "dény"],
+			["a line break", "deny\r\n"],
+			["a non-string", 42 as unknown as string],
+		])("answers %s as a code with server_error", (_label, code) => {
+			vi.spyOn(console, "warn").mockImplementation(() => {});
+			expect(errorEnvelope(code).error).toBe("server_error");
+		});
+
+		it("does not log a well-formed code", () => {
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+			errorEnvelope("invalid_request", "fine");
+			expect(warn).not.toHaveBeenCalled();
+		});
 	});
 });
 

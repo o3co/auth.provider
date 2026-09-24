@@ -19,6 +19,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createMfaProviderFactory } from "#/mfa/factory.mjs";
 import { createMfaRouter } from "#/mfa/route.mjs";
+import type { MfaVerifyResult } from "#/mfa/types.mjs";
 import { createInMemoryTransactionStore, createTestMfaProvider } from "./fixtures.mjs";
 
 describe("/auth/mfa/verify", () => {
@@ -111,6 +112,51 @@ describe("/auth/mfa/verify", () => {
 			.send({ transaction_id: "tx-retry", proof: { code: "wrong" } });
 		expect(res.status).toBe(401);
 		expect(await store.get("tx-retry")).not.toBeNull();
+	});
+
+	// RFC 6749 Appendix A.8: the description is 1*NQSCHAR. `failureReason` is
+	// the provider's — an adapter a deployment writes, in JavaScript if it
+	// likes — so the route holds it to that set and falls back to `invalid`
+	// for a reason that is not a string.
+	it.each([
+		["a reason outside RFC 6749's set", 'locked "30s" — réessayez', "locked ?30s? ? r?essayez"],
+		["a reason that is not a string", { toString: () => "locked" }, "invalid"],
+	])("sends %s inside RFC 6749's set", async (_label, failureReason, expected) => {
+		const factory = createMfaProviderFactory();
+		factory.register("totp", () =>
+			createTestMfaProvider({
+				kind: "totp",
+				onVerify: async () => ({ success: false, failureReason }) as unknown as MfaVerifyResult,
+			}),
+		);
+		const store = createInMemoryTransactionStore();
+		await store.set({
+			transactionId: "tx-reason",
+			flow: "login",
+			subject: "user-x",
+			providerKind: "totp",
+			challengeId: "ch-x",
+			expiresAt: new Date(Date.now() + 60_000),
+			resumeState: { flow: "login" },
+		});
+
+		const app = express();
+		app.use(express.json());
+		app.use(
+			createMfaRouter(express as unknown as { Router: () => express.Router }, {
+				providerFactory: factory,
+				transactionStore: store,
+				onAuthorizeResume: async () => {},
+				onFederationResume: async () => {},
+				onLoginResume: async () => {},
+			}),
+		);
+
+		const res = await request(app)
+			.post("/auth/mfa/verify")
+			.send({ transaction_id: "tx-reason", proof: { code: "wrong" } });
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({ error: "mfa_failed", error_description: expected });
 	});
 
 	it("rejects expired transaction even when store returns it (S-3)", async () => {
