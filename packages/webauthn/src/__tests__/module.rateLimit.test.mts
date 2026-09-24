@@ -308,6 +308,96 @@ describe("webauthn authentication/options rate limit — the configured budget o
 	});
 });
 
+describe("webauthn authentication/options rate limit — the slot and the seeded key", () => {
+	/**
+	 * A shared limiter applies the budget its module seeded from the app
+	 * config's `webauthn.rateLimit.authenticationOptions`; the route's
+	 * per-process fallback and its headers read the `webauthnConfig` slot. A
+	 * composition that hard-codes the slot (`webauthnConfigSchema.parse({…})`)
+	 * without the config key had the route run on the limiter's default, and
+	 * one whose key differs from the slot had the limiter apply the key. Boot
+	 * says so, once, naming both values and the key to set.
+	 */
+	const EVENT = "webauthn_authentication_options_budget_mismatch";
+	const sharedLimiter = () =>
+		defineModule({
+			name: "test:webauthn-rl-shared",
+			provides: {
+				rateLimiter: () =>
+					createMemoryRateLimiter({ limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } }),
+			},
+		});
+	const withLogger = (logger: Logger) =>
+		defineModule({ name: "test:webauthn-rl-mismatch-logger", provides: { logger: () => logger } });
+	const mismatchCalls = (logger: ReturnType<typeof spyLogger>) =>
+		logger.warn.mock.calls.filter((call) => call[1] === EVENT);
+
+	it("warns when a shared limiter is wired and the config does not give the key", async () => {
+		const logger = spyLogger();
+		const { handle } = await bootApp(makeWebAuthnConfig(2), [withLogger(logger), sharedLimiter()]);
+
+		expect(mismatchCalls(logger)).toEqual([
+			[
+				{
+					key: "webauthn.rateLimit.authenticationOptions",
+					configured: null,
+					webauthnConfig: { limit: 2, windowSeconds: 60 },
+				},
+				EVENT,
+			],
+		]);
+		await handle.dispose();
+	});
+
+	it("warns when the config's key differs from the slot, naming both", async () => {
+		const logger = spyLogger();
+		const { handle } = await bootApp(
+			makeWebAuthnConfig(2),
+			[withLogger(logger), sharedLimiter()],
+			undefined,
+			undefined,
+			{ webauthn: { rateLimit: { authenticationOptions: { limit: 5, windowSeconds: 60 } } } },
+		);
+
+		expect(mismatchCalls(logger)).toEqual([
+			[
+				{
+					key: "webauthn.rateLimit.authenticationOptions",
+					configured: { limit: 5, windowSeconds: 60 },
+					webauthnConfig: { limit: 2, windowSeconds: 60 },
+				},
+				EVENT,
+			],
+		]);
+		await handle.dispose();
+	});
+
+	it("is silent when the key and the slot agree, the key as the strings HOCON substitutes included", async () => {
+		for (const authenticationOptions of [
+			{ limit: 2, windowSeconds: 60 },
+			{ limit: "2", windowSeconds: "60" },
+		]) {
+			const logger = spyLogger();
+			const { handle } = await bootApp(
+				makeWebAuthnConfig(2),
+				[withLogger(logger), sharedLimiter()],
+				undefined,
+				undefined,
+				{ webauthn: { rateLimit: { authenticationOptions } } },
+			);
+			expect(mismatchCalls(logger), JSON.stringify(authenticationOptions)).toEqual([]);
+			await handle.dispose();
+		}
+	});
+
+	it("is silent when no shared limiter is wired: the fallback is built from the slot", async () => {
+		const logger = spyLogger();
+		const { handle } = await bootApp(makeWebAuthnConfig(2), [withLogger(logger)]);
+		expect(mismatchCalls(logger)).toEqual([]);
+		await handle.dispose();
+	});
+});
+
 describe("webauthn authentication/options rate limit (#281) — mandatory fallback", () => {
 	it("still throttles when no `rateLimiter` component is wired", async () => {
 		const { handle, app } = await bootApp(makeWebAuthnConfig(2), []);
