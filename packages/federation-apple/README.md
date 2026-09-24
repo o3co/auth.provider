@@ -196,8 +196,8 @@ runs on every token exchange.
 
 If you already produce the secret elsewhere, pass `clientSecret` instead —
 either a string or a resolver (`() => string | Promise<string>`), the
-`FederationClientSecret` form, which this adapter resolves with the session
-package's `resolveClientSecret` on every token request. Supply **one** of the two: both is ambiguous and neither is
+`FederationClientSecret` form, which this adapter resolves with core's
+`resolveClientSecret` on every token request. Supply **one** of the two: both is ambiguous and neither is
 unconfigured, and either fails at boot.
 
 ```ts

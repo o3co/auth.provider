@@ -6,15 +6,17 @@ The federation adapter port: what an upstream-IdP adapter implements, and what e
 
 ## Responsibility
 
-This directory owns the contract an adapter implements — `FederationProvider` and `FederationProfile`, and the optional capabilities `SupportsLogout`, `SupportsClaimMapping`, `SupportsRefresh` and `SupportsDelegatedAuthorization` with their request and result types and one guard each — and the rules the federation paths share: the reserved-parameter and identity-claim policy a delegated authorization is held to, the response-mode vocabulary (`query` / `form_post`), RFC 6749 §3.3's scope grammar, and what an upstream token may be handed on as (RFC 6749 `token_type`). None of it holds state.
+This directory owns the contract an adapter implements — `FederationProvider` and `FederationProfile`, and the optional capabilities `SupportsLogout`, `SupportsClaimMapping`, `SupportsRefresh` and `SupportsDelegatedAuthorization` with their request and result types and one guard each — and the rules the federation paths share: the reserved-parameter and identity-claim policy a delegated authorization is held to, the response-mode vocabulary (`query` / `form_post`), RFC 6749 §3.3's scope grammar, and what an upstream token may be handed on as (RFC 6749 `token_type`). It also owns the adapter toolkit — the pure helpers every adapter builds its upstream requests with: the PKCE S256 challenge, the URL an adapter's library exchanges the code at, and a `client_secret` that may be computed per request. None of it holds state.
 
 **Why it is separate, and why in core.** Three packages meet at this contract: `@o3co/auth-provider-session` drives an adapter from its router, `@o3co/auth-provider-oauth` reads providers off the `federationProviders` slot, and `@o3co/auth-provider-federation-grants` delegates through the capability; four adapter packages implement it. They do not all depend on one another — `session` and `oauth` are independent, `federation-grants` depends on `oauth` but not on `session`, and the adapters depend on `session` — so core is the one place all of them already depend on, and the type a federation is registered with is therefore the type its consumer reads. It is a directory of its own because it is the adapter's side of the line: no store, no route, no grant record.
+
+**Why the toolkit is here.** An adapter is its only caller — the session router uses none of it — and this contract already tells adapters to use it; core is the package every adapter depends on anyway.
 
 **What is not here.** The router, the redirect policy it feeds and `FederationResult` stay in `@o3co/auth-provider-session`; nothing outside that package answers with one. The adapters themselves are their own packages. Core implements no federation. The upstream tokens a session holds are [`../federation-tokens/`](../README.md#federation-tokens); a grant that outlives the session is [`../federation-grants/`](../federation-grants/README.md).
 
 ## Public contract
 
-- The contract is [`types.mts`](./types.mts); the response-mode vocabulary is [`response-mode.mts`](./response-mode.mts), the scope grammar [`scope.mts`](./scope.mts), the token-type rule [`token-type.mts`](./token-type.mts). Everything here is exported from the package root.
+- The contract is [`types.mts`](./types.mts); the response-mode vocabulary is [`response-mode.mts`](./response-mode.mts), the scope grammar [`scope.mts`](./scope.mts), the token-type rule [`token-type.mts`](./token-type.mts). The adapter toolkit is `codeChallenge` ([`pkce.mts`](./pkce.mts)), `callbackUrlForExchange` ([`callback-url.mts`](./callback-url.mts)) and `FederationClientSecret` / `resolveClientSecret` ([`client-secret.mts`](./client-secret.mts)). Everything here is exported from the package root.
 - `FederationProvider` is also the value type of the `federations` contribution kind ([`../modules/manifest/contributes-map.mts`](../modules/manifest/contributes-map.mts)) and of the `federationProviders` slot ([`../modules/manifest/synthetic-keys.mts`](../modules/manifest/synthetic-keys.mts)) — one type.
 - A contribution factory may answer with the value or a promise of it (`Contributed<T>`): `applyContributions` awaits it, which is what lets an adapter discover issuer metadata at boot.
 
@@ -26,7 +28,7 @@ This directory owns the contract an adapter implements — `FederationProvider` 
 
 ## Dependencies
 
-- Inside the directory, the contract and the response-mode vocabulary refer to each other, type-only in both directions. The token-type rule uses `node:net` (`isIPv6`, for the inside of an IP-literal) and nothing in core. Nothing else: no store, no config, no logger.
+- Inside the directory, the contract and the response-mode vocabulary refer to each other, type-only in both directions. The token-type rule uses `node:net` (`isIPv6`, for the inside of an IP-literal) and `codeChallenge` uses `node:crypto` (SHA-256); neither uses anything in core. Nothing else: no store, no config, no logger.
 - Depended on inside core by `modules/manifest/` (the contribution type, which is how the synthetic `federationProviders` slot and `boot/` reach it), `federation-grants/` and the package root; outside core, by the session router, `oauth`'s logout and federation-token routes, `federation-grants` and the four adapters.
 
 ## Invariants
@@ -39,10 +41,12 @@ This directory owns the contract an adapter implements — `FederationProvider` 
 6. **What the capability answers is what the retrieval consumes.** `SupportsDelegatedAuthorization.refreshDelegatedToken` and `FederationGrantRefresher.refreshDelegatedToken` both answer with the one `DelegatedTokens` type, so an adapter with the capability is a refresher the retrieval can use — [`delegated-authorization-types.test.mts`](./__tests__/delegated-authorization-types.test.mts).
 7. **A provider has `name`, `scope`, `buildAuthorizationUrl` and `exchangeCode`, and no redirect method** (`validateRedirect`, `resolveCallbackRedirect`): the redirect policy is the session router's — [`federation-provider-slim.test.mts`](./__tests__/federation-provider-slim.test.mts).
 8. **The contribution type is this contract**, and a module contributing a federation without the methods does not compile — [`../__tests__/contributes-map-substitution.test.mts`](../__tests__/contributes-map-substitution.test.mts).
+9. **The code-exchange URL carries `code`, the callback's RFC 9207 `iss`, and nothing else from the callback.** An `iss` already on the registered redirect URI is dropped when the callback carried none, so configuration cannot answer for the response — [`callback-url.test.mts`](./__tests__/callback-url.test.mts).
+10. **A client secret is resolved on every token request and never cached here**; an empty or non-string one is refused locally rather than posted upstream — [`client-secret.test.mts`](./__tests__/client-secret.test.mts). The S256 challenge is [`pkce.test.mts`](./__tests__/pkce.test.mts).
 
 ## Failure and lifecycle
 
-- Nothing here throws, holds state or has a lifetime: the guards are predicates, the policy helpers are pure, and `resolveFederationResponseMode` reads one field. An adapter's own failures are its package's business; what a delegated retrieval does with a malformed answer is [`../federation-grants/`](../federation-grants/README.md).
+- Nothing here holds state or has a lifetime: the guards are predicates, the policy helpers are pure, and `resolveFederationResponseMode` reads one field. The one throw is `resolveClientSecret` refusing a secret it would otherwise post upstream. An adapter's own failures are its package's business; what a delegated retrieval does with a malformed answer is [`../federation-grants/`](../federation-grants/README.md).
 
 ## Contract tests
 

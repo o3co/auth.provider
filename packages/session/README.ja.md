@@ -2,14 +2,14 @@
 
 最終更新: 2026-09-24
 
-[auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージが土台にするヘルパー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
+[auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージがプロバイダーと並べて contribute するリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
 ## 責務と役割
 
 **役割。** 認証のブラウザ側の半分。このパッケージが使うポート（`UserRepository`、`UserSessionStore`、`FederationTokenStore`、`SessionFederationIndex`、フェデレーションアダプター契約）は core が持ち、core はルートを一つも実装しない。このパッケージはそれらのポートをブラウザ向けに駆動するドライバーである。責務は三つ:
 
 1. **`/session` ルート** — `sessionModule`。パスワードログイン、ログアウト、CSRF トークンのルート、フェデレーションの開始ルートとコールバックルート。パスワード検証または上流 IdP の応答を `UserSession` レコードと認証済みの express session に変え、ログアウトでそれを取り消す。
-2. **フェデレーションアダプターのツールキット** — すべてのアダプターが一つの規則に従うよう、アダプターパッケージが import するもの: `codeChallenge`（PKCE S256）、`callbackUrlForExchange`（RFC 9207 `iss` の規則）、`FederationClientSecret` / `resolveClientSecret`、`createFederationRedirectPolicy` とその元になる許可リストの規則、`extractFederationSection`。
+2. **フェデレーションアダプターのツールキット** — アダプターパッケージが、自分が差し込まれるルーターから import するもの: `createFederationRedirectPolicy` とその元になる許可リストの規則、`extractFederationSection`。アダプターが上流への要求を組み立てるヘルパー — `codeChallenge`、`callbackUrlForExchange`、`FederationClientSecret` / `resolveClientSecret` — は core のもの。
 3. **ブラウザセッションストア** — `sessionStoreModule` / `sessionStoreModuleFor` と `createSessionStoreFactory` / `registerBuiltinSessionStores`。express-session ミドルウェア、その cookie、そのストア（memory、または `connect-redis` 経由の Redis）。
 
 **持つもの:**
@@ -21,7 +21,7 @@
 
 **持たないもの:**
 
-- フェデレーションアダプター契約 — `FederationProvider`、`FederationProfile`、各 capability — は core のもの（[`core/src/federations`](../core/src/federations/README.md)）。
+- フェデレーションアダプター契約 — `FederationProvider`、`FederationProfile`、各 capability — と、アダプターが要求を組み立てる純粋関数のヘルパー（`codeChallenge`、`callbackUrlForExchange`、`resolveClientSecret`）は core のもの（[`core/src/federations`](../core/src/federations/README.md)）。
 - アダプター自体: [`federation-google`](../federation-google/README.md)、[`federation-github`](../federation-github/README.md)、[`federation-apple`](../federation-apple/README.md)、[`federation-oidc`](../federation-oidc/README.md)。
 - 書き込むストア（core のポート。memory アダプターは core、Redis アダプターは [`@o3co/auth-provider-redis`](../redis/README.md)）と、ユーザーが誰か（`UserRepository` の背後の Store。例: [`@o3co/auth-provider-foundation`](../foundation/README.ja.md)）。
 - トークン発行、`POST /oauth/logout` のカスケード、上流ログアウト（`SupportsLogout`）、フェデレーショントークンのリフレッシュ（`SupportsRefresh`） — [`@o3co/auth-provider-oauth`](../oauth/README.ja.md)。
@@ -32,7 +32,7 @@
 
 **三つが同居する理由。** 他の二つはどちらもルートのために存在する。
 
-- ツールキット: リダイレクトポリシーはこのパッケージが宣言しルーターが消費する contribution 種別であり、`extractFederationSection` はルーターがコールバック URL を読むのと同じ設定の形を読む。純粋関数のヘルパー — `codeChallenge`、`callbackUrlForExchange`、client secret のリゾルバー — はこのパッケージの何にも依存せず、core の契約はそのうち二つを使うようアダプターに既に指示している。これらがここにあるのはルーターとアダプターが共有するからであり、それがすべてのアダプターパッケージがこのパッケージを peer dependency に取る理由である。
+- ツールキット: リダイレクトポリシーはこのパッケージが宣言しルーターが消費する contribution 種別であり、`extractFederationSection` はルーターがコールバック URL を読むのと同じ設定の形を読む。どちらもルーターのものであり、それがすべてのアダプターパッケージがこのパッケージを peer dependency に取る理由である。要求を組み立てる純粋関数のヘルパーはここにはない: ルーターはそのどれも使わないので、それらを使うようアダプターに指示する契約と並んで core にある。
 - ストア: `req.session` そのものであり、それを書くのはここのルートである。フェデレーションルーターは `form_post` トランザクションも同じストアに置く。`sessionModule` とは別のモジュールになっているのは、他のパッケージがこれらのルートなしに `req.session` を読むから — `oauth` の `/authorize`・同意・ログアウト、`device-grant` の検証ページ、`federation-grants` のブラウザ向けルート — であり、独自のログインを持つデプロイはストアだけをインストールする。
 
 **ソースの配置。** [`src/routes/`](src/routes/) は二つのルーター。[`src/federations/`](src/federations/) はツールキットとルーターのフェデレーション部品（クレームの優先順位、同意済みスコープ、トランザクションストア、リダイレクトポリシー）。[`src/modules/`](src/modules/) と [`src/store/`](src/store/) はブラウザセッションストア。[`src/internal/`](src/internal/) は cookie の読み取りと `User` から読むクレーム。[`src/csrf.mts`](src/csrf.mts) は CSRF の規則。[`src/redirect-allowlist.mts`](src/redirect-allowlist.mts) はログインとフェデレーションのルートが共有する許可リストの規則。各ファイルが何をするかはそのファイルのヘッダーコメントにある。
@@ -200,7 +200,7 @@ const handle = await createApp({
 
 ### コールバックがプロファイルで行うこと
 
-1. **アダプターは `callbackParams` を見る** — コールバックの文字列パラメーターから、ルーターが既に束縛した `code` と `state` を除いたもの。ユーザーエージェント経由で中継され署名されていない。アダプターはその中の RFC 9207 `iss` を `callbackUrlForExchange` 経由で渡す。
+1. **アダプターは `callbackParams` を見る** — コールバックの文字列パラメーターから、ルーターが既に束縛した `code` と `state` を除いたもの。ユーザーエージェント経由で中継され署名されていない。アダプターはその中の RFC 9207 `iss` を core の `callbackUrlForExchange` 経由で渡す。
 2. **`exchangeCode` が例外を投げると `502 exchange_failed`。** アダプター内のあらゆる拒否 — 誤った `iss`、不正な id_token、UserInfo の不一致 — はこの形で表に出て、Store には届かない。`sub` の無いプロファイルは `400 invalid_profile`。
 3. **ID は Store が解決する。** `<name>:<sub>` を `UserRepository.authenticateByToken` に渡し、例外なら `503 temporarily_unavailable`、`null` なら `401 unknown_user`（開始でリンクを求めていない限り）。
 4. **クレーム** はローカルの `User` のものに、`mapClaims` の結果を [クレームの優先順位](#クレームの優先順位-ローカルが勝ちfederated-は名前空間に隔離される) に従って合わせたもの。`amr` は `profile.amr` に `fed` を加えたもの。
@@ -409,11 +409,11 @@ export const exampleFederationModule = defineModule({
 });
 ```
 
-契約自身の規則は [core の README](../core/src/federations/README.md) と [`types.mts`](../core/src/federations/types.mts) の doc コメントにある。ツールキットがプロバイダー側に与えるもの:
+契約自身の規則は [core の README](../core/src/federations/README.md) と [`types.mts`](../core/src/federations/types.mts) の doc コメントにある。core がプロバイダー側に与えるもの（`@o3co/auth-provider-core` から export）:
 
-- `codeChallenge(codeVerifier)` — ルーターが生成した verifier に対する S256 challenge（[`src/federations/pkce.mts`](src/federations/pkce.mts)）。
-- `callbackUrlForExchange({ redirectUri, code, callbackParams })` — コード交換で OAuth ライブラリに渡す URL: `code`、コールバックが持っていれば RFC 9207 の `iss`、そしてバッグからはそれ以外何も載せない。`code` だけから URL を組み直すと `iss` が落ち、mix-up の検査が行われず、`authorization_response_iss_parameter_supported` を広告する issuer ではすべてのログインが失敗する。ライブラリには IdP が実際に公開している issuer を設定する。そうしなければ比較がすべてのログインを拒否する（[`src/federations/callback-url.mts`](src/federations/callback-url.mts)）。
-- `FederationClientSecret` / `resolveClientSecret` — 文字列またはリゾルバー（`() => string | Promise<string>`）の `client_secret`。アダプターはトークン要求のたびに `resolveClientSecret` を呼び、それは何もキャッシュしないので、secret がローテーションするアダプター（Apple の ES256 JWT）がキャッシュを受け持つ。空や文字列でない結果は上流に送らずローカルで拒否する（[`src/federations/client-secret.mts`](src/federations/client-secret.mts)）。
+- `codeChallenge(codeVerifier)` — ルーターが生成した verifier に対する S256 challenge（[`pkce.mts`](../core/src/federations/pkce.mts)）。
+- `callbackUrlForExchange({ redirectUri, code, callbackParams })` — コード交換で OAuth ライブラリに渡す URL: `code`、コールバックが持っていれば RFC 9207 の `iss`、そしてバッグからはそれ以外何も載せない。`code` だけから URL を組み直すと `iss` が落ち、mix-up の検査が行われず、`authorization_response_iss_parameter_supported` を広告する issuer ではすべてのログインが失敗する。ライブラリには IdP が実際に公開している issuer を設定する。そうしなければ比較がすべてのログインを拒否する（[`callback-url.mts`](../core/src/federations/callback-url.mts)）。
+- `FederationClientSecret` / `resolveClientSecret` — 文字列またはリゾルバー（`() => string | Promise<string>`）の `client_secret`。アダプターはトークン要求のたびに `resolveClientSecret` を呼び、それは何もキャッシュしないので、secret がローテーションするアダプター（Apple の ES256 JWT）がキャッシュを受け持つ。空や文字列でない結果は上流に送らずローカルで拒否する（[`client-secret.mts`](../core/src/federations/client-secret.mts)）。
 
 同梱のアダプターが実例になる — 例えば `federation-google` の [`google.mts`](../federation-google/src/google.mts)。
 
@@ -428,7 +428,7 @@ export const exampleFederationModule = defineModule({
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts)、[`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | ログイン、ログアウトが無効化するものとストア障害が `UserSession` の削除を止めないこと、ログインのレート制限ガード |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | 開始とコールバックのレグ、アカウントリンク、ストアへの書き込みとそのロールバック、`amr` |
 | [`Federation.formPost.test.mts`](src/routes/__tests__/Federation.formPost.test.mts)、[`Federation.applicationCookie.test.mts`](src/routes/__tests__/Federation.applicationCookie.test.mts)、[`Federation.transactionFailures.test.mts`](src/routes/__tests__/Federation.transactionFailures.test.mts)、[`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) | response mode、トランザクション cookie、手を付けられないセッション cookie、トランザクションの失敗経路、「一度きり」が保証すること |
-| [`src/federations/__tests__/`](src/federations/__tests__/) | ツールキットとルーターのフェデレーション部品 |
+| [`src/federations/__tests__/`](src/federations/__tests__/) | ツールキットとルーターのフェデレーション部品。要求を組み立てるヘルパーは core で固定される（[`core/src/federations/__tests__/`](../core/src/federations/__tests__/)） |
 
 ## 関連
 
