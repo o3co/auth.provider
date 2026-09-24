@@ -70,7 +70,7 @@ export function policyOutOfBounds(errorDescription: string): GrantError {
  * and logged the same way.
  */
 export function logGrantPolicyUnavailable(
-	logger: Logger | undefined,
+	logger: Pick<Logger, "error"> | undefined,
 	context: { readonly grantType: string; readonly policy: string; readonly site?: string },
 	cause: unknown,
 ): void {

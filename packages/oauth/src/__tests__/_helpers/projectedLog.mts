@@ -49,3 +49,37 @@ export const expectProjectedWarn = (logger: MockLogger, message: RegExp): void =
 	expect(line?.[1]).not.toBeInstanceOf(Error);
 	expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
 };
+
+/**
+ * The policy for a branch that answers 503 because a store, a repository or a
+ * keystore could not answer: exactly one line, at error level, object-first,
+ * named `event`, carrying `fields` and the error's projection (a `ReplyError`
+ * by name, not the error) — and no warn-level line about it, and nowhere the
+ * refused command.
+ *
+ * "About it" means a warn line that carries an error or is a string-first
+ * message: a verifier's once-per-logger audit-gap notice
+ * (`jwt_verify_aud_skipped`, object-first, no error) is not the outage's line
+ * and may precede it.
+ */
+export const expectOutageLine = (
+	logger: MockLogger,
+	event: string,
+	fields: Record<string, unknown>,
+	errName = "ReplyError",
+): Record<string, unknown> => {
+	const warnedAboutIt = logger.warn.mock.calls.filter(
+		([first]) =>
+			typeof first === "string" ||
+			(typeof first === "object" && first !== null && "err" in (first as object)),
+	);
+	expect(warnedAboutIt, "no warn-level line on an outage").toEqual([]);
+	expect(logger.error, "one error-level line").toHaveBeenCalledTimes(1);
+	const [line, name] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+	expect(name).toBe(event);
+	expect(line).toMatchObject(fields);
+	expect(line.err).toMatchObject({ name: errName });
+	expect(line.err).not.toBeInstanceOf(Error);
+	expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
+	return line;
+};

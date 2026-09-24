@@ -36,6 +36,7 @@ import {
 	emitAuditEvent,
 	isBearerTokenType,
 	isVerificationUnavailable,
+	logClientRepositoryUnavailable,
 	loggableError,
 	parseScopeTokens,
 	sanitizeErrorText,
@@ -319,6 +320,24 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 	router.post("/federation/:name/token", async (req: Request, res: Response) => {
 		const { name } = req.params as { name: string };
 		const logger = opts.logger ?? console;
+		// Every store this route reads or writes that cannot answer is `503`,
+		// logged once at error level as `federation_token_store_unavailable`,
+		// `store` naming which (`refresh_token_family`, `user_session`,
+		// `session_federation_index`, `federation_token`) and `step` the
+		// operation — with the error's projection, never the error: a store's
+		// error carries the command it refused, a token record among its
+		// arguments.
+		const storeUnavailable = (
+			federation: string,
+			store: "user_session" | "session_federation_index" | "federation_token",
+			step: "get" | "list" | "acquire_lock" | "get_after_lock" | "update",
+			error: unknown,
+		): void => {
+			logger.error(
+				{ federation, store, step, err: loggableError(error) },
+				"federation_token_store_unavailable",
+			);
+		};
 		const refreshBufferMs = opts.refreshBufferMs ?? 30_000;
 
 		// RFC 6749 §5.1 / RFC 9207: cache headers on every response path.
@@ -492,10 +511,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		try {
 			session = await opts.userSessionStore.get(sid);
 		} catch (error) {
-			logger.warn(
-				`POST /oauth/federation/${name}/token: userSessionStore.get failed:`,
-				loggableError(error),
-			);
+			storeUnavailable(name, "user_session", "get", error);
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "session store unavailable",
@@ -517,10 +533,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		try {
 			federations = await opts.sessionFederationIndex.listFederations(sid);
 		} catch (error) {
-			logger.warn(
-				`POST /oauth/federation/${name}/token: sessionFederationIndex.listFederations failed:`,
-				loggableError(error),
-			);
+			storeUnavailable(name, "session_federation_index", "list", error);
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "session store unavailable",
@@ -532,9 +545,10 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		try {
 			client = await opts.clientRepository.findById(azp);
 		} catch (error) {
-			logger.warn(
-				`POST /oauth/federation/${name}/token: clientRepository.findById failed:`,
-				loggableError(error),
+			logClientRepositoryUnavailable(
+				logger,
+				{ site: "federation_token", step: "find", clientId: azp },
+				error,
 			);
 			return res.status(503).json({
 				error: "temporarily_unavailable",
@@ -569,10 +583,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		try {
 			tokens = await opts.federationTokenStore.get(sid, name);
 		} catch (error) {
-			logger.warn(
-				`POST /oauth/federation/${name}/token: federationTokenStore.get failed:`,
-				loggableError(error),
-			);
+			storeUnavailable(name, "federation_token", "get", error);
 			return res.status(503).json({
 				error: "temporarily_unavailable",
 				error_description: "federation token store unavailable",
@@ -632,9 +643,9 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		// 11a: Get provider and check supportsRefresh.
 		const provider = opts.getFederationProviders()?.get(name);
 		if (!supportsRefresh(provider)) {
-			logger.warn(
-				`POST /oauth/federation/${name}/token: provider does not support refresh or not found`,
-			);
+			// The deployment's to fix, not a request's: every refresh through this
+			// federation is answered 503 until the provider is configured.
+			logger.error({ federation: name }, "federation_token_refresh_unsupported");
 			return res.status(503).json({
 				error: "refresh_not_supported",
 				error_description: sanitizeErrorText(`federation '${name}' does not support token refresh`),
@@ -659,10 +670,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					federationName: name,
 				});
 			} catch (error) {
-				logger.warn(
-					`POST /oauth/federation/${name}/token: acquireLock failed:`,
-					loggableError(error),
-				);
+				storeUnavailable(name, "federation_token", "acquire_lock", error);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "federation token store unavailable",
@@ -690,10 +698,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				try {
 					freshTokens = await opts.federationTokenStore.get(sid, name);
 				} catch (error) {
-					logger.warn(
-						`POST /oauth/federation/${name}/token: federationTokenStore.get (post-lock re-read) failed:`,
-						loggableError(error),
-					);
+					storeUnavailable(name, "federation_token", "get_after_lock", error);
 					return res.status(503).json({
 						error: "temporarily_unavailable",
 						error_description: "federation token store unavailable",
@@ -781,11 +786,20 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				const { reason } = classifyFederationRefreshError(error);
 				// The projection, never the error: the adapter's library puts the
 				// refresh answer it refused on the error's cause chain, and that
-				// answer holds the rotated refresh token.
-				logger.warn(
-					`POST /oauth/federation/${name}/token: refreshToken failed (reason: ${reason}):`,
-					loggableError(error),
-				);
+				// answer holds the rotated refresh token. An upstream that cannot be
+				// reached is this route's outage (503) and is logged as one; every
+				// other refusal is the upstream's verdict, logged at warn.
+				if (reason === "network") {
+					logger.error(
+						{ federation: name, reason, err: loggableError(error) },
+						"federation_token_upstream_unavailable",
+					);
+				} else {
+					logger.warn(
+						{ federation: name, reason, err: loggableError(error) },
+						"federation_token_refresh_failed",
+					);
+				}
 
 				if (reason === "invalid_grant") {
 					// Cleanup: delete federation token + remove federation link.
@@ -1111,10 +1125,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			try {
 				await opts.federationTokenStore.update(sid, name, updatedTokens);
 			} catch (error) {
-				logger.warn(
-					`POST /oauth/federation/${name}/token: federationTokenStore.update failed:`,
-					loggableError(error),
-				);
+				storeUnavailable(name, "federation_token", "update", error);
 				return res.status(503).json({
 					error: "temporarily_unavailable",
 					error_description: "federation token store unavailable",

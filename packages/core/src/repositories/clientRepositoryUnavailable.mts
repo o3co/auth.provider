@@ -55,7 +55,7 @@ export interface ClientRepositoryOutage {
  * store was sent.
  */
 export function logClientRepositoryUnavailable(
-	logger: Logger | undefined,
+	logger: Pick<Logger, "error"> | undefined,
 	outage: ClientRepositoryOutage,
 	cause: unknown,
 ): void {
