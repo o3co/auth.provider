@@ -64,6 +64,7 @@ import {
 	type ClientIdMetadataDocumentOptions,
 	withClientIdMetadataDocuments,
 } from "./clients/clientIdMetadataDocument.mjs";
+import { sanitizeErrorDescription } from "./errorDescription.mjs";
 import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
 import { resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
 import { createAuthorizeHandler } from "./routes/authorize.mjs";
@@ -89,13 +90,14 @@ const AUDIT_REASON_MAX_LENGTH = 200;
  * answers a malformed request and a stolen, unproven bound token alike with
  * `invalid_request` (RFC 8693 §2.2.2) — while the description names the check
  * that refused. The route's own refusals carry a `reason` code; a handler's
- * carries its description, the same text the client was sent. Some
- * descriptions quote client input (a requested scope, audience or token
- * type), so it is capped, the cut marked with `...`, to keep what a client can
- * put into the audit stream bounded.
+ * carries its description, the same text the client was sent — sanitised the
+ * same way (`sanitizeErrorDescription`). Some descriptions quote client input
+ * (a requested scope, audience or token type), so it is also capped, the cut
+ * marked with `...`, to keep what a client can put into the audit stream
+ * bounded.
  */
 const auditReason = (error: string, errorDescription: string | undefined): string => {
-	const reason = errorDescription || error;
+	const reason = sanitizeErrorDescription(errorDescription || error);
 	return reason.length > AUDIT_REASON_MAX_LENGTH
 		? `${reason.slice(0, AUDIT_REASON_MAX_LENGTH - 3)}...`
 		: reason;
@@ -373,7 +375,9 @@ export const createOAuthRouter = async (
 					});
 					return res.status(400).json({
 						error: "unsupported_grant_type",
-						error_description: `grant_type "${grant_type}" is not supported`,
+						error_description: sanitizeErrorDescription(
+							`grant_type '${grant_type}' is not supported`,
+						),
 					});
 				}
 
@@ -443,7 +447,9 @@ export const createOAuthRouter = async (
 					});
 					return res.status(400).json({
 						error: "unauthorized_client",
-						error_description: `client is not authorized for grant_type "${grant_type}"`,
+						error_description: sanitizeErrorDescription(
+							`client is not authorized for grant_type '${grant_type}'`,
+						),
 					});
 				}
 
@@ -581,7 +587,10 @@ export const createOAuthRouter = async (
 					return res.status(result.status).json(result.tokens);
 				}
 				const errorBody: Record<string, unknown> = { error: result.error };
-				if (result.errorDescription) errorBody.error_description = result.errorDescription;
+				// RFC 6749 §5.2's character set, whichever grant wrote it: several
+				// quote the client's own input (a scope, an audience, a token type).
+				if (result.errorDescription)
+					errorBody.error_description = sanitizeErrorDescription(result.errorDescription);
 				// Copilot review: do NOT inject `WWW-Authenticate: Bearer` here.
 				// The token endpoint is not a protected resource (RFC 6750 §3 applies to
 				// resource servers, not authorization endpoints), and `clientAuthMw`

@@ -278,7 +278,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					result: {
 						status: 400,
 						error: "invalid_request",
-						errorDescription: `code_challenge_method "${challengeMethod}" is not supported`,
+						errorDescription: `code_challenge_method '${challengeMethod}' is not supported`,
 					},
 				};
 			}
@@ -349,7 +349,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 						status: 400,
 						error: "invalid_grant",
 						errorDescription:
-							"code record is missing session identifier (sid) — ensure login wiring records sid at authorize time",
+							"code record is missing session identifier (sid); ensure login wiring records sid at authorize time",
 					},
 				};
 			}

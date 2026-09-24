@@ -109,6 +109,8 @@ All mounted under `/oauth` by `oauthModule`.
 
 The six slots are `userSessionStore`, `sessionRPRegistry`, `sessionFamilyIndex`, `sessionFederationIndex`, `federationTokenStore` and `refreshTokenFamilyRevocation`. The same check decides whether discovery advertises `end_session_endpoint` and the logout capabilities, so a document never names an endpoint that is not mounted.
 
+**Error descriptions.** Every `error_description` that `/oauth/token` sends, and that `/oauth/authorize` puts in an error redirect, is held to the characters RFC 6749 allows in one (§5.2, §4.1.2.1): printable ASCII without `"` and `\`. Any other character — including in a value the client sent and a description quotes, such as a grant type, scope, audience, token type or `response_type` — is replaced with `?` ([`errorDescription.mts`](./src/errorDescription.mts)), whichever grant or route wrote the description. Descriptions quote a value with `'`.
+
 `/token`, `/introspect`, `/authorize` and `/revoke` are throttled by the composition's `rateLimiter` when one is wired, ahead of client authentication, under the product's `rateLimit.failMode`; without one they are not throttled.
 
 The router refuses to be built — which through `createApp` is a boot failure — when `consentStore` is wired without `pendingConsentStore` or the reverse, and when `oauth.revocation.accessToken = "denylist"` is declared with no `accessTokenDenylist`.
@@ -149,7 +151,7 @@ Each directory under `src/` has one kind of responsibility; what a single file d
 
 | Directory | Responsibility |
 |---|---|
-| `src/` (root) | Assembly: `oauthModule`, `oauthAuthorizationModule` and `oauthSessionModule` (the fourth, `subjectRevocationServiceModule`, is in `logout/` beside the cascade it wires), `createOAuthRouter` (which composes every route below), option resolution, and a re-export of core's access-token header parser. |
+| `src/` (root) | Assembly: `oauthModule`, `oauthAuthorizationModule` and `oauthSessionModule` (the fourth, `subjectRevocationServiceModule`, is in `logout/` beside the cascade it wires), `createOAuthRouter` (which composes every route below), option resolution, the `error_description` sanitiser the token and authorization endpoints share, and a re-export of core's access-token header parser. |
 | [`routes/`](./src/routes) | One router or handler per endpoint family — authorize, consent, logout, federation token, revoke, userinfo. Routes may use `grants/`, `logout/`, `middleware/` and `clients/`; none of those imports a route. `routes/authorize.mts` also reads one grant helper, the per-client PKCE method rules, because `/authorize` validates PKCE the way `/token` does. The RFC 8707 `resource` rules both read are core's ([`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)), shared with the WebAuthn grant. |
 | [`grants/`](./src/grants) | The grant handlers: pure request-to-token decisions over core's grant contract, with no HTTP. |
 | [`middleware/`](./src/middleware) | Client authentication, reused by sibling packages. |

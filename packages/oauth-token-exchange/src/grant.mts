@@ -251,12 +251,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			}
 
 			if (requestedTokenType !== null && requestedTokenType !== ACCESS_TOKEN_TYPE) {
-				return invalidRequest(`requested_token_type "${requestedTokenType}" is not supported`);
+				return invalidRequest(`requested_token_type '${requestedTokenType}' is not supported`);
 			}
 
 			const subjectValidator = tokenExchangeValidatorResolver.get(subjectTokenType);
 			if (!subjectValidator) {
-				return invalidRequest(`subject_token_type "${subjectTokenType}" is not supported`);
+				return invalidRequest(`subject_token_type '${subjectTokenType}' is not supported`);
 			}
 
 			// Actor token type lookup — kept here so the validator reference is
@@ -277,7 +277,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					? tokenExchangeValidatorResolver.get(actorTokenType)
 					: null;
 			if (actorToken !== null && actorValidator === undefined) {
-				return invalidRequest(`actor_token_type "${actorTokenType}" is not supported`);
+				return invalidRequest(`actor_token_type '${actorTokenType}' is not supported`);
 			}
 
 			let subjectValidated: ValidatedToken | null;
@@ -568,7 +568,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							result: {
 								status: 400,
 								error: "invalid_scope",
-								errorDescription: `scope "${s}" is not in subject_token scope`,
+								errorDescription: `scope '${s}' is not in subject_token scope`,
 							},
 						};
 					}
@@ -583,7 +583,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							result: {
 								status: 400,
 								error: "invalid_scope",
-								errorDescription: `scope "${s}" is not allowed for this client`,
+								errorDescription: `scope '${s}' is not allowed for this client`,
 							},
 						};
 					}
@@ -609,7 +609,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							result: {
 								status: 400,
 								error: "invalid_target",
-								errorDescription: `audience "${aud}" is not allowed for this client`,
+								errorDescription: `audience '${aud}' is not allowed for this client`,
 							},
 						};
 					}
@@ -967,7 +967,9 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
  *
  * One code covers all of these, so the `error_description` is what tells a
  * client which check refused it; each call site's description is part of the
- * wire contract and the README names it. The request's other answers keep
+ * wire contract and the README names it. A description quotes a value with
+ * `'`: RFC 6749 §5.2 allows neither `"` nor `\` in one, and `/oauth/token`
+ * replaces any character outside its set with `?`. The request's other answers keep
  * the codes the RFCs give them — `invalid_target` for an audience or
  * resource (§2.2.2), `invalid_scope`, `invalid_client`, `unauthorized_client`
  * — a policy decision past a ceiling is core's `policyOutOfBounds`, and a
