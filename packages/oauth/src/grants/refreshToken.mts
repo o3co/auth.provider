@@ -338,10 +338,11 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			// record: read so it never widens (`readIssuedScope` — a legacy
 			// `openid<TAB>email` entry named no scope and must not start naming
 			// `email` now) and carried on in its canonical form, so a ragged
-			// claim is not passed to the next pair of tokens as it is. The request is the client's: read strictly, so a
-			// malformed one is refused as malformed. Present but naming nothing, or
-			// sent without a value (`null`), is no change, as an empty one always
-			// was. A repeated parameter arrives as an array.
+			// claim is not passed to the next pair of tokens as it is. The
+			// request is the client's: read strictly, so a malformed one is
+			// refused as malformed. Present but naming nothing, or sent without a
+			// value (`null`), is no change, as an empty one always was. A
+			// repeated parameter arrives as an array.
 			const originalScopes = readIssuedScope(scopeStr);
 			let requested: readonly string[] | undefined;
 			if (requestedScope !== undefined && requestedScope !== null) {

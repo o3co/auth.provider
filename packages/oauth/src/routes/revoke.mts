@@ -83,8 +83,9 @@ export interface RevokeRouterOptions {
  * - Returns 503 `temporarily_unavailable` when the store a revocation writes
  *   to — the access-token denylist or the refresh-token family store —
  *   fails (RFC 7009 §2.2.1), logged at error level as
- *   `revoke_store_unavailable` with the store and the client. The client is told to assume the token still
- *   exists and retry, never that it was revoked.
+ *   `revoke_store_unavailable` with the store and the client. The client is
+ *   told to assume the token still exists and retry, never that it was
+ *   revoked.
  * - Returns 200 for every other outcome (RFC 7009 §2.2 no-info-leak):
  *   the token was revoked, or it did not verify, was not one this server
  *   could use, or belonged to another client. None of those reaches a store.
