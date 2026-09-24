@@ -51,6 +51,8 @@ describe("transportCode", () => {
 			"ERR_TLS_CERT_ALTNAME_INVALID",
 			"ERR_SSL_WRONG_VERSION_NUMBER",
 			"ERR_SSL_TLSV1_ALERT_PROTOCOL_VERSION",
+			// OpenSSL 3's name for a TLS 1.2 handshake failure alert: a slash in it.
+			"ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE",
 			"UND_ERR_SOCKET",
 			"UND_ERR_HEADERS_OVERFLOW",
 			"HPE_INVALID_HEADER_TOKEN",
@@ -65,6 +67,8 @@ describe("transportCode", () => {
 			"hpe_invalid_header_token",
 			"HPE_",
 			"ERR_SSL_",
+			"ERR_SSL_/",
+			"ERR_SSL_SSL/TLS ALERT",
 			"ERR_SOMETHING_ELSE",
 			`E${SECRET}`,
 			`UND_ERR_${SECRET}`,

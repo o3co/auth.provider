@@ -44,6 +44,7 @@
 
 import { createServer, type Server } from "node:http";
 import { createServer as createNetServer, type Server as NetServer } from "node:net";
+import { createServer as createTlsServer } from "node:tls";
 import { inspect } from "node:util";
 import {
 	createAdapterFactory,
@@ -520,8 +521,8 @@ describe("a transport failure carries nothing the request carried", () => {
 			// inspects the error — core's console logger does — prints it.
 			// What is thrown instead says which of the three it was: a status
 			// line or header the parser rejects is a Store that was reached and
-			// did not answer HTTP; a body that breaks is an answer that could
-			// not be read.
+			// answered with a malformed response; a body that breaks is an
+			// answer that could not be read.
 			const lookup = name === "findSubjectByFederatedIdentity";
 			const seen: Record<string, unknown> = {};
 			const expected: Record<string, unknown> = {};
@@ -549,14 +550,14 @@ describe("a transport failure carries nothing the request carried", () => {
 				expected[where] = {
 					class: true,
 					name: "StoreTransportError",
-					reason: unreadable ? "unreadable" : "not_http",
+					reason: unreadable ? "unreadable" : "malformed_response",
 					message: unreadable
 						? lookup
 							? `HttpUserRepository: identity lookup at ${url} could not be read`
 							: `HttpUserRepository: response from ${url} could not be read`
 						: lookup
-							? `HttpUserRepository: identity lookup at ${url} answered something that is not HTTP`
-							: `HttpUserRepository: the Store at ${url} answered something that is not HTTP`,
+							? `HttpUserRepository: identity lookup at ${url} answered with a malformed or incomplete HTTP response`
+							: `HttpUserRepository: the Store at ${url} answered with a malformed or incomplete HTTP response`,
 					cause: undefined,
 					carriesTheToken: false,
 				};
@@ -663,6 +664,95 @@ describe("a transport failure carries nothing the request carried", () => {
 		);
 		expect(error?.code).toBe("ERR_SSL_WRONG_VERSION_NUMBER");
 	});
+
+	it("names a TLS 1.2 handshake the Store refused — the shape of mutual TLS, or no shared cipher", async () => {
+		// OpenSSL 3 reports it as ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE, with
+		// a slash. A TLS 1.2 server that offers only PSK ciphers refuses this
+		// client's hello the same way, and needs no certificate to do it.
+		const server = createTlsServer({
+			ciphers: "PSK",
+			maxVersion: "TLSv1.2",
+			pskCallback: () => Buffer.alloc(32, 1),
+		});
+		server.on("tlsClientError", () => {});
+		netServers.push(server);
+		await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+		const { port } = server.address() as { port: number };
+		const origin = `https://127.0.0.1:${port}`;
+		const repo = new HttpUserRepository({ ...urls(origin), bearerToken: TOKEN, timeout: 5000 });
+		const error = await repo.authenticate("alice", "pass").then(
+			() => undefined,
+			(thrown: unknown) => thrown as Error & { code?: unknown; reason?: unknown },
+		);
+		expect(error).toBeInstanceOf(StoreTransportError);
+		expect(error?.reason).toBe("unreachable");
+		expect(error?.message).toBe(
+			`HttpUserRepository: request to ${origin}/authenticate could not be reached (ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE)`,
+		);
+		expect(error?.code).toBe("ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE");
+	});
+
+	it.each(calls)(
+		"%s: a Store that answered, but not with a usable response head, is a malformed response — not the network",
+		async (name, path, call) => {
+			// Each of these reached a Store that sent bytes: a head too large to
+			// take, an interim 1xx and then a close, a head cut off. "Could not be
+			// reached" would send an operator to the network; the answer is the
+			// Store's, or a proxy's. A connection closed before any byte is still
+			// "could not be reached".
+			const lookup = name === "findSubjectByFederatedIdentity";
+			const ANSWERS = {
+				"a head over the size limit": [
+					`HTTP/1.1 200 OK\r\nX-Big: ${"a".repeat(70_000)}\r\n\r\n`,
+					"malformed_response",
+					"UND_ERR_HEADERS_OVERFLOW",
+				],
+				"an interim 1xx, then a close": [
+					"HTTP/1.1 100 Continue\r\n\r\n",
+					"malformed_response",
+					"UND_ERR_SOCKET",
+				],
+				"a head cut off": [
+					"HTTP/1.1 200 OK\r\nContent-Len",
+					"malformed_response",
+					"UND_ERR_SOCKET",
+				],
+				"a close before any byte": ["", "unreachable", "UND_ERR_SOCKET"],
+			} as const;
+			const seen: Record<string, unknown> = {};
+			const expected: Record<string, unknown> = {};
+			for (const [what, [answer, reason, code]] of Object.entries(ANSWERS)) {
+				const origin = await reflecting(() => answer);
+				const repo = new HttpUserRepository({
+					...urls(origin),
+					bearerToken: TOKEN,
+					timeout: 5000,
+				});
+				const error = await Promise.resolve(call(repo)).then(
+					() => undefined,
+					(thrown: unknown) => thrown as Error & { code?: unknown; reason?: unknown },
+				);
+				seen[what] = {
+					class: error instanceof StoreTransportError,
+					reason: error?.reason,
+					message: error?.message,
+					code: error?.code,
+				};
+				const url = `${origin}${path}`;
+				const subject = lookup ? `identity lookup at ${url}` : `the Store at ${url}`;
+				expected[what] = {
+					class: true,
+					reason,
+					message:
+						reason === "unreachable"
+							? `HttpUserRepository: ${lookup ? `identity lookup at ${url}` : `request to ${url}`} could not be reached (${code})`
+							: `HttpUserRepository: ${subject} answered with a malformed or incomplete HTTP response (${code})`,
+					code,
+				};
+			}
+			expect(seen).toEqual(expected);
+		},
+	);
 });
 
 describe("from config: the http builder", () => {
