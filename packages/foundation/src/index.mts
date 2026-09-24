@@ -95,4 +95,8 @@ export {
 	type FederatedIdentityLookupCoverage,
 	HttpUserRepository,
 } from "./repositories/HttpUserRepository.mjs";
-export { StoreCredentialRefusedError } from "./repositories/storeErrors.mjs";
+export {
+	StoreCredentialRefusedError,
+	StoreTransportError,
+	type StoreTransportFailure,
+} from "./repositories/storeErrors.mjs";

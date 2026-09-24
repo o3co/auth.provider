@@ -80,7 +80,15 @@ const userRepo = await userFactory.create({
 
 **`Bearer` チャレンジ付きの `401` または `403` は資格情報の拒否である。** `bearerToken` が設定されているとき、四つのエンドポイントのどれかから `WWW-Authenticate: Bearer …`（RFC 6750 §3 — `invalid_token`、`insufficient_scope`）を持つ `401` または `403` が返ると、この節がそのステータスに与える読み — 「ユーザーが居ない」、リンクの拒否、照会の `answered HTTP <status>` — のどれでもなく、`StoreCredentialRefusedError`（`HttpUserRepository: the Store at <url> refused this deployment's credential (HTTP <status> with a Bearer challenge) — …`）が投げられる。各呼び出し元がそのとき何を返し何をログに出すかは [Store が自分で守るべきこと](#store-が自分で守るべきこと) にある。チャレンジは大文字小文字を問わず、他のチャレンジと並んでいても、独立したヘッダー行にあっても見つけ、引用符付き文字列の中にあるものは決して数えない。閉じられていない引用符付き文字列は値の末尾まで続き、その後ろにあるものを隠す — そのときはチャレンジが無いものとして読まれる。Store がスキームの後に書いたものは何も繰り返さない。`Bearer` チャレンジの無い `401` や `403`、およびトークンが設定されていないときのあらゆる `401` や `403` は、この節が与える意味を保つので、トークンを検査しない Store には影響しない。
 
-**通信の失敗はやり取りの何も運ばない。** リクエストができない、または応答を読めない — 接続の拒否、リセット、HTTP パーサーが拒否する応答、読み取りの途中で壊れるボディ — とき、エラーは `HttpUserRepository: request to <url> could not be reached` または `response from <url> could not be read`（照会では `identity lookup at <url> …`）で、運ぶのはせいぜいオペレーターが対処できる通信のコード — `ECONNREFUSED`、`ENOTFOUND`、`ECONNRESET`、`UND_ERR_*`、TLS 検証のコード — だけ（メッセージの中と `code` として）である。通信自身のエラーや `cause` は決して運ばない: undici のパーサーのエラーは拒否したバイト列をそのまま引用し、リクエストを反射する相手 — 壊れたプロキシ、デバッグ用のエコー — はその中に `Authorization` ヘッダーやパスワードを置く。
+**通信の失敗はやり取りの何も運ばない。** リクエストができない、または応答を読めないとき、エラーは `StoreTransportError` で、その `reason` とメッセージがどれかを示す:
+
+| `reason` | いつ | メッセージ（照会では `identity lookup at <url> …`） |
+| --- | --- | --- |
+| `unreachable` | 接続の拒否、リセット、DNS、TLS | `HttpUserRepository: request to <url> could not be reached` |
+| `not_http` | Store は応答したが、HTTP パーサーがステータス行かヘッダーを拒否した | `HttpUserRepository: the Store at <url> answered something that is not HTTP` |
+| `unreadable` | HTTP の応答のボディが読み取りの途中で壊れた | `HttpUserRepository: response from <url> could not be read` |
+
+どれも運ぶのはせいぜいオペレーターが対処できる通信のコード（メッセージの中と `code` として）だけ: `ECONNREFUSED`、`ENOTFOUND`、`ECONNRESET`、`EPROTO`、`UND_ERR_*` や `HPE_*`、`ERR_SSL_*`（`ERR_SSL_WRONG_VERSION_NUMBER` は平文の HTTP を話すポートを指す https の URL）、証明書のコード。通信自身のエラーや `cause` は決して運ばない: undici のパーサーのエラーは拒否したバイト列をそのまま引用し、リクエストを反射する相手 — 壊れたプロキシ、デバッグ用のエコー — はその中に `Authorization` ヘッダーやパスワードを置く。期限を超えたリクエストはこれではなく `TimeoutError` になる（コンストラクタでの検証を参照）。
 
 **`linkFederatedIdentity`** は `linkFederatedIdentityUrl` に `{ userId, provider, sub, token, claims }` を送る: `2xx` の `User` は `{ ok: true, user }`、`401` / `403` は `{ ok: false, reason: "refused" }`、`409` は `{ ok: false, reason: "conflict" }`、それ以外は例外。拒否のボディは読まれないので、拒否が Store からの説明を運ぶことはない。`linkFederatedIdentityUrl` が設定されていなければこのメソッドは存在せず、フェデレーションのルートはそれで `?link=1` を最初から拒否すると分かる。`2xx` を返す前に Store が検査すべきこと — 未検証やリレーのアドレスでは決してリンクしない、メールアドレスだけで決してリンクしない — は [セッションパッケージの README](../session/README.ja.md#フェデレーション間のアカウントリンク482) にある。
 
@@ -111,18 +119,18 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 
 ## Store が自分で守るべきこと
 
-- **誰が呼べるか。** `authenticateByToken` と紐付けが運ぶものは秘密ではない — フェデレーションのコールバックの `<provider>:<sub>` は識別子である — ので、誰にでも応答する Store では、`authenticateByTokenUrl` に届く者は誰でも既知の ID をそのユーザーに解決でき、開いた `linkFederatedIdentityUrl` に届く者は誰でも任意の ID を任意の `userId` に結びつけられる。`bearerToken`（`CLIENT_USER_BEARER_TOKEN`、`openssl rand -hex 32` で生成）を設定し、Store は四つのエンドポイントすべてで、`Authorization` が `Bearer <そのトークン>` と正確に一致しない（定数時間で比較する）リクエストを拒否し、そのヘッダーをログに出さない。一つのトークンが四つの URL すべてに送られるので、それらは一つの信頼境界でなければならない: どれか一つのエンドポイントを運用する者は、他のエンドポイントも受け付ける資格情報を持つことになる。拒否は `401` と `WWW-Authenticate: Bearer error="invalid_token"`（RFC 6750 §3）で返す — 有効だが足りないトークンなら `403` と `error="insufficient_scope"` で。このチャレンジがあれば、Store が受け付けないトークン — 打ち間違い、途中で止まったローテーション — はすべての呼び出しで障害になり、各呼び出し元はそれを下の表のとおり報告する。チャレンジが無ければ `401` や `403` はワイヤ上の意味 — 「ユーザーが居ない」またはリンクの拒否 — を保ち、不一致はすべてのログインの失敗としてしか現れない。同じ理由で、ユーザーのパスワード誤りや未知の ID に `Bearer` チャレンジを付けてはならない: その応答は Store が auth.provider を拒否したと読まれ、そのユーザーのログイン失敗が障害になる。ローテーションは、Store に古いトークンと新しいトークンの両方を受け付けさせ、auth.provider を新しいものに移し、それから古いものを廃止する。`bearerToken` が無ければどのリクエストも `Authorization` ヘッダーを持たないので、Store は別の方法で auth.provider だけを受け入れる: ネットワークポリシーやプライベートネットワーク、または Store の前段でプラットフォームが提供する相互 TLS（ループバックアドレス上のサイドカー。`http` の例外が受け付ける）で。このアダプター自身はクライアント証明書を提供しない: Node の `fetch` がそれを受け取るのは `undici` のディスパッチャー経由だけで、このパッケージはその依存を持たない。`user:password@` を含む URL は拒否される。
+- **誰が呼べるか。** `authenticateByToken` と紐付けが運ぶものは秘密ではない — フェデレーションのコールバックの `<provider>:<sub>` は識別子である — ので、誰にでも応答する Store では、`authenticateByTokenUrl` に届く者は誰でも既知の ID をそのユーザーに解決でき、開いた `linkFederatedIdentityUrl` に届く者は誰でも任意の ID を任意の `userId` に結びつけられる。`bearerToken`（`CLIENT_USER_BEARER_TOKEN`、`openssl rand -hex 32` で生成）を設定し、Store は四つのエンドポイントすべてで、`Authorization` が `Bearer <そのトークン>` と正確に一致しない（定数時間で比較する）リクエストを拒否し、そのヘッダーをログに出さない。一つのトークンが四つの URL すべてに送られるので、それらは一つの信頼境界でなければならない: どれか一つのエンドポイントを運用する者は、他のエンドポイントも受け付ける資格情報を持つことになる。拒否は `401` と `WWW-Authenticate: Bearer error="invalid_token"`（RFC 6750 §3）で返す — 有効だが足りないトークンなら `403` と `error="insufficient_scope"` で。このチャレンジがあれば、Store が受け付けないトークン — 打ち間違い、途中で止まったローテーション — はすべての呼び出しで障害になり、各呼び出し元はそれを下の表のとおり報告する。チャレンジが無ければ `401` や `403` はワイヤ上の意味 — 「ユーザーが居ない」またはリンクの拒否 — を保ち、不一致はすべてのログインの失敗としてしか現れない。同じ理由で、ユーザーのパスワード誤り、未知の ID、ポリシーが拒否するリンクに `Bearer` チャレンジを付けてはならない: その応答は Store が auth.provider を拒否したと読まれ、そのユーザーのログインやリンクの失敗が障害になる。ローテーションは、Store に古いトークンと新しいトークンの両方を受け付けさせ、auth.provider を新しいものに移し、それから古いものを廃止する。`bearerToken` が無ければどのリクエストも `Authorization` ヘッダーを持たないので、Store は別の方法で auth.provider だけを受け入れる: ネットワークポリシーやプライベートネットワーク、または Store の前段でプラットフォームが提供する相互 TLS（ループバックアドレス上のサイドカー。`http` の例外が受け付ける）で。このアダプター自身はクライアント証明書を提供しない: Node の `fetch` がそれを受け取るのは `undici` のディスパッチャー経由だけで、このパッケージはその依存を持たない。`user:password@` を含む URL は拒否される。
 - **URL に秘密を入れない。** クエリ文字列のトークンは秘密のままではいられない: このアダプターが投げるエラーは URL 全体を示し、セッションルートはそれをログに出す。呼び出し元の資格情報は `bearerToken` に置く。このアダプターが投げるものはどれもそれを含まない。
 - **リダイレクトせずに応答する。** どのリクエストもリダイレクトを追わないので、パスワード、トークン、リンクのリクエスト、ID は設定された URL — 下の `https` の規則が検査する URL — にだけ届き、それ以外のどこからの応答もユーザー、リンク、照会の答えとして受け取られない。四つのエンドポイントのどれからの `3xx` も、他の想定外のステータスと同じく例外になる（セッションルートと jwt-bearer グラントは `503 temporarily_unavailable`、grants のコールバックは `temporarily_unavailable` を返す）ので、リダイレクトする URL — 正規のホストへリダイレクトするホストの別名、末尾スラッシュの付加、パスの移動 — の背後にある Store はすべての呼び出しで失敗する。各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する。
 
-**拒否されたトークンが呼び出し元ごとにどう見えるか。** どの呼び出し元も `StoreCredentialRefusedError` を他の Store の障害と同じく扱い、違うのはログに出すものである:
+**拒否されたトークンが呼び出し元ごとにどう見えるか。** どの呼び出し元も `StoreCredentialRefusedError` を他の Store の障害 — `StoreTransportError` や `TimeoutError` も — と同じく扱い、違うのはログに出すものである:
 
 | 呼び出し元 | 返すもの | ログ |
 | --- | --- | --- |
 | パスワードログイン、`POST /session/login`（[`@o3co/auth-provider-session`](../session/README.ja.md)） | `503 temporarily_unavailable` | `local login authenticate failed`（warn、`err` 付き） |
 | フェデレーションのログインと `?link=1` のコールバック（session） | `503 temporarily_unavailable` | `user repository lookup failed` または `federation link: user repository failed`（warn、`err` 付き） |
 | jwt-bearer グラント（[`@o3co/auth-provider-oauth`](../oauth/README.ja.md)） | `503 temporarily_unavailable` | `jwt_bearer_user_repository_unavailable`（error、`err` 付き） |
-| federation-grants の接続コールバック — ID の照会（[`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)） | `error=temporarily_unavailable` 付きのリダイレクト | `federation_grant.failure`（warn）に `during: "callback_identity_lookup"` と `classification: "store_credential_refused"` — このレポーターは分類を出し、エラーのメッセージは決して出さない |
+| federation-grants の接続コールバック — ID の照会（[`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)） | `error=temporarily_unavailable` 付きのリダイレクト | `federation_grant.failure`（warn）に `during: "callback_identity_lookup"` と `classification: "store_credential_refused"`（`StoreTransportError` なら `store_transport_failed`、`TimeoutError` なら `timeout`） — このレポーターは分類を出し、エラーのメッセージは決して出さない |
 
 `err` がログに出る場合、そのメッセージは Store の URL、ステータス、`CLIENT_USER_BEARER_TOKEN` を示し、トークンは決して示さない。
 
@@ -148,7 +156,8 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 
 - `registerBuiltinAdapters({ userFactory })` — `"http"` 型を登録する。
 - `HttpUserRepository` — リポジトリ（[`src/repositories/HttpUserRepository.mts`](src/repositories/HttpUserRepository.mts)）。
-- `StoreCredentialRefusedError` — 資格情報が拒否されたときに投げられるもの。`name` と `status`（`401` または `403`）は契約の一部。
+- `StoreCredentialRefusedError` — 資格情報が拒否されたときに投げられるもの。`name` と `storeStatus`（`401` または `403`）は契約の一部。`status` ではない: Express、http-errors、standalone の終端ハンドラーはそれを応答するステータスとして読む。
+- `StoreTransportError`、`StoreTransportFailure` — 通信の失敗で投げられるもの。`name`、`reason`、`code` は契約の一部で、こちらも `status` を持たない（[`src/repositories/storeErrors.mts`](src/repositories/storeErrors.mts)）。
 - `DEFAULT_MAX_RESPONSE_BYTES` — レスポンス上限のデフォルト。
 - `FederatedIdentityLookupCoverage` — カバレッジのエントリー一つの型。
 
@@ -158,7 +167,8 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 | --- | --- |
 | [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | 認証とその応答、`User` の形の検査、https の規則、タイムアウトとレスポンス上限、リンク、ID の照会の有無・probe・ワイヤ |
 | [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | 実際の HTTP サーバーに対して: ID の照会が拒否した応答の接続を解放すること、四つのリクエストそれぞれでリダイレクト — 別のオリジンへ、同じオリジンへ、`Location` 無し — が拒否され、リダイレクト先に何も送られないこと |
-| [`HttpUserRepository.credential.test.mts`](src/repositories/__tests__/HttpUserRepository.credential.test.mts) | 実際の HTTP サーバーに対して: `bearerToken` があれば四つのリクエストそれぞれに `Authorization: Bearer <token>` が付き、無ければ `Authorization` ヘッダーが付かないこと（直接構築でも `"http"` ビルダー経由でも）、弱い・形の誤った・空の・文字列でないトークンが構築時に拒否されること、どの失敗にもリポジトリのどの検査にもトークンが現れないこと、トークンを反射して壊れたステータス行・ヘッダー・chunked ボディを返す相手に対しても、投げられるのはエンドポイントと通信のコードだけであること、トークンを送ったときの `Bearer` チャレンジ付き `401` または `403` が四つそれぞれで `StoreCredentialRefusedError` になり、チャレンジの無いもの — またはトークンを送っていないとき — は従来どおり読まれること |
+| [`HttpUserRepository.credential.test.mts`](src/repositories/__tests__/HttpUserRepository.credential.test.mts) | 実際の HTTP サーバーに対して: `bearerToken` があれば四つのリクエストそれぞれに `Authorization: Bearer <token>` が付き、無ければ `Authorization` ヘッダーが付かないこと（直接構築でも `"http"` ビルダー経由でも）、弱い・形の誤った・空の・文字列でないトークンが構築時に拒否されること、どの失敗にもリポジトリのどの検査にもトークンが現れないこと、通信の失敗が何が失敗したかを示す `StoreTransportError` になること — 接続の拒否と平文の HTTP のポートを指す https の URL（届かない）、トークンを反射したステータス行やヘッダー（HTTP でない）や chunked ボディ（読めない） — コード付き、cause 無しで、タイムアウトはヘッダーとボディのどちらが止まっても `TimeoutError` になること、トークンを送ったときの `Bearer` チャレンジ付き `401` または `403` が四つそれぞれで `StoreCredentialRefusedError`（`storeStatus`、`status` 無し）になり、チャレンジの無いもの — またはトークンを送っていないとき — は従来どおり読まれること |
+| [`storeErrors.test.mts`](src/repositories/__tests__/storeErrors.test.mts) | どの通信のコードが残るか、二つの名前付きエラーの形 — `status` も cause も無い |
 | [`wwwAuthenticate.test.mts`](src/repositories/__tests__/wwwAuthenticate.test.mts) | どの `WWW-Authenticate` の値が `Bearer` チャレンジを持つか、敵対的な 64 KiB の値を一度の走査で読むこと |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | `"http"` のビルダー、そのデフォルトと文字列の変換、組み立て時に拒否される設定 |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | https またはループバックの規則 |

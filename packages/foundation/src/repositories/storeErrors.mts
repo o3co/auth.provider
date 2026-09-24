@@ -34,9 +34,15 @@
  * reporter classifies it `store_credential_refused`. The message names the
  * endpoint, the status and the option to check; never the token, and nothing
  * the Store wrote.
+ *
+ * The Store's status is `storeStatus`, never `status` or `statusCode`: those
+ * are what Express's finalhandler, http-errors and the standalone's terminal
+ * handler read as the status to ANSWER with, and a 4xx there is taken for a
+ * client error — the Store's 401 would reach the browser as its own, and go
+ * unlogged.
  */
 export class StoreCredentialRefusedError extends Error {
-	readonly status: 401 | 403;
+	readonly storeStatus: 401 | 403;
 
 	constructor(url: string, status: 401 | 403) {
 		super(
@@ -45,7 +51,41 @@ export class StoreCredentialRefusedError extends Error {
 				"not a token the Store accepts",
 		);
 		this.name = "StoreCredentialRefusedError";
-		this.status = status;
+		this.storeStatus = status;
+	}
+}
+
+/** What went wrong with the exchange, when it was not the Store's answer. */
+export type StoreTransportFailure =
+	/** No connection, or none that became an exchange: refused, reset, DNS, TLS. */
+	| "unreachable"
+	/** Something answered, and what it answered is not HTTP the parser accepts. */
+	| "not_http"
+	/** An HTTP answer arrived, and its body broke before it was read. */
+	| "unreadable";
+
+/**
+ * The Store could not be reached, or what it answered could not be read — a
+ * transport failure rather than an answer. Thrown so every caller answers it
+ * as it answers any Store failure; `name` is part of the contract (the
+ * federation-grants reporter classifies it `store_transport_failed`), as are
+ * `reason` and `code`.
+ *
+ * Built only from what an operator can act on: a fixed message naming the
+ * endpoint and the failure, and `code` — a transport code from the allowlist
+ * below, when there is one. Never a `cause`: the transport's own error may
+ * quote what was sent or received. And no `status` (see
+ * {@link StoreCredentialRefusedError}).
+ */
+export class StoreTransportError extends Error {
+	readonly reason: StoreTransportFailure;
+	readonly code: string | undefined;
+
+	constructor(message: string, reason: StoreTransportFailure, code?: string) {
+		super(message);
+		this.name = "StoreTransportError";
+		this.reason = reason;
+		this.code = code;
 	}
 }
 
@@ -53,8 +93,9 @@ export class StoreCredentialRefusedError extends Error {
  * Transport codes an operator can act on. A transport's error is never passed
  * on: undici's parser errors carry the bytes they choked on as `data`, and a
  * peer that reflects the request — a broken proxy, a debugging echo — puts the
- * `Authorization` header there. A code from this list, found on the error or
- * its causes, is all that is kept of one.
+ * `Authorization` header there. A code from this list, or of one of the
+ * closed families below, found on the error or its causes, is all that is
+ * kept of one.
  */
 const TRANSPORT_CODES: ReadonlySet<string> = new Set([
 	"ECONNREFUSED",
@@ -66,7 +107,9 @@ const TRANSPORT_CODES: ReadonlySet<string> = new Set([
 	"EHOSTUNREACH",
 	"ENETUNREACH",
 	"EPIPE",
+	"EPROTO",
 	"CERT_HAS_EXPIRED",
+	"CERT_NOT_YET_VALID",
 	"DEPTH_ZERO_SELF_SIGNED_CERT",
 	"SELF_SIGNED_CERT_IN_CHAIN",
 	"UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
@@ -74,29 +117,85 @@ const TRANSPORT_CODES: ReadonlySet<string> = new Set([
 	"ERR_TLS_CERT_ALTNAME_INVALID",
 ]);
 
-/** undici's own codes (`UND_ERR_SOCKET`, `UND_ERR_CONNECT_TIMEOUT`, …): a closed vocabulary. */
-const UNDICI_CODE = /^UND_ERR_[A-Z_]{1,48}$/;
+/**
+ * Families of codes, each a closed vocabulary of its producer: undici's own
+ * (`UND_ERR_SOCKET`, `UND_ERR_HEADERS_OVERFLOW`, …), llhttp's parser errors
+ * (`HPE_INVALID_HEADER_TOKEN`, … — where the runtime sets them), and
+ * OpenSSL's (`ERR_SSL_WRONG_VERSION_NUMBER` — an https URL on a port that
+ * speaks plain HTTP). Bounded, so a value that merely starts like one is not
+ * kept whole.
+ */
+const CODE_FAMILIES: readonly RegExp[] = [
+	/^UND_ERR_[A-Z_]{1,48}$/,
+	/^HPE_[A-Z_]{1,48}$/,
+	/^ERR_SSL_[A-Z0-9_]{1,64}$/,
+];
 
-/** The first allowlisted `code` on `err` or its causes, a few levels deep. */
-export function transportCode(err: unknown): string | undefined {
+const MAX_CAUSE_DEPTH = 4;
+
+/** Each of `err` and its causes, a few levels deep. */
+function* causes(err: unknown): Generator<object> {
 	let current = err;
-	for (let depth = 0; depth < 4 && typeof current === "object" && current !== null; depth++) {
-		const code = (current as { code?: unknown }).code;
-		if (typeof code === "string" && (TRANSPORT_CODES.has(code) || UNDICI_CODE.test(code))) {
+	for (
+		let depth = 0;
+		depth < MAX_CAUSE_DEPTH && typeof current === "object" && current !== null;
+		depth++
+	) {
+		yield current;
+		current = (current as { cause?: unknown }).cause;
+	}
+}
+
+/** The first allowlisted `code` on `err` or its causes. */
+export function transportCode(err: unknown): string | undefined {
+	for (const error of causes(err)) {
+		const code = (error as { code?: unknown }).code;
+		if (
+			typeof code === "string" &&
+			(TRANSPORT_CODES.has(code) || CODE_FAMILIES.some((family) => family.test(code)))
+		) {
 			return code;
 		}
-		current = (current as { cause?: unknown }).cause;
 	}
 	return undefined;
 }
 
 /**
- * The error thrown for a transport failure: `HttpUserRepository: <what>`, and
- * the allowlisted code in the message and as `code` when there is one — no
- * cause, and nothing else of `err`.
+ * Whether the transport failed parsing what came back: the peer answered, and
+ * not with HTTP. undici names the error `HTTPParserError`; where the runtime
+ * gives it a code, it is an `HPE_*` one. Read by name and code only.
  */
-export function transportFailure(what: string, err: unknown): Error {
+function isParserFailure(err: unknown): boolean {
+	for (const error of causes(err)) {
+		const { name, code } = error as { name?: unknown; code?: unknown };
+		if (name === "HTTPParserError" || (typeof code === "string" && code.startsWith("HPE_"))) {
+			return true;
+		}
+	}
+	return false;
+}
+
+const withCode = (message: string, code: string | undefined): string =>
+	code === undefined ? message : `${message} (${code})`;
+
+/**
+ * A request that failed before any answer could be taken: `messages.notHttp`
+ * when something answered and the parser refused it — the Store was reached,
+ * so "could not be reached" would send an operator to the network —
+ * otherwise `messages.unreachable`. Either with the code, when there is one.
+ */
+export function requestFailure(
+	err: unknown,
+	messages: { readonly unreachable: string; readonly notHttp: string },
+): StoreTransportError {
 	const code = transportCode(err);
-	if (code === undefined) return new Error(`HttpUserRepository: ${what}`);
-	return Object.assign(new Error(`HttpUserRepository: ${what} (${code})`), { code });
+	return isParserFailure(err)
+		? new StoreTransportError(withCode(messages.notHttp, code), "not_http", code)
+		: new StoreTransportError(withCode(messages.unreachable, code), "unreachable", code);
+}
+
+/** An answer whose body broke before it was read. */
+export function readFailure(err: unknown, message: string): StoreTransportError {
+	const code = transportCode(err);
+	return new StoreTransportError(withCode(message, code), "unreadable", code);
 }

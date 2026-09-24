@@ -535,9 +535,14 @@ accept is an outage on every Store call: logins answer
 `503 temporarily_unavailable` and log an error naming the refused credential,
 not the token; federation-grants connects log
 `classification: "store_credential_refused"`. A `401` or `403` without the
-challenge still reads as "no such user", so a mismatch then shows only as
-every login failing — and a Store must not put a `Bearer` challenge on a
-user's wrong password. Without the token, admit only this server to the Store
+challenge keeps its old meaning — at login "no such user", at a `?link=1`
+link a refusal, and at the federation-grants identity lookup an outage like
+any other non-`2xx` — so a mismatch then shows only as every login failing
+and every link refused; and a Store must not put a `Bearer` challenge on a
+user's wrong password or a link it refuses. A Store that cannot be reached, or
+answers something that is not HTTP, is logged as such, with at most a
+transport code (`ECONNREFUSED`, `ERR_SSL_WRONG_VERSION_NUMBER`, …), and never
+with what the transport quoted. Without the token, admit only this server to the Store
 by network policy or platform mutual TLS. Rotation, what each caller logs, and
 what the Store checks are in the same foundation README section.
 

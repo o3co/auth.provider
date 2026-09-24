@@ -53,6 +53,10 @@ const CLASSIFICATIONS: ReadonlyMap<string, string> = new Map([
 	// the configured token — and "unknown" would send them to the Store's
 	// uptime. Matched by name: this package does not depend on the adapter.
 	["StoreCredentialRefusedError", "store_credential_refused"],
+	// The Store could not be reached, or answered something unreadable
+	// (`StoreTransportError`): the network, TLS, or the Store itself — not the
+	// credential, and not a timeout, which is `TimeoutError`.
+	["StoreTransportError", "store_transport_failed"],
 ]);
 
 const classify = (error: unknown): string => {

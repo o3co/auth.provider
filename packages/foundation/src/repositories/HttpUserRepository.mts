@@ -27,7 +27,7 @@ import {
 	type UserRepository,
 } from "@o3co/auth-provider-core";
 import { assertSecureEndpoint } from "../endpointUrl.mjs";
-import { StoreCredentialRefusedError, transportFailure } from "./storeErrors.mjs";
+import { readFailure, requestFailure, StoreCredentialRefusedError } from "./storeErrors.mjs";
 import { hasBearerChallenge } from "./wwwAuthenticate.mjs";
 
 /** The Store answered 409 to a link request: the identity is already someone else's (#482). */
@@ -288,12 +288,17 @@ function discardBody(res: Response): void {
  * before a byte of it is read, but the streaming count is the load-bearing
  * half: a hostile Store simply omits the header (or lies), and chunked transfer
  * encoding has none to omit.
+ *
+ * Everything it throws is the adapter's own: the cap, the deadline's
+ * rejection, or — for a stream that broke mid-read — what `unreadable` makes
+ * of the transport's error, which is never passed on as it is.
  */
 async function readBodyCapped(
 	res: Response,
 	limit: number,
 	url: string,
 	deadline: Promise<never>,
+	unreadable: (err: unknown) => Error,
 ): Promise<string> {
 	const declared = Number(res.headers.get("content-length"));
 	if (Number.isFinite(declared) && declared > limit) {
@@ -317,7 +322,12 @@ async function readBodyCapped(
 			// in flight, which is exactly the slow-loris shape — headers arrive
 			// promptly, then the body dribbles or stops. One absolute deadline
 			// for the whole exchange, not a fresh one per chunk.
-			const { done, value } = await Promise.race([reader.read(), deadline]);
+			const { done, value } = await Promise.race([
+				reader.read().catch((err: unknown) => {
+					throw unreadable(err);
+				}),
+				deadline,
+			]);
 			if (done) break;
 			read += value.byteLength;
 			if (read > limit) {
@@ -343,8 +353,9 @@ async function readBodyCapped(
  * A deliberately shallow check. An aborted `fetch` rejects with the
  * `AbortError` directly; the wrapping that `fetch` does apply is for network
  * failures, which are not aborts. If some runtime did wrap one, the request
- * still fails — it would simply surface the runtime's message instead of ours,
- * which is a cosmetic difference and not worth an untestable `cause` walk.
+ * still fails — as a `StoreTransportError` ("could not be reached") instead of
+ * a `TimeoutError`, a misnamed failure rather than a missed one, and not worth
+ * an untestable `cause` walk.
  * A stalled *body* is not covered here at all: that is the deadline race in
  * `readBodyCapped`, which does not depend on abort semantics.
  */
@@ -384,8 +395,9 @@ function isAbortError(err: unknown): boolean {
  * A transport's own error is never thrown: undici's parser errors quote the
  * bytes they rejected, and a peer that reflects the request puts the
  * `Authorization` header — or a password — there. A request that cannot be
- * made, or an answer that cannot be read, throws a fixed message naming the
- * endpoint and at most an allowlisted transport code, with no cause.
+ * made, or an answer that cannot be read, throws a `StoreTransportError`
+ * (`src/repositories/storeErrors.mts`): a fixed message naming the endpoint
+ * and what failed, at most an allowlisted transport code, no cause.
  */
 export class HttpUserRepository implements UserRepository {
 	/**
@@ -645,7 +657,10 @@ export class HttpUserRepository implements UserRepository {
 				if (timedOut && isAbortError(err)) throw timeoutError();
 				// A fixed message, without the cause: what a transport reports may
 				// quote what it was sending.
-				throw transportFailure(`identity lookup at ${url} could not be reached`, err);
+				throw requestFailure(err, {
+					unreachable: `HttpUserRepository: identity lookup at ${url} could not be reached`,
+					notHttp: `HttpUserRepository: identity lookup at ${url} answered something that is not HTTP`,
+				});
 			}
 			if (!res.ok) {
 				discardBody(res);
@@ -656,11 +671,12 @@ export class HttpUserRepository implements UserRepository {
 			}
 			let raw: string;
 			try {
-				raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline);
+				raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline, (err) =>
+					readFailure(err, `HttpUserRepository: identity lookup at ${url} could not be read`),
+				);
 			} catch (err) {
 				if (timedOut) throw timeoutError();
-				if (err instanceof Error && err.message.startsWith("HttpUserRepository:")) throw err;
-				throw transportFailure(`identity lookup at ${url} could not be read`, err);
+				throw err;
 			}
 			let parsed: unknown;
 			try {
@@ -737,19 +753,23 @@ export class HttpUserRepository implements UserRepository {
 				if (timedOut && isAbortError(err)) throw timeoutError();
 				// Never the transport's own error: it may quote what it was
 				// sending — the credential, the password — or what came back.
-				throw transportFailure(`request to ${url} could not be reached`, err);
+				throw requestFailure(err, {
+					unreachable: `HttpUserRepository: request to ${url} could not be reached`,
+					notHttp: `HttpUserRepository: the Store at ${url} answered something that is not HTTP`,
+				});
 			}
 
 			if (res.ok) {
 				let raw: string;
 				try {
-					raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline);
+					raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline, (err) =>
+						readFailure(err, `HttpUserRepository: response from ${url} could not be read`),
+					);
 				} catch (err) {
+					// Whatever the deadline interrupted is a timeout; everything
+					// else readBodyCapped throws is already the adapter's own.
 					if (timedOut) throw timeoutError();
-					// Our own failures (the cap) as they are; a stream that broke
-					// mid-read, as the fixed message the transport rule requires.
-					if (err instanceof Error && err.message.startsWith("HttpUserRepository:")) throw err;
-					throw transportFailure(`response from ${url} could not be read`, err);
+					throw err;
 				}
 				let parsed: unknown;
 				try {
