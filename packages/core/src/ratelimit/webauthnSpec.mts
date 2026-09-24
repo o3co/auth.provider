@@ -45,8 +45,8 @@ export const WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX = "webauthn-authe
  * A key that is not given (no `webauthn` section, the package not loaded)
  * seeds nothing. A key that is given is read as `webauthnConfigSchema`
  * coerces it, since `reference.conf` fills both fields from environment
- * variables that HOCON substitutes as strings and `createApp` does not parse
- * this section. One that the one predicate then refuses is a
+ * variables that HOCON substitutes as strings, and no module's `configSchema`
+ * parses this section, so `createApp` hands it on as written. One that the one predicate then refuses is a
  * `RangeError` naming `webauthn.rateLimit.authenticationOptions`, as the
  * other two seeds refuse theirs: the WebAuthn schema refuses it at the config
  * boundary, and a hand-built config that never passed it is still a

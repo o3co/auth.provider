@@ -118,7 +118,8 @@ describe("a seeded budget whose key is absent", () => {
 describe("a seeded budget given as the strings HOCON substitutes", () => {
 	// An environment variable reaches the config as a string, and every
 	// schema that owns these keys coerces it. createApp parses neither the
-	// `rateLimit` nor the `webauthn` section, so a composition that hands it
+	// `rateLimit` section (unless `sessionModule`, whose schema picks it, is
+	// mounted) nor the `webauthn` section, so a composition that hands it
 	// HOCON directly must boot on the budget written, not refuse it.
 	it("boots on rateLimit.login as numeric strings, and applies it", async () => {
 		const config = baseConfig();

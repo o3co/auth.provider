@@ -281,7 +281,10 @@ export const webauthnModule = defineModule<
 					// different one the limiter applies the key. Either way the
 					// budget in force is not the one this slot states, so boot says
 					// so, once, with both values and the key to set. The key is read
-					// as the seed reads it, so numeric strings agree with numbers.
+					// as the seed reads it, so numeric strings agree with numbers. An
+					// explicit `limits.webauthn-authentication-options` in the
+					// limiter's own section, which it applies over both, is not
+					// visible here and is not compared.
 					const configured = (
 						deps.config as {
 							webauthn?: { rateLimit?: { authenticationOptions?: unknown } };

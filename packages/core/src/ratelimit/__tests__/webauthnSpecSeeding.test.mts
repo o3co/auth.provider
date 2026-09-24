@@ -111,8 +111,9 @@ describe("resolveWebAuthnAuthenticationOptionsLimitSpec", () => {
 	it("reads the key as the WebAuthn schema does: a numeric string is its number", () => {
 		// reference.conf fills both from `${?WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT}`
 		// and `..._WINDOW_SECONDS`, which HOCON substitutes as strings, and
-		// `webauthnConfigSchema` coerces them. createApp does not parse this
-		// section, so the seed reads it as that schema would.
+		// `webauthnConfigSchema` coerces them. No module's configSchema parses
+		// this section, so createApp hands it on as written, and the seed reads
+		// it as that schema would.
 		expect(
 			resolveWebAuthnAuthenticationOptionsLimitSpec({}, configured("30", "60"))[
 				WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX

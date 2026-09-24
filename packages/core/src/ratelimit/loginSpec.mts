@@ -40,11 +40,11 @@ const LOGIN_PREFIX = "login";
  * this adapter, and overwriting it would discard what they wrote.
  *
  * A `rateLimit.login` that is not given seeds nothing. One that is given is
- * read as CoreConfigSchema coerces it (a numeric string is its number) and
- * judged by the one predicate every limiter uses, after the conversion to
- * whole seconds, and one it refuses is a `RangeError` naming
- * `rateLimit.login` — a hand-built config that never passed
- * `CoreConfigSchema` is still a configuration someone wrote. It used to be
+ * read as `AppConfigSchema`'s `rateLimit` section coerces it (a numeric
+ * string is its number) and judged by the one predicate every limiter uses,
+ * after the conversion to whole seconds, and one it refuses is a `RangeError`
+ * naming `rateLimit.login` — a hand-built config that never passed that
+ * schema is still a configuration someone wrote. It used to be
  * skipped, and `/session/login` ran on the adapter's default instead. The tradeoff
  * is that an operator reading `limits` alone sees no `login` entry while login
  * *is* limited — `reference.conf` documents this beside both `limits` blocks
@@ -65,9 +65,10 @@ export const resolveLoginLimitSpec = (
 		typeof login === "object" && login !== null
 			? (login as { windowMs?: unknown; limit?: unknown })
 			: { windowMs: undefined, limit: undefined };
-	// Read as CoreConfigSchema's `z.coerce.number()` reads them: HOCON
-	// substitutes an environment variable as a string, and a composition
-	// that skipped the parse hands this the string.
+	// Read as the schema's `z.coerce.number()` reads them: HOCON substitutes
+	// an environment variable as a string, and createApp parses `rateLimit`
+	// only when `sessionModule` (whose schema picks it) is mounted, so a
+	// composition without it hands this the string.
 	const ms = configuredNumber(windowMs);
 	const spec = {
 		limit: configuredNumber(limit),
