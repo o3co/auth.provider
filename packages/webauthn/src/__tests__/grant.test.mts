@@ -664,13 +664,11 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 			...makeBaseDeps(store),
 			grantPolicy: {
 				kind: "decision-service",
-				evaluate: vi
-					.fn()
-					.mockRejectedValue(
-						Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:8181"), {
-							code: "ECONNREFUSED",
-						}),
-					),
+				evaluate: vi.fn().mockRejectedValue(
+					Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:8181"), {
+						code: "ECONNREFUSED",
+					}),
+				),
 			} as unknown as GrantDependencies["grantPolicy"],
 			logger: {
 				trace: vi.fn(),
