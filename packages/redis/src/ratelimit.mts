@@ -5,8 +5,9 @@
 
 import {
 	type AdapterBuilder,
+	assertRateLimitWindowsInRange,
 	defineModule,
-	isStorableLifetime,
+	MAX_DURATION_SECONDS,
 	type RateLimiter,
 	type RateLimitSpec,
 	resolveSeededLimitSpecs,
@@ -36,18 +37,12 @@ interface RedisRateLimiterConfig {
 const isPositiveInteger = (value: unknown): value is number =>
 	typeof value === "number" && Number.isInteger(value) && value > 0;
 
-/**
- * Whether an arbitrary value is a usable {@link RateLimitSpec}. Its window must
- * also end within the Date range: a whole but enormous `windowSeconds` is an
- * `EXPIRE` Redis refuses — after the script's `INCR` has run, leaving a
- * counter with no TTL (#269's shape).
- */
+/** Whether an arbitrary value is a usable {@link RateLimitSpec}. */
 const isRateLimitSpec = (value: unknown): value is RateLimitSpec =>
 	typeof value === "object" &&
 	value !== null &&
 	isPositiveInteger((value as { limit?: unknown }).limit) &&
-	isPositiveInteger((value as { windowSeconds?: unknown }).windowSeconds) &&
-	isStorableLifetime((value as { windowSeconds: number }).windowSeconds * 1000);
+	isPositiveInteger((value as { windowSeconds?: unknown }).windowSeconds);
 
 function normalizeLimits(raw: unknown): Record<string, RateLimitSpec> {
 	if (raw == null || typeof raw !== "object") return {};
@@ -88,6 +83,12 @@ interface CreateRedisRateLimiterOptions {
  * other redis users.
  */
 export function createRedisRateLimiter(opts: CreateRedisRateLimiterOptions): RateLimiter {
+	// A whole but enormous `windowSeconds` is an `EXPIRE` Redis refuses after
+	// the script's `INCR` has run, which leaves a counter with no TTL (#269's
+	// shape). It is refused here, not dropped: the default applying in its
+	// place would be a looser budget than the operator wrote. Checked before
+	// the screening below, which drops what is not a positive integer at all.
+	assertRateLimitWindowsInRange("createRedisRateLimiter", opts);
 	const limits = normalizeLimits(opts.limits);
 	// `defaultLimit` gets the same screening as the per-prefix specs: it is the
 	// fallback every unmatched key lands on, so a bad one is worse, not better.
@@ -158,7 +159,8 @@ export const redisRateLimiterBuilder: AdapterBuilder<RateLimiter> = (config, _ct
 
 const rateLimitSpecSchema = z.object({
 	limit: z.number().int().positive(),
-	windowSeconds: z.number().int().positive(),
+	// One year at most, as core's schema holds every duration an operator writes.
+	windowSeconds: z.number().int().positive().max(MAX_DURATION_SECONDS),
 });
 
 /**

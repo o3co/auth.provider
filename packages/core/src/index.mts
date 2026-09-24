@@ -165,6 +165,7 @@ export {
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 } from "./config/application.schema.mjs";
+export { MAX_DURATION_MS, MAX_DURATION_SECONDS } from "./config/durations.mjs";
 // OIDC discovery aggregation — modules contribute `discoveryMetadata`
 // (OidcDiscoveryContributionFactory above) and core synthesizes the
 // `/.well-known/openid-configuration` document via `buildDiscoveryDocument`.
@@ -648,6 +649,7 @@ export type {
 	RateLimiterFactory,
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";
+export { assertRateLimitWindowsInRange } from "./ratelimit/window.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
 export type {
 	ProbeResult,

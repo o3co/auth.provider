@@ -112,6 +112,7 @@ import {
 	guardedRead,
 	isDeviceVerificationRateLimitSpec,
 	loggableError,
+	MAX_DURATION_SECONDS,
 	type Module,
 	type ProviderDeps,
 	type RateLimitFailMode,
@@ -146,7 +147,9 @@ import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
  */
 const rateLimitSpecSchema = z.object({
 	limit: z.number().int().positive(),
-	windowSeconds: z.number().int().positive(),
+	// One year at most, as core's schema holds every duration an operator
+	// writes: a window past the Date range is one the limiter refuses anyway.
+	windowSeconds: z.number().int().positive().max(MAX_DURATION_SECONDS),
 });
 
 /** §5.1's worked example: "only allow 5 attempts"; five minutes is half the default code lifetime. */

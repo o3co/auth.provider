@@ -15,6 +15,7 @@
  */
 
 import type { RateLimiter, RateLimitSpec } from "./types.mjs";
+import { assertRateLimitWindowsInRange } from "./window.mjs";
 
 export const DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS = 10_000;
 
@@ -77,6 +78,9 @@ function evictEarliestResetBucket(buckets: Map<string, BucketState>): void {
 }
 
 export function createMemoryRateLimiter(options: MemoryRateLimiterOptions): RateLimiter {
+	// A window no clock reaches the end of is refused here, as the Redis
+	// adapter refuses it: its bucket would reset at an Invalid Date.
+	assertRateLimitWindowsInRange("createMemoryRateLimiter", options);
 	const buckets = new Map<string, BucketState>();
 	const maxBuckets = normalizeMaxBuckets(options.maxBuckets);
 

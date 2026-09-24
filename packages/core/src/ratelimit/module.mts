@@ -4,6 +4,7 @@
  */
 
 import { z } from "zod";
+import { MAX_DURATION_SECONDS } from "../config/durations.mjs";
 import { defineModule } from "../modules/index.mjs";
 import { createMemoryRateLimiter, DEFAULT_MEMORY_RATE_LIMITER_MAX_BUCKETS } from "./memory.mjs";
 import { resolveSeededLimitSpecs } from "./seededSpecs.mjs";
@@ -11,7 +12,7 @@ import type { RateLimitSpec } from "./types.mjs";
 
 const rateLimitSpecSchema = z.object({
 	limit: z.number().int().positive(),
-	windowSeconds: z.number().int().positive(),
+	windowSeconds: z.number().int().positive().max(MAX_DURATION_SECONDS),
 });
 
 /**

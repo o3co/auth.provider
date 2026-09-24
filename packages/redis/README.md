@@ -313,7 +313,7 @@ give the same answers:
 | `ConsentStore.grant`, `PendingConsentStore.set` | an `expiresAt` outside the Date range (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
 | `SubjectRevocation.revokeBefore`, `revokeSessionsBefore` | a boundary or `expiresAt` that is an Invalid Date | `PXAT` = the later of the `expiresAt` asked for and the key's current deadline, raised to the grants floor for a full revocation — never lowered |
 | `FederationGrantStore`, `FederationGrantIntentStore` | a caller's clock that is an Invalid Date (`RangeError`); an intent or authorization expiry that is not a date writes nothing (`{ ok: false }`, as the port says) | `PEXPIREAT` = the record's expiry plus its retention or listing allowance, rounded up (`math.ceil`) inside the script that writes it |
-| `RateLimiter` | a spec whose `windowSeconds` is not a positive integer ending within the Date range is screened out at construction, and the default window applies | `EXPIRE` = `windowSeconds`, set in the same script as the `INCR` |
+| `RateLimiter` | a spec, `defaultLimit` included, whose `windowSeconds` ends past the Date range, at construction (core's `assertRateLimitWindowsInRange`, which the in-process limiter applies too). It is refused rather than dropped, since the default applying in its place would be a looser budget than the operator wrote. The config schemas hold a window to one year | `EXPIRE` = `windowSeconds`, set in the same script as the `INCR` |
 
 [`px-rounding.test.mts`](__tests__/px-rounding.test.mts) pins both halves for
 each adapter with a recording client: the contract suites cannot tell
