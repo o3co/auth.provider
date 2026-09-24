@@ -260,6 +260,34 @@ describe("senderConstrained enforcement (shared grant-dispatch path)", () => {
 		expect(handler.captured.invoked).toBe(false);
 	});
 
+	// RFC 6749 §5.2's character set holds for the kind the refusal names: a
+	// mechanism's kind is text a composition supplies, not a closed list.
+	it("names a binding kind outside RFC 6749's character set sanitised", async () => {
+		const oddKind = 'od"d\\\u00e9';
+		const sc: SenderConstraint = { required: true, methods: ["mtls"] };
+		const app = await buildApp(capturingHandler(), {
+			clientRepo: makeInMemoryRepo(sc),
+			mountMw: true,
+			mechanisms: [
+				{
+					kind: oddKind,
+					intentExplicit: true,
+					extract: async () => ({ kind: oddKind, confirmation: { jkt: "SC-JKT" } }),
+				},
+			],
+		});
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("Authorization", TEST_BASIC_AUTH)
+			.type("form")
+			.send({ grant_type: "client_credentials" });
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual({
+			error: "unauthorized_client",
+			error_description: "client not allowed to use kind=od?d??",
+		});
+	});
+
 	it("allows when binding kind is in methods", async () => {
 		const sc: SenderConstraint = { required: true, methods: ["dpop"] };
 		const repo = makeInMemoryRepo(sc);

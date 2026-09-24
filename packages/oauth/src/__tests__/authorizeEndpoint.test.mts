@@ -462,6 +462,18 @@ describe("/authorize — response_type validation", () => {
 	// RFC 6749 §4.1.2.1 holds `error_description` to %x20-21 / %x23-5B /
 	// %x5D-7E. The refusal names the value that arrived, so the redirect
 	// replaces every other character with `?`.
+	// `state` is the client's own value, returned exactly (RFC 6749
+	// §4.1.2.1): URL-encoded in the redirect, never `?`-replaced like the
+	// error text around it.
+	it("returns state unchanged in an error redirect, whatever characters it carries", async () => {
+		const { app } = await makeApp({});
+		const state = 'a"b\\c d\u00e9\u{1F600}';
+		const res = await authorize(app, { ...baseQuery, response_type: "token", state });
+		const params = redirectParams(res);
+		expect(params.get("error")).toBe("unsupported_response_type");
+		expect(params.get("state")).toBe(state);
+	});
+
 	it("names the refused response_type within RFC 6749's character set", async () => {
 		const { app } = await makeApp({});
 		const res = await authorize(app, { ...baseQuery, response_type: 'a"b\\c\u0007d\u00e9' });
@@ -568,6 +580,35 @@ describe("/authorize — policy evaluation edges (C-2)", () => {
 		expect(evaluated.subject).toBeUndefined();
 		expect(evaluated.requestedScope).toBeUndefined();
 	});
+
+	// RFC 6749 §4.1.2.1 makes `error` 1*NQSCHAR (printable ASCII without `"`
+	// and `\`). A deny code outside it, or none, is answered `access_denied`
+	// — the code for a request the authorization server refuses — and the
+	// policy's code is logged, sanitised, for the operator who wrote it.
+	it.each([
+		["a double quote", 'bad "code"', "bad ?code?"],
+		["non-ASCII", "d\u00e9ny", "d?ny"],
+		["nothing", "", ""],
+	])(
+		"answers access_denied for a policy deny code with %s, and logs it sanitised",
+		async (_label, code, logged) => {
+			const logger = createMockLogger();
+			const { app } = await makeApp({
+				logger,
+				grantPolicy: {
+					kind: "test",
+					evaluate: async () => ({ outcome: "deny", error: code, errorDescription: "no" }),
+				},
+			});
+			const params = redirectParams(await authorize(app, baseQuery));
+			expect(params.get("error")).toBe("access_denied");
+			expect(params.get("error_description")).toBe("no");
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ error: logged },
+				"authorize_policy_deny_error_malformed",
+			);
+		},
+	);
 
 	it("refuses a policy that returns a non-array grantedScope or grantedAudience (#521)", async () => {
 		// A JavaScript policy can return a string where the type says array.

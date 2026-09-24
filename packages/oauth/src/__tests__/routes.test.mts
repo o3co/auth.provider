@@ -23,6 +23,7 @@ import {
 	createSymmetricKeyStore,
 	type FederationTokenStore,
 	type GrantHandler,
+	type Logger,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
@@ -35,6 +36,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const mockConfig = {
 	// `oauth.jwt.issuer` is required by createOAuthRouter (#266) — the router
@@ -244,6 +246,7 @@ describe("createOAuthRouter", () => {
 			grantHandler: GrantHandler;
 			grantType: string;
 			auditSink?: AuditSink;
+			logger?: Logger;
 		}) {
 			const app = express();
 			app.set("trust proxy", 1);
@@ -258,6 +261,7 @@ describe("createOAuthRouter", () => {
 				codeRepository: integrationCodeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 				auditSink: opts.auditSink,
+				...(opts.logger ? { logger: opts.logger } : {}),
 			});
 			app.use("/oauth", router);
 			return app;
@@ -410,6 +414,64 @@ describe("createOAuthRouter", () => {
 				});
 				expect(details?.reason).toBe("scope 'a?b?c?d?e?f' is not in subject_token scope");
 			});
+		});
+
+		// RFC 6749 §5.2: `error` is 1*NQSCHAR, the same characters. A grant can
+		// hand the route any code — a policy deny carries the policy's own —
+		// so one outside the set, or none, is answered `invalid_request` and
+		// logged, sanitised, naming the grant type.
+		it.each([
+			["a double quote", 'bad "code"', "bad ?code?"],
+			["nothing", "", ""],
+		])(
+			"answers invalid_request for a grant error code with %s, and logs it",
+			async (_label, code, logged) => {
+				const logger = createMockLogger();
+				const stubGrant: GrantHandler = {
+					handle: async () => ({
+						result: { status: 400, error: code, errorDescription: "denied" },
+					}),
+				};
+				const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", logger });
+				const res = await request(app)
+					.post("/oauth/token")
+					.set("Authorization", TEST_BASIC_AUTH)
+					.type("form")
+					.send({ grant_type: "stub" });
+				expect(res.status).toBe(400);
+				expect(res.body).toEqual({ error: "invalid_request", error_description: "denied" });
+				expect(logger.warn).toHaveBeenCalledWith(
+					{ grant_type: "stub", error: logged },
+					"token_error_code_malformed",
+				);
+			},
+		);
+
+		// The audit event of an unsupported grant_type records what the client
+		// sent, held to the same bounds as a handler refusal's reason.
+		it("audits the unsupported grant_type sanitised and capped", async () => {
+			const events: AuditEvent[] = [];
+			const auditSink: AuditSink = {
+				kind: "spy",
+				record: async (e) => {
+					events.push(e);
+				},
+			};
+			const stubGrant: GrantHandler = {
+				handle: async () => ({
+					result: { status: 200, tokens: { access_token: "x", token_type: "Bearer" } },
+				}),
+			};
+			const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", auditSink });
+			await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({ grant_type: `a"b${"x".repeat(300)}` });
+			await new Promise((r) => setImmediate(r));
+			const details = events.find((e) => e.type === "token.issued.failure")?.details;
+			expect(details?.reason).toBe("unsupported_grant_type");
+			expect(details?.grant_type).toBe(`a?b${"x".repeat(194)}...`);
 		});
 
 		it("sanitises the client's grant_type it echoes in unsupported_grant_type", async () => {

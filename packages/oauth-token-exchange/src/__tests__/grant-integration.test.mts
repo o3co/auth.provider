@@ -1054,6 +1054,78 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 	});
 
+	// A policy deny carries the policy's own `error`. RFC 6749 §5.2 makes
+	// `error` 1*NQSCHAR (printable ASCII without `"` and `\`), so a code
+	// outside that set — or none — is answered `invalid_request`, §2.2.2's
+	// code for a request refused by policy, and the policy's code is logged,
+	// sanitised, for the operator who wrote it.
+	describe("a policy deny", () => {
+		const denying = (error: string) =>
+			defineModule({
+				name: "test:denying-grant-policy",
+				provides: {
+					grantPolicy: () => ({
+						kind: "test",
+						evaluate: async () => ({
+							outcome: "deny" as const,
+							error,
+							errorDescription: "denied by the test policy",
+						}),
+					}),
+				},
+			});
+		const warnings = () => {
+			const logger = {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error: vi.fn(),
+				fatal: vi.fn(),
+				child: () => logger,
+			};
+			return {
+				module: defineModule({ name: "test:logger", provides: { logger: () => logger } }),
+				of: (event: string) => logger.warn.mock.calls.filter((call) => call[1] === event),
+			};
+		};
+		const body = async () => ({
+			subject_token: await signSelfIssuedAccessToken({}),
+			subject_token_type: ACCESS_TOKEN_TYPE,
+		});
+
+		it.each([
+			["a double quote", 'bad "code"', "bad ?code?"],
+			["non-ASCII", "d\u00e9ny", "d?ny"],
+			["nothing", "", ""],
+		])(
+			"answers invalid_request for a deny code with %s, and logs it sanitised",
+			async (_label, code, logged) => {
+				const log = warnings();
+				const { grant } = await boot([denying(code), log.module]);
+				const { result } = await exchange(grant, await body());
+				expect(result).toEqual({
+					status: 400,
+					error: "invalid_request",
+					errorDescription: "denied by the test policy",
+				});
+				expect(log.of("token_exchange_policy_deny_error_malformed")).toEqual([
+					[{ error: logged }, "token_exchange_policy_deny_error_malformed"],
+				]);
+			},
+		);
+
+		it("keeps a well-formed deny code, access_denied as 403", async () => {
+			const { grant } = await boot([denying("access_denied")]);
+			const { result } = await exchange(grant, await body());
+			expect(result).toEqual({
+				status: 403,
+				error: "access_denied",
+				errorDescription: "denied by the test policy",
+			});
+		});
+	});
+
 	// Core's ExchangeTokenValidator contract: `null` means the token is not
 	// acceptable (the grant answers `invalid_request`, RFC 8693 §2.2.2), a
 	// throw means the answer is not knowable (`503 temporarily_unavailable`).
