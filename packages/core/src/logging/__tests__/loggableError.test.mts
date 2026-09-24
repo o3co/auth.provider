@@ -22,6 +22,7 @@ import { describe, expect, it } from "vitest";
 import {
 	guardedRead,
 	LOGGED_AGGREGATE_MAX_ERRORS,
+	LOGGED_MAX_PROJECTIONS,
 	LOGGED_STACK_MAX_FRAMES,
 	LOGGED_STACK_MAX_LENGTH,
 	type LoggableError,
@@ -339,6 +340,64 @@ describe("loggableError — what a log line may carry of an error", () => {
 			revocable.revoke();
 			const revoked = Object.assign(new Error("outer"), { errors: revocable.proxy });
 			expect(shape(revoked)).toEqual({ name: "Error", detail: "outer" });
+		});
+	});
+
+	describe("a budget for one line", () => {
+		/**
+		 * An error `levels` deep whose every level has five Error members and
+		 * an Error cause, each with a long message: past the depth limit, 259
+		 * projections without a budget.
+		 */
+		const tree = (levels: number, label = "root"): Error => {
+			const long = `${label} ${"x".repeat(1000)}`;
+			if (levels === 0) return new Error(long);
+			return new AggregateError(
+				Array.from({ length: 5 }, (_, i) => tree(levels - 1, `${label}.${i}`)),
+				long,
+				{ cause: tree(levels - 1, `${label}.cause`) },
+			);
+		};
+		/** How many projections a line holds: the error, and its causes and members, all the way down. */
+		const count = (projected: LoggableError | undefined): number =>
+			projected === undefined
+				? 0
+				: 1 +
+					count(projected.cause) +
+					(projected.aggregateErrors ?? []).reduce((sum, member) => sum + count(member), 0);
+		const labelOf = (projected: LoggableError | undefined): string | undefined =>
+			projected?.detail?.split(" ")[0];
+
+		it(`keeps at most ${LOGGED_MAX_PROJECTIONS} projections in one line, the nearest first`, () => {
+			expect(LOGGED_MAX_PROJECTIONS).toBe(16);
+			const projected = loggableError(tree(4));
+			expect(count(projected)).toBe(LOGGED_MAX_PROJECTIONS);
+			// Sixteen, each capped: a line a log shipper takes whole.
+			expect(JSON.stringify(projected).length).toBeLessThan(LOGGED_MAX_PROJECTIONS * 4096);
+			// The error's own cause and all five of its members come before
+			// anything of theirs.
+			expect(labelOf(projected.cause)).toBe("root.cause");
+			expect(projected.aggregateErrors?.map(labelOf)).toEqual([
+				"root.0",
+				"root.1",
+				"root.2",
+				"root.3",
+				"root.4",
+			]);
+			expect(projected.aggregateErrorsOmitted).toBeUndefined();
+		});
+
+		it("says what the budget left out: a member in `aggregateErrorsOmitted`, a cause as `causeOmitted`", () => {
+			const projected = loggableError(tree(4));
+			const first = projected.aggregateErrors?.[0];
+			expect(labelOf(first?.cause)).toBe("root.0.cause");
+			expect(first?.aggregateErrors?.map(labelOf)).toEqual(["root.0.0", "root.0.1"]);
+			expect(first?.aggregateErrorsOmitted).toBe(3);
+			const last = projected.aggregateErrors?.[4];
+			expect(last?.cause).toBeUndefined();
+			expect(last?.causeOmitted).toBe(true);
+			expect(last?.aggregateErrors).toBeUndefined();
+			expect(last?.aggregateErrorsOmitted).toBe(5);
 		});
 	});
 
@@ -874,6 +933,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 
 	it("exports the limits and the guarded read the rule is built from", () => {
 		expect(LOGGED_AGGREGATE_MAX_ERRORS).toBe(5);
+		expect(LOGGED_MAX_PROJECTIONS).toBe(16);
 		expect(LOGGED_STACK_MAX_FRAMES).toBe(10);
 		expect(LOGGED_STACK_MAX_LENGTH).toBe(2048);
 		expect(guardedRead({ field: 1 }, "field")).toEqual({ value: 1 });
