@@ -14,6 +14,7 @@
  */
 
 import {
+	auditErrorText,
 	generateLogoutToken,
 	type KeyStore,
 	type Logger,
@@ -88,22 +89,25 @@ export async function broadcastBackchannelLogout(
 						signal: abort.signal,
 					});
 					if (!res.ok) {
+						// The status, not the RP's own words for it.
 						logger.warn(
-							`broadcastBackchannelLogout: RP ${rp.clientId} returned ${res.status} ${res.statusText ?? ""}`.trim(),
+							{ clientId: auditErrorText(rp.clientId), status: res.status },
+							"logout_backchannel_rejected",
 						);
 					}
 				} catch (err) {
 					logger.warn(
-						`broadcastBackchannelLogout: RP ${rp.clientId} POST to ${rp.backchannelLogoutUri} failed:`,
-						loggableError(err),
+						{ clientId: auditErrorText(rp.clientId), step: "post", err: loggableError(err) },
+						"logout_backchannel_failed",
 					);
 				} finally {
 					clearTimeout(timer);
 				}
 			} catch (err) {
+				// The logout token could not be built or signed: no POST was made.
 				logger.warn(
-					`broadcastBackchannelLogout: RP ${rp.clientId} broadcast failed:`,
-					loggableError(err),
+					{ clientId: auditErrorText(rp.clientId), step: "logout_token", err: loggableError(err) },
+					"logout_backchannel_failed",
 				);
 			}
 		});

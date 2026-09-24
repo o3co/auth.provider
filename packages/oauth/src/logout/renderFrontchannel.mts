@@ -14,7 +14,7 @@
  */
 
 import type { Logger } from "@o3co/auth-provider-core";
-import { loggableError } from "@o3co/auth-provider-core";
+import { auditErrorText, loggableError } from "@o3co/auth-provider-core";
 
 export interface FrontchannelRP {
 	readonly clientId: string;
@@ -121,8 +121,8 @@ export function renderFrontchannelLogoutHtml(opts: RenderFrontchannelLogoutHtmlO
 				return `<iframe src="${escapeHtml(iframeSrc)}" style="display:none" aria-hidden="true" referrerpolicy="no-referrer"></iframe>`;
 			} catch (err) {
 				logger.warn(
-					`renderFrontchannelLogoutHtml: failed to build iframe for RP ${rp.clientId} (skipping):`,
-					loggableError(err),
+					{ clientId: auditErrorText(rp.clientId), err: loggableError(err) },
+					"logout_frontchannel_iframe_skipped",
 				);
 				return ""; // skipped; filtered out below
 			}

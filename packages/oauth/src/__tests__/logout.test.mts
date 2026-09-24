@@ -1048,6 +1048,12 @@ describe("POST /oauth/logout", () => {
 				expect(res.status).toBe(200);
 				expect(warnSpy).toHaveBeenCalled();
 				expect(consoleWarnSpy).not.toHaveBeenCalled();
+				expectBestEffortWarn(
+					logger,
+					"logout_federation_end_session_failed",
+					{ federation: "google" },
+					"Error",
+				);
 			} finally {
 				consoleWarnSpy.mockRestore();
 			}
@@ -1543,6 +1549,47 @@ describe("POST /oauth/federation/:name/logout", () => {
 			expect(res.status).toBe(200);
 			expect(res.body).toEqual({ disconnected: true });
 			expect(res.headers["cache-control"]).toBe("no-store");
+		});
+
+		it("logs the orphan IdP session once, structured, with the error's projection", async () => {
+			const provider = {
+				...federationBase("google"),
+				endSession: vi.fn().mockRejectedValue(new Error("IdP unreachable")),
+			} as unknown as FederationProvider;
+			const logger = createMockLogger();
+			const app = buildFedLogoutApp({
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+				logger,
+			});
+
+			const res = await postFedLogout(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(200);
+			expectBestEffortWarn(
+				logger,
+				"federation_logout_end_session_failed",
+				{ federation: "google" },
+				"Error",
+			);
+		});
+	});
+
+	describe("a refused access token is logged by the verifier's reason", () => {
+		it("logs the reason alone, nothing the token carries", async () => {
+			const logger = createMockLogger();
+			const res = await postFedLogout(
+				buildFedLogoutApp({ logger }),
+				"google",
+				await mintTypMarkerToken(),
+			);
+			expect(res.status).toBe(401);
+			const line = expectBestEffortWarn(
+				logger,
+				"federation_logout_jwt_verify_failed",
+				{ federation: "google" },
+				null,
+			);
+			expect(line).toEqual({ federation: "google", reason: "typ" });
 		});
 	});
 
@@ -2231,3 +2278,17 @@ describe("POST /oauth/logout — browser session (R1a)", () => {
 		expect(browserSession.destroyed).toBe(false);
 	});
 });
+
+/**
+ * A token whose `typ` header is text the verifier reads before the signature
+ * and quotes in its refusal's message. A route's own line about the refusal
+ * carries the verifier's reason and nothing of the token.
+ */
+const TYP_MARKER = "typ-must-never-reach-a-route-line";
+const mintTypMarkerToken = (): Promise<string> =>
+	new SignJWT({ sub: "u-1", sid: "sid-1", azp: "client-1", family_id: "fam-1" })
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: TYP_MARKER })
+		.setExpirationTime("1h")
+		.setIssuedAt()
+		.setIssuer("https://auth.example.com")
+		.sign(secretKey);

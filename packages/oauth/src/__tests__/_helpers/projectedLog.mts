@@ -36,21 +36,6 @@ export const serialisedCalls = (logger: MockLogger): string => {
 };
 
 /**
- * The string-first warn line whose message matches `message` carried the
- * error's projection — a `ReplyError` by name, not the error — and no warn or
- * error call carried the refused command.
- */
-export const expectProjectedWarn = (logger: MockLogger, message: RegExp): void => {
-	const line = logger.warn.mock.calls.find(
-		([first]) => typeof first === "string" && message.test(first),
-	);
-	expect(line, `a warn line matching ${message}`).toBeDefined();
-	expect(line?.[1]).toMatchObject({ name: "ReplyError" });
-	expect(line?.[1]).not.toBeInstanceOf(Error);
-	expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
-};
-
-/**
  * The policy for a branch that answers 503 because a store, a repository or a
  * keystore could not answer: exactly one line, at error level, object-first,
  * named `event`, carrying `fields` and the error's projection (a `ReplyError`
@@ -86,8 +71,10 @@ export const expectOutageLine = (
 
 /**
  * The policy for a best-effort step whose failure the route rides over (it
- * does not answer 503 for it): exactly one warn-level line named `event`,
- * object-first, carrying `fields` and the error's projection, not the error
+ * does not answer 503 for it): exactly one warn-level line named `event`
+ * whose fields include `fields` (so two lines under one event, told apart by
+ * `store` or `clientId`, are each checked on their own), object-first,
+ * carrying the error's projection, not the error
  * (`errName: null` for a line about no error); no line at all whose first argument is a string;
  * and nowhere the refused command.
  */
@@ -101,8 +88,16 @@ export const expectBestEffortWarn = (
 		([first]) => typeof first === "string",
 	);
 	expect(stringFirst, "no template-string line").toEqual([]);
-	const lines = logger.warn.mock.calls.filter(([, name]) => name === event);
-	expect(lines, `one ${event} warn`).toHaveLength(1);
+	const lines = logger.warn.mock.calls.filter(
+		([first, name]) =>
+			name === event &&
+			typeof first === "object" &&
+			first !== null &&
+			Object.entries(fields).every(
+				([key, value]) => (first as Record<string, unknown>)[key] === value,
+			),
+	);
+	expect(lines, `one ${event} warn with ${JSON.stringify(fields)}`).toHaveLength(1);
 	const line = lines[0]?.[0] as Record<string, unknown>;
 	expect(line).toMatchObject(fields);
 	if (errName === null) {

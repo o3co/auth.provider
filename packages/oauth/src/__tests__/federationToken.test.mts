@@ -37,7 +37,6 @@ import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import {
 	expectBestEffortWarn,
 	expectOutageLine,
-	expectProjectedWarn,
 	REFUSED_COMMAND_MARKER,
 	serialisedCalls,
 	storeReplyError,
@@ -2461,7 +2460,11 @@ describe("POST /oauth/federation/:name/token", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(404);
-			expectProjectedWarn(logger, /removeFederation self-heal failed/);
+			expectBestEffortWarn(logger, "federation_token_index_self_heal_failed", {
+				federation: "google",
+				store: "session_federation_index",
+				step: "remove",
+			});
 		});
 
 		it("the refresh lock", async () => {
@@ -2612,8 +2615,16 @@ describe("POST /oauth/federation/:name/token", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(410);
-			expectProjectedWarn(logger, /federationTokenStore\.delete cleanup failed/);
-			expectProjectedWarn(logger, /removeFederation cleanup failed/);
+			expectBestEffortWarn(logger, "federation_token_cleanup_failed", {
+				federation: "google",
+				store: "federation_token",
+				step: "delete",
+			});
+			expectBestEffortWarn(logger, "federation_token_cleanup_failed", {
+				federation: "google",
+				store: "session_federation_index",
+				step: "remove",
+			});
 		});
 
 		it("the lock's release", async () => {
@@ -2638,7 +2649,11 @@ describe("POST /oauth/federation/:name/token", () => {
 				await mintAccessToken(),
 			);
 			expect(res.status).toBe(200);
-			expectProjectedWarn(logger, /lock release failed/);
+			expectBestEffortWarn(logger, "federation_token_lock_release_failed", {
+				federation: "google",
+				store: "federation_token",
+				step: "release_lock",
+			});
 		});
 	});
 
@@ -3469,5 +3484,34 @@ describe("POST /oauth/federation/:name/token — keeping a rotated refresh token
 			{ federation: "google", store: "federation_token", reason: "rotated_concurrently" },
 			null,
 		);
+	});
+});
+
+/**
+ * A token whose `typ` header is text the verifier reads before the signature
+ * and quotes in its refusal's message. A route's own line about the refusal
+ * carries the verifier's reason and nothing of the token.
+ */
+const TYP_MARKER = "typ-must-never-reach-a-route-line";
+const mintTypMarkerToken = (): Promise<string> =>
+	new SignJWT({ sub: "u-1", sid: "sid-1", azp: "client-1", family_id: "fam-1" })
+		.setProtectedHeader({ alg: "HS256", kid: "v0", typ: TYP_MARKER })
+		.setExpirationTime("1h")
+		.setIssuedAt()
+		.setIssuer("https://auth.example.com")
+		.sign(secretKey);
+
+describe("POST /oauth/federation/:name/token — a refused access token is logged by the verifier's reason", () => {
+	it("logs the reason alone, nothing the token carries", async () => {
+		const logger = createMockLogger();
+		const res = await postFedToken(buildApp({ logger }), "google", await mintTypMarkerToken());
+		expect(res.status).toBe(401);
+		const line = expectBestEffortWarn(
+			logger,
+			"federation_token_jwt_verify_failed",
+			{ federation: "google" },
+			null,
+		);
+		expect(line).toEqual({ federation: "google", reason: "typ" });
 	});
 });

@@ -1,5 +1,6 @@
 import { assert, describe, expect, it } from "vitest";
 import { createMockLogger } from "../../__tests__/_helpers/mockLogger.mjs";
+import { expectBestEffortWarn } from "../../__tests__/_helpers/projectedLog.mjs";
 import { renderFrontchannelLogoutHtml } from "../renderFrontchannel.mjs";
 
 describe("renderFrontchannelLogoutHtml", () => {
@@ -187,8 +188,13 @@ describe("renderFrontchannelLogoutHtml", () => {
 		expect(html).not.toContain("not-a-url");
 		// exactly one iframe in the output
 		expect([...html.matchAll(/<iframe/g)].length).toBe(1);
-		// warning was logged for the bad RP
-		expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining("bad"), expect.anything());
+		// one structured warning for the bad RP, with the error's projection
+		expectBestEffortWarn(
+			logger,
+			"logout_frontchannel_iframe_skipped",
+			{ clientId: "bad" },
+			"TypeError",
+		);
 	});
 
 	it("postLogoutRedirectUri is safe against </script> injection (CSP-safe pattern)", () => {

@@ -37,6 +37,7 @@ import {
 	emitAuditEvent,
 	isBearerTokenType,
 	isVerificationUnavailable,
+	JwtVerificationError,
 	logClientRepositoryUnavailable,
 	loggableError,
 	parseScopeTokens,
@@ -390,9 +391,17 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			if (isVerificationUnavailable(error)) {
 				return refuseVerificationUnavailable(res, error, logger, "federation_token");
 			}
+			// The verifier's reason alone: its message quotes what the token
+			// carries — the `typ` header, read before the signature is checked,
+			// and claims — and the verifier has already logged its own
+			// `jwt_verify_rejected`. `verifyJwt` throws nothing but its verdict;
+			// anything else would be logged as its projection.
+			const verdict = error instanceof JwtVerificationError ? error.reason : undefined;
 			logger.warn(
-				`POST /oauth/federation/${federation}/token: jwtVerify failed:`,
-				loggableError(error),
+				verdict === undefined
+					? { federation, err: loggableError(error) }
+					: { federation, reason: verdict },
+				"federation_token_jwt_verify_failed",
 			);
 			res.setHeader(
 				"WWW-Authenticate",
@@ -604,8 +613,13 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				await opts.sessionFederationIndex.removeFederation(sid, name);
 			} catch (error) {
 				logger.warn(
-					`POST /oauth/federation/${federation}/token: sessionFederationIndex.removeFederation self-heal failed:`,
-					loggableError(error),
+					{
+						federation,
+						store: "session_federation_index",
+						step: "remove",
+						err: loggableError(error),
+					},
+					"federation_token_index_self_heal_failed",
 				);
 				// Best-effort: still return 404 regardless
 			}
@@ -820,16 +834,26 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 						await opts.federationTokenStore.delete(sid, name);
 					} catch (cleanupErr) {
 						logger.warn(
-							`POST /oauth/federation/${federation}/token: federationTokenStore.delete cleanup failed:`,
-							loggableError(cleanupErr),
+							{
+								federation,
+								store: "federation_token",
+								step: "delete",
+								err: loggableError(cleanupErr),
+							},
+							"federation_token_cleanup_failed",
 						);
 					}
 					try {
 						await opts.sessionFederationIndex.removeFederation(sid, name);
 					} catch (cleanupErr) {
 						logger.warn(
-							`POST /oauth/federation/${federation}/token: sessionFederationIndex.removeFederation cleanup failed:`,
-							loggableError(cleanupErr),
+							{
+								federation,
+								store: "session_federation_index",
+								step: "remove",
+								err: loggableError(cleanupErr),
+							},
+							"federation_token_cleanup_failed",
 						);
 					}
 					emitAuditEvent(opts.auditSink, {
@@ -1187,8 +1211,13 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					await release();
 				} catch (error) {
 					logger.warn(
-						`POST /oauth/federation/${federation}/token: lock release failed:`,
-						loggableError(error),
+						{
+							federation,
+							store: "federation_token",
+							step: "release_lock",
+							err: loggableError(error),
+						},
+						"federation_token_lock_release_failed",
 					);
 				}
 			}

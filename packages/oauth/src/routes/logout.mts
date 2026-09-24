@@ -33,6 +33,7 @@ import {
 	auditedError,
 	emitAuditEvent,
 	isVerificationUnavailable,
+	JwtVerificationError,
 	loggableError,
 	sanitizeErrorText,
 	supportsLogout,
@@ -354,11 +355,18 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				if (isVerificationUnavailable(error)) {
 					return refuseVerificationUnavailable(res, error, logger, "federation_logout");
 				}
-				// Log the reason at warn level — keep minimal (don't log the token itself,
-				// since this path can be attacker-driven).
+				// The verifier's reason alone, never the token: this path can be
+				// attacker-driven, and the verifier's message quotes what the token
+				// carries (the `typ` header, read before the signature is checked,
+				// and claims). The verifier has already logged its own
+				// `jwt_verify_rejected`. `verifyJwt` throws nothing but its verdict;
+				// anything else would be logged as its projection.
+				const verdict = error instanceof JwtVerificationError ? error.reason : undefined;
 				logger.warn(
-					`/oauth/federation/${federation}/logout: jwtVerify failed:`,
-					loggableError(error),
+					verdict === undefined
+						? { federation, err: loggableError(error) }
+						: { federation, reason: verdict },
+					"federation_logout_jwt_verify_failed",
 				);
 				res.setHeader(
 					"WWW-Authenticate",
@@ -546,8 +554,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					// Best-effort: IdP logout failed but local state is already cleared.
 					// Log at warn — "orphan IdP session" case, critical for operators.
 					logger.warn(
-						`/oauth/federation/${federation}/logout: provider.endSession failed (orphan IdP session):`,
-						loggableError(error),
+						{ federation, err: loggableError(error) },
+						"federation_logout_end_session_failed",
 					);
 					emitAuditEvent(opts.auditSink, {
 						timestamp: new Date(),
@@ -794,11 +802,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					});
 					endSessionUri = result.url.toString();
 				} catch (err) {
-					// Best-effort: log and proceed without IdP redirect
-					const logger = opts.logger ?? console;
-					logger.warn(
-						`${req.method} /oauth/logout: federation ${firstFederation} endSession failed`,
-						loggableError(err),
+					// Best-effort: log and proceed without the IdP redirect.
+					(opts.logger ?? console).warn(
+						{ federation: auditErrorText(firstFederation), err: loggableError(err) },
+						"logout_federation_end_session_failed",
 					);
 				}
 			}
