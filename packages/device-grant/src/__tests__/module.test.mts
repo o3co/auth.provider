@@ -636,11 +636,18 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.headers["cache-control"]).toBe("no-store");
 		expect(res.body).toEqual(STORE_UNAVAILABLE);
 		expect(logger.error).toHaveBeenCalledTimes(1);
-		const line = loggedAs(logger.error, "device_verification_store_unavailable");
-		expect(Object.keys(line).sort()).toEqual(["action", "err"]);
-		expect(line.action).toBe("lookup");
-		expectProjection(line.err, { name: "ReplyError" });
-		expect(lines.join("\n")).toContain("READONLY You can't write against a read only replica.");
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				action: "lookup",
+				err: {
+					name: "ReplyError",
+					detail: "READONLY You can't write against a read only replica.",
+					command: { name: "evalsha" },
+					stack: FRAMES,
+				},
+			},
+			"device_verification_store_unavailable",
+		);
 		for (const line of lines) {
 			expect(line).not.toContain("BCDFGHJK");
 			expect(line).not.toContain("user-1");
@@ -768,10 +775,10 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 
 		expect(res.status).toBe(503);
 		expect(res.body).toEqual(STORE_UNAVAILABLE);
-		const line = loggedAs(logger.error, "device_verification_store_unavailable");
-		expect(Object.keys(line).sort()).toEqual(["action", "err"]);
-		expectProjection(line.err, { name: "Error", status: 403 });
-		expect(lines.join("\n")).toContain("forbidden");
+		expect(logger.error).toHaveBeenCalledWith(
+			{ action: "lookup", err: { name: "Error", detail: "forbidden", status: 403, stack: FRAMES } },
+			"device_verification_store_unavailable",
+		);
 		for (const logged of lines) {
 			expect(logged).not.toContain("BCDFGHJK");
 			expect(logged).not.toContain("user-1");
@@ -791,10 +798,13 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		);
 
 		expect(res.status).toBe(503);
-		const line = loggedAs(logger.error, "device_verification_store_unavailable");
-		expect(Object.keys(line).sort()).toEqual(["action", "err"]);
-		expectProjection(line.err, { name: "ReplyError" });
-		expect(lines.join("\n")).toContain("ERR unknown command 'evalsha'");
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				action: "lookup",
+				err: { name: "ReplyError", detail: "ERR unknown command 'evalsha'", stack: FRAMES },
+			},
+			"device_verification_store_unavailable",
+		);
 		for (const line of lines) {
 			expect(line).not.toContain("BCDFGHJK");
 			expect(line).not.toContain("user-1");
@@ -949,17 +959,18 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.body).toEqual(STORE_UNAVAILABLE);
 		expect(res.headers["cache-control"]).toContain("no-store");
 		expect(creates).toBe(1);
-		// The projection, not the error: the fields named, none that carries the
-		// command, and the kept text without the arguments.
-		const line = loggedAs(logger.error, "device_authorization_store_unavailable");
-		expect(Object.keys(line).sort()).toEqual(["clientId", "err"]);
-		expect(line.clientId).toBe(CONFIDENTIAL_ID);
-		expectProjection(line.err, { name: "ReplyError" });
+		// The projection, not the error: the kept text without the arguments.
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				clientId: CONFIDENTIAL_ID,
+				err: { name: "ReplyError", detail: "ERR unknown command 'evalsha'", stack: FRAMES },
+			},
+			"device_authorization_store_unavailable",
+		);
 		expect(logger.warn).not.toHaveBeenCalledWith(
 			expect.anything(),
 			"device_authorization_code_collision",
 		);
-		expect(lines.join("\n")).toContain("ERR unknown command 'evalsha'");
 		for (const logged of lines) {
 			expect(logged).not.toContain("BCDFGHJK");
 			expect(logged).not.toContain("'sha'");
