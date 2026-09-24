@@ -523,19 +523,62 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		},
 	);
 
-	it("answers an unexpected failure on the mounted device/verification route with JSON 500, and logs it", async () => {
+	/**
+	 * A logger that keeps every line as a JSON log shipper would write it:
+	 * an `Error` with all of its own properties, not only the enumerable ones.
+	 */
+	const serialisingLogger = () => {
+		const lines: string[] = [];
+		const serialise = (value: unknown): string =>
+			JSON.stringify(value, (_key, v: unknown) =>
+				v instanceof Error
+					? Object.fromEntries(
+							Object.getOwnPropertyNames(v).map((k) => [
+								k,
+								(v as unknown as Record<string, unknown>)[k],
+							]),
+						)
+					: v,
+			);
+		const record = (level: string) =>
+			vi.fn((obj: Record<string, unknown>, msg?: string) => {
+				lines.push(`${level} ${msg ?? ""} ${serialise(obj)}`);
+			});
+		return {
+			lines,
+			logger: {
+				warn: record("warn"),
+				info: record("info"),
+				error: record("error"),
+				debug: record("debug"),
+			},
+		};
+	};
+
+	it("answers an unexpected failure on the mounted device/verification route with JSON 500, and logs a projection of it", async () => {
 		// RFC 8628 §3.2 → RFC 6749 §5.2: this API answers in JSON, a failure
 		// included. A store that throws is the host's outage, not the
-		// caller's business: a fixed description, and the error in the log.
+		// caller's business: a fixed description in the response, and in the
+		// log the error's name and message — never the error itself. An
+		// ioredis reply error carries the command's arguments (the user code,
+		// the approving subject); a body-parser error carries the body.
 		const deps = enabledDeps();
-		const logger = { warn: vi.fn(), error: vi.fn() };
+		const { lines, logger } = serialisingLogger();
+		const replyError = Object.assign(
+			new Error("READONLY You can't write against a read only replica."),
+			{
+				name: "ReplyError",
+				command: { name: "evalsha", args: ["devauth:{devauth}:user:BCDFGHJK", "user-1"] },
+				body: "client_secret=s3cret-value",
+			},
+		);
 		const app = mountVerificationRoute({
 			...deps,
 			logger,
 			deviceCodeStore: {
 				...deps.deviceCodeStore,
 				findPendingByUserCode: async () => {
-					throw new Error("store down");
+					throw replyError;
 				},
 			},
 		});
@@ -548,11 +591,154 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 
 		expect(res.status).toBe(500);
 		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.headers["cache-control"]).toBe("no-store");
 		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ err: expect.any(Error) }),
+			{
+				err: {
+					name: "ReplyError",
+					message: "READONLY You can't write against a read only replica.",
+				},
+			},
 			"device_route_unexpected_error",
 		);
+		for (const line of lines) {
+			expect(line).not.toContain("BCDFGHJK");
+			expect(line).not.toContain("user-1");
+			expect(line).not.toContain("s3cret-value");
+		}
+	});
+
+	it("answers an unexpected failure on the mounted device_authorization route with JSON 500, and logs a projection of it", async () => {
+		// A client repository that hands back a malformed registration —
+		// `defaultScopes` a string rather than a list — is a failure of the
+		// host's data, not of the request.
+		const { lines, logger } = serialisingLogger();
+		const malformed = { ...confidentialClient, defaultScopes: "openid" };
+		const app = mountContributedRoute(0, {
+			...enabledDeps(),
+			logger,
+			clientRepository: {
+				findById: async (id: string) => (id === CONFIDENTIAL_ID ? (malformed as never) : null),
+				authenticate: async (id: string, secret: string) =>
+					id === CONFIDENTIAL_ID && secret === CONFIDENTIAL_SECRET ? (malformed as never) : null,
+			} satisfies ClientRepository,
+		});
+
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({});
+
+		expect(res.status).toBe(500);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.headers["cache-control"]).toBe("no-store");
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(logger.error).toHaveBeenCalledWith(
+			{ err: { name: "TypeError", message: expect.any(String) } },
+			"device_route_unexpected_error",
+		);
+		for (const line of lines) expect(line).not.toContain(CONFIDENTIAL_SECRET);
+	});
+
+	/** 1000 parameters is body-parser's `parameterLimit`; the secret rides along. */
+	const tooManyParameters = [
+		`client_id=${CONFIDENTIAL_ID}`,
+		`client_secret=${CONFIDENTIAL_SECRET}`,
+		...Array.from({ length: 1000 }, (_, i) => `p${i}=1`),
+	].join("&");
+
+	it.each([
+		// [label, route, headers, body, status, description]
+		[
+			"a charset the parser cannot decode",
+			1,
+			{ "Content-Type": "application/json; charset=latin1" },
+			'{"action":"lookup"}',
+			415,
+			"unsupported_encoding",
+		],
+		[
+			"a Content-Encoding the parser does not support",
+			0,
+			{ "Content-Type": "application/json", "Content-Encoding": "compress" },
+			"{}",
+			415,
+			"unsupported_encoding",
+		],
+		[
+			"a compressed body that does not decompress",
+			0,
+			{ "Content-Type": "application/json", "Content-Encoding": "gzip" },
+			"not gzip at all",
+			400,
+			"malformed_body",
+		],
+		[
+			"more form parameters than the parser takes",
+			0,
+			{ "Content-Type": "application/x-www-form-urlencoded" },
+			tooManyParameters,
+			413,
+			"body_too_large",
+		],
+	] as const)(
+		"answers %s with a 4xx in JSON, logging nothing at error level and nothing of the body",
+		async (_label, route, headers, body, status, description) => {
+			// body-parser marks these `expose` with a 4xx status: the caller's
+			// mistake. On the verification route the parser runs ahead of the
+			// CSRF guard and of any throttle, so a 500 and an error line here
+			// would be a free way for anyone to fill the error log.
+			const { lines, logger } = serialisingLogger();
+			const deps = { ...enabledDeps(), logger };
+			const app = route === 0 ? mountContributedRoute(0, deps) : mountVerificationRoute(deps);
+			const path = route === 0 ? "/oauth/device_authorization" : "/oauth/device/verification";
+
+			const res = await request(app).post(path).set(headers).send(body);
+
+			expect(res.status).toBe(status);
+			expect(res.headers["content-type"]).toMatch(/^application\/json/);
+			expect(res.headers["cache-control"]).toBe("no-store");
+			expect(res.body).toEqual({ error: "invalid_request", error_description: description });
+			expect(logger.error).not.toHaveBeenCalled();
+			for (const line of lines) expect(line).not.toContain(CONFIDENTIAL_SECRET);
+		},
+	);
+
+	it.each([
+		["the per-IP throttle's 429 on device_authorization", "throttle"],
+		["client authentication's 401 on device_authorization", "client-auth"],
+		["the CSRF guard's 403 on device/verification", "csrf"],
+	] as const)("sends no-store on %s, as on every other exit", async (_label, which) => {
+		// A refusal an intermediary caches is served to the next caller too.
+		if (which === "csrf") {
+			const app = mountVerificationRoute(enabledDeps());
+			const res = await request(app)
+				.post("/oauth/device/verification")
+				.set("Origin", "https://evil.example")
+				.send({ action: "lookup", user_code: "BCDF-GHJK" });
+			expect(res.status).toBe(403);
+			expect(res.headers["cache-control"]).toBe("no-store");
+			return;
+		}
+		const app = mountContributedRoute(
+			0,
+			enabledDeps({ limits: { device_authorization: { limit: 1, windowSeconds: 60 } } }),
+		);
+		const first = await request(app)
+			.post("/oauth/device_authorization")
+			.send({ client_id: CONFIDENTIAL_ID });
+		expect(first.status).toBe(401);
+		if (which === "client-auth") {
+			expect(first.headers["cache-control"]).toBe("no-store");
+			return;
+		}
+		const second = await request(app)
+			.post("/oauth/device_authorization")
+			.send({ client_id: CONFIDENTIAL_ID });
+		expect(second.status).toBe(429);
+		expect(second.headers["cache-control"]).toBe("no-store");
 	});
 
 	/** `enabledDeps()` with `oauth.deviceAuthorization.rateLimit` replaced. */

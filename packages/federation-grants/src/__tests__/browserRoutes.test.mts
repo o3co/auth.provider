@@ -1736,6 +1736,42 @@ describe("the consent, when the world fails or moves", () => {
 		expect(large.status).toBe(413);
 		expect(large.body).toEqual({ error: "invalid_request", error_description: "body_too_large" });
 	});
+
+	it.each([
+		// [label, headers, body, status, description]
+		[
+			"a charset the parser cannot decode",
+			{ "Content-Type": "application/json; charset=latin1" },
+			'{"decision":"accept"}',
+			415,
+			"unsupported_encoding",
+		],
+		[
+			"a compressed body that does not decompress",
+			{ "Content-Type": "application/json", "Content-Encoding": "gzip" },
+			"not gzip at all",
+			400,
+			"malformed_body",
+		],
+		[
+			"more form parameters than the parser takes",
+			{ "Content-Type": "application/x-www-form-urlencoded" },
+			Array.from({ length: 1001 }, (_, i) => `p${i}=1`).join("&"),
+			413,
+			"body_too_large",
+		],
+	] as const)(
+		"answers %s as the caller's mistake, not a 500",
+		async (_label, headers, body, status, description) => {
+			const w = world();
+			const response = await request(w.app)
+				.post(`${FEDERATION_GRANTS_BROWSER_MOUNT_PATH}/consent`)
+				.set(headers)
+				.send(body);
+			expect(response.status).toBe(status);
+			expect(response.body).toEqual({ error: "invalid_request", error_description: description });
+		},
+	);
 });
 
 describe("the callback, when the world fails or moves", () => {

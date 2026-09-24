@@ -349,6 +349,55 @@ describe("the token route — what it refuses before core", () => {
 		});
 	});
 
+	/** 1000 parameters is body-parser's `parameterLimit`. */
+	const tooManyParameters = Array.from({ length: 1001 }, (_, i) => `p${i}=1`).join("&");
+
+	it.each([
+		// [label, headers, body, status, description]
+		[
+			"a charset the parser cannot decode",
+			{ "Content-Type": "application/json; charset=latin1" },
+			'{"sub":"u"}',
+			415,
+			"unsupported_encoding",
+		],
+		[
+			"a Content-Encoding the parser does not support",
+			{ "Content-Type": "application/json", "Content-Encoding": "compress" },
+			"{}",
+			415,
+			"unsupported_encoding",
+		],
+		[
+			"a compressed body that does not decompress",
+			{ "Content-Type": "application/json", "Content-Encoding": "gzip" },
+			"not gzip at all",
+			400,
+			"malformed_body",
+		],
+		[
+			"more form parameters than the parser takes",
+			{ "Content-Type": "application/x-www-form-urlencoded" },
+			tooManyParameters,
+			413,
+			"body_too_large",
+		],
+	] as const)(
+		"answers %s as the caller's mistake, not a 500",
+		async (_label, headers, body, status, description) => {
+			// body-parser marks these `expose` with a 4xx status. Answered as
+			// `server_error`, any caller could produce 5xx answers at will.
+			const h = harness();
+			const response = await request(h.app)
+				.post(path())
+				.set("Authorization", basic())
+				.set(headers)
+				.send(body);
+			expect(response.status).toBe(status);
+			expect(response.body).toEqual({ error: "invalid_request", error_description: description });
+		},
+	);
+
 	it("refuses an unsupported content type as 415", async () => {
 		const h = harness();
 		const response = await request(h.app)

@@ -482,6 +482,7 @@ describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () =>
 					const res = await request(app).post(path).type("json").send("{not json");
 					expect(res.status, path).toBe(400);
 					expect(res.headers["content-type"], path).toMatch(/^application\/json/);
+					expect(res.headers["cache-control"], path).toBe("no-store");
 					expect(res.body, path).toEqual({
 						error: "invalid_request",
 						error_description: "malformed_body",
@@ -563,23 +564,39 @@ describe("a route of another module under /oauth, listed after oauthModule", () 
 		},
 	});
 
-	it.each([
-		["the grant enabled", ENABLED],
-		["the grant disabled", { enabled: false }],
-	] as const)("receives its body unread, with %s", async (_label, deviceAuthorization) => {
-		const config = makeConfig(deviceAuthorization);
-		const { handle, app } = await bootWith(config, [
-			sessionStoreModuleFor(config),
-			oauthModule({ config }),
-			elsewhereModule,
-			deviceGrantModule({ config }),
-		]);
-		try {
-			const res = await request(app).post("/oauth/elsewhere").type("form").send("a=1");
-			expect(res.status).toBe(200);
-			expect(res.body).toEqual({ raw: "a=1", parsedBefore: null });
-		} finally {
-			await handle.dispose();
-		}
-	});
+	// Enabled and disabled, each in both list orders of the two modules the
+	// route sits between, each with a form and a JSON body.
+	const cases = [
+		["enabled", ENABLED],
+		["disabled", { enabled: false }],
+	].flatMap(([state, deviceAuthorization]) =>
+		orders.map(
+			([order, ordered]) => [`the grant ${state}, ${order}`, deviceAuthorization, ordered] as const,
+		),
+	);
+
+	it.each(cases)(
+		"receives its body unread, with %s",
+		async (_label, deviceAuthorization, ordered) => {
+			const config = makeConfig(deviceAuthorization as Record<string, unknown>);
+			const [first, second] = ordered(config);
+			const { handle, app } = await bootWith(config, [
+				sessionStoreModuleFor(config),
+				first,
+				elsewhereModule,
+				second,
+			]);
+			try {
+				const form = await request(app).post("/oauth/elsewhere").type("form").send("a=1");
+				expect(form.status).toBe(200);
+				expect(form.body).toEqual({ raw: "a=1", parsedBefore: null });
+
+				const json = await request(app).post("/oauth/elsewhere").type("json").send('{"a":1}');
+				expect(json.status).toBe(200);
+				expect(json.body).toEqual({ raw: '{"a":1}', parsedBefore: null });
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
 });

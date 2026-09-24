@@ -170,25 +170,57 @@ describe("what the body parsers reject", () => {
 		return { state, next };
 	};
 
-	it("answers 413 for a body over the limit", () => {
-		const { state } = run({ type: "entity.too.large" });
-		expect(state.status).toBe(413);
-		expect(state.body).toEqual({ error: "invalid_request", error_description: "body_too_large" });
+	// Shaped as body-parser's `http-errors` are: `expose` and a 4xx `status`
+	// on everything that is the caller's mistake.
+	const exposed = (status: number, fields: Record<string, unknown>) => ({
+		status,
+		statusCode: status,
+		expose: true,
+		...fields,
+	});
+
+	it("answers 413 for a body over the limit, or more parameters than the parser takes", () => {
+		for (const type of ["entity.too.large", "parameters.too.many"]) {
+			const { state } = run(exposed(413, { type }));
+			expect(state.status, type).toBe(413);
+			expect(state.body).toEqual({ error: "invalid_request", error_description: "body_too_large" });
+		}
+	});
+
+	it("answers 415 for a charset or a Content-Encoding the parser cannot decode", () => {
+		for (const type of ["charset.unsupported", "encoding.unsupported"]) {
+			const { state } = run(exposed(415, { type }));
+			expect(state.status, type).toBe(415);
+			expect(state.body).toEqual({
+				error: "invalid_request",
+				error_description: "unsupported_encoding",
+			});
+		}
 	});
 
 	it("answers 400 for a body it could not read, quoting none of it", () => {
-		// `body-parser` puts the offending input into its message.
-		for (const type of ["entity.parse.failed", "encoding.unsupported"]) {
-			const { state } = run({
-				type,
+		// `body-parser` puts the offending input into its message; a corrupt
+		// compressed body is zlib's error, exposed as a 400 with no `type`.
+		for (const error of [
+			exposed(400, {
+				type: "entity.parse.failed",
 				message: "Unexpected token S in JSON at position 12 SENTINEL",
-			});
+			}),
+			exposed(400, { code: "Z_DATA_ERROR", message: "incorrect header check SENTINEL" }),
+		]) {
+			const { state } = run(error);
 			expect(state.status).toBe(400);
 			expect(state.body).toEqual({
 				error: "invalid_request",
 				error_description: "malformed_body",
 			});
 		}
+	});
+
+	it("answers 500 for an error that is not exposed, whatever its type claims", () => {
+		const { state } = run({ type: "entity.too.large" });
+		expect(state.status).toBe(500);
+		expect(state.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
 	});
 
 	it("answers 500 with a fixed description for anything else", () => {
