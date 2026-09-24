@@ -95,10 +95,17 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/core/src/config/removed-keys.mts",
 		definition: /(?:function|const)\s+withRemovedKeys\b/,
 	},
+	// One row per symbol, so the home has to define each of them: an
+	// alternation would pass a home that kept one and lost the other.
 	{
-		concept: "serialized origin, and the spelling of a list of them (#500)",
+		concept: "serialized origin (#500)",
 		home: "packages/core/src/net/origin.mts",
-		definition: /(?:function|const)\s+(?:checkSerializedOrigin|normalizeAllowedOrigins)\b/,
+		definition: /(?:function|const)\s+checkSerializedOrigin\b/,
+	},
+	{
+		concept: "serialized origin — the spelling of a list of them (#500)",
+		home: "packages/core/src/net/origin.mts",
+		definition: /(?:function|const)\s+normalizeAllowedOrigins\b/,
 	},
 	{
 		concept: "device-verification budget shape (#448)",
@@ -129,10 +136,19 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isSpecialUseAddress\b/,
 	},
 	{
-		concept: "RFC 8707 resource indicator (#172, #173)",
+		concept: "RFC 8707 resource indicator — reading `resource` (#172, #173)",
 		home: "packages/core/src/grants/resourceIndicator.mts",
-		definition:
-			/(?:function|const)\s+(?:extractResourceParam|deriveAudienceFromResources|unrepresentedResources)\b/,
+		definition: /(?:function|const)\s+extractResourceParam\b/,
+	},
+	{
+		concept: "RFC 8707 resource indicator — the audience derived from it (#173)",
+		home: "packages/core/src/grants/resourceIndicator.mts",
+		definition: /(?:function|const)\s+deriveAudienceFromResources\b/,
+	},
+	{
+		concept: "RFC 8707 resource indicator — the invalid_target check (#173)",
+		home: "packages/core/src/grants/resourceIndicator.mts",
+		definition: /(?:function|const)\s+unrepresentedResources\b/,
 	},
 	{
 		concept: "WebAuthn algorithm pin (#516)",

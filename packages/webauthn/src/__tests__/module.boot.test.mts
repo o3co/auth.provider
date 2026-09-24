@@ -35,7 +35,7 @@
  * Cross-refs: Plan T31 / spec §2.4.1
  */
 
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
 	AppConfigSchema,
@@ -308,9 +308,13 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 		const packageName = (dir: string): string =>
 			(JSON.parse(readFileSync(`${packagesDir}${dir}/package.json`, "utf8")) as { name: string })
 				.name;
+		// A directory without a package.json is not a package — AGENTS.md warns of
+		// stale untracked build output under packages/ (the old DID package).
 		const workspacePackages = new Set(
 			readdirSync(packagesDir, { withFileTypes: true })
-				.filter((entry) => entry.isDirectory())
+				.filter(
+					(entry) => entry.isDirectory() && existsSync(`${packagesDir}${entry.name}/package.json`),
+				)
 				.map((entry) => packageName(entry.name)),
 		);
 		// A dot inside a name (`ts.hocon`) is part of it; one ending a sentence is not.
@@ -529,31 +533,6 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// P1 body-parser integration (Codex Round 4 P1)
-// ---------------------------------------------------------------------------
-
-/**
- * Regression test for the missing body parser on webauthn contributed routes.
- *
- * The `createApp` boot pipeline mounts contributed routes via `handle.router`.
- * If the contributed router does NOT install `express.json()` before its POST
- * handler, then `req.body` is `undefined` in production (createApp installs no
- * global JSON parser — each contributed router installs its own, per the OAuth
- * routes pattern in routes.mts:215-216).
- *
- * The test mounts `handle.router` on a bare express app (no global JSON parser)
- * and POSTs JSON to the authentication/options endpoint. Without the fix, zod
- * parses `undefined` body and returns `invalid_request` (400). With the fix,
- * the router's own parser runs first and `req.body` is populated, so the handler
- * proceeds past body validation and returns 200 with challenge options.
- *
- * authentication/options is chosen because it is the only webauthn POST route
- * that is unauthenticated (no req.webauthnSubject required), making the test
- * self-contained without needing a session middleware stub in the app.
- *
- * Cross-refs: Codex Round 4 P1
- */
 /**
  * The operator's path for `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN`: the
  * composition root parses its resolved HOCON with core's `AppConfigSchema`,
@@ -616,6 +595,31 @@ describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_OR
 	});
 });
 
+// ---------------------------------------------------------------------------
+// P1 body-parser integration (Codex Round 4 P1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Regression test for the missing body parser on webauthn contributed routes.
+ *
+ * The `createApp` boot pipeline mounts contributed routes via `handle.router`.
+ * If the contributed router does NOT install `express.json()` before its POST
+ * handler, then `req.body` is `undefined` in production (createApp installs no
+ * global JSON parser — each contributed router installs its own, per the OAuth
+ * routes pattern in routes.mts:215-216).
+ *
+ * The test mounts `handle.router` on a bare express app (no global JSON parser)
+ * and POSTs JSON to the authentication/options endpoint. Without the fix, zod
+ * parses `undefined` body and returns `invalid_request` (400). With the fix,
+ * the router's own parser runs first and `req.body` is populated, so the handler
+ * proceeds past body validation and returns 200 with challenge options.
+ *
+ * authentication/options is chosen because it is the only webauthn POST route
+ * that is unauthenticated (no req.webauthnSubject required), making the test
+ * self-contained without needing a session middleware stub in the app.
+ *
+ * Cross-refs: Codex Round 4 P1
+ */
 describe("webauthnModule body parser integration (Codex Round 4 P1)", () => {
 	it("POST /oauth/webauthn/authentication/options parses JSON body via router-level parser (no global parser on host app)", async () => {
 		const handle = await createApp({
