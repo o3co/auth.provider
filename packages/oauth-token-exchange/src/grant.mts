@@ -236,8 +236,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			//
 			// The rule itself is core's — `isGrantTypeAllowed` with
 			// `requireAllowlist`, the same call dispatch makes — rather than a
-			// hand-rolled comparison, and the wire shape matches dispatch's
-			// byte for byte so a caller cannot tell which gate refused it.
+			// hand-rolled comparison, and the wire shape is dispatch's strict
+			// check's, byte for byte. Through `/oauth/token` a registration that
+			// names other grants only is refused before that check, by
+			// dispatch's general allowlist check, whose description quotes the
+			// type (`client is not authorized for grant_type '<type>'`); the
+			// README's note 15 states both.
 			if (!isGrantTypeAllowed(client.allowedGrantTypes, GRANT_TYPE, { requireAllowlist: true })) {
 				deps.logger?.warn(
 					{ clientId: client.clientId, grantType: GRANT_TYPE },

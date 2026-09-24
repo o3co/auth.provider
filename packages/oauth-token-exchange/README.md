@@ -39,6 +39,7 @@ Peer dependency: `@o3co/auth-provider-core`.
 import {
   createApp,
   defaultRefreshTokenFamilyRevocationModule,
+  jwksModule,
   memoryRefreshTokenFamilyStoreModule,
 } from "@o3co/auth-provider-core";
 import { oauthModule } from "@o3co/auth-provider-oauth";
@@ -52,6 +53,9 @@ const handle = await createApp({
     // The memory store is single-replica; @o3co/auth-provider-redis ships a shared one.
     memoryRefreshTokenFamilyStoreModule,
     defaultRefreshTokenFamilyRevocationModule,
+    // The grant requires oauth.jwt.issuer, and with an issuer configured the
+    // discovery document needs the jwks_uri this module contributes.
+    jwksModule,
     // …the modules that provide clientRepository, codeRepository and keyStore
   ],
   bootstrapComponents: { config, pathResolver: import.meta.resolve },
@@ -112,7 +116,7 @@ A token-exchange request may carry an optional `expires_in` form parameter: the 
 The package ships a built-in validator only for the `access_token` token type (tokens issued by this same auth.provider instance). To accept external JWTs as `subject_token`, implement `ExchangeTokenValidator` yourself and contribute it from a sibling module for `urn:ietf:params:oauth:token-type:jwt`:
 
 ```ts
-import { createApp, defineModule } from "@o3co/auth-provider-core";
+import { createApp, defineModule, jwksModule } from "@o3co/auth-provider-core";
 // The validator contract is core's, not this package's.
 import type { ExchangeTokenValidator, ValidatedToken } from "@o3co/auth-provider-core";
 import { oauthModule } from "@o3co/auth-provider-oauth";
@@ -147,6 +151,7 @@ const handle = await createApp({
     oauthModule({ config }),
     tokenExchangeModule,
     externalJwtTokenExchangeValidatorModule,
+    jwksModule,
     // …the modules that provide clientRepository, codeRepository, keyStore and
     // refreshTokenFamilyRevocation, as above
   ],
@@ -226,7 +231,7 @@ Because `invalid_request` covers both a malformed request and a refused token, t
 
 14. **Confidential clients only.** A public client (`tokenEndpointAuthMethod: "none"`) is refused with `401 invalid_client`. Through `/oauth/token` the client has already been authenticated by the oauth package's client authentication — `client_secret_basic`, `client_secret_post` or `private_key_jwt` — and the handler uses that identity, re-reading the record with `clientRepository.findById()`. A body `client_id` that disagrees with the authenticated client is refused there by client authentication itself (`401 invalid_client`); the handler's own `400 invalid_request` for a mismatch applies only where something other than that middleware supplied `ctx.authenticatedClient`. A composition that dispatches the handler without client-authentication middleware (`ctx.authenticatedClient === null`) must send `client_id` and `client_secret` in the body, which the handler checks with `clientRepository.authenticate()`: a missing secret is `401 invalid_client`, and so is a failed authentication. A client-repository failure is `503 temporarily_unavailable` on either path.
 
-15. **The grant denies by absence of `allowedGrantTypes` (#326).** Token exchange mints a fresh credential out of one a client already holds — a standing capability of a registration, not a per-user ceremony — so it is never acquired by omission. The handler declares `requiresExplicitGrantAllowlist`, which `/oauth/token` dispatch enforces before `handle` runs, and repeats the check itself for a composition that dispatches it without client-authentication middleware (`ctx.authenticatedClient === null`), where no dispatch rule runs at all. Both paths refuse with `400 unauthorized_client` / `client is not authorized for urn:ietf:params:oauth:grant-type:token-exchange`. This does not depend on `oauth.requireGrantTypeAllowlist`, which defaults off; the two compose to the stricter rule.
+15. **The grant denies by absence of `allowedGrantTypes` (#326).** Token exchange mints a fresh credential out of one a client already holds — a standing capability of a registration, not a per-user ceremony — so it is never acquired by omission. The handler declares `requiresExplicitGrantAllowlist`, which `/oauth/token` dispatch enforces before `handle` runs, and repeats the check itself for a composition that dispatches it without client-authentication middleware (`ctx.authenticatedClient === null`), where no dispatch rule runs at all. Both paths refuse with `400 unauthorized_client` / `client is not authorized for urn:ietf:params:oauth:grant-type:token-exchange`, with one exception: through `/oauth/token`, a registration that names other grants only is refused first by dispatch's general allowlist check, whose description quotes the type — `client is not authorized for grant_type 'urn:ietf:params:oauth:grant-type:token-exchange'`. This does not depend on `oauth.requireGrantTypeAllowlist`, which defaults off; the two compose to the stricter rule.
 
 16. **The issued token never outlives the subject token (RFC 8693 §2.2.1), nor exceeds `oauth.accessToken.maxExpiresIn`.** `expires_in` is `min(requested expires_in ?? oauth.accessToken.defaultExpiresIn, oauth.accessToken.maxExpiresIn, subject_token exp − now)`, where `now` is the one issuance instant the minted `iat` and `exp` are also measured from — so the cap and the stamp cannot land in different seconds and put `exp` past the subject's. A chain of exchanges therefore cannot refresh the clock past the credential it descends from, and a client cannot ask its way past the operator's max (see [Requesting a lifetime](#requesting-a-lifetime-expires_in)). A subject token with no remaining lifetime — already expired, or expiring within the current second — is refused with `invalid_request` / `subject_token has expired` rather than minting a token with a zero or negative lifetime. A subject token carrying **no `exp` claim at all** leaves `min(requested ?? default, max)` standing: there is no lifetime for the cap to descend from. The built-in validator never produces one (jose rejects an expired token before the handler sees it); a consumer-implemented validator that returns an `exp`-less `ValidatedToken` is asserting an unbounded credential, and should not do so lightly.
 
@@ -252,7 +257,7 @@ Sender-constrained exchange is supported: the handler enforces the DPoP and mTLS
 
 ## Tests
 
-[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest, the family answers of note 1, the store-outage answers of note 20, the code and description of every token refusal in [Error responses](#error-responses), and which answer a scope or audience past the ceilings gets depending on whether the request or the policy asked for it, with `tokenExchangeModule` booted through `createApp`. [`published-files.test.mts`](./src/__tests__/published-files.test.mts) holds that every source file the build publishes is reached from the entry point.
+[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest, the family answers of note 1, the store-outage answers of note 20, the code and description of every token refusal in [Error responses](#error-responses), and which answer a scope or audience past the ceilings gets depending on whether the request or the policy asked for it, with `tokenExchangeModule` booted through `createApp`. [`oauth-token-route.test.mts`](./src/__tests__/oauth-token-route.test.mts) makes the exchange over HTTP, through `oauthModule`'s `POST /oauth/token` in the composition [Register the grant](#register-the-grant) shows: client authentication, the allowlist answers of note 15, the response the route writes, and the §5.2 character set of a description that quotes the request. [`published-files.test.mts`](./src/__tests__/published-files.test.mts) holds that every source file the build publishes is reached from the entry point.
 
 ## RFC references
 
