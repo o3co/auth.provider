@@ -175,6 +175,31 @@ describe("loggableError — what a log line may carry of an error", () => {
 			});
 		});
 
+		it("cuts Redis's echo from any message, whichever client's class carries it", () => {
+			// node-redis's ErrorReply / SimpleError / BlobError set no name, so
+			// they are "Error"; the server writes the same text for every client.
+			const text =
+				"ERR unknown command 'evalsha', with args beginning with: 'sha' '1' 'devauth:user:BCDFGHJK' 'user-1'";
+			class ErrorReply extends Error {}
+			class SimpleError extends ErrorReply {}
+			for (const reply of [new Error(text), new ErrorReply(text), new SimpleError(text)]) {
+				expect(loggableError(reply)).toEqual({
+					name: "Error",
+					message: "ERR unknown command 'evalsha'",
+				});
+			}
+		});
+
+		it("reads a SyntaxError's position only as ' at position N', N at most ten digits", () => {
+			const at = (message: string) => loggableError(new SyntaxError(message)).position;
+			expect(at("Unexpected token at position 1234567890 (line 1 column 1234567891)")).toBe(
+				1234567890,
+			);
+			expect(at("Unexpected token at position 12345678901")).toBe(1234567890);
+			expect(at("Unexpected end of JSON input")).toBeUndefined();
+			expect(at("positional nonsense, position 7")).toBeUndefined();
+		});
+
 		it("keeps body-parser's `type` and status, and never the body or the parser's message", async () => {
 			const malformed = await bodyParserError('{"access_token":gho_SECRET1234567890}');
 			const parsed = loggableError(malformed);
@@ -230,6 +255,31 @@ describe("loggableError — what a log line may carry of an error", () => {
 		expect(projected.name).toHaveLength(256);
 		expect(projected.code).toHaveLength(256);
 		expect(projected.type).toHaveLength(256);
+	});
+
+	it("does not throw on a value whose prototype cannot be read, where Error.isError is missing", () => {
+		// Node 22, the engines floor, has no Error.isError; the fallback's
+		// `instanceof` asks the value for its prototype, and a Proxy may throw.
+		const hostile = new Proxy(
+			{},
+			{
+				getPrototypeOf() {
+					throw new Error("trap");
+				},
+				get() {
+					throw new Error("trap");
+				},
+			},
+		);
+		const brand = Object.getOwnPropertyDescriptor(Error, "isError");
+		delete (Error as { isError?: unknown }).isError;
+		try {
+			expect(loggableError(hostile)).toEqual({ name: "NonError", thrown: "object" });
+			// And the fallback still counts a real error.
+			expect(loggableError(new Error("kept"))).toEqual({ name: "Error", message: "kept" });
+		} finally {
+			if (brand) Object.defineProperty(Error, "isError", brand);
+		}
 	});
 
 	it("counts an error from another realm as an error", () => {
