@@ -15,8 +15,10 @@
  */
 
 import {
+	auditErrorText,
 	type ClientRepository,
 	consoleLogger,
+	isWellFormedClientId,
 	type Logger,
 	loggableError,
 	type PublicClient,
@@ -191,6 +193,15 @@ function parseBasicAuthHeader(authHeader: string | undefined): BasicParseResult 
  * failed" (RFC 6749 §5.2), which a client reads as a bad secret or a revoked
  * registration; an outage is neither. The description names only the
  * dependency, never what the store said.
+ *
+ * A `client_id` that cannot name a client — a control character, or longer
+ * than `MAX_CLIENT_ID_LENGTH` (core's `isWellFormedClientId`) — is refused
+ * like an unknown client, `401 invalid_client`, before the repository is
+ * asked. Now that a repository that throws is an outage, a client must not be
+ * able to make one throw: a SQL driver refusing a NUL byte would otherwise
+ * turn `client_id=%00` into the server's `503`. The id a
+ * `client_repository_unavailable` line records is the client's input, so it
+ * goes through `auditErrorText` (sanitised, capped).
  */
 export function createClientAuthMiddleware(
 	clientRepository: ClientRepository,
@@ -254,7 +265,10 @@ export function createClientAuthMiddleware(
 		clientId: string,
 		cause: unknown,
 	): void {
-		logger.error({ step, clientId, err: loggableError(cause) }, "client_repository_unavailable");
+		logger.error(
+			{ step, clientId: auditErrorText(clientId), err: loggableError(cause) },
+			"client_repository_unavailable",
+		);
 		rejectAs(res, 503, "temporarily_unavailable", "client repository unavailable");
 	}
 
@@ -339,6 +353,17 @@ export function createClientAuthMiddleware(
 			// We always include WWW-Authenticate because Basic is a valid retry,
 			// matching prior v0.5.0 behavior for the /oauth/introspect users.
 			rejectBasic(res, 401, "Client authentication is required");
+			return;
+		}
+
+		// A client_id no client can have is answered like an unknown one — and
+		// never handed to the repository, which may throw on it (see the JSDoc).
+		if (!isWellFormedClientId(clientId)) {
+			if (basic.kind === "ok") {
+				rejectBasic(res, 401, "Invalid client credentials");
+			} else {
+				rejectPlain(res, 401, "Unknown client");
+			}
 			return;
 		}
 

@@ -686,6 +686,7 @@ export type {
 export { isGrantTypeAllowed } from "./repositories/allowedGrantTypes.mjs";
 export type { ClientRepository, PublicClient } from "./repositories/ClientRepository.mjs";
 export type { CodeRepository, CreateCodeInput } from "./repositories/CodeRepository.mjs";
+export { isWellFormedClientId, MAX_CLIENT_ID_LENGTH } from "./repositories/clientId.mjs";
 export {
 	type ClientEntry,
 	ClientEntrySchema,

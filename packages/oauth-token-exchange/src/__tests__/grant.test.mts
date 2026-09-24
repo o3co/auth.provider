@@ -14,14 +14,15 @@
  * limitations under the License.
  */
 
-import type {
-	AppConfig,
-	ClientRepository,
-	GrantContext,
-	GrantPolicyContext,
-	GrantPolicyHook,
-	GrantPolicyRequest,
-	PublicClient,
+import {
+	type AppConfig,
+	type ClientRepository,
+	type GrantContext,
+	type GrantPolicyContext,
+	type GrantPolicyHook,
+	type GrantPolicyRequest,
+	MAX_CLIENT_ID_LENGTH,
+	type PublicClient,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it } from "vitest";
@@ -283,6 +284,39 @@ describe("createTokenExchangeGrant — request errors", () => {
 		if (!("error" in result)) expect.fail("Expected error in result");
 		expect(result.error).toBe("temporarily_unavailable");
 	});
+
+	it.each([
+		["a NUL byte", "client-a\u0000"],
+		["a line feed", "client-a\nx"],
+		["more than MAX_CLIENT_ID_LENGTH characters", "c".repeat(MAX_CLIENT_ID_LENGTH + 1)],
+	])(
+		"standalone wiring: a client_id carrying %s is invalid_client, never asked of the repository",
+		async (_label, clientId) => {
+			// A repository throws only when its store cannot answer (503), so a
+			// client_id it would choke on — a SQL driver refusing a NUL byte — is
+			// refused as the client's before it is asked (core's isWellFormedClientId).
+			const asked: string[] = [];
+			const choking: ClientRepository = {
+				findById: async () => null,
+				authenticate: async (id) => {
+					asked.push(id);
+					throw new Error("driver refused the parameter");
+				},
+			};
+			const g = buildGrant({ clientRepository: choking });
+			const token = await signSelfIssuedAccessToken({});
+			const { result } = await g.handle(
+				ctx({
+					client_id: clientId,
+					client_secret: "any",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				}),
+			);
+			expect(result).toMatchObject({ status: 401, error: "invalid_client" });
+			expect(asked).toEqual([]);
+		},
+	);
 
 	it.each([
 		["number", 123],

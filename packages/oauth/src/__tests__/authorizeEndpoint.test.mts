@@ -294,13 +294,13 @@ describe("/authorize — A-1 pre-redirect validation (400/500 JSON)", () => {
 		});
 	});
 
-	it("answers 500 server_error when the client repository is down", async () => {
+	it("answers 503 temporarily_unavailable when the client repository is down", async () => {
 		const { app } = await makeApp({ findByIdThrows: true });
 		const res = await authorize(app, baseQuery);
-		expect(res.status).toBe(500);
+		expect(res.status).toBe(503);
 		expect(res.body).toEqual({
-			error: "server_error",
-			error_description: "Failed to fetch client",
+			error: "temporarily_unavailable",
+			error_description: "client repository unavailable",
 		});
 	});
 

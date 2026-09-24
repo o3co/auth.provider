@@ -33,6 +33,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isGrantTypeAllowed,
+	isWellFormedClientId,
 	isWellFormedErrorCode,
 	loggableError,
 	matchConfirmation,
@@ -209,6 +210,19 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							status: 401,
 							error: "invalid_client",
 							errorDescription: "client_secret is required",
+						},
+					};
+				}
+				// A client_id no client can have is refused as the client's, and
+				// never handed to the repository: a repository that throws is an
+				// outage (503), and one may throw on it — a SQL driver refusing a
+				// NUL byte (core's `isWellFormedClientId`).
+				if (!isWellFormedClientId(clientId)) {
+					return {
+						result: {
+							status: 401,
+							error: "invalid_client",
+							errorDescription: "client authentication failed",
 						},
 					};
 				}

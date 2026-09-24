@@ -18,6 +18,28 @@ import type { Client } from "./types.mjs";
 
 export type PublicClient = Omit<Client, "clientSecret">;
 
+/**
+ * Where OAuth clients are looked up.
+ *
+ * The contract every route relies on:
+ *
+ * - A client that does not exist is `null`, and so is a secret that does not
+ *   match — never a throw. Those are the client's fault and are answered
+ *   `invalid_client`.
+ * - Throw only when the store cannot answer. Client authentication (the
+ *   oauth package's `createClientAuthMiddleware`, at `/oauth/token`,
+ *   `/oauth/introspect`, `/oauth/revoke` and every route that mounts it) and
+ *   `/authorize` answer a throw as `503 temporarily_unavailable` ("client
+ *   repository unavailable") and log it at error level as
+ *   `client_repository_unavailable`. A repository that throws for an unknown
+ *   client or a bad secret turns the client's mistake into the server's
+ *   outage.
+ * - The `clientId` is the client's input. Those routes screen it first
+ *   (`isWellFormedClientId`: no control character, at most
+ *   `MAX_CLIENT_ID_LENGTH` characters) and refuse a malformed one without
+ *   asking the repository, but any other character may still be in it: bind
+ *   it as a query parameter, never interpolate it.
+ */
 export interface ClientRepository {
 	/**
 	 * Look up a client without authentication. Returns the client's public

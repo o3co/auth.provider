@@ -121,7 +121,28 @@ export interface KeyStore {
 	getSigningKidFallback(): string;
 	/** Active verification keys for JWKS endpoint. Remote adapters may fetch + cache. */
 	getVerificationKeys(): Promise<ManagedKey[]>;
-	/** Specific kid's public key. Throws on unknown or expired kid. */
+	/**
+	 * Specific kid's public key.
+	 *
+	 * The contract the central verifier (`verifyJwt`) relies on:
+	 *
+	 * - A `kid` this keystore does not hold MUST be refused with
+	 *   {@link UnknownKidError}, and a retired one with {@link ExpiredKidError}.
+	 *   Those are findings about the token — refused `kid_unknown` /
+	 *   `kid_expired`, as the client's fault.
+	 * - Any other throw means the keystore cannot answer. The verifier reports
+	 *   it as `verification_key_unavailable`, which every route answers `503
+	 *   temporarily_unavailable` and logs as an outage — so throwing anything
+	 *   else for a kid that merely looks wrong turns the client's token into
+	 *   the server's outage.
+	 * - `kid` is untrusted input: the token's own header value, read before any
+	 *   signature is checked. The verifier hands over only a string of at most
+	 *   `MAX_KID_LENGTH` characters, but any character may be in it. An adapter
+	 *   that looks keys up remotely (a KMS, an HSM, a JWKS endpoint) MUST
+	 *   check it against its own key naming before it reaches that system —
+	 *   never interpolated unchecked into a URL, a path or a query — and
+	 *   answer one that fails the check with {@link UnknownKidError}.
+	 */
 	getVerificationKey(kid: string): Promise<KeyLike>;
 }
 

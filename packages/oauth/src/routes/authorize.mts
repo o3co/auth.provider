@@ -29,6 +29,7 @@ import {
 	type GrantPolicyHook,
 	isEmailVerified,
 	isGrantTypeAllowed,
+	isWellFormedClientId,
 	isWellFormedErrorCode,
 	type Logger,
 	loggableError,
@@ -213,7 +214,14 @@ const auditFailure = (ctx: AuthorizeContext, details: Record<string, unknown>): 
 /**
  * RFC 6749 §4.1.1 identification: `client_id` / `redirect_uri` presence, the
  * client lookup, and the `redirect_uri` allowlist. Everything here fails as
- * 400/500 JSON (A-1) because no trusted redirect target exists yet.
+ * 400/503 JSON (A-1) because no trusted redirect target exists yet.
+ *
+ * A `client_id` that cannot name a client (core's `isWellFormedClientId`: a
+ * control character, or longer than `MAX_CLIENT_ID_LENGTH`) is answered like
+ * an unknown one and never reaches the repository, which may throw on it. A
+ * repository that throws cannot answer: `503 temporarily_unavailable`
+ * ("client repository unavailable"), logged at error level as
+ * `client_repository_unavailable` — as client authentication answers it.
  *
  * Returns `null` when a response has been sent.
  */
@@ -237,11 +245,29 @@ const resolveClientAndRedirectUri = async (
 		return null;
 	}
 
+	if (!isWellFormedClientId(client_id)) {
+		res.status(400).json({ error: "invalid_client", error_description: "client not found" });
+		return null;
+	}
+
 	let client: PublicClient | null;
 	try {
 		client = await opts.clientRepository.findById(client_id);
-	} catch {
-		res.status(500).json({ error: "server_error", error_description: "Failed to fetch client" });
+	} catch (err) {
+		// The client's id is its own input: recorded sanitised and capped.
+		opts.logger.error(
+			{
+				site: "authorize",
+				step: "find",
+				clientId: auditErrorText(client_id),
+				err: loggableError(err),
+			},
+			"client_repository_unavailable",
+		);
+		res.status(503).json({
+			error: "temporarily_unavailable",
+			error_description: "client repository unavailable",
+		});
 		return null;
 	}
 	if (!client) {

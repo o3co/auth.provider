@@ -15,9 +15,11 @@
  */
 
 import {
+	auditErrorText,
 	consoleLogger,
 	createRemoteKeySetCache,
 	isRecordableJti,
+	isWellFormedClientId,
 	type Logger,
 	loggableError,
 	MAX_ASSERTION_LIFETIME_SECONDS,
@@ -157,7 +159,10 @@ export function createClientAssertionVerifier(
 	 * store's ioredis error carries the refused command's arguments, a client
 	 * lookup's library error its own fields, and jose's claim errors the
 	 * assertion's claims as `payload`. The context is typed, so nothing else
-	 * reaches the log beside the client id and an unsupported assertion type.
+	 * reaches the log beside the client id and an unsupported assertion type
+	 * — and both of those are the client's input, read before any signature
+	 * is checked, so they are recorded through `auditErrorText` (sanitised,
+	 * capped).
 	 */
 	const refuse = (
 		status: 400 | 401 | 500 | 503,
@@ -171,9 +176,14 @@ export function createClientAssertionVerifier(
 		} = {},
 	): ClientAssertionOutcome => {
 		const log = status >= 500 ? logger.error.bind(logger) : logger.warn.bind(logger);
-		const { err, ...fields } = context;
+		const { err, clientId, assertionType } = context;
 		log(
-			{ reason, ...fields, ...("err" in context ? { err: loggableError(err) } : {}) },
+			{
+				reason,
+				...(clientId !== undefined ? { clientId: auditErrorText(clientId) } : {}),
+				...(assertionType !== undefined ? { assertionType: auditErrorText(assertionType) } : {}),
+				...("err" in context ? { err: loggableError(err) } : {}),
+			},
 			"client_assertion_refused",
 		);
 		return { kind: "refused", status, error, description };
@@ -241,6 +251,14 @@ export function createClientAssertionVerifier(
 					"client_id_mismatch",
 					{ clientId: iss },
 				);
+			}
+			// An iss no client can have is refused like an unknown one, before
+			// the repository is asked — a repository may throw on it, and that
+			// would read as the server's outage (core's `isWellFormedClientId`).
+			if (!isWellFormedClientId(iss)) {
+				return refuse(401, "invalid_client", "Unknown client", "malformed_client_id", {
+					clientId: iss,
+				});
 			}
 
 			let client: PublicClient | null;
