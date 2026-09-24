@@ -747,4 +747,113 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.body).toEqual({ clientId: "acme" });
 		});
 	});
+
+	// RFC 6749 §5.2 limits `error_description` to %x20-21 / %x23-5B / %x5D-7E,
+	// and this middleware answers on `/oauth/token`, `/oauth/introspect` (RFC
+	// 7662 §2.3) and `/oauth/revoke` (RFC 7009 §2.2.1), which all use that
+	// format. Every description it writes, including the assertion
+	// verifier's, is held to the set; a configured `tokenEndpointAuthMethod`
+	// it quotes is sanitised rather than trusted to be ASCII.
+	describe("error descriptions within RFC 6749 §5.2's character set", () => {
+		const WITHIN_SET = /^[\x20-\x21\x23-\x5B\x5D-\x7E]*$/;
+		const ISSUER = "https://auth.test";
+		let privateKey: CryptoKey;
+		beforeAll(async () => {
+			privateKey = (await generateKeyPair("ES256")).privateKey;
+		});
+		const signed = async (claims: { iss: string; sub: string }): Promise<string> => {
+			const now = Math.floor(Date.now() / 1000);
+			return new SignJWT({ ...claims, aud: `${ISSUER}/oauth/token`, iat: now, exp: now + 60 })
+				.setProtectedHeader({ alg: "ES256", kid: "k1" })
+				.sign(privateKey);
+		};
+		// A method value outside the set, as a later registration source
+		// could supply: the middleware must not pass it through.
+		const oddMethod = 'client_secret_"b\\\u00e9' as TokenEndpointAuthMethod;
+		const buildApp = () => {
+			const app = express().use(express.urlencoded({ extended: false }));
+			app.post(
+				"/test",
+				createClientAuthMiddleware(
+					fakeRepo([
+						basicConfidential("alice", "s3cret"),
+						{ clientId: "odd", tokenEndpointAuthMethod: oddMethod, clientSecret: "s3cret" },
+					]),
+					{ issuer: ISSUER, replaySeenSet: createMemoryReplaySeenSet() },
+				),
+				(_req, res) => res.end(),
+			);
+			return app;
+		};
+		const described = (res: { body: { error_description?: unknown } }): string => {
+			const description = String(res.body.error_description);
+			expect(description).toMatch(WITHIN_SET);
+			return description;
+		};
+
+		describe("clientAuth.mts", () => {
+			it("quotes the configured method with ' in the method mismatch", async () => {
+				const res = await request(buildApp())
+					.post("/test")
+					.type("form")
+					.send({ client_id: "alice", client_secret: "s3cret" });
+				expect(described(res)).toBe(
+					"tokenEndpointAuthMethod mismatch: client is configured for 'client_secret_basic'",
+				);
+			});
+
+			it("sanitises a configured method outside the set", async () => {
+				const res = await request(buildApp())
+					.post("/test")
+					.type("form")
+					.send({ client_id: "odd", client_secret: "s3cret" });
+				expect(described(res)).toBe(
+					"tokenEndpointAuthMethod mismatch: client is configured for 'client_secret_?b??'",
+				);
+			});
+
+			it("names RFC 6749 section 2.3 without a section sign", async () => {
+				const res = await request(buildApp())
+					.post("/test")
+					.set("Authorization", `Basic ${Buffer.from("alice:s3cret").toString("base64")}`)
+					.type("form")
+					.send({
+						client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+						client_assertion: await signed({ iss: "alice", sub: "alice" }),
+					});
+				expect(described(res)).toBe(
+					"Only one client authentication method per request (RFC 6749 section 2.3): a client_assertion cannot be combined with Basic credentials or client_secret",
+				);
+			});
+		});
+
+		describe("clientAssertion.mts, answered through the middleware", () => {
+			const assert = async (claims: { iss: string; sub: string }) =>
+				request(buildApp())
+					.post("/test")
+					.type("form")
+					.send({
+						client_assertion_type: JWT_BEARER_CLIENT_ASSERTION_TYPE,
+						client_assertion: await signed(claims),
+					});
+
+			it("names RFC 7523 section 3 without a section sign", async () => {
+				expect(described(await assert({ iss: "alice", sub: "someone-else" }))).toBe(
+					"client assertion iss and sub must both be the client_id (RFC 7523 section 3)",
+				);
+			});
+
+			it("quotes the configured method with ' in the method mismatch", async () => {
+				expect(described(await assert({ iss: "alice", sub: "alice" }))).toBe(
+					"tokenEndpointAuthMethod mismatch: client is configured for 'client_secret_basic'",
+				);
+			});
+
+			it("sanitises a configured method outside the set", async () => {
+				expect(described(await assert({ iss: "odd", sub: "odd" }))).toBe(
+					"tokenEndpointAuthMethod mismatch: client is configured for 'client_secret_?b??'",
+				);
+			});
+		});
+	});
 });
