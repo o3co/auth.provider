@@ -32,6 +32,7 @@ import {
 	parseScopeTokens,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
+	resolveRefreshTokenLifetime,
 	unrepresentedResources,
 	verifyJwt,
 	wellFormedAcr,
@@ -64,6 +65,14 @@ export type RefreshTokenGrantDeps = Pick<
 
 export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandler => {
 	const { config, keyStore, logger, subjectRevocation } = deps;
+	// The lifetimes it mints with, read once, when the grant is built. A
+	// configuration built by hand that the resolvers refuse is a composition
+	// fault: refused here, it never reaches a request — read per request, it
+	// answered every refresh with a 500, after client authentication had spent
+	// whatever it spends, and `generateToken` alone would have refused it only
+	// after the rotation had spent the presented token (#449).
+	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
+	const requestedRefreshExpiresIn = resolveRefreshTokenLifetime(config);
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -592,19 +601,6 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 			// are never issued.
 			const issuedAt = Math.floor(Date.now() / 1000);
 			const newRefreshJti = randomUUID();
-			// Resolved before the reservation, not beside the signature: a
-			// configuration the resolver refuses must fail before the family
-			// store has spent the presented token, not after.
-			const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
-			const requestedRefreshExpiresIn = config.oauth.refreshToken.expiresIn;
-			// The schema refuses anything but a positive whole number of seconds;
-			// a configuration built by hand never met it, and `generateToken`
-			// refuses it only after the rotation below has spent the token.
-			if (!(Number.isSafeInteger(requestedRefreshExpiresIn) && requestedRefreshExpiresIn > 0)) {
-				throw new RangeError(
-					`oauth.refreshToken.expiresIn must be a positive whole number of seconds (got ${String(requestedRefreshExpiresIn)})`,
-				);
-			}
 			const newRefreshExp = issuedAt + requestedRefreshExpiresIn;
 			// What the rotation actually committed, once it has: IH-13 sets a
 			// family's TTL once at creation and never extends it, so a rotation

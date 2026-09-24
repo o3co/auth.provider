@@ -190,6 +190,8 @@ A registered grant must also be allowed for the client, by `allowedGrantTypes` o
 
 Enabling jwt-bearer without a `userRepository` or an `assertionVerifier` fails at boot — see [jwt-bearer](#jwt-bearer-which-issuers-are-trusted-525).
 
+**Token lifetimes are read when a grant is built.** Every grant here reads `oauth.accessToken` through core's `resolveAccessTokenLifetime`, and `authorization_code` and `refresh_token` read `oauth.refreshToken.expiresIn` through `resolveRefreshTokenLifetime`, once, in its factory. A configuration those resolvers refuse — possible only for one built by hand, since the schema refuses the same values at boot — makes the factory throw a `RangeError` naming the key, so the grant is never registered. A request never meets it: no authorization code, ID-JAG `jti` or refresh token is spent on a configuration that cannot mint the answer.
+
 ### `authorization_code`: the session, `sid`, `family_id` and the id_token
 
 The access and refresh tokens the `authorization_code` and `refresh_token` grants mint carry `family_id` — the refresh-token family, which is what [introspection](#introspection-which-tokens-a-caller-may-ask-about), [userinfo](#userinfo), [logout](#logout) and the federation token route check for revocation — and `sid`, the session id, when the code record has one. The login path writes `sid` onto the code at `/authorize` (local login or the federation callback).

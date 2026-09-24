@@ -65,6 +65,12 @@ export interface TokenExchangeDependencies
 
 export function createTokenExchangeGrant(deps: TokenExchangeDependencies): GrantHandler {
 	const { tokenExchangeValidatorResolver, clientRepository } = deps;
+	// The lifetimes it mints with, read once, when the grant is built: a
+	// configuration built by hand that the resolver refuses is a composition
+	// fault, refused before any request — read per request, it answered every
+	// exchange with a 500, after client authentication had spent whatever it
+	// spends.
+	const { defaultExpiresIn, maxExpiresIn } = resolveAccessTokenLifetime(deps.config);
 
 	return {
 		// #326 deny-by-absence, the shape `client_credentials` and the WebAuthn
@@ -917,7 +923,6 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			//    the longest a resource server validating this token offline
 			//    can keep accepting it after its family is revoked.
 			// 3. Capped at the subject token's remaining lifetime, below.
-			const { defaultExpiresIn, maxExpiresIn } = resolveAccessTokenLifetime(deps.config);
 			let expiresIn = Math.min(requestedExpiresIn ?? defaultExpiresIn, maxExpiresIn);
 
 			// RFC 8693 §2.2.1: the issued token's lifetime SHOULD NOT exceed the

@@ -54,6 +54,12 @@ export type ClientCredentialsGrantDeps = Pick<
 
 export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): GrantHandler => {
 	const { config, keyStore } = deps;
+	// The lifetime it mints with, read once, when the grant is built: a
+	// configuration built by hand that the resolver refuses is a composition
+	// fault, refused before any request — read per request, it was refused
+	// only after client authentication had spent whatever it spends, with
+	// a 500.
+	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
 
 	return {
 		// §3.4.1: machine-to-machine access is never acquired by omission — a
@@ -198,7 +204,7 @@ export const createClientCredentialsGrant = (deps: ClientCredentialsGrantDeps): 
 					client_id: client.clientId,
 				},
 				{
-					expiresIn: resolveAccessTokenLifetime(config).defaultExpiresIn,
+					expiresIn: accessTokenExpiresIn,
 					keyStore,
 					issuer,
 					audience,

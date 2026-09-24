@@ -556,11 +556,12 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 		expect(register).not.toHaveBeenCalled();
 	});
 
-	it("answers 503 when oauth.refreshToken.expiresIn is unset, so the token has no exp", async () => {
-		// The same guard reached without touching the decoder: no configured TTL
-		// means `generateToken` emits no `exp` claim, so the family would have no
-		// expiry to register under. A misconfiguration must not degrade into an
-		// unregistered refresh token.
+	it("is never built when oauth.refreshToken.expiresIn is unset, so no token without exp is minted", async () => {
+		// This used to reach the guard above at request time: no configured TTL
+		// meant `generateToken` emitted no `exp`, and the family had no expiry
+		// to register under, so the grant answered 503 — after the ceremony had
+		// consumed the challenge. The lifetime is now read when the grant is
+		// built, and a missing one refuses the composition instead.
 		const noTtlConfig = {
 			oauth: {
 				jwt: { issuer: ISSUER },
@@ -568,19 +569,17 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 				refreshToken: {},
 			},
 		} as unknown as GrantDependencies["config"];
+		const register = vi.fn(async () => {});
+		const deps = await makeDeps({
+			config: noTtlConfig,
+			refreshTokenFamilyRotation: {
+				register,
+				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
+			},
+		});
 
-		const { result } = await createWebAuthnGrant(
-			await makeDeps({
-				config: noTtlConfig,
-				refreshTokenFamilyRotation: {
-					register: vi.fn(async () => {}),
-					rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
-				},
-			}),
-		).handle(makeCtx(makeClient()));
-
-		expect(result.status).toBe(503);
-		expect("tokens" in result).toBe(false);
+		expect(() => createWebAuthnGrant(deps)).toThrow(/oauth\.refreshToken\.expiresIn/);
+		expect(register).not.toHaveBeenCalled();
 	});
 
 	it("still issues when no rotation component is wired", async () => {

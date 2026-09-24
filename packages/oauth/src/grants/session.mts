@@ -54,6 +54,12 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 	// `resolveOAuthOptions` owns the defensive read for hand-built configs
 	// that never passed the schema (the cast that used to sit in `handle`).
 	const { requireEmailVerified } = resolveOAuthOptions(config);
+	// The lifetime it mints with, read once, when the grant is built: a
+	// configuration built by hand that the resolver refuses is a composition
+	// fault, refused before any request — read per request, it was refused
+	// only after client authentication had spent whatever it spends, with
+	// a 500.
+	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -263,7 +269,7 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 								{ ...(sid ? { sid } : {}), ...(trackedAmr ? { amr: trackedAmr } : {}) },
 								{
 									keyStore,
-									expiresIn: resolveAccessTokenLifetime(config).defaultExpiresIn,
+									expiresIn: accessTokenExpiresIn,
 									issuer,
 									audience,
 									subject: userId ?? null,

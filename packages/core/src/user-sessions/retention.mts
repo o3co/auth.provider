@@ -34,7 +34,9 @@
 
 import {
 	type AccessTokenLifetimeSource,
+	type RefreshTokenLifetimeSource,
 	resolveAccessTokenLifetime,
+	resolveRefreshTokenLifetime,
 } from "../config/application.schema.mjs";
 import { FEDERATION_GRANT_LIFETIME_CEILING_MS } from "../federation-grants/lifetime.mjs";
 import { DEFAULT_CLOCK_SKEW_MS, DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jwt/verify.mjs";
@@ -53,18 +55,22 @@ import { DEFAULT_CLOCK_SKEW_MS, DEFAULT_SUBJECT_REVOCATION_SKEW_MS } from "../jw
  */
 export const SUBJECT_REVOCATION_MIN_RETENTION_MS = FEDERATION_GRANT_LIFETIME_CEILING_MS + 60_000;
 
-/** Whole milliseconds an operator configured, or a refusal that names the path. */
-const lifetime = (value: unknown, path: string, unit: "s" | "ms"): number => {
+/**
+ * Milliseconds an operator configured, or a refusal that names the path. The
+ * token lifetimes have resolvers of their own in the configuration schema;
+ * this reads what has none.
+ */
+const lifetimeMs = (value: unknown, path: string): number => {
 	const raw = typeof value === "number" ? value : Number.NaN;
 	if (!Number.isFinite(raw) || raw <= 0) {
 		throw new RangeError(
 			`resolveSubjectRevocationHorizonMs: ${path} must be a positive number of ` +
-				`${unit === "s" ? "seconds" : "milliseconds"}, and was ${JSON.stringify(value)}. ` +
+				`milliseconds, and was ${JSON.stringify(value)}. ` +
 				"The subject's revocation boundary is sized from it, and one computed from a " +
 				"missing lifetime expires while the sessions it covers are still being accepted.",
 		);
 	}
-	return unit === "s" ? raw * 1000 : raw;
+	return raw;
 };
 
 /**
@@ -92,14 +98,9 @@ const lifetime = (value: unknown, path: string, unit: "s" | "ms"): number => {
  * enforces rather than from configuration.
  */
 export function resolveSubjectRevocationHorizonMs(config: unknown): number {
-	const root = config as
-		| { oauth?: { refreshToken?: { expiresIn?: unknown } }; session?: { maxAge?: unknown } }
-		| undefined;
-	const refreshMs = lifetime(
-		root?.oauth?.refreshToken?.expiresIn,
-		"oauth.refreshToken.expiresIn",
-		"s",
-	);
+	const root = config as { session?: { maxAge?: unknown } } | undefined;
+	// Through the key's one reader, which holds it to the schema's rule.
+	const refreshMs = resolveRefreshTokenLifetime(config as RefreshTokenLifetimeSource) * 1000;
 	// The MAXIMUM, not the default. `oauth.accessToken.expiresIn` is what a
 	// grant mints when the request asks for nothing; token exchange may ask
 	// for more, up to `maxExpiresIn`. Sizing the horizon from the default
@@ -110,7 +111,7 @@ export function resolveSubjectRevocationHorizonMs(config: unknown): number {
 	// is not a lifetime rather than letting this compute from one.
 	const accessMs =
 		resolveAccessTokenLifetime(config as AccessTokenLifetimeSource).maxExpiresIn * 1000;
-	const sessionMs = lifetime(root?.session?.maxAge, "session.maxAge", "ms");
+	const sessionMs = lifetimeMs(root?.session?.maxAge, "session.maxAge");
 	const longest = Math.max(
 		sessionMs,
 		refreshMs + DEFAULT_CLOCK_SKEW_MS,

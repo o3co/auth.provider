@@ -510,19 +510,22 @@ function checkAccessTokenLifetime(
  * The access-token lifetime a deployment configured: the DEFAULT minted when a
  * request asks for nothing, and the MAX no request may exceed.
  *
- * Every grant reads the lifetime through this function — there is no other
- * correct reader:
+ * Every grant reads the lifetime through this function, when it is built —
+ * there is no other correct reader:
  *
  * - `defaultExpiresIn` when set, otherwise the deprecated `expiresIn`;
  * - `maxExpiresIn` when set, otherwise the default, so nothing is extended
  *   past the default unless the operator opts in;
  * - a default above the max, a missing default, or a value that is not a
- *   whole number of seconds within the one-year ceiling throws, naming the key.
+ *   whole number of seconds within the one-year ceiling throws a
+ *   `RangeError`, naming the key.
  *
  * The schema enforces the same rules at boot, so a loaded configuration never
  * throws here. The checks are repeated for configurations built by hand, which
  * reach a grant without meeting the schema; before this function the grants
- * handed such a value straight to `exp` arithmetic.
+ * handed such a value straight to `exp` arithmetic, and while they read it per
+ * request they refused it only after the request's single-use credential was
+ * spent. {@link resolveRefreshTokenLifetime} is the refresh token's counterpart.
  *
  * Why the alias is resolved here rather than in HOCON: `parseFile` resolves
  * substitutions per file before the layers merge, so a
@@ -531,8 +534,45 @@ function checkAccessTokenLifetime(
  */
 export function resolveAccessTokenLifetime(config: AccessTokenLifetimeSource): AccessTokenLifetime {
 	const check = checkAccessTokenLifetime(config.oauth?.accessToken);
-	if (!check.ok) throw new Error(check.message);
+	if (!check.ok) throw new RangeError(check.message);
 	return check.lifetime;
+}
+
+/**
+ * Anything carrying an `oauth.refreshToken` section: a loaded `AppConfig`, or
+ * a configuration built by hand that never met the schema. The value is
+ * `unknown` because the resolver validates it rather than trusting a type.
+ */
+export interface RefreshTokenLifetimeSource {
+	readonly oauth?: { readonly refreshToken?: { readonly expiresIn?: unknown } };
+}
+
+/**
+ * The refresh-token lifetime a deployment configured, in seconds:
+ * `oauth.refreshToken.expiresIn`.
+ *
+ * The counterpart of {@link resolveAccessTokenLifetime}, and the one reader of
+ * the key: every grant that mints a refresh token reads it through this when
+ * it is built, and so does the subject-revocation horizon. It holds the value
+ * to the schema's rule — a whole number of seconds from 1 to the one-year
+ * ceiling (`isLifetimeSeconds`, which the schema's `lifetimeSecondsSchema`
+ * states in zod) — and throws a `RangeError` naming the key for anything else,
+ * absence included.
+ *
+ * The schema already refuses such a value at boot. The check is repeated for
+ * configurations built by hand, which reach a grant without meeting it; read
+ * at request time, the grants spent an authorization code or a WebAuthn
+ * challenge before `generateToken` refused the value, and signed a refresh
+ * token with no `exp` when it was missing.
+ */
+export function resolveRefreshTokenLifetime(config: RefreshTokenLifetimeSource): number {
+	const value = config.oauth?.refreshToken?.expiresIn;
+	if (!isLifetimeSeconds(value)) {
+		throw new RangeError(
+			`oauth.refreshToken.expiresIn must be a whole number of seconds from 1 to ${MAX_DURATION_SECONDS} (got ${typeof value === "string" ? JSON.stringify(value) : String(value)})`,
+		);
+	}
+	return value;
 }
 
 /**
@@ -586,8 +626,9 @@ const accessTokenSchema = z
 	);
 
 const refreshTokenSchemaBase = z.object({
-	// #282: positive and bounded. See MAX_DURATION_SECONDS.
-	expiresIn: z.coerce.number().int().positive().max(MAX_DURATION_SECONDS),
+	// #282: positive and bounded. See MAX_DURATION_SECONDS. The rule
+	// `resolveRefreshTokenLifetime` holds a hand-built configuration to.
+	expiresIn: lifetimeSecondsSchema,
 	// CC-2 (v0.5.1): policy for refresh tokens whose `family_id` does not
 	// match a known family record. `"reject"` is the safe default; the
 	// pre-fix behavior was implicit `"accept"` (silent fall-through to

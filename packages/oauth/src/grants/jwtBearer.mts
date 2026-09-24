@@ -160,6 +160,12 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 	// #297: deployment config, resolved once at construction like the session
 	// grant does — `resolveOAuthOptions` owns the defensive read.
 	const { requireEmailVerified } = resolveOAuthOptions(config);
+	// The lifetime it mints with, read once, when the grant is built: a
+	// configuration built by hand that the resolver refuses is a composition
+	// fault, refused before any request — read per request, it was refused
+	// only after the verifier had recorded an ID-JAG's `jti`, and after client
+	// authentication had spent whatever it spends.
+	const { defaultExpiresIn } = resolveAccessTokenLifetime(config);
 
 	return {
 		// #326: a device credential is a standing capability of a registration,
@@ -435,7 +441,7 @@ export const createJwtBearerGrant = (deps: JwtBearerGrantDeps): GrantHandler => 
 			// token, so the expiry the issuing authority set stopped bounding
 			// anything once exchanged. Taken here, at minting, rather than at
 			// verification: the Store and the policy run in between.
-			let expiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
+			let expiresIn = defaultExpiresIn;
 			// One issuance instant for both the cap and the token. Read twice,
 			// a second boundary between the reads would stamp `exp` a second
 			// past the assertion's; `iat` is this instant's whole second, so

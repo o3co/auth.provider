@@ -114,6 +114,7 @@ import {
 	type ProviderDeps,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
+	resolveRefreshTokenLifetime,
 	type Token,
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
@@ -196,6 +197,13 @@ export interface WebAuthnGrantDeps
  */
 export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 	const { config, keyStore } = deps;
+	// The lifetimes it mints with, read once, when the grant is built. A
+	// configuration built by hand that the resolvers refuse is a composition
+	// fault, refused before any request reaches the ceremony — read per
+	// request, it was refused only after the challenge was consumed, and a
+	// missing refresh lifetime signed a refresh token with no `exp`.
+	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
+	const refreshTokenExpiresIn = resolveRefreshTokenLifetime(config);
 
 	return {
 		// allowedGrantTypes strictness for authenticated clients — mirroring
@@ -484,7 +492,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					amr: ["hwk"],
 				},
 				{
-					expiresIn: resolveAccessTokenLifetime(config).defaultExpiresIn,
+					expiresIn: accessTokenExpiresIn,
 					keyStore,
 					issuer,
 					audience,
@@ -522,7 +530,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					// it is handed, so the passkey's `hwk` has to be here too.
 					{ family_id: familyId, amr: ["hwk"] },
 					{
-						expiresIn: config.oauth.refreshToken.expiresIn,
+						expiresIn: refreshTokenExpiresIn,
 						keyStore,
 						issuer,
 						audience,
@@ -545,9 +553,9 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
 					// EVERY way registration can fail lands here, not just a store
 					// outage. Reading the `jti` / `exp` back off the token we just
 					// minted can fail too — an unparseable token, a decode that
-					// throws, a payload missing either claim (an unset
-					// `oauth.refreshToken.expiresIn` produces exactly that, and a
-					// remote signer is free to return claims we did not ask for) — and
+					// throws, a payload missing either claim (a remote signer is free
+					// to return claims we did not ask for; an unset
+					// `oauth.refreshToken.expiresIn` no longer gets this far) — and
 					// the first shape of this code treated an unreadable payload as
 					// "nothing to register" and served the refresh token anyway. That
 					// is the same live-token-with-no-family outcome as the outage,

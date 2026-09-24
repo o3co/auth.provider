@@ -154,8 +154,10 @@ export {
 	coerceBooleanFromEnv,
 	composeConfigSchema,
 	fullSectionsSchema,
+	type RefreshTokenLifetimeSource,
 	readAccessTokenRevocationMode,
 	resolveAccessTokenLifetime,
+	resolveRefreshTokenLifetime,
 } from "./config/application.schema.mjs";
 // OIDC discovery aggregation — modules contribute `discoveryMetadata`
 // (OidcDiscoveryContributionFactory above) and core synthesizes the

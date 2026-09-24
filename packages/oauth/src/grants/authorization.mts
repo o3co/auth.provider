@@ -27,6 +27,7 @@ import {
 	generateTokenResponse,
 	type ProviderDeps,
 	resolveAccessTokenLifetime,
+	resolveRefreshTokenLifetime,
 	type Token,
 	type UserSession,
 	unrepresentedResources,
@@ -76,6 +77,14 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	// not honour — so `/authorize` could mint a code that `/token` refused.
 	// Resolved once at composition; `logger` carries the inert-config warning.
 	const pkce = resolveOAuthOptions(config, logger).pkce;
+
+	// The lifetimes it mints with, read here for the same reason: once, when
+	// the grant is built. A configuration built by hand that the resolvers
+	// refuse is a composition fault, refused before any request can reach
+	// `consumeByCode` — read per request, it was refused only after the code
+	// was spent, and a missing refresh lifetime signed a token with no `exp`.
+	const accessTokenExpiresIn = resolveAccessTokenLifetime(config).defaultExpiresIn;
+	const refreshTokenExpiresIn = resolveRefreshTokenLifetime(config);
 
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
@@ -559,7 +568,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					...(acr ? { acr } : {}),
 				},
 				{
-					expiresIn: resolveAccessTokenLifetime(config).defaultExpiresIn,
+					expiresIn: accessTokenExpiresIn,
 					keyStore,
 					issuer,
 					audience,
@@ -582,7 +591,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 					...(acr ? { acr } : {}),
 				},
 				{
-					expiresIn: config.oauth.refreshToken.expiresIn,
+					expiresIn: refreshTokenExpiresIn,
 					keyStore,
 					issuer,
 					audience,

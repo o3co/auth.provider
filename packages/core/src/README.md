@@ -102,7 +102,7 @@ None of these is enforced; each is recorded so a change can see it.
 
 ## Config
 
-`config/` owns `AppConfigSchema` / `CoreConfigSchema` / `fullSectionsSchema`, `composeConfigSchema` (which stage 1 of boot runs over every module's schema), the removed-key refusals and the lifetime readers. It takes the issuer, secret-entropy, network and JWKS-path rules from their homes rather than restating them. Defaults live in [`../config/reference.conf`](../config/reference.conf), not in the schema (ADR [2026-04-30](../docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md)). See [Configuration](../README.md#configuration).
+`config/` owns `AppConfigSchema` / `CoreConfigSchema` / `fullSectionsSchema`, `composeConfigSchema` (which stage 1 of boot runs over every module's schema), the removed-key refusals and the lifetime readers (`resolveAccessTokenLifetime`, `resolveRefreshTokenLifetime`: each the one reader of its keys, holding a hand-built configuration to the schema's rule and throwing a `RangeError` naming the key; grants call them when they are built). It takes the issuer, secret-entropy, network and JWKS-path rules from their homes rather than restating them. Defaults live in [`../config/reference.conf`](../config/reference.conf), not in the schema (ADR [2026-04-30](../docs/adr/2026-04-30-config-schema-strict-defaults-from-hocon.md)). See [Configuration](../README.md#configuration).
 
 ## Testing support
 

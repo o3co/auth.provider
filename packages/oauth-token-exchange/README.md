@@ -115,6 +115,7 @@ A token-exchange request may carry an optional `expires_in` form parameter: the 
 - **`maxExpiresIn` unset means the default.** Until the operator raises it (`OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN`), a request can shorten a token but not lengthen it. Security note 19 is what raising it costs.
 - **Malformed is refused** with `400 invalid_request` naming `expires_in`: sent more than once, zero, longer than 10 digits, or anything but ASCII decimal digits — no sign, decimal point, exponent or whitespace.
 - **Only this grant reads it.** Every other grant ignores the parameter and mints the default.
+- **The configured pair is read when the grant is built** (core's `resolveAccessTokenLifetime`). A hand-built configuration it refuses makes `createTokenExchangeGrant` throw a `RangeError` naming the key, rather than answering every exchange with a 500.
 
 ## External JWT subject_token
 

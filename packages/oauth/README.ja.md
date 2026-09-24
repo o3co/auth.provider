@@ -184,6 +184,8 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 `userRepository` か `assertionVerifier` の無い状態で jwt-bearer を有効にすると boot が失敗する — [jwt-bearer](#jwt-bearer-信頼する発行者-525) を参照。
 
+**トークンの有効期間はグラントの構築時に読む。** ここのすべてのグラントは `oauth.accessToken` を core の `resolveAccessTokenLifetime` で、`authorization_code` と `refresh_token` は `oauth.refreshToken.expiresIn` を `resolveRefreshTokenLifetime` で、ファクトリーの中で一度だけ読む。それらのリゾルバーが拒否する config — スキーマが同じ値を起動時に拒否するので、手組みのものでしかあり得ない — ではファクトリーがキーを名指しした `RangeError` を投げ、グラントは登録されない。リクエストがそれに出会うことはない: 応答を発行できない config のために、認可コードも ID-JAG の `jti` もリフレッシュトークンも消費されない。
+
 ### `authorization_code`: セッション、`sid`、`family_id` と id_token
 
 `authorization_code` と `refresh_token` グラントが発行するアクセストークンとリフレッシュトークンは `family_id` — リフレッシュトークンファミリー。[イントロスペクション](#イントロスペクション-呼び出し元が問い合わせられるトークン)、[userinfo](#userinfo)、[ログアウト](#ログアウト)、federation token ルートが失効の確認に使う — と、コードレコードにあればセッション ID の `sid` を持つ。`sid` はログイン経路（ローカルログインかフェデレーションコールバック）が `/authorize` でコードに書き込む。
