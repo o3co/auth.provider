@@ -265,6 +265,12 @@ describe("a caught error reaches a logger only through loggableError", () => {
 				`const consumeErr = await consumeTransaction(); if (consumeErr) log.warn({ err: consumeErr }, "delete failed");`,
 			],
 			[
+				"a node-style callback's error beside a `.map((e) => …)`",
+				`const kinds = entries.map((e) => e.kind); req.session.save((err) => { if (err) log.warn({ err, kinds }, "session save failed"); });`,
+			],
+			[".catch((e) => …)", `p.catch((e) => logger.warn({ err: e }, "failed"));`],
+			["catch (e)", `try { x() } catch (e) { log.warn({ err: e }, "failed"); }`],
+			[
 				"an error a callback resolved a promise with",
 				`const saveErr = await new Promise((resolve) => { req.session.save((err) => resolve(err ?? null)); }); if (saveErr) log.warn({ err: saveErr }, "save failed");`,
 			],
@@ -301,6 +307,14 @@ describe("a caught error reaches a logger only through loggableError", () => {
 			[
 				"an awaited value that is not an error",
 				`const result = await load(); log.info({ result }, "loaded");`,
+			],
+			[
+				"a `.map((e) => …)` element read in a later log call",
+				`const summary = entries.map((e) => e.module).join(", "); for (const e of entries) log.warn({ module: e.module, summary }, "cleanup failed");`,
+			],
+			[
+				"a `.filter((e) => …)` element read in a later log call",
+				`const named = entries.filter((e) => e.kind === "name-keyed"); for (const e of named) logger.info({ kind: e.kind }, "collected");`,
 			],
 			[
 				"a node-style callback's error, projected",
