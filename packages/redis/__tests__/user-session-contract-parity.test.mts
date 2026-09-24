@@ -30,7 +30,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { callersOf, prologueDeclarations, prologueImports } from "./contract-parity.helpers.mjs";
+import {
+	callersOf,
+	isPackageSpecifier,
+	prologueDeclarations,
+	prologueImports,
+} from "./contract-parity.helpers.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CORE = join(here, "../../core/src/user-sessions/__tests__/userSessionStore.contract.mts");
@@ -62,11 +67,11 @@ describe("the UserSessionStore contract suite, in both copies", () => {
 	it("imports the port from the package rather than from core's source", () => {
 		const imports = prologueImports(COPY, readFileSync(COPY, "utf8").indexOf(FIRST_EXPORT));
 		expect(imports).toContain("@o3co/auth-provider-core");
-		// A copy imports core as a package. Core's `#/` alias does not resolve
-		// from here, and a relative or absolute path would reach into core's
-		// source rather than what the package publishes.
+		// A copy imports packages only. Core's `#/` alias does not resolve from
+		// here, and any path — relative, absolute, `file:` — would reach into
+		// core's source rather than what the package publishes.
 		for (const specifier of imports) {
-			expect(specifier, specifier).not.toMatch(/^(#\/|\.|\/)/);
+			expect(isPackageSpecifier(specifier), specifier).toBe(true);
 		}
 	});
 

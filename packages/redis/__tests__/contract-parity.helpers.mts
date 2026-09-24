@@ -53,6 +53,16 @@ export const prologueImports = (path: string, bodyStart: number): string[] =>
 		.map((statement) => (statement.moduleSpecifier as ts.StringLiteral).text);
 
 /**
+ * Whether an import specifier names a package — `vitest`,
+ * `@o3co/auth-provider-core`, `node:fs` — rather than a location. A relative,
+ * absolute, `file:` or drive-letter path, or core's `#/` alias, is a location:
+ * it reaches into core's source instead of what the package publishes.
+ */
+export const isPackageSpecifier = (specifier: string): boolean =>
+	specifier.startsWith("node:") ||
+	/^(@[a-z0-9][\w.-]*\/)?[a-z0-9][\w.-]*(\/[\w.-]+)*$/i.test(specifier);
+
+/**
  * The `.test.mts` files in `dir` that call `runner(…)` — a call, not a
  * mention. It does not judge whether the call runs: one inside a
  * `describe.skip` still counts.
