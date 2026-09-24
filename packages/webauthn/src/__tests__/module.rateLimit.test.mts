@@ -40,6 +40,7 @@ import {
 	type Logger,
 	type Module,
 	memoryChallengeStoreModule,
+	memoryRateLimiterModule,
 	memoryReplaySeenSetModule,
 	memoryWebAuthnCredentialStoreModule,
 	type RateLimiter,
@@ -137,10 +138,12 @@ async function bootApp(
 	extraModules: readonly Module[],
 	failMode?: "open" | "closed",
 	deploymentMode?: "single" | "multi",
+	extraConfig: Record<string, unknown> = {},
 ) {
 	const config = {
 		...makeCoreConfig(failMode),
 		...(deploymentMode === undefined ? {} : { deployment: { mode: deploymentMode } }),
+		...extraConfig,
 	};
 	// With a deployment mode declared, the memory stores this fixture wires
 	// stand in for shared ones: the case under test is the route's own
@@ -239,6 +242,67 @@ describe("webauthn authentication/options rate limit (#281) — shared limiter",
 
 		expect(res.headers["ratelimit-limit"]).toBe("5");
 		expect(res.headers["ratelimit-remaining"]).toBe("4");
+
+		await handle.dispose();
+	});
+});
+
+describe("webauthn authentication/options rate limit — the configured budget on a bundled shared limiter", () => {
+	/**
+	 * The composition a scaled deployment has: the bundled limiter module in
+	 * the `rateLimiter` slot, its own `limits` silent about this route, and the
+	 * route's budget where the package documents it,
+	 * `webauthn.rateLimit.authenticationOptions`. The per-process fallback
+	 * took that budget; the shared limiter was never told it, and served its
+	 * `defaultLimit` (60 per 60 s) on an unauthenticated route.
+	 */
+	const composed = (explicit: Record<string, unknown> = {}) => ({
+		webauthn: { rateLimit: { authenticationOptions: { limit: 2, windowSeconds: 60 } } },
+		memoryRateLimiter: {
+			limits: explicit,
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+			maxBuckets: 10_000,
+		},
+	});
+
+	it("applies webauthn.rateLimit.authenticationOptions, not the limiter's default", async () => {
+		const { handle, app } = await bootApp(
+			makeWebAuthnConfig(2),
+			[memoryRateLimiterModule],
+			undefined,
+			undefined,
+			composed(),
+		);
+
+		const first = await hit(app);
+		expect(first.status).toBe(200);
+		expect(first.headers["ratelimit-limit"]).toBe("2");
+		expect((await hit(app)).status).toBe(200);
+		const denied = await hit(app);
+		expect(denied.status).toBe(429);
+		expect(denied.body).toMatchObject({ error: "rate_limited" });
+
+		await handle.dispose();
+	});
+
+	it("leaves an operator's explicit limits entry for the route in force, as login's seed does", async () => {
+		// An explicit `limits.webauthn-authentication-options` is a statement
+		// about this adapter; seeding over it would discard what was written.
+		const { handle, app } = await bootApp(
+			makeWebAuthnConfig(2),
+			[memoryRateLimiterModule],
+			undefined,
+			undefined,
+			composed({
+				[WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG]: { limit: 3, windowSeconds: 60 },
+			}),
+		);
+
+		const first = await hit(app);
+		expect(first.headers["ratelimit-limit"]).toBe("3");
+		expect((await hit(app)).status).toBe(200);
+		expect((await hit(app)).status).toBe(200);
+		expect((await hit(app)).status).toBe(429);
 
 		await handle.dispose();
 	});

@@ -47,6 +47,33 @@ describe("redisRateLimiterModule", () => {
 		expect((await limiter.check(key, { userId: "u1" })).allowed).toBe(false);
 	});
 
+	it("seeds webauthn-authentication-options from webauthn.rateLimit.authenticationOptions", async () => {
+		// The route's budget lives in the WebAuthn section; unseeded, the
+		// unauthenticated options route ran on this adapter's 60 per 60 s.
+		const counts = new Map<string, number>();
+		const client = {
+			async incrementWithTtl(key: string, _ttlSeconds: number) {
+				const next = (counts.get(key) ?? 0) + 1;
+				counts.set(key, next);
+				return next;
+			},
+		};
+		const config = {
+			redisRateLimiter: { limits: {}, defaultLimit: { limit: 60, windowSeconds: 60 } },
+			webauthn: { rateLimit: { authenticationOptions: { limit: 2, windowSeconds: 60 } } },
+		};
+		const limiter = redisRateLimiterModule.provides?.rateLimiter?.({
+			config,
+			rateLimiterClient: client,
+		} as never);
+		if (!limiter) throw new Error("rateLimiter provider missing");
+		const key = "webauthn-authentication-options:ip:1.2.3.4";
+		const first = await limiter.check(key, { ip: "1.2.3.4" });
+		expect(first.limit).toBe(2);
+		expect((await limiter.check(key, { ip: "1.2.3.4" })).allowed).toBe(true);
+		expect((await limiter.check(key, { ip: "1.2.3.4" })).allowed).toBe(false);
+	});
+
 	it("refuses a window longer than a year in its own schema", () => {
 		const schema = redisRateLimiterModule.configSchema;
 		for (const redisRateLimiter of [

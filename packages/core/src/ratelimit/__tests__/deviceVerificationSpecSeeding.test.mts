@@ -109,11 +109,13 @@ describe("resolveSeededLimitSpecs", () => {
 			{},
 			{
 				rateLimit: { login: { windowMs: 900_000, limit: 20 } },
+				webauthn: { rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 } } },
 				...configured(5, 300),
 			},
 		);
 		expect(limits.login).toEqual({ limit: 20, windowSeconds: 900 });
 		expect(limits.device_verification).toEqual({ limit: 5, windowSeconds: 300 });
+		expect(limits["webauthn-authentication-options"]).toEqual({ limit: 30, windowSeconds: 60 });
 	});
 });
 

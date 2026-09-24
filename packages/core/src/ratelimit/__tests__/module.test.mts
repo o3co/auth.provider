@@ -81,6 +81,25 @@ describe("memoryRateLimiterModule", () => {
 		expect((await limiter.check(key, { userId: "u1" })).allowed).toBe(false);
 	});
 
+	it("seeds webauthn-authentication-options from webauthn.rateLimit.authenticationOptions", async () => {
+		// The route's budget lives in the WebAuthn section, as login's lives
+		// in `rateLimit.login`; unseeded, it ran on the 60 per 60 s default.
+		const cfg = {
+			memoryRateLimiter: {
+				limits: {},
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+				maxBuckets: 10_000,
+			},
+			webauthn: { rateLimit: { authenticationOptions: { limit: 2, windowSeconds: 60 } } },
+		};
+		const limiter = memoryRateLimiterModule.provides?.rateLimiter?.({ config: cfg } as never);
+		if (!limiter) throw new Error("rateLimiter provider missing");
+		const key = "webauthn-authentication-options:ip:1.2.3.4";
+		expect((await limiter.check(key, { ip: "1.2.3.4" })).limit).toBe(2);
+		expect((await limiter.check(key, { ip: "1.2.3.4" })).allowed).toBe(true);
+		expect((await limiter.check(key, { ip: "1.2.3.4" })).allowed).toBe(false);
+	});
+
 	it("bounds bucket growth with memoryRateLimiter.maxBuckets", async () => {
 		vi.useFakeTimers();
 		try {
