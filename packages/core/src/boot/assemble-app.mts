@@ -27,7 +27,7 @@
 
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
-import type { Express, RequestHandler, Router } from "express";
+import type { Express, Request, RequestHandler, Router } from "express";
 import type { InternalLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import { discoveryRouteFor, planDiscoveryDocument } from "../discovery/planRoute.mjs";
 import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
@@ -700,31 +700,50 @@ export function assembleApp(
 	// mountPath the same way the `/oauth/token` mounts above and below are —
 	// see the NOTE on the `grantMiddleware` mount.
 	const TOKEN_ENDPOINT_PATH = "/oauth/token";
-	const SENDER_CONSTRAINT_EXEMPT_PATHS = [TOKEN_ENDPOINT_PATH] as const;
+	/** The token endpoint's one method (RFC 6749 §3.2). */
+	const TOKEN_ENDPOINT_METHOD = "POST";
 
-	// Exact, case-insensitive match with one optional trailing slash — the
-	// paths an Express route on `path` answers (non-strict, case-insensitive
-	// routing, the default), which is how the token-endpoint middleware below
-	// is mounted. So the exemption covers exactly what that middleware
-	// covers. Not the sub-tree beneath it: a later module's
-	// `/oauth/token/custom` gets no token-endpoint profile, so exempting it
-	// here would leave it guarded by neither, and a DPoP-bound token replayed
-	// there as a plain Bearer would be admitted.
-	const isSenderConstraintExempt = (path: string): boolean => {
-		const lowered = path.toLowerCase();
-		return SENDER_CONSTRAINT_EXEMPT_PATHS.some(
-			(exempt) => lowered === exempt || lowered === `${exempt}/`,
+	// A POST to exactly `/oauth/token` — case-insensitive, with one optional
+	// trailing slash, the paths a `use` mount on it leaves as `/` — which is
+	// what `tokenEndpointOnly` below admits. So the exemption covers exactly
+	// what the token-endpoint middleware covers. Not the sub-tree beneath it,
+	// and not another method: a later module's `/oauth/token/custom`, or its
+	// `GET /oauth/token`, gets no token-endpoint profile, so exempting it here
+	// would leave it guarded by neither, and a DPoP-bound token replayed there
+	// as a plain Bearer would be admitted.
+	const isSenderConstraintExempt = (req: Request): boolean => {
+		const lowered = req.path.toLowerCase();
+		return (
+			req.method === TOKEN_ENDPOINT_METHOD &&
+			(lowered === TOKEN_ENDPOINT_PATH || lowered === `${TOKEN_ENDPOINT_PATH}/`)
 		);
 	};
 
+	// `mw`, for the token endpoint alone: mounted with
+	// `router.use(TOKEN_ENDPOINT_PATH, tokenEndpointOnly(mw))`, it runs only for
+	// a POST whose path ends at the mount — `req.path` is `/` for
+	// `/oauth/token` and `/oauth/token/`, in any letter case — and passes every
+	// other request on. A `use` mount rather than a route (`router.all`), so a
+	// contribution sees the request as it always has: `req.path` `/`, `req.url`
+	// `/?<query>`, `req.baseUrl` ending in `/oauth/token`. A bare `use` mount
+	// would also run it for every path beneath (`/oauth/token/custom`) and
+	// every method, handing another module's route the token endpoint's
+	// binding verdict and grant middleware.
+	const tokenEndpointOnly =
+		(mw: RequestHandler): RequestHandler =>
+		(req, res, next) => {
+			if (req.method !== TOKEN_ENDPOINT_METHOD || req.path !== "/") {
+				next();
+				return;
+			}
+			// Returned so Express 5's router forwards a rejection to `next`.
+			return mw(req, res, next);
+		};
+
 	// Synthesize a SINGLE `tokenBindingMw` from the `tokenBindingMechanisms`
 	// collector and mount it on `/oauth/token` BEFORE any other grant
-	// middleware. Mounted as a route (`router.all`), so it matches
-	// `/oauth/token` exactly — with the trailing slash and letter case the
-	// token route itself admits — and not a longer path beneath it:
-	// `router.use` would hand a later module's `/oauth/token/custom` the
-	// token endpoint's binding verdict. Multiple mechanism modules (DPoP, mTLS, ...) contribute
-	// raw mechanisms; core composes them into one middleware so the
+	// middleware — for the token endpoint alone (`tokenEndpointOnly`).
+	// Multiple mechanism modules (DPoP, mTLS, ...) contribute raw mechanisms; core composes them into one middleware so the
 	// configured `DispatchPolicy` (`intent-explicit` / `strict-mutual-
 	// exclusion`) arbitrates across modules. See ADR
 	// `packages/core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md`
@@ -749,7 +768,7 @@ export function assembleApp(
 				rawPolicy === "strict-mutual-exclusion" ? "strict-mutual-exclusion" : "intent-explicit";
 			const logger = (frozen.components as Record<string, unknown>).logger as Logger | undefined;
 			const composed = tokenBindingMw({ mechanisms, dispatchPolicy, logger });
-			router.all(TOKEN_ENDPOINT_PATH, composed);
+			router.use(TOKEN_ENDPOINT_PATH, tokenEndpointOnly(composed));
 		}
 	}
 
@@ -785,7 +804,7 @@ export function assembleApp(
 			: {}),
 	});
 	router.use((req, res, next) => {
-		if (isSenderConstraintExempt(req.path)) {
+		if (isSenderConstraintExempt(req)) {
 			next();
 			return;
 		}
@@ -794,8 +813,8 @@ export function assembleApp(
 	});
 
 	// Mount `grantMiddleware` contributions on `/oauth/token` AFTER the
-	// synthesized tokenBindingMw above — exactly `/oauth/token`, as that one
-	// is. The bundled `oauthModule` contributes
+	// synthesized tokenBindingMw above — for the token endpoint alone, as
+	// that one is (`tokenEndpointOnly`). The bundled `oauthModule` contributes
 	// its sub-router at mountPath `/oauth` (packages/oauth/src/module.mts),
 	// so the external grant-dispatch URL is `/oauth/token`. Express runs
 	// middleware in mount order, so these handlers fire before the OAuth
@@ -813,7 +832,7 @@ export function assembleApp(
 	if (grantMwCollector !== undefined) {
 		for (const mw of grantMwCollector.values()) {
 			if (mw !== null) {
-				router.all(TOKEN_ENDPOINT_PATH, mw);
+				router.use(TOKEN_ENDPOINT_PATH, tokenEndpointOnly(mw));
 			}
 		}
 	}

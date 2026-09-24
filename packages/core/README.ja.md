@@ -215,7 +215,7 @@ const myModule = defineModule({
 
 `createApp` はマニフェストを検証し、設定を合成・パースし、コンポーネントグラフを実体化し、すべての contribution を適用し、ワールドを freeze してルートをマウントします。返される `router` はそのままマウントでき（`app.use(handle.router)`）、`handle.listen(port)` で配信することもできます。`handle.dispose()` はすべての cleanup を reverse-topological 順で実行し、すべての失敗を持つ `AggregateError` で reject します。別途の `init()` ステップはありません。
 
-core が自分でマウントするもの（この順）: `cors.allowedOrigins` が空でなければ `corsMw`、contribute された機構が 1 つ以上あればそれらを合成した単一の `tokenBindingMw`、protected-resource の sender-constraint チェック（常に。トークンエンドポイントのパスを除くすべてのパスで）、グラントのディスパッチ前に `grantMiddleware` の contribution、そして issuer が設定されかつ `providerRoot` を宣言するモジュールがあれば OIDC discovery ルート。それ以外 — JWKS（`jwksModule`）、liveness と readiness（`createHealthcheckRouter`、`createReadinessRouter`）、OAuth と session のルート — は、composition root が組み込むモジュールかルーターです。
+core が自分でマウントするもの（この順）: `cors.allowedOrigins` が空でなければ `corsMw`、contribute された機構が 1 つ以上あればそれらを合成した単一の `tokenBindingMw`、protected-resource の sender-constraint チェック（常に。トークンエンドポイントへの POST を除くすべてのリクエストで）、グラントのディスパッチ前に `grantMiddleware` の contribution、そして issuer が設定されかつ `providerRoot` を宣言するモジュールがあれば OIDC discovery ルート。それ以外 — JWKS（`jwksModule`）、liveness と readiness（`createHealthcheckRouter`、`createReadinessRouter`）、OAuth と session のルート — は、composition root が組み込むモジュールかルーターです。
 
 `express` は任意の peer dependency で、遅延ロードされます: `createApp` はルーターを作るために import し（`await import("express")`）、boot は `handle.listen()` がルーターを包む `express()` ファクトリーのためにも require します（`createRequire`）— import が失敗した場合はルーターもそこから得ます。
 
@@ -429,7 +429,7 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 - `@o3co/auth-provider-dpop` — RFC 9449 DPoP（explicit-intent）。
 - `@o3co/auth-provider-mtls` — RFC 8705 mTLS の証明書バインドトークン（ambient）。
 
-どちらのパッケージも `tokenBindingMechanisms` で contribute します。core の `assembleApp` はすべての contribution を集め、null を除き、`/oauth/token` ちょうどにマウントする単一の `tokenBindingMw` を合成します。ルートとしてマウントするので、それと `grantMiddleware` の contribution が走るのはトークンエンドポイント（末尾スラッシュの有無、大文字小文字を問わない）だけで、その下の長いパスでは走りません。sender-constraint チェックが除外するのもちょうど同じパスです。
+どちらのパッケージも `tokenBindingMechanisms` で contribute します。core の `assembleApp` はすべての contribution を集め、null を除き、`/oauth/token` にマウントする単一の `tokenBindingMw` を合成します。それと `grantMiddleware` の contribution が走るのはトークンエンドポイントだけ — `/oauth/token` への POST（末尾スラッシュの有無、大文字小文字を問わない）— で、ほかのメソッドやその下の長いパスでは走りません。その中から見えるリクエストは `/oauth/token` への `use` マウントが見せるもの（`req.path` は `/`、`req.baseUrl` は `/oauth/token` で終わる）です。sender-constraint チェックが除外するのもちょうど同じリクエストです。
 
 #### ディスパッチポリシー
 

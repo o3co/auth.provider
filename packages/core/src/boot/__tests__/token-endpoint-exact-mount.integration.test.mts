@@ -79,9 +79,10 @@ const shapeOf = (req: { path: string; url: string; baseUrl: string }): SeenShape
  * grant middleware beside it; both record the requests they saw, and the
  * shape of each. The token route stands in for `oauthModule`'s, and a later
  * module serves `POST /oauth/token/custom` and `GET /oauth/token`. The router
- * is mounted at `mountedAt`, as a host app may mount it.
+ * is mounted at `mountedAt`, as a host app may mount it; `config` is merged
+ * over the valid core config.
  */
-const bootApp = async (mountedAt = "/") => {
+const bootApp = async (mountedAt = "/", config: Record<string, unknown> = {}) => {
 	const proofsJudged: string[] = [];
 	const grantMiddlewareSaw: string[] = [];
 	const mechanismShapes: SeenShape[] = [];
@@ -148,7 +149,7 @@ const bootApp = async (mountedAt = "/") => {
 				},
 			}),
 		],
-		bootstrapComponents: BOOT,
+		bootstrapComponents: { ...BOOT, config: { ...makeValidCoreConfig(), ...config } as never },
 	});
 	const app = express();
 	app.use(mountedAt, handle.router);
@@ -202,6 +203,24 @@ describe("the token endpoint's middleware matches /oauth/token exactly", () => {
 		expect(res.status).toBe(200);
 		expect(res.body).toEqual({ reached: true });
 		expect(proofsJudged).toEqual([]);
+		expect(mechanismShapes).toEqual([]);
+		expect(grantMiddlewareSaw).toEqual([]);
+	});
+
+	it("answers a CORS preflight for /oauth/token before any of the token endpoint's middleware", async () => {
+		// `corsMw` is mounted first; an OPTIONS is not the token endpoint's
+		// POST either way.
+		const { app, mechanismShapes, grantMiddlewareSaw } = await bootApp("/", {
+			cors: { allowedOrigins: ["https://spa.example"] },
+		});
+
+		const res = await request(app)
+			.options("/oauth/token")
+			.set("Origin", "https://spa.example")
+			.set("Access-Control-Request-Method", "POST");
+
+		expect(res.status).toBe(204);
+		expect(res.headers["access-control-allow-origin"]).toBe("https://spa.example");
 		expect(mechanismShapes).toEqual([]);
 		expect(grantMiddlewareSaw).toEqual([]);
 	});

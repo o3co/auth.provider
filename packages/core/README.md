@@ -215,7 +215,7 @@ const myModule = defineModule({
 
 `createApp` validates the manifests, composes and parses the configuration, materialises the component graph, applies every contribution, freezes the world and mounts the routes. The returned `router` is ready to mount (`app.use(handle.router)`) or to serve through `handle.listen(port)`; `handle.dispose()` runs every cleanup in reverse-topological order and rejects with an `AggregateError` carrying every failure. There is no separate `init()` step.
 
-What core mounts on its own, in this order: `corsMw` when `cors.allowedOrigins` is non-empty, the single `tokenBindingMw` composed from the contributed mechanisms when at least one was contributed, the protected-resource sender-constraint check (always, on every path but the token endpoint's), the `grantMiddleware` contributions ahead of grant dispatch, and the OIDC discovery route when an issuer is configured and a module declares `providerRoot`. Everything else — JWKS (`jwksModule`), liveness and readiness (`createHealthcheckRouter`, `createReadinessRouter`), the OAuth and session routes — is a module or a router the composition root installs.
+What core mounts on its own, in this order: `corsMw` when `cors.allowedOrigins` is non-empty, the single `tokenBindingMw` composed from the contributed mechanisms when at least one was contributed, the protected-resource sender-constraint check (always, on every request but the token endpoint's POST), the `grantMiddleware` contributions ahead of grant dispatch, and the OIDC discovery route when an issuer is configured and a module declares `providerRoot`. Everything else — JWKS (`jwksModule`), liveness and readiness (`createHealthcheckRouter`, `createReadinessRouter`), the OAuth and session routes — is a module or a router the composition root installs.
 
 `express` is an optional peer dependency, loaded lazily: `createApp` imports it (`await import("express")`) to build the router, and boot also requires it (`createRequire`) for the `express()` factory `handle.listen()` wraps the router in — and for the router, if the import failed.
 
@@ -430,7 +430,7 @@ Sender-constrained token binding is a first-class extension surface. The `tokenB
 - `@o3co/auth-provider-dpop` — RFC 9449 DPoP (explicit-intent).
 - `@o3co/auth-provider-mtls` — RFC 8705 mTLS certificate-bound tokens (ambient).
 
-Both packages contribute via `tokenBindingMechanisms`. Core's `assembleApp` collects all contributions, filters nulls, and composes ONE `tokenBindingMw` mounted on exactly `/oauth/token` — a route, so it and the `grantMiddleware` contributions run for the token endpoint (with or without a trailing slash, in any letter case) and for no longer path beneath it, and the sender-constraint check exempts exactly the same paths.
+Both packages contribute via `tokenBindingMechanisms`. Core's `assembleApp` collects all contributions, filters nulls, and composes ONE `tokenBindingMw` mounted on `/oauth/token`. It and the `grantMiddleware` contributions run for the token endpoint alone — a POST to `/oauth/token`, with or without a trailing slash, in any letter case — and not for another method or a longer path beneath it; inside them the request is what a `use` mount on `/oauth/token` shows (`req.path` `/`, `req.baseUrl` ending in `/oauth/token`). The sender-constraint check exempts exactly the same requests.
 
 #### Dispatch policy
 
