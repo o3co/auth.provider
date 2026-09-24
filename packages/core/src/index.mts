@@ -384,10 +384,16 @@ export type {
 	JwtType,
 	JwtVerificationReason,
 	JwtVerifyOptions,
+	VerificationUnavailableReason,
 	VerifiedJwt,
 	VerifyRevocation,
 } from "./jwt/verify.mjs";
-export { isRevocationUnavailable, JwtVerificationError, verifyJwt } from "./jwt/verify.mjs";
+export {
+	isVerificationUnavailable,
+	JwtVerificationError,
+	VERIFICATION_UNAVAILABLE_DESCRIPTION,
+	verifyJwt,
+} from "./jwt/verify.mjs";
 export type { KeyStoreFactory } from "./keys/factory.mjs";
 export {
 	createKeyStoreFactory,

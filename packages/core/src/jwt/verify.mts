@@ -22,7 +22,7 @@ import {
 	type ProtectedHeaderParameters,
 } from "jose";
 import type { AccessTokenDenylist } from "../access-token-denylist/types.mjs";
-import { ExpiredKidError, type KeyStore } from "../keys/KeyStore.mjs";
+import { ExpiredKidError, type KeyStore, UnknownKidError } from "../keys/KeyStore.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import type { SubjectRevocation } from "../user-sessions/types.mjs";
 
@@ -53,6 +53,13 @@ export type JwtVerificationReason =
 	// unknown kid is an attacker-fabricated header signal. SIEM filters can
 	// page differently on each.
 	| "kid_expired"
+	// The keystore could not answer the lookup: it threw something other than
+	// the `UnknownKidError` / `ExpiredKidError` its contract uses for the two
+	// findings — a remote key service that timed out, a vault that refused
+	// the connection. An outage, like `revocation_unavailable`, and never
+	// `kid_unknown`: that reason says the header named a key nobody holds,
+	// and every caller answers it as the client's fault.
+	| "key_unavailable"
 	// Wave 1 (§4.5) / #296: a revocation *finding*, or a fail-closed refusal
 	// when the watermark cannot be compared — the jti is on the
 	// AccessTokenDenylist (explicitly revoked via RFC 7009); the token's `iat`
@@ -77,8 +84,9 @@ export type JwtVerificationReason =
 	// §5.2 a client discards its refresh token on that. A transient store outage
 	// therefore did not degrade the service, it force-logged-out every user who
 	// refreshed during it — while the same handler already answered family-store
-	// outages with `503 temporarily_unavailable`. A caller that can retry should
-	// say so; one that cannot still refuses the token.
+	// outages with `503 temporarily_unavailable`. Every caller now answers this
+	// reason and `key_unavailable` alike: `503`, with the token still refused
+	// (`isVerificationUnavailable`).
 	| "revocation_unavailable";
 
 /**
@@ -92,33 +100,60 @@ export class JwtVerificationError extends Error {
 	constructor(
 		readonly reason: JwtVerificationReason,
 		message: string,
+		options?: ErrorOptions,
 	) {
-		super(message);
+		super(message, options);
 	}
 }
 
 /**
- * Whether `err` is a {@link JwtVerificationError} reporting that a revocation
- * store could not be consulted — the subject watermark (#408) or the jti
- * denylist (#459). One predicate for both stores: a caller that answers an
- * outage differently from a finding must not have to know which one was down.
+ * The reasons that report an outage — a dependency the verifier could not
+ * consult — rather than a finding about the token.
+ */
+export type VerificationUnavailableReason = "key_unavailable" | "revocation_unavailable";
+
+/**
+ * Whether `err` is a {@link JwtVerificationError} reporting an outage: the
+ * keystore could not answer the key lookup (`key_unavailable`), or a
+ * revocation store could not be consulted — the subject watermark (#408) or
+ * the jti denylist (#459) (`revocation_unavailable`). One predicate for every
+ * dependency: a caller that answers an outage differently from a finding must
+ * not have to know which one was down.
  *
  * A predicate rather than an inline `instanceof` + `reason` pair at each call
  * site, because the answer changes what a caller says on the wire and getting
- * it wrong is not visible in a test that only checks the happy path. The
- * refresh grant maps this to `503 temporarily_unavailable` instead of
- * `400 invalid_grant`, since RFC 6749 §5.2 makes the latter the signal for a
- * client to discard its refresh token — turning a transient outage into a
- * forced logout for everyone who refreshed during it.
+ * it wrong is not visible in a test that only checks the happy path.
  *
- * Surfaces that cannot retry, or whose refusal does not cost the caller a
- * credential (introspection answering `active: false`, a protected resource
- * answering `401`), are right to keep treating it as a refusal. The token is
- * refused either way: verification still fails closed.
+ * Every caller answers it `503 temporarily_unavailable`, never with a verdict
+ * on the token. RFC 6750 §3.1's `invalid_token` says the token "is expired,
+ * revoked, malformed, or invalid for other reasons" and invites the client to
+ * get a new one; RFC 6749 §5.2's `invalid_grant` makes a client discard its
+ * refresh token; RFC 7662's `active: false` tells a resource server the token
+ * is not active. An outage says none of those things — the token may be
+ * perfectly good — and each of them sends the client to replace a credential,
+ * which meets the same outage at the token endpoint. The token is still
+ * refused: verification fails closed either way.
  */
-export function isRevocationUnavailable(err: unknown): boolean {
-	return err instanceof JwtVerificationError && err.reason === "revocation_unavailable";
+export function isVerificationUnavailable(
+	err: unknown,
+): err is JwtVerificationError & { readonly reason: VerificationUnavailableReason } {
+	return (
+		err instanceof JwtVerificationError &&
+		(err.reason === "key_unavailable" || err.reason === "revocation_unavailable")
+	);
 }
+
+/**
+ * The `error_description` a caller puts beside `temporarily_unavailable` for
+ * an outage {@link isVerificationUnavailable} recognises: which dependency
+ * was down, and nothing about the token.
+ */
+export const VERIFICATION_UNAVAILABLE_DESCRIPTION: Readonly<
+	Record<VerificationUnavailableReason, string>
+> = Object.freeze({
+	key_unavailable: "verification key unavailable",
+	revocation_unavailable: "revocation store unavailable",
+});
 
 /**
  * The revocation stores that a verification consults, travelling as one
@@ -344,7 +379,8 @@ export const DEFAULT_SUBJECT_REVOCATION_SKEW_MS = 1_000;
  *     via {@link JwtVerifyOptions.legacyTypAccept}),
  *  3. resolves the verification key by `kid` via
  *     {@link KeyStore.getVerificationKey} (falls back to the current signing
- *     kid when the JWT has no `kid` header),
+ *     kid when the JWT has no `kid` header) — a keystore that cannot answer
+ *     is `key_unavailable`, an outage, not `kid_unknown`,
  *  4. delegates to jose `jwtVerify` with explicit `algorithms`, `issuer`, and
  *     `audience` options — pinning all three at the security-critical layer,
  *  5. enforces `iat <= now + clockSkewMs` post-signature (jose does not
@@ -353,7 +389,9 @@ export const DEFAULT_SUBJECT_REVOCATION_SKEW_MS = 1_000;
  *
  * On any failure the verifier throws {@link JwtVerificationError} with a
  * stable {@link JwtVerificationReason}. Callers map that to their own error
- * envelope (e.g. RFC 6749 `error: "invalid_token"`).
+ * envelope (e.g. RFC 6750 `error: "invalid_token"`) — except an outage
+ * ({@link isVerificationUnavailable}), which every caller answers
+ * `503 temporarily_unavailable`.
  */
 export async function verifyJwt(
 	jwt: string,
@@ -436,14 +474,25 @@ export async function verifyJwt(
 	try {
 		verificationKey = await keyStore.getVerificationKey(requestedKid);
 	} catch (cause) {
-		// KeyStore distinguishes the two failure modes via typed errors
+		// KeyStore distinguishes the two findings via typed errors
 		// (ExpiredKidError / UnknownKidError) so SIEM pipelines can tell
 		// operator-rotation expiry apart from attacker-fabricated header
-		// values without coupling to message text.
-		const reason: JwtVerificationReason =
-			cause instanceof ExpiredKidError ? "kid_expired" : "kid_unknown";
-		const message = cause instanceof Error ? cause.message : String(cause);
-		const err = new JwtVerificationError(reason, message);
+		// values without coupling to message text. Anything else it throws
+		// is the keystore failing to answer, which says nothing about the
+		// token: `key_unavailable`, with what it threw kept as the cause so a
+		// caller's log names the dependency.
+		if (cause instanceof ExpiredKidError || cause instanceof UnknownKidError) {
+			const reason: JwtVerificationReason =
+				cause instanceof ExpiredKidError ? "kid_expired" : "kid_unknown";
+			const err = new JwtVerificationError(reason, cause.message);
+			emitRejection(logger, err, undefined, header);
+			throw err;
+		}
+		const err = new JwtVerificationError(
+			"key_unavailable",
+			"verification key lookup failed (fail-closed)",
+			{ cause },
+		);
 		emitRejection(logger, err, undefined, header);
 		throw err;
 	}
@@ -596,7 +645,7 @@ export async function verifyJwt(
 	// genuinely revoked token were the same `jwt_verify_rejected reason=revoked`
 	// line, for every token on every replica until Redis returned. #408 split
 	// the outage from the finding for the watermark below; the denylist path
-	// predates that and now takes the same reason, so `isRevocationUnavailable`
+	// predates that and now takes the same reason, so `isVerificationUnavailable`
 	// covers both stores and a caller answers both outages the same way.
 	if (denylist !== undefined) {
 		const jti = typeof payload.jti === "string" ? payload.jti : undefined;

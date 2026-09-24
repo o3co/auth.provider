@@ -31,6 +31,7 @@ import type {
 import {
 	auditedError,
 	emitAuditEvent,
+	isVerificationUnavailable,
 	loggableError,
 	sanitizeErrorText,
 	supportsLogout,
@@ -42,6 +43,7 @@ import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
 import { broadcastBackchannelLogout } from "../logout/broadcastBackchannel.mjs";
 import { cascadeLogout } from "../logout/cascadeLogout.mjs";
 import { renderFrontchannelLogoutHtml } from "../logout/renderFrontchannel.mjs";
+import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -313,6 +315,11 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				});
 				payload = verified.payload as Record<string, unknown>;
 			} catch (error) {
+				// The keystore did not answer: the server's outage, not a verdict
+				// on the token (`isVerificationUnavailable`).
+				if (isVerificationUnavailable(error)) {
+					return refuseVerificationUnavailable(res, error, logger, "federation_logout");
+				}
 				// Log the reason at warn level — keep minimal (don't log the token itself,
 				// since this path can be attacker-driven).
 				logger.warn(`/oauth/federation/${name}/logout: jwtVerify failed:`, loggableError(error));
@@ -569,7 +576,14 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				logger: opts.logger,
 			});
 			payload = verified.payload as Record<string, unknown>;
-		} catch {
+		} catch (err) {
+			// The keystore did not answer: the server's outage, not a verdict
+			// on the hint (`isVerificationUnavailable`). A confirmation page
+			// would carry a hint that fails again the same way, so GET gets the
+			// 503 too.
+			if (isVerificationUnavailable(err)) {
+				return refuseVerificationUnavailable(res, err, opts.logger ?? console, "logout");
+			}
 			// Invalid signature / iss / typ. The POST verifier uses identical
 			// options, so a hint that fails GET verification will deterministically
 			// fail POST verification too — rendering a confirmation page with

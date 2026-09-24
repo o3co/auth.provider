@@ -17,6 +17,7 @@
 import {
 	type AccessTokenDenylist,
 	filterClaimsByScope,
+	isVerificationUnavailable,
 	type KeyStore,
 	type Logger,
 	type RefreshTokenFamilyRevocation,
@@ -27,6 +28,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
+import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -116,7 +118,12 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 				logger: opts.logger,
 			});
 			payload = verified.payload as Record<string, unknown>;
-		} catch {
+		} catch (err) {
+			// The keystore or a revocation store did not answer: the server's
+			// outage, not a verdict on the token (`isVerificationUnavailable`).
+			if (isVerificationUnavailable(err)) {
+				return refuseVerificationUnavailable(res, err, opts.logger, "userinfo");
+			}
 			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');
 			return res.status(401).json({ error: "invalid_token", error_description: "invalid token" });
 		}

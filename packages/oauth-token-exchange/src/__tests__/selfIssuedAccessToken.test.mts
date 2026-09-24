@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { isRevocationUnavailable } from "@o3co/auth-provider-core";
+import { isVerificationUnavailable } from "@o3co/auth-provider-core";
 import { describe, expect, it, vi } from "vitest";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
@@ -225,7 +225,7 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		const denylist = { kind: "stub", add: async () => {}, has: unreachable };
 		await expect(
 			validator({ accessTokenDenylist: denylist }).validate(token, { role: "subject" }),
-		).rejects.toSatisfy(isRevocationUnavailable);
+		).rejects.toSatisfy(isVerificationUnavailable);
 
 		const subjectRevocation = {
 			kind: "stub",
@@ -234,6 +234,6 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		};
 		await expect(
 			validator({ subjectRevocation }).validate(token, { role: "actor" }),
-		).rejects.toSatisfy(isRevocationUnavailable);
+		).rejects.toSatisfy(isVerificationUnavailable);
 	});
 });

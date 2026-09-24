@@ -26,7 +26,7 @@ import {
 	type GrantHandlerResult,
 	generateToken,
 	generateTokenResponse,
-	isRevocationUnavailable,
+	isVerificationUnavailable,
 	loggableError,
 	matchConfirmation,
 	readIssuedScope,
@@ -34,6 +34,7 @@ import {
 	resolveAccessTokenLifetime,
 	resolveRefreshTokenLifetime,
 	unrepresentedResources,
+	VERIFICATION_UNAVAILABLE_DESCRIPTION,
 	verifyJwt,
 	wellFormedAcr,
 	wellFormedAmr,
@@ -137,26 +138,32 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				tokenPayload = verified.payload;
 				typ = verified.header.typ;
 			} catch (err) {
-				// #408: a revocation store that could not be consulted is an
-				// outage, not a finding. The verifier fails closed either way —
-				// an unreachable store must never read as "not revoked" — but
-				// answering `invalid_grant` here told the client to discard its
-				// refresh token (RFC 6749 §5.2), so a transient Redis blip
-				// force-logged-out every user who refreshed during it. This
-				// handler already answers a family-store outage with `503`
-				// below; the same event class gets the same answer.
+				// #408: a dependency the verifier could not consult — a
+				// revocation store, or the keystore itself — is an outage, not a
+				// finding. The verifier fails closed either way — an unreachable
+				// store must never read as "not revoked" — but answering
+				// `invalid_grant` here told the client to discard its refresh
+				// token (RFC 6749 §5.2), so a transient Redis blip or a key
+				// service timing out force-logged-out every user who refreshed
+				// during it. This handler already answers a family-store outage
+				// with `503` below; the same event class gets the same answer.
 				//
-				// Only this reason is remapped. Every other verification
-				// failure — a bad signature, the wrong `typ`, an expired or
-				// genuinely revoked token — is still the client's problem and
-				// still `invalid_grant`.
-				if (isRevocationUnavailable(err)) {
-					logger?.error({ err: loggableError(err) }, "refresh_token_revocation_store_unavailable");
+				// Only an outage is remapped. Every other verification failure —
+				// a bad signature, a kid nobody holds, the wrong `typ`, an
+				// expired or genuinely revoked token — is still the client's
+				// problem and still `invalid_grant`.
+				if (isVerificationUnavailable(err)) {
+					// The verifier's own closed vocabulary, not text a store wrote.
+					const { reason } = err;
+					logger?.error(
+						{ site: "refresh_token", reason, err: loggableError(err) },
+						"token_verification_unavailable",
+					);
 					return {
 						result: {
 							status: 503,
 							error: "temporarily_unavailable",
-							errorDescription: "revocation store unavailable",
+							errorDescription: VERIFICATION_UNAVAILABLE_DESCRIPTION[reason],
 						},
 					};
 				}

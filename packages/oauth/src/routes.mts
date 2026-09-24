@@ -36,6 +36,7 @@ import {
 	type GrantHandlerResult,
 	type GrantPolicyHook,
 	isGrantTypeAllowed,
+	isVerificationUnavailable,
 	isWellFormedErrorCode,
 	JwtVerificationError,
 	type KeyStore,
@@ -81,6 +82,7 @@ import {
 	type IntrospectResponse,
 	isCompoundConfirmation,
 } from "./types/introspect.mjs";
+import { refuseVerificationUnavailable } from "./verificationUnavailable.mjs";
 
 /**
  * The `reason` of a grant handler's `token.issued.failure`: its
@@ -374,6 +376,32 @@ export const createOAuthRouter = async (
 		// wires no store, and the endpoint behaves exactly as it did.
 		userSessionStore,
 	});
+
+	/**
+	 * Introspection that could not verify the token because the keystore or a
+	 * revocation store did not answer. RFC 7662 §2.2's `active: false` is a
+	 * statement about the token — "not active" — and an outage is not one: a
+	 * resource server told the token is inactive refuses its client with
+	 * `invalid_token`, and the client discards a credential that may be
+	 * perfectly good. So the answer is HTTP's own `503`, which vouches for
+	 * nothing and is still fail-closed — a resource server cannot read it as
+	 * `active: true`. Audited as `introspect.store_unavailable`, the event
+	 * this endpoint already raises for a store outage.
+	 */
+	const answerIntrospectionUnavailable = (
+		req: Request,
+		res: Response,
+		err: Parameters<typeof refuseVerificationUnavailable>[1],
+	): Response => {
+		emitAuditEvent(auditSink, {
+			timestamp: new Date(),
+			type: "introspect.store_unavailable",
+			ip: req.ip,
+			userAgent: req.get("user-agent"),
+			details: { reason: err.reason },
+		});
+		return refuseVerificationUnavailable(res, err, logger, "introspect");
+	};
 
 	// Federation endpoints — mount conditionally based on available stores and config.
 	// federationTokenStore is required for both POST /oauth/federation/:name/logout and
@@ -756,6 +784,12 @@ export const createOAuthRouter = async (
 						});
 						return next();
 					} catch (cause) {
+						// A keystore or revocation store that could not answer says
+						// nothing about the token: 503, never `active: false` — see
+						// `answerIntrospectionUnavailable` above.
+						if (isVerificationUnavailable(cause)) {
+							return answerIntrospectionUnavailable(req, res, cause);
+						}
 						// SF-8: distinguish non-access-token typ rejections so SIEM
 						// can spot a refresh / id token presented as a Bearer
 						// credential. RFC 7662 §2.2 forbids leaking the typ to the
@@ -975,6 +1009,9 @@ export const createOAuthRouter = async (
 					};
 					return res.status(200).json(formatObject(response));
 				} catch (cause) {
+					if (isVerificationUnavailable(cause)) {
+						return answerIntrospectionUnavailable(req, res, cause);
+					}
 					// SF-8: same non-access-token signal as the bearer path above.
 					// `active: false` is required by RFC 7662 §2.2 regardless of
 					// rejection reason; audit log carries the typ-mismatch signal.

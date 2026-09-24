@@ -296,7 +296,15 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			let subjectValidated: ValidatedToken | null;
 			try {
 				subjectValidated = await subjectValidator.validate(subjectToken, { role: "subject" });
-			} catch {
+			} catch (err) {
+				// A validator throws only when it cannot reach an answer — a
+				// keystore or a revocation store down (core's
+				// `ExchangeTokenValidator` contract). The server's fault, so a
+				// logged 503, never a verdict on the token.
+				deps.logger?.error(
+					{ role: "subject", err: loggableError(err) },
+					"token_exchange_validation_unavailable",
+				);
 				return {
 					result: {
 						status: 503,
@@ -398,7 +406,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			if (actorToken !== null && actorValidator) {
 				try {
 					actorValidated = await actorValidator.validate(actorToken, { role: "actor" });
-				} catch {
+				} catch (err) {
+					deps.logger?.error(
+						{ role: "actor", err: loggableError(err) },
+						"token_exchange_validation_unavailable",
+					);
 					return {
 						result: {
 							status: 503,

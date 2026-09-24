@@ -35,6 +35,7 @@ import {
 	classifyFederationRefreshError,
 	emitAuditEvent,
 	isBearerTokenType,
+	isVerificationUnavailable,
 	loggableError,
 	parseScopeTokens,
 	sanitizeErrorText,
@@ -44,6 +45,7 @@ import {
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response, Router } from "express";
 import { parseAccessTokenHeader } from "../accessTokenHeader.mjs";
+import { refuseVerificationUnavailable } from "../verificationUnavailable.mjs";
 
 type ExpressLike = {
 	Router: () => Router;
@@ -358,6 +360,11 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			});
 			payload = verified.payload as Record<string, unknown>;
 		} catch (error) {
+			// The keystore or a revocation store did not answer: the server's
+			// outage, not a verdict on the token (`isVerificationUnavailable`).
+			if (isVerificationUnavailable(error)) {
+				return refuseVerificationUnavailable(res, error, logger, "federation_token");
+			}
 			logger.warn(`POST /oauth/federation/${name}/token: jwtVerify failed:`, loggableError(error));
 			res.setHeader(
 				"WWW-Authenticate",
