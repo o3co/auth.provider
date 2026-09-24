@@ -85,7 +85,11 @@ import { z } from "zod";
  * other entry is left for the schema to refuse at its index — not dropped,
  * which is what core's reader does for CORS, and which would shorten the
  * list the operator wrote. Any other shape is handed on as it is, so the
- * schema refuses it as the wrong type rather than as an empty list.
+ * schema refuses it as the wrong type rather than as an empty list. On the
+ * documented path core's `AppConfigSchema` sees the section first and refuses
+ * a non-string entry itself (`invalid_union` at `webauthn.origin`); the
+ * index-level refusal is what a composition that parses this schema directly
+ * gets.
  */
 const readOriginList = (raw: unknown): unknown => {
 	if (typeof raw === "string") return normalizeAllowedOrigins(raw);

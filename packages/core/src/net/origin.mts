@@ -104,11 +104,12 @@ import { isLoopbackHostname } from "./loopback.mjs";
  * no error and no log: precisely the silent no-op this key was wired up to
  * stop being.
  *
- * Only the shape is normalised here. Each entry is still checked — for CORS
- * with {@link checkSerializedOrigin} by both the schema (which fails boot
- * naming the index) and the middleware (which drops it with a warning), for
- * WebAuthn by `webauthnConfigSchema`'s own origin rules — so this cannot
- * widen an allowlist; it can only stop one being dropped whole.
+ * Only the shape is normalised here. Each entry is still checked with
+ * {@link checkSerializedOrigin}: for CORS by both the schema (which fails
+ * boot naming the index) and the middleware (which drops it with a warning);
+ * for WebAuthn by `webauthnConfigSchema`, which adds that the host must be a
+ * domain and admits the Android app form in `origin`. So this cannot widen an
+ * allowlist; it can only stop one being dropped whole.
  *
  * Anything that is neither an array nor a string yields no origins; the caller
  * decides whether that shape deserves a warning.

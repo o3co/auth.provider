@@ -499,7 +499,10 @@ describe("origin lists from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIG
 
 	it("refuses a list entry that is not a string at its index, rather than dropping it", () => {
 		// Dropping it would shorten the list the operator wrote and accept the
-		// rest — or, for a list of nothing else, refuse it as empty.
+		// rest — or, for a list of nothing else, refuse it as empty. (Through
+		// core's AppConfigSchema first, as the README composes it, the entry is
+		// refused there already, as `invalid_union` at `webauthn.origin`; this
+		// is the refusal for a composition that parses this schema directly.)
 		for (const key of ["origin", "topOrigin"] as const) {
 			for (const [bad, index] of [
 				[[5], 0],
