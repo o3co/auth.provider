@@ -28,16 +28,16 @@ import type {
 	ValidatedToken,
 } from "@o3co/auth-provider-core";
 import {
+	auditErrorText,
 	formatObject,
 	generateToken,
 	generateTokenResponse,
-	isErrorCode,
 	isGrantTypeAllowed,
+	isWellFormedErrorCode,
 	matchConfirmation,
 	ownedConfirmation,
 	policyOutOfBounds,
 	resolveAccessTokenLifetime,
-	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
 import { buildActClaim, countActorChainDepth, matchesMayAct, matchesMayActClient } from "./act.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
@@ -650,18 +650,34 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// same reason the audience is: a policy that turned it into its
 			// granted audience would otherwise meet the policy ceiling first and
 			// convert the caller's 400 into a 500.
+			//
+			// The refusal names what the check after the policy names: every
+			// requested resource the issued audience would not equal. That
+			// audience is taken as the request's own, which is what the later
+			// check uses unless a policy replaces it — so without such a policy
+			// the two list the same resources.
 			if (requestedResource) {
-				const unrepresentable = requestedResource.filter(
+				const unrepresentable = requestedResource.some(
 					(resource) =>
 						resource !== client.clientId &&
 						!(clientAudienceSet.has(resource) && subjectAudienceSet.has(resource)),
 				);
-				if (unrepresentable.length > 0) {
+				if (unrepresentable) {
+					const requestAudience = issuedAudience(
+						requestedAudience ?? undefined,
+						subjectValidated.aud,
+						clientAudienceSet,
+						client.clientId,
+					);
+					const missingResources = requestedResource.filter(
+						(resource) => resource !== requestAudience,
+					);
 					deps.logger?.warn(
 						{
 							subject: subjectValidated.sub,
 							clientId: client.clientId,
-							missingResources: unrepresentable,
+							audienceForToken: requestAudience,
+							missingResources,
 						},
 						"token_exchange_resource_not_in_audience",
 					);
@@ -669,7 +685,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						result: {
 							status: 400,
 							error: "invalid_target",
-							errorDescription: `requested_resources_not_in_audience: ${unrepresentable.join(" ")}`,
+							errorDescription: `requested_resources_not_in_audience: ${missingResources.join(" ")}`,
 						},
 					};
 				}
@@ -748,18 +764,23 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					// too; this covers a composition that dispatches the handler
 					// from its own route.
 					let error = decision.error;
-					if (!isErrorCode(error)) {
+					if (!isWellFormedErrorCode(error)) {
 						deps.logger?.warn(
-							{ error: sanitizeErrorText(String(error)) },
+							{ error: auditErrorText(String(error)) },
 							"token_exchange_policy_deny_error_malformed",
 						);
 						error = "invalid_request";
 					}
+					// A JavaScript policy can return anything as its description; one
+					// that is empty or not a string is not sent — RFC 6749 A.8 makes
+					// the field 1*NQSCHAR — and the default is.
+					const description = decision.errorDescription;
 					return {
 						result: {
 							status: error === "access_denied" ? 403 : 400,
 							error,
-							errorDescription: decision.errorDescription ?? "denied by policy",
+							errorDescription:
+								(typeof description === "string" && description) || "denied by policy",
 						},
 					};
 				}
@@ -824,44 +845,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 			}
 
-			// Audience derivation (spec §8.1 rule 2):
-			//   explicit narrowed audience  → use grantedAudience (first element).
-			//     Note: grantedAudience reflects either the request parameter OR a
-			//     policy hook override; each has been held to the client's
-			//     registration and the subject token's audience above.
-			//   omitted + subject single    → inherit subject.aud IFF in allowlist;
-			//                                   else fall back to clientId (prevents
-			//                                   cross-client audience confusion when a
-			//                                   stolen subject token is exchanged by a
-			//                                   client outside its intended audience)
-			//   omitted + subject multi/none → fall back to clientId (safe default)
-			// Note: generateToken accepts a single-valued audience; when grantedAudience
-			// has multiple entries only the first is used. This is a known limitation
-			// (spec §8.1.1 multi-audience requires token introspection by all parties).
-			const subjectAud = subjectValidated.aud;
-			const audienceForToken: string = (() => {
-				if (grantedAudience && grantedAudience.length > 0)
-					return grantedAudience[0] ?? client.clientId; // `?? clientId` is forward-compat for noUncheckedIndexedAccess
-				// When audience is omitted, only inherit subject.aud if it's in the
-				// calling client's allowlist. Otherwise fall back to clientId. This
-				// prevents cross-client audience confusion: a malicious client cannot
-				// use a stolen subject_token to mint a token for an audience outside
-				// its own allowlist just by omitting the audience parameter.
-				//
-				// RFC 7519 §4.1.3 permits `aud` to be either a string or an array of
-				// strings. A single-element array is semantically equivalent to a
-				// bare string, so we accept both. Multi-element arrays cannot be
-				// represented as a single audience claim in the issued token (we
-				// emit a single-valued aud), so they fall back to clientId.
-				const single =
-					typeof subjectAud === "string"
-						? subjectAud
-						: Array.isArray(subjectAud) && subjectAud.length === 1
-							? subjectAud[0]
-							: undefined;
-				if (typeof single === "string" && clientAudienceSet.has(single)) return single;
-				return client.clientId;
-			})();
+			const audienceForToken = issuedAudience(
+				grantedAudience,
+				subjectValidated.aud,
+				clientAudienceSet,
+				client.clientId,
+			);
 
 			if (requestedResource && requestedResource.length > 0) {
 				const missingResources = requestedResource.filter(
@@ -1148,6 +1137,41 @@ async function familyRefusal(
 	}
 	if (!revoked) return null;
 	return invalidRequest(forRole("family_revoked"));
+}
+
+/**
+ * The single audience an exchanged token is minted for (spec §8.1 rule 2):
+ *
+ * - an explicit audience → its first element. It is either the request
+ *   parameter or a policy hook override, each already held to the client's
+ *   registration and the subject token's audience;
+ * - omitted, and the subject names one audience → that audience, if the
+ *   client is registered for it, else the client's own id. This prevents
+ *   cross-client audience confusion: a client cannot use a stolen
+ *   subject_token to mint a token for an audience outside its own allowlist
+ *   just by omitting the audience parameter;
+ * - omitted, and the subject names several or none → the client's own id.
+ *
+ * RFC 7519 §4.1.3 lets `aud` be a string or an array; a one-element array is
+ * the same as the bare string. `generateToken` carries one audience, so a
+ * multi-element `grantedAudience` contributes only its first entry — a known
+ * limitation (spec §8.1.1: multi-audience needs introspection by every party).
+ */
+function issuedAudience(
+	grantedAudience: readonly string[] | undefined,
+	subjectAud: ValidatedToken["aud"],
+	clientAudienceSet: ReadonlySet<string>,
+	clientId: string,
+): string {
+	if (grantedAudience && grantedAudience.length > 0) return grantedAudience[0] ?? clientId; // `?? clientId` is forward-compat for noUncheckedIndexedAccess
+	const single =
+		typeof subjectAud === "string"
+			? subjectAud
+			: Array.isArray(subjectAud) && subjectAud.length === 1
+				? subjectAud[0]
+				: undefined;
+	if (typeof single === "string" && clientAudienceSet.has(single)) return single;
+	return clientId;
 }
 
 function subjectAudienceBoundary(

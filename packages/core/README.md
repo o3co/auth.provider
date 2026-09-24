@@ -74,6 +74,10 @@ A `GrantHandler.cleanup?()` is never called. `AppHandle.dispose()` runs each pro
 
 A grant that honours `resource` reads it with `extractResourceParam`, derives the audience it names with `deriveAudienceFromResources`, and refuses an issued `aud` that does not represent it with `unrepresentedResources` — [`src/grants/resourceIndicator.mts`](src/grants/resourceIndicator.mts). Each value is kept whole (a URI may contain a comma), the empty entries of a repeated parameter are dropped, and an all-empty parameter means none was requested. The oauth grants, `/authorize` and the WebAuthn grant all read it there, so a custom grant that does the same gives the same answer.
 
+#### Error text (RFC 6749)
+
+`errorEnvelope(error, description?, uri?)` builds the RFC 6749 §5.2 error body and does not check its text. RFC 6749 Appendix A.7 and A.8 limit `error` and `error_description` to `1*NQSCHAR`: printable ASCII without `"` and `\`. `sanitizeErrorText` replaces every other character with `?`, and answers `undefined` for a value that is not a string, so the caller falls back to its own default. `auditErrorText` does the same and caps the text at 200 characters, for a log line or an audit event. `isWellFormedErrorCode` checks an `error` code, such as a grant policy's deny, before it goes out. All three are in [`src/errors/envelope.mts`](src/errors/envelope.mts).
+
 ### Token Utilities
 
 `generateToken(data, options)`, `generateTokenResponse(tokens, options?)` and `formatObject` are in [`src/grants/token.mts`](src/grants/token.mts), with `Token`, `TokenResponse` and `GenerateTokenOptions` beside them.
@@ -403,7 +407,7 @@ Five optional extension points: a slot or contribution kind a composition root f
 #### GrantPolicyHook (scope / audience / token exchange policy)
 
 - `GrantPolicyHook.evaluate(request, ctx)` returns allow (with optional narrowing) or deny
-- A deny's `error` must be an RFC 6749 error code, `1*NQSCHAR`: non-empty printable ASCII without `"` and `\` (`isErrorCode`, [`errors/envelope.mts`](src/errors/envelope.mts)). `/oauth/token` answers any other code `invalid_request`, and `/oauth/authorize` answers it `access_denied`, logging the policy's code sanitised
+- A deny's `error` must be an RFC 6749 error code, `1*NQSCHAR`: non-empty printable ASCII without `"` and `\` (`isWellFormedErrorCode`, [`errors/envelope.mts`](src/errors/envelope.mts)). `/oauth/token` answers any other code `invalid_request`, and `/oauth/authorize` answers it `access_denied`, logging the policy's code sanitised
 - `/oauth/authorize` evaluates once; `/oauth/token` re-uses `grantedScope` / `grantedAudience` persisted on the Code record (no re-evaluation for `authorization_code`)
 - Other grants (refresh / client_credentials / token-exchange) evaluate at the token endpoint
 

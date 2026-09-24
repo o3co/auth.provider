@@ -158,9 +158,10 @@ export type { OidcDiscoveryContribution } from "./discovery/types.mjs";
 // custom routes outside the bundled session/oauth surfaces benefits from
 // the same helper so the entire auth product surface emits a single shape.
 export {
+	auditErrorText,
 	type ErrorEnvelope,
 	errorEnvelope,
-	isErrorCode,
+	isWellFormedErrorCode,
 	sanitizeErrorText,
 } from "./errors/envelope.mjs";
 export {

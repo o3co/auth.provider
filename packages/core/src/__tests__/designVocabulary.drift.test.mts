@@ -194,6 +194,14 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+unrepresentedResources\b/,
 	},
 	{
+		// RFC 6749 NQSCHAR, the whole class: a partial one (`\x21\x23-…`, the
+		// scope-token class NQCHAR) is a different concept and must not trip it.
+		concept: "RFC 6749 error text — the NQSCHAR class",
+		home: "packages/core/src/errors/envelope.mts",
+		definition: /\\x20-\\x21\\x23-\\x5B\\x5D-\\x7E/i,
+		homeMatches: 1,
+	},
+	{
 		concept: "WebAuthn algorithm pin (#516)",
 		home: "packages/webauthn/src/internal/options.mts",
 		definition: /(?:function|const)\s+WEBAUTHN_ALGORITHM_IDS\b|supportedAlgorithmIDs\s*:\s*\[\s*-/,

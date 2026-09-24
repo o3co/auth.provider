@@ -16,6 +16,7 @@
 
 import {
 	type AuditSink,
+	auditErrorText,
 	boundPolicyAudience,
 	buildCanonicalRequestUrl,
 	type ClientRepository,
@@ -27,8 +28,8 @@ import {
 	extractResourceParam,
 	type GrantPolicyHook,
 	isEmailVerified,
-	isErrorCode,
 	isGrantTypeAllowed,
+	isWellFormedErrorCode,
 	type Logger,
 	matchesRegisteredRedirectUri,
 	type PendingConsentStore,
@@ -1134,14 +1135,16 @@ const applyGrantPolicy = async (
 			// `access_denied` — the authorization server refused — and the code
 			// is logged, sanitised, for the operator who wrote the policy.
 			let error = decision.error;
-			if (!isErrorCode(error)) {
+			if (!isWellFormedErrorCode(error)) {
 				ctx.opts.logger.warn(
-					{ error: sanitizeErrorText(String(error)) },
+					{ error: auditErrorText(String(error)) },
 					"authorize_policy_deny_error_malformed",
 				);
 				error = "access_denied";
 			}
-			redirectError(ctx, error, decision.errorDescription ?? "policy denied");
+			// A description that is empty or not a string is not sent (RFC 6749
+			// A.8 makes the field 1*NQSCHAR); the default is.
+			redirectError(ctx, error, sanitizeErrorText(decision.errorDescription) || "policy denied");
 			return null;
 		}
 		// Presence, not truthiness: `""` and `null` are a policy saying
