@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { webauthnConfigSchema } from "../config.mjs";
 
@@ -75,10 +77,16 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 			);
 		});
 
-		it("allowCredentialsForKnownUser must be a boolean", () => {
-			expect(
-				webauthnConfigSchema.safeParse({ ...VALID, allowCredentialsForKnownUser: "true" }).success,
-			).toBe(false);
+		it("allowCredentialsForKnownUser refuses what is not a boolean spelling", () => {
+			// Core's `coerceBooleanFromEnv` vocabulary: "true" / "false" / "1" / "0"
+			// (and "" as false). Anything else fails at boot rather than being
+			// read as whichever value `Boolean(value)` would guess.
+			for (const bad of ["yes", "on", "ture", 2]) {
+				expect(
+					webauthnConfigSchema.safeParse({ ...VALID, allowCredentialsForKnownUser: bad }).success,
+					String(bad),
+				).toBe(false);
+			}
 		});
 
 		it("carries the opt-in through to the parsed config", () => {
@@ -108,6 +116,52 @@ describe("webauthnConfigSchema (spec §2.4.1)", () => {
 				expect(
 					webauthnConfigSchema.safeParse({ ...VALID, rateLimit: { authenticationOptions: bad } })
 						.success,
+				).toBe(false);
+			}
+		});
+	});
+
+	// HOCON substitutes `${?VAR}` as a string, always, so an operator who sets
+	// one of these variables hands the schema a string. Core's schema coerces
+	// every leaf an env var can reach (#288); these two were bare `z.number()` /
+	// `z.boolean()` and refused the string their own reference.conf delivers.
+	describe("env-reachable leaves take the string an env substitution delivers", () => {
+		const referenceConf = readFileSync(
+			fileURLToPath(new URL("../../config/reference.conf", import.meta.url)),
+			"utf8",
+		);
+
+		it("reference.conf lets the environment reach both leaves", () => {
+			expect(referenceConf).toMatch(/^\s*challengeTtlMs = \$\{\?WEBAUTHN_CHALLENGE_TTL_MS\}$/m);
+			expect(referenceConf).toMatch(
+				/^\s*allowCredentialsForKnownUser = \$\{\?WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER\}$/m,
+			);
+		});
+
+		it("WEBAUTHN_CHALLENGE_TTL_MS=60000 parses to the number 60000", () => {
+			const parsed = webauthnConfigSchema.parse({ ...VALID, challengeTtlMs: "60000" });
+			expect(parsed.challengeTtlMs).toBe(60_000);
+		});
+
+		it("WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER parses to a boolean", () => {
+			for (const [raw, expected] of [
+				["true", true],
+				["false", false],
+				["1", true],
+				["0", false],
+				// An exported-but-empty variable: off, as everywhere in core.
+				["", false],
+			] as const) {
+				const parsed = webauthnConfigSchema.parse({ ...VALID, allowCredentialsForKnownUser: raw });
+				expect(parsed.allowCredentialsForKnownUser, JSON.stringify(raw)).toBe(expected);
+			}
+		});
+
+		it("still refuses a TTL that is not a positive integer, in the string form too", () => {
+			for (const bad of ["", "0", "-1", "1.5", "60s", "abc", 0, -1]) {
+				expect(
+					webauthnConfigSchema.safeParse({ ...VALID, challengeTtlMs: bad }).success,
+					JSON.stringify(bad),
 				).toBe(false);
 			}
 		});
