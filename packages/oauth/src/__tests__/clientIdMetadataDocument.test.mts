@@ -290,6 +290,32 @@ describe("createClientIdMetadataDocumentResolver — the fetch (#529)", () => {
 		expect(await resolve()).toBeNull();
 		expect(warn).toHaveBeenCalledWith(expect.anything(), "cimd_document_fetch_failed");
 	});
+
+	it("logs a fetch failure's cause code beside its reason, through the projection", async () => {
+		// undici's "fetch failed" says nothing on its own; the code on its
+		// cause (ECONNREFUSED, ENOTFOUND, a TLS failure) is what an operator
+		// acts on.
+		const { resolve, warn } = resolver({}, [
+			() => {
+				throw new TypeError("fetch failed", {
+					cause: Object.assign(new Error("connect ECONNREFUSED 93.184.216.34:443"), {
+						code: "ECONNREFUSED",
+					}),
+				});
+			},
+		]);
+		expect(await resolve()).toBeNull();
+		expect(warn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				reason: "fetch failed",
+				err: expect.objectContaining({
+					name: "TypeError",
+					cause: expect.objectContaining({ code: "ECONNREFUSED" }),
+				}),
+			}),
+			"cimd_document_fetch_failed",
+		);
+	});
 });
 
 describe("createClientIdMetadataDocumentResolver — the document (#529)", () => {
