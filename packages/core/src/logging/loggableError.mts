@@ -83,9 +83,9 @@
  * - A budget for the line: at most {@link LOGGED_MAX_PROJECTIONS}
  *   projections, the error and its causes and members together, taken
  *   nearest first (breadth first: the error's own cause and members before
- *   any of theirs). A member the budget leaves out counts in
- *   `aggregateErrorsOmitted`; a cause it leaves out leaves
- *   `causeOmitted: true`.
+ *   any of theirs). Every cut shows, whether the budget or the depth limit
+ *   made it: a member left out counts in `aggregateErrorsOmitted`, and a
+ *   cause left out leaves `causeOmitted: true`.
  * - Never kept: a cause or a member that is not an Error, any other field
  *   (a command's `args`, `body`, `buffer`), and anything of a thrown value that is
  *   not an Error but its `typeof`, as `thrown`.
@@ -138,7 +138,10 @@ export interface LoggableError {
 	 */
 	readonly stack?: string;
 	readonly cause?: LoggableError;
-	/** `true` when the error has an Error cause that {@link LOGGED_MAX_PROJECTIONS} left out. */
+	/**
+	 * `true` when the error has an Error cause the projection left out: past
+	 * the depth limit, or past {@link LOGGED_MAX_PROJECTIONS}.
+	 */
 	readonly causeOmitted?: true;
 	/**
 	 * An own `reason` that is a code — lowercase words joined by `_` or `-`,
@@ -158,7 +161,8 @@ export interface LoggableError {
 	readonly aggregateErrors?: readonly LoggableError[];
 	/**
 	 * How many of the members are not in `aggregateErrors`: past the first
-	 * five, not an Error, or left out by {@link LOGGED_MAX_PROJECTIONS}.
+	 * five, not an Error, past the depth limit, or left out by
+	 * {@link LOGGED_MAX_PROJECTIONS}.
 	 */
 	readonly aggregateErrorsOmitted?: number;
 	/** For a thrown value that is not an Error: its `typeof`, and nothing of its content. */
@@ -494,10 +498,13 @@ export function loggableError(err: unknown): LoggableError {
 	let left = LOGGED_MAX_PROJECTIONS - 1;
 	for (let next = 0; next < pending.length; next++) {
 		const { err: node, depth, into } = pending[next] as (typeof pending)[number];
-		if (!isError(node) || depth >= MAX_CAUSE_DEPTH) continue;
+		if (!isError(node)) continue;
+		// Past the depth limit a child is cut as one past the budget is — and
+		// marked the same way, so every cut shows.
+		const room = depth < MAX_CAUSE_DEPTH;
 		const cause = read(node, "cause");
 		if (isError(cause)) {
-			if (left > 0) {
+			if (room && left > 0) {
 				left--;
 				into.cause = fieldsOf(cause);
 				pending.push({ err: cause, depth: depth + 1, into: into.cause });
@@ -509,7 +516,7 @@ export function loggableError(err: unknown): LoggableError {
 		if (members !== null) {
 			const kept: Draft[] = [];
 			for (const member of members.errors) {
-				if (left === 0) break;
+				if (!room || left === 0) break;
 				left--;
 				const projected = fieldsOf(member);
 				kept.push(projected);
