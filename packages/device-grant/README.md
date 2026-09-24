@@ -4,18 +4,18 @@ Last updated: 2026-09-24
 
 OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) for [`auth.provider`](https://github.com/o3co/auth.provider) — the device-code flow for input-constrained clients: TV apps, CLIs, IoT.
 
-Optional, and off until `oauth.deviceAuthorization.enabled = true`: installed but disabled, its two routes answer `404 not_found` and `/oauth/token` answers `unsupported_grant_type` for the device-code grant.
+Optional, and off until `oauth.deviceAuthorization.enabled = true`: installed but disabled, it registers no grant — `/oauth/token` answers `unsupported_grant_type` for the device-code grant, and the discovery document names neither the grant nor the endpoint — and its two routes answer `404 not_found`.
 
 ## Responsibility
 
-**Role.** An optional grant on top of the authorization server. It adds the two endpoints of the RFC 8628 ceremony — where a device starts and where a person answers — and the `urn:ietf:params:oauth:grant-type:device_code` grant, which `deviceGrantModule` contributes to core's grant registry so that [`@o3co/auth-provider-oauth`](../oauth/README.md)'s `POST /oauth/token` dispatches it.
+**Role.** An optional grant on top of the authorization server. It adds the two endpoints of the RFC 8628 ceremony — where a device starts and where a person answers — and the `urn:ietf:params:oauth:grant-type:device_code` grant, which `deviceGrantModule({ config })` contributes to core's grant registry when the grant is enabled, so that [`@o3co/auth-provider-oauth`](../oauth/README.md)'s `POST /oauth/token` dispatches it.
 
 **Owns:**
 
 - `POST /oauth/device_authorization`: client authentication, the per-IP throttle, and issuing the device and user codes;
 - `POST /oauth/device/verification`: the JSON API a deployment's verification page calls, behind the session CSRF guard and the per-subject verification budget;
 - the device-code grant: polling semantics, single use, and the binding to the client the code was issued to;
-- `device_authorization_endpoint` in the discovery document (see the [known defect](#known-defect-an-enabled-grant-does-not-boot-beside-oauthmodule)), and the boot refusals for an enabled grant that is missing what it needs.
+- `device_authorization_endpoint` in the discovery document, and the boot refusals for an enabled grant that is missing what it needs.
 
 **Does not own:**
 
@@ -68,6 +68,7 @@ oauth.deviceAuthorization {
 ```ts
 import {
   createApp,
+  jwksModule,
   memoryDeviceCodeStoreModule,
   memoryRateLimiterModule,
 } from "@o3co/auth-provider-core";
@@ -82,9 +83,13 @@ const handle = await createApp({
     // that reads the session — without it the verification route answers every
     // request `401 login_required`.
     sessionStoreModuleFor(config),
-    // Before oauthModule: see "Install it before oauthModule" below.
-    deviceGrantModule,
+    // Built from the config createApp boots with. Ahead of oauthModule so that
+    // its own 16 KiB body limit applies: see "Listing it beside oauthModule".
+    deviceGrantModule({ config }),
     oauthModule({ config }), // POST /oauth/token, where the device polls
+    // oauthModule serves the discovery document that advertises
+    // `device_authorization_endpoint`, and that document requires `jwks_uri`.
+    jwksModule,
     // Signs the user in: `POST /session/login` (or the federation callback) puts
     // the authenticated user on the session the verification route reads. A
     // deployment with its own login writes `isAuthenticated` and `user.id` itself.
@@ -95,28 +100,31 @@ const handle = await createApp({
     // Required once the grant is enabled; seeded with the verification budget above.
     memoryRateLimiterModule,
     // …the modules that provide what these require: clientRepository,
-    // codeRepository, keyStore, the session stores, the user repository …
+    // codeRepository, keyStore, the user repository, the session and
+    // federation-token stores, and an access-token denylist (or its declared
+    // absence) …
   ],
   bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
 ```
 
-The verification route's CSRF guard is built from the `session.*` config slice — see [JSON only, behind the session CSRF guard](#post-oauthdeviceverification). The standalone template's [`buildModules.mts`](../../templates/standalone/src/buildModules.mts) shows the full order of a real composition root; it does not mount this grant.
+The verification route's CSRF guard is built from the `session.*` config slice — see [JSON only, behind the session CSRF guard](#post-oauthdeviceverification). [`composition.test.mts`](./src/__tests__/composition.test.mts) boots this composition through `createApp`, with the repositories stubbed and the rest real. The standalone template's [`buildModules.mts`](../../templates/standalone/src/buildModules.mts) shows the full order of a real composition root; it does not mount this grant.
 
-### Known defect: an enabled grant does not boot beside `oauthModule`
+### Listing it beside `oauthModule`
 
-With `oauth.deviceAuthorization.enabled = true`, the composition above fails at boot with `discovery-document-invalid`. The module contributes `device_authorization_endpoint` to discovery as a literal `metadata` field, and core's discovery builder refuses any `*_endpoint` field there — endpoints must be contributed through `endpoints` so they are issuer-prefixed and validated. `oauthModule` always activates discovery (it requires an issuer), so no composition with it and an enabled device grant boots until the module contributes the field as an endpoint. A disabled grant contributes no discovery field and boots.
+`oauthModule` mounts its router at `/oauth`, and that router parses JSON and form bodies — with Express's default 100 KiB limit — for every request under `/oauth`, whichever route it is for. Routes mount in the order their modules are listed (this module declares no ordering edge), so with `oauthModule` listed first the device routes receive bodies that router has already parsed, and a body is not parsed twice.
 
-### Install it before `oauthModule`
+- **It does not change what the verification route accepts.** The handler checks the media type itself and answers anything but `application/json` with `415 invalid_request`, whether or not the body was parsed before it ran ([below](#post-oauthdeviceverification)).
+- **It does change the body limit.** Both routes parse with a 16 KiB limit; listed after `oauthModule`, they accept what its 100 KiB parsers have already read.
 
-`oauthModule` mounts its router at `/oauth`, and that router parses JSON **and** form bodies for every request under `/oauth`, whichever route it is for. Routes mount in the order their modules are listed (this module declares no ordering edge), so with `oauthModule` listed first a form `POST` to `/oauth/device/verification` is parsed before this package's router sees it, and reaches the verification handler as fields: the JSON-only rule below no longer holds, and only the CSRF guard stands between a cross-site form and an approval. Listed first, this package's routes run their own parsers — JSON only on the verification route — and a form body reaches the handler with no `action`, which is `400 invalid_request`. Nothing in the device routes depends on `oauthModule` being mounted before them: `/oauth/device_authorization` carries its own body parsers and client authentication, and the grant reaches `/oauth/token` through the grant registry, not through mount order.
+So list `deviceGrantModule({ config })` ahead of `oauthModule({ config })`. Nothing in the device routes depends on `oauthModule` being mounted before them: `/oauth/device_authorization` carries its own body parsers and client authentication, and the grant reaches `/oauth/token` through the grant registry, not through mount order.
 
 ## Public API
 
 Exported from [`src/index.mts`](./src/index.mts); the linked file holds each definition:
 
-- `deviceGrantModule`, `deviceGrantConfigSchema` — [`module.mts`](./src/module.mts). The module to install, and the `oauth.deviceAuthorization` schema it composes.
-- `createDeviceAuthorizationHandler`, `DeviceAuthorizationEndpointOptions` — [`deviceAuthorizationEndpoint.mts`](./src/deviceAuthorizationEndpoint.mts); `createDeviceVerificationHandler`, `DeviceVerificationHandlerOptions` — [`verificationEndpoint.mts`](./src/verificationEndpoint.mts); `createDeviceCodeGrant`, `DeviceCodeGrantOptions` — [`grant.mts`](./src/grant.mts). The two handlers and the grant, for a composition root that mounts them itself; it then owns what the module otherwise applies around them — client authentication, the throttle, the CSRF guard and the body parsers.
+- `deviceGrantModule`, `deviceGrantConfigSchema` — [`module.mts`](./src/module.mts). The module factory to install — `deviceGrantModule({ config })`, given the config the composition root boots with; a boot whose config disagrees with it about `oauth.deviceAuthorization.enabled` is refused — and the `oauth.deviceAuthorization` schema it composes.
+- `createDeviceAuthorizationHandler`, `DeviceAuthorizationEndpointOptions` — [`deviceAuthorizationEndpoint.mts`](./src/deviceAuthorizationEndpoint.mts); `createDeviceVerificationHandler`, `DeviceVerificationHandlerOptions` — [`verificationEndpoint.mts`](./src/verificationEndpoint.mts); `createDeviceCodeGrant`, `DeviceCodeGrantOptions` — [`grant.mts`](./src/grant.mts). The two handlers and the grant, for a composition root that mounts them itself; it then owns what the module otherwise applies around them — client authentication, the throttle, the CSRF guard and the body parsers. The verification handler's `415` for a body that is not `application/json` is the handler's own and comes with it.
 - `DEVICE_CODE_GRANT_TYPE`, `DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX`, `DEVICE_VERIFICATION_RATE_LIMIT_PREFIX`, `DeviceAuthorizationSettings`, `DeviceGrantDependencies` — [`types.mts`](./src/types.mts) (`DEVICE_VERIFICATION_RATE_LIMIT_PREFIX` is defined in core and re-exported there).
 
 The `DeviceCodeStore` port and the code generators are not exported here; they are core's ([Storage](#storage)).
@@ -137,9 +145,9 @@ Requires an authenticated end-user session. Body: `{ action, user_code }`.
 | `approve` | `{ status: "approved", client_id }` | |
 | `deny` | `{ status: "denied", client_id }` | |
 
-Errors: `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `429 slow_down`, `503 service_unavailable` (the limiter backend is down and `rateLimit.failMode = "closed"`).
+Errors: `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `415 invalid_request` (a body that is not `application/json`), `429 slow_down`, `503 service_unavailable` (the limiter backend is down and `rateLimit.failMode = "closed"`).
 
-**JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the route parses `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not) — it mounts no form parser, so a form body arrives without an `action` and is `400 invalid_request`, provided nothing mounted ahead of it has parsed the body already ([Install it before `oauthModule`](#install-it-before-oauthmodule)) — and runs the same `createCsrfGuard` as `POST /session/login`:
+**JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the endpoint accepts `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not): any other media type is `415 invalid_request`. The handler checks the media type itself rather than relying on no form parser having run, so the rule holds whichever module is listed first — `oauthModule`'s router parses form bodies for everything under `/oauth` ([Listing it beside `oauthModule`](#listing-it-beside-oauthmodule)). And the route runs the same `createCsrfGuard` as `POST /session/login`:
 
 - a foreign `Origin` / `Referer` is refused with `403 access_denied` and logged as `csrf_origin_rejected`;
 - the provider's own origin, or one listed in `session.csrf.trustedOrigins`, is accepted — a verification page served from another origin is declared there, on the same list the login form uses;
@@ -235,7 +243,7 @@ Two things about the Redis adapter are worth knowing before choosing it:
 - **Every device authorization shares one Redis Cluster slot.** The record is keyed by `device_code` and the `user_code → device_code` index by `user_code`; both are independent random values, and a script that follows the index to the record has to find both keys in the slot it was routed to. So both live under one constant hash tag — `devauth:{devauth}:code:<device_code>` and `devauth:{devauth}:user:<user_code>` — which concentrates the flow on a single slot. For a human-initiated ceremony that is an acceptable trade; this is not per-request traffic. The alternative, storing the record twice under each key, would make `approve`/`poll` non-atomic across the pair, which is what the port forbids.
 - **The TTL is not the expiry.** Both keys carry the authorization's `expiresAtMs` as their TTL so Redis reclaims them without a sweep, but `poll` answers `expired` from the timestamp: a record still inside its TTL whose deadline has passed on the caller's clock expires, and is dropped.
 
-The standalone template provides `deviceCodeStoreClient` from its shared ioredis connection but does not mount this grant; a deployment that adds `deviceGrantModule` to that manifest selects `redisDeviceCodeStoreModule` alongside it.
+The standalone template provides `deviceCodeStoreClient` from its shared ioredis connection but does not mount this grant; a deployment that adds `deviceGrantModule({ config })` to that manifest selects `redisDeviceCodeStoreModule` alongside it.
 
 Mounting the module without any store fails boot naming `oauth.deviceAuthorization.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363) — for a deployment that leaves the grant off; with `enabled = true` the module refuses to boot without a store whatever the declaration says.
 
@@ -243,7 +251,7 @@ Every field of the `DeviceAuthorization` an adapter hands back is a required key
 
 ## Tests
 
-[`flow.test.mts`](./src/__tests__/flow.test.mts) runs the ceremony end to end, [`verificationCsrf.test.mts`](./src/__tests__/verificationCsrf.test.mts) pins the CSRF guard, [`configRateLimit.test.mts`](./src/__tests__/configRateLimit.test.mts) the verification budget, and [`module.test.mts`](./src/__tests__/module.test.mts) the boot refusals and the disabled routes. The store's atomicity is core's conformance suite, run against both adapters.
+[`flow.test.mts`](./src/__tests__/flow.test.mts) runs the ceremony end to end, [`composition.test.mts`](./src/__tests__/composition.test.mts) boots the module beside `oauthModule` as the Quick start does — the discovery document, the disabled grant, and the JSON-only rule in both mount orders — [`verificationCsrf.test.mts`](./src/__tests__/verificationCsrf.test.mts) pins the CSRF guard, [`configRateLimit.test.mts`](./src/__tests__/configRateLimit.test.mts) the verification budget, and [`module.test.mts`](./src/__tests__/module.test.mts) the boot refusals and the disabled routes. The store's atomicity is core's conformance suite, run against both adapters.
 
 ## License
 

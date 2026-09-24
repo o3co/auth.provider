@@ -89,7 +89,7 @@ What each module requires and reads is declared in its manifest (linked in the t
 - `oauthModule` requires `config`, `clientRepository`, `codeRepository` and `keyStore`, and a non-empty `endpoints.login.url` — `/authorize` sends an unauthenticated browser there, so boot refuses without it.
 - `subjectRevocation`, `auditSink` and `accessTokenDenylist` are optional to wire and not optional to decide: an unfilled slot must be declared absent — `oauth.revocation.subject = "unsupported"`, `audit.sink.type = "none"`, `oauth.revocation.accessToken = "unsupported"` — or boot refuses.
 - An `oauth.jwt.issuer` that is not a canonical issuer URL fails router construction: `iss` is a property of the deployment, never read from a request.
-- `oauthModule`'s router parses JSON and form bodies for every request under `/oauth`, whichever route it is for, and routes mount in the order their modules are listed. Modules whose body handling is part of their security and that mount under `/oauth` — federation grants and the device grant — are therefore listed ahead of it; each package's README says why.
+- `oauthModule`'s router parses JSON and form bodies for every request under `/oauth`, whichever route it is for, and routes mount in the order their modules are listed, so a module mounted under `/oauth` after it receives bodies this router has already parsed, with its default limits. Modules that mount there with body handling of their own — federation grants and the device grant — are therefore listed ahead of it; each package's README says what listing it second would cost.
 
 ## Endpoints
 

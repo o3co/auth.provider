@@ -89,7 +89,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 - `oauthModule` は `config`、`clientRepository`、`codeRepository`、`keyStore` と、空でない `endpoints.login.url` を要求する — `/authorize` は未認証のブラウザーをそこへ送るので、無ければ boot が拒否する。
 - `subjectRevocation`、`auditSink`、`accessTokenDenylist` は配線は任意だが決定は任意ではない: 埋めないスロットは不在を宣言すること — `oauth.revocation.subject = "unsupported"`、`audit.sink.type = "none"`、`oauth.revocation.accessToken = "unsupported"` — さもなければ boot が拒否する。
 - `oauth.jwt.issuer` が正規の issuer URL でなければルーターの構築が失敗する: `iss` はデプロイの属性であり、リクエストから読むものではない。
-- `oauthModule` のルーターは、どのルート宛てかに関係なく `/oauth` 配下のすべてのリクエストで JSON とフォームのボディをパースし、ルートはモジュールを並べた順にマウントされる。したがって、ボディ処理がセキュリティの一部であり `/oauth` 配下にマウントするモジュール — federation grants と device グラント — はそれより前に並べる。理由はそれぞれのパッケージの README にある。
+- `oauthModule` のルーターは、どのルート宛てかに関係なく `/oauth` 配下のすべてのリクエストで JSON とフォームのボディをパースし、ルートはモジュールを並べた順にマウントされる。そのため、それより後に `/oauth` 配下へマウントされるモジュールには、このルーターが既定の上限でパースし終えたボディが届く。独自のボディ処理を持って `/oauth` 配下にマウントするモジュール — federation grants と device グラント — はそれより前に並べる。後に並べると何を失うかは、それぞれのパッケージの README にある。
 
 ## エンドポイント
 

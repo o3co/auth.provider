@@ -117,23 +117,23 @@ const ENABLED = {
 };
 
 /**
- * The Quick start's modules, in the order given, plus what supplies their
- * slots. `jwksModule` is there because `oauthModule` activates discovery and
- * a discovery document without `jwks_uri` refuses to boot;
- * `memoryAccessTokenDenylistModule` because `oauthModule` mounts
- * `/oauth/revoke` and the fixture declares the denylist capability.
+ * The Quick start's module list: `ordered` is its first three, whose order a
+ * case chooses; then the rest as written; then its "…the modules that
+ * provide what these require" — the session and federation-token stores,
+ * the access-token denylist the fixture's `oauth.revocation.accessToken`
+ * declares, and the repositories and key store.
  */
 const bootWith = async (config: AppConfig, ordered: readonly Module[]) => {
 	const handle = await createApp({
 		modules: [
 			...ordered,
+			jwksModule,
 			sessionModule,
 			memoryDeviceCodeStoreModule,
 			memoryRateLimiterModule,
-			jwksModule,
-			memoryAccessTokenDenylistModule,
 			memorySessionStoresModule,
 			memoryFederationTokenStoreModule,
+			memoryAccessTokenDenylistModule,
 			deploymentProviders,
 		],
 		bootstrapComponents: { config, pathResolver: (s: string) => s },
