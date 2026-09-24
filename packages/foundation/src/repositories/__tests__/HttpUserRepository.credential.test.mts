@@ -24,16 +24,19 @@
  * hand; and the token appears in nothing the repository throws and in no
  * inspection of the repository itself.
  *
- * And the other direction: with a token configured, a `401` carrying a
- * `Bearer` challenge (RFC 6750 §3) is the Store refusing this deployment, so
- * every one of the four requests throws it as an outage naming that cause; a
- * `401` without one — or any `401` when no token is configured — keeps the
+ * And the other direction: with a token configured, a `401` or `403`
+ * carrying a `Bearer` challenge (RFC 6750 §3) is the Store refusing this
+ * deployment, so every one of the four requests throws a
+ * StoreCredentialRefusedError — its status as `storeStatus`, never `status`;
+ * one without the challenge — or any when no token is configured — keeps the
  * meaning the wire contract gives it.
  *
- * A transport failure — a peer that reflects the request into a response the
- * parser rejects, a refused connection — is thrown with a fixed message
- * naming the endpoint and at most a transport code: never the transport's own
- * error, which quotes the bytes it choked on.
+ * A transport failure — a refused connection, an https URL on a plain-HTTP
+ * port, a peer that reflects the request into a status line, header or body
+ * the parser rejects — is a StoreTransportError: a fixed message naming the
+ * endpoint and what failed (not reached, not HTTP, not readable) and at most
+ * a transport code, never the transport's own error, which quotes the bytes
+ * it choked on. A timeout, whichever half stalls, is a TimeoutError.
  *
  * Without msw: what is asserted is the header that reaches the socket, and an
  * interceptor is one more thing between the two.
@@ -48,7 +51,11 @@ import {
 	type UserRepository,
 } from "@o3co/auth-provider-core";
 import { afterEach, describe, expect, it } from "vitest";
-import { registerBuiltinAdapters, StoreCredentialRefusedError } from "#/index.mjs";
+import {
+	registerBuiltinAdapters,
+	StoreCredentialRefusedError,
+	StoreTransportError,
+} from "#/index.mjs";
 import { HttpUserRepository } from "#/repositories/HttpUserRepository.mjs";
 
 /** 32 bytes of key material, hex — what `openssl rand -hex 32` prints. */
@@ -320,9 +327,9 @@ describe("the token is in nothing the repository throws, and in no inspection of
 
 describe("a Store that refuses this deployment's credential", () => {
 	/**
-	 * A Store that answers every request `401`, with these `WWW-Authenticate`
-	 * header lines (none when empty) and a body that says why — which nothing
-	 * thrown may repeat.
+	 * A Store that answers every request `status` (`401` unless given), with
+	 * these `WWW-Authenticate` header lines (none when empty) and a body that
+	 * says why — which nothing thrown may repeat.
 	 */
 	const refusingStore = (challenges: readonly string[], status: 401 | 403 = 401) =>
 		serve((req, res) => {
@@ -389,6 +396,10 @@ describe("a Store that refuses this deployment's credential", () => {
 				// callback's sanitized reporter — can say what happened.
 				expect(error).toBeInstanceOf(StoreCredentialRefusedError);
 				expect((error as Error).name).toBe("StoreCredentialRefusedError");
+				// Not `status`: Express and http-errors read that as the status to
+				// answer with, and a 401 here would reach a browser as its own.
+				expect((error as StoreCredentialRefusedError).storeStatus).toBe(status);
+				expect("status" in (error as object)).toBe(false);
 				expect((error as Error).message).toContain(`${origin}${path}`);
 				expect((error as Error).message).toContain(`HTTP ${status} with a Bearer challenge`);
 				expect((error as Error).message).toMatch(/refused this deployment's credential/);
@@ -501,13 +512,19 @@ describe("a transport failure carries nothing the request carried", () => {
 	} as const;
 
 	it.each(calls)(
-		"%s: a peer that reflects the token into a malformed response surfaces none of it — not in the message, not in a cause",
-		async (_name, path, call) => {
+		"%s: a peer that reflects the token into a malformed response surfaces none of it — a StoreTransportError that says what failed, with no cause",
+		async (name, path, call) => {
 			// fetch rejects with `TypeError: fetch failed` whose cause, an
 			// HTTPParserError, carries the offending bytes as `data`; a body that
 			// breaks mid-read does the same through the stream. A logger that
 			// inspects the error — core's console logger does — prints it.
+			// What is thrown instead says which of the three it was: a status
+			// line or header the parser rejects is a Store that was reached and
+			// did not answer HTTP; a body that breaks is an answer that could
+			// not be read.
+			const lookup = name === "findSubjectByFederatedIdentity";
 			const seen: Record<string, unknown> = {};
+			const expected: Record<string, unknown> = {};
 			for (const [where, answer] of Object.entries(REFLECTIONS)) {
 				const origin = await reflecting(answer);
 				const repo = new HttpUserRepository({
@@ -519,21 +536,32 @@ describe("a transport failure carries nothing the request carried", () => {
 					() => undefined,
 					(thrown: unknown) => thrown,
 				);
+				const url = `${origin}${path}`;
 				seen[where] = {
-					thrown: error instanceof Error,
-					namesTheEndpoint: error instanceof Error && error.message.includes(`${origin}${path}`),
+					class: error instanceof StoreTransportError,
+					name: (error as Error | undefined)?.name,
+					reason: (error as { reason?: unknown } | undefined)?.reason,
+					message: (error as Error | undefined)?.message,
 					cause: (error as { cause?: unknown } | undefined)?.cause,
 					carriesTheToken: surfaced(error).includes(TOKEN),
 				};
+				const unreadable = where === "a chunked body";
+				expected[where] = {
+					class: true,
+					name: "StoreTransportError",
+					reason: unreadable ? "unreadable" : "not_http",
+					message: unreadable
+						? lookup
+							? `HttpUserRepository: identity lookup at ${url} could not be read`
+							: `HttpUserRepository: response from ${url} could not be read`
+						: lookup
+							? `HttpUserRepository: identity lookup at ${url} answered something that is not HTTP`
+							: `HttpUserRepository: the Store at ${url} answered something that is not HTTP`,
+					cause: undefined,
+					carriesTheToken: false,
+				};
 			}
-			expect(seen).toEqual(
-				Object.fromEntries(
-					Object.keys(REFLECTIONS).map((where) => [
-						where,
-						{ thrown: true, namesTheEndpoint: true, cause: undefined, carriesTheToken: false },
-					]),
-				),
-			);
+			expect(seen).toEqual(expected);
 		},
 	);
 
@@ -603,12 +631,37 @@ describe("a transport failure carries nothing the request carried", () => {
 		]) {
 			const error = await Promise.resolve(call()).then(
 				() => undefined,
-				(thrown: unknown) => thrown as Error & { code?: unknown },
+				(thrown: unknown) => thrown as Error & { code?: unknown; reason?: unknown },
 			);
+			expect(error).toBeInstanceOf(StoreTransportError);
+			expect(error?.reason).toBe("unreachable");
 			expect(error?.message).toMatch(/could not be reached \(ECONNREFUSED\)$/);
 			expect(error?.code).toBe("ECONNREFUSED");
 			expect(error?.cause).toBeUndefined();
+			expect(error !== undefined && "status" in error).toBe(false);
 		}
+	});
+
+	it("names the TLS failure of an https URL that points at a port speaking plain HTTP", async () => {
+		// The shape of a Store URL written https:// for a service that serves
+		// http — the transport says ERR_SSL_WRONG_VERSION_NUMBER, and that is
+		// the one word an operator needs.
+		const plain = await serve((req, res) => {
+			req.resume();
+			res.end("{}");
+		});
+		const origin = plain.replace("http://", "https://");
+		const repo = new HttpUserRepository({ ...urls(origin), bearerToken: TOKEN, timeout: 5000 });
+		const error = await repo.authenticate("alice", "pass").then(
+			() => undefined,
+			(thrown: unknown) => thrown as Error & { code?: unknown; reason?: unknown },
+		);
+		expect(error).toBeInstanceOf(StoreTransportError);
+		expect(error?.reason).toBe("unreachable");
+		expect(error?.message).toBe(
+			`HttpUserRepository: request to ${origin}/authenticate could not be reached (ERR_SSL_WRONG_VERSION_NUMBER)`,
+		);
+		expect(error?.code).toBe("ERR_SSL_WRONG_VERSION_NUMBER");
 	});
 });
 

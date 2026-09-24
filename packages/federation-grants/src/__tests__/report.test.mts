@@ -123,6 +123,22 @@ describe("createSanitizedReporter", () => {
 		expect(JSON.stringify(warn.mock.calls[0])).not.toContain(SENTINEL);
 	});
 
+	it("names a Store that could not be reached, or answered unreadably, and nothing of its message", () => {
+		// The foundation adapter's StoreTransportError: a refused connection, a
+		// TLS failure, an answer that is not HTTP, a body that broke mid-read.
+		const { logger, warn } = spyLogger();
+		const failed = new Error(`request to https://store.test could not be reached ${SENTINEL}`);
+		failed.name = "StoreTransportError";
+		createSanitizedReporter(logger)({
+			during: "callback_identity_lookup",
+			error: failed,
+			grantId: "g",
+			correlationId: "c",
+		});
+		expect(warn.mock.calls[0]?.[0]).toMatchObject({ classification: "store_transport_failed" });
+		expect(JSON.stringify(warn.mock.calls[0])).not.toContain(SENTINEL);
+	});
+
 	it("survives a failure that is not an error at all", () => {
 		const { logger, warn } = spyLogger();
 		createSanitizedReporter(logger)({

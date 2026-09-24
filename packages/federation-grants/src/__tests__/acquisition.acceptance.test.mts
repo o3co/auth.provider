@@ -28,6 +28,7 @@
  * each rule; this tests that they are the same deployment.
  */
 
+import { createServer as createNetServer } from "node:net";
 import { inspect } from "node:util";
 import type {
 	BootstrapMap,
@@ -713,6 +714,68 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 					inspect(line, { depth: Number.POSITIVE_INFINITY, showHidden: true }).includes(TOKEN),
 				),
 			).toEqual([]);
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("reports a Store it cannot reach as store_transport_failed, and answers temporarily_unavailable", async () => {
+		const lines: unknown[][] = [];
+		const record =
+			(level: string) =>
+			(...args: unknown[]): void => {
+				lines.push([level, ...args]);
+			};
+		const logger = {
+			trace: record("trace"),
+			debug: record("debug"),
+			info: record("info"),
+			warn: record("warn"),
+			error: record("error"),
+			fatal: record("fatal"),
+			child: () => logger,
+		} as Logger;
+		// A loopback port nothing listens on — outside the mocked Store origin,
+		// so the connection is really refused.
+		const closed = await new Promise<number>((resolve) => {
+			const probe = createNetServer();
+			probe.listen(0, "127.0.0.1", () => {
+				const { port } = probe.address() as { port: number };
+				probe.close(() => resolve(port));
+			});
+		});
+		const unreachable = new HttpUserRepository({
+			authenticateUrl: `${STORE}/authenticate`,
+			authenticateByTokenUrl: `${STORE}/authenticate/token`,
+			findSubjectByFederatedIdentityUrl: `http://127.0.0.1:${closed}/identity/lookup`,
+			federatedIdentityLookupCoverage: [
+				{
+					provider: "upstream",
+					issuer: "https://issuer.example",
+					clientId: "provider-client",
+					requiredClaims: ["tid", "oid"],
+				},
+			],
+			timeout: 5000,
+		});
+		exchangeUpstream = { ...exchangeUpstream, claims: { oid: "O-ALICE", tid: "T-1" } };
+		const { handle, app } = await boot(undefined, unreachable, connections(), undefined, logger);
+		try {
+			expect((await connectAs(app, "b-http-7")).get("error")).toBe("temporarily_unavailable");
+			const reports = lines.filter(
+				([, first]) =>
+					(first as { event?: unknown } | undefined)?.event === "federation_grant.failure",
+			);
+			expect(reports).toEqual([
+				[
+					"warn",
+					expect.objectContaining({
+						during: "callback_identity_lookup",
+						classification: "store_transport_failed",
+					}),
+					"federation grant operation failed",
+				],
+			]);
 		} finally {
 			await handle.dispose();
 		}
