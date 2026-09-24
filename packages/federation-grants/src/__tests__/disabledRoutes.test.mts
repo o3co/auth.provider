@@ -18,8 +18,8 @@
  * What a deployment that has not enabled offline delegation answers (#593).
  *
  * `enabled = false` is the default, and the promise it makes is that the
- * package is indistinguishable from not being installed: the same 404, the
- * same body, and no dependency on anything the feature would need. A 404 that
+ * answer names no feature and reads nothing: a 404 with no description, and no
+ * dependency on anything the feature would need. A 404 that
  * carried a description naming the feature would tell an unauthenticated
  * caller that this deployment could do offline delegation if someone flipped a
  * key; a 404 that first parsed a body, authenticated a client or read a store
@@ -85,7 +85,7 @@ describe("the routes a disabled deployment mounts", () => {
 			.send({ sub: "local-subject" });
 
 		expect(response.status).toBe(404);
-		// Byte-identical to what a deployment without the package answers.
+		// Names no feature: nothing in it says what is missing.
 		expect(response.body).toEqual({ error: "not_found" });
 		await handle.dispose();
 	});

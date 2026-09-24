@@ -112,9 +112,11 @@ export const noStore: RequestHandler = (_req, res, next) => {
  *
  * The body carries no description, unlike the neighbouring packages'
  * refusals. That is what a disabled deployment needs:
- * `{"error":"not_found"}` is byte-identical to what a deployment without the
- * package installed answers, so an unauthenticated caller cannot learn that
- * offline delegation is one configuration key away. On an enabled deployment
+ * `{"error":"not_found"}` names no feature, so an unauthenticated caller
+ * cannot learn that offline delegation is one configuration key away. It is
+ * not byte-identical to a deployment without the package installed — there
+ * the host's own fallback answers, with its own headers and content type —
+ * but nothing in it says what is missing. On an enabled deployment
  * it is the answer for a method that does not exist — and there is no `GET`
  * status alias to point anyone at.
  */

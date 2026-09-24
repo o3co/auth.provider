@@ -1431,7 +1431,7 @@ function messageFor(reason: Exclude<Judgement, { ok: true }>["reason"]): string 
 	}
 }
 
-/** What a disabled deployment mounts here: a plain 404, indistinguishable from nothing. */
+/** What a disabled deployment mounts here: a plain 404 that names no feature. */
 export function createDisabledFederationGrantBrowserRouter(): Router {
 	const router = express.Router();
 	router.use(noStoreNoReferrer);

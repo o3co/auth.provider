@@ -234,10 +234,12 @@ const requireVerificationUri = (slice: DeviceAuthorizationConfigSlice): string =
  *
  * The `routes` contribution kind has no "skip me" return — a factory produces
  * a route or throws — so a config-disabled module cannot simply omit one. A
- * router that answers 404 is the honest equivalent: from a client's side it
- * is indistinguishable from the package not being installed, which is exactly
- * what `enabled = false` means. Nothing here reads the rest of the config, so
- * a deployment that leaves the grant off never trips its required settings.
+ * router that answers 404 is the honest equivalent: to a client the endpoint
+ * does not exist, which is exactly what `enabled = false` means. Unlike a
+ * missing package, the description names the config key, so an operator can
+ * tell a disabled grant from an uninstalled one. Nothing here reads the rest
+ * of the config, so a deployment that leaves the grant off never trips its
+ * required settings.
  */
 const disabledRoute = (id: string, mountPath: string) => {
 	const router = express.Router();

@@ -32,8 +32,9 @@ import { resolveOAuthOptions } from "../resolveOAuthOptions.mjs";
  *
  * Authorization binds to `ctx.authenticatedClient`, which `clientAuthMw`
  * populates from RFC 6749 §2.3 token-endpoint authentication. The client's
- * `allowedScopes` are the ceiling for the request, and `aud` / `azp` name that
- * same client.
+ * `allowedScopes` are the ceiling for the request; `aud` is the client's first
+ * `allowedAudiences` entry, falling back to its client id, and `azp` is the
+ * client id.
  *
  * The grant deliberately takes no `clientRepository`: `clientAuthMw` already
  * resolved the client record, so re-reading it would be a second lookup of the

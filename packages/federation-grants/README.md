@@ -1,10 +1,36 @@
 # @o3co/auth-provider-federation-grants
 
+Last updated: 2026-09-24
+
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
 Optional. Nothing here is active until `federationGrants.enabled = true`.
 
 The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — see its README's "Federation Grants" — and [`docs/offline-access.md`](docs/offline-access.md) says what each IdP needs before it will issue a refresh token.
+
+## Responsibility
+
+**Role.** The HTTP half of federation grants: the five routes a client calls under `/oauth/federation-grants`, and the browser half — connect, consent, the upstream callback — under `/session/federation-grants`. It turns core's federation-grant domain into wire answers and runs the acquisition flow in the browser.
+
+**Owns:**
+
+- the client routes: the order of their guards (correlation id, throttle, body bound and parsing, client authentication), their answers and their error identifiers;
+- the browser half: the connect handle, the consent page's contract, and the checks the callback runs before a grant is activated;
+- the boot refusals of an enabled feature that is missing what it needs, and what a disabled deployment answers;
+- the shutdown drain of work still in flight after a response (`federationGrantBackgroundModule`).
+
+**Does not own:**
+
+- the grant and intent records, the `FederationGrantStore` and `FederationGrantIntentStore` ports, and the rules for lodging, retrieval with a coordinated refresh, revocation and effective status — core, [`packages/core/src/federation-grants`](../core/src/federation-grants/README.md). A subject-wide revocation reaches grants through that port whether or not these routes are installed;
+- the stores themselves — core's memory modules and `@o3co/auth-provider-redis`;
+- the upstream authorization and refresh calls — the federation adapter's delegated-authorization capability, which only `@o3co/auth-provider-federation-oidc` implements ([`docs/offline-access.md`](docs/offline-access.md));
+- the consent page — the deployment's;
+- client authentication — `@o3co/auth-provider-oauth`'s `createClientAuthMiddleware`;
+- the browser session and login — `@o3co/auth-provider-session` (the `session-middleware` route, `endpoints.login.url`).
+
+**Why a separate package.** What these routes disclose is an *upstream* access token, held on a user's standing consent, for a backend the user is not present at. Behind `/oauth/token` it would inherit grant dispatch, `token.issued`, this provider's token minting and a sender-constraint policy that cannot bind a credential another issuer minted; inside the oauth package it would make an optional feature part of every deployment's routing surface, so enabling ordinary OAuth would acquire this lifecycle by accident. The domain and the store ports are core's so that a store adapter depends on core and never on these routes.
+
+**Why it depends on `@o3co/auth-provider-oauth`.** For one thing, `createClientAuthMiddleware`: the five client routes authenticate a confidential client exactly as `/oauth/token` does, `private_key_jwt` included, and their client-authentication `401`s carry that middleware's wording ([below](#post-oauthfederation-grantsgrantidtoken)). It is a required peer, so the package is installed even by a deployment that mounts no `oauthModule` — which is an ordinary thing to do ([below](#install-these-modules-before-oauthmodule)). Nothing in oauth imports this package.
 
 ## Install both modules
 
@@ -24,13 +50,13 @@ const app = await createApp({
     // …and the session modules you already run: the browser half mounts after
     // `session-middleware` and re-reads the durable session behind the cookie.
   ],
-  bootstrapComponents: { config, clientRepository, keyStore },
+  bootstrapComponents: { config, pathResolver: import.meta.resolve, clientRepository, keyStore },
 });
 ```
 
 `federationGrantsModules` is a pair: the routes, and the background registry a shutdown drains. They are separate manifests because their dependency edges point in different directions — see below — and mounting the routes without the registry is a boot refusal rather than a shutdown that quietly drops rotated credentials.
 
-The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a subject-wide revocation reaches grants through the same port (an ordinary logout leaves them standing, D14 — a grant is consent to act while the user is away). `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`. The same holds for the intent store (slice 6): `memoryFederationGrantIntentStoreModule` on one replica, `redisFederationGrantIntentStoreModule` on several — an intent lodged on one replica is otherwise unknown to the one the browser lands on.
+The grant store is a separate module again, because a store is what a deployment installs whether or not it mounts these routes: a subject-wide revocation reaches grants through the same port (an ordinary logout leaves them standing, D14 — a grant is consent to act while the user is away). `memoryFederationGrantStoreModule` is single-replica only; a scaled deployment wires `redisFederationGrantStoreModule` from `@o3co/auth-provider-redis`. The same holds for the intent store: `memoryFederationGrantIntentStoreModule` on one replica, `redisFederationGrantIntentStoreModule` on several — an intent lodged on one replica is otherwise unknown to the one the browser lands on.
 
 Creating grants also needs, each refused at boot when missing rather than met by a user mid-flow: `federationGrants.consent.url` (the deployment's consent page — there is no default), a `callbackURL` on every connection, `endpoints.login.url`, a `userSessionStore`, and, once a connection is configured, either a `userRepository` whose `supportsFederatedIdentityLookup` answers `true` for every connection's registration (with `findSubjectByFederatedIdentity` beside it) or `federationGrants.identityLookup = "unsupported"`. The bundled `InMemoryUserRepository` covers no registration, so a deployment on it with a connection configured must choose the second. Each is described where the flow uses it, below.
 
@@ -62,9 +88,23 @@ whole provider out of audit and which the standalone does not offer. A Store
 that drives a revocation through the library without passing `audit` records
 nothing of it, by the same choice.
 
-## A disabled deployment is indistinguishable from an uninstalled one
+## Public API
 
-`federationGrants.enabled` defaults to `false`, and while it is false both paths answer:
+Exported from [`src/index.mts`](src/index.mts); the linked file holds each definition and its doc comment:
+
+- `federationGrantsModules` — the pair to install — and its two halves `federationGrantsModule` and `federationGrantBackgroundModule`, with `federationGrantsConfigSchema` — [`module.mts`](src/module.mts).
+- `createFederationGrantRouter`, `FederationGrantRouterOptions`, `createDisabledFederationGrantRouter`, `FEDERATION_GRANTS_RATE_LIMIT_PREFIX` — [`routes.mts`](src/routes.mts). The client routes with their middleware chain, in the order that is the security property (correlation, throttle, parsing, client authentication), for a root that mounts them itself; and what a disabled deployment mounts instead.
+- `createFederationGrantTokenHandler`, `FederationGrantTokenHandlerOptions` — [`tokenRoute.mts`](src/tokenRoute.mts); `createFederationGrantStatusHandler`, `FederationGrantStatusHandlerOptions` — [`statusRoute.mts`](src/statusRoute.mts). Single handlers, without that chain.
+- `createFederationGrantBackground`, `FederationGrantBackground` — [`background.mts`](src/background.mts). The shutdown registry ([below](#shutting-down-without-losing-a-rotated-credential)).
+- `FEDERATION_GRANTS_MOUNT_PATH` — [`types.mts`](src/types.mts).
+
+The browser half is mounted only by the module. The store ports, the grant domain types and retrieval are core's and are not re-exported.
+
+## A disabled deployment names no feature and runs nothing
+
+`federationGrants.enabled` defaults to `false`, and while it is false the package still mounts both of its paths, each answering every request with a `404` that says nothing about the feature.
+
+Under `/oauth/federation-grants`, the client routes' JSON shape:
 
 ```http
 HTTP/1.1 404 Not Found
@@ -75,16 +115,28 @@ x-request-id: 4f1e…
 {"error":"not_found"}
 ```
 
-No description, deliberately. A body naming the feature would tell an unauthenticated caller that this deployment could do offline delegation if someone flipped one key. Nothing on that path parses a body, authenticates a client or reads a store either, so there is no timing to measure it by — and a deployment that leaves the feature off needs none of the components it would need to turn it on.
+Under `/session/federation-grants`, the browser half's shape — a navigation, so plain text and no redirect, and no `x-request-id`:
 
-What it is **not** is byte-identical to a deployment that never installed the package: there, nothing matches the path at all and the host's own fallback answers — Express's HTML 404 in a bare composition. Review measured the difference and it is the headers and the content type, not the body. So the property this actually has is the one worth having: the refusal names no feature, and nothing behind it runs. A deployment that wants the two indistinguishable gives its host a JSON 404 of its own.
+```http
+HTTP/1.1 404 Not Found
+Cache-Control: no-store
+Pragma: no-cache
+Referrer-Policy: no-referrer
+Content-Type: text/plain; charset=utf-8
+
+Not found.
+```
+
+No description, deliberately. A body naming the feature would tell an unauthenticated caller that this deployment could do offline delegation if someone flipped one key. Nothing on either path parses a body, authenticates a client or reads a store either, so there is no timing to measure it by — and a deployment that leaves the feature off needs none of the components it would need to turn it on.
+
+What it is **not** is byte-identical to a deployment that never installed the package: there, nothing matches the path at all and the host's own fallback answers — Express's HTML 404 in a bare composition. The difference is the headers and the content type, not what the body reveals. So the property this has is the one worth having: the refusal names no feature, and nothing behind it runs. A deployment that wants the two indistinguishable gives its host a 404 of its own. [`disabledRoutes.test.mts`](src/__tests__/disabledRoutes.test.mts) pins both shapes.
 
 ## The routes a client calls
 
 All five are `POST` and all are authenticated as a confidential client
 (`client_secret_basic`, `client_secret_post` or `private_key_jwt`). The three
 that address a grant take its id as an opaque path segment; the two that lodge
-an intent (slice 6) answer where to send the user's browser.
+an intent answer where to send the user's browser.
 
 ### `POST /oauth/federation-grants` — lodging a first-time intent
 

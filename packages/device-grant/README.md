@@ -1,8 +1,36 @@
 # @o3co/auth-provider-device-grant
 
+Last updated: 2026-09-24
+
 OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) for [`auth.provider`](https://github.com/o3co/auth.provider) — the device-code flow for input-constrained clients: TV apps, CLIs, IoT.
 
-Optional. Nothing here is active until `oauth.deviceAuthorization.enabled = true`.
+Optional, and off until `oauth.deviceAuthorization.enabled = true`: installed but disabled, its two routes answer `404 not_found` and `/oauth/token` answers `unsupported_grant_type` for the device-code grant.
+
+## Responsibility
+
+**Role.** An optional grant on top of the authorization server. It adds the two endpoints of the RFC 8628 ceremony — where a device starts and where a person answers — and the `urn:ietf:params:oauth:grant-type:device_code` grant, which `deviceGrantModule` contributes to core's grant registry so that [`@o3co/auth-provider-oauth`](../oauth/README.md)'s `POST /oauth/token` dispatches it.
+
+**Owns:**
+
+- `POST /oauth/device_authorization`: client authentication, the per-IP throttle, and issuing the device and user codes;
+- `POST /oauth/device/verification`: the JSON API a deployment's verification page calls, behind the session CSRF guard and the per-subject verification budget;
+- the device-code grant: polling semantics, single use, and the binding to the client the code was issued to;
+- `device_authorization_endpoint` in the discovery document (see the [known defect](#known-defect-an-enabled-grant-does-not-boot-beside-oauthmodule)), and the boot refusals for an enabled grant that is missing what it needs.
+
+**Does not own:**
+
+- the verification page — the deployment's ([below](#the-library-provides-the-api-the-deployment-provides-the-page));
+- the `DeviceCodeStore` port, the code generators and the memory adapter — `@o3co/auth-provider-core`; the Redis adapter — `@o3co/auth-provider-redis` ([Storage](#storage));
+- `/oauth/token` and client authentication — `@o3co/auth-provider-oauth`;
+- the browser session, login and the CSRF policy — `@o3co/auth-provider-session`;
+- the rate limiter and the seeding of its budget — core's and Redis's limiter modules.
+
+**Why a separate package, and why it depends on two siblings.** Most deployments authorize no devices, so the grant and its routes are a package a deployment adds rather than a part of every token endpoint; the store port sits in core so that a store adapter depends on core and never on this package. The package itself sits on top of two sibling packages, and takes one piece from each so that there is one implementation rather than two that can drift:
+
+- from `@o3co/auth-provider-oauth`, `createClientAuthMiddleware` — `/oauth/device_authorization` authenticates a client exactly as `/oauth/token` does, `private_key_jwt` and its `replaySeenSet` included;
+- from `@o3co/auth-provider-session`, the CSRF guard (`createCsrfGuard`, `createCsrfProtectionFromConfig`) — the verification endpoint runs the policy `POST /session/login` runs ([below](#post-oauthdeviceverification)).
+
+Neither sibling imports this package. Both are peer dependencies, installed whether or not the composition mounts their modules.
 
 ## The flow
 
@@ -38,21 +66,60 @@ oauth.deviceAuthorization {
 ```
 
 ```ts
+import {
+  createApp,
+  memoryDeviceCodeStoreModule,
+  memoryRateLimiterModule,
+} from "@o3co/auth-provider-core";
 import { deviceGrantModule } from "@o3co/auth-provider-device-grant";
-import { memoryDeviceCodeStoreModule } from "@o3co/auth-provider-core";
 import { oauthModule } from "@o3co/auth-provider-oauth";
-import { sessionModule } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 
-const app = await createApp({
-  // `sessionModule` is what puts the end user on `req.session`, and its
-  // `session.*` config is what the verification route's CSRF guard is built
-  // from — see "JSON only, behind the session CSRF guard" below.
-  // `memoryDeviceCodeStoreModule` is dev-only; a scaled deployment wires
-  // `redisDeviceCodeStoreModule` from `@o3co/auth-provider-redis` instead — see "Storage".
-  modules: [oauthModule, sessionModule, deviceGrantModule, memoryDeviceCodeStoreModule],
-  bootstrapComponents: { config, clientRepository, keyStore, rateLimiter },
+const handle = await createApp({
+  modules: [
+    // First: mounts express-session, which is what creates `req.session`. It has
+    // no ordering edge of its own, so it must be listed ahead of every module
+    // that reads the session — without it the verification route answers every
+    // request `401 login_required`.
+    sessionStoreModuleFor(config),
+    // Before oauthModule: see "Install it before oauthModule" below.
+    deviceGrantModule,
+    oauthModule({ config }), // POST /oauth/token, where the device polls
+    // Signs the user in: `POST /session/login` (or the federation callback) puts
+    // the authenticated user on the session the verification route reads. A
+    // deployment with its own login writes `isAuthenticated` and `user.id` itself.
+    sessionModule,
+    // Dev-only; a scaled deployment wires `redisDeviceCodeStoreModule` from
+    // `@o3co/auth-provider-redis` instead — see "Storage".
+    memoryDeviceCodeStoreModule,
+    // Required once the grant is enabled; seeded with the verification budget above.
+    memoryRateLimiterModule,
+    // …the modules that provide what these require: clientRepository,
+    // codeRepository, keyStore, the session stores, the user repository …
+  ],
+  bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
 ```
+
+The verification route's CSRF guard is built from the `session.*` config slice — see [JSON only, behind the session CSRF guard](#post-oauthdeviceverification). The standalone template's [`buildModules.mts`](../../templates/standalone/src/buildModules.mts) shows the full order of a real composition root; it does not mount this grant.
+
+### Known defect: an enabled grant does not boot beside `oauthModule`
+
+With `oauth.deviceAuthorization.enabled = true`, the composition above fails at boot with `discovery-document-invalid`. The module contributes `device_authorization_endpoint` to discovery as a literal `metadata` field, and core's discovery builder refuses any `*_endpoint` field there — endpoints must be contributed through `endpoints` so they are issuer-prefixed and validated. `oauthModule` always activates discovery (it requires an issuer), so no composition with it and an enabled device grant boots until the module contributes the field as an endpoint. A disabled grant contributes no discovery field and boots.
+
+### Install it before `oauthModule`
+
+`oauthModule` mounts its router at `/oauth`, and that router parses JSON **and** form bodies for every request under `/oauth`, whichever route it is for. Routes mount in the order their modules are listed (this module declares no ordering edge), so with `oauthModule` listed first a form `POST` to `/oauth/device/verification` is parsed before this package's router sees it, and reaches the verification handler as fields: the JSON-only rule below no longer holds, and only the CSRF guard stands between a cross-site form and an approval. Listed first, this package's routes run their own parsers — JSON only on the verification route — and a form body reaches the handler with no `action`, which is `400 invalid_request`. Nothing in the device routes depends on `oauthModule` being mounted before them: `/oauth/device_authorization` carries its own body parsers and client authentication, and the grant reaches `/oauth/token` through the grant registry, not through mount order.
+
+## Public API
+
+Exported from [`src/index.mts`](./src/index.mts); the linked file holds each definition:
+
+- `deviceGrantModule`, `deviceGrantConfigSchema` — [`module.mts`](./src/module.mts). The module to install, and the `oauth.deviceAuthorization` schema it composes.
+- `createDeviceAuthorizationHandler`, `DeviceAuthorizationEndpointOptions` — [`deviceAuthorizationEndpoint.mts`](./src/deviceAuthorizationEndpoint.mts); `createDeviceVerificationHandler`, `DeviceVerificationHandlerOptions` — [`verificationEndpoint.mts`](./src/verificationEndpoint.mts); `createDeviceCodeGrant`, `DeviceCodeGrantOptions` — [`grant.mts`](./src/grant.mts). The two handlers and the grant, for a composition root that mounts them itself; it then owns what the module otherwise applies around them — client authentication, the throttle, the CSRF guard and the body parsers.
+- `DEVICE_CODE_GRANT_TYPE`, `DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX`, `DEVICE_VERIFICATION_RATE_LIMIT_PREFIX`, `DeviceAuthorizationSettings`, `DeviceGrantDependencies` — [`types.mts`](./src/types.mts) (`DEVICE_VERIFICATION_RATE_LIMIT_PREFIX` is defined in core and re-exported there).
+
+The `DeviceCodeStore` port and the code generators are not exported here; they are core's ([Storage](#storage)).
 
 ## The library provides the API, the deployment provides the page
 
@@ -72,13 +139,15 @@ Requires an authenticated end-user session. Body: `{ action, user_code }`.
 
 Errors: `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `429 slow_down`, `503 service_unavailable` (the limiter backend is down and `rateLimit.failMode = "closed"`).
 
-**JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the route accepts `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not), and runs the same `createCsrfGuard` as `POST /session/login` (#272):
+**JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the route parses `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not) — it mounts no form parser, so a form body arrives without an `action` and is `400 invalid_request`, provided nothing mounted ahead of it has parsed the body already ([Install it before `oauthModule`](#install-it-before-oauthmodule)) — and runs the same `createCsrfGuard` as `POST /session/login`:
 
 - a foreign `Origin` / `Referer` is refused with `403 access_denied` and logged as `csrf_origin_rejected`;
 - the provider's own origin, or one listed in `session.csrf.trustedOrigins`, is accepted — a verification page served from another origin is declared there, on the same list the login form uses;
 - a request with no origin signal at all (a non-browser client) must present the signed double-submit token from `GET /session/csrf`: the `<session.name>.csrf` cookie echoed in the `x-csrf-token` header.
 
 The guard is built from the `session.*` config slice, so enabling the grant without one fails at boot. This is why the package depends on `@o3co/auth-provider-session`: one CSRF policy for the product, not a second origin check that can drift from it.
+
+The route reads the end user from the express-session (`isAuthenticated`, `user.id`), so `sessionStoreModule` must be mounted ahead of it and something must sign the user in; with no authenticated session every action is `401 login_required`.
 
 **One endpoint, three actions**, because all three take a `user_code` and **all three are the same brute-force oracle** — a `lookup` route that answered "which client is this?" without counting against the same budget would be a free oracle sitting beside a limited one. One route means one limiter call, and no way to add a fourth entry point that forgets it.
 
@@ -92,17 +161,17 @@ RFC 8628 §5.1 sizes the user code's entropy *against* a rate limit: an 8-charac
 
 Every attempt counts, malformed codes included: excluding them would hand an attacker an unmetered way to probe which shapes the endpoint accepts. The key is `device_verification:user:<subject>` — keyed on the **authenticated user**, not the code. Keying on the code would spend whichever code the attacker happened to hit, which is nobody's budget; keying on the subject means an attacker needs an account and burns their own.
 
-The budget is `oauth.deviceAuthorization.rateLimit { limit, windowSeconds }`, default `5` / `300`. Both bundled limiter adapters seed their `limits.device_verification` from it — the same way `login` is seeded from `rateLimit.login` — so the number the boot refusal reasons from is the number the limiter applies. Without the seed, the prefix fell through to the adapter's 60-per-minute default: twelve times the budget, silently. An operator-declared `memoryRateLimiter.limits.device_verification` (or the Redis equivalent) still wins; zero and fractional values are refused at the config boundary.
+The budget is `oauth.deviceAuthorization.rateLimit { limit, windowSeconds }`, default `5` / `300`. Both bundled limiter adapters seed their `limits.device_verification` from it — the same way `login` is seeded from `rateLimit.login` — so the number the boot refusal reasons from is the number the limiter applies. Without the seed, the prefix would fall through to the adapter's 60-per-minute default: twelve times the budget, silently. An operator-declared `memoryRateLimiter.limits.device_verification` (or the Redis equivalent) still wins; zero and fractional values are refused at the config boundary.
 
-The seed is deliberately quiet: handed a config with no usable budget it leaves the adapter's default in place rather than invent one. So the module asks for the budget itself — **enabling the grant with no valid `oauth.deviceAuthorization.rateLimit` fails boot**, naming the key (#448). A config that went through `createApp` always has one, because the schema defaults it; the refusal is for hand-built configs that never passed the schema, where the seed's silence used to mean a limiter arguing from five attempts while applying sixty. Both the seed and the refusal read one definition of "usable", `isDeviceVerificationRateLimitSpec` in core, so they cannot disagree about a value.
+The seed is deliberately quiet: handed a config with no usable budget it leaves the adapter's default in place rather than invent one. So the module asks for the budget itself — **enabling the grant with no valid `oauth.deviceAuthorization.rateLimit` fails boot**, naming the key. A config that went through `createApp` always has one, because the schema defaults it; the refusal is for hand-built configs that never passed the schema, where the seed's silence would otherwise mean a limiter arguing from five attempts while applying sixty. Both the seed and the refusal read one definition of "usable", `isDeviceVerificationRateLimitSpec` in core, so they cannot disagree about a value.
 
 `POST /oauth/device_authorization` is throttled as well, under `device_authorization:ip:<ip>` — the same `createRateLimitGuard` and key shape as `/oauth/token`, mounted **ahead of client authentication** so unauthenticated repeats are bounded before they reach a repository lookup. It uses the adapter's `defaultLimit` unless `memoryRateLimiter.limits.device_authorization` (or the Redis equivalent) declares one, and it honours the product's `rateLimit.failMode` outage policy.
 
 ### A limiter outage is the product's outage policy on both routes
 
-`POST /oauth/device/verification` honours the same `rateLimit.failMode` (#457). Its budget is keyed on the subject and its 429 is its own audit event, so it cannot sit behind the guard as a middleware; it runs the guard's check through core's `checkWithFailMode` instead, which is the guard minus the HTTP framing. When the limiter backend is down, `failMode = "closed"` answers `503 service_unavailable` "Rate limiter temporarily unavailable" — the body every guarded route answers — and `"open"` serves the lookup, approval or denial as if allowed. Either way the outage is logged as `rate_limiter_failed_closed` / `rate_limiter_failed_open` with `tag: "device_verification"` and emitted as a `rate_limit.unavailable` audit event, so the alert the operator runbook pages on fires for this endpoint too. Before #457 the handler called the limiter bare: an outage was an unhandled throw, `500 server_error` in the standalone, `failMode` ignored, no audit event — on the one endpoint RFC 8628 §5.1 sizes the code against.
+`POST /oauth/device/verification` honours the same `rateLimit.failMode`. Its budget is keyed on the subject and its 429 is its own audit event, so it cannot sit behind the guard as a middleware; it runs the guard's check through core's `checkWithFailMode` instead, which is the guard minus the HTTP framing. When the limiter backend is down, `failMode = "closed"` answers `503 service_unavailable` "Rate limiter temporarily unavailable" — the body every guarded route answers — and `"open"` serves the lookup, approval or denial as if allowed. Either way the outage is logged as `rate_limiter_failed_closed` / `rate_limiter_failed_open` with `tag: "device_verification"` and emitted as a `rate_limit.unavailable` audit event, so the alert the operator runbook pages on fires for this endpoint too.
 
-A limiter that *answers* "no" is not an outage. `429 slow_down` and the `device.rate_limited` audit event (#443) are unchanged under either mode — `"open"` waves through a request the limiter could not judge, never one it refused. A hand-mounted `createDeviceVerificationHandler` takes `failMode` alongside `rateLimiter`; the module reads both from the composition, and enabling the grant with no `rateLimit.failMode` fails boot for this route as it does for `device_authorization`.
+A limiter that *answers* "no" is not an outage. `429 slow_down` and the `device.rate_limited` audit event are the same under either mode — `"open"` waves through a request the limiter could not judge, never one it refused. A hand-mounted `createDeviceVerificationHandler` takes `failMode` alongside `rateLimiter`; the module reads both from the composition, and enabling the grant with no `rateLimit.failMode` fails boot for this route as it does for `device_authorization`.
 
 ## The decision is an audit event
 
@@ -156,10 +225,10 @@ A client must also be **allowed the grant before it can start it**: `POST /oauth
 
 The `DeviceCodeStore` port lives in `@o3co/auth-provider-core`, not here, so an adapter author depends on core alone. Two adapters ship, and which one is wired decides whether the deployment can scale:
 
-- **`memoryDeviceCodeStoreModule`** (`@o3co/auth-provider-core`) — in-process; development and single-replica only. It is registered in core's replica-unsafe module list, so a composition with `deployment.mode = "multi"` **refuses to boot** with it: pending authorizations fork per replica, and the human approves a code on the replica that served the verification page while the device polls one that has never heard of it. The store is bounded three ways: every read path drops an expired record it finds, `create` sweeps expired records every 1000 calls, and `maxEntries` (default 10 000) caps the resident set — at the cap, expired records are reclaimed first, and if every resident record is still live **`create` refuses** with `DeviceCodeStoreError { reason: "full" }` rather than evicting one (#445). The endpoint answers that refusal with `503 temporarily_unavailable` — RFC 6749 §5.2's "temporary overloading" — without re-drawing a code, and logs `device_authorization_store_full`. Its `dispose` is registered with the boot planner's lifecycle registrar.
-- **`redisDeviceCodeStoreModule`** (`@o3co/auth-provider-redis`, #433) — what a scaled deployment runs. It requires the `deviceCodeStoreClient` slot, which `makeIoredisClients` provides off the shared connection, and is configured under `redisDeviceCodeStore.keyPrefix` (default `devauth:`). Every operation the port marks atomic is one Lua script, so the conformance suite's "two polls racing for one approval" case passes against a real Redis rather than only in sequence. With it wired, `deployment.mode = "multi"` boots.
+- **`memoryDeviceCodeStoreModule`** (`@o3co/auth-provider-core`) — in-process; development and single-replica only. It is registered in core's replica-unsafe module list, so a composition with `deployment.mode = "multi"` **refuses to boot** with it: pending authorizations fork per replica, and the human approves a code on the replica that served the verification page while the device polls one that has never heard of it. The store is bounded three ways: every read path drops an expired record it finds, `create` sweeps expired records every 1000 calls, and `maxEntries` (default 10 000) caps the resident set — at the cap, expired records are reclaimed first, and if every resident record is still live **`create` refuses** with `DeviceCodeStoreError { reason: "full" }` rather than evicting one. The endpoint answers that refusal with `503 temporarily_unavailable` — RFC 6749 §5.2's "temporary overloading" — without re-drawing a code, and logs `device_authorization_store_full`. Its `dispose` is registered with the boot planner's lifecycle registrar.
+- **`redisDeviceCodeStoreModule`** (`@o3co/auth-provider-redis`) — what a scaled deployment runs. It requires the `deviceCodeStoreClient` slot, which `makeIoredisClients` provides off the shared connection, and is configured under `redisDeviceCodeStore.keyPrefix` (default `devauth:`). Every operation the port marks atomic is one Lua script, so the conformance suite's "two polls racing for one approval" case passes against a real Redis rather than only in sequence. With it wired, `deployment.mode = "multi"` boots.
 
-Refusing at the cap is the fail-closed choice. The first cut evicted the live record closest to expiry, but the flood that reaches the cap carries the newest expiries, so the records closest to expiry are exactly the pre-existing ones — a human's pending approval, an approval a device has not polled for yet — and all of them went before any of the attacker's. The sibling caps in core evict because what they hold is reconstructible (a rate-limit bucket resets, a CRL cache entry refetches); a device authorization is not, so the store keeps what was issued and refuses what is new. The refused request is a `POST /oauth/device_authorization`, which sits behind the per-IP rate-limit guard, so the flooder is the one told to retry, and a legitimate device retries into a slot the next expiry frees. Evicting same-`clientId` records first was considered and rejected: device clients are public (RFC 8628 §5.6), so a flood arrives *as* the legitimate client and that policy would evict its real users first all the same.
+Refusing at the cap is the fail-closed choice. Evicting the live record closest to expiry would not be: the flood that reaches the cap carries the newest expiries, so the records closest to expiry are exactly the pre-existing ones — a human's pending approval, an approval a device has not polled for yet — and all of them would go before any of the attacker's. The sibling caps in core evict because what they hold is reconstructible (a rate-limit bucket resets, a CRL cache entry refetches); a device authorization is not, so the store keeps what was issued and refuses what is new. The refused request is a `POST /oauth/device_authorization`, which sits behind the per-IP rate-limit guard, so the flooder is the one told to retry, and a legitimate device retries into a slot the next expiry frees. Evicting same-`clientId` records first was considered and rejected: device clients are public (RFC 8628 §5.6), so a flood arrives *as* the legitimate client and that policy would evict its real users first all the same.
 
 Two things about the Redis adapter are worth knowing before choosing it:
 
@@ -168,9 +237,13 @@ Two things about the Redis adapter are worth knowing before choosing it:
 
 The standalone template provides `deviceCodeStoreClient` from its shared ioredis connection but does not mount this grant; a deployment that adds `deviceGrantModule` to that manifest selects `redisDeviceCodeStoreModule` alongside it.
 
-Mounting the module without any store fails boot naming `oauth.deviceAuthorization.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363) — for a deployment that leaves the grant off; with `enabled = true` the module refuses to boot without a store whatever the declaration says (#626).
+Mounting the module without any store fails boot naming `oauth.deviceAuthorization.store`, which accepts `"unsupported"` as an explicit statement that this deployment knowingly cannot authorize devices (#363) — for a deployment that leaves the grant off; with `enabled = true` the module refuses to boot without a store whatever the declaration says.
 
-Every field of the `DeviceAuthorization` an adapter hands back is a required key (#626): `requestedScope`, `subject` and `grantedScope` hold `undefined` where there is none, so a read-back that forgets one is a compile error rather than a dropped field; `create`'s `requestedScope` is a required key the same way. The conformance suite compares the whole record with `toStrictEqual`, which also catches the two scope lists swapped.
+Every field of the `DeviceAuthorization` an adapter hands back is a required key: `requestedScope`, `subject` and `grantedScope` hold `undefined` where there is none, so a read-back that forgets one is a compile error rather than a dropped field; `create`'s `requestedScope` is a required key the same way ([Upgrading: store records name every field](../../docs/upgrading-required-record-keys.md)). The conformance suite compares the whole record with `toStrictEqual`, which also catches the two scope lists swapped.
+
+## Tests
+
+[`flow.test.mts`](./src/__tests__/flow.test.mts) runs the ceremony end to end, [`verificationCsrf.test.mts`](./src/__tests__/verificationCsrf.test.mts) pins the CSRF guard, [`configRateLimit.test.mts`](./src/__tests__/configRateLimit.test.mts) the verification budget, and [`module.test.mts`](./src/__tests__/module.test.mts) the boot refusals and the disabled routes. The store's atomicity is core's conformance suite, run against both adapters.
 
 ## License
 
