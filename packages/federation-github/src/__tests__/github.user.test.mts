@@ -202,6 +202,15 @@ describe("GitHub /user becomes the profile's sub", () => {
 		await expect(exchange()).rejects.toThrow(/GitHub federation "github".*\/user.*not JSON/);
 	});
 
+	it("releases the body of a /user that answers non-2xx instead of leaving it unread", async () => {
+		github.user.status = 401;
+		github.user.body = { message: "Bad credentials" };
+
+		await expect(exchange()).rejects.toThrow(/HTTP 401/);
+		const [user] = github.requestsTo(GITHUB.user);
+		expect(user?.response.bodyUsed).toBe(true);
+	});
+
 	it("does not fetch /user/emails when /user is refused", async () => {
 		github.user.status = 401;
 

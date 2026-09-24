@@ -48,6 +48,8 @@ export interface RecordedRequest {
 	readonly method: string;
 	readonly headers: Headers;
 	readonly body: URLSearchParams | undefined;
+	/** What the fake answered — a test can ask whether the client read or released its body. */
+	readonly response: Response;
 }
 
 /** What one endpoint answers: a JSON value, or `raw` text sent as it is. */
@@ -162,6 +164,23 @@ export function createFakeGithub(): FakeGithub {
 		},
 	};
 
+	const route = (url: URL, method: string, headers: Headers): Response => {
+		const where = originAndPath(url);
+		if (url.hostname === "api.github.com" && !headers.has("user-agent")) {
+			return new Response(NO_USER_AGENT, {
+				status: 403,
+				headers: { "content-type": "text/plain; charset=utf-8" },
+			});
+		}
+		if (where === GITHUB.tokenEndpoint && method === "POST") return respondToken(headers);
+		if (where === GITHUB.user && method === "GET") return respond(github.user);
+		if (where === GITHUB.emails && method === "GET") return respond(github.emails);
+		return new Response(JSON.stringify({ message: "Not Found" }), {
+			status: 404,
+			headers: { "content-type": JSON_TYPE },
+		});
+	};
+
 	const fetchImpl = async (
 		input: string | URL | Request,
 		init?: RequestInit,
@@ -183,22 +202,9 @@ export function createFakeGithub(): FakeGithub {
 			raw === undefined || raw === null
 				? undefined
 				: new URLSearchParams(raw instanceof URLSearchParams ? raw : String(raw));
-		requests.push({ url, method, headers, body });
-
-		const where = originAndPath(url);
-		if (url.hostname === "api.github.com" && !headers.has("user-agent")) {
-			return new Response(NO_USER_AGENT, {
-				status: 403,
-				headers: { "content-type": "text/plain; charset=utf-8" },
-			});
-		}
-		if (where === GITHUB.tokenEndpoint && method === "POST") return respondToken(headers);
-		if (where === GITHUB.user && method === "GET") return respond(github.user);
-		if (where === GITHUB.emails && method === "GET") return respond(github.emails);
-		return new Response(JSON.stringify({ message: "Not Found" }), {
-			status: 404,
-			headers: { "content-type": JSON_TYPE },
-		});
+		const response = route(url, method, headers);
+		requests.push({ url, method, headers, body, response });
+		return response;
 	};
 	(github as { fetch: typeof fetch }).fetch = fetchImpl as typeof fetch;
 	return github;

@@ -240,6 +240,21 @@ describe("createGithubProvider", () => {
 		expect(profile.emailVerified).toBe(true);
 	});
 
+	it.each([
+		["null", null],
+		["a string", "octocat@github.com"],
+		["a number", 42],
+		["an array", [{ email: "octocat@github.com", primary: true, verified: true }]],
+	])(
+		"skips a /user/emails row that is %s instead of losing the address beside it",
+		async (_label, row) => {
+			github.emails.body = [row, { email: "octocat@github.com", primary: true, verified: true }];
+			const profile = await exchange();
+			expect(profile.email).toBe("octocat@github.com");
+			expect(profile.emailVerified).toBe(true);
+		},
+	);
+
 	it("leaves the e-mail absent when no address is verified — and never takes /user's", async () => {
 		github.user.body = { ...githubUser(), email: "public@example.com" };
 		github.emails.body = [{ email: "nope@example.com", primary: true, verified: false }];
@@ -264,6 +279,26 @@ describe("createGithubProvider", () => {
 			expect(profile.emailVerified).toBeUndefined();
 		},
 	);
+
+	it("releases the body of a /user/emails that answers non-2xx instead of leaving it unread", async () => {
+		github.emails.status = 500;
+		github.emails.body = { message: "Server Error" };
+		await exchange();
+		const [emails] = github.requestsTo(GITHUB.emails);
+		expect(emails?.response.bodyUsed).toBe(true);
+	});
+
+	it("asks /user and /user/emails for GitHub's JSON media type at REST API version 2022-11-28", async () => {
+		// The `sub` rule reads `id` as GitHub's 2022-11-28 schema types it; the
+		// version header pins that contract instead of taking GitHub's default.
+		await exchange();
+		for (const endpoint of [GITHUB.user, GITHUB.emails]) {
+			const [request] = github.requestsTo(endpoint);
+			expect(request?.headers.get("accept")).toBe("application/vnd.github+json");
+			expect(request?.headers.get("x-github-api-version")).toBe("2022-11-28");
+			expect(request?.headers.get("authorization")).toBe(`Bearer ${ACCESS_TOKEN}`);
+		}
+	});
 
 	it("does NOT implement SupportsRefresh (GitHub OAuth Apps do not issue refresh tokens)", () => {
 		const p = createGithubProvider(baseConfig);
