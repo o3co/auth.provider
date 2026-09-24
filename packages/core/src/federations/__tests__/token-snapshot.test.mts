@@ -57,6 +57,21 @@ describe("federationTokenSnapshot — one reading of a token response for every 
 		expect("scope" in silent).toBe(false);
 	});
 
+	it("reads a scope that is present and not a string as an answer naming nothing, never as silence (#647)", () => {
+		// The bundled adapters' library refuses such an answer first, but the
+		// snapshot is exported: an adapter reading its token response some
+		// other way must not have `scope: 42` read downstream as "as
+		// requested", which would record every requested scope as consent.
+		for (const scope of [42, ["openid"], null, {}]) {
+			const snapshot = federationTokenSnapshot({
+				access_token: "at",
+				token_type: "bearer",
+				scope,
+			} as never);
+			expect(snapshot.scope, JSON.stringify(scope)).toBe("");
+		}
+	});
+
 	it("carries the refresh token and id_token when they are non-empty strings, and omits them otherwise", () => {
 		const full = federationTokenSnapshot({
 			access_token: "at",
