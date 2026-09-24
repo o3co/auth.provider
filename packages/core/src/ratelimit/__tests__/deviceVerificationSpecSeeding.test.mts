@@ -36,6 +36,7 @@ import {
 	resolveDeviceVerificationLimitSpec,
 } from "#/ratelimit/deviceVerificationSpec.mjs";
 import { resolveSeededLimitSpecs } from "#/ratelimit/seededSpecs.mjs";
+import { isUsableRateLimitSpec } from "#/ratelimit/usableSpec.mjs";
 
 const configured = (limit: unknown, windowSeconds: unknown) => ({
 	oauth: { deviceAuthorization: { rateLimit: { limit, windowSeconds } } },
@@ -85,6 +86,7 @@ describe("resolveDeviceVerificationLimitSpec", () => {
 			[5, 2.5],
 			["5", 300],
 			[5, "300"],
+			[5, 1e13],
 		]) {
 			expect(
 				resolveDeviceVerificationLimitSpec({}, configured(limit, windowSeconds))
@@ -128,6 +130,13 @@ describe("isDeviceVerificationRateLimitSpec", () => {
 		expect(isDeviceVerificationRateLimitSpec({ limit: 5, windowSeconds: 300 })).toBe(true);
 	});
 
+	it("is the one predicate every limiter judges a spec by", () => {
+		// The seed, the device-grant boot refusal and both adapters' refusal at
+		// construction answer the same question; a second definition is how
+		// they came to answer it differently for a window past the Date range.
+		expect(isDeviceVerificationRateLimitSpec).toBe(isUsableRateLimitSpec);
+	});
+
 	it.each([
 		["an absent section", undefined],
 		["null", null],
@@ -141,6 +150,7 @@ describe("isDeviceVerificationRateLimitSpec", () => {
 		["a string window", { limit: 5, windowSeconds: "300" }],
 		["a missing window", { limit: 5 }],
 		["a missing limit", { windowSeconds: 300 }],
+		["a window past the Date range", { limit: 5, windowSeconds: 1e13 }],
 	])("refuses %s", (_label, value) => {
 		// `0` is what an empty environment variable coerces to, and a budget
 		// invented from it is worse than the adapter's own default.

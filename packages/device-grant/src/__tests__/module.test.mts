@@ -1209,6 +1209,9 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		["a zero limit", { limit: 0, windowSeconds: 300 }],
 		["a fractional window", { limit: 5, windowSeconds: 0.5 }],
 		["a string limit", { limit: "5", windowSeconds: 300 }],
+		// Refused here by name, rather than by the limiter's RangeError at
+		// construction naming its own `limits.device_verification`.
+		["a window past the Date range", { limit: 5, windowSeconds: 1e13 }],
 	])("refuses to mount device/verification with %s as the budget", (_label, rateLimit) => {
 		// The same shapes the seed declines to apply: with one definition of
 		// "usable" shared with core, a budget the module accepts is one the

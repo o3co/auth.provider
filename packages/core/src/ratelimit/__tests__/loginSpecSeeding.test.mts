@@ -67,4 +67,21 @@ describe("resolveLoginLimitSpec", () => {
 			resolveLoginLimitSpec({}, { rateLimit: { login: { windowMs: 900_000, limit: 0 } } }).login,
 		).toBeUndefined();
 	});
+
+	it("judges what it would seed by the one predicate every limiter uses", () => {
+		// Its own inline check let a window past the Date range through, which
+		// the limiter then refused at construction under its own name
+		// (`limits.login`) rather than this key's.
+		for (const login of [
+			{ windowMs: 1e19, limit: 20 },
+			{ windowMs: 900_000, limit: 1.5 },
+			{ windowMs: Number.NaN, limit: 20 },
+			{ windowMs: -900_000, limit: 20 },
+		]) {
+			expect(
+				resolveLoginLimitSpec({}, { rateLimit: { login } }).login,
+				JSON.stringify(login),
+			).toBeUndefined();
+		}
+	});
 });
