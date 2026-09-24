@@ -35,6 +35,8 @@
  * Cross-refs: Plan T31 / spec §2.4.1
  */
 
+import { readdirSync, readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import {
 	createApp,
 	createMemoryWebAuthnCredentialStore,
@@ -118,8 +120,8 @@ const webauthnConfigModule = defineModule({
 });
 
 /** Bootstrap module: provides a permit-all GrantPolicy. Required by webauthnModule's
- * H-2 fail-fast invariant. Test fixtures wire this; production deployments wire a
- * real GrantPolicyHook from @o3co/auth-provider-policy. */
+ * H-2 fail-fast invariant. Test fixtures wire this; a production deployment fills
+ * the `grantPolicy` slot with a GrantPolicyHook of its own — no package ships one. */
 const noopGrantPolicyModule = defineModule({
 	name: "test:webauthn-noop-grant-policy",
 	provides: {
@@ -274,6 +276,53 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 				bootstrapComponents: minBoot,
 			}),
 		).rejects.toThrow(/webauthn grant requires `grantPolicy`/);
+	});
+
+	it("H-2 fail-fast: the refusal says how to fill the slot, and names only packages that exist", async () => {
+		const error = await createApp({
+			modules: [
+				webauthnModule,
+				webauthnConfigModule,
+				keyStoreModule,
+				memoryChallengeStoreModule,
+				memoryReplaySeenSetModule,
+				defaultChallengeCeremonyModule,
+				memoryWebAuthnCredentialStoreModule,
+				activatorModule,
+			],
+			bootstrapComponents: minBoot,
+		}).then(
+			() => undefined,
+			(e: unknown) => e,
+		);
+		// The planner wraps a throwing grant factory; the module's own words are the cause.
+		const cause = (error as { cause?: unknown } | undefined)?.cause;
+		expect(cause).toBeInstanceOf(Error);
+		const message = (cause as Error).message;
+
+		// An operator told to install a package that was never published is
+		// sent nowhere. Every package the message names is one this workspace
+		// builds.
+		const packagesDir = fileURLToPath(new URL("../../../", import.meta.url));
+		const packageName = (dir: string): string =>
+			(JSON.parse(readFileSync(`${packagesDir}${dir}/package.json`, "utf8")) as { name: string })
+				.name;
+		const workspacePackages = new Set(
+			readdirSync(packagesDir, { withFileTypes: true })
+				.filter((entry) => entry.isDirectory())
+				.map((entry) => packageName(entry.name)),
+		);
+		// A dot inside a name (`ts.hocon`) is part of it; one ending a sentence is not.
+		const named = message.match(/@o3co\/[a-z0-9-]+(?:\.[a-z0-9-]+)*/g) ?? [];
+		expect(named.length).toBeGreaterThan(0);
+		for (const name of named) {
+			expect(workspacePackages, `${name} is named by the boot error`).toContain(name);
+		}
+
+		// The two ways a composition fills a component slot.
+		expect(message).toContain("provides: { grantPolicy");
+		expect(message).toContain("bootstrapComponents");
+		expect(message).toContain("GrantPolicyHook");
 	});
 
 	/**
