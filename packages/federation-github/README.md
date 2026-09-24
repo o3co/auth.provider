@@ -125,8 +125,13 @@ checks each field's type, as the template's Google bridge
   Configuring the library with GitHub's own issuer and then comparing `iss` is
   [#598](https://github.com/o3co/auth.provider/issues/598).
 - **The user** is `GET https://api.github.com/user`, with no subject binding
-  (there is no id_token `sub` to bind to). A user object with neither `sub` nor
-  `id` is refused.
+  (there is no id_token `sub` to bind to). It is GitHub's REST API, not an
+  OpenID Connect UserInfo endpoint — it answers a numeric `id` and no `sub` — so
+  the adapter fetches it as a protected resource and reads the answer itself,
+  rather than through `openid-client`'s UserInfo handling, which requires a
+  `sub`. A non-2xx answer, a body that is not JSON, or a user object with
+  neither a usable `sub` nor a usable `id` fails the exchange, and the login
+  answers `502 exchange_failed`.
 - **The e-mail** always comes from `GET /user/emails`, never from `/user`: the
   primary verified address, else the first verified one, else none. A failed
   `/user/emails` request is read as "no address" and does not fail the login.
@@ -173,7 +178,13 @@ Defined in [`src/github.mts`](src/github.mts), exported from
 
 ## Tests
 
+Nothing mocks `openid-client`. The provider tests run the real library against
+a fake GitHub ([`fake-github.mts`](src/__tests__/fake-github.mts)) installed as
+the global `fetch` — the fetch the library uses, since the adapter configures
+none — which answers with GitHub's own bodies and records every request.
+
 | Test file | Pins |
 | --- | --- |
-| [`github.test.mts`](src/__tests__/github.test.mts) | against a stubbed `openid-client`: the authorization request, the exchange URL without `iss`, the `sub`, e-mail and scope rules, `expiresAt: null`, no refresh, `mapClaims` and `endSession` |
+| [`github.test.mts`](src/__tests__/github.test.mts) | the authorization request, the token request (PKCE verifier, `client_secret_post`), the exchange without `iss`, the e-mail choice and a failed `/user/emails`, the scope rules, `expiresAt`, no refresh, `mapClaims` and `endSession` |
+| [`github.user.test.mts`](src/__tests__/github.user.test.mts) | how `/user` becomes the `sub`: GitHub's numeric `id` without a `sub`, the `sub` and string-`id` rules, and the refusals (a non-2xx answer, a body that is not JSON, no usable `id`) |
 | [`github-module.test.mts`](src/__tests__/github-module.test.mts), [`github-module-boot.test.mts`](src/__tests__/github-module-boot.test.mts) | the module's contributions and boot with the session module |
