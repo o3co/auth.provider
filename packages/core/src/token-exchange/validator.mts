@@ -48,7 +48,8 @@ export interface ExchangeTokenValidator {
 	 *
 	 * Return contract:
 	 *   - Returning `null` signals a validation failure — the grant handler will
-	 *     respond with `invalid_grant`.
+	 *     respond with `invalid_request` (RFC 8693 §2.2.2), described as
+	 *     `subject_token validation failed` / `actor_token validation failed`.
 	 *   - Throwing signals an infrastructure failure (e.g. Redis unavailable) —
 	 *     the grant handler will respond with `temporarily_unavailable` (503).
 	 *

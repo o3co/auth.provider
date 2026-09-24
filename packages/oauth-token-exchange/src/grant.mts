@@ -351,21 +351,13 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					},
 				};
 			}
-			if (!subjectValidated) {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription: "subject_token validation failed",
-					},
-				};
-			}
+			if (!subjectValidated) return tokenRefusal("subject_token validation failed");
 
 			// RFC 9449 §5 / RFC 8705 §4 sender-constraint matrices — core's
 			// `matchConfirmation` (#324), the same implementation the refresh
-			// grant consumes; this grant keeps only the row → `invalid_grant`
-			// error mapping below. Without the matrices the exchange grant was
-			// a de-binding laundry: a stolen DPoP- or mTLS-bound
+			// grant consumes; this grant keeps only the row → refusal mapping
+			// below. Without the matrices the exchange grant was a de-binding
+			// laundry: a stolen DPoP- or mTLS-bound
 			// `subject_token` was accepted with no proof-of-possession and the
 			// issued token dropped the binding, so an attacker converted a
 			// token that was useless without the key into an ordinary bearer
@@ -375,8 +367,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			//   subject cnf.jkt | proof JKT       | Outcome
 			//   no              | no              | issue plain Bearer (legacy)
 			//   no              | yes             | issue DPoP-bound AT (opt-in upgrade)
-			//   yes             | no              | reject invalid_grant
-			//   yes             | yes, differs    | reject invalid_grant (multi-key attack)
+			//   yes             | no              | reject invalid_request
+			//   yes             | yes, differs    | reject invalid_request (multi-key attack)
 			//   yes             | yes, equal      | issue DPoP-bound AT (binding preserved)
 			//
 			// mTLS matrix: identical over `cnf["x5t#S256"]` and the presented
@@ -387,10 +379,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// short-circuits ahead of the expensive work, the same ordering
 			// rationale the refresh grant states.
 			//
-			// `invalid_grant` rather than `invalid_dpop_proof`: the proof or
-			// certificate is well-formed; it is the *grant* that cannot be
-			// honoured, which is the more caller-actionable classification and
-			// what the refresh path already returns for the same rows.
+			// `invalid_request` rather than `invalid_dpop_proof`: the proof or
+			// certificate is well-formed; it is the subject_token that is
+			// unacceptable, which RFC 8693 §2.2.2 answers `invalid_request` (see
+			// `tokenRefusal`). The refresh path answers the same rows
+			// `invalid_grant`, RFC 6749 §5.2's code for a refresh token.
 			//
 			// `actor_token` is held to this same matrix further down (#309). A
 			// request carries exactly one `ctx.tokenBinding` — one DPoP proof,
@@ -408,38 +401,23 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// a compound cnf is a forged token or an AS bug. Refuse rather
 				// than pick a winner — the stance the refresh grant and the
 				// introspection handler already take.
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription:
-							"subject_token has compound cnf binding which is not supported (Stage 1)",
-					},
-				};
+				return tokenRefusal(
+					"subject_token has compound cnf binding which is not supported (Stage 1)",
+				);
 			}
 			if (match.status === "no-proof") {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription:
-							match.member === "jkt"
-								? "subject_token requires a DPoP proof"
-								: "subject_token requires a client certificate",
-					},
-				};
+				return tokenRefusal(
+					match.member === "jkt"
+						? "subject_token requires a DPoP proof"
+						: "subject_token requires a client certificate",
+				);
 			}
 			if (match.status === "mismatch") {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription:
-							match.member === "jkt"
-								? "DPoP proof does not match subject_token binding"
-								: "client certificate does not match subject_token binding",
-					},
-				};
+				return tokenRefusal(
+					match.member === "jkt"
+						? "DPoP proof does not match subject_token binding"
+						: "client certificate does not match subject_token binding",
+				);
 			}
 
 			// The confirmation stamped onto the issued token. When the subject was
@@ -475,15 +453,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 					};
 				}
-				if (!actorValidated) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "actor_token validation failed",
-						},
-					};
-				}
+				if (!actorValidated) return tokenRefusal("actor_token validation failed");
 			}
 
 			// #309: the actor half of the matrices above, and the residual #265
@@ -520,38 +490,23 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			if (actorValidated) {
 				const actorMatch = matchConfirmation(actorValidated.claims.cnf, ctx.tokenBinding);
 				if (actorMatch.status === "compound") {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription:
-								"actor_token has compound cnf binding which is not supported (Stage 1)",
-						},
-					};
+					return tokenRefusal(
+						"actor_token has compound cnf binding which is not supported (Stage 1)",
+					);
 				}
 				if (actorMatch.status === "no-proof") {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription:
-								actorMatch.member === "jkt"
-									? "actor_token requires a DPoP proof"
-									: "actor_token requires a client certificate",
-						},
-					};
+					return tokenRefusal(
+						actorMatch.member === "jkt"
+							? "actor_token requires a DPoP proof"
+							: "actor_token requires a client certificate",
+					);
 				}
 				if (actorMatch.status === "mismatch") {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription:
-								actorMatch.member === "jkt"
-									? "DPoP proof does not match actor_token binding"
-									: "client certificate does not match actor_token binding",
-						},
-					};
+					return tokenRefusal(
+						actorMatch.member === "jkt"
+							? "DPoP proof does not match actor_token binding"
+							: "client certificate does not match actor_token binding",
+					);
 				}
 
 				// The subject's family rule, applied to the actor: the actor's
@@ -574,13 +529,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 						"token_exchange_may_act_violation",
 					);
-					return {
-						result: {
-							status: 400,
-							error: "invalid_request",
-							errorDescription: "may_act_violation: actor not authorized by subject token",
-						},
-					};
+					return tokenRefusal("may_act_violation: actor not authorized by subject token");
 				}
 
 				const maxActorChainDepth = getMaxActorChainDepth(deps);
@@ -595,13 +544,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 						"token_exchange_actor_chain_too_deep",
 					);
-					return {
-						result: {
-							status: 400,
-							error: "invalid_request",
-							errorDescription: "actor_chain_too_deep: actor chain depth limit exceeded",
-						},
-					};
+					return tokenRefusal("actor_chain_too_deep: actor chain depth limit exceeded");
 				}
 			} else {
 				// Impersonation — no `actor_token`, so the party acting on the
@@ -637,13 +580,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 						"token_exchange_may_act_violation",
 					);
-					return {
-						result: {
-							status: 400,
-							error: "invalid_request",
-							errorDescription: "may_act_violation: client not authorized by subject token",
-						},
-					};
+					return tokenRefusal("may_act_violation: client not authorized by subject token");
 				}
 			}
 
@@ -987,15 +924,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// or negative lifetime — dead on arrival, and indistinguishable
 				// at the resource server from a bug here — so it is a refusal
 				// the caller can read instead.
-				if (remaining <= 0) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "subject_token has expired",
-						},
-					};
-				}
+				if (remaining <= 0) return tokenRefusal("subject_token has expired");
 				expiresIn = Math.min(expiresIn, remaining);
 			}
 			// A subject token carrying no `exp` leaves the lifetime from steps 1
@@ -1049,6 +978,29 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			};
 		},
 	};
+}
+
+/**
+ * The refusal of a presented `subject_token` or `actor_token`, whatever check
+ * made it: the validator's `null`, a sender-constraint row, the refresh-token
+ * family rule, `may_act`, the actor-chain bound or the subject's expiry.
+ *
+ * RFC 8693 §2.2.2: when either token is "invalid for any reason, or [is]
+ * unacceptable based on policy", the value of the `error` parameter "MUST be
+ * the `invalid_request` error code". Not `invalid_grant`: RFC 6749 §5.2 gives
+ * that code to an authorization grant or a refresh token, which is why the
+ * refresh grant answers its own sender-constraint and family rows with it.
+ * What tells a client which check refused the token is the
+ * `error_description`, so each call site's description is part of the wire
+ * contract and the README names it.
+ *
+ * The request's other refusals keep the codes the RFCs give them —
+ * `invalid_target` for an audience or resource (§2.2.2), `invalid_scope`,
+ * `invalid_client`, `unauthorized_client` — and a store that cannot answer is
+ * `503 temporarily_unavailable`, never a verdict on the token.
+ */
+function tokenRefusal(errorDescription: string): GrantHandlerResult {
+	return { result: { status: 400, error: "invalid_request", errorDescription } };
 }
 
 /** What {@link parseRequestedExpiresIn} answers for a present, unusable value. */
@@ -1113,9 +1065,9 @@ function reportedFamily(validated: ValidatedToken): string | undefined {
  * This grant owns the rule, for both tokens; the built-in validator does not
  * read `refreshTokenFamilyRevocation`. A validator can only answer `null`,
  * which the handler reports as `… validation failed`, whereas a revoked family
- * has an answer of its own on `/oauth/token` — the refresh grant already gives
- * `family_revoked` there — and it tells the client that re-authenticating, not
- * retrying, is what helps.
+ * has a description of its own on `/oauth/token` — the refresh grant already
+ * gives `family_revoked` there — and it tells the client that
+ * re-authenticating, not retrying, is what helps.
  *
  * The rule keys on the family a validator asserts (`familyId`), not on the
  * token type the validator was registered for: the built-in validator can be
@@ -1130,7 +1082,11 @@ function reportedFamily(validated: ValidatedToken): string | undefined {
  * - The store throws: `503 temporarily_unavailable`, logged as
  *   `token_exchange_family_store_unavailable`, so an outage is never reported
  *   as a revoked token.
- * - The family is revoked: `invalid_grant` / `family_revoked`.
+ * - The family is revoked: `family_revoked`.
+ *
+ * Both refusals are {@link tokenRefusal}s: an unverifiable or revoked family
+ * makes the token unacceptable, which RFC 8693 §2.2.2 answers
+ * `invalid_request`.
  *
  * The actor's descriptions carry the `actor_token ` prefix the handler's other
  * actor answers carry.
@@ -1146,15 +1102,9 @@ async function familyRefusal(
 		role === "actor" ? `actor_token ${description}` : description;
 	const revocation = deps.refreshTokenFamilyRevocation;
 	if (!revocation) {
-		return {
-			result: {
-				status: 400,
-				error: "invalid_grant",
-				errorDescription: forRole(
-					"refresh token family revocation not configured (revocation cannot be verified)",
-				),
-			},
-		};
+		return tokenRefusal(
+			forRole("refresh token family revocation not configured (revocation cannot be verified)"),
+		);
 	}
 	let revoked: boolean;
 	try {
@@ -1170,13 +1120,7 @@ async function familyRefusal(
 		};
 	}
 	if (!revoked) return null;
-	return {
-		result: {
-			status: 400,
-			error: "invalid_grant",
-			errorDescription: forRole("family_revoked"),
-		},
-	};
+	return tokenRefusal(forRole("family_revoked"));
 }
 
 function subjectAudienceBoundary(

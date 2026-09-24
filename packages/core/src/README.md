@@ -70,7 +70,7 @@ What a store implementer has to change for the required keys is [docs/upgrading-
 
 ### `token-exchange/`
 
-The port a token-exchange validator implements, defined in [`token-exchange/validator.mts`](./token-exchange/validator.mts): one validator per `subject_token_type` / `actor_token_type` URI; `null` is a validation failure (`invalid_grant`), a throw is an infrastructure failure (`503 temporarily_unavailable`); a `ValidatedToken`'s structured fields are projections of its `claims`. The grant that consumes it is `packages/oauth-token-exchange`. The contract is pinned as the `tokenExchangeValidators` contribution type in [`__tests__/contributes-map-substitution.test.mts`](./__tests__/contributes-map-substitution.test.mts).
+The port a token-exchange validator implements, defined in [`token-exchange/validator.mts`](./token-exchange/validator.mts): one validator per `subject_token_type` / `actor_token_type` URI; `null` is a validation failure (`invalid_request`, which RFC 8693 §2.2.2 requires for an invalid `subject_token` or `actor_token`), a throw is an infrastructure failure (`503 temporarily_unavailable`); a `ValidatedToken`'s structured fields are projections of its `claims`. The grant that consumes it is `packages/oauth-token-exchange`. The contract is pinned as the `tokenExchangeValidators` contribution type in [`__tests__/contributes-map-substitution.test.mts`](./__tests__/contributes-map-substitution.test.mts).
 
 ## Standard implementations
 
