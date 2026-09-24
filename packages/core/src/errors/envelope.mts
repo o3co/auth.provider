@@ -77,6 +77,36 @@ export function isWellFormedErrorCode(value: unknown): value is string {
 }
 
 /**
+ * An RFC 3986 URI-reference's characters: unreserved, reserved and
+ * percent-encoded octets. Every one is inside the set RFC 6749 §5.2 allows
+ * `error_uri` (`%x21 / %x23-5B / %x5D-7E`), so a reference made of them keeps
+ * to both.
+ */
+const URI_REFERENCE_CHARACTERS = /^(?:[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=]|%[0-9A-Fa-f]{2})+$/;
+
+/** Resolves a relative reference so the WHATWG parser can judge its shape. */
+const URI_REFERENCE_BASE = "https://error-uri.invalid/";
+
+/**
+ * Whether `value` is an `error_uri` RFC 6749 allows (§5.2, Appendix A.9): a
+ * URI-reference, absolute or relative, written only in URI characters, with
+ * at most one fragment, that the WHATWG URL parser resolves. The parser is
+ * lenient about characters, which the character check is not, and strict
+ * about structure (an unclosed IP literal, a port that is not a number),
+ * which the character check is not.
+ */
+function isWellFormedErrorUri(value: unknown): value is string {
+	if (typeof value !== "string" || !URI_REFERENCE_CHARACTERS.test(value)) return false;
+	if (value.indexOf("#") !== value.lastIndexOf("#")) return false;
+	try {
+		new URL(value, URI_REFERENCE_BASE);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/**
  * The code {@link errorEnvelope} sends in place of a malformed one. The code
  * came from server-side code — a caller, a contributed mechanism, a module —
  * never from the client, so the fault is the server's; and the envelope does
@@ -124,6 +154,10 @@ export interface ErrorEnvelope {
  *   builds a code from something it does not control, and knows its answer
  *   is a refusal of the client's request, checks the code itself and falls
  *   back to a client-error code (the token-binding middleware does).
+ * - `uri` is sent only as a well-formed URI-reference in RFC 6749's `error_uri`
+ *   characters (§5.2, Appendix A.9). Any other is dropped — a reference with
+ *   a character replaced would point somewhere else — and logged as
+ *   `error_envelope_uri_malformed`.
  *
  * Contract scope: the three RFC 6749 §5.2 stock fields only (`error`,
  * `error_description`, `error_uri`). Extension fields (e.g. namespaced
@@ -132,15 +166,26 @@ export interface ErrorEnvelope {
  *
  * @param error       Machine-readable error code (snake_case, e.g. `invalid_grant`).
  * @param description Optional human-readable detail. Empty string is dropped.
- * @param uri         Optional reference URL. Empty string is dropped.
+ * @param uri         Optional reference URL. Empty string is dropped, and so is one RFC 6749 does not allow.
  */
 export function errorEnvelope(error: string, description?: string, uri?: string): ErrorEnvelope {
 	const text = sanitizeErrorText(description);
+	const reference = uri === undefined || uri === "" ? undefined : wellFormedUriOrNothing(uri);
 	return {
 		error: wellFormedCodeOrFallback(error),
 		...(text !== undefined && text !== "" ? { error_description: text } : {}),
-		...(uri !== undefined && uri !== "" ? { error_uri: uri } : {}),
+		...(reference !== undefined ? { error_uri: reference } : {}),
 	};
+}
+
+/** `uri` when RFC 6749 allows it as `error_uri`; otherwise nothing, logged. */
+function wellFormedUriOrNothing(uri: unknown): string | undefined {
+	if (isWellFormedErrorUri(uri)) return uri;
+	consoleLogger.warn(
+		{ error_uri: auditErrorText(uri) ?? `(${typeof uri})` },
+		"error_envelope_uri_malformed",
+	);
+	return undefined;
 }
 
 /** `error` when it is a well-formed RFC 6749 code, otherwise the logged fallback. */
