@@ -17,21 +17,27 @@
 /**
  * What of an error a log line may carry — the rule core's `loggableError`
  * follows. The mounted routes' tests pin that the routes use this; these pin
- * the rule, against the real errors it is written for.
+ * the rule, against errors shaped as the real ones are: `JSON.parse`'s own
+ * SyntaxErrors, and Redis error replies as ioredis (redis-errors'
+ * `ReplyError`) and node-redis (`ErrorReply`, whose `name` is `"Error"`)
+ * raise them. This package depends on no Redis client, so those two are
+ * built here with Redis's exact text rather than imported.
  */
 
-import { createRequire } from "node:module";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { LOGGED_STRING_MAX_LENGTH, loggableError } from "#/loggableError.mjs";
 
-/**
- * redis-errors' own `ReplyError`, the class ioredis raises for a Redis error
- * reply. This package does not depend on a Redis client, so it is resolved
- * through ioredis as the sibling redis package installs it.
- */
-const { ReplyError } = createRequire(
-	createRequire(new URL("../../../redis/package.json", import.meta.url)).resolve("ioredis"),
-)("redis-errors") as { ReplyError: new (message: string) => Error };
+/** Redis's own reply to an unknown command, which quotes the command's first arguments. */
+const REDIS_UNKNOWN_COMMAND =
+	"ERR unknown command 'evalsha', with args beginning with: 'sha' '1' 'devauth:user:BCDFGHJK' 'user-1'";
+
+/** ioredis raises redis-errors' `ReplyError`, whose `name` is `"ReplyError"`. */
+class ReplyError extends Error {
+	override name = "ReplyError";
+}
+
+/** node-redis raises `ErrorReply` (and `SimpleError`, `BlobError`) without setting `name`. */
+class ErrorReply extends Error {}
 
 const parseErrorOf = (input: string): Error => {
 	try {
@@ -68,16 +74,18 @@ describe("loggableError", () => {
 		});
 	});
 
-	it("cuts what a real Redis ReplyError quotes of its command", () => {
-		const error = new ReplyError(
-			"ERR unknown command 'evalsha', with args beginning with: 'sha' '1' 'devauth:user:BCDFGHJK' 'user-1'",
-		);
-		expect(error.name).toBe("ReplyError");
-		expect(loggableError(error)).toEqual({
-			name: "ReplyError",
-			message: "ERR unknown command 'evalsha'",
-		});
-	});
+	it.each([
+		["a plain Error", new Error(REDIS_UNKNOWN_COMMAND), "Error"],
+		["ioredis's ReplyError", new ReplyError(REDIS_UNKNOWN_COMMAND), "ReplyError"],
+		["node-redis's ErrorReply, named Error", new ErrorReply(REDIS_UNKNOWN_COMMAND), "Error"],
+	])(
+		"cuts the command arguments Redis quotes, whatever class carries them (%s)",
+		(_label, error, name) => {
+			// The phrase is Redis's own, so the cut is keyed on it rather than on
+			// the client library's class name.
+			expect(loggableError(error)).toEqual({ name, message: "ERR unknown command 'evalsha'" });
+		},
+	);
 
 	it("drops a real JSON.parse SyntaxError's message, keeping the position it names", () => {
 		// V8 quotes its input there; body-parser's `entity.parse.failed` is one
@@ -88,6 +96,11 @@ describe("loggableError", () => {
 		});
 		const quoted = loggableError(parseErrorOf("user_code=BCDFGHJK&sub=user-1"));
 		expect(quoted).toEqual({ name: "SyntaxError" });
+	});
+
+	it("keeps a position only when it is at most ten digits", () => {
+		const huge = new SyntaxError("Unexpected end of JSON input at position 12345678901234");
+		expect(loggableError(huge)).toEqual({ name: "SyntaxError" });
 	});
 
 	it("caps every string it keeps at 256 characters", () => {
@@ -123,5 +136,29 @@ describe("loggableError", () => {
 		expect(loggableError(42)).toEqual({ thrown: "number" });
 		expect(loggableError(null)).toEqual({ thrown: "object" });
 		expect(loggableError({ message: "m s3cret", code: "E" })).toEqual({ thrown: "object" });
+	});
+
+	describe("where Error.isError is missing, as on Node 22", () => {
+		const isError = (Error as { isError?: unknown }).isError;
+		afterEach(() => {
+			if (isError !== undefined) {
+				(Error as { isError?: unknown }).isError = isError;
+			}
+		});
+
+		it("reports a value whose prototype cannot be read as thrown, never throwing itself", () => {
+			// The `instanceof Error` fallback walks the prototype chain; a Proxy
+			// whose `getPrototypeOf` trap throws turns that walk into a throw.
+			delete (Error as { isError?: unknown }).isError;
+			const hostile = new Proxy(
+				{},
+				{
+					getPrototypeOf() {
+						throw new Error("trap");
+					},
+				},
+			);
+			expect(loggableError(hostile)).toEqual({ thrown: "object" });
+		});
 	});
 });
