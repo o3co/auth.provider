@@ -597,7 +597,7 @@ const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): Ra
 		throw new Error(
 			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires " +
 				"oauth.deviceAuthorization.rateLimit { limit, windowSeconds } as positive " +
-				"integers. It is the budget RFC 8628 §5.1 sizes the user code against and " +
+				"integers, the window ending within the Date range. It is the budget RFC 8628 §5.1 sizes the user code against and " +
 				"the value the limiter adapter seeds `device_verification` from; without " +
 				"it POST /oauth/device/verification would run on the adapter's default " +
 				"budget, which is not the number the rateLimiter requirement reasons from.",

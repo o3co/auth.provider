@@ -127,6 +127,11 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isDeviceVerificationRateLimitSpec\b/,
 	},
 	{
+		concept: "usable rate-limit spec — what a limiter applies as written",
+		home: "packages/core/src/ratelimit/usableSpec.mts",
+		definition: /(?:function|const)\s+isUsableRateLimitSpec\b/,
+	},
+	{
 		concept: "authentication claims a token may carry — amr (#481)",
 		home: "packages/core/src/grants/authenticationClaims.mts",
 		definition: /(?:function|const)\s+wellFormedAmr\b/,

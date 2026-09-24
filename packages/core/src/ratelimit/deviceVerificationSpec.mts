@@ -15,6 +15,7 @@
  */
 
 import type { RateLimitSpec } from "./types.mjs";
+import { isUsableRateLimitSpec } from "./usableSpec.mjs";
 
 /**
  * The key prefix `POST /oauth/device/verification` limits under
@@ -24,30 +25,29 @@ import type { RateLimitSpec } from "./types.mjs";
  */
 export const DEVICE_VERIFICATION_RATE_LIMIT_PREFIX = "device_verification";
 
-const isPositiveInteger = (value: unknown): value is number =>
-	typeof value === "number" && Number.isInteger(value) && value > 0;
-
 /**
  * Is `value` a budget the verification endpoint can be limited by — a
- * positive-integer `limit` and `windowSeconds`?
+ * positive whole `limit` and `windowSeconds`, the window ending within the
+ * Date range?
  *
- * The one definition of that shape (#448). The seed below answers "leave the
- * adapter's default in place" for anything else, and `deviceGrantModule`
- * answers "refuse to boot" for anything else; with two definitions those
- * two answers could be given for different inputs, and the gap between them
- * is a deployment whose boot refusal reasons from five attempts while the
- * limiter applies sixty. `docs/design-vocabulary.md` maps the concept here,
- * and the drift guard keeps a second definition from appearing.
+ * It is `isUsableRateLimitSpec` itself, the predicate every limiter adapter
+ * judges a spec by, under the name #448 gave it. The seed below answers
+ * "leave the adapter's default in place" for anything else, and
+ * `deviceGrantModule` answers "refuse to boot" for anything else; with two
+ * definitions those two answers could be given for different inputs, and
+ * the gap between them is a deployment whose boot refusal reasons from five
+ * attempts while the limiter applies sixty. A second definition here was that
+ * gap for a window past the Date range: the module mounted, and the limiter
+ * refused the seeded spec under its own name rather than this key's.
+ * `docs/design-vocabulary.md` maps the concept, and the drift guard keeps a
+ * second definition from appearing.
  *
  * `0` is what an empty environment variable coerces to; a zero-attempt
  * budget locks every user out and a zero window is not a window. Both are
  * refused for the same reason the device-grant schema refuses them.
  */
-export const isDeviceVerificationRateLimitSpec = (value: unknown): value is RateLimitSpec => {
-	if (value === null || typeof value !== "object") return false;
-	const { limit, windowSeconds } = value as { limit?: unknown; windowSeconds?: unknown };
-	return isPositiveInteger(limit) && isPositiveInteger(windowSeconds);
-};
+export const isDeviceVerificationRateLimitSpec: (value: unknown) => value is RateLimitSpec =
+	isUsableRateLimitSpec;
 
 /**
  * Seed a rate-limiter adapter's `limits` with the device-verification spec

@@ -15,6 +15,7 @@
  */
 
 import type { RateLimitSpec } from "./types.mjs";
+import { isUsableRateLimitSpec } from "./usableSpec.mjs";
 
 /** The key prefix `/session/login` limits under. See `RateLimiter.check`. */
 const LOGIN_PREFIX = "login";
@@ -55,18 +56,21 @@ export const resolveLoginLimitSpec = (
 		config as { rateLimit?: { login?: { windowMs?: unknown; limit?: unknown } } } | undefined
 	)?.rateLimit?.login;
 	const windowMs = login?.windowMs;
-	const limit = login?.limit;
-	// A hand-built config that never passed `CoreConfigSchema` can carry
-	// anything. Leaving the adapter's own default in place beats inventing a
-	// limit from a value the operator did not really supply.
-	if (typeof windowMs !== "number" || !Number.isFinite(windowMs) || windowMs <= 0) return result;
-	if (typeof limit !== "number" || !Number.isInteger(limit) || limit <= 0) return result;
-
-	result[LOGIN_PREFIX] = {
-		limit,
+	// A window in milliseconds has to be one before it is converted: rounded
+	// up, a negative one would read as a second.
+	if (typeof windowMs !== "number" || !(windowMs > 0)) return result;
+	const spec = {
+		limit: login?.limit,
 		// Specs are whole seconds; a sub-second window would round down to 0,
 		// and a zero window is not a window.
 		windowSeconds: Math.max(1, Math.ceil(windowMs / 1000)),
 	};
+	// A hand-built config that never passed `CoreConfigSchema` can carry
+	// anything. It is judged by the predicate every limiter judges a spec by,
+	// and leaving the adapter's own default in place beats inventing a limit
+	// from a value the operator did not really supply.
+	if (!isUsableRateLimitSpec(spec)) return result;
+
+	result[LOGIN_PREFIX] = { limit: spec.limit, windowSeconds: spec.windowSeconds };
 	return result;
 };
