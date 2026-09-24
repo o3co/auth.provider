@@ -1334,7 +1334,10 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		});
 
 		// The family store is the grant's (`familyRefusal`), so its outage is
-		// answered and logged there — with the role, never the token.
+		// answered and logged there — with the role and the store error's
+		// projection, never the error: ioredis puts the command it sent on a
+		// reply error, and Redis's own reply to an unknown command echoes its
+		// first arguments — here the family's key.
 		const unreachableFamilyRevocation = (failFor: (familyId: string) => boolean) =>
 			defineModule({
 				name: "test:refresh-token-family-revocation",
@@ -1342,27 +1345,63 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 					refreshTokenFamilyRevocation: () => ({
 						revokeFamily: async () => {},
 						isFamilyRevoked: async (familyId: string) => {
-							if (failFor(familyId)) throw new Error("family store unreachable");
+							if (failFor(familyId)) {
+								throw Object.assign(
+									new Error(
+										`ERR unknown command 'evalsha', with args beginning with: 'sha' '1' 'rtf:family:${familyId}'`,
+									),
+									{
+										name: "ReplyError",
+										command: { name: "evalsha", args: ["sha", "1", `rtf:family:${familyId}`] },
+									},
+								);
+							}
 							return false;
 						},
 					}),
 				},
 			});
-		const spyLogger = () => {
+		/**
+		 * A logger that serialises every own property of what it is handed,
+		 * `cause` and non-enumerable fields included — a deployment is free
+		 * to install one. Its levels are spies.
+		 */
+		const serialiseEverythingLogger = () => {
+			const lines: string[] = [];
+			const walk = (value: unknown, seen = new WeakSet<object>()): unknown => {
+				if (typeof value !== "object" || value === null) return value;
+				if (seen.has(value)) return "[circular]";
+				seen.add(value);
+				const out: Record<string, unknown> = {};
+				for (const key of Object.getOwnPropertyNames(value)) {
+					out[key] = walk((value as Record<string, unknown>)[key], seen);
+				}
+				return out;
+			};
+			const record = (level: string) =>
+				vi.fn((...args: unknown[]): void => {
+					lines.push(JSON.stringify({ level, args: walk(args) }));
+				});
 			const logger = {
-				trace: vi.fn(),
-				debug: vi.fn(),
-				info: vi.fn(),
-				warn: vi.fn(),
-				error: vi.fn(),
-				fatal: vi.fn(),
+				trace: record("trace"),
+				debug: record("debug"),
+				info: record("info"),
+				warn: record("warn"),
+				error: record("error"),
+				fatal: record("fatal"),
 				child: () => logger,
 			};
-			return logger;
+			return { logger, lines };
+		};
+		/** The store error as `loggableError` projects it: Redis's echo cut, frames only. */
+		const projectedStoreError = {
+			name: "ReplyError",
+			message: "ERR unknown command 'evalsha'",
+			stack: expect.stringMatching(/^ {4}at /),
 		};
 
 		it("answers 503 and logs the outage when the family store cannot be read for the subject_token", async () => {
-			const logger = spyLogger();
+			const { logger, lines } = serialiseEverythingLogger();
 			const { grant } = await boot([
 				unreachableFamilyRevocation(() => true),
 				defineModule({ name: "test:logger", provides: { logger: () => logger } }),
@@ -1377,13 +1416,14 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				errorDescription: "refresh token store unavailable",
 			});
 			expect(logger.error).toHaveBeenCalledWith(
-				{ err: expect.any(Error), role: "subject" },
+				{ err: projectedStoreError, role: "subject" },
 				"token_exchange_family_store_unavailable",
 			);
+			for (const line of lines) expect(line).not.toContain("fam-subject");
 		});
 
 		it("answers 503 naming the actor, and logs the actor's role, when the family store cannot be read for the actor_token", async () => {
-			const logger = spyLogger();
+			const { logger, lines } = serialiseEverythingLogger();
 			const { grant } = await boot([
 				unreachableFamilyRevocation((id) => id === "fam-actor"),
 				defineModule({ name: "test:logger", provides: { logger: () => logger } }),
@@ -1400,9 +1440,10 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				errorDescription: "actor_token refresh token store unavailable",
 			});
 			expect(logger.error).toHaveBeenCalledWith(
-				{ err: expect.any(Error), role: "actor" },
+				{ err: projectedStoreError, role: "actor" },
 				"token_exchange_family_store_unavailable",
 			);
+			for (const line of lines) expect(line).not.toContain("fam-actor");
 		});
 	});
 });
