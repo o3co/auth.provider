@@ -19,7 +19,7 @@ import express from "express";
 import pino from "pino";
 import request from "supertest";
 import { describe, expect, it } from "vitest";
-import { loggableError } from "../loggableError.mjs";
+import { type LoggableError, loggableError } from "../loggableError.mjs";
 
 /** The shape openid-client throws for a token response it refuses: the body two causes down. */
 const libraryError = (): Error => {
@@ -55,9 +55,18 @@ const bodyParserError = async (
 	return caught;
 };
 
+/** The projection without `stack`, whose frames are pinned by cases of their own. */
+const shape = (err: unknown): unknown => {
+	const walk = (projected: LoggableError): Record<string, unknown> => {
+		const { stack: _frames, cause, ...fields } = projected;
+		return cause === undefined ? fields : { ...fields, cause: walk(cause) };
+	};
+	return walk(loggableError(err));
+};
+
 describe("loggableError — what a log line may carry of an error", () => {
 	it("keeps name, message and code, and the chain of Error causes", () => {
-		expect(loggableError(libraryError())).toEqual({
+		expect(shape(libraryError())).toEqual({
 			name: "ClientError",
 			message: "invalid response encountered",
 			code: "OAUTH_INVALID_RESPONSE",
@@ -87,7 +96,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 				cause: { error: "invalid_grant" },
 			},
 		);
-		expect(loggableError(refused)).toEqual({
+		expect(shape(refused)).toEqual({
 			name: "ResponseBodyError",
 			message: "server responded with an error in the response body",
 			code: "OAUTH_RESPONSE_BODY_ERROR",
@@ -121,16 +130,16 @@ describe("loggableError — what a log line may carry of an error", () => {
 			status: "400",
 			error: 'not an error code, it has spaces and a "quote"',
 		});
-		expect(loggableError(odd)).toEqual({ name: "Error", message: "odd" });
+		expect(shape(odd)).toEqual({ name: "Error", message: "odd" });
 	});
 
 	it("says only what kind of value was thrown when it is not an Error — in `thrown`", () => {
-		expect(loggableError("at-secret")).toEqual({ name: "NonError", thrown: "string" });
-		expect(loggableError({ access_token: "at-secret" })).toEqual({
+		expect(shape("at-secret")).toEqual({ name: "NonError", thrown: "string" });
+		expect(shape({ access_token: "at-secret" })).toEqual({
 			name: "NonError",
 			thrown: "object",
 		});
-		expect(loggableError(null)).toEqual({ name: "NonError", thrown: "null" });
+		expect(shape(null)).toEqual({ name: "NonError", thrown: "null" });
 	});
 
 	it("stops following causes after a few, so a cycle cannot recurse forever", () => {
@@ -149,16 +158,17 @@ describe("loggableError — what a log line may carry of an error", () => {
 			} catch (err) {
 				failed = err;
 			}
-			expect(loggableError(failed)).toEqual({ name: "SyntaxError", position: 52 });
+			expect(shape(failed)).toEqual({ name: "SyntaxError", position: 52 });
 
 			try {
 				JSON.parse("gho_SHORTSECRET");
 			} catch (err) {
 				failed = err;
 			}
-			const projected = loggableError(failed);
-			expect(projected).toEqual({ name: "SyntaxError" });
-			expect(JSON.stringify(projected)).not.toContain("SHORTSECRET");
+			expect(shape(failed)).toEqual({ name: "SyntaxError" });
+			// The whole projection, frames included: the header that quotes the
+			// input is not among them.
+			expect(JSON.stringify(loggableError(failed))).not.toContain("SHORTSECRET");
 		});
 
 		it("cuts the arguments out of a Redis reply error, which echoes the command it refused", () => {
@@ -170,7 +180,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 				),
 				{ name: "ReplyError", command: { name: "evalsha", args: ["sha", "1", "user-1"] } },
 			);
-			expect(loggableError(reply)).toEqual({
+			expect(shape(reply)).toEqual({
 				name: "ReplyError",
 				message: "ERR unknown command 'evalsha'",
 			});
@@ -184,7 +194,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 			class ErrorReply extends Error {}
 			class SimpleError extends ErrorReply {}
 			for (const reply of [new Error(text), new ErrorReply(text), new SimpleError(text)]) {
-				expect(loggableError(reply)).toEqual({
+				expect(shape(reply)).toEqual({
 					name: "Error",
 					message: "ERR unknown command 'evalsha'",
 				});
@@ -231,7 +241,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 			new Error("unexpected HTTP response status code", { cause: gateway }),
 			{ name: "ClientError", code: "OAUTH_RESPONSE_IS_NOT_CONFORM" },
 		);
-		expect(loggableError(onCause)).toEqual({
+		expect(shape(onCause)).toEqual({
 			name: "ClientError",
 			message: "unexpected HTTP response status code",
 			code: "OAUTH_RESPONSE_IS_NOT_CONFORM",
@@ -277,9 +287,9 @@ describe("loggableError — what a log line may carry of an error", () => {
 		const brand = Object.getOwnPropertyDescriptor(Error, "isError");
 		delete (Error as { isError?: unknown }).isError;
 		try {
-			expect(loggableError(hostile)).toEqual({ name: "NonError", thrown: "object" });
+			expect(shape(hostile)).toEqual({ name: "NonError", thrown: "object" });
 			// And the fallback still counts a real error.
-			expect(loggableError(new Error("kept"))).toEqual({ name: "Error", message: "kept" });
+			expect(shape(new Error("kept"))).toEqual({ name: "Error", message: "kept" });
 		} finally {
 			if (brand) Object.defineProperty(Error, "isError", brand);
 		}
@@ -371,14 +381,16 @@ describe("loggableError — what a log line may carry of an error", () => {
 			const { err } = JSON.parse(lines[0] ?? "{}") as { err: Record<string, unknown> };
 			expect(err.type).toBe("TypeError");
 			expect(err.stack).toMatch(/^ {4}at refusesTheRecord /);
-			expect(JSON.stringify(err)).not.toContain("STACKSECRET");
+			// The message is this process's own text here, and kept; the stack
+			// carries none of it.
+			expect(err.stack).not.toContain("STACKSECRET");
 		});
 	});
 
 	it("counts an error from another realm as an error", () => {
 		const foreign = runInNewContext('Object.assign(new Error("from a vm"), { code: "E_VM" })');
 		expect(foreign instanceof Error).toBe(false);
-		expect(loggableError(foreign)).toEqual({ name: "Error", message: "from a vm", code: "E_VM" });
+		expect(shape(foreign)).toEqual({ name: "Error", message: "from a vm", code: "E_VM" });
 	});
 
 	it("does not throw when a field's getter does, and leaves that field out", () => {
@@ -390,6 +402,6 @@ describe("loggableError — what a log line may carry of an error", () => {
 				},
 			});
 		}
-		expect(loggableError(hostile)).toEqual({ name: "Error", message: "kept" });
+		expect(shape(hostile)).toEqual({ name: "Error", message: "kept" });
 	});
 });

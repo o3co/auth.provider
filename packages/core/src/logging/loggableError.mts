@@ -46,6 +46,12 @@ export interface LoggableError {
 	readonly error_description?: string;
 	/** A Response the library put on the error — its cause, or its own `response`. */
 	readonly response?: { readonly status: number; readonly contentType?: string };
+	/**
+	 * The stack's frames and nothing of its header: at most ten `    at …`
+	 * lines, joined by `\n` and cut at 2048 characters. Absent when there
+	 * are none.
+	 */
+	readonly stack?: string;
 	readonly cause?: LoggableError;
 	/** For a thrown value that is not an Error: its `typeof`, and nothing of its content. */
 	readonly thrown?: string;
@@ -66,6 +72,13 @@ const OAUTH_ERROR_TEXT = /^[\x20\x21\x23-\x5B\x5D-\x7E]+$/;
  * ReplyError (ioredis), node-redis's ErrorReply (named plain "Error").
  */
 const REDIS_ECHOED_ARGS = /, with args beginning with:[\s\S]*$/;
+
+/** A V8 stack frame line. */
+const FRAME = /^ {4}at /;
+
+/** How many frames, and how many characters of them, a projection keeps. */
+const MAX_FRAMES = 10;
+const MAX_STACK = 2048;
 
 /** A SyntaxError's offset, and nothing else of its message; a longer number is no offset. */
 const SYNTAX_POSITION = / at position (\d{1,10})(?!\d)/;
@@ -100,6 +113,27 @@ const isError = (value: unknown): value is object => {
 	} catch {
 		return false;
 	}
+};
+
+/**
+ * The frames of an error's `stack`, and nothing of its header.
+ *
+ * V8 writes the header as `name: message`, and the message is the untrusted
+ * part — it may quote a parser's input or a peer's answer, and it may span
+ * lines. So the header is taken to be as many lines as the message has, it is
+ * dropped whole, and of what follows only `    at ` lines are kept: a message
+ * line shaped like a frame cannot pass for one. At most ten frames, joined by
+ * `\n`, then cut at 2048 characters. `undefined` when no frame is left.
+ */
+const framesOf = (stack: unknown, message: unknown): string | undefined => {
+	if (typeof stack !== "string") return undefined;
+	const headerLines = typeof message === "string" ? message.split("\n").length : 1;
+	const frames = stack
+		.split("\n")
+		.slice(headerLines)
+		.filter((line) => FRAME.test(line))
+		.slice(0, MAX_FRAMES);
+	return frames.length === 0 ? undefined : frames.join("\n").slice(0, MAX_STACK);
 };
 
 /** A fetch `Response`, read structurally so that one from another realm counts too. */
@@ -164,6 +198,7 @@ function project(err: unknown, depth: number): LoggableError {
 	const description = read(err, "error_description");
 	const cause = read(err, "cause");
 	const response = responseFields(cause) ?? responseFields(read(err, "response"));
+	const stack = framesOf(read(err, "stack"), rawMessage);
 
 	let message: string | undefined;
 	let position: number | undefined;
@@ -176,7 +211,7 @@ function project(err: unknown, depth: number): LoggableError {
 		}
 	}
 
-	return {
+	const projected: LoggableError = {
 		name,
 		...(message !== undefined ? { message } : {}),
 		...(position !== undefined ? { position } : {}),
@@ -192,6 +227,14 @@ function project(err: unknown, depth: number): LoggableError {
 			? { error_description: capped(description) }
 			: {}),
 		...(response !== undefined ? { response } : {}),
+		...(stack !== undefined ? { stack } : {}),
 		...(isError(cause) && depth < MAX_CAUSE_DEPTH ? { cause: project(cause, depth + 1) } : {}),
 	};
+	// pino's err serializer names `type` after `constructor.name` when that is
+	// a function — "Object" for a plain object — and after `name` otherwise.
+	// A non-enumerable own `constructor` of `undefined` makes it read `name`
+	// ("TypeError"), with no serializer of the deployment's to configure; it is
+	// invisible to JSON, to for-in and to `util.inspect`.
+	Object.defineProperty(projected, "constructor", { value: undefined, enumerable: false });
+	return projected;
 }
