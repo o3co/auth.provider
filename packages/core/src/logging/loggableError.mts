@@ -77,7 +77,8 @@
  *   Neither field when none of those five is an Error.
  * - The command a store's error answered, by name alone: `command: { name }`
  *   from ioredis's `command: { name, args }` when the name is a token of at
- *   most 32 letters, digits and `_` — which Redis command failed, and never
+ *   most 32 letters, digits and `_`, or two joined by one `.` (a module's
+ *   `JSON.SET`) — which Redis command failed, and never
  *   its arguments. Kept at ioredis's own path, so a query on
  *   `err.command.name` reads a raw and a projected line alike.
  * - A budget for the line: at most {@link LOGGED_MAX_PROJECTIONS}
@@ -205,8 +206,12 @@ const STATUS_FIELD = /^[a-z][A-Za-z]{0,31}Status$/;
 /** The most `<word>Status` fields the projection keeps. */
 const MAX_STATUS_FIELDS = 4;
 
-/** A command's name — `set`, `evalsha`, `hello` — and nothing that could be an argument. */
-const COMMAND_NAME = /^[a-z][a-z0-9_]{0,31}$/i;
+/**
+ * A command's name — `set`, `evalsha`, `hello`, or a module's `JSON.SET`,
+ * `FT.SEARCH`: a token, and at most one more after a dot — and nothing that
+ * could be an argument.
+ */
+const COMMAND_NAME = /^[a-z][a-z0-9_]{0,31}(?:\.[a-z][a-z0-9_]{0,31})?$/i;
 
 /** RFC 6749 §5.2: `error` and `error_description` are `%x20-21 / %x23-5B / %x5D-7E`. */
 const OAUTH_ERROR_TEXT = /^[\x20\x21\x23-\x5B\x5D-\x7E]+$/;
