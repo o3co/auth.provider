@@ -642,6 +642,128 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		for (const line of lines) expect(line).not.toContain(CONFIDENTIAL_SECRET);
 	});
 
+	/** The verification route, signed in, with a store whose lookup throws `thrown`. */
+	const lookupThrowing = async (thrown: unknown) => {
+		const deps = enabledDeps();
+		const { lines, logger } = serialisingLogger();
+		const app = mountVerificationRoute({
+			...deps,
+			logger,
+			deviceCodeStore: {
+				...deps.deviceCodeStore,
+				findPendingByUserCode: async () => {
+					throw thrown;
+				},
+			},
+		});
+		const res = await request(app)
+			.post("/oauth/device/verification")
+			.set("Host", "as.example.test")
+			.set("Origin", "http://as.example.test")
+			.send({ action: "lookup", user_code: "BCDF-GHJK" });
+		return { res, lines, logger };
+	};
+
+	it("treats an exposed 4xx thrown past the parsers as the failure it is — 500, logged", async () => {
+		// Only the parsers' errors are the caller's mistake. A store that throws
+		// an `http-errors`-shaped 403 has failed; it has not been refused a body.
+		const { res, logger } = await lookupThrowing(
+			Object.assign(new Error("forbidden"), { expose: true, status: 403 }),
+		);
+
+		expect(res.status).toBe(500);
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(logger.error).toHaveBeenCalledWith(
+			{ err: { name: "Error", message: "forbidden", status: 403 } },
+			"device_route_unexpected_error",
+		);
+	});
+
+	it("logs what a Redis reply error's message says, not the command arguments it echoes", async () => {
+		// redis-errors' `ReplyError` for an unknown command quotes the first
+		// arguments into its message — here the user code and the subject.
+		const { res, lines, logger } = await lookupThrowing(
+			Object.assign(
+				new Error(
+					"ERR unknown command 'evalsha', with args beginning with: 'sha' '1' 'devauth:user:BCDFGHJK' 'user-1'",
+				),
+				{ name: "ReplyError" },
+			),
+		);
+
+		expect(res.status).toBe(500);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ err: { name: "ReplyError", message: "ERR unknown command 'evalsha'" } },
+			"device_route_unexpected_error",
+		);
+		for (const line of lines) {
+			expect(line).not.toContain("BCDFGHJK");
+			expect(line).not.toContain("user-1");
+		}
+	});
+
+	it("logs a JSON SyntaxError's message without the input V8 quotes in it", async () => {
+		let parseError: unknown;
+		try {
+			JSON.parse("user_code=BCDFGHJK&sub=user-1");
+		} catch (error) {
+			parseError = error;
+		}
+		expect(String((parseError as Error).message)).toContain("user_code");
+
+		const { res, lines } = await lookupThrowing(parseError);
+
+		expect(res.status).toBe(500);
+		for (const line of lines) {
+			expect(line).not.toContain("user_code");
+			expect(line).not.toContain("BCDFGHJK");
+		}
+	});
+
+	it("caps the logged message", async () => {
+		const { lines } = await lookupThrowing(new Error(`failure ${"x".repeat(1000)}`));
+		const logged = JSON.parse(lines[0]?.split(" ").slice(2).join(" ") ?? "{}") as {
+			err?: { message?: string };
+		};
+		expect(logged.err?.message?.length).toBeLessThanOrEqual(200);
+	});
+
+	it("logs a device-code store failure on device_authorization through the same projection", async () => {
+		// The store is retried on a collision; every attempt failing is a 500,
+		// and its warn line used to carry `String(error)` — the whole message.
+		const deps = enabledDeps();
+		const { lines, logger } = serialisingLogger();
+		const app = mountContributedRoute(0, {
+			...deps,
+			logger,
+			deviceCodeStore: {
+				...deps.deviceCodeStore,
+				create: async () => {
+					throw Object.assign(
+						new Error(
+							"ERR unknown command 'evalsha', with args beginning with: 'sha' '2' 'devauth:{devauth}:code:DC' 'devauth:{devauth}:user:BCDFGHJK'",
+						),
+						{ name: "ReplyError" },
+					);
+				},
+			},
+		});
+
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({});
+
+		expect(res.status).toBe(500);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				err: { name: "ReplyError", message: "ERR unknown command 'evalsha'" },
+			}),
+			"device_authorization_code_collision",
+		);
+		for (const line of lines) expect(line).not.toContain("BCDFGHJK");
+	});
+
 	/** 1000 parameters is body-parser's `parameterLimit`; the secret rides along. */
 	const tooManyParameters = [
 		`client_id=${CONFIDENTIAL_ID}`,
