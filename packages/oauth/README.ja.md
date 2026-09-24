@@ -676,6 +676,8 @@ clients:
 
 ### 監査イベント
 
+これらのイベントやフェデレーションのログアウトルートのイベント（`federation.logout.success`、`federation.logout.idp_unreachable`）が `details.federation` を持つとき、その値はログ行と同じ形である: パスの名前をサニタイズし 200 文字で切ったもの。`federation.token.forbidden` はフェデレーションがセッションに紐付いているかをルートが確かめる前に出るので、そこでの名前は呼び出し元がパスに入れたものそのものである。
+
 - `federation.token.success` — トークン発行時（詳細の `refreshed: boolean` で保存済みトークンかリフレッシュ経路かを区別する）
 - `federation.token.forbidden` — 403 のとき（クライアントがオプトインしていない）
 - `federation.token.family_revoked` — ファミリー失効による 401 のとき

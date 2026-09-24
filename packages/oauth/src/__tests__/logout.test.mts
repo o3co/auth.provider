@@ -1908,6 +1908,38 @@ describe("audit events", () => {
 				}),
 			);
 		});
+
+		for (const [label, raw] of [
+			["a control character", "goo\u0007gle"],
+			["more than 200 characters", "g".repeat(300)],
+		] as const) {
+			it(`audits a federation name carrying ${label} sanitised and capped`, async () => {
+				// The linked-federation check compares the path's name with the
+				// session's; what the audit event records is the log lines' form of it.
+				const auditSink: AuditSink = {
+					kind: "mock",
+					record: vi.fn().mockResolvedValue(undefined),
+				};
+				const app = buildApp({
+					auditSink,
+					sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) }),
+					sessionFederationIndex: makeSessionFederationIndex({
+						listFederations: vi.fn(async () => [raw]),
+					}),
+					getFederationProviders: () => new Map<string, FederationProvider>(),
+				});
+				const res = await postFedLogout(app, encodeURIComponent(raw), await mintAccessToken());
+				expect(res.status).toBe(200);
+				const event = vi
+					.mocked(auditSink.record)
+					.mock.calls.map(([recorded]) => recorded)
+					.find((recorded) => recorded.type === "federation.logout.success");
+				const audited = String(event?.details?.federation);
+				expect(audited.length).toBeLessThanOrEqual(200);
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be audited.
+				expect(audited).not.toMatch(/[\u0000-\u001f\u007f]/);
+			});
+		}
 	});
 
 	describe("logout.success", () => {

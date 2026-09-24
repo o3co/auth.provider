@@ -321,7 +321,9 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 	router.post("/federation/:name/token", async (req: Request, res: Response) => {
 		const { name } = req.params as { name: string };
 		// The path parameter is the caller's text, logged before any membership
-		// check: every log line carries it sanitised and capped, as a client id is.
+		// check: every log line and every audit event carries it sanitised and
+		// capped, as a client id is — `federation.token.forbidden` fires before
+		// the linked-federation check.
 		const federation = auditErrorText(name);
 		const logger = opts.logger ?? console;
 		// Every store this route reads or writes that cannot answer is `503`,
@@ -437,7 +439,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
 				details: {
-					federation: name,
+					federation,
 					reason: "token_type_unsupported",
 					tokenType: typeof named === "string" ? named : null,
 				},
@@ -569,7 +571,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				subject: sub ?? undefined,
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
-				details: { federation: name, azp },
+				details: { federation, azp },
 			});
 			return res.status(403).json({
 				error: "forbidden",
@@ -631,7 +633,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				subject: sub ?? undefined,
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
-				details: { federation: name, refreshed: false },
+				details: { federation, refreshed: false },
 			});
 			const expiresIn =
 				tokens.expiresAt === null
@@ -738,7 +740,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 						subject: sub ?? undefined,
 						ip: req.ip,
 						userAgent: req.get("user-agent"),
-						details: { federation: name, refreshed: false },
+						details: { federation, refreshed: false },
 					});
 					return res.status(200).json({
 						access_token: freshTokens.accessToken,
@@ -836,7 +838,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 						subject: sub ?? undefined,
 						ip: req.ip,
 						userAgent: req.get("user-agent"),
-						details: { federation: name },
+						details: { federation },
 					});
 					return res.status(410).json({
 						error: "re_authentication_required",
@@ -865,7 +867,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					subject: sub ?? undefined,
 					ip: req.ip,
 					userAgent: req.get("user-agent"),
-					details: { federation: name, reason },
+					details: { federation, reason },
 				});
 				return res.status(500).json({
 					error: "refresh_failed",
@@ -1057,7 +1059,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					ip: req.ip,
 					userAgent: req.get("user-agent"),
 					details: {
-						federation: name,
+						federation,
 						reason: lifetimeIsBroken
 							? "invalid_expiry"
 							: !isUsableToken(answer.accessToken)
@@ -1157,7 +1159,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				subject: sub ?? undefined,
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
-				details: { federation: name, refreshed: true },
+				details: { federation, refreshed: true },
 			});
 			return res.status(200).json({
 				// `updatedTokens`, not the adapter's object: the answer was read once,

@@ -501,6 +501,44 @@ describe("POST /oauth/federation/:name/token", () => {
 			);
 		});
 
+		for (const [label, raw] of [
+			["a control character", "goo\u0007gle"],
+			["more than 200 characters", "g".repeat(300)],
+		] as const) {
+			it(`audits a federation name carrying ${label} sanitised and capped`, async () => {
+				// `federation.token.forbidden` fires before the linked-federation
+				// check, so the name is whatever the caller put in the path. An
+				// audit event is kept longer than a log line and read by more
+				// systems: it carries the name as the log lines do.
+				const auditSink: AuditSink = {
+					kind: "mock",
+					record: vi.fn().mockResolvedValue(undefined),
+				};
+				const clientRepo = makeClientRepo({
+					findById: vi.fn().mockResolvedValue({
+						clientId: "client-1",
+						allowedRedirectUris: [],
+						allowedScopes: [],
+						allowedAzpForFederationToken: false,
+					}),
+				});
+				const res = await postFedToken(
+					buildApp({ clientRepo, auditSink }),
+					encodeURIComponent(raw),
+					await mintAccessToken(),
+				);
+				expect(res.status).toBe(403);
+				const event = vi
+					.mocked(auditSink.record)
+					.mock.calls.map(([recorded]) => recorded)
+					.find((recorded) => recorded.type === "federation.token.forbidden");
+				const audited = String(event?.details?.federation);
+				expect(audited.length).toBeLessThanOrEqual(200);
+				// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be audited.
+				expect(audited).not.toMatch(/[\u0000-\u001f\u007f]/);
+			});
+		}
+
 		it("returns 403 when client is null (not found)", async () => {
 			const clientRepo = makeClientRepo({
 				findById: vi.fn().mockResolvedValue(null),

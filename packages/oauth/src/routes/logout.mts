@@ -298,7 +298,8 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 		async (req: Request, res: Response) => {
 			const { name } = req.params as { name: string };
 			// The path parameter is the caller's text, logged before any membership
-			// check: every log line carries it sanitised and capped, as a client id is.
+			// check: every log line and every audit event carries it sanitised and
+			// capped, as a client id is.
 			const federation = auditErrorText(name);
 			const { post_logout_redirect_uri: postLogoutRedirectUri, state } = req.body as Record<
 				string,
@@ -538,7 +539,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 						subject: sub ?? undefined,
 						ip: req.ip,
 						userAgent: req.get("user-agent"),
-						details: { federation: name, redirected_to_idp: true },
+						details: { federation, redirected_to_idp: true },
 					});
 					return res.redirect(303, endSessionResult.url.toString());
 				} catch (error) {
@@ -556,7 +557,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 						userAgent: req.get("user-agent"),
 						// The error's name and code, never its message: an IdP's
 						// refusal carries the IdP's own words.
-						details: { federation: name, cause: auditedError(error) },
+						details: { federation, cause: auditedError(error) },
 					});
 					return res.status(200).json({ disconnected: true });
 				}
@@ -569,7 +570,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 				subject: sub ?? undefined,
 				ip: req.ip,
 				userAgent: req.get("user-agent"),
-				details: { federation: name, redirected_to_idp: false },
+				details: { federation, redirected_to_idp: false },
 			});
 			return res.status(200).json({ disconnected: true });
 		},

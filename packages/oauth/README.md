@@ -683,6 +683,8 @@ Rationale: federation access tokens grant access to the user's external resource
 
 ### Audit events
 
+Where one of these events, or the federation logout route's (`federation.logout.success`, `federation.logout.idp_unreachable`), carries `details.federation`, it holds the name the way the log lines do: the path's name sanitised and capped at 200 characters. `federation.token.forbidden` fires before the route checks that the federation is linked to the session, so the name there is whatever the caller put in the path.
+
 - `federation.token.success` — on token issuance (details include `refreshed: boolean` to distinguish a stored token from the refresh path)
 - `federation.token.forbidden` — on 403 (client not opted in)
 - `federation.token.family_revoked` — on 401 via revoked family
