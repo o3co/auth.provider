@@ -41,8 +41,9 @@ const post = (form: Record<string, string>): RequestInit => ({
 	body: new URLSearchParams(form).toString(),
 });
 
-const jwks = async (idp: Awaited<ReturnType<typeof createFakeIdp>>) =>
-	createLocalJWKSet(await (await idp.fetch(ENDPOINTS.jwksUri)).json());
+const jwksAt = async (idp: Awaited<ReturnType<typeof createFakeIdp>>, uri: string) =>
+	createLocalJWKSet(await (await idp.fetch(uri)).json());
+const jwks = (idp: Awaited<ReturnType<typeof createFakeIdp>>) => jwksAt(idp, ENDPOINTS.jwksUri);
 
 describe("createFakeIdp", () => {
 	it("answers a code with tokens whose id_token verifies against the published JWKS", async () => {
@@ -231,5 +232,113 @@ describe("createFakeIdp", () => {
 		expect(idp.requestsTo(ENDPOINTS.jwksUri)).toHaveLength(1);
 		const [token] = idp.requestsTo(ENDPOINTS.tokenEndpoint);
 		expect(token?.method).toBe("POST");
+	});
+});
+
+describe("createFakeIdp as a discoverable OpenID Provider", () => {
+	const ISSUER = "https://idp.test/realms/a";
+	const DISCOVERY = `${ISSUER}/.well-known/openid-configuration`;
+
+	it("serves its metadata at the issuer's discovery URL, its endpoints under the issuer by default", async () => {
+		const idp = await createFakeIdp({
+			issuer: ISSUER,
+			discovery: true,
+			userinfoEndpoint: `${ISSUER}/userinfo`,
+			endSessionEndpoint: `${ISSUER}/logout`,
+		});
+		const metadata = await (await idp.fetch(DISCOVERY)).json();
+		expect(metadata).toMatchObject({
+			issuer: ISSUER,
+			authorization_endpoint: `${ISSUER}/authorize`,
+			token_endpoint: `${ISSUER}/token`,
+			jwks_uri: `${ISSUER}/jwks`,
+			userinfo_endpoint: `${ISSUER}/userinfo`,
+			end_session_endpoint: `${ISSUER}/logout`,
+			id_token_signing_alg_values_supported: ["RS256"],
+			code_challenge_methods_supported: ["S256"],
+		});
+		// The default endpoints answer.
+		expect((await idp.fetch(`${ISSUER}/jwks`)).status).toBe(200);
+		expect((await idp.fetch(`${ISSUER}/token`, post({}))).status).toBe(200);
+	});
+
+	it("publishes no userinfo or end-session endpoint it was not given", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER, discovery: true });
+		const metadata = await (await idp.fetch(DISCOVERY)).json();
+		expect("userinfo_endpoint" in metadata).toBe(false);
+		expect("end_session_endpoint" in metadata).toBe(false);
+	});
+
+	it("lets a test corrupt one field of the document, or refuse it with a status", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER, discovery: true });
+		idp.metadata.authorization_response_iss_parameter_supported = true;
+		expect(
+			(await (await idp.fetch(DISCOVERY)).json()).authorization_response_iss_parameter_supported,
+		).toBe(true);
+		idp.discoveryStatus = 503;
+		expect((await idp.fetch(DISCOVERY)).status).toBe(503);
+	});
+
+	it("serves no discovery document unless asked to", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER });
+		expect((await idp.fetch(DISCOVERY)).status).toBe(404);
+	});
+
+	it("finds requests by a path under the issuer, and names the last token request", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER, discovery: true });
+		await idp.fetch(DISCOVERY);
+		await idp.fetch(`${ISSUER}/token`, post({ code: "c-1" }));
+		await idp.fetch(`${ISSUER}/token`, post({ code: "c-2" }));
+		expect(idp.requestsTo("/.well-known/openid-configuration")).toHaveLength(1);
+		expect(idp.requestsTo("/token")).toHaveLength(2);
+		expect(idp.lastTokenRequest()?.body?.get("code")).toBe("c-2");
+	});
+
+	it("routes a host spelled with the DNS root dot to itself", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER, discovery: true });
+		const dotted = await idp.fetch("https://idp.test./realms/a/token", post({}));
+		expect(dotted.status).toBe(200);
+		expect(idp.requestsTo("/token")).toHaveLength(1);
+	});
+
+	it("answers a refusal with the body a test gives it", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER });
+		idp.tokenStatus = 400;
+		idp.refusal = { error: "invalid_grant", error_description: "revoked" };
+		const refused = await idp.fetch(`${ISSUER}/token`, post({}));
+		expect(refused.status).toBe(400);
+		expect(await refused.json()).toEqual({ error: "invalid_grant", error_description: "revoked" });
+	});
+
+	it("puts an at_hash in the code exchange's id_token that is right, or wrong, when told to", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER });
+		const atHash = async () => {
+			const answer = await (await idp.fetch(`${ISSUER}/token`, post({}))).json();
+			return (await jwtVerify(answer.id_token, await jwksAt(idp, `${ISSUER}/jwks`))).payload
+				.at_hash;
+		};
+		expect(await atHash()).toBeUndefined();
+		idp.atHash = "valid";
+		const left = createHash("sha256").update(idp.accessToken).digest().subarray(0, 16);
+		expect(await atHash()).toBe(left.toString("base64url"));
+		idp.atHash = "wrong";
+		expect(await atHash()).not.toBe(left.toString("base64url"));
+	});
+
+	it("leaves the id_token out of a refresh unless refreshWithIdToken is on", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER });
+		idp.refreshWithIdToken = false;
+		const plain = await (
+			await idp.fetch(`${ISSUER}/token`, post({ grant_type: "refresh_token" }))
+		).json();
+		expect(plain.id_token).toBeUndefined();
+	});
+
+	it("delays its JWKS by the given milliseconds", async () => {
+		const idp = await createFakeIdp({ issuer: ISSUER });
+		idp.jwksDelayMs = 150;
+		const started = Date.now();
+		await idp.fetch(`${ISSUER}/jwks`);
+		expect(Date.now() - started).toBeGreaterThanOrEqual(140);
 	});
 });
