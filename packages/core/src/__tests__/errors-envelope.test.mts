@@ -108,6 +108,47 @@ describe("AS-1/AS-2 errorEnvelope helper (RFC 6749 §5.2)", () => {
 			expect(warn).not.toHaveBeenCalled();
 		});
 	});
+
+	// RFC 6749 §5.2 and Appendix A.9: `error_uri` is a URI-reference, and may
+	// not carry a character outside %x21 / %x23-5B / %x5D-7E.
+	describe("error_uri (Appendix A.9)", () => {
+		afterEach(() => {
+			vi.restoreAllMocks();
+		});
+
+		it.each([
+			["an absolute URI", "https://docs.example.com/errors/invalid_grant?lang=en#retry"],
+			["a relative reference", "/docs/errors/invalid_grant"],
+			["a percent-encoded character", "https://docs.example.com/errors/caf%C3%A9"],
+		])("keeps %s", (_label, uri) => {
+			expect(errorEnvelope("invalid_grant", "expired", uri).error_uri).toBe(uri);
+		});
+
+		it.each([
+			["a space", "https://docs.example.com/invalid grant"],
+			["a double quote", 'https://docs.example.com/"quoted"'],
+			["a backslash", "https://docs.example.com\\errors"],
+			["a control character", "https://docs.example.com/errors\r\nX-Injected: 1"],
+			["a non-ASCII character", "https://docs.example.com/caf\u00e9"],
+			["a malformed percent-encoding", "https://docs.example.com/errors%zz"],
+			["a character RFC 3986 does not allow", "https://docs.example.com/{errors}"],
+			["a host that does not parse", "https://[docs.example.com/errors"],
+		])("drops a uri with %s, and logs it", (_label, uri) => {
+			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const e = errorEnvelope("invalid_grant", "expired", uri);
+			expect(e).toEqual({ error: "invalid_grant", error_description: "expired" });
+			expect(warn).toHaveBeenCalledWith(
+				expect.objectContaining({ error_uri: expect.any(String) }),
+				"error_envelope_uri_malformed",
+			);
+		});
+
+		it("drops a uri that is not a string", () => {
+			vi.spyOn(console, "warn").mockImplementation(() => {});
+			const e = errorEnvelope("invalid_grant", "expired", 42 as unknown as string);
+			expect(e).toEqual({ error: "invalid_grant", error_description: "expired" });
+		});
+	});
 });
 
 // RFC 6749 Appendix A.7 and A.8: `error` and `error_description` are both
