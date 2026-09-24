@@ -382,3 +382,63 @@ describe("#593 slice 7: the standalone composes federation grants from its confi
 		expect(names(config)).toContain("core-federation-grant-intent-store-memory");
 	});
 });
+
+describe("the browser consent route parses its own body, with sessionModule listed ahead of it", () => {
+	// `sessionModule`'s routers are mounted at `/session`, the prefix the
+	// federation grants browser half mounts under too. Their parsers ran for
+	// every request beneath `/session`, so with `sessionModule` listed first
+	// the consent route's body arrived parsed — past its 16 KiB bound, its
+	// throttle-then-parse order and its JSON refusals.
+	let handleRef: Awaited<ReturnType<typeof boot>> | undefined;
+
+	afterEach(async () => {
+		await handleRef?.dispose();
+		handleRef = undefined;
+	});
+
+	/** The standalone's modules, with `sessionModule` moved ahead of the grant modules. */
+	const sessionFirst = (config: AppConfig) => {
+		const modules = modulesFor(config, true);
+		const session = modules.find((m) => m.name === "session");
+		if (session === undefined) throw new Error("sessionModule is not in the standalone's list");
+		const rest = modules.filter((m) => m !== session);
+		const at = rest.findIndex((m) => m.name.startsWith("federation-grant"));
+		return [...rest.slice(0, at), session, ...rest.slice(at)];
+	};
+
+	const bootSessionFirst = async () => {
+		const config = resolveConfig({ ...BASE_ENV, ...GRANTS_ON });
+		handleRef = await createApp({
+			modules: sessionFirst(config),
+			bootstrapComponents: { config, pathResolver: (s) => s },
+		});
+		return express().use(handleRef.router);
+	};
+
+	const CONSENT = "/session/federation-grants/consent";
+
+	it("refuses a body over 16 KiB with the route's own 413", async () => {
+		const app = await bootSessionFirst();
+
+		const res = await request(app)
+			.post(CONSENT)
+			.set("Content-Type", "application/json")
+			.send(JSON.stringify({ challenge: "c", decision: "accept", pad: "a".repeat(40 * 1024) }));
+
+		expect(res.status).toBe(413);
+		expect(res.body).toEqual({ error: "invalid_request", error_description: "body_too_large" });
+	});
+
+	it("refuses malformed JSON with the route's own 400", async () => {
+		const app = await bootSessionFirst();
+
+		const res = await request(app)
+			.post(CONSENT)
+			.set("Content-Type", "application/json")
+			.send("{not json");
+
+		expect(res.status).toBe(400);
+		expect(res.body).toEqual({ error: "invalid_request", error_description: "malformed_body" });
+		expect(res.headers["cache-control"]).toContain("no-store");
+	});
+});
