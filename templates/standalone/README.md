@@ -515,6 +515,10 @@ only for a loopback host — `localhost`, an address in `127.0.0.0/8`, or `[::1]
 deployment does not control end to end. Boot fails if either URL, the timeout,
 or the response cap is unusable, rather than at the first login attempt.
 
+Each URL must be the endpoint that answers, not one that redirects: no request
+follows a `3xx`, so a URL that redirects fails every call — see
+[What the Store must enforce itself](../../packages/foundation/README.md#what-the-store-must-enforce-itself).
+
 ### Code Repository
 
 | Variable | Default | Description |
