@@ -22,12 +22,14 @@
  * about the IdP.
  */
 
+import { createHash } from "node:crypto";
 import { createLocalJWKSet, decodeProtectedHeader, jwtVerify } from "jose";
 import { describe, expect, it } from "vitest";
 import { createFakeIdp } from "../fake-idp.mjs";
 
 const ENDPOINTS = {
 	issuer: "https://idp.test",
+	authorizationEndpoint: "https://idp.test/authorize",
 	tokenEndpoint: "https://tokens.idp.test/token",
 	jwksUri: "https://keys.idp.test/certs",
 	userinfoEndpoint: "https://api.idp.test/userinfo",
@@ -107,6 +109,91 @@ describe("createFakeIdp", () => {
 		expect("refresh_token" in refresh).toBe(false);
 		expect(refresh.token_type).toBe("DPoP");
 		expect(refresh.expires_in).toBe(1800);
+	});
+
+	describe("authorize — the user agent and the user at the authorization endpoint", () => {
+		const VERIFIER = "verifier-0123456789-abcdef-0123456789-abcdef-0123456789abcdef";
+		const CALLBACK = "https://rp.test/callback";
+		const request = (extra: Record<string, string> = {}): URL => {
+			const url = new URL(ENDPOINTS.authorizationEndpoint);
+			url.search = new URLSearchParams({
+				client_id: "client-under-test",
+				redirect_uri: CALLBACK,
+				state: "s-1",
+				nonce: "n-1",
+				code_challenge: createHash("sha256").update(VERIFIER).digest("base64url"),
+				code_challenge_method: "S256",
+				...extra,
+			}).toString();
+			return url;
+		};
+		const redeem = async (
+			idp: Awaited<ReturnType<typeof createFakeIdp>>,
+			code: string,
+			form: Record<string, string> = {},
+		) =>
+			idp.fetch(
+				ENDPOINTS.tokenEndpoint,
+				post({
+					grant_type: "authorization_code",
+					code,
+					redirect_uri: CALLBACK,
+					code_verifier: VERIFIER,
+					...form,
+				}),
+			);
+
+		it("answers a code, the state and its issuer, and binds the next id_token to the nonce", async () => {
+			const idp = await createFakeIdp(ENDPOINTS);
+			const answer = idp.authorize(request());
+			expect(answer).toEqual({ code: "authorized-code-1", state: "s-1", iss: ENDPOINTS.issuer });
+			expect(idp.nonce).toBe("n-1");
+			const token = await (await redeem(idp, answer.code)).json();
+			const { payload } = await jwtVerify(token.id_token, await jwks(idp));
+			expect(payload.nonce).toBe("n-1");
+		});
+
+		it("refuses a request for another endpoint or another client", async () => {
+			const idp = await createFakeIdp(ENDPOINTS);
+			expect(() => idp.authorize(`${ENDPOINTS.issuer}/elsewhere`)).toThrow(
+				/authorization endpoint/,
+			);
+			expect(() => idp.authorize(request({ client_id: "stranger" }))).toThrow(/client_id/);
+			const bare = await createFakeIdp({ ...ENDPOINTS, authorizationEndpoint: undefined });
+			expect(() => bare.authorize(request())).toThrow(/authorization endpoint/);
+		});
+
+		it("holds the exchange to the request: one use, its redirect URI, a verifier matching its challenge", async () => {
+			const idp = await createFakeIdp(ENDPOINTS);
+			const { code } = idp.authorize(request());
+			expect((await redeem(idp, code, { code_verifier: "wrong" })).status).toBe(400);
+			const second = idp.authorize(request());
+			expect(
+				(await redeem(idp, second.code, { redirect_uri: "https://rp.test/other" })).status,
+			).toBe(400);
+			const third = idp.authorize(request());
+			expect((await redeem(idp, third.code)).status).toBe(200);
+			// Spent: an unknown code again, answered the way the fake answers any.
+			expect((await (await redeem(idp, third.code)).json()).refresh_token).toBe("rt-1");
+		});
+
+		it("with refreshTokenOnlyOnConsent, issues a refresh token only for offline access on a consent screen", async () => {
+			const idp = await createFakeIdp(ENDPOINTS);
+			idp.refreshTokenOnlyOnConsent = true;
+			const offline = { access_type: "offline" };
+
+			const first = idp.authorize(request(offline));
+			expect((await (await redeem(idp, first.code)).json()).refresh_token).toBe("rt-1");
+			// The user has consented: no screen, so no refresh token.
+			const returning = idp.authorize(request(offline));
+			expect((await (await redeem(idp, returning.code)).json()).refresh_token).toBeUndefined();
+			// A consent screen asked for again brings one.
+			const prompted = idp.authorize(request({ ...offline, prompt: "consent" }));
+			expect((await (await redeem(idp, prompted.code)).json()).refresh_token).toBe("rt-1");
+			// Online access never does, consent or not.
+			const online = idp.authorize(request({ prompt: "consent" }));
+			expect((await (await redeem(idp, online.code)).json()).refresh_token).toBeUndefined();
+		});
 	});
 
 	it("leaves the id_token out when told to", async () => {

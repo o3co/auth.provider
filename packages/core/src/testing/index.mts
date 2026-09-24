@@ -53,6 +53,7 @@ export { createTestApp, type TestAppHandle } from "./create-test-app.mjs";
 export {
 	createFakeIdp,
 	type FakeIdp,
+	type FakeIdpAuthorizationResponse,
 	type FakeIdpOptions,
 	type FakeIdpRequest,
 } from "./fake-idp.mjs";

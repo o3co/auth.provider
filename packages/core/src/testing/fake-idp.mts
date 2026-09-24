@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 
+import { createHash } from "node:crypto";
 import { type CryptoKey, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 
 /**
@@ -38,8 +39,18 @@ export interface FakeIdpOptions {
 	readonly jwksUri: string;
 	/** Absent for a provider that publishes none (Apple). */
 	readonly userinfoEndpoint?: string;
+	/** Where `authorize` accepts an authorization request. Required to call it. */
+	readonly authorizationEndpoint?: string;
 	readonly clientId?: string;
 	readonly sub?: string;
+}
+
+/** What the user agent carries back to the callback from `authorize`. */
+export interface FakeIdpAuthorizationResponse {
+	readonly code: string;
+	readonly state: string | null;
+	/** RFC 9207: the issuer, as an IdP that advertises the parameter sends it. */
+	readonly iss: string;
 }
 
 export interface FakeIdpRequest {
@@ -81,6 +92,24 @@ export interface FakeIdp {
 	codeAnswer: Record<string, unknown>;
 	/** Laid over the refresh answer, as `codeAnswer` is over the code exchange's. */
 	refreshAnswer: Record<string, unknown>;
+	/**
+	 * Google's documented rule for a code `authorize` issued: the exchange
+	 * carries a `refresh_token` only when the authorization asked for
+	 * `access_type=offline` AND the user was shown the consent screen — the
+	 * first time this client asks this user, or whenever `prompt` includes
+	 * `consent`. Default `false`: every exchange carries one.
+	 */
+	refreshTokenOnlyOnConsent: boolean;
+	/**
+	 * Play the user agent and the user at the authorization endpoint: accept
+	 * the authorization request `url` names (its client, redirect URI, PKCE
+	 * challenge and nonce are recorded, and the next id_token echoes the
+	 * nonce), approve it, and answer what the IdP redirects back with. The
+	 * token endpoint then holds the exchange of that code to the recorded
+	 * request: the same redirect URI, a verifier that matches the challenge,
+	 * one use.
+	 */
+	authorize(url: URL | string): FakeIdpAuthorizationResponse;
 	/** Replace the signing key; the JWKS then holds only the new one. */
 	rotateKey(): Promise<string>;
 	currentKid(): string;
@@ -117,7 +146,19 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 			options.userinfoEndpoint === undefined
 				? undefined
 				: originAndPath(new URL(options.userinfoEndpoint)),
+		authorization:
+			options.authorizationEndpoint === undefined
+				? undefined
+				: originAndPath(new URL(options.authorizationEndpoint)),
 	};
+
+	/** The authorization request behind each code `authorize` issued, until it is exchanged. */
+	const authorizations = new Map<
+		string,
+		{ readonly params: URLSearchParams; readonly consentShown: boolean }
+	>();
+	/** Whether this client has been granted consent by this user before. */
+	let consentGranted = false;
 
 	let keyIndex = 0;
 	let signer: { kid: string; key: CryptoKey } = { kid: "", key: undefined as unknown as CryptoKey };
@@ -149,6 +190,24 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 		accessToken: "at-1",
 		codeAnswer: {},
 		refreshAnswer: {},
+		refreshTokenOnlyOnConsent: false,
+		authorize: (input) => {
+			const url = new URL(input);
+			if (endpoints.authorization === undefined || originAndPath(url) !== endpoints.authorization) {
+				throw new Error(`fake IdP: ${originAndPath(url)} is not its authorization endpoint`);
+			}
+			const params = url.searchParams;
+			if (params.get("client_id") !== clientId) {
+				throw new Error(`fake IdP: unknown client_id ${String(params.get("client_id"))}`);
+			}
+			const prompts = (params.get("prompt") ?? "").split(" ");
+			const consentShown = !consentGranted || prompts.includes("consent");
+			consentGranted = true;
+			const code = `authorized-code-${authorizations.size + 1}`;
+			authorizations.set(code, { params: new URLSearchParams(params), consentShown });
+			idp.nonce = params.get("nonce") ?? undefined;
+			return { code, state: params.get("state"), iss: issuer };
+		},
 		fetch: undefined as unknown as typeof fetch,
 		rotateKey: newKey,
 		currentKid: () => signer.kid,
@@ -224,13 +283,34 @@ export async function createFakeIdp(options: FakeIdpOptions): Promise<FakeIdp> {
 					),
 				);
 			}
+			const code = body?.get("code") ?? "";
+			const authorization = authorizations.get(code);
+			let issueRefreshToken = true;
+			if (authorization !== undefined) {
+				// One use, the same redirect URI, and a verifier that matches the
+				// challenge (RFC 6749 §4.1.3, RFC 7636 §4.6).
+				authorizations.delete(code);
+				const challenge = createHash("sha256")
+					.update(body?.get("code_verifier") ?? "")
+					.digest("base64url");
+				if (
+					body?.get("redirect_uri") !== authorization.params.get("redirect_uri") ||
+					challenge !== authorization.params.get("code_challenge")
+				) {
+					return json({ error: "invalid_grant" }, 400);
+				}
+				if (idp.refreshTokenOnlyOnConsent) {
+					issueRefreshToken =
+						authorization.params.get("access_type") === "offline" && authorization.consentShown;
+				}
+			}
 			return json(
 				overlaid(
 					{
 						access_token: idp.accessToken,
 						token_type: "Bearer",
 						expires_in: 3600,
-						refresh_token: "rt-1",
+						...(issueRefreshToken ? { refresh_token: "rt-1" } : {}),
 						...(idp.omitIdToken ? {} : { id_token: await mintIdToken() }),
 					},
 					idp.codeAnswer,
