@@ -271,8 +271,10 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 	};
 
 	const router = express.Router();
-	router.use(express.json());
-	router.use(express.urlencoded({ extended: false }));
+	// Scoped to the one path this router serves: it is mounted without a
+	// path inside the OAuth router, so unscoped parsers would read the body
+	// of every request under `/oauth` that reached it — other modules' too.
+	router.use("/consent", express.json(), express.urlencoded({ extended: false }));
 
 	router.get("/consent", async (req, res) => {
 		const found = await pendingFor(req, res, req.query.challenge);

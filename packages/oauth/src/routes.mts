@@ -110,6 +110,36 @@ declare module "express-session" {
 	}
 }
 
+/**
+ * Every path this router serves, its sub-routers' included — the only
+ * requests whose bodies it parses.
+ *
+ * The router is mounted at `/oauth`, a prefix other modules mount routes
+ * under too (the device grant, federation grants, WebAuthn, a deployment's
+ * own). Parsers that ran for every request beneath it consumed those
+ * routes' request streams whenever this router was mounted ahead of them,
+ * and `body-parser` does not parse a body twice — so another route's own
+ * parser, limit and media types silently never ran, and what it received
+ * depended on the order the modules were listed in. Scoped to these paths,
+ * a request this router does not own passes through with its body unread.
+ *
+ * Every route here gets exactly what it got before: JSON and urlencoded
+ * (`extended: false`), Express's default limits, ahead of anything else.
+ * `bodyParsing.test.mts` discovers the router's routes and checks that
+ * each one is parsed, so a route added without its path here fails there.
+ */
+const OAUTH_ROUTE_PATHS = [
+	"/token",
+	"/introspect",
+	"/authorize",
+	"/userinfo",
+	"/logout",
+	"/federation/:name/logout",
+	"/federation/:name/token",
+	"/revoke",
+	"/consent",
+];
+
 export const createOAuthRouter = async (
 	express: {
 		Router: () => Router;
@@ -331,8 +361,7 @@ export const createOAuthRouter = async (
 	});
 
 	router
-		.use(express.json())
-		.use(express.urlencoded({ extended: false }))
+		.use(OAUTH_ROUTE_PATHS, express.json(), express.urlencoded({ extended: false }))
 		.post(
 			"/token",
 			// D-6 ordering: rate limit BEFORE client auth so repeated unauthenticated
