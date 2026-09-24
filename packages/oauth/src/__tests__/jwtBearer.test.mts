@@ -1248,6 +1248,72 @@ describe("jwt-bearer grant — the token never outlives the assertion (auth.prox
 	});
 });
 
+describe("jwt-bearer grant — the lifetime it mints with, read when it is built", () => {
+	it("is refused when it is built with a bad access-token lifetime, and no ID-JAG jti is spent", async () => {
+		// Read when a request was answered, a hand-built lifetime the resolver
+		// refuses failed only after the verifier had recorded the assertion's
+		// jti: a 500, and an ID-JAG that can never be presented again.
+		const idp = generateKeyPairSync("ed25519");
+		const seen = createMemoryReplaySeenSet();
+		const verifier = createRegistryAssertionVerifier({
+			registry: createMemoryAssertionIssuerRegistry([
+				{
+					issuer: "https://idp.example",
+					keys: { type: "key", key: idp.publicKey },
+					algorithms: ["EdDSA"],
+					profile: "id-jag",
+				},
+			]),
+			audience: "https://auth.example",
+			issuerIdentifier: "https://auth.example",
+			replaySeenSet: seen,
+		});
+		const assertion = await new SignJWT({ client_id: "mcp-client", jti: "jti-lifetime" })
+			.setProtectedHeader({ alg: "EdDSA", typ: "oauth-id-jag+jwt" })
+			.setIssuer("https://idp.example")
+			.setSubject("user-1")
+			.setAudience("https://auth.example")
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(idp.privateKey);
+
+		for (const accessToken of [{ expiresIn: 1.5 }, { expiresIn: 0 }, {}]) {
+			let refused: unknown;
+			let grant: ReturnType<typeof build> | undefined;
+			try {
+				grant = build({
+					verifier,
+					config: {
+						oauth: { jwt: { issuer: "https://auth.example" }, accessToken },
+					} as unknown as AppConfig,
+				});
+			} catch (err) {
+				refused = err;
+			}
+			await grant
+				?.handle(
+					ctx(
+						{ assertion },
+						{
+							authenticatedClient: {
+								clientId: "mcp-client",
+								tokenEndpointAuthMethod: "client_secret_basic",
+								allowedScopes: [],
+							},
+						},
+					),
+				)
+				.catch(() => undefined);
+
+			expect(await seen.contains("jwt-bearer:id-jag:https://idp.example", "jti-lifetime")).toBe(
+				false,
+			);
+			expect(refused, JSON.stringify(accessToken)).toBeInstanceOf(RangeError);
+			expect((refused as Error).message).toMatch(/oauth\.accessToken/);
+		}
+	});
+});
+
 /*
  * #301 — enabling the grant without a verifier must fail at composition.
  *

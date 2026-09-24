@@ -65,6 +65,28 @@ function makeCtx(
 	};
 }
 
+describe("createClientCredentialsGrant — the lifetime it mints with, read when it is built", () => {
+	it("is refused when it is built with an access-token lifetime the resolver refuses", () => {
+		// Read per request, a hand-built lifetime failed every token request
+		// with a 500, after client authentication had spent whatever it spends.
+		const base = baseDeps.config as unknown as { oauth: Record<string, unknown> };
+		for (const accessToken of [
+			{ expiresIn: 1.5 },
+			{ expiresIn: 0 },
+			{ defaultExpiresIn: 600, maxExpiresIn: 60 },
+			{},
+		]) {
+			const config = {
+				oauth: { ...base.oauth, accessToken },
+			} as unknown as GrantDependencies["config"];
+			expect(
+				() => createClientCredentialsGrant({ ...baseDeps, config }),
+				JSON.stringify(accessToken),
+			).toThrow(RangeError);
+		}
+	});
+});
+
 describe("createClientCredentialsGrant — gates", () => {
 	it("returns 401 invalid_client when no authenticated client", async () => {
 		const handler = createClientCredentialsGrant(baseDeps);

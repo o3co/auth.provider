@@ -54,6 +54,26 @@ const AUTH_CLIENT = {
 	allowedScopes: ["read", "write"],
 };
 
+describe("createSessionGrant — the lifetime it mints with, read when it is built", () => {
+	it("is refused when it is built with an access-token lifetime the resolver refuses", () => {
+		// Read per request, a hand-built lifetime failed every token request
+		// with a 500, after client authentication had spent whatever it spends.
+		for (const accessToken of [
+			{ expiresIn: 1.5 },
+			{ expiresIn: 0 },
+			{ defaultExpiresIn: 600, maxExpiresIn: 60 },
+			{},
+		]) {
+			const config = {
+				oauth: { ...mockConfig.oauth, accessToken },
+			} as unknown as GrantDependencies["config"];
+			expect(() => createSessionGrant(makeDeps({ config })), JSON.stringify(accessToken)).toThrow(
+				RangeError,
+			);
+		}
+	});
+});
+
 describe("createSessionGrant", () => {
 	describe("handle", () => {
 		it("returns 401 when session is not authenticated", async () => {

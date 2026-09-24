@@ -107,6 +107,23 @@ const ctx = (
 	...overrides,
 });
 
+describe("createTokenExchangeGrant — the lifetime it mints with, read when it is built", () => {
+	it("is refused when it is built with an access-token lifetime the resolver refuses", () => {
+		// Read per request, a hand-built lifetime failed every exchange with a
+		// 500, after client authentication had spent whatever it spends.
+		const base = mockConfig as unknown as { oauth: Record<string, unknown> };
+		for (const accessToken of [
+			{ expiresIn: 1.5 },
+			{ expiresIn: 0 },
+			{ defaultExpiresIn: 600, maxExpiresIn: 60 },
+			{},
+		]) {
+			const config = { oauth: { ...base.oauth, accessToken } } as unknown as AppConfig;
+			expect(() => buildGrant({ config }), JSON.stringify(accessToken)).toThrow(RangeError);
+		}
+	});
+});
+
 describe("createTokenExchangeGrant — request errors", () => {
 	it("returns invalid_request when subject_token is missing", async () => {
 		const g = buildGrant();

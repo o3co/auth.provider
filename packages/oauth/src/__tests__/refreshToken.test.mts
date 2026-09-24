@@ -707,12 +707,13 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.error).toBe("temporarily_unavailable");
 		});
 
-		it("refuses a refresh-token lifetime that is not a positive whole number of seconds before the rotation spends the presented token", async () => {
+		it("is refused when it is built with a lifetime that is not a positive whole number of seconds, and no token is spent", async () => {
 			// The schema refuses such a value at boot; a configuration built by
 			// hand never meets it. `generateToken` refuses it too, but only after
-			// the rotation below has committed — the presented token spent and
-			// no token issued in its place (#449). So the grant reads the lifetime
-			// before it reserves anything, as it reads the access-token lifetime.
+			// the rotation has committed — the presented token spent and no token
+			// issued in its place (#449) — and read per request, even a check
+			// ahead of the rotation answers every request with a 500. The grant
+			// reads both lifetimes when it is built instead.
 			const refreshTokenFamilyStore = createMemoryRefreshTokenFamilyStore();
 			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore });
 			const revocation = createRefreshTokenFamilyRevocation({ refreshTokenFamilyStore });
@@ -732,29 +733,38 @@ describe("createRefreshTokenGrant", () => {
 				metadata: {},
 				authenticatedClient: DEFAULT_AUTH_CLIENT,
 			};
-			const withLifetime = (expiresIn: number): GrantDependencies => ({
+			const withOAuth = (over: Record<string, unknown>): GrantDependencies => ({
 				...mockDeps,
 				config: {
 					...mockConfig,
-					oauth: {
-						...mockConfig.oauth,
-						refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn },
-					},
+					oauth: { ...mockConfig.oauth, ...over },
 				} as GrantDependencies["config"],
 				refreshTokenFamilyRotation: rotation,
 				refreshTokenFamilyRevocation: revocation,
 			});
 
-			for (const expiresIn of [1.5, Number.NaN, 0]) {
-				await expect(
-					createRefreshTokenGrant(withLifetime(expiresIn)).handle(ctx),
-					String(expiresIn),
-				).rejects.toThrow(RangeError);
+			const broken: Record<string, unknown>[] = [
+				{ refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn: 1.5 } },
+				{ refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn: Number.NaN } },
+				{ refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn: 0 } },
+				{ accessToken: { expiresIn: 1.5 } },
+			];
+			for (const over of broken) {
+				let refused: unknown;
+				let handler: ReturnType<typeof createRefreshTokenGrant> | undefined;
+				try {
+					handler = createRefreshTokenGrant(withOAuth(over));
+				} catch (err) {
+					refused = err;
+				}
+				await handler?.handle(ctx).catch(() => undefined);
+				expect(refused, JSON.stringify(over)).toBeInstanceOf(RangeError);
+				expect((refused as Error).message).toMatch(/oauth\.(refreshToken|accessToken)\.expiresIn/);
 			}
 
 			// Nothing was spent: the same token still refreshes under a sound
 			// configuration, rather than reading as a replay.
-			const { result } = await createRefreshTokenGrant(withLifetime(86_400)).handle(ctx);
+			const { result } = await createRefreshTokenGrant(withOAuth({})).handle(ctx);
 			expect(result.status).toBe(200);
 		});
 

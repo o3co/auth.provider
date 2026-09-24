@@ -20,6 +20,8 @@ import {
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
+	type GrantHandler,
+	InMemoryCodeRepository,
 	type RefreshTokenFamilyRotation,
 	type SessionFamilyIndex,
 	type SessionRPRegistry,
@@ -110,6 +112,74 @@ function makeSessionRPRegistry(override?: Partial<SessionRPRegistry>): SessionRP
 		...override,
 	} as SessionRPRegistry;
 }
+
+describe("createAuthorizationGrant — the lifetimes it mints with", () => {
+	// A configuration built by hand never met the schema. Read when a request
+	// is answered, a bad lifetime was refused only after `consumeByCode` had
+	// spent the code: a 500, and a code the client can never redeem. Read when
+	// the grant is built, it is a composition fault that never reaches a code.
+	const broken: Array<[string, Record<string, unknown>]> = [
+		["oauth.refreshToken.expiresIn = 1.5", { refreshToken: { expiresIn: 1.5 } }],
+		["oauth.refreshToken.expiresIn = NaN", { refreshToken: { expiresIn: Number.NaN } }],
+		["oauth.refreshToken.expiresIn = 0", { refreshToken: { expiresIn: 0 } }],
+		["no oauth.refreshToken.expiresIn", { refreshToken: {} }],
+		["oauth.accessToken.expiresIn = 1.5", { accessToken: { expiresIn: 1.5 } }],
+	];
+	for (const [label, over] of broken) {
+		it(`is refused when it is built with ${label}, and no code is spent`, async () => {
+			const codes = new InMemoryCodeRepository();
+			try {
+				const { code } = await codes.createCode({
+					client_id: "client1",
+					redirect_uri: RP_URI,
+					code_challenge: S256_CHALLENGE,
+					code_challenge_method: "S256",
+					grantedScope: ["read"],
+					grantedAudience: undefined,
+					nonce: undefined,
+					sid: undefined,
+					acr: undefined,
+				});
+				const deps = {
+					...makeDeps(vi.fn()),
+					codeRepository: codes,
+					config: {
+						oauth: { ...mockConfig.oauth, ...over },
+					} as unknown as GrantDependencies["config"],
+				};
+
+				let refused: unknown;
+				let handler: GrantHandler | undefined;
+				try {
+					handler = createAuthorizationGrant(deps);
+				} catch (err) {
+					refused = err;
+				}
+				// Were it built, this is the redemption that would spend the code.
+				await handler
+					?.handle({
+						body: {
+							code,
+							client_id: "client1",
+							redirect_uri: RP_URI,
+							code_verifier: CODE_VERIFIER,
+						},
+						session: { user: { id: "u1" } },
+						issuer: "localhost",
+						metadata: {},
+						authenticatedClient: DEFAULT_AUTH_CLIENT,
+					})
+					.catch(() => undefined);
+
+				expect(await codes.findByCode(code)).not.toBeNull();
+				expect(refused).toBeInstanceOf(RangeError);
+				expect((refused as Error).message).toMatch(/oauth\.(refreshToken|accessToken)\.expiresIn/);
+			} finally {
+				codes.dispose();
+			}
+		});
+	}
+});
 
 describe("createAuthorizationGrant", () => {
 	describe("handle", () => {
