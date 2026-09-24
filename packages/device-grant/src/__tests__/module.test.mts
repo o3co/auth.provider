@@ -54,6 +54,31 @@ const clientRepository: ClientRepository = {
 /** A logged projection's `stack`: frames only, from the first. */
 const FRAMES = expect.stringMatching(/^ {4}at /);
 
+/**
+ * A projected error, held to what these routes may log without naming the
+ * field its text sits in (that field is the projection's own business): its
+ * `name` and stack frames, the numeric or string fields named, and none of
+ * the fields that carry a request or a command — `command` (a user code, the
+ * approving subject), `body` (a client secret), `cause`, `args`, `expose`.
+ */
+const expectProjection = (err: unknown, fields: Record<string, unknown>): void => {
+	expect(err).not.toBeInstanceOf(Error);
+	expect(err).toMatchObject({ ...fields, stack: FRAMES });
+	for (const carrier of ["command", "body", "cause", "args", "expose"]) {
+		expect(err).not.toHaveProperty(carrier);
+	}
+};
+
+/** The one call `mock` received as `event`, and its line — failing when there is not exactly one. */
+const loggedAs = (
+	mock: { mock: { calls: unknown[][] } },
+	event: string,
+): Record<string, unknown> => {
+	const calls = mock.mock.calls.filter((call) => call[1] === event);
+	expect(calls, event).toHaveLength(1);
+	return calls[0]?.[0] as Record<string, unknown>;
+};
+
 /** What every device route answers a device-code store outage with. */
 const STORE_UNAVAILABLE = {
 	error: "temporarily_unavailable",
@@ -605,10 +630,10 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.headers["cache-control"]).toBe("no-store");
 		expect(res.body).toEqual(STORE_UNAVAILABLE);
 		expect(logger.error).toHaveBeenCalledTimes(1);
-		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ err: expect.objectContaining({ name: "ReplyError" }) }),
-			"device_verification_store_unavailable",
-		);
+		const line = loggedAs(logger.error, "device_verification_store_unavailable");
+		expect(Object.keys(line).sort()).toEqual(["action", "err"]);
+		expect(line.action).toBe("lookup");
+		expectProjection(line.err, { name: "ReplyError" });
 		expect(lines.join("\n")).toContain("READONLY You can't write against a read only replica.");
 		for (const line of lines) {
 			expect(line).not.toContain("BCDFGHJK");
@@ -654,9 +679,12 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: expect.objectContaining({ name: "TypeError", stack: FRAMES }) },
+			{ err: expect.anything() },
 			"device_route_unexpected_error",
 		);
+		expectProjection(loggedAs(logger.error, "device_route_unexpected_error").err, {
+			name: "TypeError",
+		});
 	});
 
 	it("answers an unexpected failure on the mounted device_authorization route with JSON 500, and logs a projection of it", async () => {
@@ -728,16 +756,20 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	it("treats an exposed 4xx a store throws as the outage it is — 503, logged", async () => {
 		// Only the parsers' errors are the caller's mistake. A store that throws
 		// an `http-errors`-shaped 403 has failed; it has not been refused a body.
-		const { res, logger } = await lookupThrowing(
+		const { res, lines, logger } = await lookupThrowing(
 			Object.assign(new Error("forbidden"), { expose: true, status: 403 }),
 		);
 
 		expect(res.status).toBe(503);
 		expect(res.body).toEqual(STORE_UNAVAILABLE);
-		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ err: expect.objectContaining({ name: "Error", status: 403 }) }),
-			"device_verification_store_unavailable",
-		);
+		const line = loggedAs(logger.error, "device_verification_store_unavailable");
+		expect(Object.keys(line).sort()).toEqual(["action", "err"]);
+		expectProjection(line.err, { name: "Error", status: 403 });
+		expect(lines.join("\n")).toContain("forbidden");
+		for (const logged of lines) {
+			expect(logged).not.toContain("BCDFGHJK");
+			expect(logged).not.toContain("user-1");
+		}
 	});
 
 	it("logs what a Redis reply error's message says, not the command arguments it echoes", async () => {
@@ -753,10 +785,9 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		);
 
 		expect(res.status).toBe(503);
-		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({ err: expect.objectContaining({ name: "ReplyError" }) }),
-			"device_verification_store_unavailable",
-		);
+		const line = loggedAs(logger.error, "device_verification_store_unavailable");
+		expect(Object.keys(line).sort()).toEqual(["action", "err"]);
+		expectProjection(line.err, { name: "ReplyError" });
 		expect(lines.join("\n")).toContain("ERR unknown command 'evalsha'");
 		for (const line of lines) {
 			expect(line).not.toContain("BCDFGHJK");
@@ -912,23 +943,21 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.body).toEqual(STORE_UNAVAILABLE);
 		expect(res.headers["cache-control"]).toContain("no-store");
 		expect(creates).toBe(1);
-		// The projection, not the error: named, and without the command
-		// arguments (asserted on the serialised lines below). Which field holds
-		// the text is the projection's own business.
-		expect(logger.error).toHaveBeenCalledWith(
-			expect.objectContaining({
-				clientId: CONFIDENTIAL_ID,
-				err: expect.objectContaining({ name: "ReplyError" }),
-			}),
-			"device_authorization_store_unavailable",
-		);
-		const [logged] = logger.error.mock.calls[0] ?? [];
-		expect((logged as { err?: unknown } | undefined)?.err).not.toBeInstanceOf(Error);
+		// The projection, not the error: the fields named, none that carries the
+		// command, and the kept text without the arguments.
+		const line = loggedAs(logger.error, "device_authorization_store_unavailable");
+		expect(Object.keys(line).sort()).toEqual(["clientId", "err"]);
+		expect(line.clientId).toBe(CONFIDENTIAL_ID);
+		expectProjection(line.err, { name: "ReplyError" });
 		expect(logger.warn).not.toHaveBeenCalledWith(
 			expect.anything(),
 			"device_authorization_code_collision",
 		);
-		for (const line of lines) expect(line).not.toContain("BCDFGHJK");
+		expect(lines.join("\n")).toContain("ERR unknown command 'evalsha'");
+		for (const logged of lines) {
+			expect(logged).not.toContain("BCDFGHJK");
+			expect(logged).not.toContain("'sha'");
+		}
 	});
 
 	it("still re-draws on the store's collision signal, and gives up with 500 after a run of them", async () => {
@@ -958,10 +987,9 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.status).toBe(500);
 		expect(res.body.error).toBe("server_error");
 		expect(creates).toBe(5);
-		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ err: expect.objectContaining({ name: "DeviceCodeStoreError" }) }),
-			"device_authorization_code_collision",
-		);
+		const line = loggedAs(logger.warn, "device_authorization_code_collision");
+		expect(Object.keys(line).sort()).toEqual(["clientId", "err"]);
+		expectProjection(line.err, { name: "DeviceCodeStoreError" });
 	});
 
 	/** 1000 parameters is body-parser's `parameterLimit`; the secret rides along. */
