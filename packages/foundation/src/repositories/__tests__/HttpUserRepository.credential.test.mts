@@ -537,6 +537,63 @@ describe("a transport failure carries nothing the request carried", () => {
 		},
 	);
 
+	it.each(calls)(
+		"%s: a timeout is a TimeoutError whether the headers or the body stall, so a reporter that reads names says timeout",
+		async (_name, path, call) => {
+			// federation-grants' sanitized reporter classifies by `name` alone;
+			// the identity lookup's timeout was already a TimeoutError and the
+			// other three were plain Errors, read as "unknown".
+			const stalls = {
+				"the headers": () =>
+					serve((req) => {
+						req.resume();
+					}),
+				"the body": () =>
+					serve((req, res) => {
+						req.resume();
+						req.on("end", () => {
+							res.writeHead(200, { "Content-Type": "application/json" });
+							res.write('{"id":"user-1",');
+							// ...and never ends.
+						});
+					}),
+			};
+			const seen: Record<string, unknown> = {};
+			for (const [where, origin] of Object.entries(stalls)) {
+				const base = await origin();
+				const repo = new HttpUserRepository({ ...urls(base), bearerToken: TOKEN, timeout: 100 });
+				const error = await Promise.resolve(call(repo)).then(
+					() => undefined,
+					(thrown: unknown) => thrown as Error,
+				);
+				seen[where] = {
+					name: error?.name,
+					message: error?.message,
+					cause: error?.cause,
+				};
+			}
+			const expected = {
+				name: "TimeoutError",
+				message: `HttpUserRepository: request to ${"<origin>"}${path} timed out after 100ms`,
+				cause: undefined,
+			};
+			expect(
+				Object.fromEntries(
+					Object.entries(seen).map(([where, value]) => [
+						where,
+						{
+							...(value as typeof expected),
+							message: (value as typeof expected).message?.replace(
+								/http:\/\/127\.0\.0\.1:\d+/,
+								"<origin>",
+							),
+						},
+					]),
+				),
+			).toEqual({ "the headers": expected, "the body": expected });
+		},
+	);
+
 	it("names a transport code an operator can act on — and nothing else of the failure", async () => {
 		const origin = await closedOrigin();
 		const repo = new HttpUserRepository({ ...urls(origin), bearerToken: TOKEN, timeout: 5000 });

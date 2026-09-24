@@ -333,7 +333,8 @@ against it rather than relying on the abort signal, because aborting a request
 does not reliably interrupt a read already in flight. That is the slow-loris
 shape — headers arrive promptly, then the body dribbles or stops — and without
 the race it hangs forever. A request that outlives the deadline rejects with a
-`timed out after <n>ms` error naming the endpoint.
+`timed out after <n>ms` error naming the endpoint, named `TimeoutError` on all
+four requests, so a reporter that classifies by name reads it as a timeout.
 
 **`maxResponseBytes` must be a positive integer**, defaulting to
 `DEFAULT_MAX_RESPONSE_BYTES` (1 MiB). The cap is enforced against

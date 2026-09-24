@@ -772,8 +772,16 @@ export class HttpUserRepository implements UserRepository {
 		// raced against. `.catch` is attached up front so an exchange that
 		// finishes first — the overwhelmingly common case, where the timer is
 		// cleared and this never rejects — cannot leave an unhandled rejection.
-		const timeoutError = (): Error =>
-			new Error(`HttpUserRepository: request to ${url} timed out after ${this.timeout}ms`);
+		// Named as the lookup's is: a reporter that classifies by `name` —
+		// federation-grants' reads `TimeoutError` as `timeout` — sees one kind
+		// of timeout whichever request it came from.
+		const timeoutError = (): Error => {
+			const error = new Error(
+				`HttpUserRepository: request to ${url} timed out after ${this.timeout}ms`,
+			);
+			error.name = "TimeoutError";
+			return error;
+		};
 		let fireDeadline: () => void = () => {};
 		const deadline = new Promise<never>((_resolve, reject) => {
 			fireDeadline = () => reject(timeoutError());
