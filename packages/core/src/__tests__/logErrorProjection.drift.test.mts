@@ -115,24 +115,32 @@ const MESSAGE_OR_STRING = new RegExp(
 	String.raw`\b${ERROR_NAME}\.message\b|\bString\(\s*${ERROR_NAME}\s*\)`,
 );
 
+/** The line of every logger call in `original` that passes a caught error as it is. */
+function sitesIn(original: string): number[] {
+	const source = withoutComments(original);
+	const lines: number[] = [];
+	for (const call of source.matchAll(LOGGER_CALL)) {
+		const open = (call.index ?? 0) + call[0].length - 1;
+		const args = literalsBlanked(argumentsFrom(source, open));
+		const positional = topLevelArguments(args).slice(1);
+		if (
+			RAW_PROPERTY.test(args) ||
+			PROPERTY_NOT_PROJECTED.test(args) ||
+			positional.some((arg) => BARE_ERROR_ARGUMENT.test(arg)) ||
+			MESSAGE_OR_STRING.test(args)
+		) {
+			lines.push(source.slice(0, call.index).split("\n").length);
+		}
+	}
+	return lines;
+}
+
 function rawErrorLogSites(): string[] {
 	const sites: string[] = [];
 	for (const pkg of PACKAGES) {
 		for (const file of sourceFiles(join(repoRoot, "packages", pkg, "src"))) {
-			const source = withoutComments(readFileSync(file, "utf8"));
-			for (const call of source.matchAll(LOGGER_CALL)) {
-				const open = (call.index ?? 0) + call[0].length - 1;
-				const args = literalsBlanked(argumentsFrom(source, open));
-				const positional = topLevelArguments(args).slice(1);
-				if (
-					RAW_PROPERTY.test(args) ||
-					PROPERTY_NOT_PROJECTED.test(args) ||
-					positional.some((arg) => BARE_ERROR_ARGUMENT.test(arg)) ||
-					MESSAGE_OR_STRING.test(args)
-				) {
-					const line = source.slice(0, call.index).split("\n").length;
-					sites.push(`${relative(repoRoot, file)}:${line}`);
-				}
+			for (const line of sitesIn(readFileSync(file, "utf8"))) {
+				sites.push(`${relative(repoRoot, file)}:${line}`);
 			}
 		}
 	}
@@ -144,29 +152,63 @@ describe("a caught error reaches a logger only through loggableError", () => {
 		expect(rawErrorLogSites()).toEqual([]);
 	});
 
-	it("the guard sees the shapes it exists for", () => {
-		// A self-check against a guard that silently matches nothing.
-		const probe = (call: string): boolean => {
-			const args = literalsBlanked(argumentsFrom(call, call.indexOf("(")));
-			return (
-				RAW_PROPERTY.test(args) ||
-				PROPERTY_NOT_PROJECTED.test(args) ||
-				topLevelArguments(args)
-					.slice(1)
-					.some((arg) => BARE_ERROR_ARGUMENT.test(arg)) ||
-				MESSAGE_OR_STRING.test(args)
-			);
-		};
-		expect(probe(`log.warn({ err }, "failed")`)).toBe(true);
-		expect(probe(`log.warn({ err: storeErr, sid }, "failed")`)).toBe(true);
-		expect(probe("logger.warn(`failed:`, error)")).toBe(true);
-		expect(probe("logger.warn(`failed:`, cleanupErr)")).toBe(true);
-		expect(
-			probe(`logger.warn("x", { reason: err instanceof Error ? err.message : String(err) })`),
-		).toBe(true);
-		expect(probe(`log.warn({ err: loggableError(err) }, "failed")`)).toBe(false);
-		expect(probe("logger.warn(`failed:`, loggableError(error))")).toBe(false);
-		expect(probe(`log.warn({ reason: "typ", site: "x" }, "rejected")`)).toBe(false);
-		expect(probe(`log.warn({ error: "invalid_grant" }, "refused")`)).toBe(false);
+	describe("the guard sees the shapes it exists for, and no others", () => {
+		// A self-check against a guard that silently matches nothing, or that
+		// refuses another PR's code for a name it happens to use.
+		const flags = (source: string): boolean => sitesIn(source).length > 0;
+
+		it.each([
+			["shorthand", `try { x() } catch (err) { log.warn({ err }, "failed"); }`],
+			[
+				"another key",
+				`try { x() } catch (storeErr) { log.warn({ err: storeErr, sid }, "failed"); }`,
+			],
+			[
+				"a binding of any name",
+				`try { x() } catch (failure) { logger.warn({ err: failure }, "failed"); }`,
+			],
+			["{ cause: err }", `try { x() } catch (err) { logger.warn({ cause: err }, "failed"); }`],
+			["{ reason: err }", `try { x() } catch (err) { logger.warn({ reason: err }, "failed"); }`],
+			["a positional argument", "try { x() } catch (error) { logger.warn(`failed:`, error); }"],
+			[
+				"its message",
+				`try { x() } catch (err) { logger.warn("x", { reason: err instanceof Error ? err.message : String(err) }); }`,
+			],
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+			["a template literal", "try { x() } catch (err) { logger.warn(`failed: ${err.message}`); }"],
+			["logger.child", `try { x() } catch (err) { const scoped = logger.child({ err }); }`],
+			["console", `try { x() } catch (err) { console.error("failed", err); }`],
+			[".catch", `p.catch((err) => logger.warn({ err }, "failed"));`],
+			['.on("error")', `client.on("error", (err) => logger.error({ err }, "client_error"));`],
+			['.once("error")', `client.once("error", async (e) => log.error({ e }, "client_error"));`],
+		])("flags %s", (_label, source) => {
+			expect(flags(source)).toBe(true);
+		});
+
+		it.each([
+			[
+				"the projection",
+				`try { x() } catch (err) { log.warn({ err: loggableError(err) }, "failed"); }`,
+			],
+			[
+				"a projection's field",
+				"try { x() } catch (err) { logger.warn(`failed:`, loggableError(err).name); }",
+			],
+			[
+				"a code string named error",
+				`const error = sanitize(code); logger.warn({ error: auditErrorText(String(error)) }, "token_error_code_malformed");`,
+			],
+			[
+				"a code string in shorthand",
+				`const error = sanitize(code); logger.warn({ error, clientId }, "refused");`,
+			],
+			["a literal", `log.warn({ error: "invalid_grant", reason: "typ" }, "refused");`],
+			[
+				"another object's field",
+				`try { x() } catch (err) { log.warn({ code: result.err }, "x"); }`,
+			],
+		])("does not flag %s", (_label, source) => {
+			expect(flags(source)).toBe(false);
+		});
 	});
 });
