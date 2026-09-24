@@ -50,6 +50,9 @@ const clientRepository: ClientRepository = {
 	authenticate: async () => null,
 };
 
+/** A logged projection's `stack`: frames only, from the first. */
+const FRAMES = expect.stringMatching(/^ {4}at /);
+
 const CONFIDENTIAL_ID = "backend-app";
 const CONFIDENTIAL_SECRET = "s3cret-value";
 const confidentialClient = {
@@ -599,6 +602,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 				err: {
 					name: "ReplyError",
 					message: "READONLY You can't write against a read only replica.",
+					stack: FRAMES,
 				},
 			},
 			"device_route_unexpected_error",
@@ -643,7 +647,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 				err: {
 					name: "TypeError",
 					message: expect.any(String),
-					stack: expect.stringMatching(/^ {4}at /),
+					stack: FRAMES,
 				},
 			},
 			"device_route_unexpected_error",
@@ -686,7 +690,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.status).toBe(500);
 		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { name: "Error", message: "forbidden", status: 403 } },
+			{ err: { name: "Error", message: "forbidden", status: 403, stack: FRAMES } },
 			"device_route_unexpected_error",
 		);
 	});
@@ -705,7 +709,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 
 		expect(res.status).toBe(500);
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { name: "ReplyError", message: "ERR unknown command 'evalsha'" } },
+			{ err: { name: "ReplyError", message: "ERR unknown command 'evalsha'", stack: FRAMES } },
 			"device_route_unexpected_error",
 		);
 		for (const line of lines) {
@@ -769,7 +773,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.status).toBe(500);
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.objectContaining({
-				err: { name: "ReplyError", message: "ERR unknown command 'evalsha'" },
+				err: { name: "ReplyError", message: "ERR unknown command 'evalsha'", stack: FRAMES },
 			}),
 			"device_authorization_code_collision",
 		);
@@ -884,7 +888,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { name: "Error", message: "limiter decision unreadable" } },
+			{ err: { name: "Error", message: "limiter decision unreadable", stack: FRAMES } },
 			"device_route_unexpected_error",
 		);
 	});

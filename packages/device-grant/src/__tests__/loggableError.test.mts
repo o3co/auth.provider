@@ -53,6 +53,9 @@ const parseErrorOf = (input: string): Error => {
 	throw new Error("parsed");
 };
 
+/** A projection's `stack`: frames only, from the first. */
+const FRAMES = expect.stringMatching(/^ {4}at /);
+
 /** What `fn` threw. */
 const thrownBy = (fn: () => unknown): unknown => {
 	try {
@@ -87,6 +90,7 @@ describe("loggableError", () => {
 			type: "store.failed",
 			code: "E_X",
 			status: 503,
+			stack: FRAMES,
 		});
 	});
 
@@ -94,6 +98,7 @@ describe("loggableError", () => {
 		expect(loggableError(Object.assign(new Error("m"), { type: 42 }))).toEqual({
 			name: "Error",
 			message: "m",
+			stack: FRAMES,
 		});
 	});
 
@@ -106,7 +111,11 @@ describe("loggableError", () => {
 		(_label, error, name) => {
 			// The phrase is Redis's own, so the cut is keyed on it rather than on
 			// the client library's class name.
-			expect(loggableError(error)).toEqual({ name, message: "ERR unknown command 'evalsha'" });
+			expect(loggableError(error)).toEqual({
+				name,
+				message: "ERR unknown command 'evalsha'",
+				stack: FRAMES,
+			});
 		},
 	);
 
@@ -116,14 +125,16 @@ describe("loggableError", () => {
 		expect(loggableError(parseErrorOf('{"user_code":"BCDFGHJK","sub":"user-1"'))).toEqual({
 			name: "SyntaxError",
 			position: 38,
+			stack: FRAMES,
 		});
 		const quoted = loggableError(parseErrorOf("user_code=BCDFGHJK&sub=user-1"));
-		expect(quoted).toEqual({ name: "SyntaxError" });
+		expect(quoted).toEqual({ name: "SyntaxError", stack: FRAMES });
+		expect(quoted.stack).not.toContain("BCDFGHJK");
 	});
 
 	it("keeps a position only when it is at most ten digits", () => {
 		const huge = new SyntaxError("Unexpected end of JSON input at position 12345678901234");
-		expect(loggableError(huge)).toEqual({ name: "SyntaxError" });
+		expect(loggableError(huge)).toEqual({ name: "SyntaxError", stack: FRAMES });
 	});
 
 	it("caps every string it keeps at 256 characters", () => {
@@ -151,7 +162,7 @@ describe("loggableError", () => {
 				throw new Error("getter");
 			},
 		});
-		expect(loggableError(error)).toEqual({ name: "Error", message: "m" });
+		expect(loggableError(error)).toEqual({ name: "Error", message: "m", stack: FRAMES });
 	});
 
 	it("reports a thrown value that is not an Error by its type alone", () => {
@@ -186,10 +197,13 @@ describe("loggableError", () => {
 		});
 
 		it("keeps no stack whose header no longer carries the message, as it cannot tell header from frames", () => {
-			// The message was rewritten after the stack was captured: the text
-			// the header does carry is unknown, and may be shaped like a frame.
+			// The message was rewritten after the stack was formatted — V8 does
+			// that on the first read of `stack`, from the message as it is then:
+			// what the header carries instead is unknown, and may be shaped like
+			// a frame.
 			const rewritten = new Error("refused\n    at gho_INJECTED (upstream.js:1:1)");
-			rewritten.message = "refused";
+			expect(rewritten.stack).toContain("gho_INJECTED");
+			rewritten.message = "upstream refused the request";
 			expect("stack" in loggableError(rewritten)).toBe(false);
 		});
 

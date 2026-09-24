@@ -40,9 +40,22 @@
  *     quotes the command's first arguments — so the cut is keyed on the
  *     phrase, not on a client library's class: ioredis's `ReplyError` names
  *     itself, node-redis's `ErrorReply` does not;
- *   - every string kept is capped at {@link LOGGED_STRING_MAX_LENGTH};
+ *   - `stack` keeps the frames and nothing of the header before them — the
+ *     header is `name: message`, and the message is the untrusted part, so
+ *     it is cut by the message's own text: a line of the message shaped
+ *     like a frame is cut with it. At most {@link LOGGED_STACK_MAX_FRAMES}
+ *     frames and {@link LOGGED_STACK_MAX_LENGTH} characters, whichever
+ *     comes first. No `stack` when it has no frames, or when its header no
+ *     longer carries the message (rewritten after V8 formatted the stack,
+ *     which it does on the first read of `stack`): there is then no telling
+ *     the header's lines from the frames;
+ *   - every other string kept is capped at {@link LOGGED_STRING_MAX_LENGTH};
  *   - a field whose read throws (a getter) is left out, so the projection
  *     itself never throws.
+ *
+ * The frames are what locates a failure in this package's own code — a
+ * `TypeError` on data it did not expect — which name and message alone do
+ * not.
  *
  * What a kept message may still contain: the error's own wording — for a
  * Redis reply, its text before the arguments (`ERR unknown command
@@ -63,6 +76,15 @@
  */
 export const LOGGED_STRING_MAX_LENGTH = 256;
 
+/** The most stack frames the projection keeps. */
+export const LOGGED_STACK_MAX_FRAMES = 10;
+
+/** The longest `stack` the projection keeps, frames joined; the cut may fall mid-frame. */
+export const LOGGED_STACK_MAX_LENGTH = 2048;
+
+/** A V8 stack frame's line, as it starts. */
+const FRAME_PREFIX = "    at ";
+
 /**
  * `target[key]`, read so that the read cannot throw: `{ value }`, or `null`
  * when it threw — a getter, a Proxy's trap. An error handler is handed
@@ -75,6 +97,34 @@ export const guardedRead = (target: object, key: string): { readonly value: unkn
 	} catch {
 		return null;
 	}
+};
+
+/**
+ * The frames of `stack`, without the header ahead of them. The header is cut
+ * by `message`'s own text, not at the first line shaped like a frame, which
+ * the message itself may contain. `undefined` when there are no frames, or
+ * when the header no longer carries `message`. What the text cannot show is
+ * a message rewritten, after the stack was formatted, to a leading part of
+ * the one the header carries: the rest of the old message then reads as
+ * the start of the frames.
+ */
+const framesOf = (stack: unknown, message: unknown): string | undefined => {
+	if (typeof stack !== "string") return undefined;
+	let rest = stack;
+	if (typeof message === "string" && message !== "") {
+		const at = stack.indexOf(message);
+		if (at < 0) return undefined;
+		rest = stack.slice(at + message.length);
+	}
+	const lines = rest.split("\n");
+	const first = lines.findIndex((line, index) => index > 0 && line.startsWith(FRAME_PREFIX));
+	if (first < 0) return undefined;
+	const frames: string[] = [];
+	for (const line of lines.slice(first, first + LOGGED_STACK_MAX_FRAMES)) {
+		if (!line.startsWith(FRAME_PREFIX)) break;
+		frames.push(line);
+	}
+	return frames.join("\n").slice(0, LOGGED_STACK_MAX_LENGTH);
 };
 
 export const loggableError = (error: unknown): Record<string, string | number> => {
@@ -112,5 +162,7 @@ export const loggableError = (error: unknown): Record<string, string | number> =
 		if (typeof value === "number") out[key] = value;
 		else if (typeof value === "string") out[key] = cap(value);
 	}
+	const stack = framesOf(read("stack"), message);
+	if (stack !== undefined) out.stack = stack;
 	return out;
 };
