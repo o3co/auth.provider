@@ -43,7 +43,6 @@ import type {
 import { decodeJwt } from "jose";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
-import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
 
@@ -98,20 +97,16 @@ function buildGrant(
 	} = {},
 ) {
 	const store = makeFamilyRevocation();
-	const registry = new ExchangeTokenValidatorRegistry();
-	registry.register(
-		ACCESS_TOKEN_TYPE,
-		createSelfIssuedAccessTokenValidator({
-			keyStore,
-			issuer: ISSUER,
-		}),
-	);
-	if (overrides.stub) registry.register(STUB_TOKEN_TYPE, stubValidator(overrides.stub));
+	// The resolver the grant reads is `get` alone, which a Map provides.
+	const validators = new Map([
+		[ACCESS_TOKEN_TYPE, createSelfIssuedAccessTokenValidator({ keyStore, issuer: ISSUER })],
+	]);
+	if (overrides.stub) validators.set(STUB_TOKEN_TYPE, stubValidator(overrides.stub));
 	return createTokenExchangeGrant({
 		config: overrides.config ?? mockConfig,
 		keyStore,
 		refreshTokenFamilyRevocation: store,
-		tokenExchangeValidatorResolver: registry,
+		tokenExchangeValidatorResolver: validators,
 		clientRepository: overrides.clientRepository ?? mockClientRepository(),
 		...(overrides.grantPolicy ? { grantPolicy: overrides.grantPolicy } : {}),
 	} as never);

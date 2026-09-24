@@ -32,7 +32,6 @@ import { decodeJwt } from "jose";
 import { afterEach, describe, expect, it } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
 import { tokenExchangeModule } from "#/module.mjs";
-import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import { ISSUER, keyStore, signSelfIssuedAccessToken } from "./fixtures.mjs";
 
@@ -72,21 +71,13 @@ function makeStatefulStore(): RefreshTokenFamilyRevocation & { revokedFamilies: 
 }
 
 function buildHandler(store: RefreshTokenFamilyRevocation) {
-	const registry = new ExchangeTokenValidatorRegistry();
 	// The validator projects `familyId` and the grant checks it against
 	// `refreshTokenFamilyRevocation` — the same split `tokenExchangeModule`
-	// wires, which the createApp suite below boots for real.
-	registry.register(
-		ACCESS_TOKEN_TYPE,
-		createSelfIssuedAccessTokenValidator({
-			keyStore,
-			issuer: ISSUER,
-		}),
-	);
-	// ExchangeTokenValidatorRegistry is structurally compatible with
-	// TokenExchangeValidatorResolver (both expose .get); A2-γ §3.3 removed
-	// the registry from the public surface but the class remains for
-	// test scaffolding.
+	// wires, which the createApp suite below boots for real. The resolver the
+	// grant reads is `get` alone, which a Map provides.
+	const validators = new Map([
+		[ACCESS_TOKEN_TYPE, createSelfIssuedAccessTokenValidator({ keyStore, issuer: ISSUER })],
+	]);
 	return createTokenExchangeGrant({
 		config: {
 			oauth: {
@@ -99,7 +90,7 @@ function buildHandler(store: RefreshTokenFamilyRevocation) {
 		} as any,
 		keyStore,
 		refreshTokenFamilyRevocation: store,
-		tokenExchangeValidatorResolver: registry,
+		tokenExchangeValidatorResolver: validators,
 		clientRepository,
 	});
 }

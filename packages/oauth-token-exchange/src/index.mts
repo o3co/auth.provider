@@ -21,13 +21,12 @@ export {
 	type TokenExchangeDependencies,
 } from "./grant.mjs";
 export { tokenExchangeModule } from "./module.mjs";
-// Per A2-γ §3.3: ExchangeTokenValidatorRegistry / Error were the v0.4.x
-// mutable consumer-facing surface and are no longer exported. At runtime
+// No validator registry is exported, and none exists here (the v0.4.x
+// mutable ExchangeTokenValidatorRegistry went with A2-γ §3.3). At runtime
 // the resolver is built by core's boot planner from every module's
 // contributes.tokenExchangeValidators; consumers read it via
 // deps.tokenExchangeValidatorResolver (TokenExchangeValidatorResolver) and
-// contribute new validators on their own modules. `validator/registry.mts`
-// is imported by this package's tests only.
+// contribute new validators on their own modules.
 export {
 	type CreateSelfIssuedAccessTokenValidatorOptions,
 	createSelfIssuedAccessTokenValidator,

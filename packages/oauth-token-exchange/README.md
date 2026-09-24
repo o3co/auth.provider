@@ -23,7 +23,7 @@ Supports on-behalf-of, delegation (`act` claim), and scope / audience narrowing.
 
 **Why a separate package.** Token exchange is optional, and not installing the module is how it is disabled; keeping it out of `@o3co/auth-provider-oauth` keeps a deployment that does not exchange tokens from carrying the grant at all. It depends on core alone — the handler and the validator need only core's grant and validator contracts — so it does not import the oauth package, and a sibling can contribute further validators without depending on either.
 
-`src/validator/registry.mts` (`ExchangeTokenValidatorRegistry`) is not part of the package's runtime: nothing but tests imports it, and the resolver the grant reads at runtime is the one core's boot planner builds.
+The resolver the grant reads is the one core's boot planner builds; the package keeps no validator registry of its own. Everything under `src/` outside `__tests__` is reached from `src/index.mts` and is published; test scaffolding stays under `__tests__`.
 
 ## Install
 
@@ -232,7 +232,7 @@ Sender-constrained exchange is supported: the handler enforces the DPoP and mTLS
 
 ## Tests
 
-[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest and the family answers of note 1, with `tokenExchangeModule` and core's refresh-token family modules booted through `createApp`.
+[`grant.test.mts`](./src/__tests__/grant.test.mts) and [`hardening.test.mts`](./src/__tests__/hardening.test.mts) pin the handler's refusals, [`act.test.mts`](./src/__tests__/act.test.mts) the actor chain and `may_act`, [`selfIssuedAccessToken.test.mts`](./src/__tests__/selfIssuedAccessToken.test.mts) the built-in validator, and [`grant-integration.test.mts`](./src/__tests__/grant-integration.test.mts) the module's manifest and the family answers of note 1, with `tokenExchangeModule` and core's refresh-token family modules booted through `createApp`. [`published-files.test.mts`](./src/__tests__/published-files.test.mts) holds that every source file the build publishes is reached from the entry point.
 
 ## RFC references
 

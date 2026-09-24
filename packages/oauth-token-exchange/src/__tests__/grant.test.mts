@@ -26,7 +26,6 @@ import type {
 import { decodeJwt } from "jose";
 import { describe, expect, it } from "vitest";
 import { createTokenExchangeGrant, TOKEN_EXCHANGE_GRANT_TYPE } from "#/grant.mjs";
-import { ExchangeTokenValidatorRegistry } from "#/validator/registry.mjs";
 import { createSelfIssuedAccessTokenValidator } from "#/validator/selfIssuedAccessToken.mjs";
 import { ISSUER, keyStore, makeFamilyRevocation, signSelfIssuedAccessToken } from "./fixtures.mjs";
 
@@ -64,7 +63,6 @@ const mockClientRepository = (client: PublicClient | null = publicClient()): Cli
 
 function buildGrant(
 	overrides: {
-		validatorRegistry?: ExchangeTokenValidatorRegistry;
 		clientRepository?: ClientRepository;
 		/** Pass `null` to explicitly omit the store from deps (fail-closed tests). */
 		refreshTokenFamilyRevocation?: ReturnType<typeof makeFamilyRevocation> | null;
@@ -72,30 +70,21 @@ function buildGrant(
 		grantPolicy?: GrantPolicyHook;
 	} = {},
 ) {
-	const registry = overrides.validatorRegistry ?? new ExchangeTokenValidatorRegistry();
 	// null = explicitly absent; undefined = use default
 	const grantStore =
 		overrides.refreshTokenFamilyRevocation === null
 			? undefined
 			: (overrides.refreshTokenFamilyRevocation ?? makeFamilyRevocation());
-	// The validator takes no family store: the grant owns the family check.
-	if (!overrides.validatorRegistry) {
-		registry.register(
-			ACCESS_TOKEN_TYPE,
-			createSelfIssuedAccessTokenValidator({
-				keyStore,
-				issuer: ISSUER,
-			}),
-		);
-	}
+	// The resolver the grant reads is `get` alone, which a Map provides. The
+	// validator takes no family store: the grant owns the family check.
+	const validators = new Map([
+		[ACCESS_TOKEN_TYPE, createSelfIssuedAccessTokenValidator({ keyStore, issuer: ISSUER })],
+	]);
 	return createTokenExchangeGrant({
 		config: overrides.config ?? mockConfig,
 		keyStore,
 		refreshTokenFamilyRevocation: grantStore,
-		// ExchangeTokenValidatorRegistry exposes structurally-compatible
-		// `.get()` for the resolver; A2-γ §3.3 keeps the registry class as
-		// test scaffolding even though it is no longer publicly exported.
-		tokenExchangeValidatorResolver: registry,
+		tokenExchangeValidatorResolver: validators,
 		clientRepository: overrides.clientRepository ?? mockClientRepository(),
 		...(overrides.grantPolicy ? { grantPolicy: overrides.grantPolicy } : {}),
 	});
