@@ -105,6 +105,7 @@
 import {
 	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
+	consoleLogger,
 	createRateLimitGuard,
 	DEVICE_CODE_STORE_ABSENCE_POLICY,
 	defineModule,
@@ -300,13 +301,18 @@ const requireVerificationUri = (slice: DeviceAuthorizationConfigSlice): string =
 const BODY_LIMIT = "16kb";
 const BODY_LIMIT_BYTES = 16 * 1024;
 
-/** The one answer for a body over the bound, however it was found to be. */
-const refuseTooLarge = (res: Response): void => {
+/** An RFC 6749 §5.2 error body, with the cache directives every exit of these routes carries. */
+const answerError = (res: Response, status: number, error: string, description: string): void => {
 	res
-		.status(413)
+		.status(status)
 		.set("Cache-Control", "no-store")
 		.set("Pragma", "no-cache")
-		.json({ error: "invalid_request", error_description: "body_too_large" });
+		.json({ error, error_description: description });
+};
+
+/** The one answer for a body over the bound, however it was found to be. */
+const refuseTooLarge = (res: Response): void => {
+	answerError(res, 413, "invalid_request", "body_too_large");
 };
 
 /**
@@ -317,7 +323,7 @@ const refuseTooLarge = (res: Response): void => {
  * the body is read. A body with no `Content-Length` (chunked) is left to the
  * parsers' own `limit`, as federation-grants leaves it; no other module's
  * parser reads these routes' bodies (`oauthModule`'s router parses its own
- * routes only), and `bodyTooLarge` gives the parsers' refusal the same
+ * routes only), and `routeErrors` gives the parsers' refusal the same
  * answer.
  */
 const withinBodyLimit: RequestHandler = (req, res, next) => {
@@ -330,19 +336,39 @@ const withinBodyLimit: RequestHandler = (req, res, next) => {
 };
 
 /**
- * A chunked body the parsers found over the bound, answered as
- * `withinBodyLimit` answers a declared one — federation-grants'
- * `parserErrors` for this one error type. Every other error passes on to the
- * host app's handler unchanged: what it does with a malformed body or a
- * thrown handler is the host's decision, not this module's.
+ * What either route answers for an error its middleware or handler passed
+ * on — federation-grants' `parserErrors`, with its codes. RFC 8628 §3.2
+ * gives `/oauth/device_authorization` RFC 6749 §5.2's JSON error response,
+ * and the verification API answers in JSON throughout, so none of these
+ * may fall through to the host app's error page:
+ *
+ *   - a chunked body the parsers found over the bound is the `413` a
+ *     declared one gets from `withinBodyLimit`;
+ *   - a body the parser could not read is `400 invalid_request`
+ *     (`malformed_body`), quoting none of it — `body-parser` puts the
+ *     offending input into its message;
+ *   - anything else is `500 server_error` (`unexpected_error`), with the
+ *     error itself written to the log rather than the response.
  */
-const bodyTooLarge: ErrorRequestHandler = (error, _req, res, next) => {
-	if (res.headersSent || (error as { type?: unknown } | null)?.type !== "entity.too.large") {
-		next(error);
-		return;
-	}
-	refuseTooLarge(res);
-};
+const routeErrors =
+	(logger: DeviceGrantModuleDeps["logger"]): ErrorRequestHandler =>
+	(error, _req, res, next) => {
+		if (res.headersSent) {
+			next(error);
+			return;
+		}
+		const type = (error as { type?: unknown } | null)?.type;
+		if (type === "entity.too.large") {
+			refuseTooLarge(res);
+			return;
+		}
+		if (type === "entity.parse.failed" || type === "encoding.unsupported") {
+			answerError(res, 400, "invalid_request", "malformed_body");
+			return;
+		}
+		(logger ?? consoleLogger).error({ err: error }, "device_route_unexpected_error");
+		answerError(res, 500, "server_error", "unexpected_error");
+	};
 
 /**
  * What a disabled deployment mounts instead of the real endpoint.
@@ -616,7 +642,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							logger: deps.logger,
 						}),
 					);
-					router.use(bodyTooLarge);
+					router.use(routeErrors(deps.logger));
 					return {
 						id: "device-authorization",
 						mountPath: "/oauth/device_authorization",
@@ -675,7 +701,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							auditSink: deps.auditSink,
 						}),
 					);
-					router.use(bodyTooLarge);
+					router.use(routeErrors(deps.logger));
 					return {
 						id: "device-verification",
 						mountPath: "/oauth/device/verification",
