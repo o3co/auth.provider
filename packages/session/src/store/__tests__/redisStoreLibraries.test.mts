@@ -22,6 +22,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { LOGGED_STRING_MAX_LENGTH } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import {
 	loadRedisStoreLibraries,
@@ -172,6 +173,68 @@ describe("loadRedisStoreLibraries", () => {
 			})) as AggregateError;
 			expect(err.errors).toEqual([expect.any(TypeError), "connect-redis threw a string"]);
 			expect(err.message).toContain('"connect-redis": connect-redis threw a string');
+		});
+	});
+
+	// What a log line keeps of the boot failure. createApp wraps what the route
+	// factory threw as `Module "<name>" route factory failed: ${String(err)}`
+	// (core's boot/apply-contributions.mts), and core's loggableError keeps the
+	// first LOGGED_STRING_MAX_LENGTH characters of a message. The install
+	// command, and what failed, have to be inside them.
+	describe("a log line keeps what the message is for", () => {
+		const logged = (err: unknown) =>
+			`Module "sessionStoreModule" route factory failed: ${String(err)}`.slice(
+				0,
+				LOGGED_STRING_MAX_LENGTH,
+			);
+		const evaluationError = (name: string) =>
+			new TypeError(`${name} failed to evaluate: ${"a long reason, ".repeat(20)}`);
+
+		it.each([
+			["redis missing", { redis: fails(packageNotFound("redis")) }, ['"redis"']],
+			[
+				"connect-redis missing",
+				{ connectRedis: fails(packageNotFound("connect-redis")) },
+				['"connect-redis"'],
+			],
+			[
+				"both missing",
+				{
+					redis: fails(packageNotFound("redis")),
+					connectRedis: fails(packageNotFound("connect-redis")),
+				},
+				['"redis" and "connect-redis"'],
+			],
+			[
+				"redis missing, connect-redis broken",
+				{
+					redis: fails(packageNotFound("redis")),
+					connectRedis: fails(evaluationError("connect-redis")),
+				},
+				['"redis"', '"connect-redis" failed to load as well'],
+			],
+			[
+				"connect-redis missing, redis broken",
+				{
+					redis: fails(evaluationError("redis")),
+					connectRedis: fails(packageNotFound("connect-redis")),
+				},
+				['"connect-redis"', '"redis" failed to load as well'],
+			],
+		])("%s: the install command and what failed", async (_case, over, named) => {
+			const line = logged(await failure(over));
+			expect(line).toContain(INSTALL);
+			for (const text of named) expect(line).toContain(text);
+		});
+
+		it("both broken: each failure is named, with the start of its message", async () => {
+			const redisReason = evaluationError("redis");
+			const connectRedisReason = evaluationError("connect-redis");
+			const line = logged(
+				await failure({ redis: fails(redisReason), connectRedis: fails(connectRedisReason) }),
+			);
+			expect(line).toContain(redisReason.message.slice(0, 40));
+			expect(line).toContain(connectRedisReason.message.slice(0, 40));
 		});
 	});
 
