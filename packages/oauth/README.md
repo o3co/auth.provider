@@ -524,7 +524,7 @@ Flow: verifies `id_token_hint` → loads the session → broadcasts an OIDC Back
 3. Remove the session's reverse-index entries (relying parties, families, federations) — best-effort, logged, bounded by TTL.
 4. Delete the `UserSession` last. Failure stops the cascade.
 
-A cascade that stopped answers `503 {"error": "temporarily_unavailable"}`, and a retry of the same logout is safe.
+A cascade that stopped answers `503 {"error": "temporarily_unavailable"}`, and a retry of the same logout is safe. It is logged once at error level as `logout_store_unavailable` with `store: "logout_cascade"`, the `cascadeStep` and the number of `failures`; each operation that failed also has its own `logout_cascade_operation_failed` (warn). A session store that cannot be read before the cascade is the same event with `store` naming it (`user_session`, `session_rp_registry`, `session_federation_index`).
 
 On every success shape — and on the no-op answer for a session that is already gone — the endpoint also **ends the browser's own express-session**, but only when that session's `sid` is the one being logged out. RP-initiated logout is a request any party may make about any session, so a cookie naming a different `sid`, or naming none, is left alone rather than signing out an unrelated user. Without this the cookie would keep satisfying `req.session.isAuthenticated` at `/authorize` after the stores were emptied. A destroy the session store cannot complete is logged and does not turn a successful cascade into a `503`; `/authorize` refuses the dead `sid` on its own account either way (see [The OIDC surface](#the-oidc-surface-stated-284)). The `503` deliberately leaves the cookie in place, so a retry still names the session.
 
@@ -536,7 +536,7 @@ Flow: verifies the access token → checks its family is not revoked → loads t
 
 If the IdP end-session call throws, local state is already cleared; the response is `200 {"disconnected": true}` and an audit event `federation.logout.idp_unreachable` is emitted for operator visibility.
 
-Returns `404 {"error": "federation_not_linked"}` when the named federation is not in the session. A keystore or a store that cannot answer — the family check included — is `503 temporarily_unavailable`, never `401 invalid_token`.
+Returns `404 {"error": "federation_not_linked"}` when the named federation is not in the session. A keystore or a store that cannot answer — the family check included — is `503 temporarily_unavailable`, never `401 invalid_token`, logged once at error level as `federation_logout_store_unavailable` with `store` and `step` (or `token_verification_unavailable` for the keystore).
 
 ### Discovery metadata
 
@@ -658,9 +658,9 @@ Both bundled stores meet these and are pinned on them.
 | 429 | `rate_limited` | Upstream IdP rate limit exceeded (`status: 429` or `error: "too_many_requests"`); retry later |
 | 500 | `refresh_failed` | Unclassified error from the IdP refresh path, or an answer this route could not read; SIEM should group on the `details.reason` audit field |
 | 502 | `upstream_token_ineligible` | The upstream's token is one this provider may not hand on. `error_description` names the reason — `token_type_unsupported` is the only one. Carries `Retry-After: 300` |
-| 503 | `refresh_not_supported` | Provider doesn't implement `SupportsRefresh` |
+| 503 | `refresh_not_supported` | Provider doesn't implement `SupportsRefresh`; logged at error level as `federation_token_refresh_unsupported` — the deployment's to fix |
 | 503 | `lock_timeout` | Advisory lock could not be acquired within the wait window |
-| 503 | `temporarily_unavailable` | Store outage — the refresh-token family check included — a keystore or revocation store that cannot answer while the access token is verified, IdP 5xx, or upstream network failure (ECONNREFUSED / ENOTFOUND / ETIMEDOUT — including codes wrapped on `error.cause.code` of a fetch TypeError) |
+| 503 | `temporarily_unavailable` | Store outage — the refresh-token family check included — a keystore or revocation store that cannot answer while the access token is verified, IdP 5xx, or upstream network failure (ECONNREFUSED / ENOTFOUND / ETIMEDOUT — including codes wrapped on `error.cause.code` of a fetch TypeError). Each is logged once at error level: a store as `federation_token_store_unavailable` with `store` and `step`, the client lookup as `client_repository_unavailable` (`site: "federation_token"`), the upstream as `federation_token_upstream_unavailable`; an upstream refusal that is not a 503 is `federation_token_refresh_failed` (warn) |
 
 All error responses set `Cache-Control: no-store` and `Pragma: no-cache`. 401 responses include `WWW-Authenticate: Bearer error="invalid_token"` per RFC 6750.
 

@@ -520,7 +520,7 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 3. セッションの逆引きインデックスのエントリー（RP、ファミリー、フェデレーション）を削除する — ベストエフォートで、ログに出し、TTL で上限がある。
 4. 最後に `UserSession` を削除する。失敗したらカスケードはそこで止まる。
 
-止まったカスケードは `503 {"error": "temporarily_unavailable"}` を返し、同じログアウトの再試行は安全である。
+止まったカスケードは `503 {"error": "temporarily_unavailable"}` を返し、同じログアウトの再試行は安全である。error レベルで 1 回、`store: "logout_cascade"`、`cascadeStep`、失敗した数 `failures` 付きの `logout_store_unavailable` としてログに出し、失敗した各操作は `logout_cascade_operation_failed`（warn）としても出す。カスケード前にセッションストアを読めなかったときも同じイベントで、`store` がそのストア（`user_session`、`session_rp_registry`、`session_federation_index`）を名指す。
 
 成功時のどの形でも — そして既に無くなっているセッションへの何もしない応答でも — エンドポイントは**ブラウザー自身の express-session も終わらせる**。ただしそのセッションの `sid` がログアウト対象のものであるときだけである。RP-Initiated Logout は誰でもどのセッションについても行えるリクエストなので、別の `sid` を名指す Cookie や何も名指さない Cookie は、無関係なユーザーをサインアウトさせないよう手を付けない。これが無いと、ストアが空になった後も Cookie が `/authorize` で `req.session.isAuthenticated` を満たし続ける。セッションストアが完了できない破棄はログに出し、成功したカスケードを `503` にはしない。`/authorize` はいずれにせよ自分の判断で死んだ `sid` を拒否する（[OIDC の対応範囲](#oidc-の対応範囲-284)を参照）。`503` は意図して Cookie を残すので、再試行は引き続きそのセッションを名指せる。
 
@@ -534,7 +534,7 @@ IdP の end-session 呼び出しが例外を投げた場合、ローカルの状
 
 答えられないキーストアやストア — ファミリーの確認を含む — は `401 invalid_token` ではなく `503 temporarily_unavailable` になる。
 
-指定のフェデレーションがセッションに無ければ `404 {"error": "federation_not_linked"}` を返す。
+指定のフェデレーションがセッションに無ければ `404 {"error": "federation_not_linked"}` を返す。答えられないストアは `503 temporarily_unavailable` で、`store` と `step` 付きの `federation_logout_store_unavailable` として error レベルで 1 回だけログに出す。
 
 ### ディスカバリーメタデータ
 
@@ -651,9 +651,9 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 | 429 | `rate_limited` | 上流 IdP のレート制限超過（`status: 429` または `error: "too_many_requests"`）。後で再試行する |
 | 500 | `refresh_failed` | IdP リフレッシュ経路の分類できないエラー、またはこのルートが読めない応答。SIEM は監査の `details.reason` フィールドでグループ化すること |
 | 502 | `upstream_token_ineligible` | 上流のトークンがこのプロバイダーの渡せないもの。理由は `error_description` が名乗る — `token_type_unsupported` だけである。`Retry-After: 300` を付ける |
-| 503 | `refresh_not_supported` | プロバイダーが `SupportsRefresh` を実装していない |
+| 503 | `refresh_not_supported` | プロバイダーが `SupportsRefresh` を実装していない。デプロイ側で直すべきものとして `federation_token_refresh_unsupported` を error レベルでログに出す |
 | 503 | `lock_timeout` | 待機ウィンドウ内に advisory lock を取得できなかった |
-| 503 | `temporarily_unavailable` | ストア障害（リフレッシュトークンファミリーの確認を含む）、アクセストークンの検証中に答えられないキーストアや失効ストア、IdP の 5xx、または上流のネットワーク障害（ECONNREFUSED / ENOTFOUND / ETIMEDOUT — fetch の TypeError の `error.cause.code` に包まれたコードを含む） |
+| 503 | `temporarily_unavailable` | ストア障害（リフレッシュトークンファミリーの確認を含む）、アクセストークンの検証中に答えられないキーストアや失効ストア、IdP の 5xx、または上流のネットワーク障害（ECONNREFUSED / ENOTFOUND / ETIMEDOUT — fetch の TypeError の `error.cause.code` に包まれたコードを含む）。それぞれ error レベルで 1 回だけログに出す: ストアは `store` と `step` 付きの `federation_token_store_unavailable`、クライアントの検索は `client_repository_unavailable`（`site: "federation_token"`）、上流は `federation_token_upstream_unavailable`。503 でない上流の拒否は `federation_token_refresh_failed`（warn） |
 
 すべてのエラーレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける。401 レスポンスには RFC 6750 に従い `WWW-Authenticate: Bearer error="invalid_token"` を含める。
 
