@@ -64,6 +64,10 @@ interface VocabularyRow {
 	readonly homeMatches?: number;
 }
 
+// One row per symbol, so the home has to define each of them: an
+// alternation would pass a home that kept one and lost the others. The
+// exceptions match one concept in two forms — a constant's two spellings, a
+// definition or a call, a const or a literal (with `homeMatches`).
 const VOCABULARY: readonly VocabularyRow[] = [
 	{
 		concept: "loopback hostname (#364)",
@@ -71,9 +75,14 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isLoopbackHostname\b/,
 	},
 	{
-		concept: "trusted-proxy address vocabulary (#292)",
+		concept: "trusted-proxy address vocabulary — one entry (#292)",
 		home: "packages/core/src/net/trusted-proxy.mts",
-		definition: /(?:function|const)\s+(?:checkTrustedProxyEntry|createTrustedProxyMatcher)\b/,
+		definition: /(?:function|const)\s+checkTrustedProxyEntry\b/,
+	},
+	{
+		concept: "trusted-proxy address vocabulary — the matcher (#292)",
+		home: "packages/core/src/net/trusted-proxy.mts",
+		definition: /(?:function|const)\s+createTrustedProxyMatcher\b/,
 	},
 	{
 		concept: "canonical request URL (#292, #356)",
@@ -95,8 +104,6 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/core/src/config/removed-keys.mts",
 		definition: /(?:function|const)\s+withRemovedKeys\b/,
 	},
-	// One row per symbol, so the home has to define each of them: an
-	// alternation would pass a home that kept one and lost the other.
 	{
 		concept: "serialized origin (#500)",
 		home: "packages/core/src/net/origin.mts",
@@ -113,15 +120,36 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+isDeviceVerificationRateLimitSpec\b/,
 	},
 	{
-		concept: "authentication claims a token may carry (#481)",
+		concept: "authentication claims a token may carry — amr (#481)",
 		home: "packages/core/src/grants/authenticationClaims.mts",
-		definition: /(?:function|const)\s+(?:wellFormedAmr|wellFormedAcr)\b/,
+		definition: /(?:function|const)\s+wellFormedAmr\b/,
 	},
 	{
-		concept: "secret entropy floor (#282)",
+		concept: "authentication claims a token may carry — acr (#481)",
+		home: "packages/core/src/grants/authenticationClaims.mts",
+		definition: /(?:function|const)\s+wellFormedAcr\b/,
+	},
+	{
+		concept: "secret entropy floor — measuring a secret (#282)",
 		home: "packages/core/src/keys/secretEntropy.mts",
-		definition:
-			/(?:function|const)\s+(?:measureSecretEntropyBytes|assertSecretEntropy|describeWeakSecret|MIN_SECRET(?:_ENTROPY)?_BYTES)\b/,
+		definition: /(?:function|const)\s+measureSecretEntropyBytes\b/,
+	},
+	{
+		concept: "secret entropy floor — asserting it (#282)",
+		home: "packages/core/src/keys/secretEntropy.mts",
+		definition: /(?:function|const)\s+assertSecretEntropy\b/,
+	},
+	{
+		concept: "secret entropy floor — describing a weak secret (#282)",
+		home: "packages/core/src/keys/secretEntropy.mts",
+		definition: /(?:function|const)\s+describeWeakSecret\b/,
+	},
+	{
+		// Either spelling of the constant: the home defines the long one, and a
+		// short `MIN_SECRET_BYTES` elsewhere is the same floor restated.
+		concept: "secret entropy floor — the floor itself (#282)",
+		home: "packages/core/src/keys/secretEntropy.mts",
+		definition: /(?:function|const)\s+MIN_SECRET(?:_ENTROPY)?_BYTES\b/,
 	},
 	{
 		// The call is the signature: a second `createRemoteJWKSet(` is a second
@@ -159,10 +187,19 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		homeMatches: 1,
 	},
 	{
-		concept: "fail-closed grant-policy evaluation and its bounds (#441, #520)",
+		concept: "fail-closed grant-policy evaluation (#441)",
 		home: "packages/core/src/grants/grantPolicy.mts",
-		definition:
-			/(?:function|const)\s+(?:evaluateGrantPolicy|boundPolicyAudience|policyOutOfBounds)\b/,
+		definition: /(?:function|const)\s+evaluateGrantPolicy\b/,
+	},
+	{
+		concept: "fail-closed grant-policy evaluation — the audience bound (#520)",
+		home: "packages/core/src/grants/grantPolicy.mts",
+		definition: /(?:function|const)\s+boundPolicyAudience\b/,
+	},
+	{
+		concept: "fail-closed grant-policy evaluation — the out-of-bounds answer (#441, #520)",
+		home: "packages/core/src/grants/grantPolicy.mts",
+		definition: /(?:function|const)\s+policyOutOfBounds\b/,
 	},
 ];
 
