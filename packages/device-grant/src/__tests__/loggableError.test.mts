@@ -189,11 +189,28 @@ describe("loggableError", () => {
 		it("drops a message line that looks like a frame: a caller cannot write a frame into the stack", () => {
 			const injected = loggableError(
 				thrownBy(() => {
-					throw new Error("refused\n    at gho_INJECTED (upstream.js:1:1)");
+					throw new Error("refused\n    at gho_TOKEN (x:1:1)");
 				}),
 			);
-			expect(injected.stack).not.toContain("INJECTED");
+			expect(injected.stack).not.toContain("gho_TOKEN");
 			expect(injected.stack).toMatch(/^ {4}at /);
+		});
+
+		it("drops the one-line header of an error with an empty message", () => {
+			const empty = loggableError(
+				thrownBy(() => {
+					throw new Error("");
+				}),
+			);
+			expect(empty.stack).toMatch(/^ {4}at /);
+			expect(empty.stack).not.toMatch(/^Error/m);
+		});
+
+		it("keeps only the lines that are frames, wherever the others fall", () => {
+			const interleaved = new Error("m");
+			interleaved.stack =
+				"Error: m\n    at a (x.js:1:1)\n    [a note, not a frame]\n    at b (x.js:2:2)";
+			expect(loggableError(interleaved).stack).toBe("    at a (x.js:1:1)\n    at b (x.js:2:2)");
 		});
 
 		it("keeps no stack whose header no longer carries the message, as it cannot tell header from frames", () => {
@@ -201,8 +218,8 @@ describe("loggableError", () => {
 			// that on the first read of `stack`, from the message as it is then:
 			// what the header carries instead is unknown, and may be shaped like
 			// a frame.
-			const rewritten = new Error("refused\n    at gho_INJECTED (upstream.js:1:1)");
-			expect(rewritten.stack).toContain("gho_INJECTED");
+			const rewritten = new Error("refused\n    at gho_TOKEN (x:1:1)");
+			expect(rewritten.stack).toContain("gho_TOKEN");
 			rewritten.message = "upstream refused the request";
 			expect("stack" in loggableError(rewritten)).toBe(false);
 		});
@@ -242,6 +259,20 @@ describe("loggableError", () => {
 			});
 			expect(loggableError(error)).toEqual({ name: "Error", message: "m" });
 		});
+	});
+
+	it("gives every projection an own, non-enumerable `constructor: undefined`", () => {
+		// pino's error serializer types an error by `constructor.name` when it
+		// has a constructor, so every projection — a plain object — would log
+		// as `"type": "Object"`; without one it takes `name`. pino is not a
+		// dependency of this package, so the serializer itself is not run here.
+		for (const projected of [loggableError(thrownBy(refusesTheRecord)), loggableError("s3cret")]) {
+			expect(Object.hasOwn(projected, "constructor")).toBe(true);
+			expect(projected.constructor).toBeUndefined();
+			expect(Object.getOwnPropertyDescriptor(projected, "constructor")?.enumerable).toBe(false);
+			expect(Object.keys(projected)).not.toContain("constructor");
+			expect(JSON.stringify(projected)).not.toContain("constructor");
+		}
 	});
 
 	describe("where Error.isError is missing, as on Node 22", () => {
