@@ -74,7 +74,7 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 
 `resource` を扱うグラントは、`extractResourceParam` でそれを読み、それが名指す audience を `deriveAudienceFromResources` で導き、発行する `aud` がそれを表さなければ `unrepresentedResources` で拒否します — [`src/grants/resourceIndicator.mts`](src/grants/resourceIndicator.mts)。各値は分割せずにそのまま扱い（URI はカンマを含みうる）、繰り返されたパラメーターの空のエントリーは捨て、すべて空なら要求されなかったものとして扱います。oauth のグラント、`/authorize`、WebAuthn グラントはすべてここで読むので、同じことをするカスタムグラントも同じ答えになります。
 
-#### エラーのテキスト（RFC 6749）
+### エラーのテキスト（RFC 6749）
 
 `errorEnvelope(error, description?, uri?)` は RFC 6749 §5.2 のエラー本文を組み立てますが、テキストは検査しません。RFC 6749 付録 A.7 と A.8 は `error` と `error_description` を `1*NQSCHAR`（`"` と `\` を除く印字可能な ASCII）に限ります。`sanitizeErrorText` はそれ以外の文字を `?` に置き換え、文字列でない値には `undefined` を返すので、呼び出し側は自分のデフォルトに戻ります。`auditErrorText` は同じ処理に加えて 200 文字で切り詰めます。ログ行や監査イベント向けです。`isWellFormedErrorCode` は `error` コード（グラントポリシーの deny など）を送り出す前に検査します。3 つとも [`src/errors/envelope.mts`](src/errors/envelope.mts) にあります。
 
