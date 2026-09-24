@@ -78,7 +78,9 @@ export interface GoogleProviderConfig {
 	 */
 	requireAuthorizationResponseIss?: boolean;
 	/**
-	 * Whether sign-in asks Google for a refresh token. Default `"offline"`.
+	 * Whether sign-in asks Google for a refresh token. Default `"offline"`
+	 * when omitted; any other value, `null` included, is refused at
+	 * construction.
 	 *
 	 * Google issues a refresh token only when the user is shown the consent
 	 * screen, and without `prompt` it shows that screen only the first time.
@@ -120,7 +122,9 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 		);
 	}
 
-	const accessType = config.accessType ?? "offline";
+	// Only an omitted field means the default: an explicit `null` from a JS
+	// caller is a value, and refused like any other that is not one of the two.
+	const accessType = config.accessType === undefined ? "offline" : config.accessType;
 	if (accessType !== "offline" && accessType !== "online") {
 		throw new Error(
 			`Google federation "google": accessType must be "offline" or "online", got ${JSON.stringify(config.accessType)}`,

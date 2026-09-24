@@ -187,8 +187,9 @@ sign-in sends `access_type=offline` **and** `prompt=consent`:
 first sign-in, and no refresh token at all — for a deployment that uses Google
 to sign in and never refreshes Google's access token through the federation
 token route (it answers `410 refresh_token_absent` once that token expires).
-Any other value is refused at construction; an environment override arrives
-as a string, so coerce it in the bridge. The standalone template's bridge
+Only an omitted field means the default: any other value, `null` included,
+is refused at construction. An environment override arrives as a string, so
+coerce it in the bridge. The standalone template's bridge
 forwards it from `FEDERATIONS_GOOGLE_ACCESS_TYPE`.
 
 Keeping an earlier session's refresh token for the same `google:<sub>` is not
