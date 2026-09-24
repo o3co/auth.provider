@@ -1526,6 +1526,56 @@ describe("Federation routes", () => {
 		});
 
 		// Test 10 — happy path
+		it("answers a sign-in the redirect policy refuses in RFC 6749's terms", async () => {
+			// The sign-in completes and the policy's resolveCallbackRedirect
+			// refuses: its status, its words held to RFC 6749's characters, and a
+			// code that is not a string answered as the client error it is.
+			const provider = makeFakeProvider();
+			const refusing = {
+				...makePermissivePolicy(),
+				resolveCallbackRedirect: () => ({
+					ok: false as const,
+					status: 400,
+					error: 42 as unknown as string,
+					errorDescription: 'cible "interdite"',
+				}),
+			} as unknown as ReturnType<typeof makePermissivePolicy>;
+			const { app } = buildCallbackApp({
+				providers: new Map([["test", provider]]),
+				federationRedirectPolicyResolver: new Map([["test", refusing]]),
+				federation: { name: "test", state: "s1", codeVerifier: "v1", redirectTo: "/dashboard" },
+				userRepository: makeUserRepository({ id: "user-1", username: "alice" }),
+				userSessionStore: makeUserSessionStore(),
+				sessionFederationIndex: makeSessionFederationIndex(),
+				federationTokenStore: makeFederationTokenStore(),
+			});
+			const agent = await plantAndGetAgent(app);
+
+			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({
+				error: "invalid_request",
+				error_description: "cible ?interdite?",
+			});
+		});
+
+		it("answers a callback for a provider with no callback URL, quoting its name with '", async () => {
+			const { app } = buildCallbackApp({
+				providers: new Map([["test", makeFakeProvider()]]),
+				providerCallbackUrls: new Map(),
+				federation: { name: "test", state: "s1", codeVerifier: "v1", redirectTo: "/dashboard" },
+				userRepository: makeUserRepository({ id: "user-1", username: "alice" }),
+			});
+			const agent = await plantAndGetAgent(app);
+
+			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
+			expect(res.status).toBe(500);
+			expect(res.body).toEqual({
+				error: "misconfiguration",
+				error_description: "No callback URL registered for provider 'test'",
+			});
+		});
+
 		it("happy path: creates UserSession, addFederation, attaches token, sets req.session.sid, redirects to redirectTo", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);

@@ -154,6 +154,12 @@ describe("AS-1/AS-2 errorEnvelope helper (RFC 6749 §5.2)", () => {
 			["a userinfo that disguises the host", "https://example.com@evil.example/"],
 			["a user and password", "https://user:pw@docs.example.com/errors"],
 			["a userinfo on a network-path reference", "//user@docs.example.com/errors"],
+			// RFC 3986 Appendix B's split does not match a line break in a
+			// fragment, so the reference has no parts at all.
+			["a line break in the fragment", "https://docs.example.com/errors#a\nb"],
+			// The grammar admits any digits; the WHATWG parser does not.
+			["a port past 65535", "https://docs.example.com:99999/errors"],
+			["an IPv6 literal with too many groups", "https://[1:2:3:4:5:6:7:8:9]/errors"],
 		])("drops a uri with %s, and logs it", (_label, uri) => {
 			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 			const e = errorEnvelope("invalid_grant", "expired", uri);
