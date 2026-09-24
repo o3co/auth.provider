@@ -245,7 +245,7 @@ RFC 6749 §4.4 のマシン間通信: public クライアントは拒否され�
 
 **未実装:** `claims` パラメーターと、既定以外の `response_mode`。`claims_parameter_supported` と `request_parameter_supported` は省略時の既定が `false` なので、ディスカバリードキュメントは何も言わないことでそれらについて真実を述べている。
 
-**`/authorize` はコードを発行する前にセッションを再確認する。** 認証済みのブラウザーセッションの `sid` がもう `UserSessionStore` で解決できなければ、死んだ `sid` を載せたコードを発行する代わりにログインページへ送る（`prompt=none` なら `login_required`）。答えられないストアも同じくフェイルクローズになる。
+**`/authorize` はコードを発行する前にセッションを再確認する。** 認証済みのブラウザーセッションの `sid` がもう `UserSessionStore` で解決できなければ、死んだ `sid` を載せたコードを発行する代わりにログインページへ送る（`prompt=none` なら `login_required`）。答えられないストアもフェイルクローズになるが、それを判定としては扱わない: 対話的なリクエストはこれまでどおりログインページへ送り（ユーザーはそこで行動でき、ログイン経路は自分の障害を自分で報告する）、`prompt=none` のリクエストには `redirect_uri` で `temporarily_unavailable`（"session store unavailable"、RFC 6749 §4.1.2.1）を返す。`login_required` は誰もサインインしていないと RP に告げることになるが、障害にはそれが分からない。どちらの場合も障害は error レベルで 1 行、`authorize_session_liveness_unavailable` として `store: "user_session"`、`sid`、エラーの射影とともにログに出る。
 
 ## ステップアップと再認証 (#481)
 

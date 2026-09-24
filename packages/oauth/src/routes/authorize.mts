@@ -120,9 +120,13 @@ export interface AuthorizeHandlerOptions {
  * deployment.
  *
  * A store that cannot answer fails CLOSED. Minting a code is an authorization
- * decision, and an outage is not a reason to make it: the caller lands on the
- * login page (or gets `login_required`), which is recoverable, rather than
- * holding a code bound to a session nobody can vouch for.
+ * decision, and an outage is not a reason to make it. An interactive request
+ * lands on the login page, where the user can act and the login path reports
+ * its own outage. A `prompt=none` request is answered
+ * `temporarily_unavailable` (RFC 6749 §4.1.2.1), not `login_required`:
+ * that would tell the relying party the user is not signed in, a verdict the
+ * outage cannot make. Either way the outage is logged once at error level as
+ * `authorize_session_liveness_unavailable`, with the store and the projection.
  *
  * Callers MUST short-circuit on `isAuthenticated` first, so a genuinely
  * unauthenticated request still answers without touching any repository
@@ -139,7 +143,12 @@ export interface AuthorizeHandlerOptions {
 const readLiveSession = async (
 	req: Request,
 	opts: AuthorizeHandlerOptions,
-): Promise<{ readonly live: boolean; readonly session: UserSession | null }> => {
+): Promise<{
+	readonly live: boolean;
+	readonly session: UserSession | null;
+	/** The store could not answer: not live, and not a verdict either. */
+	readonly unavailable?: true;
+}> => {
 	const store = opts.userSessionStore;
 	const sid = typeof req.session?.sid === "string" ? req.session.sid : undefined;
 	if (!store || sid === undefined) return { live: true, session: null };
@@ -147,8 +156,11 @@ const readLiveSession = async (
 		const session = await store.get(sid);
 		return { live: session != null, session };
 	} catch (err) {
-		opts.logger.warn({ err: loggableError(err), sid }, "authorize_session_liveness_unavailable");
-		return { live: false, session: null };
+		opts.logger.error(
+			{ store: "user_session", sid, err: loggableError(err) },
+			"authorize_session_liveness_unavailable",
+		);
+		return { live: false, session: null, unavailable: true };
 	}
 };
 
@@ -1517,6 +1529,13 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		const prompt = resolvePrompt(ctx);
 		if (prompt === null) return;
 		if (prompt.silent && !authenticated) {
+			// A store that could not say whether the session lives says
+			// nothing about the user: `temporarily_unavailable`, not a
+			// `login_required` that tells the RP nobody is signed in.
+			if ("unavailable" in liveSession && liveSession.unavailable === true) {
+				redirectError(ctx, "temporarily_unavailable", "session store unavailable");
+				return;
+			}
 			// OIDC Core §3.1.2.6. Now that `redirect_uri` is validated this
 			// reaches the RP's own listener rather than a login page it cannot
 			// use.

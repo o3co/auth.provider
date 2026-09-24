@@ -1152,16 +1152,32 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 
 		const res = await authorize(app, baseQuery);
 
+		// The documented fail-closed step: the user can act on a login page,
+		// and the login path reports its own outage.
 		expect(res.status).toBe(302);
 		expect(res.headers.location).toContain("/login");
 		expect(createCode).not.toHaveBeenCalled();
-		expect(logger.warn).toHaveBeenCalled();
+		// The outage is logged once, at error level, with the store and the
+		// projection — not a warn.
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ store: "user_session", sid: liveSid, err: expect.objectContaining({ name: "Error" }) },
+			"authorize_session_liveness_unavailable",
+		);
+		expect(logger.error.mock.calls[0]?.[0].err).not.toBeInstanceOf(Error);
 	});
 
-	it("fails closed to login_required for prompt=none when the store is unreachable", async () => {
+	it("answers prompt=none with temporarily_unavailable when the store is unreachable, not login_required", async () => {
+		// `login_required` would tell the relying party the user is not signed
+		// in — a verdict the outage cannot make. RFC 6749 §4.1.2.1's
+		// `temporarily_unavailable` says what is true, and OIDC Core allows it
+		// as an authentication error response.
+		const logger = createMockLogger();
 		const createCode = vi.fn();
 		const { app } = await makeApp({
 			createCode,
+			logger,
 			userSessionStore: makeStore(async () => {
 				throw new Error("redis down");
 			}),
@@ -1170,8 +1186,15 @@ describe("/authorize — dead sid is unauthenticated (R1b)", () => {
 
 		const params = redirectParams(await authorize(app, { ...baseQuery, prompt: "none" }));
 
-		expect(params.get("error")).toBe("login_required");
+		expect(params.get("error")).toBe("temporarily_unavailable");
+		expect(params.get("error_description")).toBe("session store unavailable");
 		expect(createCode).not.toHaveBeenCalled();
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ store: "user_session", sid: liveSid, err: expect.objectContaining({ name: "Error" }) },
+			"authorize_session_liveness_unavailable",
+		);
 	});
 
 	it("mints unchanged when no session store is wired", async () => {

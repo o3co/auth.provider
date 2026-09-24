@@ -251,7 +251,7 @@ This is an OAuth 2.0 authorization server with the OIDC pieces a **first-party**
 
 **Not implemented:** the `claims` parameter, and `response_mode` beyond the default. `claims_parameter_supported` and `request_parameter_supported` default to `false` when omitted, so the discovery document tells the truth about them by saying nothing.
 
-**Before minting, `/authorize` re-checks the session.** An authenticated browser session whose `sid` no longer resolves in the `UserSessionStore` is sent to the login page (or answered `login_required` under `prompt=none`) rather than issued a code carrying a dead `sid`; a store that cannot answer fails closed the same way.
+**Before minting, `/authorize` re-checks the session.** An authenticated browser session whose `sid` no longer resolves in the `UserSessionStore` is sent to the login page (or answered `login_required` under `prompt=none`) rather than issued a code carrying a dead `sid`. A store that cannot answer also fails closed, but not as a verdict: an interactive request still goes to the login page, where the user can act and the login path reports its own outage, while a `prompt=none` request is answered `temporarily_unavailable` ("session store unavailable", RFC 6749 §4.1.2.1) at the `redirect_uri`. `login_required` would tell the relying party that nobody is signed in, and an outage cannot know that. Either way the outage is logged once at error level as `authorize_session_liveness_unavailable`, with `store: "user_session"`, the `sid` and the error's projection.
 
 ## Step-up and re-authentication (#481)
 
