@@ -73,6 +73,12 @@ export interface GithubProviderConfig {
 	/** Override GitHub's end-session endpoint. When omitted, the provider redirects directly
 	 *  to postLogoutRedirectUri. */
 	endSessionEndpoint?: string;
+	/**
+	 * The fetch every request to GitHub goes through — the token exchange,
+	 * `/user` and `/user/emails`. A proxy, or a test seam. Default: the global
+	 * `fetch`.
+	 */
+	fetch?: typeof fetch;
 }
 
 export type GithubProvider = FederationProvider & SupportsLogout & SupportsClaimMapping;
@@ -179,6 +185,9 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 	};
 
 	const oidcConfig = new oidc.Configuration(serverMetadata, config.clientId, config.clientSecret);
+	// `fetchProtectedResource` goes through the same configuration, so /user
+	// and /user/emails take this fetch as the token request does.
+	if (config.fetch) oidcConfig[oidc.customFetch] = config.fetch as unknown as oidc.CustomFetch;
 
 	return {
 		name: "github",
