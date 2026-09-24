@@ -127,6 +127,7 @@ describe("loadRedisStoreLibraries", () => {
 				}),
 			],
 			["an error thrown while the package evaluates", new TypeError("redis failed to evaluate")],
+			["a rejection that is not an Error at all", null],
 		])("rethrows %s unchanged", async (_case, reason) => {
 			expect(await failure({ redis: fails(reason) })).toBe(reason);
 		});
@@ -162,6 +163,15 @@ describe("loadRedisStoreLibraries", () => {
 			expect((err as AggregateError).errors).toEqual([redisReason, connectRedisReason]);
 			expect((err as AggregateError).message).toContain("redis failed to evaluate");
 			expect((err as AggregateError).message).toContain("connect-redis failed to evaluate");
+		});
+
+		it("names a failure that is not an Error in the aggregate's message too", async () => {
+			const err = (await failure({
+				redis: fails(new TypeError("redis failed to evaluate")),
+				connectRedis: fails("connect-redis threw a string"),
+			})) as AggregateError;
+			expect(err.errors).toEqual([expect.any(TypeError), "connect-redis threw a string"]);
+			expect(err.message).toContain('"connect-redis": connect-redis threw a string');
 		});
 	});
 
