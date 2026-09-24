@@ -771,8 +771,20 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					try {
 						const tokens = await opts.federationTokenStore.get(sid, firstFederation);
 						idTokenHintForIdP = tokens?.idToken ?? undefined;
-					} catch {
-						// Best-effort: if we can't get the federation token, proceed without idTokenHint
+					} catch (err) {
+						// Best effort: the logout proceeds, and the upstream end-session
+						// call goes without `id_token_hint` — the IdP may then ask the
+						// user to confirm, or choose the account itself. Said once, at
+						// warn: the route answers as it would have, not a 503.
+						(opts.logger ?? console).warn(
+							{
+								federation: auditErrorText(firstFederation),
+								store: "federation_token",
+								step: "get",
+								err: loggableError(err),
+							},
+							"logout_federation_token_read_failed",
+						);
 					}
 					const result = await provider.endSession({
 						idTokenHint: idTokenHintForIdP,

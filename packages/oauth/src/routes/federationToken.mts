@@ -994,7 +994,12 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			 * one it replaced (RFC 6749 §6), so discarding it here would leave the
 			 * stored token dead and the connection unrecoverable without
 			 * re-consent. Best effort — if the store is down the refresh is
-			 * failing anyway.
+			 * failing anyway, and the route answers the refusal it would have
+			 * answered, not a 503. So what happens here is one object-first warn:
+			 * `federation_token_keep_rotated_failed` with the `step` (`get`, the
+			 * re-read, or `update`) and the error's projection when the store
+			 * threw; `federation_token_keep_rotated_skipped` with the `reason`
+			 * when the re-read said not to write.
 			 *
 			 * Shared by both refusals below, which differ in what they answer and
 			 * not in what they owe the connection (#645).
@@ -1004,6 +1009,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 					isUsableToken(answer.refreshToken) &&
 					answer.refreshToken !== currentTokens.refreshToken
 				) {
+					let step: "get" | "update" = "get";
 					try {
 						// `currentTokens` may be stale by now. The lock TTL can
 						// expire during the upstream call — this route says so, and
@@ -1025,13 +1031,17 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 							// worse than losing a rotated token on a refresh that
 							// already failed.
 							logger.warn(
-								`POST /oauth/federation/${federation}/token: the federation token record is gone; not recreating it with the failed refresh's token`,
+								{ federation, store: "federation_token", reason: "record_gone" },
+								"federation_token_keep_rotated_skipped",
 							);
 						} else if (latest.refreshToken !== currentTokens.refreshToken) {
+							// Another request rotated the chain: its record is newer.
 							logger.warn(
-								`POST /oauth/federation/${federation}/token: a concurrent refresh rotated this connection; not overwriting it with the failed refresh's token`,
+								{ federation, store: "federation_token", reason: "rotated_concurrently" },
+								"federation_token_keep_rotated_skipped",
 							);
 						} else {
+							step = "update";
 							await opts.federationTokenStore.update(sid, name, {
 								...latest,
 								refreshToken: answer.refreshToken,
@@ -1042,8 +1052,8 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 						}
 					} catch (error) {
 						logger.warn(
-							`POST /oauth/federation/${federation}/token: federationTokenStore.update failed while keeping a rotated refresh token:`,
-							loggableError(error),
+							{ federation, store: "federation_token", step, err: loggableError(error) },
+							"federation_token_keep_rotated_failed",
 						);
 					}
 				}

@@ -513,7 +513,7 @@ An `id_token_hint` that cannot be verified is `400 invalid_token`; one that cann
 Flow: verifies `id_token_hint` → loads the session → broadcasts an OIDC Back-Channel Logout 1.0 `logout_token` to every RP with a `backchannelLogoutUri` (best-effort; a failed POST does not stop the logout) → runs the store cascade → answers with one of:
 
 - `text/html` page with an `<iframe>` per RP with a `frontchannelLogoutUri` (when `Accept: text/html` wins q-weighted negotiation)
-- `303` to the first federation's IdP end-session URL (when that federation's provider implements `SupportsLogout`)
+- `303` to the first federation's IdP end-session URL (when that federation's provider implements `SupportsLogout`). The stored federation id_token goes with it as `id_token_hint`; when the federation token record cannot be read, the redirect goes without it, logged once as `logout_federation_token_read_failed` (warn)
 - `303` to `post_logout_redirect_uri` (when it matches the client's allowlist)
 - `200 {"logged_out": true}` (fallback)
 
@@ -664,7 +664,7 @@ Both bundled stores meet these and are pinned on them.
 
 All error responses set `Cache-Control: no-store` and `Pragma: no-cache`. 401 responses include `WWW-Authenticate: Bearer error="invalid_token"` per RFC 6750.
 
-Every failure this route logs carries core's `loggableError(err)`, never the error — the `refreshToken failed (reason: …)` warning included. The adapter's library puts the refresh answer it refused, rotated refresh token included, on the error's cause chain, and a Redis store's error carries the refused command's arguments (the token record, under `allow-plaintext`); the projection drops those, keeps what tells the failures apart — the library's code, the HTTP status and content type, the upstream's OAuth `error`, and its `error_description` under the rule core states for it (the first line, cut at the start of the word holding a token-shaped run) — and removes the two known shapes in which a message quotes a peer (a JSON parser's input, Redis's echoed arguments). Other text a peer wrote into a message is kept; core's README says exactly what is. The rest of this package's logs follow the same rule.
+Every failure this route logs carries core's `loggableError(err)`, never the error — the `federation_token_refresh_failed` warning included. The adapter's library puts the refresh answer it refused, rotated refresh token included, on the error's cause chain, and a Redis store's error carries the refused command's arguments (the token record, under `allow-plaintext`); the projection drops those, keeps what tells the failures apart — the library's code, the HTTP status and content type, the upstream's OAuth `error`, and its `error_description` under the rule core states for it (the first line, cut at the start of the word holding a token-shaped run) — and removes the two known shapes in which a message quotes a peer (a JSON parser's input, Redis's echoed arguments). Other text a peer wrote into a message is kept; core's README says exactly what is. The rest of this package's logs follow the same rule.
 
 ### Opt-in: `allowedAzpForFederationToken`
 

@@ -35,6 +35,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/federationToken.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import {
+	expectBestEffortWarn,
 	expectOutageLine,
 	expectProjectedWarn,
 	REFUSED_COMMAND_MARKER,
@@ -874,9 +875,8 @@ describe("POST /oauth/federation/:name/token", () => {
 				logger,
 			});
 			await postFedToken(app, "google", await mintAccessToken());
-			const failure = lines.find((line) =>
-				line.includes("federationTokenStore.update failed while keeping a rotated refresh token"),
-			);
+			const failure = lines.find((line) => line.includes('"federation_token_keep_rotated_failed"'));
+			expect(failure).toContain('"step":"update"');
 			expect(failure).toContain("ReplyError");
 			for (const line of lines) {
 				expect(line).not.toContain("at-must-never-reach-a-log");
@@ -3386,5 +3386,88 @@ describe("POST /oauth/federation/:name/token", () => {
 			// Only the credential was salvaged — not the token that cannot be used.
 			expect(written(fedTokenStore).accessToken).toBe(baseFedTokens.accessToken);
 		});
+	});
+});
+
+describe("POST /oauth/federation/:name/token — keeping a rotated refresh token is logged, structured", () => {
+	// A refresh that answers no usable access token but rotates the refresh
+	// token: the route answers 500 refresh_failed and, best effort, re-reads
+	// the record and keeps the rotated token. Whatever happens there is one
+	// object-first warn: the route answers the refusal it would anyway, not a
+	// 503, so none of it is an error-level outage line.
+	const expiredTokens = (): FederationTokens => ({
+		...baseFedTokens,
+		expiresAt: new Date(Date.now() - 1000),
+		refreshToken: "original-rt",
+	});
+	const rotatingProvider = () =>
+		({
+			...federationBase("google"),
+			refreshToken: vi.fn().mockResolvedValue({ refreshToken: "rotated-rt" }),
+		}) as unknown as FederationProvider;
+	const run = async (store: Partial<FederationTokenStore>) => {
+		const logger = createMockLogger();
+		const fedTokenStore = makeFedTokenStore(store);
+		const app = buildApp({
+			fedTokenStore,
+			getFederationProviders: () =>
+				new Map<string, FederationProvider>([["google", rotatingProvider()]]),
+			logger,
+		});
+		const res = await postFedToken(app, "google", await mintAccessToken());
+		expect(res.status).toBe(500);
+		expect(res.body.error).toBe("refresh_failed");
+		return { logger, fedTokenStore };
+	};
+
+	it("logs a failed re-read once, with the store, the step and the projection", async () => {
+		const { logger, fedTokenStore } = await run({
+			get: vi.fn().mockResolvedValueOnce(expiredTokens()).mockRejectedValue(storeReplyError()),
+		});
+		expect(fedTokenStore.update).not.toHaveBeenCalled();
+		expectBestEffortWarn(logger, "federation_token_keep_rotated_failed", {
+			federation: "google",
+			store: "federation_token",
+			step: "get",
+		});
+	});
+
+	it("logs a failed write once, with the store, the step and the projection", async () => {
+		const { logger } = await run({
+			get: vi.fn().mockResolvedValue(expiredTokens()),
+			update: vi.fn().mockRejectedValue(storeReplyError()),
+		});
+		expectBestEffortWarn(logger, "federation_token_keep_rotated_failed", {
+			federation: "google",
+			store: "federation_token",
+			step: "update",
+		});
+	});
+
+	it("says why it kept nothing when a concurrent logout removed the record", async () => {
+		const { logger } = await run({
+			get: vi.fn().mockResolvedValueOnce(expiredTokens()).mockResolvedValue(null),
+		});
+		expectBestEffortWarn(
+			logger,
+			"federation_token_keep_rotated_skipped",
+			{ federation: "google", store: "federation_token", reason: "record_gone" },
+			null,
+		);
+	});
+
+	it("says why it kept nothing when a concurrent refresh rotated the connection", async () => {
+		const { logger } = await run({
+			get: vi
+				.fn()
+				.mockResolvedValueOnce(expiredTokens())
+				.mockResolvedValue({ ...expiredTokens(), refreshToken: "concurrent-rt" }),
+		});
+		expectBestEffortWarn(
+			logger,
+			"federation_token_keep_rotated_skipped",
+			{ federation: "google", store: "federation_token", reason: "rotated_concurrently" },
+			null,
+		);
 	});
 });

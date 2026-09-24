@@ -509,7 +509,7 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 フロー: `id_token_hint` を検証 → セッションを読む → `backchannelLogoutUri` を持つすべての RP に OIDC Back-Channel Logout 1.0 の `logout_token` を送る（ベストエフォート。POST の失敗はログアウトを止めない） → ストアカスケードを実行 → 次のいずれかで応答:
 
 - `frontchannelLogoutUri` を持つ RP ごとの `<iframe>` を含む `text/html` ページ（q 値付きネゴシエーションで `Accept: text/html` が勝った場合）
-- 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）
+- 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添える。フェデレーショントークンのレコードが読めなければ添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
 - `post_logout_redirect_uri` への `303`（クライアントのアローリストに一致する場合）
 - `200 {"logged_out": true}`（フォールバック）
 
@@ -657,7 +657,7 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 
 すべてのエラーレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける。401 レスポンスには RFC 6750 に従い `WWW-Authenticate: Bearer error="invalid_token"` を含める。
 
-このルートがログに書く失敗はすべて core の `loggableError(err)` を運び、エラーそのものは運ばない — 警告 `refreshToken failed (reason: …)` も含めて。アダプターのライブラリは拒否したリフレッシュ応答を、ローテーションされたリフレッシュトークンを含めてエラーの cause の連鎖に載せ、Redis ストアのエラーは拒否されたコマンドの引数（`allow-plaintext` ならトークンレコード）を運ぶ。射影はそれらを捨て、失敗を見分けるもの — ライブラリのコード、HTTP ステータスと content type、上流の OAuth `error`、そして core がそのために定める規則（最初の行、トークンの形の連なりを含む語の頭で切る）の下での `error_description` — を残し、メッセージが相手側を引用する既知の二つの形（JSON パーサーの入力、Redis が反復する引数）を取り除く。相手側がメッセージに書いたそれ以外のテキストは残る。何が残るかは core の README が正確に述べる。このパッケージの他のログも同じ規則に従う。
+このルートがログに書く失敗はすべて core の `loggableError(err)` を運び、エラーそのものは運ばない — 警告 `federation_token_refresh_failed` も含めて。アダプターのライブラリは拒否したリフレッシュ応答を、ローテーションされたリフレッシュトークンを含めてエラーの cause の連鎖に載せ、Redis ストアのエラーは拒否されたコマンドの引数（`allow-plaintext` ならトークンレコード）を運ぶ。射影はそれらを捨て、失敗を見分けるもの — ライブラリのコード、HTTP ステータスと content type、上流の OAuth `error`、そして core がそのために定める規則（最初の行、トークンの形の連なりを含む語の頭で切る）の下での `error_description` — を残し、メッセージが相手側を引用する既知の二つの形（JSON パーサーの入力、Redis が反復する引数）を取り除く。相手側がメッセージに書いたそれ以外のテキストは残る。何が残るかは core の README が正確に述べる。このパッケージの他のログも同じ規則に従う。
 
 ### Opt-in: `allowedAzpForFederationToken`
 

@@ -36,6 +36,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createRouter } from "#/routes/logout.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
 import {
+	expectBestEffortWarn,
 	expectOutageLine,
 	REFUSED_COMMAND_MARKER,
 	serialisedCalls,
@@ -695,6 +696,37 @@ describe("POST /oauth/logout", () => {
 			expect(res.status).toBe(303);
 			expect(res.headers.location).toContain("accounts.google.com");
 			expect(mockProvider.endSession).toHaveBeenCalledOnce();
+		});
+
+		it("goes to the upstream without the id_token hint when the token record cannot be read, and says so once", async () => {
+			// Best effort: the logout proceeds, and the upstream end-session call
+			// goes without `id_token_hint`, so the IdP may ask the user to
+			// confirm, or pick the account itself.
+			const endSession = vi.fn().mockResolvedValue({
+				url: new URL("https://accounts.google.com/logout"),
+				method: "GET",
+			});
+			const provider = { ...federationBase("google"), endSession } as unknown as FederationProvider;
+			const logger = createMockLogger();
+			const app = buildApp({
+				sessionStore: makeSessionStore({ get: vi.fn().mockResolvedValue(baseSession) }),
+				sessionFederationIndex: makeSessionFederationIndex({
+					listFederations: vi.fn(async () => ["google"]),
+				}),
+				fedTokenStore: makeFedTokenStore({ get: vi.fn().mockRejectedValue(storeReplyError()) }),
+				getFederationProviders: () => new Map<string, FederationProvider>([["google", provider]]),
+				logger,
+			});
+
+			const res = await postLogout(app, { id_token_hint: await mintIdToken() });
+
+			expect(res.status).toBe(303);
+			expect(endSession).toHaveBeenCalledWith(expect.objectContaining({ idTokenHint: undefined }));
+			expectBestEffortWarn(logger, "logout_federation_token_read_failed", {
+				federation: "google",
+				store: "federation_token",
+				step: "get",
+			});
 		});
 	});
 

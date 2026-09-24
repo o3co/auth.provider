@@ -83,3 +83,34 @@ export const expectOutageLine = (
 	expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
 	return line;
 };
+
+/**
+ * The policy for a best-effort step whose failure the route rides over (it
+ * does not answer 503 for it): exactly one warn-level line named `event`,
+ * object-first, carrying `fields` and the error's projection, not the error
+ * (`errName: null` for a line about no error); no line at all whose first argument is a string;
+ * and nowhere the refused command.
+ */
+export const expectBestEffortWarn = (
+	logger: MockLogger,
+	event: string,
+	fields: Record<string, unknown>,
+	errName: string | null = "ReplyError",
+): Record<string, unknown> => {
+	const stringFirst = [...logger.warn.mock.calls, ...logger.error.mock.calls].filter(
+		([first]) => typeof first === "string",
+	);
+	expect(stringFirst, "no template-string line").toEqual([]);
+	const lines = logger.warn.mock.calls.filter(([, name]) => name === event);
+	expect(lines, `one ${event} warn`).toHaveLength(1);
+	const line = lines[0]?.[0] as Record<string, unknown>;
+	expect(line).toMatchObject(fields);
+	if (errName === null) {
+		expect(line).not.toHaveProperty("err");
+	} else {
+		expect(line.err).toMatchObject({ name: errName });
+		expect(line.err).not.toBeInstanceOf(Error);
+	}
+	expect(serialisedCalls(logger)).not.toContain(REFUSED_COMMAND_MARKER);
+	return line;
+};
