@@ -260,7 +260,7 @@ const POLICY_EVALUATE_EXEMPTIONS: Readonly<Record<string, { calls: number; reaso
 	"packages/oauth-token-exchange/src/grant.mts": {
 		calls: 1,
 		reason:
-			"the ceilings are the subject token's, not the request's, and `access_denied` is 403; a policy scope or audience past them is `policyOutOfBounds` like the rest, the request's own audience past them RFC 8693 §2.2.2's `invalid_target`",
+			"its ceilings include the subject token's (scope: subject ∩ allowedScopes; audience: subject aud ∩ allowedAudiences ∪ {clientId}) and `access_denied` is 403; a policy scope or audience past them is `policyOutOfBounds` like the rest, the request's own audience past them RFC 8693 §2.2.2's `invalid_target`",
 	},
 };
 

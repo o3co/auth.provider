@@ -78,6 +78,29 @@ import {
 	isCompoundConfirmation,
 } from "./types/introspect.mjs";
 
+/** The longest `reason` a grant handler's refusal carries into the audit stream. */
+const AUDIT_REASON_MAX_LENGTH = 200;
+
+/**
+ * The `reason` of a grant handler's `token.issued.failure`: its
+ * `error_description`, or its `error` when it gives none.
+ *
+ * A grant's `error` alone does not tell its refusals apart — token exchange
+ * answers a malformed request and a stolen, unproven bound token alike with
+ * `invalid_request` (RFC 8693 §2.2.2) — while the description names the check
+ * that refused. The route's own refusals carry a `reason` code; a handler's
+ * carries its description, the same text the client was sent. Some
+ * descriptions quote client input (a requested scope, audience or token
+ * type), so it is capped, the cut marked with `...`, to keep what a client can
+ * put into the audit stream bounded.
+ */
+const auditReason = (error: string, errorDescription: string | undefined): string => {
+	const reason = errorDescription || error;
+	return reason.length > AUDIT_REASON_MAX_LENGTH
+		? `${reason.slice(0, AUDIT_REASON_MAX_LENGTH - 3)}...`
+		: reason;
+};
+
 declare module "express-session" {
 	interface SessionData {
 		client?: Record<string, unknown>;
@@ -573,7 +596,11 @@ export const createOAuthRouter = async (
 					clientId: req.oauthClient?.clientId,
 					ip: req.ip,
 					userAgent: req.get("user-agent"),
-					details: { grant_type, error: result.error },
+					details: {
+						grant_type,
+						error: result.error,
+						reason: auditReason(result.error, result.errorDescription),
+					},
 				});
 				return res.status(result.status).json(errorBody);
 			},

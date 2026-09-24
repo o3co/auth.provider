@@ -552,6 +552,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// this grant inherits the subject token's scope. See the note at
 			// the `grantedScope` assignment below.
 			const subjectScope = subjectValidated.scope?.split(" ").filter(Boolean) ?? [];
+			const subjectScopeSet = new Set(subjectScope);
 			const clientScopeSet = new Set(client.allowedScopes ?? []);
 			const requestedScopeStr = typeof body.scope === "string" ? body.scope : null;
 			const requestedScopeRaw = requestedScopeStr?.split(" ").filter(Boolean) ?? null;
@@ -561,7 +562,6 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const requestedScope =
 				requestedScopeRaw !== null && requestedScopeRaw.length === 0 ? null : requestedScopeRaw;
 			if (requestedScope) {
-				const subjectScopeSet = new Set(subjectScope);
 				for (const s of requestedScope) {
 					if (!subjectScopeSet.has(s)) {
 						return {
@@ -590,13 +590,21 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 			}
 
-			// Audience narrowing: requested audience ⊆ client.allowedAudiences ∪ {clientId}.
+			// The audience ceilings: what the client is registered for
+			// (`allowedAudiences` plus its own id) and what the subject token
+			// carries (its client id when it names none). The request's audience
+			// is held to both here, before the policy runs, so its answer is the
+			// request's alone — no policy decision can turn it into anything
+			// else. A policy's `grantedAudience` is held to the same two below.
+			const clientAudienceSet = new Set([...(client.allowedAudiences ?? []), client.clientId]);
+			const subjectAudienceSet = new Set(
+				subjectAudienceBoundary(subjectValidated.aud, client.clientId),
+			);
 			const requestedAudience = normalizeArrayParam(body.audience);
 			const requestedResource = normalizeArrayParam(body.resource);
 			if (requestedAudience) {
-				const allow = new Set([...(client.allowedAudiences ?? []), client.clientId]);
 				for (const aud of requestedAudience) {
-					if (!allow.has(aud)) {
+					if (!clientAudienceSet.has(aud)) {
 						return {
 							result: {
 								status: 400,
@@ -605,6 +613,31 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							},
 						};
 					}
+				}
+				// An audience the client is registered for but the subject token
+				// does not carry. RFC 8693 §2.2.2: "If the authorization server is
+				// unwilling or unable to issue a token for any target service
+				// indicated by the resource or audience parameters, the
+				// invalid_target error code SHOULD be used".
+				const widenedAudiences = requestedAudience.filter(
+					(audience) => !subjectAudienceSet.has(audience),
+				);
+				if (widenedAudiences.length > 0) {
+					deps.logger?.warn(
+						{
+							subject: subjectValidated.sub,
+							clientId: client.clientId,
+							widenedAudiences,
+						},
+						"token_exchange_audience_widening_rejected",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_target",
+							errorDescription: `audience_widening_not_allowed: ${widenedAudiences.join(" ")}`,
+						},
+					};
 				}
 			}
 
@@ -639,13 +672,6 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			let grantedScope: readonly string[] | undefined =
 				requestedScope ?? subjectScope.filter((s) => clientScopeSet.has(s));
 			let grantedAudience: readonly string[] | undefined = requestedAudience ?? undefined;
-			// The audience ceiling: what the subject token carries (its own
-			// clientId when it names none). Both the request's audience and a
-			// policy's are held to it, and who named the audience decides the
-			// answer — see the policy check below and the request check after it.
-			const subjectAudienceSet = new Set(
-				subjectAudienceBoundary(subjectValidated.aud, client.clientId),
-			);
 			if (deps.grantPolicy) {
 				const policyRequest: GrantPolicyRequest = {
 					grantType: GRANT_TYPE,
@@ -690,113 +716,70 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				}
 				// #521: presence, not truthiness, and an array — a JS policy returning
 				// a string would reach `.filter` below and throw out of the handler.
+				//
+				// The policy may narrow, never widen, and its decision is held to
+				// the exchange's ceilings before it replaces the request's value, so
+				// a refusal here is the policy's alone: the deployment's policy
+				// exceeding its authority, which every other grant answers with
+				// core's `policyOutOfBounds` (`500 server_error`, #520) — the caller
+				// did nothing wrong. Its scope ceiling is the subject token's scope
+				// AND the client's `allowedScopes`; a scope the subject carries but
+				// the registration does not would hand this client something its
+				// registration never permitted. An empty `grantedScope` strips every
+				// scope (CP-15).
 				if (decision.grantedScope !== undefined) {
 					if (!Array.isArray(decision.grantedScope)) {
 						return { result: policyOutOfBounds("policy returned a non-array grantedScope") };
 					}
+					const widenedScopes = decision.grantedScope.filter(
+						(scope) => !subjectScopeSet.has(scope) || !clientScopeSet.has(scope),
+					);
+					if (widenedScopes.length > 0) {
+						deps.logger?.warn(
+							{ subject: subjectValidated.sub, clientId: client.clientId, widenedScopes },
+							"token_exchange_policy_scope_refused",
+						);
+						return {
+							result: policyOutOfBounds(
+								`policy returned scopes exceeding the subject_token scope or client allowedScopes: ${widenedScopes.join(" ")}`,
+							),
+						};
+					}
 					grantedScope = decision.grantedScope;
 				}
+				// The audience the same way, and the same as core's
+				// `boundPolicyAudience` holds it for every other grant — within
+				// what the client is registered for — with the subject token's
+				// audience as a second bound, the one the request's audience met
+				// above. An empty `grantedAudience` is no decision, as
+				// `boundPolicyAudience` reads it: the request's audience stands.
 				if (decision.grantedAudience !== undefined) {
 					if (!Array.isArray(decision.grantedAudience)) {
 						return { result: policyOutOfBounds("policy returned a non-array grantedAudience") };
 					}
-					// Checked before it replaces the request's audience, so a
-					// widening found here is the policy's own: the deployment's
-					// policy exceeding its ceiling, which every other grant answers
-					// through core's `boundPolicyAudience` with `policyOutOfBounds`
-					// (`500 server_error`). The ceiling is the subject token's
-					// audience rather than `allowedAudiences` (README notes 3 and 5).
-					const policyWidenedAudiences = decision.grantedAudience.filter(
-						(audience) => !subjectAudienceSet.has(audience),
+					const widenedAudiences = decision.grantedAudience.filter(
+						(audience) => !subjectAudienceSet.has(audience) || !clientAudienceSet.has(audience),
 					);
-					if (policyWidenedAudiences.length > 0) {
+					if (widenedAudiences.length > 0) {
 						deps.logger?.warn(
-							{
-								subject: subjectValidated.sub,
-								clientId: client.clientId,
-								widenedAudiences: policyWidenedAudiences,
-							},
-							"token_exchange_audience_widening_rejected",
+							{ subject: subjectValidated.sub, clientId: client.clientId, widenedAudiences },
+							"token_exchange_policy_audience_refused",
 						);
 						return {
 							result: policyOutOfBounds(
-								`policy returned audiences outside the subject_token audience: ${policyWidenedAudiences.join(" ")}`,
+								`policy returned audiences outside the subject_token audience or client allowedAudiences: ${widenedAudiences.join(" ")}`,
 							),
 						};
 					}
-					grantedAudience = decision.grantedAudience;
+					if (decision.grantedAudience.length > 0) grantedAudience = decision.grantedAudience;
 				}
-			}
-
-			// The policy hook may narrow, never widen — and "widen" is now past
-			// EITHER ceiling. A hook returning a scope the subject carries but
-			// the registration does not is still handing this client something
-			// its registration never permitted, which is the boundary the
-			// README's policy-widening note promises is re-checked before
-			// minting; checking only the subject would have left the hook as a
-			// way around the ceiling added above.
-			//
-			// Only the policy can reach this: without a decision, `grantedScope`
-			// is the request's `scope`, already refused above with
-			// `invalid_scope` when it passes either ceiling, or the subject's
-			// scope clamped to the registration. So a widening is the
-			// deployment's policy exceeding its authority, not the caller asking
-			// for too much, and it gets the answer every other grant gives that:
-			// core's `policyOutOfBounds`, `500 server_error`. Not
-			// `invalid_target`, which RFC 8693 §2.2.2 gives a resource or an
-			// audience, not a scope.
-			const subjectScopeSet = new Set(subjectScope);
-			const widenedScopes =
-				grantedScope?.filter(
-					(scope) => !subjectScopeSet.has(scope) || !clientScopeSet.has(scope),
-				) ?? [];
-			if (widenedScopes.length > 0) {
-				deps.logger?.warn(
-					{
-						subject: subjectValidated.sub,
-						clientId: client.clientId,
-						widenedScopes,
-					},
-					"token_exchange_scope_widening_rejected",
-				);
-				return {
-					result: policyOutOfBounds(`scope_widening_not_allowed: ${widenedScopes.join(" ")}`),
-				};
-			}
-
-			// The request's own audience past the subject token's: the client's
-			// allowlist names an audience the subject token does not carry. A
-			// policy audience cannot reach this — it was held to the same
-			// ceiling above — so this is the caller's request, and RFC 8693
-			// §2.2.2 answers it: "If the authorization server is unwilling or
-			// unable to issue a token for any target service indicated by the
-			// resource or audience parameters, the invalid_target error code
-			// SHOULD be used".
-			const widenedAudiences =
-				grantedAudience?.filter((audience) => !subjectAudienceSet.has(audience)) ?? [];
-			if (widenedAudiences.length > 0) {
-				deps.logger?.warn(
-					{
-						subject: subjectValidated.sub,
-						clientId: client.clientId,
-						widenedAudiences,
-					},
-					"token_exchange_audience_widening_rejected",
-				);
-				return {
-					result: {
-						status: 400,
-						error: "invalid_target",
-						errorDescription: `audience_widening_not_allowed: ${widenedAudiences.join(" ")}`,
-					},
-				};
 			}
 
 			// Audience derivation (spec §8.1 rule 2):
 			//   explicit narrowed audience  → use grantedAudience (first element).
-			//     Note: grantedAudience reflects either the allowlist-validated request
-			//     parameter OR a policy hook override; both have been held to the
-			//     subject token's audience above.
+			//     Note: grantedAudience reflects either the request parameter OR a
+			//     policy hook override; each has been held to the client's
+			//     registration and the subject token's audience above.
 			//   omitted + subject single    → inherit subject.aud IFF in allowlist;
 			//                                   else fall back to clientId (prevents
 			//                                   cross-client audience confusion when a
@@ -827,10 +810,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						: Array.isArray(subjectAud) && subjectAud.length === 1
 							? subjectAud[0]
 							: undefined;
-				if (typeof single === "string") {
-					const allow = new Set([...(client.allowedAudiences ?? []), client.clientId]);
-					if (allow.has(single)) return single;
-				}
+				if (typeof single === "string" && clientAudienceSet.has(single)) return single;
 				return client.clientId;
 			})();
 
@@ -979,9 +959,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
  *   token-type error.
  * - **A presented token:** the validator's `null`, a sender-constraint row,
  *   the refresh-token family rule, `may_act`, the actor-chain bound or the
- *   subject's expiry. Not `invalid_grant`: RFC 6749 §5.2 gives that code to
- *   an authorization grant or a refresh token, which is why the refresh grant
- *   answers its own sender-constraint and family rows with it.
+ *   subject's expiry. The §2.2.2 sentence is a MUST and covers every one of
+ *   them, so no other code is open to this grant for a refused token —
+ *   `invalid_grant` included. (The refresh grant, which §2.2.2 does not
+ *   govern, answers the same sender-constraint and family rows with RFC
+ *   6749's `invalid_grant` for its refresh token.)
  *
  * One code covers all of these, so the `error_description` is what tells a
  * client which check refused it; each call site's description is part of the
