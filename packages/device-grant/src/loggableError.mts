@@ -41,21 +41,20 @@
  *     phrase, not on a client library's class: ioredis's `ReplyError` names
  *     itself, node-redis's `ErrorReply` does not;
  *   - `stack` keeps the frames and nothing of the header before them. The
- *     header is `name: message`, and the message is the untrusted part, so
- *     the header is cut by the message's own text — everything up to the end
- *     of its first occurrence — and a line of the message shaped like a
- *     frame goes with it; the rest of that line is never a frame. An empty
- *     or absent message leaves a one-line header, and the first line is
- *     dropped. Then the unbroken run of frame lines (`    at …`) from the
- *     first one is kept, stopping at the first line that is not a frame —
- *     so a `Caused by:` section appended after the frames goes too — at most
- *     {@link LOGGED_STACK_MAX_FRAMES} of them, joined and cut at
+ *     header is `name: message` — `name [code]: message` for Node's own
+ *     errors, the name alone (with its code) for an empty message — and the
+ *     message is the untrusted part, so the stack must start with exactly
+ *     that header, ending its line; a line of the message shaped like a
+ *     frame goes with it. Then the unbroken run of frame lines (`    at …`)
+ *     from the first one is kept, stopping at the first line that is not a
+ *     frame — so a `Caused by:` section appended after the frames goes too —
+ *     at most {@link LOGGED_STACK_MAX_FRAMES} of them, joined and cut at
  *     {@link LOGGED_STACK_MAX_LENGTH} characters. No `stack` when its read
- *     throws or it is not a string, when there are no frames, or when the
- *     stack does not carry the message (rewritten after V8 formatted the
- *     stack, which it does on the first read of `stack`): there is then no
- *     telling the header's lines from the frames. What can still reach the
- *     log through `stack` is listed on `framesOf`;
+ *     throws or it is not a string, when the message is not a string, when
+ *     the stack does not start with the header (a name or message rewritten
+ *     after V8 formatted the stack, which it does on the first read of
+ *     `stack`), or when there are no frames. What can still reach the log
+ *     through `stack` is listed on `framesOf`;
  *   - every other string kept is capped at {@link LOGGED_STRING_MAX_LENGTH};
  *   - a field whose read throws (a getter) is left out, so the projection
  *     itself never throws;
@@ -114,9 +113,13 @@ export const guardedRead = (target: object, key: string): { readonly value: unkn
 
 /**
  * The frames of `stack`, without the header ahead of them; `undefined` for
- * none. The header is cut by `message`'s own text — the message as it is
- * now — not at the first line shaped like a frame, which the message itself
- * may contain; the rest of the line the cut falls in is skipped. Then the
+ * none. The header is what V8 writes from the error's `name`, `message` and,
+ * for Node's own errors, `code` — `name: message` or `name [code]: message`,
+ * and for an empty message also `name` or `name [code]` — read as they are now; a
+ * `name` that is not a string compares as `"Error"`. The stack must start
+ * with one of them, followed by the end of its line, or the text cannot tell
+ * the header from the frames: a cut found anywhere else could fall inside
+ * the header, whose frame-shaped lines would then read as frames. Then the
  * unbroken run of frame lines from the first one, stopping at the first
  * line that is not a frame.
  *
@@ -124,25 +127,35 @@ export const guardedRead = (target: object, key: string): { readonly value: unkn
  * show it:
  *
  *   - a message rewritten, after the stack was formatted, to a leading part
- *     of the one the header carries: the rest of the old message then reads
- *     as the lines after the cut, and a run of frame-shaped lines in it is
- *     kept;
+ *     of the old one that ends at one of the old one's own line breaks:
+ *     `Error: orig` followed by `    at evil (…)` is exactly what an error
+ *     with the message `orig` looks like, so the old message's frame-shaped
+ *     lines are kept;
  *   - a `stack` assigned by hand, whose frame-shaped lines carry data: they
- *     are kept as frames;
- *   - a `message` that is not a string: there is no text to cut by, so only
- *     the first line is dropped, and a header of several lines keeps the
- *     frame-shaped ones among them.
+ *     are kept as frames.
  */
-const framesOf = (stack: unknown, message: unknown): string | undefined => {
-	if (typeof stack !== "string") return undefined;
-	let rest = stack;
-	if (typeof message === "string" && message !== "") {
-		const at = stack.indexOf(message);
-		if (at < 0) return undefined;
-		rest = stack.slice(at + message.length);
-	}
-	// The first line is what is left of the header's last line: never a frame.
-	const lines = rest.split("\n").slice(1);
+const framesOf = (
+	stack: unknown,
+	name: unknown,
+	message: unknown,
+	code: unknown,
+): string | undefined => {
+	if (typeof stack !== "string" || typeof message !== "string") return undefined;
+	const named = typeof name === "string" ? name : "Error";
+	const coded = typeof code === "string" ? [`${named} [${code}]`] : [];
+	const headers = [
+		...[named, ...coded].map((prefix) => `${prefix}: ${message}`),
+		// V8 writes the name alone for an empty message; a source-map
+		// `prepareStackTrace` (vitest's, for one) may still write `name: `.
+		...(message === "" ? [named, ...coded] : []),
+	];
+	const header = headers.find(
+		(candidate) =>
+			stack.startsWith(candidate) &&
+			(stack.length === candidate.length || stack[candidate.length] === "\n"),
+	);
+	if (header === undefined) return undefined;
+	const lines = stack.slice(header.length + 1).split("\n");
 	const first = lines.findIndex((line) => FRAME.test(line));
 	if (first < 0) return undefined;
 	const frames: string[] = [];
@@ -203,7 +216,7 @@ export const loggableError = (error: unknown): LoggedErrorFields => {
 		if (typeof value === "number") out[key] = value;
 		else if (typeof value === "string") out[key] = cap(value);
 	}
-	const stack = framesOf(read("stack"), message);
+	const stack = framesOf(read("stack"), name, message, read("code"));
 	if (stack !== undefined) out.stack = stack;
 	return projection(out);
 };
