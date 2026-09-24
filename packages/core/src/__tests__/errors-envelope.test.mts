@@ -118,7 +118,12 @@ describe("AS-1/AS-2 errorEnvelope helper (RFC 6749 §5.2)", () => {
 
 		it.each([
 			["an absolute URI", "https://docs.example.com/errors/invalid_grant?lang=en#retry"],
+			["an http URI", "http://docs.example.com/errors"],
+			["an IPv6 host", "https://[2001:db8::1]:8443/errors"],
 			["a relative reference", "/docs/errors/invalid_grant"],
+			["a relative path", "errors/invalid_grant"],
+			["a query only", "?code=invalid_grant"],
+			["a fragment only", "#invalid_grant"],
 			["a percent-encoded character", "https://docs.example.com/errors/caf%C3%A9"],
 		])("keeps %s", (_label, uri) => {
 			expect(errorEnvelope("invalid_grant", "expired", uri).error_uri).toBe(uri);
@@ -133,6 +138,16 @@ describe("AS-1/AS-2 errorEnvelope helper (RFC 6749 §5.2)", () => {
 			["a malformed percent-encoding", "https://docs.example.com/errors%zz"],
 			["a character RFC 3986 does not allow", "https://docs.example.com/{errors}"],
 			["a host that does not parse", "https://[docs.example.com/errors"],
+			// §5.2: a human-readable web page, so an absolute reference is http(s).
+			["a javascript: scheme", "javascript:alert(1)"],
+			["a javascript: scheme in mixed case", "JaVaScRiPt:alert(1)"],
+			["a data: scheme", "data:text/html,x"],
+			["a vbscript: scheme", "vbscript:x"],
+			["a file: scheme", "file:///etc/passwd"],
+			// RFC 3986: brackets only around an IP literal host; a relative path's
+			// first segment has no colon.
+			["a bracket outside a host", "a[b"],
+			["a colon in a relative path's first segment", "::"],
 		])("drops a uri with %s, and logs it", (_label, uri) => {
 			const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
 			const e = errorEnvelope("invalid_grant", "expired", uri);
