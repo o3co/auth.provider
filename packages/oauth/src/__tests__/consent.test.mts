@@ -49,6 +49,7 @@ import { PENDING_CONSENT_TTL_MS } from "#/routes/consent.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
 import { createMockLogger } from "./_helpers/mockLogger.mjs";
+import { expectOutageLine } from "./_helpers/projectedLog.mjs";
 
 const CLIENT_ID = "third-party-chat";
 const REDIRECT_URI = "https://chat.example/cb";
@@ -689,6 +690,13 @@ describe("the consent page and its answer, on the edges (#527 review)", () => {
 		const res = await request(harness.app).get("/oauth/consent").query({ challenge });
 		expect(res.status).toBe(503);
 		expect(res.body.error).toBe("temporarily_unavailable");
+		// The same line as every other client lookup, through core's helper.
+		expectOutageLine(
+			harness.logger,
+			"client_repository_unavailable",
+			{ site: "consent", step: "find", clientId: CLIENT_ID },
+			"Error",
+		);
 	});
 
 	it("drops the parked request when the client is no longer registered", async () => {

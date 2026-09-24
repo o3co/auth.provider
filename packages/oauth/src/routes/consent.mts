@@ -65,6 +65,7 @@ import {
 	type ConsentStore,
 	emitAuditEvent,
 	type Logger,
+	logClientRepositoryUnavailable,
 	loggableError,
 	type PendingConsentRecord,
 	type PendingConsentStore,
@@ -271,9 +272,11 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		try {
 			client = await clientRepository.findById(pending.clientId);
 		} catch (err) {
-			logger.error(
-				{ err: loggableError(err), clientId: pending.clientId },
-				"consent_client_repository_unavailable",
+			// The line every client lookup writes, through core's helper.
+			logClientRepositoryUnavailable(
+				logger,
+				{ site: "consent", step: "find", clientId: pending.clientId },
+				err,
 			);
 			jsonError(res, 503, "temporarily_unavailable", "client registry unavailable");
 			return null;
