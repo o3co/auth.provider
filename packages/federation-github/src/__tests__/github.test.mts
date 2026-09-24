@@ -187,6 +187,31 @@ describe("createGithubProvider", () => {
 		expect(profile.tokenType).toBe("bearer");
 	});
 
+	it("never carries an id_token: GitHub is plain OAuth 2.0 and issues none, so one in its answer was put there by something else", async () => {
+		// A proxy or an interceptor between this server and GitHub can add one.
+		// Its claims are shaped to pass the library's claim checks — GitHub's
+		// issuer, this client — and its signature is nobody's: nothing verifies
+		// it, and a stored one would later be handed to an end-session endpoint
+		// as `id_token_hint`, as if it were GitHub's.
+		const segment = (value: unknown) => Buffer.from(JSON.stringify(value)).toString("base64url");
+		const now = Math.floor(Date.now() / 1000);
+		const forged = [
+			segment({ alg: "RS256", typ: "JWT" }),
+			segment({
+				iss: "https://github.com",
+				aud: baseConfig.clientId,
+				sub: "12345",
+				iat: now,
+				exp: now + 600,
+			}),
+			"not-a-signature",
+		].join(".");
+		github.token.body = { ...githubTokenResponse(), id_token: forged };
+		const profile = await exchange();
+		expect(profile.sub).toBe("12345");
+		expect(profile).not.toHaveProperty("idToken");
+	});
+
 	it("returns expiresAt from expires_in, and still no refresh token, for an expiring user token", async () => {
 		github.token.body = {
 			...githubTokenResponse(),
