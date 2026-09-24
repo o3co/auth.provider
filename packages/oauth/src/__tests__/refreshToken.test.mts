@@ -750,8 +750,17 @@ describe("createRefreshTokenGrant", () => {
 			// ahead of the rotation answers every request with a 500. The grant
 			// reads both lifetimes when it is built instead.
 			const refreshTokenFamilyStore = createMemoryRefreshTokenFamilyStore();
-			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore });
-			const revocation = createRefreshTokenFamilyRevocation({ refreshTokenFamilyStore });
+			// A revoked family is kept for as long as the access tokens it could
+			// have minted are accepted: the store wrappers take that horizon.
+			const accessTokenHorizonMs = 3_600_000;
+			const rotation = createRefreshTokenFamilyRotation({
+				refreshTokenFamilyStore,
+				accessTokenHorizonMs,
+			});
+			const revocation = createRefreshTokenFamilyRevocation({
+				refreshTokenFamilyStore,
+				accessTokenHorizonMs,
+			});
 			await rotation.register("prev-jti-lifetime", "fam-lifetime", Date.now() + 86_400_000);
 			const token = await new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-lifetime" })
 				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })

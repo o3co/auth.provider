@@ -35,6 +35,8 @@ import {
 	createMemoryAccessTokenDenylist,
 	createSymmetricKeyStore,
 	DEFAULT_CLOCK_SKEW_MS,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+	REVOCATION_RETENTION_ALLOWANCE_MS,
 	type RefreshTokenFamilyRevocation,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
@@ -290,7 +292,14 @@ describe("POST /oauth/revoke — an access token with nothing left to deny", () 
 		).rejects.toMatchObject({ reason: "revoked" });
 	});
 
-	it("keeps a live token denied until it can no longer verify: its exp plus the clock tolerance", async () => {
+	it("keeps a live token denied until it can no longer verify: its exp plus the retention allowance, the clock tolerance counted once", async () => {
+		// The allowance core keeps every revocation record past the last moment
+		// what it revoked verifies: the verifier's clock tolerance, plus the
+		// replica allowance and a rounding second — the tolerance once, not
+		// added again on top.
+		expect(REVOCATION_RETENTION_ALLOWANCE_MS).toBe(
+			DEFAULT_CLOCK_SKEW_MS + DEFAULT_SUBJECT_REVOCATION_SKEW_MS + 1_000,
+		);
 		const denylist = strictDenylist();
 		const app = appWith({
 			denylist,
@@ -301,7 +310,10 @@ describe("POST /oauth/revoke — an access token with nothing left to deny", () 
 
 		await revoke(app, { token: await accessTokenWith({ exp, jti: "at-until" }) });
 
-		expect(denylist.add).toHaveBeenCalledWith("at-until", exp * 1000 + DEFAULT_CLOCK_SKEW_MS);
+		expect(denylist.add).toHaveBeenCalledWith(
+			"at-until",
+			exp * 1000 + REVOCATION_RETENTION_ALLOWANCE_MS,
+		);
 	});
 
 	it("still records a live token of the client's", async () => {
