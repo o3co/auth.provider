@@ -206,11 +206,19 @@ describe("loggableError", () => {
 			expect(empty.stack).not.toMatch(/^Error/m);
 		});
 
-		it("keeps only the lines that are frames, wherever the others fall", () => {
+		it("keeps the unbroken run of frames from the first, and nothing after a line that is not one", () => {
 			const interleaved = new Error("m");
-			interleaved.stack =
-				"Error: m\n    at a (x.js:1:1)\n    [a note, not a frame]\n    at b (x.js:2:2)";
-			expect(loggableError(interleaved).stack).toBe("    at a (x.js:1:1)\n    at b (x.js:2:2)");
+			interleaved.stack = "Error: m\n    at a\nnot a frame\n    at b";
+			expect(loggableError(interleaved).stack).toBe("    at a");
+		});
+
+		it("drops a `Caused by:` section appended after the frames", () => {
+			const appended = new Error("m");
+			appended.stack =
+				"Error: m\n    at a (x.js:1:1)\nCaused by: Error: x\n    at gho_SECRET_FRAME (x:1:1)";
+			const { stack } = loggableError(appended);
+			expect(stack).toBe("    at a (x.js:1:1)");
+			expect(stack).not.toContain("gho_SECRET_FRAME");
 		});
 
 		it("keeps no stack whose header no longer carries the message, as it cannot tell header from frames", () => {
