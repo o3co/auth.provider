@@ -159,7 +159,6 @@ jobs:
       - name: No cross-project references or agent-workspace paths in PR commit messages
         if: github.event_name == 'pull_request'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -euo pipefail
@@ -169,20 +168,24 @@ jobs:
           # bodies into the merge commit which becomes immutable history.
           # The pattern is assembled from parts so this workflow does not match itself.
           PAT="$(printf '%s' 'dpla' 'as|@dpla' 'asio')"
-          if [ -z "${BASE_SHA:-}" ] || [ -z "${HEAD_SHA:-}" ]; then
-            echo "PR base or head SHA missing; skipping commit-message scan."
+          if [ -z "${HEAD_SHA:-}" ] || [ -z "${GITHUB_BASE_REF:-}" ]; then
+            echo "PR head SHA or base branch missing; skipping commit-message scan."
             exit 0
           fi
-          # Full history is fetched via actions/checkout fetch-depth:0 above,
-          # so both SHAs are reachable. Verify defensively — if either is
-          # missing, fail loudly rather than silently passing.
-          for sha in "$BASE_SHA" "$HEAD_SHA"; do
-            if ! git cat-file -e "$sha^{commit}" 2>/dev/null; then
-              echo "ERROR: commit $sha not present in checkout; cannot scan PR commit messages."
-              exit 1
-            fi
-          done
-          MATCHES="$(git log --format='%H%n%B%n---' "$BASE_SHA..$HEAD_SHA" | grep -E "$PAT" || true)"
+          # The PR's own commits: those the head has and the base branch, as it
+          # stands now, does not. Not base.sha..head.sha — the event's base.sha
+          # can predate the base the PR was last rebased onto, and that range
+          # then takes in the base branch's own commits, which this PR cannot
+          # reword. The base branch is fetched here so its ref is present and
+          # current; the head is verified — if either is missing, fail loudly
+          # rather than silently passing.
+          git fetch --no-tags --quiet origin "+refs/heads/${GITHUB_BASE_REF}:refs/remotes/origin/${GITHUB_BASE_REF}"
+          if ! git cat-file -e "${HEAD_SHA}^{commit}" 2>/dev/null; then
+            echo "ERROR: commit $HEAD_SHA not present in checkout; cannot scan PR commit messages."
+            exit 1
+          fi
+          RANGE=("$HEAD_SHA" --not "origin/${GITHUB_BASE_REF}")
+          MATCHES="$(git log --format='%H%n%B%n---' "${RANGE[@]}" | grep -E "$PAT" || true)"
           if [ -n "$MATCHES" ]; then
             echo "ERROR: prohibited cross-project reference in PR commit messages:"
             echo "$MATCHES"
@@ -195,7 +198,7 @@ jobs:
           # bodies into develop's history, where a dead link cannot be fixed.
           # Commit by commit, so the error names the commit to reword.
           WORKSPACE_PAT="$(printf '%s' '\.clau' 'de/|superpowers/' '(specs|plans)/|/Volu' 'mes/Work' 'space/')"
-          SHAS="$(git rev-list "$BASE_SHA..$HEAD_SHA")"
+          SHAS="$(git rev-list "${RANGE[@]}")"
           FOUND=0
           for sha in $SHAS; do
             if HITS="$(git log -1 --format=%B "$sha" | grep -nE "$WORKSPACE_PAT")"; then
