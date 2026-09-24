@@ -67,6 +67,29 @@ const MAX_CAUSE_DEPTH = 3;
 const OAUTH_ERROR_TEXT = /^[\x20\x21\x23-\x5B\x5D-\x7E]+$/;
 
 /**
+ * Twenty or more characters that could be a token (base64url, base64, a
+ * JWT's segments, a hex string). An IdP that echoes the credential it refused
+ * — legacy Spring Security's "Invalid refresh token: <the token>" — writes
+ * one; a sentence does not.
+ */
+const TOKEN_RUN = /[A-Za-z0-9._~+/=-]{20,}/;
+
+/**
+ * An upstream's `error_description`: its first line — Azure AD puts a Trace
+ * ID, a Correlation ID and a timestamp on CRLF-separated lines after the
+ * AADSTS one — when that line is within RFC 6749 §5.2's character set and
+ * carries no token-shaped run. The one peer-written string the projection
+ * keeps, because an operator needs it to tell a revoked grant from a broken
+ * client.
+ */
+const descriptionOf = (value: unknown): string | undefined => {
+	if (typeof value !== "string") return undefined;
+	const firstLine = value.split(/\r?\n/, 1)[0] ?? "";
+	if (!OAUTH_ERROR_TEXT.test(firstLine) || TOKEN_RUN.test(firstLine)) return undefined;
+	return capped(firstLine);
+};
+
+/**
  * Redis quotes the leading arguments of a command it refused after this, in
  * the server's own text — so whichever client carries it: redis-errors'
  * ReplyError (ioredis), node-redis's ErrorReply (named plain "Error").
@@ -195,7 +218,7 @@ function project(err: unknown, depth: number): LoggableError {
 	const status = read(err, "status");
 	const type = read(err, "type");
 	const error = read(err, "error");
-	const description = read(err, "error_description");
+	const errorDescription = descriptionOf(read(err, "error_description"));
 	const cause = read(err, "cause");
 	const response = responseFields(cause) ?? responseFields(read(err, "response"));
 	const stack = framesOf(read(err, "stack"), rawMessage);
@@ -223,9 +246,7 @@ function project(err: unknown, depth: number): LoggableError {
 		...(typeof status === "number" && Number.isInteger(status) ? { status } : {}),
 		...(typeof type === "string" ? { type: capped(type) } : {}),
 		...(typeof error === "string" && OAUTH_ERROR_TEXT.test(error) ? { error: capped(error) } : {}),
-		...(typeof description === "string" && OAUTH_ERROR_TEXT.test(description)
-			? { error_description: capped(description) }
-			: {}),
+		...(errorDescription !== undefined ? { error_description: errorDescription } : {}),
 		...(response !== undefined ? { response } : {}),
 		...(stack !== undefined ? { stack } : {}),
 		...(isError(cause) && depth < MAX_CAUSE_DEPTH ? { cause: project(cause, depth + 1) } : {}),
