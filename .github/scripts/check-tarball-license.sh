@@ -20,8 +20,10 @@
 #     public package cannot be published without passing through here, and no
 #     tarball may be of a package the release does not publish.
 #
-# Fails closed: no tarballs, a package list pnpm cannot produce, or a tarball
-# whose manifest cannot be read is a failure, never a clean scan.
+# Fails closed: no tarballs, or a package list pnpm cannot produce, stops the
+# check; a tarball that cannot be read, or whose package.json cannot be, is
+# reported as a failure naming it, and the other tarballs are still checked.
+# Never a clean scan.
 #
 # Usage (from inside the workspace):
 #   check-tarball-license.sh <tarball-dir> <license-file>
@@ -58,13 +60,29 @@ for tgz in "$dir"/*.tgz; do
 	# Into a variable, never piped into `grep -q`: grep stops reading at its
 	# first match, tar is then killed by SIGPIPE mid-listing, and `pipefail`
 	# reports the match as a failure — a LICENSE packed first read as missing.
-	listing="$(tar -tzf "$tgz")"
+	# A tarball that cannot be read is reported and passed over, like any
+	# other failure here, so the rest are still checked.
+	if ! listing="$(tar -tzf "$tgz")"; then
+		fail "${file} cannot be read as a gzipped tarball (tar's own message is above)"
+		continue
+	fi
 
 	if ! manifest="$(tar -xzOf "$tgz" package/package.json)"; then
 		fail "${file} has no readable package/package.json"
 		continue
 	fi
-	name="$(printf '%s' "$manifest" | node -e 'process.stdout.write(String(JSON.parse(require("node:fs").readFileSync(0, "utf8")).name ?? ""))')"
+	if ! name="$(printf '%s' "$manifest" | node -e '
+		let pkg;
+		try {
+			pkg = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+		} catch {
+			process.exit(3);
+		}
+		process.stdout.write(String(pkg?.name ?? ""));
+	')"; then
+		fail "${file}: package/package.json is not JSON"
+		continue
+	fi
 	if [ -z "$name" ]; then
 		fail "${file}: its package.json names no package"
 		continue

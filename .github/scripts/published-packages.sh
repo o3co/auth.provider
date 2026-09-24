@@ -14,7 +14,13 @@ set -euo pipefail
 
 listing="$(pnpm -r ls --json --depth -1)"
 printf '%s' "$listing" | node -e '
-	const all = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+	let all;
+	try {
+		all = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+	} catch {
+		console.error("::error::pnpm printed no workspace package list — run this from inside the workspace");
+		process.exit(2);
+	}
 	const published = all.filter((p) => p.private !== true);
 	if (published.length === 0) {
 		console.error("::error::pnpm lists no workspace package that the release would publish");
