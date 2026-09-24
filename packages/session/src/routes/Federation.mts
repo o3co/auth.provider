@@ -24,6 +24,7 @@ import {
 	type FederationProvider,
 	type FederationTokenStore,
 	type Logger,
+	loggableError,
 	resolveFederationResponseMode,
 	type SessionFederationIndex,
 	type SubjectSessionIndex,
@@ -800,7 +801,10 @@ export const createRouter = (
 				callbackParams: adapterCallbackParams,
 			});
 		} catch (err) {
-			log.warn({ err }, "federation token exchange failed");
+			// The adapter's library puts the token response it refused on the
+			// error's cause chain — the access and refresh tokens included — so
+			// the log gets the projection, never the error.
+			log.warn({ err: loggableError(err) }, "federation token exchange failed");
 			return res.status(502).json({
 				error: "exchange_failed",
 				error_description: "Token exchange with upstream IdP failed",
