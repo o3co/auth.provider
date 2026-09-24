@@ -174,13 +174,13 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 	});
 
 	// Note 15: the grant denies by absence. Dispatch refuses a registration
-	// naming other grants only with the base check's description, which quotes
-	// the grant type, and one with no `allowedGrantTypes` with the strict
-	// check's, which does not.
+	// naming other grants only with the base check, and one with no
+	// `allowedGrantTypes` with the strict check; both answer in the same
+	// words, quoting the grant type.
 	it.each([
-		["names other grants only", otherGrants, `grant_type '${TOKEN_EXCHANGE_GRANT_TYPE}'`],
-		["omits allowedGrantTypes", noGrants, TOKEN_EXCHANGE_GRANT_TYPE],
-	])("refuses a client whose registration %s", async (_case, client, named) => {
+		["names other grants only", otherGrants],
+		["omits allowedGrantTypes", noGrants],
+	])("refuses a client whose registration %s", async (_case, client) => {
 		const app = await boot();
 		const subjectToken = await signSelfIssuedAccessToken({});
 
@@ -192,7 +192,7 @@ describe("token exchange through oauthModule's POST /oauth/token", () => {
 		expect(res.status).toBe(400);
 		expect(res.body).toEqual({
 			error: "unauthorized_client",
-			error_description: `client is not authorized for ${named}`,
+			error_description: `client is not authorized for grant_type '${TOKEN_EXCHANGE_GRANT_TYPE}'`,
 		});
 	});
 

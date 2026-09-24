@@ -186,7 +186,7 @@ export const createDeviceAuthorizationHandler = (
 			options.logger?.warn({ clientId: client.clientId }, "device_authorization_grant_not_allowed");
 			fail(res, 400, {
 				error: "unauthorized_client",
-				error_description: `client is not authorized for ${DEVICE_CODE_GRANT_TYPE}`,
+				error_description: `client is not authorized for grant_type '${DEVICE_CODE_GRANT_TYPE}'`,
 			});
 			return;
 		}
