@@ -14,19 +14,22 @@
  * limitations under the License.
  */
 
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import { generateCodeVerifier } from "../pkce.mjs";
+import { codeChallenge } from "../pkce.mjs";
 
-describe("generateCodeVerifier", () => {
-	it("produces a 43-character base64url string (RFC 7636 §4.1)", () => {
-		const v = generateCodeVerifier();
-		expect(v).toMatch(/^[A-Za-z0-9_-]+$/);
-		expect(v.length).toBe(43);
+describe("codeChallenge", () => {
+	it("returns BASE64URL(SHA256(verifier)) per RFC 7636 §4.2 S256", () => {
+		const verifier = "dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk";
+		const expected = createHash("sha256").update(verifier).digest("base64url");
+		expect(codeChallenge(verifier)).toBe(expected);
 	});
 
-	it("produces a different value on each call (cryptographically random)", () => {
-		const set = new Set<string>();
-		for (let i = 0; i < 100; i++) set.add(generateCodeVerifier());
-		expect(set.size).toBe(100);
+	it("produces a URL-safe base64 string (no padding, no + or /)", () => {
+		const out = codeChallenge("some-verifier-value");
+		expect(out).toMatch(/^[A-Za-z0-9_-]+$/);
+		expect(out).not.toContain("=");
+		expect(out).not.toContain("+");
+		expect(out).not.toContain("/");
 	});
 });

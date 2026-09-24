@@ -128,3 +128,14 @@ describe("core barrel — #593 federation grant domain rules", () => {
 		}
 	});
 });
+
+describe("core barrel — the federation adapter toolkit", () => {
+	it("re-exports the pure helpers every adapter builds its requests with", () => {
+		// They were `@o3co/auth-provider-session`'s, which is a router; an
+		// adapter needs none of it, and core's contract already told adapters
+		// to use two of them.
+		expect(typeof core.codeChallenge).toBe("function");
+		expect(typeof core.callbackUrlForExchange).toBe("function");
+		expect(typeof core.resolveClientSecret).toBe("function");
+	});
+});

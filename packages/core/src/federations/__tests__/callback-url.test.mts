@@ -15,7 +15,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { callbackUrlForExchange } from "#/federations/callback-url.mjs";
+import { callbackUrlForExchange } from "../callback-url.mjs";
 
 const CALLBACK = "https://auth.test/session/oauth/federation/idp-a/callback";
 

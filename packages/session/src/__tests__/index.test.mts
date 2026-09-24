@@ -39,6 +39,16 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		}
 	});
 
+	it("does not re-export the adapter toolkit, which core owns", async () => {
+		// `codeChallenge`, `callbackUrlForExchange` and `resolveClientSecret` are
+		// what an adapter builds its requests with, not what this router does:
+		// one home, core, and one import path for every adapter.
+		const mod = (await import("#/index.mjs")) as Record<string, unknown>;
+		for (const name of ["codeChallenge", "callbackUrlForExchange", "resolveClientSecret"]) {
+			expect(name in mod).toBe(false);
+		}
+	});
+
 	it("exports sessionModule as a const Module value (not a factory)", async () => {
 		const mod = await import("#/index.mjs");
 		const sessionModule = (mod as { sessionModule?: unknown }).sessionModule;
@@ -61,12 +71,6 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 	it("exports federation helper utilities for provider packages", async () => {
 		const mod = await import("#/index.mjs");
 		expect(typeof (mod as { resolveCallbackRedirect?: unknown }).resolveCallbackRedirect).toBe(
-			"function",
-		);
-		expect(typeof (mod as { codeChallenge?: unknown }).codeChallenge).toBe("function");
-		// #597: what a provider hands its OAuth library for the code exchange.
-		// A third-party adapter that rebuilds the URL by hand reproduces #595.
-		expect(typeof (mod as { callbackUrlForExchange?: unknown }).callbackUrlForExchange).toBe(
 			"function",
 		);
 	});
@@ -102,7 +106,6 @@ describe("package public surface (@o3co/auth-provider-session)", () => {
 		expect(typeof mod.mintFederationTransactionId).toBe("function");
 		// #494: removed from the public surface with the defect it implemented.
 		expect("applyCrossSiteStateCookie" in mod).toBe(false);
-		expect(typeof mod.resolveClientSecret).toBe("function");
 		// #481: the amr marker a federated login records is part of the contract.
 		expect((mod as { FEDERATED_AMR?: unknown }).FEDERATED_AMR).toBe("fed");
 	});
