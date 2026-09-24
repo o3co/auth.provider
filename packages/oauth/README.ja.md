@@ -633,7 +633,7 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 
 すべてのエラーレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける。401 レスポンスには RFC 6750 に従い `WWW-Authenticate: Bearer error="invalid_token"` を含める。
 
-このルートがログに書く失敗はすべて core の `loggableError(err)` を運び、エラーそのものは運ばない — 警告 `refreshToken failed (reason: …)` も含めて。アダプターのライブラリは拒否したリフレッシュ応答を、ローテーションされたリフレッシュトークンを含めてエラーの cause の連鎖に載せ、Redis ストアのエラーは拒否されたコマンドの引数（`allow-plaintext` ならトークンレコード）を運ぶ。射影はそれらを捨て、失敗を見分けるもの — ライブラリのコード、HTTP ステータスと content type、上流の OAuth `error`、そして core がそのために定める規則（最初の行、トークンの形の連なりの手前で切る）の下での `error_description` — を残し、メッセージが相手側を引用する既知の二つの形（JSON パーサーの入力、Redis が反復する引数）を取り除く。相手側がメッセージに書いたそれ以外のテキストは残る。何が残るかは core の README が正確に述べる。このパッケージの他のログも同じ規則に従う。
+このルートがログに書く失敗はすべて core の `loggableError(err)` を運び、エラーそのものは運ばない — 警告 `refreshToken failed (reason: …)` も含めて。アダプターのライブラリは拒否したリフレッシュ応答を、ローテーションされたリフレッシュトークンを含めてエラーの cause の連鎖に載せ、Redis ストアのエラーは拒否されたコマンドの引数（`allow-plaintext` ならトークンレコード）を運ぶ。射影はそれらを捨て、失敗を見分けるもの — ライブラリのコード、HTTP ステータスと content type、上流の OAuth `error`、そして core がそのために定める規則（最初の行、トークンの形の連なりを含む語の頭で切る）の下での `error_description` — を残し、メッセージが相手側を引用する既知の二つの形（JSON パーサーの入力、Redis が反復する引数）を取り除く。相手側がメッセージに書いたそれ以外のテキストは残る。何が残るかは core の README が正確に述べる。このパッケージの他のログも同じ規則に従う。
 
 ### Opt-in: `allowedAzpForFederationToken`
 
