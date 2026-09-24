@@ -34,7 +34,9 @@ import {
 	type ClientRepository,
 	createMemoryAccessTokenDenylist,
 	createSymmetricKeyStore,
+	DEFAULT_CLOCK_SKEW_MS,
 	type RefreshTokenFamilyRevocation,
+	verifyJwt,
 } from "@o3co/auth-provider-core";
 import express from "express";
 import { SignJWT } from "jose";
@@ -261,6 +263,45 @@ describe("POST /oauth/revoke — an access token with nothing left to deny", () 
 			expect(logger.error).not.toHaveBeenCalled();
 		});
 	}
+
+	it("records a token that expired inside the clock tolerance, which still verifies", async () => {
+		// `verifyJwt` accepts a token up to DEFAULT_CLOCK_SKEW_MS past its
+		// `exp`. A token that expired a minute ago is still usable, so its
+		// revocation has to be recorded — and recorded for as long as it can
+		// still verify, or it verifies again the moment the entry lapses.
+		const denylist = createMemoryAccessTokenDenylist();
+		const app = appWith({
+			denylist,
+			revocation: familyRevocation(false),
+			logger: createMockLogger(),
+		});
+		const token = await accessTokenWith({ exp: now() - 60, jti: "at-just-expired" });
+
+		const res = await revoke(app, { token, token_type_hint: "access_token" });
+
+		expect(res.status).toBe(200);
+		await expect(
+			verifyJwt(token, keyStore, {
+				type: "access_token",
+				expectedIssuer: ISSUER,
+				revocation: { denylist },
+			}),
+		).rejects.toMatchObject({ reason: "revoked" });
+	});
+
+	it("keeps a live token denied until it can no longer verify: its exp plus the clock tolerance", async () => {
+		const denylist = strictDenylist();
+		const app = appWith({
+			denylist,
+			revocation: familyRevocation(false),
+			logger: createMockLogger(),
+		});
+		const exp = now() + 600;
+
+		await revoke(app, { token: await accessTokenWith({ exp, jti: "at-until" }) });
+
+		expect(denylist.add).toHaveBeenCalledWith("at-until", exp * 1000 + DEFAULT_CLOCK_SKEW_MS);
+	});
 
 	it("still records a live token of the client's", async () => {
 		const denylist = strictDenylist();
