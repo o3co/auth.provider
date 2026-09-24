@@ -414,7 +414,14 @@ export { consoleLogger, createConsoleLogger } from "./logging/consoleLogger.mjs"
 // Logging
 export type { EventLogger, Logger, LogLevel } from "./logging/Logger.mjs";
 // What a log line may carry of a library's error: never the response on its cause chain.
-export { type LoggableError, loggableError } from "./logging/loggableError.mjs";
+export {
+	guardedRead,
+	LOGGED_STACK_MAX_FRAMES,
+	LOGGED_STACK_MAX_LENGTH,
+	LOGGED_STRING_MAX_LENGTH,
+	type LoggableError,
+	loggableError,
+} from "./logging/loggableError.mjs";
 export { createMfaProviderFactory } from "./mfa/factory.mjs";
 export type { MfaRouteDeps } from "./mfa/route.mjs";
 export { createMfaRouter } from "./mfa/route.mjs";

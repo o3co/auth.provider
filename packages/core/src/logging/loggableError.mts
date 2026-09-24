@@ -36,11 +36,12 @@
  *   line (split on CRLF or LF), when that line is within RFC 6749 §5.2's
  *   character set (`%x20-21 / %x23-5B / %x5D-7E`) and carries no run of
  *   twenty or more characters from `[A-Za-z0-9._~+/=-]`; capped at 256.
- * - `stack`: the frames, never the header. The header (`name: message`) is
- *   taken to be as many lines as the message has and dropped; of the lines
- *   after it only those starting with four spaces and `at ` are kept; the
- *   first ten of them, joined by `\n`, then cut at 2048 characters. Absent
- *   when no frame is left.
+ * - `stack`: the frames, never the header. A non-empty message is found in
+ *   the stack and everything up to the end of it dropped (an empty one: the
+ *   first line); a message not found — rewritten after V8 formatted the
+ *   stack — gives no stack; of what remains only lines starting with four
+ *   spaces and `at ` are kept; the first ten, joined by `\n`, then cut at
+ *   2048 characters. Absent when no frame is left or `stack` cannot be read.
  * - Also kept: `name`; a string or numeric `code`; an integer `status`; a
  *   string `type`; an `error` within §5.2's set; `response: { status,
  *   contentType }` for a Response on the cause or on `response`; and the
@@ -80,9 +81,11 @@ export interface LoggableError {
 	/** A Response the library put on the error — its cause, or its own `response`. */
 	readonly response?: { readonly status: number; readonly contentType?: string };
 	/**
-	 * The stack's frames and nothing of its header: at most ten `    at …`
-	 * lines, joined by `\n` and cut at 2048 characters. Absent when there
-	 * are none.
+	 * The stack's frames and nothing of its header: at most
+	 * {@link LOGGED_STACK_MAX_FRAMES} `    at …` lines, joined by `\n` and cut
+	 * at {@link LOGGED_STACK_MAX_LENGTH} characters. Absent when there are
+	 * none, when `stack` cannot be read, or when its header no longer carries
+	 * the message.
 	 */
 	readonly stack?: string;
 	readonly cause?: LoggableError;
@@ -91,7 +94,7 @@ export interface LoggableError {
 }
 
 /** The longest string any field keeps. */
-const MAX_STRING = 256;
+export const LOGGED_STRING_MAX_LENGTH = 256;
 
 /** How many causes deep the projection follows; a cycle ends here too. */
 const MAX_CAUSE_DEPTH = 3;
@@ -132,23 +135,32 @@ const REDIS_ECHOED_ARGS = /, with args beginning with:[\s\S]*$/;
 /** A V8 stack frame line. */
 const FRAME = /^ {4}at /;
 
-/** How many frames, and how many characters of them, a projection keeps. */
-const MAX_FRAMES = 10;
-const MAX_STACK = 2048;
+/** The most stack frames the projection keeps. */
+export const LOGGED_STACK_MAX_FRAMES = 10;
+
+/** The longest `stack` the projection keeps, frames joined; the cut may fall mid-frame. */
+export const LOGGED_STACK_MAX_LENGTH = 2048;
 
 /** A SyntaxError's offset, and nothing else of its message; a longer number is no offset. */
 const SYNTAX_POSITION = / at position (\d{1,10})(?!\d)/;
 
-const capped = (value: string): string => value.slice(0, MAX_STRING);
+const capped = (value: string): string => value.slice(0, LOGGED_STRING_MAX_LENGTH);
 
-/** Read one property; a getter that throws leaves the field out rather than the projection. */
-const read = (target: object, key: string): unknown => {
+/**
+ * `target[key]`, read so that the read cannot throw: `{ value }`, or `null`
+ * when it threw — a getter, a Proxy's trap. The projection is handed
+ * whatever was thrown, and must not throw while asking about it.
+ */
+export const guardedRead = (target: object, key: string): { readonly value: unknown } | null => {
 	try {
-		return (target as Record<string, unknown>)[key];
+		return { value: (target as Record<string, unknown>)[key] };
 	} catch {
-		return undefined;
+		return null;
 	}
 };
+
+/** One property, or `undefined` when reading it threw: that field is left out. */
+const read = (target: object, key: string): unknown => guardedRead(target, key)?.value;
 
 /**
  * An Error from this realm or another (`node:vm`, a worker's structured
@@ -172,24 +184,44 @@ const isError = (value: unknown): value is object => {
 };
 
 /**
- * The frames of an error's `stack`, and nothing of its header.
+ * The frames of an error's `stack`, and nothing of the header ahead of them
+ * — the rule device-grant's copy shares, pinned by the shared vectors in
+ * `__tests__/loggableError.test.mts`:
  *
- * V8 writes the header as `name: message`, and the message is the untrusted
- * part — it may quote a parser's input or a peer's answer, and it may span
- * lines. So the header is taken to be as many lines as the message has, it is
- * dropped whole, and of what follows only `    at ` lines are kept: a message
- * line shaped like a frame cannot pass for one. At most ten frames, joined by
- * `\n`, then cut at 2048 characters. `undefined` when no frame is left.
+ * 1. `stack` not a string (or its read threw): no stack.
+ * 2. The header is `name: message`, and the message is the untrusted part.
+ *    A non-empty `message` is found in the stack and everything up to the
+ *    end of its first occurrence is dropped — never counted in lines, so a
+ *    message line shaped like a frame goes with it; a message not found
+ *    (rewritten after V8 formatted the stack, which it does on the first
+ *    read of `stack`) means no stack, because the header can no longer be
+ *    told from the frames. An empty or absent message: the first line is
+ *    dropped.
+ * 3. Of what remains, only `    at ` lines are kept.
+ * 4. The first {@link LOGGED_STACK_MAX_FRAMES}, joined by `\n`, then cut at
+ *    {@link LOGGED_STACK_MAX_LENGTH} characters. No frame: no stack.
+ *
+ * What the text cannot show: a message rewritten, after the stack was
+ * formatted, to a leading part of the one the header carries — the rest of
+ * the old message then follows the cut; only its `    at `-shaped lines, if
+ * any, could pass for frames.
  */
 const framesOf = (stack: unknown, message: unknown): string | undefined => {
 	if (typeof stack !== "string") return undefined;
-	const headerLines = typeof message === "string" ? message.split("\n").length : 1;
-	const frames = stack
+	let rest: string;
+	if (typeof message === "string" && message !== "") {
+		const at = stack.indexOf(message);
+		if (at < 0) return undefined;
+		rest = stack.slice(at + message.length);
+	} else {
+		const newline = stack.indexOf("\n");
+		rest = newline < 0 ? "" : stack.slice(newline + 1);
+	}
+	const frames = rest
 		.split("\n")
-		.slice(headerLines)
 		.filter((line) => FRAME.test(line))
-		.slice(0, MAX_FRAMES);
-	return frames.length === 0 ? undefined : frames.join("\n").slice(0, MAX_STACK);
+		.slice(0, LOGGED_STACK_MAX_FRAMES);
+	return frames.length === 0 ? undefined : frames.join("\n").slice(0, LOGGED_STACK_MAX_LENGTH);
 };
 
 /** A fetch `Response`, read structurally so that one from another realm counts too. */
