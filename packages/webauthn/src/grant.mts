@@ -102,7 +102,6 @@ import { randomUUID } from "node:crypto";
 
 import {
 	boundPolicyAudience,
-	type ChallengeCeremony,
 	evaluateGrantPolicy,
 	extractResourceParam,
 	type GrantContext,
@@ -112,9 +111,9 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isGrantTypeAllowed,
+	type ProviderDeps,
 	resolveAccessTokenLifetime,
 	type Token,
-	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
 import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { decodeJwtPayload } from "./internal/_jwtPayload.mjs";
@@ -137,18 +136,25 @@ const REFRESH_TOKEN_GRANT_TYPE = "refresh_token";
 // ---------------------------------------------------------------------------
 
 /**
- * Dependencies for the WebAuthn grant handler.
+ * What the WebAuthn grant reads (#626 P2), declared the way the oauth grants
+ * declare theirs: the shared grant slots it uses — `config` and `keyStore` to
+ * mint, `grantPolicy` to bound scope, `refreshTokenFamilyRotation` to open a
+ * refresh-token family — plus the credential store and the challenge ceremony
+ * only this grant reads, and the RP fields of `webauthnConfig` the assertion
+ * check needs. `webauthnModule` declares every one of these slots, so a slot
+ * read here without the module declaring it is a compile error rather than
+ * an `undefined` at runtime.
  *
- * `webauthnCredentialStore` and `challengeCeremony` are required for the
- * WebAuthn assertion flow; `webauthnConfig` carries the RP config (rpId,
- * allowed origins) needed for verifyWebAuthnAssertion.
- *
- * All other slots mirror the standard GrantDependencies shape (config, keyStore,
- * optional grantPolicy).
+ * `grantPolicy` stays optional in this type although `webauthnModule` refuses
+ * to boot without it (H-2): a handler built directly, as the unit tests do,
+ * still runs without one.
  */
-export interface WebAuthnGrantDeps extends GrantDependencies {
-	readonly webauthnCredentialStore: WebAuthnCredentialStore;
-	readonly challengeCeremony: ChallengeCeremony;
+export interface WebAuthnGrantDeps
+	extends Pick<
+			GrantDependencies,
+			"config" | "keyStore" | "grantPolicy" | "refreshTokenFamilyRotation"
+		>,
+		ProviderDeps<"webauthnCredentialStore" | "challengeCeremony"> {
 	readonly webauthnConfig: {
 		readonly rpId: string;
 		readonly origin: readonly string[];
@@ -594,7 +600,7 @@ export const createWebAuthnGrant = (deps: WebAuthnGrantDeps): GrantHandler => {
  * exists to prevent rather than a variant of it.
  */
 async function registerRefreshTokenFamily(
-	rotation: NonNullable<GrantDependencies["refreshTokenFamilyRotation"]>,
+	rotation: NonNullable<WebAuthnGrantDeps["refreshTokenFamilyRotation"]>,
 	refreshTokenValue: string,
 	familyId: string,
 ): Promise<boolean> {
