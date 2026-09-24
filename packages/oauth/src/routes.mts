@@ -112,7 +112,10 @@ declare module "express-session" {
 
 /**
  * Every path this router serves, its sub-routers' included — the only
- * requests whose bodies it parses.
+ * requests whose bodies it parses. The logout, federation-token and consent
+ * routes are listed only when their stores are wired and the routes are
+ * mounted, so a deployment's own route at one of those paths receives its
+ * body unread too.
  *
  * The router is mounted at `/oauth`, a prefix other modules mount routes
  * under too (the device grant, federation grants, WebAuthn, a deployment's
@@ -125,19 +128,24 @@ declare module "express-session" {
  *
  * Every route here gets exactly what it got before: JSON and urlencoded
  * (`extended: false`), Express's default limits, ahead of anything else.
- * `bodyParsing.test.mts` discovers the router's routes and checks that
- * each one is parsed, so a route added without its path here fails there.
+ * `bodyParsing.test.mts` discovers the router's routes with every surface
+ * mounted and with none, and checks both directions — each mounted route is
+ * parsed, each unmounted one is not — so a route added without its path
+ * here, or a path left here without its route, fails there.
  */
-const OAUTH_ROUTE_PATHS = [
+const oauthRoutePaths = (mounted: {
+	readonly logout: boolean;
+	readonly federationToken: boolean;
+	readonly consent: boolean;
+}): string[] => [
 	"/token",
 	"/introspect",
 	"/authorize",
 	"/userinfo",
-	"/logout",
-	"/federation/:name/logout",
-	"/federation/:name/token",
 	"/revoke",
-	"/consent",
+	...(mounted.logout ? ["/logout", "/federation/:name/logout"] : []),
+	...(mounted.federationToken ? ["/federation/:name/token"] : []),
+	...(mounted.consent ? ["/consent"] : []),
 ];
 
 export const createOAuthRouter = async (
@@ -360,8 +368,47 @@ export const createOAuthRouter = async (
 		userSessionStore,
 	});
 
+	// Federation endpoints — mount conditionally based on available stores and config.
+	// federationTokenStore is required for both POST /oauth/federation/:name/logout and
+	// POST /oauth/federation/:name/token.
+	// logout_token signing needs the issuer; it is the router-scope canonical one.
+
+	// Logout (back-channel logout_token signing requires issuer).
+	const logoutSupported =
+		!!userSessionStore &&
+		!!sessionRPRegistry &&
+		!!sessionFamilyIndex &&
+		!!sessionFederationIndex &&
+		!!federationTokenStore &&
+		!!refreshTokenFamilyRevocation;
+
+	// Federation-token endpoint forwards upstream; does NOT need our issuer.
+	// Symmetry with logoutSupported: gates on all 4 sibling stores even
+	// though federationToken only consumes 3 of them. Mirrors A4 §3.4 /
+	// §8.1 composition-root invariant (now structurally enforced in
+	// createApp — when ANY is wired, ALL are wired).
+	const federationTokenSupported =
+		!!userSessionStore &&
+		!!sessionRPRegistry &&
+		!!sessionFamilyIndex &&
+		!!sessionFederationIndex &&
+		!!federationTokenStore &&
+		!!refreshTokenFamilyRevocation;
+
+	// #527 / #552: mounted below only with both consent stores; one without
+	// the other is refused there.
+	const consentMounted = consentStore !== undefined && pendingConsentStore !== undefined;
+
 	router
-		.use(OAUTH_ROUTE_PATHS, express.json(), express.urlencoded({ extended: false }))
+		.use(
+			oauthRoutePaths({
+				logout: logoutSupported,
+				federationToken: federationTokenSupported,
+				consent: consentMounted,
+			}),
+			express.json(),
+			express.urlencoded({ extended: false }),
+		)
 		.post(
 			"/token",
 			// D-6 ordering: rate limit BEFORE client auth so repeated unauthenticated
@@ -968,32 +1015,9 @@ export const createOAuthRouter = async (
 		}),
 	);
 
-	// Federation endpoints — mount conditionally based on available stores and config.
-	// federationTokenStore is required for both POST /oauth/federation/:name/logout and
-	// POST /oauth/federation/:name/token.
-	// logout_token signing needs the issuer; it is the router-scope canonical one.
-
-	// Logout (back-channel logout_token signing requires issuer).
-	const logoutSupported =
-		!!userSessionStore &&
-		!!sessionRPRegistry &&
-		!!sessionFamilyIndex &&
-		!!sessionFederationIndex &&
-		!!federationTokenStore &&
-		!!refreshTokenFamilyRevocation;
-
-	// Federation-token endpoint forwards upstream; does NOT need our issuer.
-	// Symmetry with logoutSupported: gates on all 4 sibling stores even
-	// though federationToken only consumes 3 of them. Mirrors A4 §3.4 /
-	// §8.1 composition-root invariant (now structurally enforced in
-	// createApp — when ANY is wired, ALL are wired).
-	const federationTokenSupported =
-		!!userSessionStore &&
-		!!sessionRPRegistry &&
-		!!sessionFamilyIndex &&
-		!!sessionFederationIndex &&
-		!!federationTokenStore &&
-		!!refreshTokenFamilyRevocation;
+	// Federation endpoints — mounted below when `logoutSupported` /
+	// `federationTokenSupported` (decided ahead of the body parsers, which
+	// are scoped to the routes actually mounted).
 
 	if (logoutSupported) {
 		router.use(
