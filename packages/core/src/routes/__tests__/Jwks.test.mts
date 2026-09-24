@@ -17,7 +17,7 @@
 import { createSecretKey } from "node:crypto";
 import type { Request, Response, Router } from "express";
 import { exportPKCS8, exportSPKI, generateKeyPair } from "jose";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { DEFAULT_JWKS_CACHE_MAX_AGE, resolveJwksCacheMaxAge } from "#/jwks/cache.mjs";
 import { DEFAULT_JWKS_PATH, resolveJwksPath } from "#/jwks/path.mjs";
 import { createAsymmetricKeyStore, createSymmetricKeyStore } from "#/keys/KeyStore.mjs";
@@ -308,6 +308,22 @@ describe("JWKS endpoint — never publishes an empty key set (#282)", () => {
 		expect(body.error).toBe("jwks_unavailable");
 		expect(body.keys).toBeUndefined();
 		expect(res.getHeader("Cache-Control")).toBe("no-store");
+	});
+
+	it("logs a keystore that yields zero publishable keys once, at error level", async () => {
+		const emptyKeyStore = {
+			algorithm: "ES256" as const,
+			getVerificationKeys: async () => [],
+		} as unknown as Parameters<typeof createRouter>[1];
+		const logger = { warn: vi.fn(), error: vi.fn() };
+		const express = createMockExpress();
+		createRouter(express, emptyKeyStore, { logger });
+		const res = createMockRes();
+		await express.routes["/.well-known/jwks.json"]({} as Request, res as unknown as Response);
+		expect(res.getStatusCode()).toBe(503);
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith({ algorithm: "ES256", keys: 0 }, "jwks_unavailable");
 	});
 
 	it("returns JWK set for ES256", async () => {

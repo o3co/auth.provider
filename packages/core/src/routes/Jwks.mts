@@ -19,6 +19,7 @@ import { exportJWK } from "jose";
 import { DEFAULT_JWKS_CACHE_MAX_AGE } from "../jwks/cache.mjs";
 import { DEFAULT_JWKS_PATH, isValidJwksPath } from "../jwks/path.mjs";
 import type { KeyStore, ManagedKey } from "../keys/KeyStore.mjs";
+import type { EventLogger } from "../logging/Logger.mjs";
 
 /**
  * JWK members that carry PRIVATE or SYMMETRIC key material and must never
@@ -65,6 +66,12 @@ export interface JwksRouterOptions {
 	 * freshly-rotated kid propagates to caching verifiers in time.
 	 */
 	cacheMaxAgeSeconds?: number;
+	/**
+	 * Where the `503 jwks_unavailable` answer is logged, at error level, as
+	 * `jwks_unavailable` with the algorithm and the number of keys the
+	 * keystore returned. Absent, it is not logged.
+	 */
+	logger?: EventLogger;
 }
 
 /**
@@ -203,6 +210,12 @@ export const createRouter = (
 				// non-public — is an outage, not a valid publication. Same reasoning
 				// as the HS256 branch: an empty set is a lie that caches. Not
 				// cached here either: the next request re-asks the keystore.
+				// Logged as the outage it is: every relying party that fetches
+				// now is told to come back later.
+				opts.logger?.error(
+					{ algorithm: keyStore.algorithm, keys: managedKeys.length },
+					"jwks_unavailable",
+				);
 				res.setHeader("Cache-Control", "no-store");
 				return res.status(503).json({
 					error: "jwks_unavailable",

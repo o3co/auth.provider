@@ -49,6 +49,7 @@ import { resolveJwksPath } from "./path.mjs";
 export const jwksModule = defineModule({
 	name: "jwks",
 	requires: ["config", "keyStore"] as const,
+	optional: ["logger"] as const,
 	contributes: {
 		routes: [
 			async (deps) => {
@@ -70,6 +71,7 @@ export const jwksModule = defineModule({
 					handler: createJwksRouter(express, deps.keyStore, {
 						path,
 						cacheMaxAgeSeconds: resolveJwksCacheMaxAge(config),
+						...(deps.logger ? { logger: deps.logger } : {}),
 					}),
 					routes: [{ method: "GET", path }],
 				};
