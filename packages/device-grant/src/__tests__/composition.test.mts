@@ -182,7 +182,7 @@ describe("deviceGrantModule beside oauthModule — discovery (RFC 8628 §4)", ()
 		const config = makeConfig(ENABLED);
 		const { handle, app } = await bootWith(config, [
 			sessionStoreModuleFor(config),
-			deviceGrantModule,
+			deviceGrantModule({ config }),
 			oauthModule({ config }),
 		]);
 		try {
@@ -208,7 +208,7 @@ describe("deviceGrantModule beside oauthModule — installed but disabled", () =
 		const config = makeConfig({ enabled: false });
 		const { handle, app } = await bootWith(config, [
 			sessionStoreModuleFor(config),
-			deviceGrantModule,
+			deviceGrantModule({ config }),
 			oauthModule({ config }),
 		]);
 		try {
@@ -239,11 +239,11 @@ describe("deviceGrantModule beside oauthModule — POST /oauth/device/verificati
 	const orders = [
 		[
 			"oauthModule listed first",
-			(config: AppConfig) => [oauthModule({ config }), deviceGrantModule],
+			(config: AppConfig) => [oauthModule({ config }), deviceGrantModule({ config })],
 		],
 		[
 			"deviceGrantModule listed first",
-			(config: AppConfig) => [deviceGrantModule, oauthModule({ config })],
+			(config: AppConfig) => [deviceGrantModule({ config }), oauthModule({ config })],
 		],
 	] as const;
 

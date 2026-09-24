@@ -38,7 +38,7 @@
  *      session's signed double-submit token. One policy, not a second one.
  */
 
-import type { ClientRepository } from "@o3co/auth-provider-core";
+import type { AppConfig, ClientRepository } from "@o3co/auth-provider-core";
 import { createMemoryDeviceCodeStore, createMemoryRateLimiter } from "@o3co/auth-provider-core";
 import { createCsrfProtectionFromConfig } from "@o3co/auth-provider-session";
 import express from "express";
@@ -109,13 +109,18 @@ const makeDeps = (overrides: { session?: unknown } = {}) => {
 	return { deps, store, logger };
 };
 
-/** Mount the module's contributed verification route behind a fixed session. */
-const mountVerification = (deps: Record<string, unknown>) => {
-	const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => {
+/** The verification route of the module built for `deps.config`, as `createApp` would call it. */
+const verificationRouteFor = (deps: { readonly config: unknown }) =>
+	deviceGrantModule({ config: deps.config as AppConfig }).contributes?.routes?.[1] as (
+		d: unknown,
+	) => {
 		mountPath: string;
 		handler: express.RequestHandler;
 	};
-	const route = factory(deps);
+
+/** Mount the module's contributed verification route behind a fixed session. */
+const mountVerification = (deps: { readonly config: unknown }) => {
+	const route = verificationRouteFor(deps)(deps);
 	const app = express();
 	app.use((req, _res, next) => {
 		(req as unknown as { session: unknown }).session = {
@@ -291,7 +296,7 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 		// No slice, no signing key for the token arm and no cookie name to
 		// read: the guard cannot be built. Fail where the operator can see it.
 		const { deps } = makeDeps({ session: undefined });
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
+		const factory = verificationRouteFor(deps);
 		expect(() => factory(deps)).toThrow(/session/);
 	});
 
@@ -306,7 +311,7 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 		// cookie called `undefined.csrf` with attributes nobody chose; the
 		// refusal names the field so the operator knows what to add.
 		const { deps } = makeDeps({ session });
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
+		const factory = verificationRouteFor(deps);
 		expect(() => factory(deps)).toThrow(expected);
 	});
 });

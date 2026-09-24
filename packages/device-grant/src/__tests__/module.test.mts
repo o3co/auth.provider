@@ -22,6 +22,7 @@
  */
 
 import type {
+	AppConfig,
 	BootstrapMap,
 	ClientRepository,
 	DeviceCodeStore,
@@ -114,8 +115,24 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 	} as unknown as BootstrapMap;
 };
 
-const boot = (overrides: Overrides) =>
-	createApp({ modules: [deviceGrantModule], bootstrapComponents: makeBoot(overrides) });
+/**
+ * Boot the module built from the same config `createApp` validates — the
+ * one a composition root holds and hands both.
+ */
+const boot = (overrides: Overrides) => {
+	const bootstrapComponents = makeBoot(overrides);
+	return createApp({
+		modules: [deviceGrantModule({ config: bootstrapComponents.config as AppConfig })],
+		bootstrapComponents,
+	});
+};
+
+/** What `createApp` hands a contribution: the config, and whatever slots the test wires. */
+type TestDeps = { readonly config: unknown } & Readonly<Record<string, unknown>>;
+
+/** The contributions of the module built for `deps.config`, as `createApp` would call them with `deps`. */
+const contributionsFor = (deps: TestDeps) =>
+	deviceGrantModule({ config: deps.config as AppConfig }).contributes;
 
 const ENABLED = {
 	enabled: true,
@@ -203,17 +220,18 @@ describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
 		// `endpoints`, not `metadata`: core prefixes the issuer and refuses an
 		// `*_endpoint` literal — the served document is pinned end to end in
 		// composition.test.mts.
-		const contribution = deviceGrantModule.contributes?.discoveryMetadata?.[0] as (
-			deps: unknown,
-		) => Record<string, unknown>;
-		const result = contribution({
+		const deps = {
 			config: {
 				oauth: {
 					jwt: { issuer: "https://as.example.test" },
 					deviceAuthorization: ENABLED,
 				},
 			},
-		});
+		};
+		const contribution = contributionsFor(deps)?.discoveryMetadata?.[0] as (
+			deps: unknown,
+		) => Record<string, unknown>;
+		const result = contribution(deps);
 		expect(result).toEqual({
 			endpoints: { device_authorization_endpoint: "/oauth/device_authorization" },
 		});
@@ -222,26 +240,25 @@ describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
 	it("advertises nothing when disabled", async () => {
 		// #283's rule: the document must not claim a capability the deployment
 		// does not have.
-		const contribution = deviceGrantModule.contributes?.discoveryMetadata?.[0] as (
+		const deps = {
+			config: {
+				oauth: {
+					jwt: { issuer: "https://as.example.test" },
+					deviceAuthorization: { enabled: false },
+				},
+			},
+		};
+		const contribution = contributionsFor(deps)?.discoveryMetadata?.[0] as (
 			deps: unknown,
 		) => Record<string, unknown>;
-		expect(
-			contribution({
-				config: {
-					oauth: {
-						jwt: { issuer: "https://as.example.test" },
-						deviceAuthorization: { enabled: false },
-					},
-				},
-			}),
-		).toEqual({});
+		expect(contribution(deps)).toEqual({});
 	});
 });
 
 describe("deviceGrantModule — the route it actually contributes", () => {
 	/** Build the contributed router and mount it, as `assembleApp` would. */
-	const mountContributedRoute = (index: number, deps: Record<string, unknown>) => {
-		const factory = deviceGrantModule.contributes?.routes?.[index] as (d: unknown) => {
+	const mountContributedRoute = (index: number, deps: TestDeps) => {
+		const factory = contributionsFor(deps)?.routes?.[index] as (d: unknown) => {
 			mountPath: string;
 			handler: express.RequestHandler;
 		};
@@ -339,7 +356,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// The guard's fail-open / fail-closed choice is the product's, made
 		// once in config. Defaulting it here would be a second policy.
 		const deps = enabledDeps();
-		const factory = deviceGrantModule.contributes?.routes?.[0] as (d: unknown) => unknown;
+		const factory = contributionsFor(deps)?.routes?.[0] as (d: unknown) => unknown;
 		expect(() => factory({ ...deps, config: { ...deps.config, rateLimit: undefined } })).toThrow(
 			/rateLimit\.failMode/,
 		);
@@ -351,15 +368,15 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// refused for this route too, not only for device_authorization — or
 		// the refusal would depend on which factory the planner ran first.
 		const deps = enabledDeps();
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory({ ...deps, config: { ...deps.config, rateLimit: undefined } })).toThrow(
 			/rateLimit\.failMode/,
 		);
 	});
 
 	/** Mount the contributed verification route behind a fixed end-user session. */
-	const mountVerificationRoute = (deps: Record<string, unknown>) => {
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => {
+	const mountVerificationRoute = (deps: TestDeps) => {
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => {
 			mountPath: string;
 			handler: express.RequestHandler;
 		};
@@ -436,10 +453,9 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// adapter's 60/60s default in place when the key is missing, so a
 		// hand-built config that never passed the schema booted with a
 		// refusal that argued from five while the limiter applied sixty.
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
-		expect(() => factory(withVerificationBudget(undefined))).toThrow(
-			/oauth\.deviceAuthorization\.rateLimit/,
-		);
+		const deps = withVerificationBudget(undefined);
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);
 	});
 
 	it.each([
@@ -450,15 +466,15 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// The same shapes the seed declines to apply: with one definition of
 		// "usable" shared with core, a budget the module accepts is one the
 		// limiter was seeded from.
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
-		expect(() => factory(withVerificationBudget(rateLimit))).toThrow(
-			/oauth\.deviceAuthorization\.rateLimit/,
-		);
+		const deps = withVerificationBudget(rateLimit);
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);
 	});
 
 	it("mounts device/verification with a usable budget", () => {
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
-		expect(() => factory(withVerificationBudget({ limit: 5, windowSeconds: 300 }))).not.toThrow();
+		const deps = withVerificationBudget({ limit: 5, windowSeconds: 300 });
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(deps)).not.toThrow();
 	});
 
 	it("answers 404 with no-store when the grant is disabled", async () => {
@@ -476,15 +492,23 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 });
 
 describe("deviceGrantModule — disabled surface", () => {
-	it("answers unsupported_grant_type at the token endpoint when disabled", async () => {
-		// Observable behaviour matches "not installed": the token endpoint
-		// answers the same code it uses for an unregistered grant.
-		const factory = deviceGrantModule.contributes?.grants?.[DEVICE_CODE_GRANT_TYPE] as (
-			deps: unknown,
-		) => { handle(ctx: unknown): Promise<{ result: { error?: string } }> };
-		const handler = factory({ config: { oauth: { deviceAuthorization: { enabled: false } } } });
-		const { result } = await handler.handle({});
-		expect(result.error).toBe("unsupported_grant_type");
+	it("contributes no grant when disabled", () => {
+		// Observable behaviour matches "not installed": with nothing
+		// registered, the token endpoint answers `unsupported_grant_type` and
+		// `grant_types_supported` does not name the grant — both pinned beside
+		// `oauthModule` in composition.test.mts. A refusing handler registered
+		// in its place was advertised as a supported grant.
+		const contributes = contributionsFor({
+			config: { oauth: { deviceAuthorization: { enabled: false } } },
+		});
+		expect(contributes?.grants).toBeUndefined();
+	});
+
+	it("contributes the grant when enabled", () => {
+		const contributes = contributionsFor({
+			config: { oauth: { deviceAuthorization: ENABLED } },
+		});
+		expect(Object.keys(contributes?.grants ?? {})).toEqual([DEVICE_CODE_GRANT_TYPE]);
 	});
 });
 
@@ -493,11 +517,6 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 		// The module hands the grant its lifetime at composition. Only the new
 		// keys are configured, so reading the deprecated `expiresIn` would hand
 		// it `undefined` and mint a token with no `exp` claim at all.
-		const factory = deviceGrantModule.contributes?.grants?.[DEVICE_CODE_GRANT_TYPE] as (
-			deps: unknown,
-		) => {
-			handle(ctx: unknown): Promise<{ result: { tokens?: Record<string, unknown> } }>;
-		};
 		const approvedStore = {
 			...createMemoryDeviceCodeStore(),
 			poll: async () => ({
@@ -515,7 +534,7 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 			}),
 		} satisfies DeviceCodeStore;
 		const base = makeValidCoreConfig();
-		const handler = factory({
+		const deps = {
 			config: {
 				oauth: {
 					...base.oauth,
@@ -528,7 +547,11 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 			},
 			deviceCodeStore: approvedStore,
 			keyStore: createSymmetricKeyStore("device-lifetime-secret.at-least-32-bytes"),
-		});
+		};
+		const factory = contributionsFor(deps)?.grants?.[DEVICE_CODE_GRANT_TYPE] as (deps: unknown) => {
+			handle(ctx: unknown): Promise<{ result: { tokens?: Record<string, unknown> } }>;
+		};
+		const handler = factory(deps);
 
 		const { result } = await handler.handle({
 			body: { device_code: "device-code-1", expires_in: "7200" },
@@ -586,8 +609,8 @@ describe("deviceGrantModule — private_key_jwt on the mounted route (#484)", ()
 			.sign(privateKey);
 	};
 
-	const mountWith = (deps: Record<string, unknown>) => {
-		const factory = deviceGrantModule.contributes?.routes?.[0] as (d: unknown) => {
+	const mountWith = (deps: TestDeps) => {
+		const factory = contributionsFor(deps)?.routes?.[0] as (d: unknown) => {
 			mountPath: string;
 			handler: express.RequestHandler;
 		};

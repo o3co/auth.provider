@@ -15,9 +15,9 @@
  */
 
 /**
- * Module manifest for the RFC 8628 device authorization grant (#298).
+ * Module factory for the RFC 8628 device authorization grant (#298).
  *
- * Contributes three things and requires two:
+ * Enabled, the module contributes:
  *
  *   - the `urn:ietf:params:oauth:grant-type:device_code` grant on `/token`;
  *   - `POST /oauth/device_authorization`, where a device starts;
@@ -29,6 +29,16 @@
  *
  * `oauth.deviceAuthorization.enabled = false` in `reference.conf`. Mounting a
  * package must not turn on a grant; the operator says so.
+ *
+ * `deviceGrantModule({ config })` reads that key from the config the
+ * composition root hands it, the way `oauthAuthorizationModule` reads
+ * `oauth.grants.<name>.enabled`: a grant is contributed only when it is on.
+ * A module whose manifest is fixed would have to contribute the grant either
+ * way, and oauth's `grant_types_supported` is read off the grant resolver, so
+ * a disabled grant registered as a handler that refuses was advertised to
+ * every client as supported. Disabled, the module contributes no grant — the
+ * token endpoint answers `unsupported_grant_type` as it does for any grant
+ * nobody registered — no discovery field, and the two routes answer `404`.
  *
  * ### Two settings with no defaults
  *
@@ -82,11 +92,13 @@
  */
 
 import {
+	type AppConfig,
 	AUDIT_SINK_ABSENCE_POLICY,
 	createRateLimitGuard,
 	DEVICE_CODE_STORE_ABSENCE_POLICY,
 	defineModule,
 	isDeviceVerificationRateLimitSpec,
+	type Module,
 	type ProviderDeps,
 	type RateLimitFailMode,
 	type RateLimitSpec,
@@ -126,7 +138,10 @@ export const deviceGrantConfigSchema = z.object({
 	oauth: z.object({
 		deviceAuthorization: z
 			.object({
-				/** When false (the default), this module contributes nothing. */
+				/**
+				 * When false (the default), the module contributes no grant and no
+				 * discovery field, and its two routes answer 404.
+				 */
 				enabled: z.boolean().default(false),
 				/**
 				 * The page where the end user types the code. No default: the
@@ -218,6 +233,15 @@ const readSettings = (deps: DeviceGrantModuleDeps): DeviceAuthorizationConfigSli
 	return slice;
 };
 
+/**
+ * The factory's decision: whether the grant is on in the config the
+ * composition root holds. `=== true` because `AppConfig` is the parsed shape —
+ * core's schema has already turned an environment-variable `"true"` into a
+ * boolean — and anything else is off, which is the secure default.
+ */
+const isEnabled = (config: AppConfig): boolean =>
+	config.oauth?.deviceAuthorization?.enabled === true;
+
 const requireVerificationUri = (slice: DeviceAuthorizationConfigSlice): string => {
 	const uri = slice["verification-uri"];
 	if (typeof uri !== "string" || uri === "") {
@@ -234,14 +258,12 @@ const requireVerificationUri = (slice: DeviceAuthorizationConfigSlice): string =
 /**
  * What a disabled deployment mounts instead of the real endpoint.
  *
- * The `routes` contribution kind has no "skip me" return — a factory produces
- * a route or throws — so a config-disabled module cannot simply omit one. A
- * router that answers 404 is the honest equivalent: to a client the endpoint
- * does not exist, which is exactly what `enabled = false` means. Unlike a
- * missing package, the description names the config key, so an operator can
- * tell a disabled grant from an uninstalled one. Nothing here reads the rest
- * of the config, so a deployment that leaves the grant off never trips its
- * required settings.
+ * A router that answers 404: to a client the endpoint does not exist, which
+ * is exactly what `enabled = false` means. It is mounted rather than left
+ * out because, unlike a missing package, the description names the config
+ * key, so an operator can tell a disabled grant from an uninstalled one.
+ * Nothing here reads the rest of the config, so a deployment that leaves the
+ * grant off never trips its required settings.
  */
 const disabledRoute = (id: string, mountPath: string) => {
 	const router = express.Router();
@@ -396,191 +418,190 @@ const requireVerificationRateLimit = (slice: DeviceAuthorizationConfigSlice): Ra
 	return spec;
 };
 
-export const deviceGrantModule = defineModule<Requires, Optional>({
-	name: "device-grant",
-	configSchema: deviceGrantConfigSchema,
-	requires: REQUIRES,
-	optional: OPTIONAL,
-	// #363: optional to wire, not optional to decide. A composition with no
-	// sink discards every device approval — a consent event — with no
-	// symptom, so it has to write `audit.sink.type = "none"` to say so.
-	absencePolicies: {
-		deviceCodeStore: DEVICE_CODE_STORE_ABSENCE_POLICY,
-		auditSink: AUDIT_SINK_ABSENCE_POLICY,
-	},
-	contributes: {
-		grants: {
-			[DEVICE_CODE_GRANT_TYPE]: (deps: DeviceGrantModuleDeps) => {
-				const slice = readSettings(deps);
-				if (slice === null) {
-					// Disabled: contribute a handler that refuses, rather than
-					// omitting the key. `unsupported_grant_type` is what the token
-					// endpoint answers for an unregistered grant anyway, so the
-					// observable behaviour matches "not installed".
-					return {
-						async handle() {
-							return {
-								result: {
-									status: 400,
-									error: "unsupported_grant_type",
-									errorDescription: "the device authorization grant is not enabled",
-								},
-							};
-						},
-					};
-				}
-				return createDeviceCodeGrant({
-					store: requireDeviceCodeStore(deps),
-					keyStore: deps.keyStore,
-					accessTokenExpiresIn: resolveAccessTokenLifetime(deps.config).defaultExpiresIn,
-					logger: deps.logger,
-				});
-			},
+/**
+ * The device grant, built for one config — see the file header for what
+ * `oauth.deviceAuthorization.enabled` decides here.
+ *
+ * Hand it the config the composition root boots with, as `oauthModule({ config })`
+ * and `oauthAuthorizationModule({ config })` take theirs.
+ */
+export const deviceGrantModule = (params: { config: AppConfig }): Module => {
+	const enabled = isEnabled(params.config);
+	return defineModule<Requires, Optional>({
+		name: "device-grant",
+		configSchema: deviceGrantConfigSchema,
+		requires: REQUIRES,
+		optional: OPTIONAL,
+		// #363: optional to wire, not optional to decide. A composition with no
+		// sink discards every device approval — a consent event — with no
+		// symptom, so it has to write `audit.sink.type = "none"` to say so.
+		absencePolicies: {
+			deviceCodeStore: DEVICE_CODE_STORE_ABSENCE_POLICY,
+			auditSink: AUDIT_SINK_ABSENCE_POLICY,
 		},
-		routes: [
-			(deps: DeviceGrantModuleDeps) => {
-				const slice = readSettings(deps);
-				if (slice === null) {
-					return disabledRoute("device-authorization", "/oauth/device_authorization");
-				}
-				const router = express.Router();
-				// Router-level body parsing, matching `oauthModule` and the
-				// WebAuthn routes: `createApp` installs no global parser.
-				router.use(express.json({ limit: "16kb" }));
-				router.use(express.urlencoded({ extended: false, limit: "16kb" }));
-				// Throttled like every other public entry point (#325), and
-				// AHEAD of client authentication — the token endpoint's D-6
-				// ordering — so repeated unauthenticated hits are bounded before
-				// they reach a repository lookup, and so a public client cannot
-				// fill the device-code store by asking. Keyed
-				// `device_authorization:ip:<ip>`; the adapter resolves the spec
-				// by that prefix and falls back to its default.
-				router.use(
-					createRateLimitGuard({
-						limiter: requireRateLimiter(deps),
-						tag: DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
-						failMode: requireFailMode(deps),
-						...(deps.logger ? { logger: deps.logger } : {}),
-						auditSink: deps.auditSink,
-					}),
-				);
-				// RFC 8628 §3.1 applies RFC 6749 §3.2.1's client-authentication
-				// requirements to this endpoint, and §5.6 expects device clients
-				// to be public. `allowPublicClients: true` is exactly that pair:
-				// a public client is identified by `client_id`, a confidential
-				// one must still present its secret. The same middleware and the
-				// same option `/oauth/token` uses, so there is one notion of
-				// client authentication rather than two that can drift.
-				router.use(
-					createClientAuthMiddleware(deps.clientRepository, {
-						issuer: deps.config.oauth.jwt.issuer,
-						allowPublicClients: true,
-						// #484: the composition's replay store, so a `private_key_jwt`
-						// client is authenticated here the way it is at every other
-						// endpoint. Without it the middleware has nowhere to record the
-						// assertion's `jti` and answers `server_error` — which is what
-						// this route did for every such client. The accepted `aud` is
-						// derived from `issuer` above, as it is at `/oauth/revoke`.
-						...(deps.replaySeenSet ? { replaySeenSet: deps.replaySeenSet } : {}),
-						...(deps.logger ? { logger: deps.logger } : {}),
-					}),
-				);
-				router.post(
-					"/",
-					createDeviceAuthorizationHandler({
-						store: requireDeviceCodeStore(deps),
-						settings: {
-							verificationUri: requireVerificationUri(slice),
-							verificationUriComplete: slice["verification-uri-complete"],
-							codeLifetimeSeconds: slice["code-lifetime-seconds"],
-							pollingIntervalSeconds: slice["polling-interval-seconds"],
+		contributes: {
+			// Only when enabled — see the file header. Absent, `/oauth/token`
+			// answers `unsupported_grant_type` for an unregistered grant, and
+			// `grant_types_supported`, read off the same resolver, does not name
+			// it: the document and the endpoint say the same thing.
+			...(enabled
+				? {
+						grants: {
+							[DEVICE_CODE_GRANT_TYPE]: (deps: DeviceGrantModuleDeps) =>
+								createDeviceCodeGrant({
+									store: requireDeviceCodeStore(deps),
+									keyStore: deps.keyStore,
+									accessTokenExpiresIn: resolveAccessTokenLifetime(deps.config).defaultExpiresIn,
+									logger: deps.logger,
+								}),
 						},
-						logger: deps.logger,
-					}),
-				);
-				return {
-					id: "device-authorization",
-					mountPath: "/oauth/device_authorization",
-					handler: router,
-				};
-			},
-			(deps: DeviceGrantModuleDeps) => {
-				const slice = readSettings(deps);
-				if (slice === null) {
-					return disabledRoute("device-verification", "/oauth/device/verification");
-				}
-				const router = express.Router();
-				// JSON only, deliberately — see the file header. A form body is
-				// a "simple" request a browser sends cross-site with the
-				// victim's cookie and no preflight; JSON is not. No form parser
-				// is mounted here, but that is not what enforces the rule:
-				// `oauthModule`'s router parses form bodies for every request
-				// under `/oauth`, and when it is listed first it has done so
-				// before this router runs. The handler checks the media type
-				// itself and answers anything else `415`.
-				router.use(express.json({ limit: "16kb" }));
-				// The session guard, verbatim: foreign origin refused, same
-				// origin or `session.csrf.trustedOrigins` accepted, no origin
-				// signal → the signed double-submit token `GET /session/csrf`
-				// mints. On the whole route rather than on `approve` / `deny`
-				// alone, for the reason the three actions are one route: no
-				// way to add a fourth that forgets it.
-				const sessionSlice = requireSessionSlice(deps);
-				// The budget this route is limited by is applied inside the
-				// limiter, seeded from config; asserting it here is what makes
-				// the `rateLimiter` requirement mean five attempts (#448).
-				requireVerificationRateLimit(slice);
-				router.post(
-					"/",
-					createCsrfGuard({
-						csrf: createCsrfProtectionFromConfig(sessionSlice),
-						trustedOrigins: sessionSlice.csrf?.trustedOrigins ?? [],
-						...(deps.logger ? { logger: deps.logger } : {}),
-					}),
-					createDeviceVerificationHandler({
-						store: requireDeviceCodeStore(deps),
-						rateLimiter: requireRateLimiter(deps),
-						// The same outage policy the device_authorization guard
-						// applies, from the same key (#457): the handler keys
-						// its budget on the subject, so it runs the guard's
-						// check itself rather than the guard as a middleware.
-						failMode: requireFailMode(deps),
-						settings: {
-							verificationUri: requireVerificationUri(slice),
-							verificationUriComplete: slice["verification-uri-complete"],
-							codeLifetimeSeconds: slice["code-lifetime-seconds"],
-							pollingIntervalSeconds: slice["polling-interval-seconds"],
-						},
-						logger: deps.logger,
-						auditSink: deps.auditSink,
-					}),
-				);
-				return {
-					id: "device-verification",
-					mountPath: "/oauth/device/verification",
-					handler: router,
-				};
-			},
-		],
-		discoveryMetadata: [
-			(deps: DeviceGrantModuleDeps) => {
-				const slice = readSettings(deps);
-				if (slice === null) return {};
-				// RFC 8628 §4. A client that cannot discover this endpoint cannot
-				// start the flow, so the metadata is the feature being reachable
-				// rather than a description of it.
-				//
-				// An issuer-relative path under `endpoints`, which core prefixes
-				// with the issuer and validates. Core's builder refuses an
-				// `*_endpoint` field under `metadata`, so a URL built here would
-				// fail every boot that has an issuer — every boot beside
-				// `oauthModule`. The grant type itself is not contributed here:
-				// `grant_types_supported` is read off the grant resolver
-				// `/oauth/token` dispatches against (#283).
-				return {
-					endpoints: { device_authorization_endpoint: "/oauth/device_authorization" },
-				};
-			},
-		],
-	},
-});
+					}
+				: {}),
+			routes: [
+				(deps: DeviceGrantModuleDeps) => {
+					const slice = readSettings(deps);
+					if (slice === null) {
+						return disabledRoute("device-authorization", "/oauth/device_authorization");
+					}
+					const router = express.Router();
+					// Router-level body parsing, matching `oauthModule` and the
+					// WebAuthn routes: `createApp` installs no global parser.
+					router.use(express.json({ limit: "16kb" }));
+					router.use(express.urlencoded({ extended: false, limit: "16kb" }));
+					// Throttled like every other public entry point (#325), and
+					// AHEAD of client authentication — the token endpoint's D-6
+					// ordering — so repeated unauthenticated hits are bounded before
+					// they reach a repository lookup, and so a public client cannot
+					// fill the device-code store by asking. Keyed
+					// `device_authorization:ip:<ip>`; the adapter resolves the spec
+					// by that prefix and falls back to its default.
+					router.use(
+						createRateLimitGuard({
+							limiter: requireRateLimiter(deps),
+							tag: DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX,
+							failMode: requireFailMode(deps),
+							...(deps.logger ? { logger: deps.logger } : {}),
+							auditSink: deps.auditSink,
+						}),
+					);
+					// RFC 8628 §3.1 applies RFC 6749 §3.2.1's client-authentication
+					// requirements to this endpoint, and §5.6 expects device clients
+					// to be public. `allowPublicClients: true` is exactly that pair:
+					// a public client is identified by `client_id`, a confidential
+					// one must still present its secret. The same middleware and the
+					// same option `/oauth/token` uses, so there is one notion of
+					// client authentication rather than two that can drift.
+					router.use(
+						createClientAuthMiddleware(deps.clientRepository, {
+							issuer: deps.config.oauth.jwt.issuer,
+							allowPublicClients: true,
+							// #484: the composition's replay store, so a `private_key_jwt`
+							// client is authenticated here the way it is at every other
+							// endpoint. Without it the middleware has nowhere to record the
+							// assertion's `jti` and answers `server_error` — which is what
+							// this route did for every such client. The accepted `aud` is
+							// derived from `issuer` above, as it is at `/oauth/revoke`.
+							...(deps.replaySeenSet ? { replaySeenSet: deps.replaySeenSet } : {}),
+							...(deps.logger ? { logger: deps.logger } : {}),
+						}),
+					);
+					router.post(
+						"/",
+						createDeviceAuthorizationHandler({
+							store: requireDeviceCodeStore(deps),
+							settings: {
+								verificationUri: requireVerificationUri(slice),
+								verificationUriComplete: slice["verification-uri-complete"],
+								codeLifetimeSeconds: slice["code-lifetime-seconds"],
+								pollingIntervalSeconds: slice["polling-interval-seconds"],
+							},
+							logger: deps.logger,
+						}),
+					);
+					return {
+						id: "device-authorization",
+						mountPath: "/oauth/device_authorization",
+						handler: router,
+					};
+				},
+				(deps: DeviceGrantModuleDeps) => {
+					const slice = readSettings(deps);
+					if (slice === null) {
+						return disabledRoute("device-verification", "/oauth/device/verification");
+					}
+					const router = express.Router();
+					// JSON only, deliberately — see the file header. A form body is
+					// a "simple" request a browser sends cross-site with the
+					// victim's cookie and no preflight; JSON is not. No form parser
+					// is mounted here, but that is not what enforces the rule:
+					// `oauthModule`'s router parses form bodies for every request
+					// under `/oauth`, and when it is listed first it has done so
+					// before this router runs. The handler checks the media type
+					// itself and answers anything else `415`.
+					router.use(express.json({ limit: "16kb" }));
+					// The session guard, verbatim: foreign origin refused, same
+					// origin or `session.csrf.trustedOrigins` accepted, no origin
+					// signal → the signed double-submit token `GET /session/csrf`
+					// mints. On the whole route rather than on `approve` / `deny`
+					// alone, for the reason the three actions are one route: no
+					// way to add a fourth that forgets it.
+					const sessionSlice = requireSessionSlice(deps);
+					// The budget this route is limited by is applied inside the
+					// limiter, seeded from config; asserting it here is what makes
+					// the `rateLimiter` requirement mean five attempts (#448).
+					requireVerificationRateLimit(slice);
+					router.post(
+						"/",
+						createCsrfGuard({
+							csrf: createCsrfProtectionFromConfig(sessionSlice),
+							trustedOrigins: sessionSlice.csrf?.trustedOrigins ?? [],
+							...(deps.logger ? { logger: deps.logger } : {}),
+						}),
+						createDeviceVerificationHandler({
+							store: requireDeviceCodeStore(deps),
+							rateLimiter: requireRateLimiter(deps),
+							// The same outage policy the device_authorization guard
+							// applies, from the same key (#457): the handler keys
+							// its budget on the subject, so it runs the guard's
+							// check itself rather than the guard as a middleware.
+							failMode: requireFailMode(deps),
+							settings: {
+								verificationUri: requireVerificationUri(slice),
+								verificationUriComplete: slice["verification-uri-complete"],
+								codeLifetimeSeconds: slice["code-lifetime-seconds"],
+								pollingIntervalSeconds: slice["polling-interval-seconds"],
+							},
+							logger: deps.logger,
+							auditSink: deps.auditSink,
+						}),
+					);
+					return {
+						id: "device-verification",
+						mountPath: "/oauth/device/verification",
+						handler: router,
+					};
+				},
+			],
+			discoveryMetadata: [
+				(deps: DeviceGrantModuleDeps) => {
+					const slice = readSettings(deps);
+					if (slice === null) return {};
+					// RFC 8628 §4. A client that cannot discover this endpoint cannot
+					// start the flow, so the metadata is the feature being reachable
+					// rather than a description of it.
+					//
+					// An issuer-relative path under `endpoints`, which core prefixes
+					// with the issuer and validates. Core's builder refuses an
+					// `*_endpoint` field under `metadata`, so a URL built here would
+					// fail every boot that has an issuer — every boot beside
+					// `oauthModule`. The grant type itself is not contributed here:
+					// `grant_types_supported` is read off the grant resolver
+					// `/oauth/token` dispatches against (#283).
+					return {
+						endpoints: { device_authorization_endpoint: "/oauth/device_authorization" },
+					};
+				},
+			],
+		},
+	});
+};

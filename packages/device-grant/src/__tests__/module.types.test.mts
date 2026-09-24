@@ -15,6 +15,7 @@
  */
 
 import type { ProviderDeps, RateLimiter } from "@o3co/auth-provider-core";
+import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import { createDeviceCodeGrant } from "#/grant.mjs";
 import { type DeviceGrantModuleDeps, deviceGrantModule } from "#/module.mjs";
@@ -37,8 +38,9 @@ type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number
 describe("deviceGrantModule's deps are the slots it declares (#626 P2)", () => {
 	it("types every contribution callback as ProviderDeps of `requires` / `optional`", () => {
 		expectTypeOf<DeviceGrantModuleDeps>().branded.toEqualTypeOf<Declared>();
-		expect([...(deviceGrantModule.requires ?? [])].sort()).toEqual([...REQUIRES].sort());
-		expect([...(deviceGrantModule.optional ?? [])].sort()).toEqual([...OPTIONAL].sort());
+		const installed = deviceGrantModule({ config: makeValidAppConfig() });
+		expect([...(installed.requires ?? [])].sort()).toEqual([...REQUIRES].sort());
+		expect([...(installed.optional ?? [])].sort()).toEqual([...OPTIONAL].sort());
 	});
 
 	it("refuses, at compile time, a read of a slot the module never declared", () => {
