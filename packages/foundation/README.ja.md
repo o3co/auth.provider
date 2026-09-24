@@ -112,7 +112,7 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 
 すべてのオプションは **コンストラクタ** で検証されるので、設定を誤ったデプロイは最初のログイン試行ではなく起動時に失敗する。
 
-**すべての URL は `https://` でなければならない**（リンクと照会のエンドポイントも含む）。これらは平文のユーザー資格情報 — `authenticateUrl` にはパスワード、`authenticateByTokenUrl` にはトークン、`findSubjectByFederatedIdentityUrl` には検証済みの上流 ID — を運ぶので、`http://` の URL は接続を弱めるだけでなく、経路上のすべてのホップに資格情報を公開する。ここで検査される URL がリクエストの唯一の行き先であり、応答を受け取る唯一の相手である: どのリクエストもリダイレクトを追わないので、`307` や `308` がこの規則の見ていない `Location` へボディを送り直すことはない。
+**すべての URL は `https://` でなければならない**（リンクと照会のエンドポイントも含む）。これらは平文のユーザー資格情報 — `authenticateUrl` にはパスワード、`authenticateByTokenUrl` にはトークン、`findSubjectByFederatedIdentityUrl` には検証済みの上流 ID — を運ぶので、`http://` の URL は接続を弱めるだけでなく、経路上のすべてのホップに資格情報を公開する。ここで検査される URL がリクエストの唯一の行き先であり、応答を受け取る唯一の相手である: どのリクエストもリダイレクトを追わないので、`307` や `308` がこの規則の見ていない `Location` へボディを送り直すことも、`301`・`302`・`303` がそこから応答を取ってくることもない。
 
 **唯一の例外はループバック:** ホストが `localhost`、`127.0.0.0/8` 内のアドレス、`[::1]` のいずれかなら `http://` を受け付ける。その通信はマシンの外に出ないので、ローカル開発とプロセス内のテストフィクスチャに証明書は要らない。それ以外のホストは **プライベートレンジのアドレスやコンテナネットワークのサービス名も含めて** `https://` が必須（`http://10.0.0.5/…`、`http://user-service/…` は拒否される）: それらはデプロイが端から端まで制御していないネットワークを越えるものであり、「内部」は「暗号化済み」の同義語ではない。資格情報を埋め込んだ URL（`https://user:pass@…`）も拒否する。
 
@@ -136,7 +136,7 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 | テストファイル | 固定するもの |
 | --- | --- |
 | [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | 認証とその応答、`User` の形の検査、https の規則、タイムアウトとレスポンス上限、リンク、ID の照会の有無・probe・ワイヤ |
-| [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | 実際の HTTP サーバーに対して: ID の照会が拒否した応答の接続を解放すること、四つのリクエストそれぞれでリダイレクト — 別のオリジンへ、同じオリジンへ、`Location` 無し — が拒否され、その後に何も送られないこと |
+| [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | 実際の HTTP サーバーに対して: ID の照会が拒否した応答の接続を解放すること、四つのリクエストそれぞれでリダイレクト — 別のオリジンへ、同じオリジンへ、`Location` 無し — が拒否され、リダイレクト先に何も送られないこと |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | `"http"` のビルダー、そのデフォルトと文字列の変換、組み立て時に拒否される設定 |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | https またはループバックの規則 |
 

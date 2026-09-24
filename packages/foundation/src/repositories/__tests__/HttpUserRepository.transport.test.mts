@@ -147,7 +147,7 @@ describe("where a request goes: only to the configured URL", () => {
 	] as const;
 
 	it.each(calls)(
-		"%s: a redirect is a failure, and neither its Location nor anywhere else hears anything",
+		"%s: a redirect is a failure, and no redirect target hears anything",
 		async (_name, path, call, failure) => {
 			// Whatever reaches a `Location` is recorded and answered with a body
 			// every one of the four would accept — a `User` that is also a lookup

@@ -237,7 +237,7 @@ upstream identity on `findSubjectByFederatedIdentityUrl` — so an
 `http://` URL does not merely weaken the connection, it publishes the credential
 to every hop on the path. The URL checked here is the only place a request goes
 and the only one whose answer is taken: no request follows a redirect, so a
-`307` or `308` cannot re-send the body to a `Location` this rule never saw.
+`307` or `308` cannot re-send the body to, and no `301`, `302` or `303` can fetch an answer from, a `Location` this rule never saw.
 
 **The one carve-out is loopback:** `http://` is accepted when the host is
 `localhost`, an address in `127.0.0.0/8`, or `[::1]`. That traffic never leaves
@@ -285,7 +285,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | Test file | Pins |
 | --- | --- |
 | [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | authentication and its answers, the `User` shape check, the https rule, the timeout and the response cap, linking, and the identity lookup's presence, probe and wire |
-| [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | against real HTTP servers: the identity lookup releasing a refused answer's connection, and a redirect refused on each of the four requests — to another origin, to the same origin, or with no `Location` — with nothing sent after it |
+| [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | against real HTTP servers: the identity lookup releasing a refused answer's connection, and a redirect refused on each of the four requests — to another origin, to the same origin, or with no `Location` — with nothing sent to a redirect target |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | the `"http"` builder, its defaults and string coercion, and configuration refused at build time |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | the https-or-loopback rule |
 
