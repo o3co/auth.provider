@@ -123,8 +123,10 @@ declare module "express-session" {
  * routes' request streams whenever this router was mounted ahead of them,
  * and `body-parser` does not parse a body twice — so another route's own
  * parser, limit and media types silently never ran, and what it received
- * depended on the order the modules were listed in. Scoped to these paths,
- * a request this router does not own passes through with its body unread.
+ * depended on the order the modules were listed in. Scoped to exactly these
+ * paths — a route (`router.all`), not `router.use`, which would match every
+ * path beneath each one, `/token/custom` as well as `/token` — a request
+ * this router does not own passes through with its body unread.
  *
  * Every route here gets exactly what it got before: JSON and urlencoded
  * (`extended: false`), Express's default limits, ahead of anything else.
@@ -405,7 +407,7 @@ export const createOAuthRouter = async (
 	const consentMounted = !!consentStore && !!pendingConsentStore;
 
 	router
-		.use(
+		.all(
 			oauthRoutePaths({
 				logout: logoutSupported,
 				federationToken: federationTokenSupported,
