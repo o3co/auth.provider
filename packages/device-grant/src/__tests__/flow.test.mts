@@ -372,6 +372,27 @@ describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 		}
 	});
 
+	it("reads scope: null as an omitted scope, and refuses any other value that is not a string", async () => {
+		// RFC 6749 §3.2: a parameter sent without a value is treated as
+		// omitted. A JSON body's `null` is that, as `scope=""` is for a form
+		// body — the same reading token exchange gives `expires_in: null`. Any
+		// other value that is not a string is `invalid_request`.
+		const { app, store, clock } = makeHarness();
+		const res = await startDevice(app, { scope: null });
+		expect(res.status).toBe(200);
+		const pending = await store.findPendingByUserCode(
+			normaliseUserCode(res.body.user_code as string) as string,
+			clock.now(),
+		);
+		expect(pending?.requestedScope).toEqual(["openid"]);
+
+		for (const scope of [42, {}, true]) {
+			const refused = await startDevice(app, { scope });
+			expect(refused.status, JSON.stringify(scope)).toBe(400);
+			expect(refused.body.error).toBe("invalid_request");
+		}
+	});
+
 	it("draws an omitted scope from defaultScopes, never the whole allowlist", async () => {
 		// #396's rule, applied here: "forgot to send scope" must not be the
 		// maximum grant. The client allows openid+profile and defaults to

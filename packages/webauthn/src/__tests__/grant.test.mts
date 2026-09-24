@@ -744,6 +744,34 @@ describe("createWebAuthnGrant — RFC 8707 resource indicator gating", () => {
 		);
 	});
 
+	it("reads scope: null as an omitted scope, and refuses any other value that is not a string", async () => {
+		// RFC 6749 §3.2: a parameter sent without a value is treated as
+		// omitted. A JSON body's `null` is that, as `scope=""` is for a form
+		// body — the same reading token exchange gives `expires_in: null`. Any
+		// other value that is not a string is `invalid_request`.
+		mockVerifyAssertion.mockResolvedValue({ ok: true, newSignCount: 6 });
+		const answer = async (scope: unknown) => {
+			const store = createMemoryWebAuthnCredentialStore();
+			await store.registerCredential(makeCredential());
+			return (
+				await createWebAuthnGrant(makeBaseDeps(store)).handle(
+					makeCtx({ assertion: makeAssertionResponse(), scope }),
+				)
+			).result;
+		};
+
+		const nulled = await answer(null);
+		if (!("tokens" in nulled)) throw new Error("expected tokens in result");
+		expect(decodeJwtPayload(nulled.tokens.access_token).scope).toBeUndefined();
+
+		for (const scope of [42, {}, true]) {
+			expect(await answer(scope), JSON.stringify(scope)).toMatchObject({
+				status: 400,
+				error: "invalid_request",
+			});
+		}
+	});
+
 	it("P1-R5: issues token with requested scope when grantPolicy is not wired (documented gap)", async () => {
 		// No policy ceiling — scope is issued as-is. README documents that deployments
 		// wanting scope authorization MUST wire grantPolicy (webauthn has no

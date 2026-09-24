@@ -398,6 +398,33 @@ describe("jwt-bearer grant — scope is a ceiling, never a grant (#301)", () => 
 		expect(result.status).toBe(200);
 	});
 
+	it("reads scope: null as an omitted scope, and refuses any other value that is not a string", async () => {
+		// RFC 6749 §3.2: a parameter sent without a value is treated as
+		// omitted. A JSON body's `null` is that, as `scope=""` is for a form
+		// body — the same reading token exchange gives `expires_in: null`. Any
+		// other value that is not a string is `invalid_request`.
+		const client = {
+			authenticatedClient: {
+				clientId: "c1",
+				allowedScopes: ["read", "write"],
+				defaultScopes: ["read"],
+			},
+		} as never;
+		const grant = build({
+			verifier: verifierFor({ subjectHandle: "d", scope: ["read", "write"] }),
+		});
+		const omitted = (await grant.handle(ctx({}, client))).result;
+		const nulled = (await grant.handle(ctx({ scope: null }, client))).result;
+		if (!("tokens" in omitted) || !("tokens" in nulled)) expect.fail("expected tokens");
+		expect(decodeJwt(nulled.tokens.access_token as string).scope).toBe("read");
+		expect(decodeJwt(omitted.tokens.access_token as string).scope).toBe("read");
+
+		for (const scope of [42, {}, true]) {
+			const { result } = await grant.handle(ctx({ scope }, client));
+			expect("error" in result && result.error, JSON.stringify(scope)).toBe("invalid_request");
+		}
+	});
+
 	it("rejects a non-string scope", async () => {
 		const { result } = await build({}).handle(ctx({ scope: ["read"] }));
 		expect("error" in result && result.error).toBe("invalid_request");

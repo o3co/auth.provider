@@ -232,6 +232,32 @@ describe("createClientCredentialsGrant — token issuance", () => {
 		}
 	});
 
+	it("reads scope: null as an omitted scope, and refuses any other value that is not a string", async () => {
+		// RFC 6749 §3.2: a parameter sent without a value is treated as
+		// omitted. A JSON body's `null` is that, as `scope=""` is for a form
+		// body — the same reading token exchange gives `expires_in: null`. Any
+		// other value that is not a string is `invalid_request`.
+		const handler = createClientCredentialsGrant(baseDeps);
+		const omitted = (await handler.handle(makeCtx(makeClient()))).result;
+		const nulled = (
+			await handler.handle(makeCtx(makeClient(), { grant_type: "client_credentials", scope: null }))
+		).result;
+		expect(omitted.status).toBe(200);
+		expect(nulled.status).toBe(200);
+		if (!("tokens" in omitted) || !("tokens" in nulled)) throw new Error("expected tokens");
+		expect(nulled.tokens.scope).toBe(omitted.tokens.scope);
+
+		for (const scope of [42, {}, true]) {
+			const { result } = await handler.handle(
+				makeCtx(makeClient(), { grant_type: "client_credentials", scope }),
+			);
+			expect(result, JSON.stringify(scope)).toMatchObject({
+				status: 400,
+				error: "invalid_request",
+			});
+		}
+	});
+
 	it("returns 400 invalid_request when scope is a non-string value (Codex review #1)", async () => {
 		// Express urlencoded body-parser materializes repeated `scope=a&scope=b`
 		// form parameters into arrays. RFC 6749 §3.3 requires a single space-

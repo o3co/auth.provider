@@ -282,6 +282,32 @@ describe("createSessionGrant", () => {
 			}
 		});
 
+		it("reads scope: null as an omitted scope, and refuses any other value that is not a string", async () => {
+			// RFC 6749 §3.2: a parameter sent without a value is treated as
+			// omitted. A JSON body's `null` is that, as `scope=""` is for a form
+			// body — the same reading token exchange gives `expires_in: null`. Any
+			// other value that is not a string is `invalid_request`.
+			const handler = createSessionGrant(makeDeps());
+			const ctx = (body: Record<string, unknown>): GrantContext => ({
+				body,
+				session: { isAuthenticated: true, user: { id: "u1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
+			});
+			const nulled = (await handler.handle(ctx({ scope: null }))).result;
+			expect(nulled.status).toBe(200);
+			if ("tokens" in nulled) expect(nulled.tokens.scope).toBeUndefined();
+
+			for (const scope of [42, {}, true]) {
+				const { result } = await handler.handle(ctx({ scope }));
+				expect(result, JSON.stringify(scope)).toMatchObject({
+					status: 400,
+					error: "invalid_request",
+				});
+			}
+		});
+
 		it("refuses a repeated scope parameter as invalid_request rather than throwing", async () => {
 			// Express reads `scope=a&scope=b` as an array; the grant called
 			// `.split` on it and the request became a 500.

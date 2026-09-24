@@ -380,6 +380,33 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
+		it("reads scope: null as no change of scope, and refuses any other value that is not a string", async () => {
+			// RFC 6749 §3.2: a parameter sent without a value is treated as
+			// omitted. A JSON body's `null` is that, as `scope=""` is for a form
+			// body — the same reading token exchange gives `expires_in: null`. Any
+			// other value that is not a string is `invalid_request`.
+			const handler = createRefreshTokenGrant(mockDeps);
+			const token = await makeRefreshToken({ scope: "read write" });
+			const ctx = (body: Record<string, unknown>): GrantContext => ({
+				body: { refresh_token: token, ...body },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+			const nulled = (await handler.handle(ctx({ scope: null }))).result;
+			if (!("tokens" in nulled)) expect.fail("expected tokens");
+			expect(nulled.tokens.scope).toBe("read write");
+
+			for (const scope of [42, {}, true]) {
+				const { result } = await handler.handle(ctx({ scope }));
+				expect(result, JSON.stringify(scope)).toMatchObject({
+					status: 400,
+					error: "invalid_request",
+				});
+			}
+		});
+
 		it("refuses a repeated scope parameter as invalid_request rather than throwing", async () => {
 			// Express reads `scope=a&scope=b` as an array; the grant called
 			// `.split` on it and the request became a 500.

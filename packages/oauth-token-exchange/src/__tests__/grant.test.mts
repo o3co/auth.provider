@@ -674,6 +674,35 @@ describe("createTokenExchangeGrant — the scope grammar (RFC 6749 §3.3)", () =
 		}
 	});
 
+	it("reads scope: null as an omitted scope, and refuses any other value that is not a string", async () => {
+		// RFC 6749 §3.2: a parameter sent without a value is treated as
+		// omitted. A JSON body's `null` is that, as `scope=""` is for a form
+		// body — the same reading token exchange gives `expires_in: null`. Any
+		// other value that is not a string is `invalid_request`.
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ scope: "read write", family_id: "fam-1" });
+		const exchange = (scope: unknown) =>
+			g.handle(
+				ctx({
+					client_id: "client-a",
+					client_secret: "any",
+					subject_token: token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+					scope,
+				}),
+			);
+		const nulled = (await exchange(null)).result;
+		if (nulled.status === 200) expect(nulled.tokens.scope).toBe("read write");
+		else expect.fail(`expected 200, got ${nulled.status}`);
+
+		for (const scope of [42, {}, true]) {
+			expect((await exchange(scope)).result, JSON.stringify(scope)).toMatchObject({
+				status: 400,
+				error: "invalid_request",
+			});
+		}
+	});
+
 	it("refuses a repeated scope parameter rather than reading it as omitted", async () => {
 		// `scope=a&scope=b` arrives as an array. Read as no scope, it inherited
 		// the subject's whole scope — a wider answer than either value asked for.
