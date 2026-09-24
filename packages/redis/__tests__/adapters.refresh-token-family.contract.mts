@@ -72,6 +72,23 @@ const FAMILY = (overrides: Partial<RefreshTokenFamily> = {}): RefreshTokenFamily
 	expiresAtMs: overrides.expiresAtMs ?? FUTURE(),
 });
 
+/**
+ * Expiries no store may be handed: not finite (NaN, from an Invalid Date or an
+ * unset setting; ±Infinity), or outside ECMAScript's Date range (±8.64e15 ms).
+ * NaN is never `<= now`, so it slipped past every past-expiry check; one past
+ * the Date range is a number Redis cannot take as a deadline (`1e21` is sent
+ * as `1e+21`) and a Date cannot hold, and a script that writes its record
+ * before setting the deadline left the record with no TTL at all.
+ */
+const UNSTORABLE_EXPIRIES = [
+	Number.NaN,
+	Number.POSITIVE_INFINITY,
+	Number.NEGATIVE_INFINITY,
+	8_640_000_000_000_001,
+	1e21,
+	-1e21,
+];
+
 export function runRefreshTokenFamilyStoreContract(
 	factory: RefreshTokenFamilyStoreContractFactory,
 	options: { readonly expiry?: ExpiryClock } = {},
@@ -311,13 +328,13 @@ export function runRefreshTokenFamilyStoreContract(
 			});
 		});
 
-		it("registerFamily refuses an expiry that is not a finite number, and records nothing", async () => {
+		it("registerFamily refuses an expiry that is not a finite number within the Date range, and records nothing", async () => {
 			// NaN is never `<= now`, so it slipped past the expired-at-issue check:
 			// the memory adapter kept the family for ever, and Redis was sent
 			// `PX NaN`. A non-finite expiry is a caller fault, not the timing race
 			// `expired-at-issue` names.
 			const store = await factory();
-			for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+			for (const bad of UNSTORABLE_EXPIRIES) {
 				await expect(store.registerFamily(FAMILY({ expiresAtMs: bad }))).rejects.toThrow(
 					RangeError,
 				);
@@ -340,11 +357,11 @@ export function runRefreshTokenFamilyStoreContract(
 			expect(found?.expiresAtMs).toBeGreaterThan(Date.now() + 59_000);
 		});
 
-		it("updateFamily refuses a committed expiry that is not a finite number, and changes nothing", async () => {
+		it("updateFamily refuses a committed expiry that is not a finite number within the Date range, and changes nothing", async () => {
 			const store = await factory();
 			const fam = FAMILY();
 			await store.registerFamily(fam);
-			for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+			for (const bad of UNSTORABLE_EXPIRIES) {
 				await expect(
 					store.updateFamily(fam.familyId, (current) => ({
 						action: "commit",

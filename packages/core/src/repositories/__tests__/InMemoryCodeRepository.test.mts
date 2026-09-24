@@ -181,6 +181,8 @@ describe("InMemoryCodeRepository", () => {
 				Number.NEGATIVE_INFINITY,
 				0,
 				-1,
+				// Whole, but its end is past the Date range from any today.
+				1e13,
 			]) {
 				await expect(repo.createCode({ ...minimalParams, expiresIn })).rejects.toThrow(RangeError);
 			}
@@ -191,7 +193,15 @@ describe("InMemoryCodeRepository", () => {
 			// The Redis repository's rule for its default, so the two agree on
 			// what a configuration may say. A per-call lifetime may still be
 			// fractional in both.
-			for (const defaultExpiresIn of [Number.NaN, Number.POSITIVE_INFINITY, 0, -1, 1.5, 0.05]) {
+			for (const defaultExpiresIn of [
+				Number.NaN,
+				Number.POSITIVE_INFINITY,
+				0,
+				-1,
+				1.5,
+				0.05,
+				1e13,
+			]) {
 				expect(() => new InMemoryCodeRepository({ defaultExpiresIn })).toThrow(RangeError);
 			}
 		});

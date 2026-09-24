@@ -64,6 +64,35 @@ const pendingStoreAt = (keyPrefix: string, io: Redis = raw) =>
 runConsentStoreContract("redis", { create: async () => consentStoreAt(freshPrefix()) });
 runPendingConsentStoreContract("redis", { create: async () => pendingStoreAt(freshPrefix()) });
 
+describe("consent stores on Redis — an expiry past the Date range", () => {
+	// The scripts write the record before they set its TTL, and Redis refuses a
+	// TTL it cannot hold (`1e21` arrives as `1e+21`) — after the write. The
+	// record was left with no TTL; a consent that should lapse never did.
+	it("is refused by grant before the script writes anything", async () => {
+		for (const expiresAt of [8_640_000_000_000_001, 1e20, 1e21]) {
+			const prefix = freshPrefix();
+			await expect(
+				consentStoreAt(prefix).grant({
+					sub: "u-1",
+					clientId: "app",
+					scopes: ["read"],
+					grantedAt: Date.now(),
+					expiresAt,
+				}),
+			).rejects.toThrow(RangeError);
+			expect(await raw.keys(`${prefix}*`)).toEqual([]);
+		}
+	});
+
+	it("is refused by a parked request before the script writes anything", async () => {
+		for (const expiresAt of [8_640_000_000_000_001, 1e20, 1e21]) {
+			const prefix = freshPrefix();
+			await expect(pendingStoreAt(prefix).set(parked({ expiresAt }))).rejects.toThrow(RangeError);
+			expect(await raw.keys(`${prefix}*`)).toEqual([]);
+		}
+	});
+});
+
 const parked = (overrides: Partial<PendingConsentRecord> = {}): PendingConsentRecord => ({
 	challenge: "ch-1",
 	sessionId: "sess-1",

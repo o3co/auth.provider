@@ -38,17 +38,21 @@ import type {
 	AccessTokenDenylistClient,
 	ChallengeStoreClient,
 	CodeRepositoryClient,
+	ConsentStoreClient,
 	CreateDeviceCodeRecordInput,
 	DeviceCodeStoreClient,
 	FederationTokenStoreClient,
+	PendingConsentStoreClient,
 	RefreshTokenFamilyClient,
 	RefreshTokenFamilyMultiClient,
 	ReplaySeenSetClient,
 	UserSessionStoreClient,
 } from "#/clients.mjs";
 import { RedisCodeRepository } from "#/code-repository.mjs";
+import { createRedisConsentStore, createRedisPendingConsentStore } from "#/consent-store.mjs";
 import { createRedisDeviceCodeStore } from "#/device-code-store.mjs";
 import { createRedisFederationTokenStore } from "#/federation-tokens.mjs";
+import { createFederationGrantLock } from "#/internal/federation-grant-lock.mjs";
 import { createRedisLock, type RedisLockClient } from "#/internal/lock.mjs";
 import { createRedisRefreshTokenFamilyStore } from "#/refresh-token-family.mjs";
 import { createRedisReplaySeenSet } from "#/replay-seen-set.mjs";
@@ -476,5 +480,176 @@ describe("an expiry that is not a finite number is refused before Redis is asked
 		});
 		await expect(store.create(sessionInput(new Date(Number.NaN)))).rejects.toThrow(RangeError);
 		expect(client.px).toEqual([]);
+	});
+});
+
+/**
+ * Past ECMAScript's Date range (±8.64e15 ms) a number is no deadline a Date
+ * can hold or Redis can take: `1e21` is sent as `1e+21`, and a whole but
+ * enormous value overflows the server's expiry. A script that writes its
+ * record before setting the deadline then leaves the record with no TTL.
+ */
+const PAST_THE_DATE_RANGE = [8_640_000_000_000_001, 1e20, 1e21, -1e21];
+
+describe("an expiry or lifetime past the Date range is refused before Redis is asked", () => {
+	/** A client every method of which records that it was called, and answers nothing. */
+	const recordingAny = <T,>() => {
+		const calls: string[] = [];
+		const client = new Proxy(
+			{},
+			{
+				get: (_target, name) => async () => {
+					calls.push(String(name));
+					return null;
+				},
+			},
+		) as T;
+		return { calls, client };
+	};
+
+	it("ChallengeStore.issue, ReplaySeenSet.markSeen and AccessTokenDenylist.add", async () => {
+		const client = recorder();
+		const challenges = createRedisChallengeStore({
+			client: { set: client.set, pttl: async () => -2, del: async () => 0 } as ChallengeStoreClient,
+			keyPrefix: "chal:",
+		});
+		const seen = createRedisReplaySeenSet({
+			client: { set: client.set, exists: async () => 0 } as ReplaySeenSetClient,
+			keyPrefix: "replay:",
+		});
+		const denylist = createRedisAccessTokenDenylist({
+			client: { set: client.set, exists: async () => 0 } as AccessTokenDenylistClient,
+			keyPrefix: "atdeny:",
+		});
+		for (const bad of PAST_THE_DATE_RANGE) {
+			await expect(challenges.issue("scope", "v", bad), String(bad)).rejects.toThrow(RangeError);
+			await expect(seen.markSeen("scope", "k", bad), String(bad)).rejects.toThrow(RangeError);
+			await expect(denylist.add("j", bad), String(bad)).rejects.toThrow(RangeError);
+		}
+		expect(client.px).toEqual([]);
+	});
+
+	it("RefreshTokenFamilyStore.registerFamily and updateFamily", async () => {
+		const recording = familyRecorder(residentFamily());
+		const store = createRedisRefreshTokenFamilyStore({
+			client: recording.client,
+			keyPrefix: "rtfam:",
+		});
+		for (const bad of PAST_THE_DATE_RANGE) {
+			await expect(store.registerFamily(family(bad)), String(bad)).rejects.toThrow(RangeError);
+			await expect(
+				store.updateFamily("fam-1", (current) => ({
+					action: "commit",
+					family: { ...current, expiresAtMs: bad },
+				})),
+				String(bad),
+			).rejects.toThrow(RangeError);
+		}
+		expect(recording.px).toEqual([]);
+		expect(recording.multiPx).toEqual([]);
+	});
+
+	it("DeviceCodeStore.create", async () => {
+		const recording = deviceCodeRecorder();
+		const store = createRedisDeviceCodeStore({ client: recording.client, keyPrefix: "devauth:" });
+		for (const bad of PAST_THE_DATE_RANGE) {
+			await expect(store.create(deviceInput(bad)), String(bad)).rejects.toThrow(RangeError);
+		}
+		expect(recording.created).toEqual([]);
+	});
+
+	it("ConsentStore.grant and PendingConsentStore.set", async () => {
+		const consent = recordingAny<ConsentStoreClient>();
+		const pending = recordingAny<PendingConsentStoreClient>();
+		const consents = createRedisConsentStore({ client: consent.client, keyPrefix: "consent:" });
+		const parked = createRedisPendingConsentStore({
+			client: pending.client,
+			keyPrefix: "consent:",
+		});
+		for (const bad of PAST_THE_DATE_RANGE) {
+			await expect(
+				consents.grant({
+					sub: "u-1",
+					clientId: "app",
+					scopes: ["read"],
+					grantedAt: NOW,
+					expiresAt: bad,
+				}),
+				String(bad),
+			).rejects.toThrow(RangeError);
+			await expect(
+				parked.set({
+					challenge: "ch-1",
+					sessionId: "sess-1",
+					sub: "u-1",
+					clientId: "app",
+					scopes: ["read"],
+					grantedScopes: [],
+					authorizeUrl: "https://issuer.example/oauth/authorize?client_id=app",
+					redirectUri: "https://app.example/cb",
+					state: undefined,
+					createdAt: NOW,
+					expiresAt: bad,
+				}),
+				String(bad),
+			).rejects.toThrow(RangeError);
+		}
+		expect(consent.calls).toEqual([]);
+		expect(pending.calls).toEqual([]);
+	});
+
+	it("CodeRepository.createCode, and FederationTokenStore's ttl, as seconds from now", async () => {
+		const client = recorder();
+		const repo = new RedisCodeRepository(codeClient(client.set));
+		// 1e13 s is 1e16 ms, which runs past the Date range from any today.
+		for (const expiresIn of [1e13, 1e18]) {
+			await expect(repo.createCode(codeInput(expiresIn)), String(expiresIn)).rejects.toThrow(
+				RangeError,
+			);
+			expect(() =>
+				createRedisFederationTokenStore({
+					client: federationTokenRecorder().client,
+					encryption: { mode: "required", key: Buffer.alloc(32, 7) },
+					ttl: expiresIn,
+				}),
+			).toThrow(/ttl/);
+		}
+		expect(client.px).toEqual([]);
+	});
+
+	it("the federation-token lock and the federation-grant lock: a TTL or a wait no clock reaches", async () => {
+		const recording = lockRecorder();
+		const lock = createRedisLock({ client: recording.client });
+		const attempts: number[] = [];
+		const grantLock = createFederationGrantLock({
+			client: {
+				tryLock: async (_key, _token, ttlMs) => {
+					attempts.push(ttlMs);
+					return true;
+				},
+				unlock: async () => {},
+			},
+			lockKey: (id) => `fg:{${id}}:lock`,
+		});
+		for (const huge of [1e16, 1e21]) {
+			await expect(
+				lock.acquireLock({ sid: "s", federationName: "google", ttlMs: huge }),
+				`ttlMs ${huge}`,
+			).rejects.toThrow(RangeError);
+			await expect(
+				lock.acquireLock({ sid: "s", federationName: "google", waitForMs: huge }),
+				`waitForMs ${huge}`,
+			).rejects.toThrow(RangeError);
+			await expect(
+				grantLock.acquire("g-1", { ttlMs: huge, waitForMs: 0 }),
+				`grant ttlMs ${huge}`,
+			).rejects.toThrow(RangeError);
+			await expect(
+				grantLock.acquire("g-1", { ttlMs: 30_000, waitForMs: huge }),
+				`grant waitForMs ${huge}`,
+			).rejects.toThrow(RangeError);
+		}
+		expect(recording.px).toEqual([]);
+		expect(attempts).toEqual([]);
 	});
 });

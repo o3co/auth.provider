@@ -2698,12 +2698,14 @@ export function runFederationGrantStoreContract<S extends FederationGrantStore>(
 			});
 
 			it("refuses a TTL or a wait that is not a usable number: a TTL of NaN compares as expired, and exclusion would be silently off", async () => {
-				for (const ttlMs of [Number.NaN, 0, -5, Number.POSITIVE_INFINITY]) {
+				// 1e16 ms from now is past the Date range: no clock reaches the end
+				// of that lease, and Redis cannot take it as a PX.
+				for (const ttlMs of [Number.NaN, 0, -5, Number.POSITIVE_INFINITY, 1e16]) {
 					await expect(store.acquireRefreshLock("g-1", { ttlMs, waitForMs: 0 })).rejects.toThrow(
 						RangeError,
 					);
 				}
-				for (const waitForMs of [Number.NaN, -1, Number.POSITIVE_INFINITY]) {
+				for (const waitForMs of [Number.NaN, -1, Number.POSITIVE_INFINITY, 1e16]) {
 					await expect(
 						store.acquireRefreshLock("g-1", { ttlMs: 120_000, waitForMs }),
 					).rejects.toThrow(RangeError);

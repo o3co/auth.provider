@@ -52,6 +52,23 @@ const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
  *
  * Per A1 §13.1 + master roadmap §3.6.
  */
+/**
+ * Expiries no store may be handed: not finite (NaN, from an Invalid Date or an
+ * unset setting; ±Infinity), or outside ECMAScript's Date range (±8.64e15 ms).
+ * NaN is never `<= now`, so it slipped past every past-expiry check; one past
+ * the Date range is a number Redis cannot take as a deadline (`1e21` is sent
+ * as `1e+21`) and a Date cannot hold, and a script that writes its record
+ * before setting the deadline left the record with no TTL at all.
+ */
+const UNSTORABLE_EXPIRIES = [
+	Number.NaN,
+	Number.POSITIVE_INFINITY,
+	Number.NEGATIVE_INFINITY,
+	8_640_000_000_000_001,
+	1e21,
+	-1e21,
+];
+
 export function runReplaySeenSetContract(
 	factoryName: string,
 	factory: ReplaySeenSetContractFactory,
@@ -94,14 +111,14 @@ export function runReplaySeenSetContract(
 			});
 		});
 
-		it("markSeen refuses an expiry that is not a finite number, and records nothing", async () => {
+		it("markSeen refuses an expiry that is not a finite number within the Date range, and records nothing", async () => {
 			// A NaN expiry is never `<= now`, so it slipped past the expired-at-issue
 			// check: the memory adapter kept the record forever and Redis was sent
 			// `PX NaN`. A non-finite expiry is a caller fault, not the timing race
 			// `expired-at-issue` names, so it is a RangeError — which the challenge
 			// ceremony, swallowing `expired-at-issue`, does not swallow.
 			await withSet(async (set) => {
-				for (const bad of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+				for (const bad of UNSTORABLE_EXPIRIES) {
 					await expect(set.markSeen("scope-A", "k-bad", bad)).rejects.toThrow(RangeError);
 					expect(await set.contains("scope-A", "k-bad")).toBe(false);
 				}

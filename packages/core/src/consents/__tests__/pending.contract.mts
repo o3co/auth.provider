@@ -47,6 +47,23 @@ const record = (overrides: Partial<PendingConsentRecord> = {}): PendingConsentRe
  * same suite against the real thing, so the two cannot disagree about what
  * "consumed" means — and "consumed" is the whole point of the port.
  */
+/**
+ * Expiries no store may be handed: not finite (NaN, from an Invalid Date or an
+ * unset setting; ±Infinity), or outside ECMAScript's Date range (±8.64e15 ms).
+ * NaN is never `<= now`, so it slipped past every past-expiry check; one past
+ * the Date range is a number Redis cannot take as a deadline (`1e21` is sent
+ * as `1e+21`) and a Date cannot hold, and a script that writes its record
+ * before setting the deadline left the record with no TTL at all.
+ */
+const UNSTORABLE_EXPIRIES = [
+	Number.NaN,
+	Number.POSITIVE_INFINITY,
+	Number.NEGATIVE_INFINITY,
+	8_640_000_000_000_001,
+	1e21,
+	-1e21,
+];
+
 export function runPendingConsentStoreContract(
 	name: string,
 	factory: PendingConsentStoreContractFactory,
@@ -118,11 +135,11 @@ export function runPendingConsentStoreContract(
 			expect(await store.consume("ch-1")).toBeNull();
 		});
 
-		it("refuses an expiry that is not a finite number, and parks nothing", async () => {
+		it("refuses an expiry that is not a finite number within the Date range, and parks nothing", async () => {
 			// NaN is never `<= now`: the memory store kept such a request for
 			// ever, and Redis was asked for a TTL of NaN after the record was
 			// written.
-			for (const expiresAt of [Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+			for (const expiresAt of UNSTORABLE_EXPIRIES) {
 				await expect(store.set(record({ expiresAt }))).rejects.toThrow(RangeError);
 				expect(await store.get("ch-1")).toBeNull();
 			}

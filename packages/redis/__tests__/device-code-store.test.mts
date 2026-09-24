@@ -83,6 +83,17 @@ describe("createRedisDeviceCodeStore — what is Redis-specific (#433)", () => {
 		]);
 	});
 
+	it("refuses a finite expiry past the Date range before the script writes anything", async () => {
+		// `1e20` is sent as a decimal PEXPIREAT Redis cannot take, and `1e21` as
+		// `1e+21`: either way the script had already written the record and its
+		// index, and both were left with no TTL at all.
+		for (const expiresAtMs of [8_640_000_000_000_001, 1e20, 1e21]) {
+			const prefix = freshPrefix();
+			await expect(storeAt(prefix).create({ ...seed, expiresAtMs })).rejects.toThrow(RangeError);
+			expect(await raw.keys(`${prefix}*`)).toEqual([]);
+		}
+	});
+
 	it("gives both keys the authorization's own expiry as their TTL", async () => {
 		// Expired records are reclaimed by Redis rather than swept. Both keys
 		// carry the same absolute deadline, so the index cannot outlive the

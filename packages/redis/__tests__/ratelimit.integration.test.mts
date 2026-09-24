@@ -31,6 +31,26 @@ afterAll(async () => {
 	await redis?.quit();
 });
 
+describe("createRedisRateLimiter on ioredis — a window no key can carry", () => {
+	it("is screened out like any unusable spec, so the counter never lands without a TTL", async () => {
+		// A whole but enormous `windowSeconds` passed the positive-integer screen,
+		// and the script's INCR ran before its EXPIRE was refused — the #269
+		// shape: a counter with no TTL, and a client 429'd for ever. The spec is
+		// dropped like any other unusable one, and the default window applies.
+		const limiter = createRedisRateLimiter({
+			client: makeIoredisClients(redis).rateLimiterClient,
+			limits: { tbig: { limit: 5, windowSeconds: 1e17 } },
+		});
+		const key = `tbig:ip:${Date.now()}`;
+
+		await limiter.check(key, {});
+
+		const pttl = await redis.pttl(key);
+		expect(pttl).toBeGreaterThan(0);
+		expect(pttl).toBeLessThanOrEqual(60_000);
+	});
+});
+
 describe("createRedisRateLimiter on ioredis — resetAt (#458)", () => {
 	it("reports a resetAt inside the window, from the counter key's PTTL", async () => {
 		const limiter = createRedisRateLimiter({
