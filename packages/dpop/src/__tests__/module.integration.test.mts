@@ -927,6 +927,8 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 					name: "JWTExpired",
 					message: '"exp" claim timestamp check failed',
 					code: "ERR_JWT_EXPIRED",
+					// jose's own code for the check, which the projection keeps.
+					reason: "check_failed",
 					stack: FRAMES,
 				},
 			},

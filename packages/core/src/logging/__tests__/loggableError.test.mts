@@ -343,18 +343,16 @@ describe("loggableError — what a log line may carry of an error", () => {
 	});
 
 	describe("a closed-set field a store's error records", () => {
-		it.each([
-			["unreachable"],
-			["connection_closed"],
-			["malformed_response"],
-			["expired-at-issue"],
-		])("keeps an own `reason` that is a code: %j", (reason) => {
-			expect(shape(Object.assign(new Error("m"), { reason }))).toEqual({
-				name: "Error",
-				message: "m",
-				reason,
-			});
-		});
+		it.each([["unreachable"], ["connection_closed"], ["malformed_response"], ["expired-at-issue"]])(
+			"keeps an own `reason` that is a code: %j",
+			(reason) => {
+				expect(shape(Object.assign(new Error("m"), { reason }))).toEqual({
+					name: "Error",
+					message: "m",
+					reason,
+				});
+			},
+		);
 
 		it.each([
 			["free text", "Token has been expired or revoked."],
@@ -395,7 +393,10 @@ describe("loggableError — what a log line may carry of an error", () => {
 			["above it", { storeStatus: 600 }],
 			["fractional", { storeStatus: 401.5 }],
 			["a string", { storeStatus: "401" }],
-			["under a name that is not `<word>Status`", { store_status: 401, Status: 401, storestatus: 401 }],
+			[
+				"under a name that is not `<word>Status`",
+				{ store_status: 401, Status: 401, storestatus: 401 },
+			],
 		])("drops a status field %s", (_label, fields) => {
 			expect(shape(Object.assign(new Error("m"), fields))).toEqual({ name: "Error", message: "m" });
 		});

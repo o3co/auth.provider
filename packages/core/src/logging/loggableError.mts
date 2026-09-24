@@ -52,9 +52,22 @@
  *   string `type`; an `error` within §5.2's set; `response: { status,
  *   contentType }` for a Response on the cause or on `response`; and the
  *   Error causes, the same way, three deep. Every string is capped at 256.
- * - Never kept: a cause that is not an Error, any other field (`command`,
- *   `body`, `buffer`), and anything of a thrown value that is not an Error
- *   but its `typeof`, as `thrown`.
+ * - Closed-set fields a store's or a client's error records, kept because
+ *   their shape cannot hold free text: an own `reason` that is a code —
+ *   lowercase words joined by `_` or `-`, at most 64 characters
+ *   (`unreachable`, `expired-at-issue`) — and an own `<word>Status` field
+ *   holding an HTTP status, 100–599, at most four of them (`storeStatus`: an
+ *   upstream's answer an error records beside its own `status`, which
+ *   Express reads as this server's).
+ * - An AggregateError's members (any error's `errors` array): of its first
+ *   {@link LOGGED_AGGREGATE_MAX_ERRORS}, the Errors, projected as causes are
+ *   and within the same three levels, as `aggregateErrors` — pino's own name
+ *   for them, so its err serializer writes them once — and how many members
+ *   are not among them, as `aggregateErrorsOmitted`. Neither field when none
+ *   of those five is an Error.
+ * - Never kept: a cause or a member that is not an Error, any other field
+ *   (`command`, `body`, `buffer`), and anything of a thrown value that is
+ *   not an Error but its `typeof`, as `thrown`.
  * - It never throws: an error from another realm counts; a throwing getter
  *   drops its field; a value the Error check cannot inspect reads as a
  *   non-Error.
@@ -105,15 +118,50 @@ export interface LoggableError {
 	 */
 	readonly stack?: string;
 	readonly cause?: LoggableError;
+	/**
+	 * An own `reason` that is a code — lowercase words joined by `_` or `-`,
+	 * at most 64 characters — e.g. a Store transport failure's `unreachable`.
+	 */
+	readonly reason?: string;
+	/**
+	 * An AggregateError's members: of its first
+	 * {@link LOGGED_AGGREGATE_MAX_ERRORS}, the Errors, projected the same way.
+	 */
+	readonly aggregateErrors?: readonly LoggableError[];
+	/** How many of the members are not in `aggregateErrors`: past the first five, or not an Error. */
+	readonly aggregateErrorsOmitted?: number;
 	/** For a thrown value that is not an Error: its `typeof`, and nothing of its content. */
 	readonly thrown?: string;
+	/**
+	 * An own `<word>Status` field holding an HTTP status (100–599), at most
+	 * four: an upstream's answer an error records beside its own `status`,
+	 * e.g. a Store refusal's `storeStatus`.
+	 */
+	readonly [statusField: `${string}Status`]: number | undefined;
 }
 
 /** The longest string any field keeps. */
 export const LOGGED_STRING_MAX_LENGTH = 256;
 
-/** How many causes deep the projection follows; a cycle ends here too. */
+/** How many causes (or AggregateError members) deep the projection follows; a cycle ends here too. */
 const MAX_CAUSE_DEPTH = 3;
+
+/** The most AggregateError members the projection looks at, at each level. */
+export const LOGGED_AGGREGATE_MAX_ERRORS = 5;
+
+/**
+ * A `reason` that is a code: lowercase words joined by `_` or `-`. No space,
+ * capital or digit, so no sentence, number or token fits; at most
+ * {@link REASON_MAX_LENGTH} characters.
+ */
+const REASON_CODE = /^[a-z]+(?:[_-][a-z]+)*$/;
+const REASON_MAX_LENGTH = 64;
+
+/** A field that records an HTTP status beside `status`: `storeStatus`, `upstreamStatus`. */
+const STATUS_FIELD = /^[a-z][A-Za-z]{0,31}Status$/;
+
+/** The most `<word>Status` fields the projection keeps. */
+const MAX_STATUS_FIELDS = 4;
 
 /** RFC 6749 §5.2: `error` and `error_description` are `%x20-21 / %x23-5B / %x5D-7E`. */
 const OAUTH_ERROR_TEXT = /^[\x20\x21\x23-\x5B\x5D-\x7E]+$/;
@@ -280,6 +328,81 @@ const framesOf = (
 	return frames.join("\n").slice(0, LOGGED_STACK_MAX_LENGTH);
 };
 
+/** An own `reason` that is a code; `undefined` for anything else, or when asking throws. */
+const reasonOf = (err: object): string | undefined => {
+	try {
+		if (!Object.hasOwn(err, "reason")) return undefined;
+	} catch {
+		return undefined;
+	}
+	const reason = read(err, "reason");
+	return typeof reason === "string" &&
+		reason.length <= REASON_MAX_LENGTH &&
+		REASON_CODE.test(reason)
+		? reason
+		: undefined;
+};
+
+/**
+ * The error's own `<word>Status` fields that hold an HTTP status, in key
+ * order, at most {@link MAX_STATUS_FIELDS}. Nothing when the keys cannot be
+ * listed (a Proxy's trap).
+ */
+const statusFieldsOf = (err: object): Record<string, number> => {
+	let keys: string[];
+	try {
+		keys = Object.keys(err);
+	} catch {
+		return {};
+	}
+	const kept: Record<string, number> = {};
+	let count = 0;
+	for (const key of keys) {
+		if (count === MAX_STATUS_FIELDS) break;
+		if (!STATUS_FIELD.test(key)) continue;
+		const value = read(err, key);
+		if (typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599) {
+			kept[key] = value;
+			count++;
+		}
+	}
+	return kept;
+};
+
+/**
+ * An AggregateError's members at `depth`: of the first
+ * {@link LOGGED_AGGREGATE_MAX_ERRORS}, the Errors, projected one level down,
+ * and how many members that leaves out. Nothing past the depth limit, for an
+ * `errors` that is not an array or cannot be read (a revoked Proxy throws
+ * even to `Array.isArray`), or when none of those members is an Error — a
+ * validation library's `errors` of plain issue objects.
+ */
+const membersOf = (
+	err: object,
+	depth: number,
+): Pick<LoggableError, "aggregateErrors" | "aggregateErrorsOmitted"> => {
+	if (depth >= MAX_CAUSE_DEPTH) return {};
+	const errors = read(err, "errors");
+	let length: unknown;
+	try {
+		if (!Array.isArray(errors)) return {};
+		length = errors.length;
+	} catch {
+		return {};
+	}
+	if (typeof length !== "number" || !Number.isInteger(length) || length < 0) return {};
+	const members: LoggableError[] = [];
+	for (let index = 0; index < Math.min(length, LOGGED_AGGREGATE_MAX_ERRORS); index++) {
+		const member = read(errors as object, String(index));
+		if (isError(member)) members.push(project(member, depth + 1));
+	}
+	if (members.length === 0) return {};
+	return {
+		aggregateErrors: members,
+		...(length > members.length ? { aggregateErrorsOmitted: length - members.length } : {}),
+	};
+};
+
 /** A fetch `Response`, read structurally so that one from another realm counts too. */
 const responseFields = (value: unknown): LoggableError["response"] | undefined => {
 	if (typeof value !== "object" || value === null) return undefined;
@@ -332,6 +455,7 @@ function project(err: unknown, depth: number): LoggableError {
 	const cause = read(err, "cause");
 	const response = responseFields(cause) ?? responseFields(read(err, "response"));
 	const stack = framesOf(read(err, "stack"), rawName, code, rawMessage);
+	const reason = reasonOf(err);
 
 	let message: string | undefined;
 	let position: number | undefined;
@@ -354,12 +478,15 @@ function project(err: unknown, depth: number): LoggableError {
 				? { code }
 				: {}),
 		...(typeof status === "number" && Number.isInteger(status) ? { status } : {}),
+		...statusFieldsOf(err),
+		...(reason !== undefined ? { reason } : {}),
 		...(typeof type === "string" ? { type: capped(type) } : {}),
 		...(typeof error === "string" && OAUTH_ERROR_TEXT.test(error) ? { error: capped(error) } : {}),
 		...(errorDescription !== undefined ? { error_description: errorDescription } : {}),
 		...(response !== undefined ? { response } : {}),
 		...(stack !== undefined ? { stack } : {}),
 		...(isError(cause) && depth < MAX_CAUSE_DEPTH ? { cause: project(cause, depth + 1) } : {}),
+		...membersOf(err, depth),
 	};
 	// pino's err serializer names `type` after `constructor.name` when that is
 	// a function — "Object" for a plain object — and after `name` otherwise.
