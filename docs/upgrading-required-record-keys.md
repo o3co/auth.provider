@@ -79,7 +79,20 @@ Write `undefined` where you have nothing. That makes "no expiry", "no state" or 
 
 **Key presence is not unchanged.** Anything that looks at keys rather than values can see a difference:
 
-- **Records the bundled stores return** now carry the key with `undefined` where they used to leave it out. This applies to the memory and Redis stores for every type above. `"k" in record`, `Object.keys` / `Object.entries`, `structuredClone` and `toStrictEqual` see the key. A spread that merges defaults *underneath* a record, `{ ...defaults, ...record }`, now lets an `undefined` override the default.
+- **Records the bundled stores return** now carry the key with `undefined` where they used to leave it out. This applies to the returned types in the table, from the memory store and, where there is one, the Redis store:
+  - `FederationTokens`;
+  - `AssertionIssuerEntry`;
+  - `RegisteredRP`;
+  - `ConsentRecord` and `PendingConsentRecord`, and the `ConsentRecordFields` the Redis consent client returns;
+  - `Code`;
+  - `DeviceAuthorization`;
+  - `FederationGrantIntent`;
+  - a federation grant's authorization, usage and credentials;
+  - `UserSession`.
+
+  The input types in the table are not read back; the next item covers them.
+
+  `"k" in record`, `Object.keys` / `Object.entries`, `structuredClone` and `toStrictEqual` see the key. A spread that merges defaults *underneath* a record, `{ ...defaults, ...record }`, now lets an `undefined` override the default.
 - **Inputs the library hands to ports you implement** now carry these keys, `undefined` included:
   - `ConsentStore.grant` gets `expiresAt` (`POST /oauth/consent`);
   - `PendingConsentStore.set` gets `state` (`/authorize`);
