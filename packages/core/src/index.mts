@@ -189,6 +189,14 @@ export type {
 	SupportsLock,
 } from "./federation-tokens/types.mjs";
 export { supportsLock } from "./federation-tokens/types.mjs";
+// The federation adapter toolkit: the pure helpers every adapter builds its
+// requests with — the PKCE S256 challenge, the URL its library exchanges the
+// code at (RFC 9207 `iss` and nothing else from the callback), and a
+// `client_secret` that may be computed per request.
+export { callbackUrlForExchange } from "./federations/callback-url.mjs";
+export type { FederationClientSecret } from "./federations/client-secret.mjs";
+export { resolveClientSecret } from "./federations/client-secret.mjs";
+export { codeChallenge } from "./federations/pkce.mjs";
 export type { FederationResponseMode } from "./federations/response-mode.mjs";
 export {
 	DEFAULT_FEDERATION_RESPONSE_MODE,

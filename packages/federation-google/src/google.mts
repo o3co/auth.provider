@@ -15,6 +15,8 @@
  */
 
 import {
+	callbackUrlForExchange,
+	codeChallenge,
 	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
@@ -26,11 +28,7 @@ import {
 	type SupportsLogout,
 	type SupportsRefresh,
 } from "@o3co/auth-provider-core";
-import {
-	callbackUrlForExchange,
-	codeChallenge,
-	createFederationRedirectPolicy,
-} from "@o3co/auth-provider-session";
+import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 
 // ComponentMap slot declaration-merge: exposes googleFederationConfig as a typed

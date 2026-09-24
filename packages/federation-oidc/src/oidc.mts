@@ -16,6 +16,8 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
+	callbackUrlForExchange,
+	codeChallenge,
 	type DelegatedAuthorizationRequest,
 	type DelegatedAuthorizationResult,
 	type DelegatedCodeExchangeRequest,
@@ -23,6 +25,7 @@ import {
 	type DelegatedTokens,
 	type EndSessionRequest,
 	type EndSessionResult,
+	type FederationClientSecret,
 	type FederationProfile,
 	type FederationProvider,
 	identityClaimsProblem,
@@ -36,11 +39,6 @@ import {
 	type SupportsRefresh,
 	selectIdentityClaims,
 } from "@o3co/auth-provider-core";
-import {
-	callbackUrlForExchange,
-	codeChallenge,
-	type FederationClientSecret,
-} from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 import { verifyAtHash } from "./at-hash.mjs";
 import { clientAuthFor, type OidcPrivateKey } from "./client-auth.mjs";

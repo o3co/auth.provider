@@ -15,25 +15,23 @@
  */
 
 import {
+	callbackUrlForExchange,
+	codeChallenge,
 	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
+	type FederationClientSecret,
 	type FederationProfile,
 	type FederationProvider,
 	isLoopbackHostname,
 	type MappedClaims,
 	type RefreshedTokens,
+	resolveClientSecret,
 	type SupportsClaimMapping,
 	type SupportsLogout,
 	type SupportsRefresh,
 } from "@o3co/auth-provider-core";
-import {
-	callbackUrlForExchange,
-	codeChallenge,
-	createFederationRedirectPolicy,
-	type FederationClientSecret,
-	resolveClientSecret,
-} from "@o3co/auth-provider-session";
+import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 import { createAppleClientSecret } from "./client-secret.mjs";
 

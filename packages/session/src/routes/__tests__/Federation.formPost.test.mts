@@ -38,9 +38,9 @@ import type {
 	FederationProvider,
 	UserRepository,
 } from "@o3co/auth-provider-core";
+import { codeChallenge } from "@o3co/auth-provider-core";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import { codeChallenge } from "#/federations/pkce.mjs";
 import { FEDERATION_TRANSACTION_KEY_PREFIX } from "#/federations/transaction.mjs";
 import {
 	buildFederationApp,

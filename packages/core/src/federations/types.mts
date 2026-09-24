@@ -27,7 +27,10 @@
  *
  * What stays in `@o3co/auth-provider-session` is what only its router uses:
  * `FederationResult`, the redirect policy it feeds, and the routes
- * themselves.
+ * themselves. The pure helpers an adapter builds its requests with — the
+ * PKCE challenge, the code-exchange URL, the client-secret resolver — are
+ * beside this contract, in `pkce.mts`, `callback-url.mts` and
+ * `client-secret.mts`.
  */
 
 import type { FederationResponseMode } from "./response-mode.mjs";
@@ -131,7 +134,7 @@ export interface FederationProvider {
 	 *
 	 * `codeVerifier` MUST be a cryptographically strong URL-safe random string; the route
 	 * layer generates and stores it in the session before calling. Adapters compute
-	 * `code_challenge` via the shared `pkce` helper (`codeChallenge(codeVerifier)`); do
+	 * `code_challenge` with this package's `codeChallenge(codeVerifier)` (`pkce.mts`); do
 	 * not accept a pre-computed challenge to avoid mismatches between transform methods.
 	 *
 	 * `nonce` is optional — OIDC providers MUST forward it as the upstream `nonce`
@@ -182,9 +185,9 @@ export interface FederationProvider {
 		 *
 		 * Protocol response parameters travel here as well. An adapter forwards
 		 * `iss` (RFC 9207) from this bag to its library's issuer check — through
-		 * `callbackUrlForExchange`, so that the rule lives in one place (#595,
-		 * #597) — and narrowing the bag to identity data would silently switch
-		 * that check off.
+		 * this package's `callbackUrlForExchange` (`callback-url.mts`), so that
+		 * the rule lives in one place (#595, #597) — and narrowing the bag to
+		 * identity data would silently switch that check off.
 		 *
 		 * **These values are relayed through the user agent and are not signed.**
 		 * The `state` check binds them to this session, which is all it binds:

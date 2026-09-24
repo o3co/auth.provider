@@ -15,6 +15,7 @@
  */
 
 import {
+	codeChallenge,
 	defineModule,
 	type EndSessionRequest,
 	type EndSessionResult,
@@ -25,7 +26,7 @@ import {
 	type SupportsClaimMapping,
 	type SupportsLogout,
 } from "@o3co/auth-provider-core";
-import { codeChallenge, createFederationRedirectPolicy } from "@o3co/auth-provider-session";
+import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 import * as oidc from "openid-client";
 
 // ComponentMap slot declaration-merge: exposes githubFederationConfig as a typed

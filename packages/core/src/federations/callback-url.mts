@@ -33,7 +33,9 @@
  *   `response`, `id_token` or `token` on this URL would change how the library
  *   reads the response. `state` never reaches an adapter.
  *
- * One place, so that the adapters cannot drift apart on this rule.
+ * One place, so that the adapters cannot drift apart on this rule. It is
+ * core's because the adapters are its only callers and core is the package
+ * every adapter already depends on.
  */
 export function callbackUrlForExchange(params: {
 	readonly redirectUri: string;
