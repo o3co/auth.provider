@@ -204,6 +204,44 @@ describe("/oauth/introspect — session liveness (R3)", () => {
 		expect(events.find((e) => e.type === "introspect.store_unavailable")).toBeDefined();
 	});
 
+	it("keeps a record the store could not parse out of introspect.store_unavailable", async () => {
+		// A store whose record does not parse throws V8's SyntaxError, which
+		// quotes the start of the input: `Unexpected token 'S', "SECRET-REC"...
+		// is not valid JSON`.
+		const leaked = "SECRET-REC";
+		let parseError: unknown;
+		try {
+			JSON.parse(`${leaked}ORD-HOLDING-A-TOKEN`);
+		} catch (err) {
+			parseError = err;
+		}
+		expect((parseError as Error).message).toContain(leaked);
+		const events: AuditEvent[] = [];
+		const auditSink: AuditSink = {
+			kind: "spy",
+			record: async (e) => {
+				events.push(e);
+			},
+		};
+		const store = {
+			kind: "memory",
+			create: vi.fn(async () => {}),
+			get: vi.fn(async () => {
+				throw parseError;
+			}),
+			delete: vi.fn(async () => {}),
+		} as unknown as UserSessionStore;
+		const app = await buildApp({ userSessionStore: store, auditSink });
+
+		const res = await introspect(app, await mintAccessToken({ sid: SID }));
+		await new Promise((r) => setImmediate(r));
+
+		expect(res.body.active).toBe(false);
+		const storeEvent = events.find((e) => e.type === "introspect.store_unavailable");
+		expect(storeEvent?.details).toEqual({ sid: SID, error: { name: "SyntaxError" } });
+		expect(JSON.stringify(events)).not.toContain(leaked);
+	});
+
 	it("does not read the store for a token carrying no sid", async () => {
 		// Client credentials, jwt-bearer, anything minted outside a browser
 		// session: there is no session to check, so the check costs nothing.

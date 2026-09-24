@@ -666,7 +666,7 @@ describe("limiter outage — rateLimit.failMode applies here too (#457)", () => 
 		expect(events[0]).toMatchObject({
 			type: "rate_limit.unavailable",
 			userAgent: "device-test/1.0",
-			details: { tag: "device_verification", error: "redis down" },
+			details: { tag: "device_verification", error: { name: "Error" } },
 		});
 		expect(typeof events[0]?.ip).toBe("string");
 		expect(events[0]?.timestamp).toBeInstanceOf(Date);

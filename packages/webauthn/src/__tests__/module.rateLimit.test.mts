@@ -326,7 +326,7 @@ describe("webauthn authentication/options rate limit (#281) — limiter outage",
 		expect(ev).toBeDefined();
 		expect(ev?.details).toMatchObject({
 			tag: WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_TAG,
-			error: "redis down",
+			error: { name: "Error" },
 		});
 
 		await handle.dispose();

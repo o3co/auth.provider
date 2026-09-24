@@ -185,7 +185,43 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 		const storeEvent = events.find((e) => e.type === "introspect.store_unavailable");
 		expect(storeEvent).toBeDefined();
 		expect((storeEvent?.details as Record<string, unknown>)?.family_id).toBe(familyId);
-		expect((storeEvent?.details as Record<string, unknown>)?.error).toContain("backend down");
+		// The error's name, not its message: the message stays in the log.
+		expect((storeEvent?.details as Record<string, unknown>)?.error).toEqual({ name: "Error" });
+	});
+
+	it("keeps what a Redis reply quotes out of introspect.store_unavailable", async () => {
+		// A Redis reply error quotes the command it refused, arguments and all;
+		// an audit sink is a record other systems read.
+		const leaked = "devauth:family:SECRET-TOKEN";
+		const token = await makeAccessToken({ family_id: "fam-reply-error" });
+		const reply = Object.assign(
+			new Error(
+				`ERR unknown command 'evalsha', with args beginning with: 'sha' '1' '${leaked}' 'x'`,
+			),
+			{ name: "ReplyError", command: { name: "evalsha", args: ["sha", "1", leaked] } },
+		);
+		const refreshTokenFamilyRevocation: RefreshTokenFamilyRevocation = {
+			revokeFamily: vi.fn(),
+			isFamilyRevoked: vi.fn().mockRejectedValue(reply),
+		};
+		const events: AuditEvent[] = [];
+		const auditSink: AuditSink = {
+			kind: "spy",
+			async record(event) {
+				events.push(event);
+			},
+		};
+
+		const app = await buildApp(refreshTokenFamilyRevocation, auditSink);
+		const res = await introspect(app, token);
+
+		expect(res.body.active).toBe(false);
+		const storeEvent = events.find((e) => e.type === "introspect.store_unavailable");
+		expect(storeEvent?.details).toEqual({
+			family_id: "fam-reply-error",
+			error: { name: "ReplyError" },
+		});
+		expect(JSON.stringify(events)).not.toContain(leaked);
 	});
 
 	it("emits introspect.family_revoked audit event when family is revoked", async () => {

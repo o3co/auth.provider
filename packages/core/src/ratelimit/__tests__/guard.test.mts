@@ -324,7 +324,8 @@ describe("createRateLimitGuard — limiter outage (OR-5 failMode policy)", () =>
 		await settleAudit();
 		const ev = events.find((e) => e.type === "rate_limit.unavailable");
 		expect(ev).toBeDefined();
-		expect(ev?.details).toEqual({ tag: "token", error: "redis down" });
+		// The audit event names the error; its message stays in the log line.
+		expect(ev?.details).toEqual({ tag: "token", error: { name: "Error" } });
 		expect(ev?.userAgent).toBe("guard-test/1.0");
 	});
 
@@ -359,7 +360,28 @@ describe("createRateLimitGuard — limiter outage (OR-5 failMode policy)", () =>
 			expect.objectContaining({ error: "NonError" }),
 			"rate_limiter_failed_open",
 		);
-		expect(events[0]?.details).toEqual({ tag: "token", error: "NonError" });
+		expect(events[0]?.details).toEqual({ tag: "token", error: { name: "NonError" } });
+	});
+
+	it("keeps what a Redis reply quotes out of the audit event", async () => {
+		// An audit sink is a record other systems read. A Redis reply error's
+		// message quotes the command it refused, arguments and all.
+		const token = "devauth:user:BCDFGHJK";
+		const { sink, events } = spyAuditSink();
+		const limiter = scriptedLimiter(() =>
+			Object.assign(
+				new Error(
+					`ERR unknown command 'evalsha', with args beginning with: 'sha' '1' '${token}' 'user-1'`,
+				),
+				{ name: "ReplyError", command: { name: "evalsha", args: ["sha", "1", token] } },
+			),
+		);
+		await hit(
+			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open", auditSink: sink })),
+		);
+		await settleAudit();
+		expect(events[0]?.details).toEqual({ tag: "token", error: { name: "ReplyError" } });
+		expect(JSON.stringify(events)).not.toContain(token);
 	});
 
 	it("survives an outage with no audit sink wired", async () => {
@@ -416,7 +438,7 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 				type: "rate_limit.unavailable",
 				ip: "203.0.113.9",
 				userAgent: "guard-test/1.0",
-				details: { tag: "device_verification", error: "redis down" },
+				details: { tag: "device_verification", error: { name: "Error" } },
 			});
 		},
 	);

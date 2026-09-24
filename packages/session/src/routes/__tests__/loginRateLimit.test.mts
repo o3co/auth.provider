@@ -216,7 +216,8 @@ describe("/session/login rate limiting — limiter failure (#270)", () => {
 		await new Promise((r) => setImmediate(r));
 		const ev = events.find((e) => e.type === "rate_limit.unavailable");
 		expect(ev).toBeDefined();
-		expect(ev?.details).toEqual({ tag: "login", error: "redis down" });
+		// The error's name, not its message: the message stays in the log line.
+		expect(ev?.details).toEqual({ tag: "login", error: { name: "Error" } });
 	});
 });
 
