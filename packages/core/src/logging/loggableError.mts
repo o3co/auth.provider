@@ -39,9 +39,12 @@
  * - `stack`: the frames, never the header. A non-empty message is found in
  *   the stack and everything up to the end of it dropped (an empty one: the
  *   first line); a message not found — rewritten after V8 formatted the
- *   stack — gives no stack; of what remains only lines starting with four
- *   spaces and `at ` are kept; the first ten, joined by `\n`, then cut at
- *   2048 characters. Absent when no frame is left or `stack` cannot be read.
+ *   stack — gives no stack; after the rest of the line the cut fell on, the
+ *   unbroken run of lines starting with four spaces and `at ` is kept (it
+ *   ends at the first line that is not one); the first ten, joined by
+ *   `\n`, then cut at 2048 characters. Absent when no frame is left or
+ *   `stack` cannot be read. See `framesOf` for what can still pass for a
+ *   frame.
  * - Also kept: `name`; a string or numeric `code`; an integer `status`; a
  *   string `type`; an `error` within §5.2's set; `response: { status,
  *   contentType }` for a Response on the cause or on `response`; and the
@@ -195,33 +198,45 @@ const isError = (value: unknown): value is object => {
  *    message line shaped like a frame goes with it; a message not found
  *    (rewritten after V8 formatted the stack, which it does on the first
  *    read of `stack`) means no stack, because the header can no longer be
- *    told from the frames. An empty or absent message: the first line is
- *    dropped.
- * 3. Of what remains, only `    at ` lines are kept.
- * 4. The first {@link LOGGED_STACK_MAX_FRAMES}, joined by `\n`, then cut at
- *    {@link LOGGED_STACK_MAX_LENGTH} characters. No frame: no stack.
+ *    told from the frames. An empty or absent message: the cut is at the
+ *    start of the stack.
+ * 3. The rest of the line the cut fell on (the header's last line) is never
+ *    a frame. After it, the unbroken run of `    at ` lines starting at the
+ *    first such line is kept, and it ends at the first line that is not one
+ *    — so a section appended after the frames ("Caused by: …") is not kept,
+ *    frame-shaped lines in it included.
+ * 4. The first {@link LOGGED_STACK_MAX_FRAMES} of the run, joined by `\n`,
+ *    then cut at {@link LOGGED_STACK_MAX_LENGTH} characters. No frame: no
+ *    stack.
  *
- * What the text cannot show: a message rewritten, after the stack was
- * formatted, to a leading part of the one the header carries — the rest of
- * the old message then follows the cut; only its `    at `-shaped lines, if
- * any, could pass for frames.
+ * What the text cannot show, and so could still pass for frames:
+ * - a message rewritten, after the stack was formatted, to a leading part
+ *   of the one the header carries: the rest of the old message follows the
+ *   cut, and its `    at `-shaped lines, if any, read as frames;
+ * - a `stack` assigned by hand with a frame-shaped line that carries data:
+ *   it is a frame by every test this can make;
+ * - a `message` that is not a string: the cut falls back to the first line,
+ *   so a header formatted from an earlier, multi-line message leaves its
+ *   later lines behind, and a frame-shaped one reads as a frame.
  */
 const framesOf = (stack: unknown, message: unknown): string | undefined => {
 	if (typeof stack !== "string") return undefined;
-	let rest: string;
+	let rest = stack;
 	if (typeof message === "string" && message !== "") {
 		const at = stack.indexOf(message);
 		if (at < 0) return undefined;
 		rest = stack.slice(at + message.length);
-	} else {
-		const newline = stack.indexOf("\n");
-		rest = newline < 0 ? "" : stack.slice(newline + 1);
 	}
-	const frames = rest
-		.split("\n")
-		.filter((line) => FRAME.test(line))
-		.slice(0, LOGGED_STACK_MAX_FRAMES);
-	return frames.length === 0 ? undefined : frames.join("\n").slice(0, LOGGED_STACK_MAX_LENGTH);
+	// The rest of the line the cut fell on is the header's, never a frame.
+	const lines = rest.split("\n").slice(1);
+	const first = lines.findIndex((line) => FRAME.test(line));
+	if (first < 0) return undefined;
+	const frames: string[] = [];
+	for (const line of lines.slice(first)) {
+		if (!FRAME.test(line) || frames.length === LOGGED_STACK_MAX_FRAMES) break;
+		frames.push(line);
+	}
+	return frames.join("\n").slice(0, LOGGED_STACK_MAX_LENGTH);
 };
 
 /** A fetch `Response`, read structurally so that one from another realm counts too. */
