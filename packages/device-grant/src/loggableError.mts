@@ -51,6 +51,8 @@
  *
  * In a file of its own rather than in `module.mts`: the device-authorization
  * endpoint logs through it too, and `module.mts` imports that endpoint.
+ * {@link guardedRead}, its one way of reading a field, is exported for
+ * `module.mts`'s parser-refusal check, which asks the same errors.
  */
 
 /**
@@ -60,6 +62,20 @@
  * rule anticipated.
  */
 export const LOGGED_STRING_MAX_LENGTH = 256;
+
+/**
+ * `target[key]`, read so that the read cannot throw: `{ value }`, or `null`
+ * when it threw — a getter, a Proxy's trap. An error handler is handed
+ * whatever was thrown, and a handler that throws while asking about it
+ * replaces it, in Express's hands, with its own throw.
+ */
+export const guardedRead = (target: object, key: string): { readonly value: unknown } | null => {
+	try {
+		return { value: (target as Record<string, unknown>)[key] };
+	} catch {
+		return null;
+	}
+};
 
 export const loggableError = (error: unknown): Record<string, string | number> => {
 	let isError: boolean;
@@ -71,13 +87,7 @@ export const loggableError = (error: unknown): Record<string, string | number> =
 		isError = false;
 	}
 	if (!isError) return { thrown: typeof error };
-	const read = (key: string): unknown => {
-		try {
-			return (error as Record<string, unknown>)[key];
-		} catch {
-			return undefined;
-		}
-	};
+	const read = (key: string): unknown => guardedRead(error as object, key)?.value;
 	const cap = (value: string): string =>
 		value.length > LOGGED_STRING_MAX_LENGTH
 			? `${value.slice(0, LOGGED_STRING_MAX_LENGTH - 1)}…`

@@ -126,7 +126,7 @@ import express, { type ErrorRequestHandler, type RequestHandler, type Response }
 import { z } from "zod";
 import { createDeviceAuthorizationHandler } from "./deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "./grant.mjs";
-import { loggableError } from "./loggableError.mjs";
+import { guardedRead, loggableError } from "./loggableError.mjs";
 import { DEVICE_AUTHORIZATION_RATE_LIMIT_PREFIX, DEVICE_CODE_GRANT_TYPE } from "./types.mjs";
 import { createDeviceVerificationHandler } from "./verificationEndpoint.mjs";
 
@@ -358,13 +358,20 @@ const withinBodyLimit: RequestHandler = (req, res, next) => {
  * Those are answered as 4xx, with no error-level log: on the verification
  * route the parser runs ahead of the CSRF guard and of any throttle, so a
  * 500 and an error line for them would let anyone fill the error log at
- * will. `null` for anything else.
+ * will. `null` for anything else — including an error one of whose three
+ * fields throws when read (a getter, a Proxy's trap). The reads go through
+ * `guardedRead`: a throw here would be `parserRefusals` throwing, and
+ * Express would hand `unexpectedErrors` that throw in place of the error.
  */
 const callerMistake = (
 	error: unknown,
 ): { readonly status: 400 | 413 | 415; readonly description: string } | null => {
 	if (error === null || typeof error !== "object") return null;
-	const { expose, status, type } = error as { expose?: unknown; status?: unknown; type?: unknown };
+	const exposed = guardedRead(error, "expose");
+	const statused = guardedRead(error, "status");
+	const typed = guardedRead(error, "type");
+	if (exposed === null || statused === null || typed === null) return null;
+	const [expose, status, type] = [exposed.value, statused.value, typed.value];
 	if (expose !== true || typeof status !== "number" || status < 400 || status >= 500) return null;
 	if (type === "entity.too.large" || type === "parameters.too.many") {
 		return { status: 413, description: "body_too_large" };
