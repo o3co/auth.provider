@@ -29,8 +29,8 @@ installs only the IdPs it uses, and `openid-client` only with one of them. Why
 Google is not a `type = "oidc"` section of
 [`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md): this
 adapter does four things the generic one does not — it sends
-`access_type=offline` at login, the parameter Google requires before it issues
-a refresh token; it carries Google's `hd` (Workspace domain) claim through to
+`access_type=offline` and `prompt=consent` at login, what Google requires before
+it issues a refresh token (below); it carries Google's `hd` (Workspace domain) claim through to
 the profile and `mapClaims`; it requires the RFC 9207 `iss` without fetching
 Google's discovery document; and without an `endSessionEndpoint` it still
 offers logout, redirecting to `postLogoutRedirectUri` or to Google's own logout
@@ -109,7 +109,7 @@ callback answers `500 misconfiguration` after the session has been saved; a
 start that carries `redirect_to` needs an allowlist entry for it and
 `authCallbackUrl` as well. A bridge that forwards the credentials alone
 therefore ends every such login on a `500` instead of in the app. The bridge above does not forward the other
-optional fields (`endSessionEndpoint`, `requireAuthorizationResponseIss`); forward them if the deployment sets them. It
+optional fields (`endSessionEndpoint`, `requireAuthorizationResponseIss`, `accessType`); forward them if the deployment sets them. It
 reads the section only when its `type` is `google` (the default for a section
 named `google`), as the standalone template does (in `buildModules.mts`), so a `type = "oidc"` section
 under that name is not read as this adapter's. It casts; a production bridge
@@ -122,12 +122,9 @@ checks each field's type, as the template's Google bridge
 ## What a login does
 
 - **Authorization request:** scope `openid profile email`, PKCE S256,
-  `access_type=offline`, and the `nonce` the session router minted. There is no
-  request without a nonce: `buildAuthorizationUrl` and `exchangeCode` both throw
-  when it is missing. No `prompt=consent` is sent, and Google returns a refresh
-  token only when the user consents — normally the first login. Later logins
-  store no refresh token, so `oauth`'s `POST /oauth/federation/:name/token`
-  cannot refresh those sessions' Google tokens (`410 refresh_token_absent`).
+  `access_type=offline` with `prompt=consent` (see below), and the `nonce` the
+  session router minted. There is no request without a nonce:
+  `buildAuthorizationUrl` and `exchangeCode` both throw when it is missing.
 - **Code exchange:** at Google's token endpoint, the client secret in the
   request body (`client_secret_post`, `openid-client`'s default), with the PKCE
   verifier. The callback's `iss` is checked first (below). The id_token's signature is
@@ -158,6 +155,33 @@ record is silent. **`hd` is not enforced:** nothing here refuses an account from
 another domain, and the claim lands only in `claims.federated.google`. A
 Workspace-domain restriction belongs in the Store, which decides who
 `google:<sub>` is.
+
+### Refresh tokens and the consent screen
+
+Google issues a refresh token only when the user is shown its consent screen,
+and without `prompt` it shows that screen only the first time an app asks.
+Upstream tokens are stored per session, so a user's second session would have
+no refresh token, and `oauth`'s `POST /oauth/federation/:name/token` would
+answer `410 refresh_token_absent` once the access token expired. So with
+`accessType: "offline"` — the default in `GoogleProviderConfig` — every
+sign-in sends `access_type=offline` **and** `prompt=consent`:
+
+- **Every sign-in shows Google's consent screen**, and every session gets a
+  refresh token.
+- **Every sign-in mints a refresh token.** Google keeps at most 100 per Google
+  account per client ID and silently invalidates the oldest when a new one is
+  issued, so a user with more than 100 live sessions loses refresh on the
+  oldest.
+
+`accessType: "online"` sends neither parameter: no consent screen after the
+first sign-in, and no refresh token at all — for a deployment that uses Google
+to sign in and never refreshes Google's access token through the federation
+token route (it answers `410 refresh_token_absent` once that token expires).
+Any other value is refused at construction; an environment override arrives
+as a string, so coerce it in the bridge.
+
+Keeping an earlier session's refresh token for the same `google:<sub>` is not
+done: it would need a credential store that outlives sessions.
 
 ### The callback's `iss` (RFC 9207)
 
@@ -217,6 +241,7 @@ Defined in [`src/google.mts`](src/google.mts), exported from
 | Test file | Pins |
 | --- | --- |
 | [`google.test.mts`](src/__tests__/google.test.mts) | the authorization request, the nonce requirement, the UserInfo `sub` binding, the profile, refresh and `mapClaims` (`endSession` has no test here) |
+| [`google.consent.test.mts`](src/__tests__/google.consent.test.mts) | that a returning user's sign-in yields a refresh token, `prompt=consent` beside `access_type=offline`, and `accessType` |
 | [`google.signature.test.mts`](src/__tests__/google.signature.test.mts) | that the id_token's signature is verified against the JWKS |
 | [`google.token-snapshot.test.mts`](src/__tests__/google.token-snapshot.test.mts) | the lifetime, `expiresIn` and `tokenType` a login and a refresh report, with and without `expires_in`, and that a non-string `scope` is refused by the library |
 | [`google.issuer-parameter.test.mts`](src/__tests__/google.issuer-parameter.test.mts) | the RFC 9207 `iss` check and `requireAuthorizationResponseIss` |
