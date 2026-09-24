@@ -784,15 +784,20 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 	// as every other grant answers it, core's `policyOutOfBounds`. An audience
 	// the subject token does not carry is RFC 8693 §2.2.2's `invalid_target`.
 	describe("scope and audience past the subject token", () => {
-		const wideningPolicy = defineModule({
-			name: "test:widening-grant-policy",
-			provides: {
-				grantPolicy: () => ({
-					kind: "test",
-					evaluate: async () => ({ outcome: "allow" as const, grantedScope: ["read", "write"] }),
-				}),
-			},
-		});
+		const policyModule = (decision: {
+			readonly grantedScope?: readonly string[];
+			readonly grantedAudience?: readonly string[];
+		}) =>
+			defineModule({
+				name: "test:grant-policy",
+				provides: {
+					grantPolicy: () => ({
+						kind: "test",
+						evaluate: async () => ({ outcome: "allow" as const, ...decision }),
+					}),
+				},
+			});
+		const wideningPolicy = policyModule({ grantedScope: ["read", "write"] });
 
 		it("answers invalid_scope when the request asks for a scope the subject_token does not carry", async () => {
 			const { grant } = await boot([]);
@@ -833,6 +838,47 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				error: "invalid_target",
 				errorDescription: "audience_widening_not_allowed: billing",
 			});
+		});
+
+		// Who named the audience decides the answer, as it does for scope. The
+		// policy's `grantedAudience` is held to the subject token's audience
+		// (README notes 3 and 5) before it replaces the request's.
+		it("answers 500 server_error when the policy grants an audience the subject_token does not carry", async () => {
+			const { grant } = await boot([policyModule({ grantedAudience: ["billing"] })]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ aud: "client-a" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result).toEqual({
+				status: 500,
+				error: "server_error",
+				errorDescription: "policy returned audiences outside the subject_token audience: billing",
+			});
+		});
+
+		it("still answers invalid_target for the request's own audience when a policy is installed but names none", async () => {
+			const { grant } = await boot([policyModule({})]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ aud: "client-a" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: "billing",
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_target",
+				errorDescription: "audience_widening_not_allowed: billing",
+			});
+		});
+
+		it("mints for an audience the policy narrows to within the subject_token's", async () => {
+			const { grant } = await boot([policyModule({ grantedAudience: ["billing"] })]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ aud: ["billing", "client-a"] }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+			});
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) return;
+			expect(decodeJwt(result.tokens.access_token).aud).toBe("billing");
 		});
 	});
 

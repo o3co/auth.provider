@@ -665,7 +665,12 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 		});
 	});
 
-	it("rejects when policy hook widens audience beyond subject aud by default", async () => {
+	// The policy's audience is checked against the subject token's before it
+	// replaces the request's, so a widening here is the policy's alone and
+	// gets `policyOutOfBounds`, as `boundPolicyAudience` answers for every
+	// other grant. The request's own audience past the subject token stays
+	// `invalid_target` (RFC 8693 §2.2.2) — see the case above.
+	it("answers server_error when the policy hook widens audience beyond subject aud", async () => {
 		const wideningPolicy: GrantPolicyHook = {
 			kind: "audience-widening",
 			async evaluate() {
@@ -688,10 +693,10 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({
-			status: 400,
-			error: "invalid_target",
-			errorDescription: expect.stringMatching(/audience_widening_not_allowed/),
+		expect(result).toEqual({
+			status: 500,
+			error: "server_error",
+			errorDescription: "policy returned audiences outside the subject_token audience: inventory",
 		});
 	});
 });
