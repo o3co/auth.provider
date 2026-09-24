@@ -200,6 +200,14 @@ describe("jwt-bearer — an ID-JAG whose date claims are not dates", () => {
 		expect((await present(assertion, true, handler)).status).toBe(200);
 		expect(await present(assertion, true, handler)).toMatchObject(malformed);
 	});
+
+	it("refuses an ID-JAG that runs more than an hour past now as invalid_grant — a replay record that long is refused", async () => {
+		// The ceiling private_key_jwt holds a client assertion to (core's
+		// MAX_ASSERTION_LIFETIME_SECONDS): an ID-JAG's jti is remembered
+		// until its exp.
+		expect(await present(await idJag({ exp: String(now() + 2 * 3600) }))).toMatchObject(malformed);
+		expect((await present(await idJag({ exp: String(now() + 3600 - 60) }))).status).toBe(200);
+	});
 });
 
 describe("jwt-bearer — an RFC 7523 assertion whose date claims are not dates", () => {

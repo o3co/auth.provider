@@ -21,6 +21,7 @@ import { malformedNumericDateClaim } from "../jwt/numericDate.mjs";
 import { isRecordableJti } from "../replay-seen-set/jti.mjs";
 import type { ReplaySeenSet } from "../replay-seen-set/types.mjs";
 import type { AssertionIssuerEntry, AssertionIssuerRegistry } from "./issuerRegistry.mjs";
+import { MAX_ASSERTION_LIFETIME_SECONDS } from "./lifetime.mjs";
 import type {
 	AssertionVerificationContext,
 	AssertionVerificationResult,
@@ -29,9 +30,6 @@ import type {
 
 /** The `typ` an Identity Assertion JWT Authorization Grant MUST carry (ID-JAG §3). */
 export const ID_JAG_TYP = "oauth-id-jag+jwt";
-
-/** How long ago an ID-JAG may have been issued (`iat`), before clock tolerance. */
-const ID_JAG_MAX_AGE_SECONDS = 3600;
 
 export interface RegistryAssertionVerifierOptions {
 	readonly registry: AssertionIssuerRegistry;
@@ -198,7 +196,11 @@ const isRefusal = (err: unknown): boolean =>
  *   authentication is required for this grant;
  * - `jti`, `iat` and `sub` are required, and each `jti` is accepted **once**
  *   for the assertion's lifetime, recorded in `replaySeenSet` per issuer; a
- *   `jti` longer than `MAX_JTI_LENGTH` (256) is refused before it is recorded;
+ *   `jti` longer than `MAX_JTI_LENGTH` (256) is refused before it is recorded,
+ *   and so is an assertion with a lifetime of more than
+ *   `MAX_ASSERTION_LIFETIME_SECONDS` past now, or an `iat` more than that
+ *   old (`lifetime.mts`, the ceiling `private_key_jwt` holds a client
+ *   assertion to);
  * - `scope` and `resource` travel as claims, not request parameters: the
  *   scope ceiling is the claim intersected with `allowedScopes`, and the
  *   audience ceiling is the `resource` claim intersected with
@@ -316,7 +318,7 @@ export function createRegistryAssertionVerifier(
 					// remembered until `exp`, so an old assertion with a distant `exp`
 					// is a stale grant and a long-lived replay record at once. The
 					// same hour the `private_key_jwt` verifier allows.
-					...(idJag ? { maxTokenAge: ID_JAG_MAX_AGE_SECONDS } : {}),
+					...(idJag ? { maxTokenAge: MAX_ASSERTION_LIFETIME_SECONDS } : {}),
 					...(idJag ? { typ: ID_JAG_TYP } : {}),
 				}));
 			} catch (err) {
@@ -337,6 +339,15 @@ export function createRegistryAssertionVerifier(
 				// kept until `exp`, so the issuer's claim does not decide its size.
 				const jti = claims.jti;
 				if (!isRecordableJti(jti)) return null;
+				// At most an hour past now (`lifetime.mts`), refused before the
+				// jti is recorded: the record lives until `exp`, so an unbounded
+				// `exp` would be a replay record with no bound either.
+				if (
+					(claims.exp as number) - Math.floor(Date.now() / 1000) >
+					MAX_ASSERTION_LIFETIME_SECONDS
+				) {
+					return null;
+				}
 				// Accepted once for its lifetime. `exp` verified above; the floor
 				// keeps a within-tolerance assertion from reading as expired at
 				// issue in the store.

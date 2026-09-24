@@ -20,6 +20,7 @@ import {
 	isRecordableJti,
 	type Logger,
 	loggableError,
+	MAX_ASSERTION_LIFETIME_SECONDS,
 	MAX_JTI_LENGTH,
 	malformedNumericDateClaim,
 	type PublicClient,
@@ -72,12 +73,14 @@ export const CLIENT_ASSERTION_ALGORITHMS = [
 ] as const;
 
 /**
- * How far ahead `exp` may be. RFC 7523 requires `exp` but bounds nothing;
- * client libraries mint assertions that live a minute or ten, and an hour
- * leaves room for a client whose clock runs ahead while keeping the
- * replay record — which lives until `exp` — small.
+ * How far ahead `exp` may be, and how old `iat`: core's
+ * `MAX_ASSERTION_LIFETIME_SECONDS`, the one ceiling for every assertion whose
+ * `jti` this server records — an ID-JAG is held to it too. RFC 7523 requires
+ * `exp` but bounds nothing; client libraries mint assertions that live a
+ * minute or ten, and an hour leaves room for a client whose clock runs ahead
+ * while keeping the replay record — which lives until `exp` — small.
  */
-export const MAX_CLIENT_ASSERTION_LIFETIME_SECONDS = 3600;
+export const MAX_CLIENT_ASSERTION_LIFETIME_SECONDS = MAX_ASSERTION_LIFETIME_SECONDS;
 
 /** The replay-record scope is per client: `client-assertion:<client_id>`. */
 export const CLIENT_ASSERTION_REPLAY_SCOPE_PREFIX = "client-assertion:";
