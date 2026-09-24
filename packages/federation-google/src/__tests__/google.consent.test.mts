@@ -124,6 +124,10 @@ describe("Google refresh tokens for returning users", () => {
 		["a misspelling", "offine"],
 		["Google's parameter name", "access_type"],
 		["an environment boolean", "true"],
+		// Only an omitted field means the default: a JS caller's explicit
+		// `null` is a value, and not one of the two.
+		["null", null],
+		["a boolean", false],
 	])("refuses an accessType that is not offline or online at construction: %s", (_l, value) => {
 		expect(() =>
 			createGoogleProvider({

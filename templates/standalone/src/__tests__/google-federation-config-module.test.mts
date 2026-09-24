@@ -180,6 +180,10 @@ describe("googleFederationConfigModule — accessType", () => {
 		expect("accessType" in buildConfig(credentials)).toBe(false);
 	});
 
+	it("leaves a null accessType absent, never forwarded as null, which the provider refuses", () => {
+		expect("accessType" in buildConfig({ ...credentials, accessType: null })).toBe(false);
+	});
+
 	it("forwards offline and online", () => {
 		expect(buildConfig({ ...credentials, accessType: "online" }).accessType).toBe("online");
 		expect(buildConfig({ ...credentials, accessType: "offline" }).accessType).toBe("offline");
