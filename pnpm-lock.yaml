@@ -472,9 +472,6 @@ importers:
       ioredis:
         specifier: ^6.0.0
         version: 6.0.0
-      redis:
-        specifier: ^6.2.1
-        version: 6.2.1(@opentelemetry/api@1.9.1)
       testcontainers:
         specifier: ^12.1.0
         version: 12.1.0
