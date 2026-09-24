@@ -22,11 +22,13 @@
  *   2. the throttle, keyed on the IP, BEFORE client authentication, so that
  *      repeated unauthenticated hits are bounded before they reach a
  *      repository lookup;
- *   3. content type and body parsing;
+ *   3. content type and body parsing, and right after them the answer to
+ *      what the parsers reject (`parserRefusals`);
  *   4. client authentication;
  *   5. the handlers;
  *   6. everything this package does not serve, as a 404;
- *   7. a sanitizing error handler, for what the parsers reject.
+ *   7. the last error handler, for what escaped every handler: a logged 500
+ *      (`unexpectedErrors`).
  *
  * Authentication before domain validation, deliberately: an unauthenticated
  * caller must not be able to learn anything about a grant, including by
@@ -39,7 +41,9 @@
 
 import {
 	type ClientRepository,
+	consoleLogger,
 	createRateLimitGuard,
+	type Logger,
 	type RateLimiter,
 	type RateLimitFailMode,
 	type ReplaySeenSet,
@@ -52,7 +56,13 @@ import {
 	createFederationGrantReauthorizeHandler,
 	type FederationGrantAcquisitionRouteOptions,
 } from "./lodgeRoute.mjs";
-import { createSanitizedAuditSink, createSanitizedLogger } from "./report.mjs";
+import {
+	createSanitizedAuditSink,
+	createSanitizedLogger,
+	isInstance,
+	readField,
+	unexpectedErrorFields,
+} from "./report.mjs";
 import { createRequestIdMiddleware } from "./requestId.mjs";
 import { createFederationGrantRevokeHandler } from "./revokeRoute.mjs";
 import { createFederationGrantStatusHandler } from "./statusRoute.mjs";
@@ -71,20 +81,15 @@ const BODY_LIMIT_BYTES = 16 * 1024;
 /**
  * The body limit, restated ahead of the parsers.
  *
- * These routes live under `/oauth`, and `oauthModule` mounts its own router
- * there whose first two middlewares are `express.json()` and
- * `express.urlencoded()` with the library's defaults. Whenever that router is
- * mounted ahead of this one, those parsers run first — and `body-parser` does
- * not parse a body twice, so the `limit` below is simply skipped and a body up
- * to the default 100 KiB arrives here. Checking `Content-Length` first is the
- * one form of this bound that holds whatever else is mounted, and in whatever
- * order.
- *
- * It does not make this package independent of mounting order: a malformed
- * body is still rejected by whichever parser reaches it first, and that
- * refusal carries neither this package's correlation nor its cache
- * directives. See the README — a composition root that wants those installs
- * `federationGrantsModules` ahead of `oauthModule`.
+ * These routes live under `/oauth`, beside `oauthModule`'s router, which
+ * parses the bodies of its own routes only — so in a composition with it,
+ * these routes' own parsers are the first to read their bodies, whatever the
+ * module order. The bound is still checked from `Content-Length` first: it
+ * refuses a declared oversized body before any of it is read, and it holds
+ * even if some other module mounts a parser under `/oauth` that runs for
+ * every request beneath it (`body-parser` does not parse a body twice, so the
+ * `limit` below would then be skipped). A body with no `Content-Length` is
+ * bounded by the parsers below.
  */
 const withinBodyLimit: RequestHandler = (req, res, next) => {
 	const declared = Number(req.headers["content-length"]);
@@ -163,26 +168,89 @@ const supportedContentType: RequestHandler = (req, res, next) => {
 };
 
 /**
- * What the body parsers reject, in this package's own vocabulary.
- *
- * Nothing of the parser's error reaches the caller: `body-parser` puts the
- * offending input into its message for a JSON syntax error, so the `type` it
- * classifies with is all that is read.
+ * Express's own refusal of a path parameter it could not percent-decode —
+ * `/oauth/federation-grants/%zz/revoke`. Express 5 raises a `URIError` with
+ * `status = 400` and no `expose`, at whichever layer first matches the
+ * parameter: the denial audit ahead of the throttle for `token` and
+ * `revoke`, the route itself for `status`. The request's own mistake.
  */
-export const parserErrors: ErrorRequestHandler = (error, _req, res, next) => {
-	if (res.headersSent) return next(error);
-	const type = (error as { type?: unknown }).type;
-	if (type === "entity.too.large") {
-		res.status(413).json({ error: "invalid_request", error_description: "body_too_large" });
-		return;
+export const undecodablePath = (error: unknown): boolean =>
+	isInstance(error, URIError) && readField(error, "status") === 400;
+
+/**
+ * A refusal that is the caller's mistake, as the answer it gets.
+ *
+ * body-parser raises `http-errors`: `expose: true` with a 4xx `status` for
+ * everything the request got wrong — a body over the limit or with more
+ * parameters than it takes (`413 body_too_large`), a charset or
+ * `Content-Encoding` it cannot decode (`415 unsupported_encoding`), JSON it
+ * cannot read or a compressed body that does not decompress (`400
+ * malformed_body`). A path parameter Express could not decode is `400
+ * malformed_path` (`undecodablePath`). Answered as a 500 instead, any caller
+ * could produce server errors at will. `null` for anything else. Shared by
+ * both routers, and only ever applied where these are the errors that can
+ * arrive (`parserRefusals`).
+ */
+export const parserRefusal = (
+	error: unknown,
+): { readonly status: 400 | 413 | 415; readonly description: string } | null => {
+	if (undecodablePath(error)) return { status: 400, description: "malformed_path" };
+	// Every read guarded (`readField`): a getter that throws here would make
+	// the error handler itself throw.
+	const expose = readField(error, "expose");
+	const status = readField(error, "status");
+	const type = readField(error, "type");
+	if (expose !== true || typeof status !== "number" || status < 400 || status >= 500) return null;
+	if (type === "entity.too.large" || type === "parameters.too.many") {
+		return { status: 413, description: "body_too_large" };
 	}
-	if (type === "entity.parse.failed" || type === "encoding.unsupported") {
-		res.status(400).json({ error: "invalid_request", error_description: "malformed_body" });
-		return;
+	if (type === "charset.unsupported" || type === "encoding.unsupported") {
+		return { status: 415, description: "unsupported_encoding" };
 	}
-	// A composition or programming fault: a fixed description, because whatever
-	// is in the error is not the caller's business.
-	res.status(500).json({ error: "server_error", error_description: "unexpected_error" });
+	return { status: 400, description: "malformed_body" };
+};
+
+/**
+ * The parsers' refusals, answered in this package's own vocabulary — mounted
+ * directly after the parsers, so the errors it sees are theirs and those of
+ * the middleware ahead of them. Nothing of the parser's error reaches the
+ * caller: `body-parser` puts the offending input into its message for a JSON
+ * syntax error, so only `expose`, `status` and `type` are read. Anything
+ * `parserRefusal` does not recognise passes on to `unexpectedErrors`.
+ *
+ * Mounted last instead, it read an `expose`d 4xx from anywhere — a store, a
+ * handler — as a refused body.
+ */
+export const parserRefusals: ErrorRequestHandler = (error, _req, res, next) => {
+	const refusal = res.headersSent ? null : parserRefusal(error);
+	if (refusal === null) return next(error);
+	res.status(refusal.status).json({
+		error: "invalid_request",
+		error_description: refusal.description,
+	});
+};
+
+/**
+ * The routers' last error handler. An error that reaches it has escaped
+ * every handler: it is `500 server_error` (`unexpected_error`), a fixed
+ * description because whatever is in the error is not the caller's business,
+ * and it is logged as `federation_grants_unexpected_error` with
+ * `unexpectedErrorFields` — a classification and a status, nothing of the
+ * error's text. The one exception is a path parameter Express could not
+ * decode at a route itself (`undecodablePath`), which is the caller's `400
+ * malformed_path` wherever it surfaces.
+ */
+export const unexpectedErrors = (logger: Logger | undefined): ErrorRequestHandler => {
+	const log = createSanitizedLogger(logger ?? consoleLogger);
+	return (error, _req, res, next) => {
+		if (res.headersSent) return next(error);
+		if (undecodablePath(error)) {
+			res.status(400).json({ error: "invalid_request", error_description: "malformed_path" });
+			return;
+		}
+		log.error(unexpectedErrorFields(error), "federation_grants_unexpected_error");
+		res.status(500).json({ error: "server_error", error_description: "unexpected_error" });
+	};
 };
 
 export interface FederationGrantRouterOptions extends FederationGrantTokenHandlerOptions {
@@ -207,9 +275,11 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 	// Before the throttle and before authentication, because what it watches
 	// for is a response those two write themselves: the handler is not the only
 	// thing that can refuse a token request, and until this existed it was the
-	// only thing auditing one.
+	// only thing auditing one. Each a route (`router.all`) on its own path, not
+	// `router.use`, which would match every path beneath it too and audit a
+	// 404 at `/:grantId/token/extra` as a token denial.
 	for (const operation of ["token", "revoke"] as const) {
-		router.use(
+		router.all(
 			`/:grantId/${operation}`,
 			createRouteDenialAudit({
 				...(options.auditSink === undefined ? {} : { sink: options.auditSink }),
@@ -226,10 +296,11 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 			now: options.now ?? (() => new Date()),
 			background: options.background,
 		});
-		// `all` on the exact collection path, not `use`: `use("/")` would match
-		// every path under the mount and count a token refusal as a lodging one.
+		// `all` on the exact paths, not `use`: `use("/")` would match every path
+		// under the mount and count a token refusal as a lodging one, and
+		// `use("/:grantId/reauthorize")` every path beneath the reauthorize route.
 		router.all("/", requestDenials);
-		router.use("/:grantId/reauthorize", requestDenials);
+		router.all("/:grantId/reauthorize", requestDenials);
 	}
 	// Ahead of client authentication, as the token endpoint orders it: repeated
 	// unauthenticated hits are bounded before they reach a repository lookup.
@@ -254,6 +325,7 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 	router.use(withinBodyLimit);
 	router.use(express.json({ limit: BODY_LIMIT }));
 	router.use(express.urlencoded({ extended: false, limit: BODY_LIMIT }));
+	router.use(parserRefusals);
 	router.use(
 		createClientAuthMiddleware(options.clientRepository, {
 			issuer: options.issuer,
@@ -273,6 +345,6 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 		router.post("/:grantId/reauthorize", createFederationGrantReauthorizeHandler(lodging));
 	}
 	router.use(notFound);
-	router.use(parserErrors);
+	router.use(unexpectedErrors(options.logger));
 	return router;
 }

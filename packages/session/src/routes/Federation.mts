@@ -1135,8 +1135,14 @@ export const createRouter = (
 		};
 
 	router
-		.use(express.json())
-		.use(express.urlencoded({ extended: false }))
+		// This router's own paths, exactly: it is mounted at `/session`, a prefix
+		// other modules mount routes under too, and a `.use` parser would read
+		// their bodies as well.
+		.all(
+			["/oauth/federation/:name", "/oauth/federation/:name/callback"],
+			express.json(),
+			express.urlencoded({ extended: false }),
+		)
 
 		// ------------------------------------------------------------------
 		// GET /oauth/federation/:name  — start the OAuth 2 redirect leg

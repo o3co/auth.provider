@@ -110,6 +110,50 @@ declare module "express-session" {
 	}
 }
 
+/**
+ * Every path this router serves, its sub-routers' included — the only
+ * requests whose bodies it parses. The logout, federation-token and consent
+ * routes are listed only when their stores are wired and the routes are
+ * mounted, so a deployment's own route at one of those paths receives its
+ * body unread too.
+ *
+ * The router is mounted at `/oauth`, a prefix other modules mount routes
+ * under too (the device grant, federation grants, WebAuthn, a deployment's
+ * own). Parsers that ran for every request beneath it consumed those
+ * routes' request streams whenever this router was mounted ahead of them,
+ * and `body-parser` does not parse a body twice — so another route's own
+ * parser, limit and media types silently never ran, and what it received
+ * depended on the order the modules were listed in. Scoped to exactly these
+ * paths — a route (`router.all`), not `router.use`, which would match every
+ * path beneath each one, `/token/custom` as well as `/token` — a request
+ * this router does not own passes through with its body unread.
+ *
+ * Every route here gets exactly what it got before: JSON and urlencoded
+ * (`extended: false`), Express's default limits, ahead of anything else.
+ * `bodyParsing.test.mts` discovers the router's routes with every surface
+ * mounted and with none, asserts this list equals them, and checks both
+ * directions — each mounted route is parsed, each unmounted one is not, nor
+ * a path beneath a mounted one — so a route added without its path here, a
+ * path left here without its route, or parsers that match by prefix, fail
+ * there.
+ *
+ * @internal Exported for that test only; not part of the package's API.
+ */
+export const oauthRoutePaths = (mounted: {
+	readonly logout: boolean;
+	readonly federationToken: boolean;
+	readonly consent: boolean;
+}): string[] => [
+	"/token",
+	"/introspect",
+	"/authorize",
+	"/userinfo",
+	"/revoke",
+	...(mounted.logout ? ["/logout", "/federation/:name/logout"] : []),
+	...(mounted.federationToken ? ["/federation/:name/token"] : []),
+	...(mounted.consent ? ["/consent"] : []),
+];
+
 export const createOAuthRouter = async (
 	express: {
 		Router: () => Router;
@@ -330,9 +374,49 @@ export const createOAuthRouter = async (
 		userSessionStore,
 	});
 
+	// Federation endpoints — mount conditionally based on available stores and config.
+	// federationTokenStore is required for both POST /oauth/federation/:name/logout and
+	// POST /oauth/federation/:name/token.
+	// logout_token signing needs the issuer; it is the router-scope canonical one.
+
+	// Logout (back-channel logout_token signing requires issuer).
+	const logoutSupported =
+		!!userSessionStore &&
+		!!sessionRPRegistry &&
+		!!sessionFamilyIndex &&
+		!!sessionFederationIndex &&
+		!!federationTokenStore &&
+		!!refreshTokenFamilyRevocation;
+
+	// Federation-token endpoint forwards upstream; does NOT need our issuer.
+	// Symmetry with logoutSupported: gates on all 4 sibling stores even
+	// though federationToken only consumes 3 of them. Mirrors A4 §3.4 /
+	// §8.1 composition-root invariant (now structurally enforced in
+	// createApp — when ANY is wired, ALL are wired).
+	const federationTokenSupported =
+		!!userSessionStore &&
+		!!sessionRPRegistry &&
+		!!sessionFamilyIndex &&
+		!!sessionFederationIndex &&
+		!!federationTokenStore &&
+		!!refreshTokenFamilyRevocation;
+
+	// #527 / #552: mounted below only with both consent stores; one without
+	// the other is refused there. Decided once, here, for the parsers and the
+	// mount alike — and by truthiness, so a JS caller's `null` is no store
+	// rather than a parser scoped to a route that is never mounted.
+	const consentMounted = !!consentStore && !!pendingConsentStore;
+
 	router
-		.use(express.json())
-		.use(express.urlencoded({ extended: false }))
+		.all(
+			oauthRoutePaths({
+				logout: logoutSupported,
+				federationToken: federationTokenSupported,
+				consent: consentMounted,
+			}),
+			express.json(),
+			express.urlencoded({ extended: false }),
+		)
 		.post(
 			"/token",
 			// D-6 ordering: rate limit BEFORE client auth so repeated unauthenticated
@@ -939,32 +1023,9 @@ export const createOAuthRouter = async (
 		}),
 	);
 
-	// Federation endpoints — mount conditionally based on available stores and config.
-	// federationTokenStore is required for both POST /oauth/federation/:name/logout and
-	// POST /oauth/federation/:name/token.
-	// logout_token signing needs the issuer; it is the router-scope canonical one.
-
-	// Logout (back-channel logout_token signing requires issuer).
-	const logoutSupported =
-		!!userSessionStore &&
-		!!sessionRPRegistry &&
-		!!sessionFamilyIndex &&
-		!!sessionFederationIndex &&
-		!!federationTokenStore &&
-		!!refreshTokenFamilyRevocation;
-
-	// Federation-token endpoint forwards upstream; does NOT need our issuer.
-	// Symmetry with logoutSupported: gates on all 4 sibling stores even
-	// though federationToken only consumes 3 of them. Mirrors A4 §3.4 /
-	// §8.1 composition-root invariant (now structurally enforced in
-	// createApp — when ANY is wired, ALL are wired).
-	const federationTokenSupported =
-		!!userSessionStore &&
-		!!sessionRPRegistry &&
-		!!sessionFamilyIndex &&
-		!!sessionFederationIndex &&
-		!!federationTokenStore &&
-		!!refreshTokenFamilyRevocation;
+	// Federation endpoints — mounted below when `logoutSupported` /
+	// `federationTokenSupported` (decided ahead of the body parsers, which
+	// are scoped to the routes actually mounted).
 
 	if (logoutSupported) {
 		router.use(
@@ -1038,10 +1099,11 @@ export const createOAuthRouter = async (
 	// not: RFC 7009 §2.1 lets a public client revoke its own tokens, so this
 	// is an unauthenticated entry point that reaches the client repository on
 	// every attempt — and with Client ID Metadata Documents on, that
-	// repository performs an outbound document fetch. Mounted as a
-	// path-scoped guard ahead of the router, because `createRevokeRouter`
-	// owns the `/revoke` path itself.
-	router.use("/revoke", rateLimitGuard("revoke"));
+	// repository performs an outbound document fetch. Mounted as a guard
+	// route ahead of the router, because `createRevokeRouter` owns the
+	// `/revoke` path itself — `router.all`, matching `/revoke` exactly, not
+	// `router.use`, which would throttle every path beneath it too.
+	router.all("/revoke", rateLimitGuard("revoke"));
 	router.use(
 		createRevokeRouter(express, {
 			clientRepository,
@@ -1066,7 +1128,7 @@ export const createOAuthRouter = async (
 	// direction — is refused here, where the operator can read why, rather
 	// than at the first third-party `/authorize`. The bundled memory module
 	// provides both.
-	if ((consentStore === undefined) !== (pendingConsentStore === undefined)) {
+	if (!consentStore !== !pendingConsentStore) {
 		const [wired, missing] = consentStore
 			? ["consentStore", "pendingConsentStore"]
 			: ["pendingConsentStore", "consentStore"];
@@ -1074,7 +1136,7 @@ export const createOAuthRouter = async (
 			`createOAuthRouter: ${wired} is wired but ${missing} is not — the consent step records consent in consentStore and parks each request under a challenge in pendingConsentStore, and cannot run with one of them; wire both (the bundled memory consent module provides both) or neither`,
 		);
 	}
-	if (consentStore && pendingConsentStore) {
+	if (consentMounted) {
 		router.use(
 			createConsentRouter(express, {
 				consentStore,

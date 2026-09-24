@@ -182,14 +182,17 @@ export const webauthnModule = defineModule<
 		},
 		routes: [
 			// POST /oauth/webauthn/registration/options
-			// express.json() is installed at router level, not at the host app level —
-			// createApp installs no global JSON parser (each contributed router installs
-			// its own, per the oauthModule routes.mts:215-216 pattern).
+			// express.json() is installed on the router, not at the host app level —
+			// createApp installs no global JSON parser, and oauthModule's router parses
+			// only its own routes' bodies, so each contributed router installs its own.
+			// On the route's own path (`router.all("/")`), not `router.use`: core
+			// mounts this router on its path by prefix, so a `use` parser would read
+			// the body of a later module's route beneath it too.
 			// 100kb limit: realistic WebAuthn blobs are under 10KB; 100kb caps DoS.
 			// Cross-refs: Codex Round 4 P1
 			(deps) => {
 				const router = express.Router();
-				router.use(express.json({ limit: "100kb" }));
+				router.all("/", express.json({ limit: "100kb" }));
 				router.post(
 					"/",
 					createRegistrationOptionsHandler({
@@ -205,10 +208,10 @@ export const webauthnModule = defineModule<
 				};
 			},
 			// POST /oauth/webauthn/registration/verify
-			// express.json() at router level — same rationale as registration/options above.
+			// express.json() on the route's own path — same rationale as registration/options above.
 			(deps) => {
 				const router = express.Router();
-				router.use(express.json({ limit: "100kb" }));
+				router.all("/", express.json({ limit: "100kb" }));
 				router.post(
 					"/",
 					createRegistrationVerifyHandler({
@@ -224,7 +227,7 @@ export const webauthnModule = defineModule<
 				};
 			},
 			// POST /oauth/webauthn/authentication/options
-			// express.json() at router level — same rationale as above.
+			// express.json() on the route's own path — same rationale as above.
 			//
 			// #281: the rate limit is MOUNTED here. It used to be "composed
 			// externally at module-wiring time (S10/S15)" — a comment, not a
@@ -232,7 +235,7 @@ export const webauthnModule = defineModule<
 			// writes a challenge per request.
 			(deps) => {
 				const router = express.Router();
-				router.use(express.json({ limit: "100kb" }));
+				router.all("/", express.json({ limit: "100kb" }));
 
 				const logger = deps.logger ?? consoleLogger;
 				const spec: RateLimitSpec = {

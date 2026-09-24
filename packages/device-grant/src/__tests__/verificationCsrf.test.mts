@@ -25,18 +25,20 @@
  * the victim's access token. `verification_uri_complete = false` exists to
  * keep the user typing the code; a forged POST types it for them.
  *
- * Two layers, both observable only through the router the module mounts —
- * the handler alone never sees a body parser or a guard:
+ * Two layers, exercised here through the router the module mounts:
  *
  *   1. JSON only. A form-encoded POST is a "simple" request the browser
- *      sends without a preflight; `application/json` is not.
+ *      sends without a preflight; `application/json` is not. The handler
+ *      refuses any other media type itself, so the rule does not depend on
+ *      what else is mounted under `/oauth` — composition.test.mts boots it
+ *      beside `oauthModule` in both orders.
  *   2. The same CSRF guard `/session/login` runs (#272): a foreign `Origin` /
  *      `Referer` is refused outright, same-origin or `session.csrf.trustedOrigins`
  *      is accepted, and a request with no origin signal at all must carry the
  *      session's signed double-submit token. One policy, not a second one.
  */
 
-import type { ClientRepository } from "@o3co/auth-provider-core";
+import type { AppConfig, ClientRepository } from "@o3co/auth-provider-core";
 import { createMemoryDeviceCodeStore, createMemoryRateLimiter } from "@o3co/auth-provider-core";
 import { createCsrfProtectionFromConfig } from "@o3co/auth-provider-session";
 import express from "express";
@@ -107,13 +109,18 @@ const makeDeps = (overrides: { session?: unknown } = {}) => {
 	return { deps, store, logger };
 };
 
-/** Mount the module's contributed verification route behind a fixed session. */
-const mountVerification = (deps: Record<string, unknown>) => {
-	const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => {
+/** The verification route of the module built for `deps.config`, as `createApp` would call it. */
+const verificationRouteFor = (deps: { readonly config: unknown }) =>
+	deviceGrantModule({ config: deps.config as AppConfig }).contributes?.routes?.[1] as (
+		d: unknown,
+	) => {
 		mountPath: string;
 		handler: express.RequestHandler;
 	};
-	const route = factory(deps);
+
+/** Mount the module's contributed verification route behind a fixed session. */
+const mountVerification = (deps: { readonly config: unknown }) => {
+	const route = verificationRouteFor(deps)(deps);
 	const app = express();
 	app.use((req, _res, next) => {
 		(req as unknown as { session: unknown }).session = {
@@ -266,10 +273,9 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 		expect(res.body.status).toBe("approved");
 	});
 
-	it("does not parse a form body even from the same origin — the endpoint is JSON-only", async () => {
-		// Layer one on its own: with no form parser mounted, a form body
-		// carries no `action`, so nothing is decided even when the origin arm
-		// would have let it through.
+	it("refuses a form body even from the same origin — the endpoint is JSON-only", async () => {
+		// Layer one on its own: the origin arm would let this through, and
+		// the media type alone refuses it, so nothing is decided.
 		const { deps, store } = makeDeps();
 		await seedPending(store);
 		const app = mountVerification(deps);
@@ -281,7 +287,7 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 			.type("form")
 			.send(`action=approve&user_code=${DISPLAYED_CODE}`);
 
-		expect(res.status).toBe(400);
+		expect(res.status).toBe(415);
 		expect(res.body.error).toBe("invalid_request");
 		expect(await isStillPending(store)).toBe(true);
 	});
@@ -290,7 +296,7 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 		// No slice, no signing key for the token arm and no cookie name to
 		// read: the guard cannot be built. Fail where the operator can see it.
 		const { deps } = makeDeps({ session: undefined });
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
+		const factory = verificationRouteFor(deps);
 		expect(() => factory(deps)).toThrow(/session/);
 	});
 
@@ -305,7 +311,7 @@ describe("device verification — cross-site requests (RFC 8628 §5.4)", () => {
 		// cookie called `undefined.csrf` with attributes nobody chose; the
 		// refusal names the field so the operator knows what to add.
 		const { deps } = makeDeps({ session });
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
+		const factory = verificationRouteFor(deps);
 		expect(() => factory(deps)).toThrow(expected);
 	});
 });

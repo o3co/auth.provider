@@ -80,12 +80,29 @@
  * user code or the device code: one is the value being brute-forced and the
  * other is a bearer credential.
  *
- * ### Cross-site requests are the module's problem, and it handles them
+ * ### JSON only, whatever parsed the body
  *
- * This handler never sees a body parser or an origin check; the router
- * `deviceGrantModule` mounts is JSON-only and runs the session package's
- * CSRF guard ahead of it (RFC 8628 §5.4 — see `module.mts`). A composition
- * that mounts this handler by hand must do the same.
+ * A form body — `application/x-www-form-urlencoded`, `multipart/form-data`,
+ * `text/plain` — is a CORS "simple" request: a browser sends it cross-site
+ * with the user's session cookie and no preflight, which is RFC 8628 §5.4's
+ * remote-phishing attack in one auto-submitting form. `application/json` is
+ * preflighted. So this handler answers anything that is not
+ * `application/json` with `415 invalid_request` before it reads a field.
+ *
+ * It checks the media type itself rather than relying on no form parser
+ * having run. In the route `deviceGrantModule` mounts none has — it mounts
+ * JSON only, and `oauthModule`'s router beside it parses its own routes
+ * only — but a composition that mounts this handler by hand may put one in
+ * front of it, and the rule is the endpoint's either way.
+ *
+ * ### The origin check is the module's, and runs first
+ *
+ * This handler runs no body parser and no origin check. The router
+ * `deviceGrantModule` mounts parses JSON and runs the session package's CSRF
+ * guard ahead of it (see `module.mts`); a composition that mounts this
+ * handler by hand must do the same. So a cross-site form is refused by the
+ * guard, `403 access_denied`, before this handler sees it: only a request
+ * the guard lets through can be answered `415`.
  */
 
 import type {
@@ -181,6 +198,17 @@ export const createDeviceVerificationHandler = (
 	};
 
 	return async (req: Request, res: Response): Promise<void> => {
+		// JSON only — see the file header. Checked on the request's media
+		// type rather than inferred from whether `req.body` has fields, so
+		// the rule holds whatever parsed the body before this handler ran.
+		if (!req.is("application/json")) {
+			respond(res, 415, {
+				error: "invalid_request",
+				error_description: "the request body must be application/json",
+			});
+			return;
+		}
+
 		const subject = subjectOf(req);
 		if (subject === null) {
 			respond(res, 401, {

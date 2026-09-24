@@ -17,16 +17,16 @@
 /**
  * These routes live UNDER another package's mount path (#593, D9).
  *
- * `oauthModule` mounts its router at `/oauth` and its first two middlewares
- * are `express.json()` and `express.urlencoded()` with the library defaults.
- * A request to `/oauth/federation-grants/...` therefore passes through those
- * parsers first whenever that router is mounted ahead of this one — and
- * `body-parser` does not parse a body twice, so this package's own 16 KiB
- * limit is skipped and a body up to the default 100 KiB reaches the handler.
+ * `oauthModule`'s router at `/oauth` parses the bodies of its own routes
+ * only, so in the shipped composition nothing reads these routes' bodies
+ * first. But `body-parser` does not parse a body twice: any router mounted
+ * ahead of this one that parses every request under `/oauth` — as
+ * `oauthModule`'s did until the device-grant fix scoped it — would skip this
+ * package's own 16 KiB limit and hand the handler a body up to its own.
  *
- * Found by review. The bound is restated here as a check of its own, ahead of
- * the parsers, so that it holds whatever else is mounted and in whatever
- * order.
+ * Found by review. The bound is restated as a check of its own, ahead of the
+ * parsers, so that it holds whatever else is mounted and in whatever order;
+ * `withOauthMountedFirst` below stands in for such a router.
  */
 
 import express from "express";
@@ -34,7 +34,7 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { basic, harness, SUBJECT } from "./harness.mjs";
 
-/** What `oauthModule` puts at `/oauth`, reduced to the part that matters here. */
+/** A router at `/oauth` that parses every body beneath it — what `oauthModule`'s did before it was scoped. */
 const withOauthMountedFirst = (grants: express.Express): express.Express => {
 	const app = express();
 	const oauth = express.Router();

@@ -47,7 +47,7 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 | `oauth.accessToken.maxExpiresIn` | token exchange の `expires_in` で得られる上限。超えるリクエストはこの値に切り詰められる。未設定ならデフォルトと同じで、明示的に設定しない限り延長されない。デフォルトがこれを超えると両キーを名指しして起動失敗 |
 | `oauth.accessToken.expiresIn` | `defaultExpiresIn` の**非推奨（deprecated）**エイリアス。`defaultExpiresIn` 未設定の間だけ読まれる（`reference.conf` は出荷時の `3600` をこのキーに置いている）。パース後の config はこの名前にも解決済みのデフォルトを持つ |
 | `oauth.refreshToken.expiresIn` | リフレッシュトークンの有効期間 |
-| `oauth.grants` | グラントタイプごとの設定。グラントタイプをキーとする。`oauth` パッケージは自分が登録するグラント — `session`、`authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer の URN — の `enabled` を読み、true のものだけを登録する。他のグラントパッケージはこのキーを読まない: token exchange と WebAuthn はモジュールが組み込まれればグラントを登録し、device grant はどちらの場合もハンドラーを登録し、`oauth.deviceAuthorization.enabled` が false の間はグラントを拒否する |
+| `oauth.grants` | グラントタイプごとの設定。グラントタイプをキーとする。`oauth` パッケージは自分が登録するグラント — `session`、`authorization_code`、`refresh_token`、`client_credentials`、jwt-bearer の URN — の `enabled` を読み、true のものだけを登録する。他のグラントパッケージはこのキーを読まない: token exchange と WebAuthn はモジュールが組み込まれればグラントを登録し、device grant は `oauth.deviceAuthorization.enabled` が true のときだけグラントを登録する — 渡された config から `deviceGrantModule({ config })` が決める |
 | `session` | ブラウザーセッションの cookie とそのストア — `secret`、`name`、`maxAge`、`secure`、`sameSite`、`domain`、`redirectAllowlist`、`storage`、`csrf` |
 | `session.csrf` | 状態変更する session ルートの CSRF ポリシー — `trustedOrigins`、`ttlSeconds` |
 | `rateLimit` | `login`: 同梱の両リミッターが初期値に使う `/session/login` の予算（`windowMs`、`limit`）。`failMode`: OAuth エンドポイントのリミッターのバックエンドが失敗したときの動作 — `closed` は `503` を返し、`open` はリクエストを通してエラーをログに出す。OAuth エンドポイントの制限値そのものはリミッターモジュールのもの（`memoryRateLimiter.*` / `redisRateLimiter.*`） |
@@ -66,7 +66,7 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 
 #### グラントハンドラーの登録
 
-モジュールはグラントを `contributes.grants` にグラントタイプをキーとして宣言します。そもそもグラントを contribute するかどうかはモジュールが決めます: `oauth` パッケージのモジュールは `oauth.grants.<name>.enabled` が true のグラントだけを contribute し、token exchange と WebAuthn はモジュールが組み込まれれば自分のグラントを contribute し、device grant はどちらの場合もハンドラーを contribute して、`oauth.deviceAuthorization.enabled` が false の間はグラントを拒否します。boot は各ファクトリーを実行し、ハンドラーをそのグラントタイプで登録し — 2 つのモジュールが同じグラントタイプを contribute すると boot は拒否されます — ステージ 5 でレジストリを freeze するので、boot 後の登録は throw します。コンシューマコードがレジストリを import したり組み立てたりすることはありません: `GrantRegistry` は内部実装で、パッケージルートからは export されていません。
+モジュールはグラントを `contributes.grants` にグラントタイプをキーとして宣言します。そもそもグラントを contribute するかどうかはモジュールが決めます: `oauth` パッケージのモジュールは `oauth.grants.<name>.enabled` が true のグラントだけを contribute し、token exchange と WebAuthn はモジュールが組み込まれれば自分のグラントを contribute し、`deviceGrantModule({ config })` は渡された config で `oauth.deviceAuthorization.enabled` が true のときだけ device grant を contribute します。boot は各ファクトリーを実行し、ハンドラーをそのグラントタイプで登録し — 2 つのモジュールが同じグラントタイプを contribute すると boot は拒否されます — ステージ 5 でレジストリを freeze するので、boot 後の登録は throw します。コンシューマコードがレジストリを import したり組み立てたりすることはありません: `GrantRegistry` は内部実装で、パッケージルートからは export されていません。
 
 `GrantHandler.cleanup?()` が呼ばれることはありません。`AppHandle.dispose()` は、提供された各コンポーネントの `lifecycle[K].cleanup` を reverse-topological 順で実行し、次に宣言を持たないモジュール提供値の `Symbol.asyncDispose` を、最後に `LifecycleRegistrar` の drain を行い — レジストリには触れません。ハンドラーのためにリソースを保持するモジュールは、自分の `lifecycle[K].cleanup` でそれを解放します。[`src/grants/README.md`](src/grants/README.md) を参照してください。
 
@@ -215,7 +215,7 @@ const myModule = defineModule({
 
 `createApp` はマニフェストを検証し、設定を合成・パースし、コンポーネントグラフを実体化し、すべての contribution を適用し、ワールドを freeze してルートをマウントします。返される `router` はそのままマウントでき（`app.use(handle.router)`）、`handle.listen(port)` で配信することもできます。`handle.dispose()` はすべての cleanup を reverse-topological 順で実行し、すべての失敗を持つ `AggregateError` で reject します。別途の `init()` ステップはありません。
 
-core が自分でマウントするもの（この順）: `cors.allowedOrigins` が空でなければ `corsMw`、contribute された機構が 1 つ以上あればそれらを合成した単一の `tokenBindingMw`、protected-resource の sender-constraint チェック（常に）、グラントのディスパッチ前に `grantMiddleware` の contribution、そして issuer が設定されかつ `providerRoot` を宣言するモジュールがあれば OIDC discovery ルート。それ以外 — JWKS（`jwksModule`）、liveness と readiness（`createHealthcheckRouter`、`createReadinessRouter`）、OAuth と session のルート — は、composition root が組み込むモジュールかルーターです。
+core が自分でマウントするもの（この順）: `cors.allowedOrigins` が空でなければ `corsMw`、contribute された機構が 1 つ以上あればそれらを合成した単一の `tokenBindingMw`、protected-resource の sender-constraint チェック（常に。トークンエンドポイントへの POST を除くすべてのリクエストで）、グラントのディスパッチ前に `grantMiddleware` の contribution、そして issuer が設定されかつ `providerRoot` を宣言するモジュールがあれば OIDC discovery ルート。それ以外 — JWKS（`jwksModule`）、liveness と readiness（`createHealthcheckRouter`、`createReadinessRouter`）、OAuth と session のルート — は、composition root が組み込むモジュールかルーターです。
 
 `express` は任意の peer dependency で、遅延ロードされます: `createApp` はルーターを作るために import し（`await import("express")`）、boot は `handle.listen()` がルーターを包む `express()` ファクトリーのためにも require します（`createRequire`）— import が失敗した場合はルーターもそこから得ます。
 
@@ -429,7 +429,7 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 - `@o3co/auth-provider-dpop` — RFC 9449 DPoP（explicit-intent）。
 - `@o3co/auth-provider-mtls` — RFC 8705 mTLS の証明書バインドトークン（ambient）。
 
-どちらのパッケージも `tokenBindingMechanisms` で contribute します。core の `assembleApp` はすべての contribution を集め、null を除き、`/oauth/token` にマウントする単一の `tokenBindingMw` を合成します。
+どちらのパッケージも `tokenBindingMechanisms` で contribute します。core の `assembleApp` はすべての contribution を集め、null を除き、`/oauth/token` にマウントする単一の `tokenBindingMw` を合成します。それと `grantMiddleware` の contribution が走るのはトークンエンドポイントだけ — `/oauth/token` への POST（末尾スラッシュの有無、大文字小文字を問わない）— で、ほかのメソッドやその下の長いパスでは走りません。その中から見えるリクエストは `/oauth/token` への `use` マウントが見せるもの（`req.path` は `/`、`req.baseUrl` は `/oauth/token` で終わる）です。sender-constraint チェックが除外するのもちょうど同じリクエストです。
 
 #### ディスパッチポリシー
 

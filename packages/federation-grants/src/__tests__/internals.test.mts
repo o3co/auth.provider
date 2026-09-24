@@ -31,7 +31,7 @@ import type { Request, Response } from "express";
 import { describe, expect, it, vi } from "vitest";
 import { createFederationGrantBackground } from "#/background.mjs";
 import { createRouteDenialAudit } from "#/denialAudit.mjs";
-import { parserErrors } from "#/routes.mjs";
+import { parserRefusals, unexpectedErrors } from "#/routes.mjs";
 import { createFederationGrantStatusHandler } from "#/statusRoute.mjs";
 import { createFederationGrantTokenHandler } from "#/tokenRoute.mjs";
 
@@ -161,33 +161,163 @@ describe("a dependency that throws where nothing expects one to", () => {
 	});
 });
 
-describe("what the body parsers reject", () => {
-	const run = (error: unknown, headersSent = false) => {
+describe("what the body parsers reject, and what escapes every handler", () => {
+	const logger = () => ({
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn(),
+	});
+	/**
+	 * The two error handlers as the router chains them: the parsers' refusals
+	 * right after the parsers, then — for whatever they pass on — the last
+	 * handler.
+	 */
+	const run = (error: unknown, headersSent = false, log = logger()) => {
 		const { res, state } = fakeResponse();
 		(res as unknown as { headersSent: boolean }).headersSent = headersSent;
 		const next = vi.fn();
-		parserErrors(error, {} as Request, res, next);
-		return { state, next };
+		parserRefusals(error, {} as Request, res, (passed?: unknown) => {
+			unexpectedErrors(log as never)(passed, {} as Request, res, next);
+		});
+		return { state, next, log };
+	};
+	/** The last handler alone, as it sees an error raised after the parsers. */
+	const last = (error: unknown, log = logger()) => {
+		const { res, state } = fakeResponse();
+		unexpectedErrors(log as never)(error, {} as Request, res, vi.fn());
+		return { state, log };
 	};
 
-	it("answers 413 for a body over the limit", () => {
-		const { state } = run({ type: "entity.too.large" });
-		expect(state.status).toBe(413);
-		expect(state.body).toEqual({ error: "invalid_request", error_description: "body_too_large" });
+	// Shaped as body-parser's `http-errors` are: `expose` and a 4xx `status`
+	// on everything that is the caller's mistake.
+	const exposed = (status: number, fields: Record<string, unknown>) => ({
+		status,
+		statusCode: status,
+		expose: true,
+		...fields,
+	});
+
+	it("answers 413 for a body over the limit, or more parameters than the parser takes", () => {
+		for (const type of ["entity.too.large", "parameters.too.many"]) {
+			const { state } = run(exposed(413, { type }));
+			expect(state.status, type).toBe(413);
+			expect(state.body).toEqual({ error: "invalid_request", error_description: "body_too_large" });
+		}
+	});
+
+	it("answers 415 for a charset or a Content-Encoding the parser cannot decode", () => {
+		for (const type of ["charset.unsupported", "encoding.unsupported"]) {
+			const { state } = run(exposed(415, { type }));
+			expect(state.status, type).toBe(415);
+			expect(state.body).toEqual({
+				error: "invalid_request",
+				error_description: "unsupported_encoding",
+			});
+		}
 	});
 
 	it("answers 400 for a body it could not read, quoting none of it", () => {
-		// `body-parser` puts the offending input into its message.
-		for (const type of ["entity.parse.failed", "encoding.unsupported"]) {
-			const { state } = run({
-				type,
+		// `body-parser` puts the offending input into its message; a corrupt
+		// compressed body is zlib's error, exposed as a 400 with no `type`.
+		for (const error of [
+			exposed(400, {
+				type: "entity.parse.failed",
 				message: "Unexpected token S in JSON at position 12 SENTINEL",
-			});
+			}),
+			exposed(400, { code: "Z_DATA_ERROR", message: "incorrect header check SENTINEL" }),
+		]) {
+			const { state } = run(error);
 			expect(state.status).toBe(400);
 			expect(state.body).toEqual({
 				error: "invalid_request",
 				error_description: "malformed_body",
 			});
+		}
+	});
+
+	it("answers 500 for an error that is not exposed, whatever its type claims", () => {
+		const { state } = run({ type: "entity.too.large" });
+		expect(state.status).toBe(500);
+		expect(state.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+	});
+
+	it("answers 500 for an exposed 4xx that is not a parser's — a store's 403 has failed", () => {
+		// Raised after the parsers, it reaches the last handler only. An
+		// `http-errors` 403 from a store is a failure, and it is logged.
+		const { state, log } = last(
+			Object.assign(new Error("forbidden"), { expose: true, status: 403 }),
+		);
+		expect(state.status).toBe(500);
+		expect(state.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(log.error).toHaveBeenCalledWith(
+			{ event: "federation_grant.unexpected_error", classification: "unknown", status: 403 },
+			"federation_grants_unexpected_error",
+		);
+	});
+
+	it("logs an unexpected error by classification and status — nothing of its text", () => {
+		const { log } = last(
+			Object.assign(new TypeError("cannot read SENTINEL"), { body: "SENTINEL", code: "SENTINEL" }),
+		);
+		expect(log.error).toHaveBeenCalledWith(
+			{ event: "federation_grant.unexpected_error", classification: "type_error" },
+			"federation_grants_unexpected_error",
+		);
+		expect(JSON.stringify(log.error.mock.calls)).not.toContain("SENTINEL");
+	});
+
+	/** `error` with a getter on `key` that throws when read. */
+	const throwingOn = <E extends object>(error: E, key: string): E =>
+		Object.defineProperty(error, key, {
+			get() {
+				throw new Error("getter");
+			},
+		});
+
+	it.each([
+		["a `name` getter that throws", () => throwingOn(new Error("m"), "name")],
+		["a `status` getter that throws", () => throwingOn(new Error("m"), "status")],
+		["a URIError whose `status` getter throws", () => throwingOn(new URIError("m"), "status")],
+		[
+			"a Proxy whose prototype cannot be read",
+			() =>
+				new Proxy(
+					{},
+					{
+						getPrototypeOf() {
+							throw new Error("trap");
+						},
+					},
+				),
+		],
+	])("answers and logs an error with %s — the handlers never throw", (_label, make) => {
+		// A throw inside the last handler reaches Express's own, which answers
+		// HTML and logs nothing of ours.
+		for (const handled of [run(make()), last(make())]) {
+			expect(handled.state.status).toBe(500);
+			expect(handled.state.body).toEqual({
+				error: "server_error",
+				error_description: "unexpected_error",
+			});
+			expect(handled.log.error).toHaveBeenCalledWith(
+				{ event: "federation_grant.unexpected_error", classification: "unknown" },
+				"federation_grants_unexpected_error",
+			);
+		}
+	});
+
+	it("answers a path Express could not decode as 400 malformed_path, wherever it surfaces", () => {
+		const undecodable = Object.assign(new URIError("Failed to decode param '%zz'"), {
+			status: 400,
+		});
+		for (const { state, log } of [run(undecodable), last(undecodable)]) {
+			expect(state.status).toBe(400);
+			expect(state.body).toEqual({ error: "invalid_request", error_description: "malformed_path" });
+			expect(log.error).not.toHaveBeenCalled();
 		}
 	});
 
@@ -252,7 +382,7 @@ describe("the hook that audits what middleware refused", () => {
 	};
 
 	it("reads a code it does not know as what the status says", async () => {
-		// `parserErrors` answers `server_error` for a composition fault, and
+		// `unexpectedErrors` answers `server_error` for a composition fault, and
 		// `error` values this route never writes are the same question: a 5xx
 		// is this provider's problem and a 4xx is the caller's.
 		expect((await drive(500, { error: "server_error" }))[0]?.details.outcome).toBe("server_error");

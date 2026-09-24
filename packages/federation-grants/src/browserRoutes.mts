@@ -83,19 +83,14 @@ import {
 	type UserRepository,
 	type UserSessionStore,
 } from "@o3co/auth-provider-core";
-import express, {
-	type ErrorRequestHandler,
-	type Request,
-	type RequestHandler,
-	type Response,
-	type Router,
-} from "express";
+import express, { type Request, type RequestHandler, type Response, type Router } from "express";
 import { federationGrantIdentityRegistration } from "./acquisitionSettings.mjs";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
 import { federationGrantConnectUri } from "./lodgeRoute.mjs";
 import { createSanitizedReporter } from "./report.mjs";
 import { createRequestIdMiddleware, requestIdOf } from "./requestId.mjs";
+import { parserRefusals, unexpectedErrors } from "./routes.mjs";
 
 /** Where this router is mounted. */
 export const FEDERATION_GRANTS_BROWSER_MOUNT_PATH = "/session/federation-grants";
@@ -625,6 +620,7 @@ export function createFederationGrantBrowserRouter(
 		consentThrottle,
 		express.json({ limit: BODY_LIMIT }),
 		express.urlencoded({ extended: false, limit: BODY_LIMIT }),
+		parserRefusals,
 		admitted(shuttingDownJson, async (req, res) => {
 			try {
 				// Belt to the challenge's braces: a page on this origin sends
@@ -1263,17 +1259,7 @@ export function createFederationGrantBrowserRouter(
 
 	// Everything else under the mount: plain, not the JSON router's 404.
 	router.use((_req, res) => plain(res, 404, "Not found."));
-	const parserErrors: ErrorRequestHandler = (error, _req, res, next) => {
-		if (res.headersSent) return next(error);
-		const type = (error as { type?: unknown }).type;
-		if (type === "entity.too.large")
-			return jsonError(res, 413, "invalid_request", "body_too_large");
-		if (type === "entity.parse.failed" || type === "encoding.unsupported") {
-			return jsonError(res, 400, "invalid_request", "malformed_body");
-		}
-		jsonError(res, 500, "server_error", "unexpected_error");
-	};
-	router.use(parserErrors);
+	router.use(unexpectedErrors(options.logger));
 	return router;
 }
 

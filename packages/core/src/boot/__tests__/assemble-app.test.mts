@@ -223,6 +223,38 @@ describe("assembleApp — 4. mount-order: cycle detection", () => {
 	});
 });
 
+describe("assembleApp — 4b. mount-order: a missing edge target names the module", () => {
+	it.each([
+		["before", { before: ["absent"] }],
+		["after", { after: ["absent"] }],
+	] as const)(
+		"a %s edge to an id nobody contributes names the declaring module",
+		(_label, edge) => {
+			// Factory-produced routes are only known here, at stage 6, so this is
+			// where an operator learns of the missing target — and the route id
+			// alone does not say which module to look at.
+			const routes: CollectedRouteContribution[] = [
+				{
+					contribution: { mountPath: "/a", handler: vi.fn() as never, id: "a", ...edge },
+					contributedBy: "ModA",
+					declarationIndex: 0,
+				},
+			];
+			let thrown: BootError | undefined;
+			try {
+				assembleApp(makeFrozenWorld(routes), {
+					express: { Router: () => makeMockRouter() as never },
+				});
+			} catch (err) {
+				thrown = err as BootError;
+			}
+			expect(thrown?.reason).toBe("route-order-target-missing");
+			expect(thrown?.message).toMatch(/module "ModA"/);
+			expect(thrown?.details).toMatchObject({ referencedByModule: "ModA" });
+		},
+	);
+});
+
 // ---------------------------------------------------------------------------
 // 5. Mount-order: declaration-index tie-breaker
 // ---------------------------------------------------------------------------

@@ -22,9 +22,11 @@
  */
 
 import type {
+	AppConfig,
 	BootstrapMap,
 	ClientRepository,
 	DeviceCodeStore,
+	Module,
 	RateLimiter,
 	RateLimitSpec,
 } from "@o3co/auth-provider-core";
@@ -39,7 +41,7 @@ import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-
 import express from "express";
 import { decodeJwt, exportJWK, generateKeyPair, type JWK, SignJWT } from "jose";
 import request from "supertest";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { deviceGrantModule } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 
@@ -47,6 +49,9 @@ const clientRepository: ClientRepository = {
 	findById: async () => null,
 	authenticate: async () => null,
 };
+
+/** A logged projection's `stack`: frames only, from the first. */
+const FRAMES = expect.stringMatching(/^ {4}at /);
 
 const CONFIDENTIAL_ID = "backend-app";
 const CONFIDENTIAL_SECRET = "s3cret-value";
@@ -114,8 +119,24 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 	} as unknown as BootstrapMap;
 };
 
-const boot = (overrides: Overrides) =>
-	createApp({ modules: [deviceGrantModule], bootstrapComponents: makeBoot(overrides) });
+/**
+ * Boot the module built from the same config `createApp` validates — the
+ * one a composition root holds and hands both.
+ */
+const boot = (overrides: Overrides) => {
+	const bootstrapComponents = makeBoot(overrides);
+	return createApp({
+		modules: [deviceGrantModule({ config: bootstrapComponents.config as AppConfig })],
+		bootstrapComponents,
+	});
+};
+
+/** What `createApp` hands a contribution: the config, and whatever slots the test wires. */
+type TestDeps = { readonly config: unknown } & Readonly<Record<string, unknown>>;
+
+/** The contributions of the module built for `deps.config`, as `createApp` would call them with `deps`. */
+const contributionsFor = (deps: TestDeps) =>
+	deviceGrantModule({ config: deps.config as AppConfig }).contributes;
 
 const ENABLED = {
 	enabled: true,
@@ -123,6 +144,24 @@ const ENABLED = {
 };
 
 describe("deviceGrantModule — boot", () => {
+	it("refuses the factory listed uncalled — the pre-factory form, `modules: [deviceGrantModule]`", async () => {
+		// The compiler does not catch it: a function has a `name`, the one
+		// field `Module` requires. Listed that way the module contributed
+		// nothing and boot succeeded, with no grant, no route and none of the
+		// refusals below. Core refuses any such entry.
+		await expect(
+			createApp({
+				modules: [deviceGrantModule as unknown as Module],
+				bootstrapComponents: makeBoot({ deviceAuthorization: ENABLED }),
+			}),
+		).rejects.toMatchObject({
+			reason: "module-factory-not-called",
+			message: expect.stringMatching(
+				/module entry "deviceGrantModule" is a function — call it with its arguments/,
+			),
+		});
+	});
+
 	it("boots disabled without any of the required settings", async () => {
 		// Installing the package must not turn on a grant, and a deployment
 		// that leaves it off must never trip settings it does not use.
@@ -180,9 +219,58 @@ describe("deviceGrantModule — boot", () => {
 		).rejects.toThrow(/enabled = true requires a deviceCodeStore component/);
 	});
 
-	it("boots with everything wired", async () => {
+	it("boots with everything wired, without oauthModule", async () => {
+		// The routes declare no ordering edge — each module under `/oauth`
+		// parses its own body — so nothing here needs another module's route
+		// to exist. The composition beside oauthModule is composition.test.mts.
 		const handle = await boot({ deviceAuthorization: ENABLED });
 		await handle.dispose();
+	});
+
+	it.each([
+		["built enabled, booted with the grant off", ENABLED, { enabled: false }],
+		["built disabled, booted with the grant on", { enabled: false }, ENABLED],
+	])("refuses to boot when the module was %s", async (_label, builtFrom, bootedWith) => {
+		// The factory decides from the config it is handed whether the grant
+		// is contributed; the routes and the discovery field read the config
+		// `createApp` validated. Two configs that disagree would register a
+		// grant whose device can never start, or serve a flow whose token
+		// endpoint refuses the grant — so the disagreement is the refusal.
+		const bootstrapComponents = makeBoot({ deviceAuthorization: bootedWith });
+		const config = bootstrapComponents.config as AppConfig;
+		const handedToFactory = {
+			...config,
+			oauth: { ...config.oauth, deviceAuthorization: builtFrom },
+		} as AppConfig;
+		await expect(
+			createApp({
+				modules: [deviceGrantModule({ config: handedToFactory })],
+				bootstrapComponents,
+			}),
+		).rejects.toThrow(/the same config/);
+	});
+
+	it("names the disagreement, not a missing store, when the booted config declares the store absent", async () => {
+		// The grant is contributed before the routes are, and it needs a
+		// store. Built enabled and booted off with `store = "unsupported"`
+		// and no store wired, the first refusal has to be the one that says
+		// what is actually wrong — the two configs — rather than the store
+		// the booted config correctly says it does not need.
+		const bootstrapComponents = makeBoot({
+			deviceAuthorization: { enabled: false, store: "unsupported" },
+			withStore: false,
+		});
+		const config = bootstrapComponents.config as AppConfig;
+		const handedToFactory = {
+			...config,
+			oauth: { ...config.oauth, deviceAuthorization: ENABLED },
+		} as AppConfig;
+		await expect(
+			createApp({
+				modules: [deviceGrantModule({ config: handedToFactory })],
+				bootstrapComponents,
+			}),
+		).rejects.toThrow(/the same config/);
 	});
 
 	it('refuses to boot with no audit sink unless audit.sink.type = "none" says so', async () => {
@@ -197,51 +285,51 @@ describe("deviceGrantModule — boot", () => {
 });
 
 describe("deviceGrantModule — discovery (RFC 8628 §4)", () => {
-	it("advertises the endpoint and the grant type when enabled", async () => {
+	it("contributes the endpoint as an issuer-relative path when enabled", () => {
 		// A client has no other way to find the endpoint, so the metadata is
-		// the feature being reachable rather than a description of it.
-		const handle = await boot({ deviceAuthorization: ENABLED });
-		const contribution = deviceGrantModule.contributes?.discoveryMetadata?.[0] as (
-			deps: unknown,
-		) => { metadata?: Record<string, unknown>; grantTypes?: readonly string[] };
-		const result = contribution({
+		// the feature being reachable rather than a description of it. Under
+		// `endpoints`, not `metadata`: core prefixes the issuer and refuses an
+		// `*_endpoint` literal — the served document is pinned end to end in
+		// composition.test.mts.
+		const deps = {
 			config: {
 				oauth: {
 					jwt: { issuer: "https://as.example.test" },
 					deviceAuthorization: ENABLED,
 				},
 			},
+		};
+		const contribution = contributionsFor(deps)?.discoveryMetadata?.[0] as (
+			deps: unknown,
+		) => Record<string, unknown>;
+		const result = contribution(deps);
+		expect(result).toEqual({
+			endpoints: { device_authorization_endpoint: "/oauth/device_authorization" },
 		});
-		expect(result.metadata?.device_authorization_endpoint).toBe(
-			"https://as.example.test/oauth/device_authorization",
-		);
-		expect(result.grantTypes).toEqual([DEVICE_CODE_GRANT_TYPE]);
-		await handle.dispose();
 	});
 
 	it("advertises nothing when disabled", async () => {
 		// #283's rule: the document must not claim a capability the deployment
 		// does not have.
-		const contribution = deviceGrantModule.contributes?.discoveryMetadata?.[0] as (
+		const deps = {
+			config: {
+				oauth: {
+					jwt: { issuer: "https://as.example.test" },
+					deviceAuthorization: { enabled: false },
+				},
+			},
+		};
+		const contribution = contributionsFor(deps)?.discoveryMetadata?.[0] as (
 			deps: unknown,
 		) => Record<string, unknown>;
-		expect(
-			contribution({
-				config: {
-					oauth: {
-						jwt: { issuer: "https://as.example.test" },
-						deviceAuthorization: { enabled: false },
-					},
-				},
-			}),
-		).toEqual({});
+		expect(contribution(deps)).toEqual({});
 	});
 });
 
 describe("deviceGrantModule — the route it actually contributes", () => {
 	/** Build the contributed router and mount it, as `assembleApp` would. */
-	const mountContributedRoute = (index: number, deps: Record<string, unknown>) => {
-		const factory = deviceGrantModule.contributes?.routes?.[index] as (d: unknown) => {
+	const mountContributedRoute = (index: number, deps: TestDeps) => {
+		const factory = contributionsFor(deps)?.routes?.[index] as (d: unknown) => {
 			mountPath: string;
 			handler: express.RequestHandler;
 		};
@@ -335,11 +423,35 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(second.headers["retry-after"]).toBeDefined();
 	});
 
+	it("counts an oversized device_authorization request against the per-IP budget", async () => {
+		// federation-grants' order: the throttle ahead of the size check, so a
+		// caller cannot send oversized bodies without spending attempts. With
+		// the check first, the 413 was free and the next request still found
+		// the whole budget.
+		const app = mountContributedRoute(
+			0,
+			enabledDeps({ limits: { device_authorization: { limit: 1, windowSeconds: 60 } } }),
+		);
+
+		const oversized = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({ padding: "x".repeat(40_000) });
+		expect(oversized.status).toBe(413);
+		expect(oversized.headers["ratelimit-limit"]).toBe("1");
+
+		const next = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({});
+		expect(next.status).toBe(429);
+	});
+
 	it("refuses to mount device_authorization without the outage policy, rateLimit.failMode", () => {
 		// The guard's fail-open / fail-closed choice is the product's, made
 		// once in config. Defaulting it here would be a second policy.
 		const deps = enabledDeps();
-		const factory = deviceGrantModule.contributes?.routes?.[0] as (d: unknown) => unknown;
+		const factory = contributionsFor(deps)?.routes?.[0] as (d: unknown) => unknown;
 		expect(() => factory({ ...deps, config: { ...deps.config, rateLimit: undefined } })).toThrow(
 			/rateLimit\.failMode/,
 		);
@@ -351,15 +463,15 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// refused for this route too, not only for device_authorization — or
 		// the refusal would depend on which factory the planner ran first.
 		const deps = enabledDeps();
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
 		expect(() => factory({ ...deps, config: { ...deps.config, rateLimit: undefined } })).toThrow(
 			/rateLimit\.failMode/,
 		);
 	});
 
 	/** Mount the contributed verification route behind a fixed end-user session. */
-	const mountVerificationRoute = (deps: Record<string, unknown>) => {
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => {
+	const mountVerificationRoute = (deps: TestDeps) => {
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => {
 			mountPath: string;
 			handler: express.RequestHandler;
 		};
@@ -414,6 +526,429 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		},
 	);
 
+	/**
+	 * A logger that keeps every line as a JSON log shipper would write it:
+	 * an `Error` with all of its own properties, not only the enumerable ones.
+	 */
+	const serialisingLogger = () => {
+		const lines: string[] = [];
+		const serialise = (value: unknown): string =>
+			JSON.stringify(value, (_key, v: unknown) =>
+				v instanceof Error
+					? Object.fromEntries(
+							Object.getOwnPropertyNames(v).map((k) => [
+								k,
+								(v as unknown as Record<string, unknown>)[k],
+							]),
+						)
+					: v,
+			);
+		const record = (level: string) =>
+			vi.fn((obj: Record<string, unknown>, msg?: string) => {
+				lines.push(`${level} ${msg ?? ""} ${serialise(obj)}`);
+			});
+		return {
+			lines,
+			logger: {
+				warn: record("warn"),
+				info: record("info"),
+				error: record("error"),
+				debug: record("debug"),
+			},
+		};
+	};
+
+	it("answers an unexpected failure on the mounted device/verification route with JSON 500, and logs a projection of it", async () => {
+		// RFC 8628 §3.2 → RFC 6749 §5.2: this API answers in JSON, a failure
+		// included. A store that throws is the host's outage, not the
+		// caller's business: a fixed description in the response, and in the
+		// log the error's name and message — never the error itself. An
+		// ioredis reply error carries the command's arguments (the user code,
+		// the approving subject); a body-parser error carries the body.
+		const deps = enabledDeps();
+		const { lines, logger } = serialisingLogger();
+		const replyError = Object.assign(
+			new Error("READONLY You can't write against a read only replica."),
+			{
+				name: "ReplyError",
+				command: { name: "evalsha", args: ["devauth:{devauth}:user:BCDFGHJK", "user-1"] },
+				body: "client_secret=s3cret-value",
+			},
+		);
+		const app = mountVerificationRoute({
+			...deps,
+			logger,
+			deviceCodeStore: {
+				...deps.deviceCodeStore,
+				findPendingByUserCode: async () => {
+					throw replyError;
+				},
+			},
+		});
+
+		const res = await request(app)
+			.post("/oauth/device/verification")
+			.set("Host", "as.example.test")
+			.set("Origin", "http://as.example.test")
+			.send({ action: "lookup", user_code: "BCDF-GHJK" });
+
+		expect(res.status).toBe(500);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.headers["cache-control"]).toBe("no-store");
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				err: {
+					name: "ReplyError",
+					message: "READONLY You can't write against a read only replica.",
+					stack: FRAMES,
+				},
+			},
+			"device_route_unexpected_error",
+		);
+		for (const line of lines) {
+			expect(line).not.toContain("BCDFGHJK");
+			expect(line).not.toContain("user-1");
+			expect(line).not.toContain("s3cret-value");
+		}
+	});
+
+	it("answers an unexpected failure on the mounted device_authorization route with JSON 500, and logs a projection of it", async () => {
+		// A client repository that hands back a malformed registration —
+		// `defaultScopes` a string rather than a list — is a failure of the
+		// host's data, not of the request.
+		const { lines, logger } = serialisingLogger();
+		const malformed = { ...confidentialClient, defaultScopes: "openid" };
+		const app = mountContributedRoute(0, {
+			...enabledDeps(),
+			logger,
+			clientRepository: {
+				findById: async (id: string) => (id === CONFIDENTIAL_ID ? (malformed as never) : null),
+				authenticate: async (id: string, secret: string) =>
+					id === CONFIDENTIAL_ID && secret === CONFIDENTIAL_SECRET ? (malformed as never) : null,
+			} satisfies ClientRepository,
+		});
+
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({});
+
+		expect(res.status).toBe(500);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.headers["cache-control"]).toBe("no-store");
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		// This package's own code failed on the data: the frames are what an
+		// operator finds it by — and the header line, which repeats the
+		// message, is not among them.
+		expect(logger.error).toHaveBeenCalledWith(
+			{
+				err: {
+					name: "TypeError",
+					message: expect.any(String),
+					stack: FRAMES,
+				},
+			},
+			"device_route_unexpected_error",
+		);
+		for (const line of lines) {
+			expect(line).not.toContain(CONFIDENTIAL_SECRET);
+			expect(line).not.toContain("TypeError:");
+		}
+	});
+
+	/** The verification route, signed in, with a store whose lookup throws `thrown`. */
+	const lookupThrowing = async (thrown: unknown) => {
+		const deps = enabledDeps();
+		const { lines, logger } = serialisingLogger();
+		const app = mountVerificationRoute({
+			...deps,
+			logger,
+			deviceCodeStore: {
+				...deps.deviceCodeStore,
+				findPendingByUserCode: async () => {
+					throw thrown;
+				},
+			},
+		});
+		const res = await request(app)
+			.post("/oauth/device/verification")
+			.set("Host", "as.example.test")
+			.set("Origin", "http://as.example.test")
+			.send({ action: "lookup", user_code: "BCDF-GHJK" });
+		return { res, lines, logger };
+	};
+
+	it("treats an exposed 4xx thrown past the parsers as the failure it is — 500, logged", async () => {
+		// Only the parsers' errors are the caller's mistake. A store that throws
+		// an `http-errors`-shaped 403 has failed; it has not been refused a body.
+		const { res, logger } = await lookupThrowing(
+			Object.assign(new Error("forbidden"), { expose: true, status: 403 }),
+		);
+
+		expect(res.status).toBe(500);
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(logger.error).toHaveBeenCalledWith(
+			{ err: { name: "Error", message: "forbidden", status: 403, stack: FRAMES } },
+			"device_route_unexpected_error",
+		);
+	});
+
+	it("logs what a Redis reply error's message says, not the command arguments it echoes", async () => {
+		// redis-errors' `ReplyError` for an unknown command quotes the first
+		// arguments into its message — here the user code and the subject.
+		const { res, lines, logger } = await lookupThrowing(
+			Object.assign(
+				new Error(
+					"ERR unknown command 'evalsha', with args beginning with: 'sha' '1' 'devauth:user:BCDFGHJK' 'user-1'",
+				),
+				{ name: "ReplyError" },
+			),
+		);
+
+		expect(res.status).toBe(500);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ err: { name: "ReplyError", message: "ERR unknown command 'evalsha'", stack: FRAMES } },
+			"device_route_unexpected_error",
+		);
+		for (const line of lines) {
+			expect(line).not.toContain("BCDFGHJK");
+			expect(line).not.toContain("user-1");
+		}
+	});
+
+	it("logs a JSON SyntaxError's message without the input V8 quotes in it", async () => {
+		let parseError: unknown;
+		try {
+			JSON.parse("user_code=BCDFGHJK&sub=user-1");
+		} catch (error) {
+			parseError = error;
+		}
+		expect(String((parseError as Error).message)).toContain("user_code");
+
+		const { res, lines } = await lookupThrowing(parseError);
+
+		expect(res.status).toBe(500);
+		for (const line of lines) {
+			expect(line).not.toContain("user_code");
+			expect(line).not.toContain("BCDFGHJK");
+		}
+	});
+
+	it("caps the logged message", async () => {
+		const { lines } = await lookupThrowing(new Error(`failure ${"x".repeat(1000)}`));
+		const logged = JSON.parse(lines[0]?.split(" ").slice(2).join(" ") ?? "{}") as {
+			err?: { message?: string };
+		};
+		expect(logged.err?.message?.length).toBeLessThanOrEqual(256);
+	});
+
+	it("logs a device-code store failure on device_authorization through the same projection", async () => {
+		// The store is retried on a collision; every attempt failing is a 500,
+		// and its warn line used to carry `String(error)` — the whole message.
+		const deps = enabledDeps();
+		const { lines, logger } = serialisingLogger();
+		const app = mountContributedRoute(0, {
+			...deps,
+			logger,
+			deviceCodeStore: {
+				...deps.deviceCodeStore,
+				create: async () => {
+					throw Object.assign(
+						new Error(
+							"ERR unknown command 'evalsha', with args beginning with: 'sha' '2' 'devauth:{devauth}:code:DC' 'devauth:{devauth}:user:BCDFGHJK'",
+						),
+						{ name: "ReplyError" },
+					);
+				},
+			},
+		});
+
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({});
+
+		expect(res.status).toBe(500);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({
+				err: { name: "ReplyError", message: "ERR unknown command 'evalsha'", stack: FRAMES },
+			}),
+			"device_authorization_code_collision",
+		);
+		for (const line of lines) expect(line).not.toContain("BCDFGHJK");
+	});
+
+	/** 1000 parameters is body-parser's `parameterLimit`; the secret rides along. */
+	const tooManyParameters = [
+		`client_id=${CONFIDENTIAL_ID}`,
+		`client_secret=${CONFIDENTIAL_SECRET}`,
+		...Array.from({ length: 1000 }, (_, i) => `p${i}=1`),
+	].join("&");
+
+	it.each([
+		// [label, route, headers, body, status, description]
+		[
+			"a charset the parser cannot decode",
+			1,
+			{ "Content-Type": "application/json; charset=latin1" },
+			'{"action":"lookup"}',
+			415,
+			"unsupported_encoding",
+		],
+		[
+			"a Content-Encoding the parser does not support",
+			0,
+			{ "Content-Type": "application/json", "Content-Encoding": "compress" },
+			"{}",
+			415,
+			"unsupported_encoding",
+		],
+		[
+			"a compressed body that does not decompress",
+			0,
+			{ "Content-Type": "application/json", "Content-Encoding": "gzip" },
+			"not gzip at all",
+			400,
+			"malformed_body",
+		],
+		[
+			"more form parameters than the parser takes",
+			0,
+			{ "Content-Type": "application/x-www-form-urlencoded" },
+			tooManyParameters,
+			413,
+			"body_too_large",
+		],
+	] as const)(
+		"answers %s with a 4xx in JSON, logging nothing at error level and nothing of the body",
+		async (_label, route, headers, body, status, description) => {
+			// body-parser marks these `expose` with a 4xx status: the caller's
+			// mistake. On the verification route the parser runs ahead of the
+			// CSRF guard and of any throttle, so a 500 and an error line here
+			// would be a free way for anyone to fill the error log.
+			const { lines, logger } = serialisingLogger();
+			const deps = { ...enabledDeps(), logger };
+			const app = route === 0 ? mountContributedRoute(0, deps) : mountVerificationRoute(deps);
+			const path = route === 0 ? "/oauth/device_authorization" : "/oauth/device/verification";
+
+			const res = await request(app).post(path).set(headers).send(body);
+
+			expect(res.status).toBe(status);
+			expect(res.headers["content-type"]).toMatch(/^application\/json/);
+			expect(res.headers["cache-control"]).toBe("no-store");
+			expect(res.body).toEqual({ error: "invalid_request", error_description: description });
+			expect(logger.error).not.toHaveBeenCalled();
+			for (const line of lines) expect(line).not.toContain(CONFIDENTIAL_SECRET);
+		},
+	);
+
+	/**
+	 * device_authorization with a limiter whose decision throws `thrown` when
+	 * the throttle reads it: an error raised ahead of the parsers, which the
+	 * parsers' refusal handler is the first to see.
+	 */
+	const throttleThrowing = async (thrown: unknown) => {
+		const { lines, logger } = serialisingLogger();
+		const app = mountContributedRoute(0, {
+			...enabledDeps(),
+			logger,
+			rateLimiter: {
+				kind: "hostile",
+				check: async () => ({
+					allowed: true,
+					get limit(): number {
+						throw thrown;
+					},
+				}),
+			} satisfies RateLimiter,
+		});
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.type("form")
+			.send(`client_id=${CONFIDENTIAL_ID}`);
+		return { res, lines, logger };
+	};
+
+	it("answers an error whose `expose` getter throws as JSON 500, logging that error rather than the getter's", async () => {
+		// The refusal handler asks every error it sees whether it is a parser's.
+		// Asking must not throw: a throw there replaced the error in hand with
+		// the getter's, and the log named the wrong failure.
+		const hostile = Object.defineProperty(new Error("limiter decision unreadable"), "expose", {
+			get() {
+				throw new Error("expose getter threw");
+			},
+		});
+
+		const { res, logger } = await throttleThrowing(hostile);
+
+		expect(res.status).toBe(500);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ err: { name: "Error", message: "limiter decision unreadable", stack: FRAMES } },
+			"device_route_unexpected_error",
+		);
+	});
+
+	it("answers a Proxy whose every trap throws as JSON 500, logged as the thrown value it is", async () => {
+		const trap = () => {
+			throw new Error("trap threw");
+		};
+		const hostile = new Proxy(
+			{},
+			{ get: trap, has: trap, ownKeys: trap, getOwnPropertyDescriptor: trap, getPrototypeOf: trap },
+		);
+
+		const { res, logger } = await throttleThrowing(hostile);
+
+		expect(res.status).toBe(500);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ err: { thrown: "object" } },
+			"device_route_unexpected_error",
+		);
+	});
+
+	it.each([
+		["the per-IP throttle's 429 on device_authorization", "throttle"],
+		["client authentication's 401 on device_authorization", "client-auth"],
+		["the CSRF guard's 403 on device/verification", "csrf"],
+	] as const)("sends no-store on %s, as on every other exit", async (_label, which) => {
+		// A refusal an intermediary caches is served to the next caller too.
+		if (which === "csrf") {
+			const app = mountVerificationRoute(enabledDeps());
+			const res = await request(app)
+				.post("/oauth/device/verification")
+				.set("Origin", "https://evil.example")
+				.send({ action: "lookup", user_code: "BCDF-GHJK" });
+			expect(res.status).toBe(403);
+			expect(res.headers["cache-control"]).toBe("no-store");
+			return;
+		}
+		const app = mountContributedRoute(
+			0,
+			enabledDeps({ limits: { device_authorization: { limit: 1, windowSeconds: 60 } } }),
+		);
+		const first = await request(app)
+			.post("/oauth/device_authorization")
+			.send({ client_id: CONFIDENTIAL_ID });
+		expect(first.status).toBe(401);
+		if (which === "client-auth") {
+			expect(first.headers["cache-control"]).toBe("no-store");
+			return;
+		}
+		const second = await request(app)
+			.post("/oauth/device_authorization")
+			.send({ client_id: CONFIDENTIAL_ID });
+		expect(second.status).toBe(429);
+		expect(second.headers["cache-control"]).toBe("no-store");
+	});
+
 	/** `enabledDeps()` with `oauth.deviceAuthorization.rateLimit` replaced. */
 	const withVerificationBudget = (rateLimit: unknown) => {
 		const deps = enabledDeps();
@@ -436,10 +971,9 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// adapter's 60/60s default in place when the key is missing, so a
 		// hand-built config that never passed the schema booted with a
 		// refusal that argued from five while the limiter applied sixty.
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
-		expect(() => factory(withVerificationBudget(undefined))).toThrow(
-			/oauth\.deviceAuthorization\.rateLimit/,
-		);
+		const deps = withVerificationBudget(undefined);
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);
 	});
 
 	it.each([
@@ -450,15 +984,15 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		// The same shapes the seed declines to apply: with one definition of
 		// "usable" shared with core, a budget the module accepts is one the
 		// limiter was seeded from.
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
-		expect(() => factory(withVerificationBudget(rateLimit))).toThrow(
-			/oauth\.deviceAuthorization\.rateLimit/,
-		);
+		const deps = withVerificationBudget(rateLimit);
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(deps)).toThrow(/oauth\.deviceAuthorization\.rateLimit/);
 	});
 
 	it("mounts device/verification with a usable budget", () => {
-		const factory = deviceGrantModule.contributes?.routes?.[1] as (d: unknown) => unknown;
-		expect(() => factory(withVerificationBudget({ limit: 5, windowSeconds: 300 }))).not.toThrow();
+		const deps = withVerificationBudget({ limit: 5, windowSeconds: 300 });
+		const factory = contributionsFor(deps)?.routes?.[1] as (d: unknown) => unknown;
+		expect(() => factory(deps)).not.toThrow();
 	});
 
 	it("answers 404 with no-store when the grant is disabled", async () => {
@@ -476,15 +1010,23 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 });
 
 describe("deviceGrantModule — disabled surface", () => {
-	it("answers unsupported_grant_type at the token endpoint when disabled", async () => {
-		// Observable behaviour matches "not installed": the token endpoint
-		// answers the same code it uses for an unregistered grant.
-		const factory = deviceGrantModule.contributes?.grants?.[DEVICE_CODE_GRANT_TYPE] as (
-			deps: unknown,
-		) => { handle(ctx: unknown): Promise<{ result: { error?: string } }> };
-		const handler = factory({ config: { oauth: { deviceAuthorization: { enabled: false } } } });
-		const { result } = await handler.handle({});
-		expect(result.error).toBe("unsupported_grant_type");
+	it("contributes no grant when disabled", () => {
+		// Observable behaviour matches "not installed": with nothing
+		// registered, the token endpoint answers `unsupported_grant_type` and
+		// `grant_types_supported` does not name the grant — both pinned beside
+		// `oauthModule` in composition.test.mts. A refusing handler registered
+		// in its place was advertised as a supported grant.
+		const contributes = contributionsFor({
+			config: { oauth: { deviceAuthorization: { enabled: false } } },
+		});
+		expect(contributes?.grants).toBeUndefined();
+	});
+
+	it("contributes the grant when enabled", () => {
+		const contributes = contributionsFor({
+			config: { oauth: { deviceAuthorization: ENABLED } },
+		});
+		expect(Object.keys(contributes?.grants ?? {})).toEqual([DEVICE_CODE_GRANT_TYPE]);
 	});
 });
 
@@ -493,11 +1035,6 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 		// The module hands the grant its lifetime at composition. Only the new
 		// keys are configured, so reading the deprecated `expiresIn` would hand
 		// it `undefined` and mint a token with no `exp` claim at all.
-		const factory = deviceGrantModule.contributes?.grants?.[DEVICE_CODE_GRANT_TYPE] as (
-			deps: unknown,
-		) => {
-			handle(ctx: unknown): Promise<{ result: { tokens?: Record<string, unknown> } }>;
-		};
 		const approvedStore = {
 			...createMemoryDeviceCodeStore(),
 			poll: async () => ({
@@ -515,7 +1052,7 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 			}),
 		} satisfies DeviceCodeStore;
 		const base = makeValidCoreConfig();
-		const handler = factory({
+		const deps = {
 			config: {
 				oauth: {
 					...base.oauth,
@@ -528,7 +1065,11 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 			},
 			deviceCodeStore: approvedStore,
 			keyStore: createSymmetricKeyStore("device-lifetime-secret.at-least-32-bytes"),
-		});
+		};
+		const factory = contributionsFor(deps)?.grants?.[DEVICE_CODE_GRANT_TYPE] as (deps: unknown) => {
+			handle(ctx: unknown): Promise<{ result: { tokens?: Record<string, unknown> } }>;
+		};
+		const handler = factory(deps);
 
 		const { result } = await handler.handle({
 			body: { device_code: "device-code-1", expires_in: "7200" },
@@ -586,8 +1127,8 @@ describe("deviceGrantModule — private_key_jwt on the mounted route (#484)", ()
 			.sign(privateKey);
 	};
 
-	const mountWith = (deps: Record<string, unknown>) => {
-		const factory = deviceGrantModule.contributes?.routes?.[0] as (d: unknown) => {
+	const mountWith = (deps: TestDeps) => {
+		const factory = contributionsFor(deps)?.routes?.[0] as (d: unknown) => {
 			mountPath: string;
 			handler: express.RequestHandler;
 		};

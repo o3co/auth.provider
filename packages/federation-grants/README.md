@@ -30,7 +30,7 @@ The standalone template composes it from `FEDERATION_GRANTS_ENABLED=true` — se
 
 **Why a separate package.** What these routes disclose is an *upstream* access token, held on a user's standing consent, for a backend the user is not present at. Behind `/oauth/token` it would inherit grant dispatch, `token.issued`, this provider's token minting and a sender-constraint policy that cannot bind a credential another issuer minted; inside the oauth package it would make an optional feature part of every deployment's routing surface, so enabling ordinary OAuth would acquire this lifecycle by accident. The domain and the store ports are core's so that a store adapter depends on core and never on these routes.
 
-**Why it depends on `@o3co/auth-provider-oauth`.** For one thing, `createClientAuthMiddleware`: the five client routes authenticate a confidential client exactly as `/oauth/token` does, `private_key_jwt` included, and their client-authentication `401`s carry that middleware's wording ([below](#post-oauthfederation-grantsgrantidtoken)). It is a required peer, so the package is installed even by a deployment that mounts no `oauthModule` — which is an ordinary thing to do ([below](#install-these-modules-before-oauthmodule)). Nothing in oauth imports this package.
+**Why it depends on `@o3co/auth-provider-oauth`.** For one thing, `createClientAuthMiddleware`: the five client routes authenticate a confidential client exactly as `/oauth/token` does, `private_key_jwt` included, and their client-authentication `401`s carry that middleware's wording ([below](#post-oauthfederation-grantsgrantidtoken)). It is a required peer, so the package is installed even by a deployment that mounts no `oauthModule` — which is an ordinary thing to do ([below](#beside-oauthmodule)). Nothing in oauth imports this package.
 
 ## Install both modules
 
@@ -489,6 +489,11 @@ Where the upstream returns the browser: each connection's `callbackURL`
 points here. Query mode only — a `form_post` federation is refused at boot,
 because that callback arrives without the session cookie.
 
+A `:connection` segment Express cannot percent-decode (`/callback/%zz`) never
+reaches the checks below: it is answered by the router's last error handler
+as JSON `400 invalid_request` (`malformed_path`), not as one of the callback's
+plain pages.
+
 It checks, in this order:
 
 1. **The transaction** — the `state` is one this provider issued, for THIS
@@ -663,28 +668,39 @@ A flow that ended without a grant — declined, the wrong account, a session to
 refresh, a stale link — emits `federation.grant.authorization_failed` with a
 fixed outcome and only the facts established by then.
 
-## Install these modules before `oauthModule`
+## Beside `oauthModule`
 
-These routes live under `/oauth`, and `oauthModule` mounts its own router there
-whose first two middlewares are `express.json()` and `express.urlencoded()`
-with the library's defaults. Express runs route contributions in mount order,
-so when that router is mounted first it sees `/oauth/federation-grants/...`
-requests before this one does — and `body-parser` does not parse a body twice.
+These routes live under `/oauth`, where `oauthModule` mounts its own router.
+That router parses the bodies of its own routes only (the paths in its
+[Endpoints](../oauth/README.md#endpoints) table), so a request to
+`/oauth/federation-grants/...` reaches this package's router with its body
+unread, whatever order the modules are listed in. Every body rule here is
+this package's own:
 
-What that costs, and what it does not:
+- **The body limit.** The 16 KiB bound is checked from `Content-Length` ahead
+  of the parsers, so it holds whatever else is mounted; a body with no
+  `Content-Length` is bounded by this package's own parsers.
+- **A body the parser refuses.** What body-parser marks as the caller's
+  mistake is answered by this package as a 4xx, with its `x-request-id` and
+  `Cache-Control: no-store`, after its throttle: too many form parameters is
+  `413 invalid_request` (`body_too_large`), a charset or `Content-Encoding`
+  it cannot decode is `415 invalid_request` (`unsupported_encoding`), and JSON
+  it cannot read or a compressed body that does not decompress is
+  `400 invalid_request` (`malformed_body`). A grant id in the path that
+  Express cannot percent-decode (`/oauth/federation-grants/%zz/token`) is
+  `400 invalid_request` (`malformed_path`). Only the parsers' errors, and
+  that one, are read as the caller's mistake: anything else that escapes
+  every handler is `500 server_error` (`unexpected_error`), logged as
+  `federation_grants_unexpected_error` with `event:
+  federation_grant.unexpected_error`, a `classification` and the error's
+  numeric `status` — nothing of the error's text, as for every report this
+  package writes.
 
-- **It does not cost the body limit.** The 16 KiB bound is checked from
-  `Content-Length` ahead of the parsers, so it holds whatever else is mounted.
-- **It does cost one exit.** A body that is not valid JSON is rejected by
-  whichever parser reaches it first. Mounted second, that is the OAuth
-  router's, and its refusal carries neither this package's `x-request-id` nor
-  its `Cache-Control: no-store`, and does not pass this package's throttle.
-
-So list `federationGrantsModules` ahead of `oauthModule` at the composition
-root. This package deliberately does not declare a `before` edge against the
-OAuth router's id: that would refuse to boot for every deployment that runs
-federation grants *without* `/oauth/token`, which is a perfectly ordinary thing
-to want.
+So the list order of `federationGrantsModules` and `oauthModule` does not
+matter. This package declares no ordering edge against the OAuth router — it
+needs none, and one would refuse to boot for every deployment that runs
+federation grants *without* `/oauth/token`, which is a perfectly ordinary
+thing to want.
 
 ## `x-request-id`
 

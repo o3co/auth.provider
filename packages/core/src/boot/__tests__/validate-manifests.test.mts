@@ -88,6 +88,47 @@ function makeStubRouteCollector() {
 }
 
 // ---------------------------------------------------------------------------
+// Before step 1 — every entry is a manifest, not the factory that builds one
+// ---------------------------------------------------------------------------
+
+describe("validateManifests — a module factory listed without being called", () => {
+	// A factory such as `deviceGrantModule({ config })` is assignable to
+	// `Module` uncalled: a function has a `name`, and that is the one field
+	// `Module` requires. Listed that way it contributed nothing — no grant, no
+	// route, no check — and boot succeeded without a word.
+	const lateModule = (_params: { readonly config: unknown }) => defineModule({ name: "late" });
+
+	it("refuses the entry, naming it and saying to call it", () => {
+		let thrown: unknown;
+		try {
+			validateManifests({
+				modules: [
+					defineModule({ name: "first", provides: { cfgA: () => ({ v: 1 }) } }),
+					lateModule as unknown as Parameters<typeof validateManifests>[0]["modules"][number],
+				],
+				bootstrapComponents: minBootstrap,
+				contributionKinds: {},
+			});
+		} catch (e) {
+			thrown = e;
+		}
+		expect(thrown).toBeInstanceOf(BootError);
+		const err = thrown as BootError;
+		expect(err.reason).toBe("module-factory-not-called");
+		expect(err.stage).toBe("validateManifests");
+		expect(err.details).toEqual({
+			reason: "module-factory-not-called",
+			index: 1,
+			name: "lateModule",
+		});
+		expect(err.message).toMatch(/module entry "lateModule" is a function/);
+		// A factory's arguments are its own — `({ config })`, `(config)`,
+		// `(name)` — so the hint does not guess them.
+		expect(err.message).toMatch(/call it with its arguments and list the module it returns/);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Step 1 — duplicate-module-name
 // ---------------------------------------------------------------------------
 
@@ -917,6 +958,7 @@ describe("validateManifests — step 14: route-order-target-missing", () => {
 			if (err.details.reason === "route-order-target-missing") {
 				expect(err.details.id).toBe("does-not-exist");
 				expect(err.details.referencedBy).toBe("self");
+				expect(err.details.referencedByModule).toBe("r");
 				expect(err.details.direction).toBe("before");
 			}
 			return;

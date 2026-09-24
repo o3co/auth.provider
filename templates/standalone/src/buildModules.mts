@@ -359,11 +359,10 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		// `session.storage.type = "memory"` declares itself replica-unsafe and
 		// `deployment.mode = "multi"` refuses it by name like the other stores.
 		sessionStoreModuleFor(config),
-		// #593 slice 7: before `oauthModule`, whose router mounts under the same
-		// `/oauth` prefix with body parsers of its own — mounted after it, a
-		// malformed body would be refused by the OAuth router's parser without
-		// this package's request id, `Cache-Control: no-store` or throttle (the
-		// package README's mounting-order rule). The browser half sits after the
+		// #593 slice 7: the grants routes mount under `/oauth` beside
+		// `oauthModule`'s router, which parses the bodies of its own routes
+		// only, so each parses its own requests and their place relative to
+		// `oauthModule` does not matter. The browser half sits after the
 		// session middleware by its own `after`, wherever it is listed.
 		...(federationGrantsEnabled ? federationGrantsModules : []),
 		oauthModule({ config }),

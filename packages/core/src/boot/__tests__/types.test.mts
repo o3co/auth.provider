@@ -39,6 +39,7 @@ import type {
 	ListShapedOverrideDetails,
 	MfaPartialWiringDetails,
 	MissingRequiredComponentDetails,
+	ModuleFactoryNotCalledDetails,
 	OverrideTargetMissingDetails,
 	ProvidesFactoryFailedDetails,
 	RouteOrderCycleDetails,
@@ -66,18 +67,20 @@ describe("BootStage", () => {
 });
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — exactly 26 literals (Phase 9 added "grant-policy-without-
+// BootErrorReason — exactly 27 literals (Phase 9 added "grant-policy-without-
 // issuer" for the CP-20 invariant restoration; issue #101 added
 // "mfa-partial-wiring" and "federation-stores-incomplete"; the OIDC discovery
 // aggregator added "discovery-document-invalid"; #271 added
 // "replica-unsafe-adapter"; #363 added
 // "component-absence-undeclared"; #375 folded #277's
-// "access-token-revocation-unenforceable" into it)
+// "access-token-revocation-unenforceable" into it; an uncalled module factory
+// in `modules` added "module-factory-not-called")
 // ---------------------------------------------------------------------------
 
 describe("BootErrorReason", () => {
-	it("contains exactly the 26 reason literals", () => {
+	it("contains exactly the 27 reason literals", () => {
 		expectTypeOf<BootErrorReason>().toEqualTypeOf<
+			| "module-factory-not-called"
 			| "duplicate-module-name"
 			| "duplicate-provides"
 			| "bootstrap-component-collision"
@@ -109,10 +112,16 @@ describe("BootErrorReason", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Per-reason Details — discriminator type checks (all 23)
+// Per-reason Details — discriminator type checks
 // ---------------------------------------------------------------------------
 
 describe("per-reason *Details discriminators", () => {
+	it("ModuleFactoryNotCalledDetails.reason", () => {
+		expectTypeOf<
+			ModuleFactoryNotCalledDetails["reason"]
+		>().toEqualTypeOf<"module-factory-not-called">();
+	});
+
 	it("DuplicateModuleNameDetails.reason", () => {
 		expectTypeOf<DuplicateModuleNameDetails["reason"]>().toEqualTypeOf<"duplicate-module-name">();
 	});

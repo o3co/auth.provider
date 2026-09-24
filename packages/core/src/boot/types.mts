@@ -632,21 +632,23 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 26 literals, Per A2-β §6.1 (+ #271, #363; #277's reason was folded into #363's by #375)
+// BootErrorReason — 27 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375)
 // ---------------------------------------------------------------------------
 
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 26 reasons.
+ * exactly 27 reasons.
  *
  * Per A2-β §6.1. Extended by issue #101 (mfa-partial-wiring,
  * federation-stores-incomplete), the OIDC discovery aggregator
- * (discovery-document-invalid), and #363 (component-absence-undeclared —
+ * (discovery-document-invalid), #363 (component-absence-undeclared —
  * which #375 also folded #277's retired access-token-revocation-unenforceable
- * reason into).
+ * reason into), and module-factory-not-called (a `modules` entry that is the
+ * factory rather than the manifest it builds).
  */
 export type BootErrorReason =
+	| "module-factory-not-called"
 	| "duplicate-module-name"
 	| "duplicate-provides"
 	| "bootstrap-component-collision"
@@ -675,8 +677,22 @@ export type BootErrorReason =
 	| "component-absence-undeclared";
 
 // ---------------------------------------------------------------------------
-// Per-reason *Details interfaces — 25 total, Per A2-β §6.1 (+ #271)
+// Per-reason *Details interfaces — one per BootErrorReason, 27 total, Per A2-β §6.1 (+ #271, #363, module-factory-not-called)
 // ---------------------------------------------------------------------------
+
+/**
+ * A `modules` entry is a function — a module factory such as
+ * `deviceGrantModule` listed without being called. `Module` requires only a
+ * `name`, which every function has, so the compiler accepts it; boot would
+ * otherwise take it as a manifest that contributes nothing.
+ */
+export interface ModuleFactoryNotCalledDetails {
+	readonly reason: "module-factory-not-called";
+	/** The entry's position in `modules`. */
+	readonly index: number;
+	/** The function's own name, or `"<anonymous>"`. */
+	readonly name: string;
+}
 
 /** Per A2-β §6.1. */
 export interface DuplicateModuleNameDetails {
@@ -920,6 +936,8 @@ export interface RouteOrderTargetMissingDetails {
 	readonly referencedBy: string | null;
 	/** Filled when `referencedBy` is null — the referencing route's mountPath. */
 	readonly referencedByMountPath?: string;
+	/** The module that contributed the referencing route — where to look. */
+	readonly referencedByModule: string;
 	readonly direction: "before" | "after";
 }
 
@@ -1036,9 +1054,13 @@ export interface ComponentAbsenceUndeclaredDetails {
  *
  * Per A2-β §6.1, extended by A5 §8.2 and the Phase 9 boot-validator
  * restoration (A4 four-store + CP-20 issuer guard). Extended by issue #101
- * (mfa-partial-wiring, federation-stores-incomplete).
+ * (mfa-partial-wiring, federation-stores-incomplete), the OIDC discovery
+ * aggregator (discovery-document-invalid), #271 (replica-unsafe-adapter),
+ * #363 (component-absence-undeclared) and module-factory-not-called — one
+ * member per `BootErrorReason`, 27 in all.
  */
 export type BootErrorDetails =
+	| ModuleFactoryNotCalledDetails
 	| DuplicateModuleNameDetails
 	| DuplicateProvidesDetails
 	| BootstrapComponentCollisionDetails

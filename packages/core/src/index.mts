@@ -107,6 +107,7 @@ export type {
 	ListCollector,
 	ListShapedOverrideDetails,
 	MissingRequiredComponentDetails,
+	ModuleFactoryNotCalledDetails,
 	NameKeyedCollector,
 	OrderedRouteContribution,
 	OverrideTargetMissingDetails,

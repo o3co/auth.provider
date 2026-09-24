@@ -59,9 +59,39 @@ const CLASSIFICATIONS: ReadonlyMap<string, string> = new Map([
 	["StoreTransportError", "store_transport_failed"],
 ]);
 
+/**
+ * `error[key]`, or `undefined` when there is nothing to read or the read
+ * throws (a getter). What describes an error must never throw on it: a throw
+ * in the routers' last error handler reaches Express's own, which answers
+ * HTML and logs nothing of this package's.
+ */
+export const readField = (error: unknown, key: string): unknown => {
+	if (error === null || (typeof error !== "object" && typeof error !== "function")) {
+		return undefined;
+	}
+	try {
+		return (error as Record<string, unknown>)[key];
+	} catch {
+		return undefined;
+	}
+};
+
+/** `error instanceof type`, or `false` when asking throws (a Proxy whose prototype cannot be read). */
+export const isInstance = (
+	error: unknown,
+	type: abstract new (...args: never[]) => unknown,
+): boolean => {
+	try {
+		return error instanceof type;
+	} catch {
+		return false;
+	}
+};
+
 const classify = (error: unknown): string => {
-	if (error instanceof Error) return CLASSIFICATIONS.get(error.name) ?? "unknown";
-	return "unknown";
+	if (!isInstance(error, Error)) return "unknown";
+	const name = readField(error, "name");
+	return typeof name === "string" ? (CLASSIFICATIONS.get(name) ?? "unknown") : "unknown";
 };
 
 /**
@@ -103,6 +133,24 @@ export function createSanitizedReporter(logger: Logger): (failure: SanitizedFail
 		);
 	};
 }
+
+/**
+ * What a log line may say about an error that escaped every handler — the
+ * routers' last error handler logs it. Its classification (from `name`, the
+ * closed set above) and, when it is a number, its `status`: nothing of the
+ * error's text, for the reason the reporter carries none. `event`,
+ * `classification` and `status` are all on `SAFE_FIELDS`.
+ */
+export const unexpectedErrorFields = (
+	error: unknown,
+): { readonly event: string; readonly classification: string; readonly status?: number } => {
+	const status = readField(error, "status");
+	return {
+		event: "federation_grant.unexpected_error",
+		classification: classify(error),
+		...(typeof status === "number" ? { status } : {}),
+	};
+};
 
 const scalar = (value: unknown): value is string | number | boolean =>
 	typeof value === "string" || typeof value === "number" || typeof value === "boolean";

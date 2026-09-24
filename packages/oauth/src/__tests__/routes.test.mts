@@ -94,6 +94,7 @@ const mockExpress = {
 	Router: () =>
 		({
 			use: vi.fn().mockReturnThis(),
+			all: vi.fn().mockReturnThis(),
 			get: vi.fn().mockReturnThis(),
 			post: vi.fn().mockReturnThis(),
 		}) as unknown as Router,
@@ -102,16 +103,21 @@ const mockExpress = {
 };
 
 function createTrackingExpress() {
-	const calls: { get: unknown[][]; post: unknown[][]; use: unknown[][] } = {
+	const calls: { get: unknown[][]; post: unknown[][]; use: unknown[][]; all: unknown[][] } = {
 		get: [],
 		post: [],
 		use: [],
+		all: [],
 	};
 	const expressLike = {
 		Router: () => {
 			const router = {
 				use: vi.fn((...args: unknown[]) => {
 					calls.use.push(args);
+					return router;
+				}),
+				all: vi.fn((...args: unknown[]) => {
+					calls.all.push(args);
 					return router;
 				}),
 				get: vi.fn((...args: unknown[]) => {
@@ -148,6 +154,7 @@ describe("createOAuthRouter", () => {
 		const postCalls: unknown[][] = [];
 		const router = {
 			use: vi.fn().mockReturnThis(),
+			all: vi.fn().mockReturnThis(),
 			get: vi.fn().mockReturnThis(),
 			post: vi.fn((...args: unknown[]) => {
 				postCalls.push(args);
