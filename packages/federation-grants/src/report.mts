@@ -31,7 +31,13 @@
  * arrives from another system.
  */
 
-import { type AuditSink, type Logger, sanitizeErrorText } from "@o3co/auth-provider-core";
+import {
+	type AuditEventDetails,
+	type AuditedError,
+	type AuditSink,
+	type Logger,
+	sanitizeErrorText,
+} from "@o3co/auth-provider-core";
 
 /**
  * The closed set a failure is described by.
@@ -223,7 +229,7 @@ const auditedField = (value: unknown): value is string =>
  * secret out is that `auditedError` reads only an error's name and code,
  * never its message.
  */
-const auditedErrorShape = (value: unknown, depth = 0): Record<string, unknown> | undefined => {
+const auditedErrorShape = (value: unknown, depth = 0): AuditedError | undefined => {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
 	const { name, code, cause, ...rest } = value as Record<string, unknown>;
 	if (Object.keys(rest).length > 0 || !auditedField(name)) return undefined;
@@ -238,16 +244,28 @@ const auditedErrorShape = (value: unknown, depth = 0): Record<string, unknown> |
 };
 
 /**
+ * What a cause that is not an audited error is replaced with: still an
+ * `AuditedError`, so `details.cause` keeps one type in every event this sink
+ * relays. A sink that fixes a field's type the first time it sees it
+ * (Elasticsearch dynamic mapping, a BigQuery schema) would drop an event
+ * whose `cause` turned into the string `"[redacted]"` here, and the key is
+ * kept rather than dropped for the reason every redaction here is: an
+ * operator can still see that there was one.
+ */
+const REDACTED_CAUSE: AuditedError = { name: "[redacted]" };
+
+/**
  * An audit event's details: {@link sanitizePayload}, except that `cause` —
  * core's `auditedError`, the one field an event carries an error in — passes
- * when it is an audited error and nothing more.
+ * when it is an audited error and nothing more, and is
+ * {@link REDACTED_CAUSE} otherwise.
  */
-const sanitizeAuditDetails = (details: Record<string, unknown>): Record<string, unknown> => {
+const sanitizeAuditDetails = (details: AuditEventDetails): AuditEventDetails => {
 	const { cause, ...rest } = details;
 	const audited = cause === undefined ? undefined : auditedErrorShape(cause);
 	return {
 		...sanitizePayload(rest),
-		...(cause === undefined ? {} : { cause: audited ?? "[redacted]" }),
+		...(cause === undefined ? {} : { cause: audited ?? REDACTED_CAUSE }),
 	};
 };
 
