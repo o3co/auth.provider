@@ -215,7 +215,7 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 	});
 
 	it("throws, rather than returning null, when a revocation store cannot be read", async () => {
-		// Core's contract: null is a verdict on the token (→ invalid_grant), a
+		// Core's contract: null is a verdict on the token (→ invalid_request), a
 		// throw is an answer that is not knowable (→ 503). An outage is the
 		// second — the verifier's `revocation_unavailable` — for either store.
 		const token = await signSelfIssuedAccessToken({ jti: "at-1" });

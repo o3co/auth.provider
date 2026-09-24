@@ -146,7 +146,10 @@ describe("createTokenExchangeGrant — request errors", () => {
 		expect(result).toMatchObject({ status: 401, error: "invalid_client" });
 	});
 
-	it("returns unsupported_token_type when subject_token_type is not registered", async () => {
+	// RFC 6749 §5.2 `invalid_request`: "an unsupported parameter value (other
+	// than grant type)". `unsupported_token_type` is RFC 7009's code for the
+	// revocation endpoint; RFC 8693 defines no token-type error of its own.
+	it("returns invalid_request when subject_token_type is not registered", async () => {
 		const g = buildGrant();
 		const token = await signSelfIssuedAccessToken({});
 		const { result } = await g.handle(
@@ -157,10 +160,15 @@ describe("createTokenExchangeGrant — request errors", () => {
 				subject_token_type: "urn:ietf:params:oauth:token-type:saml2",
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "unsupported_token_type" });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription:
+				"subject_token_type 'urn:ietf:params:oauth:token-type:saml2' is not supported",
+		});
 	});
 
-	it("returns unsupported_token_type when requested_token_type is not access_token", async () => {
+	it("returns invalid_request when requested_token_type is not access_token", async () => {
 		const g = buildGrant();
 		const token = await signSelfIssuedAccessToken({});
 		const { result } = await g.handle(
@@ -172,10 +180,15 @@ describe("createTokenExchangeGrant — request errors", () => {
 				requested_token_type: "urn:ietf:params:oauth:token-type:id_token",
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "unsupported_token_type" });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription:
+				"requested_token_type 'urn:ietf:params:oauth:token-type:id_token' is not supported",
+		});
 	});
 
-	it("returns unsupported_token_type when actor_token_type is not registered", async () => {
+	it("returns invalid_request when actor_token_type is not registered", async () => {
 		const g = buildGrant();
 		const token = await signSelfIssuedAccessToken({});
 		const { result } = await g.handle(
@@ -188,7 +201,12 @@ describe("createTokenExchangeGrant — request errors", () => {
 				actor_token_type: "urn:ietf:params:oauth:token-type:saml2",
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "unsupported_token_type" });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription:
+				"actor_token_type 'urn:ietf:params:oauth:token-type:saml2' is not supported",
+		});
 	});
 
 	it("mints a token for the minimal happy-path input (was Task 6 stub guard)", async () => {
@@ -329,7 +347,7 @@ describe("createTokenExchangeGrant — request errors", () => {
 });
 
 describe("createTokenExchangeGrant — token validation", () => {
-	it("returns invalid_grant when subject_token signature is invalid", async () => {
+	it("returns invalid_request when subject_token signature is invalid (RFC 8693 §2.2.2)", async () => {
 		const g = buildGrant();
 		const token = `${(await signSelfIssuedAccessToken({})).slice(0, -4)}AAAA`;
 		const { result } = await g.handle(
@@ -340,10 +358,10 @@ describe("createTokenExchangeGrant — token validation", () => {
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(result).toMatchObject({ status: 400, error: "invalid_request" });
 	});
 
-	it("returns invalid_grant/family_revoked when subject family is revoked", async () => {
+	it("returns invalid_request/family_revoked when subject family is revoked", async () => {
 		const store = makeFamilyRevocation({
 			isFamilyRevoked: async (id) => id === "fam-bad",
 		});
@@ -361,12 +379,12 @@ describe("createTokenExchangeGrant — token validation", () => {
 		);
 		expect(result).toMatchObject({
 			status: 400,
-			error: "invalid_grant",
+			error: "invalid_request",
 			errorDescription: "family_revoked",
 		});
 	});
 
-	it("returns invalid_grant when refreshTokenFamilyRevocation is not wired (fail-closed)", async () => {
+	it("returns invalid_request when refreshTokenFamilyRevocation is not wired (fail-closed)", async () => {
 		// refreshTokenFamilyRevocation: null → deps.refreshTokenFamilyRevocation is undefined (absent).
 		// The grant's fail-closed check fires: familyId present + no store → 400.
 		const g = buildGrant({ refreshTokenFamilyRevocation: null });
@@ -379,7 +397,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(result).toMatchObject({ status: 400, error: "invalid_request" });
 	});
 
 	it("returns temporarily_unavailable (503) when the family store throws (runtime store failure)", async () => {
@@ -428,7 +446,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 		});
 	});
 
-	it("returns invalid_grant when actor_token fails validation", async () => {
+	it("returns invalid_request when actor_token fails validation (RFC 8693 §2.2.2)", async () => {
 		const g = buildGrant();
 		const subject = await signSelfIssuedAccessToken({ family_id: "fam-1" });
 		const badActor = `${(await signSelfIssuedAccessToken({ sub: "svc-a" })).slice(0, -4)}AAAA`;
@@ -442,7 +460,7 @@ describe("createTokenExchangeGrant — token validation", () => {
 				actor_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(result).toMatchObject({ status: 400, error: "invalid_request" });
 	});
 });
 
@@ -616,7 +634,11 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 });
 
 describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
-	it("rejects when policy hook widens scope beyond subject scope by default", async () => {
+	// The request's own `scope` never reaches this check — a scope outside
+	// either ceiling is `invalid_scope` before the policy runs — so a widening
+	// here is the policy's fault, answered as every other grant answers a
+	// decision past its ceiling: core's `policyOutOfBounds`, 500 server_error.
+	it("answers server_error when the policy hook widens scope beyond subject scope", async () => {
 		const wideningPolicy: GrantPolicyHook = {
 			kind: "scope-widening",
 			async evaluate() {
@@ -636,14 +658,21 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({
-			status: 400,
-			error: "invalid_target",
-			errorDescription: expect.stringMatching(/scope_widening_not_allowed/),
+		expect(result).toEqual({
+			status: 500,
+			error: "server_error",
+			errorDescription:
+				"policy returned scopes exceeding the subject_token scope or client allowedScopes: write",
 		});
 	});
 
-	it("rejects when policy hook widens audience beyond subject aud by default", async () => {
+	// The policy's audience is checked before it replaces the request's, so a
+	// widening here is the policy's alone and gets `policyOutOfBounds`, as
+	// `boundPolicyAudience` answers for every other grant. The client is
+	// registered for both audiences, so the bound this crosses is the subject
+	// token's. The request's own audience past the subject token stays
+	// `invalid_target` (RFC 8693 §2.2.2) — see the case above.
+	it("answers server_error when the policy hook widens audience beyond subject aud", async () => {
 		const wideningPolicy: GrantPolicyHook = {
 			kind: "audience-widening",
 			async evaluate() {
@@ -653,7 +682,12 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 				};
 			},
 		};
-		const g = buildGrant({ grantPolicy: wideningPolicy });
+		const g = buildGrant({
+			grantPolicy: wideningPolicy,
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["billing", "inventory"] }),
+			),
+		});
 		const token = await signSelfIssuedAccessToken({
 			aud: "billing",
 			family_id: "fam-1",
@@ -666,10 +700,11 @@ describe("createTokenExchangeGrant — SF-5 policy subset enforcement", () => {
 				subject_token_type: ACCESS_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({
-			status: 400,
-			error: "invalid_target",
-			errorDescription: expect.stringMatching(/audience_widening_not_allowed/),
+		expect(result).toEqual({
+			status: 500,
+			error: "server_error",
+			errorDescription:
+				"policy returned audiences outside the subject_token audience or client allowedAudiences: inventory",
 		});
 	});
 });
@@ -1204,7 +1239,12 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				return { outcome: "allow", grantedAudience: ["https://api.example.com"] };
 			},
 		};
-		const g = buildGrant({ grantPolicy: capturing });
+		const g = buildGrant({
+			grantPolicy: capturing,
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["https://api.example.com"] }),
+			),
+		});
 		const token = await signSelfIssuedAccessToken({
 			aud: ["https://api.example.com"],
 			family_id: "fam-1",
@@ -1229,7 +1269,12 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				return { outcome: "allow", grantedAudience: ["https://other.example.com"] };
 			},
 		};
-		const g = buildGrant({ grantPolicy: policy });
+		const g = buildGrant({
+			grantPolicy: policy,
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["https://other.example.com"] }),
+			),
+		});
 		const token = await signSelfIssuedAccessToken({
 			aud: ["https://api.example.com", "https://other.example.com"],
 			family_id: "fam-1",
@@ -1260,7 +1305,14 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				};
 			},
 		};
-		const g = buildGrant({ grantPolicy: policy });
+		const g = buildGrant({
+			grantPolicy: policy,
+			clientRepository: mockClientRepository(
+				publicClient({
+					allowedAudiences: ["https://api.example.com/users", "https://api.example.com/orders"],
+				}),
+			),
+		});
 		const token = await signSelfIssuedAccessToken({
 			aud: ["https://api.example.com/users", "https://api.example.com/orders"],
 			family_id: "fam-1",
@@ -1291,7 +1343,12 @@ describe("createTokenExchangeGrant — policy hook", () => {
 				};
 			},
 		};
-		const g = buildGrant({ grantPolicy: policy });
+		const g = buildGrant({
+			grantPolicy: policy,
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["https://api.example.com/users"] }),
+			),
+		});
 		const token = await signSelfIssuedAccessToken({
 			aud: ["https://api.example.com/users"],
 			family_id: "fam-1",

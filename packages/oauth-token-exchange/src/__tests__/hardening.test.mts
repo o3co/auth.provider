@@ -186,7 +186,7 @@ describe("token exchange — client allowedScopes ceiling", () => {
 		});
 	});
 
-	it("refuses a policy hook that grants a subject scope outside the registration", async () => {
+	it("answers server_error for a policy hook that grants a subject scope outside the registration", async () => {
 		const policy: GrantPolicyHook = {
 			kind: "grants-admin",
 			async evaluate() {
@@ -199,10 +199,11 @@ describe("token exchange — client allowedScopes ceiling", () => {
 		});
 		const token = await signSelfIssuedAccessToken({ scope: "read admin", family_id: "fam-1" });
 		const { result } = await g.handle(ctx(exchangeBody(token)));
-		expect(result).toMatchObject({
-			status: 400,
-			error: "invalid_target",
-			errorDescription: expect.stringMatching(/scope_widening_not_allowed/),
+		expect(result).toEqual({
+			status: 500,
+			error: "server_error",
+			errorDescription:
+				"policy returned scopes exceeding the subject_token scope or client allowedScopes: admin",
 		});
 	});
 
@@ -373,7 +374,7 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 		);
 		expect(result).toMatchObject({
 			status: 400,
-			error: "invalid_grant",
+			error: "invalid_request",
 			errorDescription: expect.stringMatching(/expire/i),
 		});
 	});
@@ -391,7 +392,7 @@ describe("token exchange — issued lifetime is bounded by the subject token", (
 				subject_token_type: STUB_TOKEN_TYPE,
 			}),
 		);
-		expect(result).toMatchObject({ status: 400, error: "invalid_grant" });
+		expect(result).toMatchObject({ status: 400, error: "invalid_request" });
 	});
 
 	describe("when the clock moves between the cap and the mint", () => {

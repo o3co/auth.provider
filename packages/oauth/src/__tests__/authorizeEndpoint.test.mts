@@ -458,6 +458,29 @@ describe("/authorize — response_type validation", () => {
 		expect(params.get("state")).toBe("xyz");
 		expect(params.get("code")).toBeNull();
 	});
+
+	// RFC 6749 §4.1.2.1 holds `error_description` to %x20-21 / %x23-5B /
+	// %x5D-7E. The refusal names the value that arrived, so the redirect
+	// replaces every other character with `?`.
+	// `state` is the client's own value, returned exactly (RFC 6749
+	// §4.1.2.1): URL-encoded in the redirect, never `?`-replaced like the
+	// error text around it.
+	it("returns state unchanged in an error redirect, whatever characters it carries", async () => {
+		const { app } = await makeApp({});
+		const state = 'a"b\\c d\u00e9\u{1F600}';
+		const res = await authorize(app, { ...baseQuery, response_type: "token", state });
+		const params = redirectParams(res);
+		expect(params.get("error")).toBe("unsupported_response_type");
+		expect(params.get("state")).toBe(state);
+	});
+
+	it("names the refused response_type within RFC 6749's character set", async () => {
+		const { app } = await makeApp({});
+		const res = await authorize(app, { ...baseQuery, response_type: 'a"b\\c\u0007d\u00e9' });
+		expect(redirectParams(res).get("error_description")).toBe(
+			"response_type 'a?b?c?d?' is not supported",
+		);
+	});
 });
 
 describe("/authorize — PKCE required (#273)", () => {
@@ -505,7 +528,7 @@ describe("/authorize — code_challenge_method resolution (#273)", () => {
 		const params = redirectParams(res);
 		expect(params.get("error")).toBe("invalid_request");
 		expect(params.get("error_description")).toBe(
-			'code_challenge_method is required and must be "S256"',
+			"code_challenge_method is required and must be 'S256'",
 		);
 	});
 
@@ -528,7 +551,7 @@ describe("/authorize — code_challenge_method resolution (#273)", () => {
 		const res = await authorize(app, { ...baseQuery, code_challenge_method: "S512" });
 		const params = redirectParams(res);
 		expect(params.get("error")).toBe("invalid_request");
-		expect(params.get("error_description")).toBe('code_challenge_method "S512" is not supported');
+		expect(params.get("error_description")).toBe("code_challenge_method 'S512' is not supported");
 	});
 
 	it("persists the resolved method on the code", async () => {
@@ -557,6 +580,81 @@ describe("/authorize — policy evaluation edges (C-2)", () => {
 		expect(evaluated.subject).toBeUndefined();
 		expect(evaluated.requestedScope).toBeUndefined();
 	});
+
+	// RFC 6749 §4.1.2.1 makes `error` 1*NQSCHAR (printable ASCII without `"`
+	// and `\`). A deny code outside it, or none, is answered `access_denied`
+	// — the code for a request the authorization server refuses — and the
+	// policy's code is logged, sanitised, for the operator who wrote it.
+	it.each([
+		["a double quote", 'bad "code"', "bad ?code?"],
+		["non-ASCII", "d\u00e9ny", "d?ny"],
+		["nothing", "", ""],
+	])(
+		"answers access_denied for a policy deny code with %s, and logs it sanitised",
+		async (_label, code, logged) => {
+			const logger = createMockLogger();
+			const { app } = await makeApp({
+				logger,
+				grantPolicy: {
+					kind: "test",
+					evaluate: async () => ({ outcome: "deny", error: code, errorDescription: "no" }),
+				},
+			});
+			const params = redirectParams(await authorize(app, baseQuery));
+			expect(params.get("error")).toBe("access_denied");
+			expect(params.get("error_description")).toBe("no");
+			expect(logger.warn).toHaveBeenCalledWith(
+				{ error: logged },
+				"authorize_policy_deny_error_malformed",
+			);
+		},
+	);
+
+	it("logs a long malformed deny code capped", async () => {
+		const logger = createMockLogger();
+		const { app } = await makeApp({
+			logger,
+			grantPolicy: {
+				kind: "test",
+				evaluate: async () => ({
+					outcome: "deny",
+					error: `"${"x".repeat(300)}`,
+					errorDescription: "no",
+				}),
+			},
+		});
+		await authorize(app, baseQuery);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ error: `?${"x".repeat(196)}...` },
+			"authorize_policy_deny_error_malformed",
+		);
+	});
+
+	// A JavaScript policy can return anything as its description. One that is
+	// not a non-empty string is not sent — RFC 6749 A.8 makes the field
+	// 1*NQSCHAR — and the redirect carries the default instead.
+	it.each([
+		["a number", 42],
+		["the empty string", ""],
+	])(
+		"redirects with the default description for a deny description that is %s",
+		async (_label, description) => {
+			const { app } = await makeApp({
+				grantPolicy: {
+					kind: "test",
+					evaluate: async () =>
+						({
+							outcome: "deny",
+							error: "access_denied",
+							errorDescription: description,
+						}) as unknown as GrantPolicyDecision,
+				},
+			});
+			const params = redirectParams(await authorize(app, baseQuery));
+			expect(params.get("error")).toBe("access_denied");
+			expect(params.get("error_description")).toBe("policy denied");
+		},
+	);
 
 	it("refuses a policy that returns a non-array grantedScope or grantedAudience (#521)", async () => {
 		// A JavaScript policy can return a string where the type says array.
@@ -794,6 +892,14 @@ describe("/authorize — prompt=none (#284)", () => {
 			"select_account:invalid_request:names=true",
 			"login:invalid_request:names=true",
 		]);
+	});
+
+	it("describes an unsupported prompt value in plain ASCII (RFC 6749 §4.1.2.1)", async () => {
+		const { app } = await makeApp({});
+		const params = redirectParams(await authorize(app, { ...baseQuery, prompt: "select_account" }));
+		expect(params.get("error_description")).toBe(
+			"prompt values not supported: select_account; this authorization server has no account picker",
+		);
 	});
 
 	it("honours prompt=consent since #527 — a no-op for a first-party client, which has nothing to consent to", async () => {

@@ -22,8 +22,9 @@
  * synchronized edits in four files. Core owns the `Confirmation` union
  * (`grants/confirmation.mts`), so the matrix lives here with it: callers
  * consume {@link matchConfirmation} and keep only their own error mapping
- * (`invalid_grant` at the token endpoint, a 401 challenge at a protected
- * resource, `active: false` at introspection).
+ * (`invalid_grant` on the refresh grant and `invalid_request` on token
+ * exchange, per RFC 8693 §2.2.2, at the token endpoint; a 401 challenge at a
+ * protected resource; `active: false` at introspection).
  */
 
 import type { Confirmation } from "./confirmation.mjs";

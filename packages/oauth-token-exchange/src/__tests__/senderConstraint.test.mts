@@ -22,6 +22,9 @@
  * token dropped the binding, so exchange laundered a stolen bound token into
  * a usable bearer token. These tests pin the same 5-row matrix per mechanism
  * that `packages/oauth/src/grants/refreshToken.mts` established for refresh.
+ * The refusal code differs: refresh answers RFC 6749's `invalid_grant` for its
+ * refresh token, the exchange RFC 8693 §2.2.2's `invalid_request` for an
+ * unacceptable subject_token or actor_token.
  */
 
 import type {
@@ -141,18 +144,18 @@ describe("token exchange — DPoP binding matrix (#265)", () => {
 		expect(res.cnf).toEqual({ jkt: JKT });
 	});
 
-	it("bound subject, no proof → invalid_grant (the de-binding laundry)", async () => {
+	it("bound subject, no proof → invalid_request (the de-binding laundry)", async () => {
 		// The #265 attack: a stolen bound subject_token exchanged by a client
 		// that cannot prove possession of the binding key.
 		const res = await exchange({ cnf: { jkt: JKT } });
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 	});
 
-	it("bound subject, proof from a different key → invalid_grant", async () => {
+	it("bound subject, proof from a different key → invalid_request", async () => {
 		const res = await exchange({ cnf: { jkt: JKT } }, otherDpopBinding);
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 	});
 
 	it("bound subject, matching proof → issues a token preserving the binding", async () => {
@@ -164,7 +167,7 @@ describe("token exchange — DPoP binding matrix (#265)", () => {
 	it("does not let an mTLS binding satisfy a jkt-bound subject", async () => {
 		const res = await exchange({ cnf: { jkt: JKT } }, mtlsBinding);
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 	});
 });
 
@@ -179,16 +182,16 @@ describe("token exchange — mTLS binding matrix (#265)", () => {
 		expect(res.cnf).toEqual({ "x5t#S256": X5T });
 	});
 
-	it("bound subject, no certificate → invalid_grant", async () => {
+	it("bound subject, no certificate → invalid_request", async () => {
 		const res = await exchange({ cnf: { "x5t#S256": X5T } });
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 	});
 
-	it("bound subject, different certificate → invalid_grant", async () => {
+	it("bound subject, different certificate → invalid_request", async () => {
 		const res = await exchange({ cnf: { "x5t#S256": X5T } }, otherMtlsBinding);
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 	});
 
 	it("bound subject, matching certificate → issues a token preserving the binding", async () => {
@@ -200,7 +203,7 @@ describe("token exchange — mTLS binding matrix (#265)", () => {
 	it("does not let a DPoP binding satisfy an x5t#S256-bound subject", async () => {
 		const res = await exchange({ cnf: { "x5t#S256": X5T } }, dpopBinding);
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 	});
 });
 
@@ -213,7 +216,7 @@ describe("token exchange — cnf edge cases (#265)", () => {
 		// This AS never mints one, so a compound cnf means a forged token.
 		const res = await exchange({ cnf: { jkt: JKT, "x5t#S256": X5T } }, dpopBinding);
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 	});
 
 	it("does not let a third-party mechanism kind satisfy a jkt binding", async () => {
@@ -222,7 +225,7 @@ describe("token exchange — cnf edge cases (#265)", () => {
 		const impostor: TokenBinding = { kind: "impostor", confirmation: { jkt: JKT } };
 		const res = await exchange({ cnf: { jkt: JKT } }, impostor);
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 	});
 
 	it("treats a cnf that names no known binding as unbound", async () => {
@@ -318,17 +321,17 @@ describe("token exchange — actor_token DPoP binding matrix (#309)", () => {
 	});
 
 	// The #309 finding itself.
-	it("bound actor, no proof → invalid_grant", async () => {
+	it("bound actor, no proof → invalid_request", async () => {
 		const res = await exchangeWithActor({ cnf: { jkt: JKT } });
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 		expect(res.errorDescription).toContain("actor_token");
 	});
 
-	it("bound actor, proof from a different key → invalid_grant", async () => {
+	it("bound actor, proof from a different key → invalid_request", async () => {
 		const res = await exchangeWithActor({ cnf: { jkt: JKT } }, otherDpopBinding);
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 		expect(res.errorDescription).toContain("actor_token");
 	});
 
@@ -341,22 +344,22 @@ describe("token exchange — actor_token DPoP binding matrix (#309)", () => {
 	it("does not let an mTLS binding satisfy a jkt-bound actor", async () => {
 		const res = await exchangeWithActor({ cnf: { jkt: JKT } }, mtlsBinding);
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 	});
 });
 
 describe("token exchange — actor_token mTLS binding matrix (#309)", () => {
-	it("bound actor, no certificate → invalid_grant", async () => {
+	it("bound actor, no certificate → invalid_request", async () => {
 		const res = await exchangeWithActor({ cnf: { "x5t#S256": X5T } });
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 		expect(res.errorDescription).toContain("actor_token");
 	});
 
-	it("bound actor, different certificate → invalid_grant", async () => {
+	it("bound actor, different certificate → invalid_request", async () => {
 		const res = await exchangeWithActor({ cnf: { "x5t#S256": X5T } }, otherMtlsBinding);
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 	});
 
 	it("bound actor, matching certificate → exchanges", async () => {
@@ -368,7 +371,7 @@ describe("token exchange — actor_token mTLS binding matrix (#309)", () => {
 	it("does not let a DPoP binding satisfy an x5t#S256-bound actor", async () => {
 		const res = await exchangeWithActor({ cnf: { "x5t#S256": X5T } }, dpopBinding);
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 	});
 });
 
@@ -376,7 +379,7 @@ describe("token exchange — actor_token cnf edge cases (#309)", () => {
 	it("rejects an actor token carrying a compound cnf", async () => {
 		const res = await exchangeWithActor({ cnf: { jkt: JKT, "x5t#S256": X5T } }, dpopBinding);
 		expect(res.status).toBe(400);
-		expect(res.error).toBe("invalid_grant");
+		expect(res.error).toBe("invalid_request");
 		expect(res.errorDescription).toContain("actor_token");
 	});
 

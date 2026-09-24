@@ -1352,7 +1352,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 		expect(location.searchParams.get("error_description")).toBe(
 			// #273: `plain` is refused for every client that has not been opted
 			// into it by registration — the message names the method it refused.
-			'code_challenge_method "plain" is not supported',
+			"code_challenge_method 'plain' is not supported",
 		);
 		expect(location.searchParams.get("state")).toBe("state-plain");
 	});
@@ -1377,7 +1377,7 @@ describe("D-6 (RFC 9700 §2.1.1): /authorize public-client PKCE/S256 mandatory",
 		const location = new URL(res.headers.location);
 		expect(location.searchParams.get("error")).toBe("invalid_request");
 		expect(location.searchParams.get("error_description")).toBe(
-			'code_challenge_method is required and must be "S256"',
+			"code_challenge_method is required and must be 'S256'",
 		);
 	});
 

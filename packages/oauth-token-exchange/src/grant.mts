@@ -28,10 +28,12 @@ import type {
 	ValidatedToken,
 } from "@o3co/auth-provider-core";
 import {
+	auditErrorText,
 	formatObject,
 	generateToken,
 	generateTokenResponse,
 	isGrantTypeAllowed,
+	isWellFormedErrorCode,
 	matchConfirmation,
 	ownedConfirmation,
 	policyOutOfBounds,
@@ -94,13 +96,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			} else if (typeof bodyClientIdRaw === "string") {
 				bodyClientId = bodyClientIdRaw;
 			} else {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_request",
-						errorDescription: "client_id must be a single string value",
-					},
-				};
+				return invalidRequest("client_id must be a single string value");
 			}
 			const clientId = bodyClientId ?? ctx.authenticatedClient?.clientId ?? null;
 			const clientSecretRaw = body.client_secret;
@@ -122,13 +118,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// Present but not a string (e.g., repeated param producing string[]).
 				// Refuse to treat this as "omitted" — that path would bypass the
 				// confidential-client auth check.
-				return {
-					result: {
-						status: 400,
-						error: "invalid_request",
-						errorDescription: "client_secret must be a single string value",
-					},
-				};
+				return invalidRequest("client_secret must be a single string value");
 			}
 			// The lifetime the client asks for, in seconds. RFC 8693 defines no
 			// such parameter and RFC 6749 §3.2 has a server ignore one it does
@@ -142,14 +132,9 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// remaining)`.
 			const requestedExpiresIn = parseRequestedExpiresIn(body.expires_in);
 			if (requestedExpiresIn === MALFORMED) {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_request",
-						errorDescription:
-							"expires_in must be sent once, as a positive whole number of seconds in ASCII digits",
-					},
-				};
+				return invalidRequest(
+					"expires_in must be sent once, as a positive whole number of seconds in ASCII digits",
+				);
 			}
 			const actorToken = typeof body.actor_token === "string" ? body.actor_token : null;
 			const actorTokenType =
@@ -158,13 +143,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				typeof body.requested_token_type === "string" ? body.requested_token_type : null;
 
 			if (!subjectToken || !subjectTokenType || !clientId) {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_request",
-						errorDescription: "subject_token, subject_token_type, client_id are required",
-					},
-				};
+				return invalidRequest("subject_token, subject_token_type, client_id are required");
 			}
 
 			// Client authentication. Token Exchange supports confidential clients
@@ -196,13 +175,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// callers omit body `client_id` entirely; only verify equality
 				// when the body explicitly supplied one (`bodyClientId !== null`).
 				if (bodyClientId !== null && bodyClientId !== ctx.authenticatedClient.clientId) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_request",
-							errorDescription: "client_id does not match authenticated client",
-						},
-					};
+					return invalidRequest("client_id does not match authenticated client");
 				}
 				try {
 					client = await clientRepository.findById(ctx.authenticatedClient.clientId);
@@ -280,24 +253,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			}
 
 			if (requestedTokenType !== null && requestedTokenType !== ACCESS_TOKEN_TYPE) {
-				return {
-					result: {
-						status: 400,
-						error: "unsupported_token_type",
-						errorDescription: `requested_token_type "${requestedTokenType}" is not supported`,
-					},
-				};
+				return invalidRequest(`requested_token_type '${requestedTokenType}' is not supported`);
 			}
 
 			const subjectValidator = tokenExchangeValidatorResolver.get(subjectTokenType);
 			if (!subjectValidator) {
-				return {
-					result: {
-						status: 400,
-						error: "unsupported_token_type",
-						errorDescription: `subject_token_type "${subjectTokenType}" is not supported`,
-					},
-				};
+				return invalidRequest(`subject_token_type '${subjectTokenType}' is not supported`);
 			}
 
 			// Actor token type lookup — kept here so the validator reference is
@@ -307,36 +268,18 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// gate on req.actorTokenType for delegation from being bypassed by a
 			// caller who only sets the type header.
 			if (actorToken === null && actorTokenType !== null) {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_request",
-						errorDescription: "actor_token is required when actor_token_type is provided",
-					},
-				};
+				return invalidRequest("actor_token is required when actor_token_type is provided");
 			}
 
 			if (actorToken !== null && actorTokenType === null) {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_request",
-						errorDescription: "actor_token_type is required when actor_token is provided",
-					},
-				};
+				return invalidRequest("actor_token_type is required when actor_token is provided");
 			}
 			const actorValidator =
 				actorToken !== null && actorTokenType !== null
 					? tokenExchangeValidatorResolver.get(actorTokenType)
 					: null;
 			if (actorToken !== null && actorValidator === undefined) {
-				return {
-					result: {
-						status: 400,
-						error: "unsupported_token_type",
-						errorDescription: `actor_token_type "${actorTokenType}" is not supported`,
-					},
-				};
+				return invalidRequest(`actor_token_type '${actorTokenType}' is not supported`);
 			}
 
 			let subjectValidated: ValidatedToken | null;
@@ -351,21 +294,13 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					},
 				};
 			}
-			if (!subjectValidated) {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription: "subject_token validation failed",
-					},
-				};
-			}
+			if (!subjectValidated) return invalidRequest("subject_token validation failed");
 
 			// RFC 9449 §5 / RFC 8705 §4 sender-constraint matrices — core's
 			// `matchConfirmation` (#324), the same implementation the refresh
-			// grant consumes; this grant keeps only the row → `invalid_grant`
-			// error mapping below. Without the matrices the exchange grant was
-			// a de-binding laundry: a stolen DPoP- or mTLS-bound
+			// grant consumes; this grant keeps only the row → refusal mapping
+			// below. Without the matrices the exchange grant was a de-binding
+			// laundry: a stolen DPoP- or mTLS-bound
 			// `subject_token` was accepted with no proof-of-possession and the
 			// issued token dropped the binding, so an attacker converted a
 			// token that was useless without the key into an ordinary bearer
@@ -375,8 +310,8 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			//   subject cnf.jkt | proof JKT       | Outcome
 			//   no              | no              | issue plain Bearer (legacy)
 			//   no              | yes             | issue DPoP-bound AT (opt-in upgrade)
-			//   yes             | no              | reject invalid_grant
-			//   yes             | yes, differs    | reject invalid_grant (multi-key attack)
+			//   yes             | no              | reject invalid_request
+			//   yes             | yes, differs    | reject invalid_request (multi-key attack)
 			//   yes             | yes, equal      | issue DPoP-bound AT (binding preserved)
 			//
 			// mTLS matrix: identical over `cnf["x5t#S256"]` and the presented
@@ -387,10 +322,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// short-circuits ahead of the expensive work, the same ordering
 			// rationale the refresh grant states.
 			//
-			// `invalid_grant` rather than `invalid_dpop_proof`: the proof or
-			// certificate is well-formed; it is the *grant* that cannot be
-			// honoured, which is the more caller-actionable classification and
-			// what the refresh path already returns for the same rows.
+			// `invalid_request` rather than `invalid_dpop_proof`: the proof or
+			// certificate is well-formed; it is the subject_token that is
+			// unacceptable, which RFC 8693 §2.2.2 answers `invalid_request` (see
+			// `invalidRequest`). The refresh path answers the same rows
+			// `invalid_grant`, RFC 6749 §5.2's code for a refresh token.
 			//
 			// `actor_token` is held to this same matrix further down (#309). A
 			// request carries exactly one `ctx.tokenBinding` — one DPoP proof,
@@ -408,38 +344,23 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// a compound cnf is a forged token or an AS bug. Refuse rather
 				// than pick a winner — the stance the refresh grant and the
 				// introspection handler already take.
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription:
-							"subject_token has compound cnf binding which is not supported (Stage 1)",
-					},
-				};
+				return invalidRequest(
+					"subject_token has compound cnf binding which is not supported (Stage 1)",
+				);
 			}
 			if (match.status === "no-proof") {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription:
-							match.member === "jkt"
-								? "subject_token requires a DPoP proof"
-								: "subject_token requires a client certificate",
-					},
-				};
+				return invalidRequest(
+					match.member === "jkt"
+						? "subject_token requires a DPoP proof"
+						: "subject_token requires a client certificate",
+				);
 			}
 			if (match.status === "mismatch") {
-				return {
-					result: {
-						status: 400,
-						error: "invalid_grant",
-						errorDescription:
-							match.member === "jkt"
-								? "DPoP proof does not match subject_token binding"
-								: "client certificate does not match subject_token binding",
-					},
-				};
+				return invalidRequest(
+					match.member === "jkt"
+						? "DPoP proof does not match subject_token binding"
+						: "client certificate does not match subject_token binding",
+				);
 			}
 
 			// The confirmation stamped onto the issued token. When the subject was
@@ -475,15 +396,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 					};
 				}
-				if (!actorValidated) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "actor_token validation failed",
-						},
-					};
-				}
+				if (!actorValidated) return invalidRequest("actor_token validation failed");
 			}
 
 			// #309: the actor half of the matrices above, and the residual #265
@@ -520,38 +433,23 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			if (actorValidated) {
 				const actorMatch = matchConfirmation(actorValidated.claims.cnf, ctx.tokenBinding);
 				if (actorMatch.status === "compound") {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription:
-								"actor_token has compound cnf binding which is not supported (Stage 1)",
-						},
-					};
+					return invalidRequest(
+						"actor_token has compound cnf binding which is not supported (Stage 1)",
+					);
 				}
 				if (actorMatch.status === "no-proof") {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription:
-								actorMatch.member === "jkt"
-									? "actor_token requires a DPoP proof"
-									: "actor_token requires a client certificate",
-						},
-					};
+					return invalidRequest(
+						actorMatch.member === "jkt"
+							? "actor_token requires a DPoP proof"
+							: "actor_token requires a client certificate",
+					);
 				}
 				if (actorMatch.status === "mismatch") {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription:
-								actorMatch.member === "jkt"
-									? "DPoP proof does not match actor_token binding"
-									: "client certificate does not match actor_token binding",
-						},
-					};
+					return invalidRequest(
+						actorMatch.member === "jkt"
+							? "DPoP proof does not match actor_token binding"
+							: "client certificate does not match actor_token binding",
+					);
 				}
 
 				// The subject's family rule, applied to the actor: the actor's
@@ -574,13 +472,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 						"token_exchange_may_act_violation",
 					);
-					return {
-						result: {
-							status: 400,
-							error: "invalid_request",
-							errorDescription: "may_act_violation: actor not authorized by subject token",
-						},
-					};
+					return invalidRequest("may_act_violation: actor not authorized by subject token");
 				}
 
 				const maxActorChainDepth = getMaxActorChainDepth(deps);
@@ -595,13 +487,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 						"token_exchange_actor_chain_too_deep",
 					);
-					return {
-						result: {
-							status: 400,
-							error: "invalid_request",
-							errorDescription: "actor_chain_too_deep: actor chain depth limit exceeded",
-						},
-					};
+					return invalidRequest("actor_chain_too_deep: actor chain depth limit exceeded");
 				}
 			} else {
 				// Impersonation — no `actor_token`, so the party acting on the
@@ -637,13 +523,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 						},
 						"token_exchange_may_act_violation",
 					);
-					return {
-						result: {
-							status: 400,
-							error: "invalid_request",
-							errorDescription: "may_act_violation: client not authorized by subject token",
-						},
-					};
+					return invalidRequest("may_act_violation: client not authorized by subject token");
 				}
 			}
 
@@ -674,6 +554,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// this grant inherits the subject token's scope. See the note at
 			// the `grantedScope` assignment below.
 			const subjectScope = subjectValidated.scope?.split(" ").filter(Boolean) ?? [];
+			const subjectScopeSet = new Set(subjectScope);
 			const clientScopeSet = new Set(client.allowedScopes ?? []);
 			const requestedScopeStr = typeof body.scope === "string" ? body.scope : null;
 			const requestedScopeRaw = requestedScopeStr?.split(" ").filter(Boolean) ?? null;
@@ -683,14 +564,13 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const requestedScope =
 				requestedScopeRaw !== null && requestedScopeRaw.length === 0 ? null : requestedScopeRaw;
 			if (requestedScope) {
-				const subjectScopeSet = new Set(subjectScope);
 				for (const s of requestedScope) {
 					if (!subjectScopeSet.has(s)) {
 						return {
 							result: {
 								status: 400,
 								error: "invalid_scope",
-								errorDescription: `scope "${s}" is not in subject_token scope`,
+								errorDescription: `scope '${s}' is not in subject_token scope`,
 							},
 						};
 					}
@@ -705,28 +585,109 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							result: {
 								status: 400,
 								error: "invalid_scope",
-								errorDescription: `scope "${s}" is not allowed for this client`,
+								errorDescription: `scope '${s}' is not allowed for this client`,
 							},
 						};
 					}
 				}
 			}
 
-			// Audience narrowing: requested audience ⊆ client.allowedAudiences ∪ {clientId}.
+			// The audience ceilings: what the client is registered for
+			// (`allowedAudiences` plus its own id) and what the subject token
+			// carries (its client id when it names none). The request's audience
+			// is held to both here, before the policy runs, so its answer is the
+			// request's alone — no policy decision can turn it into anything
+			// else. A policy's `grantedAudience` is held to the same two below.
+			const clientAudienceSet = new Set([...(client.allowedAudiences ?? []), client.clientId]);
+			const subjectAudienceSet = new Set(
+				subjectAudienceBoundary(subjectValidated.aud, client.clientId),
+			);
 			const requestedAudience = normalizeArrayParam(body.audience);
 			const requestedResource = normalizeArrayParam(body.resource);
 			if (requestedAudience) {
-				const allow = new Set([...(client.allowedAudiences ?? []), client.clientId]);
 				for (const aud of requestedAudience) {
-					if (!allow.has(aud)) {
+					if (!clientAudienceSet.has(aud)) {
 						return {
 							result: {
 								status: 400,
 								error: "invalid_target",
-								errorDescription: `audience "${aud}" is not allowed for this client`,
+								errorDescription: `audience '${aud}' is not allowed for this client`,
 							},
 						};
 					}
+				}
+				// An audience the client is registered for but the subject token
+				// does not carry. RFC 8693 §2.2.2: "If the authorization server is
+				// unwilling or unable to issue a token for any target service
+				// indicated by the resource or audience parameters, the
+				// invalid_target error code SHOULD be used".
+				const widenedAudiences = requestedAudience.filter(
+					(audience) => !subjectAudienceSet.has(audience),
+				);
+				if (widenedAudiences.length > 0) {
+					deps.logger?.warn(
+						{
+							subject: subjectValidated.sub,
+							clientId: client.clientId,
+							widenedAudiences,
+						},
+						"token_exchange_audience_widening_rejected",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_target",
+							errorDescription: `audience_widening_not_allowed: ${widenedAudiences.join(" ")}`,
+						},
+					};
+				}
+			}
+			// A requested `resource` must equal the issued audience (RFC 8707,
+			// checked after the policy below), and that audience is the client id
+			// or one the registration and the subject token both carry. A resource
+			// outside that set can never be represented, so it is the request's
+			// own `invalid_target`, answered here before the policy runs — the
+			// same reason the audience is: a policy that turned it into its
+			// granted audience would otherwise meet the policy ceiling first and
+			// convert the caller's 400 into a 500.
+			//
+			// The refusal names what the check after the policy names: every
+			// requested resource the issued audience would not equal. That
+			// audience is taken as the request's own, which is what the later
+			// check uses unless a policy replaces it — so without such a policy
+			// the two list the same resources.
+			if (requestedResource) {
+				const unrepresentable = requestedResource.some(
+					(resource) =>
+						resource !== client.clientId &&
+						!(clientAudienceSet.has(resource) && subjectAudienceSet.has(resource)),
+				);
+				if (unrepresentable) {
+					const requestAudience = issuedAudience(
+						requestedAudience ?? undefined,
+						subjectValidated.aud,
+						clientAudienceSet,
+						client.clientId,
+					);
+					const missingResources = requestedResource.filter(
+						(resource) => resource !== requestAudience,
+					);
+					deps.logger?.warn(
+						{
+							subject: subjectValidated.sub,
+							clientId: client.clientId,
+							audienceForToken: requestAudience,
+							missingResources,
+						},
+						"token_exchange_resource_not_in_audience",
+					);
+					return {
+						result: {
+							status: 400,
+							error: "invalid_target",
+							errorDescription: `requested_resources_not_in_audience: ${missingResources.join(" ")}`,
+						},
+					};
 				}
 			}
 
@@ -795,124 +756,101 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					};
 				}
 				if (decision.outcome === "deny") {
+					// RFC 6749 §5.2 makes `error` 1*NQSCHAR. The policy's code goes
+					// out as given when it is one; otherwise the refusal is
+					// `invalid_request` — §2.2.2's code for a request refused by
+					// policy — and the code is logged, sanitised, for the operator
+					// who wrote the policy. `/oauth/token` checks every grant's code
+					// too; this covers a composition that dispatches the handler
+					// from its own route.
+					let error = decision.error;
+					if (!isWellFormedErrorCode(error)) {
+						deps.logger?.warn(
+							{ error: auditErrorText(String(error)) },
+							"token_exchange_policy_deny_error_malformed",
+						);
+						error = "invalid_request";
+					}
+					// A JavaScript policy can return anything as its description; one
+					// that is empty or not a string is not sent — RFC 6749 A.8 makes
+					// the field 1*NQSCHAR — and the default is.
+					const description = decision.errorDescription;
 					return {
 						result: {
-							status: decision.error === "access_denied" ? 403 : 400,
-							error: decision.error,
-							errorDescription: decision.errorDescription ?? "denied by policy",
+							status: error === "access_denied" ? 403 : 400,
+							error,
+							errorDescription:
+								(typeof description === "string" && description) || "denied by policy",
 						},
 					};
 				}
 				// #521: presence, not truthiness, and an array — a JS policy returning
 				// a string would reach `.filter` below and throw out of the handler.
+				//
+				// The policy may narrow, never widen, and its decision is held to
+				// the exchange's ceilings before it replaces the request's value, so
+				// a refusal here is the policy's alone: the deployment's policy
+				// exceeding its authority, which every other grant answers with
+				// core's `policyOutOfBounds` (`500 server_error`, #520) — the caller
+				// did nothing wrong. Its scope ceiling is the subject token's scope
+				// AND the client's `allowedScopes`; a scope the subject carries but
+				// the registration does not would hand this client something its
+				// registration never permitted. An empty `grantedScope` strips every
+				// scope (CP-15).
 				if (decision.grantedScope !== undefined) {
 					if (!Array.isArray(decision.grantedScope)) {
 						return { result: policyOutOfBounds("policy returned a non-array grantedScope") };
 					}
+					const widenedScopes = decision.grantedScope.filter(
+						(scope) => !subjectScopeSet.has(scope) || !clientScopeSet.has(scope),
+					);
+					if (widenedScopes.length > 0) {
+						deps.logger?.warn(
+							{ subject: subjectValidated.sub, clientId: client.clientId, widenedScopes },
+							"token_exchange_policy_scope_refused",
+						);
+						return {
+							result: policyOutOfBounds(
+								`policy returned scopes exceeding the subject_token scope or client allowedScopes: ${widenedScopes.join(" ")}`,
+							),
+						};
+					}
 					grantedScope = decision.grantedScope;
 				}
+				// The audience the same way, and the same as core's
+				// `boundPolicyAudience` holds it for every other grant — within
+				// what the client is registered for — with the subject token's
+				// audience as a second bound, the one the request's audience met
+				// above. An empty `grantedAudience` is no decision, as
+				// `boundPolicyAudience` reads it: the request's audience stands.
 				if (decision.grantedAudience !== undefined) {
 					if (!Array.isArray(decision.grantedAudience)) {
 						return { result: policyOutOfBounds("policy returned a non-array grantedAudience") };
 					}
-					grantedAudience = decision.grantedAudience;
+					const widenedAudiences = decision.grantedAudience.filter(
+						(audience) => !subjectAudienceSet.has(audience) || !clientAudienceSet.has(audience),
+					);
+					if (widenedAudiences.length > 0) {
+						deps.logger?.warn(
+							{ subject: subjectValidated.sub, clientId: client.clientId, widenedAudiences },
+							"token_exchange_policy_audience_refused",
+						);
+						return {
+							result: policyOutOfBounds(
+								`policy returned audiences outside the subject_token audience or client allowedAudiences: ${widenedAudiences.join(" ")}`,
+							),
+						};
+					}
+					if (decision.grantedAudience.length > 0) grantedAudience = decision.grantedAudience;
 				}
 			}
 
-			// The policy hook may narrow, never widen — and "widen" is now past
-			// EITHER ceiling. A hook returning a scope the subject carries but
-			// the registration does not is still handing this client something
-			// its registration never permitted, which is the boundary the
-			// README's policy-widening note promises is re-checked before
-			// minting; checking only the subject would have left the hook as a
-			// way around the ceiling added above.
-			const subjectScopeSet = new Set(subjectScope);
-			const widenedScopes =
-				grantedScope?.filter(
-					(scope) => !subjectScopeSet.has(scope) || !clientScopeSet.has(scope),
-				) ?? [];
-			if (widenedScopes.length > 0) {
-				deps.logger?.warn(
-					{
-						subject: subjectValidated.sub,
-						clientId: client.clientId,
-						widenedScopes,
-					},
-					"token_exchange_scope_widening_rejected",
-				);
-				return {
-					result: {
-						status: 400,
-						error: "invalid_target",
-						errorDescription: `scope_widening_not_allowed: ${widenedScopes.join(" ")}`,
-					},
-				};
-			}
-
-			const subjectAudienceSet = new Set(
-				subjectAudienceBoundary(subjectValidated.aud, client.clientId),
+			const audienceForToken = issuedAudience(
+				grantedAudience,
+				subjectValidated.aud,
+				clientAudienceSet,
+				client.clientId,
 			);
-			const widenedAudiences =
-				grantedAudience?.filter((audience) => !subjectAudienceSet.has(audience)) ?? [];
-			if (widenedAudiences.length > 0) {
-				deps.logger?.warn(
-					{
-						subject: subjectValidated.sub,
-						clientId: client.clientId,
-						widenedAudiences,
-					},
-					"token_exchange_audience_widening_rejected",
-				);
-				return {
-					result: {
-						status: 400,
-						error: "invalid_target",
-						errorDescription: `audience_widening_not_allowed: ${widenedAudiences.join(" ")}`,
-					},
-				};
-			}
-
-			// Audience derivation (spec §8.1 rule 2):
-			//   explicit narrowed audience  → use grantedAudience (first element).
-			//     Note: grantedAudience reflects either the allowlist-validated request
-			//     parameter OR a policy hook override; policy overrides are always
-			//     re-checked against the validated subject token boundary above.
-			//   omitted + subject single    → inherit subject.aud IFF in allowlist;
-			//                                   else fall back to clientId (prevents
-			//                                   cross-client audience confusion when a
-			//                                   stolen subject token is exchanged by a
-			//                                   client outside its intended audience)
-			//   omitted + subject multi/none → fall back to clientId (safe default)
-			// Note: generateToken accepts a single-valued audience; when grantedAudience
-			// has multiple entries only the first is used. This is a known limitation
-			// (spec §8.1.1 multi-audience requires token introspection by all parties).
-			const subjectAud = subjectValidated.aud;
-			const audienceForToken: string = (() => {
-				if (grantedAudience && grantedAudience.length > 0)
-					return grantedAudience[0] ?? client.clientId; // `?? clientId` is forward-compat for noUncheckedIndexedAccess
-				// When audience is omitted, only inherit subject.aud if it's in the
-				// calling client's allowlist. Otherwise fall back to clientId. This
-				// prevents cross-client audience confusion: a malicious client cannot
-				// use a stolen subject_token to mint a token for an audience outside
-				// its own allowlist just by omitting the audience parameter.
-				//
-				// RFC 7519 §4.1.3 permits `aud` to be either a string or an array of
-				// strings. A single-element array is semantically equivalent to a
-				// bare string, so we accept both. Multi-element arrays cannot be
-				// represented as a single audience claim in the issued token (we
-				// emit a single-valued aud), so they fall back to clientId.
-				const single =
-					typeof subjectAud === "string"
-						? subjectAud
-						: Array.isArray(subjectAud) && subjectAud.length === 1
-							? subjectAud[0]
-							: undefined;
-				if (typeof single === "string") {
-					const allow = new Set([...(client.allowedAudiences ?? []), client.clientId]);
-					if (allow.has(single)) return single;
-				}
-				return client.clientId;
-			})();
 
 			if (requestedResource && requestedResource.length > 0) {
 				const missingResources = requestedResource.filter(
@@ -987,15 +925,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// or negative lifetime — dead on arrival, and indistinguishable
 				// at the resource server from a bug here — so it is a refusal
 				// the caller can read instead.
-				if (remaining <= 0) {
-					return {
-						result: {
-							status: 400,
-							error: "invalid_grant",
-							errorDescription: "subject_token has expired",
-						},
-					};
-				}
+				if (remaining <= 0) return invalidRequest("subject_token has expired");
 				expiresIn = Math.min(expiresIn, remaining);
 			}
 			// A subject token carrying no `exp` leaves the lifetime from steps 1
@@ -1049,6 +979,44 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			};
 		},
 	};
+}
+
+/**
+ * `400 invalid_request`, the one code RFC 8693 §2.2.2 gives a token-exchange
+ * request that is refused for what it presented: "If the request itself is
+ * not valid or if either the `subject_token` or `actor_token` are invalid for
+ * any reason, or are unacceptable based on policy, [...] the value of the
+ * `error` parameter MUST be the `invalid_request` error code."
+ *
+ * - **The request itself:** a missing or repeated parameter, `actor_token`
+ *   without `actor_token_type` or the reverse, a body `client_id` that is not
+ *   the authenticated client, a malformed `expires_in`, and a token type this
+ *   deployment has no validator for or cannot issue — RFC 6749 §5.2's "an
+ *   unsupported parameter value". Not `unsupported_token_type`: RFC 7009
+ *   registers that code for the revocation endpoint, and RFC 8693 defines no
+ *   token-type error.
+ * - **A presented token:** the validator's `null`, a sender-constraint row,
+ *   the refresh-token family rule, `may_act`, the actor-chain bound or the
+ *   subject's expiry. The §2.2.2 sentence is a MUST and covers every one of
+ *   them, so no other code is open to this grant for a refused token —
+ *   `invalid_grant` included. (The refresh grant, which §2.2.2 does not
+ *   govern, answers the same sender-constraint and family rows with RFC
+ *   6749's `invalid_grant` for its refresh token.)
+ *
+ * One code covers all of these, so the `error_description` is what tells a
+ * client which check refused it; each call site's description is part of the
+ * wire contract and the README names it. A description quotes a value with
+ * `'`: RFC 6749 §5.2 allows neither `"` nor `\` in one, and `/oauth/token`
+ * replaces any character outside its set with `?`.
+ *
+ * The request's other answers keep the codes the RFCs give them —
+ * `invalid_target` for an audience or resource (§2.2.2), `invalid_scope`,
+ * `invalid_client`, `unauthorized_client` — a policy decision past a ceiling
+ * is core's `policyOutOfBounds`, and a store that cannot answer is
+ * `503 temporarily_unavailable`, never a verdict on the request.
+ */
+function invalidRequest(errorDescription: string): GrantHandlerResult {
+	return { result: { status: 400, error: "invalid_request", errorDescription } };
 }
 
 /** What {@link parseRequestedExpiresIn} answers for a present, unusable value. */
@@ -1113,9 +1081,9 @@ function reportedFamily(validated: ValidatedToken): string | undefined {
  * This grant owns the rule, for both tokens; the built-in validator does not
  * read `refreshTokenFamilyRevocation`. A validator can only answer `null`,
  * which the handler reports as `… validation failed`, whereas a revoked family
- * has an answer of its own on `/oauth/token` — the refresh grant already gives
- * `family_revoked` there — and it tells the client that re-authenticating, not
- * retrying, is what helps.
+ * has a description of its own on `/oauth/token` — the refresh grant already
+ * gives `family_revoked` there — and it tells the client that
+ * re-authenticating, not retrying, is what helps.
  *
  * The rule keys on the family a validator asserts (`familyId`), not on the
  * token type the validator was registered for: the built-in validator can be
@@ -1130,7 +1098,11 @@ function reportedFamily(validated: ValidatedToken): string | undefined {
  * - The store throws: `503 temporarily_unavailable`, logged as
  *   `token_exchange_family_store_unavailable`, so an outage is never reported
  *   as a revoked token.
- * - The family is revoked: `invalid_grant` / `family_revoked`.
+ * - The family is revoked: `family_revoked`.
+ *
+ * Both refusals are {@link invalidRequest}s: an unverifiable or revoked family
+ * makes the token unacceptable, which RFC 8693 §2.2.2 answers
+ * `invalid_request`.
  *
  * The actor's descriptions carry the `actor_token ` prefix the handler's other
  * actor answers carry.
@@ -1146,15 +1118,9 @@ async function familyRefusal(
 		role === "actor" ? `actor_token ${description}` : description;
 	const revocation = deps.refreshTokenFamilyRevocation;
 	if (!revocation) {
-		return {
-			result: {
-				status: 400,
-				error: "invalid_grant",
-				errorDescription: forRole(
-					"refresh token family revocation not configured (revocation cannot be verified)",
-				),
-			},
-		};
+		return invalidRequest(
+			forRole("refresh token family revocation not configured (revocation cannot be verified)"),
+		);
 	}
 	let revoked: boolean;
 	try {
@@ -1170,13 +1136,42 @@ async function familyRefusal(
 		};
 	}
 	if (!revoked) return null;
-	return {
-		result: {
-			status: 400,
-			error: "invalid_grant",
-			errorDescription: forRole("family_revoked"),
-		},
-	};
+	return invalidRequest(forRole("family_revoked"));
+}
+
+/**
+ * The single audience an exchanged token is minted for (spec §8.1 rule 2):
+ *
+ * - an explicit audience → its first element. It is either the request
+ *   parameter or a policy hook override, each already held to the client's
+ *   registration and the subject token's audience;
+ * - omitted, and the subject names one audience → that audience, if the
+ *   client is registered for it, else the client's own id. This prevents
+ *   cross-client audience confusion: a client cannot use a stolen
+ *   subject_token to mint a token for an audience outside its own allowlist
+ *   just by omitting the audience parameter;
+ * - omitted, and the subject names several or none → the client's own id.
+ *
+ * RFC 7519 §4.1.3 lets `aud` be a string or an array; a one-element array is
+ * the same as the bare string. `generateToken` carries one audience, so a
+ * multi-element `grantedAudience` contributes only its first entry — a known
+ * limitation (spec §8.1.1: multi-audience needs introspection by every party).
+ */
+function issuedAudience(
+	grantedAudience: readonly string[] | undefined,
+	subjectAud: ValidatedToken["aud"],
+	clientAudienceSet: ReadonlySet<string>,
+	clientId: string,
+): string {
+	if (grantedAudience && grantedAudience.length > 0) return grantedAudience[0] ?? clientId; // `?? clientId` is forward-compat for noUncheckedIndexedAccess
+	const single =
+		typeof subjectAud === "string"
+			? subjectAud
+			: Array.isArray(subjectAud) && subjectAud.length === 1
+				? subjectAud[0]
+				: undefined;
+	if (typeof single === "string" && clientAudienceSet.has(single)) return single;
+	return clientId;
 }
 
 function subjectAudienceBoundary(

@@ -16,6 +16,7 @@
 
 import {
 	type AuditSink,
+	auditErrorText,
 	boundPolicyAudience,
 	buildCanonicalRequestUrl,
 	type ClientRepository,
@@ -28,10 +29,12 @@ import {
 	type GrantPolicyHook,
 	isEmailVerified,
 	isGrantTypeAllowed,
+	isWellFormedErrorCode,
 	type Logger,
 	matchesRegisteredRedirectUri,
 	type PendingConsentStore,
 	type PublicClient,
+	sanitizeErrorText,
 	type UserSession,
 	type UserSessionStore,
 	unrepresentedResources,
@@ -170,7 +173,11 @@ interface AuthorizeContext {
 const toStr = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
 
 // A-1: RFC 6749 §4.1.2.1 — errors that prevent redirect (invalid client / redirect_uri)
-// must return 400 JSON. Other errors redirect with error params.
+// must return 400 JSON. Other errors redirect with error params. The same
+// section limits `error_description` to %x20-21 / %x23-5B / %x5D-7E, and
+// several descriptions name what the client sent (a `response_type`, a PKCE
+// method, `prompt` or `acr_values` entries, a `resource`), so it is
+// sanitised here rather than at each call site.
 const redirectError = (
 	ctx: AuthorizeContext,
 	error: string,
@@ -178,7 +185,7 @@ const redirectError = (
 ): Response => {
 	const url = new URL(ctx.redirectUri);
 	url.searchParams.append("error", error);
-	url.searchParams.append("error_description", errorDescription);
+	url.searchParams.append("error_description", sanitizeErrorText(errorDescription));
 	if (typeof ctx.state === "string") url.searchParams.append("state", ctx.state);
 	return ctx.res.redirect(url.toString()) as unknown as Response;
 };
@@ -270,13 +277,14 @@ const checkResponseTypeIsCode = (ctx: AuthorizeContext): boolean => {
 	if (toStr(raw) !== "code") {
 		// The description names what actually arrived — a missing parameter and
 		// a repeated one are different client bugs, and `"undefined"` in quotes
-		// (the old rendering of both) pointed at neither.
+		// (the old rendering of both) pointed at neither. Quoted with `'`:
+		// `redirectError` holds the text to RFC 6749's character set.
 		const description =
 			raw === undefined
 				? "response_type is required"
 				: Array.isArray(raw)
 					? "response_type must not be included more than once"
-					: `response_type ${JSON.stringify(String(raw))} is not supported`;
+					: `response_type '${String(raw)}' is not supported`;
 		redirectError(ctx, "unsupported_response_type", description);
 		return false;
 	}
@@ -552,8 +560,8 @@ const checkPkce = (
 			ctx,
 			"invalid_request",
 			requestedMethod === undefined
-				? `code_challenge_method is required and must be "${PKCE_METHOD_S256}"`
-				: `code_challenge_method "${requestedMethod}" is not supported`,
+				? `code_challenge_method is required and must be '${PKCE_METHOD_S256}'`
+				: `code_challenge_method '${requestedMethod}' is not supported`,
 		);
 		return null;
 	}
@@ -698,7 +706,7 @@ const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 		redirectError(
 			ctx,
 			"invalid_request",
-			`prompt values not supported: ${unsupported.join(" ")} — this authorization server ` +
+			`prompt values not supported: ${unsupported.join(" ")}; this authorization server ` +
 				"has no account picker",
 		);
 		return null;
@@ -1122,7 +1130,21 @@ const applyGrantPolicy = async (
 			return null;
 		}
 		if (decision.outcome === "deny") {
-			redirectError(ctx, decision.error, decision.errorDescription ?? "policy denied");
+			// RFC 6749 §4.1.2.1 makes `error` 1*NQSCHAR. The policy's code goes
+			// out as given when it is one; otherwise the redirect says
+			// `access_denied` — the authorization server refused — and the code
+			// is logged, sanitised, for the operator who wrote the policy.
+			let error = decision.error;
+			if (!isWellFormedErrorCode(error)) {
+				ctx.opts.logger.warn(
+					{ error: auditErrorText(String(error)) },
+					"authorize_policy_deny_error_malformed",
+				);
+				error = "access_denied";
+			}
+			// A description that is empty or not a string is not sent (RFC 6749
+			// A.8 makes the field 1*NQSCHAR); the default is.
+			redirectError(ctx, error, sanitizeErrorText(decision.errorDescription) || "policy denied");
 			return null;
 		}
 		// Presence, not truthiness: `""` and `null` are a policy saying

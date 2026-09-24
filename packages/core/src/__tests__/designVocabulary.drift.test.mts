@@ -194,6 +194,14 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		definition: /(?:function|const)\s+unrepresentedResources\b/,
 	},
 	{
+		// RFC 6749 NQSCHAR, the whole class: a partial one (`\x21\x23-…`, the
+		// scope-token class NQCHAR) is a different concept and must not trip it.
+		concept: "RFC 6749 error text — the NQSCHAR class",
+		home: "packages/core/src/errors/envelope.mts",
+		definition: /\\x20-\\x21\\x23-\\x5B\\x5D-\\x7E/i,
+		homeMatches: 1,
+	},
+	{
 		concept: "WebAuthn algorithm pin (#516)",
 		home: "packages/webauthn/src/internal/options.mts",
 		definition: /(?:function|const)\s+WEBAUTHN_ALGORITHM_IDS\b|supportedAlgorithmIDs\s*:\s*\[\s*-/,
@@ -260,7 +268,7 @@ const POLICY_EVALUATE_EXEMPTIONS: Readonly<Record<string, { calls: number; reaso
 	"packages/oauth-token-exchange/src/grant.mts": {
 		calls: 1,
 		reason:
-			"RFC 8693's contract: the ceiling is the subject token, a widening is `invalid_target`, and `access_denied` is 403",
+			"its ceilings include the subject token's (scope: subject ∩ allowedScopes; audience: subject aud ∩ allowedAudiences ∪ {clientId}) and `access_denied` is 403; a policy scope or audience past them is `policyOutOfBounds` like the rest, the request's own audience past them RFC 8693 §2.2.2's `invalid_target`",
 	},
 };
 

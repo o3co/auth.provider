@@ -98,7 +98,8 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  * `validate` follows core's ExchangeTokenValidator contract. It returns
  * null when the token is not acceptable — bad signature, wrong typ,
  * missing/empty sub, expired, issuer mismatch, a denylisted or watermarked
- * token — and the grant answers `invalid_grant`. It throws when the answer is
+ * token — and the grant answers `invalid_request` / `subject_token validation
+ * failed` (`actor_token …` for the actor). It throws when the answer is
  * not knowable: a revocation store the central verifier could not consult
  * (`isRevocationUnavailable`), which the grant answers with
  * `503 temporarily_unavailable`. The token is refused either way.
@@ -147,8 +148,8 @@ export function createSelfIssuedAccessTokenValidator(
 			} catch (err) {
 				// An unreachable denylist or subject watermark is an outage, not a
 				// finding about the token: rethrown, so the grant answers 503 rather
-				// than an `invalid_grant` that tells the client to discard a
-				// credential that may be perfectly good. The refresh grant makes the
+				// than a refusal that tells the client to discard a credential
+				// that may be perfectly good. The refresh grant makes the
 				// same split. Every other verification failure is the token's.
 				if (isRevocationUnavailable(err)) throw err;
 				return null;

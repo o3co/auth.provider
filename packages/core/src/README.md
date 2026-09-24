@@ -52,7 +52,7 @@ The ports, the record types, and the rules every implementation must satisfy.
 | `discovery/` | `OidcDiscoveryContribution`, `buildDiscoveryDocument`, `discoveryPathsFor`, and the two hooks `boot/assemble-app.mts` calls: `planDiscoveryDocument` (whether a document is served, and the document, returning one that failed to validate as a value) and `discoveryRouteFor` (the route that serves it). | Mount anything itself, or import from `boot/`. | Keeps OIDC out of the generic planner: boot hands it values and gets an ordinary route contribution back. |
 | `adapters/` | `AdapterFactory`, `BuilderContext`, `LifecycleRegistrar`. | — | A leaf every adapter-owning directory builds on. |
 | `logging/` | `Logger` (pino-compatible), `EventLogger`, `consoleLogger`. | — | A leaf. |
-| `errors/` | The RFC 6749 §5.2 error envelope. | — | A leaf. |
+| `errors/` | The RFC 6749 §5.2 error envelope, and the characters its error text may carry (`sanitizeErrorText`, `auditErrorText`, `isWellFormedErrorCode`). | — | A leaf. |
 | `net/` | Loopback, origin, the redirect-URI grammar, canonical request URL, special-use addresses, trusted-proxy parsing. | — | A leaf: one home per network rule, most of them rows of the [design vocabulary](../../../docs/design-vocabulary.md). |
 | `security/` | `constantTimeStringEqual`. | Be used where an input's length is itself secret (see its contract). | A leaf. |
 
@@ -70,7 +70,7 @@ What a store implementer has to change for the required keys is [docs/upgrading-
 
 ### `token-exchange/`
 
-The port a token-exchange validator implements, defined in [`token-exchange/validator.mts`](./token-exchange/validator.mts): one validator per `subject_token_type` / `actor_token_type` URI; `null` is a validation failure (`invalid_grant`), a throw is an infrastructure failure (`503 temporarily_unavailable`); a `ValidatedToken`'s structured fields are projections of its `claims`. The grant that consumes it is `packages/oauth-token-exchange`. The contract is pinned as the `tokenExchangeValidators` contribution type in [`__tests__/contributes-map-substitution.test.mts`](./__tests__/contributes-map-substitution.test.mts).
+The port a token-exchange validator implements, defined in [`token-exchange/validator.mts`](./token-exchange/validator.mts): one validator per `subject_token_type` / `actor_token_type` URI; `null` is a validation failure (`invalid_request`, which RFC 8693 §2.2.2 requires for an invalid `subject_token` or `actor_token`), a throw is an infrastructure failure (`503 temporarily_unavailable`); a `ValidatedToken`'s structured fields are projections of its `claims`. The grant that consumes it is `packages/oauth-token-exchange`. The contract is pinned as the `tokenExchangeValidators` contribution type in [`__tests__/contributes-map-substitution.test.mts`](./__tests__/contributes-map-substitution.test.mts).
 
 ## Standard implementations
 

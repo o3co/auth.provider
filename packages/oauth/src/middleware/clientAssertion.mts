@@ -205,7 +205,7 @@ export function createClientAssertionVerifier(
 				return refuse(
 					401,
 					"invalid_client",
-					"client assertion iss and sub must both be the client_id (RFC 7523 §3)",
+					"client assertion iss and sub must both be the client_id (RFC 7523 section 3)",
 					"iss_sub_mismatch",
 				);
 			}
@@ -237,7 +237,7 @@ export function createClientAssertionVerifier(
 				return refuse(
 					401,
 					"invalid_client",
-					`tokenEndpointAuthMethod mismatch: client is configured for "${client.tokenEndpointAuthMethod}"`,
+					`tokenEndpointAuthMethod mismatch: client is configured for '${client.tokenEndpointAuthMethod}'`,
 					"method_mismatch",
 					{ clientId: iss },
 				);

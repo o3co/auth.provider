@@ -23,6 +23,7 @@ import {
 	createSymmetricKeyStore,
 	type FederationTokenStore,
 	type GrantHandler,
+	type Logger,
 	type RefreshTokenFamilyRevocation,
 	type SessionFamilyIndex,
 	type SessionFederationIndex,
@@ -35,6 +36,7 @@ import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import { createMockLogger } from "./_helpers/mockLogger.mjs";
 
 const mockConfig = {
 	// `oauth.jwt.issuer` is required by createOAuthRouter (#266) — the router
@@ -244,6 +246,7 @@ describe("createOAuthRouter", () => {
 			grantHandler: GrantHandler;
 			grantType: string;
 			auditSink?: AuditSink;
+			logger?: Logger;
 		}) {
 			const app = express();
 			app.set("trust proxy", 1);
@@ -258,6 +261,7 @@ describe("createOAuthRouter", () => {
 				codeRepository: integrationCodeRepo,
 				keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!"),
 				auditSink: opts.auditSink,
+				...(opts.logger ? { logger: opts.logger } : {}),
 			});
 			app.use("/oauth", router);
 			return app;
@@ -338,6 +342,207 @@ describe("createOAuthRouter", () => {
 			const failEvent = events.find((e) => e.type === "token.issued.failure");
 			expect(failEvent).toBeDefined();
 			expect(failEvent?.clientId).toBe(TEST_CLIENT_ID);
+		});
+
+		// A grant's `error` alone cannot tell its refusals apart — token
+		// exchange answers a malformed request and a stolen bound token alike
+		// with `invalid_request` (RFC 8693 §2.2.2) — so the audited `reason` is
+		// the handler's own `error_description`, the way the route's refusals
+		// carry theirs. The description can echo client input, so it is capped.
+		describe("audits a grant handler's refusal with its description as the reason", () => {
+			const refusing = async (errorDescription: string | undefined) =>
+				(await refusal(errorDescription)).details;
+			const refusal = async (errorDescription: string | undefined) => {
+				const events: AuditEvent[] = [];
+				const auditSink: AuditSink = {
+					kind: "spy",
+					record: async (e) => {
+						events.push(e);
+					},
+				};
+				const stubGrant: GrantHandler = {
+					handle: async () => ({
+						result: {
+							status: 400,
+							error: "invalid_request",
+							...(errorDescription === undefined ? {} : { errorDescription }),
+						},
+					}),
+				};
+				const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", auditSink });
+				const res = await request(app)
+					.post("/oauth/token")
+					.set("Authorization", TEST_BASIC_AUTH)
+					.type("form")
+					.send({ grant_type: "stub" });
+				await new Promise((r) => setImmediate(r));
+				return {
+					body: res.body as Record<string, unknown>,
+					details: events.find((e) => e.type === "token.issued.failure")?.details,
+				};
+			};
+
+			it("carries the description", async () => {
+				expect(await refusing("subject_token requires a DPoP proof")).toEqual({
+					grant_type: "stub",
+					error: "invalid_request",
+					reason: "subject_token requires a DPoP proof",
+				});
+			});
+
+			it("caps a long description at 200 characters, marking the cut", async () => {
+				const details = await refusing(`scope '${"x".repeat(1000)}' is not allowed`);
+				expect(details?.reason).toBe(`scope '${"x".repeat(190)}...`);
+				expect(String(details?.reason)).toHaveLength(200);
+			});
+
+			it("falls back to the error code when the handler gives no description", async () => {
+				expect((await refusing(undefined))?.reason).toBe("invalid_request");
+			});
+
+			// RFC 6749 §5.2: `error_description` is limited to %x20-21 / %x23-5B /
+			// %x5D-7E. Grant descriptions quote client input — a requested scope,
+			// audience or token type — so the route replaces every other
+			// character with `?` before anything is sent or audited.
+			it("replaces a double quote, a backslash, a control character and non-ASCII with '?'", async () => {
+				const { body, details } = await refusal(
+					"scope 'a\"b\\c\u0007d\u00e9e\u{1F600}f' is not in subject_token scope",
+				);
+				expect(body).toEqual({
+					error: "invalid_request",
+					error_description: "scope 'a?b?c?d?e?f' is not in subject_token scope",
+				});
+				expect(details?.reason).toBe("scope 'a?b?c?d?e?f' is not in subject_token scope");
+			});
+		});
+
+		// RFC 6749 §5.2: `error` is 1*NQSCHAR, the same characters. A grant can
+		// hand the route any code — a policy deny carries the policy's own —
+		// so one outside the set, or none, is answered `invalid_request` and
+		// logged, sanitised, naming the grant type.
+		it.each([
+			["a double quote", 'bad "code"', "bad ?code?"],
+			["nothing", "", ""],
+		])(
+			"answers invalid_request for a grant error code with %s, and logs it",
+			async (_label, code, logged) => {
+				const logger = createMockLogger();
+				const events: AuditEvent[] = [];
+				const auditSink: AuditSink = {
+					kind: "spy",
+					record: async (e) => {
+						events.push(e);
+					},
+				};
+				const stubGrant: GrantHandler = {
+					handle: async () => ({
+						result: { status: 400, error: code, errorDescription: "denied" },
+					}),
+				};
+				const app = await buildApp({
+					grantHandler: stubGrant,
+					grantType: "stub",
+					logger,
+					auditSink,
+				});
+				const res = await request(app)
+					.post("/oauth/token")
+					.set("Authorization", TEST_BASIC_AUTH)
+					.type("form")
+					.send({ grant_type: "stub" });
+				expect(res.status).toBe(400);
+				expect(res.body).toEqual({ error: "invalid_request", error_description: "denied" });
+				expect(logger.warn).toHaveBeenCalledWith(
+					{ grant_type: "stub", error: logged },
+					"token_error_code_malformed",
+				);
+				// The audit event records the code that went out, not the malformed one.
+				await new Promise((r) => setImmediate(r));
+				expect(events.find((e) => e.type === "token.issued.failure")?.details?.error).toBe(
+					"invalid_request",
+				);
+			},
+		);
+
+		// A grant can hand back a description that is not a string — core's
+		// policy evaluation passes a JavaScript policy's deny through. It is not
+		// coerced: the response carries no error_description, and the audit
+		// reason falls back to the code.
+		it("omits a grant description that is not a string, rather than failing", async () => {
+			const events: AuditEvent[] = [];
+			const auditSink: AuditSink = {
+				kind: "spy",
+				record: async (e) => {
+					events.push(e);
+				},
+			};
+			const stubGrant: GrantHandler = {
+				handle: async () => ({
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: 42 as unknown as string,
+					},
+				}),
+			};
+			const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", auditSink });
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({ grant_type: "stub" });
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({ error: "invalid_request" });
+			await new Promise((r) => setImmediate(r));
+			expect(events.find((e) => e.type === "token.issued.failure")?.details?.reason).toBe(
+				"invalid_request",
+			);
+		});
+
+		// The audit event of an unsupported grant_type records what the client
+		// sent, held to the same bounds as a handler refusal's reason.
+		it("audits the unsupported grant_type sanitised and capped", async () => {
+			const events: AuditEvent[] = [];
+			const auditSink: AuditSink = {
+				kind: "spy",
+				record: async (e) => {
+					events.push(e);
+				},
+			};
+			const stubGrant: GrantHandler = {
+				handle: async () => ({
+					result: { status: 200, tokens: { access_token: "x", token_type: "Bearer" } },
+				}),
+			};
+			const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", auditSink });
+			await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({ grant_type: `a"b${"x".repeat(300)}` });
+			await new Promise((r) => setImmediate(r));
+			const details = events.find((e) => e.type === "token.issued.failure")?.details;
+			expect(details?.reason).toBe("unsupported_grant_type");
+			expect(details?.grant_type).toBe(`a?b${"x".repeat(194)}...`);
+		});
+
+		it("sanitises the client's grant_type it echoes in unsupported_grant_type", async () => {
+			const stubGrant: GrantHandler = {
+				handle: async () => ({
+					result: { status: 200, tokens: { access_token: "x", token_type: "Bearer" } },
+				}),
+			};
+			const app = await buildApp({ grantHandler: stubGrant, grantType: "stub" });
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({ grant_type: 'x"y\\z\u0001\u00fc' });
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({
+				error: "unsupported_grant_type",
+				error_description: "grant_type 'x?y?z??' is not supported",
+			});
 		});
 
 		// #293 item 10: a missing required parameter is `invalid_request`
