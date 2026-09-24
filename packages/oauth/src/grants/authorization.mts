@@ -66,8 +66,13 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 	// `store` naming which and `step` the operation, with the error's
 	// projection — never the error, which can carry what the store was sent.
 	const storeUnavailable = (
-		store: "user_session" | "refresh_token_family" | "session_family_index" | "session_rp_registry",
-		step: "get" | "revalidate" | "register" | "add",
+		store:
+			| "authorization_code"
+			| "user_session"
+			| "refresh_token_family"
+			| "session_family_index"
+			| "session_rp_registry",
+		step: "consume" | "get" | "revalidate" | "register" | "add",
 		clientId: string,
 		err: unknown,
 	): void => {
@@ -166,8 +171,23 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 				};
 			}
 
-			// Atomically consume code data from repository (replay attack prevention)
-			const codeData = await codeRepository.consumeByCode(code);
+			// Atomically consume code data from repository (replay attack prevention).
+			// A store that cannot answer is `503`, logged — not the terminal
+			// handler's `500`: the client did nothing wrong, and the code may
+			// still be redeemable once the store is back.
+			let codeData: Awaited<ReturnType<typeof codeRepository.consumeByCode>>;
+			try {
+				codeData = await codeRepository.consumeByCode(code);
+			} catch (err) {
+				storeUnavailable("authorization_code", "consume", authenticatedClientId, err);
+				return {
+					result: {
+						status: 503,
+						error: "temporarily_unavailable",
+						errorDescription: "authorization code store unavailable",
+					},
+				};
+			}
 			if (!codeData) {
 				return {
 					result: {

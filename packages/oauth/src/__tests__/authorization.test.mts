@@ -2788,6 +2788,25 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		async delete() {},
 	});
 
+	it("the code store's consume: 503, not the terminal handler's 500", async () => {
+		const logger = createMockLogger();
+		const handler = createAuthorizationGrant({
+			...makeDeps(vi.fn().mockRejectedValue(outage())),
+			logger,
+		} as Parameters<typeof createAuthorizationGrant>[0]);
+		const { result } = await exchange(handler);
+		expect(result).toMatchObject({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "authorization code store unavailable",
+		});
+		expectOutageLine(logger, "authorization_grant_store_unavailable", {
+			store: "authorization_code",
+			step: "consume",
+			clientId: "client1",
+		});
+	});
+
 	it("the session read before any token is signed", async () => {
 		const logger = createMockLogger();
 		const handler = createAuthorizationGrant({
