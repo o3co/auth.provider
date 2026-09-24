@@ -24,6 +24,12 @@
  * hand; and the token appears in nothing the repository throws and in no
  * inspection of the repository itself.
  *
+ * And the other direction: with a token configured, a `401` carrying a
+ * `Bearer` challenge (RFC 6750 §3) is the Store refusing this deployment, so
+ * every one of the four requests throws it as an outage naming that cause; a
+ * `401` without one — or any `401` when no token is configured — keeps the
+ * meaning the wire contract gives it.
+ *
  * Without msw: what is asserted is the header that reaches the socket, and an
  * interceptor is one more thing between the two.
  */
@@ -300,6 +306,124 @@ describe("the token is in nothing the repository throws, and in no inspection of
 		);
 		expect(JSON.stringify(repo)).not.toContain(TOKEN);
 		expect(Object.values(repo).map(String).join("\n")).not.toContain(TOKEN);
+	});
+});
+
+describe("a Store that refuses this deployment's credential", () => {
+	/**
+	 * A Store that answers every request `401`, with these `WWW-Authenticate`
+	 * header lines (none when empty) and a body that says why — which nothing
+	 * thrown may repeat.
+	 */
+	const refusingStore = (challenges: readonly string[]) =>
+		serve((req, res) => {
+			req.resume();
+			req.on("end", () => {
+				res.writeHead(401, {
+					"Content-Type": "application/json",
+					...(challenges.length === 0 ? {} : { "WWW-Authenticate": [...challenges] }),
+				});
+				res.end(JSON.stringify({ error: "invalid_token", error_description: "who are you" }));
+			});
+		});
+
+	const INVALID_TOKEN = 'Bearer error="invalid_token", error_description="who are you"';
+
+	/** What the four answer a `401` that is not a refused credential: the wire contract, unchanged. */
+	const expectWireMeaningOf401 = async (repo: HttpUserRepository, origin: string) => {
+		await expect(repo.authenticate("alice", "pass")).resolves.toBeNull();
+		await expect(repo.authenticateByToken("apple:a1")).resolves.toBeNull();
+		await expect(repo.linkFederatedIdentity?.("u1", LINK)).resolves.toEqual({
+			ok: false,
+			reason: "refused",
+		});
+		await expect(repo.findSubjectByFederatedIdentity?.(IDENTITY)).rejects.toThrow(
+			`HttpUserRepository: identity lookup at ${origin}/lookup answered HTTP 401`,
+		);
+	};
+
+	it.each(calls)(
+		"%s: a 401 with a Bearer challenge is an outage that names the refused credential, never the token or the Store's words",
+		async (_name, path, call) => {
+			// Read as "no such user", a token the Store does not accept — a typo,
+			// a half-finished rotation — would fail every login as a wrong
+			// password and every link as a policy refusal, with nothing logged.
+			const origin = await refusingStore([INVALID_TOKEN]);
+			const repo = new HttpUserRepository({ ...urls(origin), bearerToken: TOKEN, timeout: 5000 });
+
+			const outcome = await Promise.resolve(call(repo)).then(
+				(value) => ({ resolved: value }),
+				(error: unknown) => ({ rejected: error }),
+			);
+
+			expect(outcome).toHaveProperty("rejected");
+			const error = (outcome as { rejected: unknown }).rejected;
+			expect(error).toBeInstanceOf(Error);
+			expect((error as Error).message).toContain(`${origin}${path}`);
+			expect((error as Error).message).toMatch(/refused this deployment's credential/);
+			expect((error as Error).message).toMatch(/CLIENT_USER_BEARER_TOKEN/);
+			expect(surfaced(error)).not.toContain(TOKEN);
+			expect(surfaced(error)).not.toContain("who are you");
+		},
+	);
+
+	it("a 401 without a Bearer challenge keeps its wire meaning, with a token configured or not", async () => {
+		for (const challenges of [[], ['Basic realm="store"']]) {
+			const origin = await refusingStore(challenges);
+			await expectWireMeaningOf401(
+				new HttpUserRepository({ ...urls(origin), bearerToken: TOKEN, timeout: 5000 }),
+				origin,
+			);
+			await expectWireMeaningOf401(
+				new HttpUserRepository({ ...urls(origin), timeout: 5000 }),
+				origin,
+			);
+		}
+	});
+
+	it("a Bearer challenge changes nothing when no token was sent — a Store whose stack challenges every 401 is unaffected", async () => {
+		const origin = await refusingStore([INVALID_TOKEN]);
+		await expectWireMeaningOf401(
+			new HttpUserRepository({ ...urls(origin), timeout: 5000 }),
+			origin,
+		);
+	});
+
+	it("finds the Bearer challenge in any case, among others and on its own header line — and not inside another's parameter", async () => {
+		const bearer = [
+			["Bearer"],
+			['bearer realm="store"'],
+			[`Basic realm="store", ${INVALID_TOKEN}`],
+			['Basic realm="store"', INVALID_TOKEN],
+			["Negotiate, BEARER"],
+		];
+		const notBearer = [
+			['Basic realm="Bearer"'],
+			['Basic realm="store, Bearer error=x"'],
+			["Bearerish"],
+			["Basic bearer=x"],
+			['DPoP algs="ES256"'],
+		];
+
+		const outcomes: unknown[] = [];
+		for (const challenges of [...bearer, ...notBearer]) {
+			const origin = await refusingStore(challenges);
+			const repo = new HttpUserRepository({ ...urls(origin), bearerToken: TOKEN, timeout: 5000 });
+			outcomes.push(
+				await repo.authenticate("alice", "pass").then(
+					(user) => ({ challenges, user }),
+					(error: unknown) => ({ challenges, rejected: (error as Error).message }),
+				),
+			);
+		}
+
+		expect(outcomes).toEqual([
+			...bearer.map((challenges) => ({
+				challenges,
+				rejected: expect.stringMatching(/refused this deployment's credential/),
+			})),
+			...notBearer.map((challenges) => ({ challenges, user: null })),
+		]);
 	});
 });
 

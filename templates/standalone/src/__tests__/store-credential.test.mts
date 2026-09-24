@@ -21,14 +21,34 @@
  * `"http"` user adapter → the `Authorization` header a real `node:http` Store
  * receives. Unset, the Store receives no `Authorization` header; set blank —
  * an exported-but-empty variable — the user repository is refused.
+ *
+ * And what a mismatch looks like from outside, with the app booted from the
+ * shipped config through `createApp`: a Store that refuses the token with a
+ * `401` and a `Bearer` challenge turns `POST /session/login` into a `503`
+ * whose log line names the refused credential and never the token; a `401`
+ * without the challenge is still a wrong password.
  */
 
-import { createServer, type Server } from "node:http";
+import { createServer, type OutgoingHttpHeaders, type Server } from "node:http";
 import { fileURLToPath } from "node:url";
-import { type AppConfig, AppConfigSchema, type UserRepository } from "@o3co/auth-provider-core";
+import { inspect } from "node:util";
+import {
+	type AppConfig,
+	AppConfigSchema,
+	createApp,
+	createKeyStoreFactory,
+	defineModule,
+	type Logger,
+	memoryRefreshTokenFamilyStoreModule,
+	registerBuiltinKeyStores,
+	type UserRepository,
+} from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
+import express from "express";
+import request from "supertest";
 import { afterEach, describe, expect, it } from "vitest";
+import { buildModules } from "../buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
 import { repositoriesModule } from "../modules.mjs";
 
@@ -48,15 +68,26 @@ afterEach(async () => {
 	servers = [];
 });
 
+/** How the Store answers every request. */
+interface StoreAnswer {
+	readonly status: number;
+	readonly headers?: OutgoingHttpHeaders;
+	readonly body: unknown;
+}
+
+const USER: StoreAnswer = { status: 200, body: { id: "user-1", username: "alice" } };
+
 /** A Store on its own loopback port that records each request's Authorization header. */
-const recordingStore = async (): Promise<{ origin: string; heard: (string | undefined)[] }> => {
+const recordingStore = async (
+	answer: StoreAnswer = USER,
+): Promise<{ origin: string; heard: (string | undefined)[] }> => {
 	const heard: (string | undefined)[] = [];
 	const server = createServer((req, res) => {
 		req.resume();
 		req.on("end", () => {
 			heard.push(req.headers.authorization);
-			res.writeHead(200, { "Content-Type": "application/json" });
-			res.end(JSON.stringify({ id: "user-1", username: "alice" }));
+			res.writeHead(answer.status, { "Content-Type": "application/json", ...answer.headers });
+			res.end(JSON.stringify(answer.body));
 		});
 	});
 	servers.push(server);
@@ -122,5 +153,124 @@ describe("CLIENT_USER_BEARER_TOKEN reaches the Store through the shipped composi
 
 		await expect(userRepositoryFrom(config)).rejects.toThrow(/"bearerToken" must not be empty/);
 		expect(heard).toEqual([]);
+	});
+});
+
+describe("a token the Store refuses, seen from outside the booted app", () => {
+	/** Every store on memory, so the boot opens no socket but the Store's. */
+	const MEMORY_ENV: Readonly<Record<string, string>> = {
+		SESSION_SECURE: "false",
+		SESSION_NAME: "auth.session",
+		SESSION_STORAGE_TYPE: "memory",
+		USER_SESSION_STORES_ADAPTER: "memory",
+		RATE_LIMITER_ADAPTER: "memory",
+		OAUTH_CODE_ADAPTER: "memory",
+		ACCESS_TOKEN_DENYLIST_ADAPTER: "memory",
+		REPLAY_SEEN_SET_ADAPTER: "memory",
+		FEDERATION_TOKEN_STORE_TYPE: "memory",
+		CONSENT_STORE_ADAPTER: "none",
+		FEDERATION_GRANT_STORE_ADAPTER: "memory",
+		FEDERATION_GRANT_INTENT_STORE_ADAPTER: "memory",
+	};
+
+	const testKeyStoreModule = defineModule({
+		name: "test:key-store",
+		requires: ["config"] as const,
+		provides: {
+			keyStore: async ({ config: c }) => {
+				const factory = createKeyStoreFactory();
+				registerBuiltinKeyStores(factory);
+				return factory.create({
+					type: "local",
+					...((c as AppConfig).oauth.jwt.signingKey.local ?? {}),
+				});
+			},
+		},
+	});
+
+	/** Every log call, as the arguments it was made with. */
+	const capturingLogger = (): { logger: Logger; lines: { level: string; args: unknown[] }[] } => {
+		const lines: { level: string; args: unknown[] }[] = [];
+		const at =
+			(level: string) =>
+			(...args: unknown[]): void => {
+				lines.push({ level, args });
+			};
+		const logger = {
+			trace: at("trace"),
+			debug: at("debug"),
+			info: at("info"),
+			warn: at("warn"),
+			error: at("error"),
+			fatal: at("fatal"),
+			child: () => logger,
+		} as Logger;
+		return { logger, lines };
+	};
+
+	let handleRef: Awaited<ReturnType<typeof createApp>> | undefined;
+	afterEach(async () => {
+		await handleRef?.dispose();
+		handleRef = undefined;
+	});
+
+	/**
+	 * The shipped config against a Store answering `answer`, booted with the
+	 * production repositories module; then a real browser login — a CSRF pair,
+	 * then the form post.
+	 */
+	const logInAgainst = async (answer: StoreAnswer) => {
+		const { origin, heard } = await recordingStore(answer);
+		const config = resolve({ ...envFor(origin), ...MEMORY_ENV, CLIENT_USER_BEARER_TOKEN: TOKEN });
+		const { logger, lines } = capturingLogger();
+		handleRef = await createApp({
+			modules: buildModules(config, {
+				keyStoreModule: testKeyStoreModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+			}),
+			bootstrapComponents: { config, pathResolver: (s: string) => s, logger },
+		});
+		const app = express().use(handleRef.router);
+
+		const csrf = await request(app).get("/session/csrf");
+		expect(csrf.status).toBe(200);
+		const login = await request(app)
+			.post("/session/login")
+			.set("Cookie", csrf.headers["set-cookie"] as unknown as string[])
+			.set(csrf.body.header_name as string, csrf.body.csrf_token as string)
+			.type("form")
+			.send({ username: "alice", password: "correct-horse-battery-staple" });
+		const logged = lines.map((line) =>
+			inspect(line, { depth: Number.POSITIVE_INFINITY, showHidden: true }),
+		);
+		return { login, heard, logged };
+	};
+
+	it("answers the login 503 and logs the refused credential by name, never the token", async () => {
+		const { login, heard, logged } = await logInAgainst({
+			status: 401,
+			headers: { "WWW-Authenticate": 'Bearer error="invalid_token"' },
+			body: { error: "invalid_token" },
+		});
+
+		expect(heard).toEqual([`Bearer ${TOKEN}`]);
+		expect(login.status).toBe(503);
+		expect(login.body.error).toBe("temporarily_unavailable");
+		expect(logged.filter((line) => /refused this deployment's credential/.test(line))).toHaveLength(
+			1,
+		);
+		expect(logged.filter((line) => line.includes(TOKEN))).toEqual([]);
+	});
+
+	it("still answers a 401 without the challenge as a wrong password", async () => {
+		const { login, heard, logged } = await logInAgainst({
+			status: 401,
+			body: { error: "invalid_credentials" },
+		});
+
+		expect(heard).toEqual([`Bearer ${TOKEN}`]);
+		expect(login.status).toBe(401);
+		expect(login.body.error).toBe("invalid_credentials");
+		expect(logged.filter((line) => /refused this deployment's credential/.test(line))).toEqual([]);
 	});
 });
