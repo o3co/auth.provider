@@ -84,7 +84,11 @@ export interface FakeIdp {
 	discoveryStatus: number;
 	/** Claims laid over the id_token defaults. */
 	idTokenClaims: Record<string, unknown>;
-	/** The nonce the next id_token echoes; absent when undefined. */
+	/**
+	 * The nonce a code exchange's id_token echoes for a code `authorize()` did
+	 * NOT issue; absent when undefined. A code `authorize()` issued carries its
+	 * own authorization's nonce, whatever this says.
+	 */
 	nonce: string | undefined;
 	/** Sign under the current key but claim this `kid` in the header. */
 	signingKid: string | undefined;

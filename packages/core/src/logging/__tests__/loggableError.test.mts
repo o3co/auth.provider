@@ -179,7 +179,7 @@ describe("loggableError — what a log line may carry of an error", () => {
 		expect(projected.match(/"message"/g)?.length).toBeLessThanOrEqual(4);
 	});
 
-	describe("a message a parser or a peer wrote is not trusted", () => {
+	describe("the known shapes in which a message quotes a peer are removed", () => {
 		it("drops a SyntaxError's message, which quotes the input it could not parse, and keeps the position", () => {
 			let failed: unknown;
 			try {

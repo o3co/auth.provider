@@ -16,14 +16,43 @@
 
 /*
  * `loggableError`: what a log line may carry of an error that came out of a
- * library or a store talking to another system. An allowlist of fields, not
- * the error, under one rule: a message written by code in this process from
- * fixed text is kept; a message a parser or a peer wrote is not trusted. An
- * error built from a parsed upstream response carries whatever that response
- * said — an OAuth library puts the token answer it refused on the cause
- * chain, a JSON parser quotes the text it could not parse, a Redis reply
- * error echoes the command it refused — and a token answer or a store write
- * is credentials. No state.
+ * library or a store talking to another system — an allowlist of fields,
+ * never the error. An error built from a parsed upstream response carries
+ * whatever that response said: an OAuth library puts the token answer it
+ * refused on the cause chain, a JSON parser quotes the text it could not
+ * parse, a Redis reply echoes the command it refused, and ioredis puts that
+ * command's arguments — a token record, for a store write under
+ * `allow-plaintext` — on the error. What the projection does, exactly:
+ *
+ * - `message`: kept, capped at 256 characters, with the two known quoting
+ *   shapes removed. A SyntaxError's message is dropped (V8's JSON.parse and
+ *   body-parser quote the input); only ` at position N` survives, as
+ *   `position`, N at most ten digits and none from a longer number. Redis's
+ *   `, with args beginning with: …` is cut from any message. Other text a
+ *   peer wrote into a message is kept: the projection cannot tell it from
+ *   this process's own.
+ * - `error_description`: the one peer-written string kept on purpose — an
+ *   operator needs "Token has been expired or revoked." — and only its first
+ *   line (split on CRLF or LF), when that line is within RFC 6749 §5.2's
+ *   character set (`%x20-21 / %x23-5B / %x5D-7E`) and carries no run of
+ *   twenty or more characters from `[A-Za-z0-9._~+/=-]`; capped at 256.
+ * - `stack`: the frames, never the header. The header (`name: message`) is
+ *   taken to be as many lines as the message has and dropped; of the lines
+ *   after it only those starting with four spaces and `at ` are kept; the
+ *   first ten of them, joined by `\n`, then cut at 2048 characters. Absent
+ *   when no frame is left.
+ * - Also kept: `name`; a string or numeric `code`; an integer `status`; a
+ *   string `type`; an `error` within §5.2's set; `response: { status,
+ *   contentType }` for a Response on the cause or on `response`; and the
+ *   Error causes, the same way, three deep. Every string is capped at 256.
+ * - Never kept: a cause that is not an Error, any other field (`command`,
+ *   `body`, `buffer`), and anything of a thrown value that is not an Error
+ *   but its `typeof`, as `thrown`.
+ * - It never throws: an error from another realm counts; a throwing getter
+ *   drops its field; a value the Error check cannot inspect reads as a
+ *   non-Error.
+ *
+ * No state.
  */
 
 /** The fields of an error a log line carries, and its Error causes the same way. */
@@ -181,27 +210,16 @@ const responseFields = (value: unknown): LoggableError["response"] | undefined =
 };
 
 /**
- * Project an error onto the fields a log line may carry.
+ * Project an error onto the fields a log line may carry — the rules are the
+ * file header's.
  *
- * Kept: `name`; `message`, except that a SyntaxError's is dropped (V8's
- * JSON.parse and body-parser both quote the input — keep only `position N`)
- * and Redis's echo of a refused command's arguments is cut; a string or
- * numeric `code`; an integer `status`; a string `type`; an `error` and an
- * `error_description` within RFC 6749 §5.2's character set; the status and
- * content type of a Response on the cause or on `response`; and the Error
- * causes the same way, three deep. Every string is capped at 256 characters.
- *
- * Never kept: a cause that is a plain object — where openid-client and
- * oauth4webapi put the answer they refused (`cause.cause.body` on a token
- * response: the access and refresh tokens) — a field of another shape
- * (`command`, `body`, `buffer`: a store's command, a parser's input), and
- * anything of a thrown value that is not an Error but its `typeof`.
- *
- * A logger that prints the whole error — every own property, `cause`
- * included — would otherwise write an upstream's credentials to the log. The
- * shipped `consoleLogger` and pino's default serializer do not, but a
- * deployment chooses its logger, so a call site that logs a library's or a
- * store's error hands the logger this instead of the error. It never throws.
+ * A logger that prints the whole error writes what its peer said to the
+ * log. Before this projection both shipped paths did so for a store error:
+ * pino's err serializer copies every enumerable property of an error —
+ * ioredis's `command.args` included — and `consoleLogger` hands the error to
+ * `console.*`, whose inspection prints them. A deployment chooses its logger,
+ * so a call site that logs a library's or a store's error hands the logger
+ * this instead of the error. It never throws.
  */
 export function loggableError(err: unknown): LoggableError {
 	return project(err, 0);

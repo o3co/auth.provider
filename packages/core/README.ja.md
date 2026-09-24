@@ -529,12 +529,14 @@ OIDC Discovery 1.0 メタデータエンドポイント。`config.oauth.jwt.issu
 
 [`loggableError(err)`](src/logging/loggableError.mts) は、他のシステムと話すライブラリやストアから出てきたエラーの代わりに呼び出し箇所がロガーへ渡すもの。core・`session`・`oauth` で捕捉したエラーを報告するロガー呼び出しはすべてこれを通り、`src/__tests__/logErrorProjection.drift.test.mts` がそれを保つ。
 
-規則: **このプロセスのコードが固定文から書いたメッセージは残す。パーサーや相手側が書いたメッセージは信用しない。** 解析した上流の応答から作られたエラーは、その応答が言ったことを何でも運ぶ — OAuth ライブラリは拒否したトークン応答を cause の連鎖に載せ、JSON パーサーは解析できなかったテキストを引用し、Redis の応答は拒否したコマンドを反復し、ioredis はそのコマンドの引数（ストアへの書き込みならトークンレコード）をエラーに載せる。
+理由: 解析した上流の応答から作られたエラーは、その応答が言ったことを何でも運ぶ — OAuth ライブラリは拒否したトークン応答を cause の連鎖に載せ、JSON パーサーは解析できなかったテキストを引用し、Redis の応答は拒否したコマンドを反復し、ioredis はそのコマンドの引数（`allow-plaintext` でのストアへの書き込みならトークンレコード）をエラーに載せる。射影がすること:
 
-- 残すもの: `name`、`message`（上限あり）、文字列または数値の `code`、整数の `status`、文字列の `type`（body-parser の `entity.too.large`）、RFC 6749 §5.2 の文字集合に収まる `error` と `error_description`、cause または `response` にある `Response` の `response: { status, contentType }`（ゲートウェイの 503 ページ）、そして同じ形の Error である cause（3 段まで）。
-- 信用しないもの: `SyntaxError` の `message` は捨てる — V8 の `JSON.parse` も body-parser も入力を引用する — そして ` at position N`（10 桁まで）だけを `position` として残す。Redis の `, with args beginning with: …` は、どのクライアントのクラスが運んでいてもすべてのメッセージから切り取る。
+- **`message`** は残し、既知の引用の形を二つ取り除く: `SyntaxError` の message は捨てる — V8 の `JSON.parse` も body-parser も入力を引用する — ` at position N`（10 桁まで）だけを `position` として残す。Redis の `, with args beginning with: …` は、どのクライアントのクラスが運んでいてもすべてのメッセージから切り取る。相手側がメッセージに書いたそれ以外のテキストは残る: 射影はそれをこのプロセス自身のテキストと区別できない。
+- **`error_description`** は意図して残す唯一の相手側の文字列 — 失効したグラントと壊れたクライアントを見分けるため: 最初の行だけ（Azure AD の AADSTS の行で、Trace ID の行は含まない）を、その行が RFC 6749 §5.2 の文字集合に収まり、トークンになりうる文字（`[A-Za-z0-9._~+/=-]`）が 20 文字以上続かないとき — 古い Spring は "Invalid refresh token: <トークン>" と反復する。
+- **`stack`** はフレームを残し、メッセージを運ぶヘッダー行は決して残さない: フレームは 10 個、2048 文字まで、cause のそれぞれでも同じ。
+- ほかに残すもの: `name`、文字列または数値の `code`、整数の `status`、文字列の `type`（body-parser の `entity.too.large`）、§5.2 の文字集合に収まる `error`、cause または `response` にある `Response` の `response: { status, contentType }`（ゲートウェイの 503 ページ）、そして同じ形の Error である cause（3 段まで）。
 - 決して残さないもの: Error でない cause（openid-client が拒否した応答を置く場所）、それ以外のフィールド（`command`、`body`、`buffer`）、そして Error でない値を投げた場合は `typeof` 以外の何も（`thrown` として）。
-- 文字列はすべて 256 文字で切る。例外は投げない: 別 realm のエラーも Error と数え、例外を投げる getter はそのフィールドを落とし、Error かどうかの判定ができない値（Node 22 の敵対的な Proxy）は Error でないものとして読む。
+- 文字列はすべて 256 文字で切る。例外は投げない。pino の下では `type` はエラーの名前になる。
 
 ## 関連
 
