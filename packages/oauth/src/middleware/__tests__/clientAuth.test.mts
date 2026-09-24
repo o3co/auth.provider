@@ -311,7 +311,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 	});
 
 	describe("repository fail-closed", () => {
-		it("returns 401 fail-closed when findById throws — no error_description leak", async () => {
+		it("returns 503 fail-closed when findById throws — an outage, no store detail leaked", async () => {
 			const throwingRepo: ClientRepository = {
 				findById: async () => {
 					throw new Error("store unavailable");
@@ -322,13 +322,16 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			app.post("/test", createClientAuthMiddleware(throwingRepo), (_req, res) => res.end());
 			const basic = Buffer.from("alice:s3cret").toString("base64");
 			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
-			expect(res.status).toBe(401);
-			expect(res.body.error).toBe("invalid_client");
-			expect(res.body.error_description).toBeUndefined();
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "client repository unavailable",
+			});
+			expect(res.headers["www-authenticate"]).toBeUndefined();
 			expect(JSON.stringify(res.body)).not.toContain("store unavailable");
 		});
 
-		it("returns 401 fail-closed when authenticate throws — no error_description leak", async () => {
+		it("returns 503 fail-closed when authenticate throws — an outage, no store detail leaked", async () => {
 			const throwingRepo: ClientRepository = {
 				findById: async (id) =>
 					id === "alice" ? buildPublicClient(basicConfidential("alice", "s3cret")) : null,
@@ -340,12 +343,12 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			app.post("/test", createClientAuthMiddleware(throwingRepo), (_req, res) => res.end());
 			const basic = Buffer.from("alice:s3cret").toString("base64");
 			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
-			expect(res.status).toBe(401);
-			expect(res.body.error).toBe("invalid_client");
-			expect(res.body.error_description).toBeUndefined();
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+			expect(JSON.stringify(res.body)).not.toContain("store unavailable");
 		});
 
-		it("body-path: returns 401 fail-closed when authenticate throws — no WWW-Authenticate (body attempt)", async () => {
+		it("body-path: returns 503 fail-closed when authenticate throws — no WWW-Authenticate", async () => {
 			// Confidential client_secret_post + authenticate throws → rejectPlain
 			// (no Basic challenge — the caller never tried Basic).
 			const throwingRepo: ClientRepository = {
@@ -361,10 +364,9 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 				.post("/test")
 				.type("form")
 				.send({ client_id: "alice", client_secret: "s3cret" });
-			expect(res.status).toBe(401);
-			expect(res.body.error).toBe("invalid_client");
-			expect(res.body.error_description).toBeUndefined();
-			// Body-path failure → no Basic challenge.
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+			// An outage carries no Basic challenge.
 			expect(res.headers["www-authenticate"]).toBeUndefined();
 		});
 
@@ -387,7 +389,7 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			expect(res.headers["www-authenticate"]).toBeUndefined();
 		});
 
-		it("body-path: returns 401 fail-closed when findById throws — no WWW-Authenticate (body attempt)", async () => {
+		it("body-path: returns 503 fail-closed when findById throws — no WWW-Authenticate", async () => {
 			// Body-only client_id + findById throws → rejectPlain. The Basic-path
 			// version (line 266) is covered above; this exercises the matching
 			// rejectPlain branch when no Authorization header was supplied.
@@ -403,9 +405,8 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 				.post("/test")
 				.type("form")
 				.send({ client_id: "alice", client_secret: "s3cret" });
-			expect(res.status).toBe(401);
-			expect(res.body.error).toBe("invalid_client");
-			expect(res.body.error_description).toBeUndefined();
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
 			expect(res.headers["www-authenticate"]).toBeUndefined();
 			expect(JSON.stringify(res.body)).not.toContain("store unavailable");
 		});
@@ -607,10 +608,10 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 				trace: () => {},
 				debug: () => {},
 				info: () => {},
-				warn: (ctx: unknown, msg?: string) => {
+				warn: () => {},
+				error: (ctx: unknown, msg?: string) => {
 					calls.push({ ctx, msg });
 				},
-				error: () => {},
 				fatal: () => {},
 				child: () => logger,
 			};
@@ -624,8 +625,9 @@ describe("createClientAuthMiddleware (D-6 PB-2)", () => {
 			app.post("/test", createClientAuthMiddleware(throwingRepo, logger), (_req, res) => res.end());
 			const basic = Buffer.from("alice:s3cret").toString("base64");
 			const res = await request(app).post("/test").set("Authorization", `Basic ${basic}`);
-			expect(res.status).toBe(401);
-			expect(calls.length).toBeGreaterThan(0);
+			expect(res.status).toBe(503);
+			// The outage reached the logger handed in, at error level.
+			expect(calls.map((call) => call.msg)).toContain("client_repository_unavailable");
 		});
 	});
 

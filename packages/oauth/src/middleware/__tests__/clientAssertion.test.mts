@@ -186,7 +186,7 @@ describe("createClientAssertionVerifier (#484)", () => {
 			});
 		});
 
-		it("refuses an unknown client, and fails closed when the lookup throws", async () => {
+		it("refuses an unknown client, and fails closed — as an outage — when the lookup throws", async () => {
 			expect(refused(await build().verify(body(await mint()), findClient(null)))).toMatchObject({
 				status: 401,
 				error: "invalid_client",
@@ -195,8 +195,8 @@ describe("createClientAssertionVerifier (#484)", () => {
 				throw new Error("store down");
 			});
 			expect(refused(await build().verify(body(await mint()), throwing))).toMatchObject({
-				status: 401,
-				error: "invalid_client",
+				status: 503,
+				error: "temporarily_unavailable",
 			});
 		});
 
@@ -524,9 +524,10 @@ describe("createClientAssertionVerifier (#484)", () => {
 			});
 			const { logger, lines } = recordingLogger();
 			const outcome = await build({ logger }).verify(body(await mint()), lookup);
-			expect(refused(outcome)).toMatchObject({ status: 401, error: "invalid_client" });
+			// An outage, not a failed authentication (the client did nothing wrong).
+			expect(refused(outcome)).toMatchObject({ status: 503, error: "temporarily_unavailable" });
 			expect(lines).toHaveLength(1);
-			expect(lines[0]).toContain("lookup_failed");
+			expect(lines[0]).toContain("client_repository_unavailable");
 			expect(lines[0]).not.toContain("body-must-never-reach-a-log");
 		});
 

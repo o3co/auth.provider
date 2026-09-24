@@ -244,11 +244,16 @@ export function createClientAssertionVerifier(
 			try {
 				client = await findClient(iss);
 			} catch (err) {
-				// Fail closed, as the secret-based path does.
-				return refuse(401, "invalid_client", "Client lookup failed", "lookup_failed", {
-					err,
-					clientId: iss,
-				});
+				// Fail closed, as the secret-based path does — as the server's
+				// outage, not a failed authentication: the client did nothing
+				// wrong, and `invalid_client` would tell it its credential is bad.
+				return refuse(
+					503,
+					"temporarily_unavailable",
+					"client repository unavailable",
+					"client_repository_unavailable",
+					{ err, clientId: iss },
+				);
 			}
 			if (!client) {
 				return refuse(401, "invalid_client", "Unknown client", "unknown_client", { clientId: iss });
