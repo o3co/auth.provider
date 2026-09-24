@@ -513,7 +513,7 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 						userAgent: req.get("user-agent"),
 						// The error's name and code, never its message: an IdP's
 						// refusal carries the IdP's own words.
-						details: { federation: name, error: auditedError(error) },
+						details: { federation: name, cause: auditedError(error) },
 					});
 					return res.status(200).json({ disconnected: true });
 				}

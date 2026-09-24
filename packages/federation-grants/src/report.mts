@@ -198,14 +198,55 @@ const sanitizePayload = (payload: Record<string, unknown>): Record<string, unkno
 	return safe;
 };
 
+/** The longest name or code an audited error is allowed: `auditErrorText`'s cap. */
+const AUDITED_FIELD_MAX_LENGTH = 200;
+
+const auditedField = (value: unknown): value is string =>
+	typeof value === "string" && value.length <= AUDITED_FIELD_MAX_LENGTH;
+
+/**
+ * `value` rebuilt as core's `AuditedError` — `{ name, code?, cause?: { name,
+ * code? } }`, bounded strings and nothing else — or `undefined` when it is
+ * not one. What `auditedError` writes passes; anything carrying other fields
+ * (a message) or other types is not an audited error.
+ */
+const auditedErrorShape = (value: unknown, depth = 0): Record<string, unknown> | undefined => {
+	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+	const { name, code, cause, ...rest } = value as Record<string, unknown>;
+	if (Object.keys(rest).length > 0 || !auditedField(name)) return undefined;
+	if (code !== undefined && !auditedField(code)) return undefined;
+	const nested = cause === undefined || depth > 0 ? undefined : auditedErrorShape(cause, depth + 1);
+	if (cause !== undefined && nested === undefined) return undefined;
+	return {
+		name,
+		...(code !== undefined ? { code } : {}),
+		...(nested !== undefined ? { cause: nested } : {}),
+	};
+};
+
+/**
+ * An audit event's details: {@link sanitizePayload}, except that `cause` —
+ * core's `auditedError`, the one field an event carries an error in — passes
+ * when it is an audited error and nothing more.
+ */
+const sanitizeAuditDetails = (details: Record<string, unknown>): Record<string, unknown> => {
+	const { cause, ...rest } = details;
+	const audited = cause === undefined ? undefined : auditedErrorShape(cause);
+	return {
+		...sanitizePayload(rest),
+		...(cause === undefined ? {} : { cause: audited ?? "[redacted]" }),
+	};
+};
+
 /**
  * The audit sink handed to the shared rate-limit guard.
  *
- * Its `rate_limit.unavailable` event carries `details.error` — core's
- * `auditedError`, the limiter exception's name and code — and the sink holds
- * every event's details to the same allowlist the logger does, whatever core
- * puts there. The event itself is kept: an operator's dashboard counts
- * limiter outages, and the count is the useful part.
+ * Its `rate_limit.unavailable` event carries `details.cause` — core's
+ * `auditedError`, the limiter exception's name and code — which passes when it
+ * is exactly that shape; every other detail is held to the same allowlist the
+ * logger is, whatever core puts there. The event itself is kept: an
+ * operator's dashboard counts limiter outages, and the count is the useful
+ * part.
  */
 export function createSanitizedAuditSink(sink: AuditSink): AuditSink {
 	return {
@@ -213,7 +254,7 @@ export function createSanitizedAuditSink(sink: AuditSink): AuditSink {
 		record: (event) =>
 			sink.record({
 				...event,
-				...(event.details === undefined ? {} : { details: sanitizePayload(event.details) }),
+				...(event.details === undefined ? {} : { details: sanitizeAuditDetails(event.details) }),
 			}),
 	};
 }

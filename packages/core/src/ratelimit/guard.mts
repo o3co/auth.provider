@@ -141,9 +141,9 @@ export const checkWithFailMode = async (
 		// a limiter's error is a store's (a Redis reply echoes the command it
 		// refused), so its message is read through loggableError, and a thrown
 		// non-Error says what kind it was, not what it held. The audit event
-		// keeps less: the error's name and code (`auditedError`), because a
-		// sink is a record other systems read, and the message is still a
-		// store's words.
+		// keeps less: the error's name and code (`auditedError`) as
+		// `details.cause`, because a sink is a record other systems read, and
+		// the message is still a store's words.
 		const projected = loggableError(cause);
 		const reported = projected.detail ?? projected.name;
 		const ip = ctx.ip ?? "unknown";
@@ -158,7 +158,7 @@ export const checkWithFailMode = async (
 			userAgent: ctx.userAgent,
 			details: {
 				tag,
-				error: auditedError(cause),
+				cause: auditedError(cause),
 			},
 		});
 		return { status: "unavailable", failMode };

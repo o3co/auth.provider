@@ -222,7 +222,8 @@ describe("createSanitizedLogger", () => {
 		void sanitized.record({
 			timestamp: new Date(),
 			type: "rate_limit.unavailable",
-			details: { tag: "federation_grants", cause: { name: "Error", message: SENTINEL } },
+			// What a JavaScript emitter could hand over: the type refuses it.
+			details: { tag: "federation_grants", cause: { name: "Error", message: SENTINEL } as never },
 		});
 		expect((recorded[0] as { details: Record<string, unknown> }).details).toEqual({
 			tag: "federation_grants",
