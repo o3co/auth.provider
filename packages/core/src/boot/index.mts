@@ -71,6 +71,7 @@ export type {
 	ListCollector,
 	ListShapedOverrideDetails,
 	MissingRequiredComponentDetails,
+	ModuleFactoryNotCalledDetails,
 	NameKeyedCollector,
 	NormalisedModule,
 	OrderedRouteContribution,

@@ -50,6 +50,7 @@ describe("stage-1 check registries (#368)", () => {
 
 	it("keeps the documented order — the spec steps run in spec order, guards after config parse", () => {
 		expect(STAGE_ONE_PRE_CONFIG_CHECKS.map((c) => c.id)).toEqual([
+			"module-entries-are-manifests",
 			"unique-module-names",
 			"provides-closure",
 			"bootstrap-synthetic-disjointness",

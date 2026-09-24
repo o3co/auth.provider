@@ -18,9 +18,11 @@
  * boot/validate-manifests.mts — Stage 1 of the A2-β boot planner pipeline.
  *
  * Accepts the consumer's `Module[]`, `bootstrapComponents`,
- * `contributionKinds`, and `overrideComponents`; runs 14 ordered sub-checks
- * against the manifests; emits `ValidatedManifests` on success or throws a
- * typed `BootError` on the first violation in input-array order.
+ * `contributionKinds`, and `overrideComponents`; runs the two ordered check
+ * registries below against the manifests — the first row refusing an entry
+ * that is a module factory rather than the manifest it builds; emits
+ * `ValidatedManifests` on success or throws a typed `BootError` on the first
+ * violation in input-array order.
  *
  * The stage is **deterministic and side-effect-free**: same inputs → same
  * output / same error.
@@ -162,6 +164,36 @@ const BUILTIN_CONTRIBUTION_KINDS = new Set<string>([
 	"tokenBindingMechanisms",
 	"discoveryMetadata",
 ]);
+
+// ---------------------------------------------------------------------------
+// Before step 1 — every entry is a manifest
+// ---------------------------------------------------------------------------
+
+/**
+ * A `modules` entry that is a function is a module factory listed without
+ * being called — `deviceGrantModule` where `deviceGrantModule({ config })`
+ * was meant. `Module` requires only `name`, and a function has one, so the
+ * compiler accepts the entry; every other check below would then read it as
+ * a manifest that declares nothing, and boot would succeed with the module's
+ * grants, routes and refusals all silently absent. Refused first, before any
+ * check reads a field of it.
+ * @internal
+ */
+function checkModuleEntriesAreManifests(modules: readonly Module[]): void {
+	modules.forEach((entry, index) => {
+		if (typeof entry !== "function") return;
+		const name = (entry as { name?: unknown }).name;
+		const label = typeof name === "string" && name !== "" ? name : "<anonymous>";
+		throw new BootError({
+			message:
+				`module entry "${label}" is a function — call it (e.g. ${label}({ config })) ` +
+				`and list the module it returns (modules[${index}]).`,
+			reason: "module-factory-not-called",
+			stage: "validateManifests",
+			details: { reason: "module-factory-not-called", index, name: label },
+		});
+	});
+}
 
 // ---------------------------------------------------------------------------
 // Step 1 — Module identity uniqueness
@@ -1558,6 +1590,11 @@ const freezeChecks = (checks: readonly StageOneCheck[]): readonly StageOneCheck[
 	Object.freeze(checks.map((check) => Object.freeze(check)));
 
 export const STAGE_ONE_PRE_CONFIG_CHECKS: readonly StageOneCheck[] = freezeChecks([
+	{
+		id: "module-entries-are-manifests",
+		spec: "A2-β §5.1 step 1 (precondition: each entry is a manifest, not its factory)",
+		run: (ctx) => checkModuleEntriesAreManifests(ctx.rawModules),
+	},
 	{
 		id: "unique-module-names",
 		spec: "A2-β §5.1 step 1",
