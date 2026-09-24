@@ -15,7 +15,7 @@
  */
 
 /**
- * logErrorProjection.drift.test.mts — no log line in core, session or oauth
+ * logErrorProjection.drift.test.mts — no log line in the listed packages
  * hands a logger a caught error as it is.
  *
  * A store's or a library's error carries whatever the system it talked to
@@ -23,16 +23,34 @@
  * `encryption.mode = "allow-plaintext"`, a token record), openid-client puts
  * the token answer it refused on `cause.cause.body`, a JSON parser quotes its
  * input in `message`. A logger that serialises the whole error writes all of
- * it out, and a deployment chooses its logger. So every logger call in these
- * packages passes a caught error through `loggableError(...)` — the
- * projection core owns — and never the error, nor its `message` or
- * `String(...)` of it.
+ * it out, and a deployment chooses its logger. So every logger call passes a
+ * caught error through `loggableError(...)` — the projection core owns — and
+ * never the error, nor anything read off it.
  *
- * What counts as passing the error: an object property `err` / `error`
- * that is shorthand or holds an error-named identifier as it is; a bare
- * identifier that names an error (`err`, `error`, `e`, `cause`, `*Err`,
- * `*Error`) as a positional argument after the message; and `<err>.message`
- * or `String(<err>)` anywhere in the arguments. Comments are ignored.
+ * What it flags, per file: a name bound as a caught error — `catch (x)`,
+ * `.catch((x) => …)` / `.catch(x => …)` / `.catch(function (x) …)`, and
+ * `.on("error", (x) => …)` / `.once(…)` — used anywhere in the arguments of
+ * a logger call (`log.`, `logger.`, `….logger.` with a level or `child`;
+ * `console.`) other than as an object key, as the argument of
+ * `loggableError(...)`, or as another object's field (`result.err`); inside
+ * a template literal's `${…}` too. A name that merely looks like an error —
+ * a policy's `error` code — is not flagged.
+ *
+ * What it does not see (known holes, left to review):
+ * - an error that reaches a log call under a name no `catch` / `.catch` /
+ *   `.on("error")` bound in that file: a node-style callback parameter
+ *   (`session.save((err) => …)`), a re-bound value (`const failure = err`),
+ *   an `allSettled` result's `reason`, a helper's parameter that it logs;
+ * - an error flattened into a value before the call (`const reason =
+ *   err.message`, then `{ reason }`);
+ * - a logger reached some other way (a destructured `warn`, `logger[level]`),
+ *   and an audit sink, which is not a logger;
+ * - bindings are per file, not per scope: a variable elsewhere in the file
+ *   that shares a caught error's name is flagged too (rename it).
+ *
+ * The packages are `PACKAGES` below. redis, device-grant, dpop,
+ * oauth-token-exchange and the standalone template still log six raw errors
+ * between them; the follow-up that converts those sites adds them here.
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -41,11 +59,43 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 const repoRoot = fileURLToPath(new URL("../../../..", import.meta.url));
-const PACKAGES = ["core", "session", "oauth"] as const;
+/**
+ * The packages held to the rule — a path under `packages/`. Widen it with the
+ * follow-up: `redis`, `device-grant`, `dpop`, `oauth-token-exchange`, and the
+ * standalone template (under `templates/`, not `packages/`).
+ */
+const PACKAGES: readonly string[] = ["core", "session", "oauth"];
 
-const ERROR_NAME = "(?:err|error|e|cause|[a-z][A-Za-z]*Err|[a-z][A-Za-z]*Error)";
+/** A logger call: a level (or `child`) on `log`, `logger` or `….logger`, and `console`'s. */
 const LOGGER_CALL =
-	/\b(?:log|logger|(?:\w+\.)+logger)\??\.(?:trace|debug|info|warn|error|fatal)\(/g;
+	/\b(?:(?:log|logger|(?:\w+\.)+logger)\??\.(?:trace|debug|info|warn|error|fatal|child)|console\.(?:log|trace|debug|info|warn|error))\(/g;
+
+const IDENTIFIER = "[A-Za-z_$][\\w$]*";
+
+/** Where a caught error is bound: `catch (x)`, `.catch(…x…)`, `.on("error", …x…)`. */
+const CATCH_BINDINGS = [
+	new RegExp(String.raw`\bcatch\s*\(\s*(?:async\s*)?\(?\s*(${IDENTIFIER})\s*[):,=]`, "g"),
+	new RegExp(
+		String.raw`\.catch\(\s*(?:async\s+)?function\s*${IDENTIFIER}?\s*\(\s*(${IDENTIFIER})`,
+		"g",
+	),
+	new RegExp(
+		String.raw`\.(?:on|once)\(\s*["'\x60]error["'\x60]\s*,\s*(?:async\s*)?(?:function\s*${IDENTIFIER}?\s*)?\(?\s*(${IDENTIFIER})`,
+		"g",
+	),
+];
+
+/** Every name the file binds as a caught error. */
+function caughtNames(source: string): ReadonlySet<string> {
+	const names = new Set<string>();
+	for (const binding of CATCH_BINDINGS) {
+		for (const match of source.matchAll(binding)) {
+			const name = match[1];
+			if (name !== undefined && name !== "function" && name !== "async") names.add(name);
+		}
+	}
+	return names;
+}
 
 function sourceFiles(dir: string): string[] {
 	const out: string[] = [];
@@ -87,49 +137,50 @@ function argumentsFrom(source: string, open: number): string {
 const literalsBlanked = (text: string): string =>
 	text.replace(/`(?:\\[\s\S]|[^`\\])*`|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, '""');
 
-/** The top-level comma-separated arguments. */
-function topLevelArguments(text: string): string[] {
-	const parts: string[] = [];
-	let depth = 0;
-	let start = 0;
-	for (let i = 0; i < text.length; i++) {
-		const c = text[i];
-		if (c === "(" || c === "{" || c === "[") depth++;
-		else if (c === ")" || c === "}" || c === "]") depth--;
-		else if (c === "," && depth === 0) {
-			parts.push(text.slice(start, i));
-			start = i + 1;
+/** The expressions inside every template literal's `${…}`, in text blanked of other literals. */
+function templateExpressions(text: string): string[] {
+	const out: string[] = [];
+	for (const template of text.matchAll(/`(?:\\[\s\S]|[^`\\])*`/g)) {
+		for (const expression of template[0].matchAll(/\$\{([^}]*)\}/g)) {
+			out.push(expression[1] ?? "");
 		}
 	}
-	parts.push(text.slice(start));
-	return parts.map((part) => part.trim()).filter((part) => part.length > 0);
+	return out;
 }
 
-const RAW_PROPERTY = /[{,]\s*(?:err|error)\s*(?=[,}])/;
-/** `err` / `error` holding an error-named identifier as it is, not a call on or a read of it. */
-const PROPERTY_NOT_PROJECTED = new RegExp(
-	String.raw`\b(?:err|error)\s*:\s*${ERROR_NAME}\b(?!\s*[(.])`,
-);
-const BARE_ERROR_ARGUMENT = new RegExp(`^${ERROR_NAME}$`);
-const MESSAGE_OR_STRING = new RegExp(
-	String.raw`\b${ERROR_NAME}\.message\b|\bString\(\s*${ERROR_NAME}\s*\)`,
-);
+/**
+ * Whether `text` uses `name` other than as an object key, as the argument of
+ * `loggableError(...)`, or as another object's field.
+ */
+function usesRaw(text: string, name: string): boolean {
+	const occurrence = new RegExp(String.raw`(?<![\w$.])${name.replace(/\$/g, "\\$")}(?![\w$])`, "g");
+	for (const match of text.matchAll(occurrence)) {
+		const at = match.index ?? 0;
+		const before = text.slice(0, at);
+		const after = text.slice(at + name.length);
+		if (/loggableError\(\s*$/.test(before) && /^\s*\)/.test(after)) continue;
+		if (/[{,]\s*$/.test(before) && /^\s*:/.test(after)) continue;
+		return true;
+	}
+	return false;
+}
 
 /** The line of every logger call in `original` that passes a caught error as it is. */
 function sitesIn(original: string): number[] {
 	const source = withoutComments(original);
+	const names = caughtNames(source);
 	const lines: number[] = [];
+	if (names.size === 0) return lines;
 	for (const call of source.matchAll(LOGGER_CALL)) {
 		const open = (call.index ?? 0) + call[0].length - 1;
-		const args = literalsBlanked(argumentsFrom(source, open));
-		const positional = topLevelArguments(args).slice(1);
-		if (
-			RAW_PROPERTY.test(args) ||
-			PROPERTY_NOT_PROJECTED.test(args) ||
-			positional.some((arg) => BARE_ERROR_ARGUMENT.test(arg)) ||
-			MESSAGE_OR_STRING.test(args)
-		) {
-			lines.push(source.slice(0, call.index).split("\n").length);
+		const raw = argumentsFrom(source, open);
+		const code = literalsBlanked(raw);
+		const templates = templateExpressions(raw);
+		for (const name of names) {
+			if (usesRaw(code, name) || templates.some((expression) => usesRaw(expression, name))) {
+				lines.push(source.slice(0, call.index).split("\n").length);
+				break;
+			}
 		}
 	}
 	return lines;
@@ -148,7 +199,7 @@ function rawErrorLogSites(): string[] {
 }
 
 describe("a caught error reaches a logger only through loggableError", () => {
-	it("in core, session and oauth", () => {
+	it(`in ${PACKAGES.join(", ")}`, () => {
 		expect(rawErrorLogSites()).toEqual([]);
 	});
 
