@@ -59,7 +59,9 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 				expiresAt: undefined,
 			};
 			await store.grant(record);
-			expect(await store.find("u-1", "app")).toEqual(record);
+			// Strictly: a record with no expiry names `expiresAt` as `undefined`
+			// rather than leaving it out (#626).
+			expect(await store.find("u-1", "app")).toStrictEqual(record);
 			expect(await store.find("u-1", "other-app")).toBeNull();
 			expect(await store.find("u-2", "app")).toBeNull();
 		});
@@ -120,7 +122,7 @@ export function runConsentStoreContract(name: string, factory: ConsentStoreContr
 				expiresAt,
 			};
 			await store.grant(record);
-			expect(await store.find("u-1", "app")).toEqual(record);
+			expect(await store.find("u-1", "app")).toStrictEqual(record);
 			vi.setSystemTime(new Date(expiresAt + 1));
 			expect(await store.find("u-1", "app")).toBeNull();
 		});

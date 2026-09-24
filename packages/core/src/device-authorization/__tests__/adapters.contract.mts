@@ -177,32 +177,32 @@ export const runDeviceCodeStoreContract = (
 			});
 		});
 
-		it.each([
-			["null", null],
-			["an empty string", ""],
-			["false", false],
-			["zero", 0],
-		])(
-			"reads an untyped caller's %s requestedScope as no scope, and still approves",
-			async (_label, value) => {
-				// Before #626 both stores tested the field for truthiness, so a falsy
-				// value was a scopeless request. The Redis store would otherwise store
-				// its JSON, read it back as `[]`, and fail the approval script on it.
-				await withStore(async (store) => {
-					await store.create({ ...seed, requestedScope: value as unknown as undefined });
-					expect(
-						(await store.findPendingByUserCode(seed.userCode, NOW))?.requestedScope,
-					).toBeUndefined();
-					const decided = await store.approve({
-						userCode: seed.userCode,
-						subject: "user-1",
-						nowMs: NOW,
-					});
-					expect(decided.status).toBe("ok");
-					if (decided.status === "ok") expect(decided.authorization.grantedScope).toEqual([]);
+		it("names every key of a scopeless approval, which grants the empty set (#626)", async () => {
+			// `grantedScope` is `undefined` only before approval. A request that
+			// asked for no scope, approved without one, grants the empty set —
+			// adapters intersect with `requestedScope` — and every other key is
+			// still named on both reads.
+			await withStore(async (store) => {
+				await store.create({ ...seed, requestedScope: undefined });
+				const approved = {
+					userCode: seed.userCode,
+					clientId: seed.clientId,
+					requestedScope: undefined,
+					expiresAtMs: seed.expiresAtMs,
+					intervalSeconds: seed.intervalSeconds,
+					status: "approved",
+					subject: "user-1",
+					grantedScope: [],
+				};
+				expect(
+					await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW }),
+				).toStrictEqual({ status: "ok", authorization: approved });
+				expect(await store.poll(seed.deviceCode, NOW + 10 * 1000)).toStrictEqual({
+					status: "approved",
+					authorization: approved,
 				});
-			},
-		);
+			});
+		});
 
 		it("keeps an empty requestedScope as asked for — an array, not no scope", async () => {
 			await withStore(async (store) => {

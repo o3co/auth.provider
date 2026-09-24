@@ -173,3 +173,28 @@ describe("createRedisDeviceCodeStore — what is Redis-specific (#433)", () => {
 		}
 	});
 });
+
+/**
+ * What this adapter does with an untyped caller's falsy `requestedScope`: the
+ * scopeless request it was before #626 made the field a required key, which
+ * both bundled stores keep by testing it for truthiness. It is outside the
+ * port's types, so it is this adapter's behaviour and not the contract's — a
+ * third-party store owes nothing for it (#626).
+ */
+describe("redis DeviceCodeStore — an untyped caller's falsy requestedScope", () => {
+	it.each([
+		["null", null],
+		["an empty string", ""],
+		["false", false],
+		["zero", 0],
+	])("reads %s as no scope, and still approves", async (_label, value) => {
+		// Tested any other way, the store would write the value's JSON, read it
+		// back as `[]`, and fail the approval script on it.
+		const store = storeAt(freshPrefix());
+		await store.create({ ...seed, requestedScope: value as unknown as undefined });
+		expect((await store.findPendingByUserCode(seed.userCode, NOW))?.requestedScope).toBeUndefined();
+		const decided = await store.approve({ userCode: seed.userCode, subject: "user-1", nowMs: NOW });
+		expect(decided.status).toBe("ok");
+		if (decided.status === "ok") expect(decided.authorization.grantedScope).toEqual([]);
+	});
+});

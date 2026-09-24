@@ -295,9 +295,33 @@ describe("InMemoryCodeRepository", () => {
 			};
 			const created = await repo.createCode(params);
 			const expected = { ...params, code: created.code };
-			expect(created).toEqual(expected);
-			expect(await repo.findByCode(created.code)).toEqual(expected);
-			expect(await repo.consumeByCode(created.code)).toEqual(expected);
+			expect(created).toStrictEqual(expected);
+			expect(await repo.findByCode(created.code)).toStrictEqual(expected);
+			expect(await repo.consumeByCode(created.code)).toStrictEqual(expected);
+		});
+
+		it("names every field it has no value for as undefined, rather than leaving it out (#626)", async () => {
+			repo = new InMemoryCodeRepository();
+			const created = await repo.createCode(minimalParams);
+			const found = await repo.findByCode(created.code);
+			// The read `/token` makes, which builds its record separately from
+			// `findByCode`'s.
+			const consumed = await repo.consumeByCode(created.code);
+			for (const key of [
+				"code_challenge",
+				"code_challenge_method",
+				"nonce",
+				"sid",
+				"acr",
+				"grantedScope",
+				"grantedAudience",
+			]) {
+				// `toHaveProperty(key, undefined)` fails on a missing key as well as
+				// on a value.
+				expect(created, key).toHaveProperty(key, undefined);
+				expect(found, key).toHaveProperty(key, undefined);
+				expect(consumed, key).toHaveProperty(key, undefined);
+			}
 		});
 
 		it("createCode without nonce/sid leaves them undefined (backward compat)", async () => {
