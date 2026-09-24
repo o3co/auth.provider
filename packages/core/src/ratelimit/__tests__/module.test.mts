@@ -28,6 +28,18 @@ describe("memoryRateLimiterModule", () => {
 		});
 	});
 
+	it("refuses a window longer than a year in its own schema", () => {
+		for (const memoryRateLimiter of [
+			{ defaultLimit: { limit: 5, windowSeconds: 31_536_001 } },
+			{ limits: { token: { limit: 5, windowSeconds: 1e13 } } },
+		]) {
+			expect(
+				memoryRateLimiterModule.configSchema?.safeParse({ memoryRateLimiter })?.success,
+				JSON.stringify(memoryRateLimiter),
+			).toBe(false);
+		}
+	});
+
 	it("limits requests per the configured spec", async () => {
 		const cfg = {
 			memoryRateLimiter: {

@@ -16,6 +16,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { createRateLimiterFactory, registerBuiltinRateLimiters } from "#/ratelimit/factory.mjs";
+import { createMemoryRateLimiter } from "#/ratelimit/memory.mjs";
 
 describe("createRateLimiterFactory", () => {
 	it("creates factory and resolves custom limiter", async () => {
@@ -28,6 +29,46 @@ describe("createRateLimiterFactory", () => {
 		}));
 		const limiter = await factory.create({ type: "stub" });
 		expect(limiter.kind).toBe("stub");
+	});
+});
+
+describe("memory rate limiter — a window past the Date range", () => {
+	// 1e13 s is 1e16 ms: no window that long ends inside ECMAScript's Date
+	// range, so its bucket's reset is an Invalid Date, and the Redis adapter
+	// cannot set it as a TTL at all. Both adapters refuse it when built, and
+	// neither serves a looser default in its place.
+	const PAST_THE_DATE_RANGE = [1e13, 1e17];
+	const SANE = { limit: 60, windowSeconds: 60 };
+
+	it("refuses a per-prefix spec with such a window when it is built", () => {
+		for (const windowSeconds of PAST_THE_DATE_RANGE) {
+			expect(
+				() =>
+					createMemoryRateLimiter({
+						limits: { big: { limit: 5, windowSeconds } },
+						defaultLimit: SANE,
+					}),
+				String(windowSeconds),
+			).toThrow(RangeError);
+		}
+	});
+
+	it("refuses a default with such a window when it is built", () => {
+		for (const windowSeconds of PAST_THE_DATE_RANGE) {
+			expect(
+				() => createMemoryRateLimiter({ limits: {}, defaultLimit: { limit: 5, windowSeconds } }),
+				String(windowSeconds),
+			).toThrow(RangeError);
+		}
+	});
+
+	it("refuses it through the factory as well, rather than dropping the spec", async () => {
+		const factory = createRateLimiterFactory();
+		registerBuiltinRateLimiters(factory);
+		await expect(
+			(async () =>
+				factory.create({ type: "memory", limits: { big: { limit: 5, windowSeconds: 1e13 } } }))(),
+		).rejects.toThrow(RangeError);
 	});
 });
 

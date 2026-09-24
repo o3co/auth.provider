@@ -47,6 +47,19 @@ describe("redisRateLimiterModule", () => {
 		expect((await limiter.check(key, { userId: "u1" })).allowed).toBe(false);
 	});
 
+	it("refuses a window longer than a year in its own schema", () => {
+		const schema = redisRateLimiterModule.configSchema;
+		for (const redisRateLimiter of [
+			{ defaultLimit: { limit: 5, windowSeconds: 31_536_001 } },
+			{ limits: { token: { limit: 5, windowSeconds: 1e13 } } },
+		]) {
+			expect(
+				schema?.safeParse({ redisRateLimiter })?.success,
+				JSON.stringify(redisRateLimiter),
+			).toBe(false);
+		}
+	});
+
 	it("declares a configSchema with redisRateLimiter namespaced key", () => {
 		const schema = redisRateLimiterModule.configSchema;
 		expect(schema).toBeDefined();
