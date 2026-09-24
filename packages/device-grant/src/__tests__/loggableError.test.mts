@@ -339,6 +339,32 @@ describe("loggableError", () => {
 			expect(loggableError(signal.reason).stack).toMatch(/^ {4}at /);
 		});
 
+		/** An error with `fields` and a stack assigned by hand. */
+		const handAssigned = (stack: string, fields: Record<string, unknown> = {}): Error => {
+			const error = Object.assign(new Error(""), fields);
+			error.stack = stack;
+			return error;
+		};
+
+		it.each([
+			["the name alone, as V8 writes an empty message's header", "Error\n    at a"],
+			["`name: `, as source-map formatters write it", "Error: \n    at a"],
+		])("keeps the frames under %s", (_label, stack) => {
+			expect(loggableError(handAssigned(stack)).stack).toBe("    at a");
+		});
+
+		it("keeps the frames under `name [code]` for an empty message with a string code", () => {
+			expect(loggableError(handAssigned("Error [ERR_X]\n    at a", { code: "ERR_X" })).stack).toBe(
+				"    at a",
+			);
+		});
+
+		it("keeps no stack under `name [code]: message` when the code is not a string", () => {
+			const error = handAssigned("Error [42]: m\n    at a", { code: 42 });
+			error.message = "m";
+			expect("stack" in loggableError(error)).toBe(false);
+		});
+
 		it("keeps at most ten frames and 2048 characters, whichever comes first", () => {
 			expect(LOGGED_STACK_MAX_FRAMES).toBe(10);
 			expect(LOGGED_STACK_MAX_LENGTH).toBe(2048);
