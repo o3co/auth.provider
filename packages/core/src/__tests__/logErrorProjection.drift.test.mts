@@ -232,6 +232,22 @@ describe("a caught error reaches a logger only through loggableError", () => {
 			[".catch", `p.catch((err) => logger.warn({ err }, "failed"));`],
 			['.on("error")', `client.on("error", (err) => logger.error({ err }, "client_error"));`],
 			['.once("error")', `client.once("error", async (e) => log.error({ e }, "client_error"));`],
+			[
+				"a node-style callback's error",
+				`req.session.save((err) => { if (err) log.warn({ err }, "session save failed"); });`,
+			],
+			[
+				"a node-style callback written as a function",
+				`store.get(sid, function (err, value) { logger.error({ err }, "store read failed"); });`,
+			],
+			[
+				"an error a helper's promise resolved with",
+				`const consumeErr = await consumeTransaction(); if (consumeErr) log.warn({ err: consumeErr }, "delete failed");`,
+			],
+			[
+				"an error a callback resolved a promise with",
+				`const saveErr = await new Promise((resolve) => { req.session.save((err) => resolve(err ?? null)); }); if (saveErr) log.warn({ err: saveErr }, "save failed");`,
+			],
 		])("flags %s", (_label, source) => {
 			expect(flags(source)).toBe(true);
 		});
@@ -257,6 +273,18 @@ describe("a caught error reaches a logger only through loggableError", () => {
 			[
 				"another object's field",
 				`try { x() } catch (err) { log.warn({ code: result.err }, "x"); }`,
+			],
+			[
+				"an arrow's parameter that is not an error",
+				`log.info({ names: items.map((item) => item.name) }, "loaded");`,
+			],
+			[
+				"an awaited value that is not an error",
+				`const result = await load(); log.info({ result }, "loaded");`,
+			],
+			[
+				"a node-style callback's error, projected",
+				`req.session.save((err) => { if (err) log.warn({ err: loggableError(err) }, "save failed"); });`,
 			],
 		])("does not flag %s", (_label, source) => {
 			expect(flags(source)).toBe(false);
