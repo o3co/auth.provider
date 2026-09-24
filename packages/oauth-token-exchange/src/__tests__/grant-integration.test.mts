@@ -945,8 +945,8 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 
 		// The request's audience is held to the subject token before the policy
 		// runs, so what the policy then does with it cannot change the answer:
-		// echoing it back (P1), replacing it with an audience the subject token
-		// does carry (P4), or widening the scope as well (P5).
+		// not echoing it back, not replacing it with an audience the subject
+		// token does carry, and not widening the scope as well.
 		it.each([
 			["a policy that echoes the request back", echoing],
 			[

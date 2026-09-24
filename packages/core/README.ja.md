@@ -402,6 +402,7 @@ const userRepo = new InMemoryUserRepository(users);
 #### GrantPolicyHook（scope / audience / token exchange のポリシー）
 
 - `GrantPolicyHook.evaluate(request, ctx)` は allow（narrowing 可）/ deny を返す
+- deny の `error` は RFC 6749 のエラーコード `1*NQSCHAR`（空でない、`"` と `\` を除く印字可能な ASCII）でなければならない（`isErrorCode`、[`errors/envelope.mts`](src/errors/envelope.mts)）。それ以外のコードを `/oauth/token` は `invalid_request`、`/oauth/authorize` は `access_denied` として返し、ポリシーのコードをサニタイズしてログに残す
 - `/oauth/authorize` で 1 回だけ評価、`/oauth/token` は Code record に persist された `grantedScope` / `grantedAudience` を再利用（`authorization_code` では再評価しない）
 - その他のグラント（refresh / client_credentials / token-exchange）はトークンエンドポイントで評価
 

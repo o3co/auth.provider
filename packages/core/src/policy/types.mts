@@ -43,6 +43,12 @@ export type GrantPolicyDecision =
 	  }
 	| {
 			readonly outcome: "deny";
+			/**
+			 * The OAuth `error` the refusal carries. It must be an RFC 6749
+			 * error code, `1*NQSCHAR` (`isErrorCode`): `/oauth/token` answers
+			 * any other code `invalid_request`, and `/oauth/authorize`
+			 * `access_denied`, logging the policy's code sanitised.
+			 */
 			readonly error: string;
 			readonly errorDescription?: string;
 	  };

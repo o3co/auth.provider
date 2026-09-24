@@ -33,6 +33,7 @@ import {
 	type GrantHandlerResolver,
 	type GrantHandlerResult,
 	type GrantPolicyHook,
+	isErrorCode,
 	isGrantTypeAllowed,
 	JwtVerificationError,
 	type KeyStore,
@@ -47,6 +48,7 @@ import {
 	type SessionFederationIndex,
 	type SessionRPRegistry,
 	type SubjectRevocation,
+	sanitizeErrorText,
 	type UserSessionStore,
 	verifyJwt,
 } from "@o3co/auth-provider-core";
@@ -64,7 +66,6 @@ import {
 	type ClientIdMetadataDocumentOptions,
 	withClientIdMetadataDocuments,
 } from "./clients/clientIdMetadataDocument.mjs";
-import { sanitizeErrorDescription } from "./errorDescription.mjs";
 import { createClientAuthMiddleware, resolveRealm } from "./middleware/clientAuth.mjs";
 import { resolveOAuthOptions } from "./resolveOAuthOptions.mjs";
 import { createAuthorizeHandler } from "./routes/authorize.mjs";
@@ -79,8 +80,20 @@ import {
 	isCompoundConfirmation,
 } from "./types/introspect.mjs";
 
-/** The longest `reason` a grant handler's refusal carries into the audit stream. */
-const AUDIT_REASON_MAX_LENGTH = 200;
+/** The longest client-influenced text a `token.issued.failure` event carries. */
+const AUDIT_TEXT_MAX_LENGTH = 200;
+
+/**
+ * Text a client can influence, as the audit stream records it: sanitised to
+ * RFC 6749's error text characters (`sanitizeErrorText`) and capped at
+ * {@link AUDIT_TEXT_MAX_LENGTH}, the cut marked with `...`.
+ */
+const auditText = (text: string): string => {
+	const sanitised = sanitizeErrorText(text);
+	return sanitised.length > AUDIT_TEXT_MAX_LENGTH
+		? `${sanitised.slice(0, AUDIT_TEXT_MAX_LENGTH - 3)}...`
+		: sanitised;
+};
 
 /**
  * The `reason` of a grant handler's `token.issued.failure`: its
@@ -91,17 +104,13 @@ const AUDIT_REASON_MAX_LENGTH = 200;
  * `invalid_request` (RFC 8693 §2.2.2) — while the description names the check
  * that refused. The route's own refusals carry a `reason` code; a handler's
  * carries its description, the same text the client was sent — sanitised the
- * same way (`sanitizeErrorDescription`). Some descriptions quote client input
+ * same way (`sanitizeErrorText`). Some descriptions quote client input
  * (a requested scope, audience or token type), so it is also capped, the cut
  * marked with `...`, to keep what a client can put into the audit stream
  * bounded.
  */
-const auditReason = (error: string, errorDescription: string | undefined): string => {
-	const reason = sanitizeErrorDescription(errorDescription || error);
-	return reason.length > AUDIT_REASON_MAX_LENGTH
-		? `${reason.slice(0, AUDIT_REASON_MAX_LENGTH - 3)}...`
-		: reason;
-};
+const auditReason = (error: string, errorDescription: string | undefined): string =>
+	auditText(errorDescription || error);
 
 declare module "express-session" {
 	interface SessionData {
@@ -371,13 +380,11 @@ export const createOAuthRouter = async (
 						type: "token.issued.failure",
 						ip: req.ip,
 						userAgent: req.get("user-agent"),
-						details: { reason: "unsupported_grant_type", grant_type },
+						details: { reason: "unsupported_grant_type", grant_type: auditText(grant_type) },
 					});
 					return res.status(400).json({
 						error: "unsupported_grant_type",
-						error_description: sanitizeErrorDescription(
-							`grant_type '${grant_type}' is not supported`,
-						),
+						error_description: sanitizeErrorText(`grant_type '${grant_type}' is not supported`),
 					});
 				}
 
@@ -447,7 +454,7 @@ export const createOAuthRouter = async (
 					});
 					return res.status(400).json({
 						error: "unauthorized_client",
-						error_description: sanitizeErrorDescription(
+						error_description: sanitizeErrorText(
 							`client is not authorized for grant_type '${grant_type}'`,
 						),
 					});
@@ -496,7 +503,7 @@ export const createOAuthRouter = async (
 							.json(
 								errorEnvelope(
 									"invalid_client",
-									"sender-constrained binding required, none provided",
+									sanitizeErrorText("sender-constrained binding required, none provided"),
 								),
 							);
 					}
@@ -519,7 +526,7 @@ export const createOAuthRouter = async (
 							.json(
 								errorEnvelope(
 									"unauthorized_client",
-									`client not allowed to use kind=${ctx.tokenBinding.kind}`,
+									sanitizeErrorText(`client not allowed to use kind=${ctx.tokenBinding.kind}`),
 								),
 							);
 					}
@@ -586,11 +593,23 @@ export const createOAuthRouter = async (
 					});
 					return res.status(result.status).json(result.tokens);
 				}
-				const errorBody: Record<string, unknown> = { error: result.error };
+				// RFC 6749 §5.2: `error` is 1*NQSCHAR. A grant can hand back any
+				// code — a policy deny carries the policy's own — so one outside
+				// that set, or none, goes out as `invalid_request`, and the code is
+				// logged, sanitised, for whoever wired the grant or its policy.
+				let error = result.error;
+				if (!isErrorCode(error)) {
+					logger.warn(
+						{ grant_type, error: auditText(String(error)) },
+						"token_error_code_malformed",
+					);
+					error = "invalid_request";
+				}
+				const errorBody: Record<string, unknown> = { error };
 				// RFC 6749 §5.2's character set, whichever grant wrote it: several
 				// quote the client's own input (a scope, an audience, a token type).
 				if (result.errorDescription)
-					errorBody.error_description = sanitizeErrorDescription(result.errorDescription);
+					errorBody.error_description = sanitizeErrorText(result.errorDescription);
 				// Copilot review: do NOT inject `WWW-Authenticate: Bearer` here.
 				// The token endpoint is not a protected resource (RFC 6750 §3 applies to
 				// resource servers, not authorization endpoints), and `clientAuthMw`
@@ -607,8 +626,8 @@ export const createOAuthRouter = async (
 					userAgent: req.get("user-agent"),
 					details: {
 						grant_type,
-						error: result.error,
-						reason: auditReason(result.error, result.errorDescription),
+						error,
+						reason: auditReason(error, result.errorDescription),
 					},
 				});
 				return res.status(result.status).json(errorBody);

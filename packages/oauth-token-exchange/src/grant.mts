@@ -31,11 +31,13 @@ import {
 	formatObject,
 	generateToken,
 	generateTokenResponse,
+	isErrorCode,
 	isGrantTypeAllowed,
 	matchConfirmation,
 	ownedConfirmation,
 	policyOutOfBounds,
 	resolveAccessTokenLifetime,
+	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
 import { buildActClaim, countActorChainDepth, matchesMayAct, matchesMayActClient } from "./act.mjs";
 import { ACCESS_TOKEN_TYPE } from "./validator/selfIssuedAccessToken.mjs";
@@ -738,10 +740,25 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 					};
 				}
 				if (decision.outcome === "deny") {
+					// RFC 6749 §5.2 makes `error` 1*NQSCHAR. The policy's code goes
+					// out as given when it is one; otherwise the refusal is
+					// `invalid_request` — §2.2.2's code for a request refused by
+					// policy — and the code is logged, sanitised, for the operator
+					// who wrote the policy. `/oauth/token` checks every grant's code
+					// too; this covers a composition that dispatches the handler
+					// from its own route.
+					let error = decision.error;
+					if (!isErrorCode(error)) {
+						deps.logger?.warn(
+							{ error: sanitizeErrorText(String(error)) },
+							"token_exchange_policy_deny_error_malformed",
+						);
+						error = "invalid_request";
+					}
 					return {
 						result: {
-							status: decision.error === "access_denied" ? 403 : 400,
-							error: decision.error,
+							status: error === "access_denied" ? 403 : 400,
+							error,
 							errorDescription: decision.errorDescription ?? "denied by policy",
 						},
 					};
@@ -1001,12 +1018,13 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
  * client which check refused it; each call site's description is part of the
  * wire contract and the README names it. A description quotes a value with
  * `'`: RFC 6749 §5.2 allows neither `"` nor `\` in one, and `/oauth/token`
- * replaces any character outside its set with `?`. The request's other answers keep
- * the codes the RFCs give them — `invalid_target` for an audience or
- * resource (§2.2.2), `invalid_scope`, `invalid_client`, `unauthorized_client`
- * — a policy decision past a ceiling is core's `policyOutOfBounds`, and a
- * store that cannot answer is `503 temporarily_unavailable`, never a verdict
- * on the request.
+ * replaces any character outside its set with `?`.
+ *
+ * The request's other answers keep the codes the RFCs give them —
+ * `invalid_target` for an audience or resource (§2.2.2), `invalid_scope`,
+ * `invalid_client`, `unauthorized_client` — a policy decision past a ceiling
+ * is core's `policyOutOfBounds`, and a store that cannot answer is
+ * `503 temporarily_unavailable`, never a verdict on the request.
  */
 function invalidRequest(errorDescription: string): GrantHandlerResult {
 	return { result: { status: 400, error: "invalid_request", errorDescription } };

@@ -403,6 +403,7 @@ Five optional extension points: a slot or contribution kind a composition root f
 #### GrantPolicyHook (scope / audience / token exchange policy)
 
 - `GrantPolicyHook.evaluate(request, ctx)` returns allow (with optional narrowing) or deny
+- A deny's `error` must be an RFC 6749 error code, `1*NQSCHAR`: non-empty printable ASCII without `"` and `\` (`isErrorCode`, [`errors/envelope.mts`](src/errors/envelope.mts)). `/oauth/token` answers any other code `invalid_request`, and `/oauth/authorize` answers it `access_denied`, logging the policy's code sanitised
 - `/oauth/authorize` evaluates once; `/oauth/token` re-uses `grantedScope` / `grantedAudience` persisted on the Code record (no re-evaluation for `authorization_code`)
 - Other grants (refresh / client_credentials / token-exchange) evaluate at the token endpoint
 

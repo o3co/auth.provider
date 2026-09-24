@@ -20,10 +20,10 @@ import {
 	type Logger,
 	type PublicClient,
 	type ReplaySeenSet,
+	sanitizeErrorText,
 	type TokenEndpointAuthMethod,
 } from "@o3co/auth-provider-core";
 import type { RequestHandler, Response } from "express";
-import { sanitizeErrorDescription } from "../errorDescription.mjs";
 import { createClientAssertionVerifier, hasClientAssertion } from "./clientAssertion.mjs";
 
 // Module augmentation: expose `req.oauthClient` for consumers who compose this
@@ -222,7 +222,7 @@ export function createClientAuthMiddleware(
 	function errorBody(error: string, errorDescription?: string) {
 		const body: { error: string; error_description?: string } = { error };
 		if (errorDescription !== undefined)
-			body.error_description = sanitizeErrorDescription(errorDescription);
+			body.error_description = sanitizeErrorText(errorDescription);
 		return body;
 	}
 

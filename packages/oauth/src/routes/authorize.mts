@@ -27,17 +27,18 @@ import {
 	extractResourceParam,
 	type GrantPolicyHook,
 	isEmailVerified,
+	isErrorCode,
 	isGrantTypeAllowed,
 	type Logger,
 	matchesRegisteredRedirectUri,
 	type PendingConsentStore,
 	type PublicClient,
+	sanitizeErrorText,
 	type UserSession,
 	type UserSessionStore,
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
-import { sanitizeErrorDescription } from "../errorDescription.mjs";
 import {
 	PKCE_METHOD_ABSENT_DEFAULT,
 	PKCE_METHOD_S256,
@@ -183,7 +184,7 @@ const redirectError = (
 ): Response => {
 	const url = new URL(ctx.redirectUri);
 	url.searchParams.append("error", error);
-	url.searchParams.append("error_description", sanitizeErrorDescription(errorDescription));
+	url.searchParams.append("error_description", sanitizeErrorText(errorDescription));
 	if (typeof ctx.state === "string") url.searchParams.append("state", ctx.state);
 	return ctx.res.redirect(url.toString()) as unknown as Response;
 };
@@ -1128,7 +1129,19 @@ const applyGrantPolicy = async (
 			return null;
 		}
 		if (decision.outcome === "deny") {
-			redirectError(ctx, decision.error, decision.errorDescription ?? "policy denied");
+			// RFC 6749 §4.1.2.1 makes `error` 1*NQSCHAR. The policy's code goes
+			// out as given when it is one; otherwise the redirect says
+			// `access_denied` — the authorization server refused — and the code
+			// is logged, sanitised, for the operator who wrote the policy.
+			let error = decision.error;
+			if (!isErrorCode(error)) {
+				ctx.opts.logger.warn(
+					{ error: sanitizeErrorText(String(error)) },
+					"authorize_policy_deny_error_malformed",
+				);
+				error = "access_denied";
+			}
+			redirectError(ctx, error, decision.errorDescription ?? "policy denied");
 			return null;
 		}
 		// Presence, not truthiness: `""` and `null` are a policy saying

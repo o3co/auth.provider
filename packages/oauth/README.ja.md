@@ -109,7 +109,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 6 スロットとは `userSessionStore`、`sessionRPRegistry`、`sessionFamilyIndex`、`sessionFederationIndex`、`federationTokenStore`、`refreshTokenFamilyRevocation`。ディスカバリーが `end_session_endpoint` とログアウト関連の機能を広告するかどうかも同じチェックで決まるので、ドキュメントがマウントされていないエンドポイントを名指すことはない。
 
-**エラー説明。** `/oauth/token` が送る `error_description`、`/oauth/authorize` がエラーリダイレクトに載せる `error_description`、そしてクライアント認証が送る `error_description` — `/oauth/token`、`/oauth/introspect`、`/oauth/revoke` で。後の 2 つもエラーは同じ形式（RFC 7662 §2.3、RFC 7009 §2.2.1）— はすべて、RFC 6749 が許す文字（§5.2、§4.1.2.1）— `"` と `\` を除く印字可能な ASCII — に収める。それ以外の文字は、説明が引用するクライアント送信の値（グラントタイプ、スコープ、audience、トークンタイプ、`response_type` など）や設定値（クライアントの `tokenEndpointAuthMethod` など）に含まれるものも含め、どのグラント、ルート、認証処理が書いた説明でも `?` に置き換える（[`errorDescription.mts`](./src/errorDescription.mts)）。説明は値を `'` で引用する。
+**エラー説明とエラーコード。** RFC 6749 がエラーのテキストに許すのは、`"` と `\` を除く印字可能な ASCII だけである（§5.2、§4.1.2.1）。このパッケージはその範囲に次をすべて収める: `/oauth/token` が書く `error_description`（どのグラントが作ったものでも）、`/oauth/authorize` がエラーリダイレクトに載せる `error_description`、クライアント認証が `/oauth/token`、`/oauth/introspect`、`/oauth/revoke`（後の 2 つもエラーは同じ形式。RFC 7662 §2.3、RFC 7009 §2.2.1）で書く `error_description`。それ以外の文字は `?` に置き換える（core の `sanitizeErrorText`、[`errors/envelope.mts`](../core/src/errors/envelope.mts)）。説明が引用するクライアント送信の値（グラントタイプ、スコープ、audience、トークンタイプ、`response_type` など）や設定値（クライアントの `tokenEndpointAuthMethod`、トークンバインディングの kind など）に含まれる文字も同じである。説明は値を `'` で引用する。`error` コード自体は `1*NQSCHAR`（同じ文字で、空でないこと）でなければならない。グラントポリシーの deny はポリシー自身のコードを運ぶので、範囲外のコードは `/oauth/token` では `invalid_request`、`/oauth/authorize` のリダイレクトでは `access_denied` として返し、サニタイズしてログに残す（`token_error_code_malformed`、`authorize_policy_deny_error_malformed`）。クライアントの `state` は送られたとおりに返す。これらのエンドポイントで応答する core のミドルウェア（トークンバインディングのミドルウェア、レートリミッター、保護リソースのバインディング）は core の `errorEnvelope` を通して書き、そこはまだサニタイズしない。後続の変更で同じ範囲に揃える。
 
 `/token`、`/introspect`、`/authorize`、`/revoke` は、構成が `rateLimiter` を配線していればクライアント認証より前でスロットリングされ、プロダクトの `rateLimit.failMode` に従う。配線されていなければスロットリングされない。
 
@@ -151,7 +151,7 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 | ディレクトリ | 責務 |
 |---|---|
-| `src/`（ルート） | 組み立て: `oauthModule`、`oauthAuthorizationModule`、`oauthSessionModule`（4 つ目の `subjectRevocationServiceModule` は、それが配線するカスケードと並んで `logout/` にある）、`createOAuthRouter`（下のすべてのルートを組み合わせる）、オプションの解決、トークンエンドポイント、認可エンドポイント、クライアント認証が共有する `error_description` のサニタイザー、core のアクセストークンヘッダーパーサーの再 export。 |
+| `src/`（ルート） | 組み立て: `oauthModule`、`oauthAuthorizationModule`、`oauthSessionModule`（4 つ目の `subjectRevocationServiceModule` は、それが配線するカスケードと並んで `logout/` にある）、`createOAuthRouter`（下のすべてのルートを組み合わせる）、オプションの解決、core のアクセストークンヘッダーパーサーの再 export。 |
 | [`routes/`](./src/routes) | エンドポイント群ごとのルーターまたはハンドラー — authorize、consent、logout、federation token、revoke、userinfo。ルートは `grants/`、`logout/`、`middleware/`、`clients/` を使ってよいが、それらのどれもルートを import しない。`routes/authorize.mts` は grant のヘルパーを 1 つ（クライアントごとの PKCE 方式の規則）も読む。`/authorize` は PKCE を `/token` と同じやり方で検証するからである。両者が読む RFC 8707 `resource` の規則は core のもの（[`grants/resourceIndicator.mts`](../core/src/grants/resourceIndicator.mts)）で、WebAuthn グラントと共有している。 |
 | [`grants/`](./src/grants) | グラントハンドラー: core のグラント契約の上での、リクエストからトークンへの純粋な判断。HTTP を持たない。 |
 | [`middleware/`](./src/middleware) | クライアント認証。兄弟パッケージが再利用する。 |
