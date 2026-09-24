@@ -650,6 +650,10 @@ export type {
 	RateLimitSpec,
 } from "./ratelimit/types.mjs";
 export { assertUsableRateLimitSpecs, isUsableRateLimitSpec } from "./ratelimit/usableSpec.mjs";
+export {
+	resolveWebAuthnAuthenticationOptionsLimitSpec,
+	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX,
+} from "./ratelimit/webauthnSpec.mjs";
 export { type RunReadinessOptions, runReadinessProbes } from "./readiness/run.mjs";
 export type {
 	ProbeResult,
