@@ -15,10 +15,22 @@
  */
 
 /*
- * RFC 6749 §3.3's scope grammar: `isScopeToken`, `parseScopeTokens` and
- * `canonicalScope`, the one form a scope is written and compared in. Read a
- * scope through these rather than splitting it by hand: a split on a single
- * space reads a tab as part of a scope's name. No state.
+ * RFC 6749 §3.3's scope grammar: `isScopeToken`, the two readers of a
+ * space-delimited value, and `canonicalScope`, the one form a scope is
+ * written and compared in. Read a scope — or any other space-delimited
+ * protocol value, such as OIDC's `prompt` and `acr_values` — through these
+ * rather than splitting it by hand: a split on a single space reads a tab as
+ * part of a name. Which reader a site uses depends on who wrote the value:
+ *
+ * - a client's request parameter: `readSpaceDelimitedParameter`, strict. A
+ *   malformed value is the request's fault and is refused (`invalid_scope`
+ *   for a scope, RFC 6749 §4.1.2.1 / §5.2).
+ * - anything else — an upstream's answer, an assertion's claim, a client
+ *   metadata document, a token or record this server wrote:
+ *   `parseScopeTokens`, tolerant. The value is read for what it names, and
+ *   one that names nothing is never read as absent.
+ *
+ * No state.
  */
 
 /**
@@ -62,6 +74,34 @@ export function isScopeToken(entry: string): boolean {
 export function parseScopeTokens(value: unknown): readonly string[] {
 	if (typeof value !== "string") return [];
 	return [...new Set(value.split(/\s+/).filter(isScopeToken))];
+}
+
+/**
+ * A space-delimited request parameter, read strictly: its entries in order and
+ * without repeats, or `null` when it is malformed.
+ *
+ * The counterpart of {@link parseScopeTokens} for a value a client sends in a
+ * request, where RFC 6749 names the answer to a malformed one (`invalid_scope`,
+ * §4.1.2.1 and §5.2) and reading it tolerantly would answer a request the
+ * client did not make. The grammar is §3.3's — `scope-token *( SP
+ * scope-token )`:
+ *
+ * - the space is the only delimiter. Runs of spaces, and spaces at either
+ *   end, are tolerated: they can neither merge two entries nor invent one.
+ *   A value of spaces alone names nothing (`[]`), and the caller decides
+ *   whether that is an omitted parameter or a refusal.
+ * - every entry must be a scope-token ({@link isScopeToken}). A tab, a
+ *   newline, a quote, a backslash or anything outside printable ASCII makes
+ *   the whole value malformed, rather than being dropped or read as a
+ *   delimiter.
+ *
+ * OpenID Connect's other space-delimited request parameters (`prompt`,
+ * `acr_values`, OIDC Core §3.1.2.1) are read with it too: their values are
+ * printable ASCII without spaces, which the same entry grammar admits.
+ */
+export function readSpaceDelimitedParameter(value: string): readonly string[] | null {
+	const entries = value.split(" ").filter((entry) => entry !== "");
+	return entries.every(isScopeToken) ? [...new Set(entries)] : null;
 }
 
 /**

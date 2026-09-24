@@ -133,7 +133,7 @@ Both routes live under `/oauth`, where `oauthModule` mounts its router. That rou
 - **The media type.** The verification route parses JSON only, and its handler answers anything but `application/json` with `415 invalid_request` ([below](#post-oauthdeviceverification)).
 - **Where a CSRF token may come from.** A header, or a JSON body; a form carrying the token in a body field has none, so the guard refuses it.
 
-`POST /oauth/device_authorization` checks in this order: the per-IP throttle (`429` — an oversized request spends an attempt like any other), the declared size (`413`), the parsers (`413`, `415` or `400`, above), client authentication (`401 invalid_client`), then the request itself. The verification route's order is [below](#post-oauthdeviceverification).
+`POST /oauth/device_authorization` checks in this order: the per-IP throttle (`429` — an oversized request spends an attempt like any other), the declared size (`413`), the parsers (`413`, `415` or `400`, above), client authentication (`401 invalid_client`), then the request itself. Its `scope` is read as `/oauth/token` reads one (core's `readSpaceDelimitedParameter`): a value that is not RFC 6749 §3.3's space-delimited list of scope-tokens — a tab, a quote — is `400 invalid_scope`, a repeated one `400 invalid_request`, and spaces alone are an omitted scope that draws on `defaultScopes`. The verification route's order is [below](#post-oauthdeviceverification).
 
 ## Public API
 

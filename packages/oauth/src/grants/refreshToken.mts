@@ -29,6 +29,8 @@ import {
 	isRevocationUnavailable,
 	loggableError,
 	matchConfirmation,
+	parseScopeTokens,
+	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	unrepresentedResources,
 	verifyJwt,
@@ -70,7 +72,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				refresh_token?: string;
 				// D-6: `client_id` from body is no longer authoritative — `clientAuthMw`
 				// populates `ctx.authenticatedClient` and we read identity from there.
-				scope?: string;
+				scope?: unknown;
 			};
 
 			if (!refreshTokenValue) {
@@ -323,12 +325,42 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				};
 			}
 
+			// RFC 6749 §3.3, two readings. The token's own claim is this server's
+			// record: read tolerantly (`parseScopeTokens`) and carried on in its
+			// canonical form, so a ragged claim is not passed to the next pair of
+			// tokens as it is. The request is the client's: read strictly, so a
+			// malformed one is refused as malformed. Present but naming nothing, or
+			// sent without a value (`null`), is no change, as an empty one always
+			// was. A repeated parameter arrives as an array.
+			const originalScopes = parseScopeTokens(scopeStr);
+			let requested: readonly string[] | undefined;
+			if (requestedScope !== undefined && requestedScope !== null) {
+				if (typeof requestedScope !== "string") {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_request",
+							errorDescription: "scope must be a space-delimited string",
+						},
+					};
+				}
+				const named = readSpaceDelimitedParameter(requestedScope);
+				if (named === null) {
+					return {
+						result: {
+							status: 400,
+							error: "invalid_scope",
+							errorDescription: "scope is not a space-delimited list of scope-tokens",
+						},
+					};
+				}
+				if (named.length > 0) requested = named;
+			}
+
 			// RFC 6749 Section 6: requested scope MUST NOT exceed original scope
-			let grantedScope = scopeStr ?? null;
-			if (requestedScope) {
-				const requested = [...new Set(requestedScope.split(" ").filter(Boolean))];
-				const original = scopeStr ? scopeStr.split(" ") : [];
-				const invalid = requested.filter((s) => !original.includes(s));
+			let grantedScope = originalScopes.length > 0 ? originalScopes.join(" ") : null;
+			if (requested) {
+				const invalid = requested.filter((s) => !originalScopes.includes(s));
 				if (invalid.length > 0) {
 					return {
 						result: {
@@ -365,7 +397,6 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 				// the narrowed decision would have been. Failing open would
 				// effectively grant the pre-policy scope ceiling, which is
 				// exactly what policy exists to prevent.
-				const originalScopes = scopeStr ? scopeStr.split(" ") : [];
 				const outcome = await evaluateGrantPolicy(
 					deps.grantPolicy,
 					{
@@ -374,9 +405,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						// raw body — same rationale as for token aud/azp.
 						clientId: authenticatedClientId,
 						subject: subjectStr,
-						requestedScope: requestedScope
-							? [...new Set(requestedScope.split(" ").filter(Boolean))]
-							: undefined,
+						requestedScope: requested === undefined ? undefined : [...requested],
 						originalScope: scopeStr ? originalScopes : undefined,
 						// RFC 8707: populated only when oauth.resourceIndicator.enabled
 						// is true; undefined otherwise (flag-off preserves pre-existing
@@ -384,7 +413,7 @@ export const createRefreshTokenGrant = (deps: RefreshTokenGrantDeps): GrantHandl
 						resource: requestedResource ?? undefined,
 					},
 					{ ip: ctx.ip, userAgent: ctx.userAgent, issuer: issuer ?? "" },
-					grantedScope ? grantedScope.split(" ") : [],
+					requested ?? originalScopes,
 					// CP-15: RFC 6749 §6 says the issued scope MUST NOT exceed the
 					// scope of the original grant — the ceiling here, wider than the
 					// scope this refresh asked for, which a silent policy leaves.

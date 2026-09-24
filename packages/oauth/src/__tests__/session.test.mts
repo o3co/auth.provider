@@ -262,6 +262,24 @@ describe("createSessionGrant", () => {
 			}
 		});
 
+		it("refuses a repeated scope parameter as invalid_request rather than throwing", async () => {
+			// Express reads `scope=a&scope=b` as an array; the grant called
+			// `.split` on it and the request became a 500.
+			const handler = createSessionGrant(makeDeps());
+			const { result } = await handler.handle({
+				body: { scope: ["read", "write"] },
+				session: { isAuthenticated: true, user: { id: "u1" } },
+				issuer: "localhost",
+				metadata: { ip: "127.0.0.1" },
+				authenticatedClient: AUTH_CLIENT,
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "scope must be a space-delimited string",
+			});
+		});
+
 		it("grants the requested scope when it is within the allowlist", async () => {
 			const handler = createSessionGrant(makeDeps());
 			const ctx: GrantContext = {

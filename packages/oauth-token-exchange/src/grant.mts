@@ -37,7 +37,9 @@ import {
 	loggableError,
 	matchConfirmation,
 	ownedConfirmation,
+	parseScopeTokens,
 	policyOutOfBounds,
+	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
 import { buildActClaim, countActorChainDepth, matchesMayAct, matchesMayActClient } from "./act.mjs";
@@ -556,16 +558,34 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// DEFAULT is where they part company — they read `defaultScopes`,
 			// this grant inherits the subject token's scope. See the note at
 			// the `grantedScope` assignment below.
-			const subjectScope = subjectValidated.scope?.split(" ").filter(Boolean) ?? [];
+			//
+			// RFC 6749 §3.3, two readings. The subject's scope is a validated
+			// token's record, read tolerantly (`parseScopeTokens`). The request's
+			// is the client's, read strictly: a value that is not a space-delimited
+			// list of scope-tokens is refused as malformed, and a repeated
+			// parameter (an array) is refused rather than read as omitted, which
+			// would inherit the subject's whole scope.
+			const subjectScope = parseScopeTokens(subjectValidated.scope);
 			const subjectScopeSet = new Set(subjectScope);
 			const clientScopeSet = new Set(client.allowedScopes ?? []);
-			const requestedScopeStr = typeof body.scope === "string" ? body.scope : null;
-			const requestedScopeRaw = requestedScopeStr?.split(" ").filter(Boolean) ?? null;
-			// Normalize empty arrays to null — `scope=""` and `scope=" "` behave the
-			// same as scope omitted (inherit subject scope), per the same rationale
-			// that drives normalizeArrayParam for audience/resource.
-			const requestedScope =
-				requestedScopeRaw !== null && requestedScopeRaw.length === 0 ? null : requestedScopeRaw;
+			if (body.scope !== undefined && body.scope !== null && typeof body.scope !== "string") {
+				return invalidRequest("scope must be a space-delimited string");
+			}
+			const requestedScopeRaw =
+				typeof body.scope === "string" ? readSpaceDelimitedParameter(body.scope) : [];
+			if (requestedScopeRaw === null) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_scope",
+						errorDescription: "scope is not a space-delimited list of scope-tokens",
+					},
+				};
+			}
+			// Normalize empty to null — `scope=""` and `scope=" "` behave the same
+			// as scope omitted (inherit subject scope), per the same rationale that
+			// drives normalizeArrayParam for audience/resource.
+			const requestedScope = requestedScopeRaw.length === 0 ? null : requestedScopeRaw;
 			if (requestedScope) {
 				for (const s of requestedScope) {
 					if (!subjectScopeSet.has(s)) {

@@ -18,6 +18,7 @@ import {
 	classifyFederationRefreshError,
 	isKnownFederationRefreshErrorCode,
 } from "../federation-tokens/refresh-error.mjs";
+import { parseScopeTokens } from "../federations/scope.mjs";
 import type { DelegatedTokens } from "../federations/types.mjs";
 import { federationGrantAuditMetadata } from "./auditMetadata.mjs";
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
@@ -984,9 +985,13 @@ function readResponse(
 	if (expiresAt !== null && !(expiresAt instanceof Date)) return { refreshToken };
 	if (scope !== undefined && typeof scope !== "string") return { refreshToken };
 
-	// RFC 6749 §3.3: space-delimited. Absent — or empty, which is not a scope —
-	// means "as the grant's" (§6).
-	const named = scope === undefined ? [] : scope.split(" ").filter((entry) => entry !== "");
+	// RFC 6749 §3.3, read as every upstream answer is (`parseScopeTokens`):
+	// split on any whitespace, keeping the scope-tokens. Absent — or blank,
+	// which is not a scope — means "as the grant's" (§6). Named but naming no
+	// scope-token is not silence: it is a malformed answer, never the grant's
+	// scopes to be disclosed under.
+	const named = parseScopeTokens(scope);
+	if (scope !== undefined && named.length === 0 && scope.trim() !== "") return { refreshToken };
 	return {
 		refreshToken,
 		token: {

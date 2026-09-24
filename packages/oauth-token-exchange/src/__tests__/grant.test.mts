@@ -657,6 +657,27 @@ describe("createTokenExchangeGrant — the scope grammar (RFC 6749 §3.3)", () =
 		}
 	});
 
+	it("refuses a repeated scope parameter rather than reading it as omitted", async () => {
+		// `scope=a&scope=b` arrives as an array. Read as no scope, it inherited
+		// the subject's whole scope — a wider answer than either value asked for.
+		const g = buildGrant();
+		const token = await signSelfIssuedAccessToken({ scope: "read write", family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				scope: ["read", "write"],
+			}),
+		);
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "scope must be a space-delimited string",
+		});
+	});
+
 	it("reads the subject token's scope claim tolerantly: a tab in it separates, it does not join", async () => {
 		// The subject's claim is a validated token's record, read as #647 reads
 		// a recorded scope (parseScopeTokens), so a narrowing request can find

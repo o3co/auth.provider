@@ -15,6 +15,7 @@
  */
 
 import { createLocalJWKSet, decodeJwt, errors, type JWTPayload, jwtVerify } from "jose";
+import { parseScopeTokens } from "../federations/scope.mjs";
 import { createRemoteKeySetCache } from "../jwks/remoteKeySet.mjs";
 import { isRecordableJti } from "../replay-seen-set/jti.mjs";
 import type { ReplaySeenSet } from "../replay-seen-set/types.mjs";
@@ -106,9 +107,16 @@ const idJagSubjectHandle =
 		return tenant === null ? `${issuer}#${claims.sub}` : `${issuer}#${tenant}#${claims.sub}`;
 	};
 
+/**
+ * The `scope` claim, by RFC 6749 §3.3's grammar. The claim is the issuer's,
+ * so it is read tolerantly — split on any whitespace, keeping the
+ * scope-tokens (`parseScopeTokens`) — and a claim that is present but names
+ * none is an empty ceiling, never `undefined`, which would read as "no claim"
+ * and hand the entry's whole `allowedScopes` over instead.
+ */
 const defaultReadScope = (claims: JWTPayload): readonly string[] | undefined =>
 	typeof claims.scope === "string" && claims.scope.length > 0
-		? claims.scope.split(" ").filter((s) => s.length > 0)
+		? parseScopeTokens(claims.scope)
 		: undefined;
 
 /** `resource` as an ID-JAG carries it: one string or a list, or nothing. */

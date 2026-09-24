@@ -213,7 +213,12 @@ export {
 } from "./federations/response-mode.mjs";
 // RFC 6749 §3.3's scope grammar, in one place. Three packages had their own
 // copy before #647 and all three were wrong about whitespace in the same way.
-export { canonicalScope, isScopeToken, parseScopeTokens } from "./federations/scope.mjs";
+export {
+	canonicalScope,
+	isScopeToken,
+	parseScopeTokens,
+	readSpaceDelimitedParameter,
+} from "./federations/scope.mjs";
 export type {
 	FederationTokenResponse,
 	FederationTokenSnapshot,

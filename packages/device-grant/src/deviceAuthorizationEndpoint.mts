@@ -71,6 +71,7 @@ import {
 	isGrantTypeAllowed,
 	loggableError,
 	normaliseUserCode,
+	readSpaceDelimitedParameter,
 	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
@@ -104,7 +105,29 @@ const resolveScope = (
 	| { readonly ok: false; readonly error: string; readonly description: string } => {
 	const allowed = client.allowedScopes ?? [];
 
-	if (raw === undefined || (typeof raw === "string" && raw.trim() === "")) {
+	// RFC 6749 §3.3: a single space-delimited string. Express turns repeated
+	// `scope=` form keys into an array; defaulting that to the client's whole
+	// allowlist would grant more than was asked for.
+	if (raw !== undefined && typeof raw !== "string") {
+		return {
+			ok: false,
+			error: "invalid_request",
+			description: "scope must be a space-delimited string",
+		};
+	}
+	// Read strictly, as every token-endpoint grant reads a request: the space
+	// is the one delimiter, and an entry that is not a scope-token makes the
+	// value malformed. Spaces alone name nothing, which is an omitted scope.
+	const requested = raw === undefined ? [] : readSpaceDelimitedParameter(raw);
+	if (requested === null) {
+		return {
+			ok: false,
+			error: "invalid_scope",
+			description: "scope is not a space-delimited list of scope-tokens",
+		};
+	}
+
+	if (requested.length === 0) {
 		if (client.defaultScopes !== undefined) {
 			return {
 				ok: true,
@@ -119,18 +142,6 @@ const resolveScope = (
 		};
 	}
 
-	// RFC 6749 §3.3: a single space-delimited string. Express turns repeated
-	// `scope=` form keys into an array; defaulting that to the client's whole
-	// allowlist would grant more than was asked for.
-	if (typeof raw !== "string") {
-		return {
-			ok: false,
-			error: "invalid_request",
-			description: "scope must be a space-delimited string",
-		};
-	}
-
-	const requested = raw.split(" ").filter((s) => s.length > 0);
 	const refused = requested.filter((s) => !allowed.includes(s));
 	if (refused.length > 0) {
 		return {

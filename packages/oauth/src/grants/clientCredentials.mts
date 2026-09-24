@@ -26,6 +26,7 @@ import {
 	type GrantHandlerResult,
 	generateToken,
 	generateTokenResponse,
+	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
@@ -266,15 +267,22 @@ function resolveScope(
 			errorDescription: "scope must be a space-delimited string",
 		};
 	}
-	if (requestedRaw.trim() === "") {
+	// RFC 6749 §3.3, read strictly (`readSpaceDelimitedParameter`): the space
+	// is the one delimiter, so a tab- or newline-delimited value from a
+	// non-conformant client is refused as malformed — neither re-tokenized nor
+	// left to fail the subset check under a scope named with a tab. Spaces
+	// alone name nothing, which is an omitted scope.
+	const requested = readSpaceDelimitedParameter(requestedRaw);
+	if (requested === null) {
+		return {
+			status: 400,
+			error: "invalid_scope",
+			errorDescription: "scope is not a space-delimited list of scope-tokens",
+		};
+	}
+	if (requested.length === 0) {
 		return omittedScopeGrant();
 	}
-	// RFC 6749 §3.3 ABNF: scope-token delimiter is a single SP (0x20).
-	// Match sibling grants (`refreshToken.mts`, `routes.mts`) on the literal
-	// `" "` split rather than `\s+` so tab/newline-delimited scope strings
-	// from non-conformant clients fail the subset check loudly instead of
-	// being silently re-tokenized.
-	const requested = requestedRaw.split(" ").filter(Boolean);
 	const disallowed = requested.filter((s) => !allowed.includes(s));
 	if (disallowed.length > 0) {
 		return {

@@ -32,6 +32,7 @@ import {
 	generateTokenResponse,
 	isEmailVerified,
 	loggableError,
+	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	unrepresentedResources,
 } from "@o3co/auth-provider-core";
@@ -541,13 +542,25 @@ function resolveScope(
 			errorDescription: "scope must be a space-delimited string",
 		};
 	}
+	// RFC 6749 §3.3, read strictly: a client's request, so a value that is not
+	// a space-delimited list of scope-tokens is malformed, not a scope with a
+	// tab in its name that no ceiling holds. Spaces alone name nothing, which
+	// is an omitted scope.
+	const requested = raw === undefined ? [] : readSpaceDelimitedParameter(raw);
+	if (requested === null) {
+		return {
+			status: 400,
+			error: "invalid_scope",
+			errorDescription: "scope is not a space-delimited list of scope-tokens",
+		};
+	}
 	const client = ctx.authenticatedClient;
 	const ceilings = [assertionScope, client?.allowedScopes].filter(
 		(c): c is readonly string[] => c !== undefined,
 	);
 	const within = (s: string): boolean => ceilings.every((c) => c.includes(s));
 
-	if (raw === undefined || raw.trim().length === 0) {
+	if (requested.length === 0) {
 		if (client) {
 			// #396, mirrored from `client_credentials`: an omitted scope draws
 			// on the client's DECLARED default, never on the whole allowlist —
@@ -591,7 +604,6 @@ function resolveScope(
 		};
 	}
 
-	const requested = raw.split(" ").filter((s) => s.length > 0);
 	const refused = requested.filter((s) => !within(s));
 	if (refused.length > 0) {
 		return {

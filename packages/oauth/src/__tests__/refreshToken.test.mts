@@ -380,6 +380,23 @@ describe("createRefreshTokenGrant", () => {
 			}
 		});
 
+		it("refuses a repeated scope parameter as invalid_request rather than throwing", async () => {
+			// Express reads `scope=a&scope=b` as an array; the grant called
+			// `.split` on it and the request became a 500.
+			const { result } = await createRefreshTokenGrant(mockDeps).handle({
+				body: { refresh_token: await makeRefreshToken(), scope: ["read", "write"] },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_request",
+				errorDescription: "scope must be a space-delimited string",
+			});
+		});
+
 		it("reads the scope the refresh token carries by the grammar, and carries it on canonical", async () => {
 			// The token's own claim is this server's record, read tolerantly
 			// (parseScopeTokens): a tab in it is a delimiter, not part of a scope

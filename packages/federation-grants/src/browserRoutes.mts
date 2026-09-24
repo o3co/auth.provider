@@ -77,6 +77,7 @@ import {
 	federationGrantIdentityRevision,
 	judgeUpstreamAccessToken,
 	type Logger,
+	parseScopeTokens,
 	type RateLimiter,
 	type RateLimitFailMode,
 	type SupportsDelegatedAuthorization,
@@ -912,11 +913,16 @@ export function createFederationGrantBrowserRouter(
 					await fail("refresh_token_absent");
 					return;
 				}
+				// The upstream's answer, read tolerantly by RFC 6749 §3.3's grammar
+				// (`parseScopeTokens`), as every upstream answer is: a tab separates
+				// two scopes rather than joining them into one the user was never
+				// shown. Omitted means as requested; named but naming no
+				// scope-token is judged in step 7 as no answer.
 				const scopeText = tokens.scope;
 				const granted =
 					scopeText === undefined
 						? [...transaction.consent.scopes]
-						: scopeText.split(" ").filter(Boolean);
+						: [...parseScopeTokens(scopeText)];
 				const lifetime =
 					typeof tokens.expiresIn === "number" &&
 					Number.isFinite(tokens.expiresIn) &&

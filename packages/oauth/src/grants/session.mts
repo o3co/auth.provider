@@ -21,6 +21,7 @@ import {
 	generateToken,
 	generateTokenResponse,
 	isEmailVerified,
+	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	wellFormedAmr,
 } from "@o3co/auth-provider-core";
@@ -57,7 +58,7 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 	return {
 		async handle(ctx: GrantContext): Promise<GrantHandlerResult> {
 			const { body, session, issuer } = ctx;
-			const { scope: requestedScope } = body as { scope?: string };
+			const { scope: requestedScope } = body as { scope?: unknown };
 
 			// Previously this grant read `body.client_id` and, when it was absent,
 			// accepted the requested scopes as-is with `aud` / `azp` left null. A
@@ -160,9 +161,37 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 				};
 			}
 
-			// Parse and deduplicate scope
-			const rawScopes = requestedScope ? requestedScope.split(" ").filter(Boolean) : undefined;
-			const scopes = rawScopes?.length ? [...new Set(rawScopes)] : undefined;
+			// RFC 6749 §3.3, read strictly and without repeats: a client's request,
+			// so a value that is not a space-delimited list of scope-tokens is
+			// refused as malformed rather than checked against the allowlist as if
+			// a scope could be named with a tab. One that names nothing stays
+			// omitted, as one sent without a value (`null`) is. A repeated
+			// parameter arrives as an array.
+			if (
+				requestedScope !== undefined &&
+				requestedScope !== null &&
+				typeof requestedScope !== "string"
+			) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: "scope must be a space-delimited string",
+					},
+				};
+			}
+			const named =
+				typeof requestedScope === "string" ? readSpaceDelimitedParameter(requestedScope) : [];
+			if (named === null) {
+				return {
+					result: {
+						status: 400,
+						error: "invalid_scope",
+						errorDescription: "scope is not a space-delimited list of scope-tokens",
+					},
+				};
+			}
+			const scopes = named.length > 0 ? named : undefined;
 
 			// An omitted scope stays omitted rather than widening to the client's
 			// full allowlist: this grant runs on a live user session, so the

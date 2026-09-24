@@ -35,6 +35,7 @@ import {
 	matchesRegisteredRedirectUri,
 	type PendingConsentStore,
 	type PublicClient,
+	readSpaceDelimitedParameter,
 	sanitizeErrorText,
 	type UserSession,
 	type UserSessionStore,
@@ -388,8 +389,11 @@ const resumeUrl = (ctx: AuthorizeContext): string => {
 		}
 	}
 	const prompt = url.searchParams.get("prompt");
-	if (prompt !== null) {
-		const remaining = prompt.split(" ").filter((v) => v.length > 0 && v !== "consent");
+	// Read as `resolvePrompt` read it; a malformed one was refused there, so
+	// it never reaches a consent page to be carried back from.
+	const prompts = prompt === null ? null : readSpaceDelimitedParameter(prompt);
+	if (prompts !== null) {
+		const remaining = prompts.filter((v) => v !== "consent");
 		if (remaining.length === 0) {
 			url.searchParams.delete("prompt");
 		} else {
@@ -695,10 +699,16 @@ const resolvePrompt = (ctx: AuthorizeContext): PromptDirective | null => {
 		redirectError(ctx, "invalid_request", "prompt must be a single string value");
 		return null;
 	}
-	// §3.1.2.1: a space-delimited list. `none` may not be combined with any
-	// other value — "if this parameter contains none with any other value, an
-	// error is returned".
-	const values = raw.split(" ").filter((v) => v.length > 0);
+	// §3.1.2.1: a space-delimited list, read strictly — a tab is not a
+	// delimiter, so `none\tlogin` is malformed rather than one value this
+	// server happens not to support. `none` may not be combined with any other
+	// value — "if this parameter contains none with any other value, an error
+	// is returned".
+	const values = readSpaceDelimitedParameter(raw);
+	if (values === null) {
+		redirectError(ctx, "invalid_request", "prompt is not a space-delimited list of values");
+		return null;
+	}
 	if (values.length === 0) return NO_PROMPT;
 	if (values.includes("none") && values.length > 1) {
 		redirectError(ctx, "invalid_request", "prompt=none cannot be combined with other values");
@@ -855,7 +865,14 @@ const resolveAcr = (
 ): { readonly value: string | undefined } | null => {
 	const raw = ctx.params.acr_values;
 	if (raw === undefined) return { value: undefined };
-	const requested = typeof raw === "string" ? raw.split(" ").filter((v) => v.length > 0) : [];
+	// A repeat never reaches here (`checkSingleValuedParams`). Read strictly,
+	// as every space-delimited request parameter is: a malformed list is the
+	// request's fault, not an acr this deployment lacks.
+	const requested = typeof raw === "string" ? readSpaceDelimitedParameter(raw) : [];
+	if (requested === null) {
+		redirectError(ctx, "invalid_request", "acr_values is not a space-delimited list of values");
+		return null;
+	}
 	if (requested.length === 0) return { value: undefined };
 	const table = ctx.opts.oauth.acrValues;
 	const held = new Set(session?.amr ?? []);
@@ -1006,7 +1023,16 @@ const resolveScopes = (
 	client: PublicClient,
 ): { requestedScopes: string[]; allowedFilteredScopes: readonly string[] } | null => {
 	const allowedScopes = client.allowedScopes;
-	const requestedScopes = toStr(scope)?.split(" ").filter(Boolean) ?? [];
+	// RFC 6749 §3.3, read strictly: narrowing (below) is the answer to a scope
+	// this client may not have, and a malformed one is a different answer
+	// (§4.1.2.1 `invalid_scope`) — `read\tbogus` is not the scope `read` with a
+	// typo beside it. A repeat never reaches here (`checkSingleValuedParams`).
+	const named = readSpaceDelimitedParameter(toStr(scope) ?? "");
+	if (named === null) {
+		redirectError(ctx, "invalid_scope", "scope is not a space-delimited list of scope-tokens");
+		return null;
+	}
+	const requestedScopes = [...named];
 	let allowedFilteredScopes: readonly string[];
 	if (requestedScopes.length > 0) {
 		allowedFilteredScopes = requestedScopes.filter((s) => allowedScopes.includes(s));
@@ -1374,10 +1400,7 @@ export const createAuthorizeHandler = (opts: AuthorizeHandlerOptions): RequestHa
 		const promptRaw = authorizeParams(req).prompt;
 		const wantsSilentAuth =
 			typeof promptRaw === "string" &&
-			promptRaw
-				.split(" ")
-				.filter((v) => v.length > 0)
-				.includes("none");
+			(readSpaceDelimitedParameter(promptRaw)?.includes("none") ?? false);
 
 		// R1b: one liveness read per authenticated request, resolved here so
 		// both the login redirect below and the `prompt=none` refusal further
