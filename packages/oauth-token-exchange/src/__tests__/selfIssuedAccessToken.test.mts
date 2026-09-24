@@ -67,24 +67,39 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		expect(result).toBeNull();
 	});
 
-	it("does not consult a family store: the family rule is the grant's", async () => {
-		// Were the validator to refuse a revoked family, it would answer first
-		// with an opaque `null` and the grant's `family_revoked` would never
-		// reach a client — `grant-integration.test.mts` pins that answer through
-		// the booted module. So the option is gone, and a store smuggled past
-		// the types is ignored: the family is projected, never read.
+	it("refuses a refreshTokenFamilyRevocation option rather than ignoring it", () => {
+		// The family rule is the grant's: were the validator to refuse a revoked
+		// family, it would answer first with an opaque `null` and the grant's
+		// `family_revoked` would never reach a client (`grant-integration.test.mts`
+		// pins that answer through the booted module). So the option is gone —
+		// and ignored silently, a caller that relied on it from JavaScript, an
+		// options object built as a variable or a cast would lose the family
+		// check with no signal. Its presence is refused at construction, even
+		// with no value, since the caller still expected the check.
 		const store = makeFamilyRevocation({
 			isFamilyRevoked: vi.fn().mockResolvedValue(true),
 		});
-		const v = createSelfIssuedAccessTokenValidator({
+		expect(() =>
+			createSelfIssuedAccessTokenValidator({
+				keyStore,
+				issuer: ISSUER,
+				// @ts-expect-error — not an option: the grant owns the family check.
+				refreshTokenFamilyRevocation: store,
+			}),
+		).toThrow(/refreshTokenFamilyRevocation is not an option/);
+
+		const optionsBuiltElsewhere: Record<string, unknown> = {
 			keyStore,
 			issuer: ISSUER,
-			// @ts-expect-error — not an option: the grant owns the family check.
-			refreshTokenFamilyRevocation: store,
-		});
-		const token = await signSelfIssuedAccessToken({ family_id: "fam-revoked" });
-		const result = await v.validate(token, { role: "subject" });
-		expect(result?.familyId).toBe("fam-revoked");
+			refreshTokenFamilyRevocation: undefined,
+		};
+		expect(() =>
+			createSelfIssuedAccessTokenValidator(
+				optionsBuiltElsewhere as unknown as Parameters<
+					typeof createSelfIssuedAccessTokenValidator
+				>[0],
+			),
+		).toThrow(/refreshTokenFamilyRevocation is not an option/);
 		expect(store.isFamilyRevoked).not.toHaveBeenCalled();
 	});
 
