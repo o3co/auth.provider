@@ -86,6 +86,9 @@ export interface MemoryReplaySeenSet extends ReplaySeenSet {
  * pays nothing. A sweep runs once `sweepInterval` writes have accumulated
  * and at least `minSweepIntervalMs` has passed since the last one — the
  * count bounds the work per write, the floor bounds the scans per second.
+ * The floor is measured on the monotonic clock (`performance.now()`), so a
+ * wall clock stepped back cannot stall sweeps; which records are expired is
+ * judged on the wall clock, as their `expiresAtMs` is.
  * Writes keep counting through the floor, so the first write after it
  * sweeps. The guarantee is bounded growth, not zero-lag reclamation: an
  * expired record is dropped within an interval, and `markSeen` / `contains`
@@ -116,7 +119,10 @@ export function createMemoryReplaySeenSet(
 			? options.minSweepIntervalMs
 			: DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS;
 	let writesSinceSweep = 0;
-	let lastSweepAtMs = Number.NEGATIVE_INFINITY;
+	// Monotonic (`performance.now()`), not wall-clock: the floor is an
+	// interval, and a wall clock stepped back would read as a negative one and
+	// stall sweeps until it caught up. Record expiry stays wall-clock.
+	let lastSweepAtMonotonicMs = Number.NEGATIVE_INFINITY;
 
 	function getLive(key: string, nowMs: number): { expiresAtMs: number } | undefined {
 		const entry = map.get(key);
@@ -159,10 +165,13 @@ export function createMemoryReplaySeenSet(
 			}
 			map.set(k, { expiresAtMs });
 			writesSinceSweep += 1;
-			if (writesSinceSweep >= sweepInterval && nowMs - lastSweepAtMs >= minSweepIntervalMs) {
-				writesSinceSweep = 0;
-				lastSweepAtMs = nowMs;
-				sweep(nowMs);
+			if (writesSinceSweep >= sweepInterval) {
+				const monotonicMs = performance.now();
+				if (monotonicMs - lastSweepAtMonotonicMs >= minSweepIntervalMs) {
+					writesSinceSweep = 0;
+					lastSweepAtMonotonicMs = monotonicMs;
+					sweep(nowMs);
+				}
 			}
 			return true;
 		},
