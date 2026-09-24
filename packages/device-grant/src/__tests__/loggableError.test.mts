@@ -24,6 +24,7 @@
  * built here with Redis's exact text rather than imported.
  */
 
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import {
 	LOGGED_STACK_MAX_FRAMES,
@@ -230,6 +231,112 @@ describe("loggableError", () => {
 			expect(rewritten.stack).toContain("gho_TOKEN");
 			rewritten.message = "upstream refused the request";
 			expect("stack" in loggableError(rewritten)).toBe(false);
+		});
+
+		/**
+		 * An error whose message carried a frame-shaped line, its stack formatted
+		 * (V8 does that on the first read of `stack`), then `rewrite` applied.
+		 */
+		const rewrittenAfterFormatting = (
+			rewrite: (error: Error) => void,
+			message = "orig\n    at evil (S3CRET:1:1)",
+		): Error => {
+			const error = new Error(message);
+			expect(error.stack).toContain("S3CRET");
+			rewrite(error);
+			return error;
+		};
+
+		it.each(["E", "r", "Err", ": orig", "rig", "o", "Error: orig", ""])(
+			"keeps no stack when the message is rewritten to %j after the stack was formatted",
+			(message) => {
+				// A cut found anywhere in the stack could fall inside the header,
+				// and the header's frame-shaped line would then read as a frame.
+				// The header must be the stack's start, and end its line.
+				const projected = loggableError(
+					rewrittenAfterFormatting((error) => {
+						error.message = message;
+					}),
+				);
+				expect("stack" in projected).toBe(false);
+			},
+		);
+
+		it("keeps no stack when the name and message are rewritten to another header", () => {
+			const projected = loggableError(
+				rewrittenAfterFormatting((error) => {
+					error.name = "MyError";
+					error.message = "Error";
+				}),
+			);
+			expect("stack" in projected).toBe(false);
+		});
+
+		it("keeps no stack when the message is rewritten to a prefix that ends mid-line", () => {
+			const projected = loggableError(
+				rewrittenAfterFormatting((error) => {
+					error.message = "orig";
+				}, "orig and more\n    at evil (S3CRET:1:1)"),
+			);
+			expect("stack" in projected).toBe(false);
+		});
+
+		it("keeps no stack for a message that is not a string: it has no defined header", () => {
+			const error = new Error("m");
+			expect(error.stack).toMatch(/^Error: m\n/);
+			(error as unknown as { message: unknown }).message = 42;
+			expect("stack" in loggableError(error)).toBe(false);
+		});
+
+		it("still keeps a frame-shaped line when the message is rewritten to a prefix ending at one of its own line breaks", () => {
+			// The documented residual: `Error: orig` then `    at evil (…)` is
+			// exactly what an error with the message `orig` looks like, so the
+			// text cannot show the line is the old message's.
+			const projected = loggableError(
+				rewrittenAfterFormatting((error) => {
+					error.message = "orig";
+				}),
+			);
+			expect(projected.stack).toMatch(/^ {4}at evil \(S3CRET:1:1\)\n {4}at /);
+		});
+
+		/** What `fn` threw, or the error it returned. */
+		const errorFrom = (fn: () => unknown): unknown => {
+			try {
+				return fn();
+			} catch (error) {
+				return error;
+			}
+		};
+
+		class MyError extends Error {
+			override name = "MyError";
+		}
+
+		it.each([
+			["Buffer.alloc(-1)'s RangeError, its code in the header", () => Buffer.alloc(-1)],
+			["new URL's TypeError", () => new URL("x")],
+			["an fs ENOENT", () => readFileSync("/nonexistent/loggable-error-probe")],
+			["a JSON SyntaxError", () => JSON.parse("{x")],
+			[
+				"an AggregateError with a message",
+				() => new AggregateError([new Error("a")], "all failed"),
+			],
+			["an AggregateError without one", () => new AggregateError([new Error("a")])],
+			[
+				"a constructed DOMException TimeoutError",
+				() => new DOMException("timed out", "TimeoutError"),
+			],
+			["a subclass that names itself", () => new MyError("boom")],
+		])("keeps the frames of %s", (_label, fn) => {
+			expect(loggableError(errorFrom(fn)).stack).toMatch(/^ {4}at /);
+		});
+
+		it("keeps the frames of AbortSignal.timeout's TimeoutError", async () => {
+			const signal = AbortSignal.timeout(0);
+			await new Promise((resolve) => setTimeout(resolve, 20));
+			expect(signal.aborted).toBe(true);
+			expect(loggableError(signal.reason).stack).toMatch(/^ {4}at /);
 		});
 
 		it("keeps at most ten frames and 2048 characters, whichever comes first", () => {
