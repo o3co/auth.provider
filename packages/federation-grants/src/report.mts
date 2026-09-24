@@ -31,7 +31,7 @@
  * arrives from another system.
  */
 
-import type { AuditSink, Logger } from "@o3co/auth-provider-core";
+import { type AuditSink, type Logger, sanitizeErrorText } from "@o3co/auth-provider-core";
 
 /**
  * The closed set a failure is described by.
@@ -201,14 +201,27 @@ const sanitizePayload = (payload: Record<string, unknown>): Record<string, unkno
 /** The longest name or code an audited error is allowed: `auditErrorText`'s cap. */
 const AUDITED_FIELD_MAX_LENGTH = 200;
 
+/**
+ * A name or a code as `auditedError` writes one: a string within
+ * `auditErrorText`'s cap and its characters (`sanitizeErrorText` leaves it
+ * as it is).
+ */
 const auditedField = (value: unknown): value is string =>
-	typeof value === "string" && value.length <= AUDITED_FIELD_MAX_LENGTH;
+	typeof value === "string" &&
+	value.length <= AUDITED_FIELD_MAX_LENGTH &&
+	sanitizeErrorText(value) === value;
 
 /**
  * `value` rebuilt as core's `AuditedError` — `{ name, code?, cause?: { name,
- * code? } }`, bounded strings and nothing else — or `undefined` when it is
- * not one. What `auditedError` writes passes; anything carrying other fields
- * (a message) or other types is not an audited error.
+ * code? } }`, bounded strings in RFC 6749's error-text characters and
+ * nothing else — or `undefined` when it is not one. What `auditedError`
+ * writes passes; anything carrying other fields (a message), other types, or
+ * other characters (a line break) is not an audited error.
+ *
+ * This is a check of shape and characters, not of content: a name or a code
+ * that happens to hold a secret in those characters passes. What keeps a
+ * secret out is that `auditedError` reads only an error's name and code,
+ * never its message.
  */
 const auditedErrorShape = (value: unknown, depth = 0): Record<string, unknown> | undefined => {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
