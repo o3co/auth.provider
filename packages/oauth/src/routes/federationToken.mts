@@ -92,10 +92,11 @@ const UPSTREAM_INELIGIBLE_RETRY_AFTER_SECONDS = 300;
  *
  * Only an ABSENT field is admitted without being read. RFC 6749 §5.1 makes
  * `token_type` REQUIRED, so a record that names none was written from an
- * adapter that predates `FederationProfile` carrying it — every bundled
- * adapter but `federation-oidc` — rather than by an upstream meaning something
- * else. Every record written before #645 is silent too, and this is what keeps
- * them working.
+ * adapter that predates `FederationProfile` carrying it — a third-party one;
+ * every bundled adapter names it through core's `federationTokenSnapshot` —
+ * or linked before the bundled adapters did, rather than by an upstream
+ * meaning something else. Every record written before #645 is silent too, and
+ * this is what keeps them working.
  *
  * Everything else is READ, including a value that is not a token type at all.
  * A store is another thing this route does not own (D5), and the two must not
@@ -927,8 +928,8 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			//   retrieve.mts` drops the whole token on the same readings.
 			// - Absent: the answer said nothing about the type, which leaves the
 			//   one the record already carries. A refresh is not where a
-			//   connection changes how its tokens are presented, and every bundled
-			//   adapter but `federation-oidc` names none at all.
+			//   connection changes how its tokens are presented. Every bundled
+			//   adapter names one; a third-party adapter may not.
 			// - A type name: it is what the record will carry, and what decides
 			//   whether the token may be handed on.
 			const namedType = answer.tokenType !== undefined;

@@ -2554,14 +2554,14 @@ describe("POST /oauth/federation/:name/token", () => {
 			// Always `Bearer`, never the upstream's own spelling. Once a non-bearer
 			// type is refused, the only values left are case-variants of one word —
 			// RFC 6749 §5.1 makes the comparison case-insensitive, so the spelling
-			// carries nothing a caller can act on, and echoing it would have flipped
-			// every `federation-oidc` connection from `Bearer` to `bearer` on its
-			// first refresh after deploy for no gain.
+			// carries nothing a caller can act on, and echoing it would flip every
+			// connection whose upstream spells it `bearer` — every bundled adapter
+			// reports oauth4webapi's lower-cased spelling — for no gain.
 			//
 			// Silence is Bearer: §5.1 makes `token_type` REQUIRED, so a record that
 			// names none is an adapter written before `FederationProfile` carried
-			// the field — every bundled one but `federation-oidc` — and not an
-			// upstream meaning something else. This is what keeps every record
+			// the field — a third-party one, or a record linked before the bundled
+			// adapters reported it — and not an upstream meaning something else. This is what keeps every record
 			// written before #645 working.
 			const { app } = storedApp({ tokenType });
 
@@ -2714,8 +2714,8 @@ describe("POST /oauth/federation/:name/token", () => {
 
 		it("leaves the stored type standing when the refresh names none", async () => {
 			// A refresh is not where a connection changes how its tokens are
-			// presented, and every bundled adapter but `federation-oidc` names none
-			// at all.
+			// presented. Every bundled adapter names one; a third-party adapter may
+			// not, and that is the case pinned here.
 			const { app, fedTokenStore } = refreshingApp(
 				{ accessToken: "new-at", expiresIn: 3600 },
 				{ tokenType: "bearer" },
