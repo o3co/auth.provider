@@ -28,6 +28,7 @@
 import { createSecretKey } from "node:crypto";
 import { SignJWT } from "jose";
 import { describe, expect, it, vi } from "vitest";
+import { auditedError } from "#/audit/auditedError.mjs";
 import {
 	isVerificationUnavailable,
 	JwtVerificationError,
@@ -127,6 +128,39 @@ describe("verifyJwt — a keystore that cannot answer", () => {
 			expect.objectContaining({ reason: "verification_key_unavailable" }),
 			"jwt_verify_rejected",
 		);
+	});
+
+	it("reads a signing-kid fallback that throws as an outage too — for a token with no kid", async () => {
+		// A kid-less token asks the keystore for its current kid instead; a
+		// remote store that cannot say is as unavailable as one that cannot
+		// look a key up, and its error must not escape the verifier raw.
+		const real = createSymmetricKeyStore(SECRET, "v0");
+		const keyStore: KeyStore = {
+			...keyStoreWhoseLookupRejects(new Error("unused")),
+			getVerificationKey: (kid) => real.getVerificationKey(kid),
+			getSigningKidFallback: () => {
+				throw new Error("connect ECONNREFUSED 10.0.0.7:8200");
+			},
+		};
+		const kidless = await new SignJWT({ sub: "user-1" })
+			.setProtectedHeader({ alg: "HS256", typ: "at+jwt" })
+			.setIssuer(ISSUER)
+			.setIssuedAt()
+			.setExpirationTime("5m")
+			.sign(createSecretKey(Buffer.from(SECRET)));
+		const err = await verifyJwt(kidless, keyStore, options).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(JwtVerificationError);
+		expect(err).toMatchObject({ reason: "verification_key_unavailable" });
+	});
+
+	it("names itself, so an audit's details.cause.name says what failed", async () => {
+		const err = await verifyJwt(
+			await mint(),
+			keyStoreWhoseLookupRejects(new Error("down")),
+			options,
+		).catch((e: unknown) => e);
+		expect(auditedError(err)).toMatchObject({ name: "JwtVerificationError" });
+		expect(String((err as Error).stack).split("\n")[0]).toMatch(/^JwtVerificationError: /);
 	});
 
 	it("still reports a kid the keystore does not hold as kid_unknown", async () => {

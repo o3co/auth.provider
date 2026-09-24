@@ -117,7 +117,9 @@ export interface KeyStore {
 	 *
 	 * **MUST be synchronous and cheap**. Remote-sign adapters (KMS/HSM)
 	 * must cache the current kid locally and return it without any remote
-	 * call. Never exposes private key material.
+	 * call. Never exposes private key material. A throw here is read the way
+	 * a throw from `getVerificationKey` is: the keystore cannot answer
+	 * (`verification_key_unavailable`).
 	 */
 	getSigningKidFallback(): string;
 	/** Active verification keys for JWKS endpoint. Remote adapters may fetch + cache. */

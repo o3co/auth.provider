@@ -521,10 +521,13 @@ export async function verifyJwt(
 		emitRejection(logger, err, undefined, header);
 		throw err;
 	}
-	const requestedKid = headerKid ?? keyStore.getSigningKidFallback();
 	let verificationKey: Awaited<ReturnType<KeyStore["getVerificationKey"]>>;
 	try {
-		verificationKey = await keyStore.getVerificationKey(requestedKid);
+		// The fallback is inside the classification too: a remote keystore
+		// that cannot say which kid is current cannot answer either.
+		verificationKey = await keyStore.getVerificationKey(
+			headerKid ?? keyStore.getSigningKidFallback(),
+		);
 	} catch (cause) {
 		// KeyStore distinguishes the two findings via typed errors
 		// (ExpiredKidError / UnknownKidError) so SIEM pipelines can tell
