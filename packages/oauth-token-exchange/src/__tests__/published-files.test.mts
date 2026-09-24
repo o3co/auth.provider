@@ -22,8 +22,8 @@ import { describe, expect, it } from "vitest";
 // The build emits every `src/**/*.mts` outside `__tests__` (tsconfig.json's
 // `exclude`), and the package publishes all of `dist` (package.json `files`).
 // A source file the entry point does not reach therefore ships without being
-// part of the package — dead weight at best, at worst an unexported class a
-// consumer can still deep-import from the tarball. Scaffolding that only tests
+// part of the package: `exports` (".") keeps it from being imported by package
+// name, but it is still dead weight in the tarball. Scaffolding that only tests
 // use belongs under `__tests__`, where the build does not look.
 const SRC = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ENTRY = join(SRC, "index.mts");

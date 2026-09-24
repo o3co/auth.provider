@@ -74,7 +74,13 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  * alike — refusing a revoked family with `family_revoked`, and a
  * family-bearing token outright when the slot is not wired. A family check
  * here would answer first with an opaque `null` and hide that answer, which is
- * what `tokenExchangeModule` did while it handed the slot to both.
+ * what `tokenExchangeModule` did while it handed the slot to both. A caller
+ * that uses this validator outside `createTokenExchangeGrant` must check
+ * `familyId` itself, and refuse the token when it has no family store.
+ *
+ * Passing `refreshTokenFamilyRevocation` anyway throws at construction, even
+ * with no value: a caller that still expects the validator to check the
+ * family must find out, not lose the check silently.
  *
  * `issuer` is required; the constructor throws synchronously when it is
  * missing or an empty string. Without an issuer to compare against, an
@@ -95,6 +101,11 @@ export function createSelfIssuedAccessTokenValidator(
 ): ExchangeTokenValidator {
 	const { keyStore, accessTokenDenylist, subjectRevocation, issuer, legacyTypAccept, logger } =
 		options;
+	if ("refreshTokenFamilyRevocation" in options) {
+		throw new Error(
+			"createSelfIssuedAccessTokenValidator: refreshTokenFamilyRevocation is not an option. The validator does not check the refresh-token family; createTokenExchangeGrant does, given refreshTokenFamilyRevocation in its own dependencies. A caller using this validator outside createTokenExchangeGrant must check ValidatedToken.familyId itself and refuse the token when it has no family store.",
+		);
+	}
 	if (typeof issuer !== "string" || issuer.length === 0) {
 		throw new Error(
 			"createSelfIssuedAccessTokenValidator: issuer is required (a non-empty string). Without an issuer to compare against, an at+jwt signed by the same KeyStore but with a different `iss` claim could be accepted.",
