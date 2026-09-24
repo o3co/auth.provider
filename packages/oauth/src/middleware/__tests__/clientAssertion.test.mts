@@ -450,6 +450,48 @@ describe("createClientAssertionVerifier (#484)", () => {
 		});
 	});
 
+	describe("the exp ceiling allows the clock tolerance, as the ID-JAG ceiling does", () => {
+		// Both are held to core's MAX_ASSERTION_LIFETIME_SECONDS. A client whose
+		// clock runs a little ahead mints an hour-long assertion whose exp is a
+		// little past an hour from this server's now; refusing it made the
+		// refusal depend on how the two clocks happened to sit that second.
+		// A fixed `now` keeps the boundary exact.
+		const fixedNowMs = Date.now();
+		const nowSeconds = Math.floor(fixedNowMs / 1000);
+		const at = (tolerance: number, logger: Logger = silent) =>
+			build({ now: () => fixedNowMs, clockToleranceSeconds: tolerance, logger });
+
+		for (const tolerance of [30, 120]) {
+			it(`accepts exp up to the ceiling plus the tolerance (${tolerance} s)`, async () => {
+				for (const ahead of [tolerance - 1, tolerance]) {
+					const exp = nowSeconds + MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + ahead;
+					expect(await at(tolerance).verify(body(await mint({ exp })), findClient())).toMatchObject(
+						{ kind: "ok" },
+					);
+				}
+			});
+
+			it(`refuses exp past the ceiling plus the tolerance (${tolerance} s), and logs why`, async () => {
+				const warn = vi.fn();
+				const exp = nowSeconds + MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + tolerance + 1;
+				const outcome = refused(
+					await at(tolerance, { ...silent, warn }).verify(body(await mint({ exp })), findClient()),
+				);
+				expect(outcome).toMatchObject({ status: 401, error: "invalid_client" });
+				expect(outcome.description).toMatch(/exp/);
+				expect(warn).toHaveBeenCalledWith(
+					expect.objectContaining({
+						reason: "lifetime",
+						clientId: CLIENT_ID,
+						lifetimeSeconds: MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + tolerance + 1,
+						maxLifetimeSeconds: MAX_CLIENT_ASSERTION_LIFETIME_SECONDS + tolerance,
+					}),
+					"client_assertion_refused",
+				);
+			});
+		}
+	});
+
 	describe("what a refusal logs: a caught error's projection, never the error", () => {
 		/**
 		 * A logger that serialises every own property of what it is handed,

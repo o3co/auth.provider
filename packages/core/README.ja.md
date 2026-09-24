@@ -182,7 +182,7 @@ floor が置かれているのは **builder と schema**（= config 境界）で
 
 `REVOCATION_RETENTION_ALLOWANCE_MS` は、トークンを失効させた記録をその `exp` からどれだけ長く保持しなければならないかです。検証器のクロック許容、レプリカ間の余裕、丸めの 1 秒からなります。`/oauth/revoke` は denylist に入れた `jti` を `exp` からこの分だけ長く保持し、失効したリフレッシュトークンファミリーも同じ規則で保持されます（[リフレッシュトークンファミリー](#リフレッシュトークンファミリーrfc-6819-5223-の-replay-検出)）。
 
-JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるときだけ NumericDate（RFC 7519 §2）です。`isNumericDate` と `malformedNumericDateClaim`（[`src/jwt/numericDate.mts`](src/jwt/numericDate.mts)）がその規則を述べ、jwt-bearer のレジストリ検証器、`private_key_jwt`、DPoP はこれを破るアサーションや proof を、そこから期限を計算する前に拒否します。jose はこうしたクレームが数値であることしか確かめず、JSON の `1e400` は Infinity にパースされます。小数は許されます。単一使用のために `jti` を記録するアサーション — `private_key_jwt` のクライアントアサーション、ID-JAG — は、さらに現在から `MAX_ASSERTION_LIFETIME_SECONDS`（1 時間）先までしか有効でなく、発行もそれ以内でなければなりません（[`src/assertions/lifetime.mts`](src/assertions/lifetime.mts)）。リプレイの記録は `exp` まで残るので、上限の無い `exp` は上限の無い記録になるからです。
+JWT の `exp`・`iat`・`nbf` は、有限で Date の範囲に収まるときだけ NumericDate（RFC 7519 §2）です。`isNumericDate` と `malformedNumericDateClaim`（[`src/jwt/numericDate.mts`](src/jwt/numericDate.mts)）がその規則を述べ、jwt-bearer のレジストリ検証器、`private_key_jwt`、DPoP はこれを破るアサーションや proof を、そこから期限を計算する前に拒否します。jose はこうしたクレームが数値であることしか確かめず、JSON の `1e400` は Infinity にパースされます。小数は許されます。単一使用のために `jti` を記録するアサーション — `private_key_jwt` のクライアントアサーション、ID-JAG — は、さらに現在から `MAX_ASSERTION_LIFETIME_SECONDS`（1 時間）先までしか有効でなく、発行もそれ以内でなければなりません（[`src/assertions/lifetime.mts`](src/assertions/lifetime.mts)）。リプレイの記録は `exp` まで残るので、上限の無い `exp` は上限の無い記録になるからです。どちらの検証器も、ほかのすべての時刻チェックと同じく時計の許容幅をその上に認め、`exp` を同じ `assertionLifetime` で比べます。時計が少し進んでいるクライアントや IdP が、一方の経路では拒否され他方では受け入れられる、ということは起きません。
 
 ### リポジトリ
 

@@ -57,7 +57,11 @@ export type {
 	SubjectHandleReader,
 } from "./assertions/jwtAssertionVerifier.mjs";
 export { createJwtAssertionVerifier } from "./assertions/jwtAssertionVerifier.mjs";
-export { MAX_ASSERTION_LIFETIME_SECONDS } from "./assertions/lifetime.mjs";
+export {
+	type AssertionLifetime,
+	assertionLifetime,
+	MAX_ASSERTION_LIFETIME_SECONDS,
+} from "./assertions/lifetime.mjs";
 export {
 	type AssertionClaimReaders,
 	createRegistryAssertionVerifier,

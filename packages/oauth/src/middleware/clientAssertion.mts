@@ -15,6 +15,7 @@
  */
 
 import {
+	assertionLifetime,
 	auditErrorText,
 	consoleLogger,
 	createRemoteKeySetCache,
@@ -80,7 +81,9 @@ export const CLIENT_ASSERTION_ALGORITHMS = [
  * `jti` this server records — an ID-JAG is held to it too. RFC 7523 requires
  * `exp` but bounds nothing; client libraries mint assertions that live a
  * minute or ten, and an hour leaves room for a client whose clock runs ahead
- * while keeping the replay record — which lives until `exp` — small.
+ * while keeping the replay record — which lives until `exp` — small. Both
+ * limits allow the verifier's clock tolerance on top, as the ID-JAG ceiling
+ * does: `exp − now` is compared through core's `assertionLifetime`.
  */
 export const MAX_CLIENT_ASSERTION_LIFETIME_SECONDS = MAX_ASSERTION_LIFETIME_SECONDS;
 
@@ -95,7 +98,12 @@ export interface ClientAssertionVerifierOptions {
 	/** Where `jti` values are spent. Absent → assertions are answered `server_error`. */
 	readonly replaySeenSet?: ReplaySeenSet;
 	readonly logger?: Logger;
-	/** Clock tolerance on `exp` / `nbf` / `iat`, in seconds. Default 30. `iat` is also held to the lifetime ceiling. */
+	/**
+	 * Clock tolerance on `exp` / `nbf` / `iat`, in seconds. Default 30. Also
+	 * allowed on top of the lifetime ceiling, both ways: `exp − now` and the
+	 * `iat` age may each be at most `MAX_CLIENT_ASSERTION_LIFETIME_SECONDS`
+	 * plus this.
+	 */
 	readonly clockToleranceSeconds?: number;
 	/** The fetch used for `jwksUri`. A proxy, or a test seam. */
 	readonly fetch?: typeof fetch;
@@ -173,15 +181,19 @@ export function createClientAssertionVerifier(
 			readonly clientId?: string;
 			readonly assertionType?: string;
 			readonly err?: unknown;
+			/** A `lifetime` refusal's numbers: `exp − now` and the most it may be. */
+			readonly lifetimeSeconds?: number;
+			readonly maxLifetimeSeconds?: number;
 		} = {},
 	): ClientAssertionOutcome => {
 		const log = status >= 500 ? logger.error.bind(logger) : logger.warn.bind(logger);
-		const { err, clientId, assertionType } = context;
+		const { err, clientId, assertionType, lifetimeSeconds, maxLifetimeSeconds } = context;
 		log(
 			{
 				reason,
 				...(clientId !== undefined ? { clientId: auditErrorText(clientId) } : {}),
 				...(assertionType !== undefined ? { assertionType: auditErrorText(assertionType) } : {}),
+				...(lifetimeSeconds !== undefined ? { lifetimeSeconds, maxLifetimeSeconds } : {}),
 				...("err" in context ? { err: loggableError(err) } : {}),
 			},
 			"client_assertion_refused",
@@ -352,13 +364,20 @@ export function createClientAssertionVerifier(
 
 			const nowSeconds = Math.floor(now() / 1000);
 			const exp = payload.exp as number;
-			if (exp - nowSeconds > MAX_CLIENT_ASSERTION_LIFETIME_SECONDS) {
+			// The ceiling the ID-JAG verifier holds its assertions to, with the
+			// same allowance for a client whose clock runs ahead.
+			const lifetime = assertionLifetime(exp, nowSeconds, clockTolerance);
+			if (lifetime.exceeded) {
 				return refuse(
 					401,
 					"invalid_client",
 					`client assertion exp is too far ahead (at most ${MAX_CLIENT_ASSERTION_LIFETIME_SECONDS} seconds)`,
 					"lifetime",
-					{ clientId: iss },
+					{
+						clientId: iss,
+						lifetimeSeconds: lifetime.lifetimeSeconds,
+						maxLifetimeSeconds: lifetime.maxLifetimeSeconds,
+					},
 				);
 			}
 			// RFC 7523 §3 (6): `iat`, when present, must not be unreasonably far in

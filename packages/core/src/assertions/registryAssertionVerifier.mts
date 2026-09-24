@@ -22,7 +22,7 @@ import type { Logger } from "../logging/Logger.mjs";
 import { isRecordableJti } from "../replay-seen-set/jti.mjs";
 import type { ReplaySeenSet } from "../replay-seen-set/types.mjs";
 import type { AssertionIssuerEntry, AssertionIssuerRegistry } from "./issuerRegistry.mjs";
-import { MAX_ASSERTION_LIFETIME_SECONDS } from "./lifetime.mjs";
+import { assertionLifetime, MAX_ASSERTION_LIFETIME_SECONDS } from "./lifetime.mjs";
 import type {
 	AssertionVerificationContext,
 	AssertionVerificationResult,
@@ -379,9 +379,12 @@ export function createRegistryAssertionVerifier(
 				// tolerance is allowed here as in every other time check — an
 				// IdP whose clock runs ahead mints an hour-long ID-JAG a little
 				// past an hour from this server's now.
-				const lifetimeSeconds = (claims.exp as number) - Math.floor(Date.now() / 1000);
-				const maxLifetimeSeconds = MAX_ASSERTION_LIFETIME_SECONDS + clockTolerance;
-				if (lifetimeSeconds > maxLifetimeSeconds) {
+				const { exceeded, lifetimeSeconds, maxLifetimeSeconds } = assertionLifetime(
+					claims.exp as number,
+					Math.floor(Date.now() / 1000),
+					clockTolerance,
+				);
+				if (exceeded) {
 					return refused(entry, { reason: "lifetime", lifetimeSeconds, maxLifetimeSeconds });
 				}
 				// Accepted once for its lifetime. `exp` verified above; the floor
