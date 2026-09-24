@@ -30,8 +30,9 @@
 // such a machine the test's require probe reports the package as loaded and
 // fails; it cannot pass with the package visible.
 //
-// `module.registerHooks` needs Node >= 22.15 or >= 23.5; the test that loads
-// this file checks for it first.
+// `module.registerHooks` needs Node >= 22.15 or >= 23.5; on an older Node the
+// test that loads this file skips the cases that would, and on CI asserts the
+// API is there.
 import { createRequire, registerHooks } from "node:module";
 
 const hidden = new Set((process.env.HIDE_PACKAGES ?? "").split(",").filter(Boolean));

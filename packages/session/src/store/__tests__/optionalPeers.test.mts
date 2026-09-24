@@ -23,10 +23,13 @@
  * sibling.
  *
  * The hook needs `module.registerHooks` (Node >= 22.15 or >= 23.5), which the
- * package's `engines` floor predates: on an older Node the suite fails at once,
- * saying so, rather than with a child that printed nothing. Each case starts a
- * Node process that loads the package graph, so a case gets 60 seconds, not
- * the workspace's 20: on a loaded machine the process alone has taken longer.
+ * package's `engines` floor (>= 22.0.0) predates. On an older Node the cases
+ * that start a process are skipped, and the suite's title says why: the
+ * loader's own rules are covered in-process by `redisStoreLibraries.test.mts`,
+ * and the manifest case here runs anywhere. CI must not skip them, so under
+ * `CI` a case asserts the API is there. Each process-starting case starts a
+ * Node process that loads the package graph, so it gets 60 seconds, not the
+ * workspace's 20: on a loaded machine the process alone has taken longer.
  */
 
 import { execFile } from "node:child_process";
@@ -43,6 +46,7 @@ const HIDE_PACKAGES = pathToFileURL(join(HERE, "fixtures/hide-packages.mjs")).hr
 const BOOT = join(HERE, "fixtures/boot-session-store.mjs");
 const PEERS = ["redis", "connect-redis"] as const;
 const CHILD_TIMEOUT = 60_000;
+const HAS_REGISTER_HOOKS = "registerHooks" in nodeModule;
 
 type Outcome = { readonly booted: true } | { readonly booted: false; readonly message: string };
 
@@ -84,30 +88,6 @@ console.log("RESULT " + JSON.stringify({
 `;
 
 describe("the Redis session store's libraries are optional peers", () => {
-	beforeAll(() => {
-		if (!("registerHooks" in nodeModule)) {
-			throw new Error(
-				`these tests hide packages with module.registerHooks, which Node ${process.version} lacks: run them on Node >= 22.15 or >= 23.5`,
-			);
-		}
-		if (!existsSync(join(PACKAGE_DIR, "dist/index.mjs"))) {
-			throw new Error("build @o3co/auth-provider-session first: `pnpm run build`");
-		}
-	});
-
-	it(
-		"hides a package from require and import alike, and nothing else",
-		async () => {
-			expect(await run(["--input-type=module", "-e", PROBE], { HIDE_PACKAGES: "redis" })).toEqual({
-				requireHidden: "MODULE_NOT_FOUND",
-				importHidden: "ERR_MODULE_NOT_FOUND",
-				requireOther: "loaded",
-				importOther: "loaded",
-			});
-		},
-		CHILD_TIMEOUT,
-	);
-
 	it("declares redis and connect-redis as optional peers, never as dependencies", () => {
 		const manifest = JSON.parse(readFileSync(join(PACKAGE_DIR, "package.json"), "utf8")) as {
 			dependencies?: Record<string, string>;
@@ -124,27 +104,62 @@ describe("the Redis session store's libraries are optional peers", () => {
 		}
 	});
 
-	it(
-		"boots a memory-only composition with neither package installed",
-		async () => {
-			expect(await boot("memory", PEERS)).toEqual({ booted: true });
+	// CI runs a Node with module.registerHooks, and the cases below must run
+	// there: this is what keeps their skip on an older Node from hiding them.
+	it.runIf(Boolean(process.env.CI))(
+		"finds module.registerHooks on CI, so nothing below is skipped",
+		() => {
+			expect(HAS_REGISTER_HOOKS, `Node ${process.version} lacks module.registerHooks`).toBe(true);
 		},
-		CHILD_TIMEOUT,
 	);
 
-	it.each([[["redis"]], [["connect-redis"]], [["redis", "connect-redis"]]])(
-		"refuses a redis store with %j missing, naming what is missing and the fix",
-		async (hidden) => {
-			const outcome = await boot("redis", hidden);
-			expect(outcome.booted).toBe(false);
-			if (outcome.booted) return;
-			const missing = hidden.map((name) => `"${name}"`).join(" and ");
-			expect(outcome.message).toContain('session.storage.type is "redis"');
-			expect(outcome.message).toContain(
-				`${missing} ${hidden.length === 1 ? "is" : "are"} not installed`,
+	describe.skipIf(!HAS_REGISTER_HOOKS)(
+		`in a Node process that cannot resolve them (needs module.registerHooks: Node >= 22.15 or >= 23.5${HAS_REGISTER_HOOKS ? "" : `; skipped on ${process.version}`})`,
+		() => {
+			beforeAll(() => {
+				if (!existsSync(join(PACKAGE_DIR, "dist/index.mjs"))) {
+					throw new Error("build @o3co/auth-provider-session first: `pnpm run build`");
+				}
+			});
+
+			it(
+				"hides a package from require and import alike, and nothing else",
+				async () => {
+					expect(
+						await run(["--input-type=module", "-e", PROBE], { HIDE_PACKAGES: "redis" }),
+					).toEqual({
+						requireHidden: "MODULE_NOT_FOUND",
+						importHidden: "ERR_MODULE_NOT_FOUND",
+						requireOther: "loaded",
+						importOther: "loaded",
+					});
+				},
+				CHILD_TIMEOUT,
 			);
-			expect(outcome.message).toContain("npm install redis@^6.2.1 connect-redis@^10.0.0");
+
+			it(
+				"boots a memory-only composition with neither package installed",
+				async () => {
+					expect(await boot("memory", PEERS)).toEqual({ booted: true });
+				},
+				CHILD_TIMEOUT,
+			);
+
+			it.each([[["redis"]], [["connect-redis"]], [["redis", "connect-redis"]]])(
+				"refuses a redis store with %j missing, naming what is missing and the fix",
+				async (hidden) => {
+					const outcome = await boot("redis", hidden);
+					expect(outcome.booted).toBe(false);
+					if (outcome.booted) return;
+					const missing = hidden.map((name) => `"${name}"`).join(" and ");
+					expect(outcome.message).toContain('session.storage.type is "redis"');
+					expect(outcome.message).toContain(
+						`${missing} ${hidden.length === 1 ? "is" : "are"} not installed`,
+					);
+					expect(outcome.message).toContain("npm install redis@^6.2.1 connect-redis@^10.0.0");
+				},
+				CHILD_TIMEOUT,
+			);
 		},
-		CHILD_TIMEOUT,
 	);
 });
