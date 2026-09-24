@@ -35,6 +35,7 @@ import {
 	classifyFederationRefreshError,
 	emitAuditEvent,
 	isBearerTokenType,
+	loggableError,
 	parseScopeTokens,
 	supportsLock,
 	supportsRefresh,
@@ -761,9 +762,12 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				// retrieval (#593). This route acts on the reason alone, the message
 				// fallback included, exactly as before.
 				const { reason } = classifyFederationRefreshError(error);
+				// The projection, never the error: the adapter's library puts the
+				// refresh answer it refused on the error's cause chain, and that
+				// answer holds the rotated refresh token.
 				logger.warn(
 					`POST /oauth/federation/${name}/token: refreshToken failed (reason: ${reason}):`,
-					error,
+					loggableError(error),
 				);
 
 				if (reason === "invalid_grant") {
