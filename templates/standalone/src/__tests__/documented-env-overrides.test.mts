@@ -194,6 +194,7 @@ const DOCUMENTED_ENV: Readonly<Record<string, string>> = {
 	FEDERATIONS_GOOGLE_CLIENT_ID: "google-client-id",
 	FEDERATIONS_GOOGLE_CLIENT_SECRET: "google-client-secret",
 	FEDERATIONS_GOOGLE_CALLBACK_URL: "https://auth.test/session/oauth/federation/google/callback",
+	FEDERATIONS_GOOGLE_ACCESS_TYPE: "online",
 	// #524: the generic OIDC federation the template ships disabled.
 	FEDERATIONS_OIDC_ENABLED: "true",
 	FEDERATIONS_OIDC_ISSUER: "https://idp.test",
@@ -353,6 +354,7 @@ describe("#288: the shipped config boots with every documented override supplied
 		expect(config.http.port).toBe(3000);
 		expect(config.http.readinessTimeoutMs).toBe(1500);
 		expect(config.http.trustProxy).toEqual(["10.0.0.0/8", "loopback"]);
+		expect(config.federations.google?.accessType).toBe("online");
 		// The new default wins over the deprecated variable, and the parsed
 		// config mirrors it onto the old key for readers that predate the split.
 		expect(resolveAccessTokenLifetime(config)).toEqual({
