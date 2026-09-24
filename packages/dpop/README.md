@@ -68,9 +68,9 @@ implemented: the `dpop_jkt` authorization-request parameter at `/authorize`
 npm install @o3co/auth-provider-dpop @o3co/auth-provider-core
 ```
 
-Peer dependencies: `@o3co/auth-provider-core`, and `express@^5.0.0` as an
-optional one — the package imports only its types. The package depends on
-`jose` and `zod`.
+Peer dependency: `@o3co/auth-provider-core`. Optional peer dependency:
+`express@^5.0.0`, whose types alone the package imports. The package depends
+on `jose` and `zod`.
 
 ## Quick start
 

@@ -39,7 +39,9 @@ npm install @o3co/auth-provider-federation-grants @o3co/auth-provider-core @o3co
 ```
 
 Peer dependencies: `@o3co/auth-provider-core`, `@o3co/auth-provider-oauth` and
-`express@^5.0.0`. The package depends on `zod`. Delegation also needs
+`express@^5.0.0`. The package depends on `zod`.
+
+Delegation also needs
 [`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md), the one
 adapter that can delegate; the package does not import it.
 

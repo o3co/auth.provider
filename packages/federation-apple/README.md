@@ -59,7 +59,8 @@ npm install @o3co/auth-provider-federation-apple @o3co/auth-provider-core @o3co/
 ```
 
 Peer dependencies: `@o3co/auth-provider-core` and
-`@o3co/auth-provider-session`. Its dependencies are `openid-client` and `jose`.
+`@o3co/auth-provider-session`. The package depends on `jose` and
+`openid-client`.
 
 ## Usage
 

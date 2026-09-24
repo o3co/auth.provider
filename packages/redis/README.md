@@ -57,9 +57,9 @@ npm install @o3co/auth-provider-redis @o3co/auth-provider-core
 npm install ioredis@^6.0.0
 ```
 
-Peer dependencies: `@o3co/auth-provider-core`, and `ioredis@^6.0.0` as an
-optional one — only the `@o3co/auth-provider-redis/ioredis` entry imports it
-(see [Entry points](#entry-points)). The package depends on `zod`.
+Peer dependency: `@o3co/auth-provider-core`. Optional peer dependency:
+`ioredis@^6.0.0`, which only the `@o3co/auth-provider-redis/ioredis` entry
+imports (see [Entry points](#entry-points)). The package depends on `zod`.
 
 ## Requirements
 

@@ -35,7 +35,7 @@ npm install @o3co/auth-provider-federation-github @o3co/auth-provider-core @o3co
 ```
 
 Peer dependencies: `@o3co/auth-provider-core` and
-`@o3co/auth-provider-session`. `openid-client` is installed with it.
+`@o3co/auth-provider-session`. The package depends on `openid-client`.
 
 ## Usage
 

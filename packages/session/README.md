@@ -110,16 +110,18 @@ npm install @o3co/auth-provider-session @o3co/auth-provider-core express express
 npm install redis@^6.2.1 connect-redis@^10.0.0
 ```
 
-- Peer dependencies: `@o3co/auth-provider-core`, `express@^5.0.0` and
-  `express-session@^1.17.0`. Core is a peer because this package augments it
-  (the `federationRedirectPolicies` contribution kind and its slot), and an
-  augmentation reaches only the copy of core it resolves: as a peer, that is
-  your composition's one copy.
-- Optional peer dependencies: `redis@^6.2.1` and `connect-redis@^10.0.0`, the
-  Redis session store's libraries. A deployment on
-  `session.storage.type = "memory"` installs neither; nothing imports them
-  until the Redis store is built. On `"redis"` — the default — install both:
-  with either missing, boot fails naming it and the install command.
+Peer dependencies: `@o3co/auth-provider-core`, `express@^5.0.0` and
+`express-session@^1.17.0`. Optional peer dependencies: `redis@^6.2.1` and
+`connect-redis@^10.0.0`, the Redis session store's libraries. The package has
+no dependencies of its own.
+
+Core is a peer because this package augments it (the
+`federationRedirectPolicies` contribution kind and its slot), and an
+augmentation reaches only the copy of core it resolves: as a peer, that is
+your composition's one copy. A deployment on `session.storage.type = "memory"`
+installs neither Redis library; nothing imports them until the Redis store is
+built. On `"redis"` — the default — install both: with either missing, boot
+fails naming it and the install command.
 
 ## Composition
 

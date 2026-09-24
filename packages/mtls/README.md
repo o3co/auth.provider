@@ -31,9 +31,9 @@ mTLS ([RFC 8705](https://www.rfc-editor.org/rfc/rfc8705)) sender-constrained tok
 npm install @o3co/auth-provider-mtls @o3co/auth-provider-core
 ```
 
-Peer dependencies: `@o3co/auth-provider-core`, and `express@^5.0.0` as an
-optional one — the package imports only its types. The package depends on
-`pkijs`, `asn1js` and `zod`.
+Peer dependency: `@o3co/auth-provider-core`. Optional peer dependency:
+`express@^5.0.0`, whose types alone the package imports. The package depends
+on `asn1js`, `pkijs` and `zod`.
 
 ## Quick start
 
