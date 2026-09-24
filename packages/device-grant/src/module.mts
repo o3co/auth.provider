@@ -121,7 +121,7 @@ import {
 	createCsrfProtectionFromConfig,
 	type SessionCsrfConfigSlice,
 } from "@o3co/auth-provider-session";
-import express, { type RequestHandler } from "express";
+import express, { type ErrorRequestHandler, type RequestHandler, type Response } from "express";
 import { z } from "zod";
 import { createDeviceAuthorizationHandler } from "./deviceAuthorizationEndpoint.mjs";
 import { createDeviceCodeGrant } from "./grant.mjs";
@@ -318,6 +318,15 @@ const OAUTH_ROUTER_ID = "oauth-endpoints";
 const BODY_LIMIT = "16kb";
 const BODY_LIMIT_BYTES = 16 * 1024;
 
+/** The one answer for a body over the bound, however it was found to be. */
+const refuseTooLarge = (res: Response): void => {
+	res
+		.status(413)
+		.set("Cache-Control", "no-store")
+		.set("Pragma", "no-cache")
+		.json({ error: "invalid_request", error_description: "body_too_large" });
+};
+
 /**
  * The body limit, restated ahead of the parsers — federation-grants'
  * `withinBodyLimit`, with its status and body.
@@ -326,19 +335,31 @@ const BODY_LIMIT_BYTES = 16 * 1024;
  * the body is read. A body with no `Content-Length` (chunked) is left to the
  * parsers' own `limit`, as federation-grants leaves it; both routes mount
  * ahead of `oauthModule`'s router (`OAUTH_ROUTER_ID`), so those parsers are
- * the first to read it whatever the module order.
+ * the first to read it whatever the module order, and `bodyTooLarge` gives
+ * their refusal the same answer.
  */
 const withinBodyLimit: RequestHandler = (req, res, next) => {
 	const declared = Number(req.headers["content-length"]);
 	if (Number.isFinite(declared) && declared > BODY_LIMIT_BYTES) {
-		res
-			.status(413)
-			.set("Cache-Control", "no-store")
-			.set("Pragma", "no-cache")
-			.json({ error: "invalid_request", error_description: "body_too_large" });
+		refuseTooLarge(res);
 		return;
 	}
 	next();
+};
+
+/**
+ * A chunked body the parsers found over the bound, answered as
+ * `withinBodyLimit` answers a declared one — federation-grants'
+ * `parserErrors` for this one error type. Every other error passes on to the
+ * host app's handler unchanged: what it does with a malformed body or a
+ * thrown handler is the host's decision, not this module's.
+ */
+const bodyTooLarge: ErrorRequestHandler = (error, _req, res, next) => {
+	if (res.headersSent || (error as { type?: unknown } | null)?.type !== "entity.too.large") {
+		next(error);
+		return;
+	}
+	refuseTooLarge(res);
 };
 
 /**
@@ -606,6 +627,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							logger: deps.logger,
 						}),
 					);
+					router.use(bodyTooLarge);
 					return {
 						id: "device-authorization",
 						mountPath: "/oauth/device_authorization",
@@ -665,6 +687,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							auditSink: deps.auditSink,
 						}),
 					);
+					router.use(bodyTooLarge);
 					return {
 						id: "device-verification",
 						mountPath: "/oauth/device/verification",
