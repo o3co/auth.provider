@@ -21,6 +21,7 @@ import { malformedNumericDateClaim } from "../jwt/numericDate.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { isRecordableJti } from "../replay-seen-set/jti.mjs";
 import type { ReplaySeenSet } from "../replay-seen-set/types.mjs";
+import { isWellFormedIdentifier } from "../security/identifier.mjs";
 import type { AssertionIssuerEntry, AssertionIssuerRegistry } from "./issuerRegistry.mjs";
 import {
 	assertionLifetime,
@@ -71,8 +72,11 @@ export interface RegistryAssertionVerifierOptions {
 	 * `jwt_bearer_assertion_refused` with the entry's `issuer` and a `reason`:
 	 * `lifetime` (an ID-JAG past `MAX_ASSERTION_LIFETIME_SECONDS` and the
 	 * entry's clock tolerance; with `lifetimeSeconds` and
-	 * `maxLifetimeSeconds`) or `numeric_date` (with the `claim`). Other
-	 * refusals are not logged here. Absent, nothing is logged.
+	 * `maxLifetimeSeconds`) or `numeric_date` (with the `claim`) — and,
+	 * without an `issuer`, as `malformed_issuer` for an `iss` that cannot name
+	 * one (refused before the registry is asked; the value is the client's and
+	 * is not logged). Other refusals are not logged here. Absent, nothing is
+	 * logged.
 	 */
 	readonly logger?: Logger;
 	/**
@@ -300,7 +304,14 @@ export function createRegistryAssertionVerifier(
 			} catch {
 				return null;
 			}
-			if (typeof unverified.iss !== "string" || unverified.iss.length === 0) return null;
+			// The `iss` is the client's input, handed to a registry a deployment
+			// may back with its own store: one that cannot name an issuer (core's
+			// identifier rule, as for `client_id`) is refused without a lookup,
+			// so it cannot make the registry throw — an outage — either.
+			if (!isWellFormedIdentifier(unverified.iss)) {
+				logger?.warn({ kind, reason: "malformed_issuer" }, "jwt_bearer_assertion_refused");
+				return null;
+			}
 
 			// A registry outage propagates: it is not a refusal.
 			const entry = await registry.findIssuer(unverified.iss);

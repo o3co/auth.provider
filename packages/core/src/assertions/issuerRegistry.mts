@@ -18,6 +18,11 @@ import type { JSONWebKeySet } from "jose";
 import type { KeyLike } from "../keys/KeyStore.mjs";
 import { isLoopbackHostname } from "../net/loopback.mjs";
 import {
+	describeMalformedIdentifier,
+	isWellFormedIdentifier,
+	MAX_IDENTIFIER_LENGTH,
+} from "../security/identifier.mjs";
+import {
 	describeInvalidAssertionClockTolerance,
 	isValidAssertionClockTolerance,
 } from "./lifetime.mjs";
@@ -199,7 +204,15 @@ const READER_FIELDS = ["readSubjectHandle", "readScope"] as const;
  *
  * Throwing means the registry could not answer — a backing store being down —
  * and is surfaced as `503`, like every other outage on the verification path.
- * `null` is the answer for an issuer nobody registered.
+ * `null` is the answer for an issuer nobody registered; never throw for one,
+ * or a client's made-up `iss` turns into the server's outage.
+ *
+ * `issuer` is untrusted input: the assertion's own `iss`, read before any
+ * signature is checked. The verifier passes only a well-formed identifier —
+ * a string of 1 to 256 characters with no control character (core's
+ * identifier rule, the one a `client_id` and a `kid` are held to) — but any
+ * other character may be in it. A store-backed registry binds it as a query
+ * parameter and never interpolates it into a query, a path or a URL.
  */
 export interface AssertionIssuerRegistry {
 	readonly kind: string;
@@ -248,6 +261,16 @@ export function checkAssertionIssuerEntry(entry: AssertionIssuerEntryInput): voi
 		throw new Error(
 			"AssertionIssuerEntry: issuer is required — an assertion without a pinned " +
 				"issuer is signed by anyone the key belongs to (RFC 7523 §3).",
+		);
+	}
+	// An issuer no assertion could name — the verifier refuses such an `iss`
+	// before the lookup — would be a registration that never matches. The
+	// value is not repeated: it may carry control characters.
+	if (!isWellFormedIdentifier(entry.issuer)) {
+		throw new Error(
+			`AssertionIssuerEntry: issuer is not an identifier an assertion can name ` +
+				`(${describeMalformedIdentifier(entry.issuer)}); it must be a string of 1 to ` +
+				`${MAX_IDENTIFIER_LENGTH} characters with no control character.`,
 		);
 	}
 	if (entry.algorithms.length === 0) {
