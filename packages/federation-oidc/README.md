@@ -289,6 +289,12 @@ linked:
 
 ## Tests
 
+The tests run the real `openid-client` against core's shared fake OpenID
+Provider (`createFakeIdp` from `@o3co/auth-provider-core/testing`), set up in
+[`helpers.mts`](src/__tests__/helpers.mts) as an issuer that is discovered:
+it serves the discovery document, signs real RS256 id_tokens under a key it
+publishes, and records every request.
+
 | Test file | Pins |
 | --- | --- |
 | [`oidc.test.mts`](src/__tests__/oidc.test.mts) | discovery and its refusals, client authentication, the login steps above, the profile, refresh, logout and `mapClaims` |
