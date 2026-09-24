@@ -401,6 +401,26 @@ describe("origin lists from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIG
 		}
 	});
 
+	it("refuses a list entry that is not a string at its index, rather than dropping it", () => {
+		// Dropping it would shorten the list the operator wrote and accept the
+		// rest — or, for a list of nothing else, refuse it as empty.
+		for (const key of ["origin", "topOrigin"] as const) {
+			for (const [bad, index] of [
+				[[5], 0],
+				[["https://a.example", 5], 1],
+				[["https://a.example", null], 1],
+			] as const) {
+				const result = webauthnConfigSchema.safeParse({ ...VALID, [key]: bad });
+				expect(result.success, `${key}: ${JSON.stringify(bad)}`).toBe(false);
+				expect(result.error?.issues[0], `${key}: ${JSON.stringify(bad)}`).toMatchObject({
+					code: "invalid_type",
+					expected: "string",
+					path: [key, index],
+				});
+			}
+		}
+	});
+
 	it("reads an exported-but-empty WEBAUTHN_TOP_ORIGIN as unset: not framed", () => {
 		expect(webauthnConfigSchema.parse({ ...VALID, topOrigin: "" }).topOrigin).toBeUndefined();
 		// The list spelling keeps its rule: an explicit empty list is refused.
