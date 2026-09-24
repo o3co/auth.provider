@@ -229,8 +229,9 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				expectedState: oidc.skipStateCheck,
 				expectedNonce: params.nonce,
 			});
-			// The token's lifetime is dated from here, not after UserInfo.
-			const receivedAt = Date.now();
+			// The token's lifetime is dated from when the library handed the answer
+			// over — after it verified the id_token — and not after UserInfo.
+			const obtainedAt = Date.now();
 
 			// PB-5: bind UserInfo response sub against the verified id_token sub (OIDC §5.3.2).
 			// Google id_tokens always carry a non-empty string sub. If the claim is absent,
@@ -257,7 +258,7 @@ export function createGoogleProvider(config: GoogleProviderConfig): GoogleProvid
 				// The tokens as Google stated them: the lifetime as sent or none,
 				// the scope as sent (what it granted, RFC 6749 §5.1, #647), and the
 				// token type — core's one reading for every adapter.
-				...federationTokenSnapshot(tokens, receivedAt),
+				...federationTokenSnapshot(tokens, obtainedAt),
 			};
 
 			// Carry through known extension claims (e.g. Google hd).

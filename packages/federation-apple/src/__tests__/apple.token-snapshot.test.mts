@@ -55,7 +55,7 @@ const exchange = (provider: AppleProvider) =>
 	});
 
 describe("the token an Apple login and refresh report", () => {
-	it("a login reports the lifetime Apple sent, dated from receipt, and the token type", async () => {
+	it("a login reports the lifetime Apple sent, dated when the library handed it over, and the token type", async () => {
 		const { provider } = await build();
 		const before = Date.now();
 		const profile = await exchange(provider);

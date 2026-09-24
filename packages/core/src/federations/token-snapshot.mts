@@ -25,9 +25,10 @@
  * An RFC 6749 §5.1 token response as the adapter's OAuth library hands it
  * over after validating it: `access_token` and `token_type` are strings,
  * `expires_in` a number and `scope` a string when present. openid-client's
- * answer is this shape (oauth4webapi refuses any other before the adapter
- * sees it, and lower-cases `token_type`); declared here so that no vendor
- * type reaches this contract.
+ * answer is this shape — oauth4webapi refuses a non-string scope, lower-cases
+ * `token_type`, and applies `parseFloat` to an `expires_in` that is not a
+ * number (`"1000seconds"` reads as 1000, `[3600, 7200]` as 3600) before the
+ * adapter sees it. Declared here so that no vendor type reaches this contract.
  */
 export interface FederationTokenResponse {
 	readonly access_token: string;
@@ -47,11 +48,11 @@ export type FederationTokenSnapshot = {
 	readonly accessToken: string;
 	readonly refreshToken?: string;
 	readonly idToken?: string;
-	/** `receivedAt + expiresIn`, or `null` when the response stated no lifetime. */
+	/** `obtainedAt + expiresIn`, or `null` when the response stated no lifetime. */
 	readonly expiresAt: Date | null;
-	/** `expires_in` exactly as sent, or `null` when it was not. */
+	/** `expires_in` as the library read it, or `null` when the response carried none. */
 	readonly expiresIn: number | null;
-	/** Present exactly when the response carried a `scope` — an empty one included. */
+	/** Present exactly when the response carried a `scope` — an empty one included, `""` for a non-string. */
 	readonly scope?: string;
 	readonly tokenType: string;
 };
@@ -62,10 +63,17 @@ const nonEmpty = (value: string | undefined): value is string =>
 /**
  * Read a token response the way every adapter does.
  *
- * - **Lifetime.** `expires_in` as sent, and `expiresAt` dated from
- *   `receivedAt` — when the answer arrived, which an adapter that goes on to
- *   call UserInfo captures before it does. An absent `expires_in` is `null` on
- *   both: the upstream stated no lifetime, and one is not invented for it.
+ * - **Lifetime.** `expires_in` as the adapter's library read it — the
+ *   snapshot sees only the library's answer, so `"1000seconds"` has already
+ *   become 1000 — and `expiresAt` dated from `obtainedAt`: when the library
+ *   handed the answer over, after it verified any id_token (a JWKS fetch
+ *   included), and before the adapter calls UserInfo or anything else. The
+ *   delegated reader in `federation-oidc` reads the raw body and the arrival
+ *   time instead, and refuses a lifetime that is not a number: a grant's
+ *   eligibility judges the lifetime a token was issued with against an
+ *   operator's maximum (#593, D5), where a login's expiry only says when a
+ *   refresh is due. An absent `expires_in` is `null` on both fields: the
+ *   upstream stated no lifetime, and one is not invented for it.
  *   `FederationProfile.expiresAt` asks each adapter for that decision so the
  *   route layer never invents a fallback expiry; an adapter that assumed an
  *   hour was inventing one in its place. It is also what
@@ -85,14 +93,14 @@ const nonEmpty = (value: string | undefined): value is string =>
  */
 export function federationTokenSnapshot(
 	response: FederationTokenResponse,
-	receivedAt: number = Date.now(),
+	obtainedAt: number = Date.now(),
 ): FederationTokenSnapshot {
 	const expiresIn = typeof response.expires_in === "number" ? response.expires_in : null;
 	return {
 		accessToken: response.access_token,
 		...(nonEmpty(response.refresh_token) ? { refreshToken: response.refresh_token } : {}),
 		...(nonEmpty(response.id_token) ? { idToken: response.id_token } : {}),
-		expiresAt: expiresIn === null ? null : new Date(receivedAt + expiresIn * 1000),
+		expiresAt: expiresIn === null ? null : new Date(obtainedAt + expiresIn * 1000),
 		expiresIn,
 		// Absent only when the answer named none. One present but not a string
 		// is an answer that names nothing usable — "" — never silence.

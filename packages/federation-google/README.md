@@ -155,8 +155,8 @@ What `exchangeCode` returns:
 | `hd` | the Workspace domain, when UserInfo carries it — recorded, not enforced (below) |
 | `accessToken`, `idToken`, `refreshToken` | as Google issued them; `idToken` and `refreshToken` only when non-empty strings |
 | `scope` | Google's `scope` as sent; absent when Google sent none. A `scope` that is not a string is refused by `openid-client` before the adapter sees it, and the login answers `502 exchange_failed` |
-| `expiresAt` | when the answer arrived + `expires_in`; **`null` when Google sent no `expires_in`** (both IdPs document it on every token response), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
-| `expiresIn` | the `expires_in` Google sent, `null` when none |
+| `expiresAt` | when `openid-client` handed the answer over (after it verified the id_token, a JWKS fetch included) + `expiresIn`; **`null` when Google sent no `expires_in`** (Google documents it on every token response), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
+| `expiresIn` | `expires_in` as `openid-client` read it — it applies `parseFloat`, so `"1000seconds"` is 1000 — or `null` when Google sent none |
 | `tokenType` | `token_type` as `openid-client` reports it (lower-cased `bearer`), recorded by the session router verbatim |
 
 `mapClaims` maps `email`, `emailVerified`, `name`, `picture` and `hd`; the session

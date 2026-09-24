@@ -415,7 +415,9 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 				expectedState: oidc.skipStateCheck,
 				expectedNonce: nonce,
 			});
-			const receivedAt = Date.now();
+			// The token's lifetime is dated from when the library handed the answer
+			// over, after it verified the id_token.
+			const obtainedAt = Date.now();
 
 			// Apple publishes no userinfo endpoint: the verified id_token is the
 			// only source of identity, so there is no UserInfo/id_token binding to
@@ -444,7 +446,7 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 				// The tokens as Apple stated them: the lifetime as sent or none,
 				// the scope as sent (what it granted, RFC 6749 §5.1, #647), and the
 				// token type — core's one reading for every adapter.
-				...federationTokenSnapshot(tokens, receivedAt),
+				...federationTokenSnapshot(tokens, obtainedAt),
 			};
 
 			if (isPrivateEmail !== undefined) {

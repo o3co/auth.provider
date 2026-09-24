@@ -624,8 +624,10 @@ export async function createOidcProvider(
 				expectedNonce: nonce,
 				idTokenExpected: true,
 			});
-			// The token's lifetime is dated from here, not after UserInfo.
-			const receivedAt = Date.now();
+			// The token's lifetime is dated from when the library handed the answer
+			// over — after it verified the id_token — and not after UserInfo. The
+			// delegated paths date theirs at arrival, from the raw answer.
+			const obtainedAt = Date.now();
 			const claims = tokens.claims();
 			if (!claims) throw new Error(`${label}: the token response carried no id_token`);
 			const sub = claims.sub;
@@ -653,7 +655,7 @@ export async function createOidcProvider(
 				picture: optionalString(pick("picture")),
 				// Core's one reading of the token response: the lifetime as sent
 				// or none, the scope as sent (an empty one kept, #647), the type.
-				...federationTokenSnapshot(tokens, receivedAt),
+				...federationTokenSnapshot(tokens, obtainedAt),
 				...(groups ? { groups } : {}),
 			};
 		},

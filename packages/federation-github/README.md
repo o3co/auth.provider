@@ -158,8 +158,8 @@ What `exchangeCode` returns:
 | `accessToken` | as GitHub issued it |
 | `refreshToken` | always absent — the adapter has no refresh, so one that a GitHub App's expiring user token comes with is not kept |
 | `scope` | GitHub's comma-delimited `scope` rewritten as the space-delimited list the rest of the system reads (RFC 6749 §3.3); absent when GitHub sent none. A `scope` that is not a string is refused by `openid-client` before the adapter sees it, and the login answers `502 exchange_failed` |
-| `expiresAt` | when the answer arrived + `expires_in` when GitHub sends one; **`null` when it does not** (OAuth App tokens), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
-| `expiresIn` | the `expires_in` GitHub sent, `null` when none |
+| `expiresAt` | when `openid-client` handed the answer over + `expiresIn` when GitHub sends one; **`null` when it does not** (OAuth App tokens), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
+| `expiresIn` | `expires_in` as `openid-client` read it (it applies `parseFloat`), `null` when none |
 | `tokenType` | `token_type` as `openid-client` reports it (lower-cased `bearer`), recorded by the session router verbatim |
 | `idToken` | not returned — GitHub issues none |
 

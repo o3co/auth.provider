@@ -231,8 +231,9 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				pkceCodeVerifier: params.codeVerifier,
 				expectedState: oidc.skipStateCheck,
 			});
-			// The token's lifetime is dated from here, not after the REST reads.
-			const receivedAt = Date.now();
+			// The token's lifetime is dated from when the library handed the answer
+			// over, not after the REST reads.
+			const obtainedAt = Date.now();
 
 			// The user is GitHub's REST `GET /user`, which is not an OpenID Connect
 			// UserInfo endpoint: it answers a numeric `id` and no `sub`. It is
@@ -294,7 +295,7 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				refreshToken: _notKept,
 				scope: _commaDelimited,
 				...snapshot
-			} = federationTokenSnapshot(tokens, receivedAt);
+			} = federationTokenSnapshot(tokens, obtainedAt);
 
 			return {
 				issuer: GITHUB_ISSUER,

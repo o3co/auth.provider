@@ -293,8 +293,8 @@ What `exchangeCode` returns:
 | `isPrivateEmail` | normalised as above; absent when neither the marker nor an address says |
 | `accessToken`, `idToken`, `refreshToken` | as Apple issued them; `idToken` and `refreshToken` only when non-empty strings |
 | `scope` | Apple's `scope` as sent; absent when Apple sent none (the session router then records the requested scope). A `scope` that is not a string is refused by `openid-client` before the adapter sees it, and the login answers `502 exchange_failed` |
-| `expiresAt` | when the answer arrived + `expires_in`; **`null` when Apple sent no `expires_in`** (both IdPs document it on every token response), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
-| `expiresIn` | the `expires_in` Apple sent, `null` when none |
+| `expiresAt` | when `openid-client` handed the answer over (after it verified the id_token, a JWKS fetch included) + `expiresIn`; **`null` when Apple sent no `expires_in`** (Apple documents it on every token response), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
+| `expiresIn` | `expires_in` as `openid-client` read it — it applies `parseFloat`, so `"1000seconds"` is 1000 — or `null` when Apple sent none |
 | `tokenType` | `token_type` as `openid-client` reports it (lower-cased `bearer`), recorded by the session router verbatim |
 
 `mapClaims` maps `email`, `emailVerified`, `name` and `isPrivateEmail`.

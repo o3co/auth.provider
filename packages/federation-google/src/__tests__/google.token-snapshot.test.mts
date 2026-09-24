@@ -57,7 +57,7 @@ const exchange = (provider: GoogleProvider) =>
 	});
 
 describe("the token a Google login and refresh report", () => {
-	it("a login reports the lifetime Google sent, dated from receipt, and the token type", async () => {
+	it("a login reports the lifetime Google sent, dated when the library handed it over, and the token type", async () => {
 		const { provider } = await build();
 		const before = Date.now();
 		const profile = await exchange(provider);
@@ -90,6 +90,20 @@ describe("the token a Google login and refresh report", () => {
 		const refreshed = await provider.refreshToken("rt-1");
 		expect(refreshed.expiresAt).toBeNull();
 		expect(refreshed.expiresIn).toBeNull();
+	});
+
+	it("the lifetime is the library's reading of expires_in, not the text Google sent", async () => {
+		// oauth4webapi applies parseFloat to a non-number expires_in before the
+		// adapter sees the answer, so the snapshot can only report its result:
+		// "1000seconds" reads as 1000, [3600, 7200] as 3600. federation-oidc's
+		// delegated reader refuses both, from the raw body it captures itself —
+		// a grant's eligibility judges the issued lifetime; a login's expiry
+		// only says when a refresh is due.
+		const { idp, provider } = await build();
+		idp.codeAnswer = { expires_in: "1000seconds" };
+		expect((await exchange(provider)).expiresIn).toBe(1000);
+		idp.refreshAnswer = { expires_in: [3600, 7200] };
+		expect((await provider.refreshToken("rt-1")).expiresIn).toBe(3600);
 	});
 
 	it("a scope that is not a string never reaches the adapter: openid-client refuses the answer", async () => {

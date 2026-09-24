@@ -210,8 +210,8 @@ What `exchangeCode` returns:
 | `accessToken` | as the issuer sent it |
 | `idToken`, `refreshToken` | as the issuer sent them, when non-empty strings |
 | `scope` | the token response's `scope`, an empty one included; absent when the response carried none (the session router then records the requested scope). A `scope` that is not a string is refused by `openid-client` before the adapter sees it, and the login answers `502 exchange_failed` |
-| `expiresAt` | when the answer arrived + `expires_in`; **`null` when the response carried no `expires_in`**, which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
-| `expiresIn` | the `expires_in` the response carried, `null` when none |
+| `expiresAt` | when `openid-client` handed the answer over (after it verified the id_token, a JWKS fetch included) + `expiresIn`; **`null` when the response carried no `expires_in`**, which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
+| `expiresIn` | `expires_in` as `openid-client` read it — it applies `parseFloat`, so `"1000seconds"` is 1000 — or `null` when none. The delegated capability below reads the raw answer instead and refuses such a lifetime: a grant's eligibility judges the lifetime a token was issued with, where a login's expiry only says when a refresh is due |
 | `tokenType` | `token_type` as `openid-client` reports it (lower-cased), recorded by the session router verbatim |
 
 The token fields are core's `federationTokenSnapshot`, the one reading every

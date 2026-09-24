@@ -70,12 +70,13 @@ export interface FederationProfile {
 	 */
 	readonly expiresAt: Date | null;
 	/**
-	 * `expires_in` exactly as the token response carried it, in seconds; `null`
-	 * when it carried none. `expiresAt` above is derived from it on the
-	 * adapter's clock, and one step of that clock is enough to turn 3600 into
-	 * 3601 — so a rule that judges the lifetime a token was ISSUED with reads
-	 * this, not the difference of two dates (#593, D5). Optional: adapters
-	 * written before it may omit it.
+	 * `expires_in` from the token response, in seconds, as the adapter's
+	 * library read it (openid-client applies `parseFloat` to one that is not a
+	 * number); `null` when it carried none. `expiresAt` above is derived from
+	 * it on the adapter's clock, and one step of that clock is enough to turn
+	 * 3600 into 3601 — so a rule that judges the lifetime a token was ISSUED
+	 * with reads this, not the difference of two dates (#593, D5). Optional:
+	 * adapters written before it may omit it.
 	 */
 	readonly expiresIn?: number | null;
 	/** `scope` as the token response carried it, space-delimited (RFC 6749 §5.1). Absent when it carried none. */
