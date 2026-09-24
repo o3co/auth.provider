@@ -159,11 +159,15 @@ const OTHER_PROJECTIONS: ReadonlyArray<{
 ];
 
 /**
- * A logger call: a level (or `child`) on `log`, `logger` or `….logger`,
- * `console`'s, and a level on `(opts.logger ?? console)`.
+ * A logger call: a level (or `child`, or console's `log`) on a receiver that
+ * is `log`, `console`, or a name ending in `logger` / `Logger` —
+ * `consoleLogger`, `opts.logger`, `this.auditLogger` — or a parenthesised
+ * fallback between two (`(opts.logger ?? console)`, `(logger ??
+ * consoleLogger)`); with a non-null assertion (`logger!.warn`), optional
+ * chaining (`logger?.warn`) or an optional call (`warn?.(`).
  */
 const LOGGER_CALL =
-	/(?:\b(?:(?:log|logger|(?:\w+\.)+logger)\??\.(?:trace|debug|info|warn|error|fatal|child)|console\.(?:log|trace|debug|info|warn|error))|\(\s*[\w$.]+\s*\?\?\s*console\s*\)\.(?:trace|debug|info|warn|error|fatal))\(/g;
+	/(?:\b(?:[\w$]+[!?]?\.)*(?:log|console|\w*[Ll]ogger)|\(\s*[\w$.!?]+\s*\?\?\s*[\w$.!?]+\s*\))!?\??\.(?:trace|debug|info|warn|error|fatal|child|log)(?:\?\.)?\(/g;
 
 const IDENTIFIER = "[A-Za-z_$][\\w$]*";
 
@@ -678,6 +682,24 @@ describe("a caught error reaches a logger only through loggableError", () => {
 			["a template literal", "try { x() } catch (err) { logger.warn(`failed: ${err.message}`); }"],
 			["logger.child", `try { x() } catch (err) { const scoped = logger.child({ err }); }`],
 			["console", `try { x() } catch (err) { console.error("failed", err); }`],
+			[
+				"a receiver named `…Logger`",
+				`try { x() } catch (err) { consoleLogger.warn({ err }, "failed"); }`,
+			],
+			[
+				"a member path ending in `…Logger`",
+				`try { x() } catch (err) { this.auditLogger.error({ err }, "failed"); }`,
+			],
+			["a non-null assertion", `try { x() } catch (err) { logger!.warn({ err }, "failed"); }`],
+			[
+				"a fallback to another logger",
+				`try { x() } catch (err) { (logger ?? consoleLogger).warn({ err }, "failed"); }`,
+			],
+			["an optional call", `try { x() } catch (err) { logger.warn?.({ err }, "failed"); }`],
+			[
+				"an optional call on an optional receiver",
+				`try { x() } catch (err) { opts.logger?.warn?.({ err }, "failed"); }`,
+			],
 			[".catch", `p.catch((err) => logger.warn({ err }, "failed"));`],
 			['.on("error")', `client.on("error", (err) => logger.error({ err }, "client_error"));`],
 			['.once("error")', `client.once("error", async (e) => log.error({ e }, "client_error"));`],
