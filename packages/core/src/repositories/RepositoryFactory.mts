@@ -71,11 +71,12 @@ export const createRepositoryFactories = (
 	codeFactory.register("memory", (config, builderCtx) => {
 		const defaultExpiresIn =
 			config.defaultExpiresIn != null ? Number(config.defaultExpiresIn) : undefined;
+		// Whole seconds, as the Redis repository's module schema requires.
 		if (
 			defaultExpiresIn !== undefined &&
-			(!Number.isFinite(defaultExpiresIn) || defaultExpiresIn <= 0)
+			(!Number.isInteger(defaultExpiresIn) || defaultExpiresIn <= 0)
 		) {
-			throw new Error('"defaultExpiresIn" must be a finite positive number');
+			throw new Error('"defaultExpiresIn" must be a positive whole number of seconds');
 		}
 		const repo = new InMemoryCodeRepository({ defaultExpiresIn });
 		// D-5 / IH-11: register the periodic-GC interval for disposal so it

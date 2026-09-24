@@ -43,8 +43,17 @@ export class InMemoryCodeRepository implements CodeRepository {
 	private cleanupInterval: ReturnType<typeof setInterval>;
 
 	constructor(options?: { defaultExpiresIn?: number }) {
-		// Before the timer, so a refused default leaves nothing running.
-		this.defaultExpiresIn = requireLifetime(options?.defaultExpiresIn ?? 600, "defaultExpiresIn");
+		// Before the timer, so a refused default leaves nothing running. Whole
+		// seconds, as `RedisCodeRepository` requires of its default: the two
+		// read the same configuration and must refuse the same values. A
+		// per-call `expiresIn` may still be fractional in both.
+		const defaultExpiresIn = options?.defaultExpiresIn ?? 600;
+		if (!Number.isInteger(defaultExpiresIn)) {
+			throw new RangeError(
+				`InMemoryCodeRepository: defaultExpiresIn must be a positive whole number of seconds (got ${String(defaultExpiresIn)})`,
+			);
+		}
+		this.defaultExpiresIn = requireLifetime(defaultExpiresIn, "defaultExpiresIn");
 
 		this.cleanupInterval = setInterval(() => {
 			const now = Date.now();
