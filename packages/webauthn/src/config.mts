@@ -46,9 +46,19 @@
  *                                       that writes a challenge per request
  *                                       is throttled by default, not only
  *                                       when an operator remembers to.
+ *
+ * Every number and boolean an environment variable can reach through
+ * reference.conf is coerced here, the way core's application schema coerces
+ * its own (#288): a HOCON `${?VAR}` substitution is always a string. Numbers
+ * go through `z.coerce.number()`; booleans through core's
+ * `coerceBooleanFromEnv`, so `WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER`
+ * takes the same four spellings as every other switch and refuses the rest.
  */
-// biome-ignore lint/correctness/noUnusedImports: ComponentMap is used in the `declare module` augmentation below; biome does not track cross-module-declaration references.
-import type { ComponentMap as _ComponentMap } from "@o3co/auth-provider-core";
+import {
+	// biome-ignore lint/correctness/noUnusedImports: ComponentMap is used in the `declare module` augmentation below; biome does not track cross-module-declaration references.
+	type ComponentMap as _ComponentMap,
+	coerceBooleanFromEnv,
+} from "@o3co/auth-provider-core";
 import { z } from "zod";
 
 /**
@@ -225,9 +235,10 @@ export const webauthnConfigSchema = z.object({
 	/**
 	 * Challenge time-to-live in milliseconds.
 	 * Reference default (S11): 120_000 ms — mobile-network safe baseline.
-	 * Supplied via reference.conf per ADR 2026-04-30.
+	 * Supplied via reference.conf per ADR 2026-04-30; `z.coerce` because
+	 * `${?WEBAUTHN_CHALLENGE_TTL_MS}` arrives as a string.
 	 */
-	challengeTtlMs: z.number().int().positive(),
+	challengeTtlMs: z.coerce.number().int().positive(),
 	/**
 	 * WebAuthn AttestationConveyancePreference (W3C WebAuthn §5.4.7).
 	 * Reference default (S11): "none" — dogfood-friendly; no attestation
@@ -259,8 +270,12 @@ export const webauthnConfigSchema = z.object({
 	 * knowingly: pair it with a hard rate limit
 	 * (`rateLimit.authenticationOptions`) and prefer gating the endpoint
 	 * behind an authenticated identifier-first step where you can.
+	 *
+	 * `${?WEBAUTHN_ALLOW_CREDENTIALS_FOR_KNOWN_USER}` arrives as a string:
+	 * "true" / "1" turn it on, "false" / "0" (or an empty value) leave it off,
+	 * and any other spelling fails the parse.
 	 */
-	allowCredentialsForKnownUser: z.boolean(),
+	allowCredentialsForKnownUser: coerceBooleanFromEnv,
 	/**
 	 * Rate limits for the module's own endpoints.
 	 *
