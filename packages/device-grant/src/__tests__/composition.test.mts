@@ -232,8 +232,8 @@ const startDevice = async (app: express.Express): Promise<string> => {
 /**
  * Both orders of the two modules that share `/oauth`. `oauthModule`'s router
  * parses JSON and form bodies — Express's defaults, 100 KiB — for every
- * request beneath the prefix, so whatever this package enforces about a body
- * has to hold when that router has already read it.
+ * request beneath the prefix; the enabled device routes declare `before` it,
+ * so every case below has to come out the same in either list order.
  */
 const orders = [
 	[
@@ -247,60 +247,64 @@ const orders = [
 ] as const;
 
 describe("deviceGrantModule beside oauthModule — discovery (RFC 8628 §4)", () => {
-	it("boots enabled and advertises device_authorization_endpoint under the issuer", async () => {
-		// `oauthModule` always activates discovery, and core's builder refuses
-		// an issuer-relative endpoint handed over as a literal `metadata`
-		// field. So the one composition that needs this field — an enabled
-		// grant beside the token endpoint it is polled at — is the one that
-		// has to boot for the field to exist at all.
-		const config = makeConfig(ENABLED);
-		const { handle, app } = await bootWith(config, [
-			sessionStoreModuleFor(config),
-			deviceGrantModule({ config }),
-			oauthModule({ config }),
-		]);
-		try {
-			const res = await request(app).get("/.well-known/openid-configuration");
+	it.each(orders)(
+		"boots enabled and advertises device_authorization_endpoint under the issuer (%s)",
+		async (_label, ordered) => {
+			// `oauthModule` always activates discovery, and core's builder refuses
+			// an issuer-relative endpoint handed over as a literal `metadata`
+			// field. So the one composition that needs this field — an enabled
+			// grant beside the token endpoint it is polled at — is the one that
+			// has to boot for the field to exist at all.
+			const config = makeConfig(ENABLED);
+			const { handle, app } = await bootWith(config, [
+				sessionStoreModuleFor(config),
+				...ordered(config),
+			]);
+			try {
+				const res = await request(app).get("/.well-known/openid-configuration");
 
-			expect(res.status).toBe(200);
-			expect(res.body.device_authorization_endpoint).toBe(`${ISSUER}/oauth/device_authorization`);
-			// The grant reaches `grant_types_supported` the way every grant
-			// does: from the resolver `/oauth/token` dispatches against.
-			expect(res.body.grant_types_supported).toContain(DEVICE_CODE_GRANT_TYPE);
-		} finally {
-			await handle.dispose();
-		}
-	});
+				expect(res.status).toBe(200);
+				expect(res.body.device_authorization_endpoint).toBe(`${ISSUER}/oauth/device_authorization`);
+				// The grant reaches `grant_types_supported` the way every grant
+				// does: from the resolver `/oauth/token` dispatches against.
+				expect(res.body.grant_types_supported).toContain(DEVICE_CODE_GRANT_TYPE);
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
 });
 
 describe("deviceGrantModule beside oauthModule — installed but disabled", () => {
-	it("does not advertise the grant, and /oauth/token refuses it as unsupported", async () => {
-		// `grant_types_supported` is read off the resolver `/oauth/token`
-		// dispatches against (#283), so a grant that is contributed is a grant
-		// that is advertised — including a handler whose only job is to
-		// refuse. The document must say what the endpoint does.
-		const config = makeConfig({ enabled: false });
-		const { handle, app } = await bootWith(config, [
-			sessionStoreModuleFor(config),
-			deviceGrantModule({ config }),
-			oauthModule({ config }),
-		]);
-		try {
-			const discovery = await request(app).get("/.well-known/openid-configuration");
-			expect(discovery.status).toBe(200);
-			expect(discovery.body.grant_types_supported).not.toContain(DEVICE_CODE_GRANT_TYPE);
-			expect(discovery.body.device_authorization_endpoint).toBeUndefined();
+	it.each(orders)(
+		"does not advertise the grant, and /oauth/token refuses it as unsupported (%s)",
+		async (_label, ordered) => {
+			// `grant_types_supported` is read off the resolver `/oauth/token`
+			// dispatches against (#283), so a grant that is contributed is a grant
+			// that is advertised — including a handler whose only job is to
+			// refuse. The document must say what the endpoint does.
+			const config = makeConfig({ enabled: false });
+			const { handle, app } = await bootWith(config, [
+				sessionStoreModuleFor(config),
+				...ordered(config),
+			]);
+			try {
+				const discovery = await request(app).get("/.well-known/openid-configuration");
+				expect(discovery.status).toBe(200);
+				expect(discovery.body.grant_types_supported).not.toContain(DEVICE_CODE_GRANT_TYPE);
+				expect(discovery.body.device_authorization_endpoint).toBeUndefined();
 
-			const token = await request(app)
-				.post("/oauth/token")
-				.type("form")
-				.send({ grant_type: DEVICE_CODE_GRANT_TYPE, client_id: CLIENT_ID, device_code: "x" });
-			expect(token.status).toBe(400);
-			expect(token.body.error).toBe("unsupported_grant_type");
-		} finally {
-			await handle.dispose();
-		}
-	});
+				const token = await request(app)
+					.post("/oauth/token")
+					.type("form")
+					.send({ grant_type: DEVICE_CODE_GRANT_TYPE, client_id: CLIENT_ID, device_code: "x" });
+				expect(token.status).toBe(400);
+				expect(token.body.error).toBe("unsupported_grant_type");
+			} finally {
+				await handle.dispose();
+			}
+		},
+	);
 });
 
 describe("deviceGrantModule beside oauthModule — POST /oauth/device/verification is JSON-only", () => {
@@ -385,10 +389,11 @@ describe("deviceGrantModule beside oauthModule — POST /oauth/device/verificati
 });
 
 describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () => {
-	// Both routes parse with a 16 KiB limit, but `body-parser` does not parse a
-	// body twice: listed after `oauthModule`, they received whatever its
-	// 100 KiB parsers had already read. The bound has to hold in either order,
-	// with one answer.
+	// Both routes parse with a 16 KiB limit, and `body-parser` does not parse a
+	// body twice — so the bound holds only if these routes read the body
+	// before `oauthModule`'s 100 KiB parsers do. Declared or chunked, just
+	// over the bound or over `oauthModule`'s own limit, the answer is one
+	// JSON 413 in either order.
 	const TOO_LARGE = { error: "invalid_request", error_description: "body_too_large" };
 
 	// 40 000 bytes is over this package's bound and under `oauthModule`'s;
@@ -461,24 +466,35 @@ describe("deviceGrantModule beside oauthModule — the 16 KiB body limit", () =>
 	);
 
 	it.each(orders)(
-		"accepts a body of exactly 16 KiB, as the parsers it stands in for do (%s)",
+		"accepts a body of exactly 16 KiB at both routes, as the parsers it stands in for do (%s)",
 		async (_label, ordered) => {
 			// `express.json({ limit: "16kb" })` accepts exactly 16384 bytes. A
 			// restated bound that disagreed with the parser would accept or
-			// refuse the same request depending on the module order.
+			// refuse the same request depending on how its size was known.
 			const config = makeConfig(ENABLED);
 			const { handle, app } = await bootWith(config, [
 				sessionStoreModuleFor(config),
 				...ordered(config),
 			]);
 			try {
-				const body = { client_id: CLIENT_ID, padding: "" };
-				body.padding = "x".repeat(16_384 - Buffer.byteLength(JSON.stringify(body)));
-				expect(Buffer.byteLength(JSON.stringify(body))).toBe(16_384);
+				const authorization = await request(app)
+					.post("/oauth/device_authorization")
+					.type("json")
+					.send(sized(16_384, { client_id: CLIENT_ID }));
+				expect(authorization.status).toBe(200);
+				expect(typeof authorization.body.device_code).toBe("string");
 
-				const res = await request(app).post("/oauth/device_authorization").send(body);
-				expect(res.status).toBe(200);
-				expect(typeof res.body.device_code).toBe("string");
+				const userCode = authorization.body.user_code as string;
+				const agent = request.agent(app);
+				await signIn(agent);
+				const { header, token } = await csrfToken(agent);
+				const verification = await agent
+					.post("/oauth/device/verification")
+					.set(header, token)
+					.type("json")
+					.send(sized(16_384, { action: "lookup", user_code: userCode }));
+				expect(verification.status).toBe(200);
+				expect(verification.body.client_id).toBe(CLIENT_ID);
 			} finally {
 				await handle.dispose();
 			}
