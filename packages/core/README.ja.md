@@ -530,7 +530,7 @@ OIDC Discovery 1.0 メタデータエンドポイント。`config.oauth.jwt.issu
 
 [`src/logging/Logger.mts`](src/logging/Logger.mts) にある、pino 互換の構造的ロガー: `trace` / `debug` / `info` / `warn` / `error` / `fatal`（それぞれオブジェクト先頭・文字列先頭のどちらの呼び出しも受け付ける）と `child(bindings)`。pino のインスタンスはアダプターなしでこれを満たし、デフォルトは `consoleLogger`。任意の `logger` コンポーネントスロットでもある。
 
-[`loggableError(err)`](src/logging/loggableError.mts) は、他のシステムと話すライブラリやストアから出てきたエラーの代わりに呼び出し箇所がロガーへ渡すもの。core・`session`・`oauth` で捕捉したエラーを報告するロガー呼び出しはすべてこれを通り、`src/__tests__/logErrorProjection.drift.test.mts` がそれを保つ。
+[`loggableError(err)`](src/logging/loggableError.mts) は、他のシステムと話すライブラリやストアから出てきたエラーの代わりに呼び出し箇所がロガーへ渡すもの。捕捉したエラーを報告するロガー呼び出しは — ワークスペースのすべてのパッケージの `src` でも、standalone テンプレートの `src` でも — すべてこれを通り、[`src/__tests__/logErrorProjection.drift.test.mts`](src/__tests__/logErrorProjection.drift.test.mts) がそれを保つ: 読むツリーはその `SOURCE_ROOTS` に列挙してあり、ワークスペースに追加したパッケージは列挙するまでこのテストを落とす。捕捉したエラーを代わりに自前のより厳しい射影に渡すファイルは、理由とともにそこに名前を挙げてある（federation-grants の最後のエラーハンドラー。分類とステータスだけをログに出し、エラーのテキストは何も出さない）。
 
 理由: 解析した上流の応答から作られたエラーは、その応答が言ったことを何でも運ぶ — OAuth ライブラリは拒否したトークン応答を cause の連鎖に載せ、JSON パーサーは解析できなかったテキストを引用し、Redis の応答は拒否したコマンドを反復し、ioredis はそのコマンドの引数（`allow-plaintext` でのストアへの書き込みならトークンレコード）をエラーに載せる。射影がすること:
 
