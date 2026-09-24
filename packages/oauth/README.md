@@ -586,10 +586,10 @@ it, deliberately.
 
 A connection whose adapter names no type **at all** is answered `Bearer`: §5.1
 makes the field REQUIRED, so an absent field is an adapter that does not report
-it — every bundled adapter but `federation-oidc` — rather than an upstream
-meaning something else. In practice the refusal therefore binds only on
-`federation-oidc` connections; `federation-google`, `-github` and `-apple`
-forward no type, and all three issue bearer tokens.
+it — a third-party adapter written before the field, or a record linked before
+the bundled adapters reported one — rather than an upstream meaning something
+else. Every bundled adapter reports the type its upstream sent, through core's
+`federationTokenSnapshot`.
 
 Absence is the only reading treated that way. A stored value that is not a
 bearer spelling is refused whatever it is — `"DPoP "`, `""`, `null`, a number —

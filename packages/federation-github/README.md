@@ -156,10 +156,12 @@ What `exchangeCode` returns:
 | `name` | `/user`'s `name`, when a string |
 | `picture` | `/user`'s `avatar_url`, when a string |
 | `accessToken` | as GitHub issued it |
-| `refreshToken` | always absent |
+| `refreshToken` | always absent — the adapter has no refresh, so one that a GitHub App's expiring user token comes with is not kept |
 | `scope` | GitHub's comma-delimited `scope` rewritten as the space-delimited list the rest of the system reads (RFC 6749 §3.3); absent when GitHub sent none. A `scope` that is not a string is refused by `openid-client` before the adapter sees it, and the login answers `502 exchange_failed` |
-| `expiresAt` | now + `expires_in` when GitHub sends one; **`null` when it does not** (OAuth App tokens), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
-| `idToken`, `expiresIn`, `tokenType` | not returned |
+| `expiresAt` | when the answer arrived + `expires_in` when GitHub sends one; **`null` when it does not** (OAuth App tokens), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
+| `expiresIn` | the `expires_in` GitHub sent, `null` when none |
+| `tokenType` | `token_type` as `openid-client` reports it (lower-cased `bearer`), recorded by the session router verbatim |
+| `idToken` | not returned — GitHub issues none |
 
 `mapClaims` maps `email`, `emailVerified`, `name` and `picture`; the session
 package promotes only `email`, `name` and `picture`, and only where the local
@@ -199,7 +201,7 @@ are pinned by the tests' assertions instead.
 
 | Test file | Pins |
 | --- | --- |
-| [`github.test.mts`](src/__tests__/github.test.mts) | the authorization request, the token request (PKCE verifier, `client_secret_post`), the exchange without `iss`, the REST headers, the e-mail choice, malformed rows and a failed `/user/emails`, the scope rules, `expiresAt`, no refresh, `mapClaims`, `endSession`, and that `config.fetch` carries every request |
+| [`github.test.mts`](src/__tests__/github.test.mts) | the authorization request, the token request (PKCE verifier, `client_secret_post`), the exchange without `iss`, the REST headers, the e-mail choice, malformed rows and a failed `/user/emails`, the scope rules, `expiresAt`, `expiresIn` and `tokenType`, no refresh, `mapClaims`, `endSession`, and that `config.fetch` carries every request |
 | [`github.user.test.mts`](src/__tests__/github.user.test.mts) | how `/user` becomes the `sub`: GitHub's numeric `id` without a `sub`, the `sub` and `id` rules, and the refusals (a non-2xx answer, a body that is not JSON, no `id`, or one that is not a positive safe integer or a canonical digit string) |
 | [`fake-github.test.mts`](src/__tests__/fake-github.test.mts) | the fake itself: form-encoded token answers, the `User-Agent` refusal, and that the adapter's requests satisfy both |
 | [`github-module.test.mts`](src/__tests__/github-module.test.mts), [`github-module-boot.test.mts`](src/__tests__/github-module-boot.test.mts) | the module's contributions and boot with the session module |

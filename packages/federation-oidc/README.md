@@ -210,9 +210,12 @@ What `exchangeCode` returns:
 | `accessToken` | as the issuer sent it |
 | `idToken`, `refreshToken` | as the issuer sent them, when non-empty strings |
 | `scope` | the token response's `scope`, an empty one included; absent when the response carried none (the session router then records the requested scope). A `scope` that is not a string is refused by `openid-client` before the adapter sees it, and the login answers `502 exchange_failed` |
-| `expiresAt` | now + `expires_in`; **`null` when the response carried no `expires_in`**, which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
+| `expiresAt` | when the answer arrived + `expires_in`; **`null` when the response carried no `expires_in`**, which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
 | `expiresIn` | the `expires_in` the response carried, `null` when none |
 | `tokenType` | `token_type` as `openid-client` reports it (lower-cased), recorded by the session router verbatim |
+
+The token fields are core's `federationTokenSnapshot`, the one reading every
+bundled adapter gives a token response.
 
 ### Optional capabilities
 

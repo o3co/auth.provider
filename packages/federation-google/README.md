@@ -146,10 +146,11 @@ What `exchangeCode` returns:
 | `email`, `name`, `picture` | from UserInfo, when strings |
 | `emailVerified` | UserInfo's `email_verified` when it is a boolean; otherwise absent |
 | `hd` | the Workspace domain, when UserInfo carries it — recorded, not enforced (below) |
-| `accessToken`, `idToken`, `refreshToken` | as Google issued them; `refreshToken` only when Google sent one |
+| `accessToken`, `idToken`, `refreshToken` | as Google issued them; `idToken` and `refreshToken` only when non-empty strings |
 | `scope` | Google's `scope` as sent; absent when Google sent none. A `scope` that is not a string is refused by `openid-client` before the adapter sees it, and the login answers `502 exchange_failed` |
-| `expiresAt` | now + `expires_in`; **3600 seconds is assumed when Google sends no `expires_in`** |
-| `expiresIn`, `tokenType` | not returned — the session router records no token type, which `oauth` answers as `Bearer` |
+| `expiresAt` | when the answer arrived + `expires_in`; **`null` when Google sent no `expires_in`** (both IdPs document it on every token response), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
+| `expiresIn` | the `expires_in` Google sent, `null` when none |
+| `tokenType` | `token_type` as `openid-client` reports it (lower-cased `bearer`), recorded by the session router verbatim |
 
 `mapClaims` maps `email`, `emailVerified`, `name`, `picture` and `hd`; the session
 package promotes only `email`, `name` and `picture`, and only where the local
@@ -189,10 +190,10 @@ a query-parameter allowlist, or a front end that relays only `code` and
 
 - **`refreshToken()`** (`SupportsRefresh`, called by `oauth`'s
   `POST /oauth/federation/:name/token`) runs the `refresh_token` grant and
-  returns `accessToken`, `refreshToken` when rotated, `idToken`, `scope` (same
-  rule as above) and `expiresAt` (same 3600-second assumption). It returns no
-  `issuer` or `sub` — the caller keeps the stored identity — and no `expiresIn`
-  or `tokenType`.
+  returns the token fields of the table above by the same rules —
+  `accessToken`, `refreshToken` when rotated, `idToken`, `scope`, `expiresAt`,
+  `expiresIn` and `tokenType` (a non-string `scope` fails the refresh). It
+  returns no `issuer` or `sub` — the caller keeps the stored identity.
 - **`endSession()`** (`SupportsLogout`, called by `oauth`'s logout routes):
   Google publishes no `end_session_endpoint`. With `endSessionEndpoint`
   configured, that URL with `id_token_hint`, `post_logout_redirect_uri` and
@@ -217,5 +218,6 @@ Defined in [`src/google.mts`](src/google.mts), exported from
 | --- | --- |
 | [`google.test.mts`](src/__tests__/google.test.mts) | the authorization request, the nonce requirement, the UserInfo `sub` binding, the profile, refresh and `mapClaims` (`endSession` has no test here) |
 | [`google.signature.test.mts`](src/__tests__/google.signature.test.mts) | that the id_token's signature is verified against the JWKS |
+| [`google.token-snapshot.test.mts`](src/__tests__/google.token-snapshot.test.mts) | the lifetime, `expiresIn` and `tokenType` a login and a refresh report, with and without `expires_in`, and that a non-string `scope` is refused by the library |
 | [`google.issuer-parameter.test.mts`](src/__tests__/google.issuer-parameter.test.mts) | the RFC 9207 `iss` check and `requireAuthorizationResponseIss` |
 | [`google-module.test.mts`](src/__tests__/google-module.test.mts), [`google-module-boot.test.mts`](src/__tests__/google-module-boot.test.mts) | the module's contributions and boot with the session module |
