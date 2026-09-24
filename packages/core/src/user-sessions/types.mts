@@ -151,7 +151,7 @@ export interface UserSessionStore {
  *
  * TTL contract: every `registerRP` MUST be called with the session's
  * `expiresAt`; the adapter writes the storage entry with TTL synced to
- * `expiresAt`.
+ * `expiresAt`. An Invalid Date is a `RangeError`, and nothing is recorded.
  */
 export interface SessionRPRegistry {
 	readonly kind: string;
@@ -173,7 +173,7 @@ export interface SessionRPRegistry {
  * removeBySid. Per-family removal is not exposed.
  *
  * TTL contract: every `addFamilyId` MUST be called with the session's
- * `expiresAt`.
+ * `expiresAt`. An Invalid Date is a `RangeError`, and nothing is recorded.
  */
 export interface SessionFamilyIndex {
 	readonly kind: string;
@@ -202,7 +202,7 @@ export interface SessionFamilyIndex {
  * full cleanup via `removeBySid`.
  *
  * TTL contract: every `addFederation` MUST be called with the session's
- * `expiresAt`.
+ * `expiresAt`. An Invalid Date is a `RangeError`, and nothing is recorded.
  */
 export interface SessionFederationIndex {
 	readonly kind: string;
@@ -236,7 +236,7 @@ export interface SessionFederationIndex {
  *
  * TTL contract: every `addSid` MUST be called with the session's `expiresAt`,
  * so an abandoned session ages out of the index rather than accumulating
- * against a long-lived user.
+ * against a long-lived user. An Invalid Date is a `RangeError`, and nothing is recorded.
  */
 export interface SubjectSessionIndex {
 	readonly kind: string;

@@ -306,6 +306,8 @@ give the same answers:
 | `FederationTokenStore` | a `ttl` that is not a positive finite number (at construction) | `PX` and the index TTL = `ttl` × 1000, rounded up |
 | The federation-token lock (`acquireLock`) | a `ttlMs` that is not a positive finite number, a `waitForMs` that is not a non-negative finite one | `PX` = `ttlMs`, rounded up |
 | `UserSessionStore.create` | an Invalid Date `expiresAt` | `PX` = the remaining life (a `Date` is whole milliseconds) |
+| `SessionRPRegistry.registerRP`, `SessionFamilyIndex.addFamilyId`, `SessionFederationIndex.addFederation`, `SubjectSessionIndex.addSid` | an Invalid Date `expiresAt` | `PEXPIREAT` = the session's `expiresAt` |
+| `ConsentStore.grant`, `PendingConsentStore.set` | a non-finite `expiresAt` (a consent with none is `undefined`, kept until revoked) | `PEXPIRE` = the remaining life, rounded up, plus the five-minute slack |
 
 [`px-rounding.test.mts`](__tests__/px-rounding.test.mts) pins both halves for
 each adapter with a recording client: the contract suites cannot tell

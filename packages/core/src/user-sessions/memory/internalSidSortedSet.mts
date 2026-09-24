@@ -43,6 +43,11 @@ export function createMemorySidSortedSet(): MemorySidSortedSet {
 	return {
 		add(sid, member, expiresAt) {
 			const expiresAtMs = expiresAt.getTime();
+			// An Invalid Date's time is NaN, which is never `<= now`: the entry
+			// would never expire. A caller fault, refused before anything is kept.
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError("expiresAt must be a valid date");
+			}
 			if (expiresAtMs <= Date.now()) return;
 			const existing = store.get(sid);
 			// Lazy GC: if the previous bucket has already expired, drop its state

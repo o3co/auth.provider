@@ -76,6 +76,11 @@ export function createRedisSubjectSessionIndex(
 
 		async addSid(subject, sid, expiresAt) {
 			const expiresAtMs = expiresAt.getTime();
+			// A NaN score and a NaN deadline are both Redis errors; a caller
+			// fault, refused before Redis is asked.
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError("SubjectSessionIndex.addSid: expiresAt must be a valid date");
+			}
 			// An already-expired session is not worth indexing; it would only be
 			// swept on the next read. Mirrors the in-process adapter.
 			//

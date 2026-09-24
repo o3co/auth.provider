@@ -125,6 +125,11 @@ export function createRedisSidSortedSet(opts: RedisSidSortedSetOptions): RedisSi
 	return {
 		async add(sid, member, expiresAt) {
 			const expiresAtMs = expiresAt.getTime();
+			// `PEXPIREAT NaN` fails inside the MULTI after `ZADD` has run, leaving
+			// the key with no TTL. Refused before Redis is asked.
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError("expiresAt must be a valid date");
+			}
 			// Guard: no-op writes after expiry.
 			if (expiresAtMs <= Date.now()) return;
 			// Monotonically increasing score — guarantees insertion order even

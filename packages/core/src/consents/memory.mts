@@ -71,6 +71,13 @@ export function createMemoryConsentStore(): MemoryConsentStore {
 		},
 
 		async grant(record) {
+			// NaN is never `<= now`, so such a consent would be kept for ever; an
+			// infinite expiry is not the "until revoked" `undefined` spells.
+			if (record.expiresAt !== undefined && !Number.isFinite(record.expiresAt)) {
+				throw new RangeError(
+					`ConsentStore.grant: expiresAt must be a finite number or undefined (got ${String(record.expiresAt)})`,
+				);
+			}
 			// The union, per the port's contract: a concurrent accept for other
 			// scopes must not lose the consent this one records. Single-threaded
 			// here, so reading and writing around no await is atomic.
@@ -165,6 +172,12 @@ export function createMemoryPendingConsentStore(): MemoryPendingConsentStore {
 		},
 
 		async set(record) {
+			// NaN is never `<= now`, so such a request would be kept for ever.
+			if (!Number.isFinite(record.expiresAt)) {
+				throw new RangeError(
+					`PendingConsentStore.set: expiresAt must be a finite number (got ${String(record.expiresAt)})`,
+				);
+			}
 			if (records.size >= sweepAt) sweep();
 			// Re-parking a challenge already held replaces it, and must not count
 			// against the session twice.

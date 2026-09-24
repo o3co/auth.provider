@@ -37,6 +37,11 @@ export function createMemorySidHash<T>(idOf: (t: T) => string): MemorySidHash<T>
 	return {
 		setField(sid, entry, expiresAt) {
 			const expiresAtMs = expiresAt.getTime();
+			// An Invalid Date's time is NaN, which is never `<= now`: the entry
+			// would never expire. A caller fault, refused before anything is kept.
+			if (!Number.isFinite(expiresAtMs)) {
+				throw new RangeError("expiresAt must be a valid date");
+			}
 			// Codex finding: writes after expiry MUST NOT recreate a zombie
 			// entry. Mirror redis adapter's PEXPIREAT-after-expiry no-op.
 			if (expiresAtMs <= Date.now()) return;

@@ -256,6 +256,14 @@ export function createRedisConsentStore(opts: RedisConsentStoreOptions): Consent
 		},
 
 		async grant(record) {
+			// The script writes the record before it sets the TTL, so a NaN or
+			// infinite expiry left a consent with no TTL that no read could age
+			// out. "Until revoked" is `undefined`, not Infinity.
+			if (record.expiresAt !== undefined && !Number.isFinite(record.expiresAt)) {
+				throw new RangeError(
+					`ConsentStore.grant: expiresAt must be a finite number or undefined (got ${String(record.expiresAt)})`,
+				);
+			}
 			const nowMs = Date.now();
 			await client.grant(key(record.sub, record.clientId), {
 				nowMs,
@@ -297,6 +305,13 @@ export function createRedisPendingConsentStore(
 		kind: "redis",
 
 		async set(record) {
+			// Refused before the script writes the request it would then fail to
+			// expire.
+			if (!Number.isFinite(record.expiresAt)) {
+				throw new RangeError(
+					`PendingConsentStore.set: expiresAt must be a finite number (got ${String(record.expiresAt)})`,
+				);
+			}
 			const nowMs = Date.now();
 			await client.set(keys, {
 				challenge: record.challenge,
