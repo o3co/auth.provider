@@ -54,6 +54,12 @@ const clientRepository: ClientRepository = {
 /** A logged projection's `stack`: frames only, from the first. */
 const FRAMES = expect.stringMatching(/^ {4}at /);
 
+/** What every device route answers a device-code store outage with. */
+const STORE_UNAVAILABLE = {
+	error: "temporarily_unavailable",
+	error_description: "the device authorization store is unavailable; retry later",
+};
+
 const CONFIDENTIAL_ID = "backend-app";
 const CONFIDENTIAL_SECRET = "s3cret-value";
 const confidentialClient = {
@@ -559,13 +565,14 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		};
 	};
 
-	it("answers an unexpected failure on the mounted device/verification route with JSON 500, and logs a projection of it", async () => {
+	it("answers a device-code store that throws on the verification route with JSON 503, and logs a projection of it", async () => {
 		// RFC 8628 §3.2 → RFC 6749 §5.2: this API answers in JSON, a failure
 		// included. A store that throws is the host's outage, not the
-		// caller's business: a fixed description in the response, and in the
-		// log the error's name and message — never the error itself. An
-		// ioredis reply error carries the command's arguments (the user code,
-		// the approving subject); a body-parser error carries the body.
+		// caller's business: `503 temporarily_unavailable` with a fixed
+		// description, and in the log a projection of the error — never the
+		// error itself. An ioredis reply error carries the command's arguments
+		// (the user code, the approving subject); a body-parser error carries
+		// the body.
 		const deps = enabledDeps();
 		const { lines, logger } = serialisingLogger();
 		const replyError = Object.assign(
@@ -593,27 +600,63 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			.set("Origin", "http://as.example.test")
 			.send({ action: "lookup", user_code: "BCDF-GHJK" });
 
+		expect(res.status).toBe(503);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.headers["cache-control"]).toBe("no-store");
+		expect(res.body).toEqual(STORE_UNAVAILABLE);
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			expect.objectContaining({ err: expect.objectContaining({ name: "ReplyError" }) }),
+			"device_verification_store_unavailable",
+		);
+		expect(lines.join("\n")).toContain("READONLY You can't write against a read only replica.");
+		for (const line of lines) {
+			expect(line).not.toContain("BCDFGHJK");
+			expect(line).not.toContain("user-1");
+			expect(line).not.toContain("s3cret-value");
+		}
+	});
+
+	it("answers an unexpected failure on the mounted device/verification route with JSON 500, and logs a projection of it", async () => {
+		// A store that answers, but with a record this package cannot read —
+		// a scope that is not a list — is a failure of the host's data, not an
+		// outage and not the caller's mistake.
+		const deps = enabledDeps();
+		const { logger } = serialisingLogger();
+		const app = mountVerificationRoute({
+			...deps,
+			logger,
+			deviceCodeStore: {
+				...deps.deviceCodeStore,
+				findPendingByUserCode: async () =>
+					({
+						userCode: "BCDFGHJK",
+						clientId: "tv-app",
+						requestedScope: "openid",
+						expiresAtMs: Date.now() + 60_000,
+						intervalSeconds: 5,
+						status: "pending",
+						subject: undefined,
+						grantedScope: undefined,
+					}) as never,
+			},
+		});
+
+		const res = await request(app)
+			.post("/oauth/device/verification")
+			.set("Host", "as.example.test")
+			.set("Origin", "http://as.example.test")
+			.send({ action: "lookup", user_code: "BCDF-GHJK" });
+
 		expect(res.status).toBe(500);
 		expect(res.headers["content-type"]).toMatch(/^application\/json/);
 		expect(res.headers["cache-control"]).toBe("no-store");
 		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
-			{
-				err: {
-					name: "ReplyError",
-					detail: "READONLY You can't write against a read only replica.",
-					command: { name: "evalsha" },
-					stack: FRAMES,
-				},
-			},
+			{ err: expect.objectContaining({ name: "TypeError", stack: FRAMES }) },
 			"device_route_unexpected_error",
 		);
-		for (const line of lines) {
-			expect(line).not.toContain("BCDFGHJK");
-			expect(line).not.toContain("user-1");
-			expect(line).not.toContain("s3cret-value");
-		}
 	});
 
 	it("answers an unexpected failure on the mounted device_authorization route with JSON 500, and logs a projection of it", async () => {
@@ -682,18 +725,18 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		return { res, lines, logger };
 	};
 
-	it("treats an exposed 4xx thrown past the parsers as the failure it is — 500, logged", async () => {
+	it("treats an exposed 4xx a store throws as the outage it is — 503, logged", async () => {
 		// Only the parsers' errors are the caller's mistake. A store that throws
 		// an `http-errors`-shaped 403 has failed; it has not been refused a body.
 		const { res, logger } = await lookupThrowing(
 			Object.assign(new Error("forbidden"), { expose: true, status: 403 }),
 		);
 
-		expect(res.status).toBe(500);
-		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(STORE_UNAVAILABLE);
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { name: "Error", detail: "forbidden", status: 403, stack: FRAMES } },
-			"device_route_unexpected_error",
+			expect.objectContaining({ err: expect.objectContaining({ name: "Error", status: 403 }) }),
+			"device_verification_store_unavailable",
 		);
 	});
 
@@ -709,11 +752,12 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			),
 		);
 
-		expect(res.status).toBe(500);
+		expect(res.status).toBe(503);
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { name: "ReplyError", detail: "ERR unknown command 'evalsha'", stack: FRAMES } },
-			"device_route_unexpected_error",
+			expect.objectContaining({ err: expect.objectContaining({ name: "ReplyError" }) }),
+			"device_verification_store_unavailable",
 		);
+		expect(lines.join("\n")).toContain("ERR unknown command 'evalsha'");
 		for (const line of lines) {
 			expect(line).not.toContain("BCDFGHJK");
 			expect(line).not.toContain("user-1");
@@ -731,7 +775,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 
 		const { res, lines } = await lookupThrowing(parseError);
 
-		expect(res.status).toBe(500);
+		expect(res.status).toBe(503);
 		for (const line of lines) {
 			expect(line).not.toContain("user_code");
 			expect(line).not.toContain("BCDFGHJK");
@@ -766,9 +810,10 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			new Error("device code lookup failed", { cause: reply }),
 		);
 
-		expect(res.status).toBe(500);
+		expect(res.status).toBe(503);
 		expect(logger.error).toHaveBeenCalledWith(
 			{
+				action: "lookup",
 				err: {
 					name: "Error",
 					detail: "device code lookup failed",
@@ -781,7 +826,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 					},
 				},
 			},
-			"device_route_unexpected_error",
+			"device_verification_store_unavailable",
 		);
 		for (const line of lines) {
 			expect(line).not.toContain("BCDFGHJK");
@@ -804,8 +849,8 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		const { logger } = await lookupThrowing(Object.assign(new Error("store failed"), fields));
 
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { name: "Error", detail: "store failed", stack: FRAMES, ...kept } },
-			"device_route_unexpected_error",
+			{ action: "lookup", err: { name: "Error", detail: "store failed", stack: FRAMES, ...kept } },
+			"device_verification_store_unavailable",
 		);
 	});
 
@@ -815,8 +860,8 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		);
 
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: expect.objectContaining({ name: "Error", detail: "store failed" }) },
-			"device_route_unexpected_error",
+			{ action: "lookup", err: expect.objectContaining({ name: "Error", detail: "store failed" }) },
+			"device_verification_store_unavailable",
 		);
 		for (const line of lines) expect(line).not.toContain("s3cret-name");
 	});
@@ -824,10 +869,10 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 	it("logs a thrown value that is not an Error as a NonError of its type, and nothing of it", async () => {
 		const { res, lines, logger } = await lookupThrowing("device code s3cret-value");
 
-		expect(res.status).toBe(500);
+		expect(res.status).toBe(503);
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { name: "NonError", thrown: "string" } },
-			"device_route_unexpected_error",
+			{ action: "lookup", err: { name: "NonError", thrown: "string" } },
+			"device_verification_store_unavailable",
 		);
 		for (const line of lines) expect(line).not.toContain("s3cret-value");
 	});
@@ -864,10 +909,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			.send({});
 
 		expect(res.status).toBe(503);
-		expect(res.body).toEqual({
-			error: "temporarily_unavailable",
-			error_description: "the device authorization store is unavailable; retry later",
-		});
+		expect(res.body).toEqual(STORE_UNAVAILABLE);
 		expect(res.headers["cache-control"]).toContain("no-store");
 		expect(creates).toBe(1);
 		// The projection, not the error: named, and without the command

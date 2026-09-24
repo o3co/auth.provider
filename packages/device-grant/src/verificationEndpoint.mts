@@ -69,6 +69,11 @@
  * A `limited` decision is not an outage: it stays a 429 under either mode,
  * and stays the `device.rate_limited` signal (#443).
  *
+ * A device-code **store** outage is the other outage here, and gets the
+ * product's answer for one (`storeOutage.mts`): `503 temporarily_unavailable`,
+ * logged at error as `device_verification_store_unavailable` — not a `500`
+ * through the terminal handler, and not an answer about the code.
+ *
  * ### The decision is an audit event
  *
  * An approval is a consent: a named subject grants a named client a scope,
@@ -118,6 +123,7 @@ import {
 	rateLimiterUnavailableEnvelope,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
+import { DEVICE_CODE_STORE_UNAVAILABLE, reportDeviceCodeStoreOutage } from "./storeOutage.mjs";
 import { DEVICE_VERIFICATION_RATE_LIMIT_PREFIX, type DeviceGrantDependencies } from "./types.mjs";
 
 type Action = "lookup" | "approve" | "deny";
@@ -282,8 +288,29 @@ export const createDeviceVerificationHandler = (
 
 		const nowMs = now();
 
+		/**
+		 * The store could not answer: an outage, not a verdict on the code.
+		 * The line names the action and not the subject, as the route's
+		 * `device_route_unexpected_error` does not.
+		 */
+		const storeUnavailable = (err: unknown): void => {
+			reportDeviceCodeStoreOutage(options.logger, "device_verification_store_unavailable", err, {
+				action,
+			});
+			respond(res, 503, {
+				error: DEVICE_CODE_STORE_UNAVAILABLE.error,
+				error_description: DEVICE_CODE_STORE_UNAVAILABLE.description,
+			});
+		};
+
 		if (action === "lookup") {
-			const authorization = await options.store.findPendingByUserCode(userCode, nowMs);
+			let authorization: Awaited<ReturnType<typeof options.store.findPendingByUserCode>>;
+			try {
+				authorization = await options.store.findPendingByUserCode(userCode, nowMs);
+			} catch (err) {
+				storeUnavailable(err);
+				return;
+			}
 			if (authorization === null) {
 				respond(res, 404, {
 					error: "invalid_user_code",
@@ -303,15 +330,21 @@ export const createDeviceVerificationHandler = (
 			return;
 		}
 
-		const outcome =
-			action === "approve"
-				? // `grantedScope` is deliberately omitted: the port grants
-					// `requestedScope`, which was settled and filtered against the
-					// client's allowlist when the device asked. Re-reading it here
-					// to pass it back would open a window between the lookup that
-					// showed the user a scope and the write that grants one.
-					await options.store.approve({ userCode, subject, nowMs })
-				: await options.store.deny(userCode, nowMs);
+		let outcome: Awaited<ReturnType<typeof options.store.approve>>;
+		try {
+			outcome =
+				action === "approve"
+					? // `grantedScope` is deliberately omitted: the port grants
+						// `requestedScope`, which was settled and filtered against the
+						// client's allowlist when the device asked. Re-reading it here
+						// to pass it back would open a window between the lookup that
+						// showed the user a scope and the write that grants one.
+						await options.store.approve({ userCode, subject, nowMs })
+					: await options.store.deny(userCode, nowMs);
+		} catch (err) {
+			storeUnavailable(err);
+			return;
+		}
 
 		switch (outcome.status) {
 			case "ok": {

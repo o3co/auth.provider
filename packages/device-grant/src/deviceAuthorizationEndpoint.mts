@@ -75,6 +75,7 @@ import {
 	sanitizeErrorText,
 } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
+import { DEVICE_CODE_STORE_UNAVAILABLE, reportDeviceCodeStoreOutage } from "./storeOutage.mjs";
 import { DEVICE_CODE_GRANT_TYPE, type DeviceGrantDependencies } from "./types.mjs";
 
 interface OAuthErrorBody {
@@ -301,17 +302,15 @@ export const createDeviceAuthorizationHandler = (
 					return;
 				}
 				if (!(err instanceof DeviceCodeStoreError && err.reason === "collision")) {
-					// At error: an outage is what an operator pages on. A warn-only
-					// logger still gets the line rather than losing it.
-					const line = { clientId: client.clientId, err: loggableError(err) };
-					if (options.logger?.error) {
-						options.logger.error(line, "device_authorization_store_unavailable");
-					} else {
-						options.logger?.warn(line, "device_authorization_store_unavailable");
-					}
+					reportDeviceCodeStoreOutage(
+						options.logger,
+						"device_authorization_store_unavailable",
+						err,
+						{ clientId: client.clientId },
+					);
 					fail(res, 503, {
-						error: "temporarily_unavailable",
-						error_description: "the device authorization store is unavailable; retry later",
+						error: DEVICE_CODE_STORE_UNAVAILABLE.error,
+						error_description: DEVICE_CODE_STORE_UNAVAILABLE.description,
 					});
 					return;
 				}
