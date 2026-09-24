@@ -353,10 +353,10 @@ jobs:
       - name: Pack all @o3co/auth-provider-* packages
         run: |
           set -euo pipefail
-          # Per project_v050_publish_readiness_gap memory: simulate the
-          # post-publish state by tarballing every workspace package and
-          # exercising the standalone template against the tarballs (rather
-          # than the workspace:* resolution that local builds use). Catches
+          # Simulate the post-publish state by tarballing every workspace
+          # package and exercising the standalone template against the
+          # tarballs (rather than the workspace:* resolution that local
+          # builds use). Catches
           # "template references symbols not in the published tarball"
           # before tag push.
           #

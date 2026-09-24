@@ -21,7 +21,7 @@ This left two gaps:
    `application.conf` did not propagate to consumers; they continued to run whatever values their
    copy of the template had at install time.
 
-2. **The `feedback_secure_default_opt_in` discipline could not be enforced.** "Library ships
+2. **The secure-default opt-in discipline could not be enforced.** "Library ships
    `enabled = false`, consumer opts in to `enabled = true`" requires a library layer that
    consumers actually merge against at runtime. Without it, the only way to enforce default-off
    was the strict-required pattern from ADR I4 (federations) — operationally heavy and not a
@@ -78,7 +78,7 @@ registration. HOCON `${?ENV_VAR}` substitution returns a string when the variabl
 
 - Library defaults evolve via npm package upgrades. Consumers resolving `reference.conf` via
   `import.meta.resolve` automatically pick up the updated baseline on their next install.
-- The `feedback_secure_default_opt_in` discipline is now operationally enforceable: the library
+- The secure-default opt-in discipline is now operationally enforceable: the library
   ships `enabled = false`, the consumer opts in by writing `enabled = true` in their own
   `application.conf`.
 - Operator-readable config narrows to deployment-specific values; the library baseline is
@@ -130,5 +130,3 @@ registration. HOCON `${?ENV_VAR}` substitution returns a string when the variabl
 - ADR `2026-04-30-config-schema-strict-defaults-from-hocon.md` — establishes HOCON as the
   single source of truth for runtime defaults. This ADR extends that decision by making the
   library's HOCON layer consumer-reachable via npm.
-- `feedback_secure_default_opt_in` — "shipped HOCON ships built-in modules default off; consumer
-  explicitly opts in."

@@ -253,7 +253,7 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
 	 * whatever scope the caller requests. README documents "MUST wire grantPolicy"
 	 * but nothing enforced it; this test asserts the new fail-fast at boot.
 	 *
-	 * Cross-refs: post-merge security audit H-2 / [[feedback_pre_merge_final_audit_gate]]
+	 * Cross-refs: post-merge security audit H-2
 	 */
 	it("H-2 fail-fast: boot throws when webauthnModule wired without grantPolicy", async () => {
 		// All deps present EXCEPT grantPolicy.
