@@ -27,6 +27,19 @@ interface Entry {
 }
 
 /**
+ * NaN is never `<= now`, so a family registered or committed with one would
+ * never expire and never be reclaimed; ±Infinity is no expiry either. A
+ * caller fault, refused with the RangeError the Redis adapter throws for it.
+ */
+const requireFiniteExpiry = (expiresAtMs: number, operation: string): void => {
+	if (!Number.isFinite(expiresAtMs)) {
+		throw new RangeError(
+			`RefreshTokenFamilyStore.${operation}: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
+		);
+	}
+};
+
+/**
  * Memory-backed RefreshTokenFamilyStore.
  *
  * Atomicity argument (single-process, single-event-loop):
@@ -45,19 +58,6 @@ interface Entry {
  *
  * Per A3 §7.1.
  */
-/**
- * NaN is never `<= now`, so a family registered or committed with one would
- * never expire and never be reclaimed; ±Infinity is no expiry either. A
- * caller fault, refused with the RangeError the Redis adapter throws for it.
- */
-const requireFiniteExpiry = (expiresAtMs: number, operation: string): void => {
-	if (!Number.isFinite(expiresAtMs)) {
-		throw new RangeError(
-			`RefreshTokenFamilyStore.${operation}: expiresAtMs must be a finite number (got ${String(expiresAtMs)})`,
-		);
-	}
-};
-
 export function createMemoryRefreshTokenFamilyStore(): RefreshTokenFamilyStore {
 	const families = new Map<string, Entry>();
 
