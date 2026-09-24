@@ -15,8 +15,10 @@
  */
 
 /**
- * A device-code store cannot hand back an authorization that has lost a
- * field (#626).
+ * A device-code store's copy of an authorization cannot leave a field out
+ * and still compile (#626) — for a copy built as an object literal of the
+ * record type; not for one behind a cast or one that names a field with the
+ * wrong value.
  *
  * Both bundled stores rebuild the record field by field on every read, and a
  * field a copy forgot was dropped with no error: `requestedScope` gone shows

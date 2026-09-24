@@ -117,9 +117,10 @@ export const FEDERATION_GRANT_FIRST_INTENTS_PER_CLIENT_SUBJECT_LIMIT = 16;
  * Every field is a required key (#626): `resource` and `upstreamSubject` hold
  * `undefined` where there is none. Both stores copy the intent field by
  * field, and a copy that lost either widened the flow — the upstream asked
- * without the audience the connection narrows it to, or the callback linking
- * whichever upstream account signed in instead of the one the client said to
- * expect. Naming the key makes that copy a compile error.
+ * without the audience the connection narrows it to, or the callback no
+ * longer checking that the upstream account is the one the client said to
+ * expect (the issuer, a renewal's existing account and the identity lookup
+ * are still checked). Naming the key makes that copy a compile error.
  */
 export interface FederationGrantIntent {
 	/** Opaque, single-use, 256 bits. Addresses this record and nothing else. */

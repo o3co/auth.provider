@@ -15,11 +15,18 @@
  */
 
 /**
- * A registry cannot hand back an entry that has lost a ceiling.
+ * A registry's copy of an entry cannot leave a ceiling out and still compile.
+ *
+ * That is the guarantee, and all of it: an entry built as an object literal of
+ * the stored type, naming its fields, fails to compile when it forgets one.
+ * It does not stop a copy that names a field and writes the wrong value, one
+ * behind a cast, or a store that is not TypeScript.
  *
  * Every field of `AssertionIssuerEntry` beyond `issuer`, `keys` and
- * `algorithms` narrows what an assertion from that issuer may obtain, so a
- * registry that loses one WIDENS it — fails open. `allowedClients` gone admits
+ * `algorithms` restricts what an assertion from that issuer may obtain, and
+ * for the ceilings a registry that loses one WIDENS it — fails open.
+ * `clockToleranceSeconds` can go either way: gone, the default applies,
+ * looser or stricter than what was configured. `allowedClients` gone admits
  * any presenter, an unauthenticated one included; `expiresAt` gone trusts the
  * issuer for ever; `profile: "id-jag"` gone falls back to plain RFC 7523 and
  * with it the `jti` replay check, the `typ` check and the exact-`aud` check. A

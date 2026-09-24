@@ -36,10 +36,14 @@ export interface ConsentRecord {
 	 * records itself, or an adapter that ages them out on its own policy.
 	 *
 	 * A required key, `undefined` included (#626): "until revoked" is the one
-	 * value that widens what the record grants, so a store that forgot to copy
-	 * the field would make every consent it read back permanent. Spelling the
-	 * key out makes that copy a compile error, and makes a writer say "until
-	 * revoked" rather than arrive at it by leaving the field out.
+	 * value that widens what the record grants. A copy that dropped the field
+	 * would keep a consent meant to lapse until it is revoked: on the way in
+	 * (the bundled Redis store would write no expiry and no TTL), or on the
+	 * way out, in a store that judges expiry by the record it returns. The
+	 * bundled Redis store judges the stored expiry in its script, so its
+	 * read-back copy alone could not do this. Spelling the key out makes those
+	 * copies a compile error, and makes a writer say "until revoked" rather
+	 * than arrive at it by leaving the field out.
 	 */
 	readonly expiresAt: number | undefined;
 }

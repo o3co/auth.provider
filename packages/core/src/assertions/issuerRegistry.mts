@@ -139,9 +139,10 @@ export interface AssertionIssuerEntryInput {
  * {@link AssertionIssuerEntryInput}, and every one of them a REQUIRED key,
  * `undefined` where the entry names no ceiling.
  *
- * Every field beyond `issuer`, `keys` and `algorithms` is a ceiling, so a
- * registry that loses one WIDENS what the issuer's assertions may obtain — it
- * fails open. `allowedClients` gone admits any presenter, an unauthenticated
+ * Every field beyond `issuer`, `keys` and `algorithms` restricts the issuer,
+ * and most of them are ceilings a registry that loses one WIDENS — it fails
+ * open. `clockToleranceSeconds` is the exception that can go either way:
+ * gone, the default applies, looser or stricter than what was configured. `allowedClients` gone admits any presenter, an unauthenticated
  * one included; `expiresAt` gone trusts the issuer for ever; `profile:
  * "id-jag"` gone falls back to plain RFC 7523, and with it the `jti` replay
  * check, the `typ` check and the exact-`aud` check. A registry over a store —

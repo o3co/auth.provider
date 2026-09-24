@@ -15,7 +15,9 @@
  */
 
 /**
- * A code repository cannot hand back a code that has lost a field (#626).
+ * A code repository's copy of a code cannot leave a field out and still
+ * compile (#626) — for a copy built as an object literal of the record type;
+ * not for one behind a cast or one that names a field with the wrong value.
  *
  * `/authorize` decides everything a code carries, and `/token` reads it back
  * without deciding again — evaluate-once-at-authorize is the contract. Both

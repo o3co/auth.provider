@@ -95,10 +95,11 @@ export interface FederationGrantAuthorization {
  * authenticated envelope: neither field decides what the grant allows.
  *
  * Each is a required key, `undefined` where there is none (#626). Two
- * decide how often the upstream is asked: a copy that lost `ineligible` would
- * take the lock and rotate the refresh token on every request again (D5), and
- * one that lost `refreshFailure` would ask a failing upstream again at once
- * (D12). Naming the key makes a copy built field by field that forgot one a
+ * decide how often the upstream is asked: a copy that lost `ineligible` would,
+ * whenever no held access token is still usable, take the lock and rotate the
+ * refresh token on every request again (D5); one that lost `refreshFailure`
+ * would ask a failing upstream again on the next request instead of after its
+ * backoff (D12). Naming the key makes a copy built field by field that forgot one a
  * compile error. A write that spreads the old record and clears one says so
  * by convention (`refreshFailure: undefined`): the compiler cannot tell a
  * clear left out from a value meant to be kept, so the contract suite is
@@ -146,8 +147,9 @@ export interface FederationGrantRefreshFailureInput {
  * request that needs a refresh would ask a failing upstream again (D12).
  *
  * The report's fields, each a required key (#626) — a stamp that lost
- * `retryAfterSeconds` would ask the upstream again before it said to — and
- * the store's count.
+ * `retryAfterSeconds` would fall back to the default backoff, and so ask a
+ * rate-limiting upstream again before it said to whenever its `Retry-After`
+ * was the longer — and the store's count.
  */
 export interface FederationGrantRefreshFailure {
 	readonly at: Date;
