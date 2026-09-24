@@ -503,6 +503,7 @@ is documented in [its README](../../packages/federation-oidc/README.md).
 | `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | — | URL for token-based user authentication. **https required** (see below) |
 | `CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` | — | Optional. URL the Store links a federated identity at (#482); enables `?link=1` on the federation start route. **https required** |
 | `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | — | Optional. URL the Store answers who holds an upstream identity at (#613, federation grants' check 5). With it, declare what the Store covers in `repositories.user.http.federatedIdentityLookupCoverage` (HOCON). **https required** |
+| `CLIENT_USER_BEARER_TOKEN` | — | Optional. The credential this server presents to the Store: every Store request carries `Authorization: Bearer <token>`. A bare token (no `Bearer ` prefix) of at least 32 bytes — `openssl rand -hex 32`. Unset, no `Authorization` header is sent (see below) |
 | `CLIENT_USER_TIMEOUT` | `5000` | HTTP request timeout in milliseconds. Positive integer ≤ `2147483647` |
 | `CLIENT_USER_MAX_RESPONSE_BYTES` | `1048576` | Largest upstream response body accepted, in bytes |
 
@@ -518,6 +519,19 @@ or the response cap is unusable, rather than at the first login attempt.
 Each URL must be the endpoint that answers, not one that redirects: no request
 follows a `3xx`, so a URL that redirects fails every call — see
 [What the Store must enforce itself](../../packages/foundation/README.md#what-the-store-must-enforce-itself).
+
+**Who may call the Store.** What the token-based login and account linking
+send is an identifier, not a secret, so a Store that answers any caller
+resolves a known identity to its user — or links one to any account — for
+anyone who can reach it. Set `CLIENT_USER_BEARER_TOKEN` and have the Store
+answer `401` to every request whose `Authorization` is not exactly
+`Bearer <that token>`. Boot fails if the token is weaker than 32 bytes
+(measured like `SESSION_SECRET`), malformed, or exported but empty; it appears
+in no error this server throws. A `401` reads as "no such user", so a token the
+Store does not accept shows up here as every login failing rather than as an
+error — log refusals on the Store's side. Without the token, admit only this
+server to the Store by network policy or platform mutual TLS. Rotation, and
+what the Store checks, are in the same foundation README section.
 
 ### Code Repository
 

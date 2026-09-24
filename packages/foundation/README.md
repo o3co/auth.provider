@@ -24,6 +24,8 @@ package name it is not a base layer: no other package imports it at runtime
 - the transport rules on the Store's URLs — `https`, or `http` to a loopback
   host only ([`src/endpointUrl.mts`](src/endpointUrl.mts)) — and that no
   request follows a redirect away from them;
+- the credential it presents to the Store (`bearerToken`) and the floor that
+  credential is held to;
 - the request deadline and the response-size cap;
 - the coverage declaration the identity lookup is judged by at boot.
 
@@ -90,13 +92,15 @@ block; defaults are in [`reference.conf`](../core/config/reference.conf):
 | `linkFederatedIdentityUrl` | `CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` | Optional. Enables account linking. |
 | `findSubjectByFederatedIdentityUrl` | `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | Optional. The identity lookup. |
 | `federatedIdentityLookupCoverage` | — (a list; HOCON only) | What the lookup covers. Default `[]`. |
+| `bearerToken` | `CLIENT_USER_BEARER_TOKEN` | Optional. Sent on every request as `Authorization: Bearer <token>`; at least 32 bytes of key material. Unset, no `Authorization` header is sent. See [who may call the Store](#what-the-store-must-enforce-itself). |
 | `timeout` | `CLIENT_USER_TIMEOUT` | Milliseconds. Default 5000. |
 | `maxResponseBytes` | `CLIENT_USER_MAX_RESPONSE_BYTES` | Default 1048576. |
 
 ## The wire contract
 
-Every request is a `POST` with a JSON body. The user a Store answers with is
-core's [`User`](../core/src/repositories/types.mts).
+Every request is a `POST` with a JSON body, and — when `bearerToken` is
+configured — an `Authorization: Bearer <token>` header. The user a Store
+answers with is core's [`User`](../core/src/repositories/types.mts).
 
 **`authenticate`** posts `{ email, password }` to `authenticateUrl` (the
 username arrives as `email`); **`authenticateByToken`** posts `{ token }` to
@@ -203,18 +207,33 @@ deployment that then has a connection under `"required"` is refused at boot.
 
 ## What the Store must enforce itself
 
-- **Who may call it.** `HttpUserRepository` sends no credential of its own: each
-  request carries only `Content-Type: application/json`, there is no option to
-  add a header, and a URL carrying `user:password@` is refused. Nor is what
-  `authenticateByToken` and linking carry a secret — the federation callback's `<provider>:<sub>` is an
-  identifier. So anyone who can reach `authenticateByTokenUrl` can resolve a
-  known identity to its user, and anyone who can reach an open
-  `linkFederatedIdentityUrl` can bind any identity to any `userId`. Accept these
-  calls only from auth.provider: a network policy or a private network, or
-  mutual TLS provided by the platform in front of the Store.
+- **Who may call it.** What `authenticateByToken` and linking carry is not a
+  secret — the federation callback's `<provider>:<sub>` is an identifier — so a
+  Store that answers any caller lets anyone who can reach
+  `authenticateByTokenUrl` resolve a known identity to its user, and anyone who
+  can reach an open `linkFederatedIdentityUrl` bind any identity to any
+  `userId`. Configure `bearerToken` (`CLIENT_USER_BEARER_TOKEN`, from
+  `openssl rand -hex 32`) and have the Store refuse every request on all four
+  endpoints whose `Authorization` is not exactly `Bearer <that token>`,
+  compared in constant time, and never log the header. Refuse with `401`
+  (RFC 6750) and log the refusal on the Store's side: this adapter reads a
+  `401` from `authenticate` and `authenticateByToken` as "no such user" and
+  from linking as a refusal, so a token the Store does not accept — a typo, a
+  half-finished rotation — shows up at auth.provider as every login failing
+  and every link refused, not as an error (the identity lookup, which reads
+  any non-`2xx` as an outage, does throw). To rotate, have the Store accept the
+  old token and the new, move auth.provider to the new, then retire the old.
+  Without `bearerToken` no request carries an `Authorization` header, and the
+  Store must admit only auth.provider some other way — a network policy or a
+  private network, or mutual TLS provided by the platform in front of the
+  Store (a sidecar on a loopback address, which the `http` carve-out admits).
+  This adapter offers no client certificate of its own: Node's `fetch` takes
+  one only through an `undici` dispatcher, a dependency this package does not
+  carry. A URL carrying `user:password@` is refused.
 - **No secret in the URL.** A query-string token would not stay secret: the
   errors this adapter throws name the full URL, and the session routes log
-  them.
+  them. The caller's credential belongs in `bearerToken`, which nothing this
+  adapter throws carries.
 - **Answer without redirecting.** No request follows a redirect, so a
   password, a token, a link request or an identity goes only to the configured
   URL — the one the `https` rule below checks — and no answer from anywhere
@@ -270,6 +289,21 @@ the race it hangs forever. A request that outlives the deadline rejects with a
 `Content-Length` *and* while streaming, so a Store that omits the header — or
 lies in it — is still cut off rather than allowed to exhaust memory.
 
+**`bearerToken`, when set, must be a bare RFC 6750 token of at least 32 bytes
+of key material.** Unset (absent) sends no `Authorization` header. Set, it is
+refused unless it is a string, not blank (a blank environment override is a
+boot failure, not "no token"), made only of letters, digits, `-._~+/` and
+trailing `=` padding — no whitespace, no line break, and no `Bearer ` prefix,
+which the adapter adds — and it clears core's shared-secret floor
+(`MIN_SECRET_ENTROPY_BYTES`, the one `SESSION_SECRET` and `OAUTH_JWT_SECRET`
+clear), measured on the decoded length of a hex or base64 value, so
+`openssl rand -hex 16` is 16 bytes however long it looks. Whoever holds the
+token speaks to the Store as auth.provider. The shape is checked here because
+a header value `fetch` refuses is one it quotes in the error it throws. No
+refusal quotes the value, no error from a request carries it, and it is held
+in an ECMAScript private field, so it is absent from `inspect()` and
+`JSON.stringify` of the repository.
+
 ## Public API
 
 Exported from [`src/index.mts`](src/index.mts):
@@ -286,6 +320,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | --- | --- |
 | [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | authentication and its answers, the `User` shape check, the https rule, the timeout and the response cap, linking, and the identity lookup's presence, probe and wire |
 | [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | against real HTTP servers: the identity lookup releasing a refused answer's connection, and a redirect refused on each of the four requests — to another origin, to the same origin, or with no `Location` — with nothing sent to a redirect target |
+| [`HttpUserRepository.credential.test.mts`](src/repositories/__tests__/HttpUserRepository.credential.test.mts) | against real HTTP servers: `Authorization: Bearer <token>` on each of the four requests when `bearerToken` is set and no `Authorization` header when it is not, by hand and through the `"http"` builder; a weak, malformed, blank or non-string token refused at construction; the token in no failure and no inspection of the repository |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | the `"http"` builder, its defaults and string coercion, and configuration refused at build time |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | the https-or-loopback rule |
 

@@ -14,14 +14,17 @@
  * limitations under the License.
  */
 
-import type {
-	FederatedIdentityLink,
-	FederatedIdentityLookup,
-	FederatedIdentityLookupResult,
-	FederatedIdentityRegistration,
-	LinkFederatedIdentityResult,
-	User,
-	UserRepository,
+import {
+	describeWeakSecret,
+	type FederatedIdentityLink,
+	type FederatedIdentityLookup,
+	type FederatedIdentityLookupResult,
+	type FederatedIdentityRegistration,
+	type LinkFederatedIdentityResult,
+	MIN_SECRET_ENTROPY_BYTES,
+	measureSecretEntropyBytes,
+	type User,
+	type UserRepository,
 } from "@o3co/auth-provider-core";
 import { assertSecureEndpoint } from "../endpointUrl.mjs";
 
@@ -199,6 +202,58 @@ function lookupAnswer(value: unknown): FederatedIdentityLookupResult | undefined
 	}
 }
 
+/**
+ * RFC 6750 §2.1 `b64token` — the characters a bearer credential may carry.
+ * Nothing in it is whitespace or a control character, so a token that
+ * matches cannot break the header it rides in.
+ */
+const B64TOKEN = /^[A-Za-z0-9\-._~+/]+=*$/;
+
+const BEARER_TOKEN_FIELD = "bearerToken";
+
+/**
+ * The credential presented to the Store, checked (#285's rule: at
+ * construction, so a deployment that would send an unusable one fails at
+ * boot) and turned into the `Authorization` value; `undefined` when none is
+ * configured, which sends no `Authorization` header at all.
+ *
+ * The shape is refused here and not left to `fetch`: a header value `fetch`
+ * refuses is one it QUOTES in the `TypeError` it throws, on the request path,
+ * where the session routes log what is thrown. The strength is core's
+ * shared-secret floor (`MIN_SECRET_ENTROPY_BYTES`, measured on the decoded
+ * length as `SESSION_SECRET` is): whoever holds this token speaks to the Store
+ * as auth.provider — resolves an identity to its user, links one to any user.
+ * No message quotes the value.
+ */
+function bearerAuthorization(value: unknown): string | undefined {
+	if (value === undefined) return undefined;
+	const refuse = (problem: string): Error =>
+		new Error(`HttpUserRepository: "${BEARER_TOKEN_FIELD}" ${problem}`);
+	if (typeof value !== "string") throw refuse("must be a string");
+	if (value === "") {
+		throw refuse(
+			'must not be empty — HOCON substitutes an exported-but-empty variable as ""; ' +
+				"leave it unset to send no Authorization header",
+		);
+	}
+	if (!B64TOKEN.test(value)) {
+		throw refuse(
+			"must be a bare RFC 6750 token: letters, digits and - . _ ~ + /, then optional = padding — " +
+				'no whitespace, no line break, and no "Bearer " prefix (the scheme is added)',
+		);
+	}
+	const actualBytes = measureSecretEntropyBytes(value);
+	if (actualBytes < MIN_SECRET_ENTROPY_BYTES) {
+		throw new Error(
+			`HttpUserRepository: ${describeWeakSecret(actualBytes, {
+				configKey: "repositories.user.http.bearerToken",
+				envVar: "CLIENT_USER_BEARER_TOKEN",
+			})}`,
+		);
+	}
+	return `Bearer ${value}`;
+}
+
 /** Whether `value` is a positive integer that fits `bound`. */
 function isPositiveIntegerWithin(value: unknown, bound: number): value is number {
 	return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= bound;
@@ -313,8 +368,19 @@ function isAbortError(err: unknown): boolean {
  * place its body is ever sent and the only one whose answer is taken: a `3xx`
  * from the Store is an upstream failure, thrown like any other unexpected
  * status, and its `Location` is never contacted.
+ *
+ * With `bearerToken` configured, every request — authentication, linking and
+ * the identity lookup alike — carries `Authorization: Bearer <token>`, so the
+ * Store can refuse a caller that is not this deployment; without it, no
+ * request carries an `Authorization` header.
  */
 export class HttpUserRepository implements UserRepository {
+	/**
+	 * `Bearer <token>`, or `undefined` for none. An ECMAScript private field
+	 * rather than a TypeScript `private` one: `inspect()` and `JSON.stringify`
+	 * see every other field of a repository handed to a logger, and not this.
+	 */
+	readonly #authorization: string | undefined;
 	private authenticateUrl: string;
 	private authenticateByTokenUrl: string;
 	private timeout: number;
@@ -353,6 +419,7 @@ export class HttpUserRepository implements UserRepository {
 		linkFederatedIdentityUrl,
 		findSubjectByFederatedIdentityUrl,
 		federatedIdentityLookupCoverage,
+		bearerToken,
 		timeout,
 		maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
 	}: {
@@ -364,6 +431,12 @@ export class HttpUserRepository implements UserRepository {
 		findSubjectByFederatedIdentityUrl?: string;
 		/** #613: which registrations the Store's lookup covers. Needs the URL; `[]` covers none. */
 		federatedIdentityLookupCoverage?: readonly FederatedIdentityLookupCoverage[];
+		/**
+		 * Optional; sent to the Store on every request as `Authorization: Bearer
+		 * <token>`. A bare RFC 6750 token (no scheme) of at least
+		 * `MIN_SECRET_ENTROPY_BYTES` of key material — `openssl rand -hex 32`.
+		 */
+		bearerToken?: string;
 		timeout: number;
 		maxResponseBytes?: number;
 	}) {
@@ -372,6 +445,7 @@ export class HttpUserRepository implements UserRepository {
 			authenticateByTokenUrl,
 			"authenticateByTokenUrl",
 		);
+		this.#authorization = bearerAuthorization(bearerToken);
 		if (linkFederatedIdentityUrl !== undefined) {
 			this.linkFederatedIdentityUrl = assertSecureEndpoint(
 				linkFederatedIdentityUrl,
@@ -414,6 +488,13 @@ export class HttpUserRepository implements UserRepository {
 			throw new Error('HttpUserRepository: "maxResponseBytes" must be a positive integer');
 		}
 		this.maxResponseBytes = maxResponseBytes;
+	}
+
+	/** What every request carries: the body's type and, when configured, the credential. */
+	private headers(): Record<string, string> {
+		return this.#authorization === undefined
+			? { "Content-Type": "application/json" }
+			: { "Content-Type": "application/json", Authorization: this.#authorization };
 	}
 
 	async authenticate(username: string, password: string): Promise<User | null> {
@@ -520,7 +601,7 @@ export class HttpUserRepository implements UserRepository {
 			try {
 				res = await fetch(url, {
 					method: "POST",
-					headers: { "Content-Type": "application/json" },
+					headers: this.headers(),
 					body: JSON.stringify(body),
 					signal: controller.signal,
 					redirect: "manual",
@@ -595,7 +676,7 @@ export class HttpUserRepository implements UserRepository {
 		try {
 			const res = await fetch(url, {
 				method: "POST",
-				headers: { "Content-Type": "application/json" },
+				headers: this.headers(),
 				body: JSON.stringify(body),
 				signal: controller.signal,
 				// Never followed: a 307 or 308 would re-send the body — a password,

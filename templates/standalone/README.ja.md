@@ -380,12 +380,15 @@ federations {
 | `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | — | トークン認証用のユーザー認証 URL。**https 必須**（下記参照） |
 | `CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` | — | 任意。Store がフェデレーション identity を紐づける URL（#482）。フェデレーション開始ルートで `?link=1` を有効にする。**https 必須** |
 | `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | — | 任意。上流 identity の持ち主を Store が答える URL（#613、フェデレーショングラントの check 5）。設定した場合は、Store が cover する範囲を `repositories.user.http.federatedIdentityLookupCoverage`（HOCON）に宣言する。**https 必須** |
+| `CLIENT_USER_BEARER_TOKEN` | — | 任意。このサーバーが Store に提示する資格情報: Store へのすべてのリクエストが `Authorization: Bearer <token>` を持つ。32 バイト以上の素のトークン（`Bearer ` の接頭辞なし）— `openssl rand -hex 32`。未設定なら `Authorization` ヘッダーは送らない（下記参照） |
 | `CLIENT_USER_TIMEOUT` | `5000` | HTTP リクエストタイムアウト（ミリ秒）。`2147483647` 以下の正の整数 |
 | `CLIENT_USER_MAX_RESPONSE_BYTES` | `1048576` | 上流レスポンスボディの受け入れ上限（バイト） |
 
 ユーザー認証 URL は 2 つとも上流ストアへ**平文のユーザー資格情報**を運ぶため、いずれも絶対 `https://` URL でなければならない。`http://` は loopback ホスト（`localhost`、`127.0.0.0/8` 内のアドレス、`[::1]`）に限って許可され、ローカル開発で証明書を用意せずに済むようにしている。プライベートレンジのアドレス（`http://10.0.0.5/…`）やコンテナネットワークのサービス名（`http://user-service/…`）には依然として `https://` が必要 — これらはデプロイが端から端まで制御していないネットワークを越えるため。URL のどちらか、タイムアウト、レスポンス上限のいずれかが使えない値なら、最初のログイン時ではなく起動時に失敗する。
 
 各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する: どのリクエストも `3xx` を追わないので、リダイレクトする URL ではすべての呼び出しが失敗する — [Store が自分で守るべきこと](../../packages/foundation/README.ja.md#store-が自分で守るべきこと) を参照。
+
+**Store を誰が呼べるか。** トークンによるログインとアカウントリンクが送るものは秘密ではなく識別子なので、誰にでも応答する Store は、そこに届く者なら誰にでも、既知の ID をそのユーザーに解決し — あるいは任意のアカウントにリンクし — てしまう。`CLIENT_USER_BEARER_TOKEN` を設定し、Store は `Authorization` が `Bearer <そのトークン>` と正確に一致しないすべてのリクエストに `401` を返す。トークンが 32 バイトより弱い（`SESSION_SECRET` と同じ測り方）、形が誤っている、または空で export されている場合は起動に失敗する。トークンはこのサーバーが投げるどのエラーにも現れない。`401` は「ユーザーが居ない」と読まれるので、Store が受け付けないトークンはここではエラーではなく、すべてのログインの失敗として現れる — 拒否は Store 側でログに残す。トークンを使わない場合は、ネットワークポリシーかプラットフォームの相互 TLS で、このサーバーだけが Store に届くようにする。ローテーションと Store が検査することは、同じ foundation README の節にある。
 
 ### コードリポジトリ
 

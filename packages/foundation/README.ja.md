@@ -12,6 +12,7 @@ auth.provider のための「the Store」 — デプロイ自身のユーザー�
 
 - Store が実装するワイヤ契約: `HttpUserRepository` が送るリクエストと、それぞれの応答の意味（後述）。
 - Store の URL に対する通信の規則 — `https`、またはループバックホストへの `http` だけ（[`src/endpointUrl.mts`](src/endpointUrl.mts)） — と、どのリクエストもそこからリダイレクトで離れないこと。
+- Store に提示する資格情報（`bearerToken`）と、その資格情報に課す下限。
 - リクエストの期限とレスポンスサイズの上限。
 - ID の照会が起動時に判定される根拠となるカバレッジ宣言。
 
@@ -59,12 +60,13 @@ const userRepo = await userFactory.create({
 | `linkFederatedIdentityUrl` | `CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` | 任意。アカウントリンクを有効にする。 |
 | `findSubjectByFederatedIdentityUrl` | `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | 任意。ID の照会。 |
 | `federatedIdentityLookupCoverage` | —（リストなので HOCON のみ） | 照会がカバーする範囲。デフォルト `[]`。 |
+| `bearerToken` | `CLIENT_USER_BEARER_TOKEN` | 任意。すべてのリクエストで `Authorization: Bearer <token>` として送る。32 バイト以上の鍵素材。未設定なら `Authorization` ヘッダーは送らない。[Store を誰が呼べるか](#store-が自分で守るべきこと) を参照。 |
 | `timeout` | `CLIENT_USER_TIMEOUT` | ミリ秒。デフォルト 5000。 |
 | `maxResponseBytes` | `CLIENT_USER_MAX_RESPONSE_BYTES` | デフォルト 1048576。 |
 
 ## ワイヤ契約
 
-リクエストはすべて JSON ボディの `POST`。Store が返すユーザーは core の [`User`](../core/src/repositories/types.mts)。
+リクエストはすべて JSON ボディの `POST` で、`bearerToken` が設定されていれば `Authorization: Bearer <token>` ヘッダーを持つ。Store が返すユーザーは core の [`User`](../core/src/repositories/types.mts)。
 
 **`authenticate`** は `authenticateUrl` に `{ email, password }` を送る（ユーザー名は `email` として届く）。**`authenticateByToken`** は `authenticateByTokenUrl` に `{ token }` を送る。`token` は Store がユーザーに解決する不透明なハンドル — フェデレーションのコールバックからは `<provider>:<sub>`、`oauth` の jwt-bearer グラントからは検証済みアサーションの subject ハンドル。どちらも:
 
@@ -104,8 +106,8 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 
 ## Store が自分で守るべきこと
 
-- **誰が呼べるか。** `HttpUserRepository` は自分の資格情報を何も送らない: 各リクエストが持つのは `Content-Type: application/json` だけで、ヘッダーを足すオプションも無く、`user:password@` を含む URL は拒否される。`authenticateByToken` と紐付けが運ぶものも秘密ではない — フェデレーションのコールバックの `<provider>:<sub>` は識別子である。したがって `authenticateByTokenUrl` に届く者は誰でも既知の ID をそのユーザーに解決でき、開いた `linkFederatedIdentityUrl` に届く者は誰でも任意の ID を任意の `userId` に結びつけられる。これらの呼び出しは auth.provider からだけ受け付ける: ネットワークポリシーやプライベートネットワーク、または Store の前段でプラットフォームが提供する相互 TLS で。
-- **URL に秘密を入れない。** クエリ文字列のトークンは秘密のままではいられない: このアダプターが投げるエラーは URL 全体を示し、セッションルートはそれをログに出す。
+- **誰が呼べるか。** `authenticateByToken` と紐付けが運ぶものは秘密ではない — フェデレーションのコールバックの `<provider>:<sub>` は識別子である — ので、誰にでも応答する Store では、`authenticateByTokenUrl` に届く者は誰でも既知の ID をそのユーザーに解決でき、開いた `linkFederatedIdentityUrl` に届く者は誰でも任意の ID を任意の `userId` に結びつけられる。`bearerToken`（`CLIENT_USER_BEARER_TOKEN`、`openssl rand -hex 32` で生成）を設定し、Store は四つのエンドポイントすべてで、`Authorization` が `Bearer <そのトークン>` と正確に一致しない（定数時間で比較する）リクエストを拒否し、そのヘッダーをログに出さない。拒否は `401`（RFC 6750）で返し、拒否したことを Store 側でログに残す: このアダプターは `authenticate` と `authenticateByToken` からの `401` を「ユーザーが居ない」、リンクからの `401` を拒否と読むので、Store が受け付けないトークン — 打ち間違い、途中で止まったローテーション — は、auth.provider ではエラーではなく、すべてのログインの失敗とすべてのリンクの拒否として現れる（`2xx` 以外をすべて障害と読む ID の照会は例外になる）。ローテーションは、Store に古いトークンと新しいトークンの両方を受け付けさせ、auth.provider を新しいものに移し、それから古いものを廃止する。`bearerToken` が無ければどのリクエストも `Authorization` ヘッダーを持たないので、Store は別の方法で auth.provider だけを受け入れる: ネットワークポリシーやプライベートネットワーク、または Store の前段でプラットフォームが提供する相互 TLS（ループバックアドレス上のサイドカー。`http` の例外が受け付ける）で。このアダプター自身はクライアント証明書を提供しない: Node の `fetch` がそれを受け取るのは `undici` のディスパッチャー経由だけで、このパッケージはその依存を持たない。`user:password@` を含む URL は拒否される。
+- **URL に秘密を入れない。** クエリ文字列のトークンは秘密のままではいられない: このアダプターが投げるエラーは URL 全体を示し、セッションルートはそれをログに出す。呼び出し元の資格情報は `bearerToken` に置く。このアダプターが投げるものはどれもそれを含まない。
 - **リダイレクトせずに応答する。** どのリクエストもリダイレクトを追わないので、パスワード、トークン、リンクのリクエスト、ID は設定された URL — 下の `https` の規則が検査する URL — にだけ届き、それ以外のどこからの応答もユーザー、リンク、照会の答えとして受け取られない。四つのエンドポイントのどれからの `3xx` も、他の想定外のステータスと同じく例外になる（セッションルートと jwt-bearer グラントは `503 temporarily_unavailable`、grants のコールバックは `temporarily_unavailable` を返す）ので、リダイレクトする URL — 正規のホストへリダイレクトするホストの別名、末尾スラッシュの付加、パスの移動 — の背後にある Store はすべての呼び出しで失敗する。各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する。
 
 ## コンストラクタでの検証
@@ -122,6 +124,8 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 
 **`maxResponseBytes` は正の整数でなければならず**、デフォルトは `DEFAULT_MAX_RESPONSE_BYTES`（1 MiB）。上限は `Content-Length` に対しても、ストリーム読み取り中にも適用されるので、ヘッダーを省く — あるいは偽る — Store も、メモリを使い果たす前に打ち切られる。
 
+**`bearerToken` は、設定するなら 32 バイト以上の鍵素材を持つ素の RFC 6750 トークンでなければならない。** 未設定（キーが無い）なら `Authorization` ヘッダーは送らない。設定した場合は、文字列であること、空でないこと（空の環境変数による上書きは「トークン無し」ではなく起動失敗）、英字・数字・`-._~+/` と末尾の `=` パディングだけから成ること — 空白も改行も、アダプターが付ける `Bearer ` の接頭辞も含まない — 、そして core の共有シークレットの下限（`MIN_SECRET_ENTROPY_BYTES`。`SESSION_SECRET` と `OAUTH_JWT_SECRET` が満たすのと同じもの）を満たすことが求められ、どれかを欠けば拒否される。hex や base64 の値はデコード後の長さで測るので、`openssl rand -hex 16` は見た目の長さに関わらず 16 バイトである。このトークンを持つ者は auth.provider として Store と話せる。形をここで検査するのは、`fetch` が拒否するヘッダー値は、`fetch` が投げるエラーの中にそのまま引用されるからである。どの拒否も値を引用せず、リクエストのどのエラーも値を含まず、値は ECMAScript の private フィールドに保持されるので、リポジトリの `inspect()` や `JSON.stringify` にも現れない。
+
 ## パブリック API
 
 [`src/index.mts`](src/index.mts) から export される:
@@ -137,6 +141,7 @@ federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、AD
 | --- | --- |
 | [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | 認証とその応答、`User` の形の検査、https の規則、タイムアウトとレスポンス上限、リンク、ID の照会の有無・probe・ワイヤ |
 | [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | 実際の HTTP サーバーに対して: ID の照会が拒否した応答の接続を解放すること、四つのリクエストそれぞれでリダイレクト — 別のオリジンへ、同じオリジンへ、`Location` 無し — が拒否され、リダイレクト先に何も送られないこと |
+| [`HttpUserRepository.credential.test.mts`](src/repositories/__tests__/HttpUserRepository.credential.test.mts) | 実際の HTTP サーバーに対して: `bearerToken` があれば四つのリクエストそれぞれに `Authorization: Bearer <token>` が付き、無ければ `Authorization` ヘッダーが付かないこと（直接構築でも `"http"` ビルダー経由でも）、弱い・形の誤った・空の・文字列でないトークンが構築時に拒否されること、どの失敗にもリポジトリのどの検査にもトークンが現れないこと |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | `"http"` のビルダー、そのデフォルトと文字列の変換、組み立て時に拒否される設定 |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | https またはループバックの規則 |
 
