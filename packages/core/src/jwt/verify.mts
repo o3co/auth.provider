@@ -23,6 +23,7 @@ import {
 } from "jose";
 import type { AccessTokenDenylist } from "../access-token-denylist/types.mjs";
 import { ExpiredKidError, type KeyStore, UnknownKidError } from "../keys/KeyStore.mjs";
+import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import type { SubjectRevocation } from "../user-sessions/types.mjs";
 
@@ -372,18 +373,6 @@ export const DEFAULT_CLOCK_SKEW_MS = 300_000;
 export const DEFAULT_SUBJECT_REVOCATION_SKEW_MS = 1_000;
 
 /**
- * The longest `kid` header the verifier hands a keystore. RFC 7515 §4.1.4
- * makes `kid` a case-sensitive string and bounds nothing; the kids this
- * server issues are short, operator-chosen names (`oauth.jwt.signingKey`'s
- * `kid`, `v0` by default). A kid that is not a string, or longer than this,
- * names no key this server issued and is refused as `kid_unknown` before any
- * keystore sees it — so a keystore of your own never receives an unbounded,
- * attacker-chosen value to look up remotely, and a value that cannot even be
- * turned into text never reaches a message built from it.
- */
-export const MAX_KID_LENGTH = 256;
-
-/**
  * Whether `cause` is the finding `name` names: an instance of the class, or —
  * when a composition holds two copies of this package, a keystore built
  * against one and the verifier from the other — an object carrying that
@@ -516,18 +505,18 @@ export async function verifyJwt(
 	// kid header (back-compat with tokens signed before kid was emitted).
 	//
 	// The client's input is judged first, and only then is the keystore asked:
-	// a `kid` that is not a string, or longer than `MAX_KID_LENGTH`, names no
-	// key this server issued and is `kid_unknown` here. What the keystore then
-	// throws is about the keystore, never about the shape of the input — which
-	// is what lets anything but its two findings mean it could not answer.
+	// a `kid` that is not a well-formed key id (`keys/kid.mts`: a non-empty
+	// string of at most `MAX_KID_LENGTH` characters, no control character)
+	// names no key this server issued — the keystores refuse to be built with
+	// one — and is `kid_unknown` here. A present `kid: null` is such a value,
+	// not an absent kid. What the keystore then throws is about the keystore,
+	// never about the shape of the input — which is what lets anything but its
+	// two findings mean it could not answer.
 	const headerKid: unknown = header.kid;
-	if (
-		headerKid !== undefined &&
-		(typeof headerKid !== "string" || headerKid.length > MAX_KID_LENGTH)
-	) {
+	if (headerKid !== undefined && !isWellFormedKid(headerKid)) {
 		const err = new JwtVerificationError(
 			"kid_unknown",
-			`JWT kid header is not a string of at most ${MAX_KID_LENGTH} characters`,
+			`JWT kid header is not a key id: a string of 1 to ${MAX_KID_LENGTH} characters with no control character`,
 		);
 		emitRejection(logger, err, undefined, header);
 		throw err;

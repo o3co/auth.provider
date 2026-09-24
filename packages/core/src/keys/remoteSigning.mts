@@ -23,6 +23,7 @@ import {
 	type SignJwtOptions,
 	UnknownKidError,
 } from "./KeyStore.mjs";
+import { assertWellFormedKids } from "./kid.mjs";
 
 /**
  * The one thing a KMS, an HSM or a Vault-style provider has to do (#303):
@@ -217,6 +218,11 @@ export async function createRemoteSigningKeyStore(
 		verifyOnConstruction = true,
 	} = options;
 
+	// A kid verifyJwt would refuse makes every token signed under it fail.
+	assertWellFormedKids("createRemoteSigningKeyStore", [
+		["kid", kid],
+		...previousKeys.map((prev, i) => [`previousKeys[${i}].kid`, prev.kid] as const),
+	]);
 	const allKids = [kid, ...previousKeys.map((k) => k.kid)];
 	const duplicates = allKids.filter((k, i) => allKids.indexOf(k) !== i);
 	if (duplicates.length > 0) {

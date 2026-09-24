@@ -403,7 +403,6 @@ export type {
 export {
 	isVerificationUnavailable,
 	JwtVerificationError,
-	MAX_KID_LENGTH,
 	REVOCATION_RETENTION_ALLOWANCE_MS,
 	VERIFICATION_UNAVAILABLE_DESCRIPTION,
 	verifyJwt,
@@ -430,6 +429,9 @@ export {
 	ExpiredKidError,
 	UnknownKidError,
 } from "./keys/KeyStore.mjs";
+// The one rule for a kid a keystore is built with and a kid header verifyJwt
+// looks up, so a token this server signed always carries a kid it will look up.
+export { isWellFormedKid, MAX_KID_LENGTH } from "./keys/kid.mjs";
 // #303: the KeyStore whose private key never enters this process. Wired by a
 // composition root rather than selected in config — a `RemoteSigner` is a
 // function, and there is no HOCON spelling for one.

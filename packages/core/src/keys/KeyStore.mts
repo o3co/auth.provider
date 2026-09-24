@@ -15,6 +15,7 @@
  */
 import { createSecretKey, type KeyObject, type webcrypto } from "node:crypto";
 import { importPKCS8, importSPKI, SignJWT } from "jose";
+import { assertWellFormedKids } from "./kid.mjs";
 
 /**
  * JWT claims per RFC 7519. Standard claims are typed; custom claims are
@@ -137,7 +138,8 @@ export interface KeyStore {
 	 *   the server's outage.
 	 * - `kid` is untrusted input: the token's own header value, read before any
 	 *   signature is checked. The verifier hands over only a string of at most
-	 *   `MAX_KID_LENGTH` characters, but any character may be in it. An adapter
+	 *   `MAX_KID_LENGTH` characters with no control character, but any other
+	 *   character may be in it — a `/`, a `?`, a `..`. An adapter
 	 *   that looks keys up remotely (a KMS, an HSM, a JWKS endpoint) MUST
 	 *   check it against its own key naming before it reaches that system —
 	 *   never interpolated unchecked into a URL, a path or a query — and
@@ -162,6 +164,11 @@ export async function createAsymmetricKeyStore(
 	options: AsymmetricKeyStoreOptions,
 ): Promise<KeyStore> {
 	const { algorithm, kid, privateKeyPem, publicKeyPem, previousKeys = [] } = options;
+	// A kid verifyJwt would refuse makes every token signed under it fail.
+	assertWellFormedKids("createAsymmetricKeyStore", [
+		["kid", kid],
+		...previousKeys.map((prev, i) => [`previousKeys[${i}].kid`, prev.kid] as const),
+	]);
 
 	// Validate kid uniqueness
 	const allKids = [kid, ...previousKeys.map((k) => k.kid)];
@@ -249,6 +256,11 @@ export function createSymmetricKeyStore(
 	kid = "v0",
 	previousSecrets: ReadonlyArray<SymmetricPreviousSecret> = [],
 ): KeyStore {
+	// A kid verifyJwt would refuse makes every token signed under it fail.
+	assertWellFormedKids("createSymmetricKeyStore", [
+		["kid", kid],
+		...previousSecrets.map((prev, i) => [`previousSecrets[${i}].kid`, prev.kid] as const),
+	]);
 	const secretKey: KeyObject = createSecretKey(Buffer.from(secret));
 
 	const allKids = [kid, ...previousSecrets.map((p) => p.kid)];

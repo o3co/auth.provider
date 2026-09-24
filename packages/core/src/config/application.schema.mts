@@ -47,6 +47,7 @@ const commaList = z.union([z.array(z.string()), z.string()]).transform((value) =
 
 import { checkCanonicalIssuer, describeIssuerRejection } from "../issuer/canonical.mjs";
 import { isValidJwksPath } from "../jwks/path.mjs";
+import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
 import {
 	describeWeakSecret,
 	MIN_SECRET_ENTROPY_BYTES,
@@ -163,8 +164,16 @@ const rateLimitSpecSchema = z.object({
 // Codex calibration m1 requires strict() rejection rather than relying
 // on field omission, since `.passthrough()` would otherwise let
 // `previousKeys` survive into the parsed config.
+// A configured kid is held to the rule `verifyJwt` holds a kid header to
+// (`keys/kid.mts`): one it would refuse makes every token signed under it fail
+// as the client's fault. The keystores check again when they are built, for a
+// composition that builds one without this schema.
+const kidSchema = z.string().refine(isWellFormedKid, {
+	message: `must be a key id: a string of 1 to ${MAX_KID_LENGTH} characters with no control character`,
+});
+
 const hs256PreviousSecretSchema = z.object({
-	kid: z.string(),
+	kid: kidSchema,
 	secret: z.string(),
 	expiresAt: z.string(),
 });
@@ -172,7 +181,7 @@ const hs256PreviousSecretSchema = z.object({
 const signingKeyLocalHs256Schema = z
 	.object({
 		algorithm: z.literal("HS256"),
-		kid: z.string(),
+		kid: kidSchema,
 		secret: z.string().optional(),
 		previousSecrets: z.array(hs256PreviousSecretSchema).optional(),
 	})
@@ -181,7 +190,7 @@ const signingKeyLocalHs256Schema = z
 const signingKeyLocalAsymmetricSchema = z
 	.object({
 		algorithm: z.enum(["RS256", "ES256", "EdDSA"]),
-		kid: z.string(),
+		kid: kidSchema,
 		privateKey: z.string().optional(),
 		privateKeyPath: z.string().optional(),
 		publicKey: z.string().optional(),
@@ -193,7 +202,7 @@ const signingKeyLocalAsymmetricSchema = z
 		previousKeys: z
 			.array(
 				z.object({
-					kid: z.string(),
+					kid: kidSchema,
 					publicKey: z.string().optional(),
 					publicKeyPath: z.string().optional(),
 					expiresAt: z.string(),

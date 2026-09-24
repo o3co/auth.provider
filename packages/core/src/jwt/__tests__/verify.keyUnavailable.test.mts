@@ -32,7 +32,6 @@ import {
 	isVerificationUnavailable,
 	JwtVerificationError,
 	type JwtVerifyOptions,
-	MAX_KID_LENGTH,
 	VERIFICATION_UNAVAILABLE_DESCRIPTION,
 	verifyJwt,
 } from "#/jwt/verify.mjs";
@@ -42,6 +41,7 @@ import {
 	type KeyStore,
 	UnknownKidError,
 } from "#/keys/KeyStore.mjs";
+import { MAX_KID_LENGTH } from "#/keys/kid.mjs";
 import type { Logger } from "#/logging/Logger.mjs";
 import { loggableError } from "#/logging/loggableError.mjs";
 
@@ -234,6 +234,14 @@ describe("verifyJwt — a kid or typ the client made up", () => {
 		["an array", []],
 		["an object", { a: 1 }],
 		["a string longer than MAX_KID_LENGTH", "k".repeat(MAX_KID_LENGTH + 1)],
+		// The rule a keystore is built with (`keys/kid.mts`): a kid no keystore
+		// can hold is never asked for.
+		["an empty string", ""],
+		["a string carrying a line feed", "v0\nx"],
+		["a string carrying a NUL byte", "v0\u0000"],
+		// Present and null is not absent: it does not fall back to the
+		// signing kid, as a missing kid does.
+		["null", null],
 	];
 
 	for (const [label, kid] of MALFORMED_KIDS) {
