@@ -1,504 +1,366 @@
 # @o3co/auth-provider-session
 
-[auth.provider](../../README.md) 向けセッション・フェデレーションルートモジュール。
+最終更新: 2026-09-24
 
-ユーザー名/パスワードログイン、ログアウト、OAuth 2.0 フェデレーションを担当する。Google / GitHub などの具体プロバイダーは別パッケージに分離されており、各プロバイダーパッケージが per-federation な `defineModule(...)` で `FederationProvider` を contribute するモデルになっている（[`@o3co/auth-provider-federation-google`](../federation-google/README.md) / [`@o3co/auth-provider-federation-github`](../federation-github/README.md) を参照）。内部的には RFC 6749 認可コードフローを使用する。
+[auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージが土台にするヘルパー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
+
+## 責務と役割
+
+**役割。** 認証のブラウザ側の半分。このパッケージが使うポート（`UserRepository`、`UserSessionStore`、`FederationTokenStore`、`SessionFederationIndex`、フェデレーションアダプター契約）は core が持ち、core はルートを一つも実装しない。このパッケージはそれらのポートをブラウザ向けに駆動するドライバーである。責務は三つ:
+
+1. **`/session` ルート** — `sessionModule`。パスワードログイン、ログアウト、CSRF トークンのルート、フェデレーションの開始ルートとコールバックルート。パスワード検証または上流 IdP の応答を `UserSession` レコードと認証済みの express session に変え、ログアウトでそれを取り消す。
+2. **フェデレーションアダプターのツールキット** — すべてのアダプターが一つの規則に従うよう、アダプターパッケージが import するもの: `codeChallenge`（PKCE S256）、`callbackUrlForExchange`（RFC 9207 `iss` の規則）、`FederationClientSecret` / `resolveClientSecret`、`createFederationRedirectPolicy` とその元になる許可リストの規則、`extractFederationSection`。
+3. **ブラウザセッションストア** — `sessionStoreModule` / `sessionStoreModuleFor` と `createSessionStoreFactory` / `registerBuiltinSessionStores`。express-session ミドルウェア、その cookie、そのストア（memory、または `connect-redis` 経由の Redis）。
+
+**持つもの:**
+
+- `/session` ルートとその応答。それらの CSRF ポリシー（`session.csrf.*`、および `@o3co/auth-provider-device-grant` が再利用する export 済みのガード）。ログインのレート制限ガードの配線（`rateLimit.login`）。リダイレクト許可リスト（`session.redirectAllowlist`、`federations.<name>.redirectAllowlist`）。
+- フェデレーションの駆動方法: `state`・PKCE・`nonce`、`form_post` トランザクションとその cookie、クレームの優先順位、ログインが記録する `amr`、コールバックがストアに書き込む内容。
+- `federationRedirectPolicies` という contribution 種別と、それが core に宣言する `federationRedirectPolicyResolver` スロット（[`src/federations/contributes.mts`](src/federations/contributes.mts)）、および [`FederationResult`](src/federations/types.mts)。
+- express-session ミドルウェア、その cookie、そのストア（`session.*`、`session.storage.*`）。
+
+**持たないもの:**
+
+- フェデレーションアダプター契約 — `FederationProvider`、`FederationProfile`、各 capability — は core のもの（[`core/src/federations`](../core/src/federations/README.md)）。
+- アダプター自体: [`federation-google`](../federation-google/README.md)、[`federation-github`](../federation-github/README.md)、[`federation-apple`](../federation-apple/README.md)、[`federation-oidc`](../federation-oidc/README.md)。
+- 書き込むストア（core のポート。memory アダプターは core、Redis アダプターは [`@o3co/auth-provider-redis`](../redis/README.md)）と、ユーザーが誰か（`UserRepository` の背後の Store。例: [`@o3co/auth-provider-foundation`](../foundation/README.ja.md)）。
+- トークン発行、`POST /oauth/logout` のカスケード、上流ログアウト（`SupportsLogout`）、フェデレーショントークンのリフレッシュ（`SupportsRefresh`） — [`@o3co/auth-provider-oauth`](../oauth/README.ja.md)。
+- 委任認可（`SupportsDelegatedAuthorization`） — [`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)。
+- HTML 一切: ログインページとアカウントページはデプロイ側のもの。
+
+**別パッケージである理由。** core から分けているのは、core がすべてのパッケージが依存する契約でありルートを実装しないこと、そしてブラウザログインを持たずにトークンを発行するデプロイ（client credentials、token exchange）が使わないルートをインストールせずに済むこと。`@o3co/auth-provider-oauth` から分けているのは、両者が core の上の兄弟でありどちらも他方を import しないため、デプロイがどちらかを他方のルートなしにインストールできること — ただし `oauth` の `/authorize` は `req.session` を読むので、それを使うデプロイは express-session のミドルウェア（通常はこのパッケージのストアモジュール）をマウントする。分けた代償は [`POST /session/logout` が無効化するもの](#post-sessionlogout-が無効化するもの) に書いてある。
+
+**三つが同居する理由。** 他の二つはどちらもルートのために存在する。
+
+- ツールキット: リダイレクトポリシーはこのパッケージが宣言しルーターが消費する contribution 種別であり、`extractFederationSection` はルーターがコールバック URL を読むのと同じ設定の形を読む。純粋関数のヘルパー — `codeChallenge`、`callbackUrlForExchange`、client secret のリゾルバー — はこのパッケージの何にも依存せず、core の契約はそのうち二つを使うようアダプターに既に指示している。これらがここにあるのはルーターとアダプターが共有するからであり、それがすべてのアダプターパッケージがこのパッケージを peer dependency に取る理由である。
+- ストア: `req.session` そのものであり、それを書くのはここのルートである。フェデレーションルーターは `form_post` トランザクションも同じストアに置く。`sessionModule` とは別のモジュールになっているのは、他のパッケージがこれらのルートなしに `req.session` を読むから — `oauth` の `/authorize`・同意・ログアウト、`device-grant` の検証ページ、`federation-grants` のブラウザ向けルート — であり、独自のログインを持つデプロイはストアだけをインストールする。
+
+**ソースの配置。** [`src/routes/`](src/routes/) は二つのルーター。[`src/federations/`](src/federations/) はツールキットとルーターのフェデレーション部品（クレームの優先順位、同意済みスコープ、トランザクションストア、リダイレクトポリシー）。[`src/modules/`](src/modules/) と [`src/store/`](src/store/) はブラウザセッションストア。[`src/internal/`](src/internal/) は cookie の読み取りと `User` から読むクレーム。[`src/csrf.mts`](src/csrf.mts) は CSRF の規則。[`src/redirect-allowlist.mts`](src/redirect-allowlist.mts) はログインとフェデレーションのルートが共有する許可リストの規則。各ファイルが何をするかはそのファイルのヘッダーコメントにある。
 
 ## インストール
 
-このパッケージは **private** です。npm には公開されておらず、`auth.provider` モノリポ内でのみ利用できます。
-
-```jsonc
-// packages/*/package.json
-{
-  "dependencies": {
-    "@o3co/auth-provider-session": "workspace:*"
-  }
-}
+```sh
+npm install @o3co/auth-provider-session @o3co/auth-provider-core express express-session
 ```
 
-peer dependencies（ワークスペースルートに別途インストール）:
+- peer dependencies: `express@^5.0.0` と `express-session@^1.17.0`。
+- 一緒にインストールされるもの: `@o3co/auth-provider-core`、および Redis セッションストア用の `connect-redis` と `redis`。この二つは常にインストールされ、`session.storage.type = "redis"` のときにだけロードされる。
 
+## 組み立て
+
+```ts
+import { createApp } from "@o3co/auth-provider-core";
+import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
+import { googleFederationModule } from "@o3co/auth-provider-federation-google";
+
+const handle = await createApp({
+  modules: [
+    sessionStoreModuleFor(config), // 先頭に置く。後に続くすべてのモジュールが req.session を読めるように
+    sessionModule,                 // factory ではなく const Module
+    googleFederationModule,        // federations.google と federationRedirectPolicies.google を contribute
+    // ... userRepository、userSessionStore、federationTokenStore、
+    //     sessionFederationIndex、googleFederationConfig を提供するモジュール
+  ],
+  bootstrapComponents: { config, pathResolver },
+});
 ```
-express@^5.0.0
-```
 
-## パブリック API
+完全な組み立ては standalone テンプレートの [`buildModules.mts`](../../templates/standalone/src/buildModules.mts) にある。
 
-### `sessionModule`
+## ブラウザセッションストア
 
-```typescript
-import { sessionModule } from "@o3co/auth-provider-session";
-// → sessionModule は const Module（manifest）であり、factory 関数ではない。
-// createApp / createTestApp の modules リストに直接渡す。
-```
+`sessionStoreModuleFor(config)`（または静的な `sessionStoreModule`）は `/` にマウントされる `session-middleware` というルートを一つ contribute する。中身は express-session で、cookie は `session.*` から（`HttpOnly`、`Path=/`、`session.secure`、`session.sameSite`、`session.domain`、`Max-Age` = `session.maxAge`）、ストアは `session.storage.*` から組み立てられる。デプロイ内のすべての `req.session` はこれである。デフォルト値と環境変数は [`reference.conf`](../core/config/reference.conf) にある。`session.storage.type` のデフォルトは `redis`、代替は `memory` で、それ以外の値は起動に失敗する。
 
-const Module。`/session` 配下に 2 つの route bundle を contribute する:
+成り立つこと:
 
-| メソッド | パス | 説明 |
+- **マウント順はリスト順。ただしこのルートを名指しするルートは別。** このルートは `before` / `after` を宣言しない。デプロイが含まないかもしれないルート（`oauth` だけのデプロイには `sessionModule` が無い）を名指しすると `route-order-target-missing` で起動に失敗するからである。したがって **`req.session` を読むすべてのモジュールより前に** 並べる。これより前に並べたモジュールはセッションを読めず、起動時にそれを検査するものは無い。standalone テンプレートはこれを先頭に置いている。例外は逆向きの宣言である: federation grants が有効なとき、そのブラウザ向けルートは `after: ["session-middleware"]` を宣言するので、どちらがどこに並んでいてもこのルートの後にマウントされ、その id のルートが無い組み立ては `route-order-target-missing` で起動に失敗する。
+- **`__Host-` の cookie 名には `session.secure = true` と `session.domain = null` が必要** で、満たさなければ起動に失敗する。デフォルト名は `__Host-auth.session`。
+- **`memory` は `deployment.mode = "multi"` で拒否される。** express-session の `MemoryStore` はレプリカごとに分岐する: あるレプリカが処理したログインは他のレプリカに知られず、ログアウトは到達したレプリカ上しか消さず、再起動ですべてのセッションが失われる。`sessionStoreModuleFor(config)` はストレージ種別を読み、`memory` ならモジュールを replica-unsafe と宣言する。そのため core の replica-safety ガードが起動時に他の違反と並べて名指しで拒否し、`deployment.mode` が未設定なら警告し、`"single"` なら何も言わない。静的な `sessionStoreModule` は種別を知り得ないので、ガードは名指しできない。そのルートファクトリーが実行時に同じ組み合わせを拒否し（`replica-unsafe-adapter`）、警告は出さない。設定が手元にあるなら `sessionStoreModuleFor` を使う。
+- **Redis ストアは自前の接続を開く。** `session.storage.redis.url`（設定されていれば `password` も）への `redis`（node-redis）クライアントを `connect-redis` の `RedisStore` の下に置く。readiness registrar が配線されていれば probe `session-store`（`PING`）を登録し、Redis を失ったレプリカはトラフィックを受けなくなる。lifecycle registrar が配線されていれば `AppHandle.dispose()` がクライアントを quit する。クライアントの `error` イベントはプロセスを落とさず `session_store_redis_error` としてログに出る。再接続は node-redis の仕事。`url` が無ければ起動に失敗する。
+- **フェデレーショントランザクションは同じストアを共有する。** キーの接頭辞は `fedtx:` — [トランザクション cookie](#トランザクション-cookie) を参照。
+
+**`@o3co/auth-provider-redis` とは別物。** あちらの `UserSessionStore` は `sid` の背後にある `UserSession` レコード — introspection・`/userinfo`・`/authorize` が解決するもの — を持ち、他のアダプターは他の core ポートを、あちらのモジュールが作るクライアント越しに持つ。このストアが持つのは express-session 自身のレコード: このパッケージのルートがセッションに置くもの（`isAuthenticated`、`user`、`sid`、ログインの `redirectTo`、`query` フェデレーションの進行中のエンベロープ）、他のパッケージがそこに置くもの（`oauth` は `client` と `code` を宣言している）、そして `fedtx:` のフェデレーショントランザクション。レコードも接続も別で、設定も別々に行う。
+
+**別のストア。** このモジュールが登録するのは `memory` と `redis` だけ。別の express-session `Store` が必要な組み立ては、ミドルウェアを自分で組み立て — `createSessionStoreFactory(ctx)`、`registerBuiltinSessionStores(factory)`、`factory.register("<type>", builder)`（[`src/store/factory.mts`](src/store/factory.mts)） — 先頭にマウントし、このモジュールはインストールしない。federation grants を有効にするなら、そのミドルウェアを id `session-middleware` のルートとして contribute する。そうしなければ上のとおり起動に失敗する。
+
+## ルート
+
+`sessionModule` は二つのルーターを contribute し、どちらも `/session` にマウントされる:
+
+| メソッド | パス | |
 | --- | --- | --- |
-| GET | /session/csrf | double-submit CSRF トークンの発行 |
-| POST | /session/login | ユーザー名 / パスワードログイン |
-| POST | /session/logout | セッションログアウト |
-| GET | /session/oauth/federation/:name | OAuth フェデレーションフロー開始 |
-| GET | /session/oauth/federation/:name/callback | フェデレーションコールバック |
+| GET | `/session/csrf` | double-submit CSRF トークンの発行 |
+| POST | `/session/login` | パスワードログイン |
+| POST | `/session/logout` | ブラウザセッションの終了 — [無効化するもの](#post-sessionlogout-が無効化するもの) を参照 |
+| GET | `/session/oauth/federation/:name` | フェデレーションの開始（`?redirect_to=`、`?link=1`） |
+| GET | `/session/oauth/federation/:name/callback` | `query` フェデレーションのコールバック。`form_post` フェデレーションには `405`（`Allow: POST`） |
+| POST | `/session/oauth/federation/:name/callback` | `form_post` フェデレーションのコールバック。`query` フェデレーションには `405`（`Allow: GET`） |
 
-`:name` パスパラメーターは `config.federations` のキー（例: `google`、`github`、`google-work`）に対応する。未知の名前は `404` を返す。
+`:name` はフェデレーションの名前。どのモジュールも contribute していない名前は `404`。
 
-#### 状態変更ルートの CSRF 対策（#272）
+マニフェスト（[`src/module.mts`](src/module.mts)）:
 
-`POST /session/login` と `POST /session/logout` は、**same-origin（もしくは明示的に信頼した）`Origin` / `Referer`**、**または** 有効な double-submit CSRF トークンのいずれかを伴うリクエストを受理する。どちらも無いリクエストは `403 access_denied` で拒否する。以前は `Origin` ヘッダーが無いとチェック自体がスキップされていた。
+- `requires`: `config`、`userRepository`、`userSessionStore`、`federationTokenStore`、`sessionFederationIndex`、そして synthetic な `federationProviders` と `federationRedirectPolicyResolver`。後者二つは per-federation モジュールの `federations.<name>` と `federationRedirectPolicies.<name>` の contribution から boot planner が組み立てる。残り二つのセッションストア `sessionRPRegistry` と `sessionFamilyIndex` は `oauth` のもの。
+- `optional`: `logger`、`rateLimiter`、`auditSink`、`subjectSessionIndex`。`auditSink` を配線しないなら `audit.sink.type = "none"`、`subjectSessionIndex` を配線しないなら `oauth.revocation.subject = "unsupported"` で宣言しなければ起動は拒否される。
 
-- **ブラウザ** 側の変更は不要。same-origin の `fetch` / form post ではブラウザが `Origin` を付けるため、それだけで通る。
-- **ヘッダーを持たないクライアント**（curl、サーバーサイドのエージェント、テストハーネス）は `GET /session/csrf` を呼ぶ。JS から読める `<session.name>.csrf` cookie がセットされ、同じ値が `csrf_token` として返る。cookie と、`x-csrf-token` ヘッダーまたは `csrf_token` フォームフィールドの両方を送り返す。
-- **foreign な `Origin`** はトークンがあっても拒否する。クロスサイトリクエストであることの積極的な証拠だから。
-- ログイン成功時には **新しい** CSRF cookie を返すため、後続の logout に追加のラウンドトリップは要らない。
+### パスワードログイン
 
-トークンは乱数 nonce と有効期限に対する署名付きの HMAC（ステートレス）で、鍵は `session.secret` の HKDF 展開。親ドメインの cookie を書けるサブドメインでも偽造はできない。クロスオリジンのログイン UI は `session.csrf.trustedOrigins` に自身の origin を列挙する。`cors.allowedOrigins` は CSRF 信頼を与えなくなった。
+`POST /session/login` は `username` と `password` を受け取る（JSON またはフォーム）。
 
-`checkRequestOrigin`、`createCsrfProtection`、`createCsrfProtectionFromConfig`、`createCsrfGuard`、`createCsrfIssueHandler` を export しているので、独自のログインページや独自ルートを持つ composition でも同じ仕組みを使える。
+- どちらかが欠けていれば `400 invalid_request`。`UserRepository.authenticate` が `null` を返せば `401 invalid_credentials`。それ、または `UserSession` の書き込みが例外を投げれば `503 temporarily_unavailable`。
+- 成功すると `UserSession`（`amr: ["pwd"]`、寿命 `session.maxAge`）を作り、配線されていれば `subjectSessionIndex` に記録し、express session を再生成し、新しい CSRF cookie と共に `200` を返す。
+- `redirect_to` を送るなら `session.redirectAllowlist` に載っていなければならず（[リダイレクト許可リスト](#リダイレクト許可リスト) を参照）、`req.session.redirectTo` に保存される。このパッケージの中にそこへリダイレクトするものは無い。
+- ブルートフォース対策のガードは共有の `rateLimiter`（接頭辞 `login`、クライアント IP ごと）の上で `rateLimit.login` の窓と上限で動き、拒否すれば `429`、リミッター自体が失敗すれば `rateLimit.failMode` に従う。`rateLimiter` が配線されていなければルートはプロセス内のリミッターにフォールバックする: `deployment.mode = "multi"` では起動が拒否され、未設定なら `login_rate_limiter_not_shared` の警告がログに出て、`"single"` では何も言わない。
 
-`requires`: `userRepository`、`userSessionStore`、`federationTokenStore`、`sessionFederationIndex`（兄弟ストア）、加えて per-federation modules が contribute する内容を boot planner が集約する synthetic key `federationProviders` と `federationRedirectPolicyResolver`。フェデレーションモジュールの実装例は [`@o3co/auth-provider-federation-google`](../federation-google/README.md) を参照。
+### `POST /session/logout` が無効化するもの
 
----
+このプロバイダーにはログアウトのエンドポイントが **二つ** あり、無効化するものが同じではない。セッションが何を持っているかで選ぶ。
 
-### `extractFederationSection`
+`POST /session/logout` — ブラウザ自身のログアウトであり、BFF / `auth.proxy` の injection トポロジーが呼ぶもの。`200 {"message": "Logged out successfully"}` を返し、次を無効化する:
 
-```typescript
-function extractFederationSection(
-  federations: Record<string, unknown>,
-  name: string,
-): { type: string; [key: string]: unknown } | undefined;
-```
+| 対象 | 結果 |
+|------|--------|
+| express session | 破棄 |
+| セッションの `sid` に対応する `UserSession` レコード | 削除 — これにより `/oauth/introspect` は `active: false` を返し、`/oauth/userinfo` は `session` グラントで発行されたトークンを拒否する |
+| `subjectSessionIndex` のエントリー | 削除。`revokeAllForSubject` が死んだ `sid` を列挙しなくなる |
+| その `sid` の `federationTokenStore` と `sessionFederationIndex` のエントリー | 削除。上流 IdP のトークンが保存されたまま残らない |
+| **その `sid` に紐づくリフレッシュトークンファミリー** | **失効しない** |
 
-純粋関数のユーティリティ。フェデレーション設定スライスを fla 形（`{ enabled, clientId, callbackURL }`）／nested 形（`{ enabled, type, [type]: {...} }`）／shorthand（key を type として扱う）の各形状から、フラットな credential オブジェクトに正規化する。mixed 形（top-level credential と nested sub-section の両方が存在）はエラー。エントリーが無い場合や `enabled !== true` の場合は `undefined` を返す。per-federation module が自分の config スライスを読むときに使う。
+最後の行は二度読むこと。ここでログインしたあと `/authorize` → `authorization_code` フローを完了したブラウザはリフレッシュトークンを持っており、このエンドポイントはそのファミリーを **失効させない**。リフレッシュトークンは期限切れまで使える。そのセッションには `id_token_hint` 付きの `POST /oauth/logout` を使う — 完全なカスケード（リフレッシュファミリーの失効、RP レジストリ、フェデレーション、セッション削除）を実行し、ブラウザセッションも終わらせる。
 
----
+この境界は構造的なもの: カスケード（`packages/oauth/src/logout/cascadeLogout.mts`）は `refreshTokenFamilyRevocation`、`sessionFamilyIndex`、`sessionRPRegistry` を必要とし、このモジュールはそのどれも宣言しない。そして `@o3co/auth-provider-session` は `@o3co/auth-provider-oauth` を import しない — 両者は core の上の兄弟である。
 
-> **この契約の所在。** `FederationProvider`、`FederationProfile`、オプショナル
-> capability（`SupportsLogout`、`SupportsClaimMapping`、`SupportsRefresh`、
-> `SupportsDelegatedAuthorization`）とその型ガード、および response-mode の語彙は
-> #626 P1 以降 **`@o3co/auth-provider-core`** が公開しており、このパッケージからは
-> 再エクスポートしません。フェデレーションが登録される型と `oauth` /
-> `federation-grants` が読む型は同一である必要があり、エクスポート経路が二つあることが
-> その型を `unknown` に留めていた原因でした。以下の節はこのパッケージが駆動する契約の
-> 説明です。import は core から行ってください。ここに残るのはルーター、リダイレクト
-> ポリシー、トランザクションストアと `FederationResult` です。
+`session` グラントはリフレッシュトークンを発行しないので、トークンがすべてそのグラント由来のデプロイには失効させるファミリーが無く、`/session/logout` だけで足りる。
 
-### `FederationProvider` (interface)
+**失敗時の振る舞い。** ストアの各ステップはベストエフォートでログに出し、呼び出し側には伝えない: ストアの障害でログアウトが `5xx` になり、ユーザーが生きた cookie を持ったままになってはならない。`UserSession` の削除が **最初に**、express session の破棄とベストエフォートの後片付けより前に実行されるので、フェデレーション系ストアの障害が肝心の無効化を妨げることはない。失敗は `logout_user_session_delete_failed`、`logout_subject_session_index_remove_failed`、`logout_federation_token_remove_failed`、`logout_session_federation_index_remove_failed` としてログに出る — アラートは最初のものに掛ける。express session の破棄が失敗すると応答は `500 server_error` だが、その時点でレコードは既に消えているので、`/authorize` は残った cookie を自身の判断で拒否する。`sid` を持たないセッションには無効化するレコードが無く、express session だけが破棄される。
 
-```typescript
-interface FederationProvider {
-  readonly name: string;
-  readonly scope: readonly string[];
+### 状態変更ルートの CSRF 対策
 
-  buildAuthorizationUrl(params: {
-    readonly redirectUri: string;
-    readonly state: string;
-    readonly codeVerifier: string;
-  }): URL;
+`POST /session/login` と `POST /session/logout` は、same-origin（または明示的に信頼した）`Origin` / `Referer` **か**、有効な double-submit CSRF トークン **の** どちらかを持つリクエストを受理する。どちらも持たないリクエストは `403 access_denied` で拒否する。
 
-  exchangeCode(params: {
-    readonly code: string;
-    readonly codeVerifier: string;
-    readonly redirectUri: string;
-  }): Promise<FederationProfile>;
-}
-```
+- **ブラウザ** は何も追加しなくてよい: same-origin の `fetch` / フォーム送信ではブラウザが `Origin` を付け、それだけで検査を通る。
+- **ヘッダーを持たないクライアント**（curl、サーバー側のエージェント、テストハーネス）は `GET /session/csrf` を呼ぶ。JS から読める `<session.name>.csrf` cookie がセットされ、同じ値が `csrf_token` として返る。両方を送り返す: cookie と、`x-csrf-token` ヘッダーまたは `csrf_token` フォームフィールドのどちらか。
+- **foreign な** `Origin` はトークンがあっても拒否する。クロスサイトリクエストであることの積極的な証拠だから。
+- ログインに成功すると **新しい** CSRF cookie が返るので、続くログアウトに追加の往復は要らない。
 
-カスタムの OAuth 2.0 / OIDC フェデレーションプロバイダーを追加する場合はこのインターフェースを実装する。`SupportsLogout` / `SupportsClaimMapping` / `SupportsRefresh` / `SupportsDelegatedAuthorization` を必要に応じて mix-in できる。
+トークンは乱数 nonce と有効期限（`session.csrf.ttlSeconds`）に対する署名付きでステートレスな HMAC で、鍵は `session.secret` の HKDF 展開 — 親ドメインの cookie を書けるサブドメインでも偽造できない。クロスオリジンのログイン UI は自身のオリジンを `session.csrf.trustedOrigins` に載せる。`cors.allowedOrigins` は CSRF の信頼を与えない。
 
-- `name` — プロバイダーの一意な識別子。`federationProviders` の Map キーとルートの `:name` パラメーターに対応する。
-- `scope` — OAuth 2.0 スコープ。
-- `buildAuthorizationUrl` — RFC 6749 §4.1 + RFC 7636 の認可 URL を構築する。`codeVerifier` はルート層が生成して渡す。`code_challenge` の計算には `codeChallenge(codeVerifier)` を使うこと。
-- `exchangeCode` — 認可コードを `FederationProfile` に交換する。`issuer` と `sub` は必須。
+`checkRequestOrigin`、`createCsrfProtection`、`createCsrfProtectionFromConfig`、`createCsrfGuard`、`createCsrfIssueHandler` は、独自のログインページをマウントしたり独自のルートを保護したりする組み立てのために export されている（[`src/csrf.mts`](src/csrf.mts)）。`@o3co/auth-provider-device-grant` はこれらで検証ページを守っている。
 
-> **Note (A5 split, v0.5.0):** リダイレクト URL のハンドリング（`validateRedirect` / `resolveCallbackRedirect`）は `FederationProvider` から外され、専用の `FederationRedirectPolicy` capability に分離された。per-federation module は `federationRedirectPolicies.<name>` で policy を contribute する。built-in は `createFederationRedirectPolicy(...)` を使う。カスタム provider は `FederationProvider` 上にこれらのメソッドを実装しない。
+### セッションが認証について記録するもの
 
----
+すべてのセッションは `authTime` と `amr` — ユーザーがどう認証したかを表す RFC 8176 の値 — を持つ。これにより `/authorize` は `max_age`・`prompt=login`・`acr_values` を扱え、id_token は `auth_time`・`amr`・`acr` を示せる（全体像は [oauth パッケージの README](../oauth/README.ja.md) にある）:
 
-### `SupportsLogout` (オプショナル capability)
+| ログイン経路 | `amr` |
+| --- | --- |
+| `POST /session/login` | `["pwd"]` |
+| フェデレーションのコールバック | プロバイダーがプロファイルに載せた上流 IdP の `amr`（`profile.amr`、文字列の配列）に、`fed` — 「フェデレーション経由」を表すデプロイ定義のマーカーで、`FEDERATED_AMR` として export — を加えたもの。RFC 8176 にはこれを表す値が無く、OIDC Core は `amr` の値をデプロイに委ねている。 |
+| 再開された MFA ログイン（`POST /auth/mfa/verify`、デプロイが組み立てる） | デプロイの再開ハンドラーが記録するもの: 最初の要素の値に `mfa`、その要素自身の値（`otp` など）を加えたもの。`CreateUserSessionInput.amr` がその継ぎ目。 |
+| アカウントリンク（`?link=1`） | 変わらない — リンクはログインではない |
 
-IdP が OIDC RP-Initiated Logout (end-session) endpoint を公開している provider 向けのオプショナル capability。
+再認証は *新しい* セッションである: `POST /session/login` とフェデレーションのコールバックは常に新しい `authTime` でセッションを作り、`max_age` と `prompt=login` が測るのはそれである。既に認証済みのブラウザをそのまま `/authorize` に送り返すログインページは、そこで `login_required` を返され、ループしない。
 
-```ts
-interface EndSessionRequest {
-  idTokenHint?: string;
-  postLogoutRedirectUri?: string;
-  state?: string;
-}
+### フェデレーション間のアカウントリンク（#482）
 
-interface EndSessionResult {
-  url: URL;
-  method: "GET";
-}
+フェデレーションの ID は `<provider>:<sub>` — フェデレーションの名前と、IdP の不透明で安定した subject — であり、コールバックが `UserRepository.authenticateByToken` に渡すのはこの文字列である。**それが誰かを決めるのは Store。** このパッケージはメールアドレスでリンクしない: Web で Google、iOS で Apple でサインインする同じ人物は二つの ID であり、それが一つのアカウントかどうかは Store の記録であって、IdP が主張したアドレスからの推論ではない。
 
-interface SupportsLogout {
-  endSession(req: EndSessionRequest): Promise<EndSessionResult>;
-}
+アカウントが二つ目の ID を得るのは、明示的で認証済みの操作によってだけ:
 
-function supportsLogout(
-  provider: FederationProvider | undefined | null,
-): provider is FederationProvider & SupportsLogout;
-```
+1. ブラウザが既にセッションを持っている（`isAuthenticated`、生きている `UserSession`）。
+2. `?link=1` 付きでフェデレーションを開始する: `GET /session/oauth/federation/<name>?link=1` を **デプロイ自身のページ上のリンクまたはフォームから**。開始は GET でセッション cookie は `SameSite=Lax` なので、検査が無ければどのページでもサインイン中のユーザーをそこへ送れ、IdP 側のログイン CSRF と組み合わせれば攻撃者の ID が被害者のアカウントにリンクされてしまう。そのため開始には積極的な証拠が要る: `Sec-Fetch-Site: same-origin`、または `none`（入力された URL やブックマーク）。`cross-site` は拒否。`same-site` はそれだけでは足りない — 登録可能ドメイン上のすべてのホスト、ユーザーが管理する `blog.example.com` も含む — ので、それと `Sec-Fetch-Site` の無いリクエスト（古いブラウザ）は `Referer` にこのオリジンか `session.csrf.trustedOrigins` 上のオリジンを示さなければならない。`Referer` が無ければ拒否する。遷移元のページが自分でリファラーポリシーを選ぶからである。したがって兄弟ホスト上のアカウントページは `session.csrf.trustedOrigins` に載せ、`Referrer-Policy: no-referrer` を送ってはならない。拒否は `403 link_requires_trusted_origin`。認証済みセッションが無ければ `401 login_required`、Store のリポジトリが `linkFederatedIdentity` を実装していなければ `400 link_unsupported` — いずれもブラウザをどこかへ送る前に返る。
+3. コールバックでは、`state`・PKCE・`nonce` をログインとまったく同じく検査したあと、ID を解決する:
+   - **誰でもない** → `userRepository.linkFederatedIdentity(currentUserId, { provider, sub, token, claims })`。`ok` ならリンクされ、Store の `refused` は `403 link_refused`、`conflict` は `409 identity_conflict`。
+   - **別のアカウント** → `409 identity_conflict`。Store には問い合わせない。リンクでアカウントがマージされることはない。
+   - **このアカウント** → リンクするものは無く、コールバックはそのまま進む。
+4. フェデレーションは **生きている** セッション — 現在の `sid` の下の `sessionFederationIndex` と `federationTokenStore` — に紐づけられ、ブラウザはログイン後と同じようにリダイレクトされる。新しい `UserSession` は作られず、express session も再生成されない: リンクはログインではなく、セッションのクレームエンベロープは変わらない（新しいプロバイダー経由の次のログインが通常どおりに作る）。
 
-プロバイダーパッケージは、上流 IdP が end-session endpoint を提供する場合に `SupportsLogout` を実装できる。Microsoft Entra ID / Auth0 / Okta 等の integration ではカスタム provider 側で capability を足すことで対応する。
+トランザクションは要求したセッション（`link: { sid }`）を記録し、コールバックは *その* セッションのアカウントにリンクする。`form_post` フェデレーションのコールバックはアプリケーションのセッション cookie（`SameSite=Lax`）が付かないクロスサイト POST なので、それを束縛するのはこの記録である — Sign in with Apple も `query` フェデレーションとまったく同じようにリンクする — そして、コールバックで別の認証済みセッションを提示したブラウザは `401 login_required` で拒否される: ID がブラウザが今持っているセッションにリンクされることはない。Store がリンクしたあとで生きたセッションへの紐づけに失敗した場合、途中まで紐づいたフェデレーションはベストエフォートでセッションから外され（セッションが元から持っていたものはそのまま）、コールバックは `503` を返す。Store のリンクは残り、そのフェデレーション経由の次のログインはそのアカウントに着地する。
 
-カスタム provider の最小実装例:
+`link=1` が無い場合、Store が知らない ID のフェデレーションを完了した認証済みセッションは `401 unknown_user`。**暗黙のリンクは無い** — セッション cookie とはぐれた ID の組み合わせはログイン CSRF の形であり、認証済みセッションでの `link=1` がそれをユーザーの操作にする。
 
-```ts
-import type {
-  FederationProvider,
-  SupportsLogout,
-  EndSessionRequest,
-  EndSessionResult,
-} from "@o3co/auth-provider-core";
+監査イベントは二つ: `federation.identity.linked` と `federation.identity.link_refused`（`details.reason`: `conflict` または `refused`）。どちらも `subject` はそのアカウント。
 
-function createMyIdPProvider(): FederationProvider & SupportsLogout {
-  return {
-    name: "myidp",
-    scope: ["openid"],
-    buildAuthorizationUrl({ redirectUri, state, codeVerifier }) { /* ... */ },
-    async exchangeCode({ code, codeVerifier, redirectUri }) { /* ... */ },
-    async endSession(req: EndSessionRequest): Promise<EndSessionResult> {
-      const url = new URL("https://myidp.example/oidc/logout");
-      if (req.idTokenHint) url.searchParams.set("id_token_hint", req.idTokenHint);
-      if (req.postLogoutRedirectUri) url.searchParams.set("post_logout_redirect_uri", req.postLogoutRedirectUri);
-      if (req.state) url.searchParams.set("state", req.state);
-      return { url, method: "GET" };
-    },
-  };
-}
-```
+**リンクする前に Store が検査すべきこと。** この継ぎ目が受け取る `claims` はプロバイダーがマップしたもの — IdP の主張であってそれ以上ではない:
 
-Consumer 側は capability の有無を call site で判定する:
+- **メールアドレスだけで結びつけない。** IdP が検証していないアドレス（`emailVerified !== true` — [欠落は `false` ではなく、文字列は欠落扱い](#emailverified-は-idp-が何を送っても-boolean)）、リレーアドレス（Apple の `@privaterelay.appleid.com`、`isPrivateEmail` として出る）、ユーザーがアドレスを変更できる IdP は、既存アカウントと照合してはならない。典型的なアカウント乗っ取りはまさにその照合である。
+- リンク要求は既に認証済み — それが生きたセッション上の `link=1` の保証 — なので、リンクを認可するのは一致するアドレスではなくセッションである。それでも Store は拒否してよい: アカウントあたりプロバイダーごとに一つの ID、再認証からの最大経過時間、新しい ID に検証済みアドレスを要求する、など。
+- `sub` は issuer ごとに不透明で安定している。`<provider>:<sub>` をそのまま保存し、`email` から ID を導出しない。
 
-```ts
-import { supportsLogout } from "@o3co/auth-provider-core";
+`@o3co/auth-provider-foundation` の `HttpUserRepository` は `linkFederatedIdentityUrl`（`CLIENT_USER_LINK_FEDERATED_IDENTITY_URL`）が設定されていればこの継ぎ目を実装する: ワイヤ契約は [その README](../foundation/README.ja.md) を参照。core のインメモリリポジトリはメモリ上でリンクするだけ — 開発用であって永続化ではない。
 
-if (supportsLogout(provider)) {
-  const { url } = await provider.endSession({ idTokenHint, postLogoutRedirectUri, state });
-  res.redirect(url.toString());
-} else {
-  // local session destroy のみにフォールバック
-}
-```
+## フェデレーションアダプターの駆動
 
----
+アダプター契約 — `FederationProvider`、`FederationProfile`、オプショナル capability とそのガード、response mode の語彙 — は core で定義・説明されている: [`core/src/federations/README.md`](../core/src/federations/README.md)、定義は [`types.mts`](../core/src/federations/types.mts) と [`response-mode.mts`](../core/src/federations/response-mode.mts)。これらの名前は `@o3co/auth-provider-core` から import する。このパッケージは再エクスポートしない。この節はセッションルーターがアダプターに対して何をするかである。
 
-### `SupportsClaimMapping` (オプショナル capability)
+契約のうちルーターが駆動するのは `buildAuthorizationUrl`、`exchangeCode`、`responseMode`、`SupportsClaimMapping`。他の capability は別の場所で駆動される: `SupportsLogout` は `oauth` の `/oauth/logout` と `POST /oauth/federation/:name/logout`、`SupportsRefresh` は `oauth` の `POST /oauth/federation/:name/token`、`SupportsDelegatedAuthorization` は `federation-grants`。
 
-OAuth プロファイルから正規化されたクレームセットを生成できる provider 向けのオプショナル capability。
+### 開始レグ
 
-```ts
-interface MappedClaims {
-  readonly email?: string;
-  readonly emailVerified?: boolean;
-  readonly name?: string;
-  readonly picture?: string;
-  readonly groups?: ReadonlyArray<string>;
-  readonly [key: string]: unknown;   // 非標準 IdP クレーム（例: Google の "hd"）
-}
+`GET /session/oauth/federation/:name` は、IdP が nonce を使うかどうかにかかわらずすべてのフェデレーションについて、`state`（128 ビット）、PKCE の `codeVerifier`、`nonce`（128 ビット）を生成し、`redirect_to` とリンクの意図と一緒に、リダイレクト **の前に** 保存する: `query` フェデレーションなら express session に、`form_post` フェデレーションなら [フェデレーショントランザクション](#トランザクション-cookie) に。保存できないストアは `500 server_error` を返し、誰もリダイレクトしない。`buildAuthorizationUrl` に渡す `redirect_uri` は設定上のそのフェデレーションの `callbackURL`。`form_post` フェデレーションではアダプターが返した URL にルーターが `response_mode=form_post` を付け足し、`query` フェデレーションではアダプターが返した URL そのままになる。
 
-interface FederationProfile {
-  readonly issuer: string;
-  readonly sub: string;             // OIDC sub — この IdP での安定した識別子
-  readonly email?: string;
-  readonly emailVerified?: boolean;
-  readonly name?: string;
-  readonly picture?: string;
-  readonly accessToken?: string;
-  readonly refreshToken?: string;
-  readonly idToken?: string;
-  // accessToken の絶対有効期限。プロバイダーが有限の expires_in を返さない場合（例: GitHub OAuth Apps の classic token）は null。
-  // 必須フィールド。consumer は null を「refresh せず reuse」として扱わなければならない。
-  readonly expiresAt: Date | null;
-  readonly [key: string]: unknown;  // プロバイダー固有の拡張クレーム
-}
+### コールバックがプロファイルで行うこと
 
-interface SupportsClaimMapping {
-  mapClaims(profile: FederationProfile): MappedClaims;
-}
+1. **アダプターは `callbackParams` を見る** — コールバックの文字列パラメーターから、ルーターが既に束縛した `code` と `state` を除いたもの。ユーザーエージェント経由で中継され署名されていない。アダプターはその中の RFC 9207 `iss` を `callbackUrlForExchange` 経由で渡す。
+2. **`exchangeCode` が例外を投げると `502 exchange_failed`。** アダプター内のあらゆる拒否 — 誤った `iss`、不正な id_token、UserInfo の不一致 — はこの形で表に出て、Store には届かない。`sub` の無いプロファイルは `400 invalid_profile`。
+3. **ID は Store が解決する。** `<name>:<sub>` を `UserRepository.authenticateByToken` に渡し、例外なら `503 temporarily_unavailable`、`null` なら `401 unknown_user`（開始でリンクを求めていない限り）。
+4. **クレーム** はローカルの `User` のものに、`mapClaims` の結果を [クレームの優先順位](#クレームの優先順位-ローカルが勝ちfederated-は名前空間に隔離される) に従って合わせたもの。`amr` は `profile.amr` に `fed` を加えたもの。
+5. **セッション** は新しい `UserSession`（寿命 `session.maxAge`）、配線されていれば `subjectSessionIndex` のエントリー、`sessionFederationIndex` のエントリー、そして再生成された express session。`UserSession` か `sessionFederationIndex` の書き込みが失敗すれば `503 temporarily_unavailable`、セッションの再生成・保存、または下のトークンの紐づけが失敗すれば `500 session_create_failed`。どちらの場合も書き込んだものはベストエフォートで逆順にロールバックされる。`subjectSessionIndex` の書き込みが失敗してもログに出るだけでログインは進む。
+6. **トークン** は、プロファイルが `accessToken` を持つときにだけ、新しい `sid` の下で `federationTokenStore` に紐づけられる:
+   - `accessToken`、`refreshToken`、`idToken`、`expiresAt` はアダプターが返したまま — `expiresAt: null` は `null`（「リフレッシュしない」）として保存され、ルーターが有効期限をでっち上げることはない。
+   - `scope` と `grantedScope`: アダプターが `profile.scope` を返していればそれ（空や使えない文字列は何も表さない）、返していなければプロバイダーが要求した `scope` — RFC 6749 §3.3 は応答の欠落を「要求どおり」と読む（[`src/federations/consented-scope.mts`](src/federations/consented-scope.mts)）。
+   - `tokenType`: `profile.tokenType` をそのまま、文字列でなければ `""`、アダプターが返さなければ `undefined`（`oauth` はそれを `Bearer` と読む）。
 
-function supportsClaimMapping(
-  provider: FederationProvider | undefined | null,
-): provider is FederationProvider & SupportsClaimMapping;
-```
+   `profile.expiresIn` はここでは読まれない。
+7. **リダイレクト** はそのフェデレーションのリダイレクトポリシーの `resolveCallbackRedirect` が決める。デフォルトのポリシーは、開始時に `redirect_to` があればその `authCallbackUrl` に `redirect_to` を付けたもの、無ければその `clientUrl` を返す。
 
-`SupportsClaimMapping` を実装した provider は、`FederationProfile` を OIDC 標準のクレーム名に変換する。カスタム provider は `mapClaims` メソッドを追加することで対応できる:
+### response mode: `query` と `form_post`
 
-```ts
-import { supportsClaimMapping } from "@o3co/auth-provider-core";
+ほとんどの IdP は認可応答をクエリ文字列に載せてブラウザをリダイレクトで戻す。Sign in with Apple は違う: 要求した `scope` に `name` か `email` が含まれると、Apple は `application/x-www-form-urlencoded` のボディをコールバックへ **POST** する。プロバイダーはこれを `responseMode: "form_post"` で宣言し（無ければ `query`）、その宣言はルーターの三つの振る舞いを変え、アダプターは何も変えない:
 
-if (supportsClaimMapping(provider)) {
-  const claims = provider.mapClaims(profile);
-  // claims.email, claims.name, claims.picture …
-}
-```
+1. **開始ルートが `response_mode=form_post` を付け足す。** このパラメーターはアダプターごとではなくルーターで一度だけ書かれる。
+2. **`POST /session/oauth/federation/<name>/callback` がフォームボディを受け付ける。** パラメーターの出所が違うだけで GET コールバックと同じハンドラーである: 同じエンベロープの検索、同じ `state` の比較、同じ「非同期処理の前に破棄する」再利用防止、リクエストからではなく保存したエンベロープから読む同じ PKCE verifier と nonce、同じロールバック。**各 response mode が受け付けるメソッドはちょうど一つ**: `query` フェデレーションは POST に `405 method_not_allowed`（`Allow: GET`）を返すので POST の口を持たず、`form_post` フェデレーションは GET にトランザクション cookie を読む前に `405 method_not_allowed`（`Allow: POST`）を返すので、第三者の `<img src=".../callback">` はフローに届かない。
+3. **そのフェデレーションの一時的な状態はセッションではなくフェデレーショントランザクションに置かれ**、専用の cookie を持つ。
 
-#### クレームの優先順位: ローカルが勝ち、federated は名前空間に隔離される
+#### トランザクション cookie
 
-`mapClaims` の戻り値は上流 IdP による**主張**であって、この deployment にとっての事実ではない。federation callback route はそれをセッションのクレーム envelope にマージしない。適用されるルールは 1 つだけ (#279):
+`form_post` のコールバックは IdP のオリジンからの **クロスサイト POST** として届き、`SameSite=Lax` の cookie — デプロイのデフォルトであり、正しいデフォルト — はそれには付かない。セッション cookie に頼るコールバックは比較すべき `state` も PKCE verifier も無いまま届くことになる。フローにはクロスサイト POST を越える *何らかの* cookie が要るが、それがセッション cookie であってはならない。開始ルートは認証不要で、`SameSite=Lax` の cookie はトップレベルの GET には **付く** ので、開始レグがセッション cookie について何かを変えられるなら、ブラウザにリンクを一つ踏ませられる第三者なら誰でもそれを変えられることになる — しかも恒久的に。express-session は `req.session.cookie` をストアにシリアライズし、以後のリクエストのたびにそこから組み立て直すからである。
 
-- **ローカルレコードが権威**。`extractUserClaims` が `User` から読んだクレームは federated 値に置き換えられない。
-- **ギャップを埋められるのは 3 つだけ** — `email` / `name` / `picture` (`PROMOTABLE_FEDERATED_CLAIMS`)。ローカルレコードがその項目を持たず、かつ federated 値が string の場合に限る。
-- **それ以外はすべて名前空間へ**。`claims.federated[<providerName>]` に、昇格した値も・ローカルに負けた値も含めて完全な形で記録される。
+そこでクロスサイトの部分は専用の cookie と専用のレコードを持つ:
 
-したがって IdP は `groups`（adapter が勝手に生やした `roles` / `scope` / `permissions` も同様）を提供できない。それらは `claims.federated[<providerName>]` にのみ到達する。`filterClaimsByScope` は provider 固有クレームを一切出力しないため、名前空間配下の値が id_token や `/userinfo` に紛れ込むこともない。
+| | 値 |
+|---|---|
+| cookie 名 | `__Secure-<session.name から接頭辞を除いたもの>.federation` — 例: `__Host-auth.session` も `auth.session` も `__Secure-auth.session.federation` になる |
+| 属性 | `HttpOnly; Secure; SameSite=None`、`Path` はそのプロバイダーのコールバック URL に限定、`Max-Age` はトランザクションの寿命（10 分） |
+| 中身 | 不透明な 256 ビットの ID だけ |
+| レコード | `state`、`codeVerifier`、`nonce`、`redirectTo`、リンクの意図、プロバイダー名。express-session のストアに `fedtx:` というキー接頭辞で置かれる |
 
-**`federated` クレームは optional — 存在チェックを伴って読むこと。** 書き込まれるのは provider が実際に 1 つ以上のクレームを map した場合だけなので、`SupportsClaimMapping` を実装しない provider のセッションや、`mapClaims` が `{}` あるいは object 以外を返したセッションには存在しない。provider キーも同様に保証されない（セッションが持つのは、そのセッションを認証した 1 つの provider だけ）。`claims.federated[name].groups` ではなく `claims.federated?.[name]?.groups` を使う。空の `federated: {}` ではなく「不在」にしてあるのは意図的で、「コードパスが走った」だけではなく「この IdP は何も主張しなかった」を表す — #297 が `emailVerified` で確立した「不在は値ではない」という原則と同じである。
+名前は CSRF cookie と同じく `session.name` から導かれる。接頭辞だけが例外で、**無条件に** 付けられる: `__Host-` ではなく `__Secure-` なのは、`__Host-` は `Path=/` を要求し、この cookie はコールバックにパスを限定しているので `__Host-` の名前ではどのブラウザにも捨てられるから。無条件なのは、この cookie が `SameSite=None` であり、したがって常に `Secure` だから（`Secure` でない `SameSite=None` の cookie はブラウザが捨てる）。したがって `form_post` フェデレーションを持つデプロイはコールバックを HTTPS で提供する — Apple はいずれにせよ戻り URL に HTTPS を要求する。
 
-`emailVerified` が昇格対象から外れているのも同じ理由による。#297 以降これは Store 所有の状態であり、`oauth.requireEmailVerified` がトークン発行のゲートとして読む。上流 IdP が検証しているのは *IdP 自身が管理するアドレス*であって、`provider:sub` によるリンクはそれがローカルアカウントのアドレスと一致することを保証しない。IdP の主張を採用したい deployment は `claims.federated?.[<providerName>]?.emailVerified` を読み、その結果を `User` に publish する — #297 がこのフィールドを置いた場所がそこだからである。
+**アプリケーションのセッション cookie はデプロイが設定した属性を保つ**。`form_post` フェデレーションを開始したことがあるかどうかにかかわらず、すべてのセッションで。`session.sameSite` に触れることは無い。
+
+トランザクションはコールバックを、それを開始したブラウザに束縛する。`state` の比較は引き続き行われ、トランザクション cookie はそれへの追加であって置き換えではない。盗んだ `state` を対応するトランザクション cookie なしで提示した呼び出しは、`state` を読む前に拒否される（`400 invalid_session`）。
+
+リクエスト上で express-session のストアに到達できない場合 — ストアモジュールが無い、または `sessionModule` より後にマウントされている — `form_post` の開始は、完了できないフローを始める代わりに `500 misconfiguration` を返す。
+
+放棄されたフローに残るのは短命な cookie だけで、レコードもそれと一緒に期限切れになる: 有効期限はレコードに `cookie.expires` として書かれ、`MemoryStore` は読み出し時にそれで回収し、`connect-redis` はそれをキーの `EX` にする。
+
+#### 認証ホストの登録可能ドメイン配下のすべてのホストは信頼境界の内側
+
+cookie を厳密に一つのホストに固定するのは `__Host-` であり、`__Secure-` は HTTPS を要求するだけである。トランザクション cookie はホスト限定（`Domain` 属性なし）で発行されるが、`__Secure-` という名前は、別のホストが認証ホストを覆う `Domain` で同名の cookie をセットすることを止めず、ブラウザはそちらもコールバックに送る。したがってトランザクション cookie は、`form_post` フローがセッション cookie — デフォルトで `__Host-`、つまりホスト限定であり、起動時にそう検査される — より弱い唯一の場所である。
+
+- **攻撃者に必要なもの:** 認証ホストに対する cookie をセットできるホストのどれか一つの制御 — `auth.example.com` なら、その登録可能ドメイン `example.com` 配下のあらゆるホスト: `blog.example.com`、忘れられたステージングホスト、ぶら下がった DNS レコード、隣の低信頼アプリの XSS、共有ホスティングの隣人。このデプロイからは何も要らない: セッションも `state` もアカウントも。
+- **それで得られるもの:** そのホストから被害者のブラウザに `Domain=example.com` で `__Secure-<name>.federation` をセットし、自分のフェデレーションフローを開始し、*自分の* トランザクション ID を仕込み、*自分の* `state` と `code` をコールバックに自動送信する。被害者のブラウザは **攻撃者の** フェデレーションアカウントにログインした状態になり、被害者のその後の操作はそのアカウントに記録される。被害者のセッションを読むことも、資格情報を晒すことも、被害者自身のアカウントに届くこともない — ID の取り違えであって、アカウント乗っ取りではない。
+- **cookie に署名しても防げない理由:** 攻撃者のトランザクションは本当に攻撃者のものであり、サーバーが自分の発行物として受け入れるものは何でも攻撃者が正当に持っている。パスを限定した cookie に固有の性質である。
+- **すべきこと:** 認証ホストの登録可能ドメイン配下のすべてのホスト — `auth.example.com` ならすべての `*.example.com` — をデプロイの信頼境界の内側として扱い、そのどれでも信頼できない・低信頼のコンテンツを動かさない。`session.domain = null`（`__Host-` のデフォルト）が守るのはセッション cookie であってトランザクション cookie ではなく、これに対しては何もしない。ログインルートでは署名付き CSRF トークンがこの規則を補うために存在するが、ここには束縛すべきセッションが無いので、この規則が緩和策のすべてである。
+
+#### トランザクションが消費されるとき
+
+レコードと cookie は、トランザクションを **判定した** コールバックの出口すべて — 成功、`invalid_state`、`exchange_failed`、`unknown_user` いずれも — で破棄され、何も判定しなかった拒否では意図的に破棄 *されない*。規則: **拒否がトランザクションを消費するのは、リクエストがそれについて主張をしたときであり、何も主張しなかったときは手を付けない。** `state` がその主張である。`state` を持たないコールバック（レコードがこのプロバイダーのものに解決した後で確認する）は何も主張せず何も失わない（`400 invalid_request`、レコードはそのまま）。GET は cookie を読む前に `405` で拒否される。*誤った* `state` はこのトランザクションへの試行であり、やはり消費されるので、推測に二度目は無い。レコードに解決しない、または別のプロバイダーのものに解決するトランザクション ID（`400 invalid_session`）も同様に消費し、ストアの読み出しが失敗した場合はベストエフォートで消費する（`500`）。この区別が重要なのは、cookie がやむを得ず `SameSite=None` で、コールバックのパスへのあらゆるクロスサイトリクエストに付くからである: どの拒否でもレコードが消費されるなら、第三者は `<img>` タグ一つで被害者の進行中のログインを壊せてしまう。
+
+この規則は `form_post` だけのもの。`query` フェデレーションはエンベロープをセッションに置き、`state` が *一致した* 経路でだけ破棄するので、誤った `state` ではエンベロープが残る — セッション cookie は `SameSite=Lax` でトップレベルのクロスサイト GET には **付く** ため、不一致でエンベロープを消費すれば第三者に同じ可用性攻撃を与えてしまうからである。それで防げるはずの推測は現実的なものではない: `state` は CSPRNG からの 128 ビットである。両モードに共通なのは「`state` が無い」場合の規則だけ。
+
+#### 「一度きり」が保証すること
+
+レコードの破棄は `get` のあとに `destroy` で、往復が二回ある。express-session の `Store` API は `get` / `set` / `destroy` で、compare-and-delete は無く、この三つからアトミックな読み出しと消費は組み立てられない。
+
+| | |
+|---|---|
+| **保証する** | 先行するコールバックが削除を終えた *あと* に届いたコールバックはレコードを見つけられず拒否される。これが対象とするリプレイ — プロキシのログから抜かれた `code` と `state`、戻るボタン、再試行されたリクエスト — はこれで防がれる。 |
+| **保証しない** | *重なった* コールバック。どちらかが削除する前に両方がレコードを読めば、両方が `state` の比較を通り、両方が `exchangeCode` に達する。`MemoryStore` は同期的に応答するので結果的に直列化されるが、ネットワーク遅延のあるストアではそうならない。 |
+| **重なりを抑えるもの** | IdP。認可コードは IdP 側で一度きりで、競合するコールバックは必ず同じコードを持つので、何本がそこまで進んでも交換に成功するのは高々一つ — 残りは `502 exchange_failed`。PKCE がその交換をレコード内の verifier に束縛する。 |
+
+レコードがまったく削除できないなら、コールバックはコードを交換せずに `500` で止まる。これは `DeviceCodeStore` より弱い。あちらはアトミックな読み出しと消費である: あのストアは自前のアダプターを持ち、消費を Redis の一往復に押し込めるが、フェデレーショントランザクションはすべてのデプロイが設定しなければならないコンポーネントスロットを追加する代わりにセッションストアを共有している — IdP が既に提供している性質のために。[`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) が表の両半分を固定している。
+
+`query` フェデレーションはこれらのどれにも影響されない: コールバックは同一サイトのトップレベル GET で、エンベロープは `req.session.federation` に残り、認可 URL はアダプターが作ったものそのままである。
+
+### クレームの優先順位: ローカルが勝ち、federated は名前空間に隔離される
+
+`mapClaims` が返すのは **上流 IdP の主張** であって、このデプロイについての事実ではない。コールバックはそれをセッションのクレームエンベロープに丸ごと混ぜることはせず、一つの規則を適用する（[`src/federations/claim-precedence.mts`](src/federations/claim-precedence.mts)、`mergeFederatedClaims` として export）:
+
+- **ローカルのレコードが正。** `User` から読んだクレーム（`email`、`emailVerified`、`name`、`picture`、`groups`）はそのまま残り、federated な値がそれを置き換えることはない。
+- **隙間を埋めてよいのは三つのクレームだけ** — `email`、`name`、`picture`（`PROMOTABLE_FEDERATED_CLAIMS`）— で、ローカルのレコードがそのフィールドを欠いていて、かつ federated な値が文字列のときに限る。
+- **それ以外はすべて** `claims.federated[<providerName>]` **の下に名前空間化される**。昇格した値やローカルのクレームに負けた値も含め、そのまま完全に。
+
+したがって IdP は `groups`（アダプターが作り出した `roles` / `scope` / `permissions` も）を持ち込めない: それらは `claims.federated[<providerName>]` に届くだけである。`filterClaimsByScope` はプロバイダー固有のクレームを出力しないので、名前空間の下のものが id_token や `/userinfo` の応答に偶然現れることはない。
+
+**`federated` クレームは任意 — 存在を確かめて読む。** プロバイダーが少なくとも一つのクレームをマップしたときにだけ書かれるので、`SupportsClaimMapping` を実装しないプロバイダーのセッションや、`mapClaims` が `{}` やオブジェクトでない値を返したセッションには無い。プロバイダーのキーも保証されない: セッションが持つのはそれを認証した一つのプロバイダーだけである。`claims.federated[name].groups` ではなく `claims.federated?.[name]?.groups` と書く。
+
+`emailVerified` は昇格できない。これは `oauth.requireEmailVerified` がトークン発行の関門として読める Store 所有の状態であり、上流 IdP が検証するのは *その IdP が* 管理するアドレスである — `provider:sub` の結びつきは、それがローカルアカウントのアドレスであることを保証しない。この主張に基づいて動きたいデプロイは `claims.federated?.[<providerName>]?.emailVerified` を読み、その結果を `User` に反映する。
 
 ```ts
 // user: { id, username, email: "alice@corp.example", groups: ["staff"] }
 // mapClaims → { email: "alice@gmail.example", picture: "https://…", groups: ["admin"] }
 {
   email: "alice@corp.example",          // ローカルが勝つ
-  groups: ["staff"],                    // federated groups はここに到達できない
-  picture: "https://…",                 // ギャップを埋めた
+  groups: ["staff"],                    // federated な groups はここに届かない
+  picture: "https://…",                 // 隙間を埋めた
   federated: {
     google: { email: "alice@gmail.example", picture: "https://…", groups: ["admin"] },
   },
 }
 ```
 
-このマージ処理は `mergeFederatedClaims` として export されている。独自にクレーム envelope を組み立てる consumer はこれを使える。
+#### `emailVerified` は IdP が何を送っても boolean
 
----
+`MappedClaims.emailVerified` は `boolean | undefined` であり、そこへ正規化するのは **アダプターの** 仕事 — マージは型変換をせず、下流も何もしない。Sign in with Apple は応答によって `email_verified` を *文字列* の `"true"` で送る。`Boolean("false")` は `true` なので、型変換するアダプターは未検証のアドレスを検証済みと報告してしまう。`"true"` / `"false"` はそれぞれの boolean として読み、それ以外の形は **欠落** として扱う — 欠落は `false` ではない。`mapClaims` の出力に boolean でない値が届いても昇格はされないが、`claims.federated[<providerName>]` の下にはそのまま *記録される*。それを関門として読むデプロイは文字列を読むことになる。
 
-### `SupportsRefresh` (オプショナル capability)
+### フェデレーションの設定
 
-リフレッシュトークンを使って新しいアクセストークンを取得できる provider 向けのオプショナル capability。
-
-```ts
-interface RefreshedTokens {
-  readonly issuer?: string;
-  readonly sub?: string;
-  readonly email?: string;
-  readonly emailVerified?: boolean;
-  readonly name?: string;
-  readonly picture?: string;
-  readonly accessToken?: string;
-  readonly refreshToken?: string;
-  readonly idToken?: string;
-  readonly expiresAt?: Date | null;
-  /** トークンレスポンスの `expires_in` そのまま。無ければ `null`。 */
-  readonly expiresIn?: number | null;
-  /** トークンレスポンスの `scope` そのまま（空白区切り）。 */
-  readonly scope?: string;
-  /** adapter のライブラリが報告する `token_type`（oauth4webapi は小文字化する）。 */
-  readonly tokenType?: string;
-  readonly [key: string]: unknown;
-}
-
-interface SupportsRefresh {
-  refreshToken(refreshToken: string): Promise<RefreshedTokens>;
-}
-
-function supportsRefresh(
-  provider: FederationProvider | undefined | null,
-): provider is FederationProvider & SupportsRefresh;
-```
-
-フィールドは `FederationProfile` から導出せず、名前で列挙する。文字列 index signature を持つ型に `Omit` をかけると index signature だけが残り、#593 までは `accessToken` が number のスナップショットでも型検査を通っていた。すべて optional なので `{ issuer, sub }` は今も通るが、名前付きフィールドの型違いは通らない。`scope` や `tokenType` を別の型の拡張フィールドとして使っていた adapter は型エラーになる。
-
-`SupportsRefresh` を実装した provider は、ユーザー操作なしにフェデレーショントークンを維持できる。`FederationTokenStore`（`AppOptions` で設定）が初回トークンを保存し、リフレッシュフローが自動的に取得・更新する。
-
----
-
-### `SupportsDelegatedAuthorization`（オプショナル capability）
-
-federation grants（#593）を支える capability。セッションを持たない client が上流のトークンを保持する「委譲」の認可へユーザーを送り、callback が持ち帰った code を交換し、セッションなしでそのトークンを refresh できる provider が実装する。**3 つ**のメソッドが揃って初めて検出される。
-
-```ts
-interface DelegatedAuthorizationRequest {
-  readonly redirectUri: string;
-  readonly state: string;
-  readonly codeVerifier: string;
-  readonly nonce: string;                                  // 必須
-  readonly scopes: readonly string[];                      // provider のログイン scope ではなく intent の scope
-  readonly resource?: string;                              // RFC 8707
-  readonly authorizationParams?: Readonly<Record<string, string>>;
-}
-
-interface DelegatedCodeExchangeRequest {
-  readonly code: string;
-  readonly codeVerifier: string;
-  readonly redirectUri: string;
-  readonly nonce: string;                                  // 認可時に送ったもの
-  readonly resource?: string;
-  readonly callbackParams?: Readonly<Record<string, string>>;  // callback が運んできたもの（RFC 9207 の `iss` など）
-  readonly signal?: AbortSignal;
-  readonly identityClaims?: readonly string[];             // connection が指定した claim。検証済み id_token から取り出す
-}
-
-interface DelegatedAuthorizationResult {
-  readonly upstream: { readonly issuer: string; readonly subject: string; readonly claims: Readonly<Record<string, string>> };
-  readonly tokens: DelegatedTokens;
-}
-
-interface DelegatedRefreshRequest {
-  readonly refreshToken: string;
-  readonly scopes?: readonly string[];                     // RFC 6749 §6: 付与された以上は求めない
-  readonly resource?: string;
-  readonly signal?: AbortSignal;
-}
-
-interface DelegatedTokens {                                // すべて optional: `{ refreshToken }` だけでも有効な応答
-  readonly accessToken?: string;
-  readonly refreshToken?: string;
-  readonly expiresIn?: number | null;                      // 発行された秒数そのまま
-  readonly expiresAt?: Date | null;                        // adapter 自身の now + expiresIn
-  readonly scope?: string;
-  readonly tokenType?: string;
-}
-
-interface SupportsDelegatedAuthorization {
-  buildDelegatedAuthorizationUrl(params: DelegatedAuthorizationRequest): URL;
-  exchangeDelegatedCode(params: DelegatedCodeExchangeRequest): Promise<DelegatedAuthorizationResult>;
-  refreshDelegatedToken(params: DelegatedRefreshRequest): Promise<DelegatedTokens>;
-}
-
-function supportsDelegatedAuthorization(
-  provider: FederationProvider | undefined | null,
-): provider is FederationProvider & SupportsDelegatedAuthorization;
-```
-
-実装が守る規則（generic OIDC adapter が守っているもの）:
-
-- scope は intent のもので、provider のログイン scope ではない。`nonce` は必須。`resource` は認可時も refresh 時も RFC 8707 のパラメータとして送る。
-- `authorizationParams` で provider が所有するパラメータ（`client_id`、`response_type`、`redirect_uri`、`state`、`code_challenge`、`code_challenge_method`、`nonce`、`scope`、`resource`、`request`、`request_uri`、`response_mode`）を指定すると throw する。openid-client は `client_id` と `response_type` を未指定のときにしか設定しないので、複製されたパラメータは別の registration へ consent を送ってしまう。`offline_access` を求めるときは `prompt=consent` を付ける（OIDC Core §11）。operator 自身の `prompt` が優先される。
-- ライブラリが受け入れなかった応答（解釈できなかったもの、JWKS に届かず id_token を検証できなかったもの）にも rotate 済みの refresh token が含まれ得る。adapter は throw せず `{ refreshToken }` を返し、唯一の有効な credential を失わない。core はこれを malformed な応答の後として扱う。IdP が返したエラーは、ライブラリが投げるまま投げる。
-- `expiresIn` は送られてきた `expires_in` そのもの（数値か、数字だけの文字列）。それ以外なら access token を出さず refresh token だけ返す。`expiresAt` は応答が届いた時刻を起点にし、ライブラリの検証時間を含めない。`tokenType` はライブラリが報告するまま。
-
-```ts
-import { supportsRefresh } from "@o3co/auth-provider-core";
-
-if (supportsRefresh(provider)) {
-  const refreshed = await provider.refreshToken(storedRefreshToken);
-  // refreshed.accessToken, refreshed.expiresAt …
-}
-```
-
----
-
-### プロバイダーパッケージのメモ
-
-**`@o3co/auth-provider-federation-google`**
-
-- デフォルトで `openid profile email` スコープをリクエストする。
-- 安定した Google OAuth/OIDC endpoint を使用する。
-- `FederationProfile.sub` は Google のアカウント数値 ID。
-
-**`@o3co/auth-provider-federation-github`**
-
-- デフォルトスコープは `["read:user", "user:email"]`。
-- プロファイルオブジェクトに `email` フィールドが含まれない場合、GitHub `/user/emails` API を呼び出してプライマリの確認済みメールアドレスを取得することでプロファイルを補完する。
-- `FederationProfile.sub` は GitHub の数値ユーザー ID。
-- フェデレーショントークンフォーマット: `${federationName}:${sub}`（`federationName` は設定した `name`）。
-
----
-
-### `FederationResult<T>` (type)
-
-```typescript
-type FederationResult<T> =
-  | { ok: true; value: T }
-  | { ok: false; status: number; error: string; errorDescription: string };
-```
-
-`FederationProvider` のメソッドが返す判別共用体。`value` にアクセスする前に `ok` を確認すること。
-
-## 使い方
-
-### 基本的な使い方
-
-```typescript
-import { createApp } from "@o3co/auth-provider-core";
-import { sessionModule } from "@o3co/auth-provider-session";
-import { googleFederationModule } from "@o3co/auth-provider-federation-google";
-
-const handle = await createApp({
-  modules: [
-    sessionModule,                 // const — factory 呼び出しなし
-    googleFederationModule,        // federations.google + federationRedirectPolicies.google を contribute する
-    // ... composition root の userRepository や 4 ストア分割を供給するモジュール群
-  ],
-  bootstrapComponents: { config, pathResolver },
-});
-```
-
-boot planner が per-federation modules の `federations.<name>` と `federationRedirectPolicies.<name>` の contribution を集約し、synthetic な `federationProviders` と `federationRedirectPolicyResolver` ComponentMap エントリーを構築する。`sessionModule` のフェデレーションルートはこれらを消費する。
-
-planner が enforce する pairing 不変条件は **contribution kind 同士** に対するもの: contribute された `federations.<name>` には対になる `federationRedirectPolicies.<name>` が必須（逆も同様）であり、欠ける場合は `BootError({ reason: "federation-redirect-policy-unpaired" })` で boot 失敗する。
-
-planner は `config.federations` と contribution の cross-check は行わない — config で有効化されている federation に対応する provider pair を contribute するモジュールが無い場合でも boot は成功し、`/session/oauth/federation/:name` がリクエスト時に `404` を返す。設定ミスを fail-fast にしたい composition root は、対応する per-federation module（あるいは federation slice が enabled だが provider package 未インストールの場合に throw する config-bootstrap module）を追加すること。なお `sessionModule` は config 由来の不変条件を boot 時に 1 つだけ enforce する: `config.federations` で enabled になっている federation はすべて `callbackURL` を宣言する必要があり、欠ける場合は boot 失敗する（v0.4.x が `init()` で enforce していた fail-fast 不変条件と同じ）。
-
-### HOCON フェデレーション設定
-
-**ショートハンド形式（キー名 = プロバイダータイプ）:**
+`federations.<name>` がフェデレーションに名前を付け、`extractFederationSection`（[`src/federations/extract-federation-section.mts`](src/federations/extract-federation-section.mts)）がそれを読むモジュールのためにセクションを正規化する。受け付ける形は三つ:
 
 ```hocon
 federations {
+  # 省略形: キーが type を表す（ここでは "google"）。
   google {
     enabled = true
     clientId = ${FEDERATIONS_GOOGLE_CLIENT_ID}
     clientSecret = ${FEDERATIONS_GOOGLE_CLIENT_SECRET}
     callbackURL = "https://auth.example.com/session/oauth/federation/google/callback"
+    clientUrl = "https://app.example.com/"
   }
 
-  github {
+  # type を明示したフラットな形。
+  okta {
     enabled = true
-    clientId = ${FEDERATIONS_GITHUB_CLIENT_ID}
-    clientSecret = ${FEDERATIONS_GITHUB_CLIENT_SECRET}
-    callbackURL = "https://auth.example.com/session/oauth/federation/github/callback"
-  }
-}
-```
-
-**明示的なマルチテナント形式（Google を 2 インスタンス）:**
-
-```hocon
-federations {
-  google-personal {
-    enabled = true
-    type = "google"
-    google {
-      clientId = ${FEDERATIONS_GOOGLE_PERSONAL_CLIENT_ID}
-      clientSecret = ${FEDERATIONS_GOOGLE_PERSONAL_CLIENT_SECRET}
-      callbackURL = "https://auth.example.com/session/oauth/federation/google-personal/callback"
-    }
+    type = "oidc"
+    issuer = "https://dev-123.okta.com"
+    # …
   }
 
-  google-work {
+  # ネストした形: type の名前のサブセクションの下に資格情報を置く。
+  keycloak {
     enabled = true
-    type = "google"
-    google {
-      clientId = ${FEDERATIONS_GOOGLE_WORK_CLIENT_ID}
-      clientSecret = ${FEDERATIONS_GOOGLE_WORK_CLIENT_SECRET}
-      callbackURL = "https://auth.example.com/session/oauth/federation/google-work/callback"
+    type = "oidc"
+    oidc {
+      issuer = "https://sso.example.com/realms/staff"
+      # …
     }
   }
 }
 ```
 
-トップレベルのフィールドとネストされたサブセクションを混在させた形式（mixed shape）は起動時に明確なエラーで拒否される。
+ネストした形のセクションがトップレベルにも `clientId`・`clientSecret`・`callbackURL` を持つと起動に失敗する。それ以外のトップレベルのフィールドはサブセクションと並んで残り、サブセクションも同じフィールドを持てばサブセクションの値で上書きされる。`enabled = true` の無いセクションは無視される。Google・GitHub・Apple のモジュールはシングルテナント — それぞれ固定の名前（`google`、`github`、`apple`）でプロバイダーを登録する — なので、デプロイが持てるのはそれぞれ高々一つ。`type = "oidc"` のセクション（[`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md)）は一セクションが一フェデレーションになる。
 
-### リダイレクト許可リスト（`redirectAllowlist`）
+起動時の規則:
 
-`GET /session/oauth/federation/:name` の `redirect_to` クエリパラメータが指定できる URL は、すべて列挙する必要がある。
+- 有効なセクションはすべて `callbackURL` を持たなければならず、無ければ `sessionModule` が起動に失敗する。フェデレーションルーターはまさにその値を `redirect_uri` としてアダプターに渡す。
+- すべての `federations.<name>` の contribution には `federationRedirectPolicies.<name>` の contribution が対になっていなければならず（逆も同じ）、そうでなければ `federation-redirect-policy-unpaired` で起動に失敗する。
+- `sessionModule` は設定と contribution を突き合わせない。設定で有効だがどのモジュールも contribute していないフェデレーションは起動し、そのルートは `404` を返す。有効なセクションなしに contribute されたフェデレーションにはコールバック URL が無く、その開始は `500 misconfiguration` を返す。どちらかで起動を失敗させたい組み立ては自分で検査を加える。
+
+### リダイレクト許可リスト
+
+`GET /session/oauth/federation/:name?redirect_to=…` と `POST /session/login` の `redirect_to` は、その後ブラウザが行く先を示す。どちらも示せる値はすべて列挙されていなければならない: フェデレーションは `federations.<name>.redirectAllowlist`（そのリダイレクトポリシーが読む）、ログインは `session.redirectAllowlist`。
 
 ```hocon
 federations {
   google {
     enabled = true
-    # …credentials…
+    # …資格情報…
 
     redirectAllowlist = [
       "https://app.example.com/welcome"
       "https://app.example.com/account/linked"
-      "http://localhost:5173/welcome"      # ローカル開発用フロントエンド
+      "http://localhost:5173/welcome"      # ローカル開発のフロントエンド
     ]
 
     sessionDomain    = ".example.com"
@@ -508,126 +370,68 @@ federations {
 }
 ```
 
-リストを書く前に押さえておくべきルールは 4 つ:
+両方のリストに共通の規則（[`src/redirect-allowlist.mts`](src/redirect-allowlist.mts)）:
 
-- **完全一致**。scheme / host / port / path / query / fragment のすべてが一致しなければならない。正規化されるのは大文字小文字・デフォルトポート・`..` セグメント・パーセントエンコーディングだけ。ワイルドカード・前方一致・サブドメイン一致は存在しない。動的なクエリパラメータを持つ遷移先はまとめて登録できないので、固定パスにして可変部分は session 側に持たせる。
-- **未設定または空のリストは、すべての `redirect_to` を拒否する**。`redirect_to` を使わないデプロイではそれが正しい設定であり、「全部許可」の意味ではない。#278 以前は未設定の許可リストが任意の http(s) URL を受け入れており、これがオープンリダイレクトになっていた。そのフォールバックはもう存在しない。
-- **https 必須。ただし loopback は例外**。`localhost` / `127.0.0.0/8` / `[::1]` は `http://` を使える。ローカル開発のフロントエンドやネイティブクライアントの loopback listener が証明書なしで動くのはこのため。ポートは一致判定に含まれるのでクライアントが bind するポートを明記すること（RFC 8252 §7.3 のポート非依存 loopback 比較は実装していない）。
-- **`sessionDomain` を設定した場合、リスト自体が制約を受ける**。loopback 以外のエントリはすべてその domain 配下でなければならず、policy 構築時に検証される。domain 外のエントリは「設定したつもりで効いていない」状態にならず起動時に失敗する。クロスドメインの遷移先が本当に必要なら `sessionDomain` を外す。
+- **照合は完全一致。** スキーム、ホスト、ポート、パス、クエリ、フラグメントのすべてが効く。正規化で消えるのは大文字小文字、デフォルトポート、`..` セグメント、パーセントエンコーディングだけ。ワイルドカード・前方一致・サブドメイン一致は無い — エントリーは自分の兄弟を許さず、動的なクエリパラメーターを持つ行き先は一族としてまとめて列挙できない。固定のパスにし、変わる部分はセッションで運ぶ。
+- **リストが無いか空なら、どの `redirect_to` も `400 invalid_redirect` で拒否する。** パラメーターを使わないデプロイにはそれが正しい設定であり、すべてを許す方法ではない。
+- **ループバック以外は `https` が必須。** `localhost`、`127.0.0.0/8`、`[::1]` は `http://` を使える。これでローカル開発のフロントエンドやネイティブクライアントのループバックリスナーが証明書なしで動く。ポートは照合されるので、クライアントがバインドするポートを列挙する — RFC 8252 §7.3 のポートを問わないループバック比較はここでは実装されていない。
+- **cookie ドメインが設定されていれば、リスト自体を制約する。** ループバックでないエントリーはすべて `sessionDomain`（フェデレーション）または `session.domain`（ログイン）の内側でなければならず、ポリシーを組み立てる時点で検査されるので、外側のエントリーは効いているような顔で設定に残るのではなく起動に失敗する。別ドメインへのリダイレクト先を本当に意図するなら、そのフェデレーションの `sessionDomain` を外す。
 
-`authCallbackUrl` と `clientUrl` は許可リストではなく `resolveCallbackRedirect` が読む。前者は `redirect_to` を引き渡すブリッジページ、後者は `redirect_to` を伴わないコールバックのフォールバック。
+`authCallbackUrl` と `clientUrl` は許可リストではなく `resolveCallbackRedirect` が読む: 前者は `redirect_to` を受け渡すブリッジページ、後者は開始時に `redirect_to` が無かったコールバックの戻り先。どちらかが必要なのに未設定のコールバックは、セッションを保存したあとで `500 misconfiguration` を返す。したがって、すべての開始が `redirect_to` を持つのでない限りどのフェデレーションにも `clientUrl` が必要で、`redirect_to` を持つ開始には `authCallbackUrl` が必要になる。
 
-### カスタムフェデレーションプロバイダー
+`FederationRedirectPolicy`（[`src/federations/redirect-policy.mts`](src/federations/redirect-policy.mts)）が差し替え点である: モジュールはフェデレーションに独自のポリシーを contribute でき、そのポリシーは fail closed でなければならない。`createFederationRedirectPolicy` がデフォルトで、`checkRedirectShape`、`createRedirectAllowlistValidator`、`describeRedirectRejection`、`isLoopbackHostname` は独自のポリシーが同じ規則と拒否の語彙を再利用できるよう export されている。ポリシーのメソッドは [`FederationResult`](src/federations/types.mts) で答える: 値を持つ `ok`、またはそのまま返すステータス・OAuth エラーコード・説明。
 
-カスタムフェデレーションは per-federation な `defineModule(...)` を書いて、`federations.<name>`（`FederationProvider`）と `federationRedirectPolicies.<name>`（redirect policy）の両方を contribute する。型付き ComponentMap config slot を伴う const-Module パターンが推奨形 — 実装例として [`@o3co/auth-provider-federation-google` の `google.mts`](../federation-google/src/google.mts) を参照。最小スケッチ:
+### アダプターの書き方
 
-```typescript
+OpenID Connect の discovery ドキュメントを公開する IdP なら、コードは書かない: [`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md) の `type = "oidc"` セクションがアダプターになる。そうでなければ、アダプターは `federations.<name>`（`FederationProvider`）と `federationRedirectPolicies.<name>` の両方を contribute するモジュールであり、設定は小さなブリッジモジュールが `extractFederationSection` から埋める型付きの `ComponentMap` スロットに載せる:
+
+```ts
 import { defineModule, type FederationProvider } from "@o3co/auth-provider-core";
-import {
-  codeChallenge,
-  createFederationRedirectPolicy,
-} from "@o3co/auth-provider-session";
+import { createFederationRedirectPolicy } from "@o3co/auth-provider-session";
 
 declare module "@o3co/auth-provider-core" {
   interface ComponentMap {
-    readonly microsoftFederationConfig?: { clientId: string; callbackURL: string };
+    readonly exampleFederationConfig?: ExampleConfig;
   }
 }
 
-export const microsoftFederationModule = defineModule({
-  name: "federation:microsoft",
-  requires: ["microsoftFederationConfig"] as const,
+export const exampleFederationModule = defineModule({
+  name: "federation:example",
+  requires: ["exampleFederationConfig"] as const,
   contributes: {
     federations: {
-      microsoft: (deps) => buildMicrosoftProvider(deps.microsoftFederationConfig),
+      example: (deps): FederationProvider => createExampleProvider(deps.exampleFederationConfig),
     },
     federationRedirectPolicies: {
-      microsoft: (deps) => createFederationRedirectPolicy(deps.microsoftFederationConfig),
+      example: (deps) => createFederationRedirectPolicy(deps.exampleFederationConfig),
     },
   },
 });
 ```
 
-composition root は、`extractFederationSection(config.federations, "microsoft")` を実行して credentials を抽出し、`microsoftFederationConfig` 型 slot に流し込む小さな config-bootstrap module を用意する。`sessionModule` のフェデレーションルートは集約された `federationProviders` map を消費し、`:name` でルーティングする。
+契約自身の規則は [core の README](../core/src/federations/README.md) と [`types.mts`](../core/src/federations/types.mts) の doc コメントにある。ツールキットがプロバイダー側に与えるもの:
 
-## TODO-F-3 の変更点
+- `codeChallenge(codeVerifier)` — ルーターが生成した verifier に対する S256 challenge（[`src/federations/pkce.mts`](src/federations/pkce.mts)）。
+- `callbackUrlForExchange({ redirectUri, code, callbackParams })` — コード交換で OAuth ライブラリに渡す URL: `code`、コールバックが持っていれば RFC 9207 の `iss`、そしてバッグからはそれ以外何も載せない。`code` だけから URL を組み直すと `iss` が落ち、mix-up の検査が行われず、`authorization_response_iss_parameter_supported` を広告する issuer ではすべてのログインが失敗する。ライブラリには IdP が実際に公開している issuer を設定する。そうしなければ比較がすべてのログインを拒否する（[`src/federations/callback-url.mts`](src/federations/callback-url.mts)）。
+- `FederationClientSecret` / `resolveClientSecret` — 文字列またはリゾルバー（`() => string | Promise<string>`）の `client_secret`。アダプターはトークン要求のたびに `resolveClientSecret` を呼び、それは何もキャッシュしないので、secret がローテーションするアダプター（Apple の ES256 JWT）がキャッシュを受け持つ。空や文字列でない結果は上流に送らずローカルで拒否する（[`src/federations/client-secret.mts`](src/federations/client-secret.mts)）。
 
-- **ローカルログインのセッショントラッキング。** `AppOptions.userSessionStore` が設定されている場合、`POST /session/login` は `userSessionStore.create()` で `UserSession` レコードを作成し、生成された `sid` を `req.session.sid` に書き込む。これは F-2 で確立したフェデレーションコールバックのセッション作成パスと対称であり、ローカルログイン後に発行されるトークンに有効な `sid` クレームが付与されることを保証する。
+同梱のアダプターが実例になる — 例えば `federation-google` の [`google.mts`](../federation-google/src/google.mts)。
 
-## v0.3.x → v0.4.0 マイグレーション
+## これらの規則を固定するテスト
 
-v0.4.0 ではこのパッケージから passport を直接依存として削除した。
-
-### 破壊的変更
-
-1. **`FederationProviderBase` → `FederationProvider` へリネーム。** カスタムプロバイダーを実装している場合は import のインターフェース名を変更すること。
-2. **`setupPassportStrategy(passport, ctx)` を削除。** 代わりに `buildAuthorizationUrl({ redirectUri, state, codeVerifier }): URL` と `exchangeCode({ code, codeVerifier, redirectUri }): Promise<FederationProfile>` を実装する。新しいインターフェースはベンダー非依存であり、シグネチャに passport の型が漏出しない。
-3. **`FederationProfile.raw` を削除。** OIDC 標準クレームがファーストクラスフィールドになった（`sub`、`email`、`emailVerified`、`name`、`picture`、`accessToken`、`refreshToken`、`idToken`、`expiresAt`）。プロバイダー固有クレーム（Google の `hd`、Microsoft の `tid` など）はインデックスシグネチャ `[key: string]: unknown` で伝達される。
-4. **`FederationProfile.id` → `sub` へリネーム、`expiresIn: number` → `expiresAt: Date | null`（必須）に変更。** adapter は明示的に判断する必要がある — プロバイダーが有限の expiry を発行する場合は `Date`、発行しない場合（GitHub OAuth Apps の classic token 等）は `null` を返す。route 層は fallback expiry を勝手に発明しなくなった — `null` は「refresh せず、プロバイダーが invalidate するまで reuse」を意味する。`FederationTokenStore` 側の `FederationTokens.expiresAt` も同じ契約に従う。
-5. **`createPassport()` と `SetupPassportContext` をパブリック API から削除。** 状態（CSRF）と PKCE はルート層が内部で管理する。プロバイダーは純粋関数になった。
-6. **`UserSessionStore` と `FederationTokenStore` が必須になった**（以前はオプショナルでレガシーフォールバックあり）。これらは `sessionModule.requires` に宣言され、該当 component を提供するモジュールが無い場合、boot planner が `BootError(reason: 'missing-required-component')` で拒否する。
-7. **`/login` エラーレスポンス** は RFC 6749 §5.2 の形式 `{ error, error_description }` に変更。旧フォーマット `{ message: "..." }` をクライアントが解析している場合は更新が必要。
-8. **`SupportsRefresh.refreshToken`** の戻り型が `RefreshedTokens`（新型）に変更（#593 で名前付きフィールドの interface に作り直した。上の定義を参照）。Google/GitHub のリフレッシュレスポンスは正当に `sub` を省略するため、ルート層が保存済み identity を維持する。
-
-### カスタムプロバイダーのマイグレーション例
-
-**変更前（v0.3.x、passport ベース）:**
-
-```ts
-class CustomProvider implements FederationProviderBase {
-  name = "custom";
-  scope = ["openid"];
-  async setupPassportStrategy(passport, ctx) {
-    passport.use(this.name, new CustomStrategy({...}, (accessToken, refreshToken, profile, done) => {
-      done(null, { id: profile.id, raw: profile });
-    }));
-  }
-  validateRedirect(url) { /* ... */ }
-  resolveCallbackRedirect(session) { /* ... */ }
-}
-```
-
-**変更後（v0.4.0、純粋関数インターフェース）:**
-
-```ts
-import { codeChallenge } from "@o3co/auth-provider-session";
-
-class CustomProvider implements FederationProvider, SupportsClaimMapping {
-  readonly name = "custom";
-  readonly scope = ["openid"] as const;
-  buildAuthorizationUrl({ redirectUri, state, codeVerifier }) {
-    const url = new URL("https://idp.example.com/authorize");
-    url.searchParams.set("response_type", "code");
-    url.searchParams.set("client_id", this.clientId);
-    url.searchParams.set("redirect_uri", redirectUri);
-    url.searchParams.set("state", state);
-    url.searchParams.set("code_challenge", codeChallenge(codeVerifier));
-    url.searchParams.set("code_challenge_method", "S256");
-    url.searchParams.set("scope", this.scope.join(" "));
-    return url;
-  }
-  async exchangeCode({ code, codeVerifier, redirectUri }) {
-    // トークンエンドポイントへ POST + 必要に応じて userinfo を取得し、FederationProfile に正規化する
-    return {
-      issuer: "https://idp.example.com",
-      sub: userId,
-      email,
-      accessToken,
-      refreshToken,
-      expiresAt,
-    };
-  }
-  mapClaims(profile) { return { email: profile.email }; }
-  validateRedirect(url) { /* 変更なし */ }
-  resolveCallbackRedirect(session) { /* 変更なし */ }
-}
-```
-
-### モジュールの配線
-
-`sessionModule` は `userRepository`（`/login` 用）が必要。`userSessionStore` + `federationTokenStore` は `sessionModule.requires` に含まれており、該当 component を提供するモジュールが無い場合、boot planner が `BootError` を投げる。
+| テストファイル | 固定するもの |
+| --- | --- |
+| [`src/__tests__/module.test.mts`](src/__tests__/module.test.mts) | マニフェストのスロットと absence policy、`/session` の二つのルーター、`callbackURL` の起動時規則 |
+| [`src/__tests__/sessionStoreModule.test.mts`](src/__tests__/sessionStoreModule.test.mts) | `/` のミドルウェアルート、cookie 名、`__Host-` の規則、replica-safety の宣言と拒否 |
+| [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | 二つの組み込みストア、`session-store` の readiness probe、Redis クライアントのエラーリスナー |
+| [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | 署名付きトークン、オリジン検査、ガードの受理規則 |
+| [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts)、[`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | ログイン、ログアウトが無効化するものとストア障害が `UserSession` の削除を止めないこと、ログインのレート制限ガード |
+| [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | 開始とコールバックのレグ、アカウントリンク、ストアへの書き込みとそのロールバック、`amr` |
+| [`Federation.formPost.test.mts`](src/routes/__tests__/Federation.formPost.test.mts)、[`Federation.applicationCookie.test.mts`](src/routes/__tests__/Federation.applicationCookie.test.mts)、[`Federation.transactionFailures.test.mts`](src/routes/__tests__/Federation.transactionFailures.test.mts)、[`Federation.transactionConcurrency.test.mts`](src/routes/__tests__/Federation.transactionConcurrency.test.mts) | response mode、トランザクション cookie、手を付けられないセッション cookie、トランザクションの失敗経路、「一度きり」が保証すること |
+| [`src/federations/__tests__/`](src/federations/__tests__/) | ツールキットとルーターのフェデレーション部品 |
 
 ## 関連
 
-- [`@o3co/auth-provider-oauth`](../oauth/README.ja.md) — OAuth 2.0 トークン・認可ルート
-- [`@o3co/auth-provider-core`](../core/README.ja.md) — 共有型定義 (`Module`、`UserRepository`、`PathResolver`、`AppConfig`)
+- [`@o3co/auth-provider-core`](../core/README.ja.md) — このパッケージが駆動するポートと、[フェデレーションアダプター契約](../core/src/federations/README.md)
+- [`@o3co/auth-provider-oauth`](../oauth/README.ja.md) — トークン発行、`/oauth/logout`、フェデレーションのトークンとログアウトのルート
+- [`@o3co/auth-provider-redis`](../redis/README.md) — セッションストア（`UserSessionStore` など）の Redis アダプター。上のブラウザセッションストアとは別物

@@ -1,74 +1,31 @@
 # @o3co/auth-provider-foundation
 
-auth.provider 向けの本番用 HTTP ユーザー認証アダプターパッケージ。`"http"` アダプター型を `UserRepository` ファクトリーに登録し、`authenticate` / `authenticateByToken` を上流 HTTP サービスへ委譲する。
+最終更新: 2026-09-24
 
-このパッケージのスコープは v0.5.0 モジュールシステムにおける **本番用の非データベース / 外部サービスアダプター** であり、v0.5.0 時点では `HttpUserRepository` のみを提供する。以前同梱されていた Redis `CodeRepository` アダプターは Phase 10 で [`@o3co/auth-provider-redis`](../redis/README.ja.md) に移管された。
+auth.provider のための「the Store」 — デプロイ自身のユーザーサービス — の HTTP クライアント。`HttpUserRepository` は core の `UserRepository` ポートを HTTPS で実装する: ユーザーを認証し、フェデレーション ID をリンクし、federation grants が求める ID の照会に答える。`registerBuiltinAdapters` はそれを `"http"` ユーザーアダプターとして登録する。
+
+## 責務と役割
+
+**役割。** core のポート一つ、[`UserRepository`](../core/src/repositories/UserRepository.mts)（[`core/src/repositories`](../core/src/repositories/README.md) を参照）のアダプター。パッケージ名に反して基盤層ではない: 実行時にこれを import する他のパッケージは無い（`federation-grants` がテストで使うだけ）。これを選ぶのは組み立て側 — standalone テンプレートでは `repositories.user.type = "http"`。
+
+**持つもの:**
+
+- Store が実装するワイヤ契約: `HttpUserRepository` が送るリクエストと、それぞれの応答の意味（後述）。
+- Store の URL に対する通信の規則 — `https`、またはループバックホストへの `http` だけ（[`src/endpointUrl.mts`](src/endpointUrl.mts)）。
+- リクエストの期限とレスポンスサイズの上限。
+- ID の照会が起動時に判定される根拠となるカバレッジ宣言。
+
+**持たないもの:** ポートと `User` の形（core）。ユーザーをいつ認証し、ID をいつリンクし、所有者をいつ照会するか — セッションルート（[`@o3co/auth-provider-session`](../session/README.ja.md)）、`oauth` の jwt-bearer グラント（[`@o3co/auth-provider-oauth`](../oauth/README.ja.md)）、federation grants（[`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)）。Store 自体。core の開発用ユーザーアダプター（`yaml` / `static`）。Redis バックエンドのストア（[`@o3co/auth-provider-redis`](../redis/README.md)。Redis の認可コードストアもこちら）。
+
+**別パッケージである理由。** core が同梱するのはファイルから読む開発用のユーザーアダプターだけで、本番のデプロイはユーザーを自前のサービスに持ち、これはそのためのクライアントである。差し替え可能な部品 — 独自の `UserRepository` 実装を持つデプロイはこれをインストールしない — であり、core 以外の何にも依存しない（グローバルの `fetch` のみで、他の依存は無い）。
 
 ## インストール
 
 ```sh
-npm install @o3co/auth-provider-foundation
-# peer dependency（必須）:
-npm install @o3co/auth-provider-core
+npm install @o3co/auth-provider-foundation @o3co/auth-provider-core
 ```
 
-## パブリック API
-
-### `registerBuiltinAdapters`
-
-`"http"` アダプター型を、指定された `userFactory` に登録する。
-
-```typescript
-function registerBuiltinAdapters(factories: {
-  userFactory: AdapterFactory<UserRepository>;
-}): void;
-```
-
-Redis を使った認可コードストレージが必要な場合は、`@o3co/auth-provider-redis` の builder を直接登録する:
-
-```typescript
-import { redisCodeRepositoryBuilder } from "@o3co/auth-provider-redis";
-codeFactory.register("redis", redisCodeRepositoryBuilder);
-```
-
-### `HttpUserRepository`
-
-上流の HTTP サービスに認証処理を委譲する `UserRepository` 実装。
-
-```typescript
-class HttpUserRepository implements UserRepository {
-  constructor(options: {
-    authenticateUrl: string;        // ユーザー名・パスワード認証用の POST エンドポイント
-    authenticateByTokenUrl: string; // トークン認証用の POST エンドポイント
-    timeout: number;                // リクエストタイムアウト（ミリ秒）
-    maxResponseBytes?: number;      // レスポンスボディの上限、デフォルト 1 MiB
-  });
-
-  // authenticateUrl に対して { email, password } を POST
-  authenticate(username: string, password: string): Promise<User | null>;
-
-  // authenticateByTokenUrl に対して { token } を POST
-  authenticateByToken(token: string): Promise<User | null>;
-}
-```
-
-- HTTP 401 または 403 の場合は `null` を返す。
-- その他の非 OK ステータスの場合はエラーをスローする。
-- 上流が 2xx で `User`（`{ id: string, username: string, … }`）以外の JSON を返した場合もスローする — 「ユーザーが見つからない」ではなく「上流が壊れている」ケースのため。
-
-### コンストラクタでの検証
-
-すべてのオプションは**コンストラクタ**で検証される。設定を誤ったデプロイは最初のログイン時ではなく起動時に失敗する。
-
-**両方の URL は `https://` でなければならない。** これらは平文のユーザー資格情報（`authenticateUrl` にはパスワード、`authenticateByTokenUrl` にはトークン）を運ぶため、`http://` は接続を弱めるだけでなく、経路上のすべてのホップに資格情報を公開する。
-
-**唯一の例外は loopback。** ホストが `localhost`、`127.0.0.0/8` 内のアドレス、`[::1]` のいずれかであれば `http://` を許可する。この通信はマシンの外に出ないため、ローカル開発およびインプロセスのテストフィクスチャは証明書を必要としない。それ以外のホストは**プライベートレンジのアドレスやコンテナネットワークのサービス名を含めて** `https://` が必須（`http://10.0.0.5/…`、`http://user-service/…` は拒否される）。これらはデプロイが端から端まで制御していないネットワークを越えるものであり、「内部」は「暗号化済み」の同義語ではない。URL に資格情報を埋め込んだもの（`https://user:pass@…`）も拒否する。
-
-これは [`@o3co/auth-provider-core`](../core/README.ja.md) の `oauth.jwt.issuer` と同じルールで、例外の範囲を `127.0.0.1` 単一アドレスから `127.0.0.0/8` ブロック全体へ広げ、クエリ文字列を許可している（issuer は持てないが、POST エンドポイントは正当に持ちうる）。
-
-**`timeout` は `2147483647` ミリ秒以下の正の整数でなければならない。** `0`・負数・`NaN` は `setTimeout` ではいずれも「即時発火」に丸められ（＝すべてのリクエストが中断される）、Node のタイマー範囲を超える値は 1ms に丸められるため、「長めに待つ」つもりの設定が最短のタイムアウトになってしまう。デッドラインは**ボディ読み取りを含む**やり取り全体に適用される。ボディ読み取りは abort signal 頼みではなくデッドラインとの race で打ち切る — 実行中の `read()` は abort では確実に中断されないため。これはヘッダだけ即座に返してボディを止める slow-loris の形であり、race がなければ永久にハングする。超過したリクエストはエンドポイント名を含む `timed out after <n>ms` エラーで reject される。
-
-**`maxResponseBytes` は正の整数でなければならない。** デフォルトは `DEFAULT_MAX_RESPONSE_BYTES`（1 MiB）。上限は `Content-Length` に対してもストリーム読み取り中にも適用されるため、ヘッダを省略する（あるいは偽る）上流も途中で打ち切られ、メモリを食い潰すことはできない。
+`@o3co/auth-provider-core` は peer dependency。
 
 ## 使い方
 
@@ -89,8 +46,103 @@ const userRepo = await userFactory.create({
 });
 ```
 
+`registerBuiltinAdapters`（[`src/index.mts`](src/index.mts)）は `UserRepository` のファクトリーに `"http"` 型を登録する。そのビルダーは下のキーを読み、`timeout` が無ければ 5000 ms、`maxResponseBytes` が無ければ `DEFAULT_MAX_RESPONSE_BYTES`（1 MiB）をデフォルトにし、文字列で与えられた数値（環境変数による上書き）も受け付ける。`HttpUserRepository`（[`src/repositories/HttpUserRepository.mts`](src/repositories/HttpUserRepository.mts)）は同じオプションで直接構築することもできる。その場合 `timeout` は必須で、5000 ms のデフォルトはビルダーのものである。
+
+### 設定
+
+`repositories.user`（`type = "http"`、`CLIENT_USER_TYPE`）の `http` ブロックの下。デフォルト値は [`reference.conf`](../core/config/reference.conf) にある:
+
+| キー | 環境変数 | |
+| --- | --- | --- |
+| `authenticateUrl` | `CLIENT_USER_AUTHENTICATE_URL` | 必須。パスワードログイン。 |
+| `authenticateByTokenUrl` | `CLIENT_USER_AUTHENTICATE_BY_TOKEN_URL` | 必須。不透明なハンドルを解決する: フェデレーションログイン、jwt-bearer グラント。 |
+| `linkFederatedIdentityUrl` | `CLIENT_USER_LINK_FEDERATED_IDENTITY_URL` | 任意。アカウントリンクを有効にする。 |
+| `findSubjectByFederatedIdentityUrl` | `CLIENT_USER_FIND_SUBJECT_BY_FEDERATED_IDENTITY_URL` | 任意。ID の照会。 |
+| `federatedIdentityLookupCoverage` | —（リストなので HOCON のみ） | 照会がカバーする範囲。デフォルト `[]`。 |
+| `timeout` | `CLIENT_USER_TIMEOUT` | ミリ秒。デフォルト 5000。 |
+| `maxResponseBytes` | `CLIENT_USER_MAX_RESPONSE_BYTES` | デフォルト 1048576。 |
+
+## ワイヤ契約
+
+リクエストはすべて JSON ボディの `POST`。Store が返すユーザーは core の [`User`](../core/src/repositories/types.mts)。
+
+**`authenticate`** は `authenticateUrl` に `{ email, password }` を送る（ユーザー名は `email` として届く）。**`authenticateByToken`** は `authenticateByTokenUrl` に `{ token }` を送る。`token` は Store がユーザーに解決する不透明なハンドル — フェデレーションのコールバックからは `<provider>:<sub>`、`oauth` の jwt-bearer グラントからは検証済みアサーションの subject ハンドル。どちらも:
+
+- ボディが JSON の `User`（`{ id: string, username: string, … }`）である `2xx` はそのユーザー。
+- `401` または `403` は `null` — ユーザーが居ない、または資格情報が誤り。
+- `User` でないボディの `2xx` は例外 — 「ユーザーが見つからない」ではなく上流の障害。
+- それ以外のステータスは例外。
+
+`2xx` 以外の応答のボディは、これらでもリンクでも読まずに捨てる。
+
+**`linkFederatedIdentity`** は `linkFederatedIdentityUrl` に `{ userId, provider, sub, token, claims }` を送る: `2xx` の `User` は `{ ok: true, user }`、`401` / `403` は `{ ok: false, reason: "refused" }`、`409` は `{ ok: false, reason: "conflict" }`、それ以外は例外。拒否のボディは読まれないので、拒否が Store からの説明を運ぶことはない。`linkFederatedIdentityUrl` が設定されていなければこのメソッドは存在せず、フェデレーションのルートはそれで `?link=1` を最初から拒否すると分かる。`2xx` を返す前に Store が検査すべきこと — 未検証やリレーのアドレスでは決してリンクしない、メールアドレスだけで決してリンクしない — は [セッションパッケージの README](../session/README.ja.md#フェデレーション間のアカウントリンク482) にある。
+
+#### ID の照会（#613）
+
+federation grants のデプロイ（`@o3co/auth-provider-federation-grants`、ADR の [D7](../core/docs/adr/2026-09-17-federation-grants-offline-delegation.md#d7--the-connect-flow-binds-its-callback-and-refuses-on-any-mismatch) にある接続コールバックの check 5）が Store に尋ねること: 上流の ID を誰が持っているか。アカウントが別のローカルユーザーのものなら委任を拒否するためである。Store は、その ID が通ってきた登録だけでなく、その IdP の **すべての** 登録にまたがる所有について答える — ログインはユーザーがサインインしたフェデレーションの下でリンクされ、`sub` がアプリ登録ごとのペアワイズである IdP（Entra がそう）は同じ人物に登録ごとに別の `sub` を与える。grants 用の独立した登録（ADR の [D19](../core/docs/adr/2026-09-17-federation-grants-offline-delegation.md#d19--entra-on-behalf-of-is-not-implemented-and-consent-accumulates)）にとってそれが意味するのは: `unlinked` と正直に答えるには、Store は検証済みの `(tid, oid)` を、該当テナントについて完全な権威あるディレクトリと、登録をまたがるすべてのローカル所有リンクに対して解決しなければならない。部分的なディレクトリで一致が無い場合や見知らぬ ID は `identity_not_resolvable`、異なるローカル所有者が複数居るのはサーバーエラー。カバレッジを宣言することはその戦略を表明することであり、起動時にリモートのディレクトリの完全性を調べたり証明したりはしない。
+
+リクエストは `POST findSubjectByFederatedIdentityUrl` で、ボディは
+
+```json
+{ "provider": "entra-files", "issuer": "https://login.microsoftonline.com/<tenant>/v2.0",
+  "clientId": "<the grants app registration>", "sub": "<verified sub>",
+  "claims": { "tid": "<verified>", "oid": "<verified>" } }
+```
+
+— connection の設定どおりの登録、検証済みの `sub`、そして connection の `identityClaims` が名指したすべてのクレーム（id_token からの検証済みのもの。何も名指さなければ `{}`）。Store はそれらのクレームをログに出したり、保存したり、応答に含めたりしてはならない — core の [`FederatedIdentityLookup`](../core/src/repositories/UserRepository.mts) はそれらを一時的なものと定めている。照会は何も変えてはならない: ログインの記録も、リンクも、ユーザーの作成もしない。応答は `2xx` の JSON ボディで、次のいずれか
+
+| ボディ | 意味 |
+|---|---|
+| `{ "kind": "linked", "subject": "<local User.id>" }` | ちょうど一人のローカルユーザーが持っている。`subject` はそのユーザーの `id` と **バイト単位で同一** — コールバックはそれをサインイン中のユーザーの `sub` と完全一致で比較するので、パディングやその他の正規化をした id は別ユーザーのものと読まれる |
+| `{ "kind": "unlinked" }` | **完全な** 解決で誰も見つからなかった |
+| `{ "kind": "indeterminate", "reason": "registration_not_covered" }` | この登録に戦略が無い |
+| `{ "kind": "indeterminate", "reason": "identity_not_resolvable" }` | 戦略はあるが、この ID はその中に無い |
+
+それ以外のフィールドは無視する。**それ以外はすべて障害であり、決して「誰でもない」ではない**: `2xx` 以外のあらゆるステータス — `404`、`401`、`403`、`409`、`5xx` — 、空または四つのどれでもないボディの `2xx`、リダイレクト（決して追わない: ボディは検証済みの ID を運ぶ）、タイムアウト、上限を超えるボディはすべて例外になり、コールバックは `temporarily_unavailable` を返す。異なるローカル所有者が複数居る場合は Store が `500` を返す。例外が示すのはエンドポイント — そしてステータスのある応答ならそのステータス — であり、ボディ、ID、ステータステキスト、根底の原因は決して含めない。
+
+**カバレッジ。** grants モジュールが起動時に尋ねる probe は同期的で Store に届かないので、`federatedIdentityLookupCoverage` が Store の照会のカバー範囲を中継する: 登録ごとに一つのエントリー `{ provider, issuer, clientId, requiredClaims }` で、四つのフィールドすべてを完全一致で比較し（トリムなし、大文字小文字の畳み込みなし、末尾スラッシュの許容なし）、`requiredClaims` は戦略が必要とするクレーム名 — 登録と `sub` だけで足りる戦略なら `[]`。`supportsFederatedIdentityLookup(registration, identityClaims)` は、登録と一致するエントリーがあり、その `requiredClaims` のすべてが `identityClaims` に含まれるとき `true`。federation grants が有効で connection が一つ以上あり、`federationGrants.identityLookup` が `"required"`（デフォルト）のとき、grants モジュールはこれが `false` になる connection をすべて起動時に拒否する。`"unsupported"` のとき、または connection が無いときは何も求めない。誰も宣言していない登録はローカルで `registration_not_covered` と答え、宣言済みの登録で必要なクレームが欠けていれば `identity_not_resolvable` と答え、どちらもリクエストは送らない。宣言は構築時にスナップショットされ、重複した登録、不正なエントリー、URL の無いカバレッジは構築エラーになる。`federationGrants.connections` と同じく環境変数の形は無い（リストは HOCON のもの）。`findSubjectByFederatedIdentityUrl` が設定されていなければ `supportsFederatedIdentityLookup` と `findSubjectByFederatedIdentity` は存在せず、そのうえで `"required"` の下に connection を持つデプロイは起動時に拒否される。
+
+## Store が自分で守るべきこと
+
+- **誰が呼べるか。** `HttpUserRepository` は自分の資格情報を何も送らない: 各リクエストが持つのは `Content-Type: application/json` だけで、ヘッダーを足すオプションも無く、`user:password@` を含む URL は拒否される。`authenticateByToken` と紐付けが運ぶものも秘密ではない — フェデレーションのコールバックの `<provider>:<sub>` は識別子である。したがって `authenticateByTokenUrl` に届く者は誰でも既知の ID をそのユーザーに解決でき、開いた `linkFederatedIdentityUrl` に届く者は誰でも任意の ID を任意の `userId` に結びつけられる。これらの呼び出しは auth.provider からだけ受け付ける: ネットワークポリシーやプライベートネットワーク、または Store の前段でプラットフォームが提供する相互 TLS で。
+- **URL に秘密を入れない。** クエリ文字列のトークンは秘密のままではいられない: このアダプターが投げるエラーは URL 全体を示し、セッションルートはそれをログに出す。
+- **リダイレクトせずに応答する。** ID の照会はリダイレクトを決して追わない。他の三つのリクエストは追い（`fetch` のデフォルト）、`307` や `308` はボディ — パスワードを含む — を `Location` へ送り直し、下の `https` の規則はその行き先を検査しない。各 URL には、リダイレクトするエンドポイントではなく応答するエンドポイントを設定する。
+
+## コンストラクタでの検証
+
+すべてのオプションは **コンストラクタ** で検証されるので、設定を誤ったデプロイは最初のログイン試行ではなく起動時に失敗する。
+
+**すべての URL は `https://` でなければならない**（リンクと照会のエンドポイントも含む）。これらは平文のユーザー資格情報 — `authenticateUrl` にはパスワード、`authenticateByTokenUrl` にはトークン、`findSubjectByFederatedIdentityUrl` には検証済みの上流 ID — を運ぶので、`http://` の URL は接続を弱めるだけでなく、経路上のすべてのホップに資格情報を公開する。
+
+**唯一の例外はループバック:** ホストが `localhost`、`127.0.0.0/8` 内のアドレス、`[::1]` のいずれかなら `http://` を受け付ける。その通信はマシンの外に出ないので、ローカル開発とプロセス内のテストフィクスチャに証明書は要らない。それ以外のホストは **プライベートレンジのアドレスやコンテナネットワークのサービス名も含めて** `https://` が必須（`http://10.0.0.5/…`、`http://user-service/…` は拒否される）: それらはデプロイが端から端まで制御していないネットワークを越えるものであり、「内部」は「暗号化済み」の同義語ではない。資格情報を埋め込んだ URL（`https://user:pass@…`）も拒否する。
+
+これは [`@o3co/auth-provider-core`](../core/README.ja.md) の `oauth.jwt.issuer` が適用するのと同じ規則で、例外を単一アドレス `127.0.0.1` から `127.0.0.0/8` ブロック全体に広げ、クエリ文字列を許している（issuer は持てないが、POST のエンドポイントは正当に持ちうる）。
+
+**`timeout` は `2147483647` ミリ秒以下の正の整数でなければならない。** `0`・負数・`NaN` は `setTimeout` ではいずれも「即時発火」に丸められ — すべてのリクエストが中断される — 、Node のタイマー範囲を超える値は 1ms に丸められるので、「気長に待つ」つもりの設定が最もせっかちな設定になる。空の環境変数による上書きはデフォルトにはならず起動失敗になる。期限は **ボディの読み取りを含む** やり取り全体に掛かる: ボディの読み取りは abort signal に頼らず期限と競わせる。リクエストの中断は進行中の読み取りを確実には止めないからである。これは slow-loris の形 — ヘッダーはすぐ届き、ボディが少しずつ届くか止まる — で、競わせなければ永久にハングする。期限を超えたリクエストは、エンドポイントを示す `timed out after <n>ms` のエラーで reject される。
+
+**`maxResponseBytes` は正の整数でなければならず**、デフォルトは `DEFAULT_MAX_RESPONSE_BYTES`（1 MiB）。上限は `Content-Length` に対しても、ストリーム読み取り中にも適用されるので、ヘッダーを省く — あるいは偽る — Store も、メモリを使い果たす前に打ち切られる。
+
+## パブリック API
+
+[`src/index.mts`](src/index.mts) から export される:
+
+- `registerBuiltinAdapters({ userFactory })` — `"http"` 型を登録する。
+- `HttpUserRepository` — リポジトリ（[`src/repositories/HttpUserRepository.mts`](src/repositories/HttpUserRepository.mts)）。
+- `DEFAULT_MAX_RESPONSE_BYTES` — レスポンス上限のデフォルト。
+- `FederatedIdentityLookupCoverage` — カバレッジのエントリー一つの型。
+
+## テスト
+
+| テストファイル | 固定するもの |
+| --- | --- |
+| [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | 認証とその応答、`User` の形の検査、https の規則、タイムアウトとレスポンス上限、リンク、ID の照会の有無・probe・ワイヤ |
+| [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | 実際の HTTP サーバーに対する ID の照会 |
+| [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | `"http"` のビルダー、そのデフォルトと文字列の変換、組み立て時に拒否される設定 |
+| [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | https またはループバックの規則 |
+
 ## 関連
 
-- [`@o3co/auth-provider-core`](../core/README.ja.md) — コアインターフェース（`UserRepository`、`CodeRepository`、`AdapterFactory`、`createAdapterFactory`、`BuilderContext`、`PathResolver`）
-- [`@o3co/auth-provider-redis`](../redis/README.ja.md) — Redis バックエンドのアダプター群（challenges、replay-seen-set、refresh-token-family、user-sessions、federation-tokens、**code-repository**、rate-limiter）
-- [auth.provider](../../README.md) — リポジトリ全体のドキュメント
+- [`@o3co/auth-provider-core`](../core/README.ja.md) — `UserRepository` ポート、`createRepositoryFactories`、開発用ユーザーアダプター
+- [`@o3co/auth-provider-session`](../session/README.ja.md) — `authenticate`・`authenticateByToken`・`linkFederatedIdentity` を呼ぶルート
+- [`@o3co/auth-provider-federation-grants`](../federation-grants/README.md) — ID の照会の呼び出し元
+- [auth.provider](../../README.ja.md) — リポジトリ全体のドキュメント

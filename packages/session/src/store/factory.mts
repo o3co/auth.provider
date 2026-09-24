@@ -45,8 +45,11 @@ export function createSessionStoreFactory(ctx?: BuilderContext): SessionStoreFac
  * - `"memory"` — returns `undefined`; express-session falls back to its default
  *   in-memory store.
  * - `"redis"` — constructs a `connect-redis` RedisStore backed by a `redis` client
- *   (URL + optional password). The builder uses dynamic `import(...)` so consumers
- *   that only want the memory adapter don't pay the redis load cost.
+ *   (URL + optional password). The builder uses dynamic `import(...)`, so a
+ *   process on the memory adapter never loads the two modules. It does not
+ *   save installing them: `connect-redis` and `redis` are hard `dependencies`
+ *   of this package, so every install of it pulls both — including one made
+ *   only because a federation adapter names this package as a peer.
  *
  * The redis builder forwards the BuilderContext supplied at adapter-create time
  * (via `createSessionStoreFactory(ctx)`) so it can register `client.quit()` on

@@ -1,16 +1,54 @@
 # @o3co/auth-provider-federation-github
 
-GitHub federation provider for `auth.provider`.
+Last updated: 2026-09-24
+
+GitHub federation provider for `auth.provider`: sign-in with a GitHub account
+through a GitHub OAuth App, with upstream logout and claim mapping.
+
+## Responsibility
+
+**Role.** An adapter: it implements core's federation contract
+([`core/src/federations`](../core/src/federations/README.md)) for GitHub, and
+`githubFederationModule` contributes it to the session router as the federation
+`github`, with its redirect policy.
+
+**Owns:** GitHub's endpoints, how a GitHub user becomes a profile (the `sub`, the
+e-mail choice, the scope translation), and the logout URL.
+
+**Does not own:** the contract (core); the routes, `state` / PKCE verifier
+generation, the redirect-allowlist rules and claim precedence
+([`@o3co/auth-provider-session`](../session/README.md)); who the user is (the
+Store); the logout routes that call this adapter
+([`@o3co/auth-provider-oauth`](../oauth/README.md)).
+
+**Why a separate package.** Each adapter is its own package so that a deployment
+installs only the IdPs it uses, and `openid-client` only with an adapter.
+GitHub OAuth Apps are not OpenID Connect — no id_token, no `nonce`, a numeric
+user `id` instead of `sub`, a comma-delimited `scope`, and the e-mail address behind a separate API —
+so [`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md), which
+requires `openid` and an id_token, cannot stand in for it.
+
+## Install
+
+```sh
+npm install @o3co/auth-provider-federation-github
+```
+
+Peer dependencies: `@o3co/auth-provider-core` and
+`@o3co/auth-provider-session`. `openid-client` is installed with it.
 
 ## Usage
 
 Add `githubFederationModule` to the manifest list passed to `createApp`. A small
-config-bootstrap module supplies the typed `githubFederationConfig` slot (per
-A5 §10.1 const-Module pattern).
+config-bootstrap module supplies the typed `githubFederationConfig` slot:
 
 ```ts
 import { createApp, defineModule } from "@o3co/auth-provider-core";
-import { extractFederationSection, sessionModule } from "@o3co/auth-provider-session";
+import {
+  extractFederationSection,
+  sessionModule,
+  sessionStoreModuleFor,
+} from "@o3co/auth-provider-session";
 import {
   githubFederationModule,
   type GithubProviderConfig,
@@ -22,11 +60,17 @@ const githubConfigBridgeModule = defineModule({
   provides: {
     githubFederationConfig: (deps): GithubProviderConfig => {
       const slice = extractFederationSection(deps.config.federations, "github");
-      if (!slice) throw new Error("federations.github must be enabled");
+      if (slice?.type !== "github") throw new Error("federations.github must be enabled, with type github");
       return {
         clientId: slice.clientId as string,
         clientSecret: slice.clientSecret as string,
         callbackURL: slice.callbackURL as string,
+        // The redirect policy is built from this same object: a redirect
+        // field left out here is one the policy never sees.
+        redirectAllowlist: slice.redirectAllowlist as readonly string[] | undefined,
+        sessionDomain: slice.sessionDomain as string | undefined,
+        authCallbackUrl: slice.authCallbackUrl as string | undefined,
+        clientUrl: slice.clientUrl as string | undefined,
       };
     },
   },
@@ -34,23 +78,102 @@ const githubConfigBridgeModule = defineModule({
 
 const handle = await createApp({
   modules: [
+    sessionStoreModuleFor(config),
     sessionModule,
     githubFederationModule,
     githubConfigBridgeModule,
-    // ... composition-root modules supplying userRepository + four-store split
+    // ... composition-root modules supplying userRepository and the session stores
   ],
   bootstrapComponents: { config, pathResolver },
 });
 ```
 
-v0.5.0 is single-tenant: `provider.name` is fixed at `"github"`. Multi-tenant
-setups (multiple GitHub apps in one provider) are deferred post-publish.
+Single-tenant: `provider.name` is fixed at `"github"`, so the federation is
+`federations.github`, the identity handed to the Store is `github:<id>`, and a
+deployment has one GitHub client. The config fields are
+[`GithubProviderConfig`](src/github.mts). The four redirect fields
+(`redirectAllowlist`, `sessionDomain`, `authCallbackUrl`, `clientUrl`) follow the
+[session package's redirect rules](../session/README.md#redirect-allowlists),
+and they reach the redirect policy only through this slot. **Set `clientUrl`:**
+a login whose start carried no `redirect_to` lands there, and without it the
+callback answers `500 misconfiguration` after the session has been saved; a
+start that carries `redirect_to` needs an allowlist entry for it and
+`authCallbackUrl` as well. A bridge that forwards the credentials alone
+therefore ends every such login on a `500` instead of in the app. The bridge above does not forward the other
+optional fields (`endSessionEndpoint`); forward them if the deployment sets them. It
+reads the section only when its `type` is `github` (the default for a section
+named `github`), as the standalone template does for Google (in `buildModules.mts`), so a `type = "oidc"` section
+under that name is not read as this adapter's. It casts; a production bridge
+checks each field's type, as the template's Google bridge
+(`googleFederationConfigModule` in
+[`templates/standalone/src/modules.mts`](../../templates/standalone/src/modules.mts)) does.
+`createGithubProvider` throws at boot when `clientId`, `clientSecret` or
+`callbackURL` is missing.
+
+## What a login does
+
+- **Authorization request:** scope `read:user user:email` and PKCE S256. The
+  `nonce` the session router mints is ignored — GitHub issues no id_token to bind
+  it to.
+- **Code exchange:** at GitHub's token endpoint, the client secret in the
+  request body (`client_secret_post`, `openid-client`'s default), with the PKCE
+  verifier.
+- **The callback's `iss` is not checked.** GitHub advertises RFC 9207 and names
+  its issuer `https://github.com/login/oauth`, while this adapter configures its
+  library with `https://github.com` (the profile's `issuer` label); forwarding
+  `iss` would refuse every login, so the exchange URL is built from `code` alone.
+  Configuring the library with GitHub's own issuer and then comparing `iss` is
+  [#598](https://github.com/o3co/auth.provider/issues/598).
+- **The user** is `GET https://api.github.com/user`, with no subject binding
+  (there is no id_token `sub` to bind to). A user object with neither `sub` nor
+  `id` is refused.
+- **The e-mail** always comes from `GET /user/emails`, never from `/user`: the
+  primary verified address, else the first verified one, else none. A failed
+  `/user/emails` request is read as "no address" and does not fail the login.
+
+What `exchangeCode` returns:
+
+| Field | Value |
+| --- | --- |
+| `issuer` | `https://github.com` |
+| `sub` | a non-empty string `sub` when the user object carries one; otherwise its `id` — a number as a string, or a non-empty string as it is |
+| `email`, `emailVerified` | the chosen address and `true`, or both absent |
+| `name` | `/user`'s `name`, when a string |
+| `picture` | `/user`'s `avatar_url`, when a string |
+| `accessToken` | as GitHub issued it |
+| `refreshToken` | always absent |
+| `scope` | GitHub's comma-delimited `scope` rewritten as the space-delimited list the rest of the system reads (RFC 6749 §3.3); absent when GitHub sent none. A `scope` that is not a string is refused by `openid-client` before the adapter sees it, and the login answers `502 exchange_failed` |
+| `expiresAt` | now + `expires_in` when GitHub sends one; **`null` when it does not** (OAuth App tokens), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
+| `idToken`, `expiresIn`, `tokenType` | not returned |
+
+`mapClaims` maps `email`, `emailVerified`, `name` and `picture`; the session
+package promotes only `email`, `name` and `picture`, and only where the local
+record is silent.
+
+## Refresh and logout
+
+- **No refresh.** The provider does not implement `SupportsRefresh`, so `oauth`'s
+  federation token route cannot refresh a GitHub token.
+- **`endSession()`** (`SupportsLogout`, called by `oauth`'s logout routes): with
+  `endSessionEndpoint` configured, that URL with `id_token_hint`,
+  `post_logout_redirect_uri` and `state`; otherwise `postLogoutRedirectUri`, and without one
+  `https://github.com/logout`, with `state`. An unparsable URL throws.
 
 ## Public API
 
-- `githubFederationModule` — const Module contributing `federations.github` +
-  `federationRedirectPolicies.github`
-- `createGithubProvider(config: GithubProviderConfig): GithubProvider` —
-  pure constructor
-- `GithubProviderConfig`, `GithubProvider` — types
-- `githubFederationConfig` — declared ComponentMap slot for the config bridge
+Defined in [`src/github.mts`](src/github.mts), exported from
+[`src/index.mts`](src/index.mts):
+
+- `githubFederationModule` — const Module contributing `federations.github` and
+  `federationRedirectPolicies.github`; requires `githubFederationConfig`.
+- `createGithubProvider(config)` — the provider.
+- `GithubProviderConfig`, `GithubProvider` — types.
+- `githubFederationConfig` — the `ComponentMap` slot the module requires,
+  declared by module augmentation (not an export).
+
+## Tests
+
+| Test file | Pins |
+| --- | --- |
+| [`github.test.mts`](src/__tests__/github.test.mts) | against a stubbed `openid-client`: the authorization request, the exchange URL without `iss`, the `sub`, e-mail and scope rules, `expiresAt: null`, no refresh, `mapClaims` and `endSession` |
+| [`github-module.test.mts`](src/__tests__/github-module.test.mts), [`github-module-boot.test.mts`](src/__tests__/github-module-boot.test.mts) | the module's contributions and boot with the session module |

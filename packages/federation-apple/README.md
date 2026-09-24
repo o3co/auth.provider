@@ -1,21 +1,79 @@
 # @o3co/auth-provider-federation-apple
 
-Sign in with Apple federation provider for `auth.provider`.
+Last updated: 2026-09-24
 
-An iOS app that offers Google or GitHub login must offer Sign in with Apple as
-well (App Store Review Guideline 4.8), so this is the provider an iOS client of
-this stack needs to ship social login at all.
+Sign in with Apple federation provider for `auth.provider` — Apple's **web**
+flow, in a browser, back to this server.
+
+The package does the web flow only: `clientId` is the Services ID, and the App
+ID — the `client_id` of an iOS app's native Sign in with Apple
+(AuthenticationServices) — goes nowhere in this config, so a code from the
+native flow is not exchanged here. App Store guidelines may require an app that
+offers third-party login to offer an equivalent privacy-preserving login option
+as well; this package is how a deployment of this stack offers Sign in with
+Apple through the browser.
+
+## Responsibility
+
+**Role.** An adapter: it implements core's federation contract
+([`core/src/federations`](../core/src/federations/README.md)) for Sign in with
+Apple, and `appleFederationModule` contributes it to the session router as the
+federation `apple`, with its redirect policy.
+
+**Owns:** Apple's endpoints and issuer (written into the adapter, not
+discovered); the rotating ES256 client secret
+([`src/client-secret.mts`](src/client-secret.mts)); the checks on the return
+URL; how the id_token is verified; and how Apple's claims become a profile —
+`email_verified` and `is_private_email` normalised to booleans, the display
+name read from the first authorization's POST body.
+
+**Does not own:** the contract (core); the routes, the `form_post` callback, the
+federation transaction and its cookie, `state` / PKCE verifier / `nonce`
+generation, the redirect-allowlist rules and claim precedence — all
+[`@o3co/auth-provider-session`](../session/README.md), which drives every
+`form_post` federation the same way; who the user is (the Store); the refresh
+and logout routes that call this adapter
+([`@o3co/auth-provider-oauth`](../oauth/README.md)).
+
+**Why a separate package.** Each adapter is its own package so that a deployment
+installs only the IdPs it uses, and `openid-client` only with an adapter. Why Apple is not a `type = "oidc"` section of
+[`@o3co/auth-provider-federation-oidc`](../federation-oidc/README.md) — five
+things the generic adapter does not do:
+
+1. Apple's scopes are `name` and `email`, without `openid`; the generic adapter
+   refuses a scope list without `openid` at boot.
+2. The client secret is an ES256 JWT this relying party signs and must rotate,
+   sent as `client_secret_post`; the generic adapter authenticates with
+   `client_secret_basic` or `private_key_jwt`.
+3. Apple POSTs the callback, so the provider declares
+   `responseMode: "form_post"`.
+4. The display name arrives only in the first authorization's POST body (`user`),
+   never in the id_token.
+5. The return URL must be `https` and not loopback, which the provider checks at
+   boot.
+
+## Install
+
+```sh
+npm install @o3co/auth-provider-federation-apple
+```
+
+Peer dependencies: `@o3co/auth-provider-core` and
+`@o3co/auth-provider-session`. Its dependencies are `openid-client` and `jose`.
 
 ## Usage
 
 Add `appleFederationModule` to the manifest list passed to `createApp`. A small
-config-bootstrap module supplies the typed `appleFederationConfig` slot (per
-A5 §10.1 const-Module pattern).
+config-bootstrap module supplies the typed `appleFederationConfig` slot:
 
 ```ts
 import { readFileSync } from "node:fs";
 import { createApp, defineModule } from "@o3co/auth-provider-core";
-import { extractFederationSection, sessionModule } from "@o3co/auth-provider-session";
+import {
+  extractFederationSection,
+  sessionModule,
+  sessionStoreModuleFor,
+} from "@o3co/auth-provider-session";
 import {
   appleFederationModule,
   type AppleProviderConfig,
@@ -27,13 +85,19 @@ const appleConfigBridgeModule = defineModule({
   provides: {
     appleFederationConfig: (deps): AppleProviderConfig => {
       const slice = extractFederationSection(deps.config.federations, "apple");
-      if (!slice) throw new Error("federations.apple must be enabled");
+      if (slice?.type !== "apple") throw new Error("federations.apple must be enabled, with type apple");
       return {
         clientId: slice.clientId as string,          // Services ID
         callbackURL: slice.callbackURL as string,    // must be https
         teamId: slice.teamId as string,
         keyId: slice.keyId as string,
         privateKey: readFileSync(slice.privateKeyPath as string, "utf8"),
+        // The redirect policy is built from this same object: a redirect
+        // field left out here is one the policy never sees.
+        redirectAllowlist: slice.redirectAllowlist as readonly string[] | undefined,
+        sessionDomain: slice.sessionDomain as string | undefined,
+        authCallbackUrl: slice.authCallbackUrl as string | undefined,
+        clientUrl: slice.clientUrl as string | undefined,
       };
     },
   },
@@ -41,17 +105,34 @@ const appleConfigBridgeModule = defineModule({
 
 const handle = await createApp({
   modules: [
+    sessionStoreModuleFor(config), // the form_post transaction lives in this store
     sessionModule,
     appleFederationModule,
     appleConfigBridgeModule,
-    // ... composition-root modules supplying userRepository + four-store split
+    // ... composition-root modules supplying userRepository and the session stores
   ],
   bootstrapComponents: { config, pathResolver },
 });
 ```
 
 Single-tenant, as `federation-google` and `federation-github` are:
-`provider.name` is fixed at `"apple"`.
+`provider.name` is fixed at `"apple"`. The config fields are
+[`AppleProviderConfig`](src/apple.mts). The four redirect fields
+(`redirectAllowlist`, `sessionDomain`, `authCallbackUrl`, `clientUrl`) follow the
+[session package's redirect rules](../session/README.md#redirect-allowlists),
+and they reach the redirect policy only through this slot. **Set `clientUrl`:**
+a login whose start carried no `redirect_to` lands there, and without it the
+callback answers `500 misconfiguration` after the session has been saved; a
+start that carries `redirect_to` needs an allowlist entry for it and
+`authCallbackUrl` as well. A bridge that forwards the credentials alone
+therefore ends every such login on a `500` instead of in the app. The bridge above does not forward the other
+optional fields (`endSessionEndpoint`); forward them if the deployment sets them. It
+reads the section only when its `type` is `apple` (the default for a section
+named `apple`), as the standalone template does for Google (in `buildModules.mts`), so a `type = "oidc"` section
+under that name is not read as this adapter's. It casts; a production bridge
+checks each field's type, as the template's Google bridge
+(`googleFederationConfigModule` in
+[`templates/standalone/src/modules.mts`](../../templates/standalone/src/modules.mts)) does.
 
 ## What you need from Apple, and which one goes where
 
@@ -72,15 +153,14 @@ exactly, and Apple imposes two separate rules on it: the scheme must be
 satisfies the first and still fails, as do `https://127.0.0.1/cb`, the rest of
 `127.0.0.0/8`, and `https://[::1]/cb` — so local development needs a tunnel or
 a dev hostname holding a certificate. The provider checks both at
-construction, through the repo's one loopback predicate (`isLoopbackHostname`,
-#364), rather than letting the authorization endpoint answer the first login
-with an opaque `invalid_request`. The value the flow actually sends is held
-to it as well: the session module derives the `redirect_uri` from
-`federations.<name>.callbackURL`, and a request whose derived URL is not the
-configured `callbackURL` is refused before anything reaches Apple (#498) —
-the two are one value in the shipped bridge, and a composition where they
-drift fails at the first request instead of validating one URL and sending
-another.
+construction, through core's loopback predicate (`isLoopbackHostname`), rather
+than letting the authorization endpoint answer the first login with an opaque
+`invalid_request`. The value the flow actually sends is held to it as well: the
+session module derives the `redirect_uri` from `federations.<name>.callbackURL`,
+and a request whose derived URL is not the configured `callbackURL` is refused
+before anything reaches Apple — the two are one value in the bridge above, and
+a composition where they drift fails at the first request instead of validating
+one URL and sending another.
 
 ## The rotating client secret
 
@@ -105,20 +185,23 @@ the cache untouched. The key is imported once per distinct key material: when
 `privateKey` reads differently from what the held key was imported from — a
 repaired mount, or a leaked `.p8` revoked and replaced — the key is
 re-imported and the cached secret dropped on the next request, without a
-restart (#498). A signature still in progress under the old key is neither
-handed to a caller that arrives after the rotation nor kept once it
-completes. That works through whatever you passed as `privateKey`, to
-`createAppleProvider` as much as to `createAppleClientSecret`: the option is
-read at every token exchange, not copied at construction, so a getter or a
-re-read file is enough.
+restart. A signature still in progress under the old key is neither handed to a
+caller that arrives after the rotation nor kept once it completes. That works
+through whatever you passed as `privateKey`, to `createAppleProvider` as much as
+to `createAppleClientSecret`: the option is read at every token exchange, not
+copied at construction. The bridge above reads the file once, at boot; to pick
+up a replaced key without a restart, make `privateKey` a getter that re-reads
+it — `get privateKey() { return readFileSync(path, "utf8"); }` — which then
+runs on every token exchange.
 
 If you already produce the secret elsewhere, pass `clientSecret` instead —
-either a string or a resolver (`() => string | Promise<string>`), the widened
-`FederationClientSecret` form the session package resolves per token exchange.
-Supply **one** of the two: both is ambiguous and neither is unconfigured, and
-either fails at boot.
+either a string or a resolver (`() => string | Promise<string>`), the
+`FederationClientSecret` form, which this adapter resolves with the session
+package's `resolveClientSecret` on every token request. Supply **one** of the two: both is ambiguous and neither is
+unconfigured, and either fails at boot.
 
 ```ts
+import { readFileSync } from "node:fs";
 import { createAppleClientSecret } from "@o3co/auth-provider-federation-apple";
 
 const clientSecret = createAppleClientSecret({
@@ -135,105 +218,31 @@ Whenever the requested `scope` includes `name` or `email` — which this
 provider's always does — Apple does **not** redirect back with query
 parameters. It POSTs an `application/x-www-form-urlencoded` body to the
 callback, because the first-authorization `user` field does not fit a redirect
-URL.
+URL. The provider declares `responseMode: "form_post"`, and the session router
+does the rest: `response_mode=form_post` on the authorization request,
+`POST /session/oauth/federation/apple/callback` (a GET there is
+`405 method_not_allowed`), and the flow's `state`, PKCE verifier, nonce and
+post-login redirect held in a federation transaction — a record in the session
+store and a dedicated `HttpOnly; Secure; SameSite=None` cookie path-scoped to
+the callback — instead of in the session. **The start leg does not modify the
+application session cookie**, for the browser doing the Apple login or anyone
+else; the callback, as for any login, regenerates the session with the cookie
+attributes the deployment configured.
 
-An RFC 9207 `iss` in that body is compared with `https://appleid.apple.com`
-before the code is spent, and another issuer's is refused
-([#597](https://github.com/o3co/auth.provider/issues/597)). None is required:
-Apple's discovery document does not advertise
+How the transaction is bound, spent and single-used is the session package's —
+see [Response modes](../session/README.md#response-modes-query-and-form_post) —
+and so is the one thing to settle before deploying:
+**[every host on the auth host's registrable domain is inside the trust boundary](../session/README.md#every-host-on-the-auth-hosts-registrable-domain-is-inside-the-trust-boundary)**.
+The transaction cookie is `__Secure-`, not `__Host-`, so any host under the same
+registrable domain (any `*.example.com` for `auth.example.com`) can plant one
+and log a victim's browser into the attacker's own Apple account. Run no
+untrusted content on any of those hosts; `session.domain = null` protects the
+session cookie, not this one.
+
+An RFC 9207 `iss` in the posted body is compared with
+`https://appleid.apple.com` before the code is spent, and another issuer's is
+refused. None is required: Apple's discovery document does not advertise
 `authorization_response_iss_parameter_supported`.
-
-The provider declares `responseMode: "form_post"`, and the session router does
-the rest: it appends `response_mode=form_post` to the authorization request,
-mounts `POST /session/oauth/federation/apple/callback` with the same state /
-CSRF / PKCE / nonce binding as the GET callback, and carries the flow's
-ephemeral state in a **federation transaction** rather than in the session.
-
-The GET on that path answers `405 method_not_allowed` with `Allow: POST`, the
-mirror of the `405` a query federation answers to a POST. Apple only ever posts
-here, and the transaction cookie below is offered to *every* cross-site request
-that reaches the path, so refusing the method before the cookie is read is what
-keeps a third party's `<img src="…/callback">` from touching the flow
-([#502](https://github.com/o3co/auth.provider/issues/502)).
-
-That last one is the part worth knowing about before deploying. The callback is
-a **cross-site POST** from `appleid.apple.com`, and a `SameSite=Lax` cookie is
-not sent on one — a callback relying on the session cookie would arrive with no
-session, no `state` to compare against and no PKCE verifier. So the start leg
-issues a second, dedicated cookie: `HttpOnly; Secure; SameSite=None`,
-path-scoped to `/session/oauth/federation/apple/callback`, expiring in ten
-minutes, and carrying nothing but an opaque id. The `state`, PKCE verifier,
-nonce and post-login redirect are held in the session store under that id.
-
-Both are deleted as soon as a callback **judges** the transaction: on success,
-on a `state` that was compared and did not match, and on a transaction id that
-resolved to no record or to another provider's. What does *not* spend them is a
-callback that judged nothing — one carrying no `state` at all leaves the flow
-intact, which is what stops a cross-site request from cancelling a login in
-progress, and a GET is refused with `405` before the cookie is read.
-
-The single use that buys you is sequential: a callback arriving after an
-earlier one completed is refused. Two callbacks that *overlap* can both get
-past the record, because retiring it is a read and then a delete over an API
-with no compare-and-delete; what stops them
-becoming two logins is Apple's authorization code, which is itself single-use,
-so at most one exchange succeeds and the rest end in `502 exchange_failed`.
-There is nothing for you to configure either way — it is stated here because
-the alternative is a guarantee you might plan around
-([#502](https://github.com/o3co/auth.provider/issues/502)).
-
-**Your application session cookie is not modified.** Not its `SameSite`, not
-its `Secure` flag, not for the browser doing the Apple login and not for anyone
-else; `session.sameSite` in config is likewise never touched. A deployment
-running Apple beside Google keeps `SameSite=Lax` on every session in it. (Until
-[#494](https://github.com/o3co/auth.provider/issues/494) this was not true: the
-start leg relaxed the session cookie in place, and because express-session
-persists cookie attributes into the store, any third party who caused one
-navigation to the unauthenticated start route downgraded that browser's session
-cookie for good. If you are reading this against an older release, treat that as
-the reason to upgrade.)
-
-`Secure` is on the transaction cookie because browsers drop a `SameSite=None`
-cookie that is not `Secure` — and since Apple already requires an `https`
-return URL, an Apple deployment is HTTPS-only regardless.
-
-### Before you deploy: every host under your cookie domain is inside the trust boundary
-
-The transaction cookie is named `__Secure-…`, not `__Host-`, because `__Host-`
-requires `Path=/` and this cookie is deliberately scoped to the callback path
-alone. `__Host-` is what pins a cookie to exactly one host; `__Secure-` only
-pins it to HTTPS. Your session cookie defaults to `__Host-` and is enforced as
-such at boot, so the transaction cookie is the one place the Apple flow is
-weaker than the session cookie it replaced
-([#502](https://github.com/o3co/auth.provider/issues/502)).
-
-**What an attacker needs:** control of any sibling subdomain of the domain your
-cookies are scoped to — a forgotten staging host, a dangling DNS record, an XSS
-on a lower-trust app next door, a shared-hosting neighbour. They need nothing
-from this deployment: no session, no `state`, no account.
-
-**What it gets them:** from that subdomain they can set the transaction cookie
-— `session.name` with any `__Host-` / `__Secure-` prefix stripped, then
-`__Secure-` and `.federation` applied, so a deployment running the default
-`__Host-auth.session` is looking for `__Secure-auth.session.federation` — with
-`Domain=<your parent domain>` in a victim's browser. They then start their own
-Sign in with Apple flow, plant their own transaction id, and auto-submit their
-own `state` and `code` to your callback. The victim's browser ends up logged into the **attacker's** Apple
-account, and whatever the victim does next is recorded against it. It does not
-read the victim's session, expose credentials, or reach the victim's own
-account — this buys identity confusion, not account takeover.
-
-Signing the cookie would not close it: the attacker's transaction is genuinely
-theirs, so anything the server would accept as its own issuance is something
-they legitimately hold. The property is inherent to a path-scoped cookie.
-
-**What to do about it:** treat every host under your cookie domain as part of
-this deployment. Keep `session.domain = null` (the `__Host-` default), and do
-not run untrusted or lower-trust content on a subdomain of the domain the auth
-cookies live under. That is the same rule the session package's signed CSRF
-token exists to survive on the login routes; here there is no session to bind
-to, because the callback is a cross-site POST that a session cookie does not
-accompany, so the rule is the whole mitigation.
 
 ## Claims
 
@@ -246,7 +255,7 @@ both fail closed without one.
   boolean. This matters more than it looks: `Boolean("false")` is `true`, so a
   coercion would report an unverified address as verified. A claim that is
   neither a boolean nor `"true"` / `"false"` reads as absent, because absence is
-  not `false` (#297).
+  not `false`.
 - **`is_private_email` marks a Hide My Email relay address**
   (`…@privaterelay.appleid.com`) and is surfaced as `isPrivateEmail` so a
   deployment can decide about it — it is namespaced under
@@ -257,40 +266,79 @@ both fail closed without one.
   only when Apple sends no marker.
 - **The user's name arrives once**, in the POST body's `user` JSON field, on the
   first authorization only — never in the id_token, and never again on a later
-  login. It is mapped to the same `name` claim Google's module produces, so the
-  session package's existing promotion rules apply unchanged: `email` and `name`
-  fill a gap the local record left, and everything else stays under
+  login. It is mapped to the same `name` claim the other adapters produce, so
+  the session package's promotion rules apply unchanged: `email` and `name` fill
+  a gap the local record left, and everything else stays under
   `claims.federated.apple` (see `PROMOTABLE_FEDERATED_CLAIMS`). Persist it on
   first login if you want to keep it.
 - **The `user` body is not signed.** The `state` check binds it to the session
   and binds nothing else, so treat the name as self-asserted — which is exactly
   what claim precedence already assumes of every federated claim.
-- **Each name part is capped** at 128 characters (`APPLE_NAME_PART_MAX_LENGTH`):
+- **Each name part is capped** at 128 UTF-16 code units (`APPLE_NAME_PART_MAX_LENGTH`):
   a longer `firstName` or `lastName` is dropped whole, not truncated, so the
   unsigned body cannot push tens of kilobytes into the claims envelope and the
-  session store (#498).
+  session store. A malformed `user` body yields no name rather than a failed
+  login.
 - **No `picture`.** Apple asserts none.
 
-## Logout
+What `exchangeCode` returns:
 
-Apple publishes no OIDC `end_session_endpoint` — the same situation
-`federation-google` documents, minus Google's fallback, because there is no
-`appleid.apple.com` logout URL to send a browser to. `endSession` therefore
-uses a configured `endSessionEndpoint` if you supply one, otherwise redirects
-to `postLogoutRedirectUri`, and otherwise throws rather than inventing a
-destination. Local session destruction is unaffected.
+| Field | Value |
+| --- | --- |
+| `issuer` | `https://appleid.apple.com` |
+| `sub` | the id_token's `sub` — Apple's stable, team-scoped identifier |
+| `email` | the id_token's `email`, when a string |
+| `emailVerified` | normalised as above |
+| `name` | from the POST body's `user`, first authorization only |
+| `isPrivateEmail` | normalised as above; absent when neither the marker nor an address says |
+| `accessToken`, `idToken`, `refreshToken` | as Apple issued them; `refreshToken` only when Apple sent one |
+| `scope` | Apple's `scope` as sent; absent when Apple sent none (the session router then records the requested scope). A `scope` that is not a string is refused by `openid-client` before the adapter sees it, and the login answers `502 exchange_failed` |
+| `expiresAt` | now + `expires_in`; **3600 seconds is assumed when Apple sends no `expires_in`** |
+| `expiresIn`, `tokenType` | not returned — the session router records no token type, which `oauth` answers as `Bearer` |
+
+`mapClaims` maps `email`, `emailVerified`, `name` and `isPrivateEmail`.
+
+## Refresh and logout
+
+- **`refreshToken()`** (`SupportsRefresh`) runs the `refresh_token` grant with a
+  freshly resolved client secret and returns `accessToken`, `refreshToken` when
+  rotated, `idToken`, `scope` (same parsing rule as above; a non-string `scope` fails the refresh) and `expiresAt` (same
+  3600-second assumption). It returns no `issuer` or `sub` — the caller keeps the
+  stored identity — and no `expiresIn` or `tokenType`.
+- **`endSession()`** (`SupportsLogout`): Apple publishes no
+  `end_session_endpoint`, and unlike Google there is no Apple logout URL to fall
+  back to. With `endSessionEndpoint` configured, that URL with `id_token_hint`,
+  `post_logout_redirect_uri` and `state`; otherwise `postLogoutRedirectUri`
+  with `state`; otherwise it throws rather than inventing a destination. Local
+  session destruction is unaffected.
 
 ## Public API
 
-- `appleFederationModule` — const Module contributing `federations.apple` +
-  `federationRedirectPolicies.apple`
-- `createAppleProvider(config: AppleProviderConfig): AppleProvider` — pure
-  constructor
-- `createAppleClientSecret(options): () => Promise<string>` — the ES256 signer
-- `isPrivateRelayEmail(email): boolean`
-- `APPLE_ISSUER`, `APPLE_AUDIENCE`, `APPLE_PRIVATE_RELAY_DOMAIN`,
-  `APPLE_CLIENT_SECRET_MAX_LIFETIME_SECONDS`,
+Defined in [`src/apple.mts`](src/apple.mts) and
+[`src/client-secret.mts`](src/client-secret.mts), exported from
+[`src/index.mts`](src/index.mts):
+
+- `appleFederationModule` — const Module contributing `federations.apple` and
+  `federationRedirectPolicies.apple`; requires `appleFederationConfig`.
+- `createAppleProvider(config)` — the provider.
+- `createAppleClientSecret(options)` — the ES256 signer, a resolver for
+  `clientSecret`.
+- `isPrivateRelayEmail(email)`.
+- Constants: `APPLE_ISSUER`, `APPLE_AUDIENCE`, `APPLE_PRIVATE_RELAY_DOMAIN`,
+  `APPLE_NAME_PART_MAX_LENGTH`, `APPLE_CLIENT_SECRET_MAX_LIFETIME_SECONDS`,
   `APPLE_CLIENT_SECRET_DEFAULT_LIFETIME_SECONDS`,
-  `APPLE_CLIENT_SECRET_RENEWAL_WINDOW_SECONDS`
-- `AppleProviderConfig`, `AppleProvider`, `AppleClientSecretOptions` — types
-- `appleFederationConfig` — declared ComponentMap slot for the config bridge
+  `APPLE_CLIENT_SECRET_RENEWAL_WINDOW_SECONDS`.
+- Types: `AppleProviderConfig`, `AppleProvider`, `AppleClientSecretOptions`.
+- `appleFederationConfig` — the `ComponentMap` slot the module requires,
+  declared by module augmentation (not an export).
+
+## Tests
+
+| Test file | Pins |
+| --- | --- |
+| [`apple.test.mts`](src/__tests__/apple.test.mts) | construction and its boot refusals, the return-URL rules, the authorization request, the exchange and the profile, refresh, `mapClaims`, `endSession` and `isPrivateRelayEmail` |
+| [`client-secret.test.mts`](src/__tests__/client-secret.test.mts) | the JWT Apple documents, and its caching and rotation |
+| [`apple.signature.test.mts`](src/__tests__/apple.signature.test.mts) | that the id_token's signature is verified against the JWKS |
+| [`apple.issuer-parameter.test.mts`](src/__tests__/apple.issuer-parameter.test.mts) | the RFC 9207 `iss` check |
+| [`claim-precedence.test.mts`](src/__tests__/claim-precedence.test.mts) | Apple's claims under the session package's precedence rules |
+| [`apple-module.test.mts`](src/__tests__/apple-module.test.mts), [`apple-module-boot.test.mts`](src/__tests__/apple-module-boot.test.mts) | the module's contributions and boot with the session module |

@@ -1,14 +1,53 @@
 # @o3co/auth-provider-federation-oidc
 
+Last updated: 2026-09-24
+
 Generic OpenID Connect federation provider for `auth.provider`: any
 OIDC-compliant identity provider — Okta, Entra ID, Auth0, Keycloak, a
 customer's own tenant — from configuration alone, and as many instances as a
-deployment has issuers (#524).
+deployment has issuers.
 
-The `FederationProvider` contract lives in `@o3co/auth-provider-core` (#626 P1); the
-Google, GitHub and Apple packages implement it for one IdP each. This package
-implements it for every IdP that publishes an OpenID Connect discovery
-document, so adding an IdP is a config section, not a package.
+## Responsibility
+
+**Role.** An adapter: it implements core's federation contract
+([`core/src/federations`](../core/src/federations/README.md)) for any OpenID
+Connect IdP — configured from its discovery document, or by hand with
+`discovery = false` — so adding an IdP is a config section, not a package. Each `type = "oidc"` section of `federations` becomes one
+federation, contributed to the session router with its redirect policy. It is
+also the only bundled adapter with `SupportsDelegatedAuthorization`, the
+capability `@o3co/auth-provider-federation-grants` delegates through.
+
+**Owns:** issuer discovery at boot and the refusals that go with it; client
+authentication (`client_secret_basic` or `private_key_jwt`,
+[`src/client-auth.mts`](src/client-auth.mts)); id_token verification, including
+`at_hash` ([`src/at-hash.mts`](src/at-hash.mts)); the UserInfo binding; what a
+profile, a refresh and a delegated exchange contain; and reading `type = "oidc"`
+sections into provider configs ([`src/module.mts`](src/module.mts)).
+
+**Does not own:** the contract (core); the routes, `state` / PKCE verifier /
+`nonce` generation, the redirect-allowlist rules and claim precedence
+([`@o3co/auth-provider-session`](../session/README.md)); who the user is (the
+Store); the refresh and logout routes that call this adapter
+([`@o3co/auth-provider-oauth`](../oauth/README.md)); federation grants
+([`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)).
+
+**Why a separate package.** Each adapter is its own package so that a deployment
+installs only the IdPs it uses, and `openid-client` only with an adapter.
+The Google, GitHub and Apple packages implement the same contract for one IdP
+each, for what a generic OpenID Connect client cannot express: GitHub is not
+OpenID Connect, Apple's scopes, client secret and callback are not standard, and
+Google's adapter sends `access_type=offline` and carries the `hd` claim — each
+package's README says which. This package has no setting for a login-time
+authorization parameter or an extension claim.
+
+## Install
+
+```sh
+npm install @o3co/auth-provider-federation-oidc
+```
+
+Peer dependencies: `@o3co/auth-provider-core` and
+`@o3co/auth-provider-session`. Its dependencies are `openid-client` and `jose`.
 
 ## Usage
 
@@ -24,7 +63,7 @@ import {
   oidcFederationNames,
   readOidcFederationConfigs,
 } from "@o3co/auth-provider-federation-oidc";
-import { sessionModule } from "@o3co/auth-provider-session";
+import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 
 const oidcConfigBridgeModule = defineModule({
   name: "oidc-federation-config",
@@ -36,6 +75,7 @@ const oidcConfigBridgeModule = defineModule({
 
 const handle = await createApp({
   modules: [
+    sessionStoreModuleFor(config),
     sessionModule,
     oidcConfigBridgeModule,
     ...oidcFederationNames(config.federations).map((name) => oidcFederationModule(name)),
@@ -65,7 +105,9 @@ federations {
     clientId = ${OKTA_CLIENT_ID}
     clientSecret = ${OKTA_CLIENT_SECRET}
     callbackURL = "https://auth.example.com/session/oauth/federation/okta/callback"
+    clientUrl = "https://app.example.com/"
     redirectAllowlist = ["https://app.example.com/welcome"]
+    authCallbackUrl = "https://app.example.com/auth/callback"
   }
 
   keycloak {
@@ -75,6 +117,7 @@ federations {
     clientId = ${KEYCLOAK_CLIENT_ID}
     privateKey = ${KEYCLOAK_PRIVATE_KEY_PEM}     # private_key_jwt
     callbackURL = "https://auth.example.com/session/oauth/federation/keycloak/callback"
+    clientUrl = "https://app.example.com/"
     scopes = ["openid", "profile", "email", "groups"]
   }
 }
@@ -94,10 +137,11 @@ support. The nested shape (`okta { type = "oidc", oidc { ... } }`) that
 | `scopes` | no | Default `["openid", "profile", "email"]`. `openid` is mandatory — without it there is no id_token — and its absence refuses boot. |
 | `discovery` | no | Default `true`. See below. |
 | `endpoints` | no | `authorizationEndpoint`, `tokenEndpoint`, `jwksUri`, `userinfoEndpoint`, `endSessionEndpoint`. Applied over the discovered metadata; the first three are mandatory when `discovery = false`. |
-| `idTokenSignedResponseAlg` | no | Pin the id_token JWS algorithm. Otherwise the issuer's advertised `id_token_signing_alg_values_supported` is trusted; `none` and symmetric algorithms are never accepted against a JWKS. |
+| `idTokenSignedResponseAlg` | no | Pin the id_token JWS algorithm. Otherwise the issuer's advertised `id_token_signing_alg_values_supported` is trusted. With `discovery = false` nothing is advertised, and `openid-client` then accepts `RS256` only — so an IdP that signs with ES256 or EdDSA needs this set, or every login fails. `none` and symmetric algorithms are never accepted against a JWKS. |
 | `userInfo` | no | Default: call UserInfo when the issuer publishes an endpoint. `false` builds the profile from the id_token alone; `true` refuses boot if there is no endpoint. |
-| `clockToleranceSeconds` | no | Skew tolerated on `exp` / `iat`. Default 30. |
-| `redirectAllowlist`, `sessionDomain`, `authCallbackUrl`, `clientUrl` | no | The `redirect_to` policy, as for every federation — see the session package README. |
+| `clockToleranceSeconds` | no | Skew tolerated on `exp` / `iat`. Passed to `openid-client` only when set; its own default is 30. |
+| `clientUrl` | in practice | Where the browser lands after a login whose start carried no `redirect_to`. Without it such a login ends in `500 misconfiguration` after the session has been saved — so it is needed unless every start carries a `redirect_to` and `authCallbackUrl` is set. |
+| `redirectAllowlist`, `authCallbackUrl`, `sessionDomain` | no | The `redirect_to` policy, as for every federation — see the [session package README](../session/README.md#redirect-allowlists). A start that carries `redirect_to` needs both an allowlist entry for it and `authCallbackUrl`, or it is refused (`400`) or ends in `500 misconfiguration`. |
 
 `fetch` (code only) replaces the fetch every upstream request goes through —
 for a proxy, or a test double.
@@ -106,8 +150,7 @@ for a proxy, or a test double.
 
 Discovery. Each instance fetches `<issuer>/.well-known/openid-configuration`
 when the app boots, checks the document's `issuer` against the configured one,
-and keeps `authorization_endpoint`, `token_endpoint`, `jwks_uri`,
-`userinfo_endpoint` and `end_session_endpoint`. **A failure is fatal**: an
+and keeps the whole document, with any `endpoints` applied over it. **A failure is fatal**: an
 unreachable issuer, a document naming another issuer, or one without a
 `jwks_uri` refuses boot with the federation's name in the error. There is no
 silent fallback to hand-typed endpoints — a deployment that wants those sets
@@ -136,14 +179,14 @@ that cannot be parsed.
    `kid`, cached, refetched when an unknown `kid` appears — but not within a
    minute of the last fetch, so an IdP that rotates keys must publish the new
    key before signing with it, which every IdP does); `iss` equal to the
-   configured issuer; `aud` containing the client id and no untrusted extra
-   audience; `exp` and `iat` within tolerance; `nonce` equal to the
+   configured issuer; `aud` containing the client id — with more than one
+   audience, `azp` must be present and equal the client id; `exp` and `iat` within tolerance; `nonce` equal to the
    transaction's; `at_hash` recomputed from the access token when the claim is
    present (OIDC Core §3.3.2.11). A response without an id_token is refused.
 4. **UserInfo** — when enabled, fetched with the access token and bound to the
    id_token's `sub`; a mismatch is refused. UserInfo values fill `email`,
    `emailVerified`, `name`, `picture` and `groups`, falling back to the
-   id_token's claims. `email_verified` is normalised to a boolean (some IdPs
+   id_token's claim only where UserInfo does not carry one (a `null` counts as not carrying one). `email_verified` is normalised to a boolean (some IdPs
    send `"true"`); `groups` is carried only as a string array.
 5. **Identity** — `sub` is opaque and stable per issuer; the profile is never
    keyed on `email`. The session routes hand `<name>:<sub>` to the Store
@@ -155,32 +198,54 @@ Any refusal in steps 2–4 surfaces from the callback as `502 exchange_failed`
 (the session routes' answer to an upstream exchange the provider refused) and
 never reaches the Store.
 
+What `exchangeCode` returns:
+
+| Field | Value |
+| --- | --- |
+| `issuer` | the id_token's `iss` — the configured issuer |
+| `sub` | the id_token's `sub` |
+| `email`, `name`, `picture` | UserInfo's value when UserInfo carries the claim, otherwise the id_token's; kept only when a non-empty string. A UserInfo value that is present (not `null`) but malformed is dropped, not replaced by the id_token's; a `null` counts as absent |
+| `emailVerified` | read the same way, then normalised to a boolean (`"true"` / `"false"` included); any other shape is absent |
+| `groups` | read the same way; kept only when an array of strings |
+| `accessToken` | as the issuer sent it |
+| `idToken`, `refreshToken` | as the issuer sent them, when non-empty strings |
+| `scope` | the token response's `scope`, an empty one included; absent when the response carried none (the session router then records the requested scope). A `scope` that is not a string is refused by `openid-client` before the adapter sees it, and the login answers `502 exchange_failed` |
+| `expiresAt` | now + `expires_in`; **`null` when the response carried no `expires_in`**, which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
+| `expiresIn` | the `expires_in` the response carried, `null` when none |
+| `tokenType` | `token_type` as `openid-client` reports it (lower-cased), recorded by the session router verbatim |
+
 ### Optional capabilities
 
 - `SupportsRefresh` — `refreshToken()` runs the `refresh_token` grant at the
-  issuer.
-- `SupportsDelegatedAuthorization` (#593) — `buildDelegatedAuthorizationUrl()`
+  issuer and returns the token fields of the table above, by the same rules (a non-string `scope` fails the refresh rather than a login),
+  with no `issuer` or `sub`.
+- `SupportsDelegatedAuthorization` — `buildDelegatedAuthorizationUrl()`
   builds the authorization request for a federation grant: the intent's
-  scopes, a required nonce, the RFC 8707 `resource`, `prompt=consent` when
-  `offline_access` is asked for, and the connection's `authorizationParams`,
-  which may not name a parameter the adapter owns. `exchangeDelegatedCode()`
+  scopes, which must include `openid`; a required nonce; the RFC 8707
+  `resource`; `prompt=consent` when `offline_access` is asked for, unless the
+  connection's `authorizationParams` sets its own `prompt`; and those
+  `authorizationParams`, whose values must be strings and which may not name a
+  parameter the adapter owns. `exchangeDelegatedCode()`
   exchanges the connect callback's code — PKCE, the nonce, the `resource` at
   the token endpoint, `iss` forwarded — never calls UserInfo, and answers the
   verified id_token's issuer and subject, plus the claims the caller names in
-  `identityClaims` (#611), copied from that id_token only, as non-empty
-  strings only. `refreshDelegatedToken()`
-  runs the `refresh_token` grant with the grant's scopes and resource under
-  the caller's `AbortSignal`, answers the raw `expires_in`, `scope` and
-  `token_type`, and keeps a rotated refresh token out of an answer the library
-  did not accept — one it could not parse, or one whose id_token it could not
-  verify.
+  `identityClaims`, copied from that id_token only, as non-empty strings
+  only. `refreshDelegatedToken()` runs the `refresh_token` grant with the
+  grant's scopes and resource under the caller's `AbortSignal`, answers
+  `expires_in` as the IdP sent it, `scope`, and `token_type` as the library
+  reports it (lower-cased), and keeps the rotated refresh token from an answer
+  the library did not accept — one it could not parse, or one whose id_token it
+  could not verify — returning `{ refreshToken }` alone rather than losing it.
 - `SupportsLogout` — present only when the issuer publishes an
   `end_session_endpoint` (or `endpoints.endSessionEndpoint` names one):
-  RP-initiated logout with `id_token_hint`, `post_logout_redirect_uri` and
-  `state`.
-- `SupportsClaimMapping` — `mapClaims()` promotes `email`, `emailVerified`,
-  `name`, `picture` and `groups`; everything else stays namespaced under the
-  federation per the claim precedence rules in the session package.
+  RP-initiated logout with `client_id`, `id_token_hint`,
+  `post_logout_redirect_uri` and `state`.
+- `SupportsClaimMapping` — `mapClaims()` maps `email`, `emailVerified`,
+  `name`, `picture` and `groups`. The session package promotes only `email`,
+  `name` and `picture` into the top-level claims, and only where the local record
+  is silent; `groups` and `emailVerified` stay under
+  `claims.federated.<name>`, so an IdP's `groups` never becomes an authorization
+  claim ([claim precedence](../session/README.md#claim-precedence-local-wins-federated-is-namespaced)).
 
 ### Scaffold environment variables
 
@@ -198,15 +263,33 @@ More instances are more sections in `config/application.conf`.
 
 ## Public API
 
-- `createOidcProvider(name, config): Promise<OidcProvider>` — the provider
-  itself; asynchronous because discovery happens here.
-- `oidcFederationModule(name): Module` — one const-Module per instance,
-  requiring `oidcFederationConfigs` and contributing `federations.<name>` and
-  `federationRedirectPolicies.<name>`.
-- `readOidcFederationConfigs(federations)` — the slot from a `federations`
-  config section; refuses a malformed field by `federations.<name>.<field>`.
-- `oidcFederationNames(federations)` — the names of every enabled section of
-  type `oidc`, sorted.
+Exported from [`src/index.mts`](src/index.mts); the signatures are in the files
+linked:
+
+- `createOidcProvider` ([`src/oidc.mts`](src/oidc.mts)) — the provider;
+  asynchronous, because discovery happens here.
+- `oidcFederationModule` ([`src/module.mts`](src/module.mts)) — one Module per
+  instance, requiring `oidcFederationConfigs` and contributing
+  `federations.<name>` and `federationRedirectPolicies.<name>`.
+- `readOidcFederationConfigs` ([`src/module.mts`](src/module.mts)) — fills that
+  slot from a `federations` config section, refusing a malformed field by
+  `federations.<name>.<field>`.
+- `oidcFederationNames` ([`src/module.mts`](src/module.mts)) — the names of every
+  enabled section of type `oidc`, sorted.
 - `OIDC_FEDERATION_TYPE` (`"oidc"`), `DEFAULT_OIDC_SCOPES`.
-- Types: `OidcProviderConfig`, `OidcEndpointOverrides`, `OidcPrivateKey`,
-  `OidcProvider`.
+- `oidcFederationConfigs` — the `ComponentMap` slot every instance requires,
+  declared by module augmentation in [`src/module.mts`](src/module.mts) (not an
+  export).
+- Types: [`OidcProviderConfig`](src/oidc.mts) (the config fields above),
+  `OidcEndpointOverrides`, `OidcProvider` ([`src/oidc.mts`](src/oidc.mts));
+  `OidcPrivateKey` ([`src/client-auth.mts`](src/client-auth.mts)).
+
+## Tests
+
+| Test file | Pins |
+| --- | --- |
+| [`oidc.test.mts`](src/__tests__/oidc.test.mts) | discovery and its refusals, client authentication, the login steps above, the profile, refresh, logout and `mapClaims` |
+| [`at-hash.test.mts`](src/__tests__/at-hash.test.mts) | the `at_hash` check |
+| [`delegated.test.mts`](src/__tests__/delegated.test.mts) | `SupportsDelegatedAuthorization` |
+| [`oidc-module.test.mts`](src/__tests__/oidc-module.test.mts), [`oidc-module-boot.test.mts`](src/__tests__/oidc-module-boot.test.mts) | reading `type = "oidc"` sections, the module per instance, and boot |
+| [`session-routes.e2e.test.mts`](src/__tests__/session-routes.e2e.test.mts) | a login through the session routes, end to end |
