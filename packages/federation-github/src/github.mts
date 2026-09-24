@@ -284,15 +284,21 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 				// Transient /user/emails failure treated as "no email available" — never kills login.
 			}
 
-			// Core's one reading of the token response, less two things GitHub
-			// needs differently: the scope is comma-delimited (below), and a
-			// refresh token is not kept — this adapter has no refresh, so one that
-			// a GitHub App's expiring user token comes with would never be used.
-			// `expiresAt` is `null` for an OAuth App token, which states no
-			// lifetime: `/oauth/federation/:name/token` then reuses the token
-			// rather than refreshing it (FederationProfile.expiresAt).
+			// Core's one reading of the token response, less three things GitHub
+			// needs differently: the scope is comma-delimited (below); a refresh
+			// token is not kept — this adapter has no refresh, so one that a
+			// GitHub App's expiring user token comes with would never be used;
+			// and an id_token is never carried. GitHub is plain OAuth 2.0 and
+			// issues none, so one in its answer was put there by something
+			// between this server and GitHub, and nothing here verifies it: kept,
+			// it would be stored and later handed to an end-session endpoint as
+			// `id_token_hint`, as if it were GitHub's. `expiresAt` is `null` for
+			// an OAuth App token, which states no lifetime:
+			// `/oauth/federation/:name/token` then reuses the token rather than
+			// refreshing it (FederationProfile.expiresAt).
 			const {
 				refreshToken: _notKept,
+				idToken: _notIssuedByGithub,
 				scope: _commaDelimited,
 				...snapshot
 			} = federationTokenSnapshot(tokens, obtainedAt);

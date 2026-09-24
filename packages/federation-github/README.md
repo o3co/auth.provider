@@ -161,7 +161,7 @@ What `exchangeCode` returns:
 | `expiresAt` | when `openid-client` handed the answer over + `expiresIn` when GitHub sends one; **`null` when it does not** (OAuth App tokens), which `oauth`'s `POST /oauth/federation/:name/token` reads as "do not refresh; reuse the stored token" |
 | `expiresIn` | `expires_in` as `openid-client` read it (it applies `parseFloat`), `null` when none |
 | `tokenType` | `token_type` as `openid-client` reports it (lower-cased `bearer`), recorded by the session router verbatim |
-| `idToken` | not returned — GitHub issues none |
+| `idToken` | always absent — GitHub issues none, so one in its token answer was added on the way and is not kept |
 
 `mapClaims` maps `email`, `emailVerified`, `name` and `picture`; the session
 package promotes only `email`, `name` and `picture`, and only where the local
