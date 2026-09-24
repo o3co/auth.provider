@@ -14,11 +14,12 @@
  * limitations under the License.
  */
 
-import type {
-	AdapterBuilder,
-	Logger,
-	RegisteredRP,
-	SessionRPRegistry,
+import {
+	type AdapterBuilder,
+	type Logger,
+	loggableError,
+	type RegisteredRP,
+	type SessionRPRegistry,
 } from "@o3co/auth-provider-core";
 import type { SessionRPRegistryClient } from "./clients.mjs";
 import { createRedisSidHash } from "./internal/redisSidHash.mjs";
@@ -102,16 +103,18 @@ function isValidRPEnvelope(env: unknown): env is RPEnvelope {
 function deserialize(json: string, sid: string, logger?: Logger): RegisteredRP | null {
 	// Mirror the userSessionStore corrupt-envelope warn shape: object-first
 	// `{ sid, reason, cause? }` so `sid` and `reason` are reliably emitted
-	// as structured fields, and the parse error context is preserved as
-	// `cause`. The previous implementation logged a raw JSON snippet,
-	// which risked leaking sensitive data if a corrupt value happened to
-	// contain credentials — drop it entirely.
+	// as structured fields, and the parse error is `cause` — as core's
+	// `loggableError` projects it, because a SyntaxError's message quotes
+	// the stored value around the point the parse failed. The previous
+	// implementation logged a raw JSON snippet, which risked leaking
+	// sensitive data if a corrupt value happened to contain credentials —
+	// drop it entirely.
 	let parsed: unknown;
 	try {
 		parsed = JSON.parse(json);
 	} catch (cause) {
 		logger?.warn(
-			{ sid, reason: "json_parse", cause },
+			{ sid, reason: "json_parse", cause: loggableError(cause) },
 			"session_rp_registry_corrupt_envelope: JSON.parse failed",
 		);
 		return null;

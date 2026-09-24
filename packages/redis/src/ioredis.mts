@@ -3,7 +3,7 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import { createHash } from "node:crypto";
-import { consoleLogger, type EventLogger } from "@o3co/auth-provider-core";
+import { consoleLogger, type EventLogger, loggableError } from "@o3co/auth-provider-core";
 import type { Redis } from "ioredis";
 import type {
 	AccessTokenDenylistClient,
@@ -1425,9 +1425,11 @@ export function makeIoredisClients(
 			// One of these is opened per refresh rotation, so a socket blip on
 			// any short-lived duplicate crashed the provider. The parent
 			// connection is the caller's to instrument; this one is ours,
-			// because it never leaves this wrapper.
+			// because it never leaves this wrapper. It logs the projection:
+			// ioredis puts the command a reply answered on the error, and
+			// for a refused handshake that is `AUTH` with the password.
 			dup.on("error", (err: unknown) => {
-				logger.error({ err }, "redis_duplicate_connection_error");
+				logger.error({ err: loggableError(err) }, "redis_duplicate_connection_error");
 			});
 			const inner = buildRefreshClient(dup);
 			const disposable: DisposableRefreshTokenFamilyClient = {

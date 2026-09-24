@@ -160,7 +160,11 @@ describe("RedisSessionRPRegistry corrupt envelope handling", () => {
 		await registry.listRPs("sid-corrupt");
 
 		expect(logger.warn).toHaveBeenCalledWith(
-			{ sid: "sid-corrupt", reason: "json_parse", cause: expect.any(SyntaxError) },
+			{
+				sid: "sid-corrupt",
+				reason: "json_parse",
+				cause: { name: "SyntaxError", position: 1, stack: expect.stringMatching(/^ {4}at /) },
+			},
 			expect.stringContaining("JSON.parse failed"),
 		);
 		expect(logger.warn).toHaveBeenCalledWith(
@@ -189,7 +193,11 @@ describe("redisSessionRPRegistryBuilder", () => {
 		await registry.listRPs("sid-builder");
 
 		expect(logger.warn).toHaveBeenCalledWith(
-			{ sid: "sid-builder", reason: "json_parse", cause: expect.any(SyntaxError) },
+			{
+				sid: "sid-builder",
+				reason: "json_parse",
+				cause: { name: "SyntaxError", position: 1, stack: expect.stringMatching(/^ {4}at /) },
+			},
 			expect.stringContaining("session_rp_registry_corrupt_envelope"),
 		);
 	});

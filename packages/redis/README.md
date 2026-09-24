@@ -157,7 +157,7 @@ require except the two federation-grant ones:
 
 ```ts
 import { Redis } from "ioredis";
-import { createApp } from "@o3co/auth-provider-core";
+import { createApp, loggableError } from "@o3co/auth-provider-core";
 import { redisChallengeStoreModule } from "@o3co/auth-provider-redis";
 import { makeIoredisClients } from "@o3co/auth-provider-redis/ioredis";
 
@@ -177,15 +177,27 @@ const io = new Redis({
 // auto-reconnecting — and an EventEmitter `error` with no listener throws and
 // takes the process down. This connection is yours: `makeIoredisClients` does
 // not attach a listener to it, only to the connections it opens itself for
-// refresh rotation.
-io.on("error", (err) => logger.error({ err }, "redis_client_error"));
-const clients = makeIoredisClients(io);
+// refresh rotation. Log the projection, not the error (see below).
+io.on("error", (err) => logger.error({ err: loggableError(err) }, "redis_client_error"));
+const clients = makeIoredisClients(io, { logger });
 
 const handle = await createApp({
     modules: [redisChallengeStoreModule /* + others */],
     bootstrapComponents: { config, pathResolver, ...clients },
 });
 ```
+
+What reaches a log is core's [`loggableError`](../core/README.md#logger)
+projection of an error, never the error. ioredis puts the command a reply
+answered on the error, arguments included: when the server refuses the
+configured password, that is the handshake — `AUTH` and the password — on
+`command.args`, and a logger that serialises the error writes it out. The
+connections `makeIoredisClients` opens for refresh rotation log
+`redis_duplicate_connection_error` through the projection, and a stored
+authorization code, user session or RP record that does not parse is logged as
+the parser error's name and position (`RedisCodeRepository: corrupted data for
+code`, `user_session_corrupt_envelope`, `session_rp_registry_corrupt_envelope`),
+never the stored text the parser's message quotes.
 
 The federation-grant clients are built separately,
 `makeIoredisFederationGrantStoreClient(io)` and
