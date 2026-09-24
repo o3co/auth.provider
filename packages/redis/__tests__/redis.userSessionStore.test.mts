@@ -43,8 +43,10 @@ runUserSessionStoreContract(
 		});
 	},
 	// A relative PX: the session is gone when its key is.
-	keysExpire(
-		() => raw,
-		() => `t14:${suiteCounter}:`,
-	),
+	{
+		expiry: keysExpire(
+			() => raw,
+			() => `t14:${suiteCounter}:`,
+		),
+	},
 );

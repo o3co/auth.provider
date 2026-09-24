@@ -44,10 +44,12 @@ runRefreshTokenFamilyStoreContract(
 		});
 	},
 	// A relative PX: the family is gone when its key is.
-	keysExpire(
-		() => client,
-		() => `rtfam:test-${keyCounter}:`,
-	),
+	{
+		expiry: keysExpire(
+			() => client,
+			() => `rtfam:test-${keyCounter}:`,
+		),
+	},
 );
 
 // T4 hardening (Claude review I1): RefreshTokenFamilyClient.duplicate() NORMATIVE contract

@@ -58,9 +58,11 @@ const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
 
 export function runSessionFederationIndexContract(
 	factory: SessionFederationIndexFactory,
-	expiry: ExpiryClock = hostExpiry,
+	options: { readonly expiry?: ExpiryClock } = {},
 ): void {
 	describe("SessionFederationIndex contract", () => {
+		const expiry = options.expiry ?? hostExpiry;
+
 		it("addFederation then listFederations returns the name", async () => {
 			const idx = await factory();
 			await idx.addFederation("sid-1", "google", FUTURE());

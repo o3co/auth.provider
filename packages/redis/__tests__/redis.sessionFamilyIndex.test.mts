@@ -42,7 +42,7 @@ runSessionFamilyIndexContract(
 			keyPrefix: `t16:${suiteCounter}:`,
 		});
 	},
-	serverDeadlines(() => raw),
+	{ expiry: serverDeadlines(() => raw) },
 );
 
 // ---------------------------------------------------------------------------

@@ -11,8 +11,6 @@ export interface ChallengeStoreContractFactory {
 	create(): Promise<ChallengeStore> | ChallengeStore;
 	/** Optional: tear down (close client, flushdb, etc.) after each test. */
 	teardown?(store: ChallengeStore): Promise<void> | void;
-	/** The clock the store expires challenges by. Default: this process's. */
-	readonly expiry?: ExpiryClock;
 }
 
 /**
@@ -61,6 +59,7 @@ const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
 export function runChallengeStoreContract(
 	factoryName: string,
 	factory: ChallengeStoreContractFactory,
+	options: { readonly expiry?: ExpiryClock } = {},
 ): void {
 	describe(`ChallengeStore contract — ${factoryName}`, () => {
 		const future = (): number => Date.now() + 60_000;
@@ -153,7 +152,7 @@ export function runChallengeStoreContract(
 		it("expired entries are treated as nonexistent (find=null, consume=false)", async () => {
 			// Dated from, and waited out on, the store's own clock (see
 			// `ExpiryClock`), not a 50 ms expiry and a 100 ms sleep.
-			const expiry = factory.expiry ?? hostExpiry;
+			const expiry = options.expiry ?? hostExpiry;
 			await withStore(async (store) => {
 				const soon = await aheadOf(expiry);
 				await store.issue("scope-A", "ttl", soon.getTime());

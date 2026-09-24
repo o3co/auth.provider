@@ -22,19 +22,24 @@ afterAll(async () => {
 	await client?.quit();
 });
 
-runChallengeStoreContract("redis", {
-	create: () => {
-		// Per-test prefix isolation so concurrency tests do not collide across
-		// shared container state.
-		keyCounter += 1;
-		return createRedisChallengeStore({
-			client: client as unknown as ChallengeStoreClient,
-			keyPrefix: `chal:test-${keyCounter}:`,
-		});
+runChallengeStoreContract(
+	"redis",
+	{
+		create: () => {
+			// Per-test prefix isolation so concurrency tests do not collide across
+			// shared container state.
+			keyCounter += 1;
+			return createRedisChallengeStore({
+				client: client as unknown as ChallengeStoreClient,
+				keyPrefix: `chal:test-${keyCounter}:`,
+			});
+		},
 	},
-	// A relative PX: the challenge is gone when its key is.
-	expiry: keysExpire(
-		() => client,
-		() => `chal:test-${keyCounter}:`,
-	),
-});
+	{
+		// A relative PX: the challenge is gone when its key is.
+		expiry: keysExpire(
+			() => client,
+			() => `chal:test-${keyCounter}:`,
+		),
+	},
+);

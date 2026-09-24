@@ -9,8 +9,6 @@ import { describe, expect, it } from "vitest";
 export interface ReplaySeenSetContractFactory {
 	create(): Promise<ReplaySeenSet> | ReplaySeenSet;
 	teardown?(set: ReplaySeenSet): Promise<void> | void;
-	/** The clock the set expires records by. Default: this process's. */
-	readonly expiry?: ExpiryClock;
 }
 
 /**
@@ -57,6 +55,7 @@ const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
 export function runReplaySeenSetContract(
 	factoryName: string,
 	factory: ReplaySeenSetContractFactory,
+	options: { readonly expiry?: ExpiryClock } = {},
 ): void {
 	describe(`ReplaySeenSet contract — ${factoryName}`, () => {
 		const future = (): number => Date.now() + 60_000;
@@ -124,7 +123,7 @@ export function runReplaySeenSetContract(
 		it("expired entries treated as absent (contains=false after TTL)", async () => {
 			// Dated from, and waited out on, the set's own clock (see
 			// `ExpiryClock`), not a 50 ms expiry and a 100 ms sleep.
-			const expiry = factory.expiry ?? hostExpiry;
+			const expiry = options.expiry ?? hostExpiry;
 			await withSet(async (set) => {
 				const soon = await aheadOf(expiry);
 				await set.markSeen("scope-A", "k4", soon.getTime());

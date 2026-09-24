@@ -71,9 +71,11 @@ const FAMILY = (overrides: Partial<RefreshTokenFamily> = {}): RefreshTokenFamily
 
 export function runRefreshTokenFamilyStoreContract(
 	factory: RefreshTokenFamilyStoreContractFactory,
-	expiry: ExpiryClock = hostExpiry,
+	options: { readonly expiry?: ExpiryClock } = {},
 ): void {
 	describe("RefreshTokenFamilyStore contract", () => {
+		const expiry = options.expiry ?? hostExpiry;
+
 		it("registerFamily then findFamily returns the family", async () => {
 			const store = await factory();
 			const fam = FAMILY();

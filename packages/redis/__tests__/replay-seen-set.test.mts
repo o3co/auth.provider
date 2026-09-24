@@ -22,17 +22,22 @@ afterAll(async () => {
 	await client?.quit();
 });
 
-runReplaySeenSetContract("redis", {
-	create: () => {
-		keyCounter += 1;
-		return createRedisReplaySeenSet({
-			client: client as unknown as ReplaySeenSetClient,
-			keyPrefix: `replay:test-${keyCounter}:`,
-		});
+runReplaySeenSetContract(
+	"redis",
+	{
+		create: () => {
+			keyCounter += 1;
+			return createRedisReplaySeenSet({
+				client: client as unknown as ReplaySeenSetClient,
+				keyPrefix: `replay:test-${keyCounter}:`,
+			});
+		},
 	},
-	// A relative PX: the record is gone when its key is.
-	expiry: keysExpire(
-		() => client,
-		() => `replay:test-${keyCounter}:`,
-	),
-});
+	{
+		// A relative PX: the record is gone when its key is.
+		expiry: keysExpire(
+			() => client,
+			() => `replay:test-${keyCounter}:`,
+		),
+	},
+);

@@ -68,9 +68,11 @@ const INPUT = (overrides: Partial<CreateUserSessionInput> = {}): CreateUserSessi
 
 export function runUserSessionStoreContract(
 	factory: UserSessionStoreContractFactory,
-	expiry: ExpiryClock = hostExpiry,
+	options: { readonly expiry?: ExpiryClock } = {},
 ): void {
 	describe("UserSessionStore contract", () => {
+		const expiry = options.expiry ?? hostExpiry;
+
 		it("create then get returns the session with claims", async () => {
 			const store = await factory();
 			await store.create(INPUT());

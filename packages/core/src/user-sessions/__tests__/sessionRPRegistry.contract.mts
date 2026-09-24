@@ -67,9 +67,11 @@ const RP = (overrides: Partial<RegisteredRP> = {}): RegisteredRP => ({
 
 export function runSessionRPRegistryContract(
 	factory: SessionRPRegistryFactory,
-	expiry: ExpiryClock = hostExpiry,
+	options: { readonly expiry?: ExpiryClock } = {},
 ): void {
 	describe("SessionRPRegistry contract", () => {
+		const expiry = options.expiry ?? hostExpiry;
+
 		it("registerRP then listRPs returns the RP", async () => {
 			const reg = await factory();
 			await reg.registerRP("sid-1", RP(), FUTURE());

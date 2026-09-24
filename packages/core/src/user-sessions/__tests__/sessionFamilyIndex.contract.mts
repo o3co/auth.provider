@@ -58,9 +58,11 @@ const aheadOf = async (clock: ExpiryClock): Promise<Date> =>
 
 export function runSessionFamilyIndexContract(
 	factory: SessionFamilyIndexFactory,
-	expiry: ExpiryClock = hostExpiry,
+	options: { readonly expiry?: ExpiryClock } = {},
 ): void {
 	describe("SessionFamilyIndex contract", () => {
+		const expiry = options.expiry ?? hostExpiry;
+
 		it("addFamilyId then listFamilyIds returns the id", async () => {
 			const idx = await factory();
 			await idx.addFamilyId("sid-1", "fam-A", FUTURE());

@@ -42,7 +42,7 @@ runSessionFederationIndexContract(
 			keyPrefix: `t17:${suiteCounter}:`,
 		});
 	},
-	serverDeadlines(() => raw),
+	{ expiry: serverDeadlines(() => raw) },
 );
 
 // ---------------------------------------------------------------------------

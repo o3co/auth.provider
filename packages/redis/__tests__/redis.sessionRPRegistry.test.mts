@@ -42,7 +42,7 @@ runSessionRPRegistryContract(
 			keyPrefix: `t15:${suiteCounter}:`,
 		});
 	},
-	serverDeadlines(() => raw),
+	{ expiry: serverDeadlines(() => raw) },
 );
 
 // ---------------------------------------------------------------------------
