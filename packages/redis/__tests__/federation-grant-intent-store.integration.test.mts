@@ -27,29 +27,23 @@ import {
 	type FederationGrantIntentStore,
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisFederationGrantIntentStore } from "../src/federation-grant-intent-store.mjs";
 import { federationGrantIntentPairText } from "../src/internal/federation-grant-intent-codec.mjs";
 import { makeIoredisFederationGrantIntentStoreClient } from "../src/ioredis.mjs";
 import { runFederationGrantIntentStoreContract } from "./adapters.federation-grant-intent-store.contract.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let connections: Redis[] = [];
 let run = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	const at = { host: container.getHost(), port: container.getMappedPort(6379) };
+	const at = await testRedis();
 	connections = [new Redis(at), new Redis(at)];
-}, 90_000);
+});
 
 afterAll(async () => {
 	await Promise.all(connections.map((connection) => connection.quit()));
-	await container?.stop();
 });
 
 /** How the adapter spells a value inside a key — looked at from outside, as the probes must. */

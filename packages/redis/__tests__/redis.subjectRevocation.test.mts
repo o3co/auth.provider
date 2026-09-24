@@ -23,7 +23,6 @@
  */
 
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisSubjectRevocation } from "../src/subjectRevocation.mjs";
@@ -31,21 +30,17 @@ import {
 	runSessionsOnlyRevocationContract,
 	runSubjectRevocationContract,
 } from "./subjectRevocation.contract.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let raw: Redis;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	const at = await testRedis();
+	raw = new Redis(at);
+});
 
 afterAll(async () => {
 	raw?.disconnect();
-	await container?.stop();
 });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

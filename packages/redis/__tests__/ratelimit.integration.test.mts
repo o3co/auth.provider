@@ -15,25 +15,20 @@
  */
 
 import { Redis } from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisRateLimiter } from "../src/ratelimit.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let redis: Redis;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	redis = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	const at = await testRedis();
+	redis = new Redis(at);
+});
 
 afterAll(async () => {
 	await redis?.quit();
-	await container?.stop();
 });
 
 describe("createRedisRateLimiter on ioredis — resetAt (#458)", () => {

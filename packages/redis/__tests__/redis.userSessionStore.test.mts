@@ -15,26 +15,21 @@
  */
 
 import { Redis } from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll } from "vitest";
 import { makeIoredisClients } from "../src/ioredis.mjs";
 import { createRedisUserSessionStore } from "../src/userSessionStore.mjs";
+import { testRedis } from "./support/redis.mjs";
 import { runUserSessionStoreContract } from "./userSessionStore.contract.mjs";
 
-let container: StartedTestContainer;
 let raw: Redis;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	const at = await testRedis();
+	raw = new Redis(at);
+});
 
 afterAll(async () => {
 	raw?.disconnect();
-	await container?.stop();
 });
 
 let suiteCounter = 0;

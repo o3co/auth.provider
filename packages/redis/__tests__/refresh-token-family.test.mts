@@ -3,15 +3,14 @@
  * Licensed under the Apache License, Version 2.0 (the "License");
  */
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll } from "vitest";
 import type { RefreshTokenFamilyClient } from "#/clients.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { createRedisRefreshTokenFamilyStore } from "#/refresh-token-family.mjs";
 import { runRefreshTokenFamilyStoreContract } from "./adapters.refresh-token-family.contract.mjs";
 import { runRefreshTokenFamilyClientDuplicateContract } from "./adapters.refresh-token-family-client.contract.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let client: Redis;
 let keyCounter = 0;
 
@@ -27,19 +26,12 @@ const real = (raw: Redis): RefreshTokenFamilyClient =>
 	makeIoredisClients(raw).refreshTokenFamilyClient;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	client = new Redis({
-		host: container.getHost(),
-		port: container.getMappedPort(6379),
-	});
-}, 90_000);
+	const at = await testRedis();
+	client = new Redis(at);
+});
 
 afterAll(async () => {
 	await client?.quit();
-	await container?.stop();
 });
 
 runRefreshTokenFamilyStoreContract(async () => {

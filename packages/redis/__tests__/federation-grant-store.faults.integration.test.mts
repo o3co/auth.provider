@@ -31,29 +31,24 @@ import {
 	hasFederationGrantAuthorization,
 } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import {
 	createRedisFederationGrantStore,
 	type FederationGrantKey,
 } from "../src/federation-grant-store.mjs";
 import { makeIoredisFederationGrantStoreClient } from "../src/ioredis.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let redis: Redis;
 let run = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	redis = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	const at = await testRedis();
+	redis = new Redis(at);
+});
 
 afterAll(async () => {
 	await redis?.quit();
-	await container?.stop();
 });
 
 const MIN = 60_000;

@@ -22,6 +22,31 @@ export type SessionRPRegistryFactory = () => Promise<SessionRPRegistry>;
 const FUTURE = () => new Date(Date.now() + 60_000);
 const PAST = () => new Date(Date.now() - 1);
 
+/**
+ * The clock a store judges expiry by, in epoch milliseconds. An in-process
+ * store's is this process's; a Redis key expires on the server's, which can
+ * sit either side of the host's — so a Redis runner passes one that reads the
+ * server's `TIME`.
+ */
+export type StoreClock = () => Promise<number>;
+
+const hostClock: StoreClock = async () => Date.now();
+
+/**
+ * An expiry a second ahead of whichever clock is later: the host's, which a
+ * write checks it against, and the store's, which expires it. The read that
+ * follows the write lands well inside it however loaded the run is.
+ */
+const aheadOfBoth = async (storeNow: StoreClock): Promise<Date> =>
+	new Date(Math.max(Date.now(), await storeNow()) + 1_000);
+
+/** Resolves once `storeNow` has passed `at` — waited out on the store's clock, not slept on the host's. */
+const passes = async (storeNow: StoreClock, at: Date): Promise<void> => {
+	while ((await storeNow()) <= at.getTime()) {
+		await new Promise((r) => setTimeout(r, 20));
+	}
+};
+
 const RP = (overrides: Partial<RegisteredRP> = {}): RegisteredRP => ({
 	clientId: overrides.clientId ?? "client-1",
 	backchannelLogoutUri: overrides.backchannelLogoutUri ?? "https://rp.example/logout",
@@ -31,7 +56,10 @@ const RP = (overrides: Partial<RegisteredRP> = {}): RegisteredRP => ({
 	registeredAt: overrides.registeredAt ?? new Date(),
 });
 
-export function runSessionRPRegistryContract(factory: SessionRPRegistryFactory): void {
+export function runSessionRPRegistryContract(
+	factory: SessionRPRegistryFactory,
+	storeNow: StoreClock = hostClock,
+): void {
 	describe("SessionRPRegistry contract", () => {
 		it("registerRP then listRPs returns the RP", async () => {
 			const reg = await factory();
@@ -98,11 +126,15 @@ export function runSessionRPRegistryContract(factory: SessionRPRegistryFactory):
 		});
 
 		it("listRPs returns empty after expiresAt elapsed", async () => {
+			// Dated from, and waited out on, the store's own clock (see
+			// `aheadOfBoth`). A fixed 50 ms expiry and a 100 ms sleep on the host
+			// read a Redis key after the server had already expired it on a
+			// loaded run — or before, when the server's clock lagged the host's.
 			const reg = await factory();
-			const soon = new Date(Date.now() + 50);
-			await reg.registerRP("sid-1", RP(), soon);
+			const expiresAt = await aheadOfBoth(storeNow);
+			await reg.registerRP("sid-1", RP(), expiresAt);
 			expect(await reg.listRPs("sid-1")).toHaveLength(1);
-			await new Promise((r) => setTimeout(r, 100));
+			await passes(storeNow, expiresAt);
 			expect(await reg.listRPs("sid-1")).toEqual([]);
 		});
 

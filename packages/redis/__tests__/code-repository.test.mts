@@ -15,8 +15,8 @@
  */
 
 import { Redis } from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { testRedis } from "./support/redis.mjs";
 
 const KEY_PREFIX = "oauth:code:";
 
@@ -438,16 +438,12 @@ describe("RedisCodeRepository", () => {
 const describeWithRedis = process.env.REDIS_TESTCONTAINERS === "true" ? describe : describe.skip;
 
 describeWithRedis("RedisCodeRepository with real Redis", () => {
-	let container: StartedTestContainer | undefined;
 	let raw: Redis | undefined;
 
 	beforeAll(async () => {
-		container = await new GenericContainer("redis:7.2-alpine")
-			.withExposedPorts(6379)
-			.withStartupTimeout(60_000)
-			.start();
-		raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-	}, 90_000);
+		const at = await testRedis();
+		raw = new Redis(at);
+	});
 
 	afterAll(async () => {
 		if (raw) {
@@ -455,7 +451,6 @@ describeWithRedis("RedisCodeRepository with real Redis", () => {
 				raw?.disconnect();
 			});
 		}
-		await container?.stop();
 	});
 
 	it("expires authorization codes according to the Redis PX TTL", async () => {

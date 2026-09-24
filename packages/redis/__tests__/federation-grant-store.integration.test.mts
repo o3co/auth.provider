@@ -23,28 +23,22 @@
 
 import type { FederationGrantStore } from "@o3co/auth-provider-core";
 import { Redis } from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll } from "vitest";
 import { createRedisFederationGrantStore } from "../src/federation-grant-store.mjs";
 import { makeIoredisFederationGrantStoreClient } from "../src/ioredis.mjs";
 import { runFederationGrantStoreContract } from "./adapters.federation-grant-store.contract.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let connections: Redis[] = [];
 let run = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	const at = { host: container.getHost(), port: container.getMappedPort(6379) };
+	const at = await testRedis();
 	connections = [new Redis(at), new Redis(at)];
-}, 90_000);
+});
 
 afterAll(async () => {
 	await Promise.all(connections.map((connection) => connection.quit()));
-	await container?.stop();
 });
 
 const key = (byte: number): Buffer => Buffer.alloc(32, byte);

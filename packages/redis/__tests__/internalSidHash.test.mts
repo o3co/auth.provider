@@ -15,31 +15,26 @@
  */
 
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { SessionRPRegistryClient } from "../src/clients.mjs";
 import { createRedisSidHash } from "../src/internal/redisSidHash.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let raw: Redis;
 let client: SessionRPRegistryClient;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
+	const at = await testRedis();
+	raw = new Redis(at);
 	// The shipped wrapper, not a hand-rolled one: its `exec()` is where the
 	// MULTI/EXEC per-command error check lives, and a local copy would let the
 	// two drift apart exactly where that matters (Copilot review on PR #352).
 	client = makeIoredisClients(raw).sessionRPRegistryClient;
-}, 90_000);
+});
 
 afterAll(async () => {
 	raw?.disconnect();
-	await container?.stop();
 });
 
 const FUTURE = () => new Date(Date.now() + 60_000);

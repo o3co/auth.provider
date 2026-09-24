@@ -4,30 +4,22 @@
  */
 
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll } from "vitest";
 import { createRedisChallengeStore } from "../src/challenges.mjs";
 import type { ChallengeStoreClient } from "../src/clients.mjs";
 import { runChallengeStoreContract } from "./adapters.challenge-store.contract.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let client: Redis;
 let keyCounter = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	client = new Redis({
-		host: container.getHost(),
-		port: container.getMappedPort(6379),
-	});
-}, 90_000);
+	const at = await testRedis();
+	client = new Redis(at);
+});
 
 afterAll(async () => {
 	await client?.quit();
-	await container?.stop();
 });
 
 runChallengeStoreContract("redis", {

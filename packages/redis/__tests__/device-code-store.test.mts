@@ -16,27 +16,22 @@
  */
 
 import { Redis } from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createRedisDeviceCodeStore } from "#/device-code-store.mjs";
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { runDeviceCodeStoreContract } from "./adapters.device-code-store.contract.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let raw: Redis;
 let keyCounter = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	const at = await testRedis();
+	raw = new Redis(at);
+});
 
 afterAll(async () => {
 	await raw?.quit();
-	await container?.stop();
 });
 
 /** Per-test prefix isolation, so the racing cases never share a record. */

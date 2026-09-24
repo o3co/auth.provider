@@ -505,7 +505,15 @@ at all, including when an earlier grant for the pair had one.
 ## Contract tests
 
 Each adapter whose port has a core conformance suite is run through that
-suite against a real Redis (Testcontainers) in [`__tests__/`](__tests__/). A
+suite against a real Redis (Testcontainers) in [`__tests__/`](__tests__/). One
+container serves the whole run, started before any test file by
+[`__tests__/support/redis-container.global.mts`](__tests__/support/redis-container.global.mts),
+and each file takes a logical database of its own from
+[`__tests__/support/redis.mts`](__tests__/support/redis.mts) — one container
+per file paid Testcontainers' fixed ten-second port-binding wait once per file,
+and a loaded machine failed files on it. A test that waits for something to
+expire in Redis waits on the server's clock (`serverClock` there), not on a
+sleep on the host's. A
 contract file cannot be imported across a package boundary, so the suites
 there are copies of core's; [`contract-copies-parity.test.mts`](__tests__/contract-copies-parity.test.mts)
 and the per-port `*-parity.test.mts` tests fail when a copy differs from its

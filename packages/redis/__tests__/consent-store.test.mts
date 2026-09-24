@@ -19,7 +19,6 @@
 import type { PendingConsentRecord } from "@o3co/auth-provider-core";
 import { PENDING_CONSENT_PER_SESSION_LIMIT } from "@o3co/auth-provider-core";
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
 	CONSENT_EXPIRY_SLACK_MS,
@@ -29,26 +28,22 @@ import {
 import { makeIoredisClients } from "#/ioredis.mjs";
 import { runConsentStoreContract } from "./adapters.consent-store.contract.mjs";
 import { runPendingConsentStoreContract } from "./adapters.pending-consent-store.contract.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let raw: Redis;
 /** A second connection, so the racing cases are not serialised by one socket's pipeline. */
 let other: Redis;
 let keyCounter = 0;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-	other = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
-}, 90_000);
+	const at = await testRedis();
+	raw = new Redis(at);
+	other = new Redis(at);
+});
 
 afterAll(async () => {
 	await raw?.quit();
 	await other?.quit();
-	await container?.stop();
 });
 
 /** Per-test prefix isolation, so no case sees another's records. */

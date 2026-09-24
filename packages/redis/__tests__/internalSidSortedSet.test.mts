@@ -15,29 +15,24 @@
  */
 
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import type { SessionSidSortedSetClient } from "../src/clients.mjs";
 import { createRedisSidSortedSet } from "../src/internal/redisSidSortedSet.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let raw: Redis;
 let client: SessionSidSortedSetClient;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
+	const at = await testRedis();
+	raw = new Redis(at);
 	// The shipped wrapper — see the note in `internalSidHash.test.mts`.
 	client = makeIoredisClients(raw).sessionFamilyIndexClient;
-}, 90_000);
+});
 
 afterAll(async () => {
 	raw?.disconnect();
-	await container?.stop();
 });
 
 const FUTURE = () => new Date(Date.now() + 60_000);

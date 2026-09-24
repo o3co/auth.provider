@@ -23,28 +23,23 @@
 // them: these run through `makeIoredisClients`.
 
 import Redis from "ioredis";
-import { GenericContainer, type StartedTestContainer } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { RedisSidSetClient } from "../src/internal/redisSidSet.mjs";
 import { createRedisSidSet } from "../src/internal/redisSidSet.mjs";
 import { makeIoredisClients } from "../src/ioredis.mjs";
+import { testRedis } from "./support/redis.mjs";
 
-let container: StartedTestContainer;
 let raw: Redis;
 let client: RedisSidSetClient;
 
 beforeAll(async () => {
-	container = await new GenericContainer("redis:7.2-alpine")
-		.withExposedPorts(6379)
-		.withStartupTimeout(60_000)
-		.start();
-	raw = new Redis({ host: container.getHost(), port: container.getMappedPort(6379) });
+	const at = await testRedis();
+	raw = new Redis(at);
 	client = makeIoredisClients(raw).federationTokenStoreClient;
-}, 90_000);
+});
 
 afterAll(async () => {
 	raw?.disconnect();
-	await container?.stop();
 });
 
 const prefix = (s: string) => `t291:${s}:`;
