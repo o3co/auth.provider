@@ -21,7 +21,7 @@
  * hid that no GitHub login could succeed.
  */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { createGithubProvider } from "../github.mjs";
 import { ACCESS_TOKEN, createFakeGithub, GITHUB } from "./fake-github.mjs";
 
@@ -32,10 +32,6 @@ const tokenRequest = (accept?: string): RequestInit => ({
 });
 
 describe("the fake GitHub answers as GitHub does", () => {
-	afterEach(() => {
-		vi.unstubAllGlobals();
-	});
-
 	it("answers the token endpoint form-encoded unless Accept asks for JSON", async () => {
 		const github = createFakeGithub();
 
@@ -67,13 +63,13 @@ describe("the fake GitHub answers as GitHub does", () => {
 
 	it("is satisfied by the adapter: the token request asks for JSON, and every request names a User-Agent", async () => {
 		const github = createFakeGithub();
-		vi.stubGlobal("fetch", github.fetch);
 		const callback = "https://app.example.com/session/oauth/federation/github/callback";
 
 		await createGithubProvider({
 			clientId: "client-id",
 			clientSecret: "client-secret",
 			callbackURL: callback,
+			fetch: github.fetch,
 		}).exchangeCode({ code: "gh-code", codeVerifier: "v".repeat(43), redirectUri: callback });
 
 		const [token] = github.requestsTo(GITHUB.tokenEndpoint);

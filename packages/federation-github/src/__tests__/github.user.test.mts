@@ -39,11 +39,20 @@ import {
 const CALLBACK = "https://app.example.com/session/oauth/federation/github/callback";
 const CONFIG = { clientId: "client-id", clientSecret: "client-secret", callbackURL: CALLBACK };
 
+/**
+ * The fake reaches the adapter through `config.fetch`. The global fetch is a
+ * tripwire, so a case that forgot to inject fails here instead of calling
+ * GitHub.
+ */
+const refuseNetwork = async (): Promise<Response> => {
+	throw new Error("the global fetch must not be reached — inject the fake through config.fetch");
+};
+
 let github: FakeGithub;
 
 beforeEach(() => {
 	github = createFakeGithub();
-	vi.stubGlobal("fetch", github.fetch);
+	vi.stubGlobal("fetch", refuseNetwork);
 });
 
 afterEach(() => {
@@ -55,7 +64,7 @@ const UNUSABLE_ID =
 	/GitHub federation "github" received a \/user without id\/sub \(an id must be a positive safe integer, or a string of decimal digits with no sign or leading zero\)/;
 
 const exchange = () =>
-	createGithubProvider(CONFIG).exchangeCode({
+	createGithubProvider({ ...CONFIG, fetch: github.fetch }).exchangeCode({
 		code: "gh-code",
 		codeVerifier: "verifier-0123456789-abcdef-0123456789-abcdef-0123456789abcdef",
 		redirectUri: CALLBACK,

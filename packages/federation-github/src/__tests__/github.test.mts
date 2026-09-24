@@ -38,11 +38,20 @@ const baseConfig = {
 };
 const VERIFIER = "verifier-0123456789-abcdef-0123456789-abcdef-0123456789abcdef";
 
+/**
+ * The fake reaches the adapter through `config.fetch`. The global fetch is a
+ * tripwire, so a case that forgot to inject fails here instead of calling
+ * GitHub.
+ */
+const refuseNetwork = async (): Promise<Response> => {
+	throw new Error("the global fetch must not be reached — inject the fake through config.fetch");
+};
+
 let github: FakeGithub;
 
 beforeEach(() => {
 	github = createFakeGithub();
-	vi.stubGlobal("fetch", github.fetch);
+	vi.stubGlobal("fetch", refuseNetwork);
 });
 
 afterEach(() => {
@@ -50,7 +59,7 @@ afterEach(() => {
 });
 
 const exchange = (extra: Record<string, unknown> = {}) => {
-	const p = createGithubProvider(baseConfig);
+	const p = createGithubProvider({ ...baseConfig, fetch: github.fetch });
 	return p.exchangeCode({
 		code: "gh-code",
 		codeVerifier: VERIFIER,
