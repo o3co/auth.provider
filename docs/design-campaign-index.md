@@ -33,7 +33,7 @@ them.
 | Milestone | What shipped | Anchor |
 | --- | --- | --- |
 | v0.4.0 (2026-04-22) | TODO-F plan capstone: F-6 federation-token endpoint, federation-interface + session-store redesign | CHANGELOG `[0.4.0]` |
-| Phases 1–9 → v0.5.x | Module-system redesign: `defineModule` manifests, boot planner; Phase 9 = A2-γ caller migration, `LegacyModule` removal | CHANGELOG "Phase 1-9"; core README |
+| Phases 1–9 → v0.5.x | Module-system redesign: `defineModule` manifests, boot planner; Phase 9 = A2-γ caller migration, `LegacyModule` removal | CHANGELOG "Phase 1-9" (incl. the `LegacyModule` deletion); #100 (Phase 9) |
 | Phase 10 | Redis adapter relocation → `@o3co/auth-provider-redis` | CHANGELOG |
 | Wave 5d | Redis adapter switches + external-ioredis migration (OR-9/OR-4/IH-14; pairs with D-2 v2) | `application.schema.mts` redis keys |
 | Wave 5g | "ts-safety-batch" type-safety hardening (TS-2/TS-6) | redis/*, foundation |

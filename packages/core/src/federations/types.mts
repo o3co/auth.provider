@@ -108,7 +108,7 @@ export interface FederationProvider {
 	 * 1. the start route appends `response_mode=form_post` to the URL this
 	 *    provider's `buildAuthorizationUrl` returned, so the parameter is
 	 *    written once for every federation instead of in each adapter;
-	 * 2. `POST /oauth/federation/<name>/callback` starts accepting an
+	 * 2. `POST /session/oauth/federation/<name>/callback` starts accepting an
 	 *    `application/x-www-form-urlencoded` body, with the same state / PKCE
 	 *    / nonce binding as the GET callback (a provider that does not declare
 	 *    the mode answers 405 there, so no existing federation gains a POST

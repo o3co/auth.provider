@@ -14,6 +14,13 @@
  * limitations under the License.
  */
 
+/*
+ * RFC 6749 §3.3's scope grammar: `isScopeToken`, `parseScopeTokens` and
+ * `canonicalScope`, the one form a scope is written and compared in. Read a
+ * scope through these rather than splitting it by hand: a split on a single
+ * space reads a tab as part of a scope's name. No state.
+ */
+
 /**
  * Whether one entry is a scope-token.
  *
