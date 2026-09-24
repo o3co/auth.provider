@@ -332,7 +332,10 @@ describe("device authorization request (RFC 8628 §3.1–§3.2)", () => {
 		const res = await startDevice(app, { client_id: OTHER_GRANTS_ID });
 		expect(res.status).toBe(400);
 		expect(res.body.error).toBe("unauthorized_client");
-		expect(res.body.error_description).toContain(DEVICE_CODE_GRANT_TYPE);
+		// The token endpoint's words for the same refusal.
+		expect(res.body.error_description).toBe(
+			`client is not authorized for grant_type '${DEVICE_CODE_GRANT_TYPE}'`,
+		);
 	});
 
 	it("refuses a client with no allowedGrantTypes at all (#326: never acquired by omission)", async () => {
