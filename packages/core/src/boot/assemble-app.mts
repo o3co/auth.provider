@@ -699,7 +699,8 @@ export function assembleApp(
 	// above instead. The exempt path is coupled to the bundled `oauthModule`'s
 	// mountPath the same way the `/oauth/token` mounts above and below are —
 	// see the NOTE on the `grantMiddleware` mount.
-	const SENDER_CONSTRAINT_EXEMPT_PATHS = ["/oauth/token"] as const;
+	const TOKEN_ENDPOINT_PATH = "/oauth/token";
+	const SENDER_CONSTRAINT_EXEMPT_PATHS = [TOKEN_ENDPOINT_PATH] as const;
 
 	// Prefix-segment, case-insensitive match — the same semantics an Express
 	// `router.use(path, ...)` mount applies (Express routers are
@@ -714,7 +715,11 @@ export function assembleApp(
 
 	// Synthesize a SINGLE `tokenBindingMw` from the `tokenBindingMechanisms`
 	// collector and mount it on `/oauth/token` BEFORE any other grant
-	// middleware. Multiple mechanism modules (DPoP, mTLS, ...) contribute
+	// middleware. Mounted as a route (`router.all`), so it matches
+	// `/oauth/token` exactly — with the trailing slash and letter case the
+	// token route itself admits — and not a longer path beneath it:
+	// `router.use` would hand a later module's `/oauth/token/custom` the
+	// token endpoint's binding verdict. Multiple mechanism modules (DPoP, mTLS, ...) contribute
 	// raw mechanisms; core composes them into one middleware so the
 	// configured `DispatchPolicy` (`intent-explicit` / `strict-mutual-
 	// exclusion`) arbitrates across modules. See ADR
@@ -740,7 +745,7 @@ export function assembleApp(
 				rawPolicy === "strict-mutual-exclusion" ? "strict-mutual-exclusion" : "intent-explicit";
 			const logger = (frozen.components as Record<string, unknown>).logger as Logger | undefined;
 			const composed = tokenBindingMw({ mechanisms, dispatchPolicy, logger });
-			router.use("/oauth/token", composed);
+			router.all(TOKEN_ENDPOINT_PATH, composed);
 		}
 	}
 
@@ -785,7 +790,8 @@ export function assembleApp(
 	});
 
 	// Mount `grantMiddleware` contributions on `/oauth/token` AFTER the
-	// synthesized tokenBindingMw above. The bundled `oauthModule` contributes
+	// synthesized tokenBindingMw above — exactly `/oauth/token`, as that one
+	// is. The bundled `oauthModule` contributes
 	// its sub-router at mountPath `/oauth` (packages/oauth/src/module.mts),
 	// so the external grant-dispatch URL is `/oauth/token`. Express runs
 	// middleware in mount order, so these handlers fire before the OAuth
@@ -803,7 +809,7 @@ export function assembleApp(
 	if (grantMwCollector !== undefined) {
 		for (const mw of grantMwCollector.values()) {
 			if (mw !== null) {
-				router.use("/oauth/token", mw);
+				router.all(TOKEN_ENDPOINT_PATH, mw);
 			}
 		}
 	}
