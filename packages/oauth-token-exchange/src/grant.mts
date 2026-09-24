@@ -37,8 +37,8 @@ import {
 	loggableError,
 	matchConfirmation,
 	ownedConfirmation,
-	parseScopeTokens,
 	policyOutOfBounds,
+	readIssuedScope,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 } from "@o3co/auth-provider-core";
@@ -566,12 +566,14 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// the `grantedScope` assignment below.
 			//
 			// RFC 6749 §3.3, two readings. The subject's scope is a validated
-			// token's record, read tolerantly (`parseScopeTokens`). The request's
+			// token's record, read so it never widens (`readIssuedScope`): a legacy
+			// `read<TAB>write` entry named no scope and must not supply `write`
+			// to a request or to an inheriting exchange now. The request's
 			// is the client's, read strictly: a value that is not a space-delimited
 			// list of scope-tokens is refused as malformed, and a repeated
 			// parameter (an array) is refused rather than read as omitted, which
 			// would inherit the subject's whole scope.
-			const subjectScope = parseScopeTokens(subjectValidated.scope);
+			const subjectScope = readIssuedScope(subjectValidated.scope);
 			const subjectScopeSet = new Set(subjectScope);
 			const clientScopeSet = new Set(client.allowedScopes ?? []);
 			if (body.scope !== undefined && body.scope !== null && typeof body.scope !== "string") {

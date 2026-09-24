@@ -15,7 +15,7 @@
  */
 
 /*
- * RFC 6749 §3.3's scope grammar: `isScopeToken`, the two readers of a
+ * RFC 6749 §3.3's scope grammar: `isScopeToken`, the three readers of a
  * space-delimited value, and `canonicalScope`, the one form a scope is
  * written and compared in. Read a scope — or any other space-delimited
  * protocol value, such as OIDC's `prompt` and `acr_values` — through these
@@ -25,10 +25,14 @@
  * - a client's request parameter: `readSpaceDelimitedParameter`, strict. A
  *   malformed value is the request's fault and is refused (`invalid_scope`
  *   for a scope, RFC 6749 §4.1.2.1 / §5.2).
+ * - the scope a token already carries — this server's own access and refresh
+ *   tokens, a token-exchange subject: `readIssuedScope`, which never widens.
+ *   A token minted before requests were read strictly can hold an entry such
+ *   as `openid<TAB>email` that named no scope; it stays naming none.
  * - anything else — an upstream's answer, an assertion's claim, a client
- *   metadata document, a token or record this server wrote:
- *   `parseScopeTokens`, tolerant. The value is read for what it names, and
- *   one that names nothing is never read as absent.
+ *   metadata document, an upstream-token record: `parseScopeTokens`,
+ *   tolerant. The value is read for what it names, and one that names
+ *   nothing is never read as absent.
  *
  * No state.
  */
@@ -102,6 +106,29 @@ export function parseScopeTokens(value: unknown): readonly string[] {
 export function readSpaceDelimitedParameter(value: string): readonly string[] | null {
 	const entries = value.split(" ").filter((entry) => entry !== "");
 	return entries.every(isScopeToken) ? [...new Set(entries)] : null;
+}
+
+/**
+ * The scope a token already carries, read so that it can never name more than
+ * it did when the token was minted: split on the space alone, keeping only the
+ * scope-tokens, in order and without repeats.
+ *
+ * The reader for a claim this server wrote — or a validator vouches for — as
+ * opposed to an upstream's answer ({@link parseScopeTokens}). The difference
+ * is what a tab does. Before requests were read strictly, a grant could mint a
+ * scope as the client sent it, so a live token can carry `openid<TAB>email` as
+ * one entry. That entry named no scope, released no claim and matched no
+ * ceiling. Splitting it on the tab would turn it into `openid` and `email` —
+ * a scope the token was never granted — so an entry that is not a scope-token
+ * is dropped instead. Dropping can only narrow.
+ *
+ * Runs of spaces and spaces at either end name the same scopes: they can
+ * neither merge two entries nor invent one. Anything that is not a string
+ * names nothing.
+ */
+export function readIssuedScope(value: unknown): readonly string[] {
+	if (typeof value !== "string") return [];
+	return [...new Set(value.split(" ").filter(isScopeToken))];
 }
 
 /**

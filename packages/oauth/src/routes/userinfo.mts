@@ -19,8 +19,8 @@ import {
 	filterClaimsByScope,
 	type KeyStore,
 	type Logger,
-	parseScopeTokens,
 	type RefreshTokenFamilyRevocation,
+	readIssuedScope,
 	type SubjectRevocation,
 	type UserSessionStore,
 	verifyJwt,
@@ -179,9 +179,10 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		}
 
 		// Return sub + scope-filtered claims per OIDC Core §5.4. The claim is
-		// this server's own record, read by RFC 6749 §3.3's grammar
-		// (`parseScopeTokens`), so a tab in it cannot hide a granted scope.
-		const scopes = parseScopeTokens(payload.scope);
+		// this server's own record, read so it never widens (`readIssuedScope`):
+		// a legacy entry such as `openid<TAB>email` named no scope when it was
+		// minted, and must not release the email claims now.
+		const scopes = readIssuedScope(payload.scope);
 		const filtered = filterClaimsByScope(session.claims, scopes);
 		return res.status(200).json({ sub, ...filtered });
 	};

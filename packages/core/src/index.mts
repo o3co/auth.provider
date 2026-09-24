@@ -219,6 +219,7 @@ export {
 	canonicalScope,
 	isScopeToken,
 	parseScopeTokens,
+	readIssuedScope,
 	readSpaceDelimitedParameter,
 } from "./federations/scope.mjs";
 export type {
