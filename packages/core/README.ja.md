@@ -416,6 +416,7 @@ sender-constrained なトークンバインディングは第一級の拡張面�
 - `TokenBinding`（[`src/grants/tokenBinding.mts`](src/grants/tokenBinding.mts)）— 横断的なバインディングの形: `kind`、`confirmation`、そして機構がレスポンスに載せるよう求める任意の `responseHeaders`（`DPoP-Nonce`）。`kind` は開いているので、downstream の機構が追加的に拡張できる。
 - `Confirmation`（[`src/grants/confirmation.mts`](src/grants/confirmation.mts)）— RFC 7800 の `cnf` claim の payload で、`jkt` と `x5t#S256` の閉じた union。variant の追加は core の semver-minor 変更。
 - `TokenBindingMechanism`（[`src/middleware/tokenBinding.mts`](src/middleware/tokenBinding.mts)）— 動詞側の抽象: `kind`、`intentExplicit`（DPoP のようなヘッダー駆動の機構は `true`、mTLS のような ambient な機構は `false`）、`extract(req)`。
+- `TokenBindingRefusal`（同じファイル）— `extract` が拒否するときに throw するもの。duck type で読まれ、3 種類の応答のどれにあたるかは機構自身が述べる。提示された material への判定は、トークンエンドポイントでは `400 <code>`、保護リソースではチャレンジ付きの `401 invalid_token`。`retryInstruction`（DPoP の `use_dpop_nonce`）は、トークンエンドポイントでは `400 <code>`、保護リソースではその code でチャレンジする `401`。`unavailable` の障害 — 読めない replay store のように、機構が判定に至れなかった場合 — はどちらでも `503 <code>` でチャレンジなし。クレデンシャルに非はないからである。ディスパッチャーが機構の code を知ることはない。
 - `TokenBindingMechanismFactory<Deps>`（[`src/modules/manifest/contributes-map.mts`](src/modules/manifest/contributes-map.mts)）— contribution スロットのエントリー: 機構を返すか、設定でモジュールが無効なら `null` を返す（secure-default の opt-in）。
 
 #### 組み込みの機構パッケージ

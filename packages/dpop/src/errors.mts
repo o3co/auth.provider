@@ -17,9 +17,10 @@
 /**
  * Granular internal reason code for a DPoP validation failure.
  *
- * The wire-level error code is always `"invalid_dpop_proof"` (RFC 9449 §7).
- * This reason field is for internal audit emission only — it MUST NOT be
- * forwarded to the client.
+ * The wire-level error code is `"invalid_dpop_proof"` (RFC 9449 §7) for a
+ * proof found invalid; see {@link DPoPError.code} for the two that are not a
+ * verdict on the proof. This reason field is for internal audit emission
+ * only — it MUST NOT be forwarded to the client.
  *
  * Per Wave 2 Phase 2 spec §5.6.
  */
@@ -46,11 +47,14 @@ export type DPoPReasonCode =
  * Thrown by `parseProof` and `verifyProof` for any DPoP validation failure.
  *
  * Wire-level `code` is `"invalid_dpop_proof"` (RFC 9449 §7) for every
- * failure but the nonce ones, which are `"use_dpop_nonce"` (§8 / §9, #530):
+ * failure but three. The nonce ones are `"use_dpop_nonce"` (§8 / §9, #530):
  * `nonce_required` and `nonce_invalid` are an instruction to retry with the
  * nonce the answer carries in `responseHeaders`, not a verdict on the
- * proof. The `reason` field carries a granular sub-classification for
- * audit emission — it must never reach the wire.
+ * proof. `replay_store_unavailable` is `"temporarily_unavailable"`: the
+ * replay record could not be read or written, so the proof was not judged
+ * at all — core's dispatchers answer it 503 (`unavailable`). The `reason`
+ * field carries a granular sub-classification for audit emission — it must
+ * never reach the wire.
  *
  * Per Wave 2 Phase 2 spec §5.6 + design principle §3.4.
  */
@@ -61,9 +65,10 @@ export class DPoPError extends Error {
 	 * carries a stale one, is `use_dpop_nonce` (§8 / §9, #530) — the one
 	 * refusal that is an instruction rather than a verdict, and the answer
 	 * that carries it also carries the nonce to retry with, in
-	 * `responseHeaders`.
+	 * `responseHeaders`. A replay store that cannot be read is
+	 * `temporarily_unavailable`: an outage, not a verdict (`unavailable`).
 	 */
-	readonly code: "invalid_dpop_proof" | "use_dpop_nonce";
+	readonly code: "invalid_dpop_proof" | "use_dpop_nonce" | "temporarily_unavailable";
 	readonly reason: DPoPReasonCode;
 	readonly detail?: Record<string, unknown>;
 	/** Headers the HTTP answer must carry — `DPoP-Nonce` for the nonce refusals (#530). */
@@ -75,6 +80,14 @@ export class DPoPError extends Error {
 	 * challenges with this error's `code`, without knowing DPoP's codes.
 	 */
 	readonly retryInstruction?: string;
+	/**
+	 * Core's `TokenBindingRefusal.unavailable`: set for
+	 * `replay_store_unavailable`, the one refusal that is the server's fault.
+	 * The token endpoint and a protected resource answer it `503
+	 * temporarily_unavailable` with this description and no challenge — the
+	 * proof may be perfectly good, and a client retries it later.
+	 */
+	readonly unavailable?: string;
 
 	constructor(
 		reason: DPoPReasonCode,
@@ -86,10 +99,19 @@ export class DPoPError extends Error {
 		this.name = "DPoPError";
 		this.reason = reason;
 		const nonceRefusal = reason === "nonce_required" || reason === "nonce_invalid";
-		this.code = nonceRefusal ? "use_dpop_nonce" : "invalid_dpop_proof";
+		const outage = reason === "replay_store_unavailable";
+		this.code = nonceRefusal
+			? "use_dpop_nonce"
+			: outage
+				? "temporarily_unavailable"
+				: "invalid_dpop_proof";
 		if (nonceRefusal) {
 			this.retryInstruction =
 				"a server-provided nonce is required; retry with the value of the DPoP-Nonce header";
+		}
+		if (outage) {
+			this.unavailable =
+				"DPoP proofs cannot be checked for replay right now; retry the request later";
 		}
 		if (detail !== undefined) this.detail = detail;
 		if (responseHeaders !== undefined) this.responseHeaders = responseHeaders;
@@ -98,9 +120,10 @@ export class DPoPError extends Error {
 
 /**
  * The wire-level OAuth error code emitted by DPoP failures:
- * `"invalid_dpop_proof"` (RFC 9449 §7), or `"use_dpop_nonce"` (§8 / §9,
- * #530) for a proof that lacks the server-provided nonce or carries a
- * stale one. The alias is exported per spec §5.1 so consumers can name the
+ * `"invalid_dpop_proof"` (RFC 9449 §7), `"use_dpop_nonce"` (§8 / §9, #530)
+ * for a proof that lacks the server-provided nonce or carries a stale one,
+ * or `"temporarily_unavailable"` when the replay store cannot be read. The
+ * alias is exported per spec §5.1 so consumers can name the
  * wire-side surface explicitly when constructing wire-level error
  * envelopes.
  */

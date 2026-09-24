@@ -31,10 +31,11 @@
  *            protocol / Host (#292).
  *   Step 12: iat window
  *   Step 14: Replay check — one atomic `markSeen` on core's `ReplaySeenSet`
- *            under `dpop-proof:<jkt>`, kept for `replayTtlSeconds`. Wrapped
- *            so transport faults surface as the `replay_store_unavailable`
- *            audit signal rather than leaking raw Redis errors through
- *            `tokenBindingMw`.
+ *            under `dpop-proof:<jkt>`, kept for `replayTtlSeconds`. A store
+ *            that cannot be read refuses the proof as an outage
+ *            (`replay_store_unavailable`, answered 503
+ *            `temporarily_unavailable`), never as an invalid proof and
+ *            never by leaking a raw Redis error.
  *   Step 15: Return TokenBinding
  *
  * The verifier relies on `parseProof` (Sub-PR 2a) for steps 3–9 + 13 and
@@ -426,13 +427,14 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 			// (see `DPoPMechanismOptions.replayTtlSeconds`).
 			//
 			// Wrapped so that transport faults (Redis ECONNREFUSED, etc.)
-			// surface as the distinct `replay_store_unavailable` audit signal
-			// rather than leaking a raw infrastructure error through
-			// `tokenBindingMw` — operators triaging audit events need to
-			// distinguish "client sent garbage" from "replay store is down" even
-			// when both map to the same RFC 9449 §7 wire code
-			// `invalid_dpop_proof`. Either way the proof is refused: an
-			// unrecorded proof is never accepted.
+			// surface as `replay_store_unavailable` rather than leaking a raw
+			// infrastructure error. That refusal is an outage, not a verdict:
+			// the proof may be perfectly good, so it carries
+			// `temporarily_unavailable` and the `unavailable` description, which
+			// the token endpoint and a protected resource answer 503 — not RFC
+			// 9449's `invalid_dpop_proof`, which says the proof was found
+			// invalid. Either way the proof is refused: an unrecorded proof is
+			// never accepted.
 			let fresh: boolean;
 			try {
 				fresh = await replaySeenSet.markSeen(

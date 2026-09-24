@@ -17,7 +17,12 @@ import type { TokenBinding } from "../grants/tokenBinding.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 
 import "./express.mjs"; // ensure ambient Express.Request augmentation is loaded
-import { applyResponseHeaders, oauthErrorCodeOf, retryInstructionOf } from "./_responseHeaders.mjs";
+import {
+	applyResponseHeaders,
+	oauthErrorCodeOf,
+	retryInstructionOf,
+	unavailableOf,
+} from "./_responseHeaders.mjs";
 
 /**
  * Extra request-scope facts a mechanism needs when the material is
@@ -69,9 +74,11 @@ export interface TokenBindingMechanism {
 	/**
 	 * Return a `TokenBinding` of this mechanism's kind, `null` when the
 	 * intent signal is absent, or throw a structured error when the signal
-	 * is present but the proof / cert is invalid. The thrown value MAY
+	 * is present but the proof / cert is invalid — or cannot be judged
+	 * because something on the server's side failed, which the error says
+	 * with `unavailable` and which is answered 503. The thrown value MAY
 	 * carry a `code: string` field matching `/^[a-z][a-z0-9_]*$/` — that
-	 * code is forwarded as the OAuth `error` field of the 400 response.
+	 * code is forwarded as the OAuth `error` field of the response.
 	 * Errors without a snake_case `code` fall back to
 	 * `invalid_<kind>_proof` so infrastructure-layer codes (e.g. Node
 	 * `ECONNREFUSED`) do not leak through the public error envelope. The
@@ -104,6 +111,18 @@ export interface TokenBindingRefusal {
 	 * change here.
 	 */
 	readonly retryInstruction?: string;
+	/**
+	 * Present when the mechanism could not reach a verdict because something
+	 * on the server's side failed — a replay store that cannot be read — and
+	 * the text is the answer's description. Neither a verdict on the material
+	 * nor an instruction about it: the client did nothing wrong and should
+	 * retry later, so both dispatchers answer `503` with `code` as the
+	 * `error` (the mechanism names it; `temporarily_unavailable` is this
+	 * repository's code for an outage) and no `WWW-Authenticate` challenge,
+	 * because the credential is not at fault. The request is refused either
+	 * way: nothing is admitted unchecked.
+	 */
+	readonly unavailable?: string;
 }
 
 /**
@@ -179,6 +198,14 @@ export const tokenBindingMw = ({
 				binding = await mechanism.extract(req);
 			} catch (err) {
 				const code = oauthErrorCodeOf(err) ?? `invalid_${mechanism.kind}_proof`;
+				// An outage the mechanism reports is not a refused proof: 503, and
+				// logged under its own event so the two are never counted as one.
+				const unavailable = unavailableOf(err);
+				if (unavailable !== undefined) {
+					logger?.warn({ mechanism: mechanism.kind, code }, "token_binding_unavailable");
+					res.status(503).json(errorEnvelope(code, unavailable));
+					return;
+				}
 				logger?.warn({ mechanism: mechanism.kind, code }, "token_binding_proof_invalid");
 				// #530: a refusal may carry headers the client needs to retry, and
 				// say that it is an instruction rather than a verdict — in its own

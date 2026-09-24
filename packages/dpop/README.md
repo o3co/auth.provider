@@ -161,9 +161,15 @@ requests carrying one proof, exactly one is accepted.
   [`src/verifier.mts`](src/verifier.mts)). A value that is not a positive
   finite number is refused when the mechanism is built.
 - **When the store fails.** A seen-set that cannot be reached refuses the
-  proof — `400 invalid_dpop_proof`, with the `replay_store_unavailable` reason
-  in the audit record and `dpop_replay_store_unavailable` logged. A proof is
-  never accepted unrecorded.
+  request as the server's fault, not the proof's: `503 temporarily_unavailable`
+  at the token endpoint and at a protected resource, with no
+  `WWW-Authenticate` challenge, and `dpop_replay_store_unavailable` logged
+  (reason `replay_store_unavailable`). A proof is never accepted unrecorded,
+  and it is not called invalid either — RFC 9449 keeps `invalid_dpop_proof`
+  for a proof that failed its checks (§5, §7.1), and a resource's
+  `401 invalid_token` would send the client to replace a token that is fine.
+  The client retries later; the same answer `private_key_jwt` gives when its
+  replay record cannot be written.
 - **Ordering.** A proof refused for its nonce or its `ath` is refused before
   the seen-set is consulted, so it does not spend its `jti`.
 
