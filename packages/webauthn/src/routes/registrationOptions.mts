@@ -92,7 +92,7 @@ export function createRegistrationOptionsHandler(deps: RegistrationOptionsDeps):
 			res.status(500).json({
 				error: "server_error",
 				error_description:
-					"webauthnSubject.userId must be 1-64 bytes per WebAuthn §5.4.3 (opaque user-handle)",
+					"webauthnSubject.userId must be 1-64 bytes per WebAuthn section 5.4.3 (opaque user-handle)",
 			});
 			return;
 		}

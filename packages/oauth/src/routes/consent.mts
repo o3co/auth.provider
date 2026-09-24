@@ -128,7 +128,7 @@ const jsonError = (res: Response, status: number, error: string, description: st
  * is why expiry is named here rather than detected separately.
  */
 const NO_PENDING =
-	"no pending consent for this challenge — it was answered, has expired, or was not issued to this session; start again";
+	"no pending consent for this challenge: it was answered, has expired, or was not issued to this session; start again";
 
 const sameToken = (a: string, b: string): boolean => {
 	const x = Buffer.from(a);
@@ -322,7 +322,7 @@ export function createConsentRouter(express: ExpressLike, opts: ConsentRouterOpt
 		}
 		const decision = body.decision;
 		if (decision !== "accept" && decision !== "deny") {
-			return jsonError(res, 400, "invalid_request", 'decision must be "accept" or "deny"');
+			return jsonError(res, 400, "invalid_request", "decision must be 'accept' or 'deny'");
 		}
 		// The client has to exist when the answer is given, not only when the
 		// page was shown: a registration removed in between is a consent for

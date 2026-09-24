@@ -368,10 +368,9 @@ export const createRouter = (
 				if (redirect_to != null) {
 					const validation = redirectPolicy.validateRedirect(redirect_to);
 					if (!validation.ok) {
-						res.status(validation.status).json({
-							error: validation.error,
-							error_description: validation.errorDescription,
-						});
+						res
+							.status(validation.status)
+							.json(errorEnvelope(validation.error, validation.errorDescription));
 						return;
 					}
 				}

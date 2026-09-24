@@ -167,6 +167,10 @@ export type RedirectRejection =
  * two places (#405): pointing a login-flow operator at a federation key would
  * send them to edit a section that has no effect on the request they are
  * debugging.
+ *
+ * The text is written in printable ASCII without `"` and `\`: a refused
+ * request gets it as its `error_description`, which RFC 6749 Appendix A.8
+ * limits to those characters.
  */
 export function describeRedirectRejection(
 	reason: RedirectRejection,
@@ -187,19 +191,19 @@ export function describeRedirectRejection(
 			);
 		case "unsupported-scheme":
 			return (
-				"must use https, or http for a loopback host (localhost, 127.0.0.0/8, [::1]) — " +
+				"must use https, or http for a loopback host (localhost, 127.0.0.0/8, [::1]); " +
 				"no other scheme is accepted"
 			);
 		case "insecure-scheme":
 			return (
-				"must use https — http is accepted only for a loopback host " +
+				"must use https; http is accepted only for a loopback host " +
 				"(localhost, 127.0.0.0/8, [::1]), where the traffic never leaves the machine"
 			);
 		case "has-credentials":
 			return "must not embed credentials in the URL";
 		case "outside-session-domain":
 			return (
-				"must be inside the configured session cookie domain, or name a loopback host — " +
+				"must be inside the configured session cookie domain, or name a loopback host; " +
 				"a target the session cookie cannot reach would land the user logged out"
 			);
 		case "no-allowlist":

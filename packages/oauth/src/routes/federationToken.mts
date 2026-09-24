@@ -37,6 +37,7 @@ import {
 	isBearerTokenType,
 	loggableError,
 	parseScopeTokens,
+	sanitizeErrorText,
 	supportsLock,
 	supportsRefresh,
 	verifyJwt,
@@ -553,7 +554,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		if (!federations.includes(name)) {
 			return res.status(404).json({
 				error: "federation_not_linked",
-				error_description: `federation "${name}" is not linked to this session`,
+				error_description: sanitizeErrorText(`federation '${name}' is not linked to this session`),
 			});
 		}
 
@@ -584,7 +585,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			}
 			return res.status(404).json({
 				error: "federation_not_linked",
-				error_description: `federation "${name}" tokens not found`,
+				error_description: sanitizeErrorText(`federation '${name}' tokens not found`),
 			});
 		}
 
@@ -630,7 +631,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			);
 			return res.status(503).json({
 				error: "refresh_not_supported",
-				error_description: `federation "${name}" does not support token refresh`,
+				error_description: sanitizeErrorText(`federation '${name}' does not support token refresh`),
 			});
 		}
 

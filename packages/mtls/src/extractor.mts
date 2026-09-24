@@ -367,7 +367,7 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 					logger?.warn({ remoteAddress, certHeader }, "mtls_untrusted_proxy_rejected");
 					throw new MtlsError(
 						"untrusted_proxy",
-						`forwarded client certificate header "${certHeader}" arrived from a peer that is not in the trusted-proxy allowlist`,
+						`forwarded client certificate header '${certHeader}' arrived from a peer that is not in the trusted-proxy allowlist`,
 						{ remoteAddress },
 					);
 				}
