@@ -38,6 +38,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import {
+	AppConfigSchema,
 	createApp,
 	createMemoryWebAuthnCredentialStore,
 	createSymmetricKeyStore,
@@ -55,7 +56,7 @@ import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
 import express from "express";
 import supertest from "supertest";
 import { describe, expect, it, vi } from "vitest";
-import type { WebAuthnConfig } from "../config.mjs";
+import { type WebAuthnConfig, webauthnConfigSchema } from "../config.mjs";
 import { WEBAUTHN_GRANT_TYPE } from "../grant.mjs";
 import { webauthnModule } from "../module.mjs";
 
@@ -553,6 +554,68 @@ describe("webauthnModule boot integration (Wave 1 T31)", () => {
  *
  * Cross-refs: Codex Round 4 P1
  */
+/**
+ * The operator's path for `WEBAUTHN_ORIGIN` / `WEBAUTHN_TOP_ORIGIN`: the
+ * composition root parses its resolved HOCON with core's `AppConfigSchema`,
+ * and the bootstrap module this package's README describes hands
+ * `config.webauthn` to `webauthnConfigSchema`.
+ *
+ * `hoconWebauthn` is the `webauthn` section as the shipped reference.conf
+ * resolves with these variables set: its literals keep their types, every
+ * `${?VAR}` arrives as a string. That the section reaches the composition root
+ * in exactly this shape — the origin list still one comma-separated string
+ * after `AppConfigSchema` — is pinned against the real HOCON resolution in
+ * core's `reference-conf-drift.test.mts`, which has the HOCON library this
+ * package does not depend on.
+ */
+describe("webauthnConfig from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIGIN)", () => {
+	const ANDROID = "android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI";
+	const hoconWebauthn = {
+		challengeTtlMs: 120000,
+		attestationPreference: "none",
+		userVerification: "preferred",
+		allowCredentialsForKnownUser: false,
+		rateLimit: { authenticationOptions: { limit: 30, windowSeconds: 60 } },
+		rpId: "example.com",
+		rpName: "Example App",
+		origin: `https://example.com,${ANDROID}`,
+		topOrigin: "https://partner.example",
+	};
+
+	it("boots with both origins and the top origin the variables name", async () => {
+		const config = AppConfigSchema.parse({ ...coreConfig, webauthn: hoconWebauthn });
+		// The composition root hands the section on as it found it.
+		expect(config.webauthn?.origin).toBe(`https://example.com,${ANDROID}`);
+
+		const handle = await createApp({
+			modules: [
+				webauthnModule,
+				defineModule({
+					name: "test:webauthn-config-from-app-config",
+					requires: ["config"] as const,
+					provides: {
+						webauthnConfig: ({ config }) => webauthnConfigSchema.parse(config.webauthn),
+					},
+				}),
+				keyStoreModule,
+				memoryChallengeStoreModule,
+				memoryReplaySeenSetModule,
+				defaultChallengeCeremonyModule,
+				memoryWebAuthnCredentialStoreModule,
+				noopGrantPolicyModule,
+				activatorModule,
+			],
+			bootstrapComponents: { config, pathResolver: (p: string) => p } as never,
+		});
+		const resolved = (handle.components as Record<string, unknown>).webauthnConfig as
+			| WebAuthnConfig
+			| undefined;
+		expect(resolved?.origin).toEqual(["https://example.com", ANDROID]);
+		expect(resolved?.topOrigin).toEqual(["https://partner.example"]);
+		await handle.dispose();
+	});
+});
+
 describe("webauthnModule body parser integration (Codex Round 4 P1)", () => {
 	it("POST /oauth/webauthn/authentication/options parses JSON body via router-level parser (no global parser on host app)", async () => {
 		const handle = await createApp({

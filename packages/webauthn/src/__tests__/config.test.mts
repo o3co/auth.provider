@@ -310,3 +310,83 @@ describe("topOrigin — the origins this RP may be framed by (#554 audit)", () =
 		).toThrow();
 	});
 });
+
+// HOCON substitutes `${?WEBAUTHN_ORIGIN}` / `${?WEBAUTHN_TOP_ORIGIN}` as one
+// string, and an environment variable has no other way to carry a list. The
+// list therefore takes the spelling core gives `CORS_ALLOWED_ORIGINS`:
+// comma-separated, each entry trimmed, empty entries dropped. A serialized
+// origin cannot contain a comma, and neither can the base64url body of an
+// Android app origin, so the split cannot cut an entry in two.
+describe("origin lists from the environment (WEBAUTHN_ORIGIN / WEBAUTHN_TOP_ORIGIN)", () => {
+	const referenceConf = readFileSync(
+		fileURLToPath(new URL("../../config/reference.conf", import.meta.url)),
+		"utf8",
+	);
+	const ANDROID = "android:apk-key-hash:pNiP5iKyQ8JwgLTSKGZmcRHqvOUP1qGP8FfEcCQPvVI";
+
+	it("reference.conf lets the environment reach both lists", () => {
+		expect(referenceConf).toMatch(/^\s*origin = \$\{\?WEBAUTHN_ORIGIN\}$/m);
+		expect(referenceConf).toMatch(/^\s*topOrigin = \$\{\?WEBAUTHN_TOP_ORIGIN\}$/m);
+	});
+
+	it("reads a single origin as a one-entry list", () => {
+		expect(webauthnConfigSchema.parse({ ...VALID, origin: "https://example.com" }).origin).toEqual([
+			"https://example.com",
+		]);
+	});
+
+	it("splits a comma-separated WEBAUTHN_ORIGIN into its origins, web and Android alike", () => {
+		const parsed = webauthnConfigSchema.parse({
+			...VALID,
+			origin: `https://a.example,https://b.example,${ANDROID}`,
+		});
+		expect(parsed.origin).toEqual(["https://a.example", "https://b.example", ANDROID]);
+	});
+
+	it("trims each entry and drops the empty ones, as CORS_ALLOWED_ORIGINS does", () => {
+		const parsed = webauthnConfigSchema.parse({
+			...VALID,
+			origin: " https://a.example , ,https://b.example ,",
+		});
+		expect(parsed.origin).toEqual(["https://a.example", "https://b.example"]);
+	});
+
+	it("refuses a malformed entry in the string exactly as it does in the list", () => {
+		for (const bad of [
+			"https://a.example,https://*.example.com",
+			"https://a.example,http://insecure.example",
+			"https://a.example,https://user@b.example",
+			"https://a.example,a.example",
+		]) {
+			expect(webauthnConfigSchema.safeParse({ ...VALID, origin: bad }).success, bad).toBe(false);
+			expect(
+				webauthnConfigSchema.safeParse({ ...VALID, origin: bad.split(",") }).success,
+				`${bad} as a list`,
+			).toBe(false);
+		}
+	});
+
+	it("refuses an empty WEBAUTHN_ORIGIN: the relying party needs at least one origin", () => {
+		expect(webauthnConfigSchema.safeParse({ ...VALID, origin: "" }).success).toBe(false);
+		expect(webauthnConfigSchema.safeParse({ ...VALID, origin: " , " }).success).toBe(false);
+	});
+
+	it("splits WEBAUTHN_TOP_ORIGIN the same way, and keeps its own refusals", () => {
+		expect(
+			webauthnConfigSchema.parse({
+				...VALID,
+				topOrigin: "https://partner.example, https://other.example",
+			}).topOrigin,
+		).toEqual(["https://partner.example", "https://other.example"]);
+		expect(
+			webauthnConfigSchema.safeParse({ ...VALID, topOrigin: `https://partner.example,${ANDROID}` })
+				.success,
+		).toBe(false);
+	});
+
+	it("reads an exported-but-empty WEBAUTHN_TOP_ORIGIN as unset: not framed", () => {
+		expect(webauthnConfigSchema.parse({ ...VALID, topOrigin: "" }).topOrigin).toBeUndefined();
+		// The list spelling keeps its rule: an explicit empty list is refused.
+		expect(webauthnConfigSchema.safeParse({ ...VALID, topOrigin: [] }).success).toBe(false);
+	});
+});
