@@ -30,9 +30,11 @@
  *            the configured `oauth.jwt.issuer`, never the request's forwarded
  *            protocol / Host (#292).
  *   Step 12: iat window
- *   Step 14: Replay check (atomic seen) — wrapped so transport faults
- *            surface as `replay_store_unavailable` audit signal rather
- *            than leaking raw Redis errors through `tokenBindingMw`.
+ *   Step 14: Replay check — one atomic `markSeen` on core's `ReplaySeenSet`
+ *            under `dpop-proof:<jkt>`, kept for `replayTtlSeconds`. Wrapped
+ *            so transport faults surface as the `replay_store_unavailable`
+ *            audit signal rather than leaking raw Redis errors through
+ *            `tokenBindingMw`.
  *   Step 15: Return TokenBinding
  *
  * The verifier relies on `parseProof` (Sub-PR 2a) for steps 3–9 + 13 and
@@ -43,9 +45,11 @@
 
 import {
 	buildCanonicalRequestUrl,
+	ChallengeStorageError,
 	checkCanonicalIssuer,
 	describeIssuerRejection,
 	type Logger,
+	type ReplaySeenSet,
 	type TokenBindingExtractContext,
 	type TokenBindingMechanism,
 } from "@o3co/auth-provider-core";
@@ -56,7 +60,6 @@ import { DPoPError } from "./errors.mjs";
 import { normalizeHtu } from "./htu-normalize.mjs";
 import type { DPoPNonceIssuer } from "./nonce.mjs";
 import { parseProof } from "./proof.mjs";
-import type { DPoPReplayStore } from "./replay-store.mjs";
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -79,8 +82,17 @@ export interface DPoPMechanismOptions {
 	 * deriving `iss` from `Host`.
 	 */
 	readonly issuer: string;
-	/** Replay protection store. */
-	readonly replayStore: DPoPReplayStore;
+	/**
+	 * Where each accepted proof's `jti` is recorded, so the same proof is
+	 * accepted once — core's `ReplaySeenSet`, the slot `private_key_jwt`,
+	 * ID-JAG and WebAuthn record their single-use values in. Records are
+	 * scoped `dpop-proof:<jkt>` ({@link DPOP_PROOF_REPLAY_SCOPE_PREFIX}): the
+	 * same `jti` under another key is a different proof, and no other
+	 * consumer's scope can collide with one. A per-process set is correct for
+	 * one replica only; replicas refuse each other's proofs only when they
+	 * share the set.
+	 */
+	readonly replaySeenSet: ReplaySeenSet;
 	/**
 	 * Acceptance window for the `iat` claim in seconds.
 	 * Default: 60 (1 minute).
@@ -92,7 +104,9 @@ export interface DPoPMechanismOptions {
 	 */
 	readonly algWhitelist?: readonly string[];
 	/**
-	 * TTL in seconds for replay entries in the store. Default: 300 (5 minutes).
+	 * How long, in seconds, a proof's replay record is kept. Default: 300
+	 * (5 minutes). A positive finite number; construction refuses anything
+	 * else, because every record's expiry is computed from it.
 	 *
 	 * MUST be at least **`2 × iatWindowSeconds + 1`**, not `iatWindowSeconds`.
 	 *
@@ -104,9 +118,10 @@ export interface DPoPMechanismOptions {
 	 *
 	 * A replay entry is written only after the window check passes (step 14
 	 * follows step 12), so the earliest it can be created is real time
-	 * `T - W`, and it expires at `firstSeen + TTL`. Expiry is half-open — the
-	 * memory store treats an entry as live only while `expiry > now` — so the
-	 * entry is already gone at `firstSeen + TTL`.
+	 * `T - W`. It is written with `expiresAtMs = firstSeen + TTL` (the Redis
+	 * seen-set turns that back into the same relative `PX` window), and expiry
+	 * is half-open — the memory seen-set treats a record as live only while
+	 * `expiresAtMs > now` — so the entry is already gone at `firstSeen + TTL`.
 	 *
 	 * Covering the whole accepted interval therefore requires
 	 * `T - W + TTL >= T + W + 1`, i.e. `TTL >= 2W + 1`. At exactly `2W` the
@@ -141,6 +156,15 @@ export interface DPoPMechanismOptions {
 const DEFAULT_ALG_WHITELIST: readonly string[] = ["ES256", "ES384", "EdDSA", "RS256"];
 const DEFAULT_IAT_WINDOW_SECONDS = 60;
 const DEFAULT_REPLAY_TTL_SECONDS = 300;
+
+/**
+ * The seen-set scope a proof's `jti` is recorded under, per key:
+ * `dpop-proof:<jkt>`. The seen-set is shared with other consumers
+ * (`client-assertion:<client_id>`, `jwt-bearer:id-jag:<issuer>`,
+ * `webauthn:*`), and its canonical key is length-prefixed, so no record of
+ * theirs can collide with one of these.
+ */
+export const DPOP_PROOF_REPLAY_SCOPE_PREFIX = "dpop-proof:";
 
 // ---------------------------------------------------------------------------
 // Internal helpers
@@ -195,7 +219,17 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 	const algWhitelist = options.algWhitelist ?? DEFAULT_ALG_WHITELIST;
 	const iatWindowSeconds = options.iatWindowSeconds ?? DEFAULT_IAT_WINDOW_SECONDS;
 	const replayTtlSeconds = options.replayTtlSeconds ?? DEFAULT_REPLAY_TTL_SECONDS;
-	const { replayStore, logger, nonce } = options;
+	const { replaySeenSet, logger, nonce } = options;
+
+	// Every record's expiry is `now + replayTtlSeconds`. NaN would write a
+	// record the memory seen-set never expires and hand Redis `PX NaN`; a
+	// non-positive value one that is expired at issue. A composition fault
+	// either way, refused where it is made rather than on every proof.
+	if (!Number.isFinite(replayTtlSeconds) || replayTtlSeconds <= 0) {
+		throw new RangeError(
+			`createDPoPMechanism: replayTtlSeconds must be a positive finite number (got ${String(replayTtlSeconds)})`,
+		);
+	}
 
 	// Replay entries must outlive the acceptance window they protect. The iat
 	// check is symmetric AND second-truncated (`Math.abs(floor(now) - iat) > W`),
@@ -384,38 +418,48 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 			// Do NOT re-compute: proof.jkt is the canonical value.
 			const { jkt } = proof;
 
-			// Step 14 (spec §6): Replay check — atomic (jti, jkt) pair seen/mark.
-			// Wrap so that transport faults (Redis ECONNREFUSED, etc.) surface
-			// as the distinct `replay_store_unavailable` audit signal rather
-			// than leaking a raw infrastructure error through `tokenBindingMw`
-			// — operators triaging audit events need to distinguish "client
-			// sent garbage" from "replay store is down" even when both map to
-			// the same RFC 9449 §7 wire code `invalid_dpop_proof`.
-			let alreadySeen: boolean;
+			// Step 14 (spec §6): Replay check — one atomic check-and-mark of the
+			// (jkt, jti) pair in the seen-set: `markSeen` answers true only to
+			// the call that wrote the record, so of two concurrent requests
+			// carrying the same proof exactly one is accepted. Kept for
+			// `replayTtlSeconds` from now, which the iat window above bounds
+			// (see `DPoPMechanismOptions.replayTtlSeconds`).
+			//
+			// Wrapped so that transport faults (Redis ECONNREFUSED, etc.)
+			// surface as the distinct `replay_store_unavailable` audit signal
+			// rather than leaking a raw infrastructure error through
+			// `tokenBindingMw` — operators triaging audit events need to
+			// distinguish "client sent garbage" from "replay store is down" even
+			// when both map to the same RFC 9449 §7 wire code
+			// `invalid_dpop_proof`. Either way the proof is refused: an
+			// unrecorded proof is never accepted.
+			let fresh: boolean;
 			try {
-				alreadySeen = await replayStore.seen(proof.claims.jti, jkt, replayTtlSeconds);
+				fresh = await replaySeenSet.markSeen(
+					`${DPOP_PROOF_REPLAY_SCOPE_PREFIX}${jkt}`,
+					proof.claims.jti,
+					Date.now() + replayTtlSeconds * 1000,
+				);
 			} catch (err) {
 				// Narrow the catch so only TRANSPORT / availability faults
-				// surface as `replay_store_unavailable`. Programming-contract
-				// violations propagate as-is:
-				//   - DPoPError: a future refactor might shape replay-store
-				//     errors directly as DPoPError; preserve that classification.
-				//   - RangeError: `DPoPReplayStore.seen`'s interface JSDoc says
-				//     implementations SHOULD throw `RangeError` on non-positive
-				//     `ttlSeconds`. That is a programmer / config bug, NOT an
-				//     availability fault — misclassifying it as
-				//     `replay_store_unavailable` would mislead operator triage
-				//     into checking Redis health when the actual fix is the
-				//     ttl config.
+				// surface as `replay_store_unavailable`. Contract faults
+				// propagate as-is:
+				//   - DPoPError: a future refactor might shape seen-set errors
+				//     directly as DPoPError; preserve that classification.
+				//   - ChallengeStorageError: the seen-set's one domain error
+				//     (`expired-at-issue`), which a record computed from a
+				//     positive TTL cannot earn. Misclassifying it as
+				//     `replay_store_unavailable` would send operator triage to
+				//     Redis health when the fault is in the composition.
 				if (err instanceof DPoPError) throw err;
-				if (err instanceof RangeError) throw err;
+				if (err instanceof ChallengeStorageError) throw err;
 				logger?.error({ err, jti: proof.claims.jti }, "dpop_replay_store_unavailable");
 				throw new DPoPError(
 					"replay_store_unavailable",
 					"DPoP replay store is unavailable; cannot determine replay status",
 				);
 			}
-			if (alreadySeen) {
+			if (!fresh) {
 				throw new DPoPError(
 					"replay_detected",
 					"DPoP proof (jti, jkt) already seen in replay window",

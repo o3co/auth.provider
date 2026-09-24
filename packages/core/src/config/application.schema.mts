@@ -290,6 +290,30 @@ const REMOVED_AUTHORIZE_FIELDS: readonly RemovedKey[] = [
 	},
 ];
 
+/**
+ * Fields removed from `oauth.dpop`. Same mechanism as the two tables above.
+ *
+ * `replay-store` said what an empty `dpopReplayStore` slot meant — a
+ * per-process fallback under `"memory"`, a boot refusal under `"redis"` —
+ * and the slot and the fallback are both gone: every accepted proof is
+ * recorded in the `replaySeenSet` component. Failed rather than ignored
+ * (docs/release-policy.md "Retiring a config key"): a deployment that had
+ * wired a shared DPoP store beside a memory seen-set would otherwise move its
+ * DPoP records into memory with nothing new to read.
+ */
+const REMOVED_DPOP_FIELDS: readonly RemovedKey[] = [
+	{
+		name: "replay-store",
+		removedIn: "this release (follows #669)",
+		note:
+			"Every accepted DPoP proof is now recorded in the replaySeenSet component — the " +
+			"seen-set private_key_jwt, ID-JAG and WebAuthn record in — and the dpopReplayStore " +
+			"slot is gone. Choose the backend there: redisReplaySeenSetModule shares it across " +
+			'replicas (replaySeenSet.adapter = "redis" in the standalone template), and ' +
+			'deployment.mode = "multi" refuses the memory one.',
+	},
+];
+
 const jwtSchemaBase = z.object({
 	// The issuer is a property of the deployment, not of a request. It is
 	// REQUIRED: `/oauth/token` used to fall back to `req.get("host")` when this
@@ -1056,23 +1080,28 @@ export const CoreConfigSchema = z.object({
 					.optional(),
 			})
 			.optional(),
-		dpop: z
-			.object({
-				enabled: coerceBooleanFromEnv.optional(),
-				"iat-window-seconds": z.coerce.number().int().positive().optional(),
-				"alg-whitelist": z.array(z.string()).optional(),
-				"replay-store": z.enum(["memory", "redis"]).optional(),
-				"replay-store-ttl-seconds": z.coerce.number().int().positive().optional(),
-				// #530: server-provided nonce; the module's own schema defaults it.
-				nonce: z
-					.object({
-						required: z.enum(["never", "as", "as+rs"]).optional(),
-						"ttl-seconds": z.coerce.number().int().positive().optional(),
-						secret: z.string().optional(),
-					})
-					.optional(),
-			})
-			.optional(),
+		// `replay-store` is retired loudly (REMOVED_DPOP_FIELDS). Every field
+		// below owns its coercion, which the preprocess wrapper requires (#288).
+		dpop: withRemovedKeys(
+			"oauth.dpop",
+			REMOVED_DPOP_FIELDS,
+			z
+				.object({
+					enabled: coerceBooleanFromEnv.optional(),
+					"iat-window-seconds": z.coerce.number().int().positive().optional(),
+					"alg-whitelist": z.array(z.string()).optional(),
+					"replay-store-ttl-seconds": z.coerce.number().int().positive().optional(),
+					// #530: server-provided nonce; the module's own schema defaults it.
+					nonce: z
+						.object({
+							required: z.enum(["never", "as", "as+rs"]).optional(),
+							"ttl-seconds": z.coerce.number().int().positive().optional(),
+							secret: z.string().optional(),
+						})
+						.optional(),
+				})
+				.optional(),
+		),
 	}),
 });
 

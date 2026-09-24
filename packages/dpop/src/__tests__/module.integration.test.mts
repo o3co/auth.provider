@@ -135,12 +135,14 @@ const makeTokenBindingObserver =
 /**
  * Invoke the module's contributed mechanism factory directly, the way the boot
  * planner does. Used for the boot-time guards, which have to be reached
- * without `createApp` first rejecting the config for the same reason.
+ * without `createApp` first rejecting the config for the same reason. The
+ * seen-set is handed over as the planner would, so each guard is reached on
+ * its own account rather than refused for the missing set.
  */
 const buildMechanism = (config: unknown) => {
 	const factory = dpopModule.contributes?.tokenBindingMechanisms?.[0];
 	if (factory === undefined) throw new Error("dpopModule contributes no mechanism factory");
-	return factory({ config } as never);
+	return factory({ config, replaySeenSet: createMemoryReplaySeenSet() } as never);
 };
 
 // ---------------------------------------------------------------------------
