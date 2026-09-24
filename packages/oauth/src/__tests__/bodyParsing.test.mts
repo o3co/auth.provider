@@ -104,16 +104,27 @@ const routerWith = async (surfaces: "all" | "none"): Promise<Router> => {
 
 const fullRouter = () => routerWith("all");
 
-/** Every route path registered on `router`, its sub-routers' included. */
+/**
+ * Every route path registered on `router`, its sub-routers' included. A
+ * route made of body parsers alone — how the router scopes its parsers to
+ * exact paths — serves nothing and is not counted.
+ */
 const routePaths = (router: Router): string[] =>
-	(router.stack as unknown as { route?: { path: string }; handle?: { stack?: unknown } }[]).flatMap(
-		(layer) =>
-			layer.route !== undefined
-				? [layer.route.path]
-				: layer.handle?.stack !== undefined
-					? routePaths(layer.handle as unknown as Router)
-					: [],
-	);
+	(
+		router.stack as unknown as {
+			route?: { path: string | string[]; stack: { handle: { name: string } }[] };
+			handle?: { stack?: unknown };
+		}[]
+	).flatMap((layer) => {
+		if (layer.route !== undefined) {
+			const parsersOnly = layer.route.stack.every(({ handle }) =>
+				["jsonParser", "urlencodedParser"].includes(handle.name),
+			);
+			if (parsersOnly) return [];
+			return Array.isArray(layer.route.path) ? layer.route.path : [layer.route.path];
+		}
+		return layer.handle?.stack !== undefined ? routePaths(layer.handle as unknown as Router) : [];
+	});
 
 /**
  * A route of some other module, with no parser of its own: it reads the
@@ -219,6 +230,37 @@ describe("the OAuth router's body parsing", () => {
 			}
 		}
 	});
+
+	it.each([
+		["every optional surface mounted", "all"],
+		["no optional surface mounted", "none"],
+	] as const)(
+		"parses a route's path exactly, not a longer one beneath it (%s)",
+		async (_label, surfaces) => {
+			// `router.use(path)` matches every path beneath `path`, so a later
+			// module's `/oauth/token/custom` or `/oauth/consent/custom` had its
+			// body read by parsers meant for `/oauth/token` and `/oauth/consent`.
+			const router = await routerWith(surfaces);
+			const mounted = [...new Set(routePaths(router))];
+			const sibling = (path: string) => `/oauth${path.replace(":name", "example")}/custom`;
+			const app = express();
+			app.use("/oauth", router);
+			for (const path of mounted) app.post(sibling(path), readsItsOwnBody);
+
+			const seen = [];
+			for (const path of mounted) {
+				const res = await request(app).post(sibling(path)).type("form").send("a=1");
+				seen.push({ path: sibling(path), status: res.status, body: res.body });
+			}
+			expect(seen).toEqual(
+				mounted.map((path) => ({
+					path: sibling(path),
+					status: 200,
+					body: { raw: "a=1", parsedBefore: null },
+				})),
+			);
+		},
+	);
 
 	it("mounts neither the consent route nor its parser when a JS caller passes null for both stores", async () => {
 		// `null` is not a store. Treating it as wired would scope the parser to

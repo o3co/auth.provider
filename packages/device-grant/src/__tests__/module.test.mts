@@ -828,6 +828,76 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		},
 	);
 
+	/**
+	 * device_authorization with a limiter whose decision throws `thrown` when
+	 * the throttle reads it: an error raised ahead of the parsers, which the
+	 * parsers' refusal handler is the first to see.
+	 */
+	const throttleThrowing = async (thrown: unknown) => {
+		const { lines, logger } = serialisingLogger();
+		const app = mountContributedRoute(0, {
+			...enabledDeps(),
+			logger,
+			rateLimiter: {
+				kind: "hostile",
+				check: async () => ({
+					allowed: true,
+					get limit(): number {
+						throw thrown;
+					},
+				}),
+			} satisfies RateLimiter,
+		});
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.type("form")
+			.send(`client_id=${CONFIDENTIAL_ID}`);
+		return { res, lines, logger };
+	};
+
+	it("answers an error whose `expose` getter throws as JSON 500, logging that error rather than the getter's", async () => {
+		// The refusal handler asks every error it sees whether it is a parser's.
+		// Asking must not throw: a throw there replaced the error in hand with
+		// the getter's, and the log named the wrong failure.
+		const hostile = Object.defineProperty(new Error("limiter decision unreadable"), "expose", {
+			get() {
+				throw new Error("expose getter threw");
+			},
+		});
+
+		const { res, logger } = await throttleThrowing(hostile);
+
+		expect(res.status).toBe(500);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ err: { name: "Error", message: "limiter decision unreadable" } },
+			"device_route_unexpected_error",
+		);
+	});
+
+	it("answers a Proxy whose every trap throws as JSON 500, logged as the thrown value it is", async () => {
+		const trap = () => {
+			throw new Error("trap threw");
+		};
+		const hostile = new Proxy(
+			{},
+			{ get: trap, has: trap, ownKeys: trap, getOwnPropertyDescriptor: trap, getPrototypeOf: trap },
+		);
+
+		const { res, logger } = await throttleThrowing(hostile);
+
+		expect(res.status).toBe(500);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ err: { thrown: "object" } },
+			"device_route_unexpected_error",
+		);
+	});
+
 	it.each([
 		["the per-IP throttle's 429 on device_authorization", "throttle"],
 		["client authentication's 401 on device_authorization", "client-auth"],
