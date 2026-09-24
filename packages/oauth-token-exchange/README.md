@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth-token-exchange
 
-Last updated: 2026-09-24
+Last updated: 2026-09-25
 
 RFC 8693 Token Exchange grant for [auth.provider](https://github.com/o3co/auth.provider).
 Supports on-behalf-of, delegation (`act` claim), and scope / audience narrowing.

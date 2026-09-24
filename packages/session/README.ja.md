@@ -1,6 +1,6 @@
 # @o3co/auth-provider-session
 
-最終更新: 2026-09-24
+最終更新: 2026-09-25
 
 [auth.provider](../../README.ja.md) のブラウザ向けログイン・ログアウト・上流 IdP フェデレーションのルート、すべてのフェデレーションアダプターパッケージがプロバイダーと並べて contribute するリダイレクトポリシー、そしてそれらのルート（および `req.session` を読む他のすべてのルート）が乗る express-session のストア。
 
