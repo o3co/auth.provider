@@ -127,7 +127,7 @@ describe("standaloneRedisClientsModule: the shared connection refused by the ser
 			{
 				err: expect.objectContaining({
 					name: "ReplyError",
-					message: expect.stringMatching(/^WRONGPASS /),
+					detail: expect.stringMatching(/^WRONGPASS /),
 				}),
 			},
 			"standalone_redis_clients_error",

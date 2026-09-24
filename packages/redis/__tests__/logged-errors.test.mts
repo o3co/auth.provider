@@ -258,7 +258,7 @@ describe("a refresh rotation's own connection, refused by the server", () => {
 					{
 						err: expect.objectContaining({
 							name: "ReplyError",
-							message: expect.stringMatching(/^WRONGPASS /),
+							detail: expect.stringMatching(/^WRONGPASS /),
 						}),
 					},
 					"redis_duplicate_connection_error",

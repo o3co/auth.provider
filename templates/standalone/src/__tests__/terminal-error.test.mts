@@ -241,12 +241,12 @@ describe("terminal error handler (#293 item 8)", () => {
 			{
 				err: {
 					name: "ClientError",
-					message: "invalid response encountered",
+					detail: "invalid response encountered",
 					code: "OAUTH_INVALID_RESPONSE",
 					stack: expect.stringMatching(/^ {4}at /),
 					cause: {
 						name: "OperationProcessingError",
-						message: '"response" body "scope" property must be a string',
+						detail: '"response" body "scope" property must be a string',
 						code: "OAUTH_INVALID_RESPONSE",
 						stack: expect.stringMatching(/^ {4}at /),
 					},

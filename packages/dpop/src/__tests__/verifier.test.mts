@@ -615,7 +615,7 @@ describe("createDPoPMechanism", () => {
 			expect(errors.map((e) => e.msg)).toEqual(["dpop_replay_store_fault"]);
 			// Logged as its projection: the name and message say which fault.
 			expect(errors[0]?.obj).toMatchObject({
-				err: { name: fault.name, message: fault.message },
+				err: { name: fault.name, detail: fault.message },
 			});
 		},
 	);

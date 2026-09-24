@@ -46,9 +46,11 @@ export function createAppLogger(config: AppConfig): Logger {
 		level: config.logging.level,
 		// `err` is pino's conventional key for an error, and every structured
 		// event in this stack uses it — `logger.error({ err: loggableError(err) },
-		// "…_error")`, core's projection of the error, which this serialiser
-		// types by its name. An Error handed to it as it is would otherwise
-		// stringify to `{}`, the stack lost exactly where it is needed.
+		// "…_error")`. Core's projection is plain data with no `message`, so
+		// this serialiser hands it through as it is, every cause's fields
+		// included. It is here for an Error handed to it as it is, which would
+		// otherwise stringify to `{}`, the stack lost exactly where it is
+		// needed.
 		serializers: { err: stdSerializers.err },
 	});
 }

@@ -851,7 +851,7 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 			{
 				err: {
 					name: "ReplyError",
-					message: "READONLY You can't write against a read only replica.",
+					detail: "READONLY You can't write against a read only replica.",
 					stack: FRAMES,
 				},
 				jti,
@@ -882,7 +882,7 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 			{
 				err: {
 					name: "RangeError",
-					message: "markSeen: expiresAtMs must be a finite number",
+					detail: "markSeen: expiresAtMs must be a finite number",
 					stack: FRAMES,
 				},
 				jti,
@@ -925,7 +925,7 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 			{
 				err: {
 					name: "JWTExpired",
-					message: '"exp" claim timestamp check failed',
+					detail: '"exp" claim timestamp check failed',
 					code: "ERR_JWT_EXPIRED",
 					// jose's own code for the check, which the projection keeps.
 					reason: "check_failed",

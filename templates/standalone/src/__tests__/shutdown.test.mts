@@ -298,18 +298,18 @@ describe("installGracefulShutdown (#290)", () => {
 			{
 				err: {
 					name: "AggregateError",
-					message: expect.stringMatching(/^AppHandle\.dispose: 2 cleanup errors /),
+					detail: expect.stringMatching(/^AppHandle\.dispose: 2 cleanup errors /),
 					stack: FRAMES,
 					aggregateErrors: expect.arrayContaining([
 						{
 							name: "ClientError",
-							message: "invalid response encountered",
+							detail: "invalid response encountered",
 							code: "OAUTH_INVALID_RESPONSE",
 							stack: FRAMES,
 						},
 						{
 							name: "ReplyError",
-							message: "READONLY You can't write against a read only replica.",
+							detail: "READONLY You can't write against a read only replica.",
 							stack: FRAMES,
 						},
 					]),
@@ -356,7 +356,7 @@ describe("installGracefulShutdown (#290)", () => {
 			{
 				err: {
 					name: "Error",
-					message: "Server is not running.",
+					detail: "Server is not running.",
 					code: "ERR_SERVER_NOT_RUNNING",
 					stack: FRAMES,
 				},

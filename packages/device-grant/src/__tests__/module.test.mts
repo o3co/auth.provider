@@ -601,7 +601,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			{
 				err: {
 					name: "ReplyError",
-					message: "READONLY You can't write against a read only replica.",
+					detail: "READONLY You can't write against a read only replica.",
 					stack: FRAMES,
 				},
 			},
@@ -646,7 +646,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			{
 				err: {
 					name: "TypeError",
-					message: expect.any(String),
+					detail: expect.any(String),
 					stack: FRAMES,
 				},
 			},
@@ -690,7 +690,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.status).toBe(500);
 		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { name: "Error", message: "forbidden", status: 403, stack: FRAMES } },
+			{ err: { name: "Error", detail: "forbidden", status: 403, stack: FRAMES } },
 			"device_route_unexpected_error",
 		);
 	});
@@ -709,7 +709,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 
 		expect(res.status).toBe(500);
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { name: "ReplyError", message: "ERR unknown command 'evalsha'", stack: FRAMES } },
+			{ err: { name: "ReplyError", detail: "ERR unknown command 'evalsha'", stack: FRAMES } },
 			"device_route_unexpected_error",
 		);
 		for (const line of lines) {
@@ -740,9 +740,9 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		const message = `failure ${"x".repeat(1000)}`;
 		const { lines } = await lookupThrowing(new Error(message));
 		const logged = JSON.parse(lines[0]?.split(" ").slice(2).join(" ") ?? "{}") as {
-			err?: { message?: string };
+			err?: { detail?: string };
 		};
-		expect(logged.err?.message).toBe(message.slice(0, 256));
+		expect(logged.err?.detail).toBe(message.slice(0, 256));
 	});
 
 	it("logs a store error's Error causes the same way, and nothing of what they carry", async () => {
@@ -769,9 +769,9 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			{
 				err: {
 					name: "Error",
-					message: "device code lookup failed",
+					detail: "device code lookup failed",
 					stack: FRAMES,
-					cause: { name: "ReplyError", message: "ERR unknown command 'evalsha'", stack: FRAMES },
+					cause: { name: "ReplyError", detail: "ERR unknown command 'evalsha'", stack: FRAMES },
 				},
 			},
 			"device_route_unexpected_error",
@@ -797,7 +797,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		const { logger } = await lookupThrowing(Object.assign(new Error("store failed"), fields));
 
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { name: "Error", message: "store failed", stack: FRAMES, ...kept } },
+			{ err: { name: "Error", detail: "store failed", stack: FRAMES, ...kept } },
 			"device_route_unexpected_error",
 		);
 	});
@@ -808,7 +808,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		);
 
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: expect.objectContaining({ name: "Error", message: "store failed" }) },
+			{ err: expect.objectContaining({ name: "Error", detail: "store failed" }) },
 			"device_route_unexpected_error",
 		);
 		for (const line of lines) expect(line).not.toContain("s3cret-name");
@@ -854,7 +854,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.status).toBe(500);
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.objectContaining({
-				err: { name: "ReplyError", message: "ERR unknown command 'evalsha'", stack: FRAMES },
+				err: { name: "ReplyError", detail: "ERR unknown command 'evalsha'", stack: FRAMES },
 			}),
 			"device_authorization_code_collision",
 		);
@@ -969,7 +969,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		expect(res.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
 		expect(logger.error).toHaveBeenCalledTimes(1);
 		expect(logger.error).toHaveBeenCalledWith(
-			{ err: { name: "Error", message: "limiter decision unreadable", stack: FRAMES } },
+			{ err: { name: "Error", detail: "limiter decision unreadable", stack: FRAMES } },
 			"device_route_unexpected_error",
 		);
 	});

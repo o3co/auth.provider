@@ -24,8 +24,18 @@
  * command's arguments — a token record, for a store write under
  * `allow-plaintext` — on the error. What the projection does, exactly:
  *
- * - `message`: kept, capped at 256 characters, with the two known quoting
- *   shapes removed. A SyntaxError's message is dropped (V8's JSON.parse and
+ * - It is plain data, and what a logger is handed is what the line carries.
+ *   It has no `message`: a serializer takes a value with a string `message`
+ *   for an Error and rewrites it — pino's err serializer folds each `cause`
+ *   into one message and stack and writes none of the cause's fields, and
+ *   writes the name over `type`. Every such serializer (pino's `err` and
+ *   `errWithCause` among them) hands anything else through untouched, so
+ *   under pino's defaults, the standalone template's logger, `consoleLogger`
+ *   or any other, every field below reaches the line, at every level.
+ * - `detail`: the error's message, capped at 256 characters, with the two
+ *   known quoting shapes removed — `detail` (RFC 7807's name for an
+ *   occurrence's human-readable explanation) rather than `message`, for the
+ *   reason above. A SyntaxError's message is dropped (V8's JSON.parse and
  *   body-parser quote the input); only ` at position N` survives, as
  *   `position`, N at most ten digits and none from a longer number. Redis's
  *   `, with args beginning with: …` is cut from any message. Other text a
@@ -61,10 +71,10 @@
  *   Express reads as this server's).
  * - An AggregateError's members (any error's `errors` array): of its first
  *   {@link LOGGED_AGGREGATE_MAX_ERRORS}, the Errors, projected as causes are
- *   and within the same three levels, as `aggregateErrors` — pino's own name
- *   for them, so its err serializer writes them once — and how many members
- *   are not among them, as `aggregateErrorsOmitted`. Neither field when none
- *   of those five is an Error.
+ *   and within the same three levels, as `aggregateErrors` — the name pino
+ *   writes a raw AggregateError's members under, so one query finds both —
+ *   and how many members are not among them, as `aggregateErrorsOmitted`.
+ *   Neither field when none of those five is an Error.
  * - Never kept: a cause or a member that is not an Error, any other field
  *   (`command`, `body`, `buffer`), and anything of a thrown value that is
  *   not an Error but its `typeof`, as `thrown`.
@@ -77,19 +87,18 @@
 
 /**
  * The fields of an error a log line carries, and its Error causes the same
- * way.
- *
- * Every projection also has a non-enumerable own `constructor` of
- * `undefined`, so that pino's err serializer types it by `name`. It is
- * invisible to JSON, for-in and `util.inspect`, but not to a strict
- * comparison: compare a projection with `toEqual`, not `toStrictEqual`,
- * which fails on the hidden constructor.
+ * way: a plain object, with no `message`, so that no serializer takes it for
+ * an Error and rewrites it — the line carries exactly these fields.
  */
 export interface LoggableError {
 	/** The error's `name`; `"NonError"` for a thrown value that is not an Error. */
 	readonly name: string;
-	/** Absent for a SyntaxError, which quotes its input; a Redis reply's echoed arguments are cut. */
-	readonly message?: string;
+	/**
+	 * The error's message. Absent for a SyntaxError, which quotes its input; a
+	 * Redis reply's echoed arguments are cut. Not `message`, which would make
+	 * a serializer take the projection for an Error.
+	 */
+	readonly detail?: string;
 	/** A SyntaxError's `position N`, read out of its message. */
 	readonly position?: number;
 	/** A library's error code, e.g. openid-client's `OAUTH_INVALID_RESPONSE`. */
@@ -434,7 +443,8 @@ const responseFields = (value: unknown): LoggableError["response"] | undefined =
  * ioredis's `command.args` included — and `consoleLogger` hands the error to
  * `console.*`, whose inspection prints them. A deployment chooses its logger,
  * so a call site that logs a library's or a store's error hands the logger
- * this instead of the error. It never throws.
+ * this instead of the error, and every logger writes it as it is. It never
+ * throws.
  */
 export function loggableError(err: unknown): LoggableError {
 	return project(err, 0);
@@ -457,20 +467,20 @@ function project(err: unknown, depth: number): LoggableError {
 	const stack = framesOf(read(err, "stack"), rawName, code, rawMessage);
 	const reason = reasonOf(err);
 
-	let message: string | undefined;
+	let detail: string | undefined;
 	let position: number | undefined;
 	if (typeof rawMessage === "string") {
 		if (name === "SyntaxError") {
 			const at = SYNTAX_POSITION.exec(rawMessage);
 			position = at ? Number(at[1]) : undefined;
 		} else {
-			message = capped(rawMessage.replace(REDIS_ECHOED_ARGS, ""));
+			detail = capped(rawMessage.replace(REDIS_ECHOED_ARGS, ""));
 		}
 	}
 
-	const projected: LoggableError = {
+	return {
 		name,
-		...(message !== undefined ? { message } : {}),
+		...(detail !== undefined ? { detail } : {}),
 		...(position !== undefined ? { position } : {}),
 		...(typeof code === "string"
 			? { code: capped(code) }
@@ -488,11 +498,4 @@ function project(err: unknown, depth: number): LoggableError {
 		...(isError(cause) && depth < MAX_CAUSE_DEPTH ? { cause: project(cause, depth + 1) } : {}),
 		...membersOf(err, depth),
 	};
-	// pino's err serializer names `type` after `constructor.name` when that is
-	// a function — "Object" for a plain object — and after `name` otherwise.
-	// A non-enumerable own `constructor` of `undefined` makes it read `name`
-	// ("TypeError"), with no serializer of the deployment's to configure; it is
-	// invisible to JSON, to for-in and to `util.inspect`.
-	Object.defineProperty(projected, "constructor", { value: undefined, enumerable: false });
-	return projected;
 }

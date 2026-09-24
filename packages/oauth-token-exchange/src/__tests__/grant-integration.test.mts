@@ -1396,7 +1396,7 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 		/** The store error as `loggableError` projects it: Redis's echo cut, frames only. */
 		const projectedStoreError = {
 			name: "ReplyError",
-			message: "ERR unknown command 'evalsha'",
+			detail: "ERR unknown command 'evalsha'",
 			stack: expect.stringMatching(/^ {4}at /),
 		};
 
