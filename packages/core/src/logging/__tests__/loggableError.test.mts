@@ -195,7 +195,9 @@ describe("loggableError — what a log line may carry of an error", () => {
 			expect(at("Unexpected token at position 1234567890 (line 1 column 1234567891)")).toBe(
 				1234567890,
 			);
-			expect(at("Unexpected token at position 12345678901")).toBe(1234567890);
+			// A longer number is no position at all, never its first ten digits.
+			expect(at("Unexpected token at position 12345678901")).toBeUndefined();
+			expect(at("Unexpected token at position 12345678901234")).toBeUndefined();
 			expect(at("Unexpected end of JSON input")).toBeUndefined();
 			expect(at("positional nonsense, position 7")).toBeUndefined();
 		});
