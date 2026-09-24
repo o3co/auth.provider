@@ -22,6 +22,7 @@ import {
 	defineModule,
 	type GrantContext,
 	type GrantHandler,
+	type GrantPolicyDecision,
 	type GrantPolicyRequest,
 	type Module,
 	memoryRefreshTokenFamilyStoreModule,
@@ -1041,6 +1042,49 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 			}
 		});
 
+		// The early refusal names what the check after the policy names when no
+		// policy replaces the audience: every requested resource the audience
+		// the request asks for would not equal — a reachable one included.
+		it("names every requested resource the requested audience would not equal", async () => {
+			const { grant } = await boot([]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ aud: ["billing", "client-a"] }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: "billing",
+				resource: ["client-a", "https://elsewhere.example"],
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_target",
+				errorDescription: "requested_resources_not_in_audience: client-a https://elsewhere.example",
+			});
+		});
+
+		// Answered before the policy runs, so a policy deny is not reached: the
+		// request's own invalid_target comes first.
+		it("answers an unrepresentable resource before a policy deny", async () => {
+			const denyAll = defineModule({
+				name: "test:deny-all-grant-policy",
+				provides: {
+					grantPolicy: () => ({
+						kind: "test",
+						evaluate: async () => ({ outcome: "deny" as const, error: "access_denied" }),
+					}),
+				},
+			});
+			const { grant } = await boot([denyAll]);
+			const { result } = await exchange(grant, {
+				subject_token: await signSelfIssuedAccessToken({ aud: "client-a" }),
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				resource: "https://elsewhere.example",
+			});
+			expect(result).toEqual({
+				status: 400,
+				error: "invalid_target",
+				errorDescription: "requested_resources_not_in_audience: https://elsewhere.example",
+			});
+		});
+
 		it("keeps the request's audience when the policy returns an empty grantedAudience", async () => {
 			const { grant } = await boot([deciding({ grantedAudience: [] })]);
 			const { result } = await exchange(grant, {
@@ -1060,17 +1104,18 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 	// code for a request refused by policy, and the policy's code is logged,
 	// sanitised, for the operator who wrote it.
 	describe("a policy deny", () => {
-		const denying = (error: string) =>
+		const denying = (error: string, errorDescription: unknown = "denied by the test policy") =>
 			defineModule({
 				name: "test:denying-grant-policy",
 				provides: {
 					grantPolicy: () => ({
 						kind: "test",
-						evaluate: async () => ({
-							outcome: "deny" as const,
-							error,
-							errorDescription: "denied by the test policy",
-						}),
+						evaluate: async () =>
+							({
+								outcome: "deny",
+								error,
+								errorDescription,
+							}) as unknown as GrantPolicyDecision,
 					}),
 				},
 			});
@@ -1112,6 +1157,33 @@ describe("tokenExchangeModule booted through createApp — revocation", () => {
 				expect(log.of("token_exchange_policy_deny_error_malformed")).toEqual([
 					[{ error: logged }, "token_exchange_policy_deny_error_malformed"],
 				]);
+			},
+		);
+
+		it("logs a long malformed code capped, as the audit stream caps client text", async () => {
+			const log = warnings();
+			const { grant } = await boot([denying(`"${"x".repeat(300)}`), log.module]);
+			await exchange(grant, await body());
+			expect(log.of("token_exchange_policy_deny_error_malformed")).toEqual([
+				[{ error: `?${"x".repeat(196)}...` }, "token_exchange_policy_deny_error_malformed"],
+			]);
+		});
+
+		// A JavaScript policy can return anything as its description; one that
+		// is not a non-empty string is not sent — the grant's own default is.
+		it.each([
+			["a number", 42],
+			["the empty string", ""],
+		])(
+			"answers the default description for a deny description that is %s",
+			async (_label, description) => {
+				const { grant } = await boot([denying("access_denied", description)]);
+				const { result } = await exchange(grant, await body());
+				expect(result).toEqual({
+					status: 403,
+					error: "access_denied",
+					errorDescription: "denied by policy",
+				});
 			},
 		);
 

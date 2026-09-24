@@ -610,6 +610,52 @@ describe("/authorize — policy evaluation edges (C-2)", () => {
 		},
 	);
 
+	it("logs a long malformed deny code capped", async () => {
+		const logger = createMockLogger();
+		const { app } = await makeApp({
+			logger,
+			grantPolicy: {
+				kind: "test",
+				evaluate: async () => ({
+					outcome: "deny",
+					error: `"${"x".repeat(300)}`,
+					errorDescription: "no",
+				}),
+			},
+		});
+		await authorize(app, baseQuery);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ error: `?${"x".repeat(196)}...` },
+			"authorize_policy_deny_error_malformed",
+		);
+	});
+
+	// A JavaScript policy can return anything as its description. One that is
+	// not a non-empty string is not sent — RFC 6749 A.8 makes the field
+	// 1*NQSCHAR — and the redirect carries the default instead.
+	it.each([
+		["a number", 42],
+		["the empty string", ""],
+	])(
+		"redirects with the default description for a deny description that is %s",
+		async (_label, description) => {
+			const { app } = await makeApp({
+				grantPolicy: {
+					kind: "test",
+					evaluate: async () =>
+						({
+							outcome: "deny",
+							error: "access_denied",
+							errorDescription: description,
+						}) as unknown as GrantPolicyDecision,
+				},
+			});
+			const params = redirectParams(await authorize(app, baseQuery));
+			expect(params.get("error")).toBe("access_denied");
+			expect(params.get("error_description")).toBe("policy denied");
+		},
+	);
+
 	it("refuses a policy that returns a non-array grantedScope or grantedAudience (#521)", async () => {
 		// A JavaScript policy can return a string where the type says array.
 		// `.filter` would throw on one, and an audience string persisted on the

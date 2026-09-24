@@ -15,7 +15,12 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { errorEnvelope, isErrorCode, sanitizeErrorText } from "../errors/envelope.mjs";
+import {
+	auditErrorText,
+	errorEnvelope,
+	isWellFormedErrorCode,
+	sanitizeErrorText,
+} from "../errors/envelope.mjs";
 
 describe("AS-1/AS-2 errorEnvelope helper (RFC 6749 §5.2)", () => {
 	it("includes error_description and error_uri when provided", () => {
@@ -56,9 +61,9 @@ describe("AS-1/AS-2 errorEnvelope helper (RFC 6749 §5.2)", () => {
 	});
 });
 
-// RFC 6749 §5.2 (and §4.1.2.1 for the authorization endpoint): `error` is
-// 1*NQSCHAR and `error_description` is *(%x20-21 / %x23-5B / %x5D-7E) — the
-// same characters: printable ASCII without `"` and `\`.
+// RFC 6749 Appendix A.7 and A.8: `error` and `error_description` are both
+// 1*NQSCHAR, NQSCHAR = %x20-21 / %x23-5B / %x5D-7E — printable ASCII without
+// `"` and `\` (§5.2, and §4.1.2.1 for the authorization endpoint).
 describe("RFC 6749 error text", () => {
 	const allowed = Array.from({ length: 0x7f - 0x20 }, (_, i) => String.fromCharCode(0x20 + i))
 		.filter((c) => c !== '"' && c !== "\\")
@@ -79,11 +84,40 @@ describe("RFC 6749 error text", () => {
 		])("replaces %s with '?'", (_label, input, expected) => {
 			expect(sanitizeErrorText(input)).toBe(expected);
 		});
+
+		// A JavaScript policy can hand back anything as a description. It is
+		// not coerced: the caller falls back to its own default.
+		it.each([
+			["a number", 42],
+			["an object", { toString: () => "x" }],
+			["null", null],
+			["undefined", undefined],
+		])("answers undefined for %s", (_label, value) => {
+			expect(sanitizeErrorText(value)).toBeUndefined();
+		});
 	});
 
-	describe("isErrorCode", () => {
+	// For a log line or an audit event: sanitised, and capped at 200
+	// characters with the cut marked, so a client or a policy cannot put
+	// unbounded text there.
+	describe("auditErrorText", () => {
+		it("sanitises and keeps text within the cap", () => {
+			expect(auditErrorText('bad "code"')).toBe("bad ?code?");
+			expect(auditErrorText("x".repeat(200))).toBe("x".repeat(200));
+		});
+
+		it("cuts text past 200 characters, marking the cut", () => {
+			expect(auditErrorText(`"${"x".repeat(300)}`)).toBe(`?${"x".repeat(196)}...`);
+		});
+
+		it("answers undefined for a non-string", () => {
+			expect(auditErrorText(42)).toBeUndefined();
+		});
+	});
+
+	describe("isWellFormedErrorCode", () => {
 		it.each(["invalid_request", "access_denied", allowed])("accepts %j", (code) => {
-			expect(isErrorCode(code)).toBe(true);
+			expect(isWellFormedErrorCode(code)).toBe(true);
 		});
 
 		it.each([
@@ -95,7 +129,7 @@ describe("RFC 6749 error text", () => {
 			["a non-string", 42],
 			["undefined", undefined],
 		])("refuses %s", (_label, code) => {
-			expect(isErrorCode(code)).toBe(false);
+			expect(isWellFormedErrorCode(code)).toBe(false);
 		});
 	});
 });

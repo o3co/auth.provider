@@ -427,12 +427,24 @@ describe("createOAuthRouter", () => {
 			"answers invalid_request for a grant error code with %s, and logs it",
 			async (_label, code, logged) => {
 				const logger = createMockLogger();
+				const events: AuditEvent[] = [];
+				const auditSink: AuditSink = {
+					kind: "spy",
+					record: async (e) => {
+						events.push(e);
+					},
+				};
 				const stubGrant: GrantHandler = {
 					handle: async () => ({
 						result: { status: 400, error: code, errorDescription: "denied" },
 					}),
 				};
-				const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", logger });
+				const app = await buildApp({
+					grantHandler: stubGrant,
+					grantType: "stub",
+					logger,
+					auditSink,
+				});
 				const res = await request(app)
 					.post("/oauth/token")
 					.set("Authorization", TEST_BASIC_AUTH)
@@ -444,8 +456,48 @@ describe("createOAuthRouter", () => {
 					{ grant_type: "stub", error: logged },
 					"token_error_code_malformed",
 				);
+				// The audit event records the code that went out, not the malformed one.
+				await new Promise((r) => setImmediate(r));
+				expect(events.find((e) => e.type === "token.issued.failure")?.details?.error).toBe(
+					"invalid_request",
+				);
 			},
 		);
+
+		// A grant can hand back a description that is not a string — core's
+		// policy evaluation passes a JavaScript policy's deny through. It is not
+		// coerced: the response carries no error_description, and the audit
+		// reason falls back to the code.
+		it("omits a grant description that is not a string, rather than failing", async () => {
+			const events: AuditEvent[] = [];
+			const auditSink: AuditSink = {
+				kind: "spy",
+				record: async (e) => {
+					events.push(e);
+				},
+			};
+			const stubGrant: GrantHandler = {
+				handle: async () => ({
+					result: {
+						status: 400,
+						error: "invalid_request",
+						errorDescription: 42 as unknown as string,
+					},
+				}),
+			};
+			const app = await buildApp({ grantHandler: stubGrant, grantType: "stub", auditSink });
+			const res = await request(app)
+				.post("/oauth/token")
+				.set("Authorization", TEST_BASIC_AUTH)
+				.type("form")
+				.send({ grant_type: "stub" });
+			expect(res.status).toBe(400);
+			expect(res.body).toEqual({ error: "invalid_request" });
+			await new Promise((r) => setImmediate(r));
+			expect(events.find((e) => e.type === "token.issued.failure")?.details?.reason).toBe(
+				"invalid_request",
+			);
+		});
 
 		// The audit event of an unsupported grant_type records what the client
 		// sent, held to the same bounds as a handler refusal's reason.
