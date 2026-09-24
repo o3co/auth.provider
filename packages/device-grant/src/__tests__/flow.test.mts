@@ -894,6 +894,26 @@ describe("the token carries what was approved", () => {
 	});
 });
 
+describe("the access-token lifetime it is built with", () => {
+	it("refuses one that is not a positive whole number of seconds, when it is built", () => {
+		// `createDeviceCodeGrant` is public, so the lifetime can arrive without
+		// meeting core's schema or `resolveAccessTokenLifetime`. Refused here,
+		// where the composition is assembled, rather than on the first poll
+		// after a user has approved the device.
+		for (const accessTokenExpiresIn of [1.5, Number.NaN, Number.POSITIVE_INFINITY, 0, -300]) {
+			expect(
+				() =>
+					createDeviceCodeGrant({
+						store: createMemoryDeviceCodeStore(),
+						keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
+						accessTokenExpiresIn,
+					}),
+				String(accessTokenExpiresIn),
+			).toThrow(RangeError);
+		}
+	});
+});
+
 describe("code generation", () => {
 	beforeEach(() => {
 		vi.restoreAllMocks();

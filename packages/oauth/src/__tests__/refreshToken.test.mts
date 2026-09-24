@@ -15,6 +15,9 @@
  */
 import { createSecretKey } from "node:crypto";
 import {
+	createMemoryRefreshTokenFamilyStore,
+	createRefreshTokenFamilyRevocation,
+	createRefreshTokenFamilyRotation,
 	createSymmetricKeyStore,
 	type GrantContext,
 	type GrantDependencies,
@@ -640,6 +643,57 @@ describe("createRefreshTokenGrant", () => {
 			expect(result.status).toBe(503);
 			if (!("error" in result)) expect.fail("Expected error in result");
 			expect(result.error).toBe("temporarily_unavailable");
+		});
+
+		it("refuses a refresh-token lifetime that is not a positive whole number of seconds before the rotation spends the presented token", async () => {
+			// The schema refuses such a value at boot; a configuration built by
+			// hand never meets it. `generateToken` refuses it too, but only after
+			// the rotation below has committed — the presented token spent and
+			// no token issued in its place (#449). So the grant reads the lifetime
+			// before it reserves anything, as it reads the access-token lifetime.
+			const refreshTokenFamilyStore = createMemoryRefreshTokenFamilyStore();
+			const rotation = createRefreshTokenFamilyRotation({ refreshTokenFamilyStore });
+			const revocation = createRefreshTokenFamilyRevocation({ refreshTokenFamilyStore });
+			await rotation.register("prev-jti-lifetime", "fam-lifetime", Date.now() + 86_400_000);
+			const token = await new SignJWT({ sub: "u1", scope: "read write", family_id: "fam-lifetime" })
+				.setProtectedHeader({ alg: "HS256", kid: "v0", typ: "rt+jwt" })
+				.setIssuedAt()
+				.setIssuer("localhost")
+				.setAudience(DEFAULT_CLIENT_ID)
+				.setExpirationTime("24h")
+				.setJti("prev-jti-lifetime")
+				.sign(secretKey);
+			const ctx: GrantContext = {
+				body: { refresh_token: token },
+				session: {},
+				issuer: "localhost",
+				metadata: {},
+				authenticatedClient: DEFAULT_AUTH_CLIENT,
+			};
+			const withLifetime = (expiresIn: number): GrantDependencies => ({
+				...mockDeps,
+				config: {
+					...mockConfig,
+					oauth: {
+						...mockConfig.oauth,
+						refreshToken: { ...mockConfig.oauth.refreshToken, expiresIn },
+					},
+				} as GrantDependencies["config"],
+				refreshTokenFamilyRotation: rotation,
+				refreshTokenFamilyRevocation: revocation,
+			});
+
+			for (const expiresIn of [1.5, Number.NaN, 0]) {
+				await expect(
+					createRefreshTokenGrant(withLifetime(expiresIn)).handle(ctx),
+					String(expiresIn),
+				).rejects.toThrow(RangeError);
+			}
+
+			// Nothing was spent: the same token still refreshes under a sound
+			// configuration, rather than reading as a replay.
+			const { result } = await createRefreshTokenGrant(withLifetime(86_400)).handle(ctx);
+			expect(result.status).toBe(200);
 		});
 
 		it("returns invalid_grant/family_revoked when the rotation reports 'revoked'", async () => {

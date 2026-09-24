@@ -38,6 +38,38 @@ describe("generateToken — a caller-supplied identity (v0.13.0 audit)", () => {
 		}
 	});
 
+	it("refuses an expiresIn that is not a positive whole number of seconds, before signing", async () => {
+		// `exp` is `iat + expiresIn`. A fraction signs a fractional `exp` that
+		// verifiers round their own way, NaN signs `"exp": null`, Infinity an
+		// expiry that JSON writes as null too, and zero or less a token that is
+		// dead on arrival. None of them should cost a signature.
+		let signed = 0;
+		const counting = {
+			...keyStore,
+			sign: (input: Parameters<typeof keyStore.sign>[0]) => {
+				signed += 1;
+				return keyStore.sign(input);
+			},
+		};
+		for (const expiresIn of [
+			1.5,
+			Number.NaN,
+			Number.POSITIVE_INFINITY,
+			0,
+			-60,
+			Number.MAX_SAFE_INTEGER + 1,
+		]) {
+			await expect(
+				generateToken({}, { keyStore: counting, expiresIn }),
+				String(expiresIn),
+			).rejects.toThrow(RangeError);
+			await expect(generateToken({}, { keyStore: counting, expiresIn })).rejects.toThrow(
+				/expiresIn/,
+			);
+		}
+		expect(signed).toBe(0);
+	});
+
 	it("signs exactly the jti and issuedAt it is given", async () => {
 		const token = await generateToken(
 			{},
