@@ -83,7 +83,7 @@ export interface RevokeRouterOptions {
  * - Returns 503 `temporarily_unavailable` when the store a revocation writes
  *   to — the access-token denylist or the refresh-token family store —
  *   fails (RFC 7009 §2.2.1), logged at error level as
- *   `revoke_store_unavailable`. The client is told to assume the token still
+ *   `revoke_store_unavailable` with the store and the client. The client is told to assume the token still
  *   exists and retry, never that it was revoked.
  * - Returns 200 for every other outcome (RFC 7009 §2.2 no-info-leak):
  *   the token was revoked, or it did not verify, was not one this server
@@ -255,18 +255,20 @@ type RevocationAttempt = "revoked" | "not_located" | "unavailable";
 /**
  * Records a revocation in its store, or reports the store's failure. Only a
  * token that verified and belongs to the requesting client reaches here, so
- * the failure is the server's, never a verdict on the token.
+ * the failure is the server's, never a verdict on the token. The log names
+ * the store and the client whose revocation was lost — never the token.
  */
 async function recordRevocation(
 	store: "accessTokenDenylist" | "refreshTokenFamilyRevocation",
 	write: () => Promise<void>,
+	clientId: string,
 	opts: RevokeRouterOptions,
 ): Promise<RevocationAttempt> {
 	try {
 		await write();
 		return "revoked";
 	} catch (err) {
-		opts.logger.error({ err: loggableError(err), store }, "revoke_store_unavailable");
+		opts.logger.error({ err: loggableError(err), store, clientId }, "revoke_store_unavailable");
 		return "unavailable";
 	}
 }
@@ -336,6 +338,7 @@ async function tryRevokeRefreshToken(
 	return recordRevocation(
 		"refreshTokenFamilyRevocation",
 		() => revocation.revokeFamily(familyId),
+		requestingClientId,
 		opts,
 	);
 }
@@ -428,5 +431,10 @@ async function tryRevokeAccessToken(
 		return "not_located";
 	}
 
-	return recordRevocation("accessTokenDenylist", () => denylist.add(jti, exp * 1000), opts);
+	return recordRevocation(
+		"accessTokenDenylist",
+		() => denylist.add(jti, exp * 1000),
+		requestingClientId,
+		opts,
+	);
 }
