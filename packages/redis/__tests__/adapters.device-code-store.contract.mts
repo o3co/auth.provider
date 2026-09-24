@@ -81,19 +81,27 @@ export const runDeviceCodeStoreContract = (
 			});
 		});
 
-		it("refuses to create a second record for the same device code", async () => {
+		it("refuses to create a second record for the same device code, saying it collided", async () => {
 			// A collision is a generator failure. Overwriting would hand the new
-			// device the old one's pending approval.
+			// device the old one's pending approval. It is signalled as one — the
+			// endpoint re-draws for that and for nothing else, so a store that
+			// cannot be reached is not mistaken for an unlucky draw.
 			await withStore(async (store) => {
 				await store.create(seed);
-				await expect(store.create({ ...seed, userCode: "MNPQRSTV" })).rejects.toThrow();
+				await expect(store.create({ ...seed, userCode: "MNPQRSTV" })).rejects.toMatchObject({
+					name: "DeviceCodeStoreError",
+					reason: "collision",
+				});
 			});
 		});
 
-		it("refuses to create a second record for the same user code", async () => {
+		it("refuses to create a second record for the same user code, saying it collided", async () => {
 			await withStore(async (store) => {
 				await store.create(seed);
-				await expect(store.create({ ...seed, deviceCode: "dc-bbbb" })).rejects.toThrow();
+				await expect(store.create({ ...seed, deviceCode: "dc-bbbb" })).rejects.toMatchObject({
+					name: "DeviceCodeStoreError",
+					reason: "collision",
+				});
 			});
 		});
 

@@ -36,6 +36,7 @@ import {
 	createMemoryRateLimiter,
 	createMemoryReplaySeenSet,
 	createSymmetricKeyStore,
+	DeviceCodeStoreError,
 } from "@o3co/auth-provider-core";
 import { makeValidCoreConfig, makeValidFullSections } from "@o3co/auth-provider-core/testing";
 import express from "express";
@@ -831,17 +832,22 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		for (const line of lines) expect(line).not.toContain("s3cret-value");
 	});
 
-	it("logs a device-code store failure on device_authorization through the same projection", async () => {
-		// The store is retried on a collision; every attempt failing is a 500,
-		// and its warn line used to carry `String(error)` — the whole message.
+	it("answers a device-code store that cannot be reached with 503, asked once, and logs it through the same projection", async () => {
+		// An outage is not a collision: re-drawing a code cannot reach a store
+		// that is down, and a 500 blamed the server for what is, per the
+		// product's rule, a store outage — 503 temporarily_unavailable. Only
+		// the store's own collision signal is retried. The line used to carry
+		// `String(error)` — the whole message, command arguments included.
 		const deps = enabledDeps();
 		const { lines, logger } = serialisingLogger();
+		let creates = 0;
 		const app = mountContributedRoute(0, {
 			...deps,
 			logger,
 			deviceCodeStore: {
 				...deps.deviceCodeStore,
 				create: async () => {
+					creates += 1;
 					throw Object.assign(
 						new Error(
 							"ERR unknown command 'evalsha', with args beginning with: 'sha' '2' 'devauth:{devauth}:code:DC' 'devauth:{devauth}:user:BCDFGHJK'",
@@ -857,14 +863,57 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
 			.send({});
 
-		expect(res.status).toBe(500);
-		expect(logger.warn).toHaveBeenCalledWith(
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "the device authorization store is unavailable; retry later",
+		});
+		expect(res.headers["cache-control"]).toContain("no-store");
+		expect(creates).toBe(1);
+		expect(logger.error).toHaveBeenCalledWith(
 			expect.objectContaining({
 				err: { name: "ReplyError", detail: "ERR unknown command 'evalsha'", stack: FRAMES },
 			}),
+			"device_authorization_store_unavailable",
+		);
+		expect(logger.warn).not.toHaveBeenCalledWith(
+			expect.anything(),
 			"device_authorization_code_collision",
 		);
 		for (const line of lines) expect(line).not.toContain("BCDFGHJK");
+	});
+
+	it("still re-draws on the store's collision signal, and gives up with 500 after a run of them", async () => {
+		// A collision every time is a generator that keeps drawing live codes —
+		// a server fault the caller cannot cause, so 500, logged as the
+		// collision it is.
+		const deps = enabledDeps();
+		const { logger } = serialisingLogger();
+		let creates = 0;
+		const app = mountContributedRoute(0, {
+			...deps,
+			logger,
+			deviceCodeStore: {
+				...deps.deviceCodeStore,
+				create: async () => {
+					creates += 1;
+					throw new DeviceCodeStoreError({ reason: "collision" });
+				},
+			},
+		});
+
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.auth(CONFIDENTIAL_ID, CONFIDENTIAL_SECRET)
+			.send({});
+
+		expect(res.status).toBe(500);
+		expect(res.body.error).toBe("server_error");
+		expect(creates).toBe(5);
+		expect(logger.warn).toHaveBeenCalledWith(
+			expect.objectContaining({ err: expect.objectContaining({ name: "DeviceCodeStoreError" }) }),
+			"device_authorization_code_collision",
+		);
 	});
 
 	/** 1000 parameters is body-parser's `parameterLimit`; the secret rides along. */
