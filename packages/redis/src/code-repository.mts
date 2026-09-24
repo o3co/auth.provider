@@ -23,6 +23,7 @@ import {
 	consoleLogger,
 	defineModule,
 	type Logger,
+	loggableError,
 } from "@o3co/auth-provider-core";
 import { z } from "zod";
 import type { CodeRepositoryClient } from "./clients.mjs";
@@ -177,8 +178,13 @@ export class RedisCodeRepository implements CodeRepository {
 				grantedAudience,
 			};
 		} catch (err) {
+			// The projection, never the error: a SyntaxError's message quotes
+			// the stored record around the point it failed.
 			const codeHash = crypto.createHash("sha256").update(code).digest("hex").slice(0, 16);
-			this.logger.error({ err, codeHash }, "RedisCodeRepository: corrupted data for code");
+			this.logger.error(
+				{ err: loggableError(err), codeHash },
+				"RedisCodeRepository: corrupted data for code",
+			);
 			return null;
 		}
 	}
