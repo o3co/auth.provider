@@ -266,8 +266,9 @@ describe("oauth routes — TODO-C hooks (Phase 1)", () => {
 			await new Promise((r) => setImmediate(r));
 			const ev = events.find((e) => e.type === "rate_limit.unavailable");
 			expect(ev).toBeDefined();
-			// The error's name, not its message: the message stays in the log line.
-			expect((ev?.details as { error?: unknown } | undefined)?.error).toEqual({ name: "Error" });
+			// The error's name under `cause`, not its message: the message stays in
+			// the log line.
+			expect(ev?.details).toEqual({ tag: "token", cause: { name: "Error" } });
 		});
 
 		// OR-5: fail-mode policy + logger emission. Pre-OR-5 the limiter

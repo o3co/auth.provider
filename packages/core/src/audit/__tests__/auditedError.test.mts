@@ -74,11 +74,37 @@ describe("auditedError", () => {
 		expect(JSON.stringify(audited)).not.toContain(TOKEN);
 	});
 
-	it("keeps a numeric code as it is", () => {
+	it("writes a numeric code as a string, so the field has one type in every event", () => {
 		expect(auditedError(Object.assign(new Error("x"), { code: 503 }))).toEqual({
 			name: "Error",
-			code: 503,
+			code: "503",
 		});
+	});
+
+	it("keeps one level of cause: a fetch failure's network code", () => {
+		// undici's `fetch failed` is a TypeError whose cause holds what went
+		// wrong: without it every unreachable host reads the same.
+		const refused = Object.assign(new Error("connect ECONNREFUSED 10.0.0.5:6379"), {
+			code: "ECONNREFUSED",
+			errno: -61,
+			syscall: "connect",
+			address: "10.0.0.5",
+			port: 6379,
+		});
+		const failed = new TypeError("fetch failed", { cause: refused });
+		const audited = auditedError(failed);
+		expect(audited).toEqual({
+			name: "TypeError",
+			cause: { name: "Error", code: "ECONNREFUSED" },
+		});
+		expect(JSON.stringify(audited)).not.toContain("10.0.0.5");
+	});
+
+	it("keeps no more than one level of cause", () => {
+		const root = Object.assign(new Error("root"), { code: "EROOT" });
+		const middle = new Error("middle", { cause: root });
+		const top = new Error("top", { cause: middle });
+		expect(auditedError(top)).toEqual({ name: "Error", cause: { name: "Error" } });
 	});
 
 	it("says what kind of value was thrown when it is not an Error, and nothing of it", () => {

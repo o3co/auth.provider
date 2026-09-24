@@ -324,8 +324,9 @@ describe("createRateLimitGuard — limiter outage (OR-5 failMode policy)", () =>
 		await settleAudit();
 		const ev = events.find((e) => e.type === "rate_limit.unavailable");
 		expect(ev).toBeDefined();
-		// The audit event names the error; its message stays in the log line.
-		expect(ev?.details).toEqual({ tag: "token", error: { name: "Error" } });
+		// The audit event names the error under `cause`; its message stays in
+		// the log line, and `details.error` is a string wherever it appears.
+		expect(ev?.details).toEqual({ tag: "token", cause: { name: "Error" } });
 		expect(ev?.userAgent).toBe("guard-test/1.0");
 	});
 
@@ -360,7 +361,7 @@ describe("createRateLimitGuard — limiter outage (OR-5 failMode policy)", () =>
 			expect.objectContaining({ error: "NonError" }),
 			"rate_limiter_failed_open",
 		);
-		expect(events[0]?.details).toEqual({ tag: "token", error: { name: "NonError" } });
+		expect(events[0]?.details).toEqual({ tag: "token", cause: { name: "NonError" } });
 	});
 
 	it("keeps what a Redis reply quotes out of the audit event", async () => {
@@ -380,7 +381,7 @@ describe("createRateLimitGuard — limiter outage (OR-5 failMode policy)", () =>
 			makeApp(createRateLimitGuard({ limiter, tag: "token", failMode: "open", auditSink: sink })),
 		);
 		await settleAudit();
-		expect(events[0]?.details).toEqual({ tag: "token", error: { name: "ReplyError" } });
+		expect(events[0]?.details).toEqual({ tag: "token", cause: { name: "ReplyError" } });
 		expect(JSON.stringify(events)).not.toContain(token);
 	});
 
@@ -438,7 +439,7 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 				type: "rate_limit.unavailable",
 				ip: "203.0.113.9",
 				userAgent: "guard-test/1.0",
-				details: { tag: "device_verification", error: { name: "Error" } },
+				details: { tag: "device_verification", cause: { name: "Error" } },
 			});
 		},
 	);

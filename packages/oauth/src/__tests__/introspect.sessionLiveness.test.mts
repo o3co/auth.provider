@@ -238,7 +238,7 @@ describe("/oauth/introspect — session liveness (R3)", () => {
 
 		expect(res.body.active).toBe(false);
 		const storeEvent = events.find((e) => e.type === "introspect.store_unavailable");
-		expect(storeEvent?.details).toEqual({ sid: SID, error: { name: "SyntaxError" } });
+		expect(storeEvent?.details).toEqual({ sid: SID, cause: { name: "SyntaxError" } });
 		expect(JSON.stringify(events)).not.toContain(leaked);
 	});
 

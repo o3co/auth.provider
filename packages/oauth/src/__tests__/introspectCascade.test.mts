@@ -185,8 +185,9 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 		const storeEvent = events.find((e) => e.type === "introspect.store_unavailable");
 		expect(storeEvent).toBeDefined();
 		expect((storeEvent?.details as Record<string, unknown>)?.family_id).toBe(familyId);
-		// The error's name, not its message: the message stays in the log.
-		expect((storeEvent?.details as Record<string, unknown>)?.error).toEqual({ name: "Error" });
+		// The error's name under `cause`, not its message: the message stays in
+		// the log.
+		expect(storeEvent?.details).toEqual({ family_id: familyId, cause: { name: "Error" } });
 	});
 
 	it("keeps what a Redis reply quotes out of introspect.store_unavailable", async () => {
@@ -219,7 +220,7 @@ describe("/introspect — family revoke cascade (TODO-F-3 task 5)", () => {
 		const storeEvent = events.find((e) => e.type === "introspect.store_unavailable");
 		expect(storeEvent?.details).toEqual({
 			family_id: "fam-reply-error",
-			error: { name: "ReplyError" },
+			cause: { name: "ReplyError" },
 		});
 		expect(JSON.stringify(events)).not.toContain(leaked);
 	});

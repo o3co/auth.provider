@@ -33,8 +33,9 @@
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { BUILT_IN_AUDIT_EVENT_TYPES } from "#/audit/types.mjs";
 
@@ -194,5 +195,117 @@ describe("built-in audit event inventory (#369)", () => {
 			(type) => !emitted.has(type),
 		);
 		expect(dead, "listed but no emission site found").toEqual([]);
+	});
+});
+
+/**
+ * One type per `details` key, across every event (#369's inventory, extended).
+ *
+ * A sink that fixes a field's type the first time it sees it —
+ * Elasticsearch / OpenSearch dynamic mapping, a BigQuery schema, a Datadog
+ * facet — rejects every later event that carries the other type, and the
+ * events it drops are whichever arrive second. `details.error` is a string
+ * (an OAuth code, a reason) wherever it appears; an error an event reports
+ * travels as `details.cause`, always core's `auditedError(…)` projection.
+ *
+ * Read from the source, at every emission whose event is an object literal:
+ * `details.error` has to be written as a string (a literal, a template, a
+ * name, or a call to `auditErrorText` / `String`), and `details.cause` as a
+ * call to `auditedError`. `AuditEvent`'s type says the same
+ * (`audit-details.types.test.mts`); this catches what a cast would let by.
+ */
+function detailsShapeViolations(file: string, source: string): string[] {
+	const sf = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true);
+	const found: string[] = [];
+	const at = (node: ts.Node): string =>
+		`${relative(repoRoot, file)}:${sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1}`;
+	const stringShaped = (value: ts.Expression): boolean => {
+		if (
+			ts.isStringLiteral(value) ||
+			ts.isNoSubstitutionTemplateLiteral(value) ||
+			ts.isTemplateExpression(value) ||
+			ts.isIdentifier(value) ||
+			ts.isPropertyAccessExpression(value)
+		)
+			return true;
+		if (ts.isParenthesizedExpression(value)) return stringShaped(value.expression);
+		if (ts.isConditionalExpression(value))
+			return stringShaped(value.whenTrue) && stringShaped(value.whenFalse);
+		if (ts.isBinaryExpression(value)) return stringShaped(value.left) && stringShaped(value.right);
+		return (
+			ts.isCallExpression(value) &&
+			ts.isIdentifier(value.expression) &&
+			["auditErrorText", "String"].includes(value.expression.text)
+		);
+	};
+	const checkDetails = (details: ts.ObjectLiteralExpression): void => {
+		for (const property of details.properties) {
+			if (!ts.isPropertyAssignment(property) || !ts.isIdentifier(property.name)) continue;
+			const value = property.initializer;
+			if (property.name.text === "error" && !stringShaped(value)) {
+				found.push(`${at(property)} details.error is not a string: ${value.getText(sf)}`);
+			}
+			if (
+				property.name.text === "cause" &&
+				!(
+					ts.isCallExpression(value) &&
+					ts.isIdentifier(value.expression) &&
+					value.expression.text === "auditedError"
+				)
+			) {
+				found.push(`${at(property)} details.cause is not auditedError(…): ${value.getText(sf)}`);
+			}
+		}
+	};
+	const visit = (node: ts.Node): void => {
+		if (ts.isCallExpression(node)) {
+			const callee = node.expression.getText(sf);
+			const event =
+				callee === "emitAuditEvent"
+					? node.arguments[1]
+					: /(^|\.)sink\??\.record$/.test(callee)
+						? node.arguments[0]
+						: undefined;
+			if (event !== undefined && ts.isObjectLiteralExpression(event)) {
+				for (const property of event.properties) {
+					if (
+						ts.isPropertyAssignment(property) &&
+						ts.isIdentifier(property.name) &&
+						property.name.text === "details" &&
+						ts.isObjectLiteralExpression(property.initializer)
+					) {
+						checkDetails(property.initializer);
+					}
+				}
+			}
+		}
+		ts.forEachChild(node, visit);
+	};
+	visit(sf);
+	return found;
+}
+
+describe("audit details keep one type per key", () => {
+	it("writes details.error as a string and details.cause as auditedError(…), in every emission", () => {
+		const violations = listShippedSources().flatMap((file) =>
+			detailsShapeViolations(file, readFileSync(file, "utf8")),
+		);
+		expect(violations).toEqual([]);
+	});
+
+	it("sees the shapes it exists for", () => {
+		const flagged = (source: string): number => detailsShapeViolations("sample.mts", source).length;
+		expect(
+			flagged(`emitAuditEvent(sink, { type: "x", details: { error: auditedError(cause) } });`),
+		).toBe(1);
+		expect(flagged(`sink.record({ type: "x", details: { error: { name: "Error" } } });`)).toBe(1);
+		expect(flagged(`emitAuditEvent(sink, { type: "x", details: { cause: cause.message } });`)).toBe(
+			1,
+		);
+		expect(
+			flagged(
+				`emitAuditEvent(sink, { type: "x", details: { error: code, reason: "r", cause: auditedError(err) } });`,
+			),
+		).toBe(0);
 	});
 });

@@ -199,6 +199,42 @@ describe("createSanitizedLogger", () => {
 		expect(JSON.stringify(error.mock.calls[0])).not.toContain(SENTINEL);
 	});
 
+	it("carries an audited error under cause, and redacts any other value there", () => {
+		// Core's `rate_limit.unavailable` names the limiter's error as
+		// `details.cause`, `auditedError`'s `{ name, code?, cause? }` — bounded
+		// and free of the error's text, so the trail keeps it. Anything else
+		// under that key is not an audited error and is redacted.
+		const recorded: unknown[] = [];
+		const sanitized = createSanitizedAuditSink({
+			kind: "test",
+			record: async (event) => {
+				recorded.push(event);
+			},
+		});
+		void sanitized.record({
+			timestamp: new Date(),
+			type: "rate_limit.unavailable",
+			details: {
+				tag: "federation_grants",
+				cause: { name: "ReplyError", code: "ECONNRESET", cause: { name: "Error" } },
+			},
+		});
+		void sanitized.record({
+			timestamp: new Date(),
+			type: "rate_limit.unavailable",
+			details: { tag: "federation_grants", cause: { name: "Error", message: SENTINEL } },
+		});
+		expect((recorded[0] as { details: Record<string, unknown> }).details).toEqual({
+			tag: "federation_grants",
+			cause: { name: "ReplyError", code: "ECONNRESET", cause: { name: "Error" } },
+		});
+		expect((recorded[1] as { details: Record<string, unknown> }).details).toEqual({
+			tag: "federation_grants",
+			cause: "[redacted]",
+		});
+		expect(JSON.stringify(recorded)).not.toContain(SENTINEL);
+	});
+
 	it("applies the same allowlist to an audit event's details", () => {
 		// `rate_limit.unavailable` carries the same stringified exception the
 		// log line does, on a channel the logger facade never sees.

@@ -1603,7 +1603,7 @@ describe("audit events", () => {
 			expect(auditSink.record).toHaveBeenCalledWith(
 				expect.objectContaining({
 					type: "federation.logout.idp_unreachable",
-					details: { federation: "google", error: { name: "Error" } },
+					details: { federation: "google", cause: { name: "Error" } },
 				}),
 			);
 		});
@@ -1643,7 +1643,7 @@ describe("audit events", () => {
 					type: "federation.logout.idp_unreachable",
 					details: {
 						federation: "google",
-						error: { name: "ResponseBodyError", code: "OAUTH_RESPONSE_BODY_ERROR" },
+						cause: { name: "ResponseBodyError", code: "OAUTH_RESPONSE_BODY_ERROR" },
 					},
 				}),
 			);
