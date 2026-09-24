@@ -109,7 +109,7 @@ as the client sends it.
 |---|---|---|
 | Browser | `https://example.com` | Bare serialized origin: scheme + host + a port only when it is not the default. **No trailing slash**, path or uppercase host — such an entry would never match, so the schema refuses it at boot and names the origin it should have been. |
 | Browser, sub-domain | `https://app.example.com:8443` | Sharing one `rpId` across sub-domains means listing each origin. |
-| Browser, local dev | `http://localhost:3000` | `http:` is accepted for loopback only (`localhost`, `127.0.0.0/8`, `[::1]`). |
+| Browser, local dev | `http://localhost:3000` | `http:` is accepted for `localhost` only. An IP address — `127.0.0.1`, `[::1]`, any other — is refused: WebAuthn needs the origin's host to be a domain (W3C WebAuthn §5.1.3), so no browser runs a ceremony on one. |
 | Android app | `android:apk-key-hash:<base64url>` | What Credential Manager sends in place of an origin ([#497](https://github.com/o3co/auth.provider/issues/497)). |
 
 ```hocon
@@ -182,11 +182,14 @@ keytool -exportcert -alias <alias> -keystore <keystore> \
 ```
 
 The schema validates the shape only — the lowercase `android:apk-key-hash:`
-prefix plus a non-empty base64url body, with nothing after it. It cannot check
-that the hash is *your* app's, so an entry pasted from the wrong build is a
-ceremony that fails at runtime rather than a boot error. Standard-base64 `+`
-and `/` are refused: Credential Manager emits the URL-safe alphabet, so those
-characters are a transcription error every time.
+prefix and exactly the value the command above prints: 43 characters of
+unpadded base64url, the length of a SHA-256, with nothing after it. It refuses
+padding, a truncated value, and the hex fingerprint `keytool -list` shows (64
+characters once the colons are gone, and every one of them happens to be
+base64url). It cannot check that the hash is *your* app's, so an entry pasted
+from the wrong build is a ceremony that fails at runtime rather than a boot
+error. Standard-base64 `+` and `/` are refused: Credential Manager emits the
+URL-safe alphabet, so those characters are a transcription error every time.
 
 Serving `/.well-known/assetlinks.json` on the `rpId` domain is what lets the
 app use the RP ID; it is an Android platform requirement and outside this

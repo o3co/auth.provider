@@ -128,57 +128,87 @@ const readTopOriginList = (raw: unknown): unknown => {
  *   sends and the comparison is exact — `ANDROID:APK-KEY-HASH:` would parse
  *   and then never match a ceremony, the same dead-entry failure the
  *   serialized-origin rule below exists to prevent for a web origin;
- * - a non-empty base64url body (`A-Za-z0-9-_` with optional `=` padding) and
- *   nothing after it, so a path, query or fragment smuggled onto the end is
- *   refused rather than registered.
+ * - the body Credential Manager builds: the SHA-256 of the signing
+ *   certificate as unpadded base64url, which is always 43 characters —
+ *   256 bits are 42 whole characters plus a 43rd carrying the last 4 bits,
+ *   its low 2 bits zero, so it is one of `AEIMQUYcgkosw048`. Anything else
+ *   names no app: padding, a truncated or over-long value, and above all
+ *   keytool's hex fingerprint with the colons stripped, which is 64
+ *   characters that all happen to be base64url;
+ * - nothing after the body, so a path, query or fragment smuggled onto the
+ *   end is refused rather than registered.
  *
  * Standard-base64 `+` and `/` are deliberately out: the alphabet Credential
  * Manager emits is the URL-safe one, so those characters can only be a
  * transcription error.
  */
-const ANDROID_APK_KEY_HASH_ORIGIN = /^android:apk-key-hash:[A-Za-z0-9_-]+={0,2}$/;
+const ANDROID_APK_KEY_HASH_ORIGIN = /^android:apk-key-hash:[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+
+/** The refusal for an entry that starts like the Android form and misses it. */
+const ANDROID_ORIGIN_SHAPE =
+	"an Android app origin must be android:apk-key-hash: followed by the unpadded base64url " +
+	"SHA-256 of the signing certificate (43 characters), not the hex fingerprint — the lowercase " +
+	"prefix, and nothing after it";
+
+/** An IPv4 host as a serialized origin spells it; an IPv6 one is bracketed. */
+const IPV4_HOST = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/;
 
 /**
- * One web entry of `origin` or `topOrigin`: a bare serialized origin, held to
- * core's `checkSerializedOrigin` — the rule `cors.allowedOrigins` is held to,
- * for the same reason. SimpleWebAuthn compares each entry with the origin the
- * browser serialized into clientDataJSON by exact string, so an entry that
- * parses but is not that serialization — a trailing slash, a path, query or
- * fragment, userinfo, an uppercase host, an explicit default port, a
- * wildcard — matches no ceremony. `https:` is required except for a host
- * core's loopback vocabulary names (`localhost`, `127.0.0.0/8`, `[::1]`):
- * passkeys need a secure context (W3C WebAuthn §5.1.3), and a browser treats
- * those hosts as one. The refusal is core's wording, and a not-serialized
- * entry is told the origin it should have been.
+ * Why a web entry of `origin` or `topOrigin` cannot be used, or `null`.
+ *
+ * First core's `checkSerializedOrigin` — the rule `cors.allowedOrigins` is
+ * held to, for the same reason. SimpleWebAuthn compares each entry with the
+ * origin the browser serialized into clientDataJSON by exact string, so an
+ * entry that parses but is not that serialization — a trailing slash, a path,
+ * query or fragment, userinfo, an uppercase host, an explicit default port, a
+ * wildcard — matches no ceremony. `https:` is required except on a loopback
+ * host: passkeys need a secure context (W3C WebAuthn §5.1.3). The refusal is
+ * core's wording, and a not-serialized entry is told the origin it should
+ * have been.
+ *
+ * Then a rule core does not have, because CORS does not need it: the host
+ * must be a domain. WebAuthn §5.1.3 and §5.1.4.1 refuse a ceremony whose
+ * origin's effective domain is not a valid domain ("Only the domain format of
+ * host is allowed here"), so an IPv4 or IPv6 literal — `http://127.0.0.1`,
+ * `http://[::1]` included, loopback or not — is an entry no browser can use.
+ * `localhost` is the loopback name that works.
+ */
+function webOriginProblem(entry: string): string | null {
+	const rejection = checkSerializedOrigin(entry);
+	if (rejection !== null) return describeSerializedOriginRejection(rejection);
+	const { hostname } = new URL(entry);
+	if (hostname.startsWith("[") || IPV4_HOST.test(hostname)) {
+		return (
+			"WebAuthn needs a domain, not an IP address — a browser refuses a ceremony on an " +
+			"IP-literal origin (W3C WebAuthn §5.1.3); for local development use localhost"
+		);
+	}
+	return null;
+}
+
+/**
+ * A `topOrigin` entry: a web origin ({@link webOriginProblem}). An Android
+ * app origin is refused by name: it is what Credential Manager sends *as* the
+ * origin, and no browsing context frames it.
  */
 const webOriginEntry = z.string().superRefine((entry, ctx) => {
-	const rejection = checkSerializedOrigin(entry);
-	if (rejection !== null) {
-		ctx.addIssue({ code: "custom", message: describeSerializedOriginRejection(rejection) });
-	}
+	const problem = /^android:/i.test(entry)
+		? "an Android app origin is never a top origin: Credential Manager sends it as the " +
+			"ceremony's own origin, and no browsing context frames it"
+		: webOriginProblem(entry);
+	if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
 });
 
 /**
- * An `origin` entry: a web origin as above, or an Android app origin — see
- * {@link ANDROID_APK_KEY_HASH_ORIGIN}. An entry that starts like the Android
- * form and misses its shape is told so, rather than refused as a web origin
- * with no tuple origin.
+ * An `origin` entry: a web origin ({@link webOriginProblem}), or an Android
+ * app origin — see {@link ANDROID_APK_KEY_HASH_ORIGIN}. An entry that starts
+ * like the Android form and misses its shape is told what the shape is,
+ * rather than refused as a web origin with no tuple origin.
  */
 const originEntry = z.string().superRefine((entry, ctx) => {
 	if (ANDROID_APK_KEY_HASH_ORIGIN.test(entry)) return;
-	if (/^android:/i.test(entry)) {
-		ctx.addIssue({
-			code: "custom",
-			message:
-				"an Android app origin must be android:apk-key-hash:<base64url> — the lowercase prefix, " +
-				"a URL-safe base64 body, and nothing after it",
-		});
-		return;
-	}
-	const rejection = checkSerializedOrigin(entry);
-	if (rejection !== null) {
-		ctx.addIssue({ code: "custom", message: describeSerializedOriginRejection(rejection) });
-	}
+	const problem = /^android:/i.test(entry) ? ANDROID_ORIGIN_SHAPE : webOriginProblem(entry);
+	if (problem !== null) ctx.addIssue({ code: "custom", message: problem });
 });
 
 export const webauthnConfigSchema = z.object({
@@ -194,8 +224,9 @@ export const webauthnConfigSchema = z.object({
 	 * Each web origin is a bare serialized origin — scheme + host + a port only
 	 * when it is not the default: `https://example.com`,
 	 * `https://app.example.com:8443`, `http://localhost:3000`. No trailing
-	 * slash, path, wildcard or userinfo, and `https:` except on a loopback
-	 * host; see {@link webOriginEntry} for why each is refused at boot.
+	 * slash, path, wildcard or userinfo, `https:` except on a loopback host,
+	 * and a domain rather than an IP address; see {@link webOriginProblem} for
+	 * why each is refused at boot.
 	 *
 	 * An **Android app** origin is the one non-URL entry this list accepts:
 	 * `android:apk-key-hash:<base64url>`, what Credential Manager sends in place
@@ -220,7 +251,7 @@ export const webauthnConfigSchema = z.object({
 	 * deployment does intend — the parent page's origin, not this RP's — and
 	 * cross-origin passkey authentication from those frames is accepted.
 	 *
-	 * The same rule as `origin`'s web entries ({@link webOriginEntry}). Not the
+	 * The same rule as `origin`'s web entries ({@link webOriginProblem}). Not the
 	 * Android app form: `android:apk-key-hash:` is what Credential Manager
 	 * sends *as* the origin, and there is no browsing context above it to be a
 	 * top origin.
