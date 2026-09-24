@@ -57,12 +57,22 @@ Core's own in-memory modules declare it as follows
 | `core-federation-grant-intent-store-memory` | federation grant acquisition — an intent lodged on one replica is unknown to every other, so the consent page and the upstream callback answer as if the flow had expired whenever they land elsewhere, and the bound on live intents is counted per replica instead of per (client, subject). Established grants and revocations are unaffected, so this adapter beside a durable grant store is a single-replica configuration rather than a broken one |
 | `sessionStoreModule` (only with `session.storage.type = "memory"`, `SESSION_STORAGE_TYPE=memory`; #474) | the express-session store — a login served by one replica is unknown to the others, so a browser whose next request lands elsewhere is logged out, and every session is lost on restart |
 
-DPoP is not in this table. It keeps proofs in a replay store of its own
-(`dpopReplayStore`), not in the seen-set above, and `dpopModule` declares no
-`replicaSafety`: its in-process replay store boots under `multi` too, so a
-proof replayed to a replica that did not see it is accepted. Wire a shared
-store and set `oauth.dpop.replay-store = "redis"`
-(`packages/dpop/README.md` "Operator requirements").
+DPoP is not in this table, but its in-process replay store is refused under
+`multi` all the same. It keeps proofs in a replay store of its own
+(`dpopReplayStore`), not in the seen-set above, and whether that store is
+per-process depends on whether the slot is filled — which the manifest cannot
+say — so `dpopModule` declares no `replicaSafety` and applies the three states
+itself when it falls back (`packages/dpop/src/module.mts`). With DPoP enabled
+and no `dpopReplayStore` wired, `multi` refuses to boot
+(`replica-unsafe-adapter`, as the `cause` of `contribute-factory-failed`):
+each replica would keep its own seen set, so a DPoP proof captured once could
+be replayed once against each replica while its `iat` is inside
+`oauth.dpop.iat-window-seconds`. Unset warns `dpop_replay_store_not_shared`;
+`single` is silent. Wire a shared store and set
+`oauth.dpop.replay-store = "redis"`, which makes the slot mandatory in every
+mode (`packages/dpop/README.md` "Operator requirements"). A store wired under
+`replay-store = "memory"` is used as wired and is not refused, and DPoP left
+disabled builds no store.
 
 Three things the guard cannot do:
 
@@ -78,10 +88,13 @@ Three things the guard cannot do:
   so `multi` refuses them by name; before #455 they booted. Three more joined
   them in #474 and are refused the same way: express-session's own store under
   `SESSION_STORAGE_TYPE=memory`, and the login and WebAuthn-options rate
-  limiters when no shared `rateLimiter` is wired. With the mode **unset**
-  express-session's store joins the single `replica_unsafe_adapters` warning,
-  and the two rate limiters warn on their own (`login_rate_limiter_not_shared`,
-  `webauthn_authentication_options_rate_limiter_not_shared`, [§4](#4-alerts)).
+  limiters when no shared `rateLimiter` is wired. DPoP's replay store fallback
+  is refused the way the rate limiters are, when DPoP is enabled and no
+  `dpopReplayStore` is wired. With the mode **unset** express-session's store
+  joins the single `replica_unsafe_adapters` warning, and the two rate limiters
+  and the DPoP replay store warn on their own (`login_rate_limiter_not_shared`,
+  `webauthn_authentication_options_rate_limiter_not_shared`,
+  `dpop_replay_store_not_shared`, [§4](#4-alerts)).
 - **It does not see state inside a component you build and hand in.** The
   jwt-bearer trust registry is one: `createMemoryAssertionIssuerRegistry` lives
   inside the `assertionVerifier` you pass as a bootstrap component, not in a
@@ -213,6 +226,7 @@ Module-level messages that arrive wrapped in a factory failure:
   it is put back; the rotation procedure below says when a key may leave.
 - Federation tokens: `mode "allow-plaintext" is refused because the environment is "production"` — the environment is the one the config was selected by (`CONFIG_ENV`, or `NODE_ENV`) *or* `NODE_ENV` itself — and `… because deployment.mode is "multi"` in every environment (#473); either way unless `FEDERATION_TOKENS_ALLOW_INSECURE=1`, which then logs a `CRITICAL` line on every boot (`packages/redis/src/federation-tokens.mts`).
 - Per-process rate-limit fallbacks under `deployment.mode = "multi"` (#474): `deployment.mode is "multi" but no shared rateLimiter is wired for POST /session/login` and the same for `POST /oauth/webauthn/authentication/options` — a `replica-unsafe-adapter` BootError as the `cause`. Wire `rateLimiter.adapter = "redis"` or set `single` (`packages/session/src/routes/Session.mts`, `packages/webauthn/src/module.mts`).
+- DPoP replay store under `deployment.mode = "multi"`: `deployment.mode is "multi" but DPoP is enabled with no shared dpopReplayStore wired` — a `replica-unsafe-adapter` BootError as the `cause`. Wire a shared `dpopReplayStore` and set `oauth.dpop.replay-store = "redis"`, or set `single`. Separately, `oauth.dpop.replay-store = "redis"` with the slot empty is refused in every mode, by a message naming the slot (`packages/dpop/src/module.mts`).
 - Device grant: the six refusals for `verification-uri`, the `session` slice, `rateLimit.failMode`, a `rateLimiter` component, a usable `oauth.deviceAuthorization.rateLimit` budget (#448), and — with the grant enabled — a `deviceCodeStore` component, which `oauth.deviceAuthorization.store = "unsupported"` does not stand in for (#626) (`packages/device-grant/src/module.mts`).
 - mTLS: `source = "header"` with empty `trusted-proxies`; `mode = "pki"`/`"full-pki"` with empty `trusted-cas`; `mode = "pki"` with `source = "tls-layer"`; `full-pki` without `revocation.mode` + `on-unavailable`; `revocation.mode` ∈ `"crl"` / `"ocsp"` / `"both"` with empty `allowed-hosts` (`packages/mtls/README.md` "Boot-time fail-loud invariants", `packages/mtls/src/module.mts`).
 - Remote signing: `the signer's output does not verify against publicKeyPem for kid "…"` — the boot self-check in `createRemoteSigningKeyStore` (`packages/core/src/keys/remoteSigning.mts`).
@@ -595,6 +609,7 @@ stream — its level is fixed at `info`.
 | --- | --- | --- |
 | `replica_unsafe_adapters` (warn) | `core/src/boot/replica-safety.mts` | `deployment.mode` is unset; set it |
 | `login_rate_limiter_not_shared`, `webauthn_authentication_options_rate_limiter_not_shared` (warn) | `session/src/routes/Session.mts`, `webauthn/src/module.mts` | no shared `rateLimiter` and `deployment.mode` unset; the guard is per-process (`"multi"` refuses boot instead, `"single"` is silent — #474) |
+| `dpop_replay_store_not_shared` (warn) | `dpop/src/module.mts` | DPoP is enabled with no shared `dpopReplayStore` and `deployment.mode` unset; replay protection is per-process, so a proof can be replayed once against each replica (`"multi"` refuses boot instead, `"single"` is silent) |
 | `pkce_config_ignored_s256_is_mandatory` (warn) | `oauth/src/grants/pkce.mts` | a retired PKCE key (or `OAUTH_GRANTS_AUTHORIZATION_CODE_PKCE_REQUIRE_S256`) is still set; delete it |
 | `jwt_verify_aud_skipped`, `jwt_verify_iss_skipped` (warn, once per logger) | `core/src/jwt/verify.mts` | a verification surface is not pinning `aud`/`iss` |
 | `jwt_verify_legacy_typ` (warn) | `core/src/jwt/verify.mts` | `OAUTH_JWT_LEGACY_TYP_ACCEPT=true` is admitting typ-less tokens; close the window |

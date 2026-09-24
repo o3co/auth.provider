@@ -279,8 +279,11 @@ await createApp({
 Set `oauth.dpop.replay-store = "redis"` beside it: with DPoP enabled,
 `dpopModule` then refuses to boot when the slot is empty, instead of falling
 back to a per-process store that a replayed proof can dodge by landing on
-another replica. The setting is what makes the slot mandatory — `"memory"` (the
-default) boots without it under any `deployment.mode`.
+another replica. The setting makes the slot mandatory in every
+`deployment.mode`; under `"memory"` (the default) an empty slot is refused only
+under `"multi"`, warned about when the mode is unset, and accepted under
+`"single"` (see the dpop package's
+[operator requirements](../dpop/README.md#operator-requirements)).
 
 ## Federation-token keys and logout
 
