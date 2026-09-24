@@ -20,6 +20,8 @@ import {
 	createApp,
 	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
+	type Logger,
+	type Module,
 	memoryFederationTokenStoreModule,
 	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
@@ -78,6 +80,7 @@ async function boot(
 	idpA: FakeIdp,
 	idpB: FakeIdp,
 	authenticateByToken: (token: string) => Promise<unknown>,
+	extraModules: readonly Module[] = [],
 ) {
 	const config = buildConfig();
 	const repo = {
@@ -115,6 +118,7 @@ async function boot(
 			configsModule,
 			oidcFederationModule("idp-a"),
 			oidcFederationModule("idp-b"),
+			...extraModules,
 		],
 		bootstrapComponents: { config, pathResolver: (s: string) => s },
 	});
@@ -230,6 +234,70 @@ describe("OIDC federation through the session routes (#524)", () => {
 		// Refused before the code was spent, and before the Store was asked.
 		expect(idpB.requestsTo("/token")).toHaveLength(0);
 		expect(repo.authenticateByToken).toHaveBeenCalledTimes(1);
+	});
+
+	it("a failed exchange is logged without the token response the library carries on the error", async () => {
+		// openid-client refuses a token response it cannot parse with an error
+		// whose `cause.cause.body` IS that response — access and refresh token
+		// included. The shipped loggers print neither non-enumerable `cause`, but
+		// a logger that serialises the whole error does, and a deployment is free
+		// to install one. This one walks every own property, `cause` included.
+		const lines: string[] = [];
+		const serialiseEverything = (value: unknown, seen = new WeakSet<object>()): unknown => {
+			if (typeof value !== "object" || value === null) return value;
+			if (seen.has(value)) return "[circular]";
+			seen.add(value);
+			const out: Record<string, unknown> = {};
+			for (const key of Object.getOwnPropertyNames(value)) {
+				out[key] = serialiseEverything((value as Record<string, unknown>)[key], seen);
+			}
+			return out;
+		};
+		const record =
+			(level: string) =>
+			(...args: unknown[]): void => {
+				lines.push(JSON.stringify({ level, args: serialiseEverything(args) }));
+			};
+		const everything: Logger = {
+			trace: record("trace"),
+			debug: record("debug"),
+			info: record("info"),
+			warn: record("warn"),
+			error: record("error"),
+			fatal: record("fatal"),
+			child: () => everything,
+		};
+		const loggerModule = defineModule({
+			name: "test:serialise-everything-logger",
+			provides: { logger: () => everything } as never,
+		});
+
+		const idpA = await createFakeIdp({ issuer: ISSUER_A, clientId: "client-a" });
+		const idpB = await createFakeIdp({ issuer: ISSUER_B, clientId: "client-b" });
+		idpA.accessToken = "at-must-never-reach-a-log";
+		idpA.codeAnswer = { refresh_token: "rt-must-never-reach-a-log", scope: 42 };
+		const { handle, app, repo } = await boot(idpA, idpB, async () => ({ id: "u", username: "u" }), [
+			loggerModule,
+		]);
+		handleRef = handle;
+
+		const agent = request.agent(app);
+		const { state } = await startLogin(agent, "idp-a", idpA);
+		const cb = await agent.get(
+			`/session/oauth/federation/idp-a/callback?code=code-1&state=${state}`,
+		);
+		expect(cb.status).toBe(502);
+		expect(repo.authenticateByToken).not.toHaveBeenCalled();
+
+		const exchangeFailure = lines.find((line) => line.includes("federation token exchange failed"));
+		expect(exchangeFailure).toBeDefined();
+		// What an operator needs is still there: the library's code and reason.
+		expect(exchangeFailure).toContain("OAUTH_INVALID_RESPONSE");
+		expect(exchangeFailure).toContain('\\"scope\\" property must be a string');
+		for (const line of lines) {
+			expect(line).not.toContain("at-must-never-reach-a-log");
+			expect(line).not.toContain("rt-must-never-reach-a-log");
+		}
 	});
 
 	it("a callback whose id_token fails validation never reaches the Store", async () => {
