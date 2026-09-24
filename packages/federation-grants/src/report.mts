@@ -201,10 +201,11 @@ const sanitizePayload = (payload: Record<string, unknown>): Record<string, unkno
 /**
  * The audit sink handed to the shared rate-limit guard.
  *
- * Its `rate_limit.unavailable` event carries `details.error` — the same
- * stringified limiter exception the log line carries — so the sink needs the
- * same allowlist the logger does. The event itself is kept: an operator's
- * dashboard counts limiter outages, and the count is the useful part.
+ * Its `rate_limit.unavailable` event carries `details.error` — core's
+ * `auditedError`, the limiter exception's name and code — and the sink holds
+ * every event's details to the same allowlist the logger does, whatever core
+ * puts there. The event itself is kept: an operator's dashboard counts
+ * limiter outages, and the count is the useful part.
  */
 export function createSanitizedAuditSink(sink: AuditSink): AuditSink {
 	return {

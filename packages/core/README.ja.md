@@ -81,7 +81,7 @@ const config: AppConfig = AppConfigSchema.parse(rawConfig);
 
 RFC 6749 付録 A.7 と A.8 は `error` と `error_description` を `1*NQSCHAR`（`"` と `\` を除く印字可能な ASCII）に限ります。この規則は [`src/errors/envelope.mts`](src/errors/envelope.mts) にあります。
 
-- `errorEnvelope(error, description?, uri?)` は RFC 6749 §5.2 のエラー本文を組み立て、規則を自身で適用します。そのため、ここを通る書き手は渡されたものが何であっても規則に従います: core のトークンバインディングのミドルウェア（機構の `retryInstruction` や `unavailable` のテキスト、ディスパッチの衝突が名指す kind）、保護リソースのバインディング、レートリミッター（リミッターアダプターの `reason`）、セッションのルート、寄与されたモジュール自身のルート。範囲外の説明の文字は `?` として送り、文字列でない説明は空の説明と同じく落とします。形式に合わない `error` コードは `server_error` として送り、`consoleLogger` で `error_envelope_code_malformed` をログに残します。コードはサーバー側のコードから来たものであり、エンベロープは呼び出し側が返すステータスを知らないからです。`error_uri` は渡されたとおりに送ります。
+- `errorEnvelope(error, description?, uri?)` は RFC 6749 §5.2 のエラー本文を組み立て、規則を自身で適用します。そのため、ここを通る書き手は渡されたものが何であっても規則に従います: core のトークンバインディングのミドルウェア（機構の `retryInstruction` や `unavailable` のテキスト、ディスパッチの衝突が名指す kind）、保護リソースのバインディング、レートリミッター（リミッターアダプターの `reason`）、セッションのルート、寄与されたモジュール自身のルート。範囲外の説明の文字は `?` として送り、文字列でない説明は空の説明と同じく落とします。形式に合わない `error` コードは `server_error` として送り、`consoleLogger` で `error_envelope_code_malformed` をログに残します。コードはサーバー側のコードから来たものであり、エンベロープは呼び出し側が返すステータスを知らないからです。`error_uri` は、RFC 6749 の `error_uri` の文字（§5.2、付録 A.9）で書かれた形式の正しい URI-reference のときだけ送ります。それ以外は書き換えずに落とし、`error_envelope_uri_malformed` をログに残します。
 - `sanitizeErrorText` は範囲外の文字をすべて `?` に置き換え、文字列でない値には `undefined` を返すので、呼び出し側は自分のデフォルトに戻ります。本文を自分で組み立てる書き手（リダイレクトのクエリ、リテラルの `{ error, error_description }`）は、エコーするものをこれに通します。
 - `auditErrorText` は同じ処理に加えて 200 文字で切り詰めます。ログ行や監査イベント向けです。
 - `isWellFormedErrorCode` は `error` コードを送り出す前に検査します。自分で制御できないものからコードを組み立て、かつ自分の応答がクライアントのリクエストの拒否だとわかっている呼び出し側は、自分でクライアントエラーのコードに戻ります: トークンバインディングのミドルウェアは、`invalid_<kind>_proof` が形式に合わなくなる拒否を `invalid_request` として返し、`/oauth/token` と `/oauth/authorize` はグラントポリシーの deny に同じことをします（後述）。
@@ -400,6 +400,7 @@ const userRepo = new InMemoryUserRepository(users);
 - `AuditSink.record(event)` は fire-and-forget
 - Factory: `createAuditSinkFactory()`、built-in `"console"` は `registerBuiltinAuditSinks()` で登録
 - Sink のエラーは core 側で握りつぶす — audit 失敗で認証フローがブロックされることはない
+- イベントはエラーを `auditedError(err)`（[`src/audit/auditedError.mts`](src/audit/auditedError.mts)）として運ぶ: `{ name, code? }`。`loggableError` が読む name と code をサニタイズして切り詰めたもので、メッセージは運ばない。シンクは他のシステムが読む記録であり、ストアや IdP のメッセージは相手側の文字列だからである（Redis の応答が引用する引数、JSON のパースエラーが引用する入力、上流の説明）。`rate_limit.unavailable`、`introspect.store_unavailable`、`federation.logout.idp_unreachable` の `details.error` はこの形である
 
 #### レートリミッター
 
