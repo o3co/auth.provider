@@ -19,8 +19,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # Full history needed by the "No cross-project references in PR commit
-          # messages" and "Every commit in the PR installs" steps below (both
+          # Full history needed by the "No cross-project references or
+          # agent-workspace paths in PR commit messages" and "Every commit in
+          # the PR installs" steps below (both
           # walk BASE..HEAD on the PR branch). Other steps don't depend on
           # history depth.
           fetch-depth: 0
@@ -130,13 +131,15 @@ jobs:
           echo "OK: no cross-project references in scanned paths"
 
           # Nor a path into an agent's workspace: the hidden agent directory, its
-          # spec folder, an absolute macOS volume path. None of them is in this
-          # repository, so a link or a citation to one is dead for every reader —
-          # a CHANGELOG entry linked such a spec until it was caught by hand. So
-          # every tracked file is read, the CHANGELOG included; `git grep` reads
-          # tracked files only, never build output or node_modules. Assembled
-          # from parts, like the pattern above, so this file does not match itself.
-          WORKSPACE_PAT="$(printf '%s' '\.clau' 'de/|superpowers' '/specs|/Volu' 'mes/')"
+          # spec and plan folders, the workspace volume's absolute path. None of
+          # them is in this repository, so a link or a citation to one is dead
+          # for every reader — a CHANGELOG entry linked such a spec until it was
+          # caught by hand. So every tracked file is read, the CHANGELOG
+          # included; `git grep` reads tracked files only, never build output or
+          # node_modules. The PR's commit messages are read for the same pattern
+          # in the next step. Assembled from parts, like the pattern above, so
+          # this file does not match itself.
+          WORKSPACE_PAT="$(printf '%s' '\.clau' 'de/|superpowers/' '(specs|plans)/|/Volu' 'mes/Work' 'space/')"
           set +e
           HITS="$(git grep -nIE "$WORKSPACE_PAT")"
           STATUS=$?
@@ -153,7 +156,7 @@ jobs:
               exit 1
               ;;
           esac
-      - name: No cross-project references in PR commit messages
+      - name: No cross-project references or agent-workspace paths in PR commit messages
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -186,6 +189,26 @@ jobs:
             exit 1
           fi
           echo "OK: no cross-project references in PR commit messages"
+
+          # Nor a path into an agent workspace — the pattern of the file scan in
+          # the step above, assembled the same way. A squash merge promotes these
+          # bodies into develop's history, where a dead link cannot be fixed.
+          # Commit by commit, so the error names the commit to reword.
+          WORKSPACE_PAT="$(printf '%s' '\.clau' 'de/|superpowers/' '(specs|plans)/|/Volu' 'mes/Work' 'space/')"
+          SHAS="$(git rev-list "$BASE_SHA..$HEAD_SHA")"
+          FOUND=0
+          for sha in $SHAS; do
+            if HITS="$(git log -1 --format=%B "$sha" | grep -nE "$WORKSPACE_PAT")"; then
+              echo "ERROR: $(git log -1 --format='%h %s' "$sha") — its message names a path into an agent workspace:"
+              echo "$HITS"
+              FOUND=1
+            fi
+          done
+          if [ "$FOUND" -ne 0 ]; then
+            echo "Reword those commits: cite a PR or issue number instead."
+            exit 1
+          fi
+          echo "OK: no agent-workspace paths in PR commit messages"
       - name: Every commit in the PR installs (package.json parses, no conflict markers)
         if: github.event_name == 'pull_request'
         env:
