@@ -16,6 +16,7 @@
 import crypto from "node:crypto";
 
 import {
+	auditErrorText,
 	constantTimeStringEqual,
 	extractResourceParam,
 	type GrantContext,
@@ -71,7 +72,7 @@ export const createAuthorizationGrant = (deps: AuthorizationGrantDeps): GrantHan
 		err: unknown,
 	): void => {
 		logger?.error(
-			{ store, step, clientId, err: loggableError(err) },
+			{ store, step, clientId: auditErrorText(clientId), err: loggableError(err) },
 			"authorization_grant_store_unavailable",
 		);
 	};

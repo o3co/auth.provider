@@ -618,6 +618,40 @@ describe("createSessionGrant — sid binds the token to the browser session (R3)
 });
 
 describe("createSessionGrant — a session store that cannot answer is logged, not only answered 503", () => {
+	it("records the client id capped at 200 characters, as every client-id field is", async () => {
+		const error = vi.fn();
+		const longId = "c".repeat(256);
+		const handler = createSessionGrant({
+			...makeDeps(),
+			userSessionStore: {
+				kind: "broken",
+				create: async () => {},
+				get: async () => {
+					throw new Error("down");
+				},
+				delete: async () => {},
+			},
+			logger: {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn: vi.fn(),
+				error,
+				fatal: vi.fn(),
+				child: vi.fn(),
+			},
+		} as Parameters<typeof createSessionGrant>[0]);
+		await handler.handle({
+			body: {},
+			session: { isAuthenticated: true, sid: "sid-1", user: { id: "u1" } },
+			issuer: "https://auth.example",
+			metadata: {},
+			authenticatedClient: { ...AUTH_CLIENT, clientId: longId },
+		} as unknown as GrantContext);
+		expect(error).toHaveBeenCalledTimes(1);
+		expect(String(error.mock.calls[0]?.[0].clientId).length).toBeLessThanOrEqual(200);
+	});
+
 	it("logs it once, at error level, as session_grant_store_unavailable", async () => {
 		const warn = vi.fn();
 		const error = vi.fn();

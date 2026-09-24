@@ -2806,6 +2806,35 @@ describe("createAuthorizationGrant — a store that cannot answer is logged, not
 		});
 	});
 
+	it("records the client id capped at 200 characters, as every client-id field is", async () => {
+		const logger = createMockLogger();
+		const longId = "c".repeat(256);
+		const handler = createAuthorizationGrant({
+			...makeDeps(
+				vi.fn().mockResolvedValue({ code: "abc", sid: "sid-1", ...validCode, client_id: longId }),
+			),
+			userSessionStore: sessionStore(async () => {
+				throw outage();
+			}),
+			logger,
+		} as Parameters<typeof createAuthorizationGrant>[0]);
+		const { result } = await handler.handle({
+			body: { code: "abc", client_id: longId, redirect_uri: RP_URI, code_verifier: CODE_VERIFIER },
+			session: {
+				code: "abc",
+				code_client_id: longId,
+				granted_scopes: ["read"],
+				user: { id: "u1" },
+			},
+			issuer: "localhost",
+			metadata: { ip: "127.0.0.1" },
+			authenticatedClient: { ...DEFAULT_AUTH_CLIENT, clientId: longId },
+		});
+		expect(result).toMatchObject({ status: 503 });
+		const [line] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(String(line.clientId).length).toBeLessThanOrEqual(200);
+	});
+
 	it("the refresh-token family registration", async () => {
 		const logger = createMockLogger();
 		const handler = createAuthorizationGrant({

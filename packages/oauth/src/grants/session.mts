@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import {
+	auditErrorText,
 	type GrantContext,
 	type GrantDependencies,
 	type GrantHandler,
@@ -147,7 +148,7 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 						{
 							store: "user_session",
 							step: "get",
-							clientId: ctx.authenticatedClient?.clientId,
+							clientId: auditErrorText(ctx.authenticatedClient?.clientId),
 							err: loggableError(err),
 						},
 						"session_grant_store_unavailable",
