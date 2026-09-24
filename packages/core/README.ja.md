@@ -541,6 +541,7 @@ OIDC Discovery 1.0 メタデータエンドポイント。`config.oauth.jwt.issu
 - ほかに残すもの: `name`、文字列または数値の `code`、整数の `status`、文字列の `type`（body-parser の `entity.too.large`）、§5.2 の文字集合に収まる `error`、cause または `response` にある `Response` の `response: { status, contentType }`（ゲートウェイの 503 ページ）、そして同じ形の Error である cause（3 段まで）。
 - **閉じた集合のフィールド**: ストアやクライアントのエラーが記録するもので、形の上で自由なテキストを持てないため残す。コードである自身の `reason` — `_` か `-` でつないだ小文字の語で 64 文字まで（Store の通信失敗の `unreachable`、チャレンジストアの `expired-at-issue`）— と、HTTP ステータス（100〜599）を持つ自身の `<word>Status` フィールドを 4 つまで（Store の拒否の `storeStatus`）。この種のフィールドは、Express がこのサーバーの応答として読むエラー自身の `status` とは別に上流の応答を記録するものなので、どのパッケージの名前もここに挙げず、それ自身の名前のまま残す。
 - **AggregateError のメンバー**（任意のエラーの `errors` 配列）を `aggregateErrors` として: 先頭 5 つ（`LOGGED_AGGREGATE_MAX_ERRORS`）のうち Error であるものを、cause と同じように同じ 3 段の中で射影する。`aggregateErrorsOmitted` はそこに入らなかったメンバーの数。`aggregateErrors` は pino が生の AggregateError のメンバーを書くときの名前なので、一つのクエリで両方が見つかる。`handle.dispose()` の失敗は、失敗したすべての cleanup の名前とコードとともにログに出る。
+- **1 行あたりの予算**: 射影は多くとも 16 個（`LOGGED_MAX_PROJECTIONS`）— エラー、その cause、そのメンバーを合わせて — で、近いものから取る。そのためエラー自身の cause とメンバーが、それらの cause やメンバーより先に入る。予算で落としたメンバーは `aggregateErrorsOmitted` に数え、予算で落とした cause は `causeOmitted: true` を残す。文字列はすべて切り詰められるので、1 行はおよそ 64 KB に収まる。
 - 決して残さないもの: Error でない cause やメンバー（openid-client が拒否した応答を置く場所）、それ以外のフィールド（`command`、`body`、`buffer`）、そして Error でない値を投げた場合は `typeof` 以外の何も（`thrown` として）。
 - 文字列はすべて 256 文字で切る。例外は投げない。`consoleLogger` は射影をそのまま `console.*` に渡す。コンソール自身の表示はオブジェクトを 2 段までしか展開せず、それより深い段を `[Object]` に畳むが、それはコンソールの書式であって、射影に欠けているフィールドではない。
 

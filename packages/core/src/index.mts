@@ -417,6 +417,7 @@ export type { EventLogger, Logger, LogLevel } from "./logging/Logger.mjs";
 export {
 	guardedRead,
 	LOGGED_AGGREGATE_MAX_ERRORS,
+	LOGGED_MAX_PROJECTIONS,
 	LOGGED_STACK_MAX_FRAMES,
 	LOGGED_STACK_MAX_LENGTH,
 	LOGGED_STRING_MAX_LENGTH,

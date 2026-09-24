@@ -75,6 +75,12 @@
  *   writes a raw AggregateError's members under, so one query finds both —
  *   and how many members are not among them, as `aggregateErrorsOmitted`.
  *   Neither field when none of those five is an Error.
+ * - A budget for the line: at most {@link LOGGED_MAX_PROJECTIONS}
+ *   projections, the error and its causes and members together, taken
+ *   nearest first (breadth first: the error's own cause and members before
+ *   any of theirs). A member the budget leaves out counts in
+ *   `aggregateErrorsOmitted`; a cause it leaves out leaves
+ *   `causeOmitted: true`.
  * - Never kept: a cause or a member that is not an Error, any other field
  *   (`command`, `body`, `buffer`), and anything of a thrown value that is
  *   not an Error but its `typeof`, as `thrown`.
@@ -127,6 +133,8 @@ export interface LoggableError {
 	 */
 	readonly stack?: string;
 	readonly cause?: LoggableError;
+	/** `true` when the error has an Error cause that {@link LOGGED_MAX_PROJECTIONS} left out. */
+	readonly causeOmitted?: true;
 	/**
 	 * An own `reason` that is a code — lowercase words joined by `_` or `-`,
 	 * at most 64 characters — e.g. a Store transport failure's `unreachable`.
@@ -137,7 +145,10 @@ export interface LoggableError {
 	 * {@link LOGGED_AGGREGATE_MAX_ERRORS}, the Errors, projected the same way.
 	 */
 	readonly aggregateErrors?: readonly LoggableError[];
-	/** How many of the members are not in `aggregateErrors`: past the first five, or not an Error. */
+	/**
+	 * How many of the members are not in `aggregateErrors`: past the first
+	 * five, not an Error, or left out by {@link LOGGED_MAX_PROJECTIONS}.
+	 */
 	readonly aggregateErrorsOmitted?: number;
 	/** For a thrown value that is not an Error: its `typeof`, and nothing of its content. */
 	readonly thrown?: string;
@@ -157,6 +168,13 @@ const MAX_CAUSE_DEPTH = 3;
 
 /** The most AggregateError members the projection looks at, at each level. */
 export const LOGGED_AGGREGATE_MAX_ERRORS = 5;
+
+/**
+ * The most projections one line holds: the error, its causes and its
+ * members, all levels together. Each is capped — every string at 256
+ * characters, the stack at 2048 — so a line stays under about 64 KB.
+ */
+export const LOGGED_MAX_PROJECTIONS = 16;
 
 /**
  * A `reason` that is a code: lowercase words joined by `_` or `-`. No space,
@@ -379,37 +397,29 @@ const statusFieldsOf = (err: object): Record<string, number> => {
 };
 
 /**
- * An AggregateError's members at `depth`: of the first
- * {@link LOGGED_AGGREGATE_MAX_ERRORS}, the Errors, projected one level down,
- * and how many members that leaves out. Nothing past the depth limit, for an
- * `errors` that is not an array or cannot be read (a revoked Proxy throws
- * even to `Array.isArray`), or when none of those members is an Error — a
- * validation library's `errors` of plain issue objects.
+ * An AggregateError's member candidates: of its first
+ * {@link LOGGED_AGGREGATE_MAX_ERRORS} members, the Errors, and how many
+ * members it has. `null` for an `errors` that is not an array or cannot be
+ * read (a revoked Proxy throws even to `Array.isArray`), and when none of
+ * those members is an Error — a validation library's `errors` of plain issue
+ * objects.
  */
-const membersOf = (
-	err: object,
-	depth: number,
-): Pick<LoggableError, "aggregateErrors" | "aggregateErrorsOmitted"> => {
-	if (depth >= MAX_CAUSE_DEPTH) return {};
+const membersOf = (err: object): { readonly errors: object[]; readonly total: number } | null => {
 	const errors = read(err, "errors");
-	let length: unknown;
+	let total: unknown;
 	try {
-		if (!Array.isArray(errors)) return {};
-		length = errors.length;
+		if (!Array.isArray(errors)) return null;
+		total = errors.length;
 	} catch {
-		return {};
+		return null;
 	}
-	if (typeof length !== "number" || !Number.isInteger(length) || length < 0) return {};
-	const members: LoggableError[] = [];
-	for (let index = 0; index < Math.min(length, LOGGED_AGGREGATE_MAX_ERRORS); index++) {
+	if (typeof total !== "number" || !Number.isInteger(total) || total < 0) return null;
+	const candidates: object[] = [];
+	for (let index = 0; index < Math.min(total, LOGGED_AGGREGATE_MAX_ERRORS); index++) {
 		const member = read(errors as object, String(index));
-		if (isError(member)) members.push(project(member, depth + 1));
+		if (isError(member)) candidates.push(member);
 	}
-	if (members.length === 0) return {};
-	return {
-		aggregateErrors: members,
-		...(length > members.length ? { aggregateErrorsOmitted: length - members.length } : {}),
-	};
+	return candidates.length === 0 ? null : { errors: candidates, total };
 };
 
 /** A fetch `Response`, read structurally so that one from another realm counts too. */
@@ -447,10 +457,55 @@ const responseFields = (value: unknown): LoggableError["response"] | undefined =
  * throws.
  */
 export function loggableError(err: unknown): LoggableError {
-	return project(err, 0);
+	const root = fieldsOf(err);
+	// Breadth first, so the budget goes to the error's own cause and members
+	// before any of theirs. Each entry is an Error already projected, whose
+	// cause and members are still to be attached.
+	const pending: Array<{ readonly err: unknown; readonly depth: number; readonly into: Draft }> = [
+		{ err, depth: 0, into: root },
+	];
+	let left = LOGGED_MAX_PROJECTIONS - 1;
+	for (let next = 0; next < pending.length; next++) {
+		const { err: node, depth, into } = pending[next] as (typeof pending)[number];
+		if (!isError(node) || depth >= MAX_CAUSE_DEPTH) continue;
+		const cause = read(node, "cause");
+		if (isError(cause)) {
+			if (left > 0) {
+				left--;
+				into.cause = fieldsOf(cause);
+				pending.push({ err: cause, depth: depth + 1, into: into.cause });
+			} else {
+				into.causeOmitted = true;
+			}
+		}
+		const members = membersOf(node);
+		if (members !== null) {
+			const kept: Draft[] = [];
+			for (const member of members.errors) {
+				if (left === 0) break;
+				left--;
+				const projected = fieldsOf(member);
+				kept.push(projected);
+				pending.push({ err: member, depth: depth + 1, into: projected });
+			}
+			if (kept.length > 0) into.aggregateErrors = kept;
+			if (members.total > kept.length) into.aggregateErrorsOmitted = members.total - kept.length;
+		}
+	}
+	return root;
 }
 
-function project(err: unknown, depth: number): LoggableError {
+/** A projection under construction: its cause and members are attached after its own fields. */
+type Draft = {
+	-readonly [K in keyof LoggableError]: K extends "cause"
+		? Draft | undefined
+		: K extends "aggregateErrors"
+			? Draft[] | undefined
+			: LoggableError[K];
+};
+
+/** The error's own fields — everything but its cause and members, which `loggableError` attaches. */
+function fieldsOf(err: unknown): Draft {
 	if (!isError(err)) {
 		return { name: "NonError", thrown: err === null ? "null" : typeof err };
 	}
@@ -495,7 +550,5 @@ function project(err: unknown, depth: number): LoggableError {
 		...(errorDescription !== undefined ? { error_description: errorDescription } : {}),
 		...(response !== undefined ? { response } : {}),
 		...(stack !== undefined ? { stack } : {}),
-		...(isError(cause) && depth < MAX_CAUSE_DEPTH ? { cause: project(cause, depth + 1) } : {}),
-		...membersOf(err, depth),
 	};
 }
