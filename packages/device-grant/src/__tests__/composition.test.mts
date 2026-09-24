@@ -199,6 +199,36 @@ describe("deviceGrantModule beside oauthModule — discovery (RFC 8628 §4)", ()
 	});
 });
 
+describe("deviceGrantModule beside oauthModule — installed but disabled", () => {
+	it("does not advertise the grant, and /oauth/token refuses it as unsupported", async () => {
+		// `grant_types_supported` is read off the resolver `/oauth/token`
+		// dispatches against (#283), so a grant that is contributed is a grant
+		// that is advertised — including a handler whose only job is to
+		// refuse. The document must say what the endpoint does.
+		const config = makeConfig({ enabled: false });
+		const { handle, app } = await bootWith(config, [
+			sessionStoreModuleFor(config),
+			deviceGrantModule,
+			oauthModule({ config }),
+		]);
+		try {
+			const discovery = await request(app).get("/.well-known/openid-configuration");
+			expect(discovery.status).toBe(200);
+			expect(discovery.body.grant_types_supported).not.toContain(DEVICE_CODE_GRANT_TYPE);
+			expect(discovery.body.device_authorization_endpoint).toBeUndefined();
+
+			const token = await request(app)
+				.post("/oauth/token")
+				.type("form")
+				.send({ grant_type: DEVICE_CODE_GRANT_TYPE, client_id: CLIENT_ID, device_code: "x" });
+			expect(token.status).toBe(400);
+			expect(token.body.error).toBe("unsupported_grant_type");
+		} finally {
+			await handle.dispose();
+		}
+	});
+});
+
 describe("deviceGrantModule beside oauthModule — POST /oauth/device/verification is JSON-only", () => {
 	// A form body is a CORS "simple" request: a browser sends it cross-site,
 	// with the victim's session cookie and no preflight. `oauthModule`'s router
