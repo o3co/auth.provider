@@ -228,17 +228,17 @@ out-of-tree adapter can import and run:
 | `SessionFamilyIndex` | `packages/core/src/user-sessions/__tests__/sessionFamilyIndex.contract.mts` |
 | `SessionFederationIndex` | `packages/core/src/user-sessions/__tests__/sessionFederationIndex.contract.mts` |
 
-Each is run against every in-repo implementation of its port, which is what makes
-it a description of the contract rather than of one adapter. There is one
+Each is run against every in-repo implementation of its port, which is what
+makes it a description of the contract rather than of one adapter. There is one
 exception: the Redis `AccessTokenDenylist`, whose expiry is Redis's own key TTL
 and cannot follow the suite's fake clock. Its own tests cover the same cases
-against a real Redis. A contract file
-cannot be imported across a package boundary, so `packages/redis/__tests__/`
-runs copies of the core suites. A copy may differ from its core suite only
-above the first `export`, in comments and imports. The `*-parity.test.mts`
-tests there fail on any other difference, and on a copy nothing runs. A new
-port should gain a suite: "typed and swappable" means an implementer can prove
-they got it right, not only that they read the interface carefully.
+against a real Redis. A contract file cannot be imported across a package
+boundary, so `packages/redis/__tests__/` runs copies of the core suites. A copy
+may differ from its core suite only above the first `export`, in comments and
+imports. The `*-parity.test.mts` tests there fail on any other difference, and
+on a copy that no Redis test calls. A new port should gain a suite: "typed and
+swappable" means an implementer can prove they got it right, not only that they
+read the interface carefully.
 
 What the suites hold an adapter to:
 
