@@ -77,27 +77,71 @@ export function isWellFormedErrorCode(value: unknown): value is string {
 }
 
 /**
- * An RFC 3986 URI-reference's characters: unreserved, reserved and
- * percent-encoded octets. Every one is inside the set RFC 6749 §5.2 allows
- * `error_uri` (`%x21 / %x23-5B / %x5D-7E`), so a reference made of them keeps
- * to both.
+ * RFC 3986's grammar for a URI-reference, piece by piece. Every character it
+ * admits is inside the set RFC 6749 §5.2 allows `error_uri`
+ * (`%x21 / %x23-5B / %x5D-7E`), so a reference that parses keeps to both.
  */
-const URI_REFERENCE_CHARACTERS = /^(?:[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=]|%[0-9A-Fa-f]{2})+$/;
+const PCT = "%[0-9A-Fa-f]{2}";
+const UNRESERVED_SUB_DELIMS = "A-Za-z0-9\\-._~!$&'()*+,;=";
+/** Appendix B: scheme, authority, path, query, fragment. Every string matches. */
+const URI_REFERENCE_PARTS = /^(?:([^:/?#]+):)?(?:\/\/([^/?#]*))?([^?#]*)(?:\?([^#]*))?(?:#(.*))?$/;
+const SCHEME = /^[A-Za-z][A-Za-z0-9+.-]*$/;
+/** `*( pchar / "/" )`, what a path is written in. */
+const PATH = new RegExp(`^(?:[${UNRESERVED_SUB_DELIMS}:@/]|${PCT})*$`);
+/** `*( pchar / "/" / "?" )`, what a query and a fragment are written in. */
+const QUERY_OR_FRAGMENT = new RegExp(`^(?:[${UNRESERVED_SUB_DELIMS}:@/?]|${PCT})*$`);
+const USERINFO = new RegExp(`^(?:[${UNRESERVED_SUB_DELIMS}:]|${PCT})*$`);
+/** A host: an IP literal in brackets (IPv6, or IPv4 inside it), or a reg-name. */
+const HOST = new RegExp(`^(?:\\[[0-9A-Fa-f:.]+\\]|(?:[${UNRESERVED_SUB_DELIMS}]|${PCT})*)$`);
+const PORT = /^[0-9]*$/;
 
-/** Resolves a relative reference so the WHATWG parser can judge its shape. */
+/** The schemes an `error_uri` may name: §5.2's "human-readable web page". */
+const WEB_SCHEMES: ReadonlySet<string> = new Set(["http", "https"]);
+
+/** Resolves a relative reference so the WHATWG parser can judge the whole. */
 const URI_REFERENCE_BASE = "https://error-uri.invalid/";
 
+/** Whether `authority` is `[ userinfo "@" ] host [ ":" port ]` (RFC 3986 §3.2). */
+function isAuthority(authority: string): boolean {
+	const at = authority.lastIndexOf("@");
+	const userinfo = at === -1 ? "" : authority.slice(0, at);
+	const hostPort = at === -1 ? authority : authority.slice(at + 1);
+	const portAt = hostPort.startsWith("[")
+		? hostPort.indexOf(":", hostPort.indexOf("]"))
+		: hostPort.lastIndexOf(":");
+	const host = portAt === -1 ? hostPort : hostPort.slice(0, portAt);
+	const port = portAt === -1 ? "" : hostPort.slice(portAt + 1);
+	return USERINFO.test(userinfo) && HOST.test(host) && PORT.test(port);
+}
+
 /**
- * Whether `value` is an `error_uri` RFC 6749 allows (§5.2, Appendix A.9): a
- * URI-reference, absolute or relative, written only in URI characters, with
- * at most one fragment, that the WHATWG URL parser resolves. The parser is
- * lenient about characters, which the character check is not, and strict
- * about structure (an unclosed IP literal, a port that is not a number),
- * which the character check is not.
+ * Whether `value` is an `error_uri` RFC 6749 allows (§5.2, Appendix A.9):
+ *
+ * - a URI-reference by RFC 3986's grammar — each component in its own
+ *   characters, brackets only around an IP-literal host, at most one
+ *   fragment, and a relative path whose first segment has no colon;
+ * - absolute only as `http:` or `https:` — §5.2's "human-readable web page",
+ *   so no `javascript:`, `data:`, `vbscript:` or `file:`;
+ * - and one the WHATWG URL parser resolves, which refuses what the grammar
+ *   alone admits: an IPv6 literal that is not one, a port past 65535.
  */
 function isWellFormedErrorUri(value: unknown): value is string {
-	if (typeof value !== "string" || !URI_REFERENCE_CHARACTERS.test(value)) return false;
-	if (value.indexOf("#") !== value.lastIndexOf("#")) return false;
+	if (typeof value !== "string") return false;
+	const parts = URI_REFERENCE_PARTS.exec(value);
+	if (parts === null) return false;
+	const [, scheme, authority, path = "", query = "", fragment = ""] = parts;
+	if (scheme !== undefined && !(SCHEME.test(scheme) && WEB_SCHEMES.has(scheme.toLowerCase()))) {
+		return false;
+	}
+	if (authority !== undefined && !isAuthority(authority)) return false;
+	if (!PATH.test(path) || !QUERY_OR_FRAGMENT.test(query) || !QUERY_OR_FRAGMENT.test(fragment)) {
+		return false;
+	}
+	// path-noscheme (RFC 3986 §4.2): a relative path's first segment reads as
+	// a scheme if it holds a colon.
+	if (scheme === undefined && authority === undefined && path.split("/")[0]?.includes(":")) {
+		return false;
+	}
 	try {
 		new URL(value, URI_REFERENCE_BASE);
 		return true;
@@ -154,9 +198,10 @@ export interface ErrorEnvelope {
  *   builds a code from something it does not control, and knows its answer
  *   is a refusal of the client's request, checks the code itself and falls
  *   back to a client-error code (the token-binding middleware does).
- * - `uri` is sent only as a well-formed URI-reference in RFC 6749's `error_uri`
- *   characters (§5.2, Appendix A.9). Any other is dropped — a reference with
- *   a character replaced would point somewhere else — and logged as
+ * - `uri` is sent only when it is an http(s) web page or a relative reference
+ *   that RFC 3986's grammar parses, in RFC 6749's `error_uri` characters (§5.2,
+ *   Appendix A.9). Any other is dropped — a reference with a character
+ *   replaced would point somewhere else — and logged as
  *   `error_envelope_uri_malformed`.
  *
  * Contract scope: the three RFC 6749 §5.2 stock fields only (`error`,
