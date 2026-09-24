@@ -202,6 +202,29 @@ describe("deviceGrantModule — boot", () => {
 		await handle.dispose();
 	});
 
+	it.each([
+		["built enabled, booted with the grant off", ENABLED, { enabled: false }],
+		["built disabled, booted with the grant on", { enabled: false }, ENABLED],
+	])("refuses to boot when the module was %s", async (_label, builtFrom, bootedWith) => {
+		// The factory decides from the config it is handed whether the grant
+		// is contributed; the routes and the discovery field read the config
+		// `createApp` validated. Two configs that disagree would register a
+		// grant whose device can never start, or serve a flow whose token
+		// endpoint refuses the grant — so the disagreement is the refusal.
+		const bootstrapComponents = makeBoot({ deviceAuthorization: bootedWith });
+		const config = bootstrapComponents.config as AppConfig;
+		const handedToFactory = {
+			...config,
+			oauth: { ...config.oauth, deviceAuthorization: builtFrom },
+		} as AppConfig;
+		await expect(
+			createApp({
+				modules: [deviceGrantModule({ config: handedToFactory })],
+				bootstrapComponents,
+			}),
+		).rejects.toThrow(/the same config/);
+	});
+
 	it('refuses to boot with no audit sink unless audit.sink.type = "none" says so', async () => {
 		// #363's rule, applied to the decision that turns a code into a token:
 		// `auditSink` is optional to wire, not optional to decide. A composition
