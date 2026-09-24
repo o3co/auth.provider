@@ -338,7 +338,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 			const sid = typeof payload.sid === "string" ? payload.sid : null;
 			const sub = typeof payload.sub === "string" ? payload.sub : null;
 
-			// Step 4: Check family revocation. Fail-closed: any throw → 401.
+			// Step 4: Check family revocation. Fail-closed: a throw → 503, the
+			// outage it is — as the session store's below — never `401
+			// invalid_token` (RFC 6750 §3.1 describes the token, and nobody
+			// could judge it).
 			if (familyId !== null) {
 				let revoked: boolean;
 				try {
@@ -348,9 +351,9 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 						`/oauth/federation/${name}/logout: isFamilyRevoked failed (refresh store outage):`,
 						loggableError(error),
 					);
-					return res.status(401).json({
-						error: "invalid_token",
-						error_description: "revocation check unavailable",
+					return res.status(503).json({
+						error: "temporarily_unavailable",
+						error_description: "refresh token store unavailable",
 					});
 				}
 				if (revoked) {

@@ -175,10 +175,11 @@ describe("/oauth/introspect — session liveness (R3)", () => {
 		expect(event?.details).toMatchObject({ sid: SID });
 	});
 
-	it("fails closed to active:false when the session store throws", async () => {
-		// RFC 7662 defines no `temporarily_unavailable` for introspection, so
-		// inactive is the only answer that keeps a resource server on the safe
-		// side of its scope gate — the same rule the family check follows.
+	it("fails closed with 503 when the session store throws — not active:false", async () => {
+		// `active: false` says the token is not active, and an outage does not
+		// know that; a resource server told so refuses its client with
+		// `invalid_token`. HTTP's 503 vouches for nothing and is still
+		// fail-closed — the same rule the family check follows.
 		const events: AuditEvent[] = [];
 		const auditSink: AuditSink = {
 			kind: "spy",
@@ -199,8 +200,11 @@ describe("/oauth/introspect — session liveness (R3)", () => {
 		const res = await introspect(app, await mintAccessToken({ sid: SID }));
 		await new Promise((r) => setImmediate(r));
 
-		expect(res.status).toBe(200);
-		expect(res.body.active).toBe(false);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
 		expect(events.find((e) => e.type === "introspect.store_unavailable")).toBeDefined();
 	});
 
@@ -236,7 +240,7 @@ describe("/oauth/introspect — session liveness (R3)", () => {
 		const res = await introspect(app, await mintAccessToken({ sid: SID }));
 		await new Promise((r) => setImmediate(r));
 
-		expect(res.body.active).toBe(false);
+		expect(res.status).toBe(503);
 		const storeEvent = events.find((e) => e.type === "introspect.store_unavailable");
 		expect(storeEvent?.details).toEqual({ sid: SID, cause: { name: "SyntaxError" } });
 		expect(JSON.stringify(events)).not.toContain(leaked);

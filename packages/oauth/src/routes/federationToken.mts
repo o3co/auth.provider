@@ -451,7 +451,10 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				.json({ error: "invalid_token", error_description: "missing azp claim" });
 		}
 
-		// Step 5: Check family revocation. Fail-closed: any throw → 401.
+		// Step 5: Check family revocation. Fail-closed: a throw → 503, the
+		// outage it is — as the session store's below — never `401
+		// invalid_token`, which would describe a token nobody could judge
+		// (RFC 6750 §3.1) and send the client to replace it.
 		let revoked: boolean;
 		try {
 			revoked = await opts.refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
@@ -460,13 +463,9 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				`POST /oauth/federation/${name}/token: isFamilyRevoked failed (refresh store outage):`,
 				loggableError(error),
 			);
-			res.setHeader(
-				"WWW-Authenticate",
-				'Bearer error="invalid_token", error_description="revocation check unavailable"',
-			);
-			return res.status(401).json({
-				error: "invalid_token",
-				error_description: "revocation check unavailable",
+			return res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "refresh token store unavailable",
 			});
 		}
 		if (revoked) {

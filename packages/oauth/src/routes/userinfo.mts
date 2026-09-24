@@ -20,6 +20,7 @@ import {
 	isVerificationUnavailable,
 	type KeyStore,
 	type Logger,
+	loggableError,
 	type RefreshTokenFamilyRevocation,
 	readIssuedScope,
 	type SubjectRevocation,
@@ -70,8 +71,13 @@ export interface UserinfoRouterOptions {
  * the durable UserSession. Revocation is checked via family_id (cascade
  * revoke per F-3) and sid (session liveness).
  *
- * Error responses follow Bearer Token Usage (RFC 6750 §3.1): 401 with
- * WWW-Authenticate header. Fail-closed on store errors.
+ * A refusal of the token follows Bearer Token Usage (RFC 6750 §3.1): 401
+ * `invalid_token` with a `WWW-Authenticate` challenge. A keystore, a
+ * revocation store, the refresh-token family store or the session store that
+ * cannot answer is `503 temporarily_unavailable` with no challenge: still no
+ * claims (fail-closed), but `invalid_token` describes the token — "expired,
+ * revoked, malformed, or invalid" — and an outage says none of that, while it
+ * sends the client to replace a token that may be perfectly good.
  */
 export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions): Router {
 	const router = express.Router();
@@ -79,7 +85,7 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 	const handleUserinfo = async (req: Request, res: Response) => {
 		// RFC 6750 §5.3 + §6.1: bearer-authenticated responses MUST NOT be cached
 		// by intermediaries. Set this once at the top so it applies to every
-		// response path (200 success, 401 error).
+		// response path (200 success, 401 refusal, 503 outage).
 		res.setHeader("Cache-Control", "no-store");
 		res.setHeader("Pragma", "no-cache");
 
@@ -137,12 +143,17 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 			let revoked: boolean;
 			try {
 				revoked = await opts.refreshTokenFamilyRevocation.isFamilyRevoked(familyId);
-			} catch {
-				// Fail-closed: cannot determine revocation state → treat as revoked
-				res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');
-				return res
-					.status(401)
-					.json({ error: "invalid_token", error_description: "revocation check unavailable" });
+			} catch (err) {
+				// Fail-closed — no claims without an answer — but as the outage
+				// it is, not as a verdict on the token (see the JSDoc above).
+				opts.logger?.error(
+					{ store: "refresh_token_family", err: loggableError(err) },
+					"userinfo_store_unavailable",
+				);
+				return res.status(503).json({
+					error: "temporarily_unavailable",
+					error_description: "refresh token store unavailable",
+				});
 			}
 			if (revoked) {
 				res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');
@@ -169,16 +180,20 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		}
 
 		// Validate session liveness. Fail-closed on store throw (symmetric with
-		// the refreshTokenStore cascade above): a backend outage must not leak
-		// claims, and returning 401 invalid_token keeps parity with RFC 6750.
+		// the family check above): a backend outage must not leak claims, and it
+		// is answered as the outage it is, not as an invalid token.
 		let session: Awaited<ReturnType<typeof opts.userSessionStore.get>>;
 		try {
 			session = await opts.userSessionStore.get(sid);
-		} catch {
-			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');
-			return res
-				.status(401)
-				.json({ error: "invalid_token", error_description: "session lookup unavailable" });
+		} catch (err) {
+			opts.logger?.error(
+				{ store: "user_session", err: loggableError(err) },
+				"userinfo_store_unavailable",
+			);
+			return res.status(503).json({
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
 		}
 		if (!session) {
 			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');

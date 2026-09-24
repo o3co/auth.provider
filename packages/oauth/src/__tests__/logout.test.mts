@@ -1469,8 +1469,8 @@ describe("POST /oauth/federation/:name/logout", () => {
 				"google",
 				await mintAccessToken(),
 			);
-			expect(res.status).toBe(401);
-			expect(res.body.error_description).toBe("revocation check unavailable");
+			expect(res.status).toBe(503);
+			expect(res.body.error_description).toBe("refresh token store unavailable");
 			expectProjectedWarn(logger, /isFamilyRevoked failed/);
 		});
 

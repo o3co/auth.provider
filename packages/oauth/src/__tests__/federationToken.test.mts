@@ -413,7 +413,7 @@ describe("POST /oauth/federation/:name/token", () => {
 	});
 
 	describe("isFamilyRevoked throws (fail-closed)", () => {
-		it("returns 401 when revocation check throws", async () => {
+		it("returns 503 temporarily_unavailable — an outage, not an invalid token", async () => {
 			const refreshFamilyRevocation = makeFamilyRevocation({
 				isFamilyRevoked: vi.fn().mockRejectedValue(new Error("redis down")),
 			});
@@ -422,9 +422,12 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			const res = await postFedToken(app, "google", token);
 
-			expect(res.status).toBe(401);
-			expect(res.body.error).toBe("invalid_token");
-			expect(res.body.error_description).toMatch(/revocation/);
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "refresh token store unavailable",
+			});
+			expect(res.headers["www-authenticate"]).toBeUndefined();
 		});
 	});
 
