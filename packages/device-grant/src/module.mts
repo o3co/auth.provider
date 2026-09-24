@@ -39,6 +39,9 @@
  * every client as supported. Disabled, the module contributes no grant — the
  * token endpoint answers `unsupported_grant_type` as it does for any grant
  * nobody registered — no discovery field, and the two routes answer `404`.
+ * The routes and the discovery field are built from the config `createApp`
+ * validated, and a boot where that config disagrees with the factory's is
+ * refused (`settingsFor`), so the two cannot split one grant in half.
  *
  * ### Two settings with no defaults
  *
@@ -241,6 +244,36 @@ const readSettings = (deps: DeviceGrantModuleDeps): DeviceAuthorizationConfigSli
  */
 const isEnabled = (config: AppConfig): boolean =>
 	config.oauth?.deviceAuthorization?.enabled === true;
+
+/**
+ * The settings slice from the config the boot validated — `null` when the
+ * grant is off there — held to the factory's own decision.
+ *
+ * Whether the grant is contributed is decided from the config handed to
+ * `deviceGrantModule({ config })`; the routes and the discovery field are
+ * built from the one `createApp` validated. A composition root that hands
+ * the two different configs would otherwise boot half a grant: one that is
+ * registered and advertised while no device can start it, or a flow whose
+ * token endpoint refuses the grant. The two are one config in every
+ * composition root that follows the pattern, so a disagreement is refused.
+ */
+const settingsFor = (
+	enabled: boolean,
+	deps: DeviceGrantModuleDeps,
+): DeviceAuthorizationConfigSlice | null => {
+	const slice = readSettings(deps);
+	if ((slice !== null) !== enabled) {
+		const [built, booted] = enabled ? ["on", "off"] : ["off", "on"];
+		throw new Error(
+			`deviceGrantModule: built from a config with the grant ${built}, but the config ` +
+				`createApp validated has oauth.deviceAuthorization.enabled ${booted}. Whether the ` +
+				"grant is contributed is decided from the first, its routes and discovery field " +
+				"from the second — hand deviceGrantModule({ config }) the same config as " +
+				"bootstrapComponents.config.",
+		);
+	}
+	return slice;
+};
 
 const requireVerificationUri = (slice: DeviceAuthorizationConfigSlice): string => {
 	const uri = slice["verification-uri"];
@@ -459,7 +492,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 				: {}),
 			routes: [
 				(deps: DeviceGrantModuleDeps) => {
-					const slice = readSettings(deps);
+					const slice = settingsFor(enabled, deps);
 					if (slice === null) {
 						return disabledRoute("device-authorization", "/oauth/device_authorization");
 					}
@@ -525,7 +558,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					};
 				},
 				(deps: DeviceGrantModuleDeps) => {
-					const slice = readSettings(deps);
+					const slice = settingsFor(enabled, deps);
 					if (slice === null) {
 						return disabledRoute("device-verification", "/oauth/device/verification");
 					}
@@ -584,7 +617,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 			],
 			discoveryMetadata: [
 				(deps: DeviceGrantModuleDeps) => {
-					const slice = readSettings(deps);
+					const slice = settingsFor(enabled, deps);
 					if (slice === null) return {};
 					// RFC 8628 §4. A client that cannot discover this endpoint cannot
 					// start the flow, so the metadata is the feature being reachable
