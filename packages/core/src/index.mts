@@ -652,6 +652,7 @@ export type {
 export {
 	assertUsableRateLimitSpecs,
 	isUsableRateLimitSpec,
+	readConfiguredRateLimitSpec,
 	requireUsableConfiguredRateLimitSpec,
 } from "./ratelimit/usableSpec.mjs";
 export {

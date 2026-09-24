@@ -95,25 +95,30 @@ export const configuredNumber = (value: unknown): number | undefined => {
  * to handle: it is not a refusal.
  */
 export function requireUsableConfiguredRateLimitSpec(key: string, value: unknown): RateLimitSpec {
-	// Read as the key's owning schema reads it (`configuredNumber`), so a
-	// value that schema accepts is not refused here; then judged by the one
-	// predicate. The adapters' own `limits` take no such reading: their
-	// schemas do not coerce, and neither do they.
-	const fields =
-		typeof value === "object" && value !== null
-			? (value as { limit?: unknown; windowSeconds?: unknown })
-			: undefined;
-	const spec = fields && {
-		limit: configuredNumber(fields.limit),
-		windowSeconds: configuredNumber(fields.windowSeconds),
-	};
-	if (!isUsableRateLimitSpec(spec)) {
+	const spec = readConfiguredRateLimitSpec(value);
+	if (spec === undefined) {
 		throw new RangeError(
 			`${key} must be { limit, windowSeconds } as positive whole numbers, with a window that ends within the Date range (got ${described(value)})`,
 		);
 	}
-	return { limit: spec.limit, windowSeconds: spec.windowSeconds };
+	return spec;
 }
+
+/**
+ * A configured `{ limit, windowSeconds }` budget, read as the key's owning
+ * schema reads it (`configuredNumber`, so a numeric string is its number)
+ * and judged by the one predicate; `undefined` when it is not one a limiter
+ * can apply. The adapters' own `limits` take no such reading: their schemas
+ * do not coerce, and neither do they.
+ */
+export const readConfiguredRateLimitSpec = (value: unknown): RateLimitSpec | undefined => {
+	if (typeof value !== "object" || value === null) return undefined;
+	const { limit, windowSeconds } = value as { limit?: unknown; windowSeconds?: unknown };
+	const spec = { limit: configuredNumber(limit), windowSeconds: configuredNumber(windowSeconds) };
+	return isUsableRateLimitSpec(spec)
+		? { limit: spec.limit, windowSeconds: spec.windowSeconds }
+		: undefined;
+};
 
 /**
  * Refuses, when a limiter is built, every spec it was given that
