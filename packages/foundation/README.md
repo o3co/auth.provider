@@ -119,6 +119,20 @@ The body of a non-`2xx` answer is discarded unread, for these and for linking.
 No request follows a redirect, including the identity lookup: a `3xx` is one
 more status that throws, and its `Location` is never contacted.
 
+**A `401` with a `Bearer` challenge is a refused credential.** When
+`bearerToken` is configured, a `401` carrying `WWW-Authenticate: Bearer …`
+(RFC 6750 §3) from any of the four endpoints throws
+`HttpUserRepository: the Store at <url> refused this deployment's credential
+(HTTP 401 with a Bearer challenge) — …` instead of the reading this section
+otherwise gives a `401`: not "no such user", not a refused link, not the
+lookup's `answered HTTP 401`. The callers treat it as they treat any Store
+failure — `503 temporarily_unavailable` — and log it.
+The challenge is found in any case, among other challenges or on a header line
+of its own, and not inside another challenge's quoted parameter; nothing the
+Store wrote after the scheme is repeated. A `401` without a `Bearer`
+challenge, and any `401` when no token is configured, keeps the meaning this
+section gives it, so a Store that does not check the token is unaffected.
+
 **`linkFederatedIdentity`** posts `{ userId, provider, sub, token, claims }` to
 `linkFederatedIdentityUrl`: a `2xx` `User` is `{ ok: true, user }`; `401` / `403`
 is `{ ok: false, reason: "refused" }`; `409` is
@@ -215,14 +229,19 @@ deployment that then has a connection under `"required"` is refused at boot.
   `userId`. Configure `bearerToken` (`CLIENT_USER_BEARER_TOKEN`, from
   `openssl rand -hex 32`) and have the Store refuse every request on all four
   endpoints whose `Authorization` is not exactly `Bearer <that token>`,
-  compared in constant time, and never log the header. Refuse with `401`
-  (RFC 6750) and log the refusal on the Store's side: this adapter reads a
-  `401` from `authenticate` and `authenticateByToken` as "no such user" and
-  from linking as a refusal, so a token the Store does not accept — a typo, a
-  half-finished rotation — shows up at auth.provider as every login failing
-  and every link refused, not as an error (the identity lookup, which reads
-  any non-`2xx` as an outage, does throw). To rotate, have the Store accept the
-  old token and the new, move auth.provider to the new, then retire the old.
+  compared in constant time, and never log the header. Refuse with `401` and
+  `WWW-Authenticate: Bearer error="invalid_token"` (RFC 6750 §3). With that
+  challenge, a token the Store does not accept — a typo, a half-finished
+  rotation — is an outage on every call: the session routes and the
+  jwt-bearer grant answer `503 temporarily_unavailable`, the grants callback
+  `temporarily_unavailable`, and the logged error names the Store URL and the
+  refused credential, never the token. Without the challenge the `401` keeps
+  its wire meaning, "no such user" or a refused link, and a mismatch shows only
+  as every login failing. For the same reason, never send a `Bearer`
+  challenge with a user's wrong password or an unknown identity: that `401`
+  would read as the Store refusing auth.provider, and the user's failed login
+  as an outage. To rotate, have the Store accept the old token and the new,
+  move auth.provider to the new, then retire the old.
   Without `bearerToken` no request carries an `Authorization` header, and the
   Store must admit only auth.provider some other way — a network policy or a
   private network, or mutual TLS provided by the platform in front of the
@@ -320,7 +339,7 @@ Exported from [`src/index.mts`](src/index.mts):
 | --- | --- |
 | [`HttpUserRepository.test.mts`](src/repositories/__tests__/HttpUserRepository.test.mts) | authentication and its answers, the `User` shape check, the https rule, the timeout and the response cap, linking, and the identity lookup's presence, probe and wire |
 | [`HttpUserRepository.transport.test.mts`](src/repositories/__tests__/HttpUserRepository.transport.test.mts) | against real HTTP servers: the identity lookup releasing a refused answer's connection, and a redirect refused on each of the four requests — to another origin, to the same origin, or with no `Location` — with nothing sent to a redirect target |
-| [`HttpUserRepository.credential.test.mts`](src/repositories/__tests__/HttpUserRepository.credential.test.mts) | against real HTTP servers: `Authorization: Bearer <token>` on each of the four requests when `bearerToken` is set and no `Authorization` header when it is not, by hand and through the `"http"` builder; a weak, malformed, blank or non-string token refused at construction; the token in no failure and no inspection of the repository |
+| [`HttpUserRepository.credential.test.mts`](src/repositories/__tests__/HttpUserRepository.credential.test.mts) | against real HTTP servers: `Authorization: Bearer <token>` on each of the four requests when `bearerToken` is set and no `Authorization` header when it is not, by hand and through the `"http"` builder; a weak, malformed, blank or non-string token refused at construction; the token in no failure and no inspection of the repository; with a token sent, a `401` with a `Bearer` challenge an outage on each of the four, naming the refused credential, and a `401` without one — or with no token sent — read as before |
 | [`registerBuiltinAdapters.test.mts`](src/repositories/__tests__/registerBuiltinAdapters.test.mts) | the `"http"` builder, its defaults and string coercion, and configuration refused at build time |
 | [`endpointUrl.test.mts`](src/__tests__/endpointUrl.test.mts) | the https-or-loopback rule |
 

@@ -254,6 +254,28 @@ function bearerAuthorization(value: unknown): string | undefined {
 	return `Bearer ${value}`;
 }
 
+/** A quoted-string (RFC 9110 §5.6.4), escapes included. */
+const QUOTED_STRING = /"(?:[^"\\]|\\.)*"/g;
+
+/**
+ * An auth-scheme `Bearer`, case-insensitive (RFC 9110 §11.1), where a
+ * challenge begins — the value's start or after a comma — and followed by the
+ * value's end, a comma, or whitespace that does not lead to `=` (which would
+ * make `bearer` a parameter's name, not a scheme).
+ */
+const BEARER_CHALLENGE = /(?:^|,)[ \t]*bearer(?:[ \t]*(?:,|$)|[ \t]+(?!=))/i;
+
+/**
+ * Whether a `WWW-Authenticate` value carries a `Bearer` challenge (RFC 6750
+ * §3). Quoted strings are blanked first, so `realm="… Bearer …"` is not one;
+ * several header lines arrive joined by `, `, which this reads as the
+ * challenge list it is. Only the scheme is read — nothing the Store wrote
+ * after it reaches anything this adapter throws.
+ */
+function hasBearerChallenge(value: string | null): boolean {
+	return value !== null && BEARER_CHALLENGE.test(value.replace(QUOTED_STRING, '""'));
+}
+
 /** Whether `value` is a positive integer that fits `bound`. */
 function isPositiveIntegerWithin(value: unknown, bound: number): value is number {
 	return typeof value === "number" && Number.isInteger(value) && value > 0 && value <= bound;
@@ -372,7 +394,11 @@ function isAbortError(err: unknown): boolean {
  * With `bearerToken` configured, every request — authentication, linking and
  * the identity lookup alike — carries `Authorization: Bearer <token>`, so the
  * Store can refuse a caller that is not this deployment; without it, no
- * request carries an `Authorization` header.
+ * request carries an `Authorization` header. The Store says it refused THIS
+ * deployment by answering `401` with a `Bearer` challenge (RFC 6750 §3), and
+ * that answer, while a token was sent, throws on every request as an outage
+ * naming the refused credential — never as "no such user" or a refused link,
+ * which is what a `401` without the challenge still means.
  */
 export class HttpUserRepository implements UserRepository {
 	/**
@@ -497,6 +523,30 @@ export class HttpUserRepository implements UserRepository {
 			: { "Content-Type": "application/json", Authorization: this.#authorization };
 	}
 
+	/**
+	 * Throws when a non-`2xx` answer is the Store refusing this deployment's
+	 * credential: a `401` with a `Bearer` challenge, to a request that carried
+	 * the token. Read before any other reading of the status — without it a
+	 * token the Store does not accept is every login "no such user" and every
+	 * link "refused", with nothing logged. Without a token sent, a challenge is
+	 * not about one, and a Store whose stack challenges every `401` keeps the
+	 * wire meaning it has always had. The message names the endpoint and the
+	 * option to check — never the token, and nothing the Store wrote.
+	 */
+	private assertCredentialAccepted(res: Response, url: string): void {
+		if (
+			this.#authorization !== undefined &&
+			res.status === 401 &&
+			hasBearerChallenge(res.headers.get("www-authenticate"))
+		) {
+			throw new Error(
+				`HttpUserRepository: the Store at ${url} refused this deployment's credential ` +
+					"(HTTP 401 with a Bearer challenge) — bearerToken (CLIENT_USER_BEARER_TOKEN) is not " +
+					"a token the Store accepts",
+			);
+		}
+	}
+
 	async authenticate(username: string, password: string): Promise<User | null> {
 		// Without `acceptConflict` the sentinel is never produced — a 409 throws.
 		return this.post(this.authenticateUrl, { email: username, password }) as Promise<User | null>;
@@ -571,9 +621,11 @@ export class HttpUserRepository implements UserRepository {
 	 * {@link post}'s readings, though. A `401`/`403` is not "nobody", a `409` is
 	 * not a conflict, a `404` is not an absence: only a `2xx` carrying one of the
 	 * three answers is an answer, and everything else throws — as an outage,
-	 * which is what a lookup that could not be made is. What is thrown names the
-	 * endpoint — and, for an answer with a status, the status — and never the
-	 * body, the identity, a status text or an underlying cause.
+	 * which is what a lookup that could not be made is — a `401` with a `Bearer`
+	 * challenge, to a request that carried the token, as the refused credential
+	 * it is. What is thrown names the endpoint — and, for an answer with a
+	 * status, the status — and never the body, the identity, a status text or an
+	 * underlying cause.
 	 */
 	private async postLookup(url: string, body: unknown): Promise<FederatedIdentityLookupResult> {
 		const controller = new AbortController();
@@ -614,6 +666,7 @@ export class HttpUserRepository implements UserRepository {
 			}
 			if (!res.ok) {
 				discardBody(res);
+				this.assertCredentialAccepted(res, url);
 				throw new Error(
 					`HttpUserRepository: identity lookup at ${url} answered HTTP ${res.status}`,
 				);
@@ -711,6 +764,7 @@ export class HttpUserRepository implements UserRepository {
 			}
 
 			discardBody(res);
+			this.assertCredentialAccepted(res, url);
 
 			if (options.acceptConflict && res.status === 409) {
 				return CONFLICT;

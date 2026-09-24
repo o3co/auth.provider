@@ -524,14 +524,18 @@ follows a `3xx`, so a URL that redirects fails every call — see
 send is an identifier, not a secret, so a Store that answers any caller
 resolves a known identity to its user — or links one to any account — for
 anyone who can reach it. Set `CLIENT_USER_BEARER_TOKEN` and have the Store
-answer `401` to every request whose `Authorization` is not exactly
-`Bearer <that token>`. Boot fails if the token is weaker than 32 bytes
-(measured like `SESSION_SECRET`), malformed, or exported but empty; it appears
-in no error this server throws. A `401` reads as "no such user", so a token the
-Store does not accept shows up here as every login failing rather than as an
-error — log refusals on the Store's side. Without the token, admit only this
-server to the Store by network policy or platform mutual TLS. Rotation, and
-what the Store checks, are in the same foundation README section.
+answer every request whose `Authorization` is not exactly `Bearer <that token>`
+with `401` and `WWW-Authenticate: Bearer error="invalid_token"`. Boot fails if
+the token is weaker than 32 bytes (measured like `SESSION_SECRET`), malformed,
+or exported but empty; it appears in no error this server throws. With that
+challenge, a token the Store does not accept is an outage on every Store call:
+logins answer `503 temporarily_unavailable`, and the log names the refused
+credential, not the token. A `401` without the challenge still reads as "no
+such user", so a mismatch then shows only as every login failing — and a
+Store must not put a `Bearer` challenge on a user's wrong password. Without
+the token, admit only this server to the Store by network policy or platform
+mutual TLS. Rotation, and what the Store checks, are in the same foundation
+README section.
 
 ### Code Repository
 
