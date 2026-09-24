@@ -21,6 +21,7 @@ import {
 	loggableError,
 } from "@o3co/auth-provider-core";
 import type session from "express-session";
+import { loadRedisStoreLibraries } from "./redisStoreLibraries.mjs";
 
 /**
  * Factory for session stores. Builders may return `undefined` for adapters that
@@ -42,69 +43,15 @@ export function createSessionStoreFactory(ctx?: BuilderContext): SessionStoreFac
 }
 
 /**
- * The Redis store's two libraries. They are optional peer dependencies of this
- * package, so a deployment on the memory store installs neither and nothing
- * here imports them until the Redis store is built.
- */
-type RedisStoreLibraries = {
-	readonly createClient: typeof import("redis").createClient;
-	readonly RedisStore: typeof import("connect-redis").RedisStore;
-};
-
-/**
- * Whether `reason` is Node's resolver reporting that the package `name` itself
- * is not installed (`ERR_MODULE_NOT_FOUND`, "Cannot find package '<name>'").
- * A package that is installed but misses a dependency of its own names that
- * dependency instead, and is rethrown unchanged.
- */
-function isNotInstalled(reason: unknown, name: string): boolean {
-	const { code, message } = (reason ?? {}) as { code?: unknown; message?: unknown };
-	return (
-		code === "ERR_MODULE_NOT_FOUND" && typeof message === "string" && message.includes(`'${name}'`)
-	);
-}
-
-/**
- * Load `redis` and `connect-redis`, or fail naming each one that is not
- * installed and what to install — rather than with the resolver's bare
- * "Cannot find package", which says neither that the package is an optional
- * peer of this one nor which setting asked for it.
- */
-async function loadRedisStoreLibraries(): Promise<RedisStoreLibraries> {
-	const [redis, connectRedis] = await Promise.allSettled([
-		import("redis"),
-		import("connect-redis"),
-	]);
-	const notInstalled = [
-		...(redis.status === "rejected" && isNotInstalled(redis.reason, "redis")
-			? [{ name: "redis", reason: redis.reason as unknown }]
-			: []),
-		...(connectRedis.status === "rejected" && isNotInstalled(connectRedis.reason, "connect-redis")
-			? [{ name: "connect-redis", reason: connectRedis.reason as unknown }]
-			: []),
-	];
-	if (notInstalled.length > 0) {
-		const names = notInstalled.map(({ name }) => `"${name}"`).join(" and ");
-		throw new Error(
-			`session.storage.type is "redis", which needs "redis" and "connect-redis" — optional peer dependencies of @o3co/auth-provider-session, which it does not install — and ${names} ${notInstalled.length === 1 ? "is" : "are"} not installed. Install them beside @o3co/auth-provider-session: npm install redis connect-redis`,
-			{ cause: notInstalled[0]?.reason },
-		);
-	}
-	if (redis.status === "rejected") throw redis.reason;
-	if (connectRedis.status === "rejected") throw connectRedis.reason;
-	return { createClient: redis.value.createClient, RedisStore: connectRedis.value.RedisStore };
-}
-
-/**
  * Register the built-in session store adapters:
  * - `"memory"` — returns `undefined`; express-session falls back to its default
  *   in-memory store.
  * - `"redis"` — constructs a `connect-redis` RedisStore backed by a `redis` client
  *   (URL + optional password). The two libraries are optional peer
- *   dependencies of this package: the builder loads them with `import(...)`
- *   when it runs, so a deployment on the memory adapter need not install
- *   them, and one on this adapter that did not fails with an error naming the
- *   missing package and the install command.
+ *   dependencies of this package: the builder loads them when it runs
+ *   (`redisStoreLibraries.mts`), so a deployment on the memory adapter need
+ *   not install them, and one on this adapter that did not fails with an
+ *   error naming the missing package and the install command.
  *
  * The redis builder forwards the BuilderContext supplied at adapter-create time
  * (via `createSessionStoreFactory(ctx)`) so it can register `client.quit()` on
