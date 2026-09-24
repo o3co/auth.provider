@@ -129,12 +129,16 @@ checks each field's type, as the template's Google bridge
   OpenID Connect UserInfo endpoint — it answers a numeric `id` and no `sub` — so
   the adapter fetches it as a protected resource and reads the answer itself,
   rather than through `openid-client`'s UserInfo handling, which requires a
-  `sub`. A non-2xx answer, a body that is not JSON, or a user object with
-  neither a usable `sub` nor a usable `id` fails the exchange, and the login
-  answers `502 exchange_failed`.
+  `sub`. Both `/user` and `/user/emails` are asked for
+  `application/vnd.github+json` at REST API version `2022-11-28`
+  (`X-GitHub-Api-Version`), the schema the `sub` rule reads `id` against. A
+  non-2xx answer, a body that is not JSON, or a user object with neither a
+  usable `sub` nor a usable `id` fails the exchange, and the login answers
+  `502 exchange_failed`.
 - **The e-mail** always comes from `GET /user/emails`, never from `/user`: the
-  primary verified address, else the first verified one, else none. A failed
-  `/user/emails` request is read as "no address" and does not fail the login.
+  primary verified address, else the first verified one, else none. A row that
+  is not an object is skipped. A failed `/user/emails` request is read as "no
+  address" and does not fail the login.
 
 What `exchangeCode` returns:
 
@@ -188,7 +192,7 @@ refuses a request without a `User-Agent`.
 
 | Test file | Pins |
 | --- | --- |
-| [`github.test.mts`](src/__tests__/github.test.mts) | the authorization request, the token request (PKCE verifier, `client_secret_post`), the exchange without `iss`, the e-mail choice and a failed `/user/emails`, the scope rules, `expiresAt`, no refresh, `mapClaims` and `endSession` |
+| [`github.test.mts`](src/__tests__/github.test.mts) | the authorization request, the token request (PKCE verifier, `client_secret_post`), the exchange without `iss`, the REST headers, the e-mail choice, malformed rows and a failed `/user/emails`, the scope rules, `expiresAt`, no refresh, `mapClaims` and `endSession` |
 | [`github.user.test.mts`](src/__tests__/github.user.test.mts) | how `/user` becomes the `sub`: GitHub's numeric `id` without a `sub`, the `sub` and `id` rules, and the refusals (a non-2xx answer, a body that is not JSON, no `id`, or one that is not a positive safe integer or a canonical digit string) |
 | [`fake-github.test.mts`](src/__tests__/fake-github.test.mts) | the fake itself: form-encoded token answers, the `User-Agent` refusal, and that the adapter's requests satisfy both |
 | [`github-module.test.mts`](src/__tests__/github-module.test.mts), [`github-module-boot.test.mts`](src/__tests__/github-module-boot.test.mts) | the module's contributions and boot with the session module |

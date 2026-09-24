@@ -41,6 +41,15 @@ const GITHUB_ISSUER = "https://github.com";
 const SCOPES = ["read:user", "user:email"] as const;
 const GITHUB_USER_URL = "https://api.github.com/user";
 const GITHUB_EMAILS_URL = "https://api.github.com/user/emails";
+/**
+ * GitHub's recommended REST request headers: its JSON media type, and the API
+ * version the `sub` rule reads `id` against (an int64 integer), pinned rather
+ * than left to whatever version GitHub serves by default.
+ */
+const GITHUB_API_HEADERS = {
+	accept: "application/vnd.github+json",
+	"x-github-api-version": "2022-11-28",
+} as const;
 
 export interface GithubProviderConfig {
 	clientId: string;
@@ -92,7 +101,8 @@ const isJsonObject = (value: unknown): value is Record<string, unknown> =>
 
 /**
  * GET a GitHub REST resource with the user's access token and answer its JSON
- * body. Throws when GitHub answers a non-2xx status or a body that is not JSON.
+ * body. Throws when GitHub answers a non-2xx status — after releasing the body
+ * it will not read — or a body that is not JSON.
  *
  * These are GitHub's REST API, not OpenID Connect endpoints, so the library is
  * asked only to carry the request; reading the answer is this adapter's job.
@@ -102,8 +112,18 @@ const getGithubJson = async (
 	accessToken: string,
 	url: string,
 ): Promise<unknown> => {
-	const res = await oidc.fetchProtectedResource(oidcConfig, accessToken, new URL(url), "GET");
+	const res = await oidc.fetchProtectedResource(
+		oidcConfig,
+		accessToken,
+		new URL(url),
+		"GET",
+		undefined,
+		new Headers(GITHUB_API_HEADERS),
+	);
 	if (!res.ok) {
+		// Released, not left for the connection to wait on. A failure to cancel
+		// must not replace the error that says what GitHub answered.
+		await res.body?.cancel().catch(() => undefined);
 		throw new Error(`GitHub federation "github": GET ${url} answered HTTP ${res.status}`);
 	}
 	try {
@@ -226,17 +246,13 @@ export function createGithubProvider(config: GithubProviderConfig): GithubProvid
 			let email: string | undefined;
 			let emailVerified: boolean | undefined;
 			try {
-				const rows = (await getGithubJson(
-					oidcConfig,
-					tokens.access_token,
-					GITHUB_EMAILS_URL,
-				)) as Array<{
-					email?: unknown;
-					primary?: unknown;
-					verified?: unknown;
-				}>;
+				const rows = await getGithubJson(oidcConfig, tokens.access_token, GITHUB_EMAILS_URL);
 				if (Array.isArray(rows)) {
-					const verified = rows.filter((r) => r.verified === true && typeof r.email === "string");
+					// A row that is not an object is skipped: it must not take the
+					// valid addresses beside it down with it.
+					const verified = rows
+						.filter(isJsonObject)
+						.filter((r) => r.verified === true && typeof r.email === "string");
 					const primary = verified.find((r) => r.primary === true);
 					const chosen = primary ?? verified[0];
 					if (chosen && typeof chosen.email === "string") {
