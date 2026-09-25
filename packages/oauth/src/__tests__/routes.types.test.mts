@@ -21,10 +21,11 @@ import type { createOAuthRouter } from "#/routes.mjs";
 
 // #626 (comment): `createOAuthRouter` reads `registry.get` and nothing else
 // (`module.mts` reads `entries()` off the planner's resolver, not off the
-// router's), yet it asked for the whole `GrantHandlerResolver`. That is
-// what kept core's `GrantRegistry` — `get`, no `entries` — out of the
-// router's parameter and 27 of this package's test files out of typecheck.
-// The contract is what the router reads; these fire under typecheck only.
+// router's), so its `registry` parameter asks for `get` alone — whatever
+// else a registry has. It once asked for the whole `GrantHandlerResolver`,
+// which core's `GrantRegistry` could not satisfy while it had no `entries`,
+// and that kept 27 of this package's test files out of typecheck. The
+// contract is what the router reads; these fire under typecheck only.
 
 type RouterOptions = Parameters<typeof createOAuthRouter>[1];
 type RouterResult = Awaited<ReturnType<typeof createOAuthRouter>>;
@@ -36,7 +37,7 @@ describe("createOAuthRouter's registry contract is what it reads (#626)", () => 
 		expect(true).toBe(true);
 	});
 
-	it("is satisfied by core's test GrantRegistry, which has `get` and no `entries`", () => {
+	it("is satisfied by core's test GrantRegistry, which a test hands it directly", () => {
 		expectTypeOf<GrantRegistry>().toMatchTypeOf<RouterOptions["registry"]>();
 		// And by the planner's resolver, which the bundled module hands it.
 		expectTypeOf<GrantHandlerResolver>().toMatchTypeOf<RouterOptions["registry"]>();
