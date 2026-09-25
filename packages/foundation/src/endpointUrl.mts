@@ -160,15 +160,20 @@ export function assertSecureEndpoint(value: unknown, field: string): string {
 
 /**
  * `url` as a message names it: its origin and path — `https://store.example
- * /authenticate` — and never its query or fragment, which may carry a
- * credential. A value that does not parse (never a configured endpoint, which
- * the constructor has already checked) is named by what it is not.
+ * /authenticate`, as the WHATWG URL parser normalises them (a default port
+ * dropped, scheme and host lower-cased, an IPv6 literal in brackets) — and
+ * never its query or fragment, which may carry a credential. Anything that is
+ * not an http or https URL is named by what it is not: its origin would be
+ * `"null"` and its "path" the rest of it (`data:…`, `mailto:…`), and the
+ * constructor refuses such a Store URL anyway — but a caller can hand
+ * `StoreCredentialRefusedError` anything.
  */
 export function endpointForMessage(url: string): string {
 	try {
-		const { origin, pathname } = new URL(url);
-		return `${origin}${pathname}`;
+		const { protocol, origin, pathname } = new URL(url);
+		if (protocol === "http:" || protocol === "https:") return `${origin}${pathname}`;
 	} catch {
-		return "(an endpoint that is not a URL)";
+		// Named below, like any other value that is not an http or https URL.
 	}
+	return "(an endpoint that is not an http or https URL)";
 }
