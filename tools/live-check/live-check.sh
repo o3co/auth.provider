@@ -247,7 +247,7 @@ start() {
 
 	local i
 	for i in $(seq 1 90); do
-		grep -q "Server is running" "$STATE/provider.log" 2>/dev/null && break
+		grep -q '"msg":"server_listening"' "$STATE/provider.log" 2>/dev/null && break
 		if ! kill -0 "$(cut -d'|' -f1 "$STATE/provider.pid")" 2>/dev/null; then
 			tail -n 30 "$STATE/provider.log" >&2
 			stop
@@ -255,7 +255,7 @@ start() {
 		fi
 		sleep 1
 	done
-	if ! grep -q "Server is running" "$STATE/provider.log"; then
+	if ! grep -q '"msg":"server_listening"' "$STATE/provider.log"; then
 		stop
 		die "the provider did not come up in 90 s — see $STATE/provider.log"
 	fi

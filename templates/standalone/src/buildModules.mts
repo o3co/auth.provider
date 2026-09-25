@@ -15,9 +15,11 @@
  */
 import {
 	type AppConfig,
+	consoleLogger,
 	defaultRefreshTokenFamilyRevocationModule,
 	defaultRefreshTokenFamilyRotationModule,
 	jwksModule,
+	type Logger,
 	type Module,
 	memoryAccessTokenDenylistModule,
 	memoryConsentStoreModule,
@@ -65,10 +67,10 @@ import {
 } from "./modules.mjs";
 
 /**
- * Overrides for the composition. All but `environment` are test-only: they let
- * the smoke test substitute in-memory implementations of the file-system-backed
- * modules, and production callers should not pass them — the defaults match the
- * standalone scaffold.
+ * Overrides for the composition. All but `environment` and `logger` are
+ * test-only: they let the smoke test substitute in-memory implementations of
+ * the file-system-backed modules, and production callers should not pass them
+ * — the defaults match the standalone scaffold.
  */
 export interface BuildModulesOverrides {
 	/**
@@ -80,6 +82,12 @@ export interface BuildModulesOverrides {
 	 * off the config either way).
 	 */
 	readonly environment?: string;
+	/**
+	 * Where the composition's own notices go — a deprecated config key, one
+	 * `config_key_deprecated` line (warn) each. `app.mts` passes the logger it
+	 * hands every module; omitted, `consoleLogger`.
+	 */
+	readonly logger?: Logger;
 	readonly keyStoreModule?: Module;
 	readonly repositoriesModule?: Module;
 	readonly storesModule?: Module;
@@ -147,6 +155,7 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	const googleEnabled =
 		extractFederationSection(config.federations ?? {}, "google")?.type === "google";
 	const oidcFederations = oidcFederationNames(config.federations ?? {});
+	const logger = overrides.logger ?? consoleLogger;
 
 	// Wave 5d (IH-14 + OR-M1 + OR-4) + OR-9: adapter-driven branching for
 	// the OAuth-endpoint rate limiter, the user-session-store family, AND
@@ -208,9 +217,14 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 	if (oauthCodeAdapter !== undefined) {
 		codeRepositoryAdapter = oauthCodeAdapter;
 	} else if (legacyCodeType === "redis") {
-		console.warn(
-			'[buildModules] `repositories.code.type = "redis"` is deprecated; use ' +
-				'`oauth.code.adapter = "redis"` instead — see CHANGELOG for the removal version.',
+		logger.warn(
+			{
+				key: "repositories.code.type",
+				env: "CLIENT_CODE_TYPE",
+				replacement: "oauth.code.adapter",
+				replacementEnv: "OAUTH_CODE_ADAPTER",
+			},
+			"config_key_deprecated",
 		);
 		codeRepositoryAdapter = "redis";
 	} else {
@@ -230,10 +244,14 @@ export function buildModules(config: AppConfig, overrides: BuildModulesOverrides
 		accessToken.defaultExpiresIn === undefined &&
 		accessToken.expiresIn !== SHIPPED_ACCESS_TOKEN_EXPIRES_IN
 	) {
-		console.warn(
-			"[buildModules] `oauth.accessToken.expiresIn` (OAUTH_ACCESS_TOKEN_EXPIRES_IN) is " +
-				"deprecated; use `oauth.accessToken.defaultExpiresIn` " +
-				"(OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN) instead — see CHANGELOG for the removal version.",
+		logger.warn(
+			{
+				key: "oauth.accessToken.expiresIn",
+				env: "OAUTH_ACCESS_TOKEN_EXPIRES_IN",
+				replacement: "oauth.accessToken.defaultExpiresIn",
+				replacementEnv: "OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN",
+			},
+			"config_key_deprecated",
 		);
 	}
 

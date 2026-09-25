@@ -29,7 +29,9 @@ the Google and generic OpenID Connect federation adapters, `-federation-grants`,
   [`src/configPath.mts`](src/configPath.mts) and [`config/`](config/);
 - the host process: the Express app, its security headers, the health,
   readiness and metrics routes, startup and the terminal error handler —
-  [`src/app.mts`](src/app.mts). Every error this code logs — an unhandled
+  [`src/app.mts`](src/app.mts); the listener, which logs `server_listening`
+  (info, `port`) once its socket is bound and fails boot with the bind error
+  when it cannot be — [`src/listen.mts`](src/listen.mts). Every error this code logs — an unhandled
   request error, the shared Redis connection's `error` event, a failed
   shutdown — is logged as core's
   [`loggableError`](../../packages/core/README.md#logger) projection, never the
@@ -171,7 +173,7 @@ Other multi-replica considerations covered by the default modules:
 
 - The `express-session` store (`sessionStoreModule`) is its own connection: `SESSION_STORAGE_TYPE=redis` with `SESSION_STORAGE_REDIS_URL` (`session.storage.redis.url`) pointing at the shared instance.
 - The user-session stores switch on `userSessionStores.adapter = "redis"` (`USER_SESSION_STORES_ADAPTER`), which wires `redisSessionStoresModule` off the shared ioredis connection — the one `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` configures.
-- The authorization-code repository switches on `oauth.code.adapter` (`OAUTH_CODE_ADAPTER`); the template ships `"redis"`, on that same connection. `oauth.code.adapter` wins; the deprecated `repositories.code.type` (`CLIENT_CODE_TYPE`) is read, with a deprecation warning at boot, only when it is unset — which the shipped `config/application.conf` never leaves it. `CLIENT_CODE_ENDPOINT_URI` (`repositories.code.redis.endpointUri`) is bound by `config/application.conf` but nothing reads it: the Redis code repository runs on the shared connection, so there is one Redis URL for every adapter.
+- The authorization-code repository switches on `oauth.code.adapter` (`OAUTH_CODE_ADAPTER`); the template ships `"redis"`, on that same connection. `oauth.code.adapter` wins; the deprecated `repositories.code.type` (`CLIENT_CODE_TYPE`) is read, with a `config_key_deprecated` warning at boot, only when it is unset — which the shipped `config/application.conf` never leaves it. `CLIENT_CODE_ENDPOINT_URI` (`repositories.code.redis.endpointUri`) is bound by `config/application.conf` but nothing reads it: the Redis code repository runs on the shared connection, so there is one Redis URL for every adapter.
 - The replay seen-set — the `jti` single-use record behind `private_key_jwt` client authentication (#484) — switches on `replaySeenSet.adapter` (`REPLAY_SEEN_SET_ADAPTER`); the template ships `"redis"` on the shared connection, and `memory` is refused under `DEPLOYMENT_MODE=multi` because a captured client assertion would replay once per replica.
 - The consent step for clients that are not first-party (#527) switches on `consentStore.adapter` (`CONSENT_STORE_ADAPTER`). It is off (`none`) by default; `memory` is refused under `DEPLOYMENT_MODE=multi`, because a consent granted on one replica would be asked for again on every other and a consent page's parked request would be unknown to the replica that receives the answer. `redis` (#561) keeps both on the shared connection. See [Consent Store](#consent-store).
 - The federation token store defaults to memory. Set `FEDERATION_TOKEN_STORE_TYPE=redis` (`federationTokenStore.type = "redis"`) and supply `REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` — 32 bytes, base64-encoded (`openssl rand -base64 32`); the store encrypts the upstream refresh tokens it holds. It shares the ioredis socket configured by `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL`. See [Federation Token Store](#federation-token-store).
@@ -335,7 +337,7 @@ every relying party must be handed the shared secret — which also lets it
 |---|---|---|
 | `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` | `3600` | Access token lifetime in seconds that every grant mints when the request asks for none. Whole positive number, at most one year (`31536000`). |
 | `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN` | the default | The most a token-exchange request's `expires_in` parameter can obtain; a larger request is clamped to it. Unset means the default, so no token is extended unless you set this. A default above it is a boot failure naming both keys. It also bounds how long an exchanged token outlives a revocation at a resource server that validates it offline. |
-| `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | — | **Deprecated** alias of `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` (config key `oauth.accessToken.expiresIn`, of `oauth.accessToken.defaultExpiresIn`), read only while the new one is unset. Move the value to the new variable. |
+| `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | — | **Deprecated** alias of `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` (config key `oauth.accessToken.expiresIn`, of `oauth.accessToken.defaultExpiresIn`), read only while the new one is unset; while it still decides the default, boot logs `config_key_deprecated` (warn). Move the value to the new variable. |
 | `OAUTH_REFRESH_TOKEN_EXPIRES_IN` | `86400` | Refresh token lifetime in seconds. Whole positive number, at most one year (`31536000`). |
 
 Exporting one of these as an empty string is a boot failure, not a fallback:
@@ -563,7 +565,7 @@ what the Store checks are in the same foundation README section.
 
 | Variable | Default | Description |
 |---|---|---|
-| `CLIENT_CODE_TYPE` | `redis` | Deprecated alias of `OAUTH_CODE_ADAPTER` (`repositories.code.type`); read, with a boot warning, only when `oauth.code.adapter` is unset — the shipped config sets it |
+| `CLIENT_CODE_TYPE` | `redis` | Deprecated alias of `OAUTH_CODE_ADAPTER` (`repositories.code.type`); read, with a `config_key_deprecated` warning at boot, only when `oauth.code.adapter` is unset — the shipped config sets it |
 | `CLIENT_CODE_ENDPOINT_URI` | — | Legacy; bound to `repositories.code.redis.endpointUri` but not read — codes use the shared `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` connection |
 | `CLIENT_CODE_PASSWORD` | — | Redis password for code storage |
 | `CLIENT_CODE_DEFAULT_EXPIRES_IN` | `600` | Default authorization code lifetime in seconds |
@@ -841,7 +843,7 @@ the result. Rebuilding the same source then produces the same dependency tree.
 
 The production image sets `ENV HTTP_PORT=3000` and uses it for both `EXPOSE`
 and the Docker-native healthcheck against `/_healthcheck`. The HOCON config
-also reads `${?HTTP_PORT}` for `http.port`, so `app.listen()` and the
+also reads `${?HTTP_PORT}` for `http.port`, so the listener and the
 healthcheck cannot drift apart. To run on a different port:
 
 ```bash
