@@ -93,6 +93,16 @@ const keyStoreModule = defineModule({
 	},
 });
 
+/**
+ * The refresh-token family store and core's two wrappers over it: what the
+ * refresh_token grant, on in `makeValidAppConfig()`, refuses to boot without.
+ */
+const familyStoreModules = [
+	memoryRefreshTokenFamilyStoreModule,
+	defaultRefreshTokenFamilyRotationModule,
+	defaultRefreshTokenFamilyRevocationModule,
+] as const;
+
 // ---------------------------------------------------------------------------
 // Helper: build a minimal express app wired to createOAuthRouter.
 // The session middleware injects the provided session fields into req.session.
@@ -399,6 +409,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
+				...familyStoreModules,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
@@ -423,6 +434,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
+				...familyStoreModules,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
@@ -451,6 +463,7 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
 				clientRepositoryModule,
 				codeRepositoryModule,
 				keyStoreModule,
+				...familyStoreModules,
 			],
 			bootstrapComponents: { config, pathResolver: (s) => s },
 		});
@@ -474,11 +487,6 @@ describe("oauthAuthorizationModule — createTestApp integration", () => {
  * decision: on, both slots must be filled.
  */
 describe("oauthAuthorizationModule — the refresh_token grant needs its token families", () => {
-	const FAMILY_STORE = [
-		memoryRefreshTokenFamilyStoreModule,
-		defaultRefreshTokenFamilyRotationModule,
-		defaultRefreshTokenFamilyRevocationModule,
-	] as const;
 	const withRefreshToken = (enabled: boolean) => {
 		const base = makeValidAppConfig();
 		return {
@@ -536,7 +544,7 @@ describe("oauthAuthorizationModule — the refresh_token grant needs its token f
 	});
 
 	it("boots with both wired, and with the grant off and neither wired", async () => {
-		const wired = await boot(withRefreshToken(true), FAMILY_STORE);
+		const wired = await boot(withRefreshToken(true), familyStoreModules);
 		expect(wired.inspect.grants.has("refresh_token")).toBe(true);
 		await wired.dispose();
 
@@ -1553,7 +1561,7 @@ describe("oauthAuthorizationModule — declared absence for subjectRevocation (#
 		const config = makeValidAppConfig();
 		await expect(
 			createTestApp({
-				modules: [oauthAuthorizationModule({ config })],
+				modules: [oauthAuthorizationModule({ config }), ...familyStoreModules],
 				bootstrapComponents: {
 					config,
 					pathResolver: (s: string) => s,
