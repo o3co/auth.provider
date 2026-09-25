@@ -12,7 +12,7 @@ Supports on-behalf-of, delegation (`act` claim), and scope / audience narrowing.
 **Owns:**
 
 - the exchange decision: which client may exchange ([note 14](#security-notes), [note 15](#security-notes)), the scope and audience ceilings, `may_act`, the actor chain and the `act` claim, the sender-constraint matrices, the refresh-token family check on the `subject_token` and the `actor_token` ([note 1](#security-notes)), the session check and the `sid` the issued token carries ([note 21](#security-notes)), and the issued token's lifetime;
-- the built-in `access_token` validator in [`src/validator/`](./src/validator) (`createSelfIssuedAccessTokenValidator`), which verifies a token this provider issued and consults the access-token denylist and the subject watermark. It reads a token's `family_id` and `sid` but leaves the family and session checks to the handler.
+- the built-in `access_token` validator in [`src/validator/`](./src/validator) (`createSelfIssuedAccessTokenValidator`), which verifies a token this provider issued and consults the access-token denylist and the subject watermark. It reads a token's `family_id`, and its session from `sid` or — for a token that was itself exchanged — `liveness_sid`, but leaves the family and session checks to the handler.
 
 **Does not own:**
 

@@ -313,7 +313,9 @@ const livenessOf = async (
 	} catch (err) {
 		return outage("user_session", "get", err);
 	}
-	if (record === null) return "ended";
+	// `== null`: the port answers `null`, and a store of the deployment's own
+	// that answers `undefined` for a missing session is still no session.
+	if (record == null) return "ended";
 	if (record.sub !== claim.subject) {
 		options.logger?.warn({ sid }, "device_verification_session_subject_mismatch");
 		return "ended";

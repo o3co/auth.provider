@@ -77,7 +77,9 @@
  * again. An approval that records no instant (a record approved before the
  * store recorded one) is refused while a boundary is in force, as an
  * `iat`-less token is. A boundary that cannot be read is `503
- * temporarily_unavailable`, logged once at error as
+ * temporarily_unavailable` "the revocation boundary is unavailable; start a
+ * new device authorization request" — not the device-code store's
+ * description, since that store answered — logged once at error as
  * `device_code_grant_revocation_unavailable` (`store:
  * "revocation_boundary"`, `step: "read"`). The approval was consumed by the
  * poll either way, so a refused or unanswered device starts over.
@@ -262,10 +264,13 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 							clientId: client.clientId,
 						},
 					);
+					// Its own words, not the device-code store's: that store
+					// answered, and this poll consumed the approval, so a retry
+					// is `invalid_grant` — the device starts again.
 					return error(
 						503,
-						DEVICE_CODE_STORE_UNAVAILABLE.error,
-						DEVICE_CODE_STORE_UNAVAILABLE.description,
+						"temporarily_unavailable",
+						"the revocation boundary is unavailable; start a new device authorization request",
 					);
 				}
 				if (revoked) {
