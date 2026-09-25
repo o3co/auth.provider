@@ -774,6 +774,22 @@ describe("endSession", () => {
 		);
 	});
 
+	it("names an invalid postLogoutRedirectUri without repeating it", async () => {
+		// The value reaches a log line as the error's `detail`, which keeps a
+		// message's text; the adapter quotes nothing it was handed.
+		const p = createAppleProvider(baseConfig);
+		const refusal = await p
+			.endSession({ postLogoutRedirectUri: 'not a url "\r\ninjected-line' })
+			.then(
+				() => undefined,
+				(error: unknown) => error,
+			);
+		expect(refusal).toBeInstanceOf(Error);
+		expect((refusal as Error).message).toMatch(/invalid postLogoutRedirectUri/);
+		expect((refusal as Error).message).not.toContain("injected-line");
+		expect((refusal as Error).message).not.toContain("not a url");
+	});
+
 	it("rejects an invalid configured endpoint", async () => {
 		const p = createAppleProvider({ ...baseConfig, endSessionEndpoint: "not a url" });
 		await expect(p.endSession({})).rejects.toThrow(/endSessionEndpoint/);
