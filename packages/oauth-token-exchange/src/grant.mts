@@ -725,9 +725,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// unwilling or unable to issue a token for any target service
 				// indicated by the resource or audience parameters, the
 				// invalid_target error code SHOULD be used".
-				const widenedAudiences = requestedAudience.filter(
-					(audience) => !subjectAudienceSet.has(audience),
-				);
+				// Each named once: every one is an audience the client is
+				// registered for, so the set is bounded by its registration, but
+				// `audience` is not de-duplicated and a caller may repeat one.
+				const widenedAudiences = [
+					...new Set(requestedAudience.filter((audience) => !subjectAudienceSet.has(audience))),
+				];
 				if (widenedAudiences.length > 0) {
 					deps.logger?.warn(
 						{
