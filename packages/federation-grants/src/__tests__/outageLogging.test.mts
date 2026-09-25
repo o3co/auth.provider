@@ -603,18 +603,26 @@ describe("the token route — what a refresh that runs out of time logs", () => 
 		expect(payload.attempts).toBeGreaterThan(1);
 	});
 
-	it("logs a reauthorization mark that hangs as the outage, not answered", async () => {
+	it("logs a reauthorization mark that hangs as the outage, and the upstream's refusal beside it as a warn", async () => {
 		const h = harness({ limits: SHORT });
 		await seedExpired(h);
 		h.refresh.mockRejectedValue(Object.assign(new Error("refused"), { error: "invalid_grant" }));
 		vi.spyOn(h.store, "requireReauthorization").mockReturnValue(new Promise(() => {}));
 		expect((await call(h, "token")).status).toBe(503);
-		expect(written(await settled(h))).toEqual(["error federation_grant_token_unavailable"]);
+		expect(written(await settled(h))).toEqual([
+			"error federation_grant_token_unavailable",
+			"warn federation_grant_token_step_failed",
+		]);
 		expect(payloadOf(h.lines, "federation_grant_token_unavailable")).toMatchObject({
 			reason: "storage",
 			store: "federation_grant",
 			step: "mark",
 			err: NOT_ANSWERED,
+		});
+		// What the upstream said is not the outage: its verdict, told once.
+		expect(payloadOf(h.lines, "federation_grant_token_step_failed")).toMatchObject({
+			step: "upstream",
+			err: { name: "Error", error: "invalid_grant" },
 		});
 	});
 

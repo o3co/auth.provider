@@ -87,6 +87,7 @@ import {
 	federationGrantAuditMetadata,
 	federationGrantAuthorizationRevision,
 	federationGrantIdentityRevision,
+	isFederationUpstreamOutage,
 	judgeUpstreamAccessToken,
 	type Logger,
 	parseScopeTokens,
@@ -101,7 +102,7 @@ import { federationGrantIdentityRegistration } from "./acquisitionSettings.mjs";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
 import { federationGrantConnectUri } from "./lodgeRoute.mjs";
-import { createFederationGrantLog, readField } from "./log.mjs";
+import { createFederationGrantLog } from "./log.mjs";
 import { createRequestIdMiddleware, requestIdOf } from "./requestId.mjs";
 import { parserRefusals, unexpectedErrors } from "./routes.mjs";
 
@@ -661,7 +662,14 @@ export function createFederationGrantBrowserRouter(
 			if (judged.reason === "reauthentication_required") {
 				jsonError(res, 403, "reauthentication_required", "sign in again to continue");
 			} else if (judged.reason === "unavailable") {
-				jsonError(res, 503, "temporarily_unavailable", "storage");
+				// One answer for one outage: a client registry that cannot judge the
+				// question is what the page's own lookup of it answers.
+				jsonError(
+					res,
+					503,
+					"temporarily_unavailable",
+					judged.unanswered.store === "client" ? "client registry unavailable" : "storage",
+				);
 			} else if (judged.reason === "connection_not_permitted") {
 				jsonError(res, 403, "access_denied", "connection_not_permitted");
 			} else {
@@ -1051,7 +1059,10 @@ export function createFederationGrantBrowserRouter(
 							options.identityLookup === "required" ? [...(connection.identityClaims ?? [])] : [],
 					});
 				} catch (error) {
-					if (isOutage(error)) {
+					// Not reached, not in time, or answered with a 5xx — read off
+					// what the error is, never its text (core's classifier, held to
+					// the real libraries by federation-oidc's tests).
+					if (isFederationUpstreamOutage(error)) {
 						// Not reached, or not in time: the outage the redirect says.
 						log.outage(
 							"federation_grant_callback_unavailable",
@@ -1453,7 +1464,7 @@ export function createFederationGrantBrowserRouter(
 
 	// Everything else under the mount: plain, not the JSON router's 404.
 	router.use((_req, res) => plain(res, 404, "Not found."));
-	router.use(unexpectedErrors(options.logger));
+	router.use(unexpectedErrors(options.logger, "federation_grants_browser"));
 	return router;
 }
 
@@ -1587,47 +1598,6 @@ function callbackParamsOf(req: Request): Readonly<Record<string, string>> {
 		if (typeof value === "string") params[key] = value;
 	}
 	return params;
-}
-
-/** The names a request that was given up on is raised under: `AbortSignal.timeout` raises `TimeoutError`. */
-const ABANDONED: ReadonlySet<string> = new Set(["AbortError", "TimeoutError"]);
-
-/** Node's and undici's codes for a connection that could not be made, or was lost. */
-const UNREACHABLE: ReadonlySet<string> = new Set([
-	"ECONNREFUSED",
-	"ECONNRESET",
-	"ENOTFOUND",
-	"ETIMEDOUT",
-	"EAI_AGAIN",
-	"EHOSTUNREACH",
-	"ENETUNREACH",
-	"EPIPE",
-	"UND_ERR_CONNECT_TIMEOUT",
-	"UND_ERR_HEADERS_TIMEOUT",
-	"UND_ERR_BODY_TIMEOUT",
-	"UND_ERR_SOCKET",
-]);
-
-/**
- * A failure to REACH the upstream — not one it answered — is an outage, not an
- * upstream error. Read off what an error IS, never what its text says: a
- * name from {@link ABANDONED} or a code from {@link UNREACHABLE} on the error
- * or any of its first causes, or undici's own shape for a request that never
- * got an answer — `fetch`'s `TypeError` whose cause is the socket's or the
- * TLS layer's coded error (a certificate that does not verify included).
- */
-function isOutage(error: unknown): boolean {
-	let current = error;
-	for (let depth = 0; depth < 4 && current !== undefined && current !== null; depth++) {
-		const name = readField(current, "name");
-		const code = readField(current, "code");
-		if (typeof name === "string" && ABANDONED.has(name)) return true;
-		if (typeof code === "string" && UNREACHABLE.has(code)) return true;
-		const cause = readField(current, "cause");
-		if (name === "TypeError" && typeof readField(cause, "code") === "string") return true;
-		current = cause;
-	}
-	return false;
 }
 
 function messageFor(reason: Exclude<Judgement, { ok: true }>["reason"]): string {

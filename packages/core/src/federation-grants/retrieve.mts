@@ -199,7 +199,9 @@ export interface RetrieveFederationGrantTokenDeps {
 	 * response. A 503 turned from one carries the same object as its
 	 * `failure`, so a caller can log that one as the outage and every other as
 	 * a failure the answer did not carry. A write retried within the persist
-	 * budget is told once, with the last cause.
+	 * budget is told once per distinct kind of failure (name and code), with
+	 * the last error of that kind and `attempts`; a write, a mark or an
+	 * upstream call that did not answer in time is told too, as not answered.
 	 */
 	report?(failure: FederationGrantRetrievalFailure): void;
 }
@@ -357,6 +359,29 @@ const SIDE_EFFECT_WAIT_MS = 3_000;
 
 const NOT_ANSWERED = new Error("not answered in time; no longer waited for");
 
+/**
+ * What kind of failure `error` is, to tell one from another: its name and its
+ * code, read so that nothing throws. Two attempts that failed the same way
+ * are one kind, whatever their messages say.
+ */
+function kindOf(error: unknown): string {
+	if (error === null || (typeof error !== "object" && typeof error !== "function")) {
+		return `thrown:${typeof error}`;
+	}
+	const read = (key: string): unknown => {
+		try {
+			return (error as Record<string, unknown>)[key];
+		} catch {
+			return undefined;
+		}
+	};
+	const name = read("name");
+	const code = read("code");
+	return `${typeof name === "string" ? name : ""}\u0000${
+		typeof code === "string" || typeof code === "number" ? String(code) : ""
+	}`;
+}
+
 /** `work`, or `"elapsed"` when it has not settled within `ms`. No timer is left behind. */
 async function within<T>(work: Promise<T>, ms: number): Promise<T | "elapsed"> {
 	const limit = after(ms);
@@ -377,12 +402,14 @@ function report(
 	request: RetrieveFederationGrantTokenRequest,
 	during: FederationGrantRetrievalFailure["during"],
 	error: unknown,
+	attempts = 1,
 ): FederationGrantRetrievalFailure {
 	const failure: FederationGrantRetrievalFailure = {
 		during,
 		error,
 		grantId: request.grantId,
 		correlationId: request.correlationId,
+		...(attempts > 1 ? { attempts } : {}),
 	};
 	try {
 		deps.report?.(failure);
@@ -1061,7 +1088,8 @@ async function refreshUnderLock(
 	const failed = (
 		during: FederationGrantRetrievalFailure["during"],
 		error: unknown,
-	): FederationGrantRetrievalFailure => report(deps, request, during, error);
+		attempts?: number,
+	): FederationGrantRetrievalFailure => report(deps, request, during, error, attempts);
 
 	const controller = new AbortController();
 	const calledAt = deps.now().getTime();
@@ -1085,9 +1113,11 @@ async function refreshUnderLock(
 		// whether or not the abort ever settles. The stored refresh credential is
 		// not assumed to be still good: the next refresh decides.
 		controller.abort();
+		// Reported: the caller has usually been answered already, at the soft
+		// deadline, and this is what became of the call it was answered about.
 		return {
 			kind: "denied",
-			denial: unavailable("upstream"),
+			denial: unavailable("upstream", failed("upstream", NOT_ANSWERED)),
 			audits: [["federation.grant.refresh_persist_failed", "hard_timeout"]],
 			keepLock: true,
 		};
@@ -1123,7 +1153,7 @@ async function refreshUnderLock(
 					kind: "denied",
 					denial: unavailable(
 						"storage",
-						marked === "elapsed" ? undefined : failed("mark", marked.error),
+						failed("mark", marked === "elapsed" ? NOT_ANSWERED : marked.error),
 					),
 					audits: [["federation.grant.refresh_failed", "mark_not_written"]],
 				};
@@ -1327,11 +1357,26 @@ async function refreshUnderLock(
 		ineligible === null ? "success" : `upstream_token_ineligible/${ineligible.reason}`,
 	];
 	let threwBefore = false;
-	// What the last attempt that threw threw. Told once, when the loop is
-	// done with it, rather than once per attempt: the retries are one write.
-	let lastThrown: { readonly error: unknown } | undefined;
-	const reportWrite = (): FederationGrantRetrievalFailure | undefined =>
-		lastThrown === undefined ? undefined : failed("write", lastThrown.error);
+	// What every attempt that threw threw. Told once the loop is done with
+	// them, and not once per attempt: the retries are one write. Each distinct
+	// kind of failure is told once, with how many attempts failed so; what is
+	// returned — for the answer to carry — is the kind the LAST attempt threw.
+	const thrown: unknown[] = [];
+	const reportWrite = (): FederationGrantRetrievalFailure | undefined => {
+		const last = thrown.at(-1);
+		if (thrown.length === 0) return undefined;
+		const kinds = new Map<string, { last: unknown; count: number }>();
+		for (const error of thrown.splice(0)) {
+			const kind = kindOf(error);
+			kinds.set(kind, { last: error, count: (kinds.get(kind)?.count ?? 0) + 1 });
+		}
+		const lastKind = kindOf(last);
+		for (const [kind, { last: error, count }] of kinds) {
+			if (kind !== lastKind) failed("write", error, count);
+		}
+		const carried = kinds.get(lastKind) as { last: unknown; count: number };
+		return failed("write", carried.last, carried.count);
+	};
 	for (let attempt = 0; attempt < attempts; attempt++) {
 		const remaining = persistDeadline - deps.now().getTime();
 		if (remaining <= 0) break;
@@ -1352,9 +1397,12 @@ async function refreshUnderLock(
 		// later it is still guarded by the version — and until it has had the
 		// time to, nobody else is let at the refresh token it replaces.
 		if (result === "elapsed") {
+			// The answer is the write that did not answer; what attempts before
+			// it threw is told beside it, and not carried.
+			reportWrite();
 			return {
 				kind: "denied",
-				denial: unavailable("storage", reportWrite()),
+				denial: unavailable("storage", failed("write", NOT_ANSWERED)),
 				audits: [["federation.grant.refresh_persist_failed", "write_in_flight"]],
 				keepLock: true,
 			};
@@ -1388,10 +1436,11 @@ async function refreshUnderLock(
 			};
 		}
 		threwBefore = true;
-		lastThrown = { error: result.error };
+		thrown.push(result.error);
 		await after(Math.min(PERSIST_RETRY_DELAY_MS, remaining)).elapsed;
 	}
-	const writeFailure = reportWrite();
+	// No attempt that threw means none was made in time: nothing answered.
+	const writeFailure = reportWrite() ?? failed("write", NOT_ANSWERED);
 	// The new credentials are dropped. The stored refresh credential is not
 	// assumed to be still good: the next refresh decides (D12). The failure is
 	// stamped all the same, best effort, with what is left of the persist

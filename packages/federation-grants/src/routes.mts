@@ -233,13 +233,17 @@ export const parserRefusals: ErrorRequestHandler = (error, _req, res, next) => {
  * The routers' last error handler. An error that reaches it has escaped
  * every handler: it is `500 server_error` (`unexpected_error`), a fixed
  * description because whatever is in the error is not the caller's business,
- * and it is logged as `federation_grants_unexpected_error` with the request's
- * `correlationId` and the error's projection (`loggableError`). The one
- * exception is a path parameter Express could not decode at a route itself
- * (`undecodablePath`), which is the caller's `400 malformed_path` wherever it
- * surfaces.
+ * and it is logged as `federation_grants_unexpected_error` with `site` — the
+ * router it escaped: `federation_grants` or `federation_grants_browser` — the
+ * request's `correlationId` and the error's projection (`loggableError`). The
+ * one exception is a path parameter Express could not decode at a route
+ * itself (`undecodablePath`), which is the caller's `400 malformed_path`
+ * wherever it surfaces.
  */
-export const unexpectedErrors = (logger: Logger | undefined): ErrorRequestHandler => {
+export const unexpectedErrors = (
+	logger: Logger | undefined,
+	site: "federation_grants" | "federation_grants_browser",
+): ErrorRequestHandler => {
 	const log = createFederationGrantLog(logger);
 	return (error, _req, res, next) => {
 		if (res.headersSent) return next(error);
@@ -247,7 +251,7 @@ export const unexpectedErrors = (logger: Logger | undefined): ErrorRequestHandle
 			res.status(400).json({ error: "invalid_request", error_description: "malformed_path" });
 			return;
 		}
-		log.unexpected(undefined, { correlationId: requestIdOf(res) }, error);
+		log.unexpected(site, { correlationId: requestIdOf(res) }, error);
 		res.status(500).json({ error: "server_error", error_description: "unexpected_error" });
 	};
 };
@@ -342,6 +346,6 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 		router.post("/:grantId/reauthorize", createFederationGrantReauthorizeHandler(lodging));
 	}
 	router.use(notFound);
-	router.use(unexpectedErrors(options.logger));
+	router.use(unexpectedErrors(options.logger, "federation_grants"));
 	return router;
 }

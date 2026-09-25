@@ -384,6 +384,12 @@ export interface FederationGrantRetrievalFailure {
 	readonly error: unknown;
 	readonly grantId: string;
 	readonly correlationId: string;
+	/**
+	 * How many attempts this failure stands for, when more than one: a retried
+	 * write reports each distinct kind of failure (its name and code) once,
+	 * with the last error of that kind and how many attempts failed so.
+	 */
+	readonly attempts?: number;
 }
 
 /**

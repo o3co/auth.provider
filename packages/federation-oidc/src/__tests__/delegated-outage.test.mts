@@ -45,10 +45,14 @@ const closedPort = () =>
 		});
 	});
 
-/** What the delegated code exchange throws when the token endpoint answers with `token`. */
+/**
+ * What the delegated code exchange throws when the token endpoint answers with
+ * `token`. `signal` is made at the exchange — after the fake IdP is up — so
+ * that its deadline is the exchange's, however long setting up took.
+ */
 async function exchangeFailure(
 	token: (init: RequestInit | undefined) => Promise<Response>,
-	signal?: AbortSignal,
+	signal?: () => AbortSignal,
 ): Promise<unknown> {
 	const idp = await createFakeIdp({ issuer: ISSUER });
 	const provider = await createOidcProvider("idp-outage", {
@@ -70,7 +74,7 @@ async function exchangeFailure(
 			nonce: "nonce-1",
 			callbackParams: {},
 			identityClaims: [],
-			...(signal === undefined ? {} : { signal }),
+			...(signal === undefined ? {} : { signal: signal() }),
 		});
 	} catch (error) {
 		return error;
@@ -93,12 +97,15 @@ describe("the delegated code exchange's failures, as the federation-grants callb
 	});
 
 	it("reads a token endpoint that does not answer before the signal as an outage: OAUTH_TIMEOUT", async () => {
+		// A token endpoint that never answers: only the signal ends the request.
 		const error = await exchangeFailure(
 			(init) =>
 				new Promise((_resolve, reject) => {
-					init?.signal?.addEventListener("abort", () => reject(init.signal?.reason));
+					const signal = init?.signal;
+					if (signal?.aborted) reject(signal.reason);
+					signal?.addEventListener("abort", () => reject(signal.reason));
 				}),
-			AbortSignal.timeout(50),
+			() => AbortSignal.timeout(50),
 		);
 		expect(error).toMatchObject({ name: "ClientError", code: "OAUTH_TIMEOUT" });
 		expect(isFederationUpstreamOutage(error)).toBe(true);

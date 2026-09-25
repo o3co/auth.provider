@@ -32,9 +32,13 @@
  *
  * Every `503` it answers — a store that failed (core carries what failed on
  * the refusal), a key missing from the ring, a connection permitted but not
- * configured — is one line at error, `federation_grant_lodge_unavailable`; an
- * intent core could not close after a failed write is one warn,
- * `federation_grant_lodge_step_failed`, whichever answer the client got.
+ * configured — is one line at error, `federation_grant_lodge_unavailable`,
+ * naming the connection the refusal is about (a renewal's is its grant's).
+ * Every store error core met that the answer does not stand for — a write
+ * that threw and landed all the same, a question that could not be asked, an
+ * intent it could not close — is one warn each,
+ * `federation_grant_lodge_step_failed`, whichever answer the client got, a
+ * `201` included.
  */
 
 import {
@@ -45,6 +49,7 @@ import {
 	type FederationGrantLodgingDeps,
 	type FederationGrantLodgingFailure,
 	type FederationGrantLodgingResult,
+	type FederationGrantLodgingStepFailure,
 	type FederationGrantReauthorizationResult,
 	type FederationGrantStore,
 	federationGrantAuditMetadata,
@@ -176,6 +181,16 @@ function createLodgeHandler(
 			}
 		};
 
+		/**
+		 * The store errors core met that the answer does not stand for: one warn
+		 * each, whichever answer it is. None changes it.
+		 */
+		const stepsFailed = (absorbed: readonly FederationGrantLodgingStepFailure[] = []): void => {
+			for (const { store, step, error } of absorbed) {
+				log.degraded("federation_grant_lodge_step_failed", { ...context, store, step }, error);
+			}
+		};
+
 		const release = options.background.admit();
 		if (release === undefined) {
 			deny(503, SHUTTING_DOWN, "service_unavailable/shutting_down");
@@ -267,19 +282,10 @@ function createLodgeHandler(
 					unavailable(
 						result.reason,
 						"failure" in result ? result.failure : undefined,
-						result.reason === "connection_not_configured" ? body.connection : undefined,
+						"connection" in result ? result.connection : undefined,
 					);
 				}
-				// Whatever the answer: an intent core could not close after a
-				// failed write can activate nothing, but an operator sees it.
-				const cleanup = result.cleanup;
-				if (cleanup !== undefined) {
-					log.degraded(
-						"federation_grant_lodge_step_failed",
-						{ ...context, store: cleanup.store, step: cleanup.step },
-						cleanup.error,
-					);
-				}
+				stepsFailed(result.absorbed);
 				const answer = serializeFederationGrantLodgingRefusal(result);
 				const error = String(answer.body.error);
 				const description = answer.body.error_description;
@@ -292,6 +298,7 @@ function createLodgeHandler(
 				return;
 			}
 
+			stepsFailed(result.absorbed);
 			const at = now();
 			options.background.register(
 				audit({

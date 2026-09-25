@@ -74,8 +74,12 @@ export interface FederationGrantLog {
 	outage(event: string, fields: LogFields, ...cause: Cause): void;
 	/** A failure that changed no answer, or contention: one line, at warn. */
 	degraded(event: string, fields: LogFields, ...cause: Cause): void;
-	/** What escaped a handler: `federation_grants_unexpected_error`, at error. */
-	unexpected(site: string | undefined, fields: LogFields, error: unknown): void;
+	/**
+	 * What escaped a handler: `federation_grants_unexpected_error`, at error,
+	 * with `site` — the handler that caught it, or the router whose last error
+	 * handler did.
+	 */
+	unexpected(site: string, fields: LogFields, error: unknown): void;
 	/** A client lookup that could not be made: core's `client_repository_unavailable`, at error. */
 	clientRepositoryUnavailable(site: string, clientId: unknown, error: unknown): void;
 }
@@ -98,10 +102,7 @@ export function createFederationGrantLog(given: Logger | undefined): FederationG
 		outage: (event, fields, ...cause) => logger.error(payload(fields, cause), event),
 		degraded: (event, fields, ...cause) => logger.warn(payload(fields, cause), event),
 		unexpected: (site, fields, error) =>
-			logger.error(
-				payload({ ...(site === undefined ? {} : { site }), ...fields }, [error]),
-				"federation_grants_unexpected_error",
-			),
+			logger.error(payload({ site, ...fields }, [error]), "federation_grants_unexpected_error"),
 		clientRepositoryUnavailable: (site, clientId, error) =>
 			logClientRepositoryUnavailable(logger, { site, step: "find", clientId }, error),
 	};

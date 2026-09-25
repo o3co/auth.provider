@@ -117,10 +117,14 @@ const STORE_OF: Readonly<Partial<Record<FederationGrantRetrievalFailure["during"
 	touch: "federation_grant",
 };
 
-/** Where a retrieval failed, as a line names it: the step core names, and its store. */
+/**
+ * Where a retrieval failed, as a line names it: the step core names, its
+ * store, and — for a retried write — how many attempts failed so.
+ */
 const where = (failure: FederationGrantRetrievalFailure) => ({
 	store: STORE_OF[failure.during],
 	step: failure.during,
+	attempts: failure.attempts,
 });
 
 /** The reasons a `503` is contention rather than an outage: nothing is down. */
@@ -281,9 +285,10 @@ export function createFederationGrantTokenHandler(
 						: { minTtlSeconds: parsed.value.minTtlSeconds }),
 				},
 			);
+			// The outage first, then what the answer did not carry.
 			if (!result.ok && result.code === "temporarily_unavailable") {
-				flush(result.failure);
 				unavailable(result);
+				flush(result.failure);
 			} else {
 				flush();
 			}

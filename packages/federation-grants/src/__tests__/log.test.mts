@@ -102,7 +102,7 @@ describe("createFederationGrantLog", () => {
 		const { logger, lines } = createLogSpy();
 		const log = createFederationGrantLog(logger);
 		log.unexpected("token", { grantId: "g-1" }, new TypeError("bug"));
-		log.unexpected(undefined, { correlationId: "c-1" }, new Error("escaped"));
+		log.unexpected("federation_grants", { correlationId: "c-1" }, new Error("escaped"));
 		expect(written(lines)).toEqual([
 			"error federation_grants_unexpected_error",
 			"error federation_grants_unexpected_error",
@@ -113,6 +113,7 @@ describe("createFederationGrantLog", () => {
 			err: expect.objectContaining({ name: "TypeError", detail: "bug" }),
 		});
 		expect(lines[1]?.args[0]).toEqual({
+			site: "federation_grants",
 			correlationId: "c-1",
 			err: expect.objectContaining({ name: "Error", detail: "escaped" }),
 		});

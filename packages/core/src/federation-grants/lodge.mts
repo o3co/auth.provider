@@ -43,11 +43,15 @@
  *   A `false` is never a reason to name the handle again: `nameIntent` is not
  *   safely retryable once a newer intent may have superseded this one.
  *
- * A `storage` refusal carries what failed (`failure`, not enumerable): which
- * store, what it was asked, what it threw or refused — for the route
- * answering the 503 to log once. Any refusal carries an intent the lodging
- * could not close after a failed write (`cleanup`, not enumerable), whatever
- * the answer, for the route to log as the best-effort step it is.
+ * A `storage` refusal carries what failed (`failure`): which store, what it
+ * was asked, what it threw or refused — for the route answering the 503 to
+ * log once. Any answer, a success included, carries every store error it
+ * does not itself stand for (`absorbed`): a second write that threw and
+ * landed all the same, the question after one that could not be asked, a
+ * pointer write whose re-read decided the answer, an intent that could not
+ * be closed — for the route to log as what they are. A
+ * `connection_not_configured` refusal carries the connection it is about
+ * (`connection`). None of the three is enumerable (`carry.mts`).
  *
  * ## What it does not do
  *
@@ -167,11 +171,16 @@ export interface FederationGrantLodged {
 	readonly connection: string;
 	readonly scopes: readonly string[];
 	readonly resource?: string;
+	/** Store errors this answer let through regardless — see `FederationGrantLodgingAbsorbedCarrier`. */
+	readonly absorbed?: readonly FederationGrantLodgingStepFailure[];
 }
 
 /**
- * What failed where a lodging answered `storage`. For a logger; never for a
- * response — a store's error can carry what it was sent.
+ * What failed where a lodging answered `storage`, carried on the refusal as
+ * its `failure` — a property nothing enumerates (`carry.mts`), so that a
+ * spread, a serialisation or a response built from the refusal never carries
+ * it. For a logger; never for a response: a store's error can carry what it
+ * was sent.
  */
 export interface FederationGrantLodgingFailure {
 	/** What could not answer: the intent store, the grant store, or the subject's grants boundary. */
@@ -189,31 +198,45 @@ export interface FederationGrantLodgingFailure {
 }
 
 /**
- * The intent a lodging could not close after a failed write. Best effort: it
- * can activate nothing — no grant names it — and its deadline ends it. For a
- * logger; never for a response.
+ * A store error a lodging's answer does not stand for. None changes the
+ * answer; each is for a logger, never for a response:
+ *
+ * - a second write (`create_pending`, `name_intent`) that threw and landed all
+ *   the same, or whose re-read decided the answer instead;
+ * - the question after a second write that threw (`is_current_intent`), when
+ *   it could not be asked;
+ * - the intent the lodging could not close after a failed write
+ *   (`finish_intent`) — best effort: it can activate nothing, since no grant
+ *   names it, and its deadline ends it.
  */
-export interface FederationGrantLodgingCleanup {
-	readonly store: "federation_grant_intent";
-	readonly step: "finish_intent";
+export interface FederationGrantLodgingStepFailure {
+	readonly store: "federation_grant" | "federation_grant_intent";
+	readonly step: "create_pending" | "name_intent" | "is_current_intent" | "finish_intent";
 	readonly error: unknown;
 }
 
-/**
- * What any lodging refusal may carry beside its answer: the intent it could
- * not close after a failed write, whichever answer the client gets. Not
- * enumerable — nothing that serialises the refusal carries it.
- */
-export interface FederationGrantLodgingCleanupCarrier {
-	readonly cleanup?: FederationGrantLodgingCleanup;
+/** What any lodging answer, a success included, may carry beside it. */
+export interface FederationGrantLodgingAbsorbedCarrier {
+	/**
+	 * The store errors the answer does not stand for, in the order they
+	 * happened. Not enumerable (`carry.mts`): nothing that serialises the
+	 * answer carries them.
+	 */
+	readonly absorbed?: readonly FederationGrantLodgingStepFailure[];
 }
 
 /** A refusal; on `storage`, carrying what failed. */
-export interface FederationGrantLodgingRefused extends FederationGrantLodgingCleanupCarrier {
+export interface FederationGrantLodgingRefused extends FederationGrantLodgingAbsorbedCarrier {
 	readonly ok: false;
 	readonly reason: FederationGrantLodgingRefusal;
-	/** On `storage`: what failed. Not enumerable — see `FederationGrantLodgingFailure`. */
+	/** On `storage`: what failed — a `FederationGrantLodgingFailure`, not enumerable (`carry.mts`). */
 	readonly failure?: FederationGrantLodgingFailure;
+	/**
+	 * On `connection_not_configured`: the connection it is about — the one the
+	 * request named, or the renewed grant's, which a renewal need not name.
+	 * Not enumerable (`carry.mts`).
+	 */
+	readonly connection?: string;
 }
 
 export type FederationGrantLodgingResult = FederationGrantLodged | FederationGrantLodgingRefused;
@@ -255,7 +278,7 @@ export type FederationGrantReauthorizationResult =
 			  }
 			| { readonly ok: false; readonly reason: "key_unavailable" }
 	  ) &
-			FederationGrantLodgingCleanupCarrier);
+			FederationGrantLodgingAbsorbedCarrier);
 
 /**
  * The result parameters the end of a flow appends to a client's redirect URI.
@@ -296,25 +319,23 @@ type RequestCheck =
 const storage = (failure: FederationGrantLodgingFailure): FederationGrantLodgingRefused =>
 	carryingFailure({ ok: false, reason: "storage" }, failure);
 
-/** Every answer a lodging refuses with: what may carry `cleanup`. */
+/** Every answer a renewal refuses with. */
 type ReauthorizationRefusal = Extract<FederationGrantReauthorizationResult, { readonly ok: false }>;
 
 /**
- * A refusal, carrying the intent that could not be closed before it when there
- * was one — whatever the refusal is (`carry.mts`).
+ * `answer`, carrying the store errors it does not stand for, when there are
+ * any — whatever the answer is (`carry.mts`).
  */
-const withCleanup = <T extends ReauthorizationRefusal>(refusal: T, closed: Closed): T =>
-	carrying(
-		refusal,
-		"cleanup",
-		closed === undefined
-			? undefined
-			: ({
-					store: "federation_grant_intent",
-					step: "finish_intent",
-					error: closed.error,
-				} satisfies FederationGrantLodgingCleanup),
-	);
+const absorbing = <T extends FederationGrantLodgingResult | FederationGrantReauthorizationResult>(
+	answer: T,
+	absorbed: readonly FederationGrantLodgingStepFailure[],
+): T => carrying(answer, "absorbed", absorbed.length === 0 ? undefined : absorbed);
+
+/** The intent that could not be closed, as the step failure it is; nothing when it closed. */
+const leftOpen = (closed: Closed): FederationGrantLodgingStepFailure[] =>
+	closed === undefined
+		? []
+		: [{ store: "federation_grant_intent", step: "finish_intent", error: closed.error }];
 
 /**
  * What a first intent and a renewal are held to alike: where the browser goes
@@ -437,8 +458,8 @@ type Closed = { readonly error: unknown } | undefined;
 
 /**
  * Ends an intent nothing will ever reach. Best effort: its deadline ends it
- * anyway, so a failure fails nothing — it is handed back to go on the
- * `storage` refusal, where the route logs it as what it is.
+ * anyway, so a failure fails nothing — it is handed back to ride on whichever
+ * answer follows (`absorbed`), where the route logs it as what it is.
  */
 async function close(
 	store: FederationGrantIntentStore,
@@ -473,7 +494,13 @@ export async function lodgeFederationGrantIntent(
 		return { ok: false, reason: "connection_not_permitted" };
 	}
 	const connection = deps.connections.get(request.connection);
-	if (connection === undefined) return { ok: false, reason: "connection_not_configured" };
+	if (connection === undefined) {
+		return carrying<FederationGrantLodgingRefused>(
+			{ ok: false, reason: "connection_not_configured" },
+			"connection",
+			request.connection,
+		);
+	}
 
 	const checked = checkRequest(deps, request, connection);
 	if (!checked.ok) return checked;
@@ -496,6 +523,7 @@ export async function lodgeFederationGrantIntent(
 	if (!admitted.ok) return admitted;
 
 	const created = await secondWrite(
+		"create_pending",
 		() =>
 			deps.grantStore.createPending({
 				id: grantId,
@@ -509,53 +537,74 @@ export async function lodgeFederationGrantIntent(
 	);
 	if (!created.landed) {
 		const closed = await close(deps.intentStore, handle, now());
-		return withCleanup(
+		return absorbing(
 			storage({ store: "federation_grant", step: "create_pending", ...created.why }),
-			closed,
+			[...created.absorbed, ...leftOpen(closed)],
 		);
 	}
-	return {
-		ok: true,
-		grantId,
-		handle,
-		intentExpiresAt: record.expiresAt,
-		lifetimeMs: checked.lifetimeMs,
-		connection: connection.name,
-		scopes: record.scopes,
-		...(record.resource === undefined ? {} : { resource: record.resource }),
-	};
+	return absorbing<FederationGrantLodgingResult>(
+		{
+			ok: true,
+			grantId,
+			handle,
+			intentExpiresAt: record.expiresAt,
+			lifetimeMs: checked.lifetimeMs,
+			connection: connection.name,
+			scopes: record.scopes,
+			...(record.resource === undefined ? {} : { resource: record.resource }),
+		},
+		created.absorbed,
+	);
 }
 
-/** A second write: landed, or why not — the error it threw, or the store's refusal. */
+/**
+ * A second write: landed, or why not — the error it threw, or the store's
+ * refusal — and the store errors met on the way that the outcome does not
+ * stand for.
+ */
 type SecondWrite =
-	| { readonly landed: true }
+	| { readonly landed: true; readonly absorbed: readonly FederationGrantLodgingStepFailure[] }
 	| {
 			readonly landed: false;
 			readonly why: { readonly error: unknown } | { readonly refusal: "refused" };
+			readonly absorbed: readonly FederationGrantLodgingStepFailure[];
 	  };
 
 /**
  * The grant-store write, with its answer asked for rather than assumed when it
  * was lost. `landed` only when the write is known to have landed. A write that
  * threw and did not land — or could not be asked about — carries its own
- * error: that is the failure, and the question after it is the same store.
+ * error: that is the failure. What is kept beside it: the write's error when
+ * it landed all the same, and the question's error when it could not be
+ * asked.
  */
 async function secondWrite(
+	step: "create_pending" | "name_intent",
 	write: () => Promise<{ readonly ok: boolean }>,
 	landed: () => Promise<boolean>,
 ): Promise<SecondWrite> {
 	let thrown: unknown;
 	try {
-		return (await write()).ok ? { landed: true } : { landed: false, why: { refusal: "refused" } };
+		return (await write()).ok
+			? { landed: true, absorbed: [] }
+			: { landed: false, why: { refusal: "refused" }, absorbed: [] };
 	} catch (error) {
 		thrown = error;
 	}
 	try {
-		if (await landed()) return { landed: true };
-	} catch {
-		// Not known to have landed: the write's own error is what failed.
+		if (await landed()) {
+			return { landed: true, absorbed: [{ store: "federation_grant", step, error: thrown }] };
+		}
+	} catch (error) {
+		// Not known to have landed: the write's own error is what failed, and
+		// the question that could not be asked is kept beside it.
+		return {
+			landed: false,
+			why: { error: thrown },
+			absorbed: [{ store: "federation_grant", step: "is_current_intent", error }],
+		};
 	}
-	return { landed: false, why: { error: thrown } };
+	return { landed: false, why: { error: thrown }, absorbed: [] };
 }
 
 /**
@@ -642,7 +691,10 @@ type Admission =
  * NOW, not as a marker was left: a maximum no token can satisfy outranks an
  * old scope marker. The admitted status is what the 201 reports, unchanged.
  */
-function admission(status: ReturnType<typeof effectiveFederationGrantStatus>): Admission {
+function admission(
+	status: ReturnType<typeof effectiveFederationGrantStatus>,
+	connection: string,
+): Admission {
 	switch (status.status) {
 		case "revoked":
 			return {
@@ -658,7 +710,14 @@ function admission(status: ReturnType<typeof effectiveFederationGrantStatus>): A
 		case "expired":
 			return { refused: { ok: false, reason: "grant_expired", expiredBy: status.reason } };
 		case "connection_not_configured":
-			return { refused: { ok: false, reason: "connection_not_configured" } };
+			// The grant's: a renewal need not name the connection it renews.
+			return {
+				refused: carrying<ReauthorizationRefusal>(
+					{ ok: false, reason: "connection_not_configured" },
+					"connection",
+					connection,
+				),
+			};
 		case "connection_identity_changed":
 			return { refused: { ok: false, reason: "connection_identity_changed" } };
 		case "upstream_token_ineligible":
@@ -707,7 +766,7 @@ async function judgeAndLodge(
 				}
 			: { ok: false, reason: "grant_revoked", revokedBy: "backstop", revokedNow: false };
 	}
-	const judged = admission(status);
+	const judged = admission(status, grant.connection);
 	if ("refused" in judged) return judged.refused;
 	if (
 		status.status === "reauthorization_required" &&
@@ -746,6 +805,7 @@ async function judgeAndLodge(
 	if (!admitted.ok) return admitted;
 
 	const named = await secondWrite(
+		"name_intent",
 		() =>
 			deps.grantStore.nameIntent({
 				grantId: grant.id,
@@ -755,41 +815,56 @@ async function judgeAndLodge(
 		() => deps.grantStore.isCurrentIntent(grant.id, handle, now()),
 	);
 	if (named.landed) {
-		return {
-			ok: true,
-			grantId: grant.id,
-			handle,
-			intentExpiresAt: record.expiresAt,
-			lifetimeMs: checked.lifetimeMs,
-			connection: connection.name,
-			scopes: record.scopes,
-			...(record.resource === undefined ? {} : { resource: record.resource }),
-			status: judged.admitted,
-		};
+		return absorbing<FederationGrantReauthorizationResult>(
+			{
+				ok: true,
+				grantId: grant.id,
+				handle,
+				intentExpiresAt: record.expiresAt,
+				lifetimeMs: checked.lifetimeMs,
+				connection: connection.name,
+				scopes: record.scopes,
+				...(record.resource === undefined ? {} : { resource: record.resource }),
+				status: judged.admitted,
+			},
+			named.absorbed,
+		);
 	}
 
 	const closed = await close(deps.intentStore, handle, now());
 	// The pointer write lost: the grant changed under this request. What it is
 	// NOW is the answer — never a retry on the strength of the stale reading,
-	// which could renew a grant revoked in between. An intent that could not
-	// be closed can activate nothing and lapses with the flow budget; it rides
-	// on whichever answer this is (`cleanup`), so that the route reports it.
+	// which could renew a grant revoked in between. Whatever that answer is,
+	// the store errors it does not stand for ride on it (`absorbed`), so that
+	// the route reports them: the pointer write's own error, where the re-read
+	// decided instead; the question that could not be asked; and an intent
+	// that could not be closed, which can activate nothing and lapses with the
+	// flow budget.
+	const writeThrew: FederationGrantLodgingStepFailure[] =
+		"error" in named.why
+			? [{ store: "federation_grant", step: "name_intent", error: named.why.error }]
+			: [];
+	const after = [...named.absorbed, ...leftOpen(closed)];
 	let fresh: Awaited<ReturnType<FederationGrantStore["inspect"]>>;
 	try {
 		fresh = await deps.grantStore.inspect(grant.id, now());
 	} catch (error) {
-		return withCleanup(storage({ store: "federation_grant", step: "inspect", error }), closed);
+		return absorbing(storage({ store: "federation_grant", step: "inspect", error }), [
+			...writeThrew,
+			...after,
+		]);
 	}
 	if (fresh === null) {
-		return withCleanup<ReauthorizationRefusal>({ ok: false, reason: "grant_not_found" }, closed);
+		return absorbing<ReauthorizationRefusal>({ ok: false, reason: "grant_not_found" }, [
+			...writeThrew,
+			...after,
+		]);
 	}
 	// Still renewable: the write lost to something that left it so, and the
-	// honest answer is that this attempt did not take.
-	const again = admission(statusOf(deps, fresh, boundary, now()));
-	return withCleanup<ReauthorizationRefusal>(
-		"refused" in again
-			? again.refused
-			: storage({ store: "federation_grant", step: "name_intent", ...named.why }),
-		closed,
-	);
+	// honest answer is that this attempt did not take — with the write's own
+	// error as what failed.
+	const again = admission(statusOf(deps, fresh, boundary, now()), fresh.grant.connection);
+	return "refused" in again
+		? absorbing(again.refused, [...writeThrew, ...after])
+		: absorbing(storage({ store: "federation_grant", step: "name_intent", ...named.why }), after);
 }
