@@ -31,10 +31,13 @@ import type {
 	GrantContext,
 	RateLimiter,
 	RateLimitFailMode,
+	SubjectRevocation,
 	TokenBinding,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
+	consoleLogger,
+	createInMemorySubjectRevocation,
 	createMemoryDeviceCodeStore,
 	createMemoryRateLimiter,
 	createSymmetricKeyStore,
@@ -139,6 +142,7 @@ const makeHarness = (
 		store?: ReturnType<typeof createMemoryDeviceCodeStore>;
 		userSessionStore?: UserSessionStore;
 		requireEmailVerified?: boolean;
+		subjectRevocation?: SubjectRevocation;
 	} = {},
 ) => {
 	const clock = makeClock();
@@ -183,6 +187,7 @@ const makeHarness = (
 			failMode: overrides.failMode ?? "closed",
 			userSessionStore,
 			requireEmailVerified: overrides.requireEmailVerified ?? false,
+			...(overrides.subjectRevocation ? { subjectRevocation: overrides.subjectRevocation } : {}),
 			now: clock.now,
 			...(overrides.auditSink ? { auditSink: overrides.auditSink } : {}),
 			...(overrides.logger ? { logger: overrides.logger } : {}),
@@ -1229,5 +1234,151 @@ describe("a sender-constrained poll", () => {
 		} as unknown as TokenBinding);
 		expect(payload.cnf).toEqual({ "x5t#S256": "DEVICE-X5T" });
 		expect(tokens.token_type).toBe("Bearer");
+	});
+});
+
+describe("the session check, further", () => {
+	/** The authTime of every fixed session (`liveSessions.mts`). */
+	const AUTH_TIME = new Date(1_800_000_000_000);
+	const FAR = new Date(1_900_000_000_000);
+
+	it("says a cookie session with no sid needs one, distinctly from an ended session", async () => {
+		// A deployment's own login that sets `isAuthenticated` and `user.id`
+		// but no `sid` would otherwise see every action answered as a session
+		// that ended — the session grant's words for the same finding.
+		const { app } = makeHarness({ session: { isAuthenticated: true, user: { id: "user-1" } } });
+		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		expect(res.status).toBe(401);
+		expect(res.body).toEqual({
+			error: "login_required",
+			error_description: "session identifier (sid) is required",
+		});
+	});
+
+	it("warns once, naming the sid, when the session behind the cookie records another subject", async () => {
+		const logger = makeLogger();
+		const { app } = makeHarness({
+			session: { isAuthenticated: true, user: { id: "user-1" }, sid: "sid-2" },
+			logger,
+		});
+		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		expect(res.status).toBe(401);
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ sid: "sid-2" },
+			"device_verification_session_subject_mismatch",
+		);
+		expect(logger.error).not.toHaveBeenCalled();
+	});
+
+	it("refuses a session that authenticated at or before the subject's sessions boundary", async () => {
+		// `revokeAllForSubject` stamps the boundary first and deletes the
+		// sessions after it; a cascade that failed, or a session the subject
+		// index never learnt of, leaves the record while the boundary is in
+		// force. federation-grants refuses that session the same way.
+		const subjectRevocation = createInMemorySubjectRevocation();
+		await subjectRevocation.revokeBefore("user-1", AUTH_TIME, FAR);
+		const { app, poll } = makeHarness({ subjectRevocation });
+		const started = await startDevice(app);
+		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+		expect(res.status).toBe(401);
+		expect(res.body.error).toBe("login_required");
+		const pending = await poll(started.body.device_code as string);
+		expect(pending.result).toMatchObject({ status: 400, error: "authorization_pending" });
+	});
+
+	it("approves from a session that authenticated after the boundary", async () => {
+		const subjectRevocation = createInMemorySubjectRevocation();
+		await subjectRevocation.revokeBefore("user-1", new Date(AUTH_TIME.getTime() - 60_000), FAR);
+		const { app } = makeHarness({ subjectRevocation });
+		const started = await startDevice(app);
+		const res = await verify(app, { action: "approve", user_code: started.body.user_code });
+		expect(res.status).toBe(200);
+	});
+
+	it("answers a boundary it cannot read with 503, logged once at error", async () => {
+		const logger = makeLogger();
+		const subjectRevocation: SubjectRevocation = {
+			kind: "broken",
+			revokeBefore: async () => {},
+			revokedBefore: async () => {
+				throw new Error("redis down");
+			},
+		};
+		const { app } = makeHarness({ subjectRevocation, logger });
+		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "session store unavailable",
+		});
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [line, event] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(event).toBe("device_verification_session_liveness_unavailable");
+		expect(line).toMatchObject({ store: "revocation_boundary", step: "read" });
+		expect(line.err).not.toBeInstanceOf(Error);
+	});
+
+	it("spends none of the subject's budget on a session that has ended", async () => {
+		const rateLimiter = createMemoryRateLimiter({
+			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+		});
+		const dead = makeHarness({
+			rateLimiter,
+			session: { isAuthenticated: true, user: { id: "user-1" }, sid: "sid-gone" },
+		});
+		for (let i = 0; i < 3; i++) {
+			expect((await verify(dead.app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(
+				401,
+			);
+		}
+		const live = makeHarness({ rateLimiter });
+		expect((await verify(live.app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(404);
+	});
+
+	it.each(["lookup", "approve", "deny"] as const)(
+		"answers a session-store outage on %s with 503, before the code is read",
+		async (action) => {
+			const store = liveSessionStore();
+			store.get = async () => {
+				throw new Error("redis down");
+			};
+			const { app } = makeHarness({ userSessionStore: store, logger: makeLogger() });
+			const res = await verify(app, { action, user_code: "BCDF-GHJK" });
+			expect(res.status).toBe(503);
+			expect(res.body.error).toBe("temporarily_unavailable");
+		},
+	);
+
+	it("writes the outage line to core's console logger when no logger is wired", async () => {
+		const spy = vi.spyOn(consoleLogger, "error").mockImplementation(() => {});
+		try {
+			const store = liveSessionStore();
+			store.get = async () => {
+				throw new Error("redis down");
+			};
+			const { app } = makeHarness({ userSessionStore: store });
+			expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(503);
+			expect(spy).toHaveBeenCalledTimes(1);
+			expect(spy.mock.calls[0]?.[1]).toBe("device_verification_session_liveness_unavailable");
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("refuses to build a handler with no userSessionStore — a hand-mounted handler would answer every request 503", () => {
+		expect(() =>
+			createDeviceVerificationHandler({
+				store: createMemoryDeviceCodeStore(),
+				settings,
+				rateLimiter: createMemoryRateLimiter({
+					limits: { device_verification: { limit: 5, windowSeconds: 300 } },
+					defaultLimit: { limit: 60, windowSeconds: 60 },
+				}),
+				failMode: "closed",
+				requireEmailVerified: false,
+			} as never),
+		).toThrow(/userSessionStore/);
 	});
 });

@@ -36,6 +36,7 @@ import type {
 	ComponentMap,
 	DeviceCodeStore,
 	Logger,
+	SubjectRevocation,
 	SubjectRevocationService,
 	SubjectSessionIndex,
 	UserRepository,
@@ -1106,6 +1107,40 @@ describe("deviceGrantModule beside oauthModule — an approval needs the live se
 
 			const polled = await pollFor(app, deviceCode);
 			expect(polled.status).toBe(400);
+			expect(polled.body.error).toBe("authorization_pending");
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses an approval from a session the subject's sessions boundary covers, though its record survived", async () => {
+		// revokeAllForSubject stamps the boundary first and deletes the
+		// sessions after it. A cascade that failed for this session — or a
+		// session the subject index never learnt of — leaves the record while
+		// the boundary is in force: the record says live, the boundary says
+		// ended, and the boundary is the one a credential change relies on.
+		const config = makeConfig(ENABLED);
+		const { handle, app } = await bootWith(config, modulesFor(config));
+		try {
+			const { userCode, deviceCode } = await startWithCodes(app);
+			const agent = request.agent(app);
+			await signIn(agent);
+			const { header, token } = await csrfToken(agent);
+
+			const revocation = handle.components.subjectRevocation as SubjectRevocation;
+			await revocation.revokeBefore("user-1", new Date(), new Date(Date.now() + 3_600_000));
+			// The record is still there.
+			const store = handle.components.userSessionStore as UserSessionStore;
+			expect(await store.get(await sidOf(handle.components))).not.toBeNull();
+
+			const res = await agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: userCode });
+			expect(res.status).toBe(401);
+			expect(res.body).toEqual(LOGIN_REQUIRED);
+
+			const polled = await pollFor(app, deviceCode);
 			expect(polled.body.error).toBe("authorization_pending");
 		} finally {
 			await handle.dispose();
