@@ -98,6 +98,25 @@ describe("the path-validation engine's refusal", () => {
 		});
 	});
 
+	it("an intermediate that is not a CA: pkijs's code 14, in the package's words", async () => {
+		// pkijs checks basicConstraints / keyUsage on each certificate above
+		// the leaf and answers any failure there as code 14; the finer codes
+		// its check computes (3–7) never reach the result.
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root, {
+			extensions: [basicConstraints(false), keyUsage(KEY_USAGE.keyCertSign | KEY_USAGE.cRLSign)],
+		});
+		const leaf = await mintLeaf("client", 10, int);
+
+		const result = await validate([root], leaf, [int]);
+
+		expect(result).toEqual({
+			ok: false,
+			step: "path validation failed",
+			detail: "a certificate on the path above the leaf is not a CA certificate",
+		});
+	});
+
 	it("a name inside an excluded subtree: the package's words, and no cause (the engine threw no Error)", async () => {
 		const root = await mintCa("Root", 1);
 		const int = await mintIntermediate("Intermediate", 2, root, {
