@@ -418,6 +418,7 @@ const userRepo = new InMemoryUserRepository(users);
 - `AuditSink.record(event)` は fire-and-forget
 - Factory: `createAuditSinkFactory()`、built-in `"console"` は `registerBuiltinAuditSinks()` で登録
 - Sink のエラーは core 側で握りつぶす — audit 失敗で認証フローがブロックされることはない
+- 組み込みのイベントはすべて `recordAuditEvent(sink, event)`（[`src/audit/factory.mts`](src/audit/factory.mts)）を通ってシンクに届く — `emitAuditEvent` はこれを呼んで切り離し、シンクを待つ発行者（federation grants）は直接呼んでシンクの Promise を受け取る。イベントの `ip` と `userAgent` は `auditErrorText` と同じくサニタイズして切り詰め（RFC 6749 の NQSCHAR、それ以外は `?`、最大 200 文字）、文字列でなければ落としてシンクに渡す: `trust proxy` の下では `req.ip` は呼び出し元が `X-Forwarded-For` に書いたものであり、User-Agent は呼び出し元自身のヘッダーだからである。通常のアドレスや User-Agent はそのまま運ばれる。[`logErrorProjection.drift.test.mts`](src/__tests__/logErrorProjection.drift.test.mts) が、ワークスペースのほかのどこもシンクに直接書かないことを確かめる
 - イベントが報告するエラーは `details.cause` に `auditedError(err)`（[`src/audit/auditedError.mts`](src/audit/auditedError.mts)）として載せる: `{ name, code?, cause?: { name, code? } }`。`loggableError` が読む name と code、およびその cause を 1 段だけ、サニタイズして切り詰めたもので、メッセージは運ばない。シンクは他のシステムが読む記録であり、ストアや IdP のメッセージは相手側の文字列だからである（Redis の応答が引用する引数、JSON のパースエラーが引用する入力、上流の説明）。`rate_limit.unavailable`、`introspect.store_unavailable`、`federation.logout.idp_unreachable` がこれを運ぶ
 - `details` の各キーはどのイベントでも型を 1 つに保つ。フィールドの型を最初に見たもので固定するシンク（Elasticsearch の dynamic mapping、BigQuery のスキーマ、Datadog のファセット）は食い違うイベントを落とすからである: `details.error` は現れるところではどこでも文字列（OAuth のコード、理由）で、`details.cause` の code も文字列。[`AuditEventDetails`](src/audit/types.mts) が両方のキーを型付けし、[`auditEventInventory.drift.test.mts`](src/audit/__tests__/auditEventInventory.drift.test.mts) がすべての発行箇所を読んで確かめる
 
@@ -432,7 +433,7 @@ const userRepo = new InMemoryUserRepository(users);
 
 ほかのキーは開いているが、それを運ぶイベントの間で型を 1 つに保つことが期待される。
 
-- **独自の発行者**（`emitAuditEvent` を呼ぶモジュール、イベントを組み立てるシンクのラッパー）:
+- **独自の発行者**（`emitAuditEvent` か `recordAuditEvent` を呼ぶモジュール、イベントを組み立てるシンクのラッパー）— `sink.record` を自分で呼ぶものは `ip` と `userAgent` の上限を通らない:
   - 報告するエラーは `details.cause` に、`auditedError(err)` で作ったものだけを載せる;
   - エラーオブジェクト、そのメッセージ、スタックを `details` のどこにも書かない;
   - `details.error` には文字列だけを書く。

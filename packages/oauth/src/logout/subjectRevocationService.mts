@@ -39,6 +39,7 @@ import {
 	type Logger,
 	loggableError,
 	type ProviderDeps,
+	recordAuditEvent,
 	requireFederationGrantSubjectRevocation,
 	resolveFederationGrantKeepPolicy,
 	resolveSubjectRevocationHorizonMs,
@@ -144,7 +145,7 @@ const auditor = (
 		// synchronously must fail the same way as one that rejects, and
 		// neither may reach the caller.
 		void Promise.resolve()
-			.then(() => sink.record(mapped))
+			.then(() => recordAuditEvent(sink, mapped))
 			.catch((err: unknown) => {
 				logger?.error(
 					{ err: loggableError(err), grantId: event.grantId, correlationId: event.correlationId },

@@ -419,6 +419,7 @@ Five optional extension points: a slot or contribution kind a composition root f
 - `AuditSink.record(event)` fire-and-forget
 - Factory: `createAuditSinkFactory()`, built-in `"console"` via `registerBuiltinAuditSinks()`
 - Errors swallowed by core — audit failure never blocks auth flow
+- Every built-in event reaches its sink through `recordAuditEvent(sink, event)` ([`src/audit/factory.mts`](src/audit/factory.mts)) — `emitAuditEvent` calls it and detaches; an emitter that waits on its sink (federation grants) calls it directly and gets the sink's promise. It hands the sink the event's `ip` and `userAgent` sanitised and capped as `auditErrorText` does (RFC 6749 NQSCHAR, `?` for anything else, at most 200 characters), and drops either when it is not a string: behind `trust proxy`, `req.ip` is what the caller wrote in `X-Forwarded-For`, and a user agent is the caller's own header. An ordinary address or user agent is carried unchanged. [`logErrorProjection.drift.test.mts`](src/__tests__/logErrorProjection.drift.test.mts) pins that nothing else in the workspace writes a sink
 - An event carries an error it reports as `details.cause`, `auditedError(err)` ([`src/audit/auditedError.mts`](src/audit/auditedError.mts)): `{ name, code?, cause?: { name, code? } }` — the name and code `loggableError` reads, and one level of its cause, sanitised and capped, and never a message. A sink is a record other systems read, and a store's or an IdP's message is theirs: the arguments a Redis reply quotes, the input a JSON parse error quotes, an upstream's description. `rate_limit.unavailable`, `introspect.store_unavailable` and `federation.logout.idp_unreachable` carry it
 - Each `details` key keeps one type in every event, because a sink that fixes a field's type on first sight (Elasticsearch dynamic mapping, a BigQuery schema, a Datadog facet) drops the events that disagree: `details.error` is a string wherever it appears (an OAuth code, a reason), and a code in `details.cause` is a string. [`AuditEventDetails`](src/audit/types.mts) types both keys, and [`auditEventInventory.drift.test.mts`](src/audit/__tests__/auditEventInventory.drift.test.mts) reads every emission for them
 
@@ -433,7 +434,7 @@ Five optional extension points: a slot or contribution kind a composition root f
 
 Every other key is open, and is still expected to keep one type across the events that carry it.
 
-- **A custom emitter** (a module calling `emitAuditEvent`, or a sink wrapper that builds events):
+- **A custom emitter** (a module calling `emitAuditEvent` or `recordAuditEvent`, or a sink wrapper that builds events) — one that calls `sink.record` itself skips the bound on `ip` and `userAgent`:
   - puts an error it reports under `details.cause`, built with `auditedError(err)` and nothing else;
   - never writes an error object, its message or its stack anywhere in `details`;
   - writes `details.error` only as a string.

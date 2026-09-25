@@ -97,7 +97,13 @@ export interface AuditEvent {
 	readonly type: string;
 	readonly subject?: string;
 	readonly clientId?: string;
+	/**
+	 * The request's address — behind `trust proxy`, what the caller wrote in
+	 * `X-Forwarded-For`. A sink is handed it sanitised and capped
+	 * (`recordAuditEvent`).
+	 */
 	readonly ip?: string;
+	/** The request's `User-Agent`, the caller's own; a sink is handed it sanitised and capped. */
 	readonly userAgent?: string;
 	readonly details?: AuditEventDetails;
 }

@@ -73,8 +73,9 @@ function walk(dir: string, out: string[]): void {
  * the first field but not always the first line.
  *
  * The receiver pattern is deliberately narrow — `emitAuditEvent(` (the
- * helper every module-side emission goes through) and `sink.record(` (the
- * direct calls inside the audit plumbing itself) — because a bare
+ * helper every module-side emission goes through), `recordAuditEvent(` (the
+ * one an emitter that waits on its sink calls) and `sink.record(` (the direct
+ * call inside the audit plumbing itself) — because a bare
  * `\.record\(` also matches `z.record(`, and a schema definition sitting
  * near an unrelated `type: "..."` literal would poison the inventory.
  * A new emission spelled differently shows up as a missing-inventory
@@ -85,7 +86,9 @@ function emittedEventTypes(): ReadonlySet<string> {
 	const found = new Set<string>();
 	for (const file of listShippedSources()) {
 		const source = readFileSync(file, "utf8");
-		for (const call of source.matchAll(/(?:emitAuditEvent|\bsink\.record)\(/g)) {
+		for (const call of source.matchAll(
+			/(?:\bemitAuditEvent|\brecordAuditEvent|\bsink\.record)\(/g,
+		)) {
 			const windowText = source.slice(call.index, (call.index ?? 0) + 600);
 			const literal = /type:\s*"([^"]+)"/.exec(windowText);
 			if (literal?.[1]) found.add(literal[1]);

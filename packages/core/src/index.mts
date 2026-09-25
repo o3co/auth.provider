@@ -100,6 +100,7 @@ export {
 export {
 	createAuditSinkFactory,
 	emitAuditEvent,
+	recordAuditEvent,
 	registerBuiltinAuditSinks,
 } from "./audit/factory.mjs";
 // Audit
