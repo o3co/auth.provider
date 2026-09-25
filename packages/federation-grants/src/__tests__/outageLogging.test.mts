@@ -418,7 +418,7 @@ describe("what the router mounts in front of the handlers", () => {
 		expect(written(await settled(h))).toEqual(["error client_repository_unavailable"]);
 		expect(payloadOf(h.lines, "client_repository_unavailable")).toEqual({
 			site: "federation_grants",
-			step: "authenticate",
+			step: "find",
 			clientId: CLIENT_ID,
 			err: expect.objectContaining({ name: "Error", detail: "client registry down" }),
 		});

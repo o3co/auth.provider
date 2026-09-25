@@ -56,6 +56,18 @@
  * Removing mandatory consent later is a redesign of this exemption, not a UI
  * preference. The `POST` additionally refuses explicit cross-site fetch
  * metadata, which costs a legitimate page nothing.
+ *
+ * ## What it logs
+ *
+ * Every `503`, and every `temporarily_unavailable` redirect the callback
+ * answers, because something could not answer is ONE line at error —
+ * `federation_grant_connect_unavailable`, `federation_grant_consent_unavailable`
+ * or `federation_grant_callback_unavailable` — with `store` and `step` (or the
+ * `reason`) and the error's projection. A client registry that cannot answer
+ * is core's `client_repository_unavailable`, with this route as its `site`. A
+ * failure that changed no answer — a best-effort write, an upstream that
+ * refused the code — is one warn. The throttle logs and audits a limiter
+ * outage through core, with the deployment's logger and audit sink.
  */
 
 import { randomBytes } from "node:crypto";
@@ -89,7 +101,7 @@ import { federationGrantIdentityRegistration } from "./acquisitionSettings.mjs";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
 import { federationGrantConnectUri } from "./lodgeRoute.mjs";
-import { createSanitizedReporter } from "./report.mjs";
+import { createFederationGrantLog, readField } from "./log.mjs";
 import { createRequestIdMiddleware, requestIdOf } from "./requestId.mjs";
 import { parserRefusals, unexpectedErrors } from "./routes.mjs";
 
@@ -202,6 +214,23 @@ const isPrefetch = (req: Request): boolean => {
 // The judgement both halves share
 // ---------------------------------------------------------------------------
 
+/**
+ * What could not answer, for the one line an outage writes: the store (or
+ * `client`, the client registry, which core's own line reports), what it was
+ * asked, and what it threw.
+ */
+interface Unanswered {
+	readonly store:
+		| "federation_grant"
+		| "federation_grant_intent"
+		| "revocation_boundary"
+		| "user_session"
+		| "user_directory"
+		| "client";
+	readonly step: string;
+	readonly error: unknown;
+}
+
 type Judgement =
 	| { readonly ok: true; readonly binding: FederationGrantBrowserBinding }
 	| {
@@ -213,8 +242,14 @@ type Judgement =
 				| "reauthentication_required"
 				| "stale"
 				| "connection_not_permitted"
-				| "connection_changed"
-				| "unavailable";
+				| "connection_changed";
+	  }
+	| {
+			readonly ok: false;
+			readonly status: 503;
+			readonly reason: "unavailable";
+			/** What could not answer: the caller logs it, once. */
+			readonly unanswered: Unanswered;
 	  };
 
 /**
@@ -241,6 +276,8 @@ async function judge(
 		return { ok: false, status: 403, reason: "reauthentication_required" };
 	}
 
+	// Which question is being asked, so that a failure names what could not answer.
+	let asking: Omit<Unanswered, "error"> = { store: "user_session", step: "get" };
 	try {
 		const durable = await options.userSessionStore.get(sid);
 		const at = now();
@@ -252,6 +289,7 @@ async function judge(
 		) {
 			return { ok: false, status: 403, reason: "reauthentication_required" };
 		}
+		asking = { store: "revocation_boundary", step: "read" };
 		const boundary = await options.sessionsBoundary(subject);
 		if (boundary !== null && !(boundary instanceof Date && !Number.isNaN(boundary.getTime()))) {
 			throw new TypeError("the sessions boundary is neither a date nor null");
@@ -263,9 +301,11 @@ async function judge(
 		if (coveredByRevocationBoundary(durable.authTime, boundary, options.revocationSkewMs)) {
 			return { ok: false, status: 403, reason: "reauthentication_required" };
 		}
+		asking = { store: "federation_grant", step: "is_current_intent" };
 		if (!(await options.grantStore.isCurrentIntent(intent.grantId, intent.handle, now()))) {
 			return { ok: false, status: 400, reason: "stale" };
 		}
+		asking = { store: "client", step: "find" };
 		const client = await options.clientRepository.findById(intent.clientId);
 		// Read as a list or as nothing (`federationGrantAllowlist`, D9): a
 		// repository answering a string would otherwise match by substring.
@@ -276,10 +316,10 @@ async function judge(
 		if (client === null || !allowed.includes(intent.connection)) {
 			return { ok: false, status: 403, reason: "connection_not_permitted" };
 		}
-	} catch {
+	} catch (error) {
 		// Fails closed: a session, a boundary, a pointer or a client that cannot
 		// be read is not a yes.
-		return { ok: false, status: 503, reason: "unavailable" };
+		return { ok: false, status: 503, reason: "unavailable", unanswered: { ...asking, error } };
 	}
 
 	const connection = options.connections.get(intent.connection);
@@ -327,8 +367,34 @@ export function createFederationGrantBrowserRouter(
 ): Router {
 	const now = options.now ?? (() => new Date());
 	const randomId = options.randomId ?? (() => randomBytes(32).toString("base64url"));
-	const report = options.logger === undefined ? undefined : createSanitizedReporter(options.logger);
+	const log = createFederationGrantLog(options.logger);
 	const router = express.Router();
+
+	/**
+	 * A judgement that could not be made, as one line: the client registry as
+	 * core's `client_repository_unavailable` with this route as its site, any
+	 * other store as the route's own outage.
+	 */
+	const judgementUnavailable = (
+		route: "connect" | "consent",
+		fields: Readonly<Record<string, string | undefined>>,
+		intent: FederationGrantIntent,
+		unanswered: Unanswered,
+	): void => {
+		if (unanswered.store === "client") {
+			log.clientRepositoryUnavailable(
+				`federation_grant_${route}`,
+				intent.clientId,
+				unanswered.error,
+			);
+			return;
+		}
+		log.outage(
+			`federation_grant_${route}_unavailable`,
+			{ ...fields, reason: "storage", store: unanswered.store, step: unanswered.step },
+			unanswered.error,
+		);
+	};
 
 	const auditFor = (req: Request) =>
 		createFederationGrantAuditBridge({
@@ -369,11 +435,15 @@ export function createFederationGrantBrowserRouter(
 		(render: (res: Response, status: number) => void): RequestHandler =>
 		async (req, res, next) => {
 			const ip = req.ip ?? "unknown";
+			// The deployment's own logger and audit sink: a limiter outage here
+			// is logged and audited as on every other throttled route.
 			const outcome = await checkWithFailMode(
 				{
 					limiter: options.rateLimiter,
 					tag: FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX,
 					failMode: options.failMode,
+					...(options.logger === undefined ? {} : { logger: options.logger }),
+					...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
 				},
 				`${FEDERATION_GRANTS_BROWSER_RATE_LIMIT_PREFIX}:ip:${ip}`,
 				{
@@ -439,12 +509,16 @@ export function createFederationGrantBrowserRouter(
 				try {
 					intent = await options.intentStore.getIntent(handle, now());
 				} catch (error) {
-					report?.({
-						during: "connect_intent",
+					log.outage(
+						"federation_grant_connect_unavailable",
+						{
+							correlationId: requestIdOf(res),
+							reason: "storage",
+							store: "federation_grant_intent",
+							step: "get_intent",
+						},
 						error,
-						grantId: "",
-						correlationId: requestIdOf(res),
-					});
+					);
 					plain(res, 503, "Temporarily unavailable.");
 					return;
 				}
@@ -468,6 +542,14 @@ export function createFederationGrantBrowserRouter(
 				}
 				const judged = await judge(options, req, intent, now);
 				if (!judged.ok) {
+					if ("unanswered" in judged) {
+						judgementUnavailable(
+							"connect",
+							{ grantId: intent.grantId, correlationId: requestIdOf(res) },
+							intent,
+							judged.unanswered,
+						);
+					}
 					failed(req, res, judged.reason, intent);
 					plain(res, judged.status, messageFor(judged.reason));
 					return;
@@ -481,12 +563,17 @@ export function createFederationGrantBrowserRouter(
 						now: now(),
 					});
 				} catch (error) {
-					report?.({
-						during: "connect_park",
+					log.outage(
+						"federation_grant_connect_unavailable",
+						{
+							grantId: intent.grantId,
+							correlationId: requestIdOf(res),
+							reason: "storage",
+							store: "federation_grant_intent",
+							step: "park_consent",
+						},
 						error,
-						grantId: intent.grantId,
-						correlationId: requestIdOf(res),
-					});
+					);
 					plain(res, 503, "Temporarily unavailable.");
 					return;
 				}
@@ -496,7 +583,7 @@ export function createFederationGrantBrowserRouter(
 				}
 				res.redirect(303, consentLocation(options.consentUrl, options.issuer, parked.challenge));
 			} catch (error) {
-				report?.({ during: "connect", error, grantId: "", correlationId: requestIdOf(res) });
+				log.unexpected("connect", { correlationId: requestIdOf(res) }, error);
 				plain(res, 500, "Something went wrong.");
 			}
 		}),
@@ -526,12 +613,24 @@ export function createFederationGrantBrowserRouter(
 		}
 		let consent: Awaited<ReturnType<FederationGrantIntentStore["getConsent"]>>;
 		let intent: FederationGrantIntent | null = null;
+		let step = "get_consent";
 		try {
 			consent = await options.intentStore.getConsent(presented, now());
+			step = "get_intent";
 			if (consent !== null)
 				intent = await options.intentStore.getIntent(consent.intentHandle, now());
 		} catch (error) {
-			report?.({ during: "consent_read", error, grantId: "", correlationId: requestIdOf(res) });
+			log.outage(
+				"federation_grant_consent_unavailable",
+				{
+					method: req.method,
+					correlationId: requestIdOf(res),
+					reason: "storage",
+					store: "federation_grant_intent",
+					step,
+				},
+				error,
+			);
 			jsonError(res, 503, "temporarily_unavailable", "storage");
 			return null;
 		}
@@ -550,6 +649,14 @@ export function createFederationGrantBrowserRouter(
 		}
 		const judged = await judge(options, req, intent, now);
 		if (!judged.ok) {
+			if ("unanswered" in judged) {
+				judgementUnavailable(
+					"consent",
+					{ method: req.method, grantId: intent.grantId, correlationId: requestIdOf(res) },
+					intent,
+					judged.unanswered,
+				);
+			}
 			failed(req, res, judged.reason, intent);
 			if (judged.reason === "reauthentication_required") {
 				jsonError(res, 403, "reauthentication_required", "sign in again to continue");
@@ -581,12 +688,7 @@ export function createFederationGrantBrowserRouter(
 				try {
 					client = await options.clientRepository.findById(intent.clientId);
 				} catch (error) {
-					report?.({
-						during: "consent_client",
-						error,
-						grantId: intent.grantId,
-						correlationId: requestIdOf(res),
-					});
+					log.clientRepositoryUnavailable("federation_grant_consent", intent.clientId, error);
 					jsonError(res, 503, "temporarily_unavailable", "client registry unavailable");
 					return;
 				}
@@ -610,7 +712,7 @@ export function createFederationGrantBrowserRouter(
 					),
 				});
 			} catch (error) {
-				report?.({ during: "consent_get", error, grantId: "", correlationId: requestIdOf(res) });
+				log.unexpected("consent", { method: req.method, correlationId: requestIdOf(res) }, error);
 				jsonError(res, 500, "server_error", "unexpected_error");
 			}
 		}),
@@ -635,6 +737,48 @@ export function createFederationGrantBrowserRouter(
 				const found = await pendingFor(req, res, body.challenge);
 				if (found === null) return;
 				const { intent, binding, challenge } = found;
+				/** What every line of this answer carries. */
+				const context = {
+					method: req.method,
+					grantId: intent.grantId,
+					correlationId: requestIdOf(res),
+				};
+				/** A `503` this answer gives: one line at error. */
+				const consentUnavailable = (
+					description: "storage" | "upstream_unavailable",
+					at: { readonly store?: string; readonly step: string; readonly refusal?: string },
+					...cause: [] | [unknown]
+				): void => {
+					log.outage(
+						"federation_grant_consent_unavailable",
+						{ ...context, reason: description, ...at },
+						...cause,
+					);
+					jsonError(res, 503, "temporarily_unavailable", description);
+				};
+				/**
+				 * The answer recorded, or `null` after a `503`: an intent store that
+				 * cannot record it is its outage, not an unexpected error.
+				 */
+				const record = async (
+					answer: Parameters<FederationGrantIntentStore["answerConsent"]>[0]["answer"],
+				) => {
+					try {
+						return await options.intentStore.answerConsent({
+							challenge,
+							binding,
+							answer,
+							now: now(),
+						});
+					} catch (error) {
+						consentUnavailable(
+							"storage",
+							{ store: "federation_grant_intent", step: "answer_consent" },
+							error,
+						);
+						return null;
+					}
+				};
 				const decision = body.decision;
 				if (decision !== "accept" && decision !== "deny") {
 					// Refused with the question still parked: nothing was answered.
@@ -643,12 +787,8 @@ export function createFederationGrantBrowserRouter(
 				}
 
 				if (decision === "deny") {
-					const answered = await options.intentStore.answerConsent({
-						challenge,
-						binding,
-						answer: { decision: "deny" },
-						now: now(),
-					});
+					const answered = await record({ decision: "deny" });
+					if (answered === null) return;
 					if (answered.outcome !== "denied") {
 						jsonError(res, 400, "invalid_request", NO_PENDING);
 						return;
@@ -665,12 +805,11 @@ export function createFederationGrantBrowserRouter(
 						} catch (error) {
 							// The consent is already spent, so nothing can activate
 							// through this pointer; it lapses with the flow budget.
-							report?.({
-								during: "consent_retire",
+							log.degraded(
+								"federation_grant_consent_step_failed",
+								{ ...context, store: "federation_grant", step: "retire_intent" },
 								error,
-								grantId: intent.grantId,
-								correlationId: requestIdOf(res),
-							});
+							);
 						}
 					}
 					failed(req, res, "access_denied", intent);
@@ -683,7 +822,7 @@ export function createFederationGrantBrowserRouter(
 					// Boot refuses a connection whose federation lacks the
 					// capability; reaching here is a composition fault, and nothing
 					// has been spent.
-					jsonError(res, 503, "temporarily_unavailable", "upstream_unavailable");
+					consentUnavailable("upstream_unavailable", { step: "authorizer" });
 					return;
 				}
 				const state = randomId();
@@ -703,23 +842,18 @@ export function createFederationGrantBrowserRouter(
 						authorizationParams: intent.authorizationParams,
 					});
 				} catch (error) {
-					report?.({
-						during: "consent_authorize_url",
-						error,
-						grantId: intent.grantId,
-						correlationId: requestIdOf(res),
-					});
-					jsonError(res, 503, "temporarily_unavailable", "upstream_unavailable");
+					consentUnavailable("upstream_unavailable", { step: "authorization_url" }, error);
 					return;
 				}
-				const answered = await options.intentStore.answerConsent({
-					challenge,
-					binding,
-					answer: { decision: "accept", state, codeVerifier, nonce },
-					now: now(),
-				});
+				const answered = await record({ decision: "accept", state, codeVerifier, nonce });
+				if (answered === null) return;
 				if (answered.outcome === "refused") {
-					jsonError(res, 503, "temporarily_unavailable", "storage");
+					// A fault on this side, and nothing was thrown: the store names it.
+					consentUnavailable("storage", {
+						store: "federation_grant_intent",
+						step: "answer_consent",
+						refusal: answered.reason,
+					});
 					return;
 				}
 				if (answered.outcome !== "accepted") {
@@ -730,7 +864,7 @@ export function createFederationGrantBrowserRouter(
 				// upstream happens only once the transaction exists.
 				res.redirect(303, upstream.href);
 			} catch (error) {
-				report?.({ during: "consent_post", error, grantId: "", correlationId: requestIdOf(res) });
+				log.unexpected("consent", { method: req.method, correlationId: requestIdOf(res) }, error);
 				jsonError(res, 500, "server_error", "unexpected_error");
 			}
 		}),
@@ -774,7 +908,16 @@ export function createFederationGrantBrowserRouter(
 						now: now(),
 					});
 				} catch (error) {
-					report?.({ during: "callback_transaction", error, grantId: "", correlationId });
+					log.outage(
+						"federation_grant_callback_unavailable",
+						{
+							correlationId,
+							reason: "storage",
+							store: "federation_grant_intent",
+							step: "consume_transaction",
+						},
+						error,
+					);
 					plain(res, 503, "Temporarily unavailable.");
 					return;
 				}
@@ -784,7 +927,7 @@ export function createFederationGrantBrowserRouter(
 					return;
 				}
 			} catch (error) {
-				report?.({ during: "callback", error, grantId: "", correlationId });
+				log.unexpected("callback", { correlationId }, error);
 				plain(res, 500, "Something went wrong.");
 				return;
 			}
@@ -792,13 +935,29 @@ export function createFederationGrantBrowserRouter(
 			const { intent } = transaction;
 			/** What this flow's events correlate by: the id its lodging carried. */
 			const flowId = intent.correlationId;
+			/** What every line of this callback carries: its grant, and THIS request's id. */
+			const context = { grantId: intent.grantId, correlationId };
+			/**
+			 * What could not answer, behind the `temporarily_unavailable` redirect
+			 * about to be sent: one line, at error.
+			 */
+			const outage = (unanswered: Unanswered): void =>
+				log.outage(
+					"federation_grant_callback_unavailable",
+					{ ...context, reason: "storage", store: unanswered.store, step: unanswered.step },
+					unanswered.error,
+				);
 			/** Every terminal outcome after check 1 ends here: the flow is over either way. */
 			const finish = async (): Promise<void> => {
 				try {
 					await options.intentStore.finishIntent(intent.handle, now());
 				} catch (error) {
 					// Cannot undo anything, and the flow budget ends it regardless.
-					report?.({ during: "callback_finish", error, grantId: intent.grantId, correlationId });
+					log.degraded(
+						"federation_grant_callback_step_failed",
+						{ ...context, store: "federation_grant_intent", step: "finish_intent" },
+						error,
+					);
 				}
 			};
 			/** `reason` is the audit's alone (`code/reason`); the client hears the code. */
@@ -816,14 +975,16 @@ export function createFederationGrantBrowserRouter(
 				// the configuration it was lodged against; and, for a renewal, the
 				// grant it would renew still standing under the subject's boundary.
 				let grantsBoundary: Date | null;
+				let asking: Omit<Unanswered, "error"> = { store: "revocation_boundary", step: "read" };
 				try {
 					grantsBoundary = await readBoundary(options.grantsBoundary, intent.subject);
+					asking = { store: "federation_grant", step: "is_current_intent" };
 					if (!(await options.grantStore.isCurrentIntent(intent.grantId, intent.handle, at))) {
 						await fail("grant_not_authorizable");
 						return;
 					}
 				} catch (error) {
-					report?.({ during: "callback_current", error, grantId: intent.grantId, correlationId });
+					outage({ ...asking, error });
 					await fail("temporarily_unavailable");
 					return;
 				}
@@ -834,6 +995,7 @@ export function createFederationGrantBrowserRouter(
 				if (intent.kind === "reauthorization") {
 					const backstopped = await backstop(intent, grantsBoundary, audit, flowId);
 					if (backstopped !== "clear") {
+						if (backstopped !== "revoked") outage(backstopped.unanswered);
 						await fail(
 							backstopped === "revoked" ? "grant_not_authorizable" : "temporarily_unavailable",
 						);
@@ -845,7 +1007,8 @@ export function createFederationGrantBrowserRouter(
 				// subject's, and signed in after the subject's sessions boundary.
 				const session = await sessionHolds(req, transaction);
 				if (session !== "ok") {
-					await fail(session);
+					if (typeof session === "object") outage(session.unanswered);
+					await fail(typeof session === "object" ? "temporarily_unavailable" : session);
 					return;
 				}
 
@@ -888,15 +1051,31 @@ export function createFederationGrantBrowserRouter(
 							options.identityLookup === "required" ? [...(connection.identityClaims ?? [])] : [],
 					});
 				} catch (error) {
-					report?.({ during: "callback_exchange", error, grantId: intent.grantId, correlationId });
-					await fail(isOutage(error) ? "temporarily_unavailable" : "upstream_error");
+					if (isOutage(error)) {
+						// Not reached, or not in time: the outage the redirect says.
+						log.outage(
+							"federation_grant_callback_unavailable",
+							{ ...context, reason: "upstream", step: "exchange" },
+							error,
+						);
+						await fail("temporarily_unavailable");
+					} else {
+						// The upstream answered, and refused: its verdict, not an outage.
+						log.degraded(
+							"federation_grant_callback_exchange_refused",
+							{ ...context, step: "exchange" },
+							error,
+						);
+						await fail("upstream_error");
+					}
 					return;
 				}
 				const receivedAt = now().getTime();
 
 				// 5. Account binding.
-				const bound = await accountHolds(intent, connection, exchanged.upstream, correlationId);
+				const bound = await accountHolds(intent, connection, exchanged.upstream);
 				if (!bound.holds) {
+					if (bound.unanswered !== undefined) outage(bound.unanswered);
 					await fail(bound.code, bound.reason);
 					return;
 				}
@@ -971,11 +1150,14 @@ export function createFederationGrantBrowserRouter(
 				// not close it; that needs write fencing (D13).
 				const again = await sessionHolds(req, transaction);
 				if (again !== "ok") {
-					await fail(again);
+					if (typeof again === "object") outage(again.unanswered);
+					await fail(typeof again === "object" ? "temporarily_unavailable" : again);
 					return;
 				}
+				let reasking: Omit<Unanswered, "error"> = { store: "revocation_boundary", step: "read" };
 				try {
 					const boundaryNow = await readBoundary(options.grantsBoundary, intent.subject);
+					reasking = { store: "federation_grant", step: "is_current_intent" };
 					if (
 						!(await options.grantStore.isCurrentIntent(intent.grantId, intent.handle, now())) ||
 						coveredByRevocationBoundary(
@@ -988,7 +1170,7 @@ export function createFederationGrantBrowserRouter(
 						return;
 					}
 				} catch (error) {
-					report?.({ during: "callback_reread", error, grantId: intent.grantId, correlationId });
+					outage({ ...reasking, error });
 					await fail("temporarily_unavailable");
 					return;
 				}
@@ -1032,7 +1214,7 @@ export function createFederationGrantBrowserRouter(
 						now: now(),
 					});
 				} catch (error) {
-					report?.({ during: "callback_activate", error, grantId: intent.grantId, correlationId });
+					outage({ store: "federation_grant", step: "activate", error });
 					await fail("temporarily_unavailable");
 					return;
 				}
@@ -1072,7 +1254,7 @@ export function createFederationGrantBrowserRouter(
 				await finish();
 				res.redirect(303, clientReturn(intent));
 			} catch (error) {
-				report?.({ during: "callback", error, grantId: intent.grantId, correlationId });
+				log.unexpected("callback", context, error);
 				await fail("temporarily_unavailable");
 			}
 		}),
@@ -1087,7 +1269,9 @@ export function createFederationGrantBrowserRouter(
 	async function sessionHolds(
 		req: Request,
 		transaction: FederationGrantConnectTransaction,
-	): Promise<"ok" | "reauthentication_required" | "account_mismatch" | "temporarily_unavailable"> {
+	): Promise<
+		"ok" | "reauthentication_required" | "account_mismatch" | { readonly unanswered: Unanswered }
+	> {
 		const { binding, intent } = transaction;
 		if (!authenticated(req)) return "reauthentication_required";
 		if (subjectOf(req) !== intent.subject || binding.subject !== intent.subject) {
@@ -1096,6 +1280,7 @@ export function createFederationGrantBrowserRouter(
 		if (sessionIdOf(req) !== binding.sessionId || durableSidOf(req) !== binding.sid) {
 			return "reauthentication_required";
 		}
+		let asking: Omit<Unanswered, "error"> = { store: "user_session", step: "get" };
 		try {
 			const durable = await options.userSessionStore.get(binding.sid);
 			if (
@@ -1106,12 +1291,13 @@ export function createFederationGrantBrowserRouter(
 			) {
 				return "reauthentication_required";
 			}
+			asking = { store: "revocation_boundary", step: "read" };
 			const boundary = await readBoundary(options.sessionsBoundary, intent.subject);
 			if (coveredByRevocationBoundary(durable.authTime, boundary, options.revocationSkewMs)) {
 				return "reauthentication_required";
 			}
-		} catch {
-			return "temporarily_unavailable";
+		} catch (error) {
+			return { unanswered: { ...asking, error } };
 		}
 		return "ok";
 	}
@@ -1127,7 +1313,8 @@ export function createFederationGrantBrowserRouter(
 		boundary: Date | null,
 		audit: ReturnType<typeof auditFor>,
 		correlationId: string,
-	): Promise<"clear" | "revoked" | "unavailable"> {
+	): Promise<"clear" | "revoked" | { readonly unanswered: Unanswered }> {
+		let step = "find";
 		try {
 			const grant = await options.grantStore.find(intent.grantId, now());
 			if (grant === null || grant.status === "revoked") return "revoked";
@@ -1135,6 +1322,7 @@ export function createFederationGrantBrowserRouter(
 			if (!coveredByRevocationBoundary(grant.consent.at, boundary, options.revocationSkewMs)) {
 				return "clear";
 			}
+			step = "revoke";
 			const written = await options.grantStore.revoke(grant.id, "backstop", now());
 			if (written.ok) {
 				options.background.register(
@@ -1150,8 +1338,8 @@ export function createFederationGrantBrowserRouter(
 				);
 			}
 			return "revoked";
-		} catch {
-			return "unavailable";
+		} catch (error) {
+			return { unanswered: { store: "federation_grant", step, error } };
 		}
 	}
 
@@ -1169,13 +1357,22 @@ export function createFederationGrantBrowserRouter(
 		intent: FederationGrantIntent,
 		connection: FederationGrantAcquisitionConnection,
 		upstream: { readonly issuer: string; readonly subject: string; readonly claims?: unknown },
-		correlationId: string,
 	): Promise<AccountBinding> {
 		const refused = (code: CallbackError, reason?: string): AccountBinding => ({
 			holds: false,
 			code,
 			...(reason === undefined ? {} : { reason }),
 		});
+		/** Nothing could be established, and why: the redirect's `temporarily_unavailable`. */
+		const unanswered = (at: Unanswered): AccountBinding => ({
+			holds: false,
+			code: "temporarily_unavailable",
+			unanswered: at,
+		});
+		const LOOKUP = {
+			store: "user_directory",
+			step: "find_subject_by_federated_identity",
+		} as const;
 		if (upstream.issuer !== connection.upstreamIssuer) return refused("upstream_error");
 		if (intent.upstreamSubject !== undefined && upstream.subject !== intent.upstreamSubject) {
 			return refused("account_mismatch");
@@ -1191,8 +1388,8 @@ export function createFederationGrantBrowserRouter(
 				) {
 					return refused("account_mismatch");
 				}
-			} catch {
-				return refused("temporarily_unavailable");
+			} catch (error) {
+				return unanswered({ store: "federation_grant", step: "find", error });
 			}
 		}
 		if (options.identityLookup === "unsupported") return { holds: true, outcome: "unsupported" };
@@ -1204,13 +1401,10 @@ export function createFederationGrantBrowserRouter(
 		if (typeof repository?.findSubjectByFederatedIdentity !== "function") {
 			// Boot refused this under "required"; a repository that lost the
 			// method since is a composition fault an operator must hear about.
-			report?.({
-				during: "callback_identity_lookup",
+			return unanswered({
+				...LOOKUP,
 				error: new TypeError("the userRepository has no findSubjectByFederatedIdentity"),
-				grantId: intent.grantId,
-				correlationId,
 			});
-			return refused("temporarily_unavailable");
 		}
 		// #611: every claim the connection names, as the adapter verified it, or
 		// no question at all — a lookup handed part of its evidence could answer
@@ -1243,13 +1437,7 @@ export function createFederationGrantBrowserRouter(
 				throw new TypeError("the identity lookup answered something the port does not define");
 			}
 		} catch (error) {
-			report?.({
-				during: "callback_identity_lookup",
-				error,
-				grantId: intent.grantId,
-				correlationId,
-			});
-			return refused("temporarily_unavailable");
+			return unanswered({ ...LOOKUP, error });
 		}
 		switch (answer.kind) {
 			case "linked":
@@ -1297,7 +1485,13 @@ type AccountBinding =
 			readonly holds: true;
 			readonly outcome: "required/linked" | "required/unlinked" | "unsupported";
 	  }
-	| { readonly holds: false; readonly code: CallbackError; readonly reason?: string };
+	| {
+			readonly holds: false;
+			readonly code: CallbackError;
+			readonly reason?: string;
+			/** When nothing could be established: what could not answer, for the one line. */
+			readonly unanswered?: Unanswered;
+	  };
 
 /**
  * The named claims out of what the adapter answered, as a fresh object, or
@@ -1395,15 +1589,45 @@ function callbackParamsOf(req: Request): Readonly<Record<string, string>> {
 	return params;
 }
 
-/** A failure to REACH the upstream — not one it answered — is an outage, not an upstream error. */
+/** The names a request that was given up on is raised under: `AbortSignal.timeout` raises `TimeoutError`. */
+const ABANDONED: ReadonlySet<string> = new Set(["AbortError", "TimeoutError"]);
+
+/** Node's and undici's codes for a connection that could not be made, or was lost. */
+const UNREACHABLE: ReadonlySet<string> = new Set([
+	"ECONNREFUSED",
+	"ECONNRESET",
+	"ENOTFOUND",
+	"ETIMEDOUT",
+	"EAI_AGAIN",
+	"EHOSTUNREACH",
+	"ENETUNREACH",
+	"EPIPE",
+	"UND_ERR_CONNECT_TIMEOUT",
+	"UND_ERR_HEADERS_TIMEOUT",
+	"UND_ERR_BODY_TIMEOUT",
+	"UND_ERR_SOCKET",
+]);
+
+/**
+ * A failure to REACH the upstream — not one it answered — is an outage, not an
+ * upstream error. Read off what an error IS, never what its text says: a
+ * name from {@link ABANDONED} or a code from {@link UNREACHABLE} on the error
+ * or any of its first causes, or undici's own shape for a request that never
+ * got an answer — `fetch`'s `TypeError` whose cause is the socket's or the
+ * TLS layer's coded error (a certificate that does not verify included).
+ */
 function isOutage(error: unknown): boolean {
-	const name = (error as { name?: unknown })?.name;
-	if (name === "AbortError" || name === "TimeoutError") return true;
-	const cause = (error as { cause?: unknown })?.cause;
-	const causeName = (cause as { name?: unknown })?.name;
-	if (causeName === "AbortError" || causeName === "TimeoutError") return true;
-	const message = `${(error as Error)?.message ?? ""} ${(cause as Error)?.message ?? ""}`;
-	return /fetch failed|ECONNREFUSED|ECONNRESET|ENOTFOUND|ETIMEDOUT|EAI_AGAIN/.test(message);
+	let current = error;
+	for (let depth = 0; depth < 4 && current !== undefined && current !== null; depth++) {
+		const name = readField(current, "name");
+		const code = readField(current, "code");
+		if (typeof name === "string" && ABANDONED.has(name)) return true;
+		if (typeof code === "string" && UNREACHABLE.has(code)) return true;
+		const cause = readField(current, "cause");
+		if (name === "TypeError" && typeof readField(cause, "code") === "string") return true;
+		current = cause;
+	}
+	return false;
 }
 
 function messageFor(reason: Exclude<Judgement, { ok: true }>["reason"]): string {

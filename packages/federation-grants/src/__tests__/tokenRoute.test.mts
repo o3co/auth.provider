@@ -518,12 +518,10 @@ describe("the token route — denials decided before the handler", () => {
 		expect(denied[0]?.details?.outcome).toBe("invalid_request");
 	});
 
-	it("audits a limiter outage as one, and keeps its message out of the trail", async () => {
-		// Found by review. `checkWithFailMode` put the limiter exception's
-		// message into both the log line and the `rate_limit.unavailable` event
-		// — and a string was passing this package's sanitizer, which trusted
-		// scalars. Core's event now carries the error's name and code only; the
-		// sanitizer still holds the trail to its allowlist whatever arrives.
+	it("audits a limiter outage as one, and keeps what the driver put on its error out of the trail", async () => {
+		// Core's event carries the error's name and code only, and its log line
+		// the projection's message: the refused command's arguments reach
+		// neither, through this router as through every other.
 		const h = harness({ rateLimiter: brokenLimiter });
 		const response = await request(h.app).post(path()).send({ sub: SUBJECT });
 
@@ -632,10 +630,19 @@ describe("the token route — how a failure is carried", () => {
 		expect(response.headers["retry-after"]).toBe("300");
 	});
 
-	it("never echoes what an upstream said back to the caller", async () => {
+	it("never echoes what an upstream said back to the caller, into the trail or into a log line", async () => {
+		// Shaped as openid-client's refusal is: the token answer it refused on
+		// the cause chain, and an IdP that quotes the token it refused in its
+		// `error_description`. The projection keeps neither.
 		const h = harness();
 		await h.seed({ credentials: { refreshToken: SECRET, accessToken: undefined } });
-		h.refresh.mockRejectedValue(new Error(`upstream said: ${SECRET}`));
+		h.refresh.mockRejectedValue(
+			Object.assign(new Error("server responded with an error in the response body"), {
+				error: "invalid_client",
+				error_description: `Invalid refresh token: ${SECRET}`,
+				cause: Object.assign(new Error("response"), { body: { refresh_token: SECRET } }),
+			}),
+		);
 
 		const response = await request(h.app)
 			.post(path())

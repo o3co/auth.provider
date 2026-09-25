@@ -171,8 +171,6 @@ function world(options: WorldOptions = {}) {
 		auditFails: false,
 		authorizerMissing: false,
 		configurationThrows: false,
-		/** What the router's sanitized reporter wrote. */
-		logged: [] as Record<string, unknown>[],
 	};
 	const now = () => state.now;
 	// Every line the router writes, with its level (`logSpy.mts`).
@@ -276,13 +274,7 @@ function world(options: WorldOptions = {}) {
 				"userRepository" in options
 					? options.userRepository
 					: new Directory(state.owners, state.lookups, intercept),
-			logger: {
-				...spy.logger,
-				warn: (...args: unknown[]) => {
-					state.logged.push(args[0] as Record<string, unknown>);
-					spy.logger.warn(...(args as [Record<string, unknown>, string]));
-				},
-			} as never,
+			logger: spy.logger,
 			upstreamTimeoutMs: 5_000,
 			rateLimiter:
 				options.rateLimiter ??
@@ -1443,8 +1435,12 @@ describe("what the adversarial review found", () => {
 	it("reads a connection that could not be made as an outage, not the upstream's fault", async () => {
 		const w = world();
 		const a = await approved(w, "b-1");
+		// As undici raises it: `fetch`'s TypeError, the socket's coded error as its
+		// cause. Read by the code, never by the text.
 		w.state.exchangeThrows = new TypeError("fetch failed", {
-			cause: new Error("connect ECONNREFUSED"),
+			cause: Object.assign(new Error("connect ECONNREFUSED 192.0.2.1:443"), {
+				code: "ECONNREFUSED",
+			}),
 		});
 		expect(returned(await callback(w, { state: a.state, code: "c" }, "b-1")).get("error")).toBe(
 			"temporarily_unavailable",
@@ -1946,9 +1942,10 @@ describe("the identity lookup (D7 check 5), when it cannot answer", () => {
 		expect(
 			returned(await callback(missing, { state: b.state, code: "c" }, "b-1")).get("error"),
 		).toBe("temporarily_unavailable");
-		expect(missing.state.logged).toContainEqual(
-			expect.objectContaining({ during: "callback_identity_lookup" }),
-		);
+		expect(payloadOf(missing.lines, "federation_grant_callback_unavailable")).toMatchObject({
+			store: "user_directory",
+			step: "find_subject_by_federated_identity",
+		});
 	});
 
 	it("asks nothing when the deployment recorded it cannot, and says so in the audit", async () => {
@@ -2176,7 +2173,7 @@ describe("#611: verified identity claims let a Store place a pairwise sub", () =
 		expect(JSON.stringify(grant)).not.toContain("SENTINEL");
 		await w.background.drain();
 		expect(JSON.stringify(w.events)).not.toContain("SENTINEL");
-		expect(JSON.stringify(w.state.logged)).not.toContain("SENTINEL");
+		expect(JSON.stringify(w.lines)).not.toContain("SENTINEL");
 	});
 });
 
@@ -2265,9 +2262,11 @@ describe("#611: an answer that establishes no ownership refuses the delegation",
 				JSON.stringify(answer),
 			).toBe("temporarily_unavailable");
 			expect((await w.grants.find(a.grantId, w.state.now))?.status).toBe("pending");
-			expect(w.state.logged).toContainEqual(
-				expect.objectContaining({ during: "callback_identity_lookup" }),
-			);
+			expect(payloadOf(w.lines, "federation_grant_callback_unavailable")).toMatchObject({
+				store: "user_directory",
+				step: "find_subject_by_federated_identity",
+				err: { name: "TypeError" },
+			});
 		}
 	});
 

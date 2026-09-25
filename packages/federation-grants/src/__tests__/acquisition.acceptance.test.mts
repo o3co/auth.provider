@@ -661,10 +661,10 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 		}
 	});
 
-	it("reports a Store that refuses this deployment's token as store_credential_refused — never the token — and answers temporarily_unavailable", async () => {
-		// The lookup's only caller reports through the sanitized reporter,
-		// which logs a classification and never the error: without one of its
-		// own, a refused token would read as "unknown" here.
+	it("logs a Store that refuses this deployment's token as the outage, by the refusal's name — never the token — and answers temporarily_unavailable", async () => {
+		// The callback logs the lookup's failure once, at error, as the error's
+		// projection: the foundation adapter's StoreCredentialRefusedError, its
+		// fixed message and the Store's status — and nothing the request carried.
 		const TOKEN = "0328d706529061d93abd6d826e09ef0f0a1e71a12af813b29e5cd2977b7dc63a";
 		const lines: unknown[][] = [];
 		const record =
@@ -695,18 +695,20 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 			store.body = { error: "invalid_token" };
 			expect((await connectAs(app, "b-http-6")).get("error")).toBe("temporarily_unavailable");
 			expect(store.authorization).toEqual([`Bearer ${TOKEN}`]);
-			const reports = lines.filter(
-				([, first]) =>
-					(first as { event?: unknown } | undefined)?.event === "federation_grant.failure",
-			);
-			expect(reports).toEqual([
+			// Boot may write its own notices; the lines at error are the outage's.
+			expect(lines.filter(([level]) => level === "error")).toEqual([
 				[
-					"warn",
+					"error",
 					expect.objectContaining({
-						during: "callback_identity_lookup",
-						classification: "store_credential_refused",
+						reason: "storage",
+						store: "user_directory",
+						step: "find_subject_by_federated_identity",
+						err: expect.objectContaining({
+							name: "StoreCredentialRefusedError",
+							storeStatus: 401,
+						}),
 					}),
-					"federation grant operation failed",
+					"federation_grant_callback_unavailable",
 				],
 			]);
 			expect(
@@ -719,7 +721,7 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 		}
 	});
 
-	it("reports a Store it cannot reach as store_transport_failed, and answers temporarily_unavailable", async () => {
+	it("logs a Store it cannot reach as the outage, with the transport failure's reason and code, and answers temporarily_unavailable", async () => {
 		const lines: unknown[][] = [];
 		const record =
 			(level: string) =>
@@ -762,18 +764,20 @@ describe("#613: the identity lookup over HTTP, composed", () => {
 		const { handle, app } = await boot(undefined, unreachable, connections(), undefined, logger);
 		try {
 			expect((await connectAs(app, "b-http-7")).get("error")).toBe("temporarily_unavailable");
-			const reports = lines.filter(
-				([, first]) =>
-					(first as { event?: unknown } | undefined)?.event === "federation_grant.failure",
-			);
-			expect(reports).toEqual([
+			// Boot may write its own notices; the lines at error are the outage's.
+			expect(lines.filter(([level]) => level === "error")).toEqual([
 				[
-					"warn",
+					"error",
 					expect.objectContaining({
-						during: "callback_identity_lookup",
-						classification: "store_transport_failed",
+						store: "user_directory",
+						step: "find_subject_by_federated_identity",
+						err: expect.objectContaining({
+							name: "StoreTransportError",
+							reason: "unreachable",
+							code: "ECONNREFUSED",
+						}),
 					}),
-					"federation grant operation failed",
+					"federation_grant_callback_unavailable",
 				],
 			]);
 		} finally {

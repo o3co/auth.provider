@@ -30,6 +30,11 @@
  *   7. the last error handler, for what escaped every handler: a logged 500
  *      (`unexpectedErrors`).
  *
+ * The throttle and client authentication are core's and oauth's, and they log
+ * and audit through the deployment's own logger and sink — the lines every
+ * other throttled, client-authenticated route writes. Client authentication's
+ * lines carry `site: "federation_grants"`.
+ *
  * Authentication before domain validation, deliberately: an unauthenticated
  * caller must not be able to learn anything about a grant, including by
  * measuring how long a refusal took.
@@ -56,14 +61,8 @@ import {
 	createFederationGrantReauthorizeHandler,
 	type FederationGrantAcquisitionRouteOptions,
 } from "./lodgeRoute.mjs";
-import {
-	createSanitizedAuditSink,
-	createSanitizedLogger,
-	isInstance,
-	readField,
-	unexpectedErrorFields,
-} from "./report.mjs";
-import { createRequestIdMiddleware } from "./requestId.mjs";
+import { createFederationGrantLog, isInstance, readField } from "./log.mjs";
+import { createRequestIdMiddleware, requestIdOf } from "./requestId.mjs";
 import { createFederationGrantRevokeHandler } from "./revokeRoute.mjs";
 import { createFederationGrantStatusHandler } from "./statusRoute.mjs";
 import {
@@ -234,21 +233,21 @@ export const parserRefusals: ErrorRequestHandler = (error, _req, res, next) => {
  * The routers' last error handler. An error that reaches it has escaped
  * every handler: it is `500 server_error` (`unexpected_error`), a fixed
  * description because whatever is in the error is not the caller's business,
- * and it is logged as `federation_grants_unexpected_error` with
- * `unexpectedErrorFields` — a classification and a status, nothing of the
- * error's text. The one exception is a path parameter Express could not
- * decode at a route itself (`undecodablePath`), which is the caller's `400
- * malformed_path` wherever it surfaces.
+ * and it is logged as `federation_grants_unexpected_error` with the request's
+ * `correlationId` and the error's projection (`loggableError`). The one
+ * exception is a path parameter Express could not decode at a route itself
+ * (`undecodablePath`), which is the caller's `400 malformed_path` wherever it
+ * surfaces.
  */
 export const unexpectedErrors = (logger: Logger | undefined): ErrorRequestHandler => {
-	const log = createSanitizedLogger(logger ?? consoleLogger);
+	const log = createFederationGrantLog(logger);
 	return (error, _req, res, next) => {
 		if (res.headersSent) return next(error);
 		if (undecodablePath(error)) {
 			res.status(400).json({ error: "invalid_request", error_description: "malformed_path" });
 			return;
 		}
-		log.error(unexpectedErrorFields(error), "federation_grants_unexpected_error");
+		log.unexpected(undefined, { correlationId: requestIdOf(res) }, error);
 		res.status(500).json({ error: "server_error", error_description: "unexpected_error" });
 	};
 };
@@ -313,12 +312,8 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 			tag: FEDERATION_GRANTS_RATE_LIMIT_PREFIX,
 			failMode: options.failMode,
 			deniedDescription: "provider",
-			...(options.logger === undefined ? {} : { logger: createSanitizedLogger(options.logger) }),
-			// Its `rate_limit.unavailable` event carries the limiter's own error
-			// message; the same allowlist the logger gets applies to the sink.
-			...(options.auditSink === undefined
-				? {}
-				: { auditSink: createSanitizedAuditSink(options.auditSink) }),
+			...(options.logger === undefined ? {} : { logger: options.logger }),
+			...(options.auditSink === undefined ? {} : { auditSink: options.auditSink }),
 		}),
 	);
 	router.use(supportedContentType);
@@ -333,7 +328,9 @@ export function createFederationGrantRouter(options: FederationGrantRouterOption
 			// value that is not a secret, and nothing else here proves it is the
 			// client it says it is.
 			...(options.replaySeenSet === undefined ? {} : { replaySeenSet: options.replaySeenSet }),
-			...(options.logger === undefined ? {} : { logger: createSanitizedLogger(options.logger) }),
+			// Its `client_repository_unavailable` and `client_assertion_refused`
+			// lines, with the site that tells them from the token endpoint's.
+			logger: (options.logger ?? consoleLogger).child({ site: "federation_grants" }),
 		}),
 	);
 	router.post("/:grantId/token", createFederationGrantTokenHandler(options));

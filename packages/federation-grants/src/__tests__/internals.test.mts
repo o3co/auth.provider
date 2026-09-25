@@ -254,17 +254,23 @@ describe("what the body parsers reject, and what escapes every handler", () => {
 		expect(state.status).toBe(500);
 		expect(state.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
 		expect(log.error).toHaveBeenCalledWith(
-			{ event: "federation_grant.unexpected_error", classification: "unknown", status: 403 },
+			{
+				correlationId: "",
+				err: expect.objectContaining({ name: "Error", detail: "forbidden", status: 403 }),
+			},
 			"federation_grants_unexpected_error",
 		);
 	});
 
-	it("logs an unexpected error by classification and status — nothing of its text", () => {
+	it("logs an unexpected error as its projection — never what a library put beside its message", () => {
 		const { log } = last(
-			Object.assign(new TypeError("cannot read SENTINEL"), { body: "SENTINEL", code: "SENTINEL" }),
+			Object.assign(new TypeError("cannot read a property"), { body: "SENTINEL" }),
 		);
 		expect(log.error).toHaveBeenCalledWith(
-			{ event: "federation_grant.unexpected_error", classification: "type_error" },
+			{
+				correlationId: "",
+				err: expect.objectContaining({ name: "TypeError", detail: "cannot read a property" }),
+			},
 			"federation_grants_unexpected_error",
 		);
 		expect(JSON.stringify(log.error.mock.calls)).not.toContain("SENTINEL");
@@ -303,10 +309,8 @@ describe("what the body parsers reject, and what escapes every handler", () => {
 				error: "server_error",
 				error_description: "unexpected_error",
 			});
-			expect(handled.log.error).toHaveBeenCalledWith(
-				{ event: "federation_grant.unexpected_error", classification: "unknown" },
-				"federation_grants_unexpected_error",
-			);
+			expect(handled.log.error).toHaveBeenCalledTimes(1);
+			expect(handled.log.error.mock.calls[0]?.[1]).toBe("federation_grants_unexpected_error");
 		}
 	});
 

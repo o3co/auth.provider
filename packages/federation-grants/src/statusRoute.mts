@@ -36,6 +36,13 @@
  * Two things it does write. A backstop it finds is written down, because a
  * revocation only computed would be computed again by every later reader and
  * would vanish the day the boundary is lost. And that write is audited.
+ *
+ * What it logs: a `503` — the grant store, the boundary, the backstop's write,
+ * a key missing from the ring — is one line at error,
+ * `federation_grant_status_unavailable`, with `reason` (what the caller was
+ * answered), `store` and `step`. A boundary that could not be read for a
+ * grant answered from the record is one warn,
+ * `federation_grant_status_step_failed`.
  */
 
 import {
@@ -51,9 +58,9 @@ import {
 import type { RequestHandler } from "express";
 import { createFederationGrantAuditBridge } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
+import { createFederationGrantLog } from "./log.mjs";
 import { parseFederationGrantStatusRequest } from "./parse.mjs";
 import { allows } from "./permission.mjs";
-import { createSanitizedReporter } from "./report.mjs";
 import { requestIdOf } from "./requestId.mjs";
 import { federationGrantStatusView } from "./statusView.mjs";
 
@@ -79,7 +86,7 @@ export function createFederationGrantStatusHandler(
 	options: FederationGrantStatusHandlerOptions,
 ): RequestHandler {
 	const now = options.now ?? (() => new Date());
-	const report = options.logger === undefined ? undefined : createSanitizedReporter(options.logger);
+	const log = createFederationGrantLog(options.logger);
 
 	return async (req, res) => {
 		const correlationId = requestIdOf(res);
@@ -93,6 +100,22 @@ export function createFederationGrantStatusHandler(
 			operation: "status",
 			now,
 		});
+
+		/** A `503` this route answers: one line, at error. */
+		const unavailable = (
+			reason: "storage" | "key_unavailable",
+			at?: { readonly store: string; readonly step: string; readonly error: unknown },
+		): void => {
+			const fields = { grantId, correlationId, reason, store: at?.store, step: at?.step };
+			if (at === undefined) log.outage("federation_grant_status_unavailable", fields);
+			else log.outage("federation_grant_status_unavailable", fields, at.error);
+			res.status(503).json(UNAVAILABLE(reason));
+		};
+		// A boundary that could not be read is logged by whichever exit it
+		// reaches: as the outage when it is what the 503 is for, and as a
+		// failure the answer did not need otherwise.
+		let boundaryFailure: { readonly error: unknown } | undefined;
+		let boundaryAnswered = false;
 
 		const release = options.background.admit();
 		if (release === undefined) {
@@ -116,15 +139,13 @@ export function createFederationGrantStatusHandler(
 			// consented to, is described from the record — and a 503 there would
 			// hide the one thing the caller most needs to know.
 			let boundary: Date | null | undefined;
-			let boundaryFailed = false;
 			try {
 				boundary = await options.grantsBoundary(parsed.value.subject);
 				if (boundary !== null && !(boundary instanceof Date && !Number.isNaN(boundary.getTime()))) {
 					throw new TypeError("the grants boundary is neither a date nor null");
 				}
 			} catch (error) {
-				boundaryFailed = true;
-				report?.({ during: "boundary", error, grantId, correlationId });
+				boundaryFailure = { error };
 			}
 
 			// Its own failure, not the handler's: a store that is down is an
@@ -134,8 +155,7 @@ export function createFederationGrantStatusHandler(
 			try {
 				inspection = await options.store.inspect(grantId, now());
 			} catch (error) {
-				report?.({ during: "status", error, grantId, correlationId });
-				res.status(503).json(UNAVAILABLE("storage"));
+				unavailable("storage", { store: "federation_grant", step: "inspect", error });
 				return;
 			}
 			// Sampled after both reads: the status is judged at an instant no
@@ -200,8 +220,13 @@ export function createFederationGrantStatusHandler(
 					.json(federationGrantStatusView(grant, { status: "pending" }, maxExpiresInMs, true));
 				return;
 			}
-			if (boundaryFailed) {
-				res.status(503).json(UNAVAILABLE("storage"));
+			if (boundaryFailure !== undefined) {
+				boundaryAnswered = true;
+				unavailable("storage", {
+					store: "revocation_boundary",
+					step: "read",
+					error: boundaryFailure.error,
+				});
 				return;
 			}
 
@@ -234,8 +259,7 @@ export function createFederationGrantStatusHandler(
 				try {
 					written = await options.store.revoke(grantId, "backstop", at);
 				} catch (error) {
-					report?.({ during: "backstop_revoke", error, grantId, correlationId });
-					res.status(503).json(UNAVAILABLE("storage"));
+					unavailable("storage", { store: "federation_grant", step: "revoke", error });
 					return;
 				}
 				// A write that changed nothing — another reader got there first —
@@ -271,15 +295,22 @@ export function createFederationGrantStatusHandler(
 			) {
 				// Only here. An outage must not mask a terminal answer, and
 				// nothing reported ahead of this needs a credential at all.
-				res.status(503).json(UNAVAILABLE("key_unavailable"));
+				unavailable("key_unavailable");
 				return;
 			}
 
 			res.status(200).json(federationGrantStatusView(grant, status, maxExpiresInMs, permitted()));
 		} catch (error) {
-			report?.({ during: "handler", error, grantId, correlationId });
+			log.unexpected("status", { grantId, correlationId }, error);
 			res.status(500).json({ error: "server_error" });
 		} finally {
+			if (boundaryFailure !== undefined && !boundaryAnswered) {
+				log.degraded(
+					"federation_grant_status_step_failed",
+					{ grantId, correlationId, store: "revocation_boundary", step: "read" },
+					boundaryFailure.error,
+				);
+			}
 			release();
 		}
 	};

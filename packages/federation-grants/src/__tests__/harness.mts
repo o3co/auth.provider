@@ -338,12 +338,16 @@ export const refusingLimiter: RateLimiter = {
 };
 
 /**
- * A limiter whose backend is down, carrying a secret in its message — which is
- * what a driver does when a connection string fails to parse.
+ * A limiter whose backend is down, carrying a secret where a Redis client puts
+ * one: on the refused command's arguments, which core's projection never
+ * writes. (A message is written as it is — capped — by every route's throttle
+ * alike: it is the store's own text.)
  */
 export const brokenLimiter: RateLimiter = {
 	kind: "broken",
 	check: async () => {
-		throw new Error(`redis://user:${SECRET}@limiter:6379 refused the connection`);
+		throw Object.assign(new Error("Connection is closed."), {
+			command: { name: "evalsha", args: [SECRET] },
+		});
 	},
 };

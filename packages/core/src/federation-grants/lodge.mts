@@ -43,6 +43,10 @@
  *   A `false` is never a reason to name the handle again: `nameIntent` is not
  *   safely retryable once a newer intent may have superseded this one.
  *
+ * A `storage` refusal carries what failed (`failure`, not enumerable): which
+ * store, what it was asked, what it threw or refused, and an intent that
+ * could not be closed after it — for the route answering the 503 to log once.
+ *
  * ## What it does not do
  *
  * It contacts no upstream, creates no consent, writes no credential, looks up
@@ -53,11 +57,13 @@
 import { randomBytes } from "node:crypto";
 import { checkRedirectUri } from "../net/redirect-uri.mjs";
 import { federationGrantAllowlist } from "./allowlist.mjs";
+import { carryingFailure } from "./carry.mjs";
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
 import { resolveFederationGrantIntentScopes } from "./eligibility.mjs";
 import {
 	FEDERATION_GRANT_FLOW_BUDGET_MS,
 	type FederationGrantIntent,
+	type FederationGrantIntentRefusal,
 	type FederationGrantIntentStore,
 } from "./intentStore.mjs";
 import { resolveFederationGrantLifetimeMs } from "./lifetime.mjs";
@@ -161,9 +167,43 @@ export interface FederationGrantLodged {
 	readonly resource?: string;
 }
 
-export type FederationGrantLodgingResult =
-	| FederationGrantLodged
-	| { readonly ok: false; readonly reason: FederationGrantLodgingRefusal };
+/**
+ * What failed where a lodging answered `storage`. For a logger; never for a
+ * response — a store's error can carry what it was sent.
+ */
+export interface FederationGrantLodgingFailure {
+	/** What could not answer: the intent store, the grant store, or the subject's grants boundary. */
+	readonly store: "federation_grant_intent" | "federation_grant" | "revocation_boundary";
+	/** What it was asked. */
+	readonly step: "put_intent" | "create_pending" | "name_intent" | "inspect" | "read" | "revoke";
+	/** What it threw. Absent where it answered with a refusal instead. */
+	readonly error?: unknown;
+	/**
+	 * A refusal that is a fault on this side, where nothing was thrown: the
+	 * intent store's `collision`, `expired` or `closed`, or `refused` for a
+	 * grant-store write whose guard refused it.
+	 */
+	readonly refusal?: Exclude<FederationGrantIntentRefusal, "limit"> | "refused";
+	/**
+	 * The intent the lodging could not close after a failed second write.
+	 * Best effort: it can activate nothing, and its deadline ends it.
+	 */
+	readonly cleanup?: {
+		readonly store: "federation_grant_intent";
+		readonly step: "finish_intent";
+		readonly error: unknown;
+	};
+}
+
+/** A refusal; on `storage`, carrying what failed. */
+export interface FederationGrantLodgingRefused {
+	readonly ok: false;
+	readonly reason: FederationGrantLodgingRefusal;
+	/** On `storage`: what failed. Not enumerable — see `FederationGrantLodgingFailure`. */
+	readonly failure?: FederationGrantLodgingFailure;
+}
+
+export type FederationGrantLodgingResult = FederationGrantLodged | FederationGrantLodgingRefused;
 
 export type FederationGrantReauthorizationResult =
 	| (FederationGrantLodged & {
@@ -174,7 +214,7 @@ export type FederationGrantReauthorizationResult =
 			 */
 			readonly status: FederationGrantRenewableStatus;
 	  })
-	| { readonly ok: false; readonly reason: FederationGrantLodgingRefusal }
+	| FederationGrantLodgingRefused
 	| {
 			readonly ok: false;
 			readonly reason: "grant_not_found" | "authorization_pending" | "connection_mismatch";
@@ -234,7 +274,23 @@ type RequestCheck =
 			readonly scopes: readonly string[];
 			readonly lifetimeMs: number;
 	  }
-	| { readonly ok: false; readonly reason: FederationGrantLodgingRefusal };
+	| FederationGrantLodgingRefused;
+
+/** `storage`, carrying what failed where nothing enumerates it (`carry.mts`). */
+const storage = (failure: FederationGrantLodgingFailure): FederationGrantLodgingRefused =>
+	carryingFailure({ ok: false, reason: "storage" }, failure);
+
+/** A failure, with the intent that could not be closed after it when there was one. */
+const withCleanup = (
+	failure: FederationGrantLodgingFailure,
+	closed: Closed,
+): FederationGrantLodgingFailure =>
+	closed === undefined
+		? failure
+		: {
+				...failure,
+				cleanup: { store: "federation_grant_intent", step: "finish_intent", error: closed.error },
+			};
 
 /**
  * What a first intent and a renewal are held to alike: where the browser goes
@@ -332,9 +388,7 @@ function intentRecord(input: {
 	};
 }
 
-type Admitted =
-	| { readonly ok: true }
-	| { readonly ok: false; readonly reason: "intent_limit" | "storage" };
+type Admitted = { readonly ok: true } | FederationGrantLodgingRefused;
 
 async function admit(
 	store: FederationGrantIntentStore,
@@ -344,23 +398,37 @@ async function admit(
 	let written: Awaited<ReturnType<FederationGrantIntentStore["putIntent"]>>;
 	try {
 		written = await store.putIntent(record, now);
-	} catch {
-		return { ok: false, reason: "storage" };
+	} catch (error) {
+		return storage({ store: "federation_grant_intent", step: "put_intent", error });
 	}
 	if (written.outcome !== "refused") return { ok: true };
+	if (written.reason === "limit") return { ok: false, reason: "intent_limit" };
 	// A fresh 256-bit handle that collides, or a deadline ten minutes out that
 	// has already passed, is a fault on this side and not the client's.
-	return { ok: false, reason: written.reason === "limit" ? "intent_limit" : "storage" };
+	return storage({ store: "federation_grant_intent", step: "put_intent", refusal: written.reason });
 }
 
-/** Ends an intent nothing will ever reach. Best effort: its deadline ends it anyway. */
-async function close(store: FederationGrantIntentStore, handle: string, now: Date): Promise<void> {
+/** What closing an intent came to: nothing, or the error it failed with. */
+type Closed = { readonly error: unknown } | undefined;
+
+/**
+ * Ends an intent nothing will ever reach. Best effort: its deadline ends it
+ * anyway, so a failure fails nothing — it is handed back to go on the
+ * `storage` refusal, where the route logs it as what it is.
+ */
+async function close(
+	store: FederationGrantIntentStore,
+	handle: string,
+	now: Date,
+): Promise<Closed> {
 	try {
 		await store.finishIntent(handle, now);
-	} catch {
+		return undefined;
+	} catch (error) {
 		// The intent cannot activate anything without a grant naming it, and it
 		// lapses with the flow budget. Failing the request over its cleanup would
 		// report an outage for something already harmless.
+		return { error };
 	}
 }
 
@@ -415,9 +483,11 @@ export async function lodgeFederationGrantIntent(
 			}),
 		() => deps.grantStore.isCurrentIntent(grantId, handle, now()),
 	);
-	if (!created) {
-		await close(deps.intentStore, handle, now());
-		return { ok: false, reason: "storage" };
+	if (!created.landed) {
+		const closed = await close(deps.intentStore, handle, now());
+		return storage(
+			withCleanup({ store: "federation_grant", step: "create_pending", ...created.why }, closed),
+		);
 	}
 	return {
 		ok: true,
@@ -431,23 +501,36 @@ export async function lodgeFederationGrantIntent(
 	};
 }
 
+/** A second write: landed, or why not — the error it threw, or the store's refusal. */
+type SecondWrite =
+	| { readonly landed: true }
+	| {
+			readonly landed: false;
+			readonly why: { readonly error: unknown } | { readonly refusal: "refused" };
+	  };
+
 /**
  * The grant-store write, with its answer asked for rather than assumed when it
- * was lost. `true` only when the write is known to have landed.
+ * was lost. `landed` only when the write is known to have landed. A write that
+ * threw and did not land — or could not be asked about — carries its own
+ * error: that is the failure, and the question after it is the same store.
  */
 async function secondWrite(
 	write: () => Promise<{ readonly ok: boolean }>,
 	landed: () => Promise<boolean>,
-): Promise<boolean> {
+): Promise<SecondWrite> {
+	let thrown: unknown;
 	try {
-		return (await write()).ok;
-	} catch {
-		try {
-			return await landed();
-		} catch {
-			return false;
-		}
+		return (await write()).ok ? { landed: true } : { landed: false, why: { refusal: "refused" } };
+	} catch (error) {
+		thrown = error;
 	}
+	try {
+		if (await landed()) return { landed: true };
+	} catch {
+		// Not known to have landed: the write's own error is what failed.
+	}
+	return { landed: false, why: { error: thrown } };
 }
 
 /**
@@ -466,8 +549,8 @@ export async function lodgeFederationGrantReauthorization(
 	let inspection: Awaited<ReturnType<FederationGrantStore["inspect"]>>;
 	try {
 		inspection = await deps.grantStore.inspect(request.grantId, now());
-	} catch {
-		return { ok: false, reason: "storage" };
+	} catch (error) {
+		return storage({ store: "federation_grant", step: "inspect", error });
 	}
 	// One answer for an unknown grant, another client's and another subject's:
 	// a grant ID proves nothing, and whose grant it is must not be learnable
@@ -486,9 +569,9 @@ export async function lodgeFederationGrantReauthorization(
 		if (boundary !== null && !(boundary instanceof Date && !Number.isNaN(boundary.getTime()))) {
 			throw new TypeError("the grants boundary is neither a date nor null");
 		}
-	} catch {
+	} catch (error) {
 		// Fails closed: a boundary that cannot be read is not "nothing revoked".
-		return { ok: false, reason: "storage" };
+		return storage({ store: "revocation_boundary", step: "read", error });
 	}
 
 	return await judgeAndLodge(deps, request, inspection, boundary, now, randomId);
@@ -586,8 +669,8 @@ async function judgeAndLodge(
 		let written: Awaited<ReturnType<FederationGrantStore["revoke"]>>;
 		try {
 			written = await deps.grantStore.revoke(grant.id, "backstop", now());
-		} catch {
-			return { ok: false, reason: "storage" };
+		} catch (error) {
+			return storage({ store: "federation_grant", step: "revoke", error });
 		}
 		return written.ok
 			? {
@@ -646,7 +729,7 @@ async function judgeAndLodge(
 			}),
 		() => deps.grantStore.isCurrentIntent(grant.id, handle, now()),
 	);
-	if (named) {
+	if (named.landed) {
 		return {
 			ok: true,
 			grantId: grant.id,
@@ -660,19 +743,25 @@ async function judgeAndLodge(
 		};
 	}
 
-	await close(deps.intentStore, handle, now());
+	const closed = await close(deps.intentStore, handle, now());
 	// The pointer write lost: the grant changed under this request. What it is
 	// NOW is the answer — never a retry on the strength of the stale reading,
-	// which could renew a grant revoked in between.
+	// which could renew a grant revoked in between. An intent that could not
+	// be closed goes on a `storage` answer; beside any other it can activate
+	// nothing, and lapses with the flow budget.
 	let fresh: Awaited<ReturnType<FederationGrantStore["inspect"]>>;
 	try {
 		fresh = await deps.grantStore.inspect(grant.id, now());
-	} catch {
-		return { ok: false, reason: "storage" };
+	} catch (error) {
+		return storage(withCleanup({ store: "federation_grant", step: "inspect", error }, closed));
 	}
 	if (fresh === null) return { ok: false, reason: "grant_not_found" };
 	// Still renewable: the write lost to something that left it so, and the
 	// honest answer is that this attempt did not take.
 	const again = admission(statusOf(deps, fresh, boundary, now()));
-	return "refused" in again ? again.refused : { ok: false, reason: "storage" };
+	return "refused" in again
+		? again.refused
+		: storage(
+				withCleanup({ store: "federation_grant", step: "name_intent", ...named.why }, closed),
+			);
 }

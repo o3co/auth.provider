@@ -433,7 +433,7 @@ Every other key is open, and is still expected to keep one type across the event
   An event written as an object literal is held to the two keys by the compiler. A `details` built first as a `Record<string, unknown>` is not, so an emitter that assembles one owns the rule itself.
 - **A custom sink** (an `AuditSink` implementation, or a wrapper that relays events):
   - may rely on `details.error` being a string and `details.cause` an `AuditedError` wherever they appear;
-  - if it transforms or redacts details, keeps those types: a `cause` it will not carry is replaced with an `AuditedError` (federation-grants' sanitised sink uses `{ name: "[redacted]" }`), never with a string or a message;
+  - if it transforms or redacts details, keeps those types: a `cause` it will not carry is replaced with an `AuditedError` (`{ name: "[redacted]" }`, say), never with a string or a message;
   - may drop a key, but should not change its type.
 
   Every name and code in an `AuditedError` is already held to printable ASCII without `"` and `\` and capped at 200 characters.

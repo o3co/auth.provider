@@ -386,16 +386,22 @@ describe("what the coverage report on #610 showed no test reached", () => {
 		await draining;
 	});
 
-	it("answers a failure nothing expected with a fixed 500, and logs nothing it carried", async () => {
+	it("answers a failure nothing expected with a fixed 500, and logs its projection — nothing it carried beside its message", async () => {
 		const h = harness();
-		// A configuration that cannot be read, with a secret in the message.
+		// A configuration that cannot be read, with a secret on the error.
 		h.world.connections.get = () => {
-			throw new Error(`redis://user:${SECRET}@config refused the connection`);
+			throw Object.assign(new Error("configuration unreadable"), { body: SECRET });
 		};
 		const response = await lodge(h);
 		expect(response.status).toBe(500);
 		expect(response.body).toEqual({ error: "server_error", error_description: "unexpected_error" });
-		expect(h.logs.length).toBeGreaterThan(0);
+		expect(h.lines.map((line) => `${line.level} ${String(line.args[1])}`)).toEqual([
+			"error federation_grants_unexpected_error",
+		]);
+		expect(h.lines[0]?.args[0]).toMatchObject({
+			site: "create",
+			err: { name: "Error", detail: "configuration unreadable" },
+		});
 		expect(JSON.stringify(h.logs)).not.toContain(SECRET);
 	});
 

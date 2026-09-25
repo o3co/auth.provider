@@ -29,6 +29,12 @@
  * assertion until a browser session proves it (D7) — contact the upstream,
  * create a consent, write a credential, establish a session, or activate
  * anything. The answer is where to send the user, and nothing more.
+ *
+ * Every `503` it answers — a store that failed (core carries what failed on
+ * the refusal), a key missing from the ring, a connection permitted but not
+ * configured — is one line at error, `federation_grant_lodge_unavailable`; an
+ * intent core could not close after a failed write is one warn,
+ * `federation_grant_lodge_step_failed`.
  */
 
 import {
@@ -37,6 +43,7 @@ import {
 	type FederationGrantIntentStore,
 	type FederationGrantLodgingClient,
 	type FederationGrantLodgingDeps,
+	type FederationGrantLodgingFailure,
 	type FederationGrantLodgingResult,
 	type FederationGrantReauthorizationResult,
 	type FederationGrantStore,
@@ -49,11 +56,11 @@ import type { RequestHandler } from "express";
 import { createFederationGrantAuditBridge, routeDeniedEvent } from "./audit.mjs";
 import type { FederationGrantBackground } from "./background.mjs";
 import { markHandlerReached } from "./denialAudit.mjs";
+import { createFederationGrantLog } from "./log.mjs";
 import {
 	parseFederationGrantCreateRequest,
 	parseFederationGrantReauthorizeRequest,
 } from "./parse.mjs";
-import { createSanitizedReporter } from "./report.mjs";
 import { requestIdOf } from "./requestId.mjs";
 import { serializeFederationGrantLodgingRefusal } from "./serialize.mjs";
 
@@ -96,7 +103,7 @@ function createLodgeHandler(
 	mode: "create" | "reauthorize",
 ): RequestHandler {
 	const now = options.now ?? (() => new Date());
-	const report = options.logger === undefined ? undefined : createSanitizedReporter(options.logger);
+	const log = createFederationGrantLog(options.logger);
 
 	return async (req, res) => {
 		const correlationId = requestIdOf(res);
@@ -111,6 +118,12 @@ function createLodgeHandler(
 			now,
 		});
 		markHandlerReached(res);
+		/** What every line of this call carries. */
+		const context = {
+			operation: mode,
+			grantId: pathGrantId === "" ? undefined : pathGrantId,
+			correlationId,
+		};
 
 		/**
 		 * A refusal, and the trail of it. `subject` is what the caller ASSERTED
@@ -137,6 +150,38 @@ function createLodgeHandler(
 					}),
 				).catch(() => undefined),
 			);
+		};
+
+		/**
+		 * A `503` core answered: one line at error, naming what failed when core
+		 * says — and an intent it could not close after it, as one warn.
+		 */
+		const unavailable = (
+			reason: "storage" | "key_unavailable" | "connection_not_configured",
+			failure: FederationGrantLodgingFailure | undefined,
+			connection: string | undefined,
+		): void => {
+			const fields = {
+				...context,
+				reason,
+				connection,
+				store: failure?.store,
+				step: failure?.step,
+				refusal: failure?.refusal,
+			};
+			if (failure !== undefined && "error" in failure) {
+				log.outage("federation_grant_lodge_unavailable", fields, failure.error);
+			} else {
+				log.outage("federation_grant_lodge_unavailable", fields);
+			}
+			const cleanup = failure?.cleanup;
+			if (cleanup !== undefined) {
+				log.degraded(
+					"federation_grant_lodge_step_failed",
+					{ ...context, store: cleanup.store, step: cleanup.step },
+					cleanup.error,
+				);
+			}
 		};
 
 		const release = options.background.admit();
@@ -222,13 +267,16 @@ function createLodgeHandler(
 						}).catch(() => undefined),
 					);
 				}
-				if (result.reason === "storage" || result.reason === "key_unavailable") {
-					report?.({
-						during: "lodge",
-						error: new Error(result.reason),
-						grantId: pathGrantId,
-						correlationId,
-					});
+				if (
+					result.reason === "storage" ||
+					result.reason === "key_unavailable" ||
+					result.reason === "connection_not_configured"
+				) {
+					unavailable(
+						result.reason,
+						"failure" in result ? result.failure : undefined,
+						result.reason === "connection_not_configured" ? body.connection : undefined,
+					);
 				}
 				const answer = serializeFederationGrantLodgingRefusal(result);
 				const error = String(answer.body.error);
@@ -273,7 +321,7 @@ function createLodgeHandler(
 				expires_in: Math.floor(result.lifetimeMs / 1000),
 			});
 		} catch (error) {
-			report?.({ during: "handler", error, grantId: pathGrantId, correlationId });
+			log.unexpected(mode, { grantId: context.grantId, correlationId }, error);
 			deny(500, UNEXPECTED, "server_error/unexpected_error");
 		} finally {
 			release();

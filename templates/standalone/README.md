@@ -545,8 +545,8 @@ template's default — boot fails if the token is weaker than 32 bytes
 in no error this server throws. With that challenge, a token the Store does not
 accept is an outage on every Store call: logins answer
 `503 temporarily_unavailable` and log an error naming the refused credential,
-not the token; federation-grants connects log
-`classification: "store_credential_refused"`. A `401` or `403` without the
+not the token, and so do federation-grants connects
+(`federation_grant_callback_unavailable`). A `401` or `403` without the
 challenge keeps its old meaning — at login "no such user", at a `?link=1`
 link a refusal, and at the federation-grants identity lookup an outage like
 any other non-`2xx` — so a mismatch then shows only as every login failing

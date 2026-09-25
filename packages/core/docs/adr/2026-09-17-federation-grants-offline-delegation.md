@@ -2453,6 +2453,25 @@ not boot — and a library composition that declared it has chosen. A Store
 that drives a revocation without passing `audit` records nothing of it, by
 the same choice; what it passes gets the correlation ID above.
 
+**Amended for the logging policy that followed `loggableError`.** "The
+package logs its name and its classification, never the error whole" was an
+allowlist that predated core's projection, and it cost what an operator
+needed: every outage was a warn carrying a classification, several `503`s
+were logged not at all, and the client-authentication and throttle lines
+were redacted to `"[redacted]"` although the same limiter and the same
+client registry were logged whole by every other route. The package now
+writes what the rest of the provider writes: an outage answered `503` or
+`temporarily_unavailable` is one line at error with `store` / `step` or the
+`reason`, and the error as `loggableError`'s projection — which drops what a
+library puts beside a message (a response body, a command's arguments, a
+token answer on a cause) and cuts an `error_description` before anything
+token-shaped, but keeps the message itself, capped. A retrieval's `503`
+carries the failure it reported (`failure`), and a lodging's `storage`
+refusal what failed, so the route logs the outage once. The sentinel
+criterion stands as the projection defines it: a secret a library carries on
+an error never reaches a log line; one an upstream writes into an error's
+message is that upstream's text, logged as every route logs it.
+
 ### D19 — Entra: on-behalf-of is not implemented, and consent accumulates
 
 An OBO assertion must be an access token issued for the middle-tier API that
