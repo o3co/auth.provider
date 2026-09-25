@@ -37,8 +37,10 @@
  * What the scan cannot turn into an edge it reports, and "sees every import
  * in core's product code" fails on it: core imported by its own package name,
  * an `import()` or `require()` of a computed specifier, a `require()` of a
- * core file — through `require` or any name bound to `createRequire(…)` —
- * and an `import … = require(…)`.
+ * core file, and an `import … = require(…)`. A `require()` is a call through
+ * `require` or through a name bound to a call of `createRequire` — imported
+ * from `node:module` or `module` by name or aliased, or reached as a member
+ * of that module's namespace or default import.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
@@ -120,8 +122,39 @@ function scanSource(from: string, text: string): Scan {
 		const to = coreFile(specifier);
 		if (to !== undefined) edges.push({ from, to, typeOnly });
 	};
-	// `require`, and every name bound to `createRequire(…)` — collected
-	// first, so a use before its binding in source order is seen too.
+	// `require`, and every name bound to a call of `createRequire` — collected
+	// before the walk, so a use before its binding in source order is seen
+	// too. `createRequire` is reached however `node:module` (or `module`) was
+	// imported: by name, aliased, or as a member of a namespace or default
+	// import; a bare `createRequire(…)` counts as well.
+	const creators = new Set(["createRequire"]);
+	const moduleObjects = new Set<string>();
+	for (const statement of source.statements) {
+		if (
+			!ts.isImportDeclaration(statement) ||
+			!ts.isStringLiteral(statement.moduleSpecifier) ||
+			!["node:module", "module"].includes(statement.moduleSpecifier.text)
+		) {
+			continue;
+		}
+		const clause = statement.importClause;
+		if (clause?.name !== undefined) moduleObjects.add(clause.name.text);
+		const named = clause?.namedBindings;
+		if (named !== undefined && ts.isNamespaceImport(named)) moduleObjects.add(named.name.text);
+		if (named !== undefined && ts.isNamedImports(named)) {
+			for (const element of named.elements) {
+				if ((element.propertyName ?? element.name).text === "createRequire") {
+					creators.add(element.name.text);
+				}
+			}
+		}
+	}
+	const makesRequire = (callee: ts.Expression): boolean =>
+		(ts.isIdentifier(callee) && creators.has(callee.text)) ||
+		(ts.isPropertyAccessExpression(callee) &&
+			ts.isIdentifier(callee.expression) &&
+			moduleObjects.has(callee.expression.text) &&
+			callee.name.text === "createRequire");
 	const requireNames = new Set(["require"]);
 	const bindings = (node: ts.Node): void => {
 		if (
@@ -129,8 +162,7 @@ function scanSource(from: string, text: string): Scan {
 			ts.isIdentifier(node.name) &&
 			node.initializer !== undefined &&
 			ts.isCallExpression(node.initializer) &&
-			ts.isIdentifier(node.initializer.expression) &&
-			node.initializer.expression.text === "createRequire"
+			makesRequire(node.initializer.expression)
 		) {
 			requireNames.add(node.name.text);
 		}
@@ -342,6 +374,41 @@ describe("the import scan", () => {
 			"boot/example.mts:5: a require() of a computed specifier",
 		]);
 	});
+
+	it.each([
+		["aliased", 'import { createRequire as mk } from "node:module";', "mk(import.meta.url)"],
+		[
+			"from a namespace import",
+			'import * as m from "node:module";',
+			"m.createRequire(import.meta.url)",
+		],
+		[
+			"from a default import",
+			'import nodeModule from "node:module";',
+			"nodeModule.createRequire(import.meta.url)",
+		],
+		['from "module"', 'import { createRequire } from "module";', "createRequire(import.meta.url)"],
+		[
+			'aliased from "module"',
+			'import { createRequire as mk } from "module";',
+			"mk(import.meta.url)",
+		],
+	])(
+		"reads a require function made by createRequire imported %s as require",
+		(_form, importLine, call) => {
+			const { edges, holes } = scanSource(
+				"boot/example.mts",
+				[
+					importLine,
+					`const r = ${call};`,
+					'const express = r("express");',
+					'const sibling = r("./sibling.mjs");',
+				].join("\n"),
+			);
+			expect(edges).toEqual([]);
+			expect(holes).toEqual(["boot/example.mts:4: a require() of core's own ./sibling.mjs"]);
+		},
+	);
 
 	it("passes over what is not core: a package, and the ComponentMap augmentation", () => {
 		const { edges, holes } = scanSource(
