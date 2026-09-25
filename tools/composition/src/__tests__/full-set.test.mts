@@ -636,6 +636,26 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 		},
 	},
 	{
+		module: "device-grant",
+		slot: "userSessionStore",
+		surface: "POST /oauth/device/verification",
+		run: async (app, outage) => {
+			const started = await request(app)
+				.post("/oauth/device_authorization")
+				.type("form")
+				.send({ client_id: TV.id });
+			const { agent, header, token } = await signedIn(app);
+			outage.down = true;
+			// The approval reads the live UserSession behind the cookie first.
+			return agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: started.body.user_code });
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "device_verification_session_liveness_unavailable",
+	},
+	{
 		module: "dpop",
 		slot: "replaySeenSet",
 		surface: "a DPoP proof at /oauth/token",

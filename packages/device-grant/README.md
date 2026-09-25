@@ -1,6 +1,6 @@
 # @o3co/auth-provider-device-grant
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 OAuth 2.0 Device Authorization Grant ([RFC 8628](https://www.rfc-editor.org/rfc/rfc8628)) for [`auth.provider`](https://github.com/o3co/auth.provider) — the device-code flow for input-constrained clients: TV apps, CLIs, IoT.
 
@@ -13,7 +13,7 @@ Optional, and off until `oauth.deviceAuthorization.enabled = true`: installed bu
 **Owns:**
 
 - `POST /oauth/device_authorization`: client authentication, the per-IP throttle, and issuing the device and user codes;
-- `POST /oauth/device/verification`: the JSON API a deployment's verification page calls, behind the session CSRF guard and the per-subject verification budget;
+- `POST /oauth/device/verification`: the JSON API a deployment's verification page calls, behind the session CSRF guard, the live-session check and the per-subject verification budget;
 - the device-code grant: polling semantics, single use, and the binding to the client the code was issued to;
 - `device_authorization_endpoint` in the discovery document, and the boot refusals for an enabled grant that is missing what it needs.
 
@@ -22,7 +22,7 @@ Optional, and off until `oauth.deviceAuthorization.enabled = true`: installed bu
 - the verification page — the deployment's ([below](#the-library-provides-the-api-the-deployment-provides-the-page));
 - the `DeviceCodeStore` port, the code generators and the memory adapter — `@o3co/auth-provider-core`; the Redis adapter — `@o3co/auth-provider-redis` ([Storage](#storage));
 - `/oauth/token` and client authentication — `@o3co/auth-provider-oauth`;
-- the browser session, login and the CSRF policy — `@o3co/auth-provider-session`;
+- the browser session, login and the CSRF policy — `@o3co/auth-provider-session`; the `UserSession` store the live-session check reads — core's port, filled by a session-store module;
 - the rate limiter and the seeding of its budget — core's and Redis's limiter modules;
 - what a log line may carry of an error — core's `loggableError`, which both routes log their failures through.
 
@@ -82,6 +82,7 @@ import {
   jwksModule,
   memoryDeviceCodeStoreModule,
   memoryRateLimiterModule,
+  memorySessionStoresModule,
 } from "@o3co/auth-provider-core";
 import { deviceGrantModule } from "@o3co/auth-provider-device-grant";
 import { oauthModule } from "@o3co/auth-provider-oauth";
@@ -112,11 +113,14 @@ const handle = await createApp({
     memoryDeviceCodeStoreModule,
     // Required once the grant is enabled; seeded with the verification budget above.
     memoryRateLimiterModule,
+    // Required once the grant is enabled: the userSessionStore the verification
+    // route reads the live UserSession from. Dev-only; `redisSessionStoresModule`
+    // from `@o3co/auth-provider-redis` on more than one replica.
+    memorySessionStoresModule,
     // …the modules that provide what these require: clientRepository,
-    // codeRepository, keyStore, the user repository, the session and
-    // federation-token stores, an access-token denylist (or its declared
-    // absence), and an audit sink or `audit.sink.type = "none"` — boot refuses
-    // without one …
+    // codeRepository, keyStore, the user repository, the federation-token
+    // store, an access-token denylist (or its declared absence), and an audit
+    // sink or `audit.sink.type = "none"` — boot refuses without one …
   ],
   bootstrapComponents: { config, pathResolver: import.meta.resolve },
 });
@@ -153,7 +157,7 @@ That is the boundary `/authorize` already draws — it redirects to a deployment
 
 ### `POST /oauth/device/verification`
 
-Requires an authenticated end-user session. Body: `{ action, user_code }`.
+Requires an authenticated end-user session whose `UserSession` is live ([below](#an-approval-needs-the-live-session)). Body: `{ action, user_code }`.
 
 | action | 200 response | notes |
 | --- | --- | --- |
@@ -161,7 +165,7 @@ Requires an authenticated end-user session. Body: `{ action, user_code }`.
 | `approve` | `{ status: "approved", client_id }` | |
 | `deny` | `{ status: "denied", client_id }` | |
 
-Errors: `400 invalid_request` (`malformed_body` for JSON the parser cannot read; otherwise a missing or unknown `action`), `401 login_required`, `403 access_denied` (CSRF), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `413 invalid_request` (`body_too_large`: a JSON body over 16 KiB), `415 invalid_request` (a body that is not `application/json`; `unsupported_encoding` for a charset or `Content-Encoding` the parser cannot decode), `429 slow_down`, `500 server_error` (`unexpected_error`, logged as `device_route_unexpected_error`), `503 service_unavailable` (the limiter backend is down and `rateLimit.failMode = "closed"`), `503 temporarily_unavailable` (the device-code store cannot be read or written, logged as `device_verification_store_unavailable`; see [Storage](#storage)).
+Errors: `400 invalid_request` (`malformed_body` for JSON the parser cannot read; otherwise a missing or unknown `action`), `401 login_required` (no authenticated session, or one whose `UserSession` has ended), `403 access_denied` (CSRF; or, under `oauth.requireEmailVerified`, an `approve` from a user without a verified email), `404 invalid_user_code`, `409 already_decided`, `410 expired_token`, `413 invalid_request` (`body_too_large`: a JSON body over 16 KiB), `415 invalid_request` (a body that is not `application/json`; `unsupported_encoding` for a charset or `Content-Encoding` the parser cannot decode), `429 slow_down`, `500 server_error` (`unexpected_error`, logged as `device_route_unexpected_error`), `503 service_unavailable` (the limiter backend is down and `rateLimit.failMode = "closed"`), `503 temporarily_unavailable` (the device-code store cannot be read or written, logged as `device_verification_store_unavailable`, see [Storage](#storage); or the user-session store cannot say whether the session is live, "session store unavailable", logged as `device_verification_session_liveness_unavailable`).
 
 **JSON only, behind the session CSRF guard.** The endpoint authorises on the end-user session cookie — the one credential a browser attaches to a request some other site made, which is all RFC 8628 §5.4's remote-phishing attack needs: obtain a `user_code` as any public client, auto-submit `action=approve&user_code=…` from the victim's browser, collect the victim's token. So the endpoint accepts `application/json` only (a form body is a "simple" request sent cross-site without a preflight; JSON is not): any other media type is `415 invalid_request`. The handler checks the media type itself rather than relying on no form parser having run, so the rule is the endpoint's wherever it is mounted ([Beside `oauthModule`](#beside-oauthmodule)). And the route runs the same `createCsrfGuard` as `POST /session/login`:
 
@@ -171,9 +175,17 @@ Errors: `400 invalid_request` (`malformed_body` for JSON the parser cannot read;
 
 The guard is built from the `session.*` config slice, so enabling the grant without one fails at boot. This is why the package depends on `@o3co/auth-provider-session`: one CSRF policy for the product, not a second origin check that can drift from it.
 
-**The checks run in this order:** the declared body size (`413`), the JSON parser (`413` for a chunked body over the bound, `415 unsupported_encoding` for one it cannot decode, `400 malformed_body` for one it cannot read), the CSRF guard (`403 access_denied`), then, in the handler, the media type (`415`) and the session (`401 login_required`). So RFC 8628 §5.4's cross-site form is refused by the guard with `403` before its media type is looked at. `415` is what a request the guard lets through gets for a body that is not JSON — a same-origin form, or a POST with no body at all — and it comes before `401`: a non-JSON request with no session is `415`.
+**The checks run in this order:** the declared body size (`413`), the JSON parser (`413` for a chunked body over the bound, `415 unsupported_encoding` for one it cannot decode, `400 malformed_body` for one it cannot read), the CSRF guard (`403 access_denied`), then, in the handler, the media type (`415`), the session (`401 login_required`), its `UserSession` (`401 login_required`, or `503` when the store cannot answer), the action (`400`), the email gate on `approve` (`403`), the budget (`429`, or the limiter outage's `503`) and the code. So RFC 8628 §5.4's cross-site form is refused by the guard with `403` before its media type is looked at. `415` is what a request the guard lets through gets for a body that is not JSON — a same-origin form, or a POST with no body at all — and it comes before `401`: a non-JSON request with no session is `415`.
 
-The route reads the end user from the express-session (`isAuthenticated`, `user.id`), so `sessionStoreModule` must be mounted ahead of it and something must sign the user in; with no authenticated session every action is `401 login_required`.
+The route reads the end user from the express-session (`isAuthenticated`, `user.id`, `sid`), so `sessionStoreModule` must be mounted ahead of it and something must sign the user in; with no authenticated session every action is `401 login_required`.
+
+#### An approval needs the live session
+
+The cookie's `isAuthenticated` is a claim; the `UserSession` its `sid` names is the fact. A logout, `revokeAllForSubject`, or a record deleted out of band ends the record and leaves the cookie as it was — and the device token an approval leads to carries no `sid` and no `family_id`, so nothing that happens afterwards reaches it. So every action first reads the `UserSession`, as `/authorize`, `/oauth/consent` and the session grant do, with the session grant's rule: the cookie session must name a `sid`, the store must hold it, and the record must name the same subject. Otherwise the answer is `401 login_required` ("the session is no longer active; sign in again"), and the page sends the user to sign in. A store that cannot answer is `503 temporarily_unavailable` "session store unavailable", logged once at error as `device_verification_session_liveness_unavailable` (`store`, `step`, `sid`, the error's projection) — never an approval on the cookie's word.
+
+**Enabling the grant requires a `userSessionStore` component**, so boot fails without one (`memorySessionStoresModule` on one replica, `redisSessionStoresModule` from `@o3co/auth-provider-redis` otherwise). The slot is optional in the manifest, so a deployment that leaves the grant off needs none. A hand-mounted `createDeviceVerificationHandler` takes the store as `userSessionStore`.
+
+Under `oauth.requireEmailVerified` (#297), `approve` from a user the Store has not published a verified email for is `403 access_denied` "email address is not verified" — the gate `/authorize` and the session grant hold at issuance, held here because an approval is what the device's token is issued from. It reads the session's user as `/authorize` does, applies to `approve` only (a lookup shows what is asked; a denial issues nothing), and comes before the budget and the code, so it spends no attempt. A hand-mounted handler takes the setting as `requireEmailVerified`.
 
 **One endpoint, three actions**, because all three take a `user_code` and **all three are the same brute-force oracle** — a `lookup` route that answered "which client is this?" without counting against the same budget would be a free oracle sitting beside a limited one. One route means one limiter call, and no way to add a fourth entry point that forgets it.
 

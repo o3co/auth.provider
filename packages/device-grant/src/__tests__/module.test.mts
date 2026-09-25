@@ -46,6 +46,7 @@ import request from "supertest";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { deviceGrantModule } from "#/module.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
+import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 
 const clientRepository: ClientRepository = {
 	findById: async () => null,
@@ -421,6 +422,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		},
 		clientRepository: confidentialRepository,
 		deviceCodeStore: createMemoryDeviceCodeStore(),
+		userSessionStore: liveSessionStore(),
 		rateLimiter: createMemoryRateLimiter({
 			limits: {
 				device_verification: { limit: 5, windowSeconds: 300 },
@@ -541,10 +543,7 @@ describe("deviceGrantModule — the route it actually contributes", () => {
 		const route = factory(deps);
 		const app = express();
 		app.use((req, _res, next) => {
-			(req as unknown as { session: unknown }).session = {
-				isAuthenticated: true,
-				user: { id: "user-1" },
-			};
+			(req as unknown as { session: unknown }).session = liveCookieSession();
 			next();
 		});
 		app.use(route.mountPath, route.handler);

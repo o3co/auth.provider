@@ -1141,6 +1141,10 @@ describe("deviceGrantModule beside oauthModule — an approval needs the live se
 			await signIn(agent);
 			const { header, token } = await csrfToken(agent);
 
+			// What the boot and the sign-in wrote (the replica-safety warning)
+			// is not this request's; the assertions below count only its lines.
+			logger.warn.mockClear();
+			logger.error.mockClear();
 			outage.down = true;
 			const res = await agent
 				.post("/oauth/device/verification")
@@ -1161,6 +1165,7 @@ describe("deviceGrantModule beside oauthModule — an approval needs the live se
 			expect(line).toMatchObject({
 				store: "user_session",
 				step: "get",
+				sid: await sidOf(handle.components),
 				err: { name: "Error", code: "ECONNRESET" },
 			});
 			expect(line.err).not.toBeInstanceOf(Error);

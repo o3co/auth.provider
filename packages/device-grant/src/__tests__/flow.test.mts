@@ -31,7 +31,6 @@ import type {
 	GrantContext,
 	RateLimiter,
 	RateLimitFailMode,
-	UserSession,
 	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
@@ -49,6 +48,7 @@ import { createDeviceAuthorizationHandler } from "#/deviceAuthorizationEndpoint.
 import { createDeviceCodeGrant } from "#/grant.mjs";
 import { DEVICE_CODE_GRANT_TYPE } from "#/types.mjs";
 import { createDeviceVerificationHandler } from "#/verificationEndpoint.mjs";
+import { liveCookieSession, liveSessionStore } from "./liveSessions.mjs";
 
 const CLIENT_ID = "tv-app";
 const ISSUER = "https://as.example.test";
@@ -115,41 +115,6 @@ const settings = {
 	pollingIntervalSeconds: 5,
 };
 
-/** The durable session the harness's cookie session names by default. */
-const LIVE_SID = "sid-1";
-
-/**
- * The `UserSession` records the harness's store holds, by `sid`: `user-1`'s
- * live session, and one that names another subject.
- */
-const sessionRecord = (sid: string, sub: string): UserSession => ({
-	sid,
-	sub,
-	authTime: new Date(1_800_000_000_000),
-	createdAt: new Date(1_800_000_000_000),
-	expiresAt: new Date(1_900_000_000_000),
-	claims: {},
-	amr: ["pwd"],
-});
-
-/**
- * A store over fixed records. The flow is what these tests pin; what the
- * store adapters do is their contract suite's business.
- */
-const sessionStoreOf = (records: readonly UserSession[]): UserSessionStore => {
-	const bySid = new Map(records.map((record) => [record.sid, record]));
-	return {
-		kind: "fixed",
-		create: async () => {
-			throw new Error("the harness's sessions are fixed");
-		},
-		get: async (sid) => bySid.get(sid) ?? null,
-		delete: async (sid) => {
-			bySid.delete(sid);
-		},
-	};
-};
-
 /** A clock the tests move by hand, so polling intervals are not real waits. */
 const makeClock = (start = 1_800_000_000_000) => {
 	let current = start;
@@ -185,14 +150,8 @@ const makeHarness = (
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 		});
 
-	const session = overrides.session ?? {
-		isAuthenticated: true,
-		user: { id: "user-1" },
-		sid: LIVE_SID,
-	};
-	const userSessionStore =
-		overrides.userSessionStore ??
-		sessionStoreOf([sessionRecord(LIVE_SID, "user-1"), sessionRecord("sid-2", "user-2")]);
+	const session = overrides.session ?? liveCookieSession();
+	const userSessionStore = overrides.userSessionStore ?? liveSessionStore();
 
 	const app = express();
 	app.use(express.json());

@@ -79,6 +79,40 @@
  * `device.decision_outcome_unknown`, with the subject, as the decision itself
  * would have been.
  *
+ * ### The session behind the cookie is asked, not the cookie
+ *
+ * `isAuthenticated` is what the browser's cookie session claims; the
+ * `UserSession` record its `sid` names is the fact. A logout, a
+ * `revokeAllForSubject` or a record deleted out of band ends the record and
+ * leaves the cookie as it was — and an approval is the last point anything
+ * can ask: the device token it leads to carries no `sid` and no
+ * `family_id`, and its `iat` postdates a subject watermark stamped before
+ * the approval, so no later revocation reaches it. So every action reads
+ * the record first, as `/authorize`, `/oauth/consent` and the session grant
+ * read it, with the session grant's rule for what counts: a `sid` the store
+ * holds, recording the cookie's own subject. A cookie session with no
+ * `sid`, a `sid` the store no longer holds, or one naming another subject
+ * is `401 login_required` — the same answer as no session, because the page
+ * has the same remedy. The module refuses to boot an enabled grant without a
+ * store, so there is no cookie-only mode.
+ *
+ * A store that cannot answer fails closed, as an outage:
+ * `503 temporarily_unavailable` ("session store unavailable", the answer
+ * `/oauth/consent` gives), logged once at error as
+ * `device_verification_session_liveness_unavailable` with the store, the
+ * step and core's projection of the error — not `login_required`, which
+ * would tell the page the user is signed out when the store said nothing.
+ *
+ * ### `oauth.requireEmailVerified` holds an approval as it holds issuance
+ *
+ * `/authorize` and the session grant refuse a user the Store has not
+ * published a verified email for (#297); an approval is what the device's
+ * token is issued from, so `approve` is refused the same way —
+ * `403 access_denied`, the code `/authorize` answers it with. Only `approve`:
+ * a lookup shows the user what is asked, and a denial issues nothing. The
+ * refusal comes before the budget is spent and before the code is read, so
+ * it is neither an attempt nor an oracle.
+ *
  * ### The decision is an audit event
  *
  * An approval is a consent: a named subject grants a named client a scope,
@@ -120,10 +154,14 @@ import type {
 	RateLimiter,
 	RateLimitFailMode,
 	RateLimitOutageLogger,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
 	checkWithFailMode,
+	consoleLogger,
 	emitAuditEvent,
+	isEmailVerified,
+	loggableError,
 	normaliseUserCode,
 	rateLimiterUnavailableEnvelope,
 } from "@o3co/auth-provider-core";
@@ -140,19 +178,31 @@ const respond = (res: Response, status: number, body: Record<string, unknown>): 
 };
 
 /**
- * The authenticated end user, from the session the deployment's verification
- * page runs inside.
+ * What the cookie session the deployment's verification page runs inside
+ * claims: the end user, the `sid` of the `UserSession` it was issued with,
+ * and the user object the email gate reads (as `/authorize` reads it).
  *
  * Returns `null` when there is nobody logged in. That is a 401, not a
  * redirect: this is a JSON API called by a page, and the page owns what to do
  * about a missing session.
  */
-const subjectOf = (req: Request): string | null => {
-	const session = (req as { session?: { isAuthenticated?: boolean; user?: { id?: unknown } } })
-		.session;
+interface SessionClaim {
+	readonly subject: string;
+	readonly sid: string | undefined;
+	readonly user: unknown;
+}
+
+const claimOf = (req: Request): SessionClaim | null => {
+	const session = (
+		req as {
+			session?: { isAuthenticated?: boolean; user?: { id?: unknown }; sid?: unknown };
+		}
+	).session;
 	if (session?.isAuthenticated !== true) return null;
 	const id = session.user?.id;
-	return typeof id === "string" && id !== "" ? id : null;
+	if (typeof id !== "string" || id === "") return null;
+	const sid = typeof session.sid === "string" && session.sid !== "" ? session.sid : undefined;
+	return { subject: id, sid, user: session.user };
 };
 
 /**
@@ -193,7 +243,42 @@ export interface DeviceVerificationHandlerOptions extends DeviceGrantDependencie
 	 * down is `rateLimit.failMode`, one policy for the product (#457).
 	 */
 	readonly failMode: RateLimitFailMode;
+	/**
+	 * Required: where the `UserSession` behind the cookie's `sid` is read —
+	 * see the file header. Without it an approval would rest on the cookie's
+	 * word alone, which is the defect the read closes.
+	 */
+	readonly userSessionStore: UserSessionStore;
+	/**
+	 * `oauth.requireEmailVerified` (#297), resolved. Required rather than
+	 * defaulted, so a composition that mounts this handler by hand states
+	 * whether the gate holds instead of losing it by omission.
+	 */
+	readonly requireEmailVerified: boolean;
 }
+
+/**
+ * Whether the `UserSession` behind the claim is live — see the file header.
+ * `"live"` only for a record the store holds under the claim's `sid` that
+ * records the claim's subject; `"unavailable"` when the store threw, after
+ * the one error line has been written.
+ */
+const livenessOf = async (
+	claim: SessionClaim,
+	options: Pick<DeviceVerificationHandlerOptions, "userSessionStore" | "logger">,
+): Promise<"live" | "ended" | "unavailable"> => {
+	if (claim.sid === undefined) return "ended";
+	try {
+		const record = await options.userSessionStore.get(claim.sid);
+		return record?.sub === claim.subject ? "live" : "ended";
+	} catch (err) {
+		// The fields `/authorize` and `/oauth/consent` write for the same read.
+		const line = { store: "user_session", step: "get", sid: claim.sid, err: loggableError(err) };
+		const logger = hasErrorChannel(options.logger) ? options.logger : consoleLogger;
+		logger.error(line, "device_verification_session_liveness_unavailable");
+		return "unavailable";
+	}
+};
 
 export const createDeviceVerificationHandler = (
 	options: DeviceVerificationHandlerOptions,
@@ -220,14 +305,32 @@ export const createDeviceVerificationHandler = (
 			return;
 		}
 
-		const subject = subjectOf(req);
-		if (subject === null) {
+		const claim = claimOf(req);
+		if (claim === null) {
 			respond(res, 401, {
 				error: "login_required",
 				error_description: "an authenticated end-user session is required to approve a device",
 			});
 			return;
 		}
+		// The record behind the cookie, before anything else is asked — see
+		// the file header.
+		const liveness = await livenessOf(claim, options);
+		if (liveness === "unavailable") {
+			respond(res, 503, {
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
+			return;
+		}
+		if (liveness === "ended") {
+			respond(res, 401, {
+				error: "login_required",
+				error_description: "the session is no longer active; sign in again",
+			});
+			return;
+		}
+		const { subject } = claim;
 
 		const body = (req.body ?? {}) as Record<string, unknown>;
 		const action = body.action;
@@ -235,6 +338,15 @@ export const createDeviceVerificationHandler = (
 			respond(res, 400, {
 				error: "invalid_request",
 				error_description: `action must be one of: ${ACTIONS.join(", ")}`,
+			});
+			return;
+		}
+
+		// #297, before the budget and the code — see the file header.
+		if (action === "approve" && options.requireEmailVerified && !isEmailVerified(claim.user)) {
+			respond(res, 403, {
+				error: "access_denied",
+				error_description: "email address is not verified",
 			});
 			return;
 		}
