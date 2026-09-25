@@ -329,6 +329,25 @@ describe("the v2 key-ring envelope", () => {
 		).not.toThrow();
 	});
 
+	it('refuses a purpose that is not a string: a JS caller\'s undefined would otherwise seal under the label "undefined"', () => {
+		// `RegExp.prototype.test` and the header's template literal both coerce,
+		// so `undefined`, `null` and `42` would each pass the pattern as text.
+		const sealed = sealWithKeyRing("rt-1", RING, BINDING);
+		for (const purpose of [undefined, null, 42, { toString: () => "o3co:x" }]) {
+			const binding = { ...BINDING, purpose: purpose as unknown as string };
+			expect(() => sealWithKeyRing("rt-1", RING, binding), String(purpose)).toThrow(
+				new RangeError(
+					"sealing purpose must be 1 to 64 printable ASCII characters, without a space",
+				),
+			);
+			expect(() => openWithKeyRing(sealed, RING, binding), String(purpose)).toThrow(
+				new RangeError(
+					"sealing purpose must be 1 to 64 printable ASCII characters, without a space",
+				),
+			);
+		}
+	});
+
 	it("opens a vector sealed outside this module: the format is a contract, not whatever the writer happens to produce", () => {
 		// Sealed here by hand, the way another implementation would have to: the
 		// GCM AAD is the purpose and a NUL, then the key ID and the record's own
