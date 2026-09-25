@@ -20,6 +20,7 @@ import {
 	isVerificationUnavailable,
 	type KeyStore,
 	type Logger,
+	livenessSidOf,
 	loggableError,
 	type RefreshTokenFamilyRevocation,
 	readIssuedScope,
@@ -165,8 +166,16 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 
 		// sub is required; sid is optional (needed for session-backed claims —
 		// when absent or no userSessionStore wired, we return {sub} only).
+		//
+		// Two session links (core's `grants/sessionClaims.mts`): the token's own
+		// `sid`, on which the session's claims are released, and a derived
+		// token's `liveness_sid` (a token-exchange result), which is checked
+		// for liveness and releases nothing — a downstream holder of an
+		// exchanged token is not the session's client, and is answered `{ sub }`
+		// as before the link existed.
 		const sub = typeof payload.sub === "string" ? payload.sub : null;
-		const sid = typeof payload.sid === "string" ? payload.sid : null;
+		const sid = typeof payload.sid === "string" && payload.sid.length > 0 ? payload.sid : null;
+		const livenessSid = livenessSidOf(payload);
 		if (!sub) {
 			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');
 			return res
@@ -175,7 +184,7 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		}
 
 		// Without a session store, return only sub (no durable claim source)
-		if (!opts.userSessionStore || !sid) {
+		if (!opts.userSessionStore || livenessSid === null) {
 			return res.status(200).json({ sub });
 		}
 
@@ -184,7 +193,7 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		// is answered as the outage it is, not as an invalid token.
 		let session: Awaited<ReturnType<typeof opts.userSessionStore.get>>;
 		try {
-			session = await opts.userSessionStore.get(sid);
+			session = await opts.userSessionStore.get(livenessSid);
 		} catch (err) {
 			opts.logger?.error(
 				{ store: "user_session", err: loggableError(err) },
@@ -198,6 +207,10 @@ export function createRouter(express: ExpressLike, opts: UserinfoRouterOptions):
 		if (!session) {
 			res.setHeader("WWW-Authenticate", 'Bearer realm="userinfo", error="invalid_token"');
 			return res.status(401).json({ error: "invalid_token", error_description: "session_invalid" });
+		}
+		// A liveness-only link: the session is live, and none of it is released.
+		if (sid === null) {
+			return res.status(200).json({ sub });
 		}
 
 		// Return sub + scope-filtered claims per OIDC Core §5.4. The claim is

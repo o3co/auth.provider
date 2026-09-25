@@ -42,6 +42,11 @@ import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
+import {
+	COMPOUND_DPOP_BINDING,
+	COMPOUND_MTLS_BINDING,
+	UNOWNED_BINDINGS,
+} from "./_helpers/unownedBindings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -263,8 +268,8 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 			// rides RFC 8705 §4 ("the authorization server SHOULD bind the
 			// refresh token to the certificate the client used"). mTLS still
 			// keeps wire-level token_type "Bearer" per RFC 8705 §3 — only
-			// DPoP signals "DPoP" in the response wrapper. AT cnf propagation
-			// remains mechanism-agnostic (RFC 7800).
+			// DPoP signals "DPoP" in the response wrapper. The AT carries the
+			// member the mTLS mechanism owns (core's `ownedConfirmation`).
 			//
 			// The previous "RT stays plain" assertion was pinned at PR #185
 			// because there was no refresh-time mTLS enforcement matrix in
@@ -290,7 +295,7 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 			// mTLS keeps wire-level "Bearer" per RFC 8705 §3.
 			expect(result.tokens.token_type).toBe("Bearer");
 
-			// AT gets the mTLS cnf shape (mechanism-agnostic propagation)
+			// AT gets the member the mTLS mechanism owns
 			const atPayload = decodePayload(result.tokens.access_token as string);
 			const atCnf = atPayload.cnf as Record<string, string> | undefined;
 			expect(atCnf?.["x5t#S256"]).toBe("MTLS-THUMBPRINT-AC");
@@ -327,7 +332,7 @@ describe("DPoP cnf-claim propagation — authorization_code grant (§9.1)", () =
 			if (!("tokens" in result)) expect.fail("Expected tokens in result");
 			expect(result.tokens.token_type).toBe("Bearer");
 
-			// AT cnf still propagates (mechanism-agnostic).
+			// AT cnf still propagates (the member the mTLS mechanism owns).
 			const atPayload = decodePayload(result.tokens.access_token as string);
 			expect((atPayload.cnf as { "x5t#S256"?: string } | undefined)?.["x5t#S256"]).toBe(
 				"MTLS-THUMBPRINT-CONF",
@@ -401,5 +406,63 @@ describe("confidential-client RT binding — opt-in, authorization_code (#275)",
 		expect(result.status).toBe(200);
 		if (!("tokens" in result)) expect.fail("Expected tokens in result");
 		expect(decodePayload(result.tokens.refresh_token as string).cnf).toBeUndefined();
+	});
+});
+
+describe("authorization_code stamps only the confirmation the binding's mechanism owns", () => {
+	// A public client, so both the access and the refresh token are bound when
+	// anything is: the case where a stamped confirmation would reach furthest.
+	it.each(UNOWNED_BINDINGS)(
+		"mints an unbound access and refresh token, advertised as Bearer, for %s",
+		async (_label, tokenBinding) => {
+			const handler = createAuthorizationGrant(
+				makeDeps(vi.fn().mockResolvedValue({ ...validPublicCode })),
+			);
+			const { result } = await handler.handle({ ...baseCtxPublic, tokenBinding });
+
+			expect(result.status).toBe(200);
+			if (!("tokens" in result)) expect.fail("Expected tokens in result");
+			expect(decodePayload(result.tokens.access_token as string).cnf).toBeUndefined();
+			expect(decodePayload(result.tokens.refresh_token as string).cnf).toBeUndefined();
+			expect(result.tokens.token_type).toBe("Bearer");
+		},
+	);
+
+	it("stamps the DPoP member of a compound confirmation and nothing else", async () => {
+		const handler = createAuthorizationGrant(
+			makeDeps(vi.fn().mockResolvedValue({ ...validPublicCode })),
+		);
+		const { result } = await handler.handle({
+			...baseCtxPublic,
+			tokenBinding: COMPOUND_DPOP_BINDING,
+		});
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		expect(decodePayload(result.tokens.access_token as string).cnf).toEqual({ jkt: "OWNED-JKT" });
+		expect(decodePayload(result.tokens.refresh_token as string).cnf).toEqual({
+			jkt: "OWNED-JKT",
+		});
+		expect(result.tokens.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const handler = createAuthorizationGrant(
+			makeDeps(vi.fn().mockResolvedValue({ ...validPublicCode })),
+		);
+		const { result } = await handler.handle({
+			...baseCtxPublic,
+			tokenBinding: COMPOUND_MTLS_BINDING,
+		});
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		expect(decodePayload(result.tokens.access_token as string).cnf).toEqual({
+			"x5t#S256": "OWNED-X5T",
+		});
+		expect(decodePayload(result.tokens.refresh_token as string).cnf).toEqual({
+			"x5t#S256": "OWNED-X5T",
+		});
+		expect(result.tokens.token_type).toBe("Bearer");
 	});
 });

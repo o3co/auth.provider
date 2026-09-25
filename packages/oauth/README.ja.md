@@ -407,7 +407,7 @@ Authorization: Basic base64("https%3A%2F%2Fapi.example.com%2Forders:s3cret")
 ### 失効したファミリーと終了したセッション
 
 - **リフレッシュトークンファミリー。** `family_id` を持つトークンは、`refreshTokenFamilyRevocation` が配線されていれば `isFamilyRevoked` で確認される: 失効済みのファミリーは `active: false` を返して `introspect.family_revoked` を出す。答えられないストアは `503 temporarily_unavailable`（"refresh token store unavailable"）で、`introspect.store_unavailable` として監査し `introspect_store_unavailable` としてログに出す — 上と同じ理由で障害である。`family_id` の無いトークンは署名と失効ストアだけで検証される。失効したファミリーは、それが発行し得た最後のアクセストークンが受け入れられなくなるまで記憶されるので、ファミリー自身のリフレッシュトークンが期限切れになっても答えは戻らない（core の `refresh-token-family/retention.mts`）。
-- **セッションの生存。** `sid` クレームを持つトークンは `UserSessionStore` で確認される — `/oauth/userinfo` と同じ読み取り。ログアウトした・期限切れの・帯域外で削除されたセッションは `active: false` を返して `introspect.session_invalid` を出し、ストアの障害は `503 temporarily_unavailable`（"session store unavailable"）で、ファミリーストアと同じく監査しログに出す。`sid` の無いトークン（client credentials、jwt-bearer）はこの読み取りのコストを払わず、`userSessionStore` を配線しない構成も払わない。
+- **セッションの生存。** `sid` クレーム — またはトークン交換の結果が subject トークンのセッションへの生存確認専用のつながりとして持つ `liveness_sid`（core の `grants/sessionClaims.mts`） — を持つトークンは `UserSessionStore` で確認される — `/oauth/userinfo` と同じ読み取り。ログアウトした・期限切れの・帯域外で削除されたセッションは `active: false` を返して `introspect.session_invalid` を出し、ストアの障害は `503 temporarily_unavailable`（"session store unavailable"）で、ファミリーストアと同じく監査しログに出す。`sid` の無いトークン（client credentials、jwt-bearer）はこの読み取りのコストを払わず、`userSessionStore` を配線しない構成も払わない。
 
 これらは問い合わせる呼び出し元にしか効かない: JWT を署名と `exp` だけでオフライン検証するリソースサーバーは失効を見ず、期限まで受け入れ続ける。
 
@@ -440,7 +440,8 @@ OIDC Core §5.3。`GET` と `POST` で受け付ける。永続化された `User
 | セッション未発見 | `401 invalid_token` |
 | キーストア、jti の denylist、サブジェクトのウォーターマークが答えない | `503 temporarily_unavailable`（"verification key unavailable" / "revocation store unavailable"）、チャレンジなし。`token_verification_unavailable` としてログ出力 |
 | リフレッシュトークンファミリーストアかセッションストアが答えない | `503 temporarily_unavailable`（"refresh token store unavailable" / "session store unavailable"）、チャレンジなし。`userinfo_store_unavailable` としてログ出力 |
-| `userSessionStore` 未配線、または `sid` クレームなし | `200 { sub }`（sub のみ、永続クレームなし） |
+| `userSessionStore` 未配線、または `sid` も `liveness_sid` もなし | `200 { sub }`（sub のみ、永続クレームなし） |
+| `liveness_sid` があり `sid` がない（トークン交換の結果）、セッションがアクティブ | `200 { sub }` — セッションは確認するが、そのどれも渡さない: 交換されたトークンの保持者はセッションのクライアントではない。スコープが何を言っていても同じ |
 | セッションがアクティブ | `200 { sub, ...スコープで絞ったクレーム }` |
 
 すべてのレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける（RFC 6750 §5.3）。障害は拒否される — クレームは返さない — が、`invalid_token` としてではない。RFC 6750 §3.1 はそれをトークンについての記述（"expired, revoked, malformed, or invalid"）と定義しており、クライアントにトークンを取り替えさせるからである。
@@ -460,9 +461,10 @@ OIDC Core §5.3。`GET` と `POST` で受け付ける。永続化された `User
 
 ### 発行
 
-- **アクセストークンの `cnf` は仕組みに依存しない。** どのバインディングの `confirmation` もそのまま流れる — DPoP の `{ jkt }`、mTLS の `{ "x5t#S256" }`。
+- **アクセストークンの `cnf` はバインディングの仕組みが所有するメンバーである。** どのグラントも、リクエストのバインディングに core の `ownedConfirmation` を適用したもの — DPoP の `{ jkt }`、mTLS の `{ "x5t#S256" }` — を刻み、仕組みが返した `confirmation` をそのまま刻むことはない。どちらのメンバーも所有しない kind の寄与された仕組みや、kind が所有しないメンバーを運ぶバインディングには、バインドされていないトークンを発行する。複合の confirmation は所有するメンバーだけを残す。WebAuthn グラント、デバイスグラント、トークン交換も同じ規則に従う。
 - **リフレッシュトークンの `cnf` は public クライアントには付け、confidential クライアントには要求があったときだけ付ける。** バインドされたアクセストークンを持つ public クライアントはバインドされたリフレッシュトークンを受け取り、次のリフレッシュが連続性を強制する。confidential クライアントはプレーンなリフレッシュトークンを受け取る — クライアント認証がリフレッシュ時の認証手段だからである（RFC 9449 §5、RFC 8705 §7.1） — ただし `oauth.tokenBinding.bindConfidentialClientRefreshTokens = true`（`OAUTH_TOKEN_BINDING_BIND_CONFIDENTIAL_CLIENT_REFRESH_TOKENS`）ならそれもバインドする。その代償は鍵のローテーションである: バインドされたリフレッシュトークンは、その有効期間全体にわたってクライアントを 1 つの鍵か証明書に固定する。
-- **ワイヤー上の `token_type`:** `"DPoP"` は DPoP のバインディングのときだけ（RFC 9449 §5）。mTLS は `"Bearer"` のまま（RFC 8705 §3） — 証明書がバインディングの証拠であって、ワイヤー上のトークン型ではない。
+- **必須の送信者制約は格下げされない。** `senderConstrained: { required: true }` で登録されたクライアントについて、`/oauth/token` のディスパッチのゲートはどのグラントも動く前に次を拒否する: バインディングなし（`401 invalid_client`）、`methods` にない kind のバインディング（`400 unauthorized_client`）、その kind が所有するメンバーを confirmation に持たないバインディング（`400 invalid_request`、"sender-constrained binding carries no confirmation its mechanism owns"。監査は `token.issued.failure`、`reason: "sender_constraint_unowned_confirmation"`） — 最後のものは、制約のないクライアントが受け取るバインドなしの Bearer トークンとして発行されてしまうところだった。
+- **ワイヤー上の `token_type`** は core の `generateTokenResponse` がアクセストークンの `cnf` から読む: `cnf.jkt` なら `"DPoP"`（RFC 9449 §5）、mTLS（RFC 8705 §3 — 証明書がバインディングの証拠であって、ワイヤー上のトークン型ではない）とバインドなしは `"Bearer"`。応答の型がクレームと食い違うことはない。
 
 ### リフレッシュ時のマトリクス
 

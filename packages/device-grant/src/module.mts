@@ -58,6 +58,25 @@
  * grant off boot without one, and declaring it absent says why it is missing
  * — it does not make the grant work without it.
  *
+ * And so does an enabled grant with no `userSessionStore`. The verification
+ * endpoint approves only from a live `UserSession` — the record behind the
+ * cookie's `sid`, not the cookie's `isAuthenticated` — because the device
+ * token an approval leads to carries no `sid` and no `family_id`, so no
+ * logout reaches it afterwards (see `verificationEndpoint.mts`). Without the
+ * store that question cannot be asked, and an endpoint that trusted the
+ * cookie instead would look guarded and not be — the limiter's argument
+ * again. The slot stays optional in the manifest, as it is on `oauthModule`:
+ * a deployment that leaves the grant off needs none, and there is nothing
+ * to declare.
+ *
+ * `subjectRevocation` is read by both halves when it is wired: the
+ * verification endpoint refuses a session its sessions boundary covers, and
+ * the grant refuses an approval made at or before it (the window between an
+ * approval and the poll, which a watermark stamped in between would
+ * otherwise not reach — the token minted at the poll postdates it). Optional
+ * and undeclared here: `oauthModule`, which every enabled grant is composed
+ * with, carries its absence policy.
+ *
  * ### The verification endpoint is a CSRF target, and is guarded as one
  *
  * `POST /oauth/device/verification` authorises on the end-user session cookie
@@ -246,6 +265,13 @@ const OPTIONAL = [
 	"replaySeenSet",
 	"logger",
 	"auditSink",
+	// Read by the verification endpoint, which approves only from a live
+	// `UserSession`; required once the grant is enabled
+	// (`requireUserSessionStore`), unused while it is off.
+	"userSessionStore",
+	// The subject's sessions boundary: read by the verification endpoint
+	// (a session it covers) and the grant (an approval it covers).
+	"subjectRevocation",
 ] as const;
 
 /**
@@ -578,6 +604,30 @@ const requireDeviceCodeStore = (
 };
 
 /**
+ * The verification endpoint reads the `UserSession` behind the cookie before
+ * any action (see `verificationEndpoint.mts`), so an enabled grant without the
+ * store is refused here, in the shape of the limiter's and the store's
+ * refusals — optional in the manifest, required when the grant is on, as
+ * `federationGrantsModule` requires it for the same kind of browser consent.
+ */
+const requireUserSessionStore = (
+	deps: DeviceGrantModuleDeps,
+): NonNullable<DeviceGrantModuleDeps["userSessionStore"]> => {
+	if (deps.userSessionStore === undefined) {
+		throw new Error(
+			"deviceGrantModule: oauth.deviceAuthorization.enabled = true requires a " +
+				"userSessionStore component. POST /oauth/device/verification approves only from " +
+				"the live UserSession behind the cookie's sid: the device token an approval leads " +
+				"to carries no sid and no family_id, so no logout reaches it afterwards, and a " +
+				"cookie that outlived its session would otherwise approve. " +
+				"Install memorySessionStoresModule (single replica only) or " +
+				"redisSessionStoresModule, or leave the grant disabled.",
+		);
+	}
+	return deps.userSessionStore;
+};
+
+/**
  * #448: the budget the refusal above reasons from has to be one the limiter
  * was actually seeded with.
  *
@@ -647,6 +697,9 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 									keyStore: deps.keyStore,
 									accessTokenExpiresIn: resolveAccessTokenLifetime(deps.config).defaultExpiresIn,
 									logger: deps.logger,
+									// An approval a later sessions boundary covers is refused
+									// at the poll (see grant.mts).
+									...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
 								});
 							},
 						},
@@ -764,6 +817,7 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 					// limiter, seeded from config; asserting it here is what makes
 					// the `rateLimiter` requirement mean five attempts (#448).
 					requireVerificationRateLimit(slice);
+					const userSessionStore = requireUserSessionStore(deps);
 					router.post(
 						"/",
 						createCsrfGuard({
@@ -779,6 +833,13 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 							// its budget on the subject, so it runs the guard's
 							// check itself rather than the guard as a middleware.
 							failMode: requireFailMode(deps),
+							// The live-session read every action starts with.
+							userSessionStore,
+							// #297, read as `/authorize` reads it: `=== true`, so a
+							// hand-built config that never passed the schema is off.
+							requireEmailVerified: deps.config.oauth?.requireEmailVerified === true,
+							// The sessions boundary, when the composition wires one.
+							...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
 							settings: {
 								verificationUri: requireVerificationUri(slice),
 								verificationUriComplete: slice["verification-uri-complete"],

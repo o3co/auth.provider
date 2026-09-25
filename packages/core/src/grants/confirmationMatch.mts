@@ -146,8 +146,10 @@ export const matchConfirmation = (
  * third-party mechanism) or the confirmation lacks that member.
  *
  * This is the value a grant may stamp onto a token it issues for the
- * request: material the owning mechanism actually validated. The kind
- * gating is the same boundary {@link matchConfirmation} enforces.
+ * request: material the owning mechanism actually validated. Every grant
+ * that issues tokens stamps this and never `binding.confirmation` itself,
+ * which carries whatever a mechanism returned. The kind gating is the same
+ * boundary {@link matchConfirmation} enforces.
  */
 export const ownedConfirmation = (
 	binding: TokenBinding | null | undefined,
@@ -192,6 +194,27 @@ export const extractConfirmation = (raw: unknown): Confirmation | undefined => {
 		if (value !== undefined) return { [member]: value } as Confirmation;
 	}
 	return undefined;
+};
+
+/**
+ * The wire-level `token_type` for an access token whose `cnf` is `cnf` (the
+ * raw claim, or the `Confirmation` a grant stamped): the scheme core's
+ * binding profile names for the member it carries — `DPoP` for `jkt`
+ * (RFC 9449 §5), `Bearer` for `x5t#S256` (RFC 8705 §3) — and `Bearer` for no
+ * binding. Read through {@link extractConfirmation}, so a member counts only
+ * as a non-empty string, as it does at every surface that reads a `cnf`. A
+ * compound `cnf` narrows as `extractConfirmation` narrows it; a surface that
+ * vouches for a token screens it out first ({@link isCompoundConfirmation}).
+ *
+ * One reading for the token response (`generateTokenResponse`) and for
+ * introspection, so the envelope and the introspection answer cannot
+ * disagree about the same token.
+ */
+export const tokenTypeForConfirmation = (cnf: unknown): "Bearer" | "DPoP" => {
+	const confirmation = extractConfirmation(cnf);
+	if (confirmation === undefined) return "Bearer";
+	const member = CONFIRMATION_MEMBERS.find((candidate) => candidate in confirmation);
+	return member === undefined ? "Bearer" : BINDING_PROFILES[member].challenge;
 };
 
 /**

@@ -40,6 +40,7 @@ const OPTIONAL = [
 	"logger",
 	"accessTokenDenylist",
 	"subjectRevocation",
+	"userSessionStore",
 ] as const;
 type Declared = ProviderDeps<(typeof REQUIRES)[number], (typeof OPTIONAL)[number]>;
 
@@ -53,8 +54,8 @@ describe("tokenExchangeModule's deps are the slots it declares (#626 P2)", () =>
 	it("refuses, at compile time, a read of a slot the module never declared", () => {
 		if (false as boolean) {
 			const deps = {} as TokenExchangeModuleDeps;
-			// @ts-expect-error — `userSessionStore` is in neither requires nor optional
-			void deps.userSessionStore;
+			// @ts-expect-error — `sessionRPRegistry` is in neither requires nor optional
+			void deps.sessionRPRegistry;
 			// @ts-expect-error — nor is `codeRepository`
 			void deps.codeRepository;
 		}
@@ -79,13 +80,15 @@ describe("createTokenExchangeGrant declares the slots it reads (#626 P2)", () =>
 
 	it("is TokenExchangeDependencies, and carries no slot the grant does not read", () => {
 		expectTypeOf<GrantDeps>().toEqualTypeOf<TokenExchangeDependencies>();
-		expectTypeOf<GrantDeps>().not.toHaveProperty("userSessionStore");
+		// It reads the UserSession store (the `sid` rule) and nothing else of
+		// the session stores.
+		expectTypeOf<GrantDeps>().toHaveProperty("userSessionStore");
 		expectTypeOf<GrantDeps>().not.toHaveProperty("refreshTokenFamilyRotation");
 		expectTypeOf<GrantDeps>().not.toHaveProperty("sessionRPRegistry");
 		if (false as boolean) {
 			const deps = {} as GrantDeps;
-			// @ts-expect-error — the exchange reads no session store
-			void deps.userSessionStore;
+			// @ts-expect-error — the exchange reads no RP registry
+			void deps.sessionRPRegistry;
 		}
 		expect(true).toBe(true);
 	});

@@ -26,8 +26,9 @@
  *
  * What is asserted here:
  *   - the confirmation the request already carries reaches the access token,
- *     for both binding kinds, exactly as `authorization.mts` and
- *     `clientCredentials.mts` apply it — mechanism-agnostic, ungated;
+ *     for both binding kinds, exactly as every other grant applies it — the
+ *     member the binding's mechanism owns (core's `ownedConfirmation`),
+ *     ungated, and nothing for a binding whose kind owns no member it carries;
  *   - the wire-level `token_type` describes what was minted: "DPoP" for a
  *     DPoP-bound token (RFC 9449 §5), "Bearer" for an mTLS-bound one
  *     (RFC 8705 §3, where the binding travels on the TLS layer);
@@ -329,6 +330,66 @@ describe("createWebAuthnGrant — unbound requests are unchanged (#489)", () => 
 
 		expect(decodePayload(tokens.access_token).cnf).toBeUndefined();
 		expect(decodePayload(tokens.refresh_token as string).cnf).toBeUndefined();
+		expect(tokens.token_type).toBe("Bearer");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Only the member the binding's mechanism owns is stamped
+// ---------------------------------------------------------------------------
+
+describe("createWebAuthnGrant — stamps only the confirmation the binding's mechanism owns", () => {
+	// `Confirmation` is extensible by mechanism, and `ctx.tokenBinding` carries
+	// what the mechanism returned. A contributed kind presenting a DPoP or mTLS
+	// member, or a DPoP binding presenting an mTLS one, was validated by no
+	// mechanism that owns the member — core's `ownedConfirmation` is the rule.
+	const unowned: readonly (readonly [string, TokenBinding])[] = [
+		["a contributed kind presenting cnf.jkt", { kind: "acme", confirmation: { jkt: "ACME-JKT" } }],
+		[
+			"a contributed kind presenting cnf.x5t#S256",
+			{ kind: "acme", confirmation: { "x5t#S256": "ACME-X5T" } },
+		],
+		[
+			"a DPoP binding presenting cnf.x5t#S256",
+			{ kind: "dpop", confirmation: { "x5t#S256": "CROSSED-X5T" } },
+		],
+		["an mTLS binding presenting cnf.jkt", { kind: "mtls", confirmation: { jkt: "CROSSED-JKT" } }],
+	];
+
+	it.each(unowned)(
+		"mints an unbound access and refresh token, advertised as Bearer, for %s",
+		async (_label, tokenBinding) => {
+			const tokens = await issue(await makeDeps(), makeCtx(makeClient(), { tokenBinding }));
+
+			expect(decodePayload(tokens.access_token).cnf).toBeUndefined();
+			expect(decodePayload(tokens.refresh_token as string).cnf).toBeUndefined();
+			expect(tokens.token_type).toBe("Bearer");
+		},
+	);
+
+	it("stamps the DPoP member of a compound confirmation and nothing else", async () => {
+		const compound = {
+			kind: "dpop",
+			confirmation: { jkt: PROOF_JKT, "x5t#S256": "STOWAWAY-X5T" },
+		} as unknown as TokenBinding;
+		const tokens = await issue(await makeDeps(), makeCtx(makeClient(), { tokenBinding: compound }));
+
+		expect(decodePayload(tokens.access_token).cnf).toEqual({ jkt: PROOF_JKT });
+		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({ jkt: PROOF_JKT });
+		expect(tokens.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const compound = {
+			kind: "mtls",
+			confirmation: { jkt: "STOWAWAY-JKT", "x5t#S256": CERT_THUMBPRINT },
+		} as unknown as TokenBinding;
+		const tokens = await issue(await makeDeps(), makeCtx(makeClient(), { tokenBinding: compound }));
+
+		expect(decodePayload(tokens.access_token).cnf).toEqual({ "x5t#S256": CERT_THUMBPRINT });
+		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({
+			"x5t#S256": CERT_THUMBPRINT,
+		});
 		expect(tokens.token_type).toBe("Bearer");
 	});
 });

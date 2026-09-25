@@ -25,6 +25,16 @@ import type { Confirmation } from "./confirmation.mjs";
  * registry domain). Adding a new confirmation variant (e.g. RFC 9421
  * `jwk` confirmation) is a core semver-minor change, not a
  * downstream-only extension.
+ *
+ * A binding binds only through the member its `kind` owns in core's
+ * `BINDING_PROFILES` (`ownedConfirmation`, `grants/confirmationMatch.mts`):
+ * every grant stamps that member and nothing else. A binding with none — a
+ * new `kind` core has no profile for, or a known kind presenting another
+ * kind's member — binds nothing: a token requested with it is issued
+ * unbound and advertised as Bearer, and a client whose
+ * `senderConstrained.required` allows its kind is refused at dispatch
+ * (`invalid_request`) rather than downgraded. So a new kind that is meant
+ * to bind tokens lands its profile in core first.
  */
 export interface TokenBinding {
 	readonly kind: string;

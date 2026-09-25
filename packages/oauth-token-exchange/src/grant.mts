@@ -29,12 +29,14 @@ import type {
 } from "@o3co/auth-provider-core";
 import {
 	auditErrorText,
+	consoleLogger,
 	formatObject,
 	generateToken,
 	generateTokenResponse,
 	isGrantTypeAllowed,
 	isWellFormedClientId,
 	isWellFormedErrorCode,
+	LIVENESS_SID_CLAIM,
 	logClientRepositoryUnavailable,
 	logGrantPolicyUnavailable,
 	loggableError,
@@ -61,7 +63,12 @@ const GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange";
 export interface TokenExchangeDependencies
 	extends Pick<
 			GrantDependencies,
-			"config" | "keyStore" | "logger" | "grantPolicy" | "refreshTokenFamilyRevocation"
+			| "config"
+			| "keyStore"
+			| "logger"
+			| "grantPolicy"
+			| "refreshTokenFamilyRevocation"
+			| "userSessionStore"
 		>,
 		ProviderDeps<"clientRepository"> {
 	readonly tokenExchangeValidatorResolver: Pick<TokenExchangeValidatorResolver, "get">;
@@ -327,8 +334,9 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// A validator throws only when it cannot reach an answer — a
 				// keystore or a revocation store down (core's
 				// `ExchangeTokenValidator` contract). The server's fault, so a
-				// logged 503, never a verdict on the token.
-				deps.logger?.error(
+				// logged 503, never a verdict on the token — on core's console
+				// logger when none is wired, never silently.
+				(deps.logger ?? consoleLogger).error(
 					{ role: "subject", err: loggableError(err) },
 					"token_exchange_validation_unavailable",
 				);
@@ -428,13 +436,16 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			// still short-circuits ahead of the store read.
 			const subjectFamilyRefusal = await familyRefusal(deps, "subject", subjectValidated);
 			if (subjectFamilyRefusal) return subjectFamilyRefusal;
+			// The session rule, beside it: see `sessionRefusal`.
+			const subjectSessionRefusal = await sessionRefusal(deps, "subject", subjectValidated);
+			if (subjectSessionRefusal) return subjectSessionRefusal;
 
 			let actorValidated: typeof subjectValidated | null = null;
 			if (actorToken !== null && actorValidator) {
 				try {
 					actorValidated = await actorValidator.validate(actorToken, { role: "actor" });
 				} catch (err) {
-					deps.logger?.error(
+					(deps.logger ?? consoleLogger).error(
 						{ role: "actor", err: loggableError(err) },
 						"token_exchange_validation_unavailable",
 					);
@@ -508,6 +519,10 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// delegation any more than a revoked subject may be exchanged.
 				const actorFamilyRefusal = await familyRefusal(deps, "actor", actorValidated);
 				if (actorFamilyRefusal) return actorFamilyRefusal;
+				// And the session rule: an actor whose session a logout ended is
+				// not a live delegation either.
+				const actorSessionRefusal = await sessionRefusal(deps, "actor", actorValidated);
+				if (actorSessionRefusal) return actorSessionRefusal;
 
 				const subjectMayAct = subjectValidated.claims.may_act;
 				if (
@@ -1046,6 +1061,13 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			const accessToken = await generateToken(
 				formatObject({
 					family_id: reportedFamily(subjectValidated),
+					// The subject's session, as a liveness link only (core's
+					// `grants/sessionClaims.mts`): the logout that ends the subject
+					// token ends this one at introspection and userinfo, and no
+					// capability a `sid` authorises — the session's claims, its
+					// upstream tokens — is reachable with it. The actor's session
+					// is not carried: the issued token speaks for the subject.
+					[LIVENESS_SID_CLAIM]: subjectValidated.sid ? subjectValidated.sid : undefined,
 					act,
 				}),
 				{
@@ -1063,16 +1085,11 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 			);
 
 			// RFC 9449 §5: a DPoP-bound access token is advertised as
-			// `token_type: "DPoP"`. The envelope defaulted to Bearer while the
-			// token itself carried `cnf.jkt`, so a DPoP-aware client believed
-			// the response and presented the token as a Bearer token — which
-			// this provider's own protected-resource middleware refuses (RFC
-			// 9449 §7.1). mTLS keeps "Bearer": RFC 8705 §3 does not redefine
-			// the wire-level type. Read off the confirmation actually stamped
-			// into the token, so the envelope cannot disagree with the claim.
-			const responseTokenType =
-				issuedConfirmation && "jkt" in issuedConfirmation ? "DPoP" : "Bearer";
-			const tokens = generateTokenResponse({ accessToken }, { tokenType: responseTokenType });
+			// `token_type: "DPoP"`; mTLS keeps "Bearer" (RFC 8705 §3).
+			// `generateTokenResponse` reads it off the confirmation actually
+			// stamped into the token, so the envelope cannot disagree with the
+			// claim.
+			const tokens = generateTokenResponse({ accessToken });
 			const tokensWithIssuedType: typeof tokens & { issued_token_type: string } = {
 				...tokens,
 				issued_token_type: ACCESS_TOKEN_TYPE,
@@ -1209,7 +1226,7 @@ function reportedFamily(validated: ValidatedToken): string | undefined {
  *   issued token's `act` claim on a credential whose revocation cannot be
  *   checked.
  * - The store throws: `503 temporarily_unavailable`, logged as
- *   `token_exchange_family_store_unavailable` with the role and core's
+ *   `token_exchange_family_store_unavailable` with `store`, the role and core's
  *   `loggableError` projection of the store's error, so an outage is never
  *   reported as a revoked token.
  * - The family is revoked: `family_revoked`.
@@ -1241,9 +1258,10 @@ async function familyRefusal(
 		revoked = await revocation.isFamilyRevoked(familyId);
 	} catch (err) {
 		// The projection: a store error carries what it sent — an ioredis
-		// reply error the command, the family's key included.
-		deps.logger?.error(
-			{ err: loggableError(err), role },
+		// reply error the command, the family's key included. On core's
+		// console logger when none is wired: an outage is never silent.
+		(deps.logger ?? consoleLogger).error(
+			{ store: "refresh_token_family", role, err: loggableError(err) },
 			"token_exchange_family_store_unavailable",
 		);
 		return {
@@ -1256,6 +1274,68 @@ async function familyRefusal(
 	}
 	if (!revoked) return null;
 	return invalidRequest(forRole("family_revoked"));
+}
+
+/**
+ * The session rule for a token presented as `subject_token` or `actor_token`:
+ * the refusal to return, or `null` when the token passes.
+ *
+ * A token this provider minted from a browser session carries the session's
+ * `sid`, and a logout ends it: `/oauth/introspect`, `/oauth/userinfo` and the
+ * refresh grant read the `UserSession` it names, and a token whose session is
+ * gone is inactive there. The rule here is theirs, read the same way — keyed
+ * on the `sid` a validator reports (`ValidatedToken.sid`, never `claims.sid`,
+ * which a foreign issuer's token may carry for a session this store never
+ * held):
+ *
+ * - No `sid`, or no `userSessionStore` wired: nothing to check. Without a
+ *   store no surface judges a `sid`, and introspection passes the token too.
+ * - The store holds no session under it, or one recorded for another
+ *   subject (the session grant's rule): `invalid_request` `session_invalid`
+ *   (the refresh grant's words; RFC 8693 §2.2.2 makes every refused token
+ *   `invalid_request`), `actor_token session_invalid` for the actor.
+ * - The store throws: `503 temporarily_unavailable` "session store
+ *   unavailable" (`actor_token session store unavailable`), logged once at
+ *   error, on core's console logger when no logger is wired, as
+ *   `token_exchange_session_store_unavailable` with the store, the step, the
+ *   role and core's `loggableError` projection — an outage is never reported
+ *   as an ended session, nor waved through as a live one.
+ *
+ * The issued token carries the subject's session as `liveness_sid` (see the
+ * issuance above), so the same logout reaches it too — and nothing a `sid`
+ * authorises does.
+ */
+async function sessionRefusal(
+	deps: Pick<TokenExchangeDependencies, "userSessionStore" | "logger">,
+	role: "subject" | "actor",
+	validated: ValidatedToken,
+): Promise<GrantHandlerResult | null> {
+	const sid = validated.sid ? validated.sid : undefined;
+	const store = deps.userSessionStore;
+	if (sid === undefined || store === undefined) return null;
+	const forRole = (description: string) =>
+		role === "actor" ? `actor_token ${description}` : description;
+	let live: boolean;
+	try {
+		// The session grant's rule: the record must be this token's
+		// subject's. A token naming another subject's session is not tied to
+		// it, and that session's liveness says nothing about this subject.
+		live = (await store.get(sid))?.sub === validated.sub;
+	} catch (err) {
+		(deps.logger ?? consoleLogger).error(
+			{ store: "user_session", step: "get", role, err: loggableError(err) },
+			"token_exchange_session_store_unavailable",
+		);
+		return {
+			result: {
+				status: 503,
+				error: "temporarily_unavailable",
+				errorDescription: forRole("session store unavailable"),
+			},
+		};
+	}
+	if (live) return null;
+	return invalidRequest(forRole("session_invalid"));
 }
 
 /**

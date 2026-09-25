@@ -23,6 +23,7 @@ import {
 	generateTokenResponse,
 	isEmailVerified,
 	loggableError,
+	ownedConfirmation,
 	readSpaceDelimitedParameter,
 	resolveAccessTokenLifetime,
 	wellFormedAmr,
@@ -273,30 +274,31 @@ export const createSessionGrant = (deps: SessionGrantDeps): GrantHandler => {
 			// matters either way is that `aud` is never null — an audience-less
 			// token was half of what made the old path a self-elevation.
 			const audience = client.allowedAudiences?.[0] ?? client.clientId;
-			const confirmation = ctx.tokenBinding?.confirmation;
+			// The member the binding's mechanism kind owns (core's
+			// `ownedConfirmation`): a contributed mechanism cannot have a binding
+			// minted that no owning mechanism validated. The response's
+			// `token_type` is read off it by `generateTokenResponse`.
+			const confirmation = ownedConfirmation(ctx.tokenBinding);
 
 			return {
 				result: {
 					status: 200,
-					tokens: generateTokenResponse(
-						{
-							accessToken: await generateToken(
-								{ ...(sid ? { sid } : {}), ...(trackedAmr ? { amr: trackedAmr } : {}) },
-								{
-									keyStore,
-									expiresIn: accessTokenExpiresIn,
-									issuer,
-									audience,
-									subject: userId ?? null,
-									authorizedParty: client.clientId,
-									scope: scopes?.join(" ") ?? null,
-									tokenType: "at+jwt",
-									...(confirmation ? { confirmation } : {}),
-								},
-							),
-						},
-						{ tokenType: ctx.tokenBinding?.kind === "dpop" ? "DPoP" : "Bearer" },
-					),
+					tokens: generateTokenResponse({
+						accessToken: await generateToken(
+							{ ...(sid ? { sid } : {}), ...(trackedAmr ? { amr: trackedAmr } : {}) },
+							{
+								keyStore,
+								expiresIn: accessTokenExpiresIn,
+								issuer,
+								audience,
+								subject: userId ?? null,
+								authorizedParty: client.clientId,
+								scope: scopes?.join(" ") ?? null,
+								tokenType: "at+jwt",
+								...(confirmation ? { confirmation } : {}),
+							},
+						),
+					}),
 				},
 			};
 		},

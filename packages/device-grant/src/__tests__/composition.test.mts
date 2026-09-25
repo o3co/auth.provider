@@ -33,14 +33,21 @@ import type {
 	AuditSink,
 	ClientRepository,
 	CodeRepository,
+	ComponentMap,
 	DeviceCodeStore,
 	Logger,
+	SubjectRevocation,
+	SubjectRevocationService,
+	SubjectSessionIndex,
 	UserRepository,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
 	createApp,
+	createInMemoryUserSessionStore,
 	createMemoryDeviceCodeStore,
 	createSymmetricKeyStore,
+	defaultRefreshTokenFamilyRevocationModule,
 	defineModule,
 	jwksModule,
 	type Module,
@@ -48,10 +55,11 @@ import {
 	memoryDeviceCodeStoreModule,
 	memoryFederationTokenStoreModule,
 	memoryRateLimiterModule,
+	memoryRefreshTokenFamilyStoreModule,
 	memorySessionStoresModule,
 } from "@o3co/auth-provider-core";
 import { makeValidAppConfig } from "@o3co/auth-provider-core/testing";
-import { oauthModule } from "@o3co/auth-provider-oauth";
+import { oauthModule, subjectRevocationServiceModule } from "@o3co/auth-provider-oauth";
 import { sessionModule, sessionStoreModuleFor } from "@o3co/auth-provider-session";
 import express, { type RequestHandler } from "express";
 import request from "supertest";
@@ -88,10 +96,18 @@ const codeRepository: CodeRepository = {
 
 const USERNAME = "alice";
 const PASSWORD = "correct horse battery staple";
+/** A second user, whose Store has published a verified email (#297). */
+const VERIFIED_USERNAME = "bob";
 
 const userRepository: UserRepository = {
-	authenticate: async (username, password) =>
-		username === USERNAME && password === PASSWORD ? ({ id: "user-1" } as never) : null,
+	authenticate: async (username, password) => {
+		if (password !== PASSWORD) return null;
+		if (username === USERNAME) return { id: "user-1" } as never;
+		if (username === VERIFIED_USERNAME) {
+			return { id: "user-2", email: "bob@example.test", emailVerified: true } as never;
+		}
+		return null;
+	},
 	authenticateByToken: async () => null,
 };
 
@@ -132,11 +148,13 @@ const ENABLED = {
 const bootWith = async (
 	config: AppConfig,
 	ordered: readonly Module[],
-	// What a case swaps in: the device-code store, and the logger and audit sink it reads.
+	// What a case swaps in: the device-code store, the logger and audit sink it
+	// reads, and a component standing in for one a module provides.
 	swap: {
 		readonly deviceCodeStore?: Module;
 		readonly logger?: Logger;
 		readonly auditSink?: AuditSink;
+		readonly overrideComponents?: Partial<ComponentMap>;
 	} = {},
 ) => {
 	const handle = await createApp({
@@ -157,6 +175,7 @@ const bootWith = async (
 			...(swap.logger ? { logger: swap.logger } : {}),
 			...(swap.auditSink ? { auditSink: swap.auditSink } : {}),
 		},
+		...(swap.overrideComponents ? { overrideComponents: swap.overrideComponents } : {}),
 	});
 	const app = express();
 	app.use(handle.router);
@@ -173,12 +192,12 @@ const csrfToken = async (agent: Agent): Promise<{ header: string; token: string 
 };
 
 /** Sign in through `POST /session/login`, as the verification page's user would have. */
-const signIn = async (agent: Agent): Promise<void> => {
+const signIn = async (agent: Agent, username: string = USERNAME): Promise<void> => {
 	const { header, token } = await csrfToken(agent);
 	const res = await agent
 		.post("/session/login")
 		.set(header, token)
-		.send({ username: USERNAME, password: PASSWORD });
+		.send({ username, password: PASSWORD });
 	expect(res.status).toBe(200);
 };
 
@@ -953,4 +972,324 @@ describe("deviceGrantModule beside oauthModule — a device-code store outage is
 			}
 		},
 	);
+});
+
+describe("deviceGrantModule beside oauthModule — an approval needs the live session behind the cookie", () => {
+	// The verification page runs inside the end-user session, and the cookie
+	// says `isAuthenticated`. That is the browser's claim; the `UserSession`
+	// record its `sid` names is the fact. A logout, a subject-wide revocation
+	// or a record deleted out of band ends the record and leaves the cookie as
+	// it was — and the device token an approval leads to carries no `sid` and
+	// no `family_id`, so nothing revokes it afterwards. The approval is the one
+	// place the session can be asked about, so it is asked there, as
+	// `/authorize`, the session grant and `/oauth/consent` ask it.
+
+	const [first] = orders;
+	const modulesFor = (config: AppConfig): Module[] => [
+		sessionStoreModuleFor(config),
+		...first[1](config),
+	];
+
+	/** The one session `user-1` holds, found the way a credential change finds it. */
+	const sidOf = async (components: Readonly<Partial<ComponentMap>>): Promise<string> => {
+		const index = components.subjectSessionIndex as SubjectSessionIndex;
+		const sids = await index.listSids("user-1");
+		expect(sids).toHaveLength(1);
+		return sids[0] as string;
+	};
+
+	/** The device's poll at `/oauth/token`. */
+	const pollFor = (app: express.Express, deviceCode: string) =>
+		request(app).post("/oauth/token").type("form").send({
+			grant_type: DEVICE_CODE_GRANT_TYPE,
+			client_id: CLIENT_ID,
+			device_code: deviceCode,
+		});
+
+	/** A device starts the flow; both codes, for a case that polls too. */
+	const startWithCodes = async (
+		app: express.Express,
+	): Promise<{ userCode: string; deviceCode: string }> => {
+		const res = await request(app)
+			.post("/oauth/device_authorization")
+			.type("form")
+			.send({ client_id: CLIENT_ID });
+		expect(res.status).toBe(200);
+		return { userCode: res.body.user_code as string, deviceCode: res.body.device_code as string };
+	};
+
+	const LOGIN_REQUIRED = expect.objectContaining({ error: "login_required" });
+
+	it("approves from a live session, and the device's poll is then answered with a token", async () => {
+		const config = makeConfig(ENABLED);
+		const { handle, app } = await bootWith(config, modulesFor(config));
+		try {
+			const { userCode, deviceCode } = await startWithCodes(app);
+			const agent = request.agent(app);
+			await signIn(agent);
+			const { header, token } = await csrfToken(agent);
+
+			const approved = await agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: userCode });
+			expect(approved.status).toBe(200);
+			expect(approved.body.status).toBe("approved");
+
+			const polled = await pollFor(app, deviceCode);
+			expect(polled.status).toBe(200);
+			expect(typeof polled.body.access_token).toBe("string");
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses every action once the UserSession behind the cookie is deleted, and the device stays pending", async () => {
+		const config = makeConfig(ENABLED);
+		const { handle, app } = await bootWith(config, modulesFor(config));
+		try {
+			const { userCode, deviceCode } = await startWithCodes(app);
+			const agent = request.agent(app);
+			await signIn(agent);
+			const { header, token } = await csrfToken(agent);
+
+			// Out of band: the record goes, the browser's cookie stays.
+			const store = handle.components.userSessionStore as UserSessionStore;
+			await store.delete(await sidOf(handle.components));
+
+			for (const action of ["lookup", "approve", "deny"] as const) {
+				const res = await agent
+					.post("/oauth/device/verification")
+					.set(header, token)
+					.send({ action, user_code: userCode });
+				expect(res.status, action).toBe(401);
+				expect(res.body, action).toEqual(LOGIN_REQUIRED);
+				expect(res.headers["cache-control"], action).toContain("no-store");
+			}
+
+			// Nothing was decided: the device is told to keep polling.
+			const polled = await pollFor(app, deviceCode);
+			expect(polled.status).toBe(400);
+			expect(polled.body.error).toBe("authorization_pending");
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses an approval after the subject's sessions were revoked with revokeAllForSubject", async () => {
+		// The Store's call after a credential change. It ends every session the
+		// subject holds and stamps a watermark over every token minted before
+		// it — and a device token minted from an approval AFTER it would carry
+		// a later `iat`, so the watermark cannot reach it. Only the approval can.
+		const config = makeConfig(ENABLED);
+		const { handle, app } = await bootWith(config, [
+			...modulesFor(config),
+			subjectRevocationServiceModule,
+			memoryRefreshTokenFamilyStoreModule,
+			defaultRefreshTokenFamilyRevocationModule,
+		]);
+		try {
+			const { userCode, deviceCode } = await startWithCodes(app);
+			const agent = request.agent(app);
+			await signIn(agent);
+			const { header, token } = await csrfToken(agent);
+
+			const service = handle.components.subjectRevocationService as SubjectRevocationService;
+			const report = await service.revokeAllForSubject({ subject: "user-1" });
+			expect(report.complete).toBe(true);
+
+			const res = await agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: userCode });
+			expect(res.status).toBe(401);
+			expect(res.body).toEqual(LOGIN_REQUIRED);
+
+			const polled = await pollFor(app, deviceCode);
+			expect(polled.status).toBe(400);
+			expect(polled.body.error).toBe("authorization_pending");
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses an approval from a session the subject's sessions boundary covers, though its record survived", async () => {
+		// revokeAllForSubject stamps the boundary first and deletes the
+		// sessions after it. A cascade that failed for this session — or a
+		// session the subject index never learnt of — leaves the record while
+		// the boundary is in force: the record says live, the boundary says
+		// ended, and the boundary is the one a credential change relies on.
+		const config = makeConfig(ENABLED);
+		const { handle, app } = await bootWith(config, modulesFor(config));
+		try {
+			const { userCode, deviceCode } = await startWithCodes(app);
+			const agent = request.agent(app);
+			await signIn(agent);
+			const { header, token } = await csrfToken(agent);
+
+			const revocation = handle.components.subjectRevocation as SubjectRevocation;
+			await revocation.revokeBefore("user-1", new Date(), new Date(Date.now() + 3_600_000));
+			// The record is still there.
+			const store = handle.components.userSessionStore as UserSessionStore;
+			expect(await store.get(await sidOf(handle.components))).not.toBeNull();
+
+			const res = await agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: userCode });
+			expect(res.status).toBe(401);
+			expect(res.body).toEqual(LOGIN_REQUIRED);
+
+			const polled = await pollFor(app, deviceCode);
+			expect(polled.body.error).toBe("authorization_pending");
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses the device's poll when the subject's sessions were revoked between the approval and the poll", async () => {
+		// The approval was given from a live session. revokeAllForSubject then
+		// lands before the device polls — within the code's lifetime, ten
+		// minutes by default — and the token the poll would mint postdates its
+		// watermark, so nothing downstream would refuse it. A holder of a
+		// stolen live session could approve codes ahead and redeem them after
+		// the victim's credential change.
+		const config = makeConfig(ENABLED);
+		const { handle, app } = await bootWith(config, [
+			...modulesFor(config),
+			subjectRevocationServiceModule,
+			memoryRefreshTokenFamilyStoreModule,
+			defaultRefreshTokenFamilyRevocationModule,
+		]);
+		try {
+			const { userCode, deviceCode } = await startWithCodes(app);
+			const agent = request.agent(app);
+			await signIn(agent);
+			const { header, token } = await csrfToken(agent);
+			const approved = await agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: userCode });
+			expect(approved.status).toBe(200);
+
+			const service = handle.components.subjectRevocationService as SubjectRevocationService;
+			expect((await service.revokeAllForSubject({ subject: "user-1" })).complete).toBe(true);
+
+			const polled = await pollFor(app, deviceCode);
+			expect(polled.status).toBe(400);
+			expect(polled.body.error).toBe("invalid_grant");
+			expect(polled.body.access_token).toBeUndefined();
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("answers a session-store outage with 503 temporarily_unavailable, logged once at error, and decides nothing", async () => {
+		// The store said nothing about whether the user is signed in, so the
+		// answer is the outage, not `login_required` — and not an approval on
+		// the cookie's word either.
+		const inner = createInMemoryUserSessionStore();
+		const outage = { down: false };
+		const userSessionStore: UserSessionStore = {
+			kind: "outage",
+			create: (input) => inner.create(input),
+			delete: (sid) => inner.delete(sid),
+			get: (sid) =>
+				outage.down
+					? Promise.reject(
+							Object.assign(new Error("Connection is closed."), { code: "ECONNRESET" }),
+						)
+					: inner.get(sid),
+		};
+		const logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn(), debug: vi.fn() };
+		const config = makeConfig(ENABLED);
+		const { handle, app } = await bootWith(config, modulesFor(config), {
+			logger: logger as unknown as Logger,
+			overrideComponents: { userSessionStore },
+		});
+		try {
+			const { userCode, deviceCode } = await startWithCodes(app);
+			const agent = request.agent(app);
+			await signIn(agent);
+			const { header, token } = await csrfToken(agent);
+
+			// What the boot and the sign-in wrote (the replica-safety warning)
+			// is not this request's; the assertions below count only its lines.
+			logger.warn.mockClear();
+			logger.error.mockClear();
+			outage.down = true;
+			const res = await agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: userCode });
+			expect(res.status).toBe(503);
+			expect(res.body).toEqual({
+				error: "temporarily_unavailable",
+				error_description: "session store unavailable",
+			});
+			expect(res.headers["cache-control"]).toContain("no-store");
+
+			const lines = logger.error.mock.calls.filter(
+				(call) => call[1] === "device_verification_session_liveness_unavailable",
+			);
+			expect(lines).toHaveLength(1);
+			const line = lines[0]?.[0] as Record<string, unknown>;
+			expect(line).toMatchObject({
+				store: "user_session",
+				step: "get",
+				sid: await sidOf(handle.components),
+				err: { name: "Error", code: "ECONNRESET" },
+			});
+			expect(line.err).not.toBeInstanceOf(Error);
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.warn).not.toHaveBeenCalled();
+
+			outage.down = false;
+			const polled = await pollFor(app, deviceCode);
+			expect(polled.status).toBe(400);
+			expect(polled.body.error).toBe("authorization_pending");
+		} finally {
+			await handle.dispose();
+		}
+	});
+
+	it("refuses an approval from a user without a verified email when oauth.requireEmailVerified is on, and lets a verified one approve", async () => {
+		// #297: the gate `/authorize` and the session grant hold at issuance.
+		// An approval is what the device's token is issued from, so it is held
+		// here too — otherwise a deployment requiring a verified email would
+		// find those two gated and this path open.
+		const base = makeConfig(ENABLED);
+		const config = { ...base, oauth: { ...base.oauth, requireEmailVerified: true } } as AppConfig;
+		const { handle, app } = await bootWith(config, modulesFor(config));
+		try {
+			const unverified = await startWithCodes(app);
+			const alice = request.agent(app);
+			await signIn(alice);
+			const aliceCsrf = await csrfToken(alice);
+			const refused = await alice
+				.post("/oauth/device/verification")
+				.set(aliceCsrf.header, aliceCsrf.token)
+				.send({ action: "approve", user_code: unverified.userCode });
+			expect(refused.status).toBe(403);
+			expect(refused.body).toEqual({
+				error: "access_denied",
+				error_description: "email address is not verified",
+			});
+			const pending = await pollFor(app, unverified.deviceCode);
+			expect(pending.body.error).toBe("authorization_pending");
+
+			const verified = await startWithCodes(app);
+			const bob = request.agent(app);
+			await signIn(bob, VERIFIED_USERNAME);
+			const bobCsrf = await csrfToken(bob);
+			const approved = await bob
+				.post("/oauth/device/verification")
+				.set(bobCsrf.header, bobCsrf.token)
+				.send({ action: "approve", user_code: verified.userCode });
+			expect(approved.status).toBe(200);
+			expect(approved.body.status).toBe("approved");
+		} finally {
+			await handle.dispose();
+		}
+	});
 });
