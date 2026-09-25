@@ -17,6 +17,7 @@
 import {
 	type AdapterBuilder,
 	type CreateUserSessionInput,
+	consoleLogger,
 	type Logger,
 	loggableError,
 	type UserSession,
@@ -29,12 +30,12 @@ export interface RedisUserSessionStoreOptions {
 	readonly client: UserSessionStoreClient;
 	readonly keyPrefix: string;
 	/**
-	 * Optional structured logger consumed by `get()` when a stored
-	 * envelope fails JSON.parse or shape validation (TS-3). Optional
-	 * chaining is used so callers that don't inject a logger get the
-	 * same fail-closed `null` return without an emitted warn. Phase F
-	 * will add a `consoleLogger` fallback once the D-4 ComponentMap
-	 * `logger` slot lands and module wiring threads it through.
+	 * Where `get()` reports a stored envelope that fails JSON.parse or shape
+	 * validation (TS-3): one `user_session_corrupt_envelope` warn, `reason`
+	 * `json_parse` (with the parser's projection as `err`) or
+	 * `shape_invalid`. `redisSessionStoresModule` passes the composition's
+	 * `logger` slot; absent, `consoleLogger`. The read is refused (`null`)
+	 * either way.
 	 */
 	readonly logger?: Logger;
 }
@@ -152,6 +153,7 @@ const fromEnvelope = (e: Envelope): UserSession => ({
  */
 export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions): UserSessionStore {
 	const k = (sid: string) => `${opts.keyPrefix}${sid}`;
+	const logger = opts.logger ?? consoleLogger;
 	return {
 		kind: "redis",
 		async create(input) {
@@ -208,18 +210,15 @@ export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions):
 				// review on PR #123. The cause is projected: a SyntaxError's
 				// message quotes the envelope — the session's claims — around
 				// the point the parse failed.
-				opts.logger?.warn(
-					{ sid, reason: "json_parse", cause: loggableError(cause) },
-					"user_session_corrupt_envelope: JSON.parse failed",
+				logger.warn(
+					{ sid, reason: "json_parse", err: loggableError(cause) },
+					"user_session_corrupt_envelope",
 				);
 				return null;
 			}
 
 			if (!isValidEnvelope(parsed)) {
-				opts.logger?.warn(
-					{ sid, reason: "shape_invalid" },
-					"user_session_corrupt_envelope: shape invalid",
-				);
+				logger.warn({ sid, reason: "shape_invalid" }, "user_session_corrupt_envelope");
 				return null;
 			}
 
@@ -242,22 +241,21 @@ export function createRedisUserSessionStore(opts: RedisUserSessionStoreOptions):
  *
  * Mirrors the boot-time guard pattern of `redisChallengeStoreBuilder`
  * (TS-M2): missing `client` throws at boot rather than crashing at first
- * Redis op. Optional `logger` is forwarded to the adapter for the TS-3
- * corrupt-envelope warn path emitted inside `get()`; the corrupt-envelope
- * fail-closed (returns `null`) is independent of logger presence — when
- * the logger is absent the warn is silently swallowed but the security
- * gate still triggers. The spread idiom omits the field when the caller
- * did not supply one (preserves "absent" semantics under
- * `exactOptionalPropertyTypes`).
+ * Redis op. The TS-3 corrupt-envelope warn inside `get()` goes to
+ * `config.logger`, else the factory context's logger, else `consoleLogger`;
+ * the corrupt-envelope fail-closed (returns `null`) is independent of which.
+ * The spread idiom omits the field when neither was supplied (preserves
+ * "absent" semantics under `exactOptionalPropertyTypes`).
  */
-export const redisUserSessionStoreBuilder: AdapterBuilder<UserSessionStore> = (config, _ctx) => {
+export const redisUserSessionStoreBuilder: AdapterBuilder<UserSessionStore> = (config, ctx) => {
 	const c = config as { client?: UserSessionStoreClient; keyPrefix?: string; logger?: Logger };
 	if (!c.client) {
 		throw new Error("redisUserSessionStoreBuilder: 'client' option is required");
 	}
+	const logger = c.logger ?? ctx?.logger;
 	return createRedisUserSessionStore({
 		client: c.client,
 		keyPrefix: c.keyPrefix ?? "ss:us:",
-		...(c.logger !== undefined ? { logger: c.logger } : {}),
+		...(logger !== undefined ? { logger } : {}),
 	});
 };

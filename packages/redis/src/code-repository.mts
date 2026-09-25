@@ -167,8 +167,8 @@ export class RedisCodeRepository implements CodeRepository {
 			if (typeof p.client_id !== "string" || typeof p.redirect_uri !== "string") {
 				const codeHash = crypto.createHash("sha256").update(code).digest("hex").slice(0, 16);
 				this.logger.error(
-					{ codeHash },
-					"RedisCodeRepository: legacy/corrupted code record missing required identity fields",
+					{ codeHash, reason: "identity_fields_missing" },
+					"authorization_code_corrupt_record",
 				);
 				return null;
 			}
@@ -199,8 +199,8 @@ export class RedisCodeRepository implements CodeRepository {
 			// the stored record around the point it failed.
 			const codeHash = crypto.createHash("sha256").update(code).digest("hex").slice(0, 16);
 			this.logger.error(
-				{ err: loggableError(err), codeHash },
-				"RedisCodeRepository: corrupted data for code",
+				{ codeHash, reason: "json_parse", err: loggableError(err) },
+				"authorization_code_corrupt_record",
 			);
 			return null;
 		}
@@ -243,6 +243,7 @@ export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (confi
 	return new RedisCodeRepository(c.client, {
 		keyPrefix: c.keyPrefix,
 		defaultExpiresIn: c.defaultExpiresIn,
+		...(ctx?.logger !== undefined ? { logger: ctx.logger } : {}),
 	});
 };
 
@@ -263,6 +264,9 @@ export const redisCodeRepositoryBuilder: AdapterBuilder<CodeRepository> = (confi
 export const redisCodeRepositoryModule = defineModule({
 	name: "redis-code-repository",
 	requires: ["codeRepositoryClient", "config"] as const,
+	// Where a stored record that cannot be read is reported
+	// (`authorization_code_corrupt_record`); consoleLogger when empty.
+	optional: ["logger"] as const,
 	configSchema: z.object({
 		redisCodeRepository: z
 			.object({
@@ -287,6 +291,7 @@ export const redisCodeRepositoryModule = defineModule({
 			return new RedisCodeRepository(deps.codeRepositoryClient, {
 				keyPrefix: cfg?.keyPrefix,
 				defaultExpiresIn: cfg?.defaultExpiresIn,
+				...(deps.logger !== undefined ? { logger: deps.logger } : {}),
 			});
 		},
 	},

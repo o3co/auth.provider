@@ -691,11 +691,18 @@ stream — its level is fixed at `info`.
 
 ### Data corruption — a stored record could not be read
 
-`user_session_corrupt_envelope: …` and `session_rp_registry_corrupt_envelope: …`
-(warn; `packages/redis/src/userSessionStore.mts`, `sessionRPRegistry.mts`) —
-the record is treated as absent (fail-closed). `RedisCodeRepository: corrupted
-data for code` / `… legacy/corrupted code record missing required identity
-fields` (error; `packages/redis/src/code-repository.mts`) — the code is refused.
+`user_session_corrupt_envelope` and `session_rp_registry_corrupt_envelope`
+(warn, `sid`, `reason` `json_parse` with the parser's projection as `err`, or
+`shape_invalid`; `packages/redis/src/userSessionStore.mts`,
+`sessionRPRegistry.mts`) — the record is treated as absent (fail-closed).
+`authorization_code_corrupt_record` (error, `codeHash`, `reason` `json_parse`
+with `err`, or `identity_fields_missing`;
+`packages/redis/src/code-repository.mts`) — the code is refused. They were
+`user_session_corrupt_envelope: JSON.parse failed` (and `: shape invalid`), the
+same for the RP registry, `RedisCodeRepository: corrupted data for code` and
+`… legacy/corrupted code record missing required identity fields`; the session
+stores' lines now reach the deployment's logger (they were written only by a
+store built with one, which the module never did).
 A federation-token envelope that fails to decrypt is **deleted** and the user is
 sent to re-authenticate (`packages/redis/src/federation-tokens.mts` `get`).
 A watermark that is not a number throws rather than reading as "not revoked"

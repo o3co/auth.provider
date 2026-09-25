@@ -202,9 +202,14 @@ the line still says which command failed. The connections
 `makeIoredisClients` opens for refresh rotation log
 `redis_duplicate_connection_error` through the projection, and a stored
 authorization code, user session or RP record that does not parse is logged as
-the parser error's name and position (`RedisCodeRepository: corrupted data for
-code`, `user_session_corrupt_envelope`, `session_rp_registry_corrupt_envelope`),
-never the stored text the parser's message quotes.
+the parser error's name and position, as `err`, never the stored text the
+parser's message quotes: `authorization_code_corrupt_record` (error),
+`user_session_corrupt_envelope` and `session_rp_registry_corrupt_envelope`
+(warn), each with `reason` `json_parse` — or, for a record that parses but is
+not one, `shape_invalid` (`identity_fields_missing` for a code without its
+client and redirect URI). The stores write them on the logger their module
+hands them (the `logger` slot) and on `consoleLogger` when there is none, so
+a corrupt record is never unreported.
 
 A `MULTI`/`EXEC` whose queued command Redis refused (`WRONGTYPE`, `OOM`,
 `READONLY` …) is thrown as an error that names the operation in fixed words —
@@ -293,8 +298,10 @@ Each adapter ships in up to two forms:
 | `redisDeviceCodeStoreModule` | `deviceCodeStoreClient` | `deviceCodeStore` | `redisDeviceCodeStore` | `redisDeviceCodeStoreBuilder` |
 | `redisConsentStoreModule` | `consentStoreClient`, `pendingConsentStoreClient` | `consentStore`, `pendingConsentStore` | `redisConsentStore` | `redisConsentStoreBuilder`, `redisPendingConsentStoreBuilder` |
 
-Every module also requires `config`; the two sealing-store modules also read
-the optional `logger` slot, for the plaintext guard's line. The `*Client` column is the slot
+Every module also requires `config`. Every module whose stores log also reads
+the optional `logger` slot: the two sealing-store modules, for the plaintext
+guard's line; `redisSessionStoresModule` and `redisCodeRepositoryModule`, for a
+stored record they cannot read. The `*Client` column is the slot
 `makeIoredisClients` fills, except the two federation-grant clients (see
 above); a composition that wires a module without providing its client slot
 fails stage-1 boot with `missing-required-component` — named at boot, not at
