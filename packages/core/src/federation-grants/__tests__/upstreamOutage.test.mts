@@ -78,18 +78,56 @@ describe("isFederationUpstreamOutage", () => {
 		],
 		...(
 			[
+				// Connection codes a socket reports.
+				"ECONNABORTED",
+				"EPROTO",
+				"ENETDOWN",
+				"EHOSTDOWN",
+				"ENETRESET",
+				// undici's own family, whatever the member: this server's transport
+				// or its composition, a 503 either way.
+				"UND_ERR_CONNECT_TIMEOUT",
+				"UND_ERR_CLOSED",
+				"UND_ERR_DESTROYED",
+				"UND_ERR_RES_CONTENT_LENGTH_MISMATCH",
+				"UND_ERR_HEADERS_OVERFLOW",
+				"UND_ERR_INVALID_ARG",
+				// llhttp's parser errors (undici's HTTPParserError).
+				"HPE_INVALID_CONSTANT",
+				// Node's X509 verification codes, prefixed and not.
 				"CERT_HAS_EXPIRED",
+				"CERT_REVOKED",
+				"UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+				"UNABLE_TO_DECRYPT_CERT_SIGNATURE",
+				"DEPTH_ZERO_SELF_SIGNED_CERT",
+				"INVALID_CA",
+				"PATH_LENGTH_EXCEEDED",
+				"INVALID_PURPOSE",
+				"CRL_HAS_EXPIRED",
+				"ERROR_IN_CERT_NOT_AFTER_FIELD",
+				"OUT_OF_MEM",
+				// Node's TLS codes and OpenSSL's, one with OpenSSL 3's slash.
 				"ERR_TLS_CERT_ALTNAME_INVALID",
 				"ERR_SSL_WRONG_VERSION_NUMBER",
-				"UNABLE_TO_VERIFY_LEAF_SIGNATURE",
-				"DEPTH_ZERO_SELF_SIGNED_CERT",
+				"ERR_SSL_SSL/TLS_ALERT_HANDSHAKE_FAILURE",
+				// A URL fetch could not parse: nothing was sent.
 				"ERR_INVALID_URL",
-				"UND_ERR_CONNECT_TIMEOUT",
 			] as const
 		).map((code): [string, unknown] => [
 			`undici's fetch failure over a ${code} cause — the TLS layer, the URL or the socket`,
 			new TypeError("fetch failed", { cause: coded(code) }),
 		]),
+		[
+			"undici's own error, raised without fetch's TypeError around it",
+			Object.assign(new Error("other side closed"), {
+				name: "SocketError",
+				code: "UND_ERR_CLOSED",
+			}),
+		],
+		[
+			"a TLS verification error, raised without fetch's TypeError around it",
+			Object.assign(new Error("certificate has expired"), { code: "CERT_HAS_EXPIRED" }),
+		],
 		[
 			"undici's fetch failure over a coded socket error, raised in another realm",
 			runInNewContext(
@@ -147,13 +185,25 @@ describe("isFederationUpstreamOutage", () => {
 		],
 		["a thrown plain object that looks like a timeout", { name: "TimeoutError" }],
 		["a thrown plain object that carries a 5xx status", { status: 503 }],
-		[
-			"a TypeError over a cause whose code is no transport's — an adapter's validation error",
+		...(
+			[
+				// An adapter's validation error, a token library's, a programming
+				// error: none says anything about the transport.
+				"OAUTH_INVALID_RESPONSE",
+				"ERR_JWT_EXPIRED",
+				"ERR_INVALID_ARG_TYPE",
+				// Starts like undici's family, and is not one of its codes.
+				"UND_ERR_not_a_code",
+			] as const
+		).map((code): [string, unknown] => [
+			`a TypeError over a cause whose code, ${code}, is no transport's`,
 			new TypeError("invalid response", {
-				cause: Object.assign(new Error("the answer is not one"), {
-					code: "OAUTH_INVALID_RESPONSE",
-				}),
+				cause: Object.assign(new Error("the answer is not one"), { code }),
 			}),
+		]),
+		[
+			"a token library's error raised on its own",
+			Object.assign(new Error('"exp" claim timestamp check failed'), { code: "ERR_JWT_EXPIRED" }),
 		],
 		[
 			"a connection code five causes down, past where the walk looks",
