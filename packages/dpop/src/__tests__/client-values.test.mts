@@ -153,4 +153,25 @@ describe("a DPoP refusal of the client's own typ or alg quotes neither", () => {
 		});
 		expect(verdictOf(calls)?.err.detail).toBe("alg is not an accepted DPoP algorithm");
 	});
+
+	it.each([
+		// W3C WebCrypto registrations, marked Prohibited.
+		"RS1",
+		"HS1",
+		// RFC 9964: ML-DSA for JOSE.
+		"ML-DSA-44",
+		"ML-DSA-65",
+		"ML-DSA-87",
+	])("%s, in the IANA JWS algorithms registry, is named too", async (alg) => {
+		const { app, calls } = appWith();
+
+		await request(app)
+			.post("/oauth/token")
+			.set("DPoP", proof({ alg, typ: "dpop+jwt", jwk: await publicJwk() }));
+
+		expect(calls).toContainEqual({
+			level: "warn",
+			args: [{ alg, whitelist: ["ES256", "ES384", "EdDSA", "RS256"] }, "dpop_alg_not_allowed"],
+		});
+	});
 });
