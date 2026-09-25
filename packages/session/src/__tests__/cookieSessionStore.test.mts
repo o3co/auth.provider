@@ -28,11 +28,16 @@
  *
  * A route that meets the same store failing answers its own `503` and logs
  * its own line; express-session must not then write the session again when
- * the response ends — after a failed regeneration it would save the fresh,
- * empty session, and after a failed transaction write refresh the expiry of
- * one it never changed, each time waiting on the same store and reporting
- * the same outage a second time. (A failed `req.session.save` needs no such
- * care: express-session counts a session as saved once a save was asked.)
+ * the response ends — it would save a regenerated session (whose `save`
+ * express-session does not track, so a failed one is tried again), and
+ * refresh the expiry of a session the request carried a cookie for (a failed
+ * save included), each time waiting on the same store and reporting the same
+ * outage a second time. Every route drops the request's session after such an
+ * outage, and these cases pin that the store sees one write.
+ *
+ * A record the store holds but cannot be read is not an outage: it is read as
+ * absent, so the browser starts a fresh session, and is logged once as a
+ * warn.
  *
  * Booted through `createApp`: the real module, the real express-session and
  * the real connect-redis, over a node-redis client faked in memory (the one
@@ -54,6 +59,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const fake = vi.hoisted(() => {
 	const data = new Map<string, string>();
 	const failing = new Set<string>();
+	/** A command that fails from its `n`th call on (counted since the last reset). */
+	const failFrom = new Map<string, number>();
 	const calls: Record<string, number> = { get: 0, set: 0, expire: 0, del: 0 };
 	/** What node-redis rejects a refused command with: the command's arguments ride on it. */
 	const replyError = (command: string, args: unknown[]): Error =>
@@ -63,7 +70,8 @@ const fake = vi.hoisted(() => {
 		});
 	const run = <T,>(command: string, args: unknown[], answer: () => T): Promise<T> => {
 		calls[command] = (calls[command] ?? 0) + 1;
-		return failing.has(command)
+		const from = failFrom.get(command);
+		return failing.has(command) || (from !== undefined && (calls[command] ?? 0) >= from)
 			? Promise.reject(replyError(command, args))
 			: Promise.resolve(answer());
 	};
@@ -85,7 +93,7 @@ const fake = vi.hoisted(() => {
 				return keys.length;
 			}),
 	};
-	return { data, failing, calls, client };
+	return { data, failing, failFrom, calls, client };
 });
 
 vi.mock("redis", () => ({ createClient: () => fake.client }));
@@ -165,6 +173,7 @@ const resetCalls = (): void => {
 beforeEach(() => {
 	fake.data.clear();
 	fake.failing.clear();
+	fake.failFrom.clear();
 	resetCalls();
 });
 
@@ -225,8 +234,16 @@ async function boot(logger: SpyLogger): Promise<express.Express> {
 								{
 									name: "test",
 									scope: ["openid"],
-									buildAuthorizationUrl: () => new URL("https://idp.example.com/authorize"),
-									exchangeCode: vi.fn(),
+									buildAuthorizationUrl: ({ state }: { state: string }) => {
+										const url = new URL("https://idp.example.com/authorize");
+										url.searchParams.set("state", state);
+										return url;
+									},
+									exchangeCode: vi.fn(async () => ({
+										issuer: "https://idp.example.com",
+										sub: "external-42",
+										expiresAt: null,
+									})),
 								},
 							],
 							[
@@ -407,7 +424,7 @@ describe("a route that meets the cookie store failing answers once, and the sess
 		expect(res.status).toBe(503);
 		expect(res.body).toEqual({
 			error: "temporarily_unavailable",
-			error_description: "Session store temporarily unavailable",
+			error_description: "Session store unavailable",
 		});
 		expectOneOutageLine(logger, "login_store_unavailable", {
 			store: "cookie_session",
@@ -419,8 +436,14 @@ describe("a route that meets the cookie store failing answers once, and the sess
 	it("GET /session/oauth/federation/:name whose envelope cannot be saved: 503, one error line, one write attempted", async () => {
 		const logger = spyLogger();
 		const agent = request.agent(await boot(logger));
+		// A browser that already holds a session: after a failed save,
+		// express-session would still refresh its expiry.
+		expect((await agent.get("/probe/write")).status).toBe(200);
+		clear(logger);
+		resetCalls();
 
 		fake.failing.add("set");
+		fake.failing.add("expire");
 		const res = await agent.get("/session/oauth/federation/test");
 
 		expect(res.status).toBe(503);
@@ -430,5 +453,140 @@ describe("a route that meets the cookie store failing answers once, and the sess
 			step: "save",
 		});
 		expect(fake.calls.set).toBe(1);
+		expect(fake.calls.expire).toBe(0);
+	});
+
+	/** Start a query-mode federation and answer with the callback URL its state belongs to. */
+	const startFederation = async (agent: ReturnType<typeof request.agent>): Promise<string> => {
+		const started = await agent.get("/session/oauth/federation/test");
+		expect(started.status).toBe(302);
+		const state = new URL(started.headers.location as string).searchParams.get("state");
+		return `/session/oauth/federation/test/callback?state=${state}&code=c1`;
+	};
+
+	it("the federation callback whose session cannot be regenerated: 503, one error line, and no session written", async () => {
+		const logger = spyLogger();
+		const agent = request.agent(await boot(logger));
+		const callback = await startFederation(agent);
+		clear(logger);
+		resetCalls();
+
+		// The envelope's retirement (a save) succeeds; the regeneration's
+		// destroy of the old record does not, nor anything after it.
+		fake.failing.add("del");
+		fake.failFrom.set("set", 2);
+		fake.failing.add("expire");
+		const res = await agent.get(callback);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expectOneOutageLine(logger, "federation_callback_store_unavailable", {
+			store: "cookie_session",
+			step: "regenerate",
+		});
+		expect(fake.calls.set).toBe(1);
+		expect(fake.calls.expire).toBe(0);
+	});
+
+	it("the federation callback whose regenerated session cannot be saved: 503, one error line, and no destroy of a session never written", async () => {
+		const logger = spyLogger();
+		const agent = request.agent(await boot(logger));
+		const callback = await startFederation(agent);
+		clear(logger);
+		resetCalls();
+
+		// The envelope's retirement succeeds and so does the regeneration's
+		// destroy; the regenerated session's save fails.
+		fake.failFrom.set("set", 2);
+		fake.failing.add("expire");
+		const res = await agent.get(callback);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expectOneOutageLine(logger, "federation_callback_store_unavailable", {
+			store: "cookie_session",
+			step: "save",
+		});
+		expect(fake.calls.set).toBe(2);
+		// The regeneration's one destroy of the old record, and nothing else:
+		// the session that failed to save was never written, so there is
+		// nothing to destroy.
+		expect(fake.calls.del).toBe(1);
+		expect(fake.calls.expire).toBe(0);
+	});
+
+	it("POST /session/logout whose cookie session cannot be destroyed: 503, one error line, no further write", async () => {
+		const logger = spyLogger();
+		const agent = request.agent(await boot(logger));
+		expect((await agent.get("/probe/write")).status).toBe(200);
+		const csrf = await csrfFor(agent);
+		clear(logger);
+		resetCalls();
+
+		fake.failing.add("del");
+		fake.failing.add("set");
+		fake.failing.add("expire");
+		const res = await agent.post("/session/logout").set(csrf.header, csrf.token);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expectOneOutageLine(logger, "session_logout_store_unavailable", {
+			store: "cookie_session",
+			step: "destroy",
+		});
+		expect(fake.calls.del).toBe(1);
+		expect(fake.calls.set).toBe(0);
+		expect(fake.calls.expire).toBe(0);
+	});
+});
+
+describe("a cookie-session record the store holds but cannot read", () => {
+	/** The one session record in the fake store. */
+	const onlyRecordKey = (): string => {
+		const keys = [...fake.data.keys()].filter((key) => key.startsWith("sess:"));
+		expect(keys).toHaveLength(1);
+		return keys[0] as string;
+	};
+
+	it.each([
+		["text that is not JSON", '{"cookie": {"originalMaxAge": 36'],
+		["JSON that is not a session record", "42"],
+		["a record with no cookie", '{"value":"written"}'],
+	])(
+		"%s is read as absent: a fresh session, and one warn without the record",
+		async (_label, corrupt) => {
+			const logger = spyLogger();
+			const agent = request.agent(await boot(logger));
+			expect((await agent.get("/probe/write")).status).toBe(200);
+			fake.data.set(onlyRecordKey(), corrupt);
+			clear(logger);
+
+			const res = await agent.get("/probe/read");
+
+			expect(res.status).toBe(200);
+			expect(res.body).toEqual({ value: null });
+			expect(logger.warn).toHaveBeenCalledTimes(1);
+			const [context, name] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
+			expect(name).toBe("session_cookie_record_unreadable");
+			expect(context).toEqual({ store: "cookie_session" });
+			expect(JSON.stringify(logger.warn.mock.calls)).not.toContain(corrupt);
+			for (const level of ["trace", "debug", "info", "error", "fatal"] as const) {
+				expect(logger[level]).not.toHaveBeenCalled();
+			}
+		},
+	);
+
+	it("while a store that cannot answer is still the 503", async () => {
+		const logger = spyLogger();
+		const agent = request.agent(await boot(logger));
+		expect((await agent.get("/probe/write")).status).toBe(200);
+		clear(logger);
+
+		fake.failing.add("get");
+		const res = await agent.get("/probe/read");
+
+		expect(res.status).toBe(503);
+		expect(logger.warn).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
 	});
 });

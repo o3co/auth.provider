@@ -1328,7 +1328,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 		expect(res.status).toBe(503);
 		expect(res.body).toEqual({
 			error: "temporarily_unavailable",
-			error_description: "Session store temporarily unavailable",
+			error_description: "Session store unavailable",
 		});
 		expectOutageLogged(
 			logger,
@@ -1358,7 +1358,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 		expect(res.status).toBe(503);
 		expect(res.body).toEqual({
 			error: "temporarily_unavailable",
-			error_description: "Session store temporarily unavailable",
+			error_description: "Session store unavailable",
 		});
 		expectOutageLogged(
 			logger,
@@ -1421,7 +1421,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 		expect(res.status).toBe(503);
 		expect(res.body).toEqual({
 			error: "temporarily_unavailable",
-			error_description: "Session store temporarily unavailable",
+			error_description: "Session store unavailable",
 		});
 		expectOutageLogged(
 			logger,
@@ -1447,7 +1447,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 		expect(res.status).toBe(503);
 		expect(res.body).toEqual({
 			error: "temporarily_unavailable",
-			error_description: "Session store temporarily unavailable",
+			error_description: "Session store unavailable",
 		});
 		expectOutageLogged(
 			logger,

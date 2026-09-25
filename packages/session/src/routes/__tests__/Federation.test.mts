@@ -682,6 +682,28 @@ describe("account linking across federations (#482)", () => {
 				expect(res.body.error).toBe("link_requires_trusted_origin");
 			});
 
+			it("logs a refused start once, with the caller's Sec-Fetch-Site sanitised and capped", async () => {
+				// The header is the caller's text, as any other caller-controlled
+				// string on a log line: through `auditErrorText`, never sliced raw.
+				const logger = spyLogger();
+				const app = buildCallbackApp({
+					providers,
+					federation: {},
+					sessionSeed: seed,
+					userRepository: linkableRepo(),
+					logger: logger as unknown as Logger,
+				}).app;
+				const res = await start(app, { "Sec-Fetch-Site": `x"y\\${"z".repeat(300)}` });
+				expect(res.status).toBe(403);
+				expect(logger.warn).toHaveBeenCalledTimes(1);
+				const [context, name] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
+				expect(name).toBe("federation_link_start_rejected");
+				expect(context.provider).toBe("test");
+				expect(context.secFetchSite).toMatch(/^x\?y\?z+\.\.\.$/);
+				expect((context.secFetchSite as string).length).toBeLessThanOrEqual(200);
+				expect(logger.error).not.toHaveBeenCalled();
+			});
+
 			it.each([["same-origin"], ["none"]])(
 				"accepts a start whose navigation is %s",
 				async (site) => {

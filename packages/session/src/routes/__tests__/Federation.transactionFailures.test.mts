@@ -97,7 +97,7 @@ type Knobs = {
 	/** Mount something that is not store-shaped. */
 	malformedSessionStore?: boolean;
 	/** Make one store method fail. */
-	failOn?: "get" | "set" | "destroy";
+	failOn?: "get" | "set" | "destroy" | ReadonlyArray<"get" | "set" | "destroy">;
 	/** Register this callback URL instead of a well-formed one. */
 	callbackUrl?: string | null;
 	/** Passed straight through as the router's `config`. */
@@ -159,17 +159,19 @@ const DEFAULT_COOKIE_NAME = deriveFederationTransactionCookieName("harness.sessi
 function buildApp(knobs: Knobs = {}) {
 	const records = new Map<string, unknown>();
 	const backing = makeRecordStore(records);
+	const fails = (method: "get" | "set" | "destroy"): boolean =>
+		knobs.failOn === method || (Array.isArray(knobs.failOn) && knobs.failOn.includes(method));
 	const sessionStore = {
 		get(sid: string, cb: (err: unknown, record?: unknown) => void) {
-			if (knobs.failOn === "get") return cb(new Error("store down"));
+			if (fails("get")) return cb(new Error("store down"));
 			backing.get(sid, cb);
 		},
 		set(sid: string, record: unknown, cb?: (err?: unknown) => void) {
-			if (knobs.failOn === "set") return cb?.(new Error("store down"));
+			if (fails("set")) return cb?.(new Error("store down"));
 			backing.set(sid, record, cb);
 		},
 		destroy(sid: string, cb?: (err?: unknown) => void) {
-			if (knobs.failOn === "destroy") return cb?.(new Error("store down"));
+			if (fails("destroy")) return cb?.(new Error("store down"));
 			backing.destroy(sid, cb);
 		},
 	};
@@ -359,6 +361,31 @@ describe("a form_post callback refuses when the transaction cannot be resolved o
 			store: "federation_transaction",
 			step: "get",
 		});
+	});
+
+	it("logs the outage before the discard that fails behind it", async () => {
+		// The read failed, and the best-effort discard then fails on the same
+		// store: the outage is the cause and is written first, its cleanup
+		// warn after.
+		const { app, records } = buildApp();
+		const flow = await start(app, records);
+
+		const logger = spyLogger();
+		const { app: broken } = buildApp({ failOn: ["get", "destroy"], logger });
+		const res = await request(broken)
+			.post("/oauth/federation/apple/callback")
+			.set("Cookie", flow.cookie)
+			.type("form")
+			.send({ state: flow.state, code: "c" });
+
+		expect(res.status).toBe(503);
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error.mock.calls[0]?.[1]).toBe("federation_callback_store_unavailable");
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn.mock.calls[0]?.[1]).toBe("federation_cleanup_failed");
+		expect(logger.error.mock.invocationCallOrder[0]).toBeLessThan(
+			logger.warn.mock.invocationCallOrder[0] ?? 0,
+		);
 	});
 
 	it("503s and logs once rather than exchanging the code when the transaction cannot be deleted", async () => {
