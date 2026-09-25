@@ -68,11 +68,20 @@
  * and the intermediate's up, the common outage, `"allow"` refused — and it
  * meant a CRL the engine discarded for a bad signature never reached the
  * logged availability branch. Deciding here makes `on-unavailable` mean what
- * the configuration says: `"reject"` refuses on the first certificate whose
- * status is unknown — or only partly known, because one of the distribution
- * points it names could not be used (#446) — `"allow"` skips exactly those
+ * the configuration says: `"reject"` refuses a certificate whose status is
+ * unknown — or only partly known, because one of the distribution points it
+ * names could not be used (#446) — `"allow"` skips exactly those
  * certificates and logs each one, and a status that *was* determined as
  * revoked is refused under both.
+ *
+ * Under `"reject"` an unknown status is one of two things. When every source
+ * behind it failed to answer usefully — an outage, as `crl.mts` and
+ * `ocsp.mts` mark it — the refusal is the server's: the result says
+ * `outage`, this validator writes no line, and the mechanism refuses it
+ * `unavailable`, which core's dispatcher answers 503 and logs once. Anything
+ * else is the certificate's own shape, a verdict, refused and logged here as
+ * before. A verdict anywhere on the path wins over an outage: the outage is
+ * held until every certificate has been judged.
  *
  * The ordering — validate, then fetch — is a security property, not an
  * optimisation. A distribution point is a URL inside a certificate, and
@@ -192,6 +201,15 @@ export type FullPkiResult =
 			readonly step: string;
 			readonly detail: string;
 			readonly cause?: unknown;
+			/**
+			 * Set when the refusal is the server's outage, not a verdict on the
+			 * certificate: under `on-unavailable = "reject"`, the only thing that
+			 * stopped the path was a revocation source that did not answer
+			 * usefully (see `crl.mts`, "An outage, or the certificate's shape").
+			 * The mechanism refuses it `unavailable` — `503` from the dispatcher,
+			 * which writes its one line — and this validator writes none.
+			 */
+			readonly outage?: true;
 	  };
 
 export interface FullPkiValidator {
@@ -227,6 +245,8 @@ type RevocationOutcome =
 			readonly detail: string;
 			/** The library error behind `reason`, when one threw. */
 			readonly cause?: unknown;
+			/** Every source asked failed because it did not answer usefully. */
+			readonly outage?: true;
 	  };
 
 /** `{ cause }` when there is one, for a spread into an outcome or a result. */
@@ -400,6 +420,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 											reason: last.reason,
 											detail: describeUnavailable(own.unavailable),
 											...withCause(last.cause),
+											...(own.unavailable.every((point) => point.outage) ? { outage: true } : {}),
 										};
 									}
 									return own;
@@ -423,6 +444,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				reason: lookup.reason,
 				detail: lookup.detail,
 				...withCause(lookup.cause),
+				...(lookup.outage ? { outage: true } : {}),
 			};
 		}
 		// Every CRL here verified against `issuer`, whose subject is this
@@ -451,6 +473,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				reason: lookup.reason,
 				detail: lookup.detail,
 				...withCause(lookup.cause),
+				...(lookup.outage ? { outage: true } : {}),
 			};
 		}
 		if (lookup.responderUnchecked && !uncheckedResponders.has(lookup.responder)) {
@@ -526,13 +549,20 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 		}
 		const crl = await byCrl(certificate, issuer, now);
 		if (crl.kind !== "unavailable") return crl;
-		// `err` goes with `reason`, and both are the CRL's: the OCSP failure's
+		// An outage when every source the certificate names failed as one; a
+		// source it names none of (no responder, no distribution point) was
+		// never asked, and says nothing either way.
+		const asked = [ocsp, crl].filter(
+			(source) => source.reason !== "no_responder" && source.reason !== "no_distribution_point",
+		);
+		// `cause` goes with `reason`, and both are the CRL's: the OCSP failure's
 		// projection was on the fallback line above.
 		return {
 			kind: "unavailable",
 			reason: crl.reason,
 			detail: `ocsp: ${ocsp.reason} (${ocsp.detail}); crl: ${crl.reason} (${crl.detail})`,
 			...withCause(crl.cause),
+			...(asked.length > 0 && asked.every((source) => source.outage) ? { outage: true } : {}),
 		};
 	};
 
@@ -689,6 +719,13 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					decide(certificate, path[index + 1] as pkijs.Certificate, now),
 				),
 			);
+			// Under "reject", an outage — a source that did not answer usefully —
+			// is the server's, answered 503, and it is held until every
+			// certificate has been judged: a certificate on the path that is
+			// revoked, or whose status cannot be determined for a reason of its
+			// own, is a verdict a retry would not change, and it wins. The first
+			// outage is returned only when nothing else refused.
+			let outage: FullPkiResult | undefined;
 			for (const [index, certificate] of subjects.entries()) {
 				const outcome = outcomes[index] as RevocationOutcome;
 
@@ -706,6 +743,18 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 
 				if (outcome.kind === "unavailable") {
 					const subject = toNode(certificate).subject;
+					if (revocation.onUnavailable === "reject" && outcome.outage) {
+						// Not logged here: the dispatcher that answers the 503 writes the
+						// outage's one line, with this detail and cause.
+						outage ??= {
+							ok: false,
+							step: "revocation status unavailable",
+							detail: `${subject}: ${outcome.reason} — ${outcome.detail}`,
+							...withCause(outcome.cause),
+							outage: true,
+						};
+						continue;
+					}
 					if (revocation.onUnavailable === "reject") {
 						options.logger?.warn(
 							{ subject, reason: outcome.reason, detail: outcome.detail, ...errOf(outcome.cause) },
@@ -748,6 +797,19 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					const subject = toNode(certificate).subject;
 					const last = outcome.unavailable[outcome.unavailable.length - 1] as CrlPointUnavailable;
 					const detail = describeUnavailable(outcome.unavailable);
+					if (
+						revocation.onUnavailable === "reject" &&
+						outcome.unavailable.every((point) => point.outage)
+					) {
+						outage ??= {
+							ok: false,
+							step: "revocation status unavailable",
+							detail: `${subject}: ${last.reason} — ${detail}`,
+							...withCause(last.cause),
+							outage: true,
+						};
+						continue;
+					}
 					if (revocation.onUnavailable === "reject") {
 						options.logger?.warn(
 							{ subject, reason: last.reason, detail, ...errOf(last.cause) },
@@ -767,7 +829,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				}
 			}
 
-			return { ok: true };
+			return outage ?? { ok: true };
 		},
 	};
 };

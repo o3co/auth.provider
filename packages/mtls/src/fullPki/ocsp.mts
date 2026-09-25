@@ -148,6 +148,15 @@
  * WebCrypto checking its signature, the platform fetch — as `cause`, never
  * its text. Summed up over several responders, `reason` and `cause` are the
  * last failure's.
+ *
+ * An unavailability is marked `outage`, as in `crl.mts`, when the responder
+ * did not answer usefully: it could not be fetched for a reason of its own
+ * (`isSourceFailure`), it answered with bytes that are not a response or a
+ * status (`unparseable`), it said it could not answer (`responder_error`:
+ * `tryLater`, `internalError`, …), or its answer is out of date (`stale`) — or
+ * a delegated responder's own status could not be read for such a reason
+ * (`responder_status_unavailable`). A lookup over several responders is an
+ * outage only when every one of them was.
  */
 
 import { createHash, randomBytes, X509Certificate } from "node:crypto";
@@ -166,7 +175,7 @@ import {
 } from "./criticalExtensions.mjs";
 import { CRL_NEGATIVE_CACHE_TTL_MS } from "./crl.mjs";
 import { DEFAULT_ALGORITHM_POLICY } from "./defaults.mjs";
-import type { GuardedFetch } from "./fetchGuard.mjs";
+import { type GuardedFetch, isSourceFailure } from "./fetchGuard.mjs";
 
 /** OID of `authorityInfoAccess` (RFC 5280 §4.2.2.1). */
 const OID_AUTHORITY_INFO_ACCESS = "1.3.6.1.5.5.7.1.1";
@@ -273,6 +282,8 @@ export type OcspLookup =
 			readonly detail: string;
 			/** The last failure's library error, beside its `reason`, when one threw. */
 			readonly cause?: unknown;
+			/** Every responder that was asked failed as an outage (see the module header). */
+			readonly outage?: true;
 	  };
 
 export type OcspResponders =
@@ -425,6 +436,7 @@ type CacheEntry =
 			readonly reason: RespondersFailure | CertificateFailure;
 			readonly detail: string;
 			readonly cause?: unknown;
+			readonly outage?: true;
 			/** Epoch millis after which the responder is tried again. */
 			readonly expiresAt: number;
 	  };
@@ -450,7 +462,21 @@ type Answer =
 			readonly reason: OcspUnavailableReason;
 			readonly detail: string;
 			readonly cause?: unknown;
+			readonly outage?: true;
 	  };
+
+/** The reasons that say a responder did not answer usefully (see the module header). */
+const OUTAGE_REASONS: ReadonlySet<OcspUnavailableReason> = new Set<OcspUnavailableReason>([
+	"unparseable",
+	"responder_error",
+	"stale",
+]);
+
+/** `answer`, marked an outage when its reason says the responder did not answer usefully. */
+const markOutage = (answer: Answer): Answer =>
+	!answer.ok && answer.outage === undefined && OUTAGE_REASONS.has(answer.reason)
+		? { ...answer, outage: true }
+		: answer;
 
 export interface OcspResolverOptions {
 	readonly fetch: GuardedFetch;
@@ -502,6 +528,8 @@ export type ResponderRevocationOutcome =
 			readonly reason: string;
 			readonly detail: string;
 			readonly cause?: unknown;
+			/** The source for the responder's status did not answer usefully. */
+			readonly outage?: true;
 	  };
 
 export type ResponderRevocationCheck = (
@@ -954,15 +982,15 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 	const remember = (
 		key: string,
 		reason: RespondersFailure | CertificateFailure,
-		detail: string,
+		failure: { readonly detail: string; readonly cause?: unknown; readonly outage?: true },
 		now: Date,
-		cause?: unknown,
 	): void =>
 		store(key, {
 			kind: "unavailable",
 			reason,
-			detail,
-			...(cause !== undefined ? { cause } : {}),
+			detail: failure.detail,
+			...(failure.cause !== undefined ? { cause: failure.cause } : {}),
+			...(failure.outage ? { outage: true } : {}),
 			expiresAt: now.getTime() + OCSP_NEGATIVE_CACHE_TTL_MS,
 		});
 
@@ -988,6 +1016,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 				reason: "fetch_failed",
 				detail: `${fetched.reason} (${fetched.detail})`,
 				...(fetched.cause !== undefined ? { cause: fetched.cause } : {}),
+				...(isSourceFailure(fetched.reason) ? { outage: true } : {}),
 			};
 		}
 
@@ -1115,7 +1144,13 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 		now: Date,
 	): Promise<
 		| { ok: true; unchecked: boolean }
-		| { ok: false; reason: OcspUnavailableReason; detail: string; cause?: unknown }
+		| {
+				ok: false;
+				reason: OcspUnavailableReason;
+				detail: string;
+				cause?: unknown;
+				outage?: true;
+		  }
 	> => {
 		if (options.responderRevocation === undefined) return { ok: true, unchecked: true };
 		const own = await options.responderRevocation(delegate, issuer, now);
@@ -1134,6 +1169,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 					"the delegated responder's own revocation status is unavailable " +
 					`(${own.reason}): ${own.detail}`,
 				...(own.cause !== undefined ? { cause: own.cause } : {}),
+				...(own.outage ? { outage: true } : {}),
 			};
 		}
 		return { ok: true, unchecked: own.kind === "unspecified" };
@@ -1148,7 +1184,9 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 	): Promise<Answer> => {
 		const existing = inFlight.get(key);
 		if (existing !== undefined) return existing;
-		const pending = query(url, certificate, issuer, now).finally(() => inFlight.delete(key));
+		const pending = query(url, certificate, issuer, now)
+			.then(markOutage)
+			.finally(() => inFlight.delete(key));
 		inFlight.set(key, pending);
 		return pending;
 	};
@@ -1193,6 +1231,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 					reason: down.reason,
 					detail: `${down.detail}; not retried yet`,
 					...(down.cause !== undefined ? { cause: down.cause } : {}),
+					...(down.outage ? { outage: true } : {}),
 				};
 			}
 		}
@@ -1208,20 +1247,13 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 			return answer;
 		}
 		if (RESPONDER_FAILURES.has(answer.reason)) {
-			remember(
-				responderDownKey(url),
-				answer.reason as RespondersFailure,
-				answer.detail,
-				now,
-				answer.cause,
-			);
+			remember(responderDownKey(url), answer.reason as RespondersFailure, answer, now);
 		} else if (CERTIFICATE_FAILURES.has(answer.reason)) {
 			remember(
 				certificateDownKey(url, issuerId, serial),
 				answer.reason as CertificateFailure,
-				answer.detail,
+				answer,
 				now,
-				answer.cause,
 			);
 		}
 		// `bad_signature` and `nonce_mismatch` are left unremembered on purpose.
@@ -1242,6 +1274,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 				reason: OcspUnavailableReason;
 				detail: string;
 				cause?: unknown;
+				outage?: true;
 			}[] = [];
 			for (const url of responders.urls) {
 				const answer = await lookup(url, certificate, issuer, issuerId, serial, now);
@@ -1258,6 +1291,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 					reason: answer.reason,
 					detail: answer.detail,
 					...(answer.cause !== undefined ? { cause: answer.cause } : {}),
+					...(answer.outage ? { outage: true } : {}),
 				});
 			}
 			const last = failures[failures.length - 1];
@@ -1268,6 +1302,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 					.map((entry) => `${entry.url}: ${entry.reason} (${entry.detail})`)
 					.join("; "),
 				...(last?.cause !== undefined ? { cause: last.cause } : {}),
+				...(failures.length > 0 && failures.every((entry) => entry.outage) ? { outage: true } : {}),
 			};
 		},
 	};

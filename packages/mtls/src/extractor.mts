@@ -44,7 +44,7 @@ import {
 	type TokenBindingMechanism,
 } from "@o3co/auth-provider-core";
 import type { Request } from "express";
-import { MtlsError } from "./errors.mjs";
+import { MtlsError, MtlsRevocationUnavailableError } from "./errors.mjs";
 import type { SignatureAlgorithmName } from "./fullPki/algorithms.mjs";
 import { type FullPkiTuning, resolveFullPkiTuning } from "./fullPki/defaults.mjs";
 import { createFullPkiValidator, type FullPkiValidator } from "./fullPki/validate.mjs";
@@ -495,6 +495,22 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 			// --- Step 5: chain validation (both PKI modes) ---
 			if (fullPkiValidator !== null) {
 				const result = await fullPkiValidator.validate(x509, chainCerts, now);
+				if (!result.ok && result.outage) {
+					// The server's outage, not a verdict: a revocation source did not
+					// answer usefully. Refused `unavailable` — the dispatcher answers
+					// 503 and writes the one line, so nothing is logged here.
+					throw new MtlsError(
+						"revocation_unavailable",
+						"client certificate revocation status could not be determined",
+						{ step: result.step },
+						{
+							cause: new MtlsRevocationUnavailableError(
+								result.detail,
+								result.cause !== undefined ? { cause: result.cause } : undefined,
+							),
+						},
+					);
+				}
 				if (!result.ok) {
 					// `err` is the projection of a library error behind the refusal, when
 					// one threw — never its text, which `detail` does not carry either.

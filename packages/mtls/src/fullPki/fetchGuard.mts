@@ -94,6 +94,28 @@ export type FetchRejection =
 	| "timeout"
 	| "network_error";
 
+/**
+ * The refusals that say the source did not answer usefully — it could not be
+ * reached in time, answered with an HTTP error or a redirect, or answered
+ * with something too large or of the wrong type — as against the ones about
+ * the URL a certificate names (a scheme, host, credentials or URL this guard
+ * will not fetch). The first kind is an outage of the source, which a retry
+ * may clear and a client cannot cause; the second is the certificate's own
+ * shape. `crl.mts` and `ocsp.mts` read this to say which an unavailable
+ * status is.
+ */
+const SOURCE_FAILURES: ReadonlySet<FetchRejection> = new Set<FetchRejection>([
+	"timeout",
+	"network_error",
+	"http_error",
+	"redirect_refused",
+	"response_too_large",
+	"unexpected_content_type",
+]);
+
+/** Whether a refusal is the source's failure rather than the URL's (see {@link SOURCE_FAILURES}). */
+export const isSourceFailure = (reason: FetchRejection): boolean => SOURCE_FAILURES.has(reason);
+
 export type FetchOutcome =
 	| { readonly ok: true; readonly bytes: Uint8Array }
 	| {

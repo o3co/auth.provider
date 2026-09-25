@@ -700,15 +700,65 @@ describe("full-pki revocation", () => {
 			logger,
 		}).validate(leaf.x509, [int.x509], NOW);
 
-		expect(result.ok).toBe(false);
-		if (!result.ok) expect(result.step).toBe("revocation status unavailable");
+		// A distribution point answering 503 is the source's outage: refused as
+		// the server's (`outage`, answered 503 by the dispatcher, which logs
+		// it), with no line of the validator's own.
+		expect(result).toMatchObject({
+			ok: false,
+			step: "revocation status unavailable",
+			outage: true,
+		});
+		expect(logger.warn).not.toHaveBeenCalled();
+	});
+
+	it("under 'reject', a verdict elsewhere on the path wins over an outage: a revoked intermediate is refused as revoked", async () => {
+		// The leaf's list is down (an outage, a retry may clear it), but the
+		// intermediate is on its issuer's list: no retry changes that, so the
+		// answer is the verdict, not a 503.
+		const { root, int, leaf } = await buildChain();
+		const { impl } = stubFetch({
+			[INT_CRL_URL]: 503,
+			[ROOT_CRL_URL]: await mintCrl({ issuer: root, revoked: [int] }),
+		});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toMatchObject({ ok: false, step: "certificate revoked" });
+		expect(result).not.toHaveProperty("outage");
+	});
+
+	it("under 'reject', a status unavailable for the certificate's own reason wins over an outage", async () => {
+		// The leaf's list is down; the intermediate names no distribution
+		// point at all — its own shape, which no retry changes.
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root);
+		const leaf = await mintLeaf("client", 10, int, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				clientAuthEku(),
+				crlDistributionPoints([INT_CRL_URL]),
+			],
+		});
+		const { impl } = stubFetch({ [INT_CRL_URL]: 503 });
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("reject"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toMatchObject({ ok: false, step: "revocation status unavailable" });
+		expect(result).not.toHaveProperty("outage");
 		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ subject: "CN=client", reason: "fetch_failed" }),
+			expect.objectContaining({ subject: "CN=Intermediate", reason: "no_distribution_point" }),
 			"mtls_revocation_unavailable_rejected",
-		);
-		expect(logger.warn).not.toHaveBeenCalledWith(
-			expect.anything(),
-			"mtls_revocation_unavailable_allowed",
 		);
 	});
 
@@ -1046,11 +1096,11 @@ describe("full-pki revocation — distribution points and CRL shapes the resolve
 		if (!result.ok) {
 			expect(result.step).toBe("revocation status unavailable");
 			expect(result.detail).toContain(INT_CRL_MIRROR_URL);
+			// The point that is down answered 503: the source's outage, which the
+			// dispatcher answers and logs — not a line of the validator's own.
+			expect(result.outage).toBe(true);
 		}
-		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ subject: "CN=client", reason: "fetch_failed" }),
-			"mtls_revocation_unavailable_rejected",
-		);
+		expect(logger.warn).not.toHaveBeenCalled();
 	});
 
 	it("under 'allow', checks the same certificate against the CRL it did obtain and logs the point it did not", async () => {
@@ -1894,11 +1944,13 @@ describe("full-pki revocation — mode = both (#431)", () => {
 			expect(result.step).toBe("revocation status unavailable");
 			expect(result.detail).toMatch(/ocsp/i);
 			expect(result.detail).toMatch(/crl/i);
+			// Both sources answered 503: an outage, answered and logged by the
+			// dispatcher. The validator's one line is the OCSP fallback's.
+			expect(result.outage).toBe(true);
 		}
-		expect(logger.warn).toHaveBeenCalledWith(
-			expect.objectContaining({ subject: "CN=client", reason: "fetch_failed" }),
-			"mtls_revocation_unavailable_rejected",
-		);
+		expect(logger.warn.mock.calls.map(([, event]) => event)).toEqual([
+			"mtls_revocation_ocsp_fallback",
+		]);
 	});
 
 	it("is unavailable only when both are: 'allow' waves through with the unavailable line", async () => {
