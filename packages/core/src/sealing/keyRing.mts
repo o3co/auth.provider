@@ -44,29 +44,47 @@ export type SealingKeyRing = readonly SealingKey[];
 
 const KEY_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
-/** Whether `id` is one a ring may hold, and so one an envelope may name. */
-export const isSealingKeyId = (id: string): boolean => KEY_ID_PATTERN.test(id);
+/**
+ * Whether `id` is one a ring may hold, and so one an envelope may name: a
+ * string of 1 to 64 characters of `A-Za-z0-9_-`. Anything but a string is
+ * not, whatever its text would be.
+ */
+export const isSealingKeyId = (id: unknown): id is string =>
+	typeof id === "string" && KEY_ID_PATTERN.test(id);
 
 /**
  * Refuses, as a `RangeError`, a ring no envelope could be sealed or opened
- * under: a key ID outside the rule, a duplicate ID, or key material that is
- * not {@link SEALING_KEY_BYTES} bytes. A ring is a setting, and one that is
- * given but unusable is refused rather than worked around. An empty ring
- * passes; whether one may be empty is the caller's to say (it can open
- * nothing and seal nothing).
+ * under: a key ID outside the rule, a duplicate ID, or a key that is not a
+ * Buffer of {@link SEALING_KEY_BYTES} bytes (a string of that length would be
+ * used as its UTF-8 bytes). A ring is a setting, and one that is given but
+ * unusable is refused rather than worked around. An empty ring passes;
+ * whether one may be empty is the caller's to say (it can open nothing and
+ * seal nothing).
+ *
+ * `setting` names the ring in the refusal, as its reader knows it: the
+ * configuration key it was read from (`mfa.encryptionKeys`), or the option
+ * it was passed as. An ID outside the rule is named by its index and never
+ * quoted, since an operator who swapped an ID and its key would otherwise
+ * see the key in a boot error; an ID that passed the rule is quoted.
  */
-export function checkSealingKeyRing(ring: SealingKeyRing): void {
+export function checkSealingKeyRing(ring: SealingKeyRing, setting: string): void {
 	const seen = new Set<string>();
-	for (const entry of ring) {
+	ring.forEach((entry, index) => {
 		if (!isSealingKeyId(entry.id)) {
-			throw new RangeError(`encryption key id must match ${KEY_ID_PATTERN.source}`);
+			throw new RangeError(
+				`${setting} has an encryption key id at index ${index} that does not match ${KEY_ID_PATTERN.source}`,
+			);
 		}
-		if (seen.has(entry.id)) throw new RangeError("duplicate encryption key id");
+		if (seen.has(entry.id)) {
+			throw new RangeError(`${setting} has a duplicate encryption key id "${entry.id}"`);
+		}
 		seen.add(entry.id);
-		if (entry.key.length !== SEALING_KEY_BYTES) {
-			throw new RangeError(`encryption key must be ${SEALING_KEY_BYTES} bytes`);
+		if (!Buffer.isBuffer(entry.key) || entry.key.length !== SEALING_KEY_BYTES) {
+			throw new RangeError(
+				`${setting} has an encryption key "${entry.id}" that is not a Buffer of ${SEALING_KEY_BYTES} bytes`,
+			);
 		}
-	}
+	});
 }
 
 /**
@@ -80,7 +98,7 @@ export function checkSealingKeyRing(ring: SealingKeyRing): void {
  * secret manager, is not the value an operator checked.
  */
 export function decodeSealingKey(encoded: string): Buffer | undefined {
-	if (/\s/.test(encoded)) return undefined;
+	if (typeof encoded !== "string" || /\s/.test(encoded)) return undefined;
 	const bytes = Buffer.from(encoded, "base64");
 	if (bytes.toString("base64") !== encoded) return undefined;
 	return bytes.length === SEALING_KEY_BYTES ? bytes : undefined;

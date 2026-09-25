@@ -87,6 +87,13 @@ export type OpenedSeal =
 
 const PURPOSE_PATTERN = /^[\x21-\x7E]{1,64}$/;
 
+/**
+ * What a ring handed straight to seal or open is called in a refusal. A
+ * reader that took the ring from its configuration checks it first with
+ * `checkSealingKeyRing`, under the key it read it from.
+ */
+const RING_SETTING = "sealing key ring";
+
 const header = (purpose: string): Buffer => {
 	if (!PURPOSE_PATTERN.test(purpose)) {
 		throw new RangeError(
@@ -98,7 +105,7 @@ const header = (purpose: string): Buffer => {
 
 const u32 = (value: number): Buffer => {
 	if (!Number.isInteger(value) || value < 0 || value > 0xff_ff_ff_ff) {
-		throw new Error("length exceeds a 32-bit prefix");
+		throw new RangeError("sealing record is longer than a 32-bit length prefix can state");
 	}
 	const out = Buffer.alloc(4);
 	out.writeUInt32BE(value);
@@ -126,19 +133,22 @@ const aad = (head: Buffer, keyId: Buffer, record: Buffer): Buffer =>
  * appear inside it whatever an operator configures.
  *
  * Throws a `RangeError` on a ring that could not seal (empty, or refused by
- * `checkSealingKeyRing`) and on a purpose outside {@link SealBinding.purpose}'s
- * rule: both are faults of the caller or its configuration, never of the
- * value.
+ * `checkSealingKeyRing`, under the name "sealing key ring"), on a purpose
+ * outside {@link SealBinding.purpose}'s rule, and on a record longer than a
+ * 32-bit length prefix can state: each a fault of the caller or its
+ * configuration, never of the value.
  */
 export function sealWithKeyRing(
 	plaintext: string,
 	ring: SealingKeyRing,
 	binding: SealBinding,
 ): string {
-	checkSealingKeyRing(ring);
+	checkSealingKeyRing(ring, RING_SETTING);
 	const head = header(binding.purpose);
 	const sealing = ring[0];
-	if (sealing === undefined) throw new RangeError("no encryption key to seal with");
+	if (sealing === undefined) {
+		throw new RangeError(`${RING_SETTING} has no encryption key to seal with`);
+	}
 	const keyId = Buffer.from(sealing.id, "utf8");
 	const iv = randomBytes(IV_LEN);
 	const cipher = createCipheriv(ALGO, sealing.key, iv, { authTagLength: TAG_LEN });
@@ -167,7 +177,7 @@ export function openWithKeyRing(
 	ring: SealingKeyRing,
 	binding: SealBinding,
 ): OpenedSeal {
-	checkSealingKeyRing(ring);
+	checkSealingKeyRing(ring, RING_SETTING);
 	const head = header(binding.purpose);
 	const parts = envelope.split(".");
 	if (parts.length !== 5 || parts[0] !== VERSION) return { state: "unreadable" };

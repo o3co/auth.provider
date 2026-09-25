@@ -16,6 +16,7 @@
 
 import {
 	type AuthorizedFederationGrant,
+	checkSealingKeyRing,
 	DEFAULT_FEDERATION_GRANT_TOMBSTONE_RETENTION_MS,
 	decodeSealingKey,
 	defineModule,
@@ -381,19 +382,22 @@ export function createRedisFederationGrantStore(
 	validateEncryptionMode("federation-grants", options.encryption.mode, options.guard ?? {});
 	// Copied, so a buffer the caller mutates after construction cannot change
 	// what this store opens — the ring is held for the store's whole life.
+	if (options.encryption.mode === "required") {
+		// A ring is a setting: every refusal of it, here or in core's ring rule,
+		// is a RangeError. Refused here rather than at the first write: a ring
+		// that cannot seal is a configuration problem, and finding it out per
+		// grant means finding it out once a user has already consented. Checked
+		// as it was handed over, before the copy below: `Buffer.from` would turn
+		// a string key into its UTF-8 bytes.
+		if (options.encryption.keys.length === 0) {
+			throw RANGE('mode "required" needs at least one encryption key');
+		}
+		checkSealingKeyRing(options.encryption.keys, "federation grant store: encryption.keys");
+	}
 	const ring: readonly FederationGrantKey[] =
 		options.encryption.mode === "required"
 			? options.encryption.keys.map((entry) => ({ id: entry.id, key: Buffer.from(entry.key) }))
 			: [];
-	if (options.encryption.mode === "required") {
-		// A ring is a setting: every refusal of it, here or in core's sealing
-		// leaf, is a RangeError.
-		if (ring.length === 0) throw RANGE('mode "required" needs at least one encryption key');
-		// Refused here rather than at the first write: a ring that cannot seal is
-		// a configuration problem, and finding it out per grant means finding it
-		// out once a user has already consented.
-		sealCredential("", ring, Buffer.alloc(0));
-	}
 
 	const grantKey = (id: string): string => `${keyPrefix}{${segment(id)}}:grant`;
 	const credKey = (id: string): string => `${keyPrefix}{${segment(id)}}:cred`;
@@ -886,16 +890,23 @@ export interface RedisFederationGrantStoreModuleOptions {
 	readonly environment?: string;
 }
 
+/** Where the resolver reads the ring, which is what its refusals name. */
+const KEYS_SETTING = "federationGrants.encryptionKeys";
+
 /**
- * Canonical base64 of exactly 32 bytes, or a RangeError that names the key:
- * core's rule for a configured sealing key (`decodeSealingKey`), applied at
- * boot so that a key that cannot be read is found before a user consents,
- * not per grant after.
+ * Canonical base64 of exactly 32 bytes, or a RangeError that names the entry
+ * by its index: core's rule for a configured sealing key
+ * (`decodeSealingKey`), applied at boot so that a key that cannot be read is
+ * found before a user consents, not per grant after. The entry's id is not
+ * quoted: it has not been checked yet, and an operator who swapped an id and
+ * its key would see the key in the boot error.
  */
-const keyMaterial = (id: string, encoded: string): Buffer => {
+const keyMaterial = (index: number, encoded: string): Buffer => {
 	const bytes = decodeSealingKey(encoded);
 	if (bytes === undefined) {
-		throw RANGE(`encryption key "${id}" must be canonical base64 of ${SEALING_KEY_BYTES} bytes`);
+		throw RANGE(
+			`${KEYS_SETTING}[${index}].key must be canonical base64 of ${SEALING_KEY_BYTES} bytes`,
+		);
 	}
 	return bytes;
 };
@@ -916,6 +927,17 @@ export function resolveRedisFederationGrantStoreOptions(
 	const config = moduleConfigSchema.parse(rawConfig);
 	const grants = config.federationGrants;
 	const mode = grants.encryptionMode ?? "required";
+	// In the order they were written: the first seals. Checked here, under
+	// the key they were read from, before the store checks them again under
+	// the option it takes them as.
+	const keys: readonly FederationGrantKey[] =
+		mode === "allow-plaintext"
+			? []
+			: (grants.encryptionKeys ?? []).map((entry, index) => ({
+					id: entry.id,
+					key: keyMaterial(index, entry.key),
+				}));
+	checkSealingKeyRing(keys, `federation grant store: ${KEYS_SETTING}`);
 	return {
 		keyPrefix: config.redisFederationGrantStore.keyPrefix,
 		...(grants.tombstoneRetention !== undefined
@@ -925,16 +947,7 @@ export function resolveRedisFederationGrantStoreOptions(
 			? { listingAllowanceMs: config.redisFederationGrantStore.listingAllowanceMs }
 			: {}),
 		encryption:
-			mode === "allow-plaintext"
-				? { mode: "allow-plaintext" }
-				: {
-						mode: "required",
-						// In the order they were written: the first seals.
-						keys: (grants.encryptionKeys ?? []).map((entry) => ({
-							id: entry.id,
-							key: keyMaterial(entry.id, entry.key),
-						})),
-					},
+			mode === "allow-plaintext" ? { mode: "allow-plaintext" } : { mode: "required", keys },
 		guard: {
 			...(moduleOptions.environment !== undefined
 				? { environment: moduleOptions.environment }

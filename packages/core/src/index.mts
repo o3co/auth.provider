@@ -1162,7 +1162,9 @@ export {
 	sealWithKeyRing,
 } from "./sealing/envelope.mjs";
 export {
+	checkSealingKeyRing,
 	decodeSealingKey,
+	isSealingKeyId,
 	SEALING_KEY_BYTES,
 	type SealingKey,
 	type SealingKeyRing,
