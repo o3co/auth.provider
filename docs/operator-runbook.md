@@ -617,7 +617,7 @@ stream — its level is fixed at `info`.
 | `readiness_probe_failed` (warn), sustained; `auth_dependency_up == 0` | `core/src/routes/Readiness.mts`, `templates/standalone/src/metrics.mts` | a replica is out of rotation |
 | `unhandled_request_error` (error) | `core/src/middleware/terminalError.mts` — at the end of the composed router, and again after the template's host routes (health, readiness, metrics; `templates/standalone/src/routes.mts`) | a `500` you did not plan for — includes a signer (KMS) failure. A cookie-store failure is no longer one of them: it is `session_middleware_store_unavailable`. A body parser's refusal (`400` / `413` / `415`) is not logged |
 | `server_error` (error), sustained | `templates/standalone/src/listen.mts` | the bound listener failed an `accept` — `EMFILE` / `ENFILE` (the process or the host is out of file descriptors), or `ECONNABORTED`. One line per failed `accept`, so fd exhaustion is a burst: alert on the rate, not on one line. The listener stays open and serves what it can still accept, but a sustained rate means fd exhaustion — check `ulimit -n` (the container's `nofile`) against the connection count, and look for connection leaks (keep-alives a proxy never closes, Redis clients, outbound fetches left open). Once nothing can be accepted `/_healthcheck` fails too and liveness restarts the process; this line says why. A bind failure (`EADDRINUSE`, `EACCES`) is not this line: it fails boot (§1, "Boot refusals") |
-| `device_route_unexpected_error`, `federation_grants_unexpected_error` (error) | `device-grant/src/module.mts`, `federation-grants/src/routes.mts` | a `500` on the device-grant or federation-grants routes. Answered inside those routers, so `unhandled_request_error` does not fire for them — an alert on that event alone misses these |
+| `device_route_unexpected_error`, `federation_grants_unexpected_error` (error) | `device-grant/src/module.mts`, `federation-grants/src/routes.mts` | a `500` on the device-grant or federation-grants routes. Answered inside those routers, so `unhandled_request_error` does not fire for them — an alert on that event alone misses these — except for an error that arrives after a response's headers went out: those routers pass it on, and core's terminal handler logs it as `unhandled_request_error` with `headersSent: true` |
 | `device_authorization_store_unavailable`, `device_verification_store_unavailable`, `device_code_grant_store_unavailable` (error) | `device-grant/src/deviceAuthorizationEndpoint.mts`, `verificationEndpoint.mts`, `grant.mts` | the device-code store is down or timed out: the device could not start (`device_authorization`, no code re-drawn), the user's lookup, approval or denial got no answer (`device/verification`), or the device's poll got none (`/oauth/token`). Each answered `503 temporarily_unavailable`. The same outage as the shared-Redis row above. An approval or a denial may nonetheless have been recorded before the reply was lost: a retry then answers `409 already_decided`, and the audit event `device.decision_outcome_unknown` marks the attempt. A poll's approval may likewise have been consumed, and the device's retry answers `invalid_grant`; the device starts again |
 | `token_verification_unavailable` (error) by `site` and `reason` | `oauth/src/verificationUnavailable.mts`, `oauth/src/grants/refreshToken.mts`, `oauth/src/routes/revoke.mts` | a route (`site`: `introspect`, `userinfo`, `federation_token`, `federation_logout`, `logout`, `revoke`, `refresh_token`) is answering `503` because it could not verify tokens: `reason: "verification_key_unavailable"` = the keystore did not answer (the projected error's `cause` names it); `"revocation_unavailable"` = the denylist or the watermark store is unreachable. Replaces `refresh_token_revocation_store_unavailable` |
 | `token_exchange_validation_unavailable` (error) | `oauth-token-exchange/src/grant.mts` | token exchanges are answering `503` because a validator could not reach an answer — for the built-in one, the keystore or a revocation store; `role` says which token |
@@ -919,10 +919,16 @@ refuses the new record rather than evict a live one. Every consumer shares
 the set, so all of them answer `503 temporarily_unavailable` until records
 expire: DPoP at the token endpoint and at protected resources, logged as
 `token_binding_unavailable` / `protected_resource_binding_unavailable`, and
-`private_key_jwt`, ID-JAG and WebAuthn ceremonies, logged as
-`client_assertion_refused`, `jwt_bearer_assertion_verifier_unavailable` and
-`webauthn_ceremony_store_unavailable` — each with
-`err.name: "ReplaySeenSetFullError"`. Sustained, that is a flood of fresh
+`private_key_jwt`, ID-JAG and WebAuthn, logged as
+`client_assertion_refused`, `jwt_bearer_assertion_verifier_unavailable`,
+`webauthn_ceremony_store_unavailable` (registration) and
+`webauthn_grant_store_unavailable` (the passkey grant at `/oauth/token`,
+`store: "challenge_ceremony"`, `step: "consume"`) — each with
+`err.name: "ReplaySeenSetFullError"`. A WebAuthn ceremony consumes its
+challenge before it records it as seen, so the one that met a full set has
+already lost its challenge: its retry is `400 invalid_grant`
+(`challenge_unknown`), and the user starts the ceremony again from the
+options request. Sustained, that is a flood of fresh
 DPoP proofs, or more traffic than one replica's seen-set should carry: move
 to `REPLAY_SEEN_SET_ADAPTER=redis`. The challenge store is capped the same
 way at a million challenges (`challengeStore.memory.maxEntries`;
