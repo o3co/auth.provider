@@ -27,14 +27,6 @@
  *   5. Verify assertion via verifyWebAuthnAssertion. ok=false → 400 invalid_grant.
  *   6. Atomic CAS sign-count update via credentialStore.updateSignCount.
  *      Returns false → 400 invalid_grant (concurrent race / clone attack).
- *
- *   A store that cannot answer at steps 3, 4 or 6, or when the refresh-token
- *   family is registered, is the server's outage, not a verdict on the passkey:
- *   503 temporarily_unavailable, logged once at error level as
- *   `webauthn_grant_store_unavailable` with `store` and `step`, and no token.
- *   Nothing is spent before step 4; from there the challenge is consumed, so
- *   the client's retry of the same assertion is 400 invalid_grant and the user
- *   runs the ceremony again.
  *   7. Optional grantPolicy gate — rt-style: called unconditionally when deps.grantPolicy
  *      is wired (Codex Round 3 P1). The resourceIndicator flag gates ONLY whether
  *      body.resource is forwarded in the request payload (Stage 1 plumbing contract).
@@ -50,6 +42,15 @@
  *      grant does, so rotation and RFC 6819 §5.2.2.3 replay detection are the shared
  *      ones. A registration that does not name `refresh_token` — including one that
  *      declares no `allowedGrantTypes` at all — receives the access token alone.
+ *
+ * Store outages:
+ *   A store that cannot answer at steps 3, 4 or 6, or when the refresh-token
+ *   family is registered in step 8, is the server's outage, not a verdict on
+ *   the passkey: 503 temporarily_unavailable, logged once at error level as
+ *   `webauthn_grant_store_unavailable` with `store` and `step`, and no token.
+ *   Nothing is spent before step 4; from there the challenge may be consumed,
+ *   so the client's retry of the same assertion is 400 invalid_grant and the
+ *   user runs the ceremony again.
  *
  * Sender binding:
  *   A DPoP- or mTLS-bound request carries its RFC 7800 confirmation into BOTH
