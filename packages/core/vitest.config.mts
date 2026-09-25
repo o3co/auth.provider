@@ -98,6 +98,7 @@ export default defineConfig({
 				// `expectTypeOf`, and the fixtures build records whose every field is
 				// a required key. Paired with tsconfig.test.json.
 				"src/mfa/__tests__/**/*.test.mts",
+				"src/mail/__tests__/**/*.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
 			// itself, where 4 was content to let an imported helper register

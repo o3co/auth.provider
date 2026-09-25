@@ -59,7 +59,8 @@
 		// One type per audit `details` key; paired with vitest.config.mts.
 		"src/audit/__tests__/audit-details.types.test.mts",
 		// The MFA ports; paired with vitest.config.mts.
-		"src/mfa/**/*.mts"
+		"src/mfa/**/*.mts",
+		"src/mail/**/*.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }
