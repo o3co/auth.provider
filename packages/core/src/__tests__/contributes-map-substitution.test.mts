@@ -18,7 +18,7 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import type { AuditSink } from "../audit/types.mjs";
 import type { FederationProvider as ConcreteFederationProvider } from "../federations/types.mjs";
 import type { GrantHandler as ConcreteGrantHandler } from "../grants/types.mjs";
-import type { MfaProvider } from "../mfa/types.mjs";
+import type { MfaFactor as ConcreteMfaFactor } from "../mfa/factor.mjs";
 import type {
 	AuditHook,
 	ExchangeTokenValidator,
@@ -26,7 +26,9 @@ import type {
 	GrantHandler,
 	GrantPolicyHookContribution,
 	MfaFactor,
+	MfaFactorFactory,
 } from "../modules/manifest/contributes-map.mjs";
+import type { Contributed } from "../modules/manifest/contributed.mjs";
 import { defineModule } from "../modules/manifest/define-module.mjs";
 import type { GrantPolicyHook } from "../policy/types.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../token-exchange/validator.mjs";
@@ -52,8 +54,23 @@ describe("AS-M1: same-package concrete substitutions in contributes-map", () => 
 		expect(true).toBe(true);
 	});
 
-	it("MfaFactor is the canonical MfaProvider interface", () => {
-		expectTypeOf<MfaFactor>().toEqualTypeOf<MfaProvider>();
+	it("MfaFactor is the second-factor contract in mfa/factor (D3, D7)", () => {
+		// The #69 `MfaProvider` is gone; the name survives as the contract a
+		// factor implements, so what a module contributes and what the
+		// coordinator reads back through `mfaFactorResolver` are one type.
+		expectTypeOf<MfaFactor>().toEqualTypeOf<ConcreteMfaFactor>();
+		expect(true).toBe(true);
+	});
+
+	it("an mfaFactors factory may answer null: the factor switched off by its configuration (D3)", () => {
+		expectTypeOf<ReturnType<MfaFactorFactory<unknown>>>().toEqualTypeOf<
+			Contributed<ConcreteMfaFactor | null>
+		>();
+		defineModule({
+			name: "acme-mfa-factor-off",
+			requires: [],
+			contributes: { mfaFactors: { acme: () => null } },
+		});
 		expect(true).toBe(true);
 	});
 
