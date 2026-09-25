@@ -22,7 +22,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LOGGED_STRING_MAX_LENGTH } from "@o3co/auth-provider-core";
+import { LOGGED_STRING_MAX_LENGTH, loggableError } from "@o3co/auth-provider-core";
 import { describe, expect, it } from "vitest";
 import {
 	loadRedisStoreLibraries,
@@ -157,7 +157,14 @@ describe("loadRedisStoreLibraries", () => {
 			},
 		);
 
-		it("throws both other failures together", async () => {
+		// The aggregate carries the two failures as its `errors`, whole, and says
+		// in fixed text which packages they are: a failure's own text is never
+		// copied into the message, where it would travel on as a plain string
+		// past every projection. core's loggableError projects the members.
+		const BOTH_FAILED =
+			'"redis" and "connect-redis" both failed to load, for a reason other than not being installed; the two failures are this error\'s errors';
+
+		it("throws both other failures together, in fixed text", async () => {
 			const redisReason = new TypeError("redis failed to evaluate");
 			const connectRedisReason = new RangeError("connect-redis failed to evaluate");
 			const err = await failure({
@@ -166,19 +173,16 @@ describe("loadRedisStoreLibraries", () => {
 			});
 			expect(err).toBeInstanceOf(AggregateError);
 			expect((err as AggregateError).errors).toEqual([redisReason, connectRedisReason]);
-			expect((err as AggregateError).message).toContain("redis failed to evaluate");
-			expect((err as AggregateError).message).toContain("connect-redis failed to evaluate");
+			expect((err as AggregateError).message).toBe(BOTH_FAILED);
 		});
 
-		it("names a failure that is not an Error in the aggregate's message too", async () => {
+		it("keeps a failure that is not an Error among the errors, and out of the message", async () => {
 			const err = (await failure({
 				redis: fails(new TypeError("redis failed to evaluate")),
 				connectRedis: fails("connect-redis threw a string"),
 			})) as AggregateError;
 			expect(err.errors).toEqual([expect.any(TypeError), "connect-redis threw a string"]);
-			expect(err.message).toBe(
-				'"redis" and "connect-redis" failed to load: redis: redis failed to evaluate; connect-redis: connect-redis threw a string',
-			);
+			expect(err.message).toBe(BOTH_FAILED);
 		});
 	});
 
@@ -233,14 +237,27 @@ describe("loadRedisStoreLibraries", () => {
 			for (const text of named) expect(line).toContain(text);
 		});
 
-		it("both broken: each failure is named, with the start of its message", async () => {
+		it("both broken: the line names both packages, and the projection carries each failure", async () => {
 			const redisReason = evaluationError("redis");
 			const connectRedisReason = evaluationError("connect-redis");
-			const line = logged(
-				await failure({ redis: fails(redisReason), connectRedis: fails(connectRedisReason) }),
-			);
-			expect(line).toContain(redisReason.message.slice(0, 40));
-			expect(line).toContain(connectRedisReason.message.slice(0, 40));
+			const err = await failure({
+				redis: fails(redisReason),
+				connectRedis: fails(connectRedisReason),
+			});
+			const line = logged(err);
+			expect(line).toContain('"redis" and "connect-redis" both failed to load');
+			// What core's loggableError writes for the aggregate: each member,
+			// projected, as `aggregateErrors`.
+			expect(loggableError(err)).toMatchObject({
+				name: "AggregateError",
+				aggregateErrors: [
+					{ name: "TypeError", detail: expect.stringContaining("redis failed to evaluate") },
+					{
+						name: "TypeError",
+						detail: expect.stringContaining("connect-redis failed to evaluate"),
+					},
+				],
+			});
 		});
 	});
 

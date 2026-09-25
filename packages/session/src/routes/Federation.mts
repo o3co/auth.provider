@@ -18,6 +18,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import {
 	type AppConfig,
 	type AuditSink,
+	auditErrorText,
 	consoleLogger,
 	emitAuditEvent,
 	errorEnvelope,
@@ -48,6 +49,11 @@ import {
 	type FederationTransactionStore,
 	mintFederationTransactionId,
 } from "../federations/transaction.mjs";
+import {
+	abandonCookieSession,
+	SESSION_STORE_UNAVAILABLE,
+	USER_DIRECTORY_UNAVAILABLE,
+} from "../internal/cookieSession.mjs";
 import { readCookie } from "../internal/cookies.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
@@ -191,6 +197,106 @@ const readCallbackParams = (source: unknown): Readonly<Record<string, string>> =
 			(entry): entry is [string, string] => typeof entry[1] === "string",
 		),
 	);
+};
+
+/**
+ * The stores the federation routes read or write, as their log lines name
+ * them. `cookie_session` is the express-session store behind `req.session`;
+ * `federation_transaction` is a `form_post` federation's transaction record,
+ * kept in that same store under a key of its own (#494).
+ */
+type FederationStore =
+	| "user_repository"
+	| "user_session"
+	| "session_federation_index"
+	| "federation_token"
+	| "subject_session_index"
+	| "federation_transaction"
+	| "cookie_session";
+
+/** The operation on a {@link FederationStore} that failed, as a log line names it. */
+type FederationStoreStep =
+	| "get"
+	| "set"
+	| "delete"
+	| "save"
+	| "regenerate"
+	| "destroy"
+	| "create"
+	| "authenticate_by_token"
+	| "link"
+	| "list"
+	| "add"
+	| "attach"
+	| "remove"
+	| "remove_by_sid"
+	| "remove_sid";
+
+/** Which leg of a federation a store outage stopped. */
+type FederationOutageEvent =
+	| "federation_start_store_unavailable"
+	| "federation_callback_store_unavailable"
+	| "federation_link_store_unavailable";
+
+/**
+ * A store a federation route cannot do without could not answer: the
+ * server's outage, never a verdict on the user or the IdP. One line at error
+ * level — the event naming the leg, `store` which store, `step` the
+ * operation — with the error's projection, never the error: a store's error
+ * can carry what it was sent (under `allow-plaintext`, a token record). The
+ * caller answers `503 temporarily_unavailable`.
+ */
+const logStoreUnavailable = (
+	log: Logger,
+	event: FederationOutageEvent,
+	store: FederationStore,
+	step: FederationStoreStep,
+	cause: unknown,
+	context: Readonly<Record<string, unknown>> = {},
+): void => {
+	log.error({ ...context, store, step, err: loggableError(cause) }, event);
+};
+
+/** A composition fault a federation route can meet, as its log line names it. */
+type FederationMisconfiguration =
+	| "no_callback_url"
+	| "no_redirect_policy"
+	| "no_session_store"
+	| "no_callback_path";
+
+/**
+ * A federation route met a composition fault — a provider with no callback URL
+ * or no redirect policy, a `form_post` federation with no express-session
+ * store on its requests or a callback URL with no path to scope its cookie
+ * to. No client causes it and no retry fixes it: one line at error level,
+ * `federation_misconfigured`, with the `reason`; the caller answers `500`.
+ */
+const logMisconfigured = (
+	log: Logger,
+	reason: FederationMisconfiguration,
+	context: Readonly<Record<string, unknown>> = {},
+): void => {
+	log.error({ ...context, reason }, "federation_misconfigured");
+};
+
+/**
+ * Run one best-effort cleanup step — a rollback after a failed login or link,
+ * the discard of a refused transaction. A step that fails is one warn line,
+ * `federation_cleanup_failed`, with `store`, `step` and the error's
+ * projection; the request's own answer stands either way.
+ */
+const cleanUp = async (
+	log: Logger,
+	store: FederationStore,
+	step: FederationStoreStep,
+	run: () => Promise<unknown>,
+	context: Readonly<Record<string, unknown>> = {},
+): Promise<void> => {
+	try {
+		await run();
+	} catch (err) {
+		log.warn({ ...context, store, step, err: loggableError(err) }, "federation_cleanup_failed");
+	}
 };
 
 export const createRouter = (
@@ -385,15 +491,21 @@ export const createRouter = (
 				error_description: "The link was started from a different session",
 			});
 		}
+		// Every line the link writes names the session it was for.
+		const linkContext = { sid: currentSid };
 		let current: Awaited<ReturnType<typeof userSessionStore.get>>;
 		try {
 			current = await userSessionStore.get(currentSid);
 		} catch (err) {
-			log.warn({ err: loggableError(err) }, "federation link: user session lookup failed");
-			return res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "Session store unavailable",
-			});
+			logStoreUnavailable(
+				log,
+				"federation_link_store_unavailable",
+				"user_session",
+				"get",
+				err,
+				linkContext,
+			);
+			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
 		if (!current) {
 			return res.status(401).json({
@@ -438,11 +550,15 @@ export const createRouter = (
 					claims: { ...(mapped as Record<string, unknown>) },
 				});
 			} catch (err) {
-				log.warn({ err: loggableError(err) }, "federation link: user repository failed");
-				return res.status(503).json({
-					error: "temporarily_unavailable",
-					error_description: "User directory temporarily unavailable",
-				});
+				logStoreUnavailable(
+					log,
+					"federation_link_store_unavailable",
+					"user_repository",
+					"link",
+					err,
+					linkContext,
+				);
+				return res.status(503).json(USER_DIRECTORY_UNAVAILABLE);
 			}
 			if (!outcome.ok) {
 				void emitAuditEvent(auditSink, {
@@ -471,14 +587,26 @@ export const createRouter = (
 		}
 
 		// Whether the session already carried this federation: a failed re-link
-		// must not take an existing attachment down with it.
+		// must not take an existing attachment down with it. `listed` says the
+		// read answered at all — until it has, nothing was written and there is
+		// nothing this request may undo.
 		let hadFederation = false;
+		let listed = false;
+		// The write in flight, so the one catch that answers them all can log
+		// the one that failed.
+		let linking: { store: FederationStore; step: FederationStoreStep } = {
+			store: "session_federation_index",
+			step: "list",
+		};
 		try {
 			hadFederation = (await sessionFederationIndex.listFederations(currentSid)).includes(
 				provider.name,
 			);
+			listed = true;
+			linking = { store: "session_federation_index", step: "add" };
 			await sessionFederationIndex.addFederation(currentSid, provider.name, current.expiresAt);
 			if (profile.accessToken) {
+				linking = { store: "federation_token", step: "attach" };
 				const consented = consentedScope(profile.scope, provider.scope);
 				const tokenType = recordedTokenType(profile.tokenType);
 				await federationTokenStore.attach(currentSid, provider.name, {
@@ -504,35 +632,44 @@ export const createRouter = (
 				});
 			}
 		} catch (err) {
-			log.warn(
-				{ err: loggableError(err) },
-				"federation link: attaching to the live session failed",
+			logStoreUnavailable(
+				log,
+				"federation_link_store_unavailable",
+				linking.store,
+				linking.step,
+				err,
+				linkContext,
 			);
 			// Best-effort rollback, as the login path does. The transaction is
 			// consumed and the Store's link stands — the identity is the
 			// account's, and the next login through this federation lands on it —
 			// so what must not be left behind is a half-attached federation on the
-			// live session: the token record first, then the index entry. One the
-			// session already carried is left as it was.
-			if (!hadFederation) {
-				try {
-					await federationTokenStore.delete(currentSid, provider.name);
-				} catch {
-					// best-effort
-				}
-				try {
-					await sessionFederationIndex.removeFederation(currentSid, provider.name);
-				} catch {
-					// best-effort
-				}
+			// live session: the token record first, then the index entry. A
+			// federation the session was already attached to before this link is
+			// left attached, as it was. Nothing is rolled back either when the
+			// index could not even be read: nothing was written, and whether the
+			// session carried the federation is what that read would have said.
+			if (listed && !hadFederation) {
+				await cleanUp(
+					log,
+					"federation_token",
+					"delete",
+					() => federationTokenStore.delete(currentSid, provider.name),
+					linkContext,
+				);
+				await cleanUp(
+					log,
+					"session_federation_index",
+					"remove",
+					() => sessionFederationIndex.removeFederation(currentSid, provider.name),
+					linkContext,
+				);
 			}
-			return res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "Session store unavailable",
-			});
+			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
 		const policy = federationRedirectPolicyResolver.get(provider.name);
 		if (!policy) {
+			logMisconfigured(log, "no_redirect_policy");
 			return res.status(500).json({
 				error: "internal_error",
 				error_description: "redirect policy not registered for provider",
@@ -542,7 +679,7 @@ export const createRouter = (
 		if (!redirect.ok) {
 			// A policy's refusal, in its words, held to RFC 6749's characters, and
 			// a client error kept one (`refusalEnvelope`).
-			return res.status(redirect.status).json(refusalEnvelope(redirect, logger));
+			return res.status(redirect.status).json(refusalEnvelope(redirect, log));
 		}
 		return res.redirect(redirect.value);
 	};
@@ -598,6 +735,45 @@ export const createRouter = (
 			}
 		};
 
+		/**
+		 * Consume the transaction on a path that is refusing anyway: best
+		 * effort, so a delete that fails is one `federation_cleanup_failed`
+		 * warn and the refusal stands. The transaction lives in the cookie
+		 * session's store, so after a failure the request's cookie session is
+		 * dropped too, and express-session does not write to that store again
+		 * as the response ends (`../internal/cookieSession.mts`).
+		 */
+		const discardTransaction = async (): Promise<void> => {
+			const discardErr = await consumeTransaction();
+			if (discardErr) {
+				log.warn(
+					{ store: "federation_transaction", step: "delete", err: loggableError(discardErr) },
+					"federation_cleanup_failed",
+				);
+				abandonCookieSession(req);
+			}
+		};
+
+		/**
+		 * The cookie session's store — the express session, or a `form_post`
+		 * transaction kept in the same store — could not answer: log the
+		 * outage first, then (when asked) discard the transaction best-effort,
+		 * so a cleanup warn never precedes its cause; drop the request's cookie
+		 * session so express-session does not write to that store again as the
+		 * response ends, and answer `503`.
+		 */
+		const refuseCookieStoreOutage = async (
+			store: "cookie_session" | "federation_transaction",
+			step: FederationStoreStep,
+			cause: unknown,
+			{ discard = false }: { readonly discard?: boolean } = {},
+		): Promise<unknown> => {
+			logStoreUnavailable(log, "federation_callback_store_unavailable", store, step, cause);
+			if (discard) await discardTransaction();
+			abandonCookieSession(req);
+			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+		};
+
 		if (responseMode === "form_post") {
 			transactions = transactionStore(req);
 			transactionId = readCookie(req, transactionCookieName);
@@ -613,12 +789,7 @@ export const createRouter = (
 			try {
 				fed = (await transactions.get(transactionId)) ?? undefined;
 			} catch (err) {
-				log.warn({ err: loggableError(err) }, "federation transaction lookup failed");
-				await consumeTransaction();
-				return res.status(500).json({
-					error: "server_error",
-					error_description: "Session store unavailable",
-				});
+				return refuseCookieStoreOutage("federation_transaction", "get", err, { discard: true });
 			}
 		} else {
 			fed = req.session.federation;
@@ -626,7 +797,7 @@ export const createRouter = (
 
 		// Check the envelope is present and names this provider
 		if (!fed || fed.name !== String(req.params.name)) {
-			await consumeTransaction();
+			await discardTransaction();
 			return res.status(400).json({
 				error: "invalid_session",
 				error_description: "No active federation session for this provider",
@@ -657,7 +828,7 @@ export const createRouter = (
 		// | unknown provider (404)                     | no — no transaction is ever read |
 		// | wrong method for the response mode (405)   | no — refused before the cookie is read |
 		// | no transaction cookie or no store (400)    | nothing to spend |
-		// | transaction lookup failed (500)            | best-effort — the record was presented and cannot be trusted intact |
+		// | transaction lookup failed (503)            | best-effort — the record was presented and cannot be trusted intact |
 		// | no `state` in the callback (400)           | **no** — the claim was never made |
 		// | `state` present and wrong (400)            | yes — a guess, and one guess is all there is |
 		// | envelope absent or names another provider  | yes — same, judged against the record |
@@ -692,7 +863,7 @@ export const createRouter = (
 		// CSRF state check — unchanged, and deliberately so: the transaction
 		// cookie is an addition to this comparison, never a replacement for it.
 		if (params.state !== fed.state) {
-			await consumeTransaction();
+			await discardTransaction();
 			return res.status(400).json({
 				error: "invalid_state",
 				error_description: "CSRF state mismatch",
@@ -735,17 +906,14 @@ export const createRouter = (
 		// paying that, for a property the IdP already provides.
 		//
 		// Fail-closed either way: if the ephemeral state cannot be retired at
-		// all, it stays readable indefinitely, so the flow stops with a 500
-		// rather than continuing — an attacker who could force the delete to fail
-		// and then replay would otherwise face no reuse prevention whatsoever.
+		// all, it stays readable indefinitely, so the flow stops with the
+		// store's outage (503) rather than continuing — an attacker who could
+		// force the delete to fail and then replay would otherwise face no reuse
+		// prevention whatsoever.
 		if (responseMode === "form_post") {
 			const consumeErr = await consumeTransaction();
 			if (consumeErr) {
-				log.warn({ err: loggableError(consumeErr) }, "federation transaction delete failed");
-				return res.status(500).json({
-					error: "server_error",
-					error_description: "Session store unavailable",
-				});
+				return refuseCookieStoreOutage("federation_transaction", "delete", consumeErr);
 			}
 		} else {
 			delete req.session.federation;
@@ -753,11 +921,7 @@ export const createRouter = (
 				req.session.save((err) => resolve(err ?? null));
 			});
 			if (reusePrevSaveErr) {
-				log.warn({ err: loggableError(reusePrevSaveErr) }, "reuse-prevention session save failed");
-				return res.status(500).json({
-					error: "server_error",
-					error_description: "Session store unavailable",
-				});
+				return refuseCookieStoreOutage("cookie_session", "save", reusePrevSaveErr);
 			}
 		}
 
@@ -775,6 +939,7 @@ export const createRouter = (
 		// providerCallbackUrls is the authoritative map; same entry verified above in the start handler.
 		const callbackUrl = providerCallbackUrls.get(provider.name);
 		if (!callbackUrl) {
+			logMisconfigured(log, "no_callback_url");
 			return res.status(500).json({
 				error: "misconfiguration",
 				error_description: sanitizeErrorText(
@@ -810,10 +975,13 @@ export const createRouter = (
 				callbackParams: adapterCallbackParams,
 			});
 		} catch (err) {
-			// The adapter's library puts the token response it refused on the
-			// error's cause chain — the access and refresh tokens included — so
-			// the log gets the projection, never the error.
-			log.warn({ err: loggableError(err) }, "federation token exchange failed");
+			// The upstream refused or could not answer: its verdict or its
+			// outage, not this server's, so a warn. The adapter's library puts
+			// the token response it refused on the error's cause chain — the
+			// access and refresh tokens included — so the log gets the
+			// projection, never the error. `provider` rides on `log`'s binding:
+			// the registered federation's name, not the path's text.
+			log.warn({ err: loggableError(err) }, "federation_callback_exchange_failed");
 			return res.status(502).json({
 				error: "exchange_failed",
 				error_description: "Token exchange with upstream IdP failed",
@@ -832,11 +1000,14 @@ export const createRouter = (
 		try {
 			user = await userRepository.authenticateByToken(identityToken);
 		} catch (err) {
-			log.warn({ err: loggableError(err) }, "user repository lookup failed");
-			return res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "User directory temporarily unavailable",
-			});
+			logStoreUnavailable(
+				log,
+				"federation_callback_store_unavailable",
+				"user_repository",
+				"authenticate_by_token",
+				err,
+			);
+			return res.status(503).json(USER_DIRECTORY_UNAVAILABLE);
 		}
 		// #482: an explicit link request completes here, or is refused here. It
 		// never falls through to the login path below: a link is not a login.
@@ -887,11 +1058,14 @@ export const createRouter = (
 				amr: federatedAmr(profile),
 			});
 		} catch (err) {
-			log.warn({ err: loggableError(err) }, "userSession create failed");
-			return res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "Session store unavailable",
-			});
+			logStoreUnavailable(
+				log,
+				"federation_callback_store_unavailable",
+				"user_session",
+				"create",
+				err,
+			);
+			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
 
 		// #296: record the session against its subject so a later credential
@@ -920,11 +1094,10 @@ export const createRouter = (
 		 */
 		const rollbackSubjectIndex = async (): Promise<void> => {
 			if (!subjectSessionIndex) return;
-			try {
-				await subjectSessionIndex.removeSid(user.id, sid);
-			} catch {
-				// best-effort — bounded by the index's own TTL
-			}
+			// A failure is bounded by the index's own TTL.
+			await cleanUp(log, "subject_session_index", "remove_sid", () =>
+				subjectSessionIndex.removeSid(user.id, sid),
+			);
 		};
 
 		// A4 §5.2: federation linkage recorded as a sibling-store operation.
@@ -935,21 +1108,20 @@ export const createRouter = (
 		try {
 			await sessionFederationIndex.addFederation(sid, provider.name, expiresAt);
 		} catch (err) {
+			logStoreUnavailable(
+				log,
+				"federation_callback_store_unavailable",
+				"session_federation_index",
+				"add",
+				err,
+			);
 			// Rollback the orphan UserSession (created above; addFederation failure
 			// means the session has no federation linkage, which would silently
 			// bypass federation logout / token-attach paths).
-			try {
-				await userSessionStore.delete(sid);
-			} catch {
-				// best-effort — ignore (the original error is the one returned)
-			}
+			await cleanUp(log, "user_session", "delete", () => userSessionStore.delete(sid));
 			// #296: the session is gone, so its subject-index entry must go too.
 			await rollbackSubjectIndex();
-			log.warn({ err: loggableError(err) }, "sessionFederationIndex.addFederation failed");
-			return res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "Session store unavailable",
-			});
+			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
 
 		// Session fixation mitigation: regenerate the session ID before writing auth state.
@@ -966,38 +1138,42 @@ export const createRouter = (
 			req.session.regenerate((err: Error | null) => resolve(err));
 		});
 		if (regenerateErr) {
+			// express-session regenerates by destroying the old record in its
+			// store: a failure is that store's outage.
+			logStoreUnavailable(
+				log,
+				"federation_callback_store_unavailable",
+				"cookie_session",
+				"regenerate",
+				regenerateErr,
+			);
 			// Rollback in REVERSE order of creation:
 			//   1. sessionFederationIndex.removeBySid (created last — added in step above)
 			//   2. userSessionStore.delete (created first)
 			// Per A4 §6.1: cross-store atomicity is not promised; reverse-order rollback
 			// is best-effort but minimizes the window where one store has the linkage
 			// and the other doesn't.
-			try {
-				await sessionFederationIndex.removeBySid(sid);
-			} catch {
-				// best-effort — ignore
-			}
-			try {
-				await userSessionStore.delete(sid);
-			} catch {
-				// best-effort — ignore
-			}
+			await cleanUp(log, "session_federation_index", "remove_by_sid", () =>
+				sessionFederationIndex.removeBySid(sid),
+			);
+			await cleanUp(log, "user_session", "delete", () => userSessionStore.delete(sid));
 			// #296: the session is gone, so its subject-index entry must go too.
 			await rollbackSubjectIndex();
-			log.error(
-				{ err: loggableError(regenerateErr) },
-				"session regeneration failed after userSessionStore.create",
-			);
-			return res.status(500).json({
-				error: "session_create_failed",
-				error_description: "Internal error: session could not be regenerated",
-			});
+			// express-session generated a fresh session for the failed
+			// regeneration; it must not be saved against the store that failed.
+			abandonCookieSession(req);
+			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
 
 		// Post-regenerate: attach federation tokens + restore sid on the new session.
 		// Any failure here rolls back in REVERSE order (F-6 pattern).
 		// Note: `session` is a stale reference after regenerate — use req.session exclusively.
 		let attachedToFederation = false;
+		// The write in flight, so the catch can log the store that failed.
+		let persisting: { store: FederationStore; step: FederationStoreStep } = {
+			store: "federation_token",
+			step: "attach",
+		};
 		try {
 			if (profile.accessToken) {
 				// `profile.expiresAt` is `Date | null` (required on FederationProfile).
@@ -1026,59 +1202,59 @@ export const createRouter = (
 			req.session.user = user as Record<string, unknown>;
 
 			// Persist the new session with auth state.
+			persisting = { store: "cookie_session", step: "save" };
 			await new Promise<void>((resolve, reject) => {
 				req.session.save((err) => (err ? reject(err as Error) : resolve()));
 			});
-
-			// Resolve redirect URL via policy (Theme B: redirect concerns separated from IdP protocol)
-			const callbackPolicy = federationRedirectPolicyResolver.get(provider.name);
-			if (!callbackPolicy) {
-				return res.status(500).json({
-					error: "internal_error",
-					error_description: "redirect policy not registered for provider",
-				});
-			}
-			const redirectResult = callbackPolicy.resolveCallbackRedirect({ redirectTo });
-			if (!redirectResult.ok) {
-				return res.status(redirectResult.status).json(refusalEnvelope(redirectResult, logger));
-			}
-
-			return res.redirect(redirectResult.value);
 		} catch (err) {
+			logStoreUnavailable(
+				log,
+				"federation_callback_store_unavailable",
+				persisting.store,
+				persisting.step,
+				err,
+			);
 			// Rollback in REVERSE order of creation:
 			//   1. federationTokenStore (attached last, undone first — already here)
 			//   2. sessionFederationIndex.removeBySid (NEW — undone before session)
 			//   3. userSessionStore.delete (created first, undone last)
 			if (attachedToFederation) {
-				try {
-					await federationTokenStore.delete(sid, provider.name);
-				} catch {
-					// best-effort — ignore
-				}
+				await cleanUp(log, "federation_token", "delete", () =>
+					federationTokenStore.delete(sid, provider.name),
+				);
 			}
-			try {
-				await sessionFederationIndex.removeBySid(sid);
-			} catch {
-				// best-effort — ignore
-			}
-			try {
-				await userSessionStore.delete(sid);
-			} catch {
-				// best-effort — ignore
-			}
+			await cleanUp(log, "session_federation_index", "remove_by_sid", () =>
+				sessionFederationIndex.removeBySid(sid),
+			);
+			await cleanUp(log, "user_session", "delete", () => userSessionStore.delete(sid));
 			// #296: the session is gone, so its subject-index entry must go too.
 			await rollbackSubjectIndex();
-			// Best-effort: destroy the fresh (empty) session so the store doesn't
-			// accumulate authenticated-nothing sessions on post-regenerate failures.
-			await new Promise<void>((resolve) => {
-				req.session.destroy(() => resolve());
-			});
-			log.error({ err: loggableError(err) }, "session post-create failed");
+			// The regenerated session was never saved — its save is what failed,
+			// or the attach before it — so there is no record to destroy. Drop it
+			// from the request instead, so express-session neither saves it as
+			// the response ends nor sets a cookie naming it. (A save whose reply
+			// was lost after Redis wrote it does leave a record. It is harmless:
+			// no cookie names it, its `sid` was rolled back above so `/authorize`
+			// refuses it, and it expires at its TTL.)
+			abandonCookieSession(req);
+			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+		}
+
+		// Resolve redirect URL via policy (Theme B: redirect concerns separated from IdP protocol)
+		const callbackPolicy = federationRedirectPolicyResolver.get(provider.name);
+		if (!callbackPolicy) {
+			logMisconfigured(log, "no_redirect_policy");
 			return res.status(500).json({
-				error: "session_create_failed",
-				error_description: "Internal error: session could not be persisted",
+				error: "internal_error",
+				error_description: "redirect policy not registered for provider",
 			});
 		}
+		const redirectResult = callbackPolicy.resolveCallbackRedirect({ redirectTo });
+		if (!redirectResult.ok) {
+			return res.status(redirectResult.status).json(refusalEnvelope(redirectResult, log));
+		}
+
+		return res.redirect(redirectResult.value);
 	};
 
 	/**
@@ -1188,6 +1364,7 @@ export const createRouter = (
 				if (!policy) {
 					// Pairing invariant fires at boot; this branch is defence-in-depth
 					// against a hypothetical bug bypassing the invariant at runtime.
+					logMisconfigured(logger, "no_redirect_policy", { provider: provider.name });
 					return res.status(500).json({
 						error: "internal_error",
 						error_description: "redirect policy not registered for provider",
@@ -1195,7 +1372,9 @@ export const createRouter = (
 				}
 				const validation = policy.validateRedirect(redirect_to);
 				if (!validation.ok) {
-					return res.status(validation.status).json(refusalEnvelope(validation, logger));
+					return res
+						.status(validation.status)
+						.json(refusalEnvelope(validation, logger, { provider: provider.name }));
 				}
 				redirectTo = redirect_to;
 			}
@@ -1222,8 +1401,10 @@ export const createRouter = (
 				if (!isLinkStartTrusted(req, linkTrustedOrigins)) {
 					logger.warn(
 						{
-							provider: String(req.params.name),
-							secFetchSite: (req.get("sec-fetch-site") ?? "").slice(0, 32),
+							provider: provider.name,
+							// The caller's header, sanitised and capped like every
+							// caller-controlled string on a log line.
+							secFetchSite: auditErrorText(req.get("sec-fetch-site") ?? ""),
 						},
 						"federation_link_start_rejected",
 					);
@@ -1270,6 +1451,7 @@ export const createRouter = (
 			// callback URL is missing.
 			const callbackUrl = providerCallbackUrls.get(provider.name);
 			if (!callbackUrl) {
+				logMisconfigured(logger, "no_callback_url", { provider: provider.name });
 				return res.status(500).json({
 					error: "misconfiguration",
 					error_description: sanitizeErrorText(
@@ -1304,10 +1486,14 @@ export const createRouter = (
 				const transactions = transactionStore(req);
 				const cookiePath = transactionCookiePath(provider);
 				if (!transactions || cookiePath === undefined) {
-					logger.error(
-						{ provider: provider.name, callbackUrl },
-						"federation declares response_mode=form_post but no express-session store is reachable on the request, or its callback URL has no parsable path; the cross-site callback would arrive with nothing to check state against",
-					);
+					// The composition's fault, not an outage: a form_post federation
+					// whose request carries no express-session store, or whose
+					// callback URL has no path to scope the cookie to, cannot check
+					// state on the cross-site callback it would be sent.
+					logMisconfigured(logger, transactions ? "no_callback_path" : "no_session_store", {
+						provider: provider.name,
+						callbackUrl,
+					});
 					return res.status(500).json({
 						error: "misconfiguration",
 						error_description: sanitizeErrorText(
@@ -1325,14 +1511,16 @@ export const createRouter = (
 				try {
 					await transactions.set(transactionId, envelope, federationTransactionTtlMs);
 				} catch (err) {
-					logger.warn(
-						{ err: loggableError(err), provider: provider.name },
-						"federation transaction save failed",
+					logStoreUnavailable(
+						logger,
+						"federation_start_store_unavailable",
+						"federation_transaction",
+						"set",
+						err,
+						{ provider: provider.name },
 					);
-					return res.status(500).json({
-						error: "server_error",
-						error_description: "Session store unavailable",
-					});
+					abandonCookieSession(req);
+					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 				}
 
 				res.cookie(transactionCookieName, transactionId, {
@@ -1353,14 +1541,16 @@ export const createRouter = (
 					req.session.save((err) => resolve(err ?? null));
 				});
 				if (startSaveErr) {
-					logger.warn(
-						{ err: loggableError(startSaveErr), provider: provider.name },
-						"federation start session save failed",
+					logStoreUnavailable(
+						logger,
+						"federation_start_store_unavailable",
+						"cookie_session",
+						"save",
+						startSaveErr,
+						{ provider: provider.name },
 					);
-					return res.status(500).json({
-						error: "server_error",
-						error_description: "Session store unavailable",
-					});
+					abandonCookieSession(req);
+					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 				}
 			}
 

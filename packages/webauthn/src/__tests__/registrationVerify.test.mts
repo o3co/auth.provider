@@ -125,14 +125,16 @@ function buildApp(subject: WebAuthnSubject | undefined, deps = makeDeps()) {
 		next();
 	});
 
+	const logger = { error: vi.fn() };
 	const handler = createRegistrationVerifyHandler({
 		config: BASE_CONFIG,
 		challengeCeremony: deps.challengeCeremony,
 		credentialStore: deps.credentialStore,
+		logger,
 	});
 
 	app.post("/oauth/webauthn/registration/verify", handler);
-	return { app, ...deps };
+	return { app, logger, ...deps };
 }
 
 /** Issue a challenge for userId under the registration scope. */
@@ -278,7 +280,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 
 	it("500 for a subject whose userId is not a 1-64 byte handle, in RFC 6749's characters", async () => {
 		// Appendix A.8 allows printable ASCII only: "section", not the sign.
-		const { app } = buildApp({ userId: "x".repeat(65) });
+		const { app, logger } = buildApp({ userId: "x".repeat(65) });
 
 		const res = await supertest(app)
 			.post("/oauth/webauthn/registration/verify")
@@ -290,6 +292,11 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 			error_description:
 				"webauthnSubject.userId must be 1-64 bytes per WebAuthn section 5.4.3 (opaque user-handle)",
 		});
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ site: "registration_verify", byteLength: 65 },
+			"webauthn_subject_user_handle_invalid",
+		);
 	});
 
 	// -------------------------------------------------------------------------
@@ -478,18 +485,18 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 	});
 
 	// -------------------------------------------------------------------------
-	// Test 12: Non-duplicate adapter error rethrows (Round 6 M3 regression guard)
+	// Test 12: Non-duplicate adapter error is an outage (Round 6 M3 regression guard)
 	// -------------------------------------------------------------------------
-	it("500 (not silent 200) when registerCredential throws a non-duplicate adapter error", async () => {
+	it("503 (not silent 200) when registerCredential throws a non-duplicate adapter error", async () => {
 		mockVerifyAttestation.mockResolvedValueOnce({ ok: true, material: STUB_MATERIAL });
 
 		const deps = makeDeps();
 		const challengeValue = await issueChallenge(deps.challengeStore, "alice");
 
 		// Simulate a transient backing-store failure (Redis ECONNRESET, SQL timeout, etc.)
-		// The route MUST NOT swallow this; it must rethrow → Express default error
-		// handler → 500. A future refactor that catches-all-and-200s is the regression
-		// this test guards.
+		// The route MUST NOT swallow this: it is the store's outage, answered 503
+		// (routes.storeOutage.test.mts pins the log line). A future refactor that
+		// catches-all-and-200s is the regression this test guards.
 		vi.spyOn(deps.credentialStore, "registerCredential").mockRejectedValueOnce(
 			new Error("transient backing store failure"),
 		);
@@ -499,7 +506,8 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 			.post("/oauth/webauthn/registration/verify")
 			.send({ response: makeStubResponse(challengeValue) });
 
-		expect(res.status).toBe(500);
+		expect(res.status).toBe(503);
+		expect(res.body.error).toBe("temporarily_unavailable");
 		// MUST NOT return the success body.
 		expect(res.body.credentialId).toBeUndefined();
 	});

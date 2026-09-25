@@ -30,6 +30,10 @@
  *   - challengeTtlMs controls the window; default 120_000 ms per spec §2.4.1.
  *   - excludeCredentials is populated from the credential store to prevent
  *     re-registering an already-registered authenticator for this user.
+ *   - A store that cannot answer — the credential list or the challenge
+ *     write — is 503 temporarily_unavailable, logged once at error level as
+ *     `webauthn_ceremony_store_unavailable` (`../internal/storeUnavailable.mts`).
+ *     Nothing was issued that the client could use; it asks again.
  *
  * NOT barrel-exported from the package index — internal to the webauthn module
  * until Task 31 wires the router.
@@ -37,10 +41,11 @@
  * Cross-refs: Plan T27 / spec §2.4 / §2.4.1
  */
 
-import type { ChallengeStore, WebAuthnCredentialStore } from "@o3co/auth-provider-core";
+import type { ChallengeStore, Logger, WebAuthnCredentialStore } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler, Response } from "express";
 import type { WebAuthnConfig } from "../config.mjs";
 import { generateRegistrationOptionsForUser } from "../internal/options.mjs";
+import { refuseCeremonyStoreUnavailable } from "../internal/storeUnavailable.mjs";
 
 // WebAuthnSubject type + Express Request augmentation live in request.mts and
 // are barrel-exported. Re-export here so importers of this internal file still
@@ -55,6 +60,8 @@ export interface RegistrationOptionsDeps {
 	readonly config: WebAuthnConfig;
 	readonly challengeStore: ChallengeStore;
 	readonly credentialStore: WebAuthnCredentialStore;
+	/** Where a store outage is logged. */
+	readonly logger: Pick<Logger, "error">;
 	// session/bearer auth resolved upstream — endpoint trusts req.webauthnSubject
 }
 
@@ -65,7 +72,7 @@ export interface RegistrationOptionsDeps {
 /**
  * Creates an Express RequestHandler for POST /oauth/webauthn/registration/options.
  *
- * @param deps - Injected dependencies (config, challengeStore, credentialStore).
+ * @param deps - Injected dependencies (config, challengeStore, credentialStore, logger).
  * @returns RequestHandler suitable for mounting on an Express router.
  */
 export function createRegistrationOptionsHandler(deps: RegistrationOptionsDeps): RequestHandler {
@@ -89,6 +96,13 @@ export function createRegistrationOptionsHandler(deps: RegistrationOptionsDeps):
 		// it so misconfigurations fail loudly with a 500 (consumer bug, not a 400).
 		const userIdByteLength = new TextEncoder().encode(userId).length;
 		if (userIdByteLength < 1 || userIdByteLength > 64) {
+			// The composition's fault, logged once: the length, never the value —
+			// the misconfiguration this catches is a middleware handing over an
+			// e-mail or a username.
+			deps.logger.error(
+				{ site: "registration_options", byteLength: userIdByteLength },
+				"webauthn_subject_user_handle_invalid",
+			);
 			res.status(500).json({
 				error: "server_error",
 				error_description:
@@ -102,7 +116,18 @@ export function createRegistrationOptionsHandler(deps: RegistrationOptionsDeps):
 
 		// Populate excludeCredentials from the credential store to prevent
 		// re-registering an already-registered authenticator for this user.
-		const existing = await deps.credentialStore.listByUserId(userId);
+		let existing: Awaited<ReturnType<typeof deps.credentialStore.listByUserId>>;
+		try {
+			existing = await deps.credentialStore.listByUserId(userId);
+		} catch (err) {
+			refuseCeremonyStoreUnavailable(
+				res,
+				deps.logger,
+				{ site: "registration_options", store: "webauthn_credential", step: "list" },
+				err,
+			);
+			return;
+		}
 
 		// Generate a fresh random challenge for this ceremony.
 		const challenge = crypto.getRandomValues(new Uint8Array(32));
@@ -122,11 +147,21 @@ export function createRegistrationOptionsHandler(deps: RegistrationOptionsDeps):
 		// replay. The value stored is the base64url string from SimpleWebAuthn so
 		// it can be compared directly against the client response in the verify step.
 		const expiresAtMs = Date.now() + deps.config.challengeTtlMs;
-		await deps.challengeStore.issue(
-			`webauthn:registration:${userId}`,
-			options.challenge,
-			expiresAtMs,
-		);
+		try {
+			await deps.challengeStore.issue(
+				`webauthn:registration:${userId}`,
+				options.challenge,
+				expiresAtMs,
+			);
+		} catch (err) {
+			refuseCeremonyStoreUnavailable(
+				res,
+				deps.logger,
+				{ site: "registration_options", store: "challenge", step: "issue" },
+				err,
+			);
+			return;
+		}
 
 		res.status(200).json(options);
 	};

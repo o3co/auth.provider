@@ -12,11 +12,13 @@ import {
 	type AppConfig,
 	BootError,
 	type BuilderContext,
+	consoleLogger,
 	defineModule,
 	fullSectionsSchema,
 	type ReplicaSafetyDeclaration,
 } from "@o3co/auth-provider-core";
 import session from "express-session";
+import { guardCookieSession } from "../internal/cookieSession.mjs";
 import { createSessionStoreFactory, registerBuiltinSessionStores } from "../store/factory.mjs";
 
 /**
@@ -54,8 +56,9 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 		name: MODULE_NAME,
 		configSchema: sessionStoreConfigSchema,
 		requires: ["config"],
-		// `logger` is optional (D-4): the redis client's error handler falls back
-		// to consoleLogger when the composition wires no logger slot.
+		// `logger` is optional (D-4): the redis client's error handler, and the
+		// middleware's report of a store that cannot load or save a session,
+		// fall back to consoleLogger when the composition wires no logger slot.
 		optional: ["lifecycleRegistrar", "readinessRegistrar", "logger"],
 		...(replicaSafety === undefined ? {} : { replicaSafety }),
 		contributes: {
@@ -99,6 +102,9 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 						type: storageSlice.type,
 						...((storageSlice[storageSlice.type] ?? {}) as Record<string, unknown>),
 					});
+					// A store error express-session would hand to `next(err)` is
+					// answered by the guard: `503` when the session cannot be loaded,
+					// one error line either way (`../internal/cookieSession.mts`).
 					const middleware = session({
 						name: config.session.name,
 						secret: config.session.secret,
@@ -126,7 +132,7 @@ function buildSessionStoreModule(replicaSafety: ReplicaSafetyDeclaration | undef
 					return {
 						id: "session-middleware",
 						mountPath: "/",
-						handler: middleware,
+						handler: guardCookieSession(middleware, deps.logger ?? consoleLogger),
 					};
 				},
 			],

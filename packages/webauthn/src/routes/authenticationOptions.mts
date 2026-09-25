@@ -43,6 +43,11 @@
  *     that flag off the credential store is not consulted at all — so the
  *     response body, its key set, and the work done to produce it are identical
  *     whether or not the named account exists.
+ *   - A store that cannot answer — the credential list (opt-in only) or the
+ *     challenge write — is 503 temporarily_unavailable, logged once at error
+ *     level as `webauthn_ceremony_store_unavailable`
+ *     (`../internal/storeUnavailable.mts`). The caller-supplied `userId` is not
+ *     on the line.
  *
  * `createAuthenticationOptionsHandler` is NOT barrel-exported from the package
  * index — it is internal to the webauthn module, which mounts it (Task 31).
@@ -55,6 +60,7 @@
 
 import {
 	type ChallengeStore,
+	type Logger,
 	WEBAUTHN_AUTHENTICATION_OPTIONS_RATE_LIMIT_PREFIX,
 	type WebAuthnCredentialStore,
 } from "@o3co/auth-provider-core";
@@ -62,6 +68,7 @@ import type { Request, RequestHandler, Response } from "express";
 import { z } from "zod";
 import type { WebAuthnConfig } from "../config.mjs";
 import { generateAuthenticationOptionsForUser } from "../internal/options.mjs";
+import { refuseCeremonyStoreUnavailable } from "../internal/storeUnavailable.mjs";
 
 // ---------------------------------------------------------------------------
 // Rate-limit key
@@ -135,6 +142,8 @@ export interface AuthenticationOptionsDeps {
 	readonly config: WebAuthnConfig;
 	readonly challengeStore: ChallengeStore;
 	readonly credentialStore: WebAuthnCredentialStore;
+	/** Where a store outage is logged. */
+	readonly logger: Pick<Logger, "error">;
 	// Rate limiting is mounted by `module.mts` in front of this handler
 	// (core's `createRateLimitGuard`), so it is middleware rather than a
 	// handler-level dep — but it is no longer merely assumed. See #281.
@@ -149,7 +158,7 @@ export interface AuthenticationOptionsDeps {
  *
  * Unauthenticated — no req.webauthnSubject check.
  *
- * @param deps - Injected dependencies (config, challengeStore, credentialStore).
+ * @param deps - Injected dependencies (config, challengeStore, credentialStore, logger).
  * @returns RequestHandler suitable for mounting on an Express router.
  */
 export function createAuthenticationOptionsHandler(
@@ -180,10 +189,20 @@ export function createAuthenticationOptionsHandler(
 		// in exchange for supporting non-discoverable authenticators; the 200 /
 		// no-error-shape mitigation from the original design is all that remains
 		// there, and it is not enough on its own. See the config JSDoc.
-		const allowCredentials =
-			deps.config.allowCredentialsForKnownUser && userId !== undefined
-				? await deps.credentialStore.listByUserId(userId)
-				: [];
+		let allowCredentials: Awaited<ReturnType<typeof deps.credentialStore.listByUserId>> = [];
+		if (deps.config.allowCredentialsForKnownUser && userId !== undefined) {
+			try {
+				allowCredentials = await deps.credentialStore.listByUserId(userId);
+			} catch (err) {
+				refuseCeremonyStoreUnavailable(
+					res,
+					deps.logger,
+					{ site: "authentication_options", store: "webauthn_credential", step: "list" },
+					err,
+				);
+				return;
+			}
+		}
 
 		// Generate a fresh 32-byte random challenge for this ceremony.
 		const challenge = crypto.getRandomValues(new Uint8Array(32));
@@ -201,7 +220,17 @@ export function createAuthenticationOptionsHandler(
 		// userId is resolved post-assertion from the credential record — the
 		// authenticator identifies the user, not the client request.
 		const expiresAtMs = Date.now() + deps.config.challengeTtlMs;
-		await deps.challengeStore.issue("webauthn:authentication", options.challenge, expiresAtMs);
+		try {
+			await deps.challengeStore.issue("webauthn:authentication", options.challenge, expiresAtMs);
+		} catch (err) {
+			refuseCeremonyStoreUnavailable(
+				res,
+				deps.logger,
+				{ site: "authentication_options", store: "challenge", step: "issue" },
+				err,
+			);
+			return;
+		}
 
 		res.status(200).json(options);
 	};

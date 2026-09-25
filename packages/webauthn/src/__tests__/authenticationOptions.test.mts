@@ -92,6 +92,7 @@ function buildApp(
 		config,
 		challengeStore,
 		credentialStore,
+		logger: { error: vi.fn() },
 	});
 
 	app.post("/oauth/webauthn/authentication/options", handler);

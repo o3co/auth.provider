@@ -22,7 +22,6 @@ import {
 	consoleLogger,
 	createMemoryRateLimiter,
 	createRateLimitGuard,
-	errorEnvelope,
 	type FederationTokenStore,
 	type Logger,
 	loggableError,
@@ -41,6 +40,11 @@ import {
 	createCsrfProtectionFromConfig,
 	type SessionCsrfConfigSlice,
 } from "../csrf.mjs";
+import {
+	abandonCookieSession,
+	SESSION_STORE_UNAVAILABLE,
+	USER_DIRECTORY_UNAVAILABLE,
+} from "../internal/cookieSession.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
@@ -300,20 +304,23 @@ export const createRouter = (
 	 * the cookie. This inverts `cascadeLogout`'s §6.2 order (fanout first,
 	 * `delete` last) on purpose: §6.2 defers the delete so a FAILED cascade
 	 * stays retryable through the sid it did not erase, and this endpoint
-	 * offers no retry — it never reports failure to the caller, and the caller
-	 * loses the cookie naming the sid either way. With retry off the table the
+	 * offers no retry of these steps — it never reports their failure to the
+	 * caller, and once the cookie is destroyed the caller has lost the sid. With retry off the table the
 	 * remaining criterion is which failure hurts most, and that is the one
 	 * that leaves a token still honoured. So the delete runs first and is not
 	 * conditional on the hygiene that follows.
 	 *
-	 * FAILURE — every step is best-effort and logged, never propagated. A
-	 * store outage must not turn a logout into a 5xx that leaves the user
-	 * holding a live cookie: the cookie is the half this endpoint can always
-	 * deliver, and a 5xx would invite a retry of work that partly succeeded.
-	 * The residue of a failed delete is covered from the other side —
-	 * `/authorize` refuses a session whose `sid` does not resolve, and a store
-	 * that cannot answer `delete` will not answer `get` either, which the
-	 * introspection and userinfo liveness checks both fail closed on.
+	 * FAILURE — every step here is best-effort and logged, never propagated:
+	 * an outage of these stores must not turn a logout into a 5xx that leaves
+	 * the user holding a live cookie — the cookie is the half this endpoint can
+	 * always deliver, and a 5xx would invite a retry of work that partly
+	 * succeeded. The residue of a failed delete is covered from the other side
+	 * — `/authorize` refuses a session whose `sid` does not resolve, and a
+	 * store that cannot answer `delete` will not answer `get` either, which the
+	 * introspection and userinfo liveness checks both fail closed on. The one
+	 * exception is the cookie's own destroy, in the route: when the cookie
+	 * store cannot destroy the browser session the user is not logged out, so
+	 * that answers `503` and the client retries.
 	 */
 	const invalidateSessionRecords = async (sid: string, sub: string | undefined): Promise<void> => {
 		if (userSessionStore) {
@@ -349,6 +356,43 @@ export const createRouter = (
 					"logout_session_federation_index_remove_failed",
 				);
 			}
+		}
+	};
+
+	/**
+	 * A store `/session/login` cannot do without could not answer — the user
+	 * directory, the `UserSession` record, the cookie session's regeneration
+	 * or save:
+	 * the server's outage, never a verdict on the credentials. One line at
+	 * error level, `login_store_unavailable`, `store` naming which and `step`
+	 * the operation, with the error's projection — never the error, which can
+	 * carry what the store was sent — and never the username. The caller
+	 * answers `503 temporarily_unavailable`.
+	 */
+	const loginStoreUnavailable = (
+		store: "user_repository" | "user_session" | "cookie_session",
+		step: "authenticate" | "create" | "regenerate" | "save",
+		cause: unknown,
+		context: { readonly sid?: string; readonly sub?: string } = {},
+	): void => {
+		logger.error({ ...context, store, step, err: loggableError(cause) }, "login_store_unavailable");
+	};
+
+	/**
+	 * One best-effort rollback step of a login that failed after its
+	 * `UserSession` was created. A step that fails is one warn,
+	 * `login_cleanup_failed`, and the login's own answer stands.
+	 */
+	const loginCleanup = async (
+		store: "user_session" | "subject_session_index",
+		step: "delete" | "remove_sid",
+		context: { readonly sid: string; readonly sub?: string },
+		run: () => Promise<unknown>,
+	): Promise<void> => {
+		try {
+			await run();
+		} catch (err) {
+			logger.warn({ ...context, store, step, err: loggableError(err) }, "login_cleanup_failed");
 		}
 	};
 
@@ -389,11 +433,8 @@ export const createRouter = (
 				try {
 					user = await userRepository.authenticate(username, password);
 				} catch (err) {
-					logger.warn({ err: loggableError(err) }, "local login authenticate failed");
-					return res.status(503).json({
-						error: "temporarily_unavailable",
-						error_description: "User directory temporarily unavailable",
-					});
+					loginStoreUnavailable("user_repository", "authenticate", err);
+					return res.status(503).json(USER_DIRECTORY_UNAVAILABLE);
 				}
 				if (!user) {
 					return res.status(401).json({
@@ -410,11 +451,11 @@ export const createRouter = (
 				if (userSessionStore) {
 					const claims = extractUserClaims(user);
 					const now = new Date();
-					sid = randomUUID();
+					const createdSid = randomUUID();
+					const expiresAt = new Date(now.getTime() + sessionTtlMs);
 					try {
-						const expiresAt = new Date(now.getTime() + sessionTtlMs);
 						await userSessionStore.create({
-							sid,
+							sid: createdSid,
 							sub: user.id,
 							authTime: now,
 							expiresAt,
@@ -422,75 +463,102 @@ export const createRouter = (
 							// #481: a password login (RFC 8176 `pwd`).
 							amr: ["pwd"],
 						});
-						// #296: record the session against its subject so a later
-						// credential change can find it. Best-effort and AFTER the
-						// session exists: a failure here must not deny a legitimate
-						// login, and the cost is that this one session is missed by
-						// `revokeAllForSubject` — logged so it is not silent.
-						//
-						// Written at the earliest point the session exists rather than
-						// after the regeneration below, because the two failure modes
-						// are not symmetric: a missing entry is a live session a
-						// credential change will never find, while an orphan entry
-						// costs one redundant cascade that `cascadeLogout` absorbs
-						// idempotently. The regeneration rollback compensates.
-						if (subjectSessionIndex) {
-							try {
-								await subjectSessionIndex.addSid(user.id, sid, expiresAt);
-							} catch (err) {
-								logger.error(
-									{ err: loggableError(err), sub: user.id, sid },
-									"subject_session_index_write_failed",
-								);
-							}
-						}
-					} catch {
-						// Fail-closed: store unavailable — return controlled 503 JSON rather
-						// than an unhandled rejection hitting Express's default HTML error
-						// handler. Matches the /token grant fail-closed pattern (CP-16/CP-17).
-						// RFC 6749 §5.2 error shape for consistency with other /login failures.
-						return res.status(503).json({
-							error: "temporarily_unavailable",
-							error_description: "Session store temporarily unavailable",
+					} catch (err) {
+						// Fail-closed: the store's outage, answered as one — never a
+						// session-less login, and never an unhandled rejection reaching
+						// Express's default HTML error handler. Matches the /token grant
+						// fail-closed pattern (CP-16/CP-17), in RFC 6749 §5.2's shape.
+						loginStoreUnavailable("user_session", "create", err, {
+							sid: createdSid,
+							sub: user.id,
 						});
+						return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+					}
+					sid = createdSid;
+					// #296: record the session against its subject so a later
+					// credential change can find it. Best-effort and AFTER the
+					// session exists: a failure here must not deny a legitimate
+					// login, and the cost is that this one session is missed by
+					// `revokeAllForSubject` — logged so it is not silent.
+					//
+					// Written at the earliest point the session exists rather than
+					// after the regeneration below, because the two failure modes
+					// are not symmetric: a missing entry is a live session a
+					// credential change will never find, while an orphan entry
+					// costs one redundant cascade that `cascadeLogout` absorbs
+					// idempotently. The regeneration rollback compensates.
+					if (subjectSessionIndex) {
+						try {
+							await subjectSessionIndex.addSid(user.id, createdSid, expiresAt);
+						} catch (err) {
+							logger.error(
+								{ err: loggableError(err), sub: user.id, sid: createdSid },
+								"subject_session_index_write_failed",
+							);
+						}
 					}
 				}
 
-				req.session.regenerate((err: Error | null) => {
-					if (err) {
-						// Best-effort rollback: UserSession was created but session regeneration failed.
-						// Delete the orphan record so it doesn't leak. Ignore cleanup errors — the
-						// primary error is already being returned to the caller.
-						if (sid && userSessionStore) {
-							userSessionStore.delete(sid).catch(() => {
-								/* best-effort cleanup */
-							});
-							// #296: the session is gone, so its subject-index entry must
-							// go too — otherwise `revokeAllForSubject` would enumerate a
-							// sid that no longer exists.
-							subjectSessionIndex?.removeSid(user.id, sid).catch(() => {
-								/* best-effort cleanup */
-							});
+				/**
+				 * The cookie session could not be regenerated or saved: its store's
+				 * outage. The UserSession was created but no browser session names
+				 * it, so the orphan is deleted best-effort, and (#296) its
+				 * subject-index entry with it — otherwise `revokeAllForSubject`
+				 * would enumerate a sid that no longer exists. The request's cookie
+				 * session is dropped so express-session neither writes it again nor
+				 * sets a cookie for it (`../internal/cookieSession.mts`).
+				 */
+				const refuseCookieSessionOutage = async (
+					step: "regenerate" | "save",
+					cause: unknown,
+				): Promise<Response> => {
+					loginStoreUnavailable("cookie_session", step, cause, sid === undefined ? {} : { sid });
+					if (sid !== undefined && userSessionStore) {
+						const orphan = sid;
+						await loginCleanup("user_session", "delete", { sid: orphan }, () =>
+							userSessionStore.delete(orphan),
+						);
+						if (subjectSessionIndex) {
+							await loginCleanup(
+								"subject_session_index",
+								"remove_sid",
+								{ sid: orphan, sub: user.id },
+								() => subjectSessionIndex.removeSid(user.id, orphan),
+							);
 						}
-						return res
-							.status(500)
-							.json(errorEnvelope("server_error", "Session regeneration failed"));
 					}
-					req.session.isAuthenticated = true;
-					req.session.user = user as Record<string, unknown> | undefined;
-					if (redirectTo) {
-						req.session.redirectTo = redirectTo;
-					}
-					// Restore sid on the new session so downstream (token/introspect) can read it.
-					if (sid) {
-						req.session.sid = sid;
-					}
-					// The caller is now on a regenerated session; hand it a fresh
-					// token in the same response so the follow-up `/session/logout`
-					// does not need another round trip to `/session/csrf`.
-					csrfProtection.issue(res);
-					return res.status(200).json({ message: "Logged in successfully" });
+					abandonCookieSession(req);
+					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+				};
+
+				// express-session regenerates by destroying the old record in its
+				// store, so a failure is that store's outage.
+				const regenerateErr = await new Promise<unknown>((resolve) => {
+					req.session.regenerate((err: unknown) => resolve(err ?? null));
 				});
+				if (regenerateErr) return refuseCookieSessionOutage("regenerate", regenerateErr);
+				req.session.isAuthenticated = true;
+				req.session.user = user as Record<string, unknown> | undefined;
+				if (redirectTo) {
+					req.session.redirectTo = redirectTo;
+				}
+				// Restore sid on the new session so downstream (token/introspect) can read it.
+				if (sid) {
+					req.session.sid = sid;
+				}
+				// Saved before answering, as the federation callback does: left to
+				// express-session's save when the response ends, a store that failed
+				// there did so after the `200`, and the browser held a cookie for a
+				// session the next request would not find.
+				const saveErr = await new Promise<unknown>((resolve) => {
+					req.session.save((err: unknown) => resolve(err ?? null));
+				});
+				if (saveErr) return refuseCookieSessionOutage("save", saveErr);
+				// The caller is now on a regenerated session; hand it a fresh
+				// token in the same response so the follow-up `/session/logout`
+				// does not need another round trip to `/session/csrf`.
+				csrfProtection.issue(res);
+				return res.status(200).json({ message: "Logged in successfully" });
 			},
 		)
 		.post("/logout", verifyCsrf, async (req: Request, res: Response) => {
@@ -507,17 +575,29 @@ export const createRouter = (
 				await invalidateSessionRecords(sid, sub);
 			}
 
-			req.session.destroy((err: Error | null) => {
-				if (err) {
-					// Unchanged contract. The records are already gone by now, so
-					// the surviving cookie buys nothing: `/authorize`'s R1b check
-					// treats an `isAuthenticated` session whose `sid` no longer
-					// resolves as unauthenticated, and `/oauth/introspect` and
-					// `/oauth/userinfo` refuse the tokens it minted.
-					return res.status(500).json(errorEnvelope("server_error", "Session destroy failed"));
-				}
-				return res.status(200).json({ message: "Logged out successfully" });
+			const destroyErr = await new Promise<unknown>((resolve) => {
+				req.session.destroy((err: unknown) => resolve(err ?? null));
 			});
+			if (destroyErr) {
+				// The cookie store could not destroy the browser session: its
+				// outage, answered as one so the client retries. The records are
+				// already gone by now, so the surviving cookie buys nothing:
+				// `/authorize`'s R1b check treats an `isAuthenticated` session whose
+				// `sid` no longer resolves as unauthenticated, and
+				// `/oauth/introspect` and `/oauth/userinfo` refuse the tokens it
+				// minted.
+				logger.error(
+					{
+						...(sid === undefined ? {} : { sid }),
+						store: "cookie_session",
+						step: "destroy",
+						err: loggableError(destroyErr),
+					},
+					"session_logout_store_unavailable",
+				);
+				return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+			}
+			return res.status(200).json({ message: "Logged out successfully" });
 		});
 
 	return router;

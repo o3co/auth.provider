@@ -134,7 +134,7 @@ function makeLiveUserSessionStore(
  * userRepository.authenticate controls the login outcome:
  * - resolves to a User object → successful login
  * - resolves to null → invalid credentials (401)
- * - rejects with an Error → authentication error (500)
+ * - rejects with an Error → user directory outage (503)
  *
  * Returns `capturedSession`: a ref populated by a post-router middleware so
  * tests can assert on `req.session` fields (e.g. `sid`) after a response.
@@ -155,6 +155,7 @@ function buildApp(
 		sessionTtlMs?: number;
 		regenerateError?: Error;
 		destroyError?: Error;
+		saveError?: Error;
 		config?: AppConfig;
 	} = {},
 ) {
@@ -176,14 +177,15 @@ function buildApp(
 		sessionTtlMs,
 		regenerateError,
 		destroyError,
+		saveError,
 		config = stubConfig,
 	} = opts;
 
 	const app = express();
 
 	// Minimal express-session stub so req.session.regenerate / destroy / save work.
-	// regenerateError/destroyError opt-ins simulate session-store failures so tests
-	// can drive the AS-1 500 server_error envelope paths.
+	// regenerateError/destroyError opt-ins simulate cookie-store failures, which
+	// the routes answer as the outage they are (503 temporarily_unavailable).
 	app.use((req, _res, next) => {
 		const sessionData: Record<string, unknown> = { ...(initialSession ?? {}) };
 		(req as unknown as { session: Record<string, unknown> }).session = {
@@ -202,8 +204,8 @@ function buildApp(
 				Object.assign(req as unknown as { session: Record<string, unknown> }, { session: fresh });
 				cb(null);
 			},
-			save(cb: (err: null) => void) {
-				cb(null);
+			save(cb: (err: Error | null) => void) {
+				cb(saveError ?? null);
 			},
 			destroy(cb: (err: Error | null) => void) {
 				if (destroyError) {
@@ -650,7 +652,7 @@ describe("Session routes — POST /session/login", () => {
 			expect(res.body).not.toHaveProperty("message");
 		});
 
-		it("session regeneration failure returns 500 server_error envelope (no `message`)", async () => {
+		it("session regeneration failure returns the 503 temporarily_unavailable envelope (no `message`)", async () => {
 			const { app } = buildApp({
 				userSessionStore: makeUserSessionStore(),
 				sessionTtlMs: 3600_000,
@@ -661,24 +663,24 @@ describe("Session routes — POST /session/login", () => {
 				.send("username=alice&password=secret")
 				.set("Content-Type", "application/x-www-form-urlencoded");
 
-			expect(res.status).toBe(500);
+			expect(res.status).toBe(503);
 			expect(res.body).toMatchObject({
-				error: "server_error",
+				error: "temporarily_unavailable",
 				error_description: expect.any(String),
 			});
 			expect(res.body).not.toHaveProperty("message");
 		});
 
-		it("logout session destroy failure returns 500 server_error envelope (no `message`)", async () => {
+		it("logout session destroy failure returns the 503 temporarily_unavailable envelope (no `message`)", async () => {
 			const { app } = buildApp({
 				destroyError: new Error("destroy failed"),
 			});
 
 			const res = await logoutRequest(app);
 
-			expect(res.status).toBe(500);
+			expect(res.status).toBe(503);
 			expect(res.body).toMatchObject({
-				error: "server_error",
+				error: "temporarily_unavailable",
 				error_description: expect.any(String),
 			});
 			expect(res.body).not.toHaveProperty("message");
@@ -923,7 +925,7 @@ describe("Session routes — subject session index (#296)", () => {
 			.send("username=alice&password=secret")
 			.set("Content-Type", "application/x-www-form-urlencoded");
 
-		expect(res.status).toBe(500);
+		expect(res.status).toBe(503);
 		expect(index.addSid).toHaveBeenCalledOnce();
 		expect(index.removeSid).toHaveBeenCalledOnce();
 		const [, removedSid] = index.removeSid.mock.calls[0] as [string, string];
@@ -947,7 +949,7 @@ describe("Session routes — subject session index (#296)", () => {
 			.send("username=alice&password=secret")
 			.set("Content-Type", "application/x-www-form-urlencoded");
 
-		expect(res.status).toBe(500);
+		expect(res.status).toBe(503);
 	});
 
 	it("logs in normally when no index is wired", async () => {
@@ -1197,9 +1199,10 @@ describe("Session routes — POST /session/logout invalidates the session record
 		);
 	});
 
-	it("keeps the 500 envelope when the cookie destroy itself fails", async () => {
-		// Pre-existing contract, deliberately unchanged: if the browser session
-		// survives, the logout did not happen from the browser's point of view.
+	it("answers 503 when the cookie destroy itself fails", async () => {
+		// If the browser session survives, the logout did not happen from the
+		// browser's point of view — and the cookie store that could not destroy
+		// it is an outage, so the answer tells the client to retry.
 		const store = makeLiveUserSessionStore(["sid-1"]);
 		const { app } = buildApp({
 			userSessionStore: store,
@@ -1209,10 +1212,248 @@ describe("Session routes — POST /session/logout invalidates the session record
 
 		const res = await logoutRequest(app);
 
-		expect(res.status).toBe(500);
-		expect(res.body).toMatchObject({ error: "server_error" });
+		expect(res.status).toBe(503);
+		expect(res.body).toMatchObject({ error: "temporarily_unavailable" });
 		// The record still went, so the token minted from this session is dead
 		// even though the cookie survived.
 		expect(store.live.has("sid-1")).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The outage policy on the session routes: a store the route cannot do
+// without is `503 temporarily_unavailable`, logged once at error level —
+// `login_store_unavailable` / `session_logout_store_unavailable`, with `store`,
+// `step` and the error's projection — and each best-effort rollback step that
+// fails is one `login_cleanup_failed` warn.
+// ---------------------------------------------------------------------------
+
+describe("Session routes — a store that cannot answer is an outage, logged once", () => {
+	const spyLogger = () => {
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		};
+		logger.child.mockReturnValue(logger);
+		return logger;
+	};
+	type SpyLogger = ReturnType<typeof spyLogger>;
+
+	/**
+	 * Exactly one error line named `event` with `fields` and the error's
+	 * projection (never the `Error`); one `login_cleanup_failed` warn per entry
+	 * of `cleanups`, in order; nothing at any other level.
+	 */
+	const expectOutageLogged = (
+		logger: SpyLogger,
+		event: string,
+		fields: Record<string, unknown>,
+		detail: string,
+		cleanups: ReadonlyArray<Record<string, unknown>> = [],
+	): void => {
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [context, name] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(name).toBe(event);
+		expect(context).toMatchObject(fields);
+		expect(context.err).not.toBeInstanceOf(Error);
+		expect(context.err).toMatchObject({ name: "Error", detail });
+		expect(logger.warn).toHaveBeenCalledTimes(cleanups.length);
+		cleanups.forEach((cleanup, index) => {
+			const [warned, warnName] = logger.warn.mock.calls[index] as [Record<string, unknown>, string];
+			expect(warnName).toBe("login_cleanup_failed");
+			expect(warned).toMatchObject(cleanup);
+			expect(warned.err).not.toBeInstanceOf(Error);
+		});
+		for (const level of ["trace", "debug", "info", "fatal"] as const) {
+			expect(logger[level]).not.toHaveBeenCalled();
+		}
+	};
+
+	// One replica, so the router's construction-time notice about its
+	// per-process login limiter is not among the lines a test counts.
+	const config = { ...stubConfig, deployment: { mode: "single" } } as unknown as AppConfig;
+
+	const login = (app: express.Express) =>
+		loginRequest(app)
+			.send("username=alice&password=secret")
+			.set("Content-Type", "application/x-www-form-urlencoded");
+
+	it("the user directory: 503 and one error line, no username on it", async () => {
+		const logger = spyLogger();
+		const { app } = buildApp({
+			userRepository: {
+				authenticate: vi.fn().mockRejectedValue(new Error("directory down")),
+				authenticateByToken: vi.fn(),
+			} as unknown as UserRepository,
+			logger: logger as unknown as Logger,
+			config,
+		});
+
+		const res = await login(app);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "User directory temporarily unavailable",
+		});
+		expectOutageLogged(
+			logger,
+			"login_store_unavailable",
+			{ store: "user_repository", step: "authenticate" },
+			"directory down",
+		);
+		expect(JSON.stringify(logger.error.mock.calls)).not.toContain("alice");
+	});
+
+	it("the session record: 503 and one error line — it used to be silent", async () => {
+		const logger = spyLogger();
+		const { app } = buildApp({
+			userSessionStore: {
+				kind: "memory",
+				create: vi.fn().mockRejectedValue(new Error("session store down")),
+				get: vi.fn(),
+				delete: vi.fn(),
+			} as unknown as UserSessionStore,
+			logger: logger as unknown as Logger,
+			config,
+		});
+
+		const res = await login(app);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "Session store unavailable",
+		});
+		expectOutageLogged(
+			logger,
+			"login_store_unavailable",
+			{ store: "user_session", step: "create", sub: "u-1", sid: expect.any(String) },
+			"session store down",
+		);
+	});
+
+	it("the cookie session's regeneration: 503, one error line, and the record rolled back", async () => {
+		const logger = spyLogger();
+		const store = makeLiveUserSessionStore();
+		const created: string[] = [];
+		store.create = async (input) => {
+			created.push(input.sid);
+			store.live.set(input.sid, input);
+		};
+		const { app } = buildApp({
+			userSessionStore: store,
+			regenerateError: new Error("cookie store down"),
+			logger: logger as unknown as Logger,
+			config,
+		});
+
+		const res = await login(app);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "Session store unavailable",
+		});
+		expectOutageLogged(
+			logger,
+			"login_store_unavailable",
+			{ store: "cookie_session", step: "regenerate", sid: created[0] },
+			"cookie store down",
+		);
+		expect(store.live.size).toBe(0);
+	});
+
+	it("the rollback after a failed regeneration: one warn per step that fails", async () => {
+		const logger = spyLogger();
+		const { app } = buildApp({
+			userSessionStore: {
+				kind: "memory",
+				create: vi.fn(async () => {}),
+				get: vi.fn(),
+				delete: vi.fn().mockRejectedValue(new Error("session store down")),
+			} as unknown as UserSessionStore,
+			subjectSessionIndex: makeSubjectSessionIndex({
+				removeSid: vi.fn().mockRejectedValue(new Error("subject index down")),
+			}),
+			regenerateError: new Error("cookie store down"),
+			logger: logger as unknown as Logger,
+			config,
+		});
+
+		const res = await login(app);
+
+		expect(res.status).toBe(503);
+		expectOutageLogged(
+			logger,
+			"login_store_unavailable",
+			{ store: "cookie_session", step: "regenerate" },
+			"cookie store down",
+			[
+				{ store: "user_session", step: "delete", sid: expect.any(String) },
+				{ store: "subject_session_index", step: "remove_sid", sub: "u-1" },
+			],
+		);
+	});
+
+	it("the regenerated session's save: 503, one error line, and the record rolled back", async () => {
+		const logger = spyLogger();
+		const store = makeLiveUserSessionStore();
+		const created: string[] = [];
+		store.create = async (input) => {
+			created.push(input.sid);
+			store.live.set(input.sid, input);
+		};
+		const { app } = buildApp({
+			userSessionStore: store,
+			saveError: new Error("cookie store down"),
+			logger: logger as unknown as Logger,
+			config,
+		});
+
+		const res = await login(app);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "Session store unavailable",
+		});
+		expectOutageLogged(
+			logger,
+			"login_store_unavailable",
+			{ store: "cookie_session", step: "save", sid: created[0] },
+			"cookie store down",
+		);
+		expect(store.live.size).toBe(0);
+	});
+
+	it("the cookie session's destroy at logout: 503 and one error line", async () => {
+		const logger = spyLogger();
+		const { app } = buildApp({
+			userSessionStore: makeLiveUserSessionStore(["sid-1"]),
+			destroyError: new Error("cookie store down"),
+			initialSession: { isAuthenticated: true, sid: "sid-1", user: { id: "u-1" } },
+			logger: logger as unknown as Logger,
+			config,
+		});
+
+		const res = await logoutRequest(app);
+
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "Session store unavailable",
+		});
+		expectOutageLogged(
+			logger,
+			"session_logout_store_unavailable",
+			{ store: "cookie_session", step: "destroy", sid: "sid-1" },
+			"cookie store down",
+		);
 	});
 });

@@ -289,7 +289,9 @@ describe("OIDC federation through the session routes (#524)", () => {
 		expect(cb.status).toBe(502);
 		expect(repo.authenticateByToken).not.toHaveBeenCalled();
 
-		const exchangeFailure = lines.find((line) => line.includes("federation token exchange failed"));
+		const exchangeFailure = lines.find((line) =>
+			line.includes("federation_callback_exchange_failed"),
+		);
 		expect(exchangeFailure).toBeDefined();
 		// What an operator needs is still there: the library's code and reason.
 		expect(exchangeFailure).toContain("OAUTH_INVALID_RESPONSE");

@@ -18,6 +18,7 @@ import {
 	type BuilderContext,
 	consoleLogger,
 	createAdapterFactory,
+	type Logger,
 	loggableError,
 } from "@o3co/auth-provider-core";
 import type session from "express-session";
@@ -43,6 +44,61 @@ export function createSessionStoreFactory(ctx?: BuilderContext): SessionStoreFac
 }
 
 /**
+ * How the Redis store reads and writes a session record: JSON, as
+ * connect-redis's default does — except that a record which cannot be read is
+ * absent rather than an error. Text that is not JSON, or JSON that is not a
+ * session record (a plain object — not an array — carrying a `cookie` that is
+ * a plain object too, which express-session rebuilds the session's cookie
+ * from), would otherwise fail every request
+ * that browser makes until the record expires, answered as a store outage
+ * (`../internal/cookieSession.mts`). Read as absent, express-session starts a
+ * fresh session for the request. Logged once per read as a warn,
+ * `session_cookie_record_unreadable` with `store: "cookie_session"` — never
+ * the record's text, nor the parser's message, which quotes it.
+ *
+ * The record is not deleted, and the browser keeps its cookie: a fresh,
+ * unmodified session sets no new one (`saveUninitialized: false`). So every
+ * request from that browser reads the same record again and logs another
+ * warn, until the user signs in — which sets a new cookie — or the record's
+ * TTL passes. A stream of these from one browser is one record.
+ *
+ * Every record in the store is read through this, not only sessions: a
+ * `form_post` federation transaction (`fedtx:`) that cannot be read is absent,
+ * so its callback answers `400 invalid_session` and the user starts the
+ * federation again; an oauth re-authentication ask (`reauth:`) that cannot be
+ * read is no ask, so `/authorize` asks for the re-authentication again. Both
+ * warn the same way, as `store: "cookie_session"`.
+ *
+ * A store that cannot answer at all is not a record and never reaches here:
+ * it is still the `503`.
+ */
+function readableSessionRecords(logger: Pick<Logger, "warn">): {
+	parse(text: string): session.SessionData;
+	stringify(record: session.SessionData): string;
+} {
+	return {
+		stringify: (record) => JSON.stringify(record),
+		parse: (text) => {
+			let record: unknown;
+			try {
+				record = JSON.parse(text);
+			} catch {
+				record = undefined;
+			}
+			const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+				value !== null && typeof value === "object" && !Array.isArray(value);
+			if (isPlainObject(record) && isPlainObject(record.cookie)) {
+				return record as unknown as session.SessionData;
+			}
+			logger.warn({ store: "cookie_session" }, "session_cookie_record_unreadable");
+			// connect-redis hands this to express-session as the stored session;
+			// `null` is its "no such session".
+			return null as unknown as session.SessionData;
+		},
+	};
+}
+
+/**
  * Register the built-in session store adapters:
  * - `"memory"` — returns `undefined`; express-session falls back to its default
  *   in-memory store.
@@ -60,7 +116,8 @@ export function createSessionStoreFactory(ctx?: BuilderContext): SessionStoreFac
  * The redis client's `error` events are reported through
  * `BuilderContext.logger` — the same context that carries `lifecycle` and
  * `readiness` — falling back to `consoleLogger` when the composition wires no
- * logger slot.
+ * logger slot. So is a stored record the store cannot read, which
+ * {@link readableSessionRecords} reads as absent.
  */
 export function registerBuiltinSessionStores(factory: SessionStoreFactory): void {
 	factory.register("memory", () => undefined);
@@ -107,6 +164,6 @@ export function registerBuiltinSessionStores(factory: SessionStoreFactory): void
 			name: "session-store",
 			check: () => client.ping(),
 		});
-		return new RedisStore({ client });
+		return new RedisStore({ client, serializer: readableSessionRecords(logger) });
 	});
 }

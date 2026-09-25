@@ -62,20 +62,6 @@ function isNotInstalled(reason: unknown, name: string): boolean {
 const INSTALL_COMMAND = "npm install redis@^6.2.1 connect-redis@^10.0.0";
 
 /**
- * How much of each member's message the AggregateError's own message quotes:
- * its first line, cut to this length. Two of them, the header and the prefix
- * createApp adds (`Module "sessionStoreModule" route factory failed:
- * AggregateError: `) fit in the 256 characters core's loggableError keeps of
- * a message.
- */
-const MEMBER_BRIEF_LENGTH = 60;
-
-const briefOf = (reason: unknown): string => {
-	const [line = ""] = (reason instanceof Error ? reason.message : String(reason)).split("\n");
-	return line.length > MEMBER_BRIEF_LENGTH ? `${line.slice(0, MEMBER_BRIEF_LENGTH - 1)}…` : line;
-};
-
-/**
  * Load `redis` and `connect-redis`, or fail without losing a failure:
  *
  * - A library that is not installed is named, in one message for both —
@@ -86,9 +72,11 @@ const briefOf = (reason: unknown): string => {
  *   and that failure is the cause instead: the message already names what is
  *   missing, and the other failure is what it cannot restate.
  * - A single failure of any other kind is rethrown unchanged; two are thrown
- *   together as an `AggregateError`, whose message names each package with the
- *   first line of its failure, cut short. The members themselves are its
- *   `errors`, logged whole where core's loggableError projects them.
+ *   together as an `AggregateError` whose message is fixed text naming both
+ *   packages. The failures themselves are its `errors`, whole, and a log line
+ *   gets them where core's loggableError projects the members: their text is
+ *   never copied into the message, where it would travel on as a plain string
+ *   past every projection.
  *
  * What a message is for comes first: the names and the install command, then
  * the explanation. createApp prefixes the route factory's error with
@@ -135,7 +123,7 @@ export async function loadRedisStoreLibraries(
 	if (other.length > 1) {
 		throw new AggregateError(
 			other.map(({ reason }) => reason),
-			`${other.map(({ name }) => `"${name}"`).join(" and ")} failed to load: ${other.map(({ name, reason }) => `${name}: ${briefOf(reason)}`).join("; ")}`,
+			`${other.map(({ name }) => `"${name}"`).join(" and ")} both failed to load, for a reason other than not being installed; the two failures are this error's errors`,
 		);
 	}
 	throw other[0]?.reason;

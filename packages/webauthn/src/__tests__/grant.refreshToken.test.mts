@@ -34,9 +34,10 @@
  *   - that the family the grant registers rotates once and then reports a
  *     replay, driven through core's real store + rotation wrapper rather than a
  *     spy, so the RFC 6819 §5.2.2.3 semantics are the shared ones;
- *   - that no refresh token is served unless its family was registered — a
- *     store outage, a decode that throws, and a payload missing `jti` or `exp`
- *     all answer 503 and return no tokens at all;
+ *   - that the family is registered under the refresh token's reserved `jti`
+ *     and expiry before anything is signed (#449), so no refresh token is
+ *     served unless its family was registered, and a family store that cannot
+ *     answer is a 503 that costs no signature;
  *   - the DPoP `cnf.jkt` binding, on the same public-client /
  *     `bindConfidentialClientRefreshTokens` gate `authorization.mts` and
  *     `refreshToken.mts` apply.
@@ -71,24 +72,11 @@ vi.mock("#/internal/verification.mjs", () => ({
 	verifyWebAuthnAttestation: vi.fn(),
 }));
 
-// Spied, not replaced: the default implementation is the real one, so every
-// test below exercises the genuine decode. Only the unregisterable-token cases
-// override it, one call at a time, to reach branches a correctly minted token
-// cannot produce.
-vi.mock("#/internal/_jwtPayload.mjs", async () => {
-	const actual = await vi.importActual<typeof import("#/internal/_jwtPayload.mjs")>(
-		"#/internal/_jwtPayload.mjs",
-	);
-	return { decodeJwtPayload: vi.fn(actual.decodeJwtPayload) };
-});
-
 import { createWebAuthnGrant, WEBAUTHN_GRANT_TYPE } from "#/grant.mjs";
-import { decodeJwtPayload } from "#/internal/_jwtPayload.mjs";
 import { verifyWebAuthnAssertion } from "#/internal/verification.mjs";
 import { webauthnModule } from "#/module.mjs";
 
 const mockVerifyAssertion = vi.mocked(verifyWebAuthnAssertion);
-const mockDecodeJwtPayload = vi.mocked(decodeJwtPayload);
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -220,6 +208,21 @@ async function issue(
 	}
 	expect(result.status).toBe(200);
 	return result.tokens;
+}
+
+/** A logger whose every level is a spy; `child` answers the same logger. */
+function spyLogger() {
+	const logger = {
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn(),
+	};
+	logger.child.mockReturnValue(logger);
+	return logger;
 }
 
 function dpopBinding(jkt: string): TokenBinding {
@@ -409,7 +412,7 @@ describe("createWebAuthnGrant — the issued refresh token is redeemable (#480)"
 // ---------------------------------------------------------------------------
 
 describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => {
-	it("registers the family under the issued token's own jti and exp", async () => {
+	it("registers the family under the minted refresh token's own jti, expiring exactly at its exp", async () => {
 		const register = vi.fn(async () => {});
 		const rotation: RefreshTokenFamilyRotation = {
 			register,
@@ -431,6 +434,38 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 		expect(jti).toBe(payload.jti);
 		expect(familyId).toBe(payload.family_id);
 		expect(expiresAtMs).toBe((payload.exp as number) * 1000);
+		expect((payload.exp as number) - (payload.iat as number)).toBe(REFRESH_TOKEN_TTL);
+	});
+
+	it("registers the family before anything is signed, so a family store that cannot answer costs no signature (#449)", async () => {
+		// The refresh token's identity — its `jti` and the instant its lifetime
+		// is measured from — is reserved first and registered with the family
+		// store; tokens are signed only once that holds, as the refresh grant
+		// does. A KMS-backed key bills every signature.
+		const signing = createSymmetricKeyStore(SECRET);
+		const sign = vi.spyOn(signing, "sign");
+		const register = vi.fn(async () => {
+			throw new Error("family store down");
+		});
+		const logger = spyLogger();
+
+		const { result } = await createWebAuthnGrant(
+			await makeDeps({
+				keyStore: signing,
+				refreshTokenFamilyRotation: {
+					register,
+					rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
+				},
+				logger,
+			}),
+		).handle(makeCtx(makeClient()));
+
+		expect(result.status).toBe(503);
+		expect("tokens" in result).toBe(false);
+		expect(register).toHaveBeenCalledTimes(1);
+		expect(sign).not.toHaveBeenCalled();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error.mock.calls[0]?.[1]).toBe("webauthn_grant_store_unavailable");
 	});
 
 	it("rotates once and then reports a replay, on core's own rotation wrapper", async () => {
@@ -487,74 +522,6 @@ describe("createWebAuthnGrant — refresh-token family lifecycle (#480)", () => 
 		expect(result.status).toBe(503);
 		expect("error" in result && result.error).toBe("temporarily_unavailable");
 		expect("tokens" in result).toBe(false);
-	});
-
-	// -------------------------------------------------------------------------
-	// A token that cannot be registered must not be served either
-	//
-	// Registration needs the `jti` and `exp` of the token just minted. Reading
-	// them back can fail — the decode can throw, or return a payload missing
-	// either claim — and the first shape of this code treated that as "nothing
-	// to register" and returned the refresh token anyway. That is the same
-	// outcome as the store outage above (a live refresh token with no rotation
-	// record and no replay detection) reached down a different branch, so it
-	// gets the same fail-closed answer.
-	// -------------------------------------------------------------------------
-
-	it("answers 503 and serves nothing when the minted token cannot be decoded", async () => {
-		const register = vi.fn(async () => {});
-		const deps = await makeDeps({
-			refreshTokenFamilyRotation: {
-				register,
-				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
-			},
-		});
-		mockDecodeJwtPayload.mockImplementationOnce(() => {
-			throw new Error("decode blew up");
-		});
-
-		const { result } = await createWebAuthnGrant(deps).handle(makeCtx(makeClient()));
-
-		expect(result.status).toBe(503);
-		expect("error" in result && result.error).toBe("temporarily_unavailable");
-		expect("tokens" in result).toBe(false);
-		expect(register).not.toHaveBeenCalled();
-	});
-
-	it("answers 503 and serves nothing when the minted token carries no jti", async () => {
-		const register = vi.fn(async () => {});
-		const deps = await makeDeps({
-			refreshTokenFamilyRotation: {
-				register,
-				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
-			},
-		});
-		mockDecodeJwtPayload.mockReturnValueOnce({ exp: Math.floor(Date.now() / 1000) + 60 });
-
-		const { result } = await createWebAuthnGrant(deps).handle(makeCtx(makeClient()));
-
-		expect(result.status).toBe(503);
-		expect("error" in result && result.error).toBe("temporarily_unavailable");
-		expect("tokens" in result).toBe(false);
-		expect(register).not.toHaveBeenCalled();
-	});
-
-	it("answers 503 and serves nothing when the minted token carries no exp", async () => {
-		const register = vi.fn(async () => {});
-		const deps = await makeDeps({
-			refreshTokenFamilyRotation: {
-				register,
-				rotate: vi.fn(async () => ({ outcome: "rotated" as const })),
-			},
-		});
-		mockDecodeJwtPayload.mockReturnValueOnce({ jti: "a-jti-with-no-exp" });
-
-		const { result } = await createWebAuthnGrant(deps).handle(makeCtx(makeClient()));
-
-		expect(result.status).toBe(503);
-		expect("error" in result && result.error).toBe("temporarily_unavailable");
-		expect("tokens" in result).toBe(false);
-		expect(register).not.toHaveBeenCalled();
 	});
 
 	it("is never built when oauth.refreshToken.expiresIn is unset, so no token without exp is minted", async () => {
