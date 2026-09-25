@@ -762,6 +762,36 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		});
 	});
 
+	it("names each widened audience once, on the line and in the refusal, however often it was sent", async () => {
+		// Every widened audience is one the client is registered for, so the
+		// values are bounded — but `audience` is not de-duplicated, and the
+		// caller chooses how many times it repeats one.
+		const logger = spyLogger();
+		const g = buildGrant({
+			logger: logger as unknown as Logger,
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences: ["inventory"] })),
+		});
+		const token = await signSelfIssuedAccessToken({ aud: "billing", family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: Array.from({ length: 600 }, () => "inventory"),
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: "audience_widening_not_allowed: inventory",
+		});
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		const [line, event] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
+		expect(event).toBe("token_exchange_audience_widening_rejected");
+		expect(line.widenedAudiences).toEqual(["inventory"]);
+	});
+
 	it("mints a token when audience is empty array (treated as no audience requested)", async () => {
 		const g = buildGrant({
 			clientRepository: mockClientRepository(publicClient({ allowedAudiences: [] })),
