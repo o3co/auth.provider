@@ -334,8 +334,9 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// A validator throws only when it cannot reach an answer — a
 				// keystore or a revocation store down (core's
 				// `ExchangeTokenValidator` contract). The server's fault, so a
-				// logged 503, never a verdict on the token.
-				deps.logger?.error(
+				// logged 503, never a verdict on the token — on core's console
+				// logger when none is wired, never silently.
+				(deps.logger ?? consoleLogger).error(
 					{ role: "subject", err: loggableError(err) },
 					"token_exchange_validation_unavailable",
 				);
@@ -444,7 +445,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				try {
 					actorValidated = await actorValidator.validate(actorToken, { role: "actor" });
 				} catch (err) {
-					deps.logger?.error(
+					(deps.logger ?? consoleLogger).error(
 						{ role: "actor", err: loggableError(err) },
 						"token_exchange_validation_unavailable",
 					);
@@ -1225,7 +1226,7 @@ function reportedFamily(validated: ValidatedToken): string | undefined {
  *   issued token's `act` claim on a credential whose revocation cannot be
  *   checked.
  * - The store throws: `503 temporarily_unavailable`, logged as
- *   `token_exchange_family_store_unavailable` with the role and core's
+ *   `token_exchange_family_store_unavailable` with `store`, the role and core's
  *   `loggableError` projection of the store's error, so an outage is never
  *   reported as a revoked token.
  * - The family is revoked: `family_revoked`.
@@ -1257,9 +1258,10 @@ async function familyRefusal(
 		revoked = await revocation.isFamilyRevoked(familyId);
 	} catch (err) {
 		// The projection: a store error carries what it sent — an ioredis
-		// reply error the command, the family's key included.
-		deps.logger?.error(
-			{ err: loggableError(err), role },
+		// reply error the command, the family's key included. On core's
+		// console logger when none is wired: an outage is never silent.
+		(deps.logger ?? consoleLogger).error(
+			{ store: "refresh_token_family", role, err: loggableError(err) },
 			"token_exchange_family_store_unavailable",
 		);
 		return {
@@ -1288,11 +1290,13 @@ async function familyRefusal(
  *
  * - No `sid`, or no `userSessionStore` wired: nothing to check. Without a
  *   store no surface judges a `sid`, and introspection passes the token too.
- * - The store holds no session under it: `invalid_request` `session_invalid`
+ * - The store holds no session under it, or one recorded for another
+ *   subject (the session grant's rule): `invalid_request` `session_invalid`
  *   (the refresh grant's words; RFC 8693 §2.2.2 makes every refused token
  *   `invalid_request`), `actor_token session_invalid` for the actor.
  * - The store throws: `503 temporarily_unavailable` "session store
- *   unavailable", logged once at error as
+ *   unavailable" (`actor_token session store unavailable`), logged once at
+ *   error, on core's console logger when no logger is wired, as
  *   `token_exchange_session_store_unavailable` with the store, the step, the
  *   role and core's `loggableError` projection — an outage is never reported
  *   as an ended session, nor waved through as a live one.
@@ -1309,9 +1313,14 @@ async function sessionRefusal(
 	const sid = validated.sid ? validated.sid : undefined;
 	const store = deps.userSessionStore;
 	if (sid === undefined || store === undefined) return null;
+	const forRole = (description: string) =>
+		role === "actor" ? `actor_token ${description}` : description;
 	let live: boolean;
 	try {
-		live = (await store.get(sid)) != null;
+		// The session grant's rule: the record must be this token's
+		// subject's. A token naming another subject's session is not tied to
+		// it, and that session's liveness says nothing about this subject.
+		live = (await store.get(sid))?.sub === validated.sub;
 	} catch (err) {
 		(deps.logger ?? consoleLogger).error(
 			{ store: "user_session", step: "get", role, err: loggableError(err) },
@@ -1321,12 +1330,12 @@ async function sessionRefusal(
 			result: {
 				status: 503,
 				error: "temporarily_unavailable",
-				errorDescription: "session store unavailable",
+				errorDescription: forRole("session store unavailable"),
 			},
 		};
 	}
 	if (live) return null;
-	return invalidRequest(role === "actor" ? "actor_token session_invalid" : "session_invalid");
+	return invalidRequest(forRole("session_invalid"));
 }
 
 /**
