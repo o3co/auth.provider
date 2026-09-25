@@ -43,6 +43,7 @@ import * as pkijs from "pkijs";
 /** OIDs used by the shapes these tests mint. */
 const OID = {
 	commonName: "2.5.4.3",
+	organizationName: "2.5.4.10",
 	basicConstraints: "2.5.29.19",
 	keyUsage: "2.5.29.15",
 	extKeyUsage: "2.5.29.37",
@@ -107,6 +108,31 @@ const setCommonName = (name: pkijs.RelativeDistinguishedNames, cn: string): void
 		}),
 	);
 };
+
+/**
+ * `O=<organization>` then `CN=<cn>`, each its own RDN — the two-part subject
+ * Node renders on two lines. Built from DER: pkijs puts every attribute of a
+ * name it encodes itself into one SET, a single multi-valued RDN.
+ */
+const twoPartName = (cn: string, organization: string): pkijs.RelativeDistinguishedNames =>
+	pkijs.RelativeDistinguishedNames.fromBER(
+		new asn1js.Sequence({
+			value: [
+				[OID.organizationName, organization],
+				[OID.commonName, cn],
+			].map(
+				([type, value]) =>
+					new asn1js.Set({
+						value: [
+							new pkijs.AttributeTypeAndValue({
+								type: type as string,
+								value: new asn1js.Utf8String({ value: value as string }),
+							}).toSchema(),
+						],
+					}),
+			),
+		}).toBER(false),
+	);
 
 // ---------------------------------------------------------------------------
 // Extension builders
@@ -462,6 +488,8 @@ export const certificateIssuerEntryExtension = (cn: string): pkijs.Extension => 
 
 export interface Minted {
 	readonly cn: string;
+	/** An `O=` part before the `CN=`, for a subject of more than one part. */
+	readonly organization?: string;
 	readonly serial: number;
 	readonly keys: CryptoKeyPair;
 	readonly cert: pkijs.Certificate;
@@ -472,6 +500,8 @@ export interface Minted {
 
 export interface MintOptions {
 	readonly cn: string;
+	/** An `O=` part before the `CN=`: a subject Node renders on two lines. */
+	readonly organization?: string;
 	readonly serial: number;
 	/** Omit for a self-signed certificate. */
 	readonly issuer?: Minted;
@@ -500,8 +530,17 @@ export const mint = async (options: MintOptions): Promise<Minted> => {
 	const cert = new pkijs.Certificate();
 	cert.version = 2;
 	cert.serialNumber = new asn1js.Integer({ value: options.serial });
-	setCommonName(cert.subject, options.cn);
-	setCommonName(cert.issuer, options.issuer?.cn ?? options.cn);
+	const issuerName = options.issuer ?? options;
+	if (options.organization !== undefined) {
+		cert.subject = twoPartName(options.cn, options.organization);
+	} else {
+		setCommonName(cert.subject, options.cn);
+	}
+	if (issuerName.organization !== undefined) {
+		cert.issuer = twoPartName(issuerName.cn, issuerName.organization);
+	} else {
+		setCommonName(cert.issuer, issuerName.cn);
+	}
 	cert.notBefore.value = options.notBefore ?? DEFAULT_NOT_BEFORE;
 	cert.notAfter.value = options.notAfter ?? DEFAULT_NOT_AFTER;
 	cert.extensions = [...(options.extensions ?? [])];
@@ -512,6 +551,7 @@ export const mint = async (options: MintOptions): Promise<Minted> => {
 	const pem = toPem(der);
 	return {
 		cn: options.cn,
+		...(options.organization !== undefined ? { organization: options.organization } : {}),
 		serial: options.serial,
 		keys,
 		cert,

@@ -123,7 +123,8 @@ type LeafCrl = "refused" | "hanging" | "garbage" | "clean" | "revoked";
  * after the first — one the live server answers 404 (`missing`) or one on a
  * port nothing listens on (`refused`). `extra.intSourcesRefused` points the
  * intermediate's own CRL and OCSP responder at ports nothing listens on;
- * `extra.intRevoked` has the root's list name the intermediate.
+ * `extra.intRevoked` has the root's list name the intermediate;
+ * `extra.leafOrganization` puts an `O=` part before the leaf's `CN=`.
  */
 const pki = async (
 	leafCrl: LeafCrl,
@@ -134,6 +135,7 @@ const pki = async (
 		readonly morePoints?: readonly ("missing" | "refused")[];
 		readonly intSourcesRefused?: boolean;
 		readonly intRevoked?: boolean;
+		readonly leafOrganization?: string;
 	} = {},
 ) => {
 	const root = await mintCa("Root", 1);
@@ -172,6 +174,7 @@ const pki = async (
 	}
 	const leafResponder = leafResponderRefused ? `${await closedOrigin()}/ocsp` : undefined;
 	const leaf = await mintLeaf(extra.leafCn ?? "client", 10, int, {
+		...(extra.leafOrganization !== undefined ? { organization: extra.leafOrganization } : {}),
 		extensions: [
 			basicConstraints(false),
 			keyUsage(KEY_USAGE.digitalSignature),
@@ -616,6 +619,79 @@ describe("the outage line's account survives a long subject", () => {
 		expect(
 			line.err.detail.startsWith("revocation status could not be determined for CN=client-x"),
 		).toBe(true);
+	});
+});
+
+describe("a subject of several parts is one line wherever it is named", () => {
+	// Node's X509Certificate.subject puts each part of the name on a line of
+	// its own. A log field, a detail or a member's message naming the
+	// certificate that way spans lines; it is named on one, the parts joined
+	// with ", ".
+	const SUBJECT = "O=Example Corp, CN=client";
+
+	it("the outage line: the aggregate and each member name the certificate on one line", async () => {
+		const { root, int, leaf, leafPoint } = await pki("refused", "127.0.0.1", false, {
+			leafOrganization: "Example Corp",
+		});
+		const { app, calls } = appWith(root, "reject");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(503);
+		expect(calls).toEqual([
+			{
+				level: "error",
+				args: outageLine(
+					"token_binding_unavailable",
+					[sourceMember("crl", leafPoint, "fetch_failed", REFUSED, SUBJECT)],
+					SUBJECT,
+				),
+			},
+		]);
+	});
+
+	it("the allowed line: its subject field is one line", async () => {
+		const { root, int, leaf } = await pki("refused", "127.0.0.1", false, {
+			leafOrganization: "Example Corp",
+		});
+		const { app, calls } = appWith(root, "allow");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(200);
+		expect(calls).toEqual([
+			{
+				level: "warn",
+				args: [
+					expect.objectContaining({ subject: SUBJECT, reason: "fetch_failed" }),
+					"mtls_revocation_unavailable_allowed",
+				],
+			},
+		]);
+	});
+
+	it("a revoked certificate's verdict: its detail names it on one line", async () => {
+		const { root, int, leaf } = await pki("revoked", "127.0.0.1", false, {
+			leafOrganization: "Example Corp",
+		});
+		const { app, calls } = appWith(root, "reject");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(400);
+		expect(calls[0]?.args).toEqual([
+			{
+				step: "certificate revoked",
+				detail: `${SUBJECT}: listed on the CRL published by CN=Intermediate`,
+			},
+			"mtls_full_pki_validation_failed",
+		]);
 	});
 });
 
