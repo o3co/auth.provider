@@ -451,44 +451,12 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 		why: "jose's own fixed text about the token, as the verdict's message; jose's claims ride on the error, not in its message",
 	},
 	{
-		file: "packages/federation-oidc/src/at-hash.mts",
-		sites: 1,
-		why: "the message of an error it throws, the original kept as `cause` (outside this change; for review)",
-	},
-	{
-		file: "packages/federation-oidc/src/client-auth.mts",
-		sites: 1,
-		why: "the message of a construction error it throws, the original kept as `cause` (outside this change; for review)",
-	},
-	{
-		file: "packages/federation-oidc/src/oidc.mts",
-		sites: 1,
-		why: "the message of a construction error it throws, the original kept as `cause` (outside this change; for review)",
-	},
-	{
-		file: "packages/mtls/src/fullPki/crl.mts",
-		sites: 2,
-		why: "a PKI library's text about the certificate under check, as a refusal's `detail` (outside this change; for review)",
-	},
-	{
-		file: "packages/mtls/src/fullPki/ocsp.mts",
-		sites: 1,
-		why: "a PKI library's text about the certificate under check, as a refusal's `detail` (outside this change; for review)",
-	},
-	{
-		file: "packages/mtls/src/extractor.mts",
-		sites: 7,
-		why: "a PEM/DER or header parser's text, and a trust-anchor file read's, cast `(err as Error)` into the message of an error it throws, the original not kept as `cause` (outside this PR; for review)",
-	},
-	{
-		file: "packages/mtls/src/fullPki/validate.mts",
-		sites: 1,
-		why: "a PKI library's text about the certificate under check, as a refusal's `detail` (outside this change; for review)",
-	},
-	{
 		file: "packages/redis/src/ioredis.mts",
-		sites: 2,
-		why: "the message of an error it throws, the queued command's error kept as `cause`; and a NOSCRIPT classifier that reads the text and never logs it (outside this change; for review)",
+		sites: 1,
+		why:
+			"the NOSCRIPT classifier: ioredis's ReplyError carries no code, only Redis's reply text, and " +
+			"ioredis's own Script reads the same text the same way; the text decides a boolean and is " +
+			"never logged or thrown",
 	},
 ];
 
@@ -500,11 +468,18 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 const STRING_FIRST_EVERYWHERE: readonly string[] = [
 	"packages/core/src",
 	"packages/dpop/src",
+	"packages/federation-apple/src",
+	"packages/federation-github/src",
+	"packages/federation-google/src",
 	"packages/federation-grants/src",
+	"packages/federation-oidc/src",
+	"packages/mtls/src",
 	"packages/oauth/src",
 	"packages/oauth-token-exchange/src",
+	"packages/redis/src",
 	"packages/session/src",
 	"packages/webauthn/src",
+	"templates/standalone/src",
 ];
 
 /** The string-first calls that stay, each file's count exact, with why. */
