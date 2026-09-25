@@ -36,9 +36,23 @@
  * core no longer builds one from an unchecked stored code — the allow-list is
  * applied where the reason is constructed (D11), which is the only place a
  * mutation pass can hold it.
+ *
+ * **A caller's own text is bounded.** Two fields are the caller's before
+ * anything has checked them: the grant id, a path parameter audited by the
+ * denial hook ahead of client authentication and by core for a grant nobody
+ * holds, and the subject, which the body asserts. Both reach the sink through
+ * core's `auditErrorText` — sanitised, capped at 200 characters — as every
+ * string on this package's log lines already is: a sink is read by systems
+ * that split on a line break, and the standalone writes every event into its
+ * log. A well-formed id or subject is carried unchanged.
  */
 
-import type { AuditEvent, AuditSink, FederationGrantAuditEvent } from "@o3co/auth-provider-core";
+import {
+	type AuditEvent,
+	type AuditSink,
+	auditErrorText,
+	type FederationGrantAuditEvent,
+} from "@o3co/auth-provider-core";
 
 export interface FederationGrantAuditBridgeOptions {
 	/** Absent on a deployment that declared `audit.sink.type = "none"`. */
@@ -64,13 +78,13 @@ export function createFederationGrantAuditBridge(
 		const mapped: AuditEvent = {
 			timestamp: now(),
 			type: event.type,
-			subject: event.subject,
+			subject: auditErrorText(event.subject),
 			clientId: event.clientId,
 			...(options.ip === undefined ? {} : { ip: options.ip }),
 			...(options.userAgent === undefined ? {} : { userAgent: options.userAgent }),
 			details: {
 				correlationId: event.correlationId,
-				grantId: event.grantId,
+				grantId: auditErrorText(event.grantId),
 				...(event.connection === undefined ? {} : { connection: event.connection }),
 				// Copies, so that a sink which holds its argument cannot be
 				// handed a reference into a record core is still working with.
