@@ -32,6 +32,7 @@
 import {
 	type AuditEvent,
 	type AuditSink,
+	auditErrorText,
 	createSubjectRevocationService,
 	defineModule,
 	type FederationGrantAuditEvent,
@@ -122,11 +123,13 @@ const auditor = (
 		const mapped: AuditEvent = {
 			timestamp: new Date(),
 			type: event.type,
-			subject: event.subject,
+			// Sanitised and capped, as the federation-grants bridge does: both
+			// came from a request once, and the sink writes them onto a line.
+			subject: auditErrorText(event.subject),
 			clientId: event.clientId,
 			details: {
 				correlationId: event.correlationId,
-				grantId: event.grantId,
+				grantId: auditErrorText(event.grantId),
 				// What access ended, where core established it (D18). Copies,
 				// so a sink that holds its argument cannot be handed a
 				// reference into what core is still working with.
@@ -148,7 +151,11 @@ const auditor = (
 			.then(() => recordAuditEvent(sink, mapped))
 			.catch((err: unknown) => {
 				logger?.error(
-					{ err: loggableError(err), grantId: event.grantId, correlationId: event.correlationId },
+					{
+						err: loggableError(err),
+						grantId: auditErrorText(event.grantId),
+						correlationId: event.correlationId,
+					},
 					"federation_grant_audit_failed",
 				);
 			});
