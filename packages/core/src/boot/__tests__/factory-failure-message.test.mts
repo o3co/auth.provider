@@ -63,10 +63,10 @@ const bootFailure = async (modules: readonly Module[]): Promise<BootError> => {
 const printed = (err: unknown): string =>
 	inspect(err, { depth: Number.POSITIVE_INFINITY, showHidden: true });
 
-/** A JSON parser's error, which quotes the text it could not parse. */
+/** A JSON parser's error, which quotes the text it could not parse: V8 quotes it whole. */
 const parseErrorQuoting = (marker: string): SyntaxError => {
 	try {
-		JSON.parse(`{"clientSecret":"${marker}`);
+		JSON.parse(marker);
 	} catch (err) {
 		return err as SyntaxError;
 	}
@@ -156,8 +156,11 @@ describe("a factory's error, in the boot failure's message", () => {
 			const thrown = parseErrorQuoting("json-secret-marker");
 			const err = await bootFailure([build(thrown)]);
 			expect(err.message).toBe(`${prefix}SyntaxError`);
-			// The error itself is still there for a caller that inspects it.
+			// The error itself is still there for a caller that reads it…
 			expect(err.cause).toBe(thrown);
+			// …and printing the BootError (Node's unhandled-rejection printer,
+			// `console.error`) shows the cause's projection, not the cause.
+			expect(printed(err)).not.toContain("json-secret-marker");
 		}
 	});
 
@@ -167,6 +170,7 @@ describe("a factory's error, in the boot failure's message", () => {
 			'Module "test:failing-provider" provider factory for "clientRepository" failed: a thrown string',
 		);
 		expect(err.cause).toBe("string-secret-marker");
+		expect(printed(err)).not.toContain("string-secret-marker");
 	});
 
 	it("cuts the arguments a Redis reply echoes, as a log line does", async () => {
@@ -183,6 +187,44 @@ describe("a factory's error, in the boot failure's message", () => {
 		expect(err.message).toBe(
 			'Module "test:failing-provider" provider factory for "clientRepository" failed: ReplyError: ERR Error running script',
 		);
+		expect(printed(err)).not.toContain("redis-args-secret-marker");
+	});
+
+	it("prints a cleanup's failure by its projection too", async () => {
+		// A component already built is cleaned up when a later factory fails;
+		// the cleanup's own error — a store's, carrying the command it refused
+		// — rides on the BootError's `details.cleanupErrors`.
+		const closing = defineModule({
+			name: "test:closing-store",
+			provides: { codeRepository: () => ({}) as never },
+			lifecycle: {
+				codeRepository: {
+					eager: true,
+					cleanup: () => {
+						throw Object.assign(new Error("QUIT refused"), {
+							command: { name: "quit", args: ["cleanup-args-secret-marker"] },
+						});
+					},
+				},
+			},
+		});
+		const failing = defineModule({
+			name: "test:failing-after",
+			requires: ["codeRepository"] as const,
+			provides: {
+				clientRepository: () => {
+					throw new Error("boom");
+				},
+			},
+			lifecycle: { clientRepository: { eager: true } },
+		});
+		const err = await bootFailure([closing, failing]);
+		expect(err.details).toMatchObject({
+			reason: "provides-factory-failed",
+			cleanupErrors: [{ module: "test:closing-store", componentKey: "codeRepository" }],
+		});
+		expect(printed(err)).toContain("QUIT refused");
+		expect(printed(err)).not.toContain("cleanup-args-secret-marker");
 	});
 
 	it("keeps an Error's whole message: a refusal's advice, at its end, is what an operator acts on", async () => {

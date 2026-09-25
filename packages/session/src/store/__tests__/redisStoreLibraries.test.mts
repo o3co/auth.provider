@@ -187,17 +187,19 @@ describe("loadRedisStoreLibraries", () => {
 	});
 
 	// What a log line keeps of the boot failure. createApp wraps what the route
-	// factory threw as `Module "<name>" route factory failed: <Name>: <message>`
-	// (core's boot/apply-contributions.mts, by the error's loggableError
-	// projection), and core's loggableError keeps the first
-	// LOGGED_STRING_MAX_LENGTH characters of a message. The install command,
+	// factory threw as `Module "<name>" route factory failed: <name>: <message>`,
+	// the thrown error read by core's loggableError rules
+	// (boot/failure-summary.mts), and a log line keeps the first
+	// LOGGED_STRING_MAX_LENGTH characters of that message. The install command,
 	// and what failed, have to be inside them.
 	describe("a log line keeps what the message is for", () => {
-		const logged = (err: unknown) =>
-			`Module "sessionStoreModule" route factory failed: ${String(err)}`.slice(
+		const logged = (err: unknown) => {
+			const { name, detail } = loggableError(err);
+			return `Module "sessionStoreModule" route factory failed: ${name}: ${detail}`.slice(
 				0,
 				LOGGED_STRING_MAX_LENGTH,
 			);
+		};
 		const evaluationError = (name: string) =>
 			new TypeError(`${name} failed to evaluate: ${"a long reason, ".repeat(20)}`);
 

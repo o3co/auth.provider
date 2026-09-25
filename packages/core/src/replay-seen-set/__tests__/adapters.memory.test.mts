@@ -141,16 +141,13 @@ describe("createMemoryReplaySeenSet — bounded growth", () => {
 		expect(set.size).toBe(1);
 	});
 
-	it("ignores a nonsensical sweep interval rather than never sweeping", async () => {
-		for (const bad of [0, -1, 1.5, Number.NaN]) {
-			vi.useFakeTimers();
-			const set = createMemoryReplaySeenSet({ sweepInterval: bad });
-			await fill(set, DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL - 1, 1_000, "dead");
-			vi.advanceTimersByTime(60_000);
-			await set.markSeen("scope-A", "trigger", Date.now() + 600_000);
-			// The default interval applied: the thousandth write swept.
-			expect(set.size).toBe(1);
-			vi.useRealTimers();
+	it("refuses a sweep interval that is not a positive whole number, rather than using another", () => {
+		for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(() => createMemoryReplaySeenSet({ sweepInterval: bad }), String(bad)).toThrow(
+				new RangeError(
+					`createMemoryReplaySeenSet: sweepInterval must be a positive whole number (got ${String(bad)})`,
+				),
+			);
 		}
 	});
 });
@@ -238,7 +235,7 @@ describe("createMemoryReplaySeenSet — sweeps are also bounded in time", () => 
 		expect(set.size).toBe(3);
 	});
 
-	it("takes a floor of zero as no floor, and ignores a nonsensical one", async () => {
+	it("takes a floor of zero as no floor, and refuses one that is not a whole number of milliseconds", async () => {
 		vi.useFakeTimers();
 		const unfloored = createMemoryReplaySeenSet({ sweepInterval: 2, minSweepIntervalMs: 0 });
 		await fill(unfloored, 2, 10, "a");
@@ -246,13 +243,15 @@ describe("createMemoryReplaySeenSet — sweeps are also bounded in time", () => 
 		await fill(unfloored, 2, 600_000, "b");
 		expect(unfloored.size).toBe(2);
 
-		for (const bad of [-1, 1.5, Number.NaN]) {
-			const set = createMemoryReplaySeenSet({ sweepInterval: 2, minSweepIntervalMs: bad });
-			await fill(set, 2, 10, "a");
-			vi.advanceTimersByTime(20);
-			await fill(set, 2, 600_000, "b");
-			// The default ten-second floor applied: the expired two remain.
-			expect(set.size).toBe(4);
+		for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(
+				() => createMemoryReplaySeenSet({ sweepInterval: 2, minSweepIntervalMs: bad }),
+				String(bad),
+			).toThrow(
+				new RangeError(
+					`createMemoryReplaySeenSet: minSweepIntervalMs must be a whole number of milliseconds, 0 or more (got ${String(bad)})`,
+				),
+			);
 		}
 	});
 });
@@ -271,8 +270,13 @@ describe("createMemoryReplaySeenSet — sweeps are also bounded in time", () => 
 describe("createMemoryReplaySeenSet — a cap on the records it holds", () => {
 	const later = (): number => Date.now() + 600_000;
 
-	it("holds at most 100 000 records by default", () => {
-		expect(DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES).toBe(100_000);
+	it("holds at most a million records by default, and says what its cap is", () => {
+		// A million: at DPoP's default 300-second window, filling it takes some
+		// 3 300 fresh proofs a second, each verified first — about what one
+		// process can verify at all — rather than a rate one client sends idly.
+		expect(DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES).toBe(1_000_000);
+		expect(createMemoryReplaySeenSet().maxEntries).toBe(DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES);
+		expect(createMemoryReplaySeenSet({ maxEntries: 5 }).maxEntries).toBe(5);
 	});
 
 	it("refuses a new record at its cap as a store fault, recording nothing and evicting nothing", async () => {

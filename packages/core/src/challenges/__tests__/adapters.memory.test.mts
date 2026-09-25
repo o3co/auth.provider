@@ -147,16 +147,15 @@ describe("createMemoryChallengeStore — bounded growth", () => {
 		expect(store.size).toBe(0);
 	});
 
-	it("ignores a nonsensical sweep interval rather than never sweeping", async () => {
-		for (const bad of [0, -1, 1.5, Number.NaN]) {
-			vi.useFakeTimers();
-			const store = createMemoryChallengeStore({ sweepInterval: bad });
-			await issueMany(store, DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL - 1, 1_000, "dead");
-			vi.advanceTimersByTime(60_000);
-			await store.issue("webauthn-authentication", "trigger", Date.now() + 600_000);
-			// The default interval applied: the thousandth write swept.
-			expect(store.size).toBe(1);
-			vi.useRealTimers();
+	it("refuses a sweep interval that is not a positive whole number, rather than using another", () => {
+		// It used to fall back to the default: a setting given and unusable was
+		// quietly replaced, which is what a boot refusal exists to prevent.
+		for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(() => createMemoryChallengeStore({ sweepInterval: bad }), String(bad)).toThrow(
+				new RangeError(
+					`createMemoryChallengeStore: sweepInterval must be a positive whole number (got ${String(bad)})`,
+				),
+			);
 		}
 	});
 });
@@ -217,7 +216,7 @@ describe("createMemoryChallengeStore — sweeps are also bounded in time", () =>
 		expect(store.size).toBe(3);
 	});
 
-	it("takes a floor of zero as no floor, and ignores a nonsensical one", async () => {
+	it("takes a floor of zero as no floor, and refuses one that is not a whole number of milliseconds", async () => {
 		vi.useFakeTimers();
 		const unfloored = createMemoryChallengeStore({ sweepInterval: 2, minSweepIntervalMs: 0 });
 		await issueMany(unfloored, 2, 10, "a");
@@ -225,13 +224,15 @@ describe("createMemoryChallengeStore — sweeps are also bounded in time", () =>
 		await issueMany(unfloored, 2, 600_000, "b");
 		expect(unfloored.size).toBe(2);
 
-		for (const bad of [-1, 1.5, Number.NaN]) {
-			const store = createMemoryChallengeStore({ sweepInterval: 2, minSweepIntervalMs: bad });
-			await issueMany(store, 2, 10, "a");
-			vi.advanceTimersByTime(20);
-			await issueMany(store, 2, 600_000, "b");
-			// The default ten-second floor applied: the expired two remain.
-			expect(store.size).toBe(4);
+		for (const bad of [-1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(
+				() => createMemoryChallengeStore({ sweepInterval: 2, minSweepIntervalMs: bad }),
+				String(bad),
+			).toThrow(
+				new RangeError(
+					`createMemoryChallengeStore: minSweepIntervalMs must be a whole number of milliseconds, 0 or more (got ${String(bad)})`,
+				),
+			);
 		}
 	});
 });

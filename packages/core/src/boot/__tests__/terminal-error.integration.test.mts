@@ -74,6 +74,14 @@ const routesModule = defineModule({
 				router.get("/item/:id", (req, res) => {
 					res.status(200).json({ id: req.params.id });
 				});
+				router.get("/gone", () => {
+					// An `http-errors` refusal that is not a body's: `expose`, 404.
+					throw Object.assign(new Error("no such record: record-id-marker"), {
+						status: 404,
+						statusCode: 404,
+						expose: true,
+					});
+				});
 				router.get("/boom", () => {
 					throw Object.assign(new Error("store said: secret-in-message-marker"), {
 						command: { name: "set", args: ["secret-in-args-marker"] },
@@ -169,6 +177,21 @@ describe("createApp's router answers a body parser's refusal itself", () => {
 		expect(res.status).toBe(400);
 		expect(res.headers["content-type"]).toMatch(/^application\/json/);
 		expect(res.body).toEqual({ error: "invalid_request", error_description: "malformed_path" });
+		expect(logger.error).not.toHaveBeenCalled();
+		expect(otherLevels(logger)).toEqual([]);
+		await handle.dispose();
+	});
+
+	it("keeps the status of any other refusal marked as the client's, answering it without its message", async () => {
+		const logger = spyLogger();
+		const { app, handle } = await boot(logger);
+
+		const res = await request(app).get("/t/gone");
+
+		expect(res.status).toBe(404);
+		expect(res.headers["content-type"]).toMatch(/^application\/json/);
+		expect(res.body).toEqual({ error: "invalid_request", error_description: "request_refused" });
+		expect(res.text).not.toContain("record-id-marker");
 		expect(logger.error).not.toHaveBeenCalled();
 		expect(otherLevels(logger)).toEqual([]);
 		await handle.dispose();
