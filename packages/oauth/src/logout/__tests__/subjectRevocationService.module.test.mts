@@ -26,6 +26,7 @@
  */
 
 import {
+	type AuditEvent,
 	createInMemorySubjectRevocation,
 	createInMemorySubjectSessionIndex,
 	createMemoryFederationGrantStore,
@@ -403,5 +404,39 @@ describe("subjectRevocationServiceModule", () => {
 				}),
 			}),
 		);
+	});
+
+	it("hands the sink a grant's subject and id sanitised and capped, as the federation-grants bridge does", async () => {
+		// Both come from the deployment's Store, which took them from a
+		// request once; the sink writes them onto a line, so they are bounded
+		// the same way on every path that audits a grant.
+		const hostile = `u-1\r\nFORGED ${"x".repeat(10_000)}`;
+		const grantId = `g-1\nFORGED ${"y".repeat(10_000)}`;
+		const store = createMemoryFederationGrantStore();
+		const now = new Date();
+		await store.createPending({
+			id: grantId,
+			subject: hostile,
+			clientId: "agent",
+			connection: "okta-calendar",
+			intent: { handle: "h", expiresAt: new Date(now.getTime() + HOUR) },
+			now,
+		});
+		const record = vi.fn(async () => undefined);
+		const service = build({
+			config: enabled(),
+			federationGrantStore: store,
+			auditSink: { record },
+		});
+
+		await service.revokeAllForSubject({ subject: hostile });
+
+		expect(record).toHaveBeenCalledTimes(1);
+		const event = (record.mock.calls[0] as unknown as [AuditEvent])[0];
+		expect(event.subject).toMatch(/^u-1\?\?FORGED x+\.\.\.$/);
+		expect(event.subject?.length).toBeLessThanOrEqual(200);
+		const recordedId = (event.details as { grantId: string }).grantId;
+		expect(recordedId).toMatch(/^g-1\?FORGED y+\.\.\.$/);
+		expect(recordedId.length).toBeLessThanOrEqual(200);
 	});
 });

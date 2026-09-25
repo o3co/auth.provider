@@ -130,6 +130,8 @@ export interface Harness {
 		id?: string;
 		subject?: string;
 		clientId?: string;
+		/** The upstream account's `sub`, as the IdP's ID token named it. */
+		upstreamSubject?: string;
 	}): Promise<void>;
 }
 
@@ -303,7 +305,10 @@ export function harness(options: HarnessOptions = {}): Harness {
 				authorization: {
 					identityRevision: federationGrantIdentityRevision(configured),
 					authorizationRevision: federationGrantAuthorizationRevision(configured),
-					upstream: { issuer: connection.upstreamIssuer, subject: "upstream-subject" },
+					upstream: {
+						issuer: connection.upstreamIssuer,
+						subject: over.upstreamSubject ?? "upstream-subject",
+					},
 					scopes: [...SCOPES],
 					consent: { at, sid: "sid-1", scopes: [...SCOPES] },
 					authorizedAt: at,

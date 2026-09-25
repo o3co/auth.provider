@@ -15,7 +15,7 @@
  */
 import { type Logger, loggableError } from "@o3co/auth-provider-core";
 import { StoreCredentialRefusedError, StoreTransportError } from "@o3co/auth-provider-foundation";
-import express from "express";
+import express, { type NextFunction, type Request, type Response } from "express";
 import request from "supertest";
 import { describe, expect, it, vi } from "vitest";
 import { createTerminalErrorHandler } from "../terminalError.mjs";
@@ -256,5 +256,65 @@ describe("terminal error handler (#293 item 8)", () => {
 			"unhandled_request_error",
 		);
 		for (const line of lines) expect(line).not.toContain("UPSTREAM-S3CRET");
+	});
+});
+
+describe("terminal error handler — the endpoint it logs is the caller's path", () => {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+	const CONTROL = /[\u0000-\u001f\u007f]/;
+	/** What an assertion needs of a logged string: a failure prints this, not the string. */
+	const shapeOf = (text: unknown) => ({
+		string: typeof text === "string",
+		control: CONTROL.test(String(text)),
+		within200: String(text).length <= 200,
+	});
+	const BOUNDED = { string: true, control: false, within200: true };
+
+	/** The one error line, and nothing at warn. */
+	const onlyError = (logger: Logger, error: ReturnType<typeof vi.fn>) => {
+		expect(error).toHaveBeenCalledTimes(1);
+		expect(logger.warn).not.toHaveBeenCalled();
+		const [line, event] = error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(event).toBe("unhandled_request_error");
+		expect(line.err).not.toBeInstanceOf(Error);
+		return line;
+	};
+
+	it("logs a 10 000-character path capped", async () => {
+		const { logger, error } = makeLogger();
+		const app = express();
+		app.get(/^\/boom/, () => {
+			throw new Error("route exploded");
+		});
+		app.use(createTerminalErrorHandler(logger));
+
+		const res = await request(app).get(`/boom/${"a".repeat(10_000)}`);
+
+		expect(res.status).toBe(500);
+		expect(shapeOf(onlyError(logger, error).endpoint)).toEqual(BOUNDED);
+	});
+
+	it("logs a path carrying a line break and control characters sanitised", () => {
+		// A real HTTP client refuses to send these in a request target; a
+		// lenient parser, or another server in front, is what could hand one on.
+		const { logger, error } = makeLogger();
+		const res = { headersSent: false, status: vi.fn(), json: vi.fn() };
+		res.status.mockReturnValue(res);
+		const next = vi.fn();
+
+		createTerminalErrorHandler(logger)(
+			new Error("route exploded"),
+			{
+				path: `/boom\r\nFORGED unhandled_request_error\u001b[31m\u0000\u0007${"a".repeat(10_000)}`,
+			} as Request,
+			res as unknown as Response,
+			next as unknown as NextFunction,
+		);
+
+		expect(res.status).toHaveBeenCalledWith(500);
+		expect(next).not.toHaveBeenCalled();
+		const endpoint = onlyError(logger, error).endpoint;
+		expect(shapeOf(endpoint)).toEqual(BOUNDED);
+		expect(String(endpoint).startsWith("/boom??FORGED")).toBe(true);
 	});
 });

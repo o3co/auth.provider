@@ -47,7 +47,12 @@
  */
 
 import { createHash, createHmac, hkdfSync, randomBytes, timingSafeEqual } from "node:crypto";
-import { consoleLogger, errorEnvelope, type Logger } from "@o3co/auth-provider-core";
+import {
+	auditErrorText,
+	consoleLogger,
+	errorEnvelope,
+	type Logger,
+} from "@o3co/auth-provider-core";
 import type { CookieOptions, NextFunction, Request, RequestHandler, Response } from "express";
 import { readCookie } from "./internal/cookies.mjs";
 
@@ -79,9 +84,6 @@ export const MAX_CSRF_TTL_SECONDS = 86_400;
  * token in flight in one move.
  */
 const CSRF_KEY_INFO = "o3co.auth.provider/session-csrf/v1";
-
-/** Bounds what a rejected request can write into the log. */
-const MAX_LOGGED_ORIGIN_LENGTH = 256;
 
 /**
  * What the token arm concluded.
@@ -339,8 +341,9 @@ export const createCsrfGuard = ({
 		if (originVerdict === "foreign") {
 			const rawOrigin = req.headers?.origin;
 			const origin = Array.isArray(rawOrigin) ? rawOrigin[0] : rawOrigin;
+			// Both are the caller's: sanitised and capped (`auditErrorText`).
 			logger.warn(
-				{ origin: (origin ?? "").slice(0, MAX_LOGGED_ORIGIN_LENGTH), path: req.path },
+				{ origin: auditErrorText(origin ?? ""), path: auditErrorText(req.path) },
 				"csrf_origin_rejected",
 			);
 			res.status(403).json(errorEnvelope("access_denied", "CSRF origin check failed"));
@@ -349,7 +352,10 @@ export const createCsrfGuard = ({
 		if (originVerdict === "absent") {
 			const tokenVerdict = csrf.verify(req);
 			if (tokenVerdict !== "valid") {
-				logger.warn({ verdict: tokenVerdict, path: req.path }, "csrf_token_rejected");
+				logger.warn(
+					{ verdict: tokenVerdict, path: auditErrorText(req.path) },
+					"csrf_token_rejected",
+				);
 				res
 					.status(403)
 					.json(

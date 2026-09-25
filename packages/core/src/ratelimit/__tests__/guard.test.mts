@@ -444,7 +444,7 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 		},
 	);
 
-	it("normalises a missing ip to 'unknown' in the outage report, as the guard does", async () => {
+	it("normalises a missing ip to 'unknown' on the outage line, and audits no ip", async () => {
 		const logger = makeLogger();
 		const { sink, events } = spyAuditSink();
 		const limiter = scriptedLimiter(() => new Error("redis down"));
@@ -458,7 +458,9 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 			expect.objectContaining({ ip: "unknown" }),
 			"rate_limiter_failed_open",
 		);
-		expect(events[0]?.ip).toBe("unknown");
+		// "unknown" is no address: the audit event leaves `ip` out rather than
+		// put it in a field an SIEM maps as an IP type.
+		expect(events[0] !== undefined && "ip" in events[0]).toBe(false);
 	});
 
 	it("rateLimiterUnavailableEnvelope() is the body the guard answers under failMode='closed'", async () => {
@@ -473,6 +475,89 @@ describe("checkWithFailMode — the guard's check + outage policy, for a route t
 		expect(rateLimiterUnavailableEnvelope()).toEqual({
 			error: "service_unavailable",
 			error_description: "Rate limiter temporarily unavailable",
+		});
+	});
+});
+
+describe("createRateLimitGuard — an outage's report of the caller's ip and user agent", () => {
+	// Behind `trust proxy`, `req.ip` is what the caller wrote in
+	// X-Forwarded-For; the user agent is its own header. Over real HTTP either
+	// can carry a tab, the C1 controls (U+0085 NEL, U+009B CSI) and ten
+	// thousand characters — Node refuses CR/LF and the C0 escapes, not these.
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged or audited.
+	const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+	const shapeOf = (value: unknown) => ({
+		string: typeof value === "string",
+		control: CONTROL.test(String(value)),
+		within200: String(value).length <= 200,
+		kept: /^x\?+FORGED /.test(String(value)),
+	});
+	const BOUNDED = { string: true, control: false, within200: true, kept: true };
+	const HOSTILE = `x\t\u0085\u009bFORGED rate_limit.unavailable ${"h".repeat(10_000)}`;
+
+	const outage = async (headers: Record<string, string>) => {
+		const logger = makeLogger();
+		const { sink, events } = spyAuditSink();
+		const app = express();
+		app.set("trust proxy", true);
+		app.get(
+			"/guarded",
+			createRateLimitGuard({
+				limiter: scriptedLimiter(() => new Error("redis down")),
+				tag: "token",
+				failMode: "closed",
+				logger,
+				auditSink: sink,
+			}),
+			(_req, res) => {
+				res.status(200).json({ ok: true });
+			},
+		);
+		const res = await request(app).get("/guarded").set(headers);
+		expect(res.status).toBe(503);
+		await settleAudit();
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		const [line, name] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+		expect(name).toBe("rate_limiter_failed_closed");
+		const audited = events.filter((e) => e.type === "rate_limit.unavailable");
+		expect(audited).toHaveLength(1);
+		return { line, event: audited[0] as AuditEvent };
+	};
+
+	it("logs an X-Forwarded-For ip sanitised and capped, and audits none that is not an address", async () => {
+		const { line, event } = await outage({ "X-Forwarded-For": HOSTILE });
+		expect({ logged: shapeOf(line.ip), audited: "ip" in event }).toEqual({
+			logged: BOUNDED,
+			audited: false,
+		});
+	});
+
+	it.each([
+		["x", undefined],
+		["fe80::1%eth0", "fe80::1"],
+		["2001:db8::7", "2001:db8::7"],
+	])("audits X-Forwarded-For %s as the ip %s", async (forwarded, expected) => {
+		const { event } = await outage({ "X-Forwarded-For": forwarded });
+		expect({ ip: event.ip, hasIp: "ip" in event }).toEqual({
+			ip: expected,
+			hasIp: expected !== undefined,
+		});
+	});
+
+	it("audits a user agent sanitised and capped", async () => {
+		const { event } = await outage({ "User-Agent": HOSTILE });
+		expect(shapeOf(event.userAgent)).toEqual(BOUNDED);
+	});
+
+	it("still reports an ordinary ip and user agent exactly", async () => {
+		const { line, event } = await outage({
+			"X-Forwarded-For": "203.0.113.7",
+			"User-Agent": "guard-test/1.0",
+		});
+		expect(line.ip).toBe("203.0.113.7");
+		expect({ ip: event.ip, userAgent: event.userAgent }).toEqual({
+			ip: "203.0.113.7",
+			userAgent: "guard-test/1.0",
 		});
 	});
 });

@@ -431,9 +431,11 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 		 * The type the record named goes to the audit sink and not to the caller:
 		 * an operator needs to know which upstream started answering something
 		 * else, and the caller can do nothing with it but retry. It is reported
-		 * as it was read, because a value that is not a token type is the thing
-		 * worth seeing; `null` is a value that is not a string at all, which
-		 * cannot be put in a field typed as one.
+		 * as it was read, sanitised and capped (`auditErrorText`), because a
+		 * value that is not a token type is the thing worth seeing — and the
+		 * upstream wrote it, so it may hold a line break or any length; `null`
+		 * is a value that is not a string at all, which cannot be put in a
+		 * field typed as one.
 		 *
 		 * `Retry-After` because the condition is not transient and a client that
 		 * retries a 5xx otherwise drives one upstream refresh per retry — the
@@ -450,7 +452,7 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 				details: {
 					federation,
 					reason: "token_type_unsupported",
-					tokenType: typeof named === "string" ? named : null,
+					tokenType: typeof named === "string" ? auditErrorText(named) : null,
 				},
 			});
 			res.setHeader("Retry-After", String(UPSTREAM_INELIGIBLE_RETRY_AFTER_SECONDS));

@@ -26,7 +26,7 @@ import {
 	type User,
 	type UserRepository,
 } from "@o3co/auth-provider-core";
-import { assertSecureEndpoint } from "../endpointUrl.mjs";
+import { assertSecureEndpoint, endpointForMessage } from "../endpointUrl.mjs";
 import { readFailure, requestFailure, StoreCredentialRefusedError } from "./storeErrors.mjs";
 import { hasBearerChallenge } from "./wwwAuthenticate.mjs";
 
@@ -291,12 +291,13 @@ function discardBody(res: Response): void {
  *
  * Everything it throws is the adapter's own: the cap, the deadline's
  * rejection, or — for a stream that broke mid-read — what `unreadable` makes
- * of the transport's error, which is never passed on as it is.
+ * of the transport's error, which is never passed on as it is. `endpoint` is
+ * how its messages name the Store: origin and path (`endpointForMessage`).
  */
 async function readBodyCapped(
 	res: Response,
 	limit: number,
-	url: string,
+	endpoint: string,
 	deadline: Promise<never>,
 	unreadable: (err: unknown) => Error,
 ): Promise<string> {
@@ -304,7 +305,7 @@ async function readBodyCapped(
 	if (Number.isFinite(declared) && declared > limit) {
 		discardBody(res);
 		throw new Error(
-			`HttpUserRepository: upstream ${url} response exceeds the ${limit}-byte cap ` +
+			`HttpUserRepository: upstream ${endpoint} response exceeds the ${limit}-byte cap ` +
 				`(Content-Length: ${declared})`,
 		);
 	}
@@ -332,7 +333,7 @@ async function readBodyCapped(
 			read += value.byteLength;
 			if (read > limit) {
 				throw new Error(
-					`HttpUserRepository: upstream ${url} response exceeds the ${limit}-byte cap`,
+					`HttpUserRepository: upstream ${endpoint} response exceeds the ${limit}-byte cap`,
 				);
 			}
 			text += decoder.decode(value, { stream: true });
@@ -398,6 +399,11 @@ function isAbortError(err: unknown): boolean {
  * made, or an answer that cannot be read, throws a `StoreTransportError`
  * (`src/repositories/storeErrors.mts`): a fixed message naming the endpoint
  * and what failed, at most an allowlisted transport code, no cause.
+ *
+ * Every message names an endpoint by its origin and path alone
+ * (`endpointForMessage`, `src/endpointUrl.mts`): a Store URL may carry a
+ * query string, and a query may carry a credential, while every caller logs
+ * what this throws.
  */
 export class HttpUserRepository implements UserRepository {
 	/**
@@ -532,13 +538,13 @@ export class HttpUserRepository implements UserRepository {
 	 * Store whose stack challenges every refusal keeps the wire meaning it has
 	 * always had.
 	 */
-	private assertCredentialAccepted(res: Response, url: string): void {
+	private assertCredentialAccepted(res: Response, endpoint: string): void {
 		if (
 			this.#authorization !== undefined &&
 			(res.status === 401 || res.status === 403) &&
 			hasBearerChallenge(res.headers.get("www-authenticate"))
 		) {
-			throw new StoreCredentialRefusedError(url, res.status);
+			throw new StoreCredentialRefusedError(endpoint, res.status);
 		}
 	}
 
@@ -618,16 +624,18 @@ export class HttpUserRepository implements UserRepository {
 	 * three answers is an answer, and everything else throws — as an outage,
 	 * which is what a lookup that could not be made is — a `401` or `403` with a
 	 * `Bearer` challenge, to a request that carried the token, as the refused
-	 * credential it is. What is thrown names the endpoint — and, for an answer
+	 * credential it is. What is thrown names the endpoint by origin and path — and, for an answer
 	 * with a status, the status; for a transport failure, at most its code — and
 	 * never the body, the identity, a status text or an underlying cause.
 	 */
 	private async postLookup(url: string, body: unknown): Promise<FederatedIdentityLookupResult> {
+		// What every message names: origin and path, never the query.
+		const endpoint = endpointForMessage(url);
 		const controller = new AbortController();
 		let timedOut = false;
 		const timeoutError = (): Error => {
 			const error = new Error(
-				`HttpUserRepository: request to ${url} timed out after ${this.timeout}ms`,
+				`HttpUserRepository: request to ${endpoint} timed out after ${this.timeout}ms`,
 			);
 			error.name = "TimeoutError";
 			return error;
@@ -658,22 +666,22 @@ export class HttpUserRepository implements UserRepository {
 				// A fixed message, without the cause: what a transport reports may
 				// quote what it was sending.
 				throw requestFailure(err, {
-					unreachable: `HttpUserRepository: identity lookup at ${url} could not be reached`,
-					closed: `HttpUserRepository: identity lookup at ${url}: the connection closed before a complete response arrived`,
-					malformed: `HttpUserRepository: identity lookup at ${url} answered with a malformed HTTP response`,
+					unreachable: `HttpUserRepository: identity lookup at ${endpoint} could not be reached`,
+					closed: `HttpUserRepository: identity lookup at ${endpoint}: the connection closed before a complete response arrived`,
+					malformed: `HttpUserRepository: identity lookup at ${endpoint} answered with a malformed HTTP response`,
 				});
 			}
 			if (!res.ok) {
 				discardBody(res);
-				this.assertCredentialAccepted(res, url);
+				this.assertCredentialAccepted(res, endpoint);
 				throw new Error(
-					`HttpUserRepository: identity lookup at ${url} answered HTTP ${res.status}`,
+					`HttpUserRepository: identity lookup at ${endpoint} answered HTTP ${res.status}`,
 				);
 			}
 			let raw: string;
 			try {
-				raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline, (err) =>
-					readFailure(err, `HttpUserRepository: identity lookup at ${url} could not be read`),
+				raw = await readBodyCapped(res, this.maxResponseBytes, endpoint, deadline, (err) =>
+					readFailure(err, `HttpUserRepository: identity lookup at ${endpoint} could not be read`),
 				);
 			} catch (err) {
 				if (timedOut) throw timeoutError();
@@ -683,12 +691,12 @@ export class HttpUserRepository implements UserRepository {
 			try {
 				parsed = JSON.parse(raw);
 			} catch {
-				throw new Error(`HttpUserRepository: upstream ${url} returned a non-JSON body`);
+				throw new Error(`HttpUserRepository: upstream ${endpoint} returned a non-JSON body`);
 			}
 			const answer = lookupAnswer(parsed);
 			if (answer === undefined) {
 				throw new Error(
-					`HttpUserRepository: identity lookup at ${url} answered a body that is not one of the ` +
+					`HttpUserRepository: identity lookup at ${endpoint} answered a body that is not one of the ` +
 						"port's answers (linked / unlinked / indeterminate)",
 				);
 			}
@@ -703,6 +711,8 @@ export class HttpUserRepository implements UserRepository {
 		body: unknown,
 		options: { acceptConflict?: boolean } = {},
 	): Promise<User | null | typeof CONFLICT> {
+		// What every message names: origin and path, never the query.
+		const endpoint = endpointForMessage(url);
 		const controller = new AbortController();
 		let timedOut = false;
 
@@ -716,7 +726,7 @@ export class HttpUserRepository implements UserRepository {
 		// of timeout whichever request it came from.
 		const timeoutError = (): Error => {
 			const error = new Error(
-				`HttpUserRepository: request to ${url} timed out after ${this.timeout}ms`,
+				`HttpUserRepository: request to ${endpoint} timed out after ${this.timeout}ms`,
 			);
 			error.name = "TimeoutError";
 			return error;
@@ -755,17 +765,17 @@ export class HttpUserRepository implements UserRepository {
 				// Never the transport's own error: it may quote what it was
 				// sending — the credential, the password — or what came back.
 				throw requestFailure(err, {
-					unreachable: `HttpUserRepository: request to ${url} could not be reached`,
-					closed: `HttpUserRepository: the connection to ${url} closed before a complete response arrived`,
-					malformed: `HttpUserRepository: the Store at ${url} answered with a malformed HTTP response`,
+					unreachable: `HttpUserRepository: request to ${endpoint} could not be reached`,
+					closed: `HttpUserRepository: the connection to ${endpoint} closed before a complete response arrived`,
+					malformed: `HttpUserRepository: the Store at ${endpoint} answered with a malformed HTTP response`,
 				});
 			}
 
 			if (res.ok) {
 				let raw: string;
 				try {
-					raw = await readBodyCapped(res, this.maxResponseBytes, url, deadline, (err) =>
-						readFailure(err, `HttpUserRepository: response from ${url} could not be read`),
+					raw = await readBodyCapped(res, this.maxResponseBytes, endpoint, deadline, (err) =>
+						readFailure(err, `HttpUserRepository: response from ${endpoint} could not be read`),
 					);
 				} catch (err) {
 					// Whatever the deadline interrupted is a timeout; everything
@@ -780,20 +790,22 @@ export class HttpUserRepository implements UserRepository {
 					// Same class of failure as the shape check below: the Store is
 					// broken, not the credential. Reported as ours rather than as a
 					// bare SyntaxError with no indication of where it came from.
-					throw new Error(`HttpUserRepository: upstream ${url} returned a non-JSON body`);
+					throw new Error(`HttpUserRepository: upstream ${endpoint} returned a non-JSON body`);
 				}
 				if (!isUser(parsed)) {
 					// Upstream returned 2xx with an unexpected shape — this is an
 					// "upstream is broken" case, not a "user not found" case, so
 					// throw rather than return null. The thrown error propagates
 					// as a 500 to the client (correct: upstream-service failure).
-					throw new Error(`HttpUserRepository: upstream ${url} returned an invalid User shape`);
+					throw new Error(
+						`HttpUserRepository: upstream ${endpoint} returned an invalid User shape`,
+					);
 				}
 				return parsed;
 			}
 
 			discardBody(res);
-			this.assertCredentialAccepted(res, url);
+			this.assertCredentialAccepted(res, endpoint);
 
 			if (options.acceptConflict && res.status === 409) {
 				return CONFLICT;
@@ -802,7 +814,7 @@ export class HttpUserRepository implements UserRepository {
 				return null;
 			}
 
-			throw new Error(`Unexpected HTTP status ${res.status} from ${url}`);
+			throw new Error(`Unexpected HTTP status ${res.status} from ${endpoint}`);
 		} finally {
 			clearTimeout(timer);
 		}

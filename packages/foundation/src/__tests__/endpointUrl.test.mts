@@ -20,6 +20,7 @@ import {
 	checkSecureEndpoint,
 	describeEndpointRejection,
 	type EndpointRejection,
+	endpointForMessage,
 	isLoopbackHostname,
 } from "#/endpointUrl.mjs";
 
@@ -196,5 +197,49 @@ describe("assertSecureEndpoint", () => {
 		} catch (err) {
 			expect((err as Error).message).not.toContain("hunter2");
 		}
+	});
+});
+
+describe("endpointForMessage", () => {
+	it("names an endpoint by its origin and path, without its query or fragment", () => {
+		expect(
+			endpointForMessage("https://users.example.com/authenticate?api_key=SECRET&tenant=acme#frag"),
+		).toBe("https://users.example.com/authenticate");
+		expect(endpointForMessage("http://127.0.0.1:8080/lookup?x=1")).toBe(
+			"http://127.0.0.1:8080/lookup",
+		);
+	});
+
+	it("names an endpoint without a query exactly as configured", () => {
+		expect(endpointForMessage("https://users.example.com/authenticate")).toBe(
+			"https://users.example.com/authenticate",
+		);
+	});
+
+	it("names an IPv6 literal with its brackets and port", () => {
+		expect(endpointForMessage("http://[::1]:8080/x?k=v")).toBe("http://[::1]:8080/x");
+	});
+
+	it("names an endpoint as the URL parser normalises it: a default port dropped", () => {
+		expect(endpointForMessage("https://users.example.com:443/authenticate?k=v")).toBe(
+			"https://users.example.com/authenticate",
+		);
+		expect(endpointForMessage("http://127.0.0.1:80/lookup")).toBe("http://127.0.0.1/lookup");
+		expect(endpointForMessage("HTTPS://Users.Example.COM/a")).toBe("https://users.example.com/a");
+	});
+
+	it("never throws, and never quotes what does not parse", () => {
+		expect(endpointForMessage("not a url?api_key=SECRET")).toBe(
+			"(an endpoint that is not an http or https URL)",
+		);
+	});
+
+	it.each([
+		["a data: URL", "data:text/plain,SECRET?api_key=SECRET"],
+		["a file: URL", "file:///etc/SECRET?api_key=SECRET"],
+		["a javascript: URL", "javascript:SECRET"],
+		["a mailto: URL", "mailto:SECRET@example.com?subject=x"],
+	])("names %s by what it is not, quoting none of it", (_label, url) => {
+		expect(endpointForMessage(url)).toBe("(an endpoint that is not an http or https URL)");
 	});
 });

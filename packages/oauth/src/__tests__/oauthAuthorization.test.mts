@@ -875,6 +875,87 @@ describe("IH-6: /authorize openid scope gate", () => {
 		);
 	});
 
+	it("logs the first ten requested scopes, each capped, and how many were sent", async () => {
+		// Every entry is a well-formed scope-token, so nothing refuses the
+		// request before the gate — but the caller chooses how many it sends
+		// and how long each is, and the line is not to grow with either.
+		const logger = createMockLogger();
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-many-scopes" },
+			captureCode: vi.fn(),
+			logger,
+		});
+
+		// A form POST (OIDC Core §3.1.2.1), because a query this long outgrows
+		// the request line's size limit.
+		const res = await request(app)
+			.post("/oauth/authorize")
+			.type("form")
+			.send({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				code_challenge: AUTHORIZE_S256_CHALLENGE,
+				code_challenge_method: "S256",
+				state: "state-many-scopes",
+				scope: [
+					`long-${"s".repeat(10_000)}`,
+					...Array.from({ length: 999 }, (_, i) => `scope-${i}`),
+				].join(" "),
+			});
+
+		expect(res.status).toBe(302);
+		expect(new URL(res.headers.location).searchParams.get("error")).toBe("invalid_scope");
+		const calls = vi
+			.mocked(logger.warn)
+			.mock.calls.filter(([, event]) => event === "authorize_rejected_missing_openid_scope");
+		expect(calls).toHaveLength(1);
+		const line = calls[0]?.[0] as { requestedScopes?: unknown; requestedScopeCount?: unknown };
+		const logged = Array.isArray(line.requestedScopes) ? (line.requestedScopes as string[]) : [];
+		expect({
+			array: Array.isArray(line.requestedScopes),
+			entries: logged.length,
+			firstWithin200: (logged[0] ?? "").length <= 200,
+			rest: logged.slice(1),
+			count: line.requestedScopeCount,
+		}).toEqual({
+			array: true,
+			entries: 10,
+			firstWithin200: true,
+			rest: Array.from({ length: 9 }, (_, i) => `scope-${i}`),
+			count: 1_000,
+		});
+	});
+
+	it("refuses a scope carrying a line break before any line is written of it", async () => {
+		// RFC 6749 §3.3 reads the scope strictly: a control character is no
+		// scope-token, so the request is refused as `invalid_scope` and the
+		// gate that logs never runs.
+		const logger = createMockLogger();
+		const app = await buildAuthorizeApp({
+			sessionFields: { sid: "sid-crlf-scope" },
+			captureCode: vi.fn(),
+			logger,
+		});
+
+		const res = await request(app)
+			.get("/oauth/authorize")
+			.query({
+				response_type: "code",
+				client_id: "client-1",
+				redirect_uri: "https://example.test/cb",
+				code_challenge: AUTHORIZE_S256_CHALLENGE,
+				code_challenge_method: "S256",
+				state: "state-crlf-scope",
+				scope: `profile\r\nFORGED\u001b[31m${"a".repeat(10_000)}`,
+			});
+
+		expect(res.status).toBe(302);
+		expect(new URL(res.headers.location).searchParams.get("error")).toBe("invalid_scope");
+		expect(JSON.stringify(vi.mocked(logger.warn).mock.calls)).not.toContain("FORGED");
+		expect(JSON.stringify(vi.mocked(logger.error).mock.calls)).not.toContain("FORGED");
+	});
+
 	it("allows oidc-required requests that include openid", async () => {
 		let captured: Parameters<CodeRepository["createCode"]>[0] | undefined;
 		const app = await buildAuthorizeApp({

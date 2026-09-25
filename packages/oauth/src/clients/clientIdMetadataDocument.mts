@@ -76,8 +76,10 @@
 import { promises as dns } from "node:dns";
 import { isIP } from "node:net";
 import {
+	auditErrorText,
 	type ClientRepository,
 	checkRedirectUri,
+	describeRedirectUriRejection,
 	isLoopbackHostname,
 	isSpecialUseAddress,
 	type Logger,
@@ -299,7 +301,8 @@ function toClient(
 		throw new DocumentRejected(
 			method === "private_key_jwt"
 				? "private_key_jwt is not allowed for a Client ID Metadata Document: its keys would come from the same document that names them"
-				: `token_endpoint_auth_method ${JSON.stringify(method)} is not allowed for a Client ID Metadata Document`,
+				: // The document's author wrote it: quoted as the Content-Type is.
+					`token_endpoint_auth_method '${auditErrorText(typeof method === "string" ? method : JSON.stringify(method))}' is not allowed for a Client ID Metadata Document`,
 		);
 	}
 	const redirectUris = asStringArray(doc.redirect_uris, "redirect_uris");
@@ -308,7 +311,7 @@ function toClient(
 		const rejection = checkRedirectUri(uri);
 		if (rejection !== null) {
 			throw new DocumentRejected(
-				`redirect_uris entry ${JSON.stringify(uri)} is not acceptable: ${rejection}`,
+				`redirect_uris entry '${auditErrorText(uri)}' is not acceptable: ${describeRedirectUriRejection(rejection)}`,
 			);
 		}
 	}
@@ -516,7 +519,11 @@ export function createClientIdMetadataDocumentResolver(
 		const contentType = res.headers.get("content-type") ?? "";
 		if (!/json/i.test(contentType)) {
 			await res.body?.cancel().catch(() => undefined);
-			throw new DocumentRejected(`document is not JSON (Content-Type: ${contentType || "absent"})`);
+			// The client's server wrote the header: quoted sanitised and capped,
+			// since the message is what the log keeps as `reason`.
+			throw new DocumentRejected(
+				`document is not JSON (Content-Type: ${contentType === "" ? "absent" : auditErrorText(contentType)})`,
+			);
 		}
 		const text = await readCapped(res, maxBytes);
 		let parsed: unknown;
@@ -558,7 +565,11 @@ export function createClientIdMetadataDocumentResolver(
 			// what `reason` cannot — a fetch failure's cause code.
 			const projected = loggableError(err);
 			logger?.warn(
-				{ clientId, reason: projected.detail ?? projected.name, err: projected },
+				{
+					clientId: auditErrorText(clientId),
+					reason: projected.detail ?? projected.name,
+					err: projected,
+				},
 				rejected ? "cimd_document_rejected" : "cimd_document_fetch_failed",
 			);
 			if (rejected) {
@@ -590,7 +601,7 @@ export function createClientIdMetadataDocumentResolver(
 		async resolve(clientId) {
 			if (!isClientIdMetadataDocumentUrl(clientId)) return null;
 			if (!hostAllowed(new URL(clientId).hostname)) {
-				logger?.warn({ clientId }, "cimd_host_not_allowed");
+				logger?.warn({ clientId: auditErrorText(clientId) }, "cimd_host_not_allowed");
 				return null;
 			}
 			const cached = cache.get(clientId);

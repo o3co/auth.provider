@@ -1229,3 +1229,67 @@ describe("loggableError — what a log line may carry of an error", () => {
 		expect(shape(hostile)).toEqual({ name: "Error", detail: "kept" });
 	});
 });
+
+describe("loggableError — detail is one line of text", () => {
+	// A message is often a peer's or a caller's text a library quoted: jose's
+	// "Extension Header Parameter \"<name>\" is not recognized", an IdP's
+	// refusal, a fetch cause. Whatever breaks a line or reorders it on screen
+	// is replaced by `?`: C0 (line breaks, tab, ESC), DEL, C1 (NEL, CSI), the
+	// Unicode line and paragraph separators, and the bidi embedding, override
+	// and isolate controls. Not RFC 6749's set: `"` and `\` stay, and so does
+	// any other character, a non-ASCII letter included.
+	const UNSAFE =
+		"\r\n\t\u0000\u001b\u007f\u0080\u0085\u009b\u009f\u2028\u2029\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069";
+
+	it("replaces each line-breaking or reordering character with ?", () => {
+		expect(loggableError(new Error(`a${UNSAFE}b`)).detail).toBe(`a${"?".repeat(UNSAFE.length)}b`);
+	});
+
+	it('keeps " and \\ and every other character', () => {
+		const message = 'refused "x" at C:\\path — é 日本 ☃ \u00a0 \u200b';
+		expect(loggableError(new Error(message)).detail).toBe(message);
+	});
+
+	it("still caps the detail at 256 characters", () => {
+		const detail = loggableError(new Error(`\u2028${"x".repeat(10_000)}`)).detail ?? "";
+		expect({ length: detail.length, head: detail.slice(0, 2) }).toEqual({
+			length: 256,
+			head: "?x",
+		});
+	});
+
+	it("filters a cause's detail the same way", () => {
+		const err = new Error("outer", { cause: new Error("in\r\nner\u202e") });
+		expect(loggableError(err).cause?.detail).toBe("in??ner?");
+	});
+
+	it("replaces the directional marks U+200E, U+200F and U+061C", () => {
+		expect(loggableError(new Error("a\u200eb\u200fc\u061cd")).detail).toBe("a?b?c?d");
+	});
+
+	it("never cuts the 256-character detail through a surrogate pair", () => {
+		const detail = loggableError(new Error(`${"a".repeat(255)}😀`)).detail ?? "";
+		expect({
+			loneHigh: /[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(detail),
+			length: detail.length,
+		}).toEqual({ loneHigh: false, length: 255 });
+	});
+});
+
+describe("loggableError — name, code and type are one line of text too", () => {
+	const UNSAFE = "\r\n\u0085\u2028\u202e\u200e";
+
+	it("replaces each line-breaking or reordering character in them with ?", () => {
+		const err = Object.assign(new Error("m"), {
+			code: `E${UNSAFE}CODE`,
+			type: `entity${UNSAFE}type`,
+		});
+		err.name = `Custom${UNSAFE}Error`;
+		const projected = loggableError(err);
+		expect({ name: projected.name, code: projected.code, type: projected.type }).toEqual({
+			name: "Custom??????Error",
+			code: "E??????CODE",
+			type: "entity??????type",
+		});
+	});
+});

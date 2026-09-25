@@ -18,8 +18,10 @@
  * Core's audit events carried to the deployment's sink (#593, D18).
  *
  * **The sink's promise is returned, not detached.** `emitAuditEvent` — which
- * every other module-side emission goes through — calls `sink.record(event)`
- * and swallows the promise. That is right where the emitter is answering a
+ * most module-side emissions go through — hands the event to core's
+ * `recordAuditEvent` and swallows the promise; oauth's subject-revocation
+ * auditor calls `recordAuditEvent` itself and logs a rejection rather than
+ * waiting. That is right where the emitter is answering a
  * request and will be gone before the sink settles; it is wrong here, because
  * core bounds its own audit waits and hands them to the background registry,
  * and a promise nobody holds is one a shutdown cannot drain. The event most
@@ -36,9 +38,27 @@
  * core no longer builds one from an unchecked stored code — the allow-list is
  * applied where the reason is constructed (D11), which is the only place a
  * mutation pass can hold it.
+ *
+ * **A caller's own text is bounded.** Two fields are the caller's before
+ * anything has checked them: the grant id, a path parameter audited by the
+ * denial hook ahead of client authentication and by core for a grant nobody
+ * holds, and the subject, which the body asserts. Both reach the sink through
+ * core's `auditErrorText` — sanitised, capped at 200 characters — as every
+ * string on this package's log lines already is: a sink is read by systems
+ * that split on a line break, and the standalone writes every event into its
+ * log. A well-formed id or subject is carried unchanged. The request's `ip`
+ * (an address, or left out) and `userAgent` are bounded by
+ * `recordAuditEvent` itself, which is how this hands every event to the sink
+ * and still returns its promise.
  */
 
-import type { AuditEvent, AuditSink, FederationGrantAuditEvent } from "@o3co/auth-provider-core";
+import {
+	type AuditEvent,
+	type AuditSink,
+	auditErrorText,
+	type FederationGrantAuditEvent,
+	recordAuditEvent,
+} from "@o3co/auth-provider-core";
 
 export interface FederationGrantAuditBridgeOptions {
 	/** Absent on a deployment that declared `audit.sink.type = "none"`. */
@@ -64,13 +84,13 @@ export function createFederationGrantAuditBridge(
 		const mapped: AuditEvent = {
 			timestamp: now(),
 			type: event.type,
-			subject: event.subject,
+			subject: auditErrorText(event.subject),
 			clientId: event.clientId,
 			...(options.ip === undefined ? {} : { ip: options.ip }),
 			...(options.userAgent === undefined ? {} : { userAgent: options.userAgent }),
 			details: {
 				correlationId: event.correlationId,
-				grantId: event.grantId,
+				grantId: auditErrorText(event.grantId),
 				...(event.connection === undefined ? {} : { connection: event.connection }),
 				// Copies, so that a sink which holds its argument cannot be
 				// handed a reference into a record core is still working with.
@@ -93,7 +113,7 @@ export function createFederationGrantAuditBridge(
 		// about a sink that was dropping everything. The one thing this does
 		// add is that a synchronous throw arrives as a rejection, so both
 		// failures look the same to whoever is waiting.
-		await sink.record(mapped);
+		await recordAuditEvent(sink, mapped);
 	};
 }
 

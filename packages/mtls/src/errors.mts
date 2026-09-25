@@ -14,6 +14,8 @@
  * limitations under the License.
  */
 
+import { lineSafeText } from "@o3co/auth-provider-core";
+
 /**
  * Granular internal reason code for an mTLS certificate validation failure.
  *
@@ -108,7 +110,10 @@ export class MtlsError extends Error {
  * per source, so a log line's cap on a projected message (core's
  * `loggableError`, 256 characters) cuts no other source's account; the
  * certificate it was asked about comes last, so a long subject is what the
- * cap cuts, never the URL or the reason.
+ * cap cuts, never the URL or the reason. The URL, the detail and the subject
+ * are the certificate's or the source's own text (a distribution point, a
+ * responder's Content-Type): each is on one line and capped (core's
+ * `lineSafeText`), in the message and in the fields alike.
  */
 export class MtlsRevocationSourceError extends Error {
 	readonly source: "crl" | "ocsp";
@@ -128,15 +133,17 @@ export class MtlsRevocationSourceError extends Error {
 		},
 		options?: ErrorOptions,
 	) {
+		const url = lineSafeText(failure.url);
+		const subject = lineSafeText(failure.subject);
 		super(
-			`${failure.source}${failure.url !== undefined ? ` ${failure.url}` : ""}: ${failure.reason} — ${failure.detail}; for ${failure.subject}`,
+			`${failure.source}${url !== undefined ? ` ${url}` : ""}: ${failure.reason} — ${lineSafeText(failure.detail)}; for ${subject}`,
 			options,
 		);
 		this.name = "MtlsRevocationSourceError";
 		this.source = failure.source;
-		if (failure.url !== undefined) this.url = failure.url;
+		if (url !== undefined) this.url = url;
 		this.reason = failure.reason;
-		this.subject = failure.subject;
+		this.subject = subject;
 	}
 }
 
