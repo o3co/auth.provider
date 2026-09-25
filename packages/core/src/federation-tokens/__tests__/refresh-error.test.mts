@@ -61,13 +61,13 @@ describe("classifyFederationRefreshError (#593, D12)", () => {
 		});
 
 		it("keeps the order the session-bound route has always had, where two readings apply", () => {
-			// A rejected token before a rate limit, a rate limit before an outage, an
+			// A rate limit before a rejected token, a rate limit before an outage, an
 			// outage before a network code. The message fallback reads an outage
 			// only, so a message naming both is an outage.
 			const network = { code: "ECONNREFUSED" };
 			expect(
 				classifyFederationRefreshError(upstream({ error: "invalid_grant", status: 429 })).reason,
-			).toBe("invalid_grant");
+			).toBe("rate_limited");
 			expect(
 				classifyFederationRefreshError(upstream({ error: "too_many_requests", status: 503 }))
 					.reason,
@@ -190,8 +190,19 @@ describe("classifyFederationRefreshError (#593, D12)", () => {
 				).toMatchObject({ reason: "network", structured: true });
 			});
 
+			it("reads a rate limit, not a rejected token, off a 429 whatever code it names", () => {
+				// Asked to slow down, the upstream judged nothing about the credential.
+				for (const error of ["invalid_grant", "invalid_token"]) {
+					expect(classifyFederationRefreshError(upstream({ error, status: 429 })), error).toEqual({
+						reason: "rate_limited",
+						structured: true,
+						upstreamCode: error,
+					});
+				}
+			});
+
 			it("still reads a rejected token off a structured code under a 4xx", () => {
-				for (const status of [400, 401, 429]) {
+				for (const status of [400, 401]) {
 					expect(
 						classifyFederationRefreshError(upstream({ error: "invalid_grant", status })),
 						String(status),

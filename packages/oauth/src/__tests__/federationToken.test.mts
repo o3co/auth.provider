@@ -2944,6 +2944,22 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(429);
 			expect(res.body.error).toBe("rate_limited");
+			// The upstream named no wait, so none is invented.
+			expect(res.headers["retry-after"]).toBeUndefined();
+		});
+
+		it("forwards the upstream's Retry-After on the 429", async () => {
+			const providerError = Object.assign(new Error("rate limit hit"), {
+				error: "too_many_requests",
+				status: 429,
+				response: new Response(null, { status: 429, headers: { "retry-after": "30" } }),
+			});
+			const app = buildRefreshFailure(providerError);
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(429);
+			expect(res.headers["retry-after"]).toBe("30");
 		});
 
 		// SF-13 RED-3b (Round 1 Claude Minor): the helper also classifies on `.error ===
@@ -3175,6 +3191,24 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(500);
 			expect(res.body.error).toBe("refresh_failed");
+			expectKept(fedTokenStore, sessionFederationIndex, auditSink);
+		});
+
+		it("keeps them and answers 429 with the upstream's Retry-After when a 429 names invalid_grant", async () => {
+			const { app, fedTokenStore, sessionFederationIndex, auditSink } = refreshRejectingWith(
+				Object.assign(new Error("server responded with an error in the response body"), {
+					name: "ResponseBodyError",
+					error: "invalid_grant",
+					status: 429,
+					response: new Response(null, { status: 429, headers: { "retry-after": "120" } }),
+				}),
+			);
+
+			const res = await postFedToken(app, "google", await mintAccessToken());
+
+			expect(res.status).toBe(429);
+			expect(res.body.error).toBe("rate_limited");
+			expect(res.headers["retry-after"]).toBe("120");
 			expectKept(fedTokenStore, sessionFederationIndex, auditSink);
 		});
 
