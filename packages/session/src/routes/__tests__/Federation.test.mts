@@ -490,6 +490,22 @@ function expectOutageLogged(
 	}
 }
 
+/**
+ * A composition fault's shape: exactly one line at error level, named
+ * `federation_misconfigured`, carrying `fields` and no error (nothing threw),
+ * and nothing at any other level.
+ */
+function expectMisconfigurationLogged(logger: SpyLogger, fields: Record<string, unknown>): void {
+	expect(logger.error).toHaveBeenCalledTimes(1);
+	const [context, name] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+	expect(name).toBe("federation_misconfigured");
+	expect(context).toMatchObject(fields);
+	expect(context).not.toHaveProperty("err");
+	for (const level of ["trace", "debug", "info", "warn", "fatal"] as const) {
+		expect(logger[level]).not.toHaveBeenCalled();
+	}
+}
+
 /** Make the session's `regenerate` fail, as a cookie-store `destroy` failure does. */
 const failRegenerate: express.RequestHandler = (req, _res, next) => {
 	req.session.regenerate = (cb?: (err: unknown) => void) => {
@@ -1101,6 +1117,7 @@ describe("account linking across federations (#482)", () => {
 		});
 
 		it("answers 500 without a redirect policy for the provider, and relays a policy refusal", async () => {
+			const unregisteredLogger = spyLogger();
 			const unregistered = buildCallbackApp({
 				providers,
 				federation: linkEnvelope,
@@ -1108,10 +1125,15 @@ describe("account linking across federations (#482)", () => {
 				userRepository: linkableRepo({ current: null }),
 				userSessionStore: liveStore(),
 				federationRedirectPolicyResolver: new Map(),
+				logger: unregisteredLogger as unknown as Logger,
 			});
 			const none = await callback(await plantAndGetAgent(unregistered.app));
 			expect(none.status).toBe(500);
 			expect(none.body.error).toBe("internal_error");
+			expectMisconfigurationLogged(unregisteredLogger, {
+				provider: "test",
+				reason: "no_redirect_policy",
+			});
 
 			const refusing = {
 				...makePermissivePolicy(),
@@ -1781,11 +1803,13 @@ describe("Federation routes", () => {
 		});
 
 		it("answers a callback for a provider with no callback URL, quoting its name with '", async () => {
+			const logger = spyLogger();
 			const { app } = buildCallbackApp({
 				providers: new Map([["test", makeFakeProvider()]]),
 				providerCallbackUrls: new Map(),
 				federation: { name: "test", state: "s1", codeVerifier: "v1", redirectTo: "/dashboard" },
 				userRepository: makeUserRepository({ id: "user-1", username: "alice" }),
+				logger: logger as unknown as Logger,
 			});
 			const agent = await plantAndGetAgent(app);
 
@@ -1795,6 +1819,7 @@ describe("Federation routes", () => {
 				error: "misconfiguration",
 				error_description: "No callback URL registered for provider 'test'",
 			});
+			expectMisconfigurationLogged(logger, { provider: "test", reason: "no_callback_url" });
 		});
 
 		it("happy path: creates UserSession, addFederation, attaches token, sets req.session.sid, redirects to redirectTo", async () => {
@@ -3182,5 +3207,62 @@ describe("the federation login callback answers a store that cannot answer as an
 			store: "cookie_session",
 			step: "save",
 		});
+	});
+});
+
+describe("a federation route's composition fault is a 500, logged once at error", () => {
+	const buildStart = (options: {
+		readonly policies?: ReadonlyMap<string, ReturnType<typeof makePermissivePolicy>>;
+		readonly callbackUrls?: ReadonlyMap<string, string>;
+	}) => {
+		const logger = spyLogger();
+		const app = makeSessionApp(new Map());
+		app.use(
+			createRouter(express, {
+				config: {} as never,
+				federationProviders: new Map([["test", makeFakeProvider()]]),
+				federationRedirectPolicyResolver:
+					options.policies ?? new Map([["test", makePermissivePolicy()]]),
+				providerCallbackUrls: options.callbackUrls ?? new Map([["test", TEST_CALLBACK_URL]]),
+				userRepository: makeUserRepository(),
+				userSessionStore: makeUserSessionStore(),
+				sessionFederationIndex: makeSessionFederationIndex(),
+				federationTokenStore: makeFederationTokenStore(),
+				logger: logger as unknown as Logger,
+			}),
+		);
+		return { app, logger };
+	};
+
+	it("a start with redirect_to and no redirect policy for the provider", async () => {
+		const { app, logger } = buildStart({ policies: new Map() });
+		const res = await request(app).get("/oauth/federation/test?redirect_to=%2Fdashboard");
+		expect(res.status).toBe(500);
+		expect(res.body.error).toBe("internal_error");
+		expectMisconfigurationLogged(logger, { provider: "test", reason: "no_redirect_policy" });
+	});
+
+	it("a start for a provider with no callback URL", async () => {
+		const { app, logger } = buildStart({ callbackUrls: new Map() });
+		const res = await request(app).get("/oauth/federation/test");
+		expect(res.status).toBe(500);
+		expect(res.body.error).toBe("misconfiguration");
+		expectMisconfigurationLogged(logger, { provider: "test", reason: "no_callback_url" });
+	});
+
+	it("a login callback with no redirect policy, once the session is persisted", async () => {
+		const logger = spyLogger();
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", makeFakeProvider()]]),
+			federation: { name: "test", state: "s1", codeVerifier: "v1" },
+			federationRedirectPolicyResolver: new Map(),
+			logger: logger as unknown as Logger,
+		});
+		const res = await (await plantAndGetAgent(app)).get(
+			"/oauth/federation/test/callback?state=s1&code=c1",
+		);
+		expect(res.status).toBe(500);
+		expect(res.body.error).toBe("internal_error");
+		expectMisconfigurationLogged(logger, { reason: "no_redirect_policy" });
 	});
 });

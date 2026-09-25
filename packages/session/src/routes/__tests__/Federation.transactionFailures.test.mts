@@ -26,8 +26,10 @@
  *
  * A store that cannot answer is the server's outage: `503
  * temporarily_unavailable`, logged once at error level with `store` and
- * `step`. A composition with no store to hold the transaction is the
- * deployment's fault: `500 misconfiguration`, logged once at error level.
+ * `step`. A composition with no store to hold the transaction, or no callback
+ * URL to scope its cookie to, is the deployment's fault: `500
+ * misconfiguration`, logged once at error level as `federation_misconfigured`
+ * with the `reason`.
  */
 
 import type { FederationProvider, Logger } from "@o3co/auth-provider-core";
@@ -258,32 +260,53 @@ describe("a form_post start leg refuses when it cannot hold a transaction", () =
 		);
 		expectOneErrorLine(
 			logger,
-			"federation_form_post_start_misconfigured",
-			{ provider: "apple", callbackUrl: CALLBACK_URL },
+			"federation_misconfigured",
+			{ provider: "apple", reason: "no_session_store", callbackUrl: CALLBACK_URL },
 			false,
 		);
 	});
 
 	it("500s when what is mounted is not a store", async () => {
-		const { app } = buildApp({ malformedSessionStore: true });
+		const logger = spyLogger();
+		const { app } = buildApp({ malformedSessionStore: true, logger });
 		const res = await request(app).get("/oauth/federation/apple");
 		expect(res.status).toBe(500);
 		expect(res.body.error).toBe("misconfiguration");
+		expectOneErrorLine(
+			logger,
+			"federation_misconfigured",
+			{ provider: "apple", reason: "no_session_store" },
+			false,
+		);
 	});
 
 	it("500s when the callback URL has no path to scope the cookie to", async () => {
-		const { app } = buildApp({ callbackUrl: "not-a-url" });
+		const logger = spyLogger();
+		const { app } = buildApp({ callbackUrl: "not-a-url", logger });
 		const res = await request(app).get("/oauth/federation/apple");
 		expect(res.status).toBe(500);
 		expect(res.body.error).toBe("misconfiguration");
+		expectOneErrorLine(
+			logger,
+			"federation_misconfigured",
+			{ provider: "apple", reason: "no_callback_path" },
+			false,
+		);
 	});
 
 	it("500s when the provider has no callback URL registered at all", async () => {
-		const { app } = buildApp({ callbackUrl: null });
+		const logger = spyLogger();
+		const { app } = buildApp({ callbackUrl: null, logger });
 		const res = await request(app).get("/oauth/federation/apple");
 		expect(res.status).toBe(500);
 		expect(res.body.error).toBe("misconfiguration");
 		expect(res.body.error_description).toBe("No callback URL registered for provider 'apple'");
+		expectOneErrorLine(
+			logger,
+			"federation_misconfigured",
+			{ provider: "apple", reason: "no_callback_url" },
+			false,
+		);
 	});
 
 	it("503s, logs once, and redirects nobody, when the transaction cannot be written", async () => {

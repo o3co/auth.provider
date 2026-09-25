@@ -88,15 +88,16 @@ function buildApp(
 		next();
 	});
 
+	const logger = { error: vi.fn() };
 	const handler = createRegistrationOptionsHandler({
 		config: BASE_CONFIG,
 		challengeStore,
 		credentialStore,
-		logger: { error: vi.fn() },
+		logger,
 	});
 
 	app.post("/oauth/webauthn/registration/options", handler);
-	return { app, challengeStore, credentialStore };
+	return { app, challengeStore, credentialStore, logger };
 }
 
 // ---------------------------------------------------------------------------
@@ -116,7 +117,7 @@ describe("POST /oauth/webauthn/registration/options (spec §2.4)", () => {
 	it("500 for a subject whose userId is not a 1-64 byte handle, in RFC 6749's characters", async () => {
 		// A consumer bug, answered as one. Appendix A.8 allows printable ASCII
 		// only, so the description says "section", not the section sign.
-		const { app } = buildApp({ userId: "" });
+		const { app, logger } = buildApp({ userId: "" });
 
 		const res = await supertest(app).post("/oauth/webauthn/registration/options").send({});
 
@@ -126,6 +127,13 @@ describe("POST /oauth/webauthn/registration/options (spec §2.4)", () => {
 			error_description:
 				"webauthnSubject.userId must be 1-64 bytes per WebAuthn section 5.4.3 (opaque user-handle)",
 		});
+		// The composition's fault, logged once — its length, never the value,
+		// which a misconfigured middleware may have filled with an e-mail.
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ site: "registration_options", byteLength: 0 },
+			"webauthn_subject_user_handle_invalid",
+		);
 	});
 
 	it("200 returns PublicKeyCredentialCreationOptions; challenge stored under webauthn:registration:<userId>", async () => {

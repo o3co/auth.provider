@@ -125,15 +125,16 @@ function buildApp(subject: WebAuthnSubject | undefined, deps = makeDeps()) {
 		next();
 	});
 
+	const logger = { error: vi.fn() };
 	const handler = createRegistrationVerifyHandler({
 		config: BASE_CONFIG,
 		challengeCeremony: deps.challengeCeremony,
 		credentialStore: deps.credentialStore,
-		logger: { error: vi.fn() },
+		logger,
 	});
 
 	app.post("/oauth/webauthn/registration/verify", handler);
-	return { app, ...deps };
+	return { app, logger, ...deps };
 }
 
 /** Issue a challenge for userId under the registration scope. */
@@ -279,7 +280,7 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 
 	it("500 for a subject whose userId is not a 1-64 byte handle, in RFC 6749's characters", async () => {
 		// Appendix A.8 allows printable ASCII only: "section", not the sign.
-		const { app } = buildApp({ userId: "x".repeat(65) });
+		const { app, logger } = buildApp({ userId: "x".repeat(65) });
 
 		const res = await supertest(app)
 			.post("/oauth/webauthn/registration/verify")
@@ -291,6 +292,11 @@ describe("POST /oauth/webauthn/registration/verify (spec §2.4)", () => {
 			error_description:
 				"webauthnSubject.userId must be 1-64 bytes per WebAuthn section 5.4.3 (opaque user-handle)",
 		});
+		expect(logger.error).toHaveBeenCalledTimes(1);
+		expect(logger.error).toHaveBeenCalledWith(
+			{ site: "registration_verify", byteLength: 65 },
+			"webauthn_subject_user_handle_invalid",
+		);
 	});
 
 	// -------------------------------------------------------------------------
