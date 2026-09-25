@@ -22,7 +22,7 @@
  * `createApp` function. The orchestrator owns no per-call state: it receives
  * inputs, calls each stage function in order, and forwards the output.
  *
- * Built-in defaults for the seven contribution kinds are seeded by
+ * Built-in defaults for the eleven built-in contribution kinds are seeded by
  * `mergeWithBuiltins`; consumer-supplied kinds (via `contributionKinds`)
  * overlay on top.
  *
@@ -78,8 +78,10 @@ import { validateManifests } from "./validate-manifests.mjs";
  *   6. assembleApp — mount routes, build AppHandle.
  *
  * Built-in contribution kinds (grants, tokenExchangeValidators, federations,
- * mfaFactors, auditHooks, routes, grantPolicyHooks, grantMiddleware) are
- * seeded by `mergeWithBuiltins`; consumer-supplied kinds overlay on top.
+ * federationRedirectPolicies, mfaFactors, auditHooks, routes,
+ * grantPolicyHooks, grantMiddleware, tokenBindingMechanisms,
+ * discoveryMetadata) are seeded by `mergeWithBuiltins`; consumer-supplied
+ * kinds overlay on top.
  *
  * The generic `B` constrains `bootstrapComponents` to a typed subset of
  * `ComponentMap` so downstream stages receive a well-typed config/pathResolver.
@@ -169,21 +171,20 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 // ---------------------------------------------------------------------------
 
 /**
- * Seed the seven built-in contribution kinds and overlay any consumer-supplied
+ * Seed the eleven built-in contribution kinds and overlay any consumer-supplied
  * collectors on top.
  *
  * Built-in defaults:
  * - grants: a `NameKeyedCollector` over one `GrantRegistry`, which holds the
  *   handlers and answers every call — `register` / `replace` (throwing
  *   `GrantRegistryError`), `freeze`, `get` and `entries`.
- * - tokenExchangeValidators: Map-backed `NameKeyedCollector`. The
- *   `ExchangeTokenValidatorRegistry` lives in a separate package
- *   (`oauth-token-exchange`) that `core` does not depend on; a plain Map
- *   implementation satisfies the `NameKeyedCollector` contract without a
- *   cross-package import. Same cleanup opportunity: if the registry is moved
- *   into core, switch to registry-backed form.
- * - federations, mfaFactors: Map-backed `NameKeyedCollector`.
- * - auditHooks, grantPolicyHooks, grantMiddleware: identity-dedup `ListCollector`.
+ * - tokenExchangeValidators, federations, federationRedirectPolicies,
+ *   mfaFactors: a Map-backed `NameKeyedCollector`, which is the only registry
+ *   of its kind. Token-exchange validators are contributed by modules
+ *   (`oauth-token-exchange` contributes the self-issued access-token one) and
+ *   read back through the `tokenExchangeValidatorResolver` synthetic key.
+ * - auditHooks, grantPolicyHooks, grantMiddleware, tokenBindingMechanisms,
+ *   discoveryMetadata: identity-dedup `ListCollector`.
  * - routes: declaration-indexed `RouteCollector`.
  *
  * @internal
@@ -250,11 +251,11 @@ function makeGrantCollector(): NameKeyedCollector<GrantHandler> {
  * (e.g. `<MfaFactor>`, `<FederationProvider>`) so the produced collector
  * matches the narrowed `ContributionCollectorMap` slot.
  *
- * Used for `tokenExchangeValidators`, `federations`, and `mfaFactors`.
- * `tokenExchangeValidators` uses this form because `ExchangeTokenValidatorRegistry`
- * lives in a separate package that `core` does not depend on. The Map
- * implementation satisfies the full `NameKeyedCollector` contract including
- * `entries()` without a cross-package import.
+ * Used for `tokenExchangeValidators`, `federations`,
+ * `federationRedirectPolicies` and `mfaFactors`. The Map is the only registry
+ * of each of those kinds, and keeps the whole `NameKeyedCollector` contract:
+ * `register` throws on a duplicate and `replace` on an unknown name, both
+ * throw after `freeze()`, and `entries()` lists in registration order.
  *
  * @internal
  */

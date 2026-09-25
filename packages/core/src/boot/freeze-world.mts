@@ -34,10 +34,12 @@ import type { FrozenWorld, RegistryWorld } from "./types.mjs";
  *    now structurally immutable. Consumer code that captures a reference
  *    cannot mutate the map.
  * 2. For each `(kind, collector)` in `registry.registries`: if the collector
- *    exposes a `freeze()` method, call it. Skip otherwise. This covers
- *    name-keyed registries (`GrantRegistry`, `ExchangeTokenValidatorRegistry`,
- *    consumer-defined registries), `RouteCollector` (always has `freeze()`),
- *    and opt-in `ListCollector<V>` instances.
+ *    exposes a `freeze()` method, call it. Skip otherwise. This covers the
+ *    built-in name-keyed collectors (`grants` over `GrantRegistry`; the
+ *    Map-backed ones for token-exchange validators, federations, federation
+ *    redirect policies and MFA factors), consumer-defined collectors,
+ *    `RouteCollector` (always has `freeze()`), and the `ListCollector<V>`
+ *    instances that define one.
  *
  * `AdapterFactory` is explicitly out of scope per A6+A7 §2.3 — it is
  * composition-root-shaped with no module-init activation boundary and is not
