@@ -25,8 +25,9 @@
  * shapes — and a refusal `upstream_rejected`.
  *
  * Read off what the library raised — the `name`, the `code` and a numeric
- * `status` of the error and of its first causes that are themselves Errors,
- * and the `status` of a `Response` it was raised over — and never off what a
+ * `status` of the error and of its first causes that are themselves Errors
+ * (of this realm or another), and the `status` of a `Response` it was raised
+ * over (this realm's fetch or another copy's) — and never off what a
  * text says or what a peer wrote: a message is whatever the library or the
  * upstream wrote, and openid-client puts the IdP's parsed error body on a
  * `ResponseBodyError` as its `cause`, where a `status`, a `code` or a `name`
@@ -104,10 +105,21 @@ const isError = (value: unknown): boolean => {
 	}
 };
 
-/** A fetch `Response` — what oauth4webapi raises a status it would not read over. */
+/**
+ * A fetch `Response` — what oauth4webapi raises a status it would not read
+ * over — of this realm's fetch or of another copy: npm undici's, which a
+ * deployment's own `fetch` answers with and oauth4webapi accepts by its tag.
+ * Recognised as oauth4webapi recognises one: the global class, or the
+ * `Response` tag. A parsed body cannot carry the tag — it is symbol-keyed,
+ * and JSON has no symbols — and the walk reaches this only through an Error's
+ * cause, so peer-written data still decides nothing. Asking never throws.
+ */
 const isResponse = (value: unknown): boolean => {
 	try {
-		return typeof Response === "function" && value instanceof Response;
+		return (
+			(typeof Response === "function" && value instanceof Response) ||
+			Object.prototype.toString.call(value) === "[object Response]"
+		);
 	} catch {
 		return false;
 	}

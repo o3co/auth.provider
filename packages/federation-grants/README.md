@@ -608,8 +608,9 @@ It checks, in this order:
    `ECONNRESET`, `ENOTFOUND`, `ETIMEDOUT`, `UND_ERR_SOCKET`, …) on the error
    or its causes, `fetch`'s `TypeError` over a coded socket or TLS error, or a
    5xx `status` on the error or on the `Response` it was raised over (an IdP
-   answering 503) — each read only on what the library raised, never on the
-   IdP's parsed body. The token route's refresh reads the same shapes as an
+   answering 503; a deployment's own `fetch` — npm undici's `Response` —
+   included) — each read only on what the library raised, never on the IdP's
+   parsed body. The token route's refresh reads the same shapes as an
    outage (`503 upstream`). One the upstream answered with a refusal is
    `upstream_error`.
 5. **The upstream account**: the connection's issuer; for a renewal, the
