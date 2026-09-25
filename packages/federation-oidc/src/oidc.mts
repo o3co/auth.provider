@@ -54,7 +54,9 @@ import { clientAuthFor, type OidcPrivateKey } from "./client-auth.mjs";
  * - **At construction** (boot): resolves the issuer's metadata through
  *   OpenID Connect Discovery. A discovery failure is fatal — there is no
  *   silent fallback to hand-typed endpoints; a deployment that wants those
- *   sets `discovery = false` and writes them down under `endpoints`.
+ *   sets `discovery = false` and writes them down under `endpoints`. The
+ *   error says so in fixed words and carries openid-client's as `cause`,
+ *   never its text: that is the library's reading of what the issuer sent.
  * - **Authorization request**: `authorization_code` with PKCE S256, `state`
  *   and `nonce`, all three minted by the session routes per transaction.
  * - **Callback**: exchanges the code with `client_secret_basic` or
@@ -122,8 +124,6 @@ export function checkFederationName(name: unknown): asserts name is string {
 		);
 	}
 }
-
-const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 const optionalString = (value: unknown): string | undefined =>
 	typeof value === "string" && value.length > 0 ? value : undefined;
@@ -285,7 +285,7 @@ async function resolveServerMetadata(
 		} catch (err) {
 			throw new Error(
 				`${label}: discovery of ${config.issuer} failed and the provider cannot start without the issuer's metadata ` +
-					`(set discovery = false and the endpoints to run from hand-typed values): ${message(err)}`,
+					"(set discovery = false and the endpoints to run from hand-typed values)",
 				{ cause: err },
 			);
 		}
