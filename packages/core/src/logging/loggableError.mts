@@ -300,6 +300,16 @@ const descriptionOf = (value: unknown): string | undefined => {
  */
 const REDIS_ECHOED_ARGS = /, with args beginning with:[\s\S]*$/;
 
+/**
+ * An error's message by the projection's rules, before `detail`'s cap:
+ * nothing for a SyntaxError (V8's JSON.parse and body-parser quote the
+ * input) or for a message that is not a string; Redis's echoed arguments cut.
+ */
+const messageText = (name: string, message: unknown): string | undefined =>
+	typeof message !== "string" || name === "SyntaxError"
+		? undefined
+		: message.replace(REDIS_ECHOED_ARGS, "");
+
 /** A V8 stack frame line. */
 const FRAME = /^ {4}at /;
 
@@ -522,6 +532,20 @@ const responseFields = (value: unknown): LoggableError["response"] | undefined =
 };
 
 /**
+ * The text `detail` is cut from: `err`'s message by the projection's rules —
+ * nothing for a SyntaxError, a message that is not a string or a value that
+ * is not an Error; a Redis reply's echoed arguments cut — without the
+ * 256-character cap. For a message read once and whole rather than a log
+ * field: a boot failure's, whose advice often runs past 256 characters
+ * (`boot/failure-summary.mts`).
+ */
+export function uncappedDetail(err: unknown): string | undefined {
+	if (!isError(err)) return undefined;
+	const rawName = read(err, "name");
+	return messageText(typeof rawName === "string" ? rawName : "Error", read(err, "message"));
+}
+
+/**
  * Project an error onto the fields a log line may carry — the rules are the
  * file header's.
  *
@@ -608,15 +632,12 @@ function ownFieldsOf(err: unknown): Draft {
 	const reason = reasonOf(err);
 	const command = commandOf(err);
 
-	let detail: string | undefined;
+	const text = messageText(name, rawMessage);
+	const detail = text === undefined ? undefined : capped(text);
 	let position: number | undefined;
-	if (typeof rawMessage === "string") {
-		if (name === "SyntaxError") {
-			const at = SYNTAX_POSITION.exec(rawMessage);
-			position = at ? Number(at[1]) : undefined;
-		} else {
-			detail = capped(rawMessage.replace(REDIS_ECHOED_ARGS, ""));
-		}
+	if (typeof rawMessage === "string" && name === "SyntaxError") {
+		const at = SYNTAX_POSITION.exec(rawMessage);
+		position = at ? Number(at[1]) : undefined;
 	}
 
 	return {

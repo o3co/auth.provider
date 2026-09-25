@@ -204,7 +204,7 @@ The ports are [`src/repositories/ClientRepository.mts`](src/repositories/ClientR
 
 #### Built-in implementations
 
-`InMemoryClientRepository` and `InMemoryUserRepository` take a `Map` of entries validated by `ClientEntrySchema` / `UserEntrySchema`; `InMemoryCodeRepository` takes an optional `defaultExpiresIn` and runs a GC timer that its `dispose()` clears. `loadYamlMap(filePath, schema)` ([`src/repositories/loadYamlMap.mts`](src/repositories/loadYamlMap.mts)) reads a YAML file whose top-level keys are record IDs and validates each entry against `schema`; pass the result to `InMemoryClientRepository` or `InMemoryUserRepository` — see [Loading clients and users from YAML](#loading-clients-and-users-from-yaml).
+`InMemoryClientRepository` and `InMemoryUserRepository` take a `Map` of entries validated by `ClientEntrySchema` / `UserEntrySchema`; `InMemoryCodeRepository` takes an optional `defaultExpiresIn` and runs a GC timer that its `dispose()` clears. `loadYamlMap(filePath, schema)` ([`src/repositories/loadYamlMap.mts`](src/repositories/loadYamlMap.mts)) reads a YAML file whose top-level keys are record IDs and validates each entry against `schema`; pass the result to `InMemoryClientRepository` or `InMemoryUserRepository` — see [Loading clients and users from YAML](#loading-clients-and-users-from-yaml). A file that does not parse is refused as `Invalid YAML in <file> at <line>:<column>: <reason>`, with no `cause` and nothing of the file: js-yaml's own error quotes the lines around the fault and holds the whole file, and these files hold secrets.
 
 #### Adapter factory primitives
 

@@ -1,6 +1,6 @@
 # repositories
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 ## Responsibility
 
@@ -46,7 +46,7 @@ It is separate because the Store's data model is read by `oauth`, `session`, `fo
 - `isWellFormedClientId` admits an id at 256 characters and non-ASCII, and refuses one past 256, an empty one, and any C0, DEL or C1 control character — [`clientId.test.mts`](./__tests__/clientId.test.mts). The bundled repository and the yaml adapter refuse to register such an id, naming its position and never echoing a control character — [`registeredClientIds.test.mts`](./__tests__/registeredClientIds.test.mts).
 - `isGrantTypeAllowed`: absent → allowed unless `requireAllowlist`; `[]` → denied; exact string match — [`allowedGrantTypes.test.mts`](./__tests__/allowedGrantTypes.test.mts).
 - The bundled user adapter runs a bcrypt compare for unknown users and on the plain-text path, never returns `password`, and its identity lookup covers no registration and changes nothing — [`InMemoryUserRepository.test.mts`](./__tests__/InMemoryUserRepository.test.mts).
-- Factories: `register` throws on a duplicate type, an unregistered type is `AdapterFactoryError`, the `memory` code builder validates `defaultExpiresIn` — [`createRepositoryFactories.test.mts`](./__tests__/createRepositoryFactories.test.mts); `loadYamlMap` refuses non-mapping YAML and invalid entries — [`loadYamlMap.test.mts`](./__tests__/loadYamlMap.test.mts).
+- Factories: `register` throws on a duplicate type, an unregistered type is `AdapterFactoryError`, the `memory` code builder validates `defaultExpiresIn` — [`createRepositoryFactories.test.mts`](./__tests__/createRepositoryFactories.test.mts); `loadYamlMap` refuses non-mapping YAML and invalid entries, and a file that does not parse by its path, line, column and the parser's reason alone — no `cause`, nothing the parser quoted of the file — [`loadYamlMap.test.mts`](./__tests__/loadYamlMap.test.mts).
 - Records are readonly at compile time — [`../__tests__/repository-types-readonly.test.mts`](../__tests__/repository-types-readonly.test.mts).
 
 ## Failure and lifecycle

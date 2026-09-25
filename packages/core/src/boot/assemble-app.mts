@@ -43,6 +43,7 @@ import {
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
 import { normalizeAllowedOrigins } from "../net/origin.mjs";
 import type { InternalReadinessRegistrar } from "../readiness/types.mjs";
+import { failureDetail } from "./failure-summary.mjs";
 import type {
 	AppHandle,
 	CleanupRecord,
@@ -589,11 +590,15 @@ export function assembleApp(
 		// not in the step: a discovery misconfiguration has to surface as a
 		// `BootError` like every other assembleApp failure, and the step would
 		// have to import the stage to say so.
+		// The planner's text by its projection (`failureDetail`), in the
+		// message and in `details.detail` alike, never the message itself: see
+		// `failure-summary.mts`.
+		const detail = failureDetail(planning.error);
 		throw new BootError({
-			message: `assembleApp: ${planning.error.message}`,
+			message: `assembleApp: ${detail}`,
 			reason: "discovery-document-invalid",
 			stage: "assembleApp",
-			details: { reason: "discovery-document-invalid", detail: planning.error.message },
+			details: { reason: "discovery-document-invalid", detail },
 			cause: planning.error,
 		});
 	}

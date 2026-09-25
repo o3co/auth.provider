@@ -1014,7 +1014,11 @@ export interface FederationStoresIncompleteDetails {
  */
 export interface DiscoveryDocumentInvalidDetails {
 	readonly reason: "discovery-document-invalid";
-	/** The underlying `DiscoveryDocumentError` message. */
+	/**
+	 * The underlying `DiscoveryDocumentError`'s message, read by
+	 * `loggableError`'s rules (`boot/failure-summary.mts`). The error itself
+	 * is the BootError's `cause`.
+	 */
 	readonly detail: string;
 }
 

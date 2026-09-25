@@ -1,6 +1,6 @@
 # boot
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 ## Responsibility
 
@@ -51,7 +51,8 @@ One wiring rule is not a row: `requireFederationGrantSubjectRevocation` ([`../fe
 
 ## Failure and lifecycle
 
-- A refused boot is a `BootError` with `reason`, `stage` and typed `details`; `cause` is set for the `*-factory-failed` reasons and for `discovery-document-invalid`, which carries the `DiscoveryDocumentError` it wraps ([`discovery-aggregation.integration.test.mts`](./__tests__/discovery-aggregation.integration.test.mts)). A required dependency missing at stage 3 or 4 is a plain `Error` — an invariant an earlier stage should have caught, not an operator problem.
+- A refused boot is a `BootError` with `reason`, `stage` and typed `details`; `cause` is set for the `*-factory-failed` reasons and for `discovery-document-invalid`, which carries the `DiscoveryDocumentError` it wraps ([`discovery-aggregation.integration.test.mts`](./__tests__/discovery-aggregation.integration.test.mts)).
+- A `BootError`'s message names the error behind it by `loggableError`'s rules — its name and message, nothing of a SyntaxError's text, a Redis reply's echoed arguments cut, only the kind of a thrown value that is not an Error — never by `String(...)` of it, and without a log field's 256-character cap, so a refusal's advice is kept whole (`failure-summary.mts`); the error itself is the `cause`. A boot failure is printed whole to the log it ends in, and a parser's error quotes its input — [`factory-failure-message.test.mts`](./__tests__/factory-failure-message.test.mts). A required dependency missing at stage 3 or 4 is a plain `Error` — an invariant an earlier stage should have caught, not an operator problem.
 - Partial rollback: a stage-3 failure runs the cleanups already recorded, in reverse, collecting cleanup errors into `details.cleanupErrors` — [`materialize-components.test.mts`](./__tests__/materialize-components.test.mts); `LifecycleRegistrar` cleanups drain when any later stage fails — [`create-app.test.mts`](./__tests__/create-app.test.mts).
 - `dispose()` is single-shot. It runs `lifecycle.cleanup` in reverse-topological order, falls back to `Symbol.asyncDispose` for module-provided values that declared none — never for override or bootstrap values — and drains the `LifecycleRegistrar` in LIFO order; every error is aggregated into one `AggregateError` — [`assemble-app.test.mts`](./__tests__/assemble-app.test.mts), [`integration.test.mts`](./__tests__/integration.test.mts).
 - A `LifecycleRegistrar` cleanup that throws is logged once, at error, object-first as `adapter_lifecycle_cleanup_failed` with `phase` (`dispose` or `boot_failure`), its `cleanupIndex` and the `loggableError` projection, and the drain goes on — also when the logger itself throws, so a failed boot still rethrows the error that failed it. At `dispose()` the line goes to the `logger` component; when boot failed, to the logger the composition root handed in (bootstrap or override); either way to `consoleLogger` when there is none — [`create-app.test.mts`](./__tests__/create-app.test.mts), [`AdapterFactory.test.mts`](../adapters/__tests__/AdapterFactory.test.mts).
