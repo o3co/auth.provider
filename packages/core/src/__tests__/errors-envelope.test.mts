@@ -231,6 +231,12 @@ describe("RFC 6749 error text", () => {
 		it("answers undefined for a non-string", () => {
 			expect(auditErrorText(42)).toBeUndefined();
 		});
+
+		it("replaces the Unicode line separators and the bidi controls, which are not ASCII", () => {
+			expect(auditErrorText("a\u2028b\u2029c\u202ad\u202ee\u2066f\u2069g\u0085h")).toBe(
+				"a?b?c?d?e?f?g?h",
+			);
+		});
 	});
 
 	// A list a client chose — the scopes it asked for, the resources it named

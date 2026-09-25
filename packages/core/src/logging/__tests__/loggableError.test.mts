@@ -1229,3 +1229,37 @@ describe("loggableError — what a log line may carry of an error", () => {
 		expect(shape(hostile)).toEqual({ name: "Error", detail: "kept" });
 	});
 });
+
+describe("loggableError — detail is one line of text", () => {
+	// A message is often a peer's or a caller's text a library quoted: jose's
+	// "Extension Header Parameter \"<name>\" is not recognized", an IdP's
+	// refusal, a fetch cause. Whatever breaks a line or reorders it on screen
+	// is replaced by `?`: C0 (line breaks, tab, ESC), DEL, C1 (NEL, CSI), the
+	// Unicode line and paragraph separators, and the bidi embedding, override
+	// and isolate controls. Not RFC 6749's set: `"` and `\` stay, and so does
+	// any other character, a non-ASCII letter included.
+	const UNSAFE =
+		"\r\n\t\u0000\u001b\u007f\u0080\u0085\u009b\u009f\u2028\u2029\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069";
+
+	it("replaces each line-breaking or reordering character with ?", () => {
+		expect(loggableError(new Error(`a${UNSAFE}b`)).detail).toBe(`a${"?".repeat(UNSAFE.length)}b`);
+	});
+
+	it('keeps " and \\ and every other character', () => {
+		const message = 'refused "x" at C:\\path — é 日本 ☃ \u00a0 \u200b';
+		expect(loggableError(new Error(message)).detail).toBe(message);
+	});
+
+	it("still caps the detail at 256 characters", () => {
+		const detail = loggableError(new Error(`\u2028${"x".repeat(10_000)}`)).detail ?? "";
+		expect({ length: detail.length, head: detail.slice(0, 2) }).toEqual({
+			length: 256,
+			head: "?x",
+		});
+	});
+
+	it("filters a cause's detail the same way", () => {
+		const err = new Error("outer", { cause: new Error("in\r\nner\u202e") });
+		expect(loggableError(err).cause?.detail).toBe("in??ner?");
+	});
+});
