@@ -258,6 +258,12 @@ describe("guarded fetch — response limits", () => {
 			{ expectContentType: "application/ocsp-response" },
 			"unexpected_content_type",
 		],
+		[
+			"a Content-Length above the cap",
+			{ status: 200, headers: { "content-length": "999999" } },
+			{},
+			"response_too_large",
+		],
 	] as const)("releases the body it will not read: %s", async (_label, init, request, reason) => {
 		// A refusal made before the body is read must cancel it, or the
 		// connection stays held until the peer gives up.
