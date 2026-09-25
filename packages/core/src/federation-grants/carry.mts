@@ -15,17 +15,26 @@
  */
 
 /**
- * How a typed answer carries the failure it was turned from (`failure`) to
- * the route that logs it: as a property nothing enumerates. A spread, a
+ * How a typed answer carries what failed to the route that logs it — the
+ * failure it was turned from (`failure`), or a best-effort step that failed
+ * after it (`cleanup`) — as a property nothing enumerates. A spread, a
  * serialisation, or a response or audit event built from the answer never
  * carries what a store or an upstream put on the error; a reader that asks
- * for `failure` by name gets it. Used by the retrieval and by lodging.
+ * for the field by name gets it. Used by the retrieval and by lodging.
  */
 
-/** `value`, with `failure` attached and not enumerable; nothing is attached for no failure. */
-export function carryingFailure<T extends object>(value: T, failure: unknown): T {
-	if (failure !== undefined) {
-		Object.defineProperty(value, "failure", { value: failure, enumerable: false });
+/** `value`, with `payload` attached under `key` and not enumerable; nothing is attached for none. */
+export function carrying<T extends object>(
+	value: T,
+	key: "failure" | "cleanup",
+	payload: unknown,
+): T {
+	if (payload !== undefined) {
+		Object.defineProperty(value, key, { value: payload, enumerable: false });
 	}
 	return value;
 }
+
+/** `value`, carrying the failure it was turned from. */
+export const carryingFailure = <T extends object>(value: T, failure: unknown): T =>
+	carrying(value, "failure", failure);

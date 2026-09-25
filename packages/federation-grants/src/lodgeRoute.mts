@@ -34,7 +34,7 @@
  * the refusal), a key missing from the ring, a connection permitted but not
  * configured — is one line at error, `federation_grant_lodge_unavailable`; an
  * intent core could not close after a failed write is one warn,
- * `federation_grant_lodge_step_failed`.
+ * `federation_grant_lodge_step_failed`, whichever answer the client got.
  */
 
 import {
@@ -174,14 +174,6 @@ function createLodgeHandler(
 			} else {
 				log.outage("federation_grant_lodge_unavailable", fields);
 			}
-			const cleanup = failure?.cleanup;
-			if (cleanup !== undefined) {
-				log.degraded(
-					"federation_grant_lodge_step_failed",
-					{ ...context, store: cleanup.store, step: cleanup.step },
-					cleanup.error,
-				);
-			}
 		};
 
 		const release = options.background.admit();
@@ -276,6 +268,16 @@ function createLodgeHandler(
 						result.reason,
 						"failure" in result ? result.failure : undefined,
 						result.reason === "connection_not_configured" ? body.connection : undefined,
+					);
+				}
+				// Whatever the answer: an intent core could not close after a
+				// failed write can activate nothing, but an operator sees it.
+				const cleanup = result.cleanup;
+				if (cleanup !== undefined) {
+					log.degraded(
+						"federation_grant_lodge_step_failed",
+						{ ...context, store: cleanup.store, step: cleanup.step },
+						cleanup.error,
 					);
 				}
 				const answer = serializeFederationGrantLodgingRefusal(result);

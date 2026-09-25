@@ -1034,6 +1034,8 @@ export {
 export {
 	type FederationGrantAcquisitionConnection,
 	type FederationGrantLodged,
+	type FederationGrantLodgingCleanup,
+	type FederationGrantLodgingCleanupCarrier,
 	type FederationGrantLodgingClient,
 	type FederationGrantLodgingDeps,
 	type FederationGrantLodgingFailure,

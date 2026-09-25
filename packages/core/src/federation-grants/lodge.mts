@@ -44,8 +44,10 @@
  *   safely retryable once a newer intent may have superseded this one.
  *
  * A `storage` refusal carries what failed (`failure`, not enumerable): which
- * store, what it was asked, what it threw or refused, and an intent that
- * could not be closed after it — for the route answering the 503 to log once.
+ * store, what it was asked, what it threw or refused — for the route
+ * answering the 503 to log once. Any refusal carries an intent the lodging
+ * could not close after a failed write (`cleanup`, not enumerable), whatever
+ * the answer, for the route to log as the best-effort step it is.
  *
  * ## What it does not do
  *
@@ -57,7 +59,7 @@
 import { randomBytes } from "node:crypto";
 import { checkRedirectUri } from "../net/redirect-uri.mjs";
 import { federationGrantAllowlist } from "./allowlist.mjs";
-import { carryingFailure } from "./carry.mjs";
+import { carrying, carryingFailure } from "./carry.mjs";
 import { effectiveFederationGrantStatus } from "./effective-status.mjs";
 import { resolveFederationGrantIntentScopes } from "./eligibility.mjs";
 import {
@@ -184,19 +186,30 @@ export interface FederationGrantLodgingFailure {
 	 * grant-store write whose guard refused it.
 	 */
 	readonly refusal?: Exclude<FederationGrantIntentRefusal, "limit"> | "refused";
-	/**
-	 * The intent the lodging could not close after a failed second write.
-	 * Best effort: it can activate nothing, and its deadline ends it.
-	 */
-	readonly cleanup?: {
-		readonly store: "federation_grant_intent";
-		readonly step: "finish_intent";
-		readonly error: unknown;
-	};
+}
+
+/**
+ * The intent a lodging could not close after a failed write. Best effort: it
+ * can activate nothing — no grant names it — and its deadline ends it. For a
+ * logger; never for a response.
+ */
+export interface FederationGrantLodgingCleanup {
+	readonly store: "federation_grant_intent";
+	readonly step: "finish_intent";
+	readonly error: unknown;
+}
+
+/**
+ * What any lodging refusal may carry beside its answer: the intent it could
+ * not close after a failed write, whichever answer the client gets. Not
+ * enumerable — nothing that serialises the refusal carries it.
+ */
+export interface FederationGrantLodgingCleanupCarrier {
+	readonly cleanup?: FederationGrantLodgingCleanup;
 }
 
 /** A refusal; on `storage`, carrying what failed. */
-export interface FederationGrantLodgingRefused {
+export interface FederationGrantLodgingRefused extends FederationGrantLodgingCleanupCarrier {
 	readonly ok: false;
 	readonly reason: FederationGrantLodgingRefusal;
 	/** On `storage`: what failed. Not enumerable — see `FederationGrantLodgingFailure`. */
@@ -215,31 +228,34 @@ export type FederationGrantReauthorizationResult =
 			readonly status: FederationGrantRenewableStatus;
 	  })
 	| FederationGrantLodgingRefused
-	| {
-			readonly ok: false;
-			readonly reason: "grant_not_found" | "authorization_pending" | "connection_mismatch";
-	  }
-	| { readonly ok: false; readonly reason: "connection_identity_changed" }
-	| {
-			readonly ok: false;
-			readonly reason: "grant_revoked";
-			readonly revokedBy: FederationGrantRevokedBy;
-			/** Whether THIS call wrote the revocation — what decides whether it is audited. */
-			readonly revokedNow: boolean;
-			/** The record the write returned, when `revokedNow`: what the audit of it describes (D18). */
-			readonly revoked?: FederationGrant;
-	  }
-	| {
-			readonly ok: false;
-			readonly reason: "grant_expired";
-			readonly expiredBy: FederationGrantExpiredReason;
-	  }
-	| {
-			readonly ok: false;
-			readonly reason: "upstream_token_ineligible";
-			readonly ineligibleBy: FederationGrantIneligibilityReason;
-	  }
-	| { readonly ok: false; readonly reason: "key_unavailable" };
+	| ((
+			| {
+					readonly ok: false;
+					readonly reason: "grant_not_found" | "authorization_pending" | "connection_mismatch";
+			  }
+			| { readonly ok: false; readonly reason: "connection_identity_changed" }
+			| {
+					readonly ok: false;
+					readonly reason: "grant_revoked";
+					readonly revokedBy: FederationGrantRevokedBy;
+					/** Whether THIS call wrote the revocation — what decides whether it is audited. */
+					readonly revokedNow: boolean;
+					/** The record the write returned, when `revokedNow`: what the audit of it describes (D18). */
+					readonly revoked?: FederationGrant;
+			  }
+			| {
+					readonly ok: false;
+					readonly reason: "grant_expired";
+					readonly expiredBy: FederationGrantExpiredReason;
+			  }
+			| {
+					readonly ok: false;
+					readonly reason: "upstream_token_ineligible";
+					readonly ineligibleBy: FederationGrantIneligibilityReason;
+			  }
+			| { readonly ok: false; readonly reason: "key_unavailable" }
+	  ) &
+			FederationGrantLodgingCleanupCarrier);
 
 /**
  * The result parameters the end of a flow appends to a client's redirect URI.
@@ -280,17 +296,25 @@ type RequestCheck =
 const storage = (failure: FederationGrantLodgingFailure): FederationGrantLodgingRefused =>
 	carryingFailure({ ok: false, reason: "storage" }, failure);
 
-/** A failure, with the intent that could not be closed after it when there was one. */
-const withCleanup = (
-	failure: FederationGrantLodgingFailure,
-	closed: Closed,
-): FederationGrantLodgingFailure =>
-	closed === undefined
-		? failure
-		: {
-				...failure,
-				cleanup: { store: "federation_grant_intent", step: "finish_intent", error: closed.error },
-			};
+/** Every answer a lodging refuses with: what may carry `cleanup`. */
+type ReauthorizationRefusal = Extract<FederationGrantReauthorizationResult, { readonly ok: false }>;
+
+/**
+ * A refusal, carrying the intent that could not be closed before it when there
+ * was one — whatever the refusal is (`carry.mts`).
+ */
+const withCleanup = <T extends ReauthorizationRefusal>(refusal: T, closed: Closed): T =>
+	carrying(
+		refusal,
+		"cleanup",
+		closed === undefined
+			? undefined
+			: ({
+					store: "federation_grant_intent",
+					step: "finish_intent",
+					error: closed.error,
+				} satisfies FederationGrantLodgingCleanup),
+	);
 
 /**
  * What a first intent and a renewal are held to alike: where the browser goes
@@ -485,8 +509,9 @@ export async function lodgeFederationGrantIntent(
 	);
 	if (!created.landed) {
 		const closed = await close(deps.intentStore, handle, now());
-		return storage(
-			withCleanup({ store: "federation_grant", step: "create_pending", ...created.why }, closed),
+		return withCleanup(
+			storage({ store: "federation_grant", step: "create_pending", ...created.why }),
+			closed,
 		);
 	}
 	return {
@@ -605,7 +630,7 @@ export type FederationGrantRenewableStatus =
 /** What the lifecycle says of a renewal: the status it is admitted from, or the answer it gets instead. */
 type Admission =
 	| { readonly admitted: FederationGrantRenewableStatus }
-	| { readonly refused: FederationGrantReauthorizationResult };
+	| { readonly refused: ReauthorizationRefusal };
 
 /**
  * What a reauthorization cannot mend, as the answer it gets — or the status it
@@ -747,21 +772,24 @@ async function judgeAndLodge(
 	// The pointer write lost: the grant changed under this request. What it is
 	// NOW is the answer — never a retry on the strength of the stale reading,
 	// which could renew a grant revoked in between. An intent that could not
-	// be closed goes on a `storage` answer; beside any other it can activate
-	// nothing, and lapses with the flow budget.
+	// be closed can activate nothing and lapses with the flow budget; it rides
+	// on whichever answer this is (`cleanup`), so that the route reports it.
 	let fresh: Awaited<ReturnType<FederationGrantStore["inspect"]>>;
 	try {
 		fresh = await deps.grantStore.inspect(grant.id, now());
 	} catch (error) {
-		return storage(withCleanup({ store: "federation_grant", step: "inspect", error }, closed));
+		return withCleanup(storage({ store: "federation_grant", step: "inspect", error }), closed);
 	}
-	if (fresh === null) return { ok: false, reason: "grant_not_found" };
+	if (fresh === null) {
+		return withCleanup<ReauthorizationRefusal>({ ok: false, reason: "grant_not_found" }, closed);
+	}
 	// Still renewable: the write lost to something that left it so, and the
 	// honest answer is that this attempt did not take.
 	const again = admission(statusOf(deps, fresh, boundary, now()));
-	return "refused" in again
-		? again.refused
-		: storage(
-				withCleanup({ store: "federation_grant", step: "name_intent", ...named.why }, closed),
-			);
+	return withCleanup<ReauthorizationRefusal>(
+		"refused" in again
+			? again.refused
+			: storage({ store: "federation_grant", step: "name_intent", ...named.why }),
+		closed,
+	);
 }
