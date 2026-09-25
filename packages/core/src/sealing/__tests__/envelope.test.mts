@@ -156,6 +156,49 @@ describe("the v2 key-ring envelope", () => {
 		}
 	});
 
+	it("reads only a 16-byte tag and a 12-byte IV, whatever lengths the platform's GCM would take", () => {
+		// Node before 26 accepts a GCM tag of 4 to 16 bytes on decrypt unless
+		// told the length, so an envelope whose tag was cut short opened: a
+		// forgery would then need to match 32 bits, not 128, and short tags
+		// leak the authentication key (Ferguson). Every envelope ever sealed
+		// has a 12-byte IV and a 16-byte tag, so nothing else is read.
+		const parts = sealWithKeyRing("rt-1", RING, BINDING).split(".");
+		const tag = Buffer.from(parts[4] as string, "base64url");
+		for (const length of [4, 8, 12]) {
+			const truncated = [...parts.slice(0, 4), tag.subarray(0, length).toString("base64url")].join(
+				".",
+			);
+			expect(openWithKeyRing(truncated, RING, BINDING), `a ${length}-byte tag`).toStrictEqual({
+				state: "unreadable",
+			});
+		}
+		// A 16-byte IV, sealed by hand under the right key and the right
+		// authenticated data: GCM itself would take it.
+		const kid = Buffer.from("k-2026-09", "utf8");
+		const iv = Buffer.alloc(16, 9);
+		const cipher = createCipheriv("aes-256-gcm", key(2), iv);
+		cipher.setAAD(
+			Buffer.concat([
+				Buffer.from("o3co:test:value\0", "ascii"),
+				u32(kid.length),
+				kid,
+				u32(BINDING.record.length),
+				BINDING.record,
+			]),
+		);
+		const ct = Buffer.concat([cipher.update("rt-1", "utf8"), cipher.final()]);
+		const longIv = [
+			"v2",
+			kid.toString("base64url"),
+			iv.toString("base64url"),
+			ct.toString("base64url"),
+			cipher.getAuthTag().toString("base64url"),
+		].join(".");
+		expect(openWithKeyRing(longIv, RING, BINDING), "a 16-byte IV").toStrictEqual({
+			state: "unreadable",
+		});
+	});
+
 	it("refuses a ring it cannot seal with, as a RangeError: no keys, a key that is not 32 bytes, a duplicate or unusable ID", () => {
 		// A ring is a setting, and a setting that cannot be used is refused as a
 		// RangeError naming what is wrong with it.
