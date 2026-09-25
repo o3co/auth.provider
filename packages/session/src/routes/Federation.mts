@@ -644,11 +644,11 @@ export const createRouter = (
 			// consumed and the Store's link stands — the identity is the
 			// account's, and the next login through this federation lands on it —
 			// so what must not be left behind is a half-attached federation on the
-			// live session: the token record first, then the index entry. One the
-			// session already carried is left as it was, and so is everything
-			// when the index could not even be read: nothing was written, and
-			// whether the session carried the federation is what that read would
-			// have said.
+			// live session: the token record first, then the index entry. A
+			// federation the session was already attached to before this link is
+			// left attached, as it was. Nothing is rolled back either when the
+			// index could not even be read: nothing was written, and whether the
+			// session carried the federation is what that read would have said.
 			if (listed && !hadFederation) {
 				await cleanUp(
 					log,

@@ -3420,6 +3420,21 @@ describe("a redirect policy that answers a 5xx is logged once at error; its 4xx 
 		});
 	});
 
+	it("the start, when a contributed policy answers a 5xx with no code and no description that are strings", async () => {
+		// A contributed policy is a deployment's code; the line still says what
+		// arrived, by type, rather than dropping the field.
+		const { app, logger } = startWith(() => ({ ok: false, status: 502, error: 7 }));
+		const res = await request(app).get("/oauth/federation/test?redirect_to=%2Fdashboard");
+		expect(res.status).toBe(502);
+		expect(res.body.error).toBe("server_error");
+		expectPolicyFaultLogged(logger, {
+			provider: "test",
+			status: 502,
+			error: "(number)",
+			errorDescription: "(undefined)",
+		});
+	});
+
 	it("the start, when the policy refuses the redirect_to with a 4xx: nothing is logged", async () => {
 		const { app, logger } = startWith(() => ({
 			ok: false,
