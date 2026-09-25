@@ -158,11 +158,14 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 		// D-5 partial-boot failure: any builder may have already registered a
 		// cleanup callback before a later stage threw. Best-effort drain so
 		// adapter sub-resources do not leak when boot fails. No AppHandle
-		// exists, but a composition root that has a logger passed it as a
-		// bootstrap component — the replica-safety check in stage 1 logs
-		// through it too — so a failed cleanup is logged there, and through
-		// `consoleLogger` only when there is none.
-		await lifecycleReg._drain(validatedBootstrap.logger ?? consoleLogger, "boot_failure");
+		// exists, but a composition root that has a logger handed it in, as a
+		// bootstrap component or an override (never both: stage 1 refuses the
+		// pair) — `dispose()` logs through either — so a failed cleanup is
+		// logged there, and through `consoleLogger` only when there is none.
+		await lifecycleReg._drain(
+			overrideComponents?.logger ?? validatedBootstrap.logger ?? consoleLogger,
+			"boot_failure",
+		);
 		throw err;
 	}
 }

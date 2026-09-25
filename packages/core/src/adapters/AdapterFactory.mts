@@ -104,7 +104,7 @@ export interface InternalLifecycleRegistrar extends LifecycleRegistrar {
 	 * `{ phase, cleanupIndex, err: loggableError(err) }` with the event
 	 * `adapter_lifecycle_cleanup_failed`, where `phase` says which drain it
 	 * was — `AppHandle.dispose()` or a boot that failed. The drain never
-	 * throws.
+	 * throws, not even when the logger does.
 	 *
 	 * @internal
 	 */
@@ -136,11 +136,17 @@ export function createLifecycleRegistrar(): InternalLifecycleRegistrar {
 				try {
 					await cleanup();
 				} catch (err) {
-					logger.error(
-						{ phase, cleanupIndex: i, err: loggableError(err) },
-						"adapter_lifecycle_cleanup_failed",
-					);
 					errors.push(err);
+					try {
+						logger.error(
+							{ phase, cleanupIndex: i, err: loggableError(err) },
+							"adapter_lifecycle_cleanup_failed",
+						);
+					} catch {
+						// A logger that cannot log must not cost the cleanups still
+						// to run, nor replace the error a failed boot rethrows. The
+						// failure itself is in the errors returned.
+					}
 				}
 			}
 			return errors;

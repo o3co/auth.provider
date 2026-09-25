@@ -555,6 +555,76 @@ describe("createApp — 7. boot-failure LifecycleRegistrar drain (D-5)", () => {
 			console_.restore();
 		}
 	});
+
+	it("logs it through a logger handed in as an override", async () => {
+		// `dispose()` logs through an override logger; a failed boot must too.
+		// (A logger in both channels is refused at stage 1, before any adapter
+		// is built.)
+		const logger = spyLogger();
+		const console_ = spyConsole();
+		try {
+			await expect(
+				createApp({
+					modules: [adapterWhoseCloseThrowsModule(), failingModule()],
+					bootstrapComponents: minBoot,
+					overrideComponents: { logger: logger as unknown as Logger },
+					contributionKinds: makeStubCollectors(),
+				}),
+			).rejects.toBeInstanceOf(BootError);
+
+			expectOneCleanupFailureLine(logger.error.mock.calls, "boot_failure");
+			for (const level of ["trace", "debug", "info", "warn", "fatal"] as const) {
+				expect(logger[level]).not.toHaveBeenCalled();
+			}
+			for (const method of ["error", "warn", "info", "debug", "log"] as const) {
+				expect(console_[method]).not.toHaveBeenCalled();
+			}
+		} finally {
+			console_.restore();
+		}
+	});
+
+	it("runs every remaining cleanup and rethrows the error that failed boot when the logger itself throws", async () => {
+		// A logger that cannot log must not cost a cleanup, nor replace the
+		// boot failure the caller is owed with its own.
+		const ran: string[] = [];
+		const logger = spyLogger();
+		logger.error.mockImplementation(() => {
+			throw new Error("log sink down");
+		});
+		const twoCleanupsModule = defineModule<never, "lifecycleRegistrar">({
+			name: "TwoCleanupsMod",
+			optional: ["lifecycleRegistrar"],
+			provides: {
+				slotCA: async (deps) => {
+					deps.lifecycleRegistrar?.register(async () => {
+						ran.push("registered-first");
+					});
+					deps.lifecycleRegistrar?.register(async () => {
+						throw new Error("close failed");
+					});
+					return 1;
+				},
+			},
+			lifecycle: { slotCA: { eager: true } },
+		});
+
+		const failure = await createApp({
+			modules: [twoCleanupsModule, failingModule()],
+			bootstrapComponents: { ...minBoot, logger: logger as unknown as Logger },
+			contributionKinds: makeStubCollectors(),
+		}).then(
+			() => undefined,
+			(err: unknown) => err,
+		);
+
+		expect(failure).toBeInstanceOf(BootError);
+		expect((failure as BootError).reason).toBe("provides-factory-failed");
+		expect(((failure as BootError).cause as Error).message).toBe("stage-3-boom");
+		// LIFO: the throwing close ran first; the one registered before it still ran.
+		expect(ran).toEqual(["registered-first"]);
+		expect(logger.error).toHaveBeenCalledTimes(1);
+	});
 });
 
 // ---------------------------------------------------------------------------

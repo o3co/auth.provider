@@ -396,6 +396,29 @@ describe("createLifecycleRegistrar (D-5)", () => {
 		}
 	});
 
+	it("never throws when the logger throws: every remaining cleanup still runs, every error is returned", async () => {
+		const ran: string[] = [];
+		const reg = createLifecycleRegistrar();
+		reg.register(async () => {
+			ran.push("first-registered");
+		});
+		reg.register(async () => {
+			throw new Error("second fails");
+		});
+		reg.register(async () => {
+			throw new Error("third fails");
+		});
+		const error = vi.fn(() => {
+			throw new Error("log sink down");
+		});
+
+		const errors = await reg._drain({ error }, "dispose");
+
+		expect(ran).toEqual(["first-registered"]);
+		expect((errors as Error[]).map((err) => err.message)).toEqual(["third fails", "second fails"]);
+		expect(error).toHaveBeenCalledTimes(2);
+	});
+
 	it("empty registrar drain returns empty error array (no-op)", async () => {
 		const reg = createLifecycleRegistrar();
 		const errors = await reg._drain({ error: () => {} }, "dispose");
