@@ -265,6 +265,28 @@ describe("createClientIdMetadataDocumentResolver — what a refusal logs of the 
 		expect(reason.startsWith("document is not JSON (Content-Type: text/html?")).toBe(true);
 	});
 
+	it("quotes a token_endpoint_auth_method the document names, sanitised as auditErrorText does", async () => {
+		const { resolve, warn } = resolver({}, [
+			() => json(document({ token_endpoint_auth_method: 'a"b\u2028c\u202e\u007f' })),
+		]);
+
+		expect(await resolve()).toBeNull();
+		expect(onlyLine(warn, "cimd_document_rejected").reason).toBe(
+			"token_endpoint_auth_method 'a?b?c??' is not allowed for a Client ID Metadata Document",
+		);
+	});
+
+	it("quotes a redirect_uris entry sanitised, and says why it is refused", async () => {
+		const { resolve, warn } = resolver({}, [
+			() => json(document({ redirect_uris: ["http://evil.example/cb\u2028\u202e"] })),
+		]);
+
+		expect(await resolve()).toBeNull();
+		expect(onlyLine(warn, "cimd_document_rejected").reason).toBe(
+			"redirect_uris entry 'http://evil.example/cb??' is not acceptable: http:// is accepted for loopback hosts only (localhost, 127.0.0.0/8, [::1]); got host \"evil.example\"",
+		);
+	});
+
 	it("still quotes an ordinary Content-Type exactly", async () => {
 		const { resolve, warn } = resolver({}, [
 			() => new Response("<html/>", { status: 200, headers: { "content-type": "text/html" } }),
@@ -276,6 +298,10 @@ describe("createClientIdMetadataDocumentResolver — what a refusal logs of the 
 		);
 	});
 
+	// A real route never gets here with one: `/authorize` and client
+	// authentication refuse a client id over 256 characters
+	// (`MAX_CLIENT_ID_LENGTH`) before the resolver is asked. These drive the
+	// resolver directly, the one place a longer id could still reach a line.
 	const LONG_ID = `https://client.example/${"p".repeat(10_000)}`;
 
 	it("logs a 10 000-character client id capped when its document is refused", async () => {
