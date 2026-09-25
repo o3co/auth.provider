@@ -958,12 +958,14 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 		await handle.dispose();
 	});
 
-	it("answers 503 at the token endpoint when the memory seen-set is at its cap, and still refuses a replay", async () => {
+	it("answers 503 at the token endpoint when the memory seen-set holds DPoP's share, and still refuses a replay", async () => {
 		// The token endpoint records a proof before its rate limit runs, so
-		// anyone can make the set write one record per request. At its cap the
-		// memory set refuses a new record as a store fault: the proof is refused
-		// unrecorded, as the server's outage — never accepted unrecorded, and
-		// never answered as an invalid proof.
+		// anyone can make the set write one record per request. Once the
+		// memory set holds the share of its cap DPoP may fill, it refuses a new
+		// proof as a store fault: refused unrecorded, as the server's outage —
+		// never accepted unrecorded, and never answered as an invalid proof —
+		// under its own reason, `replay_store_full`, apart from a store that
+		// cannot be reached.
 		const { logger, lines } = serialiseEverythingLogger();
 		const seenSet = createMemoryReplaySeenSet({ maxEntries: 1 });
 		const { handle, app } = await bootReplica({ mode: "single", seenSet, logger });
@@ -981,11 +983,11 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 			{
 				mechanism: "dpop",
 				code: "temporarily_unavailable",
-				reason: "replay_store_unavailable",
+				reason: "replay_store_full",
 				err: {
 					name: "ReplaySeenSetFullError",
 					detail:
-						"memory ReplaySeenSet is at its cap of 1 live records; refusing a new one rather than evicting one",
+						"memory ReplaySeenSet holds 1 live records, the share of its cap of 1 that DPoP proofs may fill; refusing a new proof so the rest stays for the other consumers",
 					reason: "full",
 					stack: FRAMES,
 				},

@@ -304,6 +304,36 @@ describe("createMemoryReplaySeenSet — a cap on the records it holds", () => {
 		expect(await set.contains("client-assertion:c1", "jti-2")).toBe(true);
 	});
 
+	it("keeps the last tenth for the other consumers: a DPoP proof is refused once the set holds 90% of its cap", async () => {
+		// DPoP records a proof before any rate limit or token check, and every
+		// consumer shares the set: a DPoP flood that filled it refused client
+		// authentication too, for up to the replay window after it stopped.
+		const set = createMemoryReplaySeenSet({ maxEntries: 10 });
+		for (let i = 0; i < 9; i += 1) {
+			expect(await set.markSeen("dpop-proof:flood-key", `jti-${i}`, later())).toBe(true);
+		}
+		const refusal = await set.markSeen("dpop-proof:flood-key", "jti-9", later()).then(
+			() => undefined,
+			(err: unknown) => err,
+		);
+		expect(refusal).toBeInstanceOf(ReplaySeenSetFullError);
+		expect(refusal).toMatchObject({ reason: "full" });
+		expect((refusal as Error).message).toBe(
+			"memory ReplaySeenSet holds 9 live records, the share of its cap of 10 that DPoP proofs may fill; refusing a new proof so the rest stays for the other consumers",
+		);
+		// The other consumers write on, to the cap itself.
+		expect(await set.markSeen("client-assertion:rp", "jti-a", later())).toBe(true);
+		await expect(set.markSeen("client-assertion:rp", "jti-b", later())).rejects.toBeInstanceOf(
+			ReplaySeenSetFullError,
+		);
+		expect(set.size).toBe(10);
+	});
+
+	it("rounds DPoP's share up, so a set of any size takes a proof", async () => {
+		const set = createMemoryReplaySeenSet({ maxEntries: 1 });
+		expect(await set.markSeen("dpop-proof:k", "jti-1", later())).toBe(true);
+	});
+
 	it("still refuses a replay at its cap: a replay writes nothing", async () => {
 		const set = createMemoryReplaySeenSet({ maxEntries: 1 });
 		expect(await set.markSeen("scope-A", "jti-1", later())).toBe(true);
