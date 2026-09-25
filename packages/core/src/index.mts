@@ -855,10 +855,12 @@ export type {
 } from "./challenges/types.mjs";
 export {
 	createMemoryReplaySeenSet,
+	DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES,
 	DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS,
 	DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL,
 	type MemoryReplaySeenSet,
 	type MemoryReplaySeenSetOptions,
+	ReplaySeenSetFullError,
 } from "./replay-seen-set/adapters/memory.mjs";
 export {
 	createReplaySeenSetFactory,

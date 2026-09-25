@@ -84,6 +84,24 @@ imports (see [Entry points](#entry-points)). The package depends on `zod`.
   supported by the bundled clients** — enable scripting, or implement the
   per-purpose client interfaces ([Backing-client contract](#backing-client-contract))
   over another atomic primitive yourself.
+- **A `maxmemory`, and an eviction policy that cannot drop a replay record.**
+  The replay seen-set writes a record for every DPoP proof it sees — at the
+  token endpoint before its rate limit runs, at a protected resource before
+  the access token is verified — and keeps it for
+  `oauth.dpop.replay-store-ttl-seconds` (300 s by default), so its size
+  follows the request rate, whoever sends the requests. Set `maxmemory` so a
+  flood cannot take the server's host down, and choose what happens at it.
+  Under `noeviction` a full server refuses the write, and every consumer
+  refuses what it was recording as an outage, `503 temporarily_unavailable`:
+  it fails closed. An evicting policy keeps accepting writes by deleting
+  keys, and a deleted replay record is a proof or assertion that can be
+  replayed within its window: `allkeys-lru` (and every `allkeys-*` policy)
+  can evict any key, a replay record included, and the `volatile-*` policies
+  evict keys that carry a TTL, which every replay record does. Keep the
+  seen-set on a server whose policy is `noeviction`, or on one sized never
+  to reach `maxmemory`. Core's in-process seen-set has a cap of its own
+  (`createMemoryReplaySeenSet`'s `maxEntries`, 100 000 records by default)
+  and refuses at it the same way.
 
 ## Adapters
 

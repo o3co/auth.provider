@@ -675,7 +675,7 @@ stream — its level is fixed at `info`.
 | `jwt_bearer_issuer_audience_mismatch` (warn) | `oauth/src/grants/jwtBearer.mts` | the presenting client's `allowedAudiences` and the assertion issuer's `allowedAudiences` (its trust-registry entry) admit no audience in common, so no token could name one both stand behind. Devices get `invalid_grant`; compare the two registrations (#525) |
 | `cimd_document_rejected`, `cimd_document_fetch_failed`, `cimd_host_not_allowed` (warn) | `oauth/src/clients/clientIdMetadataDocument.mts` | a Client ID Metadata Document client (#529) was refused: the reason names what failed (a redirect, a byte cap, a special-use address, a document that does not match its URL). The client sees `invalid_client`; a steady rate from one host is a misconfigured client or a probe |
 | `revoke_store_unavailable` (error) | `oauth/src/routes/revoke.mts` | `/oauth/revoke` is answering `503`: a client's revocation was not recorded, so the token it asked to end is still valid until it expires. `store` says whether the access-token denylist or the refresh-token family store failed, and `clientId` whose revocation was lost. A client that ignores the `503` keeps a live token it believes revoked — retries succeed once the store is back |
-| `token_binding_unavailable`, `protected_resource_binding_unavailable` (error) by `mechanism` and `reason` | `core/src/middleware/tokenBinding.mts`, `protectedResourceBinding.mts` | a token-binding mechanism could not reach a verdict, and requests at `/oauth/token` (`token_binding_unavailable`) or at protected resources (`protected_resource_binding_unavailable`) are answering `503 temporarily_unavailable`. The dispatcher that answers owns the one line, with the mechanism's `reason` and its `cause`'s projection when it gives them. For DPoP: `reason: "replay_store_unavailable"` = the seen-set is unreachable; `reason: "replay_store_fault"` = it answered with its own contract error (a `RangeError` or `expired-at-issue`) — a broken or hand-built seen-set, whose fix is in the composition, not in Redis. These replace DPoP's own `dpop_replay_store_unavailable` / `dpop_replay_store_fault` lines and the dispatchers' former warn lines |
+| `token_binding_unavailable`, `protected_resource_binding_unavailable` (error) by `mechanism` and `reason` | `core/src/middleware/tokenBinding.mts`, `protectedResourceBinding.mts` | a token-binding mechanism could not reach a verdict, and requests at `/oauth/token` (`token_binding_unavailable`) or at protected resources (`protected_resource_binding_unavailable`) are answering `503 temporarily_unavailable`. The dispatcher that answers owns the one line, with the mechanism's `reason` and its `cause`'s projection when it gives them. For DPoP: `reason: "replay_store_unavailable"` = the seen-set is unreachable, or refused the write — core's in-process set at its cap (`err.name: "ReplaySeenSetFullError"`, `err.reason: "full"`; see Sizing), a Redis at `maxmemory` under `noeviction`; `reason: "replay_store_fault"` = it answered with its own contract error (a `RangeError` or `expired-at-issue`) — a broken or hand-built seen-set, whose fix is in the composition, not in Redis. These replace DPoP's own `dpop_replay_store_unavailable` / `dpop_replay_store_fault` lines and the dispatchers' former warn lines |
 | `shutdown_drain_deadline_exceeded`, `shutdown_cleanup_failed`, `shutdown_cleanup_timed_out`, `shutdown_server_close_failed` (error) + non-zero exit — formerly `graceful shutdown: drain deadline exceeded, closing remaining connections`, `…: cleanup failed`, `…: cleanup timed out`, `…: server close failed`; the drain starts with `shutdown_draining` and ends with `shutdown_complete` (info, `reason`, `drain`, `exitCode`) | `templates/standalone/src/shutdown.mts` | a replica did not drain within `drainTimeoutMs` (default 10 s), its cleanup did not finish within the allowance (45 s or more with federation grants on — a rotated upstream credential may be unwritten), or it could not release its connections |
 | `adapter_lifecycle_cleanup_failed` (error) with `phase`, `cleanupIndex` and `err` | `core/src/adapters/AdapterFactory.mts` | an adapter's own cleanup — typically the close of a connection its builder opened — threw while `handle.dispose()` drained them (`phase: "dispose"`) or while a failed boot did (`phase: "boot_failure"`). One line per failed cleanup, through the deployment's logger — the `logger` component at dispose, the logger the composition root handed in (bootstrap or override) when boot failed; the standalone passes one — and to stderr only when there is none; the drain goes on to the rest, even when the logger itself throws. A dispose then rejects, which the standalone reports as `graceful shutdown: cleanup failed`; a failed boot rethrows the error that failed it (a `BootError` for every refusal) |
 
@@ -879,6 +879,18 @@ lifetime) per family:
   the user has consented to, until revoked; one parked request per consent
   page shown, for at most 15 minutes (10 plus the slack), 16 per session at
   most. Only with `CONSENT_STORE_ADAPTER=redis`.
+- **Replay records** — one per DPoP proof for
+  `oauth.dpop.replay-store-ttl-seconds` (default 300 s), and one per
+  `private_key_jwt` assertion, ID-JAG and consumed WebAuthn challenge for its
+  window. A DPoP proof is recorded at the token endpoint before its rate
+  limit runs and at a protected resource before the access token is verified,
+  so this family grows with whatever request rate anyone sends. Give Redis a
+  `maxmemory` with the `noeviction` policy: a full server then refuses the
+  write, and the request is answered `503` (fail closed). An evicting policy
+  (`allkeys-lru` and the other `allkeys-*`, and `volatile-*`, since every
+  replay record has a TTL) makes room by deleting keys, and a deleted replay
+  record is a proof or assertion that can be replayed within its window
+  (`packages/redis/README.md`, Requirements).
 
 The standalone does not mount the device grant, so it holds no device-code
 keys. A deployment that adds it with `redisDeviceCodeStoreModule` holds, per
@@ -894,7 +906,16 @@ hold their live entries plus at most those that expired since the last sweep:
 each sweeps on its writes, at most once per 1000 writes and once per ten
 seconds (`packages/core/src/single-use/sweep.mts`), so a WebAuthn ceremony
 the user abandons, or an options request repeated in a loop, costs an entry
-for its lifetime and not until the process restarts.
+for its lifetime and not until the process restarts. The replay seen-set is
+also capped at 100 000 records (about 20 MB; `maxEntries` in
+`packages/core/src/replay-seen-set/adapters/memory.mts`). At the cap it
+reclaims what has expired, at most once per ten seconds, and otherwise
+refuses the new record rather than evict a live one: DPoP and
+`private_key_jwt` answer `503 temporarily_unavailable` until records expire,
+logged as `token_binding_unavailable` / `client_assertion_refused` with
+`err.name: "ReplaySeenSetFullError"`. Sustained, that is a flood of fresh
+DPoP proofs, or more traffic than one replica's seen-set should carry: move
+to `REPLAY_SEEN_SET_ADAPTER=redis`.
 
 ### Failure timing on the shared socket
 

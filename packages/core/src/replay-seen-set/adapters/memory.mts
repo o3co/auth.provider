@@ -46,11 +46,48 @@ export const DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL = 1_000;
 export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MIN_SWEEP_INTERVAL_MS = 10_000;
 
 /**
- * How the sweep is paced: `sweepInterval` writing `markSeen` calls, and at
- * least `minSweepIntervalMs` between two sweeps (see
- * {@link AmortizedSweepOptions}).
+ * The most records the set holds by default. At about 200 bytes a record
+ * that is some 20 MB, and it is more than DPoP's default 300-second window
+ * fills at 300 recorded proofs a second on the single replica this set is
+ * for (a deployment of more uses the Redis seen-set). Raise it with
+ * `maxEntries` in a module of your own that builds the set.
  */
-export type MemoryReplaySeenSetOptions = AmortizedSweepOptions;
+export const DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES = 100_000;
+
+/**
+ * How the sweep is paced — `sweepInterval` writing `markSeen` calls, and at
+ * least `minSweepIntervalMs` between two sweeps (see
+ * {@link AmortizedSweepOptions}) — and the cap on the records it holds.
+ */
+export interface MemoryReplaySeenSetOptions extends AmortizedSweepOptions {
+	/**
+	 * The most records the set holds, expired-but-unswept ones included;
+	 * {@link DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES} when absent. A value
+	 * that is not a positive whole number is a `RangeError`, never read as no
+	 * cap.
+	 */
+	readonly maxEntries?: number;
+}
+
+/**
+ * What `markSeen` throws when the set is at its cap and none of its records
+ * has expired: a store fault, as a Redis seen-set's refused write at
+ * `maxmemory` is — not one of the port's contract errors
+ * (`ChallengeStorageError`, `RangeError`), which a consumer reads as its own
+ * mistake. Every consumer refuses what it was recording, unrecorded: DPoP and
+ * `private_key_jwt` answer `503 temporarily_unavailable`. `reason` is
+ * `"full"`, which a logged projection keeps.
+ */
+export class ReplaySeenSetFullError extends Error {
+	readonly reason = "full" as const;
+
+	constructor(maxEntries: number) {
+		super(
+			`memory ReplaySeenSet is at its cap of ${maxEntries} live records; refusing a new one rather than evicting one`,
+		);
+		this.name = "ReplaySeenSetFullError";
+	}
+}
 
 /** In-process seen-set, with the record count exposed for observability. */
 export interface MemoryReplaySeenSet extends ReplaySeenSet {
@@ -84,6 +121,24 @@ export interface MemoryReplaySeenSet extends ReplaySeenSet {
  * `markSeen` / `contains` keep answering correctly for one that has not been
  * swept yet.
  *
+ * ## Why it has a cap, and refuses at it
+ *
+ * The sweep bounds the set by time, not by count: what it holds is the
+ * records written within their lifetime, so the write rate decides its size.
+ * DPoP writes one for every freshly signed proof — at the token endpoint
+ * before its rate limit runs, at a protected resource before the access
+ * token is verified — so anyone can make it write at will. `maxEntries`
+ * bounds it. At the cap the set first reclaims what has expired, at most
+ * once per sweep floor (`minSweepIntervalMs`), so a flood that holds it at
+ * the cap does not make every write a full scan; if it is still full it
+ * refuses the new record with {@link ReplaySeenSetFullError}, a store fault.
+ * It never evicts a live record to make room: an evicted record is a value
+ * that can be accepted again — a replay. A replay of a value it holds needs
+ * no room and is still refused (`false`). While it is full every consumer
+ * sharing it refuses what it would record — DPoP proofs, `private_key_jwt`
+ * assertions, ID-JAGs, WebAuthn challenges — until records expire, which is
+ * the fail-closed answer the port asks of a store that cannot write.
+ *
  * The `getLive` helper is deliberately duplicated rather than shared with
  * the memory ChallengeStore — three similar lines is preferable to a
  * premature abstraction here, since the two stores have semantically
@@ -97,6 +152,12 @@ export interface MemoryReplaySeenSet extends ReplaySeenSet {
 export function createMemoryReplaySeenSet(
 	options: MemoryReplaySeenSetOptions = {},
 ): MemoryReplaySeenSet {
+	const maxEntries = options.maxEntries ?? DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES;
+	if (!Number.isInteger(maxEntries) || maxEntries <= 0) {
+		throw new RangeError(
+			`createMemoryReplaySeenSet: maxEntries must be a positive whole number (got ${String(maxEntries)})`,
+		);
+	}
 	const map = new Map<string, { expiresAtMs: number }>();
 	const schedule = createAmortizedSweep(options, {
 		sweepInterval: DEFAULT_MEMORY_REPLAY_SEEN_SET_SWEEP_INTERVAL,
@@ -141,6 +202,13 @@ export function createMemoryReplaySeenSet(
 			const k = canonicalKey(scope, key);
 			if (getLive(k, nowMs) !== undefined) {
 				return false;
+			}
+			// At the cap: reclaim what has expired, no more often than the
+			// sweep floor, and refuse if the set is still full. See "Why it has
+			// a cap, and refuses at it" above.
+			if (map.size >= maxEntries) {
+				if (schedule.due()) sweep(nowMs);
+				if (map.size >= maxEntries) throw new ReplaySeenSetFullError(maxEntries);
 			}
 			map.set(k, { expiresAtMs });
 			if (schedule.wrote()) sweep(nowMs);

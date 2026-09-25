@@ -52,6 +52,14 @@ export interface AmortizedSweepOptions {
 export interface AmortizedSweep {
 	/** Count one write; `true` when the caller is to sweep now. */
 	wrote(): boolean;
+	/**
+	 * `true` when the caller may sweep now whatever the write count — at
+	 * least `minSweepIntervalMs` since the last sweep — and counts it as that
+	 * sweep. For a store at its cap, which reclaims what has expired before it
+	 * refuses: a sweep per refused write would make each one O(size) under
+	 * the flood that fills it.
+	 */
+	due(): boolean;
 }
 
 export function createAmortizedSweep(
@@ -73,15 +81,21 @@ export function createAmortizedSweep(
 	let writesSinceSweep = 0;
 	let lastSweepAtMonotonicMs = Number.NEGATIVE_INFINITY;
 
+	/** Past the floor: record the sweep and answer `true`. */
+	const pastFloor = (): boolean => {
+		const monotonicMs = performance.now();
+		if (monotonicMs - lastSweepAtMonotonicMs < minSweepIntervalMs) return false;
+		writesSinceSweep = 0;
+		lastSweepAtMonotonicMs = monotonicMs;
+		return true;
+	};
+
 	return {
 		wrote() {
 			writesSinceSweep += 1;
 			if (writesSinceSweep < sweepInterval) return false;
-			const monotonicMs = performance.now();
-			if (monotonicMs - lastSweepAtMonotonicMs < minSweepIntervalMs) return false;
-			writesSinceSweep = 0;
-			lastSweepAtMonotonicMs = monotonicMs;
-			return true;
+			return pastFloor();
 		},
+		due: pastFloor,
 	};
 }
