@@ -4,10 +4,13 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	ChallengeStoreFullError,
 	createMemoryChallengeStore,
+	DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES,
 	DEFAULT_MEMORY_CHALLENGE_STORE_MIN_SWEEP_INTERVAL_MS,
 	DEFAULT_MEMORY_CHALLENGE_STORE_SWEEP_INTERVAL,
-} from "../adapters/memory.mjs";
+} from "#/challenges/adapters/memory.mjs";
+import { ChallengeStorageError } from "#/single-use/errors.mjs";
 import { runChallengeStoreContract } from "./adapters.contract.mjs";
 
 runChallengeStoreContract("memory", {
@@ -231,6 +234,110 @@ describe("createMemoryChallengeStore — sweeps are also bounded in time", () =>
 			).toThrow(
 				new RangeError(
 					`createMemoryChallengeStore: minSweepIntervalMs must be a whole number of milliseconds, 0 or more (got ${String(bad)})`,
+				),
+			);
+		}
+	});
+});
+
+/*
+ * Nothing bounded the store but time. WebAuthn authentication options are
+ * asked for without a credential, and each issues a challenge kept for the
+ * ceremony's window, so the request rate decided how much memory the store
+ * held — and the window is an operator setting. A cap on the challenges it
+ * holds bounds it; at the cap it refuses a new challenge as a store fault —
+ * the ceremony cannot start, and the options route answers 503 — the way a
+ * Redis store refuses a write at `maxmemory` under `noeviction`. It never
+ * evicts a live challenge, which would fail the ceremony of a user already
+ * in front of their authenticator.
+ */
+describe("createMemoryChallengeStore — a cap on the challenges it holds", () => {
+	const later = (): number => Date.now() + 600_000;
+
+	it("holds at most a million challenges by default, and says what its cap is", () => {
+		expect(DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES).toBe(1_000_000);
+		expect(createMemoryChallengeStore().maxEntries).toBe(
+			DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES,
+		);
+		expect(createMemoryChallengeStore({ maxEntries: 5 }).maxEntries).toBe(5);
+	});
+
+	it("refuses a new challenge at its cap as a store fault, recording nothing and evicting nothing", async () => {
+		const store = createMemoryChallengeStore({ maxEntries: 2 });
+		await store.issue("webauthn:authentication", "c-1", later());
+		await store.issue("webauthn:registration:u1", "c-2", later());
+
+		const refusal = await store.issue("webauthn:authentication", "c-3", later()).then(
+			() => undefined,
+			(err: unknown) => err,
+		);
+		expect(refusal).toBeInstanceOf(ChallengeStoreFullError);
+		// Not the port's own refusals (`duplicate`, `expired-at-issue`, a
+		// RangeError), which a caller reads as something it did.
+		expect(refusal).not.toBeInstanceOf(ChallengeStorageError);
+		expect(refusal).not.toBeInstanceOf(RangeError);
+		expect(refusal).toMatchObject({ name: "ChallengeStoreFullError", reason: "full" });
+		expect((refusal as Error).message).toBe(
+			"memory ChallengeStore is at its cap of 2 live challenges; refusing a new one rather than evicting one",
+		);
+
+		expect(store.size).toBe(2);
+		expect(await store.find("webauthn:authentication", "c-3")).toBeNull();
+		expect(await store.find("webauthn:authentication", "c-1")).not.toBeNull();
+		expect(await store.find("webauthn:registration:u1", "c-2")).not.toBeNull();
+	});
+
+	it("still answers a duplicate as a duplicate at its cap", async () => {
+		const store = createMemoryChallengeStore({ maxEntries: 1 });
+		await store.issue("webauthn:authentication", "c-1", later());
+		await expect(store.issue("webauthn:authentication", "c-1", later())).rejects.toMatchObject({
+			name: "ChallengeStorageError",
+			reason: "duplicate",
+		});
+	});
+
+	it("has room again once a challenge is consumed", async () => {
+		const store = createMemoryChallengeStore({ maxEntries: 1 });
+		await store.issue("webauthn:authentication", "c-1", later());
+		expect(await store.consume("webauthn:authentication", "c-1")).toBe(true);
+		await store.issue("webauthn:authentication", "c-2", later());
+		expect(store.size).toBe(1);
+	});
+
+	it("reclaims expired challenges before it refuses", async () => {
+		vi.useFakeTimers();
+		const store = createMemoryChallengeStore({ maxEntries: 2, minSweepIntervalMs: 0 });
+		await store.issue("webauthn:authentication", "short", Date.now() + 1_000);
+		await store.issue("webauthn:authentication", "long", later());
+		vi.advanceTimersByTime(2_000);
+		await store.issue("webauthn:authentication", "next", later());
+		expect(store.size).toBe(2);
+		expect(await store.find("webauthn:authentication", "long")).not.toBeNull();
+	});
+
+	it("scans for expired challenges at its cap no more often than its sweep floor", async () => {
+		vi.useFakeTimers();
+		const store = createMemoryChallengeStore({ maxEntries: 2, minSweepIntervalMs: 1_000 });
+		await store.issue("webauthn:authentication", "a", Date.now() + 10);
+		await store.issue("webauthn:authentication", "b", Date.now() + 10);
+		await expect(store.issue("webauthn:authentication", "c", later())).rejects.toBeInstanceOf(
+			ChallengeStoreFullError,
+		);
+		vi.advanceTimersByTime(20);
+		// Both have expired, but the floor has not passed: no scan.
+		await expect(store.issue("webauthn:authentication", "d", later())).rejects.toBeInstanceOf(
+			ChallengeStoreFullError,
+		);
+		vi.advanceTimersByTime(1_000);
+		await store.issue("webauthn:authentication", "e", later());
+		expect(store.size).toBe(1);
+	});
+
+	it("refuses a cap that is not a positive whole number, rather than holding no cap", () => {
+		for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+			expect(() => createMemoryChallengeStore({ maxEntries: bad }), String(bad)).toThrow(
+				new RangeError(
+					`createMemoryChallengeStore: maxEntries must be a positive whole number (got ${String(bad)})`,
 				),
 			);
 		}
