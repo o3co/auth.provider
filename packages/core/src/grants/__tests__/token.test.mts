@@ -402,6 +402,13 @@ describe("generateTokenResponse token_type follows the access token's confirmati
 		expect(generateTokenResponse({ accessToken }).token_type).toBe("Bearer");
 	});
 
+	it("reads the confirmation as every cnf reader does: an empty member names no binding", () => {
+		// `extractConfirmation`'s rule (a non-empty string member), which the
+		// introspection handler applies too — never the key's mere presence.
+		const accessToken = { token: "t", confirmation: { jkt: "" } as unknown as Confirmation };
+		expect(generateTokenResponse({ accessToken }).token_type).toBe("Bearer");
+	});
+
 	it("answers for the access token, not the refresh token beside it", async () => {
 		const accessToken = await generateToken({}, { keyStore });
 		const refreshToken = await generateToken({}, { keyStore, confirmation: { jkt: "abc" } });
