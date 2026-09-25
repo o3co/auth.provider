@@ -405,7 +405,7 @@ describe("revocation.mode = both: the OCSP fallback is logged once it has answer
 	});
 
 	it("both down under reject: 503, the dispatcher's one error line, naming both sources and carrying both errors", async () => {
-		const { root, int, leaf } = await pki("refused", "127.0.0.1", true);
+		const { root, int, leaf, leafPoint, leafResponder } = await pki("refused", "127.0.0.1", true);
 		const { app, calls } = appWith(root, "reject", "both");
 
 		const res = await request(app)

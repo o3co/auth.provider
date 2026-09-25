@@ -236,6 +236,11 @@ export type CrlLookup =
 			readonly cause?: unknown;
 			/** Every point that could not be used was an outage (see the module header). */
 			readonly outage?: true;
+			/**
+			 * Each point that could not be used, when the certificate named any:
+			 * what a caller that reports every source one by one reads.
+			 */
+			readonly points?: readonly CrlPointUnavailable[];
 	  };
 
 /** One audit-trail line per URI that could not be used. */
@@ -840,6 +845,7 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 					...(unavailable.length > 0 && unavailable.every((point) => point.outage)
 						? { outage: true }
 						: {}),
+					points: unavailable,
 				};
 			}
 			return { ok: true, crls, unavailable };

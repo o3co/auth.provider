@@ -44,7 +44,7 @@ import {
 	type TokenBindingMechanism,
 } from "@o3co/auth-provider-core";
 import type { Request } from "express";
-import { MtlsError, MtlsRevocationUnavailableError } from "./errors.mjs";
+import { MtlsError } from "./errors.mjs";
 import type { SignatureAlgorithmName } from "./fullPki/algorithms.mjs";
 import { type FullPkiTuning, resolveFullPkiTuning } from "./fullPki/defaults.mjs";
 import { createFullPkiValidator, type FullPkiValidator } from "./fullPki/validate.mjs";
@@ -503,12 +503,9 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 						"revocation_unavailable",
 						"client certificate revocation status could not be determined",
 						{ step: result.step },
-						{
-							cause: new MtlsRevocationUnavailableError(
-								result.detail,
-								result.cause !== undefined ? { cause: result.cause } : undefined,
-							),
-						},
+						// The validator's account, one member per source that could not
+						// be used (an MtlsRevocationUnavailableError).
+						result.cause !== undefined ? { cause: result.cause } : undefined,
 					);
 				}
 				if (!result.ok) {

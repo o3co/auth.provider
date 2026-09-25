@@ -68,7 +68,8 @@ export type MtlsReasonCode =
  * The message is this package's own fixed text. When a parser refused the
  * material, its error is the standard `cause` — never copied into the
  * message, since a parser's message is its reading of what the client sent.
- * An outage's `cause` is an {@link MtlsRevocationUnavailableError}.
+ * An outage's `cause` is an {@link MtlsRevocationUnavailableError}, one member
+ * per revocation source that could not be used.
  *
  * Per Wave 2 Phase 3 spec §5.5 + design principle §3.4.
  */
@@ -100,15 +101,49 @@ export class MtlsError extends Error {
 }
 
 /**
- * The cause of a `revocation_unavailable` refusal: this package's account of
- * which revocation source could not answer and why — subjects, URLs,
- * reasons, statuses and transport codes, in its own words — with the
- * library's error, when one threw, as its own `cause`. The dispatcher's
- * outage line carries its projection.
+ * One revocation source — a CRL distribution point or an OCSP responder — that
+ * could not be used, as a member of an {@link MtlsRevocationUnavailableError}:
+ * `<source> <url>: <reason> — <detail>`, all this package's own words, with the
+ * library's error, when one threw, as its `cause`. One error per source, so a
+ * log line's cap on a projected message (core's `loggableError`, 256
+ * characters) cuts no other source's account.
  */
-export class MtlsRevocationUnavailableError extends Error {
-	constructor(detail: string, options?: ErrorOptions) {
-		super(detail, options);
+export class MtlsRevocationSourceError extends Error {
+	readonly source: "crl" | "ocsp";
+	readonly url?: string;
+	/** The source's reason code (`fetch_failed`, `unparseable`, `stale`, …), which a projection keeps. */
+	readonly reason: string;
+
+	constructor(
+		failure: {
+			readonly source: "crl" | "ocsp";
+			readonly url?: string;
+			readonly reason: string;
+			readonly detail: string;
+		},
+		options?: ErrorOptions,
+	) {
+		super(
+			`${failure.source}${failure.url !== undefined ? ` ${failure.url}` : ""}: ${failure.reason} — ${failure.detail}`,
+			options,
+		);
+		this.name = "MtlsRevocationSourceError";
+		this.source = failure.source;
+		if (failure.url !== undefined) this.url = failure.url;
+		this.reason = failure.reason;
+	}
+}
+
+/**
+ * The cause of a `revocation_unavailable` refusal: an AggregateError whose
+ * members are the {@link MtlsRevocationSourceError}s — one per source that
+ * could not be used — and whose own message is short, naming the certificate
+ * last. The dispatcher's outage line carries its projection: the message,
+ * and each member (the first five) with its library error.
+ */
+export class MtlsRevocationUnavailableError extends AggregateError {
+	constructor(subject: string, sources: readonly MtlsRevocationSourceError[]) {
+		super(sources, `revocation status could not be determined for ${subject}`);
 		this.name = "MtlsRevocationUnavailableError";
 	}
 }

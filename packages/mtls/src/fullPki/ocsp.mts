@@ -284,7 +284,22 @@ export type OcspLookup =
 			readonly cause?: unknown;
 			/** Every responder that was asked failed as an outage (see the module header). */
 			readonly outage?: true;
+			/**
+			 * Each responder that was asked and could not be used, when the
+			 * certificate named any: what a caller that reports every source one
+			 * by one reads.
+			 */
+			readonly responders?: readonly OcspResponderUnavailable[];
 	  };
+
+/** One responder that was asked and could not be used, and why. */
+export interface OcspResponderUnavailable {
+	readonly url: string;
+	readonly reason: OcspUnavailableReason;
+	readonly detail: string;
+	readonly cause?: unknown;
+	readonly outage?: true;
+}
 
 export type OcspResponders =
 	| { readonly ok: true; readonly urls: readonly string[] }
@@ -1269,13 +1284,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 
 			const issuerId = issuerKeyId(issuer);
 			const serial = serialHex(certificate);
-			const failures: {
-				url: string;
-				reason: OcspUnavailableReason;
-				detail: string;
-				cause?: unknown;
-				outage?: true;
-			}[] = [];
+			const failures: OcspResponderUnavailable[] = [];
 			for (const url of responders.urls) {
 				const answer = await lookup(url, certificate, issuer, issuerId, serial, now);
 				if (answer.ok) {
@@ -1303,6 +1312,7 @@ export const createOcspResolver = (options: OcspResolverOptions): OcspResolver =
 					.join("; "),
 				...(last?.cause !== undefined ? { cause: last.cause } : {}),
 				...(failures.length > 0 && failures.every((entry) => entry.outage) ? { outage: true } : {}),
+				responders: failures,
 			};
 		},
 	};

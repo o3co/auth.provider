@@ -237,7 +237,17 @@ describe("a CRL pkijs cannot use", () => {
 			ok: false,
 			step: "revocation status unavailable",
 			detail: `CN=client: unparseable — ${INT_CRL_URL}: unparseable (not a DER CRL)`,
-			cause: expect.objectContaining({ name: "AsnError" }),
+			// One member per source that could not be used, pkijs's error on it.
+			cause: expect.objectContaining({
+				name: "MtlsRevocationUnavailableError",
+				errors: [
+					expect.objectContaining({
+						name: "MtlsRevocationSourceError",
+						message: `crl ${INT_CRL_URL}: unparseable — not a DER CRL`,
+						cause: expect.objectContaining({ name: "AsnError" }),
+					}),
+				],
+			}),
 			outage: true,
 		});
 		expect(logger.warn).not.toHaveBeenCalled();
