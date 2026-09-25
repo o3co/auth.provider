@@ -504,7 +504,7 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 - `post_logout_redirect_uri`（任意） — `client.postLogoutRedirectUris` のいずれかと**バイト単位で完全一致**しなければならない。逆ドメインのカスタムスキームは正当なエントリーだが、それだからといって緩和はされない。
 - `state`（任意） — `post_logout_redirect_uri` へのリダイレクト時にそのまま返す
 
-`post_logout_redirect_uri` は、ヒントを検証した直後に 1 回だけ、ヒントの発行先クライアント（その `aud`）のリストと照合し、以後は照合の結果だけを使う — 確認ページも、上流の end-session 呼び出しも、このエンドポイント自身のリダイレクトも。一致しないもの、あるいはこのデプロイメントが知らないクライアントのものは、送られなかったものとして扱う。特に、**フェデレーションの end-session 呼び出しには決して渡さない**。Google、GitHub、Apple は end-session エンドポイントを公開しておらず、設定されていなければそのアダプターは渡された URI へそのままリダイレクトするからである。`post_logout_redirect_uri` を指定しないリクエストはクライアントリポジトリに一切問い合わせない。答えられないクライアントリポジトリは、何もログアウトする前に `503 temporarily_unavailable`（"client repository unavailable"）となり、`site: "logout"` 付きの `client_repository_unavailable` として error レベルで 1 回ログに出す。
+`post_logout_redirect_uri` は、ヒントを検証しセッションを名指すと確かめた直後に 1 回だけ、ヒントの発行先クライアント（その `aud`）のリストと照合し、以後は照合の結果だけを使う — 確認ページも、上流の end-session 呼び出しも、このエンドポイント自身のリダイレクトも。一致しないもの、あるいはこのデプロイメントが知らないクライアントのものは、送られなかったものとして扱う。特に、**フェデレーションの end-session 呼び出しには決して渡さない**。Google、GitHub、Apple は end-session エンドポイントを公開しておらず、設定されていなければそのアダプターは渡された URI へそのままリダイレクトするからである。`post_logout_redirect_uri` を指定しないリクエストはクライアントリポジトリに一切問い合わせない。答えられないクライアントリポジトリは、何もログアウトする前に `503 temporarily_unavailable`（"client repository unavailable"）となり、`site: "logout"` 付きの `client_repository_unavailable` として error レベルで 1 回ログに出す。
 
 `id_token_hint` の発行から 24 時間を超えた `GET` には、ログアウトする代わりに確認ページを返す。そのフォームはヒントと `state` をこのエンドポイントへ POST で送り返し、`post_logout_redirect_uri` はクライアントのアローリストにある場合だけ送り返す。
 

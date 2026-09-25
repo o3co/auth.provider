@@ -1141,7 +1141,8 @@ async function refreshUnderLock(
 		// (`isFederationUpstreamOutage`, the connect callback's own test), or
 		// whatever else the classifier reads structurally as one: a 5xx status
 		// or a connection code on a thrown value that is not an Error, which a
-		// hand-written adapter may throw. A 5xx is never a verdict on the
+		// hand-written adapter may throw. Neither reads the IdP's parsed body,
+		// which openid-client carries as the error's cause. A 5xx is never a verdict on the
 		// credential, whatever OAuth code its body carries: a 503 naming an
 		// interaction code must not stamp the user's absence (below). A 429 is
 		// no outage, and stays the rate limit below. The classifier's

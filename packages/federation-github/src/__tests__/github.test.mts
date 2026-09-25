@@ -386,7 +386,7 @@ describe("createGithubProvider", () => {
 		// message's text; the adapter quotes nothing it was handed.
 		const p = createGithubProvider(baseConfig);
 		const refusal = await p
-			.endSession({ postLogoutRedirectUri: 'not a url "\r\ninjected-line' })
+			.endSession({ postLogoutRedirectUri: '%%bogus "\r\ninjected-line' })
 			.then(
 				() => undefined,
 				(error: unknown) => error,
@@ -394,7 +394,7 @@ describe("createGithubProvider", () => {
 		expect(refusal).toBeInstanceOf(Error);
 		expect((refusal as Error).message).toMatch(/invalid postLogoutRedirectUri/);
 		expect((refusal as Error).message).not.toContain("injected-line");
-		expect((refusal as Error).message).not.toContain("not a url");
+		expect((refusal as Error).message).not.toContain("%%bogus");
 	});
 
 	it("endSession honors configured endSessionEndpoint when present (I-1 — GitHub Enterprise support)", async () => {

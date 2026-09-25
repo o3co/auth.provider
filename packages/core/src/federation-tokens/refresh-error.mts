@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import { isFederationUpstreamOutage } from "./upstreamOutage.mjs";
+import { isError, isFederationUpstreamOutage } from "./upstreamOutage.mjs";
 
 /**
  * SF-13 — what an upstream federation refresh failed with.
@@ -57,6 +57,13 @@ export interface FederationRefreshErrorClassification {
  * openid-client v6 rethrows these as-is. Walk the cause chain so
  * `ECONNREFUSED` / `ENOTFOUND` / `ETIMEDOUT` reach the `network` classification
  * regardless of whether the code lands on the top-level error or its `cause`.
+ *
+ * The code is read on the thrown value itself, whatever it is — a hand-written
+ * adapter may throw a plain object — and on a cause only when that cause is an
+ * Error: openid-client's `ResponseBodyError` carries the IdP's parsed JSON body
+ * as its cause, and a `code` the IdP wrote there says nothing about this
+ * server's transport. `isFederationUpstreamOutage` follows causes by the same
+ * rule.
  */
 const NETWORK_CODES: ReadonlySet<string> = new Set([
 	"ECONNREFUSED",
@@ -68,6 +75,7 @@ const NETWORK_CODES: ReadonlySet<string> = new Set([
 function extractNetworkCode(error: unknown): string | undefined {
 	let cur: unknown = error;
 	for (let depth = 0; depth < 4 && cur !== null && typeof cur === "object"; depth++) {
+		if (depth > 0 && !isError(cur)) return undefined;
 		const code = (cur as { code?: unknown }).code;
 		if (typeof code === "string" && NETWORK_CODES.has(code)) return code;
 		cur = (cur as { cause?: unknown }).cause;
@@ -151,8 +159,9 @@ function structuredReason(error: object): FederationRefreshErrorReason | undefin
 	if (outage) return "network";
 	// Node network-layer failures: ECONNREFUSED / ENOTFOUND / ETIMEDOUT may be on
 	// the top-level error (legacy adapters) or wrapped as `.cause` of a TypeError
-	// thrown by undici/fetch (openid-client v6's transport) — here also when what
-	// carries the code is not an Error, which the outage test does not follow.
+	// thrown by undici/fetch (openid-client v6's transport) — here also when the
+	// thrown value itself is not an Error, which the outage test does not read.
+	// Never in a cause that is not an Error: that is a peer's parsed body.
 	if (extractNetworkCode(error) !== undefined) return "network";
 	return undefined;
 }

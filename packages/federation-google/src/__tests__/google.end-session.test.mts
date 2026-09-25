@@ -70,7 +70,7 @@ describe("Google endSession()", () => {
 		// message's text; the adapter names what was wrong and quotes nothing
 		// it was handed.
 		const p = createGoogleProvider(baseConfig);
-		const handed = 'not a url "\r\ninjected-line';
+		const handed = '%%bogus "\r\ninjected-line';
 		const refusal = await p.endSession({ postLogoutRedirectUri: handed }).then(
 			() => undefined,
 			(error: unknown) => error,
@@ -78,6 +78,6 @@ describe("Google endSession()", () => {
 		expect(refusal).toBeInstanceOf(Error);
 		expect((refusal as Error).message).toMatch(/invalid postLogoutRedirectUri/);
 		expect((refusal as Error).message).not.toContain("injected-line");
-		expect((refusal as Error).message).not.toContain("not a url");
+		expect((refusal as Error).message).not.toContain("%%bogus");
 	});
 });
