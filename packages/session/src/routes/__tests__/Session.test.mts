@@ -1272,6 +1272,10 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 		}
 	};
 
+	// One replica, so the router's construction-time notice about its
+	// per-process login limiter is not among the lines a test counts.
+	const config = { ...stubConfig, deployment: { mode: "single" } } as unknown as AppConfig;
+
 	const login = (app: express.Express) =>
 		loginRequest(app)
 			.send("username=alice&password=secret")
@@ -1285,6 +1289,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 				authenticateByToken: vi.fn(),
 			} as unknown as UserRepository,
 			logger: logger as unknown as Logger,
+			config,
 		});
 
 		const res = await login(app);
@@ -1313,6 +1318,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 				delete: vi.fn(),
 			} as unknown as UserSessionStore,
 			logger: logger as unknown as Logger,
+			config,
 		});
 
 		const res = await login(app);
@@ -1342,6 +1348,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 			userSessionStore: store,
 			regenerateError: new Error("cookie store down"),
 			logger: logger as unknown as Logger,
+			config,
 		});
 
 		const res = await login(app);
@@ -1374,6 +1381,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 			}),
 			regenerateError: new Error("cookie store down"),
 			logger: logger as unknown as Logger,
+			config,
 		});
 
 		const res = await login(app);
@@ -1398,6 +1406,7 @@ describe("Session routes — a store that cannot answer is an outage, logged onc
 			destroyError: new Error("cookie store down"),
 			initialSession: { isAuthenticated: true, sid: "sid-1", user: { id: "u-1" } },
 			logger: logger as unknown as Logger,
+			config,
 		});
 
 		const res = await logoutRequest(app);
