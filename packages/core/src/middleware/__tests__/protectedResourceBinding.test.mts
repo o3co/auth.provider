@@ -427,6 +427,61 @@ describe("protectedResourceBindingMw — a server-side outage", () => {
 		expect(JSON.stringify(logger.error.mock.calls)).not.toContain("refused-command-marker");
 	});
 
+	it("logs a failed proof once at warn: its code, the refusal's reason, and its projection with the cause inside", async () => {
+		const token = await mintToken({ sub: "u1", cnf: { "x5t#S256": X5T } });
+		let parseError: unknown;
+		try {
+			JSON.parse('{"x5c":"refused-material-marker');
+		} catch (err) {
+			parseError = err;
+		}
+		const refusal = Object.assign(new Error("header parse failure", { cause: parseError }), {
+			code: "invalid_certificate",
+			reason: "malformed_header",
+		});
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child() {
+				return this;
+			},
+		};
+		const { res } = await run(
+			protectedResourceBindingMw({
+				mechanisms: [throwingMechanism("mtls", refusal)],
+				logger: logger as never,
+			}),
+			`Bearer ${token}`,
+		);
+		expect(res.statusCode).toBe(401);
+		expect(logger.error).not.toHaveBeenCalled();
+		// Beside it, the sender-constraint refusal's own line
+		// (`sender_constraint_rejected`, reason `proof_invalid`).
+		const proofLines = logger.warn.mock.calls.filter(
+			([, event]) => event === "protected_resource_binding_proof_invalid",
+		);
+		expect(proofLines).toHaveLength(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{
+				mechanism: "mtls",
+				code: "invalid_certificate",
+				reason: "malformed_header",
+				err: expect.objectContaining({
+					name: "Error",
+					detail: "header parse failure",
+					reason: "malformed_header",
+					cause: expect.objectContaining({ name: "SyntaxError" }),
+				}),
+			},
+			"protected_resource_binding_proof_invalid",
+		);
+		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("refused-material-marker");
+	});
+
 	it("reads a bare code as a failed proof: only the mechanism can say it was an outage", async () => {
 		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT } });
 		const bare = Object.assign(new Error("down"), { code: "temporarily_unavailable" });
