@@ -20,10 +20,10 @@
  * verdict. Every path that calls an upstream decides on it:
  *
  * - the refresh-error classifier (`classifyFederationRefreshError` in
- *   `refresh-error.mts`, beside it) reads it first, before any OAuth code the
- *   answer names, so an outage is `network` and never a rejected refresh
- *   token — for the session-bound token route and a federation grant's
- *   retrieval alike;
+ *   `refresh-error.mts`, beside it) reads it before the OAuth codes that
+ *   reject a refresh token, so an outage is never a rejected refresh token —
+ *   for the session-bound token route and a federation grant's retrieval
+ *   alike;
  * - the federation-grant connect callback's code exchange answers an outage
  *   `temporarily_unavailable` and anything else `upstream_error` (#593, D7);
  * - the federation-grant retrieval's refresh answers an outage `503 upstream`

@@ -225,7 +225,8 @@ export type {
 } from "./federation-tokens/types.mjs";
 export { supportsLock } from "./federation-tokens/types.mjs";
 // Whether a failed upstream call is an outage: the classifier reads it before
-// any code an answer names, and the federation-grant connect callback on its own.
+// the codes that reject a refresh token, and the federation-grant connect
+// callback on its own.
 export { isFederationUpstreamOutage } from "./federation-tokens/upstreamOutage.mjs";
 // The federation adapter toolkit: the pure helpers every adapter builds its
 // requests with — the PKCE S256 challenge, the URL its library exchanges the

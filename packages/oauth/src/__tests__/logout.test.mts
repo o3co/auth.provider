@@ -862,9 +862,28 @@ describe("POST /oauth/logout", () => {
 			const logger = createMockLogger();
 			const sessionStore = makeSessionStore();
 			const refreshFamilyRevocation = makeFamilyRevocation();
+			// A relying party that would hear of the logout over the back channel,
+			// and the browser's own session: neither may be touched by a 503.
+			const sessionRPRegistry = makeSessionRPRegistry({
+				listRPs: vi.fn(async () => [
+					{
+						clientId: "rp-1",
+						backchannelLogoutUri: "https://rp-1.example/backchannel",
+						backchannelLogoutSessionRequired: true,
+						frontchannelLogoutUri: undefined,
+						frontchannelLogoutSessionRequired: undefined,
+						registeredAt: new Date(),
+					},
+				]),
+			});
+			const fetchImpl = vi.fn().mockResolvedValue({ ok: true });
+			const browserSession = makeBrowserSession({ sid: "sid-1" });
 			const { app, endSession } = buildWithUpstream({
 				sessionStore,
 				refreshFamilyRevocation,
+				sessionRPRegistry,
+				fetchImpl,
+				browserSession,
 				clientRepo: makeClientRepo({ findById: vi.fn().mockRejectedValue(storeReplyError()) }),
 				logger,
 			});
@@ -886,9 +905,12 @@ describe("POST /oauth/logout", () => {
 				clientId: "client-1",
 			});
 			// Nothing ran, so a retry is the same request.
+			expect(sessionRPRegistry.listRPs).not.toHaveBeenCalled();
+			expect(fetchImpl).not.toHaveBeenCalled();
 			expect(endSession).not.toHaveBeenCalled();
 			expect(refreshFamilyRevocation.revokeFamily).not.toHaveBeenCalled();
 			expect(sessionStore.delete).not.toHaveBeenCalled();
+			expect(browserSession.destroyed).toBe(false);
 		});
 	});
 
@@ -1626,6 +1648,34 @@ describe("POST /oauth/federation/:name/logout", () => {
 
 			expect(res.status).toBe(303);
 			expect(endSession).toHaveBeenCalledOnce();
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("is none when the token's client is not known", async () => {
+			const { app, endSession } = buildWithUpstream({
+				clientRepo: makeClientRepo({ findById: vi.fn().mockResolvedValue(null) }),
+			});
+
+			const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }), {
+				post_logout_redirect_uri: REGISTERED,
+			});
+
+			expect(res.status).toBe(303);
+			expect(endSession).toHaveBeenCalledWith(
+				expect.objectContaining({ postLogoutRedirectUri: undefined }),
+			);
+		});
+
+		it("asks the client repository nothing when the request names no post_logout_redirect_uri", async () => {
+			const findById = vi.fn().mockRejectedValue(storeReplyError());
+			const { app, endSession } = buildWithUpstream({ clientRepo: makeClientRepo({ findById }) });
+
+			const res = await postFedLogout(app, "google", await mintAccessToken({ azp: "client-1" }));
+
+			expect(res.status).toBe(303);
+			expect(findById).not.toHaveBeenCalled();
 			expect(endSession).toHaveBeenCalledWith(
 				expect.objectContaining({ postLogoutRedirectUri: undefined }),
 			);

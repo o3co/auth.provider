@@ -23,9 +23,10 @@ import { isFederationUpstreamOutage } from "./upstreamOutage.mjs";
  *   mismatched). Only ever the IdP's structured answer — an `error` of
  *   `invalid_grant` or `invalid_token` on what the library raised — and never
  *   during an outage: a caller may end the credential on it.
- * - `rate_limited`: the IdP answered 429.
+ * - `rate_limited`: the IdP answered 429, or named `too_many_requests` —
+ *   under a 5xx too: asked to slow down, a caller does.
  * - `network`: the IdP could not be reached, did not answer in time, or
- *   answered 5xx — whatever its body said.
+ *   answered 5xx — whatever else its body said.
  * - `unknown`: anything else.
  */
 export type FederationRefreshErrorReason = "invalid_grant" | "rate_limited" | "network" | "unknown";
@@ -126,8 +127,8 @@ function retryAfterSeconds(error: object): number | undefined {
 
 function structuredReason(error: object): FederationRefreshErrorReason | undefined {
 	const e = error as { error?: unknown; status?: unknown };
-	// An outage first, before any code the answer names: the upstream could not
-	// be reached, did not answer in time, or answered 5xx — on the error, its
+	// An outage first, before the codes that reject the refresh token: the
+	// upstream could not be reached, did not answer in time, or answered 5xx — on the error, its
 	// Error causes or the Response it was raised over (`isFederationUpstreamOutage`),
 	// or a 5xx status on a thrown value that is not an Error, which a hand-written
 	// adapter may throw. A 5xx is never a verdict on the refresh token, whatever

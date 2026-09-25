@@ -1137,13 +1137,18 @@ async function refreshUnderLock(
 		}
 		// An outage, read before anything the body said: the upstream could not
 		// be reached, did not answer in time, or answered 5xx — on the error, its
-		// Error causes or the Response it was raised over. A 5xx is never a
-		// verdict on the credential, whatever OAuth code its body carries: a 503
-		// naming an interaction code must not stamp the user's absence (below).
-		// `isFederationUpstreamOutage` is the connect callback's own test, and
-		// the classifier reads it first too. A 429 is no outage, and stays the
-		// rate limit below.
-		const outage = isFederationUpstreamOutage(settled.error);
+		// Error causes or the Response it was raised over
+		// (`isFederationUpstreamOutage`, the connect callback's own test), or
+		// whatever else the classifier reads structurally as one: a 5xx status
+		// or a connection code on a thrown value that is not an Error, which a
+		// hand-written adapter may throw. A 5xx is never a verdict on the
+		// credential, whatever OAuth code its body carries: a 503 naming an
+		// interaction code must not stamp the user's absence (below). A 429 is
+		// no outage, and stays the rate limit below. The classifier's
+		// message-only `network` is a guess, and is not an outage here.
+		const outage =
+			isFederationUpstreamOutage(settled.error) ||
+			(classified.reason === "network" && classified.structured);
 		// Only the upstream's structured rejection ends the credentials, which is
 		// all the classifier's `invalid_grant` ever is: it is never read during
 		// an outage — a 503 saying `invalid_grant` must not send the user through

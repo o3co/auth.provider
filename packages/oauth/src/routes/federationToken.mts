@@ -805,8 +805,9 @@ export function createRouter(express: ExpressLike, opts: FederationTokenRouterOp
 			} catch (error) {
 				// SF-13: core's classifier, shared with the federation grant retrieval
 				// (#593). Its reason is safe to act on alone: an outage — the upstream
-				// not reached, not in time, or answering 5xx, whatever its body says —
-				// is `network`, read before any code the answer names, and
+				// not reached, not in time, or answering 5xx, whatever its body says
+				// (a `too_many_requests` stays the 429) — is `network`, read before
+				// the codes that reject the refresh token, and
 				// `invalid_grant` is only ever the upstream's structured verdict, never
 				// a message's text. So the stored tokens below are ended on that
 				// verdict and on nothing else, and an outage keeps them for the retry.

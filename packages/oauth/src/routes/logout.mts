@@ -89,8 +89,8 @@ interface BrowserSessionLike {
  * it does not leave the loop open:
  *
  *   - Such a session cannot be the subject of an RP-initiated logout in the
- *     first place. Step 5 above refuses an `id_token_hint` carrying no `sid`
- *     with `400 invalid_request` long before this helper runs, so there is no
+ *     first place. Step 2 refuses an `id_token_hint` carrying no `sid` with
+ *     `400 invalid_request` long before this helper runs, so there is no
  *     logout whose effect could be missed.
  *   - Where a `userSessionStore` IS wired, a code minted from such a session
  *     is refused at the token endpoint (`grants/authorization.mts`, the
@@ -250,12 +250,12 @@ export interface LogoutRouterOptions {
  *   - state (optional)
  *
  * Flow:
- *   1. Verify id_token_hint via keyStore. Fail → 400 invalid_token for POST,
- *      confirmation HTML for GET.
- *   2. Extract `sid` and `aud` (= client_id), and hold `post_logout_redirect_uri`
- *      to the client's registered `postLogoutRedirectUris` — the one value every
- *      later step uses. A GET whose hint is stale answers the confirmation page
- *      here. Missing sid → 400 invalid_request.
+ *   1. Verify id_token_hint via keyStore. Fail → 400 invalid_token, on GET as
+ *      on POST; a keystore that cannot answer → 503.
+ *   2. Extract `sid` and `aud` (= client_id). Missing sid → 400
+ *      invalid_request. Hold `post_logout_redirect_uri` to the client's
+ *      registered `postLogoutRedirectUris` — the one value every later step
+ *      uses. A GET whose hint is stale answers the confirmation page here.
  *   3. Load session from userSessionStore. Missing → 200 JSON { logged_out: true } (no-op).
  *   4. Broadcast Back-Channel Logout to all registered RPs (best-effort).
  *   5. Resolve IdP end-session URI for the first federation (if any, if provider supportsEndSession).
@@ -274,7 +274,10 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 	// the federation logout, `logout_store_unavailable` for RP-initiated
 	// logout — `store` naming which and `step` the operation, with the error's
 	// projection, never the error: a store's error carries the command it
-	// refused.
+	// refused. The client repository, asked only to check a
+	// `post_logout_redirect_uri`, is the one exception to the event name: its
+	// line is core's `client_repository_unavailable`, as at every other client
+	// lookup (`registeredPostLogoutRedirectUri`).
 	const federationLogoutStoreUnavailable = (
 		logger: EventLogger,
 		federation: string,
@@ -723,6 +726,17 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					? rawAud[0]
 					: null;
 
+		// A hint that names no session can log nothing out, on GET as on POST:
+		// refused before the client repository is asked about its redirect, and
+		// before a stale GET's confirmation page, whose "Sign out" could only
+		// post the same hint back to this refusal.
+		if (!sid) {
+			return res.status(400).json({
+				error: "invalid_request",
+				error_description: "id_token_hint missing sid claim",
+			});
+		}
+
 		// The post_logout_redirect_uri this logout may use, held to the initiating
 		// client's registered list once, here — before the confirmation page
 		// echoes it, before any RP or upstream hears of the logout, and before
@@ -752,13 +766,6 @@ export function createRouter(express: ExpressLike, opts: LogoutRouterOptions): R
 					state,
 				});
 			}
-		}
-
-		if (!sid) {
-			return res.status(400).json({
-				error: "invalid_request",
-				error_description: "id_token_hint missing sid claim",
-			});
 		}
 
 		// Step 3: Load session. Missing → defensive 200 no-op.

@@ -3098,6 +3098,13 @@ describe("POST /oauth/federation/:name/token", () => {
 			);
 		};
 
+		/** An outage is logged, not audited: no `federation.token.refresh_failed` for it. */
+		const expectNoRefreshFailedAudit = (auditSink: AuditSink) => {
+			expect(auditSink.record).not.toHaveBeenCalledWith(
+				expect.objectContaining({ type: "federation.token.refresh_failed" }),
+			);
+		};
+
 		it("keeps them and answers 503 when a 5xx answer's body says invalid_grant", async () => {
 			// An adapter whose library puts the body's code and the status on one
 			// error, as openid-client's ResponseBodyError does for a 4xx.
@@ -3119,6 +3126,7 @@ describe("POST /oauth/federation/:name/token", () => {
 				error_description: "upstream federation provider temporarily unavailable",
 			});
 			expectKept(fedTokenStore, sessionFederationIndex, auditSink);
+			expectNoRefreshFailedAudit(auditSink);
 			expectOutageLine(
 				logger,
 				"federation_token_upstream_unavailable",
@@ -3144,6 +3152,7 @@ describe("POST /oauth/federation/:name/token", () => {
 
 			expect(res.status).toBe(503);
 			expectKept(fedTokenStore, sessionFederationIndex, auditSink);
+			expectNoRefreshFailedAudit(auditSink);
 		});
 
 		it("keeps them when only the message says invalid_grant", async () => {

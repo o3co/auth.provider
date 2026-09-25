@@ -24,6 +24,12 @@
  * which depends on no adapter, so its own tests stand one in. What they hand
  * the adapter, and what they make of what its library raises, can only be
  * seen here.
+ *
+ * Not `all-modules-composition.fixture.mts`: that one switches every module
+ * on and signs with a key it keeps to itself. The tests here present an
+ * `id_token_hint` and an access token of their own — a caller's, with the
+ * claims the case needs — so the deployment signs with an HS256 secret this
+ * file holds, and nothing but Google is federated.
  */
 
 import { createHmac } from "node:crypto";
@@ -52,8 +58,8 @@ import { validate } from "@o3co/ts.hocon/zod";
 import express from "express";
 import request from "supertest";
 import { expect } from "vitest";
-import { buildModules } from "../buildModules.mjs";
-import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "../configPath.mjs";
+import { buildModules } from "#/buildModules.mjs";
+import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "#/configPath.mjs";
 
 const configDir = fileURLToPath(new URL("../../config", import.meta.url));
 
