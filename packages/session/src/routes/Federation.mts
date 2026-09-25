@@ -18,6 +18,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import {
 	type AppConfig,
 	type AuditSink,
+	auditErrorText,
 	consoleLogger,
 	emitAuditEvent,
 	errorEnvelope,
@@ -48,7 +49,7 @@ import {
 	type FederationTransactionStore,
 	mintFederationTransactionId,
 } from "../federations/transaction.mjs";
-import { abandonCookieSession } from "../internal/cookieSession.mjs";
+import { abandonCookieSession, SESSION_STORE_UNAVAILABLE } from "../internal/cookieSession.mjs";
 import { readCookie } from "../internal/cookies.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
@@ -232,12 +233,6 @@ type FederationOutageEvent =
 	| "federation_start_store_unavailable"
 	| "federation_callback_store_unavailable"
 	| "federation_link_store_unavailable";
-
-/** What a session-side store outage answers: RFC 6749's code for a temporary condition. */
-const SESSION_STORE_UNAVAILABLE = {
-	error: "temporarily_unavailable",
-	error_description: "Session store unavailable",
-} as const;
 
 /** What a user-directory outage answers. */
 const USER_DIRECTORY_UNAVAILABLE = {
@@ -764,15 +759,19 @@ export const createRouter = (
 		/**
 		 * The cookie session's store — the express session, or a `form_post`
 		 * transaction kept in the same store — could not answer: log the
-		 * outage, drop the request's cookie session so express-session does not
-		 * write to that store again as the response ends, and answer `503`.
+		 * outage first, then (when asked) discard the transaction best-effort,
+		 * so a cleanup warn never precedes its cause; drop the request's cookie
+		 * session so express-session does not write to that store again as the
+		 * response ends, and answer `503`.
 		 */
-		const refuseCookieStoreOutage = (
+		const refuseCookieStoreOutage = async (
 			store: "cookie_session" | "federation_transaction",
 			step: FederationStoreStep,
 			cause: unknown,
-		): unknown => {
+			{ discard = false }: { readonly discard?: boolean } = {},
+		): Promise<unknown> => {
 			logStoreUnavailable(log, "federation_callback_store_unavailable", store, step, cause);
+			if (discard) await discardTransaction();
 			abandonCookieSession(req);
 			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		};
@@ -792,8 +791,7 @@ export const createRouter = (
 			try {
 				fed = (await transactions.get(transactionId)) ?? undefined;
 			} catch (err) {
-				await discardTransaction();
-				return refuseCookieStoreOutage("federation_transaction", "get", err);
+				return refuseCookieStoreOutage("federation_transaction", "get", err, { discard: true });
 			}
 		} else {
 			fed = req.session.federation;
@@ -1233,19 +1231,11 @@ export const createRouter = (
 			await cleanUp(log, "user_session", "delete", () => userSessionStore.delete(sid));
 			// #296: the session is gone, so its subject-index entry must go too.
 			await rollbackSubjectIndex();
-			// Best-effort: destroy the fresh (empty) session so the store doesn't
-			// accumulate authenticated-nothing sessions on post-regenerate failures.
-			await cleanUp(
-				log,
-				"cookie_session",
-				"destroy",
-				() =>
-					new Promise<void>((resolve, reject) => {
-						req.session.destroy((destroyErr) =>
-							destroyErr ? reject(destroyErr as Error) : resolve(),
-						);
-					}),
-			);
+			// The regenerated session was never saved — its save is what failed,
+			// or the attach before it — so there is no record to destroy. Drop it
+			// from the request instead, so express-session neither saves it as
+			// the response ends nor sets a cookie naming it.
+			abandonCookieSession(req);
 			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
 
@@ -1410,8 +1400,10 @@ export const createRouter = (
 				if (!isLinkStartTrusted(req, linkTrustedOrigins)) {
 					logger.warn(
 						{
-							provider: String(req.params.name),
-							secFetchSite: (req.get("sec-fetch-site") ?? "").slice(0, 32),
+							provider: provider.name,
+							// The caller's header, sanitised and capped like every
+							// caller-controlled string on a log line.
+							secFetchSite: auditErrorText(req.get("sec-fetch-site") ?? ""),
 						},
 						"federation_link_start_rejected",
 					);

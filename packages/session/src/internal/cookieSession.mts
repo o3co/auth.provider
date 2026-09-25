@@ -16,13 +16,25 @@
 
 /**
  * The cookie session's store failing: how the express-session middleware this
- * package mounts answers it, and how a route that met it keeps express-session
- * from trying again. Internal to the package; `modules/sessionStoreModule.mts`
- * and the two routers are its callers.
+ * package mounts answers it, how a route that met it keeps express-session
+ * from trying again, and the one body every session-side store outage is
+ * answered with. Internal to the package; `modules/sessionStoreModule.mts` and
+ * the two routers are its callers.
  */
 
 import { type Logger, loggableError } from "@o3co/auth-provider-core";
 import type { Request, RequestHandler } from "express";
+
+/**
+ * What the session package answers, with `503`, when a session-side store —
+ * the cookie session's, a `form_post` transaction's, the `UserSession`
+ * store, a federation index or token store — cannot answer. RFC 6749's code
+ * for a temporary condition, one wording everywhere.
+ */
+export const SESSION_STORE_UNAVAILABLE = Object.freeze({
+	error: "temporarily_unavailable",
+	error_description: "Session store unavailable",
+});
 
 /**
  * express-session's middleware, with its store failures answered here rather
@@ -32,10 +44,12 @@ import type { Request, RequestHandler } from "express";
  * line as the outage it is:
  *
  * - **Before the route runs**, when it cannot load the request's session (the
- *   store is unreachable, or answers with a record it cannot read): the
- *   request used to end in the terminal handler as a `500`. It is `503
- *   temporarily_unavailable` now, answered here, and no route runs — every
- *   route behind this middleware reads `req.session`.
+ *   store is unreachable or times out): the request used to end in the
+ *   terminal handler as a `500`. It is `503 temporarily_unavailable` now,
+ *   answered here, and no route runs — every route behind this middleware
+ *   reads `req.session`. A record the store answers with but that cannot be
+ *   read is not an outage and does not come here: the Redis store reads it as
+ *   absent (`../store/factory.mts`), so the browser starts a fresh session.
  * - **After the route answered**, when it cannot save the session or refresh
  *   its expiry: the answer has gone, so it stands; the error used to reach
  *   Express's final handler, which printed its stack and dropped the
@@ -62,10 +76,7 @@ export function guardCookieSession(
 				"session_middleware_store_unavailable",
 			);
 			if (step === "save") return;
-			res.status(503).json({
-				error: "temporarily_unavailable",
-				error_description: "Session store unavailable",
-			});
+			res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		});
 	};
 }

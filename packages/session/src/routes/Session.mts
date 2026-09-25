@@ -40,7 +40,7 @@ import {
 	createCsrfProtectionFromConfig,
 	type SessionCsrfConfigSlice,
 } from "../csrf.mjs";
-import { abandonCookieSession } from "../internal/cookieSession.mjs";
+import { abandonCookieSession, SESSION_STORE_UNAVAILABLE } from "../internal/cookieSession.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
@@ -389,12 +389,6 @@ export const createRouter = (
 			logger.warn({ ...context, store, step, err: loggableError(err) }, "login_cleanup_failed");
 		}
 	};
-
-	/** What the routes answer when a session-side store cannot. */
-	const SESSION_STORE_UNAVAILABLE = {
-		error: "temporarily_unavailable",
-		error_description: "Session store temporarily unavailable",
-	} as const;
 
 	router
 		// This router's own paths, exactly: it is mounted at `/session`, a prefix
