@@ -1151,7 +1151,7 @@ export class BootError extends Error {
 	 * the process ends in.
 	 */
 	[inspect.custom](_depth: number, options: InspectOptions, print: typeof inspect): string {
-		const details = this.details as unknown as Record<string, unknown>;
+		const details = (this.details ?? {}) as unknown as Record<string, unknown>;
 		const cleanupErrors = details.cleanupErrors;
 		const shown = {
 			reason: this.reason,
