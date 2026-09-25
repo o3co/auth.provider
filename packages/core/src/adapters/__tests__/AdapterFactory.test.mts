@@ -325,7 +325,7 @@ describe("createLifecycleRegistrar (D-5)", () => {
 		reg.register(makeCleanup(1));
 		reg.register(makeCleanup(2));
 		reg.register(makeCleanup(3));
-		const errors = await reg._drain({ error: () => {} });
+		const errors = await reg._drain({ error: () => {} }, "dispose");
 		expect(order).toEqual([3, 2, 1]);
 		expect(maxConcurrent).toBe(1);
 		expect(errors).toEqual([]);
@@ -344,7 +344,7 @@ describe("createLifecycleRegistrar (D-5)", () => {
 		reg.register(async () => {
 			ran.push("third-registered");
 		});
-		const errors = await reg._drain({ error });
+		const errors = await reg._drain({ error }, "dispose");
 		// LIFO: third runs, then boom (caught), then first.
 		expect(ran).toEqual(["third-registered", "first-registered"]);
 		expect(errors).toHaveLength(1);
@@ -374,7 +374,7 @@ describe("createLifecycleRegistrar (D-5)", () => {
 			fatal: vi.fn(),
 		};
 
-		const errors = await reg._drain(logger);
+		const errors = await reg._drain(logger, "boot_failure");
 
 		expect(errors).toHaveLength(1);
 		expect(logger.error).toHaveBeenCalledTimes(1);
@@ -382,6 +382,7 @@ describe("createLifecycleRegistrar (D-5)", () => {
 		expect(event).toBe("adapter_lifecycle_cleanup_failed");
 		expect(rest).toEqual([]);
 		expect(fields).toEqual({
+			phase: "boot_failure",
 			cleanupIndex: 0,
 			err: expect.objectContaining({
 				name: "Error",
@@ -397,7 +398,7 @@ describe("createLifecycleRegistrar (D-5)", () => {
 
 	it("empty registrar drain returns empty error array (no-op)", async () => {
 		const reg = createLifecycleRegistrar();
-		const errors = await reg._drain({ error: () => {} });
+		const errors = await reg._drain({ error: () => {} }, "dispose");
 		expect(errors).toEqual([]);
 	});
 });

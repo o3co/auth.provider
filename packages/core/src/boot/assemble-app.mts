@@ -448,7 +448,7 @@ function buildDispose(
 				// The logger component when one is wired, else `consoleLogger`:
 				// either way one object-first line per failed cleanup.
 				const log = (frozen.components as Record<string, unknown>).logger as Logger | undefined;
-				const drainErrors = await lifecycleReg._drain(log ?? consoleLogger);
+				const drainErrors = await lifecycleReg._drain(log ?? consoleLogger, "dispose");
 				for (const err of drainErrors) {
 					errorsWithOrigin.push({
 						module: "(lifecycle-registrar)",

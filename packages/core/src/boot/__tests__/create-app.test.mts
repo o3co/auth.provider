@@ -84,6 +84,76 @@ const projectedCloseFailure = expect.objectContaining({
 	cause: expect.objectContaining({ name: "Error", detail: "socket gone" }),
 });
 
+/** A module whose adapter registers a close that throws. */
+const adapterWhoseCloseThrowsModule = () =>
+	defineModule<never, "lifecycleRegistrar">({
+		name: "AdapterMod-close-throws",
+		optional: ["lifecycleRegistrar"],
+		provides: {
+			slotCA: (deps) => buildAdapterWhoseCloseThrows(deps.lifecycleRegistrar),
+		},
+		lifecycle: { slotCA: { eager: true } },
+	});
+
+/** A module whose provider throws at stage 3, so boot fails after the adapter was built. */
+const failingModule = () =>
+	defineModule({
+		name: "FailMod",
+		provides: {
+			slotCB: async () => {
+				throw new Error("stage-3-boom");
+			},
+		},
+		lifecycle: { slotCB: { eager: true } },
+	});
+
+/** A spy for every `Logger` method, so a test can say nothing was logged at another level. */
+function spyLogger() {
+	return {
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn(),
+	};
+}
+
+/** Silenced spies on every console method a `consoleLogger` level routes to. */
+function spyConsole() {
+	const spies = {
+		error: vi.spyOn(console, "error").mockImplementation(() => {}),
+		warn: vi.spyOn(console, "warn").mockImplementation(() => {}),
+		info: vi.spyOn(console, "info").mockImplementation(() => {}),
+		debug: vi.spyOn(console, "debug").mockImplementation(() => {}),
+		log: vi.spyOn(console, "log").mockImplementation(() => {}),
+	};
+	return {
+		...spies,
+		restore: () => {
+			for (const spy of Object.values(spies)) spy.mockRestore();
+		},
+	};
+}
+
+/**
+ * The one line a failed adapter cleanup logs, at error: object-first, the
+ * event name, the phase that drained it and the projected error — and
+ * nothing after.
+ */
+function expectOneCleanupFailureLine(
+	calls: readonly unknown[][],
+	phase: "boot_failure" | "dispose",
+): void {
+	expect(calls).toHaveLength(1);
+	const [fields, event, ...rest] = calls[0] as unknown[];
+	expect(event).toBe("adapter_lifecycle_cleanup_failed");
+	expect(rest).toEqual([]);
+	expect(fields).toEqual({ phase, cleanupIndex: 0, err: projectedCloseFailure });
+	expect((fields as { err: unknown }).err).not.toBeInstanceOf(Error);
+}
+
 // Per ADR 2026-04-30: schema is a pure type contract; defaults live in
 // hocon. validateAndComposeConfig calls CoreConfigSchema.parse, so the
 // fixture supplies a minimal schema-valid baseline (intentionally
@@ -440,46 +510,49 @@ describe("createApp — 7. boot-failure LifecycleRegistrar drain (D-5)", () => {
 		expect(cleanupRan).toBe(true);
 	});
 
-	it("prints a cleanup that throws once, with the event name and the projected error", async () => {
-		// No logger exists before boot has finished, so the drain writes to the
-		// console — still one line, still carrying the event name.
-		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+	it("logs a cleanup that throws once, through the bootstrap logger, marked boot_failure", async () => {
+		// A composition root that has a logger hands it in as a bootstrap
+		// component, and it is there when a later stage throws.
+		const logger = spyLogger();
+		const console_ = spyConsole();
 		try {
-			const adapterMod = defineModule<never, "lifecycleRegistrar">({
-				name: "AdapterMod-close-throws",
-				optional: ["lifecycleRegistrar"],
-				provides: {
-					slotCA: (deps) => buildAdapterWhoseCloseThrows(deps.lifecycleRegistrar),
-				},
-				lifecycle: { slotCA: { eager: true } },
-			});
-			const failMod = defineModule({
-				name: "FailMod",
-				provides: {
-					slotCB: async () => {
-						throw new Error("stage-3-boom");
-					},
-				},
-				lifecycle: { slotCB: { eager: true } },
-			});
-
 			await expect(
 				createApp({
-					modules: [adapterMod, failMod],
+					modules: [adapterWhoseCloseThrowsModule(), failingModule()],
+					bootstrapComponents: { ...minBoot, logger: logger as unknown as Logger },
+					contributionKinds: makeStubCollectors(),
+				}),
+			).rejects.toBeInstanceOf(BootError);
+
+			expectOneCleanupFailureLine(logger.error.mock.calls, "boot_failure");
+			for (const level of ["trace", "debug", "info", "warn", "fatal"] as const) {
+				expect(logger[level]).not.toHaveBeenCalled();
+			}
+			for (const method of ["error", "warn", "info", "debug", "log"] as const) {
+				expect(console_[method]).not.toHaveBeenCalled();
+			}
+		} finally {
+			console_.restore();
+		}
+	});
+
+	it("logs it through consoleLogger when no bootstrap logger was given: one console.error, object-first", async () => {
+		const console_ = spyConsole();
+		try {
+			await expect(
+				createApp({
+					modules: [adapterWhoseCloseThrowsModule(), failingModule()],
 					bootstrapComponents: minBoot,
 					contributionKinds: makeStubCollectors(),
 				}),
 			).rejects.toBeInstanceOf(BootError);
 
-			expect(consoleError).toHaveBeenCalledTimes(1);
-			const [prefix, event, fields, ...rest] = consoleError.mock.calls[0] as unknown[];
-			expect(prefix).toBe("[boot-failure lifecycle drain]");
-			expect(event).toBe("adapter_lifecycle_cleanup_failed");
-			expect(rest).toEqual([]);
-			expect(fields).toEqual({ cleanupIndex: 0, err: projectedCloseFailure });
-			expect((fields as { err: unknown }).err).not.toBeInstanceOf(Error);
+			expectOneCleanupFailureLine(console_.error.mock.calls, "boot_failure");
+			for (const method of ["warn", "info", "debug", "log"] as const) {
+				expect(console_[method]).not.toHaveBeenCalled();
+			}
 		} finally {
-			consoleError.mockRestore();
+			console_.restore();
 		}
 	});
 });
@@ -489,74 +562,44 @@ describe("createApp — 7. boot-failure LifecycleRegistrar drain (D-5)", () => {
 // ---------------------------------------------------------------------------
 
 describe("createApp — 7b. dispose logs a failed adapter cleanup through the logger component", () => {
-	it("once at error, object-first with the event name and the projected error", async () => {
-		const logger = {
-			trace: vi.fn(),
-			debug: vi.fn(),
-			info: vi.fn(),
-			warn: vi.fn(),
-			error: vi.fn(),
-			fatal: vi.fn(),
-			child: vi.fn(),
-		};
+	it("once at error, object-first with the event name, marked dispose, and the projected error", async () => {
+		const logger = spyLogger();
 		const loggerMod = defineModule({
 			name: "LoggerMod",
 			provides: { logger: () => logger as unknown as Logger },
 			lifecycle: { logger: { eager: true } },
 		});
-		const adapterMod = defineModule<never, "lifecycleRegistrar">({
-			name: "AdapterMod-close-throws",
-			optional: ["lifecycleRegistrar"],
-			provides: {
-				slotCA: (deps) => buildAdapterWhoseCloseThrows(deps.lifecycleRegistrar),
-			},
-			lifecycle: { slotCA: { eager: true } },
-		});
 		const handle = await createApp({
-			modules: [loggerMod, adapterMod],
+			modules: [loggerMod, adapterWhoseCloseThrowsModule()],
 			bootstrapComponents: minBoot,
 			contributionKinds: makeStubCollectors(),
 		});
 
 		await expect(handle.dispose()).rejects.toBeInstanceOf(AggregateError);
 
-		expect(logger.error).toHaveBeenCalledTimes(1);
-		const [fields, event, ...rest] = logger.error.mock.calls[0] as unknown[];
-		expect(event).toBe("adapter_lifecycle_cleanup_failed");
-		expect(rest).toEqual([]);
-		expect(fields).toEqual({ cleanupIndex: 0, err: projectedCloseFailure });
-		expect((fields as { err: unknown }).err).not.toBeInstanceOf(Error);
+		expectOneCleanupFailureLine(logger.error.mock.calls, "dispose");
 		for (const level of ["trace", "debug", "info", "warn", "fatal"] as const) {
 			expect(logger[level]).not.toHaveBeenCalled();
 		}
 	});
 
 	it("through consoleLogger when no logger component is wired: one console.error, object-first", async () => {
-		const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+		const console_ = spyConsole();
 		try {
-			const adapterMod = defineModule<never, "lifecycleRegistrar">({
-				name: "AdapterMod-close-throws",
-				optional: ["lifecycleRegistrar"],
-				provides: {
-					slotCA: (deps) => buildAdapterWhoseCloseThrows(deps.lifecycleRegistrar),
-				},
-				lifecycle: { slotCA: { eager: true } },
-			});
 			const handle = await createApp({
-				modules: [adapterMod],
+				modules: [adapterWhoseCloseThrowsModule()],
 				bootstrapComponents: minBoot,
 				contributionKinds: makeStubCollectors(),
 			});
 
 			await expect(handle.dispose()).rejects.toBeInstanceOf(AggregateError);
 
-			expect(consoleError).toHaveBeenCalledTimes(1);
-			const [fields, event, ...rest] = consoleError.mock.calls[0] as unknown[];
-			expect(event).toBe("adapter_lifecycle_cleanup_failed");
-			expect(rest).toEqual([]);
-			expect(fields).toEqual({ cleanupIndex: 0, err: projectedCloseFailure });
+			expectOneCleanupFailureLine(console_.error.mock.calls, "dispose");
+			for (const method of ["warn", "info", "debug", "log"] as const) {
+				expect(console_[method]).not.toHaveBeenCalled();
+			}
 		} finally {
-			consoleError.mockRestore();
+			console_.restore();
 		}
 	});
 });

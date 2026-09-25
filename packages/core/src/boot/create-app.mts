@@ -33,6 +33,7 @@ import type { RequestHandler, Router } from "express";
 import { createLifecycleRegistrar } from "../adapters/AdapterFactory.mjs";
 import type { OidcDiscoveryContribution } from "../discovery/types.mjs";
 import { GrantRegistry } from "../grants/registry.mjs";
+import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { TokenBindingMechanism } from "../middleware/tokenBinding.mjs";
 import type {
 	AuditHook,
@@ -156,12 +157,12 @@ export async function createApp<B extends BootstrapMap = DefaultBootstrapMap>(
 	} catch (err) {
 		// D-5 partial-boot failure: any builder may have already registered a
 		// cleanup callback before a later stage threw. Best-effort drain so
-		// adapter sub-resources do not leak when boot fails.
-		await lifecycleReg._drain({
-			// Boot-failure path: no AppHandle exists yet, so no Logger slot to
-			// resolve. console.error is the only available emission channel.
-			error: (obj, event) => console.error("[boot-failure lifecycle drain]", event, obj),
-		});
+		// adapter sub-resources do not leak when boot fails. No AppHandle
+		// exists, but a composition root that has a logger passed it as a
+		// bootstrap component — the replica-safety check in stage 1 logs
+		// through it too — so a failed cleanup is logged there, and through
+		// `consoleLogger` only when there is none.
+		await lifecycleReg._drain(validatedBootstrap.logger ?? consoleLogger, "boot_failure");
 		throw err;
 	}
 }

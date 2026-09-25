@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-import type { Logger } from "../logging/Logger.mjs";
+import type { EventLogger, Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
 import type { ReadinessRegistrar } from "../readiness/types.mjs";
 
@@ -101,14 +101,17 @@ export interface InternalLifecycleRegistrar extends LifecycleRegistrar {
 	 * Drain all registered cleanups in LIFO order. Returns the array of
 	 * errors encountered (empty if all cleanups succeeded). Each failure is
 	 * logged as it occurs, once, at error, object-first:
-	 * `{ cleanupIndex, err: loggableError(err) }` with the event
-	 * `adapter_lifecycle_cleanup_failed`. The drain never throws.
+	 * `{ phase, cleanupIndex, err: loggableError(err) }` with the event
+	 * `adapter_lifecycle_cleanup_failed`, where `phase` says which drain it
+	 * was — `AppHandle.dispose()` or a boot that failed. The drain never
+	 * throws.
 	 *
 	 * @internal
 	 */
-	_drain(logger: {
-		error(obj: Record<string, unknown>, event: string): void;
-	}): Promise<readonly unknown[]>;
+	_drain(
+		logger: Pick<EventLogger, "error">,
+		phase: "dispose" | "boot_failure",
+	): Promise<readonly unknown[]>;
 }
 
 /**
@@ -122,9 +125,10 @@ export function createLifecycleRegistrar(): InternalLifecycleRegistrar {
 		register(cleanup: () => Promise<void>): void {
 			cleanups.push(cleanup);
 		},
-		async _drain(logger: {
-			error(obj: Record<string, unknown>, event: string): void;
-		}): Promise<readonly unknown[]> {
+		async _drain(
+			logger: Pick<EventLogger, "error">,
+			phase: "dispose" | "boot_failure",
+		): Promise<readonly unknown[]> {
 			const errors: unknown[] = [];
 			for (let i = cleanups.length - 1; i >= 0; i--) {
 				const cleanup = cleanups[i];
@@ -133,7 +137,7 @@ export function createLifecycleRegistrar(): InternalLifecycleRegistrar {
 					await cleanup();
 				} catch (err) {
 					logger.error(
-						{ cleanupIndex: i, err: loggableError(err) },
+						{ phase, cleanupIndex: i, err: loggableError(err) },
 						"adapter_lifecycle_cleanup_failed",
 					);
 					errors.push(err);
