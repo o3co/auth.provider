@@ -37,6 +37,16 @@ const BINDING: SealBinding = {
 	record: Buffer.from("the record this value belongs to", "utf8"),
 };
 
+/** What `run` threw: its exact class and its message. */
+const refusal = (run: () => unknown): { class: unknown; message: string } => {
+	try {
+		run();
+	} catch (err) {
+		return { class: (err as Error).constructor, message: (err as Error).message };
+	}
+	throw new Error("expected a refusal");
+};
+
 const u32 = (value: number): Buffer => {
 	const out = Buffer.alloc(4);
 	out.writeUInt32BE(value);
@@ -146,32 +156,49 @@ describe("the v2 key-ring envelope", () => {
 		}
 	});
 
-	it("refuses a ring it cannot seal with: no keys, a key that is not 32 bytes, a duplicate or unusable ID", () => {
-		expect(() => sealWithKeyRing("rt-1", [], BINDING)).toThrow(/key/);
-		expect(() => sealWithKeyRing("rt-1", [{ id: "k", key: Buffer.alloc(16, 1) }], BINDING)).toThrow(
-			/32 bytes/,
-		);
+	it("refuses a ring it cannot seal with, as a RangeError: no keys, a key that is not 32 bytes, a duplicate or unusable ID", () => {
+		// A ring is a setting, and a setting that cannot be used is refused as a
+		// RangeError naming what is wrong with it.
+		expect(refusal(() => sealWithKeyRing("rt-1", [], BINDING))).toStrictEqual({
+			class: RangeError,
+			message: "no encryption key to seal with",
+		});
+		expect(
+			refusal(() => sealWithKeyRing("rt-1", [{ id: "k", key: Buffer.alloc(16, 1) }], BINDING)),
+		).toStrictEqual({ class: RangeError, message: "encryption key must be 32 bytes" });
 		const duplicate: SealingKeyRing = [
 			{ id: "k", key: key(1) },
 			{ id: "k", key: key(2) },
 		];
-		expect(() => sealWithKeyRing("rt-1", duplicate, BINDING)).toThrow(/id/);
+		expect(refusal(() => sealWithKeyRing("rt-1", duplicate, BINDING))).toStrictEqual({
+			class: RangeError,
+			message: "duplicate encryption key id",
+		});
 		for (const id of ["", "k.2", "k 2", "k\n", "x".repeat(65)]) {
 			expect(
-				() => sealWithKeyRing("rt-1", [{ id, key: key(1) }], BINDING),
+				refusal(() => sealWithKeyRing("rt-1", [{ id, key: key(1) }], BINDING)),
 				JSON.stringify(id),
-			).toThrow(/id/);
+			).toStrictEqual({
+				class: RangeError,
+				message: "encryption key id must match ^[A-Za-z0-9_-]{1,64}$",
+			});
 		}
 	});
 
 	it("refuses to open with a ring that could not have sealed: a malformed ring is a configuration fault, not an unreadable value", () => {
 		const sealed = sealWithKeyRing("rt-1", RING, BINDING);
-		expect(() =>
-			openWithKeyRing(sealed, [...RING, { id: "k-2026-09", key: key(7) }], BINDING),
-		).toThrow(/id/);
-		expect(() => openWithKeyRing(sealed, [{ id: "k", key: Buffer.alloc(31, 1) }], BINDING)).toThrow(
-			/32 bytes/,
-		);
+		expect(
+			refusal(() => openWithKeyRing(sealed, [...RING, { id: "k-2026-09", key: key(7) }], BINDING)),
+		).toStrictEqual({ class: RangeError, message: "duplicate encryption key id" });
+		expect(
+			refusal(() => openWithKeyRing(sealed, [{ id: "k", key: Buffer.alloc(31, 1) }], BINDING)),
+		).toStrictEqual({ class: RangeError, message: "encryption key must be 32 bytes" });
+		expect(
+			refusal(() => openWithKeyRing(sealed, [{ id: "k.2", key: key(1) }], BINDING)),
+		).toStrictEqual({
+			class: RangeError,
+			message: "encryption key id must match ^[A-Za-z0-9_-]{1,64}$",
+		});
 	});
 
 	it("refuses a purpose that is not 1 to 64 printable ASCII characters, on both sides", () => {

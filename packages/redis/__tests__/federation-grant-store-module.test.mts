@@ -22,10 +22,14 @@
 // a configuration that cannot seal is refused at boot rather than at the first
 // grant — which would mean refusing after a user had already consented.
 
+import { createApp, defineModule } from "@o3co/auth-provider-core";
+import { makeValidCoreConfig } from "@o3co/auth-provider-core/testing";
 import { describe, expect, it, vi } from "vitest";
 import type { FederationGrantStoreClient } from "../src/clients.mjs";
 import {
+	createRedisFederationGrantStore,
 	DEFAULT_FEDERATION_GRANT_LISTING_ALLOWANCE_MS,
+	redisFederationGrantStoreModule,
 	redisFederationGrantStoreModuleFor,
 	resolveRedisFederationGrantStoreOptions,
 } from "../src/federation-grant-store.mjs";
@@ -140,6 +144,84 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 				String(bytes),
 			).toThrow(/32 bytes/);
 		}
+	});
+
+	it("refuses a ring whose key ids break the rule as a RangeError: a configured value it cannot use", () => {
+		// The ring is checked by core's sealing leaf when the store seals once at
+		// construction; its refusals are RangeErrors, as every refused setting is.
+		const ringOf = (ids: readonly string[]) => ({
+			encryptionMode: "required",
+			encryptionKeys: ids.map((id) => ({ id, key: KEY })),
+		});
+		expect(() => build(ringOf(["k-1", "k-1"]))).toThrow(
+			new RangeError("duplicate encryption key id"),
+		);
+		expect(() => build(ringOf(["k.2"]))).toThrow(
+			new RangeError("encryption key id must match ^[A-Za-z0-9_-]{1,64}$"),
+		);
+	});
+
+	it("refuses the same ring as a RangeError when the store factory is called directly", () => {
+		// A composition root that builds the store itself, without the module,
+		// meets the ring rule unwrapped.
+		const direct = (keys: readonly { id: string; key: Buffer }[]) => () =>
+			createRedisFederationGrantStore({ client, encryption: { mode: "required", keys } });
+		const material = Buffer.alloc(32, 7);
+		expect(
+			direct([
+				{ id: "k-1", key: material },
+				{ id: "k-1", key: material },
+			]),
+		).toThrow(new RangeError("duplicate encryption key id"));
+		expect(direct([{ id: "k 1", key: material }])).toThrow(
+			new RangeError("encryption key id must match ^[A-Za-z0-9_-]{1,64}$"),
+		);
+		expect(direct([{ id: "k-1", key: Buffer.alloc(16, 7) }])).toThrow(
+			new RangeError("encryption key must be 32 bytes"),
+		);
+	});
+
+	it("fails boot on such a ring with the RangeError as the BootError's cause, naming the module", async () => {
+		// Stands in for the routes that read the store, so that the store is in
+		// the closure boot builds.
+		const grantsReader = defineModule({
+			name: "test:federation-grant-store-reader",
+			optional: ["federationGrantStore"] as const,
+			contributes: {
+				routes: [
+					{
+						mountPath: "/__test_noop__",
+						id: "test-noop",
+						handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+					},
+				],
+			},
+		});
+		const boot = createApp({
+			modules: [redisFederationGrantStoreModule, grantsReader],
+			bootstrapComponents: {
+				config: {
+					...makeValidCoreConfig(),
+					federationGrants: {
+						encryptionMode: "required",
+						encryptionKeys: [
+							{ id: "k-1", key: KEY },
+							{ id: "k-1", key: KEY },
+						],
+					},
+				},
+				pathResolver: (p: string) => p,
+				federationGrantStoreClient: client,
+			} as never,
+		});
+		await expect(boot).rejects.toMatchObject({
+			name: "BootError",
+			reason: "provides-factory-failed",
+			details: { module: "redis-federation-grant-store", componentKey: "federationGrantStore" },
+		});
+		const refused = await boot.catch((err: unknown) => err);
+		expect((refused as Error).cause).toStrictEqual(new RangeError("duplicate encryption key id"));
+		expect((refused as Error).cause).toBeInstanceOf(RangeError);
 	});
 
 	it("refuses a retention that is not a duration, rather than reading it as none", () => {
