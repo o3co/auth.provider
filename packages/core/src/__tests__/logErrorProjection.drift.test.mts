@@ -493,7 +493,7 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 	{
 		file: "packages/core/src/jwt/verify.mts",
 		sites: 1,
-		why: "jose's own fixed text about the token, as the verdict's message; jose's claims ride on the error, not in its message",
+		why: "jose's own text about the token, as the verdict's message, through lineSafeText — it quotes an unrecognised crit name the caller wrote; jose's claims ride on the error, not in its message",
 	},
 	{
 		file: "packages/redis/src/ioredis.mts",

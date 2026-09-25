@@ -26,6 +26,7 @@ import { auditErrorText } from "../errors/envelope.mjs";
 import { ExpiredKidError, type KeyStore, UnknownKidError } from "../keys/KeyStore.mjs";
 import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
 import type { Logger } from "../logging/Logger.mjs";
+import { lineSafeText } from "../logging/loggableError.mjs";
 import type { SubjectRevocation } from "../user-sessions/types.mjs";
 
 /**
@@ -91,11 +92,16 @@ export type JwtVerificationReason =
 	// (`isVerificationUnavailable`).
 	| "revocation_unavailable";
 
+/** The longest jose message a verdict keeps: the cap `auditErrorText` applies to caller text. */
+const JOSE_MESSAGE_MAX_LENGTH = 200;
+
 /**
  * Thrown by {@link verifyJwt} on any verification failure. The `reason` field
  * is the audit-stable discriminator; `message` is a human-readable summary
- * suitable for `logger.warn` but NOT for client-facing error responses
- * (callers must map to RFC-compliant error envelopes themselves).
+ * suitable for `logger.warn` — what it quotes of the caller's token (a `typ`,
+ * a `crit` name jose quotes) is on one line and capped — but NOT for
+ * client-facing error responses (callers must map to RFC-compliant error
+ * envelopes themselves).
  */
 export class JwtVerificationError extends Error {
 	override readonly name = "JwtVerificationError";
@@ -634,9 +640,15 @@ export async function verifyJwt(
 		payload = result.payload;
 	} catch (cause) {
 		const reason = classifyJoseError(cause);
+		// jose's text on one line and capped (`lineSafeText`): it is fixed
+		// text about the token but for one thing — an unrecognised `crit`
+		// entry is refused, before the signature, by quoting the name the
+		// caller wrote. Not `auditErrorText`, whose RFC 6749 set would turn
+		// every claim name jose quotes (`"exp" claim timestamp check failed`)
+		// into `?exp?`.
 		const err = new JwtVerificationError(
 			reason,
-			cause instanceof Error ? cause.message : String(cause),
+			lineSafeText(cause instanceof Error ? cause.message : String(cause), JOSE_MESSAGE_MAX_LENGTH),
 		);
 		emitRejection(logger, err, undefined, header);
 		throw err;
