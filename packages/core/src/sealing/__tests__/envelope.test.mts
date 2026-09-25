@@ -228,7 +228,7 @@ describe("the v2 key-ring envelope", () => {
 			refusal(() => sealWithKeyRing("rt-1", [{ id: "k", key: Buffer.alloc(16, 1) }], BINDING)),
 		).toStrictEqual({
 			class: RangeError,
-			message: 'sealing key ring has an encryption key "k" that is not a Buffer of 32 bytes',
+			message: "sealing key ring has an encryption key at index 0 that is not a Buffer of 32 bytes",
 		});
 		const duplicate: SealingKeyRing = [
 			{ id: "k", key: key(1) },
@@ -236,7 +236,7 @@ describe("the v2 key-ring envelope", () => {
 		];
 		expect(refusal(() => sealWithKeyRing("rt-1", duplicate, BINDING))).toStrictEqual({
 			class: RangeError,
-			message: 'sealing key ring has a duplicate encryption key id "k"',
+			message: "sealing key ring has a duplicate encryption key id at index 1",
 		});
 		for (const id of ["", "k.2", "k 2", "k\n", "x".repeat(65)]) {
 			expect(
@@ -258,7 +258,7 @@ describe("the v2 key-ring envelope", () => {
 			),
 		).toStrictEqual({
 			class: RangeError,
-			message: 'sealing key ring has an encryption key "k" that is not a Buffer of 32 bytes',
+			message: "sealing key ring has an encryption key at index 0 that is not a Buffer of 32 bytes",
 		});
 	});
 
@@ -277,13 +277,13 @@ describe("the v2 key-ring envelope", () => {
 			refusal(() => openWithKeyRing(sealed, [...RING, { id: "k-2026-09", key: key(7) }], BINDING)),
 		).toStrictEqual({
 			class: RangeError,
-			message: 'sealing key ring has a duplicate encryption key id "k-2026-09"',
+			message: "sealing key ring has a duplicate encryption key id at index 2",
 		});
 		expect(
 			refusal(() => openWithKeyRing(sealed, [{ id: "k", key: Buffer.alloc(31, 1) }], BINDING)),
 		).toStrictEqual({
 			class: RangeError,
-			message: 'sealing key ring has an encryption key "k" that is not a Buffer of 32 bytes',
+			message: "sealing key ring has an encryption key at index 0 that is not a Buffer of 32 bytes",
 		});
 		expect(
 			refusal(() => openWithKeyRing(sealed, [{ id: "k.2", key: key(1) }], BINDING)),

@@ -124,22 +124,25 @@ describe("checkSealingKeyRing", () => {
 				"mfa.encryptionKeys has an encryption key id at index 1 that does not match ^[A-Za-z0-9_-]{1,64}$",
 			],
 			[
-				"a duplicate id, named",
+				"a duplicate id, named by the index of the second",
 				[
 					{ id: "k-1", key: material },
 					{ id: "k-1", key: Buffer.alloc(32, 2) },
 				],
-				'mfa.encryptionKeys has a duplicate encryption key id "k-1"',
+				"mfa.encryptionKeys has a duplicate encryption key id at index 1",
 			],
 			[
-				"a key that is not 32 bytes",
-				[{ id: "k-1", key: Buffer.alloc(16, 1) }],
-				'mfa.encryptionKeys has an encryption key "k-1" that is not a Buffer of 32 bytes',
+				"a key that is not 32 bytes, named by its index",
+				[
+					{ id: "k-0", key: material },
+					{ id: "k-1", key: Buffer.alloc(16, 1) },
+				],
+				"mfa.encryptionKeys has an encryption key at index 1 that is not a Buffer of 32 bytes",
 			],
 			[
 				"a key that is not a Buffer: a 32-character string would be used as its UTF-8 bytes",
 				[{ id: "k-1", key: "k".repeat(32) as unknown as Buffer }],
-				'mfa.encryptionKeys has an encryption key "k-1" that is not a Buffer of 32 bytes',
+				"mfa.encryptionKeys has an encryption key at index 0 that is not a Buffer of 32 bytes",
 			],
 		];
 		for (const [what, ring, message] of cases) {
@@ -153,11 +156,29 @@ describe("checkSealingKeyRing", () => {
 		}
 	});
 
-	it("never echoes an id outside the rule: an operator who swapped id and key would see the key", () => {
-		const swapped = material.toString("base64");
+	it("never quotes an id, even one that passes the rule: an operator who swapped id and key would see the key", () => {
+		// A 32-byte key spelled in hex (64 characters) or in unpadded base64url
+		// (43) passes the id rule, so passing it is no sign an id is not key
+		// material. Every refusal names the entry by its index instead.
+		const hex = material.toString("hex");
+		const base64url = material.toString("base64url");
+		const padded = material.toString("base64");
+		for (const swapped of [hex, base64url]) {
+			expect(isSealingKeyId(swapped), swapped).toBe(true);
+			for (const ring of [
+				[{ id: swapped, key: "k-1" as unknown as Buffer }],
+				[
+					{ id: swapped, key: material },
+					{ id: swapped, key: material },
+				],
+			]) {
+				const { message } = refusal(() => checkSealingKeyRing(ring, "mfa.encryptionKeys"));
+				expect(message, swapped).not.toContain(swapped);
+			}
+		}
 		const { message } = refusal(() =>
-			checkSealingKeyRing([{ id: swapped, key: material }], "mfa.encryptionKeys"),
+			checkSealingKeyRing([{ id: padded, key: material }], "mfa.encryptionKeys"),
 		);
-		expect(message).not.toContain(swapped);
+		expect(message).not.toContain(padded);
 	});
 });

@@ -196,7 +196,7 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 		});
 		expect(() => build(ringOf(["k-1", "k-1"]))).toThrow(
 			new RangeError(
-				'federation grant store: federationGrants.encryptionKeys has a duplicate encryption key id "k-1"',
+				"federation grant store: federationGrants.encryptionKeys has a duplicate encryption key id at index 1",
 			),
 		);
 		expect(() => build(ringOf(["k-1", "k.2"]))).toThrow(
@@ -219,7 +219,7 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 			]),
 		).toThrow(
 			new RangeError(
-				'federation grant store: encryption.keys has a duplicate encryption key id "k-1"',
+				"federation grant store: encryption.keys has a duplicate encryption key id at index 1",
 			),
 		);
 		expect(direct([{ id: "k 1", key: material }])).toThrow(
@@ -229,9 +229,26 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 		);
 		expect(direct([{ id: "k-1", key: Buffer.alloc(16, 7) }])).toThrow(
 			new RangeError(
-				'federation grant store: encryption.keys has an encryption key "k-1" that is not a Buffer of 32 bytes',
+				"federation grant store: encryption.keys has an encryption key at index 0 that is not a Buffer of 32 bytes",
 			),
 		);
+		// An id that passes the rule can itself be key material: a 32-byte key
+		// in hex, or in unpadded base64url. Swapped with its key, it must not
+		// reach the refusal.
+		for (const swapped of [material.toString("hex"), material.toString("base64url")]) {
+			let thrown: unknown;
+			try {
+				direct([{ id: swapped, key: "k-1" as unknown as Buffer }])();
+			} catch (err) {
+				thrown = err;
+			}
+			expect(thrown, swapped).toStrictEqual(
+				new RangeError(
+					"federation grant store: encryption.keys has an encryption key at index 0 that is not a Buffer of 32 bytes",
+				),
+			);
+			expect((thrown as Error).message, swapped).not.toContain(swapped);
+		}
 		// The store's own refusal of a ring with nothing to seal with, before the
 		// leaf is asked: the same setting, so the same class.
 		expect(direct([])).toThrow(
@@ -290,7 +307,7 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 				{ id: "k-1", key: KEY },
 				{ id: "k-1", key: KEY },
 			],
-			'federation grant store: federationGrants.encryptionKeys has a duplicate encryption key id "k-1"',
+			"federation grant store: federationGrants.encryptionKeys has a duplicate encryption key id at index 1",
 		],
 		[
 			"a key id outside the rule",
