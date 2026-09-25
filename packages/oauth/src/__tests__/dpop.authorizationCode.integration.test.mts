@@ -42,7 +42,11 @@ import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
 import { createAuthorizationGrant } from "#/grants/authorization.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
-import { COMPOUND_DPOP_BINDING, UNOWNED_BINDINGS } from "./_helpers/unownedBindings.mjs";
+import {
+	COMPOUND_DPOP_BINDING,
+	COMPOUND_MTLS_BINDING,
+	UNOWNED_BINDINGS,
+} from "./_helpers/unownedBindings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -440,5 +444,25 @@ describe("authorization_code stamps only the confirmation the binding's mechanis
 			jkt: "OWNED-JKT",
 		});
 		expect(result.tokens.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const handler = createAuthorizationGrant(
+			makeDeps(vi.fn().mockResolvedValue({ ...validPublicCode })),
+		);
+		const { result } = await handler.handle({
+			...baseCtxPublic,
+			tokenBinding: COMPOUND_MTLS_BINDING,
+		});
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		expect(decodePayload(result.tokens.access_token as string).cnf).toEqual({
+			"x5t#S256": "OWNED-X5T",
+		});
+		expect(decodePayload(result.tokens.refresh_token as string).cnf).toEqual({
+			"x5t#S256": "OWNED-X5T",
+		});
+		expect(result.tokens.token_type).toBe("Bearer");
 	});
 });

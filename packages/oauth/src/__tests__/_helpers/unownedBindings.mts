@@ -34,6 +34,7 @@ export const UNOWNED_BINDINGS: readonly (readonly [string, TokenBinding])[] = [
 		"a DPoP binding presenting cnf.x5t#S256",
 		{ kind: "dpop", confirmation: { "x5t#S256": "CROSSED-X5T" } },
 	],
+	["an mTLS binding presenting cnf.jkt", { kind: "mtls", confirmation: { jkt: "CROSSED-JKT" } }],
 ];
 
 /**
@@ -45,4 +46,10 @@ export const UNOWNED_BINDINGS: readonly (readonly [string, TokenBinding])[] = [
 export const COMPOUND_DPOP_BINDING = {
 	kind: "dpop",
 	confirmation: { jkt: "OWNED-JKT", "x5t#S256": "STOWAWAY-X5T" },
+} as unknown as TokenBinding;
+
+/** The mTLS counterpart: its `x5t#S256` is stamped, the stowaway `jkt` is not, and the token is Bearer. */
+export const COMPOUND_MTLS_BINDING = {
+	kind: "mtls",
+	confirmation: { jkt: "STOWAWAY-JKT", "x5t#S256": "OWNED-X5T" },
 } as unknown as TokenBinding;

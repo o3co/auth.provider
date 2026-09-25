@@ -46,7 +46,11 @@ import { decodeJwt, SignJWT } from "jose";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createJwtBearerGrant, JWT_BEARER_GRANT_TYPE } from "#/grants/jwtBearer.mjs";
 import { oauthAuthorizationModule } from "#/oauthAuthorization.mjs";
-import { COMPOUND_DPOP_BINDING, UNOWNED_BINDINGS } from "./_helpers/unownedBindings.mjs";
+import {
+	COMPOUND_DPOP_BINDING,
+	COMPOUND_MTLS_BINDING,
+	UNOWNED_BINDINGS,
+} from "./_helpers/unownedBindings.mjs";
 
 const keyStore = createSymmetricKeyStore("test-secret-at-least-32-chars!!");
 const config = {
@@ -1451,5 +1455,15 @@ describe("jwt-bearer grant stamps only the confirmation the binding's mechanism 
 		if (!("tokens" in result)) expect.fail("expected tokens");
 		expect(decodeJwt(result.tokens.access_token as string).cnf).toEqual({ jkt: "OWNED-JKT" });
 		expect(result.tokens.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const { result } = await build({}).handle(ctx({}, { tokenBinding: COMPOUND_MTLS_BINDING }));
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("expected tokens");
+		expect(decodeJwt(result.tokens.access_token as string).cnf).toEqual({
+			"x5t#S256": "OWNED-X5T",
+		});
+		expect(result.tokens.token_type).toBe("Bearer");
 	});
 });

@@ -353,6 +353,7 @@ describe("createWebAuthnGrant — stamps only the confirmation the binding's mec
 			"a DPoP binding presenting cnf.x5t#S256",
 			{ kind: "dpop", confirmation: { "x5t#S256": "CROSSED-X5T" } },
 		],
+		["an mTLS binding presenting cnf.jkt", { kind: "mtls", confirmation: { jkt: "CROSSED-JKT" } }],
 	];
 
 	it.each(unowned)(
@@ -376,5 +377,19 @@ describe("createWebAuthnGrant — stamps only the confirmation the binding's mec
 		expect(decodePayload(tokens.access_token).cnf).toEqual({ jkt: PROOF_JKT });
 		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({ jkt: PROOF_JKT });
 		expect(tokens.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const compound = {
+			kind: "mtls",
+			confirmation: { jkt: "STOWAWAY-JKT", "x5t#S256": CERT_THUMBPRINT },
+		} as unknown as TokenBinding;
+		const tokens = await issue(await makeDeps(), makeCtx(makeClient(), { tokenBinding: compound }));
+
+		expect(decodePayload(tokens.access_token).cnf).toEqual({ "x5t#S256": CERT_THUMBPRINT });
+		expect(decodePayload(tokens.refresh_token as string).cnf).toEqual({
+			"x5t#S256": CERT_THUMBPRINT,
+		});
+		expect(tokens.token_type).toBe("Bearer");
 	});
 });

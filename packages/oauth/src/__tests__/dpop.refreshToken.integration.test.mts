@@ -44,7 +44,11 @@ import {
 import { decodeJwt, SignJWT } from "jose";
 import { describe, expect, it } from "vitest";
 import { createRefreshTokenGrant } from "#/grants/refreshToken.mjs";
-import { COMPOUND_DPOP_BINDING, UNOWNED_BINDINGS } from "./_helpers/unownedBindings.mjs";
+import {
+	COMPOUND_DPOP_BINDING,
+	COMPOUND_MTLS_BINDING,
+	UNOWNED_BINDINGS,
+} from "./_helpers/unownedBindings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared fixtures
@@ -544,5 +548,24 @@ describe("refresh_token stamps only the confirmation the binding's mechanism own
 		expect(decodeJwt(result.tokens.access_token).cnf).toEqual({ jkt: "OWNED-JKT" });
 		expect(decodeJwt(result.tokens.refresh_token as string).cnf).toEqual({ jkt: "OWNED-JKT" });
 		expect(result.tokens.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const rt = await mintRefreshToken({ clientId: PUBLIC_CLIENT_ID });
+		const { result } = await createRefreshTokenGrant(mockDeps).handle(
+			buildCtx({
+				refreshToken: rt,
+				authenticatedClient: publicAuthClient,
+				tokenBinding: COMPOUND_MTLS_BINDING,
+			}),
+		);
+
+		expect(result.status).toBe(200);
+		if (!("tokens" in result)) expect.fail("Expected tokens in result");
+		expect(decodeJwt(result.tokens.access_token).cnf).toEqual({ "x5t#S256": "OWNED-X5T" });
+		expect(decodeJwt(result.tokens.refresh_token as string).cnf).toEqual({
+			"x5t#S256": "OWNED-X5T",
+		});
+		expect(result.tokens.token_type).toBe("Bearer");
 	});
 });

@@ -1203,6 +1203,7 @@ describe("a sender-constrained poll", () => {
 			"a DPoP binding presenting cnf.x5t#S256",
 			{ kind: "dpop", confirmation: { "x5t#S256": "CROSSED-X5T" } },
 		],
+		["an mTLS binding presenting cnf.jkt", { kind: "mtls", confirmation: { jkt: "CROSSED-JKT" } }],
 	] as const)(
 		"mints an unbound access token, advertised as Bearer, for %s",
 		async (_label, tokenBinding) => {
@@ -1219,5 +1220,14 @@ describe("a sender-constrained poll", () => {
 		} as unknown as TokenBinding);
 		expect(payload.cnf).toEqual({ jkt: "DEVICE-JKT" });
 		expect(tokens.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const { tokens, payload } = await approvedPoll({
+			kind: "mtls",
+			confirmation: { jkt: "STOWAWAY-JKT", "x5t#S256": "DEVICE-X5T" },
+		} as unknown as TokenBinding);
+		expect(payload.cnf).toEqual({ "x5t#S256": "DEVICE-X5T" });
+		expect(tokens.token_type).toBe("Bearer");
 	});
 });

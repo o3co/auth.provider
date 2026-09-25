@@ -19,7 +19,11 @@ import { describe, expect, it, vi } from "vitest";
 import { createSessionGrant } from "#/grants/session.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
 import { codeRecord } from "./_helpers/codeRecord.mjs";
-import { COMPOUND_DPOP_BINDING, UNOWNED_BINDINGS } from "./_helpers/unownedBindings.mjs";
+import {
+	COMPOUND_DPOP_BINDING,
+	COMPOUND_MTLS_BINDING,
+	UNOWNED_BINDINGS,
+} from "./_helpers/unownedBindings.mjs";
 
 const SID = "browser-session";
 const SUB = "user-1";
@@ -272,5 +276,12 @@ describe("session grant stamps only the confirmation the binding's mechanism own
 		expect(result.status).toBe(200);
 		expect(decodeJwt(result.body.access_token).cnf).toEqual({ jkt: "OWNED-JKT" });
 		expect(result.body.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const result = await mint(await buildApp(await liveStore(), COMPOUND_MTLS_BINDING));
+		expect(result.status).toBe(200);
+		expect(decodeJwt(result.body.access_token).cnf).toEqual({ "x5t#S256": "OWNED-X5T" });
+		expect(result.body.token_type).toBe("Bearer");
 	});
 });

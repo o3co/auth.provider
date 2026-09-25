@@ -40,7 +40,11 @@ import request from "supertest";
 import { describe, expect, it } from "vitest";
 import { createClientCredentialsGrant } from "#/grants/clientCredentials.mjs";
 import { createOAuthRouter } from "#/routes.mjs";
-import { COMPOUND_DPOP_BINDING, UNOWNED_BINDINGS } from "./_helpers/unownedBindings.mjs";
+import {
+	COMPOUND_DPOP_BINDING,
+	COMPOUND_MTLS_BINDING,
+	UNOWNED_BINDINGS,
+} from "./_helpers/unownedBindings.mjs";
 
 // ---------------------------------------------------------------------------
 // Shared test fixtures
@@ -262,5 +266,12 @@ describe("client_credentials stamps only the confirmation the binding's mechanis
 		expect(res.status).toBe(200);
 		expect(decodeJwt(res.body.access_token as string).cnf).toEqual({ jkt: "OWNED-JKT" });
 		expect(res.body.token_type).toBe("DPoP");
+	});
+
+	it("stamps the mTLS member of a compound confirmation and nothing else, advertised as Bearer", async () => {
+		const res = await issue(COMPOUND_MTLS_BINDING);
+		expect(res.status).toBe(200);
+		expect(decodeJwt(res.body.access_token as string).cnf).toEqual({ "x5t#S256": "OWNED-X5T" });
+		expect(res.body.token_type).toBe("Bearer");
 	});
 });
