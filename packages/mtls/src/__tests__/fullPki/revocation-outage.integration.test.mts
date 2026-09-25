@@ -122,7 +122,8 @@ type LeafCrl = "refused" | "hanging" | "garbage" | "clean" | "revoked";
  * `extra.leafCn` names the leaf; `extra.morePoints` adds distribution points
  * after the first — one the live server answers 404 (`missing`) or one on a
  * port nothing listens on (`refused`). `extra.intSourcesRefused` points the
- * intermediate's own CRL and OCSP responder at ports nothing listens on.
+ * intermediate's own CRL and OCSP responder at ports nothing listens on;
+ * `extra.intRevoked` has the root's list name the intermediate.
  */
 const pki = async (
 	leafCrl: LeafCrl,
@@ -132,6 +133,7 @@ const pki = async (
 		readonly leafCn?: string;
 		readonly morePoints?: readonly ("missing" | "refused")[];
 		readonly intSourcesRefused?: boolean;
+		readonly intRevoked?: boolean;
 	} = {},
 ) => {
 	const root = await mintCa("Root", 1);
@@ -179,7 +181,7 @@ const pki = async (
 			...(leafResponder !== undefined ? [ocspAia(leafResponder)] : []),
 		],
 	});
-	lists["/root.crl"] = await mintCrl({ issuer: root });
+	lists["/root.crl"] = await mintCrl({ issuer: root, revoked: extra.intRevoked ? [int] : [] });
 	if (leafCrl === "garbage") lists["/int.crl"] = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
 	if (leafCrl === "clean") lists["/int.crl"] = await mintCrl({ issuer: int });
 	if (leafCrl === "revoked") lists["/int.crl"] = await mintCrl({ issuer: int, revoked: [leaf] });
@@ -423,7 +425,7 @@ describe("full-pki, on-unavailable = reject: what stays a verdict", () => {
 	});
 });
 
-describe("full-pki, on-unavailable = allow: unchanged", () => {
+describe("full-pki, on-unavailable = allow: an allowed line only for a request that was served", () => {
 	it("a refused connection: the certificate is bound, one allowed line at warn", async () => {
 		const { root, int, leaf } = await pki("refused");
 		const { app, calls } = appWith(root, "allow");
@@ -437,6 +439,67 @@ describe("full-pki, on-unavailable = allow: unchanged", () => {
 		expect(calls.map(({ level, args }) => [level, args[1]])).toEqual([
 			["warn", "mtls_revocation_unavailable_allowed"],
 		]);
+	});
+});
+
+describe("full-pki, on-unavailable = allow: a verdict elsewhere on the path has its own lines alone", () => {
+	it("the leaf's point refused and the intermediate revoked: 400, the verdict's lines, no allowed line", async () => {
+		// The leaf's status is unknown and "allow" would admit it, but the
+		// intermediate is revoked: the request is refused, and a line saying
+		// the leaf was allowed would describe a request that was not served.
+		const { root, int, leaf } = await pki("refused", "127.0.0.1", false, { intRevoked: true });
+		const { app, calls } = appWith(root, "allow");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(400);
+		expect(res.body.error).toBe("invalid_certificate");
+		expect(calls.map(({ level, args }) => [level, args[1]])).toEqual([
+			["warn", "mtls_full_pki_validation_failed"],
+			["warn", "token_binding_proof_invalid"],
+		]);
+		expect(calls[0]?.args[0]).toMatchObject({ step: "certificate revoked" });
+	});
+
+	it("one of the leaf's two points refused and the intermediate revoked: the same, no partially-allowed line", async () => {
+		const { root, int, leaf } = await pki("clean", "127.0.0.1", false, {
+			morePoints: ["refused"],
+			intRevoked: true,
+		});
+		const { app, calls } = appWith(root, "allow");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(400);
+		expect(calls.map(({ level, args }) => [level, args[1]])).toEqual([
+			["warn", "mtls_full_pki_validation_failed"],
+			["warn", "token_binding_proof_invalid"],
+		]);
+	});
+
+	it("one of the leaf's two points refused and the intermediate clean: served, its one partially-allowed line", async () => {
+		const { root, int, leaf, morePoints } = await pki("clean", "127.0.0.1", false, {
+			morePoints: ["refused"],
+		});
+		const { app, calls } = appWith(root, "allow");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(200);
+		expect(calls.map(({ level, args }) => [level, args[1]])).toEqual([
+			["warn", "mtls_revocation_partially_unavailable_allowed"],
+		]);
+		expect(calls[0]?.args[0]).toMatchObject({
+			subject: "CN=client",
+			reason: "fetch_failed",
+			detail: expect.stringContaining(morePoints[0] as string),
+		});
 	});
 });
 
