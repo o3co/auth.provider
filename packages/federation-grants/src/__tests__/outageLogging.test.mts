@@ -394,6 +394,33 @@ describe("the lodging routes", () => {
 		});
 	});
 
+	it("logs an intent it could not close after a lost renewal as one warn, whatever the answer", async () => {
+		// The pointer write lost to a revocation, and the intent it named could
+		// not be closed: the answer is the grant's (410 grant_revoked), and the
+		// intent — which can activate nothing, and lapses with the flow budget —
+		// is one warn, where it used to be nothing.
+		const h = harness();
+		await h.seed();
+		const revoke = h.store.revoke.bind(h.store);
+		vi.spyOn(h.store, "nameIntent").mockImplementation(async () => {
+			await revoke(GRANT_ID, "subject", h.world.now);
+			throw new Error("connection reset");
+		});
+		vi.spyOn(h.intents, "finishIntent").mockRejectedValue(new Error("close failed"));
+		const response = await renew(h);
+		expect(response.status).toBe(410);
+		expect(response.body).toEqual({ error: "grant_revoked", error_description: "subject" });
+		expect(written(await settled(h))).toEqual(["warn federation_grant_lodge_step_failed"]);
+		expect(payloadOf(h.lines, "federation_grant_lodge_step_failed")).toEqual({
+			operation: "reauthorize",
+			grantId: GRANT_ID,
+			correlationId: REQUEST_ID,
+			store: "federation_grant_intent",
+			step: "finish_intent",
+			err: expect.objectContaining({ name: "Error", detail: "close failed" }),
+		});
+	});
+
 	it("logs a renewal's key missing from the ring", async () => {
 		const h = harness();
 		await h.seed();

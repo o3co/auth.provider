@@ -891,6 +891,7 @@ describe("lodging without an id source of the caller's", () => {
  */
 describe("what a storage refusal carries, for the route that answers it", () => {
 	const failureOf = (result: unknown) => (result as { failure?: Record<string, unknown> }).failure;
+	const cleanupOf = (result: unknown) => (result as { cleanup?: Record<string, unknown> }).cleanup;
 
 	it("names the intent store and the error it threw", async () => {
 		const down = new Error("intent store down");
@@ -959,8 +960,14 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 			store: "federation_grant",
 			step: "create_pending",
 			error: down,
-			cleanup: { store: "federation_grant_intent", step: "finish_intent", error: closing },
 		});
+		// Its own field, beside the failure: the same one any refusal carries.
+		expect(cleanupOf(result)).toEqual({
+			store: "federation_grant_intent",
+			step: "finish_intent",
+			error: closing,
+		});
+		expect(Object.keys(result)).not.toContain("cleanup");
 	});
 
 	it("names a second write the store refused", async () => {
@@ -1056,6 +1063,99 @@ describe("what a storage refusal carries, for the route that answers it", () => 
 				step: "name_intent",
 				error: reset,
 			});
+			expect(cleanupOf(result)).toBeUndefined();
+		});
+
+		/**
+		 * A pointer write that lost, an intent that could not be closed after it,
+		 * and a re-read that answers as the grant is now — revoked, gone, or
+		 * still renewable. The answer is the re-read's; the intent that could
+		 * not be closed rides on it whichever answer it is.
+		 */
+		const lostAndUnclosed = (
+			reread: FederationGrantStore["inspect"],
+			closing: Error,
+		): FederationGrantLodgingDeps =>
+			deps({
+				grantStore: {
+					...grants,
+					nameIntent: async () => {
+						throw new Error("connection reset");
+					},
+					isCurrentIntent: async () => false,
+					inspect: (() => {
+						let reads = 0;
+						return async (id: string, when: Date) => {
+							reads += 1;
+							return reads === 1 ? await grants.inspect(id, when) : await reread(id, when);
+						};
+					})(),
+				},
+				intentStore: {
+					...intents,
+					finishIntent: async () => {
+						throw closing;
+					},
+				},
+			});
+
+		it.each([
+			[
+				"revoked meanwhile",
+				async (id: string, when: Date) => {
+					await grants.revoke(id, "subject", when);
+					return await grants.inspect(id, when);
+				},
+				{ ok: false, reason: "grant_revoked", revokedBy: "subject", revokedNow: false },
+			],
+			["gone", async () => null, { ok: false, reason: "grant_not_found" }],
+		] as const)(
+			"carries an intent it could not close on a re-read that answers the grant %s",
+			async (_label, reread, answered) => {
+				await establish();
+				const closing = new Error("close failed");
+				const result = await lodgeFederationGrantReauthorization(
+					lostAndUnclosed(reread, closing),
+					renewal(),
+				);
+				expect(result).toEqual(answered);
+				expect(cleanupOf(result)).toEqual({
+					store: "federation_grant_intent",
+					step: "finish_intent",
+					error: closing,
+				});
+				expect(Object.keys(result)).not.toContain("cleanup");
+				expect(JSON.stringify(result)).not.toContain("close failed");
+			},
+		);
+
+		it("carries it on a storage answer beside what failed, and on a re-read that failed", async () => {
+			await establish();
+			const closing = new Error("close failed");
+			const stillRenewable = await lodgeFederationGrantReauthorization(
+				lostAndUnclosed((id, when) => grants.inspect(id, when), closing),
+				renewal(),
+			);
+			expect(stillRenewable).toEqual({ ok: false, reason: "storage" });
+			expect(failureOf(stillRenewable)).toMatchObject({
+				store: "federation_grant",
+				step: "name_intent",
+			});
+			expect(cleanupOf(stillRenewable)).toMatchObject({ step: "finish_intent", error: closing });
+
+			const down = new Error("re-read down");
+			const unread = await lodgeFederationGrantReauthorization(
+				lostAndUnclosed(async () => {
+					throw down;
+				}, closing),
+				renewal(),
+			);
+			expect(failureOf(unread)).toEqual({
+				store: "federation_grant",
+				step: "inspect",
+				error: down,
+			});
+			expect(cleanupOf(unread)).toMatchObject({ step: "finish_intent", error: closing });
 		});
 	});
 });
