@@ -593,6 +593,34 @@ describe("every module's primary route answers in the one app", () => {
 		},
 	);
 
+	// KNOWN DEFECT (the template's federation config, with the session
+	// package's redirect policy): a federation enabled the way the template
+	// README documents — its `FEDERATIONS_OIDC_*` variables — boots, and every
+	// login through it then ends at the callback in `500 misconfiguration`
+	// "client URL not configured", after the user has signed in upstream.
+	// `clientUrl` has no environment form (`application.conf` ships it
+	// commented out) and nothing at boot asks for it. Either shape of fix
+	// passes: boot refusing the federation by the missing key, or the login
+	// completing.
+	it.fails("a federation enabled from the documented variables alone either refuses to boot or completes a login", async () => {
+		const withoutLanding = (config: AppConfig): AppConfig => {
+			const federations = config.federations as Record<string, Record<string, unknown>>;
+			const { clientUrl: _dropped, ...oidc } = federations.oidc ?? {};
+			return { ...config, federations: { ...federations, oidc } } as unknown as AppConfig;
+		};
+		let composed: Composition;
+		try {
+			composed = await boot({ config: withoutLanding });
+		} catch (err) {
+			expect(String((err as { cause?: unknown }).cause ?? err)).toMatch(/clientUrl/);
+			return;
+		}
+		const callback = await (
+			await federatedCallback(composed.app, "oidc", composed.upstreams.oidc)
+		)();
+		expect(callback.status).toBeLessThan(500);
+	});
+
 	it("a federation grant is lodged, beside oauthModule under /oauth", async () => {
 		const { app } = await boot();
 		const res = await lodgeGrant(app);
