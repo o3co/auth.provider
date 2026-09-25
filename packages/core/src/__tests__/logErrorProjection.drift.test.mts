@@ -92,6 +92,25 @@
  * sees only a literal: a message held in a variable or built by a call
  * (`logger.warn(message)`, `logger.warn(describe(x))`) is not flagged.
  *
+ * A fourth rule reads the same logger calls, and every `emitAuditEvent(...)`,
+ * for the request itself: `req.body`, `req.query`, `req.params`, `req.path`,
+ * `req.originalUrl`, `req.url`, `req.headers`, `req.cookies`, `req.get(…)` or
+ * `req.header(…)` (on `req` or a member path ending in it, `ctx.req`) —
+ * inside a template literal's `${…}` too — anywhere but inside the
+ * parentheses of `auditErrorText(...)`. What a caller sent is put on a line
+ * sanitised and capped: a log line and an audit event are read by systems
+ * that split on a line break, and neither may be made unbounded by a caller.
+ * The one exception is an audit event's own `userAgent` field written as
+ * `userAgent: req.get("user-agent")` inside `emitAuditEvent(...)` — the
+ * header `AuditEvent.userAgent` exists to carry, which Node's HTTP parser
+ * already bounds (no line break, the header-size limit). What it does not
+ * see, and each site's own tests pin instead: a request value read into a
+ * name first (`const name = req.params.name`), a receiver not named `req`,
+ * a value derived from one (a list of the caller's resources, a parsed
+ * body's field), and an audit event built anywhere but `emitAuditEvent`
+ * (federation-grants' bridge takes its events from core and from its
+ * routes, and sanitises what it forwards itself).
+ *
  * Where it looks is `SOURCE_ROOTS` below: every workspace package's `src`
  * and the standalone template's, tests (`__tests__`) left out. A package
  * added under `packages/` or `templates/` fails "names every workspace
@@ -837,5 +856,146 @@ describe("a logger call opens with an object, not a string (string-first rule)",
 		for (const { file, sites: allowed, why } of STRING_FIRST_ALLOWED) {
 			expect(sites.get(file)?.length ?? 0, `${file} — ${why}`).toBe(allowed);
 		}
+	});
+});
+
+/** `emitAuditEvent(`: the one function every route-side audit event goes through. */
+const AUDIT_CALL = /\bemitAuditEvent\(/g;
+
+/**
+ * A read of the request itself, on `req` or a member path ending in it
+ * (`ctx.req`): what the caller sent, or a header it chose.
+ */
+const REQUEST_READ =
+	/(?<![\w$])req\s*\.\s*(?:(?:body|query|params|path|originalUrl|url|headers|cookies)(?![\w$])|(?:get|header)\s*\()/;
+
+/** The audit event's own `userAgent` field, written as the header it exists to carry. */
+const USER_AGENT_FIELD = /\buserAgent\s*:\s*(?:[\w$]+\.)*req\.get\(\s*(["'`])user-agent\1\s*\)/g;
+
+/** `text` with every `name(...)` call replaced by `""`, parentheses balanced. */
+function withoutCallsOf(text: string, name: string): string {
+	const open = new RegExp(String.raw`\b${name}\(`, "g");
+	let out = "";
+	let from = 0;
+	for (let match = open.exec(text); match !== null; match = open.exec(text)) {
+		if (match.index < from) continue;
+		const start = match.index + match[0].length - 1;
+		let depth = 0;
+		let end = text.length;
+		for (let i = start; i < text.length; i++) {
+			if (text[i] === "(") depth++;
+			else if (text[i] === ")" && --depth === 0) {
+				end = i + 1;
+				break;
+			}
+		}
+		out += `${text.slice(from, match.index)}""`;
+		from = end;
+		open.lastIndex = end;
+	}
+	return out + text.slice(from);
+}
+
+/** Whether `args` reads the request anywhere but inside `auditErrorText(...)`. */
+function readsRequestRaw(args: string, { audit }: { readonly audit: boolean }): boolean {
+	const exempted = audit ? args.replace(USER_AGENT_FIELD, 'userAgent: ""') : args;
+	return [literalsBlanked(exempted), ...templateExpressions(exempted)].some((code) =>
+		REQUEST_READ.test(withoutCallsOf(literalsBlanked(code), "auditErrorText")),
+	);
+}
+
+/** The line of every logger or `emitAuditEvent` call in `original` that hands on a raw request read. */
+function requestReadSitesIn(original: string): number[] {
+	const source = withoutComments(original);
+	const lines: number[] = [];
+	for (const { line, args } of loggerCalls(source)) {
+		if (readsRequestRaw(args, { audit: false })) lines.push(line);
+	}
+	for (const call of source.matchAll(AUDIT_CALL)) {
+		const args = argumentsFrom(source, (call.index ?? 0) + call[0].length - 1);
+		if (readsRequestRaw(args, { audit: true })) {
+			lines.push(source.slice(0, call.index).split("\n").length);
+		}
+	}
+	return lines.sort((a, b) => a - b);
+}
+
+function requestReadSites(): string[] {
+	const sites: string[] = [];
+	for (const root of SOURCE_ROOTS) {
+		for (const file of sourceFiles(join(repoRoot, root))) {
+			for (const line of requestReadSitesIn(readFileSync(file, "utf8"))) {
+				sites.push(`${relative(repoRoot, file)}:${line}`);
+			}
+		}
+	}
+	return sites;
+}
+
+describe("a request value reaches a logger or an audit event only through auditErrorText", () => {
+	it(`in ${SOURCE_ROOTS.join(", ")}`, () => {
+		expect(requestReadSites()).toEqual([]);
+	});
+
+	describe("the guard sees the shapes it exists for, and no others", () => {
+		const flags = (source: string): boolean => requestReadSitesIn(source).length > 0;
+
+		it.each([
+			["the path", `logger.warn({ path: req.path }, "rejected");`],
+			["the path, on ctx.req", `ctx.opts.logger.warn({ path: ctx.req.path }, "rejected");`],
+			["a path parameter", `log.warn({ grantId: req.params.grantId }, "refused");`],
+			["a query parameter", `logger.info({ scope: req.query.scope }, "asked");`],
+			["a body field", `logger.warn({ subject: req.body.sub }, "refused");`],
+			["the whole body", `logger.warn({ body: req.body }, "refused");`],
+			["a header, by property", `logger.warn({ origin: req.headers.origin }, "refused");`],
+			["a header, by getter", `logger.warn({ origin: req.get("origin") }, "refused");`],
+			["the original URL", `logger.error({ url: req.originalUrl }, "unhandled");`],
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+			["a template literal", 'logger.warn({ at: `${req.method} ${req.path}` }, "refused");'],
+			[
+				"an audit detail",
+				`emitAuditEvent(sink, { type: "x", details: { grantId: req.params.grantId } });`,
+			],
+			[
+				"a header other than user-agent as the audit's userAgent",
+				`emitAuditEvent(sink, { type: "x", userAgent: req.get("origin") });`,
+			],
+			[
+				"a user-agent anywhere but the audit's userAgent field",
+				`emitAuditEvent(sink, { type: "x", details: { agent: req.get("user-agent") } });`,
+			],
+			[
+				"a request read beside a sanitised one",
+				`logger.warn({ a: auditErrorText(req.path), b: req.path }, "refused");`,
+			],
+		])("flags %s", (_label, source) => {
+			expect(flags(source)).toBe(true);
+		});
+
+		it.each([
+			["the path, sanitised", `logger.warn({ path: auditErrorText(req.path) }, "rejected");`],
+			[
+				"a header, sanitised with a fallback",
+				`logger.warn({ site: auditErrorText(req.get("sec-fetch-site") ?? "") }, "rejected");`,
+			],
+			[
+				"the audit event's own userAgent field",
+				`emitAuditEvent(sink, { type: "x", ip: req.ip, userAgent: req.get("user-agent") });`,
+			],
+			[
+				"the audit event's own userAgent field, on ctx.req",
+				`emitAuditEvent(sink, { type: "x", userAgent: ctx.req.get("user-agent") });`,
+			],
+			["the peer address", `logger.warn({ ip: req.ip }, "rejected");`],
+			["a string naming the path", `logger.warn({ note: "req.path" }, "rejected");`],
+			["a call that is not a logger's", `res.status(400).json({ path: req.path });`],
+			["a name that merely ends in req", `logger.warn({ path: myreq.path }, "rejected");`],
+			[
+				"a request value read into a name first (a known gap)",
+				`const p = req.path; logger.warn({ p }, "x");`,
+			],
+		])("does not flag %s", (_label, source) => {
+			expect(flags(source)).toBe(false);
+		});
 	});
 });
