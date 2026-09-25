@@ -60,6 +60,28 @@
  * DPoP-aware device presented its DPoP-bound token as a bearer token, which a
  * resource server enforcing the binding refuses (§7.1).
  *
+ * ### A revocation between the approval and the poll
+ *
+ * The approval is checked against the live session when it is given
+ * (`verificationEndpoint.mts`). A `revokeAllForSubject` that lands after it
+ * and before the device polls — anywhere within the code's lifetime — is
+ * older than the token this poll mints, so `verifyJwt` never refuses that
+ * token; a holder of a stolen live session could approve codes ahead and
+ * redeem them after the victim's credential change. So with
+ * `subjectRevocation` wired, the poll holds the approval's own instant
+ * (`DeviceAuthorization.approvedAtMs`) against the subject's sessions
+ * boundary, as the verification endpoint holds the session's `authTime`
+ * against it: an approval at or before the boundary (core's
+ * `coveredByRevocationBoundary`, with `verifyJwt`'s one-second allowance) is
+ * `400 invalid_grant` — the approval was revoked, and the device starts
+ * again. An approval that records no instant (a record approved before the
+ * store recorded one) is refused while a boundary is in force, as an
+ * `iat`-less token is. A boundary that cannot be read is `503
+ * temporarily_unavailable`, logged once at error as
+ * `device_code_grant_revocation_unavailable` (`store:
+ * "revocation_boundary"`, `step: "read"`). The approval was consumed by the
+ * poll either way, so a refused or unanswered device starts over.
+ *
  * ### A store outage is 503, not a verdict
  *
  * A `poll` that throws is the device-code store failing, which the handler
@@ -79,8 +101,11 @@ import type {
 	GrantHandler,
 	GrantHandlerResult,
 	KeyStore,
+	SubjectRevocation,
 } from "@o3co/auth-provider-core";
 import {
+	coveredByRevocationBoundary,
+	DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
 	generateToken,
 	generateTokenResponse,
 	isLifetimeSeconds,
@@ -98,6 +123,11 @@ export interface DeviceCodeGrantOptions {
 		error?(obj: Record<string, unknown>, msg: string): void;
 	};
 	readonly now?: () => number;
+	/**
+	 * The subject's sessions boundary — see the file header. Optional as it
+	 * is at every surface that reads it.
+	 */
+	readonly subjectRevocation?: Pick<SubjectRevocation, "revokedBefore">;
 }
 
 const error = (status: number, code: string, description: string): GrantHandlerResult => ({
@@ -201,6 +231,50 @@ export const createDeviceCodeGrant = (options: DeviceCodeGrantOptions): GrantHan
 			   forgets to cannot mint a subject-less token. */
 			if (authorization.subject === undefined) {
 				return error(400, "invalid_grant", "authorization carries no approving subject");
+			}
+
+			// See the file header: a revocation stamped between the approval and
+			// this poll.
+			const revocation = options.subjectRevocation;
+			if (revocation !== undefined) {
+				let revoked: boolean;
+				try {
+					const boundary = await revocation.revokedBefore(authorization.subject);
+					if (boundary !== null && !(boundary instanceof Date)) {
+						throw new TypeError("the sessions boundary is neither a date nor null");
+					}
+					revoked =
+						boundary !== null &&
+						(authorization.approvedAtMs === undefined ||
+							coveredByRevocationBoundary(
+								new Date(authorization.approvedAtMs),
+								boundary,
+								DEFAULT_SUBJECT_REVOCATION_SKEW_MS,
+							));
+				} catch (err) {
+					reportDeviceCodeStoreOutage(
+						options.logger,
+						"device_code_grant_revocation_unavailable",
+						err,
+						{
+							store: "revocation_boundary",
+							step: "read",
+							clientId: client.clientId,
+						},
+					);
+					return error(
+						503,
+						DEVICE_CODE_STORE_UNAVAILABLE.error,
+						DEVICE_CODE_STORE_UNAVAILABLE.description,
+					);
+				}
+				if (revoked) {
+					return error(
+						400,
+						"invalid_grant",
+						"the approval predates a revocation of the subject's sessions; start a new device authorization request",
+					);
+				}
 			}
 
 			const scope = authorization.grantedScope ?? [];

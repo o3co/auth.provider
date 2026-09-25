@@ -30,6 +30,7 @@ A deployment that only wires the bundled stores and modules has nothing to chang
 | `CodeData`, `Code` | `code_challenge`, `code_challenge_method`, `nonce`, `sid`, `acr`; `expiresIn`, `grantedScope`, `grantedAudience` | #655 |
 | `CreateCodeInput` (new: what `createCode` takes) | every field of `Code` but `code`, all required except `expiresIn` (left out, the repository's default applies) | #655 |
 | `DeviceAuthorization`, `CreateDeviceAuthorizationInput` | `requestedScope`, `subject`, `grantedScope`; `requestedScope`. `ApproveDeviceAuthorizationInput.grantedScope` stays optional: leaving it out grants `requestedScope` whole. | #656 |
+| `DeviceAuthorization` (later) | `approvedAtMs`: the instant an approval was given, the `nowMs` `approve` was handed; `undefined` before. A `DeviceCodeStore` of your own records it and returns it — the device grant holds it against the subject's sessions boundary at the poll. A record approved before the upgrade (the bundled Redis store's included) reads it as `undefined`, which a poll refuses while the subject has a boundary in force. | — |
 | `FederationGrantIntent` | `resource`, `upstreamSubject` | #658 |
 | `FederationGrantAuthorization`, `FederationGrantUsage`, `FederationGrantCredentials` | `resource`; `lastUsedAt`, `ineligible`, `refreshFailure`; `accessToken` | #657 |
 | `FederationGrantRefreshFailure` (the stored stamp) | `retryAfterSeconds`, `upstreamCode`. It no longer `extends` `FederationGrantRefreshFailureInput`, whose fields stay optional. | #657 |

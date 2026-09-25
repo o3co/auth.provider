@@ -1313,6 +1313,7 @@ describe("deviceGrantModule — the access-token lifetime", () => {
 					status: "approved" as const,
 					subject: "user-1",
 					grantedScope: ["openid"],
+					approvedAtMs: Date.now(),
 				},
 			}),
 		} satisfies DeviceCodeStore;

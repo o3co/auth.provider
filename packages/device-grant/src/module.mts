@@ -697,6 +697,9 @@ export const deviceGrantModule = (params: { config: AppConfig }): Module => {
 									keyStore: deps.keyStore,
 									accessTokenExpiresIn: resolveAccessTokenLifetime(deps.config).defaultExpiresIn,
 									logger: deps.logger,
+									// An approval a later sessions boundary covers is refused
+									// at the poll (see grant.mts).
+									...(deps.subjectRevocation ? { subjectRevocation: deps.subjectRevocation } : {}),
 								});
 							},
 						},

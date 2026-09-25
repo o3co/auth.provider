@@ -565,7 +565,7 @@ Core's requirement rule (`packages/core/src/mfa/requirement.mts`) is one pure fu
 - **Baseline** (`mfa.mode = "required"`): met when the primary is not in the baseline's set (`mfa.requiredAfter`, fixed to `["pwd"]` for now, D13), or when `mfaAt` is set. A session whose primary is unknown is not met and is re-authenticated. **`session: null`** — no `sid`, or no store — **is not met** under `required` and is re-authenticated.
 - **`acr_values`**: D15's selection over `vouchedAmr`; an unmet value is a step-up target when the values it lacks are all in `secondFactorMethods` ∪ `{mfa}`.
 - **Recent MFA** (for enrollment-grade actions): `mfaAt` within `mfa.manage.maxAgeSeconds`; for a subject with no counting factor, a recent primary (`authTime` within the same window) instead, as F4; under `mfa.mode = "off"`, no requirement.
-- **Conditional requirements are boot checks.** A manifest's `requires` is static, so `oauthModule` and `deviceGrantModule` keep `userSessionStore` optional and their factories refuse (`mfa-requires-user-session-store`) when `mfa.mode` is not `off` and it is unwired. `mfaModule` requires it outright.
+- **Conditional requirements are boot checks.** A manifest's `requires` is static, so `oauthModule` and `deviceGrantModule` keep `userSessionStore` optional and their factories refuse (`mfa-requires-user-session-store`) when `mfa.mode` is not `off` and it is unwired. `mfaModule` requires it outright. (Amended: `deviceGrantModule` already refuses an enabled grant without it, whatever the mode — see the note after the table.)
 
 | Consumer | Where | Today | With MFA |
 | --- | --- | --- | --- |
@@ -580,6 +580,8 @@ Core's requirement rule (`packages/core/src/mfa/requirement.mts`) is one pure fu
 | `/session/mfa/*` | `packages/mfa` | — | its own rules |
 | `/session/logout`, `/oauth/logout` | session, oauth | — | none: they reduce privilege |
 | `/oauth/userinfo`, `/oauth/introspect`, `POST /oauth/federation/:name/token` | oauth | bearer tokens | none: they read tokens minted at the gated points |
+
+**Amended 2026-09-26 (before implementation): device verification already reads the live session.** The device grant's liveness read shipped ahead of this ADR, as a security fix rather than an MFA slice, and in a stricter form than the row above plans. `deviceGrantModule` refuses to boot an enabled grant without a `userSessionStore` whatever `mfa.mode` is (`enabled = true requires a userSessionStore component`), so the `mfa-requires-user-session-store` refusal is subsumed for it and `oauthModule` alone keeps the MFA-conditional one. Device verification answers a missing `sid` or a dead session `401 login_required` today, reads the subject's sessions boundary when `subjectRevocation` is wired, and the grant refuses an approval that boundary covers at the poll. What the MFA slice (build order step 14) still adds to the device grant is only its baseline gate on `approve` (`403 mfa_step_up_required`) and the `vouchedAmr` stamp on the device token. The rows and steps below that describe the refusal as MFA-conditional read with this amendment.
 
 ### D17 — `acr_values`, `max_age` and `prompt=login`: one decision over one ask per request
 
@@ -693,7 +695,7 @@ Core's reference and schema hold what core's consumers read with the MFA package
 | email enabled, no `mailSender` | `mfaEmailFactorModule` requires the slot; the planner's missing-required refusal, with a hint naming `SMTP_HOST` | **email is never silently disabled** |
 | WebAuthn factor enabled, no `webauthnConfig` | `webauthnMfaFactorModule` requires the slot | `webauthn.rpId` / `rpName` / `origin` |
 | key ring empty, a key not 32 bytes, a duplicate id, or the sample key where D11 refuses it | the MFA config schema | `mfa.encryptionKeys` / `MFA_ENCRYPTION_KEY` |
-| `mfa.mode` not `off`, `oauthModule` or `deviceGrantModule` without `userSessionStore` | their factories (`mfa-requires-user-session-store`) | the slot |
+| `mfa.mode` not `off`, `oauthModule` or `deviceGrantModule` without `userSessionStore` | their factories (`mfa-requires-user-session-store`; amended: `deviceGrantModule` refuses an enabled grant without it whatever the mode, D16) | the slot |
 | memory MFA stores under `deployment.mode = "multi"` | core, replica safety | the modules and what forks |
 | Redis factor store on an `allkeys-*` eviction policy | `redisMfaFactorStoreModule` (D12) | the policy |
 | `mfaFactorStore.adapter = "store"` without the four URLs | foundation's builder | the missing URLs |
@@ -815,11 +817,11 @@ A scaffold owns its `buildModules` and `application.conf`, so **upgrading packag
 
 ### BREAKING for integrators
 
-1. **Boot** (after the flip): a composition with `sessionModule` or `oauthModule` must install the MFA modules or write `mfa.mode = "off"`; with MFA installed, it must wire mail or write `mfa.notices = "none"`; `oauthModule` and `deviceGrantModule` need `userSessionStore` when MFA is on.
+1. **Boot** (after the flip): a composition with `sessionModule` or `oauthModule` must install the MFA modules or write `mfa.mode = "off"`; with MFA installed, it must wire mail or write `mfa.notices = "none"`; `oauthModule` and `deviceGrantModule` need `userSessionStore` when MFA is on (amended: an enabled `deviceGrantModule` needs it already, whatever the mode — D16).
 2. **The login page**: `POST /session/login` can answer `403 mfa_required` / `mfa_enrollment_required`. A page that ignores it shows the error text rather than looping.
 3. **New pages**: `endpoints.mfa.url`, and the account page.
 4. **The `session` grant** answers `400 invalid_grant` (with `step_up: "mfa"`) for a session without the second factor.
-5. **Device verification** needs a live `UserSession` and can answer `401 login_required` / `403 mfa_step_up_required`.
+5. **Device verification** can answer `403 mfa_step_up_required`. (Amended: the live-`UserSession` requirement and its `401 login_required` shipped before this ADR — see D16.)
 6. **Federation `?link=1`** and WebAuthn registration through the helper require recent MFA.
 7. **Upstream `amr`** (#481): no longer stamped or honoured for `acr` unless the federation is trusted; acr entries only it satisfied are dropped with a warning.
 8. **`claims` naming `acr`** is refused with `invalid_request`.

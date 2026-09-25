@@ -62,6 +62,15 @@ export interface DeviceAuthorization {
 	readonly subject: string | undefined;
 	/** Set when `status === "approved"`: what they approved. `undefined` before. */
 	readonly grantedScope: readonly string[] | undefined;
+	/**
+	 * Set when `status === "approved"`: when the approval was given, in epoch
+	 * milliseconds — the `nowMs` the approve call was handed. `undefined`
+	 * before. What a poll holds against the subject's sessions boundary: a
+	 * revocation stamped between the approval and the poll is older than the
+	 * token the poll mints, so only the approval's own instant can show the
+	 * approval came before it.
+	 */
+	readonly approvedAtMs: number | undefined;
 }
 
 export type DeviceAuthorizationStatus = "pending" | "approved" | "denied";
