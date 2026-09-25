@@ -45,6 +45,8 @@ import {
 	basicConstraints,
 	clientAuthEku,
 	crlDistributionPoints,
+	distributionPoint,
+	distributionPointsExtension,
 	KEY_USAGE,
 	keyUsage,
 	mintCa,
@@ -112,8 +114,19 @@ type LeafCrl = "refused" | "garbage" | "clean" | "revoked";
  * list) is `leafCrl`: a refused connection, bytes that are not DER, a clean
  * list, or one naming the leaf. With `leafResponderRefused`, the leaf also
  * names an OCSP responder nothing listens on — for `revocation.mode = "both"`.
+ * `extra.leafCn` names the leaf; `extra.morePoints` adds distribution points
+ * after the first — one the live server answers 404 (`missing`) or one on a
+ * port nothing listens on (`refused`).
  */
-const pki = async (leafCrl: LeafCrl, leafPointHost = "127.0.0.1", leafResponderRefused = false) => {
+const pki = async (
+	leafCrl: LeafCrl,
+	leafPointHost = "127.0.0.1",
+	leafResponderRefused = false,
+	extra: {
+		readonly leafCn?: string;
+		readonly morePoints?: readonly ("missing" | "refused")[];
+	} = {},
+) => {
 	const root = await mintCa("Root", 1);
 	const lists: Record<string, Uint8Array> = {};
 	const live = await listen((req, res) => {
@@ -132,20 +145,30 @@ const pki = async (leafCrl: LeafCrl, leafPointHost = "127.0.0.1", leafResponderR
 		leafCrl === "refused"
 			? `${await closedOrigin()}/int.crl`
 			: `${live.replace("127.0.0.1", leafPointHost)}/int.crl`;
-	const leaf = await mintLeaf("client", 10, int, {
+	const morePoints: string[] = [];
+	for (const [index, kind] of (extra.morePoints ?? []).entries()) {
+		morePoints.push(
+			kind === "missing"
+				? `${live}/int-missing-${index}.crl`
+				: `${await closedOrigin()}/int-${index}.crl`,
+		);
+	}
+	const leafResponder = leafResponderRefused ? `${await closedOrigin()}/ocsp` : undefined;
+	const leaf = await mintLeaf(extra.leafCn ?? "client", 10, int, {
 		extensions: [
 			basicConstraints(false),
 			keyUsage(KEY_USAGE.digitalSignature),
 			clientAuthEku(),
-			crlDistributionPoints([leafPoint]),
-			...(leafResponderRefused ? [ocspAia(`${await closedOrigin()}/ocsp`)] : []),
+			// One distribution point per URL: separate points, not alternatives.
+			distributionPointsExtension([leafPoint, ...morePoints].map((url) => distributionPoint(url))),
+			...(leafResponder !== undefined ? [ocspAia(leafResponder)] : []),
 		],
 	});
 	lists["/root.crl"] = await mintCrl({ issuer: root });
 	if (leafCrl === "garbage") lists["/int.crl"] = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
 	if (leafCrl === "clean") lists["/int.crl"] = await mintCrl({ issuer: int });
 	if (leafCrl === "revoked") lists["/int.crl"] = await mintCrl({ issuer: int, revoked: [leaf] });
-	return { root, int, leaf, leafPoint };
+	return { root, int, leaf, leafPoint, morePoints, leafResponder };
 };
 
 const mechanism = (
@@ -194,20 +217,41 @@ const appWith = (root: Minted, onUnavailable: "reject" | "allow", mode: "crl" | 
 	return { app, calls };
 };
 
-const outageLine = (event: string, leafPoint: string, cause: unknown) => [
+/**
+ * One source that could not be used, as the outage line projects it: an
+ * error of its own, so the cap on a projected message cuts no other source.
+ */
+const sourceMember = (source: "crl" | "ocsp", url: string, reason: string, cause?: unknown) => ({
+	name: "MtlsRevocationSourceError",
+	detail: expect.stringContaining(`${source} ${url}: ${reason} — `),
+	reason,
+	stack: FRAMES,
+	...(cause === undefined ? {} : { cause }),
+});
+
+/**
+ * The dispatcher's one outage line: the certificate named last in a short
+ * message, and one member per source that could not be used.
+ */
+const outageLine = (event: string, members: readonly unknown[], subject = "CN=client") => [
 	{
 		mechanism: "mtls",
 		code: "temporarily_unavailable",
 		reason: "revocation_unavailable",
 		err: {
 			name: "MtlsRevocationUnavailableError",
-			detail: expect.stringContaining(leafPoint),
+			detail: `revocation status could not be determined for ${subject}`,
 			stack: FRAMES,
-			...(cause === undefined ? {} : { cause }),
+			aggregateErrors: members,
 		},
 	},
 	event,
 ];
+
+const REFUSED = expect.objectContaining({
+	name: "TypeError",
+	cause: expect.objectContaining({ code: "ECONNREFUSED" }),
+});
 
 describe("full-pki, on-unavailable = reject: a revocation source that cannot answer is an outage", () => {
 	it("a refused connection: 503 temporarily_unavailable, one error line, nothing at warn", async () => {
@@ -223,18 +267,13 @@ describe("full-pki, on-unavailable = reject: a revocation source that cannot ans
 		expect(calls).toEqual([
 			{
 				level: "error",
-				args: outageLine(
-					"token_binding_unavailable",
-					leafPoint,
-					expect.objectContaining({
-						name: "TypeError",
-						cause: expect.objectContaining({ code: "ECONNREFUSED" }),
-					}),
-				),
+				args: outageLine("token_binding_unavailable", [
+					sourceMember("crl", leafPoint, "fetch_failed", REFUSED),
+				]),
 			},
 		]);
-		const line = calls[0]?.args[0] as { err: { detail: string } };
-		expect(line.err.detail).toContain("network_error (ECONNREFUSED)");
+		const line = calls[0]?.args[0] as { err: { aggregateErrors: Array<{ detail: string }> } };
+		expect(line.err.aggregateErrors[0]?.detail).toContain("network_error (ECONNREFUSED)");
 	});
 
 	it("an answer that is not DER: the same, pkijs's error inside", async () => {
@@ -249,11 +288,14 @@ describe("full-pki, on-unavailable = reject: a revocation source that cannot ans
 		expect(calls).toEqual([
 			{
 				level: "error",
-				args: outageLine(
-					"token_binding_unavailable",
-					leafPoint,
-					expect.objectContaining({ name: "AsnError" }),
-				),
+				args: outageLine("token_binding_unavailable", [
+					sourceMember(
+						"crl",
+						leafPoint,
+						"unparseable",
+						expect.objectContaining({ name: "AsnError" }),
+					),
+				]),
 			},
 		]);
 	});
@@ -279,11 +321,9 @@ describe("full-pki, on-unavailable = reject: a revocation source that cannot ans
 		expect(calls).toEqual([
 			{
 				level: "error",
-				args: outageLine(
-					"protected_resource_binding_unavailable",
-					leafPoint,
-					expect.objectContaining({ name: "TypeError" }),
-				),
+				args: outageLine("protected_resource_binding_unavailable", [
+					sourceMember("crl", leafPoint, "fetch_failed", REFUSED),
+				]),
 			},
 		]);
 	});
@@ -376,18 +416,38 @@ describe("revocation.mode = both: the OCSP fallback is logged once it has answer
 		expect(calls.map(({ level, args }) => [level, args[1]])).toEqual([
 			["error", "token_binding_unavailable"],
 		]);
-		const line = calls[0]?.args[0] as { err: Record<string, unknown> };
-		expect(line.err).toMatchObject({
-			name: "MtlsRevocationUnavailableError",
-			detail: expect.stringMatching(/ocsp: fetch_failed .*; crl: fetch_failed /),
-			cause: {
-				name: "AggregateError",
-				aggregateErrors: [
-					expect.objectContaining({ name: "TypeError" }),
-					expect.objectContaining({ name: "TypeError" }),
-				],
-			},
+		expect(calls[0]?.args).toEqual(
+			outageLine("token_binding_unavailable", [
+				sourceMember("ocsp", leafResponder as string, "fetch_failed", REFUSED),
+				sourceMember("crl", leafPoint, "fetch_failed", REFUSED),
+			]),
+		);
+	});
+
+	it("OCSP down and one of two CRL points down under reject: one error line, naming OCSP and the point", async () => {
+		// The CRL answered from its first point, but the second could not be
+		// used: under "reject" a partial answer is no answer, so the fallback
+		// was not served — no fallback line, and OCSP is named on the one line
+		// the dispatcher writes.
+		const { root, int, leaf, morePoints, leafResponder } = await pki("clean", "127.0.0.1", true, {
+			morePoints: ["missing"],
 		});
+		const { app, calls } = appWith(root, "reject", "both");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(503);
+		expect(calls).toEqual([
+			{
+				level: "error",
+				args: outageLine("token_binding_unavailable", [
+					sourceMember("ocsp", leafResponder as string, "fetch_failed", REFUSED),
+					sourceMember("crl", morePoints[0] as string, "fetch_failed"),
+				]),
+			},
+		]);
 	});
 
 	it("both down under allow: the certificate is bound, one allowed line naming both sources", async () => {
@@ -405,5 +465,36 @@ describe("revocation.mode = both: the OCSP fallback is logged once it has answer
 		expect(calls[0]?.args[0]).toMatchObject({
 			detail: expect.stringMatching(/ocsp: fetch_failed .*; crl: fetch_failed /),
 		});
+	});
+});
+
+describe("the outage line's account survives a long subject", () => {
+	it("each source that could not be used is its own member, so a long DN pushes no URL off the line", async () => {
+		// loggableError caps a message at 256 characters. One message holding
+		// the subject and every URL lost the URLs behind a long DN; one short
+		// member per source keeps each within its own cap.
+		const leafCn = `client-${"x".repeat(230)}`;
+		const { root, int, leaf, leafPoint, morePoints } = await pki("refused", "127.0.0.1", false, {
+			leafCn,
+			morePoints: ["refused"],
+		});
+		const { app, calls } = appWith(root, "reject");
+
+		const res = await request(app)
+			.post("/oauth/token")
+			.set("x-forwarded-client-cert", xfcc(leaf, int));
+
+		expect(res.status).toBe(503);
+		const line = calls[0]?.args[0] as {
+			err: { detail: string; aggregateErrors: Array<{ detail: string }> };
+		};
+		expect(calls).toHaveLength(1);
+		expect(line.err.aggregateErrors).toEqual([
+			sourceMember("crl", leafPoint, "fetch_failed", REFUSED),
+			sourceMember("crl", morePoints[0] as string, "fetch_failed", REFUSED),
+		]);
+		expect(
+			line.err.detail.startsWith("revocation status could not be determined for CN=client-x"),
+		).toBe(true);
 	});
 });
