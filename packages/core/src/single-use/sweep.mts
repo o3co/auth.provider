@@ -38,7 +38,8 @@
  */
 
 /**
- * How a store's sweep is paced; each absent value takes the store's default.
+ * How a store's sweep is paced; each value left out (`undefined`) takes the
+ * store's default.
  * A value given that cannot be used is a `RangeError` naming the store and
  * the option — never replaced by the default, which would leave a setting
  * that says one thing and a store that does another.
@@ -75,13 +76,18 @@ export function createAmortizedSweep(
 	defaults: { readonly sweepInterval: number; readonly minSweepIntervalMs: number },
 	owner: string,
 ): AmortizedSweep {
-	const sweepInterval = options.sweepInterval ?? defaults.sweepInterval;
+	// Only a setting left out takes the default: an explicit `null` is refused.
+	const sweepInterval =
+		options.sweepInterval === undefined ? defaults.sweepInterval : options.sweepInterval;
 	if (!Number.isInteger(sweepInterval) || sweepInterval <= 0) {
 		throw new RangeError(
 			`${owner}: sweepInterval must be a positive whole number (got ${String(sweepInterval)})`,
 		);
 	}
-	const minSweepIntervalMs = options.minSweepIntervalMs ?? defaults.minSweepIntervalMs;
+	const minSweepIntervalMs =
+		options.minSweepIntervalMs === undefined
+			? defaults.minSweepIntervalMs
+			: options.minSweepIntervalMs;
 	if (!Number.isInteger(minSweepIntervalMs) || minSweepIntervalMs < 0) {
 		throw new RangeError(
 			`${owner}: minSweepIntervalMs must be a whole number of milliseconds, 0 or more (got ${String(minSweepIntervalMs)})`,

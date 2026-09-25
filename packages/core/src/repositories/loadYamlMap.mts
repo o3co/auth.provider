@@ -65,8 +65,9 @@ const unparseable = (filePath: string, err: unknown): Error => {
 		mark !== undefined && Number.isInteger(mark.line) && Number.isInteger(mark.column)
 			? ` at ${mark.line + 1}:${mark.column + 1}`
 			: "";
-	const reason = reasonOf(err.reason);
-	return new Error(`Invalid YAML in ${filePath}${at}${reason === "" ? "" : `: ${reason}`}`);
+	// Never empty: every reason js-yaml writes opens with its own fixed text,
+	// so the cut in `reasonOf` always leaves some of it.
+	return new Error(`Invalid YAML in ${filePath}${at}: ${reasonOf(err.reason)}`);
 };
 
 export const loadYamlMap = <T extends z.ZodTypeAny>(

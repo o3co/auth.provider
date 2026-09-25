@@ -187,7 +187,10 @@ export function createMemoryReplaySeenSet(
 	options: MemoryReplaySeenSetOptions = {},
 ): MemoryReplaySeenSet {
 	const maxEntries = usableMaxEntries(
-		options.maxEntries ?? DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES,
+		// Only a cap left out takes the default: an explicit `null` is refused.
+		options.maxEntries === undefined
+			? DEFAULT_MEMORY_REPLAY_SEEN_SET_MAX_ENTRIES
+			: options.maxEntries,
 		"createMemoryReplaySeenSet",
 	);
 	// DPoP's share, rounded up, and always a record short of the cap so the

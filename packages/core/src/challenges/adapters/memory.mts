@@ -147,7 +147,10 @@ export function createMemoryChallengeStore(
 	options: MemoryChallengeStoreOptions = {},
 ): MemoryChallengeStore {
 	const maxEntries = usableMaxEntries(
-		options.maxEntries ?? DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES,
+		// Only a cap left out takes the default: an explicit `null` is refused.
+		options.maxEntries === undefined
+			? DEFAULT_MEMORY_CHALLENGE_STORE_MAX_ENTRIES
+			: options.maxEntries,
 		"createMemoryChallengeStore",
 	);
 	const map = new Map<string, { expiresAtMs: number }>();
