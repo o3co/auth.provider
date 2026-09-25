@@ -24,6 +24,7 @@
  * before this existed.
  */
 
+import { auditErrorText } from "../errors/envelope.mjs";
 import type { FederationGrantAuditEvent } from "./retrieve.mjs";
 import { type FederationGrant, hasFederationGrantAuthorization } from "./types.mjs";
 
@@ -44,6 +45,12 @@ import { type FederationGrant, hasFederationGrantAuthorization } from "./types.m
  *
  * Copies, so that a sink which holds its argument cannot be handed a reference
  * into a record the caller is still working with.
+ *
+ * The upstream subject is the ID token's `sub`, stored as the IdP wrote it:
+ * it is carried sanitised and capped (`auditErrorText`), here rather than in
+ * a bridge, because every emitter takes it from here — core's retrieval and
+ * revocation, whose `audit` seam a composer may fill with its own function,
+ * and the routes' bridges. A well-formed subject is carried unchanged.
  */
 export function federationGrantAuditMetadata(
 	grant: FederationGrant,
@@ -53,7 +60,7 @@ export function federationGrantAuditMetadata(
 		connection: grant.connection,
 		// Projected, not spread: an event carries the established pair and
 		// nothing else a record's object might hold (#611).
-		upstream: { issuer: grant.upstream.issuer, subject: grant.upstream.subject },
+		upstream: { issuer: grant.upstream.issuer, subject: auditErrorText(grant.upstream.subject) },
 		...(grant.resource === undefined ? {} : { resource: grant.resource }),
 		scopes: [...grant.scopes],
 	};

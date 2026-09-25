@@ -104,8 +104,9 @@ An event's grant id and subject are sanitised and capped at 200 characters
 (core's `auditErrorText`), as every string on this package's log lines is:
 both can be what the caller sent — the path's grant id is audited before
 client authentication, and `sub` is an assertion — and a sink is read by
-systems that split on a line break. A well-formed id or subject is carried
-unchanged.
+systems that split on a line break. `upstream.subject`, the IdP's `sub`, is
+bounded the same way by core when it builds the event's metadata. A
+well-formed id or subject is carried unchanged.
 
 ### What is logged
 
