@@ -17,7 +17,7 @@ auth.provider のデプロイ可能なサーバーテンプレート。これは
 - 具体的な logger と監査ストリーム（pino） — [`src/logger.mts`](src/logger.mts) — およびメトリクス（[`src/metrics.mts`](src/metrics.mts)）
 - プロセスのライフサイクル: drain の deadline 付きのシグナル処理 — [`src/shutdown.mts`](src/shutdown.mts)
 - パッケージング: `Dockerfile`、compose ファイル群、`Makefile`
-- 自身のテスト: `pnpm run test` と `make test` がこの合成に対して実行する `src/__tests__/` と、独自の `package.json` を持つ別個のブラックボックス API スイートで、既に起動しているサーバー（`API_BASE_URL`）に対して実行する `tests/`。
+- 自身のテスト: `pnpm run test` と `make test` がこの合成に対して実行する `src/__tests__/` と、独自の `package.json` を持つ別個のブラックボックス API スイートで、既に起動しているサーバー（`API_BASE_URL`）に対して実行する `tests/`。`src/__tests__/` が保つものの 1 つは、このテンプレートが有効にできるすべてのモジュールが一緒に起動し、モジュールが出会って初めて成り立つ契約 — 1 つのディスカバリー文書、どちらのマウント順でも保たれる各モジュールのボディ規則、503 で答えて 1 行だけログに出るストアまたはリポジトリの障害 — を守ることであり、`all-modules-composition.test.mts` がそれを固定する。
 
 **所有しない**のは HTTP API、グラント、トークン形式、各ストアの振る舞い、config スキーマで、これらはパッケージ側が所有する。変更は上流で行い、ここでは行わない。
 
@@ -28,7 +28,7 @@ auth.provider のデプロイ可能なサーバーテンプレート。これは
 - **Node.js** `>=22.0.0`
 - **`bcrypt` のネイティブバイナリ**: このテンプレートは推移的に `bcrypt@6.x` に依存しており、これは `darwin-arm64`、`darwin-x64`、`linux-x64`（glibc と musl）、`linux-arm64`（glibc と musl）、`linux-arm`、`win32-x64`、`win32-arm64` 向けの **prebuild 済み N-API バイナリ**を同梱している。これらのプラットフォームでは `pnpm install` はソースからコンパイルせずに成功し、追加のツールチェーンは不要である（`darwin-*`、`node:*-alpine`、`node:*-bookworm` の各イメージはいずれも同梱の prebuild に一致する）。一致する prebuild の無いプラットフォームや libc/arch の組み合わせでは `pnpm install` がコンパイルにフォールバックし、その場合は C++ コンパイラと Python（Node.js ネイティブアドオンの標準ツールチェーン）が必要になる: Debian/Ubuntu は `apt-get install build-essential python3`、Alpine は `apk add make g++ python3`、macOS は `xcode-select --install`。`bcrypt` 向けの pnpm 10 の `onlyBuiltDependencies` allowlist は `pnpm-workspace.yaml` にある — pnpm ≥10.29 は単一パッケージのプロジェクトでもそこからしか読まない。`create-auth-provider` は scaffold するプロジェクトにこのファイルを書き出す（このモノレポ内では、allowlist はワークスペースルートの `pnpm-workspace.yaml` にある）。これが無いと、新規の `pnpm install` はそれらのプラットフォームで install hook を黙ってスキップする。
 - **Redis 7.2 LTS 以降** — Redis をバックエンドとするアダプター（refresh token family ストア、コードリポジトリ、フェデレーショントークンストア、セッションストア）すべてに必要。複数のアダプターが依存する `pExpireGT` フラグの組は Redis 7.0+ で導入された。7.2 LTS がテスト済みの下限である。AWS ElastiCache for Redis 7.2、Upstash Redis、Redis Cloud 7.2、セルフマネージドの `redis:7.2-alpine` でテストしている。
-- **ioredis** `^6.0.0`（ランタイムの直接依存）。このテンプレートが配線する `@o3co/auth-provider-redis` のアダプター — refresh token family、認可コード、rate limit カウンター、アクセストークン denylist、replay seen-set、ユーザーセッションストア、フェデレーショントークンストア、同意ストア、フェデレーショングラントのストア — はすべて、`standaloneRedisClientsModule` がレプリカごとに開く 1 本の ioredis 接続の上で動く。`redis` npm パッケージ（`^6.2.1`）が依存に残っている理由は 1 つだけである: `connect-redis` は node-redis クライアントを受け取るため、`SESSION_STORAGE_TYPE=redis` の背後にある `express-session` ストアは 2 本目の別接続になる（`/readyz` の `session-store` probe）。
+- **ioredis** `^6.0.0`（ランタイムの直接依存）。このテンプレートが配線する `@o3co/auth-provider-redis` のアダプター — refresh token family、認可コード、rate limit カウンター、アクセストークン denylist、replay seen-set、ユーザーセッションストア、フェデレーショントークンストア、同意ストア、フェデレーショングラントのストア — はすべて、`standaloneRedisClientsModule` がレプリカごとに開く 1 本の ioredis 接続の上で動く。同じモジュールは Redis パッケージが提供するほかのストア — デバイスコードストアと WebAuthn の challenge ストア — のクライアントも提供するため、デバイスグラントや WebAuthn を Redis のストアとともに `buildModules.mts` に加えるデプロイは、そのクライアントをここで得る。`redis` npm パッケージ（`^6.2.1`）が依存に残っている理由は 1 つだけである: `connect-redis` は node-redis クライアントを受け取るため、`SESSION_STORAGE_TYPE=redis` の背後にある `express-session` ストアは 2 本目の別接続になる（`/readyz` の `session-store` probe）。
 
 ## ファーストパーティクライアント
 

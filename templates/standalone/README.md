@@ -45,6 +45,11 @@ the Google and generic OpenID Connect federation adapters, `-federation-grants`,
 - its tests: `src/__tests__/`, which `pnpm run test` and `make test` run against
   this composition, and `tests/`, a separate black-box API suite with its own
   `package.json`, run against a server that is already up (`API_BASE_URL`).
+  Among what `src/__tests__/` holds: every module this template can turn on
+  boots together and keeps the contracts that exist only when they meet — one
+  discovery document, each module's body rules in either mount order, a store
+  or repository outage answered 503 and logged once — pinned by
+  `all-modules-composition.test.mts`.
 
 **Does not own** the HTTP API, the grants, the token format, how each store
 behaves, or the config schema — the packages do. Change those upstream, not
@@ -62,7 +67,7 @@ repository.
 - **Node.js** `>=22.0.0`
 - **`bcrypt` native binary**: this template depends transitively on `bcrypt@6.x`, which ships **prebuilt N-API binaries** for `darwin-arm64`, `darwin-x64`, `linux-x64` (glibc and musl), `linux-arm64` (glibc and musl), `linux-arm`, `win32-x64`, and `win32-arm64`. On these platforms `pnpm install` succeeds without compiling from source, and no extra toolchain is required (the `darwin-*`, `node:*-alpine`, and `node:*-bookworm` images all match a shipped prebuild). On platforms or libc/arch combinations that have no matching prebuild, `pnpm install` falls back to compiling, which then requires a C++ compiler and Python (the standard Node.js native-addon toolchain): Debian/Ubuntu `apt-get install build-essential python3`, Alpine `apk add make g++ python3`, macOS `xcode-select --install`. The pnpm 10 `onlyBuiltDependencies` allowlist for `bcrypt` lives in `pnpm-workspace.yaml` — pnpm ≥10.29 reads it only from there, in single-package projects too. `create-auth-provider` writes that file into the project it scaffolds (inside this monorepo, the allowlist sits in the workspace root's `pnpm-workspace.yaml`); without it a fresh `pnpm install` silently skips the install hook on those platforms.
 - **Redis 7.2 LTS or later** for any Redis-backed adapter (refresh token family store, code repository, federation token store, session store). The `pExpireGT` flag pair on which several adapters depend was introduced in Redis 7.0+; 7.2 LTS is the tested floor. Tested against AWS ElastiCache for Redis 7.2, Upstash Redis, Redis Cloud 7.2, and self-managed `redis:7.2-alpine`.
-- **ioredis** `^6.0.0` (direct runtime dependency). Every `@o3co/auth-provider-redis` adapter this template wires — refresh-token families, authorization codes, rate-limit counters, the access-token denylist, the replay seen-set, the user-session stores, the federation-token store, the consent stores and the federation-grant stores — runs off the one ioredis connection `standaloneRedisClientsModule` opens per replica. The `redis` npm package (`^6.2.1`) stays a dependency for one thing: `connect-redis` takes a node-redis client, so the `express-session` store behind `SESSION_STORAGE_TYPE=redis` is a second, separate connection (the `session-store` probe in `/readyz`).
+- **ioredis** `^6.0.0` (direct runtime dependency). Every `@o3co/auth-provider-redis` adapter this template wires — refresh-token families, authorization codes, rate-limit counters, the access-token denylist, the replay seen-set, the user-session stores, the federation-token store, the consent stores and the federation-grant stores — runs off the one ioredis connection `standaloneRedisClientsModule` opens per replica. The same module provides the client of every other store the Redis package ships — the device-code store and the WebAuthn challenge store — so a deployment that adds the device grant or WebAuthn to `buildModules.mts` with a Redis store finds its client there. The `redis` npm package (`^6.2.1`) stays a dependency for one thing: `connect-redis` takes a node-redis client, so the `express-session` store behind `SESSION_STORAGE_TYPE=redis` is a second, separate connection (the `session-store` probe in `/readyz`).
 
 ## First-party clients
 

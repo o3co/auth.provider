@@ -74,7 +74,11 @@ export const oauthSessionModule = (params: { config: AppConfig }): Module => {
 		// `config` is required because createSessionGrant reads the access-token lifetime from it
 		// when building the token response for authenticated sessions.
 		requires: ["config", "keyStore"],
-		optional: ["userSessionStore"],
+		// `logger` carries the grant's one line for a session-store outage
+		// (`session_grant_store_unavailable`). Boot hands a module only the
+		// slots its manifest names, so without it the grant answered 503 and
+		// logged nothing, whatever logger the composition root had wired.
+		optional: ["userSessionStore", "logger"],
 		contributes: {
 			grants: {
 				session: (deps) => createSessionGrant(deps),

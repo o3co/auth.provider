@@ -76,6 +76,70 @@ describe("oauthSessionModule", () => {
 			await handle.dispose();
 		}
 	});
+	it("logs a session-store outage on the composition's logger, once, at error", async () => {
+		// The grant writes the outage's one line through `deps.logger`, and the
+		// boot planner hands a module only the slots its manifest names: a
+		// manifest without `logger` answered the 503 and logged nothing.
+		const base = makeValidAppConfig();
+		const config = {
+			...base,
+			oauth: { ...base.oauth, grants: { ...base.oauth.grants, session: { enabled: true } } },
+		};
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: vi.fn(),
+		};
+		const handle = await createTestApp({
+			modules: [
+				oauthSessionModule({ config }),
+				keyStoreModule,
+				defineModule({
+					name: "test:session-store",
+					provides: {
+						userSessionStore: () => ({
+							kind: "memory" as const,
+							get: async () => {
+								throw new Error("connect ECONNREFUSED 127.0.0.1:6379");
+							},
+							create: async () => {},
+							delete: async () => {},
+						}),
+					},
+				}),
+			],
+			bootstrapComponents: { config, pathResolver: (s) => s, logger },
+		});
+		try {
+			const grant = handle.inspect.grants.get("session") as GrantHandler;
+			const { result } = await grant.handle({
+				body: {},
+				session: { isAuthenticated: true, sid: "sid-1", user: { id: "user" } },
+				issuer: "https://issuer.test",
+				metadata: {},
+				authenticatedClient: { clientId: "app", tokenEndpointAuthMethod: "none" },
+			});
+			expect(result).toMatchObject({ status: 503, error: "temporarily_unavailable" });
+			expect(logger.error).toHaveBeenCalledTimes(1);
+			expect(logger.error).toHaveBeenCalledWith(
+				expect.objectContaining({
+					store: "user_session",
+					step: "get",
+					err: expect.objectContaining({ name: "Error" }),
+				}),
+				"session_grant_store_unavailable",
+			);
+			expect(logger.error.mock.calls[0]?.[0].err).not.toBeInstanceOf(Error);
+			expect(logger.warn).not.toHaveBeenCalled();
+		} finally {
+			await handle.dispose();
+		}
+	});
+
 	it("has name 'oauth-session'", () => {
 		const config = makeValidAppConfig();
 		const module = oauthSessionModule({ config });
