@@ -442,6 +442,92 @@ const expectNoTokenIn = (lines: readonly string[]): void => {
 	}
 };
 
+/** A logger whose every level is a spy; `child` answers the same logger. */
+function spyLogger() {
+	const logger = {
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn(),
+	};
+	logger.child.mockReturnValue(logger);
+	return logger;
+}
+
+type SpyLogger = ReturnType<typeof spyLogger>;
+
+/**
+ * The outage policy's shape for one failed request: exactly one line at error
+ * level, object-first, named `event`, carrying `fields` and the error's
+ * projection (a plain object, never the `Error`); then one
+ * `federation_cleanup_failed` warn per best-effort step that failed, in
+ * order; and nothing at any other level.
+ */
+function expectOutageLogged(
+	logger: SpyLogger,
+	event: string,
+	fields: Record<string, unknown>,
+	cleanups: ReadonlyArray<Record<string, unknown>> = [],
+): void {
+	expect(logger.error).toHaveBeenCalledTimes(1);
+	const [context, name] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+	expect(name).toBe(event);
+	expect(context).toMatchObject(fields);
+	expect(context.err).not.toBeInstanceOf(Error);
+	expect(context.err).toMatchObject({ name: expect.any(String), detail: expect.any(String) });
+	expect(logger.warn).toHaveBeenCalledTimes(cleanups.length);
+	cleanups.forEach((cleanup, index) => {
+		const [warned, warnName] = logger.warn.mock.calls[index] as [Record<string, unknown>, string];
+		expect(warnName).toBe("federation_cleanup_failed");
+		expect(warned).toMatchObject(cleanup);
+		expect(warned.err).not.toBeInstanceOf(Error);
+	});
+	for (const level of ["trace", "debug", "info", "fatal"] as const) {
+		expect(logger[level]).not.toHaveBeenCalled();
+	}
+}
+
+/** Make the session's `regenerate` fail, as a cookie-store `destroy` failure does. */
+const failRegenerate: express.RequestHandler = (req, _res, next) => {
+	req.session.regenerate = (cb?: (err: unknown) => void) => {
+		cb?.(new Error("cookie store down"));
+		return req.session;
+	};
+	next();
+};
+
+/**
+ * Make the `n`th `save` of the request fail — the first is the envelope's
+ * retirement, the second the regenerated session's persist.
+ */
+const failSave =
+	(n: 1 | 2): express.RequestHandler =>
+	(req, _res, next) => {
+		let saves = 0;
+		const patch = (session: import("express-session").Session) => {
+			const original = session.save.bind(session);
+			session.save = (cb?: (err: unknown) => void) => {
+				saves++;
+				if (saves === n && typeof cb === "function") {
+					cb(new Error("cookie store down"));
+					return session;
+				}
+				return original(cb);
+			};
+		};
+		patch(req.session);
+		const regenerate = req.session.regenerate.bind(req.session);
+		req.session.regenerate = (cb?: (err: unknown) => void) =>
+			regenerate((err: unknown) => {
+				patch(req.session);
+				cb?.(err);
+			});
+		next();
+	};
+
 async function plantAndGetAgent(app: express.Express): Promise<ReturnType<typeof request.agent>> {
 	const agent = request.agent(app);
 	// Use the /_plant route to set the cookie
@@ -926,7 +1012,7 @@ describe("account linking across federations (#482)", () => {
 			const agent = await plantAndGetAgent(app);
 			const res = await callback(agent);
 			expect(res.status).toBe(503);
-			const failure = lines.find((line) => line.includes("attaching to the live session failed"));
+			const failure = lines.find((line) => line.includes("federation_link_store_unavailable"));
 			expect(failure).toContain("ReplyError");
 			expectNoTokenIn(lines);
 		});
@@ -1254,6 +1340,141 @@ describe("account linking across federations (#482)", () => {
 			expect(res.status).toBe(401);
 			expect(res.body.error).toBe("unknown_user");
 			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+		});
+	});
+
+	// A store the link needs that cannot answer is `503`, logged once at error
+	// level as `federation_link_store_unavailable` with `store`, `step` and the
+	// linking session's `sid`; a best-effort rollback step that fails is one
+	// `federation_cleanup_failed` warn each.
+	describe("a store that cannot answer", () => {
+		const down = (what: string) =>
+			vi.fn(async () => {
+				throw new Error(`${what} down`);
+			});
+
+		it("the session read: 503, one error line, and the Store is never asked", async () => {
+			const repo = linkableRepo({ current: null });
+			const logger = spyLogger();
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: { ...makeUserSessionStore(), get: down("session store") },
+				logger,
+			});
+			const res = await callback(await plantAndGetAgent(app));
+			expect(res.status).toBe(503);
+			expectOutageLogged(logger, "federation_link_store_unavailable", {
+				store: "user_session",
+				step: "get",
+				sid: "s-1",
+			});
+			expect(repo.linkFederatedIdentity).not.toHaveBeenCalled();
+		});
+
+		it("the Store's link: 503 and one error line", async () => {
+			const repo = linkableRepo({ current: null });
+			repo.linkFederatedIdentity.mockRejectedValueOnce(new Error("directory down"));
+			const logger = spyLogger();
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: liveStore(),
+				logger,
+			});
+			const res = await callback(await plantAndGetAgent(app));
+			expect(res.status).toBe(503);
+			expectOutageLogged(logger, "federation_link_store_unavailable", {
+				store: "user_repository",
+				step: "link",
+				sid: "s-1",
+			});
+		});
+
+		it("the index read: 503, one error line, and nothing rolled back that was never written", async () => {
+			// Nothing was attached yet, so there is nothing to undo — and an
+			// attachment the session already carried must not be taken down by a
+			// read that could not say whether it existed.
+			const repo = linkableRepo({ current: null });
+			const sfi = makeSessionFederationIndex({ listFederations: down("federation index") });
+			const fts = makeFederationTokenStore();
+			const logger = spyLogger();
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: liveStore(),
+				sessionFederationIndex: sfi,
+				federationTokenStore: fts,
+				logger,
+			});
+			const res = await callback(await plantAndGetAgent(app));
+			expect(res.status).toBe(503);
+			expectOutageLogged(logger, "federation_link_store_unavailable", {
+				store: "session_federation_index",
+				step: "list",
+				sid: "s-1",
+			});
+			expect(sfi.addFederation).not.toHaveBeenCalled();
+			expect(sfi.removeFederation).not.toHaveBeenCalled();
+			expect(fts.delete).not.toHaveBeenCalled();
+		});
+
+		it("the index write: 503 and one error line", async () => {
+			const repo = linkableRepo({ current: null });
+			const sfi = makeSessionFederationIndex({ addFederation: down("federation index") });
+			const logger = spyLogger();
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: liveStore(),
+				sessionFederationIndex: sfi,
+				logger,
+			});
+			const res = await callback(await plantAndGetAgent(app));
+			expect(res.status).toBe(503);
+			expectOutageLogged(logger, "federation_link_store_unavailable", {
+				store: "session_federation_index",
+				step: "add",
+				sid: "s-1",
+			});
+		});
+
+		it("the token attach: 503, one error line, and a warn for each rollback step that fails", async () => {
+			const repo = linkableRepo({ current: null });
+			const sfi = makeSessionFederationIndex({ removeFederation: down("federation index") });
+			const fts = makeFederationTokenStore();
+			fts.attach.mockRejectedValueOnce(new Error("token store down"));
+			fts.delete.mockRejectedValueOnce(new Error("token store down"));
+			const logger = spyLogger();
+			const { app } = buildCallbackApp({
+				providers,
+				federation: linkEnvelope,
+				sessionSeed: seed,
+				userRepository: repo,
+				userSessionStore: liveStore(),
+				sessionFederationIndex: sfi,
+				federationTokenStore: fts,
+				logger,
+			});
+			const res = await callback(await plantAndGetAgent(app));
+			expect(res.status).toBe(503);
+			expectOutageLogged(
+				logger,
+				"federation_link_store_unavailable",
+				{ store: "federation_token", step: "attach", sid: "s-1" },
+				[
+					{ store: "federation_token", step: "delete", sid: "s-1" },
+					{ store: "session_federation_index", step: "remove", sid: "s-1" },
+				],
+			);
 		});
 	});
 });
@@ -1711,7 +1932,7 @@ describe("Federation routes", () => {
 		});
 
 		// Test 11 — rollback: FederationTokenStore.attach throws → UserSessionStore.delete; no token.delete
-		it("rollback: attach throws → UserSessionStore.delete called; returns 500", async () => {
+		it("rollback: attach throws → UserSessionStore.delete called; returns 503", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
 			const uss = makeUserSessionStore();
@@ -1727,7 +1948,7 @@ describe("Federation routes", () => {
 			const agent = await plantAndGetAgent(app);
 
 			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
-			expect(res.status).toBe(500);
+			expect(res.status).toBe(503);
 
 			expect(uss.create).toHaveBeenCalledOnce();
 			// Token was NOT attached, so token.delete NOT called
@@ -1791,7 +2012,7 @@ describe("Federation routes", () => {
 			const agent = await plantAndGetAgent(app);
 
 			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
-			expect(res.status).toBe(500);
+			expect(res.status).toBe(503);
 
 			// UserSession was created
 			expect(uss.create).toHaveBeenCalledOnce();
@@ -2034,8 +2255,8 @@ describe("Federation routes", () => {
 			expect((sessionData.user as Record<string, unknown>).id).toBe("user-1");
 		});
 
-		// Fix 1: if regenerate fails, userSessionStore.delete is called (rollback) and 500 returned
-		it("Fix 1: regenerate failure → UserSessionStore.delete rollback + 500", async () => {
+		// Fix 1: if regenerate fails, userSessionStore.delete is called (rollback) and 503 returned
+		it("Fix 1: regenerate failure → UserSessionStore.delete rollback + 503", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
 			const uss = makeUserSessionStore();
@@ -2059,8 +2280,8 @@ describe("Federation routes", () => {
 			const agent = await plantAndGetAgent(app);
 
 			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
-			expect(res.status).toBe(500);
-			expect(JSON.parse(res.text)).toMatchObject({ error: "session_create_failed" });
+			expect(res.status).toBe(503);
+			expect(JSON.parse(res.text)).toMatchObject({ error: "temporarily_unavailable" });
 
 			// UserSession was created then rolled back
 			expect(uss.create).toHaveBeenCalledOnce();
@@ -2070,8 +2291,8 @@ describe("Federation routes", () => {
 			expect(fts.delete).not.toHaveBeenCalled();
 		});
 
-		// Fix 2 — fail-closed reuse-prevention: save failure returns 500, does NOT call exchangeCode
-		it("Fix 2: reuse-prevention save failure returns 500 and does NOT call exchangeCode", async () => {
+		// Fix 2 — fail-closed reuse-prevention: save failure returns 503, does NOT call exchangeCode
+		it("Fix 2: reuse-prevention save failure returns 503 and does NOT call exchangeCode", async () => {
 			const provider = makeFakeProvider();
 			const providers = new Map([["test", provider]]);
 
@@ -2098,9 +2319,9 @@ describe("Federation routes", () => {
 			const agent = await plantAndGetAgent(app);
 
 			const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
-			expect(res.status).toBe(500);
+			expect(res.status).toBe(503);
 			expect(JSON.parse(res.text)).toMatchObject({
-				error: "server_error",
+				error: "temporarily_unavailable",
 				error_description: "Session store unavailable",
 			});
 
@@ -2298,8 +2519,8 @@ describe("Federation routes", () => {
 				const agent = await plantAndGetAgent(app);
 
 				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
-				expect(res.status).toBe(500);
-				expect(JSON.parse(res.text)).toMatchObject({ error: "session_create_failed" });
+				expect(res.status).toBe(503);
+				expect(JSON.parse(res.text)).toMatchObject({ error: "temporarily_unavailable" });
 
 				// Both stores were rolled back
 				expect(sfi.removeBySid).toHaveBeenCalledOnce();
@@ -2325,8 +2546,10 @@ describe("Federation routes", () => {
 				});
 				const agent = await plantAndGetAgent(app);
 				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
-				expect(res.status).toBe(500);
-				const failure = lines.find((line) => line.includes("session post-create failed"));
+				expect(res.status).toBe(503);
+				const failure = lines.find((line) =>
+					line.includes("federation_callback_store_unavailable"),
+				);
 				expect(failure).toContain("ReplyError");
 				expectNoTokenIn(lines);
 			});
@@ -2378,7 +2601,7 @@ describe("Federation routes", () => {
 				const agent = await plantAndGetAgent(app);
 
 				const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
-				expect(res.status).toBe(500);
+				expect(res.status).toBe(503);
 
 				// federationTokenStore.delete called (token was attached before save failed)
 				expect(fts.delete).toHaveBeenCalledOnce();
@@ -2649,7 +2872,7 @@ describe("federation login: subject session index (#296)", () => {
 		const agent = await plantAndGetAgent(app);
 
 		const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
-		expect(res.status).toBe(500);
+		expect(res.status).toBe(503);
 		expect(uss.delete).toHaveBeenCalledOnce();
 		expect(ssi.removeSid).toHaveBeenCalledOnce();
 	});
@@ -2697,7 +2920,7 @@ describe("federation login: subject session index (#296)", () => {
 		const agent = await plantAndGetAgent(app);
 
 		const res = await agent.get("/oauth/federation/test/callback?state=s1&code=c1");
-		expect(res.status).toBe(500);
+		expect(res.status).toBe(503);
 		expect(uss.delete).toHaveBeenCalledOnce();
 		expect(ssi.removeSid).toHaveBeenCalledOnce();
 	});
@@ -2762,5 +2985,202 @@ describe("amr on federated sessions (#481)", () => {
 			};
 			expect(createArg.amr).toEqual(expected);
 		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// The outage policy on the login callback: a store that cannot answer is
+// `503 temporarily_unavailable`, logged once at error level as
+// `federation_callback_store_unavailable` with `store` and `step` and the
+// error's projection; each best-effort rollback step that fails is one
+// `federation_cleanup_failed` warn.
+// ---------------------------------------------------------------------------
+
+describe("the federation login callback answers a store that cannot answer as an outage", () => {
+	const federation = { name: "test", state: "s1", codeVerifier: "v1" };
+	const callback = async (app: express.Express) =>
+		(await plantAndGetAgent(app)).get("/oauth/federation/test/callback?state=s1&code=c1");
+	const down = (what: string) =>
+		vi.fn(async () => {
+			throw new Error(`${what} down`);
+		});
+	const SESSION_STORE_UNAVAILABLE = {
+		error: "temporarily_unavailable",
+		error_description: "Session store unavailable",
+	};
+
+	it("the Store's lookup: 503 and one error line", async () => {
+		const logger = spyLogger();
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", makeFakeProvider()]]),
+			federation,
+			userRepository: { authenticate: vi.fn(), authenticateByToken: down("directory") },
+			logger,
+		});
+		const res = await callback(app);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual({
+			error: "temporarily_unavailable",
+			error_description: "User directory temporarily unavailable",
+		});
+		expectOutageLogged(logger, "federation_callback_store_unavailable", {
+			store: "user_repository",
+			step: "authenticate_by_token",
+		});
+	});
+
+	it("the session record: 503 and one error line", async () => {
+		const logger = spyLogger();
+		const uss = makeUserSessionStore();
+		uss.create.mockRejectedValueOnce(new Error("session store down"));
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", makeFakeProvider()]]),
+			federation,
+			userSessionStore: uss,
+			logger,
+		});
+		const res = await callback(app);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expectOutageLogged(logger, "federation_callback_store_unavailable", {
+			store: "user_session",
+			step: "create",
+		});
+	});
+
+	it("the federation index: 503, one error line, and a warn for the rollback that fails", async () => {
+		const logger = spyLogger();
+		const uss = makeUserSessionStore();
+		uss.delete.mockRejectedValueOnce(new Error("session store down"));
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", makeFakeProvider()]]),
+			federation,
+			userSessionStore: uss,
+			sessionFederationIndex: makeSessionFederationIndex({
+				addFederation: down("federation index"),
+			}),
+			subjectSessionIndex: makeSubjectSessionIndex({ removeSid: down("subject index") }),
+			logger,
+		});
+		const res = await callback(app);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expectOutageLogged(
+			logger,
+			"federation_callback_store_unavailable",
+			{ store: "session_federation_index", step: "add" },
+			[
+				{ store: "user_session", step: "delete" },
+				{ store: "subject_session_index", step: "remove_sid" },
+			],
+		);
+	});
+
+	it("the cookie session's regeneration: 503 — no longer 500 — and one error line", async () => {
+		const logger = spyLogger();
+		const uss = makeUserSessionStore();
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", makeFakeProvider()]]),
+			federation,
+			userSessionStore: uss,
+			saveInterceptor: failRegenerate,
+			logger,
+		});
+		const res = await callback(app);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expectOutageLogged(logger, "federation_callback_store_unavailable", {
+			store: "cookie_session",
+			step: "regenerate",
+		});
+		expect(uss.delete).toHaveBeenCalledOnce();
+	});
+
+	it("the token attach after regeneration: 503 — no longer 500 — and one error line", async () => {
+		const logger = spyLogger();
+		const fts = makeFederationTokenStore();
+		fts.attach.mockRejectedValueOnce(new Error("token store down"));
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", makeFakeProvider()]]),
+			federation,
+			federationTokenStore: fts,
+			logger,
+		});
+		const res = await callback(app);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expectOutageLogged(logger, "federation_callback_store_unavailable", {
+			store: "federation_token",
+			step: "attach",
+		});
+	});
+
+	it("the regenerated session's persist: 503 — no longer 500 — and one error line", async () => {
+		const logger = spyLogger();
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", makeFakeProvider()]]),
+			federation,
+			saveInterceptor: failSave(2),
+			logger,
+		});
+		const res = await callback(app);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expectOutageLogged(logger, "federation_callback_store_unavailable", {
+			store: "cookie_session",
+			step: "save",
+		});
+	});
+
+	it("the envelope's retirement: 503 — no longer 500 — one error line, and no code exchanged", async () => {
+		const logger = spyLogger();
+		const provider = makeFakeProvider();
+		const { app } = buildCallbackApp({
+			providers: new Map([["test", provider]]),
+			federation,
+			saveInterceptor: failSave(1),
+			logger,
+		});
+		const res = await callback(app);
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expectOutageLogged(logger, "federation_callback_store_unavailable", {
+			store: "cookie_session",
+			step: "save",
+		});
+		expect(provider.exchangeCode).not.toHaveBeenCalled();
+	});
+
+	it("a start whose session cannot be saved: 503 — no longer 500 — and one error line", async () => {
+		const logger = spyLogger();
+		const store: SessionStore = new Map();
+		const app = makeSessionApp(store);
+		app.use((req, _res, next) => {
+			req.session.save = (cb?: (err: unknown) => void) => {
+				cb?.(new Error("cookie store down"));
+				return req.session;
+			};
+			next();
+		});
+		app.use(
+			createRouter(express, {
+				config: {} as never,
+				federationProviders: new Map([["test", makeFakeProvider()]]),
+				federationRedirectPolicyResolver: new Map([["test", makePermissivePolicy()]]),
+				providerCallbackUrls: new Map([["test", TEST_CALLBACK_URL]]),
+				userRepository: makeUserRepository(),
+				userSessionStore: makeUserSessionStore(),
+				sessionFederationIndex: makeSessionFederationIndex(),
+				federationTokenStore: makeFederationTokenStore(),
+				logger: logger as unknown as Logger,
+			}),
+		);
+		const res = await request(app).get("/oauth/federation/test");
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(SESSION_STORE_UNAVAILABLE);
+		expectOutageLogged(logger, "federation_start_store_unavailable", {
+			store: "cookie_session",
+			step: "save",
+		});
 	});
 });

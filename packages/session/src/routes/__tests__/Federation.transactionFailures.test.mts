@@ -23,13 +23,18 @@
  * before the redirect, or cannot be retired before the code is exchanged, is a
  * flow that must not continue — an attacker who could force the failure and
  * then replay would otherwise bypass the binding entirely.
+ *
+ * A store that cannot answer is the server's outage: `503
+ * temporarily_unavailable`, logged once at error level with `store` and
+ * `step`. A composition with no store to hold the transaction is the
+ * deployment's fault: `500 misconfiguration`, logged once at error level.
  */
 
-import type { FederationProvider } from "@o3co/auth-provider-core";
+import type { FederationProvider, Logger } from "@o3co/auth-provider-core";
 import { codeChallenge } from "@o3co/auth-provider-core";
 import express from "express";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
 	deriveFederationTransactionCookieName,
 	FEDERATION_TRANSACTION_KEY_PREFIX,
@@ -99,6 +104,52 @@ type Knobs = {
 	cookieName?: string;
 	/** Make the session's own `save` fail, for the query-mode branch. */
 	failSessionSave?: boolean;
+	/** The router's logger. */
+	logger?: Logger;
+};
+
+/** A logger whose every level is a spy; `child` answers the same logger. */
+function spyLogger() {
+	const logger = {
+		trace: vi.fn(),
+		debug: vi.fn(),
+		info: vi.fn(),
+		warn: vi.fn(),
+		error: vi.fn(),
+		fatal: vi.fn(),
+		child: vi.fn(),
+	};
+	logger.child.mockReturnValue(logger);
+	return logger;
+}
+
+/**
+ * Exactly one line at error level, object-first, named `event`, carrying
+ * `fields` (and, when `projected`, the error's projection — never the `Error`),
+ * and nothing at any other level.
+ */
+function expectOneErrorLine(
+	logger: ReturnType<typeof spyLogger>,
+	event: string,
+	fields: Record<string, unknown>,
+	projected = true,
+): void {
+	expect(logger.error).toHaveBeenCalledTimes(1);
+	const [context, name] = logger.error.mock.calls[0] as [Record<string, unknown>, string];
+	expect(name).toBe(event);
+	expect(context).toMatchObject(fields);
+	if (projected) {
+		expect(context.err).not.toBeInstanceOf(Error);
+		expect(context.err).toMatchObject({ name: "Error", detail: "store down" });
+	}
+	for (const level of ["trace", "debug", "info", "warn", "fatal"] as const) {
+		expect(logger[level]).not.toHaveBeenCalled();
+	}
+}
+
+const STORE_UNAVAILABLE = {
+	error: "temporarily_unavailable",
+	error_description: "Session store unavailable",
 };
 
 const DEFAULT_COOKIE_NAME = deriveFederationTransactionCookieName("harness.session");
@@ -167,6 +218,7 @@ function buildApp(knobs: Knobs = {}) {
 			...(knobs.cookieName === undefined
 				? {}
 				: { federationTransactionCookieName: knobs.cookieName }),
+			...(knobs.logger === undefined ? {} : { logger: knobs.logger }),
 		}),
 	);
 
@@ -195,13 +247,20 @@ describe("a form_post start leg refuses when it cannot hold a transaction", () =
 	it("500s when no express-session store is mounted on the request", async () => {
 		// The old code warned and carried on, redirecting the user to Apple for a
 		// callback that could not possibly have worked.
-		const { app } = buildApp({ withoutSessionStore: true });
+		const logger = spyLogger();
+		const { app } = buildApp({ withoutSessionStore: true, logger });
 		const res = await request(app).get("/oauth/federation/apple");
 		expect(res.status).toBe(500);
 		expect(res.body.error).toBe("misconfiguration");
 		// RFC 6749 Appendix A.8 allows no `"`: the name is quoted with `'`.
 		expect(res.body.error_description).toBe(
 			"Federation 'apple' cannot start: no session store is mounted to hold its transaction",
+		);
+		expectOneErrorLine(
+			logger,
+			"federation_form_post_start_misconfigured",
+			{ provider: "apple", callbackUrl: CALLBACK_URL },
+			false,
 		);
 	});
 
@@ -227,49 +286,66 @@ describe("a form_post start leg refuses when it cannot hold a transaction", () =
 		expect(res.body.error_description).toBe("No callback URL registered for provider 'apple'");
 	});
 
-	it("500s, and redirects nobody, when the transaction cannot be written", async () => {
-		const { app, records } = buildApp({ failOn: "set" });
+	it("503s, logs once, and redirects nobody, when the transaction cannot be written", async () => {
+		const logger = spyLogger();
+		const { app, records } = buildApp({ failOn: "set", logger });
 		const res = await request(app).get("/oauth/federation/apple");
-		expect(res.status).toBe(500);
-		expect(res.body.error).toBe("server_error");
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(STORE_UNAVAILABLE);
 		expect(records.size).toBe(0);
+		expectOneErrorLine(logger, "federation_start_store_unavailable", {
+			provider: "apple",
+			store: "federation_transaction",
+			step: "set",
+		});
 	});
 });
 
 describe("a query federation still fails closed on its own session save", () => {
-	it("500s when the start leg cannot persist the envelope in the session", async () => {
-		// The query branch is untouched by #494 and keeps the behaviour it had:
-		// a store that cannot hold the state must not send the user to the IdP.
-		const { app } = buildApp({ failSessionSave: true });
+	it("503s and logs once when the start leg cannot persist the envelope in the session", async () => {
+		// A store that cannot hold the state must not send the user to the IdP.
+		const logger = spyLogger();
+		const { app } = buildApp({ failSessionSave: true, logger });
 		const res = await request(app).get("/oauth/federation/query-idp");
-		expect(res.status).toBe(500);
-		expect(res.body.error).toBe("server_error");
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(STORE_UNAVAILABLE);
+		expectOneErrorLine(logger, "federation_start_store_unavailable", {
+			provider: "query-idp",
+			store: "cookie_session",
+			step: "save",
+		});
 	});
 });
 
 describe("a form_post callback refuses when the transaction cannot be resolved or retired", () => {
-	it("500s when the store cannot be read", async () => {
+	it("503s and logs once when the store cannot be read", async () => {
 		const { app, records } = buildApp();
 		const flow = await start(app, records);
 
-		const { app: broken } = buildApp({ failOn: "get" });
+		const logger = spyLogger();
+		const { app: broken } = buildApp({ failOn: "get", logger });
 		const res = await request(broken)
 			.post("/oauth/federation/apple/callback")
 			.set("Cookie", flow.cookie)
 			.type("form")
 			.send({ state: flow.state, code: "c" });
 
-		expect(res.status).toBe(500);
-		expect(res.body.error).toBe("server_error");
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(STORE_UNAVAILABLE);
+		expectOneErrorLine(logger, "federation_callback_store_unavailable", {
+			store: "federation_transaction",
+			step: "get",
+		});
 	});
 
-	it("500s rather than exchanging the code when the transaction cannot be deleted", async () => {
+	it("503s and logs once rather than exchanging the code when the transaction cannot be deleted", async () => {
 		// Reuse prevention is the whole point of the delete: if it fails, the
 		// transaction is still replayable, so the flow stops here.
 		const { app, records } = buildApp();
 		const flow = await start(app, records);
 
-		const { app: undeletable, records: sharedRecords } = buildApp({ failOn: "destroy" });
+		const logger = spyLogger();
+		const { app: undeletable, records: sharedRecords } = buildApp({ failOn: "destroy", logger });
 		sharedRecords.set(
 			`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`,
 			records.get(`${FEDERATION_TRANSACTION_KEY_PREFIX}${flow.id}`),
@@ -281,8 +357,12 @@ describe("a form_post callback refuses when the transaction cannot be resolved o
 			.type("form")
 			.send({ state: flow.state, code: "c" });
 
-		expect(res.status).toBe(500);
-		expect(res.body.error).toBe("server_error");
+		expect(res.status).toBe(503);
+		expect(res.body).toEqual(STORE_UNAVAILABLE);
+		expectOneErrorLine(logger, "federation_callback_store_unavailable", {
+			store: "federation_transaction",
+			step: "delete",
+		});
 	});
 
 	it("still refuses cleanly when the provider has no callback URL to scope the cleared cookie to", async () => {
