@@ -235,8 +235,8 @@ the PR description lists the range, and every operator-visible commit in it
 refusal, a default) has an entry — a `multi` boot refusal merged mid-cycle
 was invisible until its cut once, and the listed range is what makes the
 omission reviewable. Cleanliness: one heading per type in the new section,
-no repeated entry openers, order Added / Changed / Removed / Fixed /
-Security (as in `v0.9.0`):
+no repeated entry openers, order Added / Changed / Deprecated / Removed /
+Fixed / Security, a type with no entries left out (as in `v0.9.0`):
 
 ```bash
 # the section being cut is the first version section in the file
