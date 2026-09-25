@@ -190,6 +190,8 @@ standalone テンプレートの [`buildModules.mts`](../../templates/standalone
 
 `authorization_code` と `refresh_token` グラントが発行するアクセストークンとリフレッシュトークンは `family_id` — リフレッシュトークンファミリー。[イントロスペクション](#イントロスペクション-呼び出し元が問い合わせられるトークン)、[userinfo](#userinfo)、[ログアウト](#ログアウト)、federation token ルートが失効の確認に使う — と、コードレコードにあればセッション ID の `sid` を持つ。`sid` はログイン経路（ローカルログインかフェデレーションコールバック）が `/authorize` でコードに書き込む。
 
+**新しいファミリーはリフレッシュトークン自身の識別子で登録される。** リフレッシュトークンの `jti` と、その有効期間を測り始める時刻は署名の前に予約される。`refreshTokenFamilyRotation` が配線されていれば、トークンを返す前に、ファミリーがその `jti` で、その時刻に `oauth.refreshToken.expiresIn` を足した時刻 — トークンの `exp` — を期限として登録される。グラントはそれらを署名済みのトークンから読み戻さないので、`KeyStore` がトークンをどんな形で返しても、発行されたリフレッシュトークンがローテーションの記録を持たないことはない。答えられないファミリーストアは `503 temporarily_unavailable` で、`store: "refresh_token_family"` と `step: "register"` を付けて `authorization_grant_store_unavailable` としてログに出す。ローテーションを配線しなければファミリーは登録されず、リプレイ検出は働かない。
+
 **`userSessionStore` が配線されているとき、コードは生存中のセッションを名指さなければならない。** トークンのサブジェクトはそのセッションから来て、グラントは [ログアウト](#ログアウト)が見つけられるよう、新しいファミリーとクライアントをそのセッションに結び付ける:
 
 - `sid` の無いコードは `400 invalid_grant` — ログインの配線が記録しなかった;

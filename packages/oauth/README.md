@@ -196,6 +196,8 @@ Enabling jwt-bearer without a `userRepository` or an `assertionVerifier` fails a
 
 The access and refresh tokens the `authorization_code` and `refresh_token` grants mint carry `family_id` — the refresh-token family, which is what [introspection](#introspection-which-tokens-a-caller-may-ask-about), [userinfo](#userinfo), [logout](#logout) and the federation token route check for revocation — and `sid`, the session id, when the code record has one. The login path writes `sid` onto the code at `/authorize` (local login or the federation callback).
 
+**The new family is registered under the refresh token's own identity.** The refresh token's `jti` and the instant its lifetime is measured from are reserved before it is signed. With a `refreshTokenFamilyRotation` wired, the family is registered under that `jti`, expiring at that instant plus `oauth.refreshToken.expiresIn` — the token's `exp` — before any token is returned; the grant never reads them back from the signed token, so no form a `KeyStore` returns it in can leave a served refresh token without a rotation record. A family store that cannot answer is `503 temporarily_unavailable`, logged as `authorization_grant_store_unavailable` with `store: "refresh_token_family"` and `step: "register"`. With no rotation wired, no family is registered and replay detection is off.
+
 **With a `userSessionStore` wired, the code must name a live session.** The session is where the tokens' subject comes from, and the grant links the new family and the client to it so that [logout](#logout) can find them:
 
 - a code with no `sid` is `400 invalid_grant` — the login wiring did not record one;
