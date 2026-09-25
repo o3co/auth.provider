@@ -344,22 +344,22 @@ const checkPathLength = (path: readonly pkijs.Certificate[]): FullPkiResult => {
 };
 
 /**
- * This package's words for the result codes the engine can answer with here:
- * pkijs's own checks (`resultCode` 3–10, 21, 41, 42, 98, 99). The engine runs
- * without revocation material, so its revocation codes (11–13) cannot occur;
+ * This package's words for the result codes the engine can answer with here
+ * (pkijs 3.4): its path checks — 8 (validity), 9 (path length), 10 (name
+ * chaining), 14 (a certificate above the leaf failed its CA check:
+ * basicConstraints, keyUsage or an unparseable critical extension; the finer
+ * codes 3–7 that check computes never reach the result) — and its policy and
+ * name-constraint checks (21, 41, 42, 98, 99). The engine runs without
+ * revocation material, so its revocation codes (11–13) cannot occur;
  * revocation outcomes are named by the local pass below. The engine's
  * `resultMessage` is never used — it is the library's text, and for an
  * error it caught, that error's message.
  */
 const ENGINE_FAILURE_DETAIL: Readonly<Record<number, string>> = {
-	3: "a CA certificate on the path asserts keyCertSign without basicConstraints",
-	4: "a CA certificate on the path lacks the keyCertSign key usage",
-	5: "an intermediate certificate lacks the cRLSign key usage",
-	6: "a critical extension on the path could not be parsed",
-	7: "the chain holds more than one end-entity certificate",
 	8: "a certificate on the path is not yet valid or has expired",
 	9: "the path is too short",
 	10: "issuer and subject names on the path do not chain",
+	14: "a certificate on the path above the leaf is not a CA certificate",
 	21: "a name form a name constraint requires is missing",
 	41: "a name on the path is outside the permitted subtrees of a name constraint",
 	42: "a name on the path is inside an excluded subtree of a name constraint",
@@ -385,7 +385,9 @@ const describeEngineFailure = (
 ): { step: string; detail: string; cause?: unknown } => {
 	const cause = result.error !== undefined ? { cause: result.error } : {};
 	if (
-		noIssuer ||
+		// The empty issuer lookup is read only where the builder's plain Error
+		// lands (`unknown`): a refusal with a code of its own is that code's.
+		(noIssuer && result.resultCode === pkijs.ChainValidationCode.unknown) ||
 		result.resultCode === pkijs.ChainValidationCode.noPath ||
 		result.resultCode === pkijs.ChainValidationCode.noValidPath
 	) {
