@@ -31,6 +31,8 @@ import type {
 	GrantContext,
 	RateLimiter,
 	RateLimitFailMode,
+	UserSession,
+	UserSessionStore,
 } from "@o3co/auth-provider-core";
 import {
 	createMemoryDeviceCodeStore,
@@ -113,6 +115,41 @@ const settings = {
 	pollingIntervalSeconds: 5,
 };
 
+/** The durable session the harness's cookie session names by default. */
+const LIVE_SID = "sid-1";
+
+/**
+ * The `UserSession` records the harness's store holds, by `sid`: `user-1`'s
+ * live session, and one that names another subject.
+ */
+const sessionRecord = (sid: string, sub: string): UserSession => ({
+	sid,
+	sub,
+	authTime: new Date(1_800_000_000_000),
+	createdAt: new Date(1_800_000_000_000),
+	expiresAt: new Date(1_900_000_000_000),
+	claims: {},
+	amr: ["pwd"],
+});
+
+/**
+ * A store over fixed records. The flow is what these tests pin; what the
+ * store adapters do is their contract suite's business.
+ */
+const sessionStoreOf = (records: readonly UserSession[]): UserSessionStore => {
+	const bySid = new Map(records.map((record) => [record.sid, record]));
+	return {
+		kind: "fixed",
+		create: async () => {
+			throw new Error("the harness's sessions are fixed");
+		},
+		get: async (sid) => bySid.get(sid) ?? null,
+		delete: async (sid) => {
+			bySid.delete(sid);
+		},
+	};
+};
+
 /** A clock the tests move by hand, so polling intervals are not real waits. */
 const makeClock = (start = 1_800_000_000_000) => {
 	let current = start;
@@ -134,6 +171,8 @@ const makeHarness = (
 		auditSink?: AuditSink;
 		logger?: ReturnType<typeof makeLogger>;
 		store?: ReturnType<typeof createMemoryDeviceCodeStore>;
+		userSessionStore?: UserSessionStore;
+		requireEmailVerified?: boolean;
 	} = {},
 ) => {
 	const clock = makeClock();
@@ -146,7 +185,14 @@ const makeHarness = (
 			defaultLimit: { limit: 60, windowSeconds: 60 },
 		});
 
-	const session = overrides.session ?? { isAuthenticated: true, user: { id: "user-1" } };
+	const session = overrides.session ?? {
+		isAuthenticated: true,
+		user: { id: "user-1" },
+		sid: LIVE_SID,
+	};
+	const userSessionStore =
+		overrides.userSessionStore ??
+		sessionStoreOf([sessionRecord(LIVE_SID, "user-1"), sessionRecord("sid-2", "user-2")]);
 
 	const app = express();
 	app.use(express.json());
@@ -175,6 +221,8 @@ const makeHarness = (
 			settings: resolved,
 			rateLimiter,
 			failMode: overrides.failMode ?? "closed",
+			userSessionStore,
+			requireEmailVerified: overrides.requireEmailVerified ?? false,
 			now: clock.now,
 			...(overrides.auditSink ? { auditSink: overrides.auditSink } : {}),
 			...(overrides.logger ? { logger: overrides.logger } : {}),
@@ -436,6 +484,70 @@ describe("verification endpoint", () => {
 		const res = await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
 		expect(res.status).toBe(401);
 		expect(res.body.error).toBe("login_required");
+	});
+
+	it.each([
+		["records no sid", { isAuthenticated: true, user: { id: "user-1" } }],
+		[
+			"names a sid the store does not hold",
+			{ isAuthenticated: true, user: { id: "user-1" }, sid: "sid-gone" },
+		],
+		[
+			"names another subject's session",
+			{ isAuthenticated: true, user: { id: "user-1" }, sid: "sid-2" },
+		],
+	])(
+		"answers login_required, deciding nothing, for a cookie session that %s",
+		async (_label, session) => {
+			// The session grant's rule: with a store wired, the cookie's claim
+			// stands only on a live record of the same subject. A session with
+			// no `sid` is one no logout can reach, and a record of another
+			// subject is not this cookie's; neither is an end user to approve as.
+			const { app, poll } = makeHarness({ session });
+			const started = await startDevice(app);
+			const userCode = started.body.user_code as string;
+			for (const action of ["lookup", "approve", "deny"]) {
+				const res = await verify(app, { action, user_code: userCode });
+				expect(res.status, action).toBe(401);
+				expect(res.body.error, action).toBe("login_required");
+			}
+			const result = await poll(started.body.device_code as string);
+			expect(result.result).toMatchObject({ status: 400, error: "authorization_pending" });
+		},
+	);
+
+	it("refuses an approval from an unverified email under requireEmailVerified, and nothing else", async () => {
+		// #297's gate is on issuance: `approve` is what a token is issued from.
+		// A lookup shows the user what is being asked, and a denial issues
+		// nothing, so both still go through.
+		const { app, poll } = makeHarness({ requireEmailVerified: true });
+		const started = await startDevice(app);
+		const userCode = started.body.user_code as string;
+
+		const refused = await verify(app, { action: "approve", user_code: userCode });
+		expect(refused.status).toBe(403);
+		expect(refused.body).toEqual({
+			error: "access_denied",
+			error_description: "email address is not verified",
+		});
+		expect((await verify(app, { action: "lookup", user_code: userCode })).status).toBe(200);
+		const pending = await poll(started.body.device_code as string);
+		expect(pending.result).toMatchObject({ status: 400, error: "authorization_pending" });
+		expect((await verify(app, { action: "deny", user_code: userCode })).status).toBe(200);
+	});
+
+	it("does not spend the subject's budget on an approval the email gate refuses", async () => {
+		// Refused before the code is read: no oracle, and no attempt counted.
+		const rateLimiter = createMemoryRateLimiter({
+			limits: { device_verification: { limit: 1, windowSeconds: 300 } },
+			defaultLimit: { limit: 60, windowSeconds: 60 },
+		});
+		const { app } = makeHarness({ requireEmailVerified: true, rateLimiter });
+		for (let i = 0; i < 3; i++) {
+			const res = await verify(app, { action: "approve", user_code: "BCDF-GHJK" });
+			expect(res.status).toBe(403);
+		}
+		expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(404);
 	});
 
 	it("answers a malformed code exactly as it answers an unknown one", async () => {

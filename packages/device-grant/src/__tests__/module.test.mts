@@ -32,6 +32,7 @@ import type {
 } from "@o3co/auth-provider-core";
 import {
 	createApp,
+	createInMemoryUserSessionStore,
 	createMemoryDeviceCodeStore,
 	createMemoryRateLimiter,
 	createMemoryReplaySeenSet,
@@ -111,6 +112,7 @@ interface Overrides {
 	readonly deviceAuthorization?: Record<string, unknown>;
 	readonly withStore?: boolean;
 	readonly withRateLimiter?: boolean;
+	readonly withUserSessionStore?: boolean;
 	/** Drop the `audit.sink.type = "none"` declaration the fixture carries. */
 	readonly withoutAuditDeclaration?: boolean;
 }
@@ -146,6 +148,9 @@ const makeBoot = (overrides: Overrides): BootstrapMap => {
 		clientRepository,
 		keyStore: createSymmetricKeyStore("test-secret-at-least-32-chars!!!"),
 		...(overrides.withStore === false ? {} : { deviceCodeStore: createMemoryDeviceCodeStore() }),
+		...(overrides.withUserSessionStore === false
+			? {}
+			: { userSessionStore: createInMemoryUserSessionStore() }),
 		...(overrides.withRateLimiter === false
 			? {}
 			: {
@@ -223,6 +228,26 @@ describe("deviceGrantModule — boot", () => {
 		await expect(boot({ deviceAuthorization: ENABLED, withRateLimiter: false })).rejects.toThrow(
 			/§5\.1|rate/i,
 		);
+	});
+
+	it("refuses to boot enabled without a userSessionStore, naming the component", async () => {
+		// An approval turns the browser session into a device token that
+		// carries no `sid` and no `family_id`, so nothing a logout or a
+		// credential change does afterwards reaches it. Whether the session
+		// behind the cookie is still live is the one question the approval can
+		// ask, and without the store it cannot — so an enabled grant without
+		// one is a boot refusal, as a missing limiter is, not an endpoint that
+		// trusts the cookie alone.
+		await expect(
+			boot({ deviceAuthorization: ENABLED, withUserSessionStore: false }),
+		).rejects.toThrow(/enabled = true requires a userSessionStore component/);
+	});
+
+	it("boots disabled without a userSessionStore", async () => {
+		// The slot stays optional in the manifest: a deployment that installs
+		// the package and leaves the grant off has no approvals to check.
+		const handle = await boot({ withUserSessionStore: false });
+		await handle.dispose();
 	});
 
 	it("refuses to boot without a device code store, naming the config key", async () => {
