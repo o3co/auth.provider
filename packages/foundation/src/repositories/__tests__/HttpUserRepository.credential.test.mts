@@ -394,8 +394,9 @@ describe("a Store that refuses this deployment's credential", () => {
 
 				expect(outcome, `HTTP ${status}`).toHaveProperty("rejected");
 				const error = (outcome as { rejected: unknown }).rejected;
-				// A class of its own, so a caller that reports by name — the grants
-				// callback's sanitized reporter — can say what happened.
+				// A class of its own, so that a line that projects the error — the
+				// grants callback's federation_grant_callback_unavailable — says
+				// what happened by its name.
 				expect(error).toBeInstanceOf(StoreCredentialRefusedError);
 				expect((error as Error).name).toBe("StoreCredentialRefusedError");
 				// Not `status`: Express and http-errors read that as the status to
@@ -589,9 +590,10 @@ describe("a transport failure carries nothing the request carried", () => {
 	it.each(calls)(
 		"%s: a timeout is a TimeoutError whether the headers or the body stall, so a reporter that reads names says timeout",
 		async (_name, path, call) => {
-			// federation-grants' sanitized reporter classifies by `name` alone;
-			// the identity lookup's timeout was already a TimeoutError and the
-			// other three were plain Errors, read as "unknown".
+			// A caller that reads an error's `name` — federation-grants' outage
+			// classification, a projected log line — tells a timeout by it; the
+			// identity lookup's timeout was already a TimeoutError and the other
+			// three were plain Errors.
 			const stalls = {
 				"the headers": () =>
 					serve((req) => {
