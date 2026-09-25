@@ -71,8 +71,10 @@
  * the configuration says: `"reject"` refuses a certificate whose status is
  * unknown — or only partly known, because one of the distribution points it
  * names could not be used (#446) — `"allow"` skips exactly those
- * certificates and logs each one, and a status that *was* determined as
- * revoked is refused under both.
+ * certificates and logs each one once the whole path has passed (a request
+ * refused for another certificate used no soft-fail, and has its refusal's
+ * lines alone), and a status that *was* determined as revoked is refused
+ * under both.
  *
  * Under `"reject"` an unknown status is one of two things. When every source
  * behind it failed to answer usefully — an outage, as `crl.mts` and
@@ -289,6 +291,25 @@ interface FallbackNotice {
 	readonly detail: string;
 	readonly cause?: unknown;
 	readonly failures: readonly SourceFailure[];
+}
+
+/**
+ * A line the revocation pass owes a request only if it is served: a
+ * certificate admitted under `"allow"` with its status unknown or only partly
+ * known, or one whose CRL was served over a responder that failed. Held until
+ * the whole path has passed, and then written in path order — a request
+ * refused for another certificate used neither the soft-fail nor the
+ * fallback, and its refusal's lines are its account.
+ */
+interface PendingLine {
+	readonly event:
+		| "mtls_revocation_unavailable_allowed"
+		| "mtls_revocation_partially_unavailable_allowed"
+		| "mtls_revocation_ocsp_fallback";
+	readonly subject: string;
+	readonly reason: string;
+	readonly detail: string;
+	readonly cause?: unknown;
 }
 
 /** A CRL distribution point that could not be used, as a {@link SourceFailure}. */
@@ -879,7 +900,9 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			const memberOf =
 				(subject: string) =>
 				(failure: SourceFailure): OutageMember => ({ subject, failure });
-			const notices: { readonly subject: string; readonly notice: FallbackNotice }[] = [];
+			// Under "allow", and for a fallback served under either policy, the
+			// lines a served request is owed wait for the path's result.
+			const pending: PendingLine[] = [];
 			for (const [index, certificate] of subjects.entries()) {
 				const outcome = outcomes[index] as RevocationOutcome;
 
@@ -919,11 +942,15 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					// Soft-fail. Logged at warn, never silently: an operator who chose
 					// "allow" still needs to see how often it is being used, because a
 					// permanent soft-fail is an unrevocable PKI wearing a revocation
-					// configuration.
-					options.logger?.warn(
-						{ subject, reason: outcome.reason, detail: outcome.detail, ...errOf(outcome.cause) },
-						"mtls_revocation_unavailable_allowed",
-					);
+					// configuration. Logged once the path has passed: a request another
+					// certificate's revocation refuses did not use the soft-fail.
+					pending.push({
+						event: "mtls_revocation_unavailable_allowed",
+						subject,
+						reason: outcome.reason,
+						detail: outcome.detail,
+						...withCause(outcome.cause),
+					});
 					continue;
 				}
 
@@ -933,7 +960,13 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				// determined, nothing beside a verdict's own lines.
 				if (outcome.fallback !== undefined) {
 					const subject = toNode(certificate).subject;
-					notices.push({ subject, notice: outcome.fallback });
+					pending.push({
+						event: "mtls_revocation_ocsp_fallback",
+						subject,
+						reason: outcome.fallback.reason,
+						detail: outcome.fallback.detail,
+						...withCause(outcome.fallback.cause),
+					});
 					members.push(...outcome.fallback.failures.map(memberOf(subject)));
 				}
 
@@ -949,9 +982,9 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				// shape — and "reject" is the operator's instruction not to
 				// guess in the permissive direction. Under "allow" that guess is
 				// what was chosen, so the certificate passes and the gap is logged
-				// — under its own message, because "checked against part of its
-				// revocation material" and "not checked at all" are different
-				// facts on an operator's dashboard.
+				// once the path has — under its own message, because "checked
+				// against part of its revocation material" and "not checked at
+				// all" are different facts on an operator's dashboard.
 				if (outcome.unavailable.length > 0) {
 					const subject = toNode(certificate).subject;
 					const last = outcome.unavailable[outcome.unavailable.length - 1] as CrlPointUnavailable;
@@ -976,10 +1009,13 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 							...withCause(last.cause),
 						};
 					}
-					options.logger?.warn(
-						{ subject, reason: last.reason, detail, ...errOf(last.cause) },
-						"mtls_revocation_partially_unavailable_allowed",
-					);
+					pending.push({
+						event: "mtls_revocation_partially_unavailable_allowed",
+						subject,
+						reason: last.reason,
+						detail,
+						...withCause(last.cause),
+					});
 				}
 			}
 
@@ -995,12 +1031,12 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					outage: true,
 				};
 			}
-			// The path passed: each certificate whose CRL was served over a
-			// failed responder is a request served on the fallback.
-			for (const { subject, notice } of notices) {
+			// The path passed: the request was served, on each soft-fail and
+			// fallback it used.
+			for (const line of pending) {
 				options.logger?.warn(
-					{ subject, reason: notice.reason, detail: notice.detail, ...errOf(notice.cause) },
-					"mtls_revocation_ocsp_fallback",
+					{ subject: line.subject, reason: line.reason, detail: line.detail, ...errOf(line.cause) },
+					line.event,
 				);
 			}
 			return { ok: true };
