@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 ## Responsibility
 
@@ -405,6 +405,8 @@ const userRepo = new InMemoryUserRepository(users);
 Five optional extension points: a slot or contribution kind a composition root fills, or leaves empty.
 
 #### MFA
+
+> **Deprecated.** Everything in this section is unwired, and the multi-factor design in [`docs/adr/2026-09-25-multi-factor-authentication.md`](docs/adr/2026-09-25-multi-factor-authentication.md) (D3) replaces it: `createMfaRouter` continues flows through callbacks at a route with no CSRF guard, a failed verification leaves its transaction open to retries until it expires, and `MfaTransactionStore`'s get-then-delete lets two verifications in flight both pass. The names D3 removes are marked `@deprecated`; `MfaCoordinator` and `MfaTransactionStore` keep their names with a new shape. Do not build on this surface.
 
 - `MfaProvider`, with the optional `SupportsEnrollment` / `SupportsRevocation` capabilities, the guards `supportsEnrollment()` / `supportsRevocation()`, and the `MfaCoordinator` / `MfaTransactionStore` types — [`src/mfa/types.mts`](src/mfa/types.mts); the factory `createMfaProviderFactory()` — [`src/mfa/factory.mts`](src/mfa/factory.mts).
 - `createMfaRouter(express, deps)` builds `POST /auth/mfa/verify { transaction_id, proof }`: it loads the pending transaction from the `MfaTransactionStore`, verifies the proof with the provider of the transaction's `providerKind`, and hands the resumed flow to the `onAuthorizeResume` / `onFederationResume` / `onLoginResume` callbacks you supply.

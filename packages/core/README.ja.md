@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-最終更新: 2026-09-25
+最終更新: 2026-09-26
 
 ## 責務と役割
 
@@ -404,6 +404,8 @@ const userRepo = new InMemoryUserRepository(users);
 任意の拡張ポイントが 5 つあります: composition root が埋める、あるいは空のままにするスロットか contribution 種別です。
 
 #### MFA
+
+> **非推奨。** この節のものはどれも配線されておらず、[`docs/adr/2026-09-25-multi-factor-authentication.md`](docs/adr/2026-09-25-multi-factor-authentication.md) の多要素認証の設計（D3）が置き換える。`createMfaRouter` は CSRF ガードのないルートでフローの続きをコールバックに委ね、検証に失敗してもトランザクションは期限まで再試行を受け付け、`MfaTransactionStore` の get してから delete する操作では、同時に進む二つの検証がどちらも通る。D3 が削除する名前には `@deprecated` を付けた。`MfaCoordinator` と `MfaTransactionStore` は名前を残し、形を変える。この面の上に作らないこと。
 
 - `MfaProvider` と任意の `SupportsEnrollment` / `SupportsRevocation` capability、ガード `supportsEnrollment()` / `supportsRevocation()`、`MfaCoordinator` / `MfaTransactionStore` 型 — [`src/mfa/types.mts`](src/mfa/types.mts)。ファクトリー `createMfaProviderFactory()` — [`src/mfa/factory.mts`](src/mfa/factory.mts)。
 - `createMfaRouter(express, deps)` は `POST /auth/mfa/verify { transaction_id, proof }` を作る: 保留中のトランザクションを `MfaTransactionStore` から読み、トランザクションの `providerKind` のプロバイダーで proof を検証し、再開するフローを呼び出し側が渡す `onAuthorizeResume` / `onFederationResume` / `onLoginResume` コールバックに渡す。
