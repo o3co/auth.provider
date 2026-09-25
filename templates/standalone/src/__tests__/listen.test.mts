@@ -71,6 +71,34 @@ describe("listen", () => {
 		expect(calls).toEqual([{ level: "info", args: [{ port }, "server_listening"] }]);
 	});
 
+	it("logs a server error after the bind — server_error, the projection — rather than swallowing it", async () => {
+		// Express 5 hands its listen callback the server's first `error`; once
+		// the socket is bound, a later one (accept EMFILE) went to that spent
+		// callback and was lost — and the one after it, with no listener left,
+		// threw out of the process.
+		const { logger, calls } = recordingLogger();
+		const server = await listen(express(), 0, logger);
+		opened.push(server);
+		calls.length = 0;
+
+		const failure = Object.assign(new Error("accept EMFILE"), { code: "EMFILE" });
+		server.emit("error", failure);
+		server.emit("error", failure);
+
+		expect(calls).toEqual([
+			{
+				level: "error",
+				args: [{ err: expect.objectContaining({ name: "Error", code: "EMFILE" }) }, "server_error"],
+			},
+			{
+				level: "error",
+				args: [{ err: expect.objectContaining({ name: "Error", code: "EMFILE" }) }, "server_error"],
+			},
+		]);
+		const line = calls[0]?.args[0] as { err: unknown };
+		expect(line.err).not.toBeInstanceOf(Error);
+	});
+
 	it("rejects with the server's error for a port already bound, and announces nothing", async () => {
 		const holder = createServer();
 		// Every interface, as `app.listen(port)` binds, so the two collide.
