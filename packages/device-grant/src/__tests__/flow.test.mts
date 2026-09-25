@@ -1383,6 +1383,42 @@ describe("the session check, further", () => {
 		}
 	});
 
+	it("writes the subject-mismatch warning to core's console logger when no logger is wired", async () => {
+		const spy = vi.spyOn(consoleLogger, "warn").mockImplementation(() => {});
+		try {
+			const { app } = makeHarness({
+				session: { isAuthenticated: true, user: { id: "user-1" }, sid: "sid-2" },
+			});
+			expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(401);
+			expect(spy).toHaveBeenCalledTimes(1);
+			expect(spy).toHaveBeenCalledWith(
+				{ sid: "sid-2" },
+				"device_verification_session_subject_mismatch",
+			);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	it("writes the rate-limited warning to core's console logger when no logger is wired", async () => {
+		const spy = vi.spyOn(consoleLogger, "warn").mockImplementation(() => {});
+		try {
+			const rateLimiter = createMemoryRateLimiter({
+				limits: { device_verification: { limit: 1, windowSeconds: 300 } },
+				defaultLimit: { limit: 60, windowSeconds: 60 },
+			});
+			const { app } = makeHarness({ rateLimiter });
+			await verify(app, { action: "lookup", user_code: "BCDF-GHJK" });
+			expect((await verify(app, { action: "lookup", user_code: "BCDF-GHJK" })).status).toBe(429);
+			expect(spy).toHaveBeenCalledWith(
+				expect.objectContaining({ subject: "user-1", action: "lookup", remaining: 0 }),
+				"device_verification_rate_limited",
+			);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
 	it("refuses to build a handler with no userSessionStore — a hand-mounted handler would answer every request 503", () => {
 		expect(() =>
 			createDeviceVerificationHandler({
