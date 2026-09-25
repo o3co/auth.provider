@@ -252,9 +252,9 @@ export function createRedisFederationTokenStore(
 ): FederationTokenStore & SupportsLock {
 	// OR-12: hard production guard MUST run before any encryption-key parsing
 	// so the same gate fires regardless of which entry point a consumer picks.
-	// `redisFederationTokenStoreBuilder` does its own pre-construction
-	// validation; this guard closes the gap when consumers call this lower-
-	// level factory directly (the OR-12 spec's M2 calibration delta).
+	// It runs here and only here — the builder and the module reach it through
+	// this factory — so its notice is written once per store (the OR-12 spec's
+	// M2 calibration delta put it here for direct callers of this factory).
 	validateEncryptionMode("federation-tokens", opts.encryption.mode, {
 		environment: opts.environment,
 		deploymentMode: opts.deploymentMode,
