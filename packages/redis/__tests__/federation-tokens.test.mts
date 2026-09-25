@@ -494,9 +494,16 @@ describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard"
 				{},
 			),
 		).not.toThrow();
-		expect(errorSpy).toHaveBeenCalledWith(
-			expect.stringContaining("FEDERATION_TOKENS_ALLOW_INSECURE=1"),
-		);
+		expect(errorSpy.mock.calls).toEqual([
+			[
+				expect.objectContaining({
+					store: "federation-tokens",
+					environment: "production",
+					override: "FEDERATION_TOKENS_ALLOW_INSECURE",
+				}),
+				"federation_store_plaintext_override",
+			],
+		]);
 	});
 
 	it("succeeds in development with allow-plaintext (warn-only)", () => {
@@ -508,7 +515,9 @@ describe("OR-12 — redisFederationTokenStoreBuilder env-based encryption guard"
 				{},
 			),
 		).not.toThrow();
-		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("allow-plaintext"));
+		expect(warnSpy.mock.calls).toEqual([
+			[{ store: "federation-tokens", mode: "allow-plaintext" }, "federation_store_plaintext"],
+		]);
 	});
 
 	it("succeeds silently with mode=required in production (no warn, no throw)", () => {
@@ -643,7 +652,9 @@ describe("#473 — the plaintext guard reads the selected environment and deploy
 				deploymentMode: "single",
 			}),
 		).not.toThrow();
-		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("allow-plaintext"));
+		expect(warnSpy.mock.calls).toEqual([
+			[{ store: "federation-tokens", mode: "allow-plaintext" }, "federation_store_plaintext"],
+		]);
 		expect(errorSpy).not.toHaveBeenCalled();
 	});
 
@@ -656,10 +667,17 @@ describe("#473 — the plaintext guard reads the selected environment and deploy
 				deploymentMode: "multi",
 			}),
 		).not.toThrow();
-		expect(errorSpy).toHaveBeenCalledWith(
-			expect.stringMatching(/CRITICAL.*FEDERATION_TOKENS_ALLOW_INSECURE=1/),
-		);
-		expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('deployment.mode is "multi"'));
+		expect(errorSpy.mock.calls).toEqual([
+			[
+				{
+					store: "federation-tokens",
+					mode: "allow-plaintext",
+					deploymentMode: "multi",
+					override: "FEDERATION_TOKENS_ALLOW_INSECURE",
+				},
+				"federation_store_plaintext_override",
+			],
+		]);
 	});
 
 	it("the builder forwards environment and deploymentMode to the same guard", () => {

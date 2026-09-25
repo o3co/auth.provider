@@ -259,6 +259,16 @@ function makeFakePipeline(reply: unknown) {
 
 const WRONGTYPE = new Error("WRONGTYPE Operation against a key holding the wrong kind of value");
 
+/**
+ * What a failed queued command is thrown as: the operation in fixed words,
+ * the reply's error as `cause` and nowhere in the message — the reply is
+ * Redis's text about the command it refused, and can quote its arguments.
+ */
+const queuedFailure = (operation: string, cause: unknown) => ({
+	message: `${operation}: a queued command failed inside MULTI/EXEC`,
+	cause,
+});
+
 describe("makeIoredisClients — MULTI/EXEC replies are inspected", () => {
 	it("sAddWithTtl rejects when a queued command failed", async () => {
 		const io = makeFakeIoredis({
@@ -266,7 +276,7 @@ describe("makeIoredisClients — MULTI/EXEC replies are inspected", () => {
 		});
 		await expect(
 			makeIoredisClients(io).federationTokenStoreClient.sAddWithTtl("k", "m", 1000),
-		).rejects.toThrow(/WRONGTYPE/);
+		).rejects.toMatchObject(queuedFailure("federationTokenStoreClient.sAddWithTtl", WRONGTYPE));
 	});
 
 	it("sAddWithTtl resolves when every queued command succeeded", async () => {
@@ -295,7 +305,9 @@ describe("makeIoredisClients — MULTI/EXEC replies are inspected", () => {
 		});
 		const p = makeIoredisClients(io).sessionRPRegistryClient.multi();
 		p.hSet("k", "f", "v").pExpireGT("k", Date.now() + 1000);
-		await expect(p.exec()).rejects.toThrow(/WRONGTYPE/);
+		await expect(p.exec()).rejects.toMatchObject(
+			queuedFailure("sessionRPRegistryClient.exec", WRONGTYPE),
+		);
 	});
 
 	it("sessionFamilyIndexClient.multi().exec() rejects on a failed queued command", async () => {
@@ -304,18 +316,23 @@ describe("makeIoredisClients — MULTI/EXEC replies are inspected", () => {
 		});
 		const p = makeIoredisClients(io).sessionFamilyIndexClient.multi();
 		p.zAdd("k", { score: 1, value: "m" }, { NX: true });
-		await expect(p.exec()).rejects.toThrow(/WRONGTYPE/);
+		await expect(p.exec()).rejects.toMatchObject(
+			queuedFailure("sessionFamilyIndexClient.exec", WRONGTYPE),
+		);
 	});
 
 	it("refreshTokenFamilyClient.multi().exec() rejects on a failed queued command", async () => {
 		// The CAS loop reports `committed` on a non-null reply. A silently
 		// failed SET would be reported as a successful rotation.
+		const oom = new Error("OOM command not allowed");
 		const io = makeFakeIoredis({
-			multi: vi.fn(() => makeFakePipeline([[new Error("OOM command not allowed"), null]])) as never,
+			multi: vi.fn(() => makeFakePipeline([[oom, null]])) as never,
 		});
 		const p = makeIoredisClients(io).refreshTokenFamilyClient.multi();
 		p.set("k", "v", "PX", 1000);
-		await expect(p.exec()).rejects.toThrow(/OOM/);
+		await expect(p.exec()).rejects.toMatchObject(
+			queuedFailure("refreshTokenFamilyClient.exec", oom),
+		);
 	});
 
 	it("refreshTokenFamilyClient.multi().exec() still returns null for a WATCH abort", async () => {
@@ -345,15 +362,18 @@ describe("makeIoredisClients — MULTI/EXEC reply shapes the check must survive"
 		).resolves.toBeUndefined();
 	});
 
-	it("reports a non-Error rejection value without stringifying it as [object Object]", async () => {
+	it("keeps a non-Error value in the slot as the cause, as it is", async () => {
 		// Redis replies arrive as `ReplyError`, but a mocked or exotic driver
-		// can put anything in the slot. The operator still needs to read it.
+		// can put anything in the slot. It is still a failure, and it is kept
+		// whole on `cause` rather than turned into text.
 		const io = makeFakeIoredis({
 			multi: vi.fn(() => makeFakePipeline([["EXECABORT Transaction discarded", null]])) as never,
 		});
 		await expect(
 			makeIoredisClients(io).federationTokenStoreClient.sAddWithTtl("k", "m", 1000),
-		).rejects.toThrow(/EXECABORT Transaction discarded/);
+		).rejects.toMatchObject(
+			queuedFailure("federationTokenStoreClient.sAddWithTtl", "EXECABORT Transaction discarded"),
+		);
 	});
 });
 

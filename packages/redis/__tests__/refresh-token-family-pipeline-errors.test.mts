@@ -109,14 +109,18 @@ describe("#352 regression — updateFamily must not report a rotation Redis refu
 		// Pre-fix this was `{ outcome: "committed", ... }` — a rotation the
 		// store never persisted, reported as durable.
 		expect(result).toBeInstanceOf(Error);
-		expect((result as Error).message).toMatch(/OOM/);
+		expect((result as Error).cause).toMatchObject({ message: expect.stringMatching(/^OOM /) });
 	});
 
-	it("surfaces the driver's own message so the operator can tell why", async () => {
-		const { store } = makeStore([
-			[[new Error("READONLY You can't write against a read only replica."), null]],
-		]);
-		await expect(store.updateFamily("fam-1", commitRotation)).rejects.toThrow(/READONLY/);
+	it("keeps the driver's own error as the cause, so the operator can tell why", async () => {
+		// On `cause`, not in the message: the reply is Redis's text about the
+		// command it refused. `loggableError` projects the cause for the log.
+		const readonly = new Error("READONLY You can't write against a read only replica.");
+		const { store } = makeStore([[[readonly, null]]]);
+		await expect(store.updateFamily("fam-1", commitRotation)).rejects.toMatchObject({
+			message: "refreshTokenFamilyClient.exec: a queued command failed inside MULTI/EXEC",
+			cause: readonly,
+		});
 	});
 
 	it("still treats a null EXEC as a CAS conflict and retries (WATCH abort is not an error)", async () => {
