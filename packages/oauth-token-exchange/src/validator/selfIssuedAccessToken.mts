@@ -75,8 +75,10 @@ export interface CreateSelfIssuedAccessTokenValidatorOptions {
  *   - Issuer match (always — `issuer` is a required option)
  *   - The access-token denylist and the subject watermark, when wired (#367)
  *
- * It does NOT check the refresh-token family. It projects `family_id` as
- * `familyId`, and `createTokenExchangeGrant` checks it against
+ * It does NOT check the refresh-token family or the session. It projects
+ * `sid` as `sid`, which `createTokenExchangeGrant` checks against the
+ * user-session store and carries onto the issued token, and `family_id` as
+ * `familyId`, which `createTokenExchangeGrant` checks against
  * `refreshTokenFamilyRevocation` for the subject_token and the actor_token
  * alike — refusing a revoked family with `family_revoked`, and a
  * family-bearing token outright when the slot is not wired. A family check
@@ -163,6 +165,9 @@ export function createSelfIssuedAccessTokenValidator(
 			// Projected, not checked: the grant owns the family rule (see the
 			// factory's JSDoc), so a revoked family gets the grant's answer.
 			const familyId = typeof payload.family_id === "string" ? payload.family_id : undefined;
+			// The same for the session: the grant checks it and carries it on.
+			const sid =
+				typeof payload.sid === "string" && payload.sid.length > 0 ? payload.sid : undefined;
 			const mayAct =
 				isRecord(payload.may_act) ||
 				(Array.isArray(payload.may_act) && payload.may_act.every(isRecord))
@@ -177,6 +182,7 @@ export function createSelfIssuedAccessTokenValidator(
 					? { aud: payload.aud as string | string[] }
 					: {}),
 				...(familyId ? { familyId } : {}),
+				...(sid ? { sid } : {}),
 				...(payload.act && typeof payload.act === "object" && !Array.isArray(payload.act)
 					? { act: payload.act as Record<string, unknown> }
 					: {}),

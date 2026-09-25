@@ -112,6 +112,12 @@ const OPTIONAL = [
 	// denylist or declare `oauth.revocation.accessToken = "unsupported"`.
 	"accessTokenDenylist",
 	"subjectRevocation",
+	// Read by the grant alone (`sessionRefusal` in grant.mts): a subject or
+	// actor token carrying a `sid` is refused once its session has ended, and
+	// the issued token carries the subject's `sid`, so the logout that ends
+	// the one ends the other. Optional as it is on `oauthModule`: without a
+	// store no surface judges a `sid`.
+	"userSessionStore",
 ] as const;
 
 /**
