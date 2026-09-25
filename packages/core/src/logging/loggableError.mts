@@ -238,6 +238,14 @@ export const LOGGED_MAX_PROJECTIONS = 16;
 const REASON_CODE = /^[a-z]+(?:[_-][a-z]+)*$/;
 const REASON_MAX_LENGTH = 64;
 
+/**
+ * Whether `value` is a `reason` a log line may carry: a code — lowercase
+ * words joined by `_` or `-`, at most 64 characters. The projection's own
+ * rule, for a line that reads a `reason` off something other than an error.
+ */
+export const isLoggableReason = (value: unknown): value is string =>
+	typeof value === "string" && value.length <= REASON_MAX_LENGTH && REASON_CODE.test(value);
+
 /** A field that records an HTTP status beside `status`: `storeStatus`, `upstreamStatus`. */
 const STATUS_FIELD = /^[a-z][A-Za-z]{0,31}Status$/;
 
@@ -437,11 +445,7 @@ const reasonOf = (err: object): string | undefined => {
 		return undefined;
 	}
 	const reason = read(err, "reason");
-	return typeof reason === "string" &&
-		reason.length <= REASON_MAX_LENGTH &&
-		REASON_CODE.test(reason)
-		? reason
-		: undefined;
+	return isLoggableReason(reason) ? reason : undefined;
 };
 
 /**

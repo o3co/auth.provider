@@ -144,9 +144,10 @@ const OTHER_PROJECTIONS: ReadonlyArray<{
 		file,
 		projection: "unavailableLogFields",
 		why:
-			"core's own (middleware/_responseHeaders.mts): a token-binding refusal's string `reason` " +
-			"and `loggableError` of its `cause` — nothing else of the refusal, so exactly as strict " +
-			"as loggableError",
+			"core's own (middleware/_responseHeaders.mts): a token-binding refusal's `reason` when it " +
+			"is a code (`isLoggableReason`, the rule loggableError keeps a `reason` by) and " +
+			"`loggableError` of its `cause` — nothing else of the refusal, so exactly as strict as " +
+			"loggableError",
 	})),
 	...[
 		"packages/core/src/middleware/tokenBinding.mts",
