@@ -239,6 +239,26 @@ const VOCABULARY: readonly VocabularyRow[] = [
 		home: "packages/core/src/grants/grantPolicy.mts",
 		definition: /(?:function|const)\s+policyOutOfBounds\b/,
 	},
+	{
+		concept: "key-ring sealing envelope — sealing (#593)",
+		home: "packages/core/src/sealing/envelope.mts",
+		definition: /(?:function|const)\s+sealWithKeyRing\b/,
+	},
+	{
+		concept: "key-ring sealing envelope — opening (#593)",
+		home: "packages/core/src/sealing/envelope.mts",
+		definition: /(?:function|const)\s+openWithKeyRing\b/,
+	},
+	{
+		concept: "key-ring sealing envelope — the ring rule (#593)",
+		home: "packages/core/src/sealing/keyRing.mts",
+		definition: /(?:function|const)\s+checkSealingKeyRing\b/,
+	},
+	{
+		concept: "key-ring sealing envelope — a configured key (#593)",
+		home: "packages/core/src/sealing/keyRing.mts",
+		definition: /(?:function|const)\s+decodeSealingKey\b/,
+	},
 ];
 
 /** Every shipped source file across the workspace: packages/*\/src\/**\/*.mts, tests excluded. */
