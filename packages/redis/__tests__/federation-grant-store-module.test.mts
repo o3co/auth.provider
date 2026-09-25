@@ -60,6 +60,46 @@ const build = (
 	});
 };
 
+/**
+ * Stands in for the routes that read the store, so that the store is in the
+ * closure boot builds.
+ */
+const grantsReader = defineModule({
+	name: "test:federation-grant-store-reader",
+	optional: ["federationGrantStore"] as const,
+	contributes: {
+		routes: [
+			{
+				mountPath: "/__test_noop__",
+				id: "test-noop",
+				handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+			},
+		],
+	},
+});
+
+/**
+ * Boots the module through `createApp` with `extra` over a valid core
+ * configuration, requires the boot to fail on the store's provider, naming the
+ * module, and answers the BootError's cause.
+ */
+const bootRefusal = async (extra: Record<string, unknown>): Promise<unknown> => {
+	const boot = createApp({
+		modules: [redisFederationGrantStoreModule, grantsReader],
+		bootstrapComponents: {
+			config: { ...makeValidCoreConfig(), ...extra },
+			pathResolver: (p: string) => p,
+			federationGrantStoreClient: client,
+		} as never,
+	});
+	await expect(boot).rejects.toMatchObject({
+		name: "BootError",
+		reason: "provides-factory-failed",
+		details: { module: "redis-federation-grant-store", componentKey: "federationGrantStore" },
+	});
+	return ((await boot.catch((err: unknown) => err)) as Error).cause;
+};
+
 describe("the Redis federation grant store module (#593, D16)", () => {
 	it("needs the client and the configuration, and says which slot it fills", () => {
 		const module = redisFederationGrantStoreModuleFor();
@@ -236,42 +276,37 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 	])(
 		"fails boot on %s with a RangeError as the BootError's cause, naming the module",
 		async (_what, encryptionKeys, message) => {
-			// Stands in for the routes that read the store, so that the store is in
-			// the closure boot builds.
-			const grantsReader = defineModule({
-				name: "test:federation-grant-store-reader",
-				optional: ["federationGrantStore"] as const,
-				contributes: {
-					routes: [
-						{
-							mountPath: "/__test_noop__",
-							id: "test-noop",
-							handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
-						},
-					],
-				},
+			const cause = await bootRefusal({
+				federationGrants: { encryptionMode: "required", encryptionKeys },
 			});
-			const boot = createApp({
-				modules: [redisFederationGrantStoreModule, grantsReader],
-				bootstrapComponents: {
-					config: {
-						...makeValidCoreConfig(),
-						federationGrants: { encryptionMode: "required", encryptionKeys },
-					},
-					pathResolver: (p: string) => p,
-					federationGrantStoreClient: client,
-				} as never,
-			});
-			await expect(boot).rejects.toMatchObject({
-				name: "BootError",
-				reason: "provides-factory-failed",
-				details: { module: "redis-federation-grant-store", componentKey: "federationGrantStore" },
-			});
-			const refused = await boot.catch((err: unknown) => err);
-			expect((refused as Error).cause).toStrictEqual(new RangeError(message));
-			expect((refused as Error).cause).toBeInstanceOf(RangeError);
+			expect(cause).toStrictEqual(new RangeError(message));
+			expect(cause).toBeInstanceOf(RangeError);
 		},
 	);
+
+	it("refuses a key prefix that would break the hash tag as a RangeError, through the factory and at boot", async () => {
+		// `{` or `}` in the prefix would move the hash tag a grant's three keys
+		// share, and scatter them across a Cluster's slots. A setting that is
+		// given but unusable, like the ring.
+		const message = 'federation grant store: keyPrefix may not contain "{" or "}"';
+		for (const keyPrefix of ["fg{", "}fg:", "a{b}:"]) {
+			expect(
+				() =>
+					createRedisFederationGrantStore({
+						client,
+						keyPrefix,
+						encryption: { mode: "required", keys: [{ id: "k-1", key: Buffer.alloc(32, 7) }] },
+					}),
+				keyPrefix,
+			).toThrow(new RangeError(message));
+		}
+		const cause = await bootRefusal({
+			federationGrants: { encryptionMode: "required", encryptionKeys: [{ id: "k-1", key: KEY }] },
+			redisFederationGrantStore: { keyPrefix: "fg:{tenant}:" },
+		});
+		expect(cause).toStrictEqual(new RangeError(message));
+		expect(cause).toBeInstanceOf(RangeError);
+	});
 
 	it("refuses a retention that is not a duration, rather than reading it as none", () => {
 		// Copilot's finding, and the one where the two readings look the same
