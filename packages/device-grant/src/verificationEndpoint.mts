@@ -317,7 +317,7 @@ const livenessOf = async (
 	// that answers `undefined` for a missing session is still no session.
 	if (record == null) return "ended";
 	if (record.sub !== claim.subject) {
-		options.logger?.warn({ sid }, "device_verification_session_subject_mismatch");
+		(options.logger ?? consoleLogger).warn({ sid }, "device_verification_session_subject_mismatch");
 		return "ended";
 	}
 	const revocation = options.subjectRevocation;
@@ -448,7 +448,7 @@ export const createDeviceVerificationHandler = (
 			// A limiter that answered "no" is not an outage: this is the #443
 			// signal that an account is guessing codes, under either fail mode.
 			const { decision } = budget;
-			options.logger?.warn(
+			(options.logger ?? consoleLogger).warn(
 				{ subject, action, remaining: decision.remaining },
 				"device_verification_rate_limited",
 			);
