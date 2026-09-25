@@ -94,6 +94,7 @@ a composition root. Listed because a module may `require` them.
 | --- | --- | --- | --- | --- |
 | `federationRedirectPolicyResolver` | `ReadonlyMap<string, FederationRedirectPolicy>` | optional | `session/federations/contributes.mts` | Synthetic key: the assembled per-federation `redirect_to` policies. |
 | `grantHandlerResolver` | `GrantHandlerResolver` | optional | `core/modules/manifest/synthetic-keys.mts` | Synthetic key: the assembled grant registry, resolved from every module's `contributes.grants`. |
+| `mfaFactorResolver` | `MfaFactorResolver` | optional | `core/modules/manifest/synthetic-keys.mts` | Synthetic key: every second factor contributed as `contributes.mfaFactors`, by kind. A factory that answered `null` (the factor switched off by its configuration) claims its kind and is absent from the resolver. Assembled after the `provides` factories run, so a module reads it from a contribution factory. |
 | `tokenExchangeValidatorResolver` | `TokenExchangeValidatorResolver` | optional | `core/modules/manifest/synthetic-keys.mts` | Synthetic key: the assembled RFC 8693 subject/actor token validators. |
 
 ## Component slots

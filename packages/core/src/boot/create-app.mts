@@ -203,7 +203,7 @@ function mergeWithBuiltins(consumer: ContributionKindMap | undefined): Contribut
 		tokenExchangeValidators: makeMapNameKeyedCollector<ExchangeTokenValidator>(),
 		federations: makeMapNameKeyedCollector<FederationProvider>(),
 		federationRedirectPolicies: makeMapNameKeyedCollector<unknown>(),
-		mfaFactors: makeMapNameKeyedCollector<MfaFactor>(),
+		mfaFactors: makeMapNameKeyedCollector<MfaFactor | null>(),
 		auditHooks: makeIdentityDedupListCollector<AuditHook>(),
 		routes: makeRouteCollector(),
 		grantPolicyHooks: makeIdentityDedupListCollector<GrantPolicyHookContribution>(),

@@ -20,7 +20,8 @@
  * Takes the `ComponentWorld` from stage 3 plus the merged
  * `ContributionCollectorMap`, and:
  *   - Step 0: prepares synthetic read-side projections (`grantHandlerResolver`,
- *     `tokenExchangeValidatorResolver`, `federationProviders`) into the working
+ *     `tokenExchangeValidatorResolver`, `federationProviders`,
+ *     `federationRedirectPolicyResolver`, `mfaFactorResolver`) into the working
  *     component map before any factory runs.
  *   - Step 2: iterates modules in `BootPlan.initOrder`, pre-scanning for
  *     collector conflicts, then invoking name-keyed contribution factories and
@@ -35,8 +36,10 @@ import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { isTokenBindingMw } from "../middleware/tokenBinding.mjs";
 import type { ComponentKey } from "../modules/manifest/component-map.mjs";
+import type { MfaFactor } from "../modules/manifest/contributes-map.mjs";
 import type {
 	GrantHandlerResolver,
+	MfaFactorResolver,
 	TokenExchangeValidatorResolver,
 } from "../modules/manifest/synthetic-keys.mjs";
 import type {
@@ -228,6 +231,25 @@ function makeFederationRedirectPolicyResolver(
 }
 
 /**
+ * Instantiate a stable read-side `MfaFactorResolver` over the `mfaFactors`
+ * collector. A kind whose factory answered `null` — the factor switched off
+ * by its configuration — is registered in the collector, so a second
+ * contribution of it is still a duplicate, and is absent from what the
+ * resolver answers. Reads through at call time, like the other resolvers.
+ * @internal
+ */
+function makeMfaFactorResolver(collector: NameKeyedCollector<MfaFactor | null>): MfaFactorResolver {
+	return {
+		get: (kind: string) => collector.get(kind) ?? undefined,
+		entries: function* (): IterableIterator<readonly [string, MfaFactor]> {
+			for (const [kind, factor] of collector.entries()) {
+				if (factor !== null) yield [kind, factor] as const;
+			}
+		},
+	};
+}
+
+/**
  * Step 0 — prepareSyntheticProjections.
  *
  * For each name-keyed collector that has a corresponding synthetic
@@ -267,6 +289,9 @@ function prepareSyntheticProjections(
 			contributionKinds.federationRedirectPolicies as NameKeyedCollector<unknown>,
 		);
 		components.federationRedirectPolicyResolver = view;
+	}
+	if (contributionKinds.mfaFactors !== undefined) {
+		components.mfaFactorResolver = makeMfaFactorResolver(contributionKinds.mfaFactors);
 	}
 }
 
@@ -361,7 +386,8 @@ function warnOnTokenBindingSurfaceOverlap(
  *
  * Steps:
  *   0. `prepareSyntheticProjections` — inject stable read-side resolvers for
- *      `grants`, `tokenExchangeValidators`, `federations` into the working
+ *      `grants`, `tokenExchangeValidators`, `federations`,
+ *      `federationRedirectPolicies`, `mfaFactors` into the working
  *      component map so contribution factories can capture resolver references
  *      that are fully populated at request time.
  *   2. Name-keyed pass (in `BootPlan.initOrder`):

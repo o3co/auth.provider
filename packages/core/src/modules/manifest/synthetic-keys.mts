@@ -18,6 +18,7 @@ import type {
 	ExchangeTokenValidator,
 	FederationProvider,
 	GrantHandler,
+	MfaFactor,
 } from "./contributes-map.mjs";
 
 /**
@@ -44,6 +45,17 @@ export interface TokenExchangeValidatorResolver {
 }
 
 /**
+ * Read-only projection of the boot planner's `mfaFactors` collector: every
+ * contributed second factor by kind (the MFA ADR's D3, D7). A kind whose
+ * factory answered `null` — switched off by its configuration — is absent
+ * from both `get` and `entries`.
+ */
+export interface MfaFactorResolver {
+	readonly get: (kind: string) => MfaFactor | undefined;
+	readonly entries: () => IterableIterator<readonly [string, MfaFactor]>;
+}
+
+/**
  * Re-export of `FederationProvider` for consumers that name the slot's value
  * type. It is the adapter port itself since #626 P1 — it was a placeholder
  * while the contract lived in `packages/session`.
@@ -60,6 +72,7 @@ export type { FederationProvider };
  * A5 (Phase 7) added `federationRedirectPolicyResolver` — the synthetic
  * projection for `federationRedirectPolicies` contributions (typed in
  * `@o3co/auth-provider-session/src/federations/contributes.mts`).
+ * `mfaFactorResolver` is the projection for `mfaFactors` (the MFA ADR's D3).
  *
  * Per A2-α §6.5 NORMATIVE constraints. The PRIMARY immutability guard
  * is the TypeScript declared type `ReadonlySet<string>` — `.add()`,
@@ -77,6 +90,7 @@ export const SYNTHETIC_COMPONENT_KEYS: ReadonlySet<string> = Object.freeze(
 		"tokenExchangeValidatorResolver",
 		"grantHandlerResolver",
 		"federationRedirectPolicyResolver",
+		"mfaFactorResolver",
 		// D-5: lifecycleRegistrar is boot-planner-owned (pre-seeded into the
 		// bootstrap map by createApp). Consumer-supplied values via
 		// bootstrapComponents/overrideComponents would create two registrars
@@ -131,5 +145,6 @@ declare module "@o3co/auth-provider-core" {
 		readonly grantHandlerResolver?: GrantHandlerResolver;
 		readonly tokenExchangeValidatorResolver?: TokenExchangeValidatorResolver;
 		readonly federationProviders?: ReadonlyMap<string, FederationProvider>;
+		readonly mfaFactorResolver?: MfaFactorResolver;
 	}
 }

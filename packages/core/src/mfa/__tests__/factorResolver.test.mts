@@ -50,17 +50,27 @@ const factor = (kind: string): MfaFactor => ({
 	completeEnrollment: async () => ({ ok: false, reason: "invalid" }),
 });
 
-/** Reads the resolver the way a coordinator module would: by requiring it. */
+/**
+ * Reads the resolver by requiring it, from a contribution factory: the
+ * planner assembles a synthetic key before contribution factories run and
+ * after the `provides` factories, so this is where a module reads one.
+ */
 function reader(seen: { resolver?: MfaFactorResolver }) {
 	return defineModule({
 		name: "test:mfa-factor-reader",
 		requires: ["mfaFactorResolver"] as const,
-		provides: {
-			"test.mfaFactorReader": (deps) => {
-				seen.resolver = deps.mfaFactorResolver;
-				return true;
-			},
-		} as never,
+		contributes: {
+			routes: [
+				(deps) => {
+					seen.resolver = deps.mfaFactorResolver;
+					return {
+						id: "test-mfa-factor-reader",
+						mountPath: "/__test_mfa_factor_reader__",
+						handler: ((_req: unknown, _res: unknown, next: () => void) => next()) as never,
+					};
+				},
+			],
+		},
 	});
 }
 

@@ -440,7 +440,12 @@ export interface ContributionCollectorMap {
 	 */
 	readonly federationRedirectPolicies?: NameKeyedCollector<unknown>;
 	readonly tokenExchangeValidators?: NameKeyedCollector<ExchangeTokenValidator>;
-	readonly mfaFactors?: NameKeyedCollector<MfaFactor>;
+	/**
+	 * Collector for `mfaFactors` contributions. A `null` entry is a factor its
+	 * configuration switched off: it claims the kind, and
+	 * `mfaFactorResolver` leaves it out.
+	 */
+	readonly mfaFactors?: NameKeyedCollector<MfaFactor | null>;
 	readonly auditHooks?: ListCollector<AuditHook>;
 	readonly routes?: RouteCollector;
 	readonly grantPolicyHooks?: ListCollector<GrantPolicyHookContribution>;
