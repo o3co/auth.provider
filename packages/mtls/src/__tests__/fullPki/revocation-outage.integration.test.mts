@@ -428,7 +428,7 @@ describe("full-pki, on-unavailable = reject: what stays a verdict", () => {
 	});
 });
 
-describe("full-pki, on-unavailable = allow: an allowed line only for a request that was served", () => {
+describe("full-pki, on-unavailable = allow: an allowed line only for a certificate the mechanism accepted", () => {
 	it("a refused connection: the certificate is bound, one allowed line at warn", async () => {
 		const { root, int, leaf } = await pki("refused");
 		const { app, calls } = appWith(root, "allow");
@@ -448,8 +448,9 @@ describe("full-pki, on-unavailable = allow: an allowed line only for a request t
 describe("full-pki, on-unavailable = allow: a verdict elsewhere on the path has its own lines alone", () => {
 	it("the leaf's point refused and the intermediate revoked: 400, the verdict's lines, no allowed line", async () => {
 		// The leaf's status is unknown and "allow" would admit it, but the
-		// intermediate is revoked: the request is refused, and a line saying
-		// the leaf was allowed would describe a request that was not served.
+		// intermediate is revoked: the path is refused, and a line saying the
+		// leaf was allowed would describe a certificate the mechanism did not
+		// accept.
 		const { root, int, leaf } = await pki("refused", "127.0.0.1", false, { intRevoked: true });
 		const { app, calls } = appWith(root, "allow");
 
@@ -484,7 +485,7 @@ describe("full-pki, on-unavailable = allow: a verdict elsewhere on the path has 
 		]);
 	});
 
-	it("one of the leaf's two points refused and the intermediate clean: served, its one partially-allowed line", async () => {
+	it("one of the leaf's two points refused and the intermediate clean: accepted, its one partially-allowed line", async () => {
 		const { root, int, leaf, morePoints } = await pki("clean", "127.0.0.1", false, {
 			morePoints: ["refused"],
 		});
@@ -727,11 +728,11 @@ describe("more sources down than one line keeps", () => {
 });
 
 describe("one outage line for the whole path", () => {
-	it("the leaf served on the CRL and the intermediate down under both: 503, the one error line, naming the leaf's responder too", async () => {
+	it("the leaf decided by its CRL and the intermediate down under both: 503, the one error line, naming the leaf's responder too", async () => {
 		// A shared OCSP outage with the root's CRL down: the leaf's CRL answers,
-		// the intermediate's does not. The request is refused, so no line may
-		// say it was served on the fallback — and the responder the leaf could
-		// not reach is part of the outage the one line accounts for.
+		// the intermediate's does not. The path is refused, so no line may say
+		// the leaf was accepted on the fallback — and the responder the leaf
+		// could not reach is part of the outage the one line accounts for.
 		const { root, int, leaf, leafResponder, intPoint, intResponder } = await pki(
 			"clean",
 			"127.0.0.1",
@@ -796,8 +797,9 @@ describe("one outage line for the whole path", () => {
 	});
 
 	it("the leaf's OCSP down and its CRL listing it: 400, the verdict's lines, no fallback line", async () => {
-		// The fallback line marks a request served on the CRL. This one was
-		// refused, and the verdict's own lines are its account.
+		// The fallback line marks a certificate the mechanism accepted on the
+		// CRL. This path was refused, and the verdict's own lines are its
+		// account.
 		const { root, int, leaf } = await pki("revoked", "127.0.0.1", true);
 		const { app, calls } = appWith(root, "reject", "both");
 

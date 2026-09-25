@@ -120,9 +120,12 @@
  * wins; a certificate is unavailable when both sources are, or when the
  * responder said `unknown` and the CRL did not list it. The fallback is logged
  * when a responder was actually asked and failed, the CRL then answered, and
- * the request was served on that answer, so an OCSP outage is visible even
- * while the CRL keeps revocation checking alive. `decide` hands the notice
- * back rather than writing it, because whether the request is served is the
+ * the mechanism accepted the certificate on that answer — its whole path
+ * passed — so an OCSP outage is visible even while the CRL keeps revocation
+ * checking alive. The line says what the mechanism accepted, no more: the
+ * request can still be refused afterwards, by another mechanism, the grant
+ * or a protected resource's binding check. `decide` hands the notice back
+ * rather than writing it, because whether the certificate is accepted is the
  * whole path's to say: it is written once every certificate has passed. A
  * path refused for another certificate's outage names the failed responder
  * among the outage's members instead, and a path refused as a verdict has
@@ -295,12 +298,15 @@ interface FallbackNotice {
 }
 
 /**
- * A line the revocation pass owes a request only if it is served: a
- * certificate admitted under `"allow"` with its status unknown or only partly
- * known, or one whose CRL was served over a responder that failed. Held until
- * the whole path has passed, and then written in path order — a request
- * refused for another certificate used neither the soft-fail nor the
- * fallback, and its refusal's lines are its account.
+ * A line for a certificate the mechanism accepted — its whole path passed —
+ * on the soft-fail or the fallback: one admitted under `"allow"` with its
+ * status unknown or only partly known, or one whose CRL answer was used over
+ * a responder that failed. Held until the whole path has passed, and then
+ * written in path order: a path refused for another certificate accepted
+ * nothing on either, and its refusal's lines are its account. The line says
+ * no more than that: the request can still be refused afterwards, by another
+ * mechanism's verdict or `strict-mutual-exclusion`, by the grant, or at a
+ * protected resource by `no_matching_binding`.
  */
 interface PendingLine {
 	readonly event:
@@ -676,8 +682,8 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			// A degraded answer. The responder that was asked and did not answer
 			// is handed back as a notice, so an OCSP outage stays visible while
 			// the CRL carries on — written by `validate` once the whole path has
-			// passed, since a request refused for another certificate was not
-			// served on this fallback. A revoked certificate is a verdict and has
+			// passed, since a path refused for another certificate accepted
+			// nothing on this fallback. A revoked certificate is a verdict and has
 			// the verdict's lines. A certificate that names no responder is a
 			// normal shape under "both" — a CA that publishes only CRLs for some
 			// of its certificates — not an outage, and has no notice.
@@ -902,8 +908,8 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			const memberOf =
 				(subject: string) =>
 				(failure: SourceFailure): OutageMember => ({ subject, failure });
-			// Under "allow", and for a fallback served under either policy, the
-			// lines a served request is owed wait for the path's result.
+			// Under "allow", and for a fallback used under either policy, the
+			// lines for what the mechanism accepted wait for the path's result.
 			const pending: PendingLine[] = [];
 			for (const [index, certificate] of subjects.entries()) {
 				const outcome = outcomes[index] as RevocationOutcome;
@@ -944,8 +950,8 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					// Soft-fail. Logged at warn, never silently: an operator who chose
 					// "allow" still needs to see how often it is being used, because a
 					// permanent soft-fail is an unrevocable PKI wearing a revocation
-					// configuration. Logged once the path has passed: a request another
-					// certificate's revocation refuses did not use the soft-fail.
+					// configuration. Logged once the path has passed: a path another
+					// certificate's revocation refuses accepted nothing on the soft-fail.
 					pending.push({
 						event: "mtls_revocation_unavailable_allowed",
 						subject,
@@ -1033,8 +1039,10 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					outage: true,
 				};
 			}
-			// The path passed: the request was served, on each soft-fail and
-			// fallback it used.
+			// The path passed: the mechanism accepted the certificate, on each
+			// soft-fail and fallback it used. The request can still be refused
+			// afterwards — by another mechanism, the grant, or a protected
+			// resource's binding check — and these lines claim nothing about it.
 			for (const line of pending) {
 				options.logger?.warn(
 					{ subject: line.subject, reason: line.reason, detail: line.detail, ...errOf(line.cause) },
