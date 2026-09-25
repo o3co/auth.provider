@@ -31,11 +31,18 @@
  * on whether an import is type-only: `import type` / `export type`, a clause
  * whose every named binding is marked `type`, or `import("…")` in a type
  * position. Anything else is a value import, `await import("…")` included.
- * Only relative specifiers are core's; a package name is not an edge here.
+ * A relative specifier and a `#/…` one (the package's subpath import) name a
+ * core file; any other package name is not an edge here.
+ *
+ * What the scan cannot turn into an edge it reports, and "sees every import
+ * in core's product code" fails on it: core imported by its own package name,
+ * an `import()` or `require()` of a computed specifier, a `require()` of a
+ * core file, and an `import … = require(…)`. What it does not see at all: a
+ * require function bound under another name than `require`.
  */
 
 import { type Dirent, readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { join, posix, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { describe, expect, it } from "vitest";
@@ -71,18 +78,47 @@ function productFiles(dir: string = srcDir): string[] {
 
 const fromSrc = (path: string): string => relative(srcDir, path).split(sep).join("/");
 
-function importsOf(file: string): ImportEdge[] {
-	const source = ts.createSourceFile(
-		file,
-		readFileSync(file, "utf8"),
-		ts.ScriptTarget.Latest,
-		true,
-	);
+/**
+ * The name core is published under. Core importing itself by it is an edge
+ * the scan cannot resolve to a file; `declare module "…"`, which augments
+ * `ComponentMap`, is not an import and is not read as one.
+ */
+const OWN_PACKAGE = "@o3co/auth-provider-core";
+
+/** What the scan found in one source: its edges into core, and what it could not resolve. */
+interface Scan {
+	readonly edges: readonly ImportEdge[];
+	/** `file:line: what` for each import the scan cannot turn into an edge. */
+	readonly holes: readonly string[];
+}
+
+/** Scan `text` as the file at `from` (relative to `src/`). */
+function scanSource(from: string, text: string): Scan {
+	const source = ts.createSourceFile(from, text, ts.ScriptTarget.Latest, true);
 	const edges: ImportEdge[] = [];
-	const add = (specifier: string, typeOnly: boolean): void => {
-		if (!specifier.startsWith(".")) return;
-		const to = fromSrc(resolve(dirname(file), specifier)).replace(/\.mjs$/, ".mts");
-		edges.push({ from: fromSrc(file), to, typeOnly });
+	const holes: string[] = [];
+	const hole = (node: ts.Node, what: string): void => {
+		const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
+		holes.push(`${from}:${line}: ${what}`);
+	};
+	/** The core file `specifier` names, relative to `src/`; undefined for a package. */
+	const coreFile = (specifier: string): string | undefined => {
+		const path = specifier.startsWith(".")
+			? posix.normalize(posix.join(posix.dirname(from), specifier))
+			: specifier.startsWith("#/")
+				? specifier.slice(2)
+				: undefined;
+		return path?.replace(/\.mjs$/, ".mts");
+	};
+	const isOwnPackage = (specifier: string): boolean =>
+		specifier === OWN_PACKAGE || specifier.startsWith(`${OWN_PACKAGE}/`);
+	const add = (node: ts.Node, specifier: string, typeOnly: boolean): void => {
+		if (isOwnPackage(specifier)) {
+			hole(node, `an import of core by its package name, ${specifier}`);
+			return;
+		}
+		const to = coreFile(specifier);
+		if (to !== undefined) edges.push({ from, to, typeOnly });
 	};
 	const visit = (node: ts.Node): void => {
 		if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
@@ -96,7 +132,7 @@ function importsOf(file: string): ImportEdge[] {
 						ts.isNamedImports(bindings) &&
 						bindings.elements.length > 0 &&
 						bindings.elements.every((element) => element.isTypeOnly)));
-			add(node.moduleSpecifier.text, typeOnly);
+			add(node, node.moduleSpecifier.text, typeOnly);
 		} else if (
 			ts.isExportDeclaration(node) &&
 			node.moduleSpecifier !== undefined &&
@@ -109,28 +145,57 @@ function importsOf(file: string): ImportEdge[] {
 					ts.isNamedExports(clause) &&
 					clause.elements.length > 0 &&
 					clause.elements.every((element) => element.isTypeOnly));
-			add(node.moduleSpecifier.text, typeOnly);
+			add(node, node.moduleSpecifier.text, typeOnly);
 		} else if (
 			ts.isImportTypeNode(node) &&
 			ts.isLiteralTypeNode(node.argument) &&
 			ts.isStringLiteral(node.argument.literal)
 		) {
-			add(node.argument.literal.text, true);
+			add(node, node.argument.literal.text, true);
+		} else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword) {
+			const argument = node.arguments[0];
+			if (argument !== undefined && ts.isStringLiteralLike(argument)) {
+				add(node, argument.text, false);
+			} else {
+				hole(node, "an import() of a computed specifier");
+			}
 		} else if (
 			ts.isCallExpression(node) &&
-			node.expression.kind === ts.SyntaxKind.ImportKeyword &&
-			node.arguments[0] !== undefined &&
-			ts.isStringLiteralLike(node.arguments[0])
+			ts.isIdentifier(node.expression) &&
+			node.expression.text === "require"
 		) {
-			add(node.arguments[0].text, false);
+			// `createRequire` is how core loads `express`, an optional peer. A
+			// package is not an edge; a core file loaded this way would be one
+			// the scan does not see, so it is refused rather than guessed at.
+			const argument = node.arguments[0];
+			if (argument === undefined || !ts.isStringLiteralLike(argument)) {
+				hole(node, "a require() of a computed specifier");
+			} else if (isOwnPackage(argument.text)) {
+				hole(node, `an import of core by its package name, ${argument.text}`);
+			} else if (coreFile(argument.text) !== undefined) {
+				hole(node, `a require() of core's own ${argument.text}`);
+			}
+		} else if (
+			ts.isImportEqualsDeclaration(node) &&
+			ts.isExternalModuleReference(node.moduleReference)
+		) {
+			const expression = node.moduleReference.expression;
+			hole(
+				node,
+				`an import-equals require of ${ts.isStringLiteralLike(expression) ? expression.text : "a computed specifier"}`,
+			);
 		}
 		ts.forEachChild(node, visit);
 	};
 	visit(source);
-	return edges;
+	return { edges, holes };
 }
 
-const EDGES: readonly ImportEdge[] = productFiles().flatMap(importsOf);
+const SCANS: readonly Scan[] = productFiles().map((file) =>
+	scanSource(fromSrc(file), readFileSync(file, "utf8")),
+);
+
+const EDGES: readonly ImportEdge[] = SCANS.flatMap((scan) => scan.edges);
 
 /** The edges from files under `from` to files under `to`, as `file -> file` lines. */
 function edgesBetween(from: string, to: string, kind: "any" | "value"): string[] {
@@ -147,12 +212,12 @@ function edgesBetween(from: string, to: string, kind: "any" | "value"): string[]
 const nodeOf = (path: string): string =>
 	path.includes("/") ? path.slice(0, path.indexOf("/") + 1) : path;
 
-/** Every set of nodes that import one another's values, each sorted, sorted by first member. */
-function valueCycles(): string[][] {
+/** Every set of `node`s that import one another's values, each sorted, sorted by first member. */
+function valueCycles(node: (path: string) => string): string[][] {
 	const next = new Map<string, Set<string>>();
 	for (const edge of EDGES) {
-		const from = nodeOf(edge.from);
-		const to = nodeOf(edge.to);
+		const from = node(edge.from);
+		const to = node(edge.to);
 		if (edge.typeOnly || from === to) continue;
 		next.set(from, (next.get(from) ?? new Set()).add(to));
 	}
@@ -162,30 +227,30 @@ function valueCycles(): string[][] {
 	const stack: string[] = [];
 	const onStack = new Set<string>();
 	const cycles: string[][] = [];
-	const connect = (node: string): void => {
-		index.set(node, index.size);
-		low.set(node, index.get(node) as number);
-		stack.push(node);
-		onStack.add(node);
-		for (const target of next.get(node) ?? []) {
+	const connect = (current: string): void => {
+		index.set(current, index.size);
+		low.set(current, index.get(current) as number);
+		stack.push(current);
+		onStack.add(current);
+		for (const target of next.get(current) ?? []) {
 			if (!index.has(target)) {
 				connect(target);
-				low.set(node, Math.min(low.get(node) as number, low.get(target) as number));
+				low.set(current, Math.min(low.get(current) as number, low.get(target) as number));
 			} else if (onStack.has(target)) {
-				low.set(node, Math.min(low.get(node) as number, index.get(target) as number));
+				low.set(current, Math.min(low.get(current) as number, index.get(target) as number));
 			}
 		}
-		if (low.get(node) !== index.get(node)) return;
+		if (low.get(current) !== index.get(current)) return;
 		const component: string[] = [];
 		let member: string | undefined;
 		do {
 			member = stack.pop() as string;
 			onStack.delete(member);
 			component.push(member);
-		} while (member !== node);
+		} while (member !== current);
 		if (component.length > 1) cycles.push(component.sort());
 	};
-	for (const node of next.keys()) if (!index.has(node)) connect(node);
+	for (const start of next.keys()) if (!index.has(start)) connect(start);
 	return cycles.sort((a, b) => (a[0] ?? "").localeCompare(b[0] ?? ""));
 }
 
@@ -200,11 +265,66 @@ const STANDING_VALUE_CYCLES: ReadonlyArray<{
 }> = [
 	{
 		members: ["federation-grants/", "user-sessions/"],
-		why: "subject-wide revocation ends grants through federation-grants/, and the grants' wiring rule reads a capability guard from user-sessions/; no file-level cycle crosses them (src/README.md, where a boundary is a judgement call)",
+		why: "subject-wide revocation ends grants through federation-grants/, and the grants' wiring rule reads a capability guard from user-sessions/; no cycle of value imports between their files closes, which the file-level case below holds (src/README.md, where a boundary is a judgement call)",
 	},
 ];
 
 describe("the import scan", () => {
+	it("maps a `#/` specifier — core's own subpath import — to the file it names", () => {
+		const { edges, holes } = scanSource(
+			"adapters/example.mts",
+			[
+				'import { isLoopbackHostname } from "#/net/loopback.mjs";',
+				'import type { Logger } from "#/logging/Logger.mjs";',
+			].join("\n"),
+		);
+		expect(edges).toEqual([
+			{ from: "adapters/example.mts", to: "net/loopback.mts", typeOnly: false },
+			{ from: "adapters/example.mts", to: "logging/Logger.mts", typeOnly: true },
+		]);
+		expect(holes).toEqual([]);
+	});
+
+	it("reports what it cannot resolve instead of passing over it", () => {
+		const { holes } = scanSource(
+			"adapters/example.mts",
+			[
+				'import { createApp } from "@o3co/auth-provider-core";',
+				'export * from "@o3co/auth-provider-core/testing";',
+				"const loaded = await import(specifier);",
+				'const sibling = require("./sibling.mjs");',
+				"const computed = require(specifier);",
+				'import legacy = require("./legacy");',
+			].join("\n"),
+		);
+		expect(holes).toEqual([
+			"adapters/example.mts:1: an import of core by its package name, @o3co/auth-provider-core",
+			"adapters/example.mts:2: an import of core by its package name, @o3co/auth-provider-core/testing",
+			"adapters/example.mts:3: an import() of a computed specifier",
+			"adapters/example.mts:4: a require() of core's own ./sibling.mjs",
+			"adapters/example.mts:5: a require() of a computed specifier",
+			"adapters/example.mts:6: an import-equals require of ./legacy",
+		]);
+	});
+
+	it("passes over what is not core: a package, and the ComponentMap augmentation", () => {
+		const { edges, holes } = scanSource(
+			"jwks/example.mts",
+			[
+				'import { z } from "zod";',
+				'const express = require("express");',
+				'const lazy = await import("express");',
+				'declare module "@o3co/auth-provider-core" { interface ComponentMap { readonly x?: number } }',
+			].join("\n"),
+		);
+		expect(edges).toEqual([]);
+		expect(holes).toEqual([]);
+	});
+
+	it("sees every import in core's product code", () => {
+		expect(SCANS.flatMap((scan) => scan.holes)).toEqual([]);
+	});
+
 	it("reads a type-only edge as type-only and a value edge as a value", () => {
 		// A scan that classifies nothing, or everything the same way, would pass
 		// every rule below vacuously.
@@ -259,7 +379,7 @@ const LEAVES: Readonly<
 	"adapters/": [
 		{
 			edge: "adapters/AdapterFactory.mts -> logging/Logger.mts (type)",
-			why: "`BuilderContext.logger`: the logger a builder reports its connection's errors through",
+			why: "`BuilderContext.logger`, the logger a builder reports its connection's errors through, and `EventLogger`, the one method the lifecycle drain logs a failed cleanup through",
 		},
 		{
 			edge: "adapters/AdapterFactory.mts -> logging/loggableError.mts",
@@ -283,6 +403,18 @@ const LEAVES: Readonly<
 };
 
 describe("core's leaves import nothing else in core but the edges listed", () => {
+	it("checks exactly the leaves src/README.md names", () => {
+		// The rule is the README's; a leaf added there and not here, or kept
+		// here after the README dropped it, would be a rule nobody holds.
+		const readme = readFileSync(join(srcDir, "README.md"), "utf8");
+		const bullet = readme.split("\n").find((line) => / are leaves:/.test(line));
+		expect(bullet, "src/README.md's leaf bullet").toBeDefined();
+		const named = [...(bullet ?? "").split(" are leaves:")[0].matchAll(/`([\w-]+\/)`/g)].map(
+			(match) => match[1],
+		);
+		expect(named.sort()).toEqual(Object.keys(LEAVES).sort());
+	});
+
 	it.each(Object.keys(LEAVES))("%s", (leaf) => {
 		expect(productFiles(join(srcDir, leaf)).length, `${leaf} holds product code`).toBeGreaterThan(
 			0,
@@ -294,12 +426,21 @@ describe("core's leaves import nothing else in core but the edges listed", () =>
 	});
 });
 
+describe("no two of core's files import each other's values", () => {
+	it("finds no value cycle between files anywhere in core", () => {
+		// What src/README.md and the standing directory cycle's reason claim:
+		// even where two directories depend on each other, no chain of value
+		// imports leads from a file back to itself.
+		expect(valueCycles((path) => path)).toEqual([]);
+	});
+});
+
 describe("no two of core's directories import each other's values", () => {
 	it("finds no value cycle between directories but the ones that stand", () => {
 		// `jwks/module.mts` contributed the router in `routes/Jwks.mts`, which
 		// read the path rule and `Cache-Control` back from `jwks/`. Publishing
 		// the key set is one job, so its router lives in `jwks/`.
-		expect(valueCycles()).toEqual(
+		expect(valueCycles(nodeOf)).toEqual(
 			STANDING_VALUE_CYCLES.map((cycle) => [...cycle.members].sort()).sort((a, b) =>
 				(a[0] ?? "").localeCompare(b[0] ?? ""),
 			),
