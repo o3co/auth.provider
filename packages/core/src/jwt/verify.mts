@@ -22,6 +22,7 @@ import {
 	type ProtectedHeaderParameters,
 } from "jose";
 import type { AccessTokenDenylist } from "../access-token-denylist/types.mjs";
+import { auditErrorText } from "../errors/envelope.mjs";
 import { ExpiredKidError, type KeyStore, UnknownKidError } from "../keys/KeyStore.mjs";
 import { isWellFormedKid, MAX_KID_LENGTH } from "../keys/kid.mjs";
 import type { Logger } from "../logging/Logger.mjs";
@@ -492,9 +493,14 @@ export async function verifyJwt(
 				throw err;
 			}
 		} else if (headerTyp !== effectiveExpectedTyp) {
+			// Quoted sanitised and capped: the message is what a caller's log
+			// carries as the projected error's `detail`, and the header is
+			// whatever the caller wrote — CR/LF and ten thousand characters
+			// included. A `typ` is a media type (RFC 7515 §4.1.9), an open
+			// vocabulary, so there is no closed set to map it onto.
 			const err = new JwtVerificationError(
 				"typ",
-				`JWT typ ${headerTyp} does not match expected ${effectiveExpectedTyp}`,
+				`JWT typ ${auditErrorText(headerTyp)} does not match expected ${effectiveExpectedTyp}`,
 			);
 			emitRejection(logger, err, undefined, header);
 			throw err;
@@ -868,8 +874,9 @@ function emitRejection(
 			jti: payload?.jti,
 			sub: payload?.sub,
 			iss: payload?.iss,
-			// The client's header: logged only as the string it should be.
-			typ: typeof header?.typ === "string" ? header.typ : undefined,
+			// The client's header, read before its signature: logged only as
+			// the string it should be, sanitised and capped (`auditErrorText`).
+			typ: typeof header?.typ === "string" ? auditErrorText(header.typ) : undefined,
 		},
 		"jwt_verify_rejected",
 	);
