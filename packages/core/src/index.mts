@@ -477,6 +477,8 @@ export {
 	type LoggableError,
 	loggableError,
 } from "./logging/loggableError.mjs";
+// Mail (the MFA ADR's D5): the port MFA codes and notices leave through
+export type { MailMessage, MailSender } from "./mail/types.mjs";
 // MFA (the MFA ADR): the coordinator slot and its absence policy; the stores,
 // their memory adapters, factories and modules
 export {
