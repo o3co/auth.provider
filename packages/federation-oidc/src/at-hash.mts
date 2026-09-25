@@ -28,17 +28,23 @@ import { decodeProtectedHeader } from "jose";
  * means it, and a mismatch is a response that has been tampered with.
  */
 
-function hashFor(alg: string): string {
+/** The hash `alg` names for `at_hash`; `undefined` for an alg that names none. */
+function hashFor(alg: string): string | undefined {
 	const sized = /^(?:RS|PS|ES|HS)(256|384|512)$/.exec(alg);
 	if (sized) return `sha${sized[1]}`;
 	if (alg === "ES256K") return "sha256";
 	if (alg === "EdDSA" || alg === "Ed25519") return "sha512";
-	throw new Error(`at_hash cannot be verified for a JWS alg of ${JSON.stringify(alg)}`);
+	return undefined;
 }
+
+const unhashedAlg = (alg: string): string =>
+	`at_hash cannot be verified for a JWS alg of ${JSON.stringify(alg)}`;
 
 /** The `at_hash` value for `accessToken` on an id_token signed with `alg`. */
 export function computeAtHash(accessToken: string, alg: string): string {
-	const digest = createHash(hashFor(alg)).update(accessToken).digest();
+	const hash = hashFor(alg);
+	if (hash === undefined) throw new Error(unhashedAlg(alg));
+	const digest = createHash(hash).update(accessToken).digest();
 	return digest.subarray(0, digest.length / 2).toString("base64url");
 }
 
@@ -61,14 +67,10 @@ export function verifyAtHash(
 	if (typeof alg !== "string") {
 		throw new Error(`${label}: id_token has no alg header to verify at_hash with`);
 	}
-	let expected: string;
-	try {
-		expected = computeAtHash(accessToken, alg);
-	} catch (err) {
-		throw new Error(`${label}: ${err instanceof Error ? err.message : String(err)}`, {
-			cause: err,
-		});
-	}
+	// Checked rather than caught: the refusal is this module's own, and says
+	// which alg it was in its own words.
+	if (hashFor(alg) === undefined) throw new Error(`${label}: ${unhashedAlg(alg)}`);
+	const expected = computeAtHash(accessToken, alg);
 	const presented = Buffer.from(atHash);
 	const wanted = Buffer.from(expected);
 	if (presented.length !== wanted.length || !timingSafeEqual(presented, wanted)) {

@@ -202,9 +202,21 @@ the line still says which command failed. The connections
 `makeIoredisClients` opens for refresh rotation log
 `redis_duplicate_connection_error` through the projection, and a stored
 authorization code, user session or RP record that does not parse is logged as
-the parser error's name and position (`RedisCodeRepository: corrupted data for
-code`, `user_session_corrupt_envelope`, `session_rp_registry_corrupt_envelope`),
-never the stored text the parser's message quotes.
+the parser error's name and position, as `err`, never the stored text the
+parser's message quotes: `authorization_code_corrupt_record` (error),
+`user_session_corrupt_envelope` and `session_rp_registry_corrupt_envelope`
+(warn), each with `reason` `json_parse` — or, for a record that parses but is
+not one, `shape_invalid` (`identity_fields_missing` for a code without its
+client and redirect URI). The stores write them on the logger their module
+hands them (the `logger` slot) and on `consoleLogger` when there is none, so
+a corrupt record is never unreported.
+
+A `MULTI`/`EXEC` whose queued command Redis refused (`WRONGTYPE`, `OOM`,
+`READONLY` …) is thrown as an error that names the operation in fixed words —
+`<client>.<method>: a queued command failed inside MULTI/EXEC` — with the
+reply error as its `cause`. Redis's text stays off the message, since a
+refusal can quote the command's arguments; the projection of the cause is
+where an operator reads it.
 
 The federation-grant clients are built separately,
 `makeIoredisFederationGrantStoreClient(io)` and
@@ -256,12 +268,20 @@ Each adapter ships in up to two forms:
   config by a name other than `NODE_ENV` (the standalone's `CONFIG_ENV`): the
   plaintext guard reads that name in addition to `NODE_ENV`, and
   `deployment.mode` off the config — `"multi"` refuses plaintext in every
-  environment (#473).
+  environment (#473). Where plaintext goes ahead the guard logs one line on
+  the module's optional `logger` slot (`consoleLogger` when it is empty):
+  `federation_store_plaintext` (warn, `store`, `mode`) where it is allowed,
+  `federation_store_plaintext_override` (error, with the `environment` or
+  `deploymentMode` that would have refused it and `override`) where only
+  `FEDERATION_TOKENS_ALLOW_INSECURE=1` let it through.
 - An **`AdapterBuilder`** (`redisChallengeStoreBuilder`,
   `redisCodeRepositoryBuilder`, …) for a composition root that selects a
   backend at runtime through core's `AdapterFactory`:
   `factory.register("redis", redisXxxBuilder)`, then
-  `factory.create({ type: "redis", client, ... })`.
+  `factory.create({ type: "redis", client, ... })`. A builder writes on the
+  logger of the factory's context. `redisCodeRepositoryBuilder` is
+  deprecated and says so on every call: `adapter_builder_deprecated` (warn,
+  `builder`, `replacement`).
 
 | Module | Requires | Provides | Config key | Builder |
 | --- | --- | --- | --- | --- |
@@ -278,7 +298,10 @@ Each adapter ships in up to two forms:
 | `redisDeviceCodeStoreModule` | `deviceCodeStoreClient` | `deviceCodeStore` | `redisDeviceCodeStore` | `redisDeviceCodeStoreBuilder` |
 | `redisConsentStoreModule` | `consentStoreClient`, `pendingConsentStoreClient` | `consentStore`, `pendingConsentStore` | `redisConsentStore` | `redisConsentStoreBuilder`, `redisPendingConsentStoreBuilder` |
 
-Every module also requires `config`. The `*Client` column is the slot
+Every module also requires `config`. Every module whose stores log also reads
+the optional `logger` slot: the two sealing-store modules, for the plaintext
+guard's line; `redisSessionStoresModule` and `redisCodeRepositoryModule`, for a
+stored record they cannot read. The `*Client` column is the slot
 `makeIoredisClients` fills, except the two federation-grant clients (see
 above); a composition that wires a module without providing its client slot
 fails stage-1 boot with `missing-required-component` — named at boot, not at

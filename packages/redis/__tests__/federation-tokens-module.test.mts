@@ -91,7 +91,10 @@ describe("#473 — the module hands the guard the selected environment and deplo
 		expect((provideFrom(redisFederationTokenStoreModuleFor({})) as { kind: string }).kind).toBe(
 			"redis",
 		);
-		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("allow-plaintext"));
+		expect(warnSpy).toHaveBeenCalledWith(
+			{ store: "federation-tokens", mode: "allow-plaintext" },
+			"federation_store_plaintext",
+		);
 	});
 });
 

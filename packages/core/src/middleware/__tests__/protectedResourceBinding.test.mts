@@ -332,6 +332,37 @@ describe("protectedResourceBindingMw — compound cnf", () => {
 		expect(next).not.toHaveBeenCalled();
 		expect(res.statusCode).toBe(401);
 	});
+
+	it("logs the rejection once, naming what was rejected as `rejection` — not `reason`", async () => {
+		// `reason` on the verdict line beside it is the mechanism's own name
+		// for a refused proof; this line's field says which sender-constraint
+		// rule refused the request, and must not share that name.
+		const token = await mintToken({ sub: "u1", cnf: { jkt: JKT, "x5t#S256": X5T } });
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child() {
+				return this;
+			},
+		};
+		await run(
+			protectedResourceBindingMw({
+				mechanisms: [succeedingMechanism("dpop", { jkt: JKT })],
+				logger: logger as never,
+			}),
+			`DPoP ${token}`,
+		);
+		expect(logger.warn.mock.calls).toEqual([
+			[
+				{ rejection: "compound_cnf", scheme: "dpop", site: "protected_resource_binding" },
+				"sender_constraint_rejected",
+			],
+		]);
+	});
 });
 
 describe("protectedResourceBindingMw — a server-side outage", () => {
@@ -425,6 +456,65 @@ describe("protectedResourceBindingMw — a server-side outage", () => {
 		});
 		expect(line.err).not.toBeInstanceOf(Error);
 		expect(JSON.stringify(logger.error.mock.calls)).not.toContain("refused-command-marker");
+	});
+
+	it("logs a failed proof once at warn: its code, the refusal's reason, and its projection with the cause inside", async () => {
+		const token = await mintToken({ sub: "u1", cnf: { "x5t#S256": X5T } });
+		let parseError: unknown;
+		try {
+			JSON.parse('{"x5c":"refused-material-marker');
+		} catch (err) {
+			parseError = err;
+		}
+		const refusal = Object.assign(new Error("header parse failure", { cause: parseError }), {
+			code: "invalid_certificate",
+			reason: "malformed_header",
+		});
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child() {
+				return this;
+			},
+		};
+		const { res } = await run(
+			protectedResourceBindingMw({
+				mechanisms: [throwingMechanism("mtls", refusal)],
+				logger: logger as never,
+			}),
+			`Bearer ${token}`,
+		);
+		expect(res.statusCode).toBe(401);
+		expect(logger.error).not.toHaveBeenCalled();
+		// Beside it, the sender-constraint refusal's own line, whose field is
+		// `rejection`: `reason` on this line is the mechanism's.
+		const proofLines = logger.warn.mock.calls.filter(
+			([, event]) => event === "protected_resource_binding_proof_invalid",
+		);
+		expect(proofLines).toHaveLength(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{ rejection: "proof_invalid", scheme: "bearer", site: "protected_resource_binding" },
+			"sender_constraint_rejected",
+		);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{
+				mechanism: "mtls",
+				code: "invalid_certificate",
+				reason: "malformed_header",
+				err: expect.objectContaining({
+					name: "Error",
+					detail: "header parse failure",
+					reason: "malformed_header",
+					cause: expect.objectContaining({ name: "SyntaxError" }),
+				}),
+			},
+			"protected_resource_binding_proof_invalid",
+		);
+		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("refused-material-marker");
 	});
 
 	it("reads a bare code as a failed proof: only the mechanism can say it was an outage", async () => {

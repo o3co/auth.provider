@@ -27,6 +27,7 @@ import express from "express";
 import helmet from "helmet";
 import { buildModules } from "./buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "./configPath.mjs";
+import { listen } from "./listen.mjs";
 import { createAppLogger } from "./logger.mjs";
 import { createMetrics } from "./metrics.mjs";
 import { cleanupAllowanceFor, installGracefulShutdown } from "./shutdown.mjs";
@@ -103,8 +104,10 @@ await (async (): Promise<void> => {
 	// `environment` is the name the config above was selected by (#473): the
 	// Redis federation-token store's plaintext guard reads it in addition to
 	// NODE_ENV, so `CONFIG_ENV=production` is production to the guard too.
+	// `logger` is where the composition's own notices go (a deprecated config
+	// key), the same logger every module gets through the slot below.
 	const handle = await createApp({
-		modules: buildModules(config, { environment: env }),
+		modules: buildModules(config, { environment: env, logger }),
 		bootstrapComponents: {
 			config,
 			pathResolver: import.meta.resolve,
@@ -151,9 +154,9 @@ await (async (): Promise<void> => {
 	// to handlers registered after the route that threw it. See
 	// `terminalError.mts` for what it catches and why.
 	app.use(createTerminalErrorHandler(logger));
-	const server = app.listen(config.http.port, (): void => {
-		logger.info(`Server is running on http://localhost:${config.http.port}`);
-	});
+	// Resolves once the socket is bound (`server_listening`); a port that
+	// cannot be bound rejects, and boot fails with that error (`listen.mts`).
+	const server = await listen(app, config.http.port, logger);
 
 	// Step 6: Graceful shutdown — handle.dispose() runs reverse-topological
 	// per-component cleanup (per A2-β §8.1) plus D-5 LifecycleRegistrar drain

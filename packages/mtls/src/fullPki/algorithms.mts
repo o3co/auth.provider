@@ -36,6 +36,7 @@
  */
 
 import type { X509Certificate } from "node:crypto";
+import { subjectLine } from "./subject.mjs";
 
 /**
  * The algorithms this module will name. Deliberately a closed set: an
@@ -132,7 +133,7 @@ export const checkAlgorithmPolicy = (
 		return {
 			ok: false,
 			step: "signature algorithm not permitted",
-			detail: `${certificate.subject}: ${algorithm.detail}`,
+			detail: `${subjectLine(certificate)}: ${algorithm.detail}`,
 		};
 	}
 
@@ -141,7 +142,7 @@ export const checkAlgorithmPolicy = (
 		return {
 			ok: false,
 			step: "rsa key too small",
-			detail: `${certificate.subject}: ${bits}-bit RSA key is below the configured minimum of ${policy.minRsaKeyBits}`,
+			detail: `${subjectLine(certificate)}: ${bits}-bit RSA key is below the configured minimum of ${policy.minRsaKeyBits}`,
 		};
 	}
 

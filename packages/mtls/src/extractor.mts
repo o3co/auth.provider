@@ -40,6 +40,7 @@ import { readFileSync } from "node:fs";
 import {
 	createTrustedProxyMatcher,
 	type Logger,
+	loggableError,
 	type TokenBindingMechanism,
 } from "@o3co/auth-provider-core";
 import type { Request } from "express";
@@ -304,7 +305,8 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 						return new X509Certificate(pem);
 					} catch (err) {
 						throw new Error(
-							`createMtlsMechanism: trustedCas[${index}] is not a parseable X.509 certificate: ${(err as Error).message}`,
+							`createMtlsMechanism: trustedCas[${index}] is not a parseable X.509 certificate`,
+							{ cause: err },
 						);
 					}
 				})
@@ -382,8 +384,11 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 				} catch (err) {
 					throw new MtlsError(
 						"malformed_header",
-						`${dialect} header parse failure: ${(err as Error).message}`,
+						`${dialect} header parse failure`,
 						{ dialect },
+						{
+							cause: err,
+						},
 					);
 				}
 				certPem = parsed.certPem;
@@ -429,7 +434,7 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 				try {
 					leafDer = pemToDer(certPem);
 				} catch (err) {
-					throw new MtlsError("cert_decode_failed", `PEM decode failed: ${(err as Error).message}`);
+					throw new MtlsError("cert_decode_failed", "PEM decode failed", undefined, { cause: err });
 				}
 			}
 			// biome-ignore lint/style/noNonNullAssertion: leafDer is set in both branches above
@@ -437,23 +442,23 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 
 			// Parse to X509Certificate for validity + chain steps. `new X509Certificate(der)`
 			// throws DOMException / Error on malformed DER — wrap to MtlsError so the
-			// audit pipeline gets the structured reason.
+			// audit pipeline gets the structured reason. Every parser's refusal here
+			// is wrapped the same way: fixed text, the parser's error as `cause`.
 			let x509: X509Certificate;
 			let chainCerts: readonly X509Certificate[] = [];
 			try {
 				x509 = new X509Certificate(der);
 			} catch (err) {
-				throw new MtlsError("cert_decode_failed", `DER parse failed: ${(err as Error).message}`);
+				throw new MtlsError("cert_decode_failed", "DER parse failed", undefined, { cause: err });
 			}
 
 			if (tlsChainCerts.length > 0) {
 				try {
 					chainCerts = tlsChainCerts.map((der) => new X509Certificate(der));
 				} catch (err) {
-					throw new MtlsError(
-						"cert_decode_failed",
-						`TLS peer chain DER parse failed: ${(err as Error).message}`,
-					);
+					throw new MtlsError("cert_decode_failed", "TLS peer chain DER parse failed", undefined, {
+						cause: err,
+					});
 				}
 			}
 
@@ -464,10 +469,9 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 				try {
 					chainCerts = blocks.map((b) => new X509Certificate(b));
 				} catch (err) {
-					throw new MtlsError(
-						"cert_decode_failed",
-						`Chain= entry DER parse failed: ${(err as Error).message}`,
-					);
+					throw new MtlsError("cert_decode_failed", "Chain= entry DER parse failed", undefined, {
+						cause: err,
+					});
 				}
 			}
 
@@ -491,15 +495,35 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 			// --- Step 5: chain validation (both PKI modes) ---
 			if (fullPkiValidator !== null) {
 				const result = await fullPkiValidator.validate(x509, chainCerts, now);
+				if (!result.ok && result.outage) {
+					// The server's outage, not a verdict: a revocation source did not
+					// answer usefully. Refused `unavailable` — the dispatcher answers
+					// 503 and writes the one line, so nothing is logged here.
+					throw new MtlsError(
+						"revocation_unavailable",
+						"client certificate revocation status could not be determined",
+						{ step: result.step },
+						// The validator's account, one member per source that could not
+						// be used (an MtlsRevocationUnavailableError).
+						result.cause !== undefined ? { cause: result.cause } : undefined,
+					);
+				}
 				if (!result.ok) {
+					// `err` is the projection of a library error behind the refusal, when
+					// one threw — never its text, which `detail` does not carry either.
 					logger?.warn(
-						{ step: result.step, detail: result.detail },
+						{
+							step: result.step,
+							detail: result.detail,
+							...(result.cause !== undefined ? { err: loggableError(result.cause) } : {}),
+						},
 						"mtls_full_pki_validation_failed",
 					);
 					throw new MtlsError(
 						"chain_validation_failed",
 						`client certificate failed RFC 5280 path validation: ${result.step}`,
 						{ step: result.step, detail: result.detail },
+						result.cause !== undefined ? { cause: result.cause } : undefined,
 					);
 				}
 			} else if (mode === "pki") {
@@ -542,7 +566,8 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
  *
  * Sync I/O is appropriate here because it runs once at module construction
  * (boot time), before any request is served. A file-read failure throws a
- * plain Error with the entry index for operator debugging.
+ * plain Error with the entry index for operator debugging, the read's error
+ * (its `code`, `ENOENT` / `EACCES`) as `cause`.
  *
  * Per Wave 2 Phase 3 spec §7.1.
  */
@@ -553,7 +578,8 @@ const resolveTrustedCaEntry = (entry: string, index: number): string => {
 			return readFileSync(path, "utf8");
 		} catch (err) {
 			throw new Error(
-				`createMtlsMechanism: trustedCas[${index}] = "${entry}": failed to read file at ${path}: ${(err as Error).message}`,
+				`createMtlsMechanism: trustedCas[${index}] = "${entry}": failed to read file at ${path}`,
+				{ cause: err },
 			);
 		}
 	}

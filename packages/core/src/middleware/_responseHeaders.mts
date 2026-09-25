@@ -84,6 +84,27 @@ export const unavailableLogFields = (err: unknown): Record<string, unknown> => {
 	};
 };
 
+/**
+ * What a verdict's log line carries of the refusal — the line a dispatcher
+ * writes when a mechanism refused the presented material
+ * (`token_binding_proof_invalid`, `protected_resource_binding_proof_invalid`):
+ * the refusal's `reason`, when it is a code, beside the refusal's projection
+ * as `err`, whose own `cause` is the error that made the mechanism refuse (a
+ * parser's, a library's) — never the refusal itself. The whole refusal is
+ * projected, not only its cause: a mechanism may give several refusals one
+ * `reason` and tell them apart by its own fixed message, and a thrown value
+ * with no `reason` at all (a mechanism's bug) is still named by its projection.
+ * `reason` follows the projection's rule for a code — lowercase words joined
+ * by `_` or `-` — so a mechanism cannot put free text beside it.
+ */
+export const verdictLogFields = (err: unknown): Record<string, unknown> => {
+	const projected = loggableError(err);
+	return {
+		...(projected.reason !== undefined ? { reason: projected.reason } : {}),
+		err: projected,
+	};
+};
+
 export const unavailableOf = (err: unknown): string | undefined => {
 	if (oauthErrorCodeOf(err) === undefined) return undefined;
 	const description = (err as { unavailable?: unknown }).unavailable;

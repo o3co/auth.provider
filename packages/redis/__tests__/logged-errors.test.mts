@@ -132,8 +132,12 @@ describe("RedisCodeRepository: a stored record it cannot parse", () => {
 				{
 					level: "error",
 					args: [
-						{ err: { name: "SyntaxError", stack: FRAMES }, codeHash: expect.any(String) },
-						"RedisCodeRepository: corrupted data for code",
+						{
+							codeHash: expect.any(String),
+							reason: "json_parse",
+							err: { name: "SyntaxError", stack: FRAMES },
+						},
+						"authorization_code_corrupt_record",
 					],
 				},
 			]);
@@ -168,8 +172,8 @@ describe("a stored session envelope it cannot parse", () => {
 			{
 				level: "warn",
 				args: [
-					{ sid: "sid-1", reason: "json_parse", cause: { name: "SyntaxError", stack: FRAMES } },
-					"user_session_corrupt_envelope: JSON.parse failed",
+					{ sid: "sid-1", reason: "json_parse", err: { name: "SyntaxError", stack: FRAMES } },
+					"user_session_corrupt_envelope",
 				],
 			},
 		]);
@@ -199,8 +203,8 @@ describe("a stored session envelope it cannot parse", () => {
 			{
 				level: "warn",
 				args: [
-					{ sid: "sid-1", reason: "json_parse", cause: { name: "SyntaxError", stack: FRAMES } },
-					"session_rp_registry_corrupt_envelope: JSON.parse failed",
+					{ sid: "sid-1", reason: "json_parse", err: { name: "SyntaxError", stack: FRAMES } },
+					"session_rp_registry_corrupt_envelope",
 				],
 			},
 		]);

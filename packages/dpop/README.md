@@ -135,6 +135,8 @@ When both `dpopModule` and `mtlsModule` are installed, the `oauth.tokenBinding.d
 
 See [ADR 2026-05-20-token-binding-first-class-abstraction.md](../core/docs/adr/2026-05-20-token-binding-first-class-abstraction.md) for the design rationale and [packages/mtls/README.md](../mtls/README.md#cross-mechanism-dispatch-dpop--mtls) for the symmetric view from the mTLS side.
 
+A refused proof is a `DPoPError` with a `reason` (`DPoPReasonCode`) and this package's own fixed message; core's dispatcher logs it once, `token_binding_proof_invalid` / `protected_resource_binding_proof_invalid`, with the refusal's projection. The message never quotes what the client wrote — a `typ` that is not `dpop+jwt` is "typ is not dpop+jwt", an `alg` outside the allowlist "alg is not an accepted DPoP algorithm" — and `dpop_alg_not_allowed` (warn) names the refused `alg` only when it is a registered JWS algorithm, `unregistered` otherwise.
+
 ## Discovery metadata
 
 When `oauth.dpop.enabled = true`, this module contributes `dpop_signing_alg_values_supported` (RFC 9449 §5.1) to `/.well-known/openid-configuration`, carrying the configured `alg-whitelist` verbatim. It is the same read the proof verifier is constructed from, so an algorithm a client picks off discovery is one this deployment will accept.
@@ -181,7 +183,8 @@ So of two requests carrying one proof, exactly one is accepted.
 - **How long.** `replay-store-ttl-seconds` from the moment the proof is first
   accepted, which must be at least `2 × iat-window-seconds + 1` to outlive the
   proof's acceptance window; below that the mechanism logs
-  `replay_ttl_below_iat_window` (derivation: `replayTtlSeconds` in
+  `dpop_replay_ttl_below_window` (warn, `iatWindowSeconds`,
+  `replayTtlSeconds`, `requiredTtlSeconds`; derivation: `replayTtlSeconds` in
   [`src/verifier.mts`](src/verifier.mts)). A value that is not a positive
   finite number is refused when the mechanism is built.
 - **When the store fails.** A seen-set that cannot be reached refuses the

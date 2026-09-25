@@ -67,7 +67,7 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 		// 1st arg, the human-readable message is the 2nd arg.
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.objectContaining({ sid: "sid-bad", reason: "json_parse" }),
-			expect.any(String),
+			"user_session_corrupt_envelope",
 		);
 	});
 
@@ -122,17 +122,24 @@ describe("TS-3: RedisUserSessionStore.get — corrupt envelope validation", () =
 		// 1st arg, the human-readable message is the 2nd arg.
 		expect(logger.warn).toHaveBeenCalledWith(
 			expect.objectContaining({ sid: "sid-corrupt", reason: "shape_invalid" }),
-			expect.any(String),
+			"user_session_corrupt_envelope",
 		);
 	});
 
-	it("returns null without logger when no logger is injected (optional-chain semantics)", async () => {
-		const client = makeMockClient();
-		const store = createRedisUserSessionStore({ client, keyPrefix });
-		client.seed(`${keyPrefix}sid-corrupt`, "{not-valid-json}");
-		const result = await store.get("sid-corrupt");
-		expect(result).toBeNull();
-		// No assertion on logger — simply not crashing without one is the
-		// success criterion.
+	it("returns null and writes through consoleLogger when no logger is injected", async () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const client = makeMockClient();
+			const store = createRedisUserSessionStore({ client, keyPrefix });
+			client.seed(`${keyPrefix}sid-corrupt`, "{not-valid-json}");
+			const result = await store.get("sid-corrupt");
+			expect(result).toBeNull();
+			expect(warn).toHaveBeenCalledWith(
+				expect.objectContaining({ sid: "sid-corrupt", reason: "json_parse" }),
+				"user_session_corrupt_envelope",
+			);
+		} finally {
+			warn.mockRestore();
+		}
 	});
 });

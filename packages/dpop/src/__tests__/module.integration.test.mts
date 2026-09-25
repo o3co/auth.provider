@@ -1015,12 +1015,8 @@ describe("dpopModule — replay records under deployment.mode (replica safety)",
 			});
 
 			expect(consoleWarn).toHaveBeenCalledWith(
-				expect.objectContaining({
-					reason: "replay_ttl_below_iat_window",
-					replayTtlSeconds: 120,
-					requiredTtlSeconds: 121,
-				}),
-				expect.any(String),
+				{ iatWindowSeconds: 60, replayTtlSeconds: 120, requiredTtlSeconds: 121 },
+				"dpop_replay_ttl_below_window",
 			);
 
 			await handle.dispose();

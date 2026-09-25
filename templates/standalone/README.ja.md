@@ -13,7 +13,7 @@ auth.provider のデプロイ可能なサーバーテンプレート。これは
 - どのモジュールをどの順序で合成し、各ストアスロットをどのアダプターで埋めるか — [`src/buildModules.mts`](src/buildModules.mts)（[モジュール合成順序](#モジュール合成順序) を参照）
 - この scaffold だけが持つモジュール — 署名鍵ストア、クライアントリポジトリとユーザーリポジトリ、監査 sink、共有される唯一の Redis 接続、in-memory のユーザーセッションストア・コードリポジトリ・フェデレーショントークンストア、そしてフェデレーションの config bridge — [`src/modules.mts`](src/modules.mts)。これらがパッケージではなく scaffold 側にあるのは、どれもこのテンプレートの設定セクションから自分のコンポーネントを組み立てるためである。別のソースを使いたいデプロイは、同じ形のモジュールを自前で配線する
 - 設定をどこから読み、そのレイヤーをどう重ねるか — [`src/configPath.mts`](src/configPath.mts) と [`config/`](config/)
-- ホストプロセス: Express アプリ、そのセキュリティヘッダー、health / readiness / metrics の各ルート、起動処理、終端のエラーハンドラー — [`src/app.mts`](src/app.mts)。このコードがログに出すエラー — 処理されなかったリクエストのエラー、共有 Redis 接続の `error` イベント、失敗したシャットダウン — はすべて core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影としてログに出し、エラーそのものは出さない。エラーは上流や Redis が言ったことを運びうるためである（サーバーが接続を拒否したとき、接続のエラーは `AUTH` のハンドシェイクをパスワードごと運ぶ）
+- ホストプロセス: Express アプリ、そのセキュリティヘッダー、health / readiness / metrics の各ルート、起動処理、終端のエラーハンドラー — [`src/app.mts`](src/app.mts)。リスナーはソケットが bind されたときに `server_listening`（info、`port`）を 1 行ログに出し、bind できなければその bind のエラーで起動を失敗させ、その後のサーバーのエラーは `server_error`（error）としてログに出す — [`src/listen.mts`](src/listen.mts)。このコードがログに出すエラー — 処理されなかったリクエストのエラー、共有 Redis 接続の `error` イベント、失敗したシャットダウン — はすべて core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影としてログに出し、エラーそのものは出さない。エラーは上流や Redis が言ったことを運びうるためである（サーバーが接続を拒否したとき、接続のエラーは `AUTH` のハンドシェイクをパスワードごと運ぶ）
 - 具体的な logger と監査ストリーム（pino） — [`src/logger.mts`](src/logger.mts) — およびメトリクス（[`src/metrics.mts`](src/metrics.mts)）
 - プロセスのライフサイクル: drain の deadline 付きのシグナル処理 — [`src/shutdown.mts`](src/shutdown.mts)
 - パッケージング: `Dockerfile`、compose ファイル群、`Makefile`
@@ -104,7 +104,7 @@ redisRateLimiter {
 
 - `express-session` のストア（`sessionStoreModule`）は独自の接続である: `SESSION_STORAGE_TYPE=redis` とし、`SESSION_STORAGE_REDIS_URL`（`session.storage.redis.url`）を共有インスタンスに向ける。
 - ユーザーセッションストアは `userSessionStores.adapter = "redis"`（`USER_SESSION_STORES_ADAPTER`）で切り替わり、共有の ioredis 接続 — `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` で設定するもの — の上に `redisSessionStoresModule` を配線する。
-- 認可コードリポジトリは `oauth.code.adapter`（`OAUTH_CODE_ADAPTER`）で切り替わる。テンプレートは同じ接続上の `"redis"` を同梱している。`oauth.code.adapter` が優先される。非推奨の `repositories.code.type`（`CLIENT_CODE_TYPE`）は、`oauth.code.adapter` が未設定のときにだけ、起動時の非推奨警告付きで読まれる — 同梱の `config/application.conf` がそれを未設定のままにすることはない。`CLIENT_CODE_ENDPOINT_URI`（`repositories.code.redis.endpointUri`）は `config/application.conf` でバインドされているが、それを読むものは何も無い: Redis のコードリポジトリは共有接続の上で動くため、すべてのアダプターで Redis URL は 1 つである。
+- 認可コードリポジトリは `oauth.code.adapter`（`OAUTH_CODE_ADAPTER`）で切り替わる。テンプレートは同じ接続上の `"redis"` を同梱している。`oauth.code.adapter` が優先される。非推奨の `repositories.code.type`（`CLIENT_CODE_TYPE`）は、`oauth.code.adapter` が未設定のときにだけ、起動時の `config_key_deprecated` 警告付きで読まれる — 同梱の `config/application.conf` がそれを未設定のままにすることはない。`CLIENT_CODE_ENDPOINT_URI`（`repositories.code.redis.endpointUri`）は `config/application.conf` でバインドされているが、それを読むものは何も無い: Redis のコードリポジトリは共有接続の上で動くため、すべてのアダプターで Redis URL は 1 つである。
 - replay seen-set — `private_key_jwt` クライアント認証（#484）の背後にある、`jti` の一回限り使用の記録 — は `replaySeenSet.adapter`（`REPLAY_SEEN_SET_ADAPTER`）で切り替わる。テンプレートは共有接続上の `"redis"` を同梱しており、`memory` は `DEPLOYMENT_MODE=multi` のもとでは拒否される。捕獲されたクライアントアサーションが、レプリカごとに 1 回ずつリプレイできてしまうためである。
 - ファーストパーティでないクライアントのための同意ステップ（#527）は `consentStore.adapter`（`CONSENT_STORE_ADAPTER`）で切り替わる。デフォルトはオフ（`none`）である。`memory` は `DEPLOYMENT_MODE=multi` のもとでは拒否される。あるレプリカで与えた同意が他のすべてのレプリカで再度求められ、同意ページが保留したリクエストを、回答を受け取ったレプリカが知らないという事態になるためである。`redis`（#561）は両方を共有接続上に保持する。[同意ストア](#同意ストア) を参照。
 - フェデレーショントークンストアのデフォルトは memory である。`FEDERATION_TOKEN_STORE_TYPE=redis`（`federationTokenStore.type = "redis"`）を設定し、`REDIS_FEDERATION_TOKEN_STORE_ENCRYPTION_KEY` — 32 バイト、base64 エンコード（`openssl rand -base64 32`） — を与えること。ストアは保持する上流のリフレッシュトークンを暗号化する。`REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` で設定した ioredis ソケットを共有する。[フェデレーショントークンストア](#フェデレーショントークンストア) を参照。
@@ -250,7 +250,7 @@ openssl pkey -in jwt-private.pem -pubout -out jwt-public.pem
 |---|---|---|
 | `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` | `3600` | リクエストが有効期間を指定しないときに全グラントが発行するアクセストークンの有効期間（秒）。正の整数、上限は 1 年（`31536000`）。 |
 | `OAUTH_ACCESS_TOKEN_MAX_EXPIRES_IN` | デフォルトと同じ | token exchange リクエストの `expires_in` パラメータで得られる上限。超えるリクエストはこの値に切り詰められる。未設定ならデフォルトと同じで、これを設定しない限りどのトークンも延長されない。デフォルトがこれを超えると、両キーを名指しして起動に失敗する。オフラインで検証するリソースサーバーに対し、交換で発行されたトークンが失効後も通用し得る期間の上限でもある。 |
-| `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | — | `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` の**非推奨（deprecated）**エイリアス（config キーでは `oauth.accessToken.expiresIn` が `oauth.accessToken.defaultExpiresIn` のエイリアス）。新しい変数が未設定の間だけ読まれる。値は新しい変数へ移すこと。 |
+| `OAUTH_ACCESS_TOKEN_EXPIRES_IN` | — | `OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN` の**非推奨（deprecated）**エイリアス（config キーでは `oauth.accessToken.expiresIn` が `oauth.accessToken.defaultExpiresIn` のエイリアス）。新しい変数が未設定の間だけ読まれる。これがまだデフォルトを決めている間は、起動時に `config_key_deprecated`（warn）がログに出る。値は新しい変数へ移すこと。 |
 | `OAUTH_REFRESH_TOKEN_EXPIRES_IN` | `86400` | リフレッシュトークンの有効期間（秒）。正の整数、上限は 1 年（`31536000`）。 |
 
 これらを空文字で export すると、フォールバックではなく起動失敗になる: HOCON は `FOO=` を `""` に解決し、それが `0` に coerce され、有効期間 0 は発行時点で既に期限切れのトークンを発行するため。
@@ -395,7 +395,7 @@ federations {
 
 | 変数 | デフォルト | 説明 |
 |---|---|---|
-| `CLIENT_CODE_TYPE` | `redis` | `OAUTH_CODE_ADAPTER` の非推奨エイリアス（`repositories.code.type`）。`oauth.code.adapter` が未設定のときにだけ、起動時の警告付きで読まれる — 同梱の config はそれを設定している |
+| `CLIENT_CODE_TYPE` | `redis` | `OAUTH_CODE_ADAPTER` の非推奨エイリアス（`repositories.code.type`）。`oauth.code.adapter` が未設定のときにだけ、起動時の `config_key_deprecated` 警告付きで読まれる — 同梱の config はそれを設定している |
 | `CLIENT_CODE_ENDPOINT_URI` | — | レガシー。`repositories.code.redis.endpointUri` にバインドされているが読まれない — コードは共有の `REFRESH_TOKEN_FAMILY_STORE_REDIS_URL` 接続を使う |
 | `CLIENT_CODE_PASSWORD` | — | コードストア用 Redis パスワード |
 | `CLIENT_CODE_DEFAULT_EXPIRES_IN` | `600` | 認可コードのデフォルト有効期間（秒） |
@@ -581,7 +581,7 @@ production ファイルは `environment:` ブロックで `SESSION_SECURE=true` 
 
 イメージは `pnpm install --frozen-lockfile` でインストールするため、コミット済みの `pnpm-lock.yaml` がビルドの必須入力である — `create-auth-provider` が scaffold 時に生成する。手元に無い場合は一度 `pnpm install` を実行して結果をコミットすること。これにより、同じソースからのリビルドは同じ依存ツリーを生む。
 
-本番イメージは `ENV HTTP_PORT=3000` を設定し、それを `EXPOSE` と、`/_healthcheck` に対する Docker ネイティブの healthcheck の両方に使う。HOCON 設定も `http.port` に `${?HTTP_PORT}` を読むため、`app.listen()` と healthcheck がずれることはない。別のポートで動かすには:
+本番イメージは `ENV HTTP_PORT=3000` を設定し、それを `EXPOSE` と、`/_healthcheck` に対する Docker ネイティブの healthcheck の両方に使う。HOCON 設定も `http.port` に `${?HTTP_PORT}` を読むため、リスナーと healthcheck がずれることはない。別のポートで動かすには:
 
 ```bash
 docker run -e HTTP_PORT=8080 -p 8080:8080 my-auth-provider
@@ -657,7 +657,7 @@ probe は接続を開いた builder が登録するため、リストはこの�
 2. **新規接続は即座に停止**し、idle な keep-alive ソケットは解放される — これらは背後にリクエストの無いままサーバーを開いたままにするため、解放しなければ、閑散としたサーバーが deadline 全体を無駄に待つことになる。
 3. **in-flight リクエストには `drainTimeoutMs`**（デフォルト **10 秒**）が与えられ、その間に完了する。
 4. **deadline を過ぎると残りの接続は切断され、プロセスは非ゼロで終了する。** 常に `0` しか見ない orchestrator には、正常な drain と時間切れになった drain を区別できない。
-5. **`cleanup` は drain の後、終了の前に実行される** — `handle.dispose()`、すなわち逆トポロジカル順のコンポーネント cleanup と Redis／タイマーの drain である。そこでの失敗はこのサービス自身の logger（他のすべての行と同じ NDJSON）でログに出力され、終了コードにも反映される。throw した dispose でもプロセスは終了し、プロセスが固まることはない。その行が運ぶのは失敗の core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影であり、エラーそのものではない: `dispose()` はすべての cleanup 自身のエラーをまとめた AggregateError で reject し、その行はそれぞれをコードとともに名前で示し（`aggregateErrors`、先頭 5 つ）、それが持つものは何も出さない — その中には失敗したストアへの書き込みが、書き込もうとしていた内容ごと含まれうる。
+5. **`cleanup` は drain の後、終了の前に実行される** — `handle.dispose()`、すなわち逆トポロジカル順のコンポーネント cleanup と Redis／タイマーの drain である。そこでの失敗はこのサービス自身の logger（他のすべての行と同じ NDJSON）で `shutdown_cleanup_failed`（または `shutdown_cleanup_timed_out`）としてログに出力され、終了コードにも反映される。各段階はそれぞれ 1 つのイベントである — `shutdown_draining`、`shutdown_drain_deadline_exceeded`、`shutdown_server_close_failed`、`shutdown_complete`。throw した dispose でもプロセスは終了し、プロセスが固まることはない。その行が運ぶのは失敗の core の [`loggableError`](../../packages/core/README.ja.md#logger) による射影であり、エラーそのものではない: `dispose()` はすべての cleanup 自身のエラーをまとめた AggregateError で reject し、その行はそれぞれをコードとともに名前で示し（`aggregateErrors`、先頭 5 つ）、それが持つものは何も出さない — その中には失敗したストアへの書き込みが、書き込もうとしていた内容ごと含まれうる。
 
 6. **フェデレーショングラントが有効なら、`cleanup` には最長の refresh の尻尾に余裕を加えた時間が与えられる**（`src/shutdown.mts` の `cleanupAllowanceFor`）: `federationGrants.upstreamHardTimeoutMs` + `persistRetryBudgetMs` + `lockWaitMs` + 12 秒で、45 秒を下回ることはない — 同梱の予算（25 + 3 + 5 + 12）ではちょうど 45 秒 — これは drain の 10 秒を継承するのではない。dispose が、ローテーションされた上流資格情報の書き込みを待つためである。予算を上げれば allowance もそれに応じて増えるので、orchestrator の grace もそれに合わせて上げること。無効なら、cleanup の予算は drain のものと同じままである。
 

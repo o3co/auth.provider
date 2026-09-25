@@ -130,8 +130,9 @@ export interface DPoPMechanismOptions {
 	 * second — a real, if narrow, replay window.
 	 *
 	 * The defaults (60 / 300) satisfy this with margin. A mechanism
-	 * constructed below the requirement logs a warning
-	 * (`reason: "replay_ttl_below_iat_window"`, carrying `requiredTtlSeconds`).
+	 * constructed below the requirement logs `dpop_replay_ttl_below_window`
+	 * (warn, carrying `iatWindowSeconds`, `replayTtlSeconds` and
+	 * `requiredTtlSeconds`).
 	 */
 	readonly replayTtlSeconds?: number;
 	readonly logger?: Logger;
@@ -155,6 +156,45 @@ export interface DPoPMechanismOptions {
 // ---------------------------------------------------------------------------
 
 const DEFAULT_ALG_WHITELIST: readonly string[] = ["ES256", "ES384", "EdDSA", "RS256"];
+
+/**
+ * The signature and MAC algorithm names in IANA's "JSON Web Signature and
+ * Encryption Algorithms" registry: a closed vocabulary, so a refused alg in
+ * it can be named on a log line without a client choosing what the line
+ * says. Anything else — a JWE key-management name (`RSA-OAEP`, `dir`)
+ * included — is logged as `unregistered`. Checked against the registry as
+ * last updated 2026-05-22; a name registered later reads `unregistered`
+ * until it is added here, which costs a log line its precision and nothing
+ * else.
+ */
+const REGISTERED_JWS_ALGS: ReadonlySet<string> = new Set([
+	// RFC 7518 §3.1
+	"HS256",
+	"HS384",
+	"HS512",
+	"RS256",
+	"RS384",
+	"RS512",
+	"ES256",
+	"ES384",
+	"ES512",
+	"PS256",
+	"PS384",
+	"PS512",
+	"none",
+	// RFC 8037 (Deprecated by RFC 9864), RFC 9864, RFC 8812
+	"EdDSA",
+	"Ed25519",
+	"Ed448",
+	"ES256K",
+	// RFC 9964
+	"ML-DSA-44",
+	"ML-DSA-65",
+	"ML-DSA-87",
+	// W3C WebCrypto, registered for use in a JWK and marked Prohibited
+	"RS1",
+	"HS1",
+]);
 const DEFAULT_IAT_WINDOW_SECONDS = 60;
 const DEFAULT_REPLAY_TTL_SECONDS = 300;
 
@@ -249,14 +289,11 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 	// would break deployments that are running today.
 	const requiredTtlSeconds = iatWindowSeconds * 2 + 1;
 	if (replayTtlSeconds < requiredTtlSeconds) {
+		// A proof can outlive its replay entry and be replayed while still
+		// inside its acceptance window: `requiredTtlSeconds` is 2W + 1.
 		logger?.warn(
-			{
-				reason: "replay_ttl_below_iat_window",
-				iatWindowSeconds,
-				replayTtlSeconds,
-				requiredTtlSeconds,
-			},
-			"replayTtlSeconds is below 2 × iatWindowSeconds + 1 (requiredTtlSeconds); a proof can outlive its replay entry and be replayed while still inside its acceptance window",
+			{ iatWindowSeconds, replayTtlSeconds, requiredTtlSeconds },
+			"dpop_replay_ttl_below_window",
 		);
 	}
 
@@ -290,8 +327,16 @@ export const createDPoPMechanism = (options: DPoPMechanismOptions): TokenBinding
 			// Step 5 (spec §6): Algorithm allowlist check.
 			// parseProof ensures alg is a non-empty string; whitelist check is here.
 			if (!algWhitelist.includes(proof.alg)) {
-				logger?.warn({ alg: proof.alg, whitelist: algWhitelist }, "dpop_alg_not_allowed");
-				throw new DPoPError("alg_not_allowed", `alg ${proof.alg} is not in the allowlist`);
+				// The alg is the client's: named on the line only when it is a
+				// registered one, and never in the refusal's message.
+				logger?.warn(
+					{
+						alg: REGISTERED_JWS_ALGS.has(proof.alg) ? proof.alg : "unregistered",
+						whitelist: algWhitelist,
+					},
+					"dpop_alg_not_allowed",
+				);
+				throw new DPoPError("alg_not_allowed", "alg is not an accepted DPoP algorithm");
 			}
 
 			// Step 8 (spec §6): Signature verification.

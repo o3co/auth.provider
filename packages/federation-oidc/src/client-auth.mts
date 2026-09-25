@@ -34,7 +34,9 @@ import * as oidc from "openid-client";
  *
  * Exactly one of the two: a config with both is ambiguous, one with neither
  * cannot authenticate, and each is refused at construction rather than at the
- * first login.
+ * first login. So is a key OpenSSL cannot parse or jose cannot sign with — in
+ * fixed words naming the setting, the library's error kept as `cause` and off
+ * the message, since a library's message is its reading of the input.
  */
 export interface OidcPrivateKey {
 	/** PEM-encoded PKCS#8 private key (`-----BEGIN PRIVATE KEY-----`). */
@@ -53,8 +55,6 @@ export interface OidcClientCredentials {
 /** `application/x-www-form-urlencoded`, as RFC 6749 §2.3.1 requires before base64. */
 const formUrlEncode = (value: string): string =>
 	new URLSearchParams([["v", value]]).toString().slice(2);
-
-const message = (err: unknown): string => (err instanceof Error ? err.message : String(err));
 
 /**
  * The client-authentication hook openid-client applies to every token-endpoint
@@ -122,14 +122,14 @@ export async function privateKeyJwt(
 	try {
 		keyObject = createPrivateKey(spec.pem);
 	} catch (err) {
-		throw new Error(`${label}: privateKey could not be parsed: ${message(err)}`, { cause: err });
+		throw new Error(`${label}: privateKey could not be parsed`, { cause: err });
 	}
 	const alg = spec.alg ?? inferAlg(label, keyObject);
 	let key: Awaited<ReturnType<typeof importPKCS8>>;
 	try {
 		key = await importPKCS8(spec.pem, alg, { extractable: false });
 	} catch (err) {
-		throw new Error(`${label}: privateKey cannot sign ${alg}: ${message(err)}`, { cause: err });
+		throw new Error(`${label}: privateKey cannot sign ${alg}`, { cause: err });
 	}
 	return oidc.PrivateKeyJwt(spec.kid === undefined ? key : { key, kid: spec.kid });
 }

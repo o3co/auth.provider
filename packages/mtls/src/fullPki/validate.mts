@@ -68,11 +68,25 @@
  * and the intermediate's up, the common outage, `"allow"` refused — and it
  * meant a CRL the engine discarded for a bad signature never reached the
  * logged availability branch. Deciding here makes `on-unavailable` mean what
- * the configuration says: `"reject"` refuses on the first certificate whose
- * status is unknown — or only partly known, because one of the distribution
- * points it names could not be used (#446) — `"allow"` skips exactly those
- * certificates and logs each one, and a status that *was* determined as
- * revoked is refused under both.
+ * the configuration says: `"reject"` refuses a certificate whose status is
+ * unknown — or only partly known, because one of the distribution points it
+ * names could not be used (#446) — `"allow"` skips exactly those
+ * certificates and logs each one once the whole path has passed (a request
+ * refused for another certificate used no soft-fail, and has its refusal's
+ * lines alone), and a status that *was* determined as revoked is refused
+ * under both.
+ *
+ * Under `"reject"` an unknown status is one of two things. When every source
+ * behind it failed to answer usefully — an outage, as `crl.mts` and
+ * `ocsp.mts` mark it — the refusal is the server's: the result says
+ * `outage`, this validator writes no line, and the mechanism refuses it
+ * `unavailable`, which core's dispatcher answers 503 and logs once. Anything
+ * else is the certificate's own shape, a verdict, refused and logged here as
+ * before. A verdict anywhere on the path wins over an outage: the outage is
+ * held until every certificate has been judged, and then it is the whole
+ * path's — one refusal whose cause names every source that could not be
+ * used, for every certificate on the path, so an operator sees the next
+ * source down before fixing the first.
  *
  * The ordering — validate, then fetch — is a security property, not an
  * optimisation. A distribution point is a URL inside a certificate, and
@@ -105,12 +119,26 @@
  * has said nothing, and the `unknown` stands. A *revoked* from either source
  * wins; a certificate is unavailable when both sources are, or when the
  * responder said `unknown` and the CRL did not list it. The fallback is logged
- * when a responder was actually asked and failed, so an OCSP outage is
- * visible even while the CRL keeps revocation checking alive.
+ * when a responder was actually asked and failed, the CRL then answered, and
+ * the mechanism accepted the certificate on that answer — its whole path
+ * passed — so an OCSP outage is visible even while the CRL keeps revocation
+ * checking alive. The line says what the mechanism accepted, no more: the
+ * request can still be refused afterwards, by another mechanism, the grant
+ * or a protected resource's binding check. `decide` hands the notice back
+ * rather than writing it, because whether the certificate is accepted is the
+ * whole path's to say: it is written once every certificate has passed. A
+ * path refused for another certificate's outage names the failed responder
+ * among the outage's members instead, and a path refused as a verdict has
+ * that verdict's lines. When the CRL does not answer either, the one line is
+ * the unavailability's — the dispatcher's outage line under `"reject"`, the
+ * allowed line under `"allow"` — naming both sources and carrying both
+ * errors (an AggregateError, OCSP's first).
  */
 
 import { X509Certificate } from "node:crypto";
+import { loggableError } from "@o3co/auth-provider-core";
 import * as pkijs from "pkijs";
+import { MtlsRevocationSourceError, MtlsRevocationUnavailableError } from "../errors.mjs";
 import { checkClientLeafProfile } from "../pki.mjs";
 import { type AlgorithmPolicy, checkAlgorithmPolicy } from "./algorithms.mjs";
 import { checkCriticalExtensions, checkLeafKeyUsage } from "./criticalExtensions.mjs";
@@ -122,6 +150,7 @@ import {
 } from "./crl.mjs";
 import { createGuardedFetch } from "./fetchGuard.mjs";
 import { checkMustStaple, createOcspResolver, type OcspResolver } from "./ocsp.mjs";
+import { subjectLine } from "./subject.mjs";
 
 /** OID of `basicConstraints` (RFC 5280 §4.2.1.9). */
 const OID_BASIC_CONSTRAINTS = "2.5.29.19";
@@ -177,9 +206,33 @@ export interface FullPkiOptions {
 	readonly fetchImpl?: typeof globalThis.fetch;
 }
 
+/**
+ * The verdict. A refusal names its `step` and a `detail` in this module's own
+ * words; `cause` is the library error behind it, when one threw — pkijs,
+ * WebCrypto, the platform fetch — as it was thrown, and never its text in
+ * `detail`. Whoever logs the refusal logs core's `loggableError` projection of
+ * `cause` as `err`, and nothing else of it.
+ */
 export type FullPkiResult =
 	| { readonly ok: true }
-	| { readonly ok: false; readonly step: string; readonly detail: string };
+	| {
+			readonly ok: false;
+			readonly step: string;
+			readonly detail: string;
+			readonly cause?: unknown;
+			/**
+			 * Set when the refusal is the server's outage, not a verdict on the
+			 * certificate: under `on-unavailable = "reject"`, the only thing that
+			 * stopped the path was a revocation source that did not deliver a
+			 * usable answer (see `crl.mts`, "An outage, or the certificate's
+			 * shape"). The mechanism refuses it `unavailable` — `503` from the
+			 * dispatcher, which writes its one line — and this validator writes
+			 * none. `cause` is then an `MtlsRevocationUnavailableError`, one
+			 * member per source that could not be used, for every certificate on
+			 * the path.
+			 */
+			readonly outage?: true;
+	  };
 
 export interface FullPkiValidator {
 	validate(
@@ -207,14 +260,116 @@ type RevocationOutcome =
 			readonly kind: "determined";
 			/** CRL distribution points that could not be used, for the per-point strictness (#446). */
 			readonly unavailable: readonly CrlPointUnavailable[];
+			/**
+			 * Under `"both"`, the responder that was asked and failed before the
+			 * CRL's answer was served. Written as `mtls_revocation_ocsp_fallback`
+			 * only once the whole path has passed; folded into an outage's
+			 * members when another certificate's status could not be determined.
+			 */
+			readonly fallback?: FallbackNotice;
 	  }
-	| { readonly kind: "unavailable"; readonly reason: string; readonly detail: string };
+	| {
+			readonly kind: "unavailable";
+			readonly reason: string;
+			readonly detail: string;
+			/** The library error behind `reason`, when one threw. */
+			readonly cause?: unknown;
+			/** Every source asked failed because it did not answer usefully. */
+			readonly outage?: true;
+			/** Each source that could not be used, one by one — what an outage's cause is built from. */
+			readonly failures: readonly SourceFailure[];
+	  };
+
+/** One revocation source — a CRL distribution point or an OCSP responder — that could not be used. */
+interface SourceFailure {
+	readonly source: "crl" | "ocsp";
+	readonly url?: string;
+	readonly reason: string;
+	readonly detail: string;
+	readonly cause?: unknown;
+}
+
+/** The OCSP failure a certificate's CRL answer was served over, under `"both"`. */
+interface FallbackNotice {
+	readonly reason: string;
+	readonly detail: string;
+	readonly cause?: unknown;
+	readonly failures: readonly SourceFailure[];
+}
+
+/**
+ * A line for a certificate the mechanism accepted — its whole path passed —
+ * on the soft-fail or the fallback: one admitted under `"allow"` with its
+ * status unknown or only partly known, or one whose CRL answer was used over
+ * a responder that failed. Held until the whole path has passed, and then
+ * written in path order: a path refused for another certificate accepted
+ * nothing on either, and its refusal's lines are its account. The line says
+ * no more than that: the request can still be refused afterwards, by another
+ * mechanism's verdict or `strict-mutual-exclusion`, by the grant, or at a
+ * protected resource by `no_matching_binding`.
+ */
+interface PendingLine {
+	readonly event:
+		| "mtls_revocation_unavailable_allowed"
+		| "mtls_revocation_partially_unavailable_allowed"
+		| "mtls_revocation_ocsp_fallback";
+	readonly subject: string;
+	readonly reason: string;
+	readonly detail: string;
+	readonly cause?: unknown;
+}
+
+/** A CRL distribution point that could not be used, as a {@link SourceFailure}. */
+const pointFailure = (point: CrlPointUnavailable): SourceFailure => ({
+	source: "crl",
+	url: point.url,
+	reason: point.reason,
+	detail: point.detail,
+	...withCause(point.cause),
+});
+
+/** A source that could not be used, and the certificate it was asked about. */
+interface OutageMember {
+	readonly subject: string;
+	readonly failure: SourceFailure;
+}
+
+/**
+ * The cause of an outage refusal: one short error per source that could not
+ * be used, each naming its certificate last — so a log line's cap on a
+ * projected message cuts no source's account — in path order, leaf first.
+ * `subjects` are the certificates whose status could not be determined.
+ */
+const revocationUnavailable = (
+	subjects: readonly string[],
+	members: readonly OutageMember[],
+): MtlsRevocationUnavailableError =>
+	new MtlsRevocationUnavailableError(
+		subjects,
+		members.map(
+			({ subject, failure }) =>
+				new MtlsRevocationSourceError(
+					{ ...failure, subject },
+					failure.cause !== undefined ? { cause: failure.cause } : undefined,
+				),
+		),
+	);
+
+/** `{ cause }` when there is one, for a spread into an outcome or a result. */
+const withCause = (cause: unknown): { cause?: unknown } => (cause !== undefined ? { cause } : {});
+
+/** `{ err }`, the projection of `cause`, when there is one — for a log line. */
+const errOf = (cause: unknown): { err?: ReturnType<typeof loggableError> } =>
+	cause !== undefined ? { err: loggableError(cause) } : {};
 
 const toPkijs = (certificate: X509Certificate): pkijs.Certificate =>
 	pkijs.Certificate.fromBER(certificate.raw);
 
 const toNode = (certificate: pkijs.Certificate): X509Certificate =>
 	new X509Certificate(Buffer.from(certificate.toSchema(true).toBER(false)));
+
+/** The certificate's subject on one line ({@link subjectLine}), as every line and detail here names it. */
+const subjectOf = (certificate: pkijs.Certificate): string => subjectLine(toNode(certificate));
 
 /**
  * `pathLenConstraint` bounds how many CA certificates may appear *below* a
@@ -251,31 +406,65 @@ const checkPathLength = (path: readonly pkijs.Certificate[]): FullPkiResult => {
 };
 
 /**
- * Map the engine's outcome onto a short step name the audit trail can carry.
- *
- * The engine is only ever run without revocation material, so its revocation
- * codes (11–13) cannot occur here; revocation outcomes are named by the
- * local pass below.
+ * This package's words for the result codes the engine can answer with here
+ * (pkijs 3.4): its path checks — 8 (validity), 9 (path length), 10 (name
+ * chaining), 14 (a certificate above the leaf failed its CA check:
+ * basicConstraints, keyUsage or an unparseable critical extension; the finer
+ * codes 3–7 that check computes never reach the result) — and its policy and
+ * name-constraint checks (21, 41, 42, 98, 99). The engine runs without
+ * revocation material, so its revocation codes (11–13) cannot occur;
+ * revocation outcomes are named by the local pass below. The engine's
+ * `resultMessage` is never used — it is the library's text, and for an
+ * error it caught, that error's message.
  */
-const describeEngineFailure = (result: {
-	resultCode: number;
-	resultMessage: string;
-}): { step: string; detail: string } => {
-	// `buildPath` throws a plain `Error` when no path reaches an anchor, and
-	// the engine maps anything that is not its own `ChainValidationError` onto
-	// `ChainValidationCode.unknown`. The message is therefore the only way to
-	// tell "untrusted anchor" — the single most common misconfiguration — from
-	// a genuine internal failure, so it is matched alongside the codes.
-	if (/no (valid )?certificate path/i.test(result.resultMessage)) {
-		return { step: "no path to trust anchor", detail: result.resultMessage };
+const ENGINE_FAILURE_DETAIL: Readonly<Record<number, string>> = {
+	8: "a certificate on the path is not yet valid or has expired",
+	9: "the path is too short",
+	10: "issuer and subject names on the path do not chain",
+	14: "a certificate on the path above the leaf is not a CA certificate",
+	21: "a name form a name constraint requires is missing",
+	41: "a name on the path is outside the permitted subtrees of a name constraint",
+	42: "a name on the path is inside an excluded subtree of a name constraint",
+	98: "a certificate policy mapping is prohibited on the path",
+	99: "a certificate policy mapping maps anyPolicy",
+};
+
+/**
+ * Map the engine's outcome onto a short step name the audit trail can carry,
+ * a detail in this package's words, and the Error the engine caught, if any.
+ *
+ * "No path to a trust anchor" — the single most common misconfiguration —
+ * arrives two ways: as pkijs's own `ChainValidationError` (`noPath`,
+ * `noValidPath`), or as a plain `Error` its path builder throws when a
+ * certificate has no issuer among those it was given, which the engine maps
+ * onto `unknown`. The second is recognised by `noIssuer` — the issuer lookup
+ * came back empty, which the validator observes through the engine's
+ * `findIssuer` hook — not by the message, which is pkijs's text.
+ */
+const describeEngineFailure = (
+	result: { readonly resultCode: number; readonly error?: unknown },
+	noIssuer: boolean,
+): { step: string; detail: string; cause?: unknown } => {
+	const cause = result.error !== undefined ? { cause: result.error } : {};
+	if (
+		// The empty issuer lookup is read only where the builder's plain Error
+		// lands (`unknown`): a refusal with a code of its own is that code's.
+		(noIssuer && result.resultCode === pkijs.ChainValidationCode.unknown) ||
+		result.resultCode === pkijs.ChainValidationCode.noPath ||
+		result.resultCode === pkijs.ChainValidationCode.noValidPath
+	) {
+		return {
+			step: "no path to trust anchor",
+			detail: "no certificate path reaches a configured trust anchor",
+			...cause,
+		};
 	}
-	switch (result.resultCode) {
-		case 60:
-		case 97:
-			return { step: "no path to trust anchor", detail: result.resultMessage };
-		default:
-			return { step: "path validation failed", detail: result.resultMessage };
-	}
+	const detail =
+		ENGINE_FAILURE_DETAIL[result.resultCode] ??
+		(result.resultCode === pkijs.ChainValidationCode.unknown
+			? "the path validation engine failed"
+			: `the path validation engine refused the path (code ${result.resultCode})`);
+	return { step: "path validation failed", detail, ...cause };
 };
 
 export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidator => {
@@ -341,6 +530,9 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 											kind: "unavailable",
 											reason: last.reason,
 											detail: describeUnavailable(own.unavailable),
+											...withCause(last.cause),
+											...(own.unavailable.every((point) => point.outage) ? { outage: true } : {}),
+											failures: own.unavailable.map(pointFailure),
 										};
 									}
 									return own;
@@ -358,16 +550,30 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 		now: Date,
 	): Promise<RevocationOutcome> => {
 		const lookup = await (crlResolver as CrlResolver).resolve(certificate, issuer, now);
-		if (!lookup.ok) return { kind: "unavailable", reason: lookup.reason, detail: lookup.detail };
+		if (!lookup.ok) {
+			return {
+				kind: "unavailable",
+				reason: lookup.reason,
+				detail: lookup.detail,
+				...withCause(lookup.cause),
+				...(lookup.outage ? { outage: true } : {}),
+				failures: lookup.points?.map(pointFailure) ?? [
+					{
+						source: "crl",
+						reason: lookup.reason,
+						detail: lookup.detail,
+						...withCause(lookup.cause),
+					},
+				],
+			};
+		}
 		// Every CRL here verified against `issuer`, whose subject is this
 		// certificate's issuer name, so the serial comparison is the whole
 		// check.
 		if (lookup.crls.some((crl) => crl.isCertificateRevoked(certificate))) {
 			return {
 				kind: "revoked",
-				detail:
-					`${toNode(certificate).subject}: listed on the CRL published by ` +
-					toNode(issuer).subject,
+				detail: `${subjectOf(certificate)}: listed on the CRL published by ${subjectOf(issuer)}`,
 			};
 		}
 		return { kind: "determined", unavailable: lookup.unavailable };
@@ -379,11 +585,35 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 		now: Date,
 	): Promise<RevocationOutcome> => {
 		const lookup = await (ocspResolver as OcspResolver).resolve(certificate, issuer, now);
-		if (!lookup.ok) return { kind: "unavailable", reason: lookup.reason, detail: lookup.detail };
+		if (!lookup.ok) {
+			return {
+				kind: "unavailable",
+				reason: lookup.reason,
+				detail: lookup.detail,
+				...withCause(lookup.cause),
+				...(lookup.outage ? { outage: true } : {}),
+				failures: lookup.responders?.map(
+					(responder): SourceFailure => ({
+						source: "ocsp",
+						url: responder.url,
+						reason: responder.reason,
+						detail: responder.detail,
+						...withCause(responder.cause),
+					}),
+				) ?? [
+					{
+						source: "ocsp",
+						reason: lookup.reason,
+						detail: lookup.detail,
+						...withCause(lookup.cause),
+					},
+				],
+			};
+		}
 		if (lookup.responderUnchecked && !uncheckedResponders.has(lookup.responder)) {
 			uncheckedResponders.add(lookup.responder);
 			options.logger?.warn(
-				{ responder: lookup.responder, subject: toNode(certificate).subject },
+				{ responder: lookup.responder, subject: subjectOf(certificate) },
 				"mtls_ocsp_responder_unchecked",
 			);
 		}
@@ -392,7 +622,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			return {
 				kind: "revoked",
 				detail:
-					`${toNode(certificate).subject}: reported revoked at ` +
+					`${subjectOf(certificate)}: reported revoked at ` +
 					`${lookup.status.revokedAt.toISOString()}${reason} by the OCSP responder at ` +
 					lookup.responder,
 			};
@@ -436,22 +666,78 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			if (listed.kind === "revoked") return listed;
 			return ocsp;
 		}
-		// A certificate that names no responder is a normal shape under
-		// "both" — a CA that publishes only CRLs for some of its
-		// certificates — not an outage. A responder that was asked and did
-		// not answer is, and stays visible even while the CRL carries on.
-		if (ocsp.reason !== "no_responder") {
-			options.logger?.warn(
-				{ subject: toNode(certificate).subject, reason: ocsp.reason, detail: ocsp.detail },
-				"mtls_revocation_ocsp_fallback",
-			);
-		}
 		const crl = await byCrl(certificate, issuer, now);
-		if (crl.kind !== "unavailable") return crl;
+		// The fallback's answer is served when it settles the certificate —
+		// revoked, or determined from every point it names — or when it is a
+		// partial answer the policy takes ("allow"). Under "reject" a partial
+		// answer is no answer: the loop below would refuse it, so it is folded
+		// together with the OCSP failure here, as when the CRL did not answer
+		// at all.
+		const served =
+			crl.kind === "revoked" ||
+			(crl.kind === "determined" &&
+				(crl.unavailable.length === 0 ||
+					("onUnavailable" in revocation && revocation.onUnavailable === "allow")));
+		if (served) {
+			// A degraded answer. The responder that was asked and did not answer
+			// is handed back as a notice, so an OCSP outage stays visible while
+			// the CRL carries on — written by `validate` once the whole path has
+			// passed, since a path refused for another certificate accepted
+			// nothing on this fallback. A revoked certificate is a verdict and has
+			// the verdict's lines. A certificate that names no responder is a
+			// normal shape under "both" — a CA that publishes only CRLs for some
+			// of its certificates — not an outage, and has no notice.
+			if (crl.kind === "determined" && ocsp.reason !== "no_responder") {
+				return {
+					...crl,
+					fallback: {
+						reason: ocsp.reason,
+						detail: ocsp.detail,
+						...withCause(ocsp.cause),
+						failures: ocsp.failures,
+					},
+				};
+			}
+			return crl;
+		}
+		// Neither source gave an answer that is served. No fallback line: the
+		// unavailability below is the one account of it — the dispatcher's
+		// outage line, or this validator's rejected or allowed line — and it
+		// names both sources.
+		const gaps = crl.kind === "determined" ? crl.unavailable : [];
+		const crlSide =
+			crl.kind === "unavailable"
+				? crl
+				: {
+						reason: (gaps[gaps.length - 1] as CrlPointUnavailable).reason,
+						detail: describeUnavailable(gaps),
+						cause: gaps[gaps.length - 1]?.cause,
+						outage: gaps.every((point) => point.outage) ? (true as const) : undefined,
+						failures: gaps.map(pointFailure),
+					};
+		// An outage when every source the certificate names failed as one; a
+		// source it names none of (no responder, no distribution point) was
+		// never asked, and says nothing either way — nor is it a member of the
+		// outage's cause, where it would spend one of the slots a log line keeps.
+		const asked = [ocsp, crlSide].filter(
+			(source) => source.reason !== "no_responder" && source.reason !== "no_distribution_point",
+		);
+		// `reason` is the CRL's, the last source asked. The errors are both
+		// sources', OCSP's first: an AggregateError of the two when both
+		// threw — its members are what a warn line projects — else the one
+		// that did. An outage's refusal is built from `failures` instead.
+		const causes = [ocsp.cause, crlSide.cause].filter((cause) => cause !== undefined);
+		const cause =
+			causes.length > 1
+				? new AggregateError(causes, "neither revocation source answered: OCSP, then the CRL")
+				: causes[0];
 		return {
 			kind: "unavailable",
-			reason: crl.reason,
-			detail: `ocsp: ${ocsp.reason} (${ocsp.detail}); crl: ${crl.reason} (${crl.detail})`,
+			reason: crlSide.reason,
+			detail: `ocsp: ${ocsp.reason} (${ocsp.detail}); crl: ${crlSide.reason} (${crlSide.detail})`,
+			...withCause(cause),
+			...(asked.length > 0 && asked.every((source) => source.outage) ? { outage: true } : {}),
+			failures: asked.flatMap((source) => source.failures),
 		};
 	};
 
@@ -488,25 +774,41 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			// `passedWhenNotRevValues: true` here is not a policy choice — no CRLs
 			// are supplied, so the engine's revocation block does not run at all.
 			// The flag only keeps the engine from objecting to their absence.
+			let noIssuer = false;
 			const engine = new pkijs.CertificateChainValidationEngine({
 				trustedCerts,
 				certs,
 				checkDate: now,
+				// The default lookup, observed: an empty answer is the one case in
+				// which the path builder throws its plain, code-less Error, and it
+				// is how "no path to a trust anchor" is told apart from any other
+				// Error the engine catches (`describeEngineFailure`).
+				findIssuer: async (certificate, validationEngine, crypto) => {
+					const issuers = await validationEngine.defaultFindIssuer(
+						certificate,
+						validationEngine,
+						crypto,
+					);
+					if (issuers.length === 0) noIssuer = true;
+					return issuers;
+				},
 			});
 
 			let first: Awaited<ReturnType<pkijs.CertificateChainValidationEngine["verify"]>>;
 			try {
 				first = await engine.verify({ passedWhenNotRevValues: true });
 			} catch (err) {
+				// pkijs 3 catches inside `verify` and answers a result instead; this
+				// is for a version that does not. The error is the library's.
 				return {
 					ok: false,
 					step: "path validation failed",
-					detail: err instanceof Error ? err.message : String(err),
+					detail: "the path validation engine failed",
+					cause: err,
 				};
 			}
 			if (!first.result) {
-				const { step, detail } = describeEngineFailure(first);
-				return { ok: false, step, detail };
+				return { ok: false, ...describeEngineFailure(first, noIssuer) };
 			}
 
 			const path = first.certificatePath ?? [];
@@ -592,6 +894,23 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					decide(certificate, path[index + 1] as pkijs.Certificate, now),
 				),
 			);
+			// Under "reject", an outage — a source that did not answer usefully —
+			// is the server's, answered 503, and it is held until every
+			// certificate has been judged: a certificate on the path that is
+			// revoked, or whose status cannot be determined for a reason of its
+			// own, is a verdict a retry would not change, and it wins. When
+			// nothing else refused, the outage is returned for the whole path:
+			// every certificate whose status could not be determined, and every
+			// source that could not be used — a responder the CRL was served over
+			// included — in path order.
+			const outages: { readonly subject: string; readonly account: string }[] = [];
+			const members: OutageMember[] = [];
+			const memberOf =
+				(subject: string) =>
+				(failure: SourceFailure): OutageMember => ({ subject, failure });
+			// Under "allow", and for a fallback used under either policy, the
+			// lines for what the mechanism accepted wait for the path's result.
+			const pending: PendingLine[] = [];
 			for (const [index, certificate] of subjects.entries()) {
 				const outcome = outcomes[index] as RevocationOutcome;
 
@@ -608,27 +927,55 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				}
 
 				if (outcome.kind === "unavailable") {
-					const subject = toNode(certificate).subject;
+					const subject = subjectOf(certificate);
+					if (revocation.onUnavailable === "reject" && outcome.outage) {
+						// Not logged here: the dispatcher that answers the 503 writes the
+						// outage's one line, with the cause built below.
+						outages.push({ subject, account: `${outcome.reason} — ${outcome.detail}` });
+						members.push(...outcome.failures.map(memberOf(subject)));
+						continue;
+					}
 					if (revocation.onUnavailable === "reject") {
 						options.logger?.warn(
-							{ subject, reason: outcome.reason, detail: outcome.detail },
+							{ subject, reason: outcome.reason, detail: outcome.detail, ...errOf(outcome.cause) },
 							"mtls_revocation_unavailable_rejected",
 						);
 						return {
 							ok: false,
 							step: "revocation status unavailable",
 							detail: `${subject}: ${outcome.reason} — ${outcome.detail}`,
+							...withCause(outcome.cause),
 						};
 					}
 					// Soft-fail. Logged at warn, never silently: an operator who chose
 					// "allow" still needs to see how often it is being used, because a
 					// permanent soft-fail is an unrevocable PKI wearing a revocation
-					// configuration.
-					options.logger?.warn(
-						{ subject, reason: outcome.reason, detail: outcome.detail },
-						"mtls_revocation_unavailable_allowed",
-					);
+					// configuration. Logged once the path has passed: a path another
+					// certificate's revocation refuses accepted nothing on the soft-fail.
+					pending.push({
+						event: "mtls_revocation_unavailable_allowed",
+						subject,
+						reason: outcome.reason,
+						detail: outcome.detail,
+						...withCause(outcome.cause),
+					});
 					continue;
+				}
+
+				// Served on the CRL over a responder that failed: the notice waits
+				// for the path's result — written if the path passes, a member of
+				// the outage if another certificate's status could not be
+				// determined, nothing beside a verdict's own lines.
+				if (outcome.fallback !== undefined) {
+					const subject = subjectOf(certificate);
+					pending.push({
+						event: "mtls_revocation_ocsp_fallback",
+						subject,
+						reason: outcome.fallback.reason,
+						detail: outcome.fallback.detail,
+						...withCause(outcome.fallback.cause),
+					});
+					members.push(...outcome.fallback.failures.map(memberOf(subject)));
 				}
 
 				// Only a certificate absent from every CRL that was obtained is
@@ -643,31 +990,65 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				// shape — and "reject" is the operator's instruction not to
 				// guess in the permissive direction. Under "allow" that guess is
 				// what was chosen, so the certificate passes and the gap is logged
-				// — under its own message, because "checked against part of its
-				// revocation material" and "not checked at all" are different
-				// facts on an operator's dashboard.
+				// once the path has — under its own message, because "checked
+				// against part of its revocation material" and "not checked at
+				// all" are different facts on an operator's dashboard.
 				if (outcome.unavailable.length > 0) {
-					const subject = toNode(certificate).subject;
+					const subject = subjectOf(certificate);
 					const last = outcome.unavailable[outcome.unavailable.length - 1] as CrlPointUnavailable;
 					const detail = describeUnavailable(outcome.unavailable);
+					if (
+						revocation.onUnavailable === "reject" &&
+						outcome.unavailable.every((point) => point.outage)
+					) {
+						outages.push({ subject, account: `${last.reason} — ${detail}` });
+						members.push(...outcome.unavailable.map(pointFailure).map(memberOf(subject)));
+						continue;
+					}
 					if (revocation.onUnavailable === "reject") {
 						options.logger?.warn(
-							{ subject, reason: last.reason, detail },
+							{ subject, reason: last.reason, detail, ...errOf(last.cause) },
 							"mtls_revocation_unavailable_rejected",
 						);
 						return {
 							ok: false,
 							step: "revocation status unavailable",
 							detail: `${subject}: ${last.reason} — ${detail}`,
+							...withCause(last.cause),
 						};
 					}
-					options.logger?.warn(
-						{ subject, reason: last.reason, detail },
-						"mtls_revocation_partially_unavailable_allowed",
-					);
+					pending.push({
+						event: "mtls_revocation_partially_unavailable_allowed",
+						subject,
+						reason: last.reason,
+						detail,
+						...withCause(last.cause),
+					});
 				}
 			}
 
+			if (outages.length > 0) {
+				return {
+					ok: false,
+					step: "revocation status unavailable",
+					detail: outages.map(({ subject, account }) => `${subject}: ${account}`).join("; "),
+					cause: revocationUnavailable(
+						outages.map(({ subject }) => subject),
+						members,
+					),
+					outage: true,
+				};
+			}
+			// The path passed: the mechanism accepted the certificate, on each
+			// soft-fail and fallback it used. The request can still be refused
+			// afterwards — by another mechanism, the grant, or a protected
+			// resource's binding check — and these lines claim nothing about it.
+			for (const line of pending) {
+				options.logger?.warn(
+					{ subject: line.subject, reason: line.reason, detail: line.detail, ...errOf(line.cause) },
+					line.event,
+				);
+			}
 			return { ok: true };
 		},
 	};

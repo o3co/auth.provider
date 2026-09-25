@@ -16,6 +16,7 @@
 
 import {
 	type AdapterBuilder,
+	consoleLogger,
 	type Logger,
 	loggableError,
 	type RegisteredRP,
@@ -27,6 +28,13 @@ import { createRedisSidHash } from "./internal/redisSidHash.mjs";
 export interface RedisSessionRPRegistryOptions {
 	readonly client: SessionRPRegistryClient;
 	readonly keyPrefix: string;
+	/**
+	 * Where `listRPs()` reports a stored record it cannot read: one
+	 * `session_rp_registry_corrupt_envelope` warn, `reason` `json_parse` (with
+	 * the parser's projection as `err`) or `shape_invalid`.
+	 * `redisSessionStoresModule` passes the composition's `logger` slot;
+	 * absent, `consoleLogger`.
+	 */
 	readonly logger?: Logger;
 }
 
@@ -100,10 +108,10 @@ function isValidRPEnvelope(env: unknown): env is RPEnvelope {
 	);
 }
 
-function deserialize(json: string, sid: string, logger?: Logger): RegisteredRP | null {
+function deserialize(json: string, sid: string, logger: Logger): RegisteredRP | null {
 	// Mirror the userSessionStore corrupt-envelope warn shape: object-first
-	// `{ sid, reason, cause? }` so `sid` and `reason` are reliably emitted
-	// as structured fields, and the parse error is `cause` — as core's
+	// `{ sid, reason, err? }` so `sid` and `reason` are reliably emitted
+	// as structured fields, and the parse error is `err` — as core's
 	// `loggableError` projects it, because a SyntaxError's message quotes
 	// the stored value around the point the parse failed. The previous
 	// implementation logged a raw JSON snippet, which risked leaking
@@ -113,17 +121,14 @@ function deserialize(json: string, sid: string, logger?: Logger): RegisteredRP |
 	try {
 		parsed = JSON.parse(json);
 	} catch (cause) {
-		logger?.warn(
-			{ sid, reason: "json_parse", cause: loggableError(cause) },
-			"session_rp_registry_corrupt_envelope: JSON.parse failed",
+		logger.warn(
+			{ sid, reason: "json_parse", err: loggableError(cause) },
+			"session_rp_registry_corrupt_envelope",
 		);
 		return null;
 	}
 	if (!isValidRPEnvelope(parsed)) {
-		logger?.warn(
-			{ sid, reason: "shape_invalid" },
-			"session_rp_registry_corrupt_envelope: shape invalid",
-		);
+		logger.warn({ sid, reason: "shape_invalid" }, "session_rp_registry_corrupt_envelope");
 		return null;
 	}
 	const env = parsed;
@@ -166,7 +171,7 @@ export function createRedisSessionRPRegistry(
 	opts: RedisSessionRPRegistryOptions,
 ): SessionRPRegistry {
 	const hash = createRedisSidHash({ client: opts.client, keyPrefix: opts.keyPrefix });
-	const logger = opts.logger;
+	const logger = opts.logger ?? consoleLogger;
 	return {
 		kind: "redis",
 		async registerRP(sid, rp, expiresAt) {
@@ -199,15 +204,14 @@ export function createRedisSessionRPRegistry(
  *
  * Mirrors the boot-time guard pattern of `redisChallengeStoreBuilder`
  * (TS-M2): missing `client` throws at boot rather than crashing at first
- * Redis op. Optional `logger` is forwarded to the adapter for the
- * corrupt-envelope warn path emitted inside `listRPs()`; the
- * fail-closed behavior (corrupt entries are dropped from the result)
- * is independent of logger presence — when the logger is absent the
- * warn is silently swallowed but the security gate still triggers. The
- * spread idiom omits the field when the caller did not supply one
- * (preserves "absent" semantics under `exactOptionalPropertyTypes`).
+ * Redis op. The corrupt-envelope warn inside `listRPs()` goes to
+ * `config.logger`, else the factory context's logger, else `consoleLogger`;
+ * the fail-closed behavior (corrupt entries are dropped from the result)
+ * is independent of which. The spread idiom omits the field when neither
+ * was supplied (preserves "absent" semantics under
+ * `exactOptionalPropertyTypes`).
  */
-export const redisSessionRPRegistryBuilder: AdapterBuilder<SessionRPRegistry> = (config, _ctx) => {
+export const redisSessionRPRegistryBuilder: AdapterBuilder<SessionRPRegistry> = (config, ctx) => {
 	const c = config as {
 		client?: SessionRPRegistryClient;
 		keyPrefix?: string;
@@ -216,9 +220,10 @@ export const redisSessionRPRegistryBuilder: AdapterBuilder<SessionRPRegistry> = 
 	if (!c.client) {
 		throw new Error("redisSessionRPRegistryBuilder: 'client' option is required");
 	}
+	const logger = c.logger ?? ctx?.logger;
 	return createRedisSessionRPRegistry({
 		client: c.client,
 		keyPrefix: c.keyPrefix ?? "ss:rp:",
-		...(c.logger !== undefined ? { logger: c.logger } : {}),
+		...(logger !== undefined ? { logger } : {}),
 	});
 };

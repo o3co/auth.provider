@@ -123,6 +123,38 @@
  * several distribution points; the lookup reports the ones it could not use
  * alongside the CRLs it did obtain, and leaves it to the caller whether a
  * partial answer is an answer — under `"reject"` it is not.
+ *
+ * ### What an unavailability says
+ *
+ * A `reason` from `CrlUnavailableReason` and a `detail` in this module's own
+ * words. When a library threw on the way — pkijs parsing the CRL, WebCrypto
+ * checking its signature, the platform fetch — its error rides beside them as
+ * `cause`, as it was thrown, and never as text in `detail`: the library's
+ * message is its reading of bytes a CA or a network path handed over, and a
+ * log line carries only core's `loggableError` projection of it. Where
+ * several points are summed up in one lookup, `reason` and `cause` are the
+ * last failure's, together.
+ *
+ * ### An outage, or the certificate's shape
+ *
+ * An unavailability is marked `outage` when the source did not deliver a
+ * usable answer: it could not be fetched for a reason of its own
+ * (`isSourceFailure` in `fetchGuard.mts`: unreachable, timed out, an HTTP
+ * error, a redirect, an answer too large or of the wrong type), it answered
+ * with bytes that are not a CRL (`unparseable`), or its list is out of date
+ * (`stale`). Each is a fault of the source or of this server's configuration,
+ * never a verdict on the certificate, and a client cannot cause any. Some
+ * clear on retry — a refused connection, a timeout, a 5xx, a truncated
+ * answer, a list the CA has not yet republished; some need an operator — a
+ * 404 or 410 (the CA moved or dropped its list), an answer larger than
+ * `max-response-bytes`, a redirect (never followed), an answer of the wrong
+ * media type (a proxy or portal in the way). Everything else — no or an
+ * unsupported distribution point, a URL the guard will not fetch, a CRL of a
+ * shape or algorithm this resolver does not accept, a signature that does not
+ * verify — is not. A lookup that sums several points up is an outage only
+ * when every point it could not use was one. The validator answers an outage
+ * under `on-unavailable = "reject"` as the server's (503), and anything else
+ * as a verdict on the certificate.
  */
 
 import { createHash } from "node:crypto";
@@ -130,7 +162,7 @@ import * as pkijs from "pkijs";
 import { type AlgorithmPolicy, checkSignatureAlgorithm } from "./algorithms.mjs";
 import { checkCrlCriticalExtensions, extensionValueParsed } from "./criticalExtensions.mjs";
 import { DEFAULT_ALGORITHM_POLICY } from "./defaults.mjs";
-import type { GuardedFetch } from "./fetchGuard.mjs";
+import { type GuardedFetch, isSourceFailure } from "./fetchGuard.mjs";
 
 /** OID of the `cRLDistributionPoints` extension (RFC 5280 §4.2.1.13). */
 const OID_CRL_DISTRIBUTION_POINTS = "2.5.29.31";
@@ -183,6 +215,10 @@ export interface CrlPointUnavailable {
 	readonly url: string;
 	readonly reason: CrlUnavailableReason;
 	readonly detail: string;
+	/** The library error behind `reason`, when one threw. */
+	readonly cause?: unknown;
+	/** The source did not answer usefully (see the module header), rather than the certificate's shape. */
+	readonly outage?: true;
 }
 
 export type CrlLookup =
@@ -198,7 +234,20 @@ export type CrlLookup =
 			 */
 			readonly unavailable: readonly CrlPointUnavailable[];
 	  }
-	| { readonly ok: false; readonly reason: CrlUnavailableReason; readonly detail: string };
+	| {
+			readonly ok: false;
+			readonly reason: CrlUnavailableReason;
+			readonly detail: string;
+			/** The last failure's library error, beside its `reason`, when one threw. */
+			readonly cause?: unknown;
+			/** Every point that could not be used was an outage (see the module header). */
+			readonly outage?: true;
+			/**
+			 * Each point that could not be used, when the certificate named any:
+			 * what a caller that reports every source one by one reads.
+			 */
+			readonly points?: readonly CrlPointUnavailable[];
+	  };
 
 /** One audit-trail line per URI that could not be used. */
 export const describeUnavailable = (points: readonly CrlPointUnavailable[]): string =>
@@ -355,6 +404,8 @@ type CacheEntry =
 			readonly kind: "unavailable";
 			readonly reason: RememberedReason;
 			readonly detail: string;
+			readonly cause?: unknown;
+			readonly outage?: true;
 			/** Epoch millis after which the distribution point is tried again. */
 			readonly expiresAt: number;
 	  };
@@ -366,12 +417,20 @@ type Loaded =
 			readonly ok: false;
 			readonly reason: "fetch_failed" | "unparseable";
 			readonly detail: string;
+			readonly cause?: unknown;
+			readonly outage?: true;
 	  };
 
 /** What one distribution-point URI produced, after every check. */
 type UrlOutcome =
 	| { readonly ok: true; readonly crl: pkijs.CertificateRevocationList }
-	| { readonly ok: false; readonly reason: CrlUnavailableReason; readonly detail: string };
+	| {
+			readonly ok: false;
+			readonly reason: CrlUnavailableReason;
+			readonly detail: string;
+			readonly cause?: unknown;
+			readonly outage?: true;
+	  };
 
 export interface CrlResolverOptions {
 	readonly fetch: GuardedFetch;
@@ -447,7 +506,7 @@ const issuerMaySignCrls = (issuer: pkijs.Certificate): boolean => {
 const verifySignature = async (
 	crl: pkijs.CertificateRevocationList,
 	issuer: pkijs.Certificate,
-): Promise<{ ok: true } | { ok: false; detail: string }> => {
+): Promise<{ ok: true } | { ok: false; detail: string; cause?: unknown }> => {
 	if (!issuerMaySignCrls(issuer)) {
 		return { ok: false, detail: "the issuing CA's keyUsage omits cRLSign (RFC 5280 §6.3.3)" };
 	}
@@ -455,10 +514,9 @@ const verifySignature = async (
 	try {
 		verified = await crl.verify({ issuerCertificate: issuer });
 	} catch (err) {
-		return {
-			ok: false,
-			detail: `signature check failed: ${err instanceof Error ? err.message : String(err)}`,
-		};
+		// Thrown rather than answered `false`: a signature value WebCrypto
+		// cannot read, a key it cannot import. Its text stays on the cause.
+		return { ok: false, detail: "signature check failed", cause: err };
 	}
 	return verified
 		? { ok: true }
@@ -590,18 +648,35 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 		cache.set(key, entry);
 	};
 
-	const remember = (url: string, reason: RememberedReason, detail: string, now: Date): void =>
+	const remember = (
+		url: string,
+		failure: {
+			readonly reason: RememberedReason;
+			readonly detail: string;
+			readonly cause?: unknown;
+			readonly outage?: true;
+		},
+		now: Date,
+	): void =>
 		store(unavailableKey(url), {
 			kind: "unavailable",
-			reason,
-			detail,
+			reason: failure.reason,
+			detail: failure.detail,
+			...(failure.cause !== undefined ? { cause: failure.cause } : {}),
+			...(failure.outage ? { outage: true } : {}),
 			expiresAt: now.getTime() + CRL_NEGATIVE_CACHE_TTL_MS,
 		});
 
 	const fetchAndParse = async (url: string): Promise<Loaded> => {
 		const fetched = await options.fetch(url);
 		if (!fetched.ok) {
-			return { ok: false, reason: "fetch_failed", detail: `${fetched.reason} (${fetched.detail})` };
+			return {
+				ok: false,
+				reason: "fetch_failed",
+				detail: `${fetched.reason} (${fetched.detail})`,
+				...(fetched.cause !== undefined ? { cause: fetched.cause } : {}),
+				...(isSourceFailure(fetched.reason) ? { outage: true } : {}),
+			};
 		}
 		try {
 			return { ok: true, crl: pkijs.CertificateRevocationList.fromBER(fetched.bytes) };
@@ -609,7 +684,9 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 			return {
 				ok: false,
 				reason: "unparseable",
-				detail: `not a DER CRL (${err instanceof Error ? err.message : String(err)})`,
+				detail: "not a DER CRL",
+				cause: err,
+				outage: true,
 			};
 		}
 	};
@@ -640,12 +717,14 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 				ok: false,
 				reason: unavailable.reason,
 				detail: `${unavailable.detail}; not retried yet`,
+				...(unavailable.cause !== undefined ? { cause: unavailable.cause } : {}),
+				...(unavailable.outage ? { outage: true } : {}),
 			};
 		}
 
 		const loaded = await load(url);
 		if (!loaded.ok) {
-			remember(url, loaded.reason, loaded.detail, now);
+			remember(url, loaded, now);
 			return loaded;
 		}
 
@@ -655,12 +734,12 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 		// like, and the answer is at most "do not use it".
 		const critical = checkCrlCriticalExtensions(loaded.crl);
 		if (!critical.ok) {
-			remember(url, "unsupported_critical_extension", critical.detail, now);
+			remember(url, { reason: "unsupported_critical_extension", detail: critical.detail }, now);
 			return { ok: false, reason: "unsupported_critical_extension", detail: critical.detail };
 		}
 		const scope = checkScope(loaded.crl);
 		if (!scope.ok) {
-			remember(url, "unsupported_crl_scope", scope.detail, now);
+			remember(url, { reason: "unsupported_crl_scope", detail: scope.detail }, now);
 			return { ok: false, reason: "unsupported_crl_scope", detail: scope.detail };
 		}
 
@@ -678,7 +757,7 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 		);
 		if (!algorithm.ok) {
 			const detail = `the CRL's signature algorithm ${algorithm.detail}`;
-			remember(url, "algorithm_not_permitted", detail, now);
+			remember(url, { reason: "algorithm_not_permitted", detail }, now);
 			return { ok: false, reason: "algorithm_not_permitted", detail };
 		}
 
@@ -688,7 +767,12 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 		// not pin a refusal for anyone.
 		const signature = await verifySignature(loaded.crl, issuer);
 		if (!signature.ok) {
-			return { ok: false, reason: "bad_signature", detail: signature.detail };
+			return {
+				ok: false,
+				reason: "bad_signature",
+				detail: signature.detail,
+				...(signature.cause !== undefined ? { cause: signature.cause } : {}),
+			};
 		}
 
 		const fresh = freshness(loaded.crl, now);
@@ -697,8 +781,15 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 			// window only, so a responder that has stopped publishing costs one
 			// probe per window rather than one per request — and is noticed
 			// within seconds once it publishes again.
-			remember(url, fresh.reason, fresh.detail, now);
-			return { ok: false, reason: fresh.reason, detail: fresh.detail };
+			// A list past its `nextUpdate` is the source's outage — the CA has not
+			// published — where a list with none at all is its shape.
+			const failure = {
+				reason: fresh.reason,
+				detail: fresh.detail,
+				...(fresh.reason === "stale" ? { outage: true as const } : {}),
+			};
+			remember(url, failure, now);
+			return { ok: false, ...failure };
 		}
 
 		store(usableKey(url, issuerId), {
@@ -738,7 +829,13 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 						found = outcome.crl;
 						break;
 					}
-					failures.push({ url, reason: outcome.reason, detail: outcome.detail });
+					failures.push({
+						url,
+						reason: outcome.reason,
+						detail: outcome.detail,
+						...(outcome.cause !== undefined ? { cause: outcome.cause } : {}),
+						...(outcome.outage ? { outage: true } : {}),
+					});
 				}
 				if (found === undefined) unavailable.push(...failures);
 				else crls.push(found);
@@ -750,6 +847,11 @@ export const createCrlResolver = (options: CrlResolverOptions): CrlResolver => {
 					ok: false,
 					reason: last?.reason ?? "fetch_failed",
 					detail: describeUnavailable(unavailable),
+					...(last?.cause !== undefined ? { cause: last.cause } : {}),
+					...(unavailable.length > 0 && unavailable.every((point) => point.outage)
+						? { outage: true }
+						: {}),
+					points: unavailable,
 				};
 			}
 			return { ok: true, crls, unavailable };

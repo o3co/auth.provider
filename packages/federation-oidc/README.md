@@ -161,7 +161,16 @@ fetched at all.
 
 Boot also refuses a config with both `clientSecret` and `privateKey`, with
 neither, with a name that is not one URL path segment, or with a private key
-that cannot be parsed.
+that cannot be parsed or cannot sign the algorithm it is used for.
+
+A refusal that comes from a library — `openid-client` on discovery, OpenSSL or
+`jose` on the key — says what failed in fixed words (`discovery of <issuer>
+failed …`, `privateKey could not be parsed`, `privateKey cannot sign <alg>`)
+and carries the library's error as its `cause`. The library's text is never
+copied into the message: it is the library's reading of what it was handed,
+and a JSON parser quotes it. Node prints the cause chain of the error that
+stops boot, and core's `loggableError` projects it, so the reason is still in
+front of the operator.
 
 ### What happens at login
 
@@ -301,6 +310,7 @@ publishes, and records every request.
 | --- | --- |
 | [`oidc.test.mts`](src/__tests__/oidc.test.mts) | discovery and its refusals, client authentication, the login steps above, the profile, refresh, logout and `mapClaims` |
 | [`at-hash.test.mts`](src/__tests__/at-hash.test.mts) | the `at_hash` check |
+| [`library-errors.test.mts`](src/__tests__/library-errors.test.mts) | what core's `loggableError` keeps of the errors `openid-client` throws for a token answer, and that a construction failure keeps the library's text off its message and on its `cause` |
 | [`delegated.test.mts`](src/__tests__/delegated.test.mts) | `SupportsDelegatedAuthorization` |
 | [`oidc-module.test.mts`](src/__tests__/oidc-module.test.mts), [`oidc-module-boot.test.mts`](src/__tests__/oidc-module-boot.test.mts) | reading `type = "oidc"` sections, the module per instance, and boot |
 | [`session-routes.e2e.test.mts`](src/__tests__/session-routes.e2e.test.mts) | a login through the session routes, end to end, and that a failed exchange is logged without the token response the library carries on the error |

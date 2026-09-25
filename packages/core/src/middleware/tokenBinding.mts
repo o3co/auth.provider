@@ -23,6 +23,7 @@ import {
 	retryInstructionOf,
 	unavailableLogFields,
 	unavailableOf,
+	verdictLogFields,
 } from "./_responseHeaders.mjs";
 
 /**
@@ -135,12 +136,20 @@ export interface TokenBindingRefusal {
 	 * and logs this cause's projection there, so a mechanism need not log the
 	 * outage itself — and should not, or it is logged twice. Optional: a
 	 * mechanism that gives none is still logged, without `err`.
+	 *
+	 * On a verdict: the error that made the mechanism refuse — a parser's, a
+	 * library's — kept here rather than copied into the message. The verdict
+	 * line (`token_binding_proof_invalid`,
+	 * `protected_resource_binding_proof_invalid`) carries the refusal's
+	 * projection, this cause projected inside it.
 	 */
 	readonly cause?: unknown;
 	/**
 	 * The mechanism's own name for the refusal (`replay_store_unavailable`,
-	 * `replay_store_fault`), written on the outage's log line beside the
-	 * `code`. Never sent.
+	 * `replay_store_fault`, mTLS's `malformed_header`), written on the
+	 * refusal's log line — the outage's or the verdict's — beside the `code`.
+	 * A code, lowercase words joined by `_` or `-`; the verdict line leaves
+	 * out anything else. Never sent.
 	 */
 	readonly reason?: string;
 }
@@ -242,7 +251,13 @@ export const tokenBindingMw = ({
 					res.status(503).json(errorEnvelope(code, unavailable));
 					return;
 				}
-				logger?.warn({ mechanism: mechanism.kind, code }, "token_binding_proof_invalid");
+				// A verdict on the material: one warn line, with what the mechanism
+				// said of it — its `reason`, and the refusal projected with the
+				// error behind it as `cause` (`verdictLogFields`).
+				logger?.warn(
+					{ mechanism: mechanism.kind, code, ...verdictLogFields(err) },
+					"token_binding_proof_invalid",
+				);
 				// #530: a refusal may carry headers the client needs to retry, and
 				// say that it is an instruction rather than a verdict — in its own
 				// words (`TokenBindingRefusal`).

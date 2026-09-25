@@ -423,6 +423,68 @@ describe("a server-side outage is the mechanism's to state, and answers 503", ()
 		expect(JSON.stringify(logger.error.mock.calls)).not.toContain("refused-command-marker");
 	});
 
+	it("logs a verdict once at warn: the refusal's reason, and its projection with the cause inside", async () => {
+		// A mechanism states why it refused (`reason`) and, when a parser
+		// refused the material, that parser's error (`cause`). The verdict line
+		// carried the mechanism and the code alone, so neither reached a log.
+		const logger = spyLogger();
+		let parseError: unknown;
+		try {
+			JSON.parse('{"x5c":"refused-material-marker');
+		} catch (err) {
+			parseError = err;
+		}
+		const refusal = Object.assign(new Error("header parse failure", { cause: parseError }), {
+			code: "invalid_certificate",
+			reason: "malformed_header",
+		});
+		const mw = tokenBindingMw({
+			mechanisms: [mtlsMechanism(refusal)],
+			dispatchPolicy: "intent-explicit",
+			logger: logger as never,
+		});
+		const res = fakeRes();
+		await mw(fakeReq(), res, vi.fn());
+		expect(res.status).toHaveBeenCalledWith(400);
+		expect(logger.error).not.toHaveBeenCalled();
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.warn).toHaveBeenCalledWith(
+			{
+				mechanism: "mtls",
+				code: "invalid_certificate",
+				reason: "malformed_header",
+				err: {
+					name: "Error",
+					detail: "header parse failure",
+					code: "invalid_certificate",
+					reason: "malformed_header",
+					stack: expect.stringMatching(/^ {4}at /),
+					cause: { name: "SyntaxError", position: expect.any(Number), stack: expect.any(String) },
+				},
+			},
+			"token_binding_proof_invalid",
+		);
+		expect(JSON.stringify(logger.warn.mock.calls)).not.toContain("refused-material-marker");
+	});
+
+	it("logs a refusal with no reason of its own — a mechanism's bug — by its projection alone", async () => {
+		const logger = spyLogger();
+		const mw = tokenBindingMw({
+			mechanisms: [dpopMechanism(new TypeError("cannot read properties of undefined"))],
+			dispatchPolicy: "intent-explicit",
+			logger: logger as never,
+		});
+		await mw(fakeReq(), fakeRes(), vi.fn());
+		expect(logger.warn).toHaveBeenCalledWith(
+			{
+				mechanism: "dpop",
+				code: "invalid_dpop_proof",
+				err: expect.objectContaining({ name: "TypeError" }),
+			},
+			"token_binding_proof_invalid",
+		);
+	});
+
 	it("reads a bare code as a verdict: only the mechanism can say it was an outage", async () => {
 		const bare = Object.assign(new Error("down"), { code: "temporarily_unavailable" });
 		const mw = tokenBindingMw({

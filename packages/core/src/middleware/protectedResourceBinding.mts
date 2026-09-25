@@ -51,7 +51,6 @@ import { errorEnvelope } from "../errors/envelope.mjs";
 import { BINDING_PROFILES, matchConfirmation } from "../grants/confirmationMatch.mjs";
 import type { TokenBinding } from "../grants/tokenBinding.mjs";
 import type { Logger } from "../logging/Logger.mjs";
-import { loggableError } from "../logging/loggableError.mjs";
 import type { TokenBindingMechanism } from "./tokenBinding.mjs";
 
 import "./express.mjs"; // ensure ambient Express.Request augmentation is loaded
@@ -61,6 +60,7 @@ import {
 	retryInstructionOf,
 	unavailableLogFields,
 	unavailableOf,
+	verdictLogFields,
 } from "./_responseHeaders.mjs";
 
 export interface ProtectedResourceBindingOptions {
@@ -117,9 +117,14 @@ export const protectedResourceBindingMw = ({
 			return;
 		}
 
-		const reject = (reason: string, challenge: string, description: string): void => {
+		const reject = (rejection: string, challenge: string, description: string): void => {
+			// `rejection` names the sender-constraint rule that refused the
+			// request (`compound_cnf`, `scheme_mismatch`, `proof_invalid`,
+			// `no_matching_binding`). Not `reason`: the verdict line written
+			// beside a `proof_invalid` uses that for the mechanism's own name for
+			// the refused proof.
 			logger?.warn(
-				{ reason, scheme, site: "protected_resource_binding" },
+				{ rejection, scheme, site: "protected_resource_binding" },
 				"sender_constraint_rejected",
 			);
 			res.setHeader("WWW-Authenticate", `${challenge} error="invalid_token"`);
@@ -179,8 +184,15 @@ export const protectedResourceBindingMw = ({
 					res.status(503).json(errorEnvelope(code, unavailable));
 					return;
 				}
+				// The same verdict line the token endpoint writes: the code the
+				// refusal carries, its `reason`, and its projection
+				// (`verdictLogFields`).
 				logger?.warn(
-					{ mechanism: mechanism.kind, err: loggableError(err) },
+					{
+						mechanism: mechanism.kind,
+						...(code !== undefined ? { code } : {}),
+						...verdictLogFields(err),
+					},
 					"protected_resource_binding_proof_invalid",
 				);
 				const retryInstruction = retryInstructionOf(err);

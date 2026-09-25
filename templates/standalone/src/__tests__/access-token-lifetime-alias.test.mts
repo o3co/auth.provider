@@ -27,7 +27,7 @@
  */
 
 import { fileURLToPath } from "node:url";
-import { type AppConfig, AppConfigSchema } from "@o3co/auth-provider-core";
+import { type AppConfig, AppConfigSchema, type Logger } from "@o3co/auth-provider-core";
 import { parseFile } from "@o3co/ts.hocon";
 import { validate } from "@o3co/ts.hocon/zod";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -54,14 +54,46 @@ function loadShipped(env: Record<string, string> = {}): AppConfig {
 	);
 }
 
-/** Every console warning `buildModules` emits about the deprecated key. */
-function aliasWarnings(config: AppConfig): string[] {
-	const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-	buildModules(config);
-	return warn.mock.calls
-		.map((call) => String(call[0]))
-		.filter((message) => message.includes("oauth.accessToken.expiresIn"));
+/** What `buildModules` hands the logger it is given, per level. */
+function logged(config: AppConfig): Array<{ level: string; args: unknown[] }> {
+	const calls: Array<{ level: string; args: unknown[] }> = [];
+	const record =
+		(level: string) =>
+		(...args: unknown[]): void => {
+			calls.push({ level, args });
+		};
+	const logger: Logger = {
+		trace: record("trace"),
+		debug: record("debug"),
+		info: record("info"),
+		warn: record("warn"),
+		error: record("error"),
+		fatal: record("fatal"),
+		child: () => logger,
+	};
+	buildModules(config, { logger });
+	return calls;
 }
+
+/** The one line the alias is reported by: object-first, an event name, at warn. */
+const ALIAS_WARNING = {
+	level: "warn",
+	args: [
+		{
+			key: "oauth.accessToken.expiresIn",
+			env: "OAUTH_ACCESS_TOKEN_EXPIRES_IN",
+			replacement: "oauth.accessToken.defaultExpiresIn",
+			replacementEnv: "OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN",
+		},
+		"config_key_deprecated",
+	],
+};
+
+/** Every line `buildModules` writes about the deprecated key. */
+const aliasWarnings = (config: AppConfig) =>
+	logged(config).filter(
+		({ args }) => (args[0] as { key?: unknown } | undefined)?.key === "oauth.accessToken.expiresIn",
+	);
 
 describe("the deprecated access-token lifetime alias", () => {
 	afterEach(() => {
@@ -81,12 +113,8 @@ describe("the deprecated access-token lifetime alias", () => {
 		);
 	});
 
-	it("warns once when OAUTH_ACCESS_TOKEN_EXPIRES_IN still decides the default", () => {
-		const warnings = aliasWarnings(loadShipped({ OAUTH_ACCESS_TOKEN_EXPIRES_IN: "900" }));
-		expect(warnings).toHaveLength(1);
-		expect(warnings[0]).toMatch(/deprecated/);
-		expect(warnings[0]).toMatch(/oauth\.accessToken\.defaultExpiresIn/);
-		expect(warnings[0]).toMatch(/OAUTH_ACCESS_TOKEN_DEFAULT_EXPIRES_IN/);
+	it("warns once, object-first, when OAUTH_ACCESS_TOKEN_EXPIRES_IN still decides the default", () => {
+		expect(logged(loadShipped({ OAUTH_ACCESS_TOKEN_EXPIRES_IN: "900" }))).toEqual([ALIAS_WARNING]);
 	});
 
 	it("warns for a hand-built configuration that overrides only the old key", () => {
@@ -96,6 +124,12 @@ describe("the deprecated access-token lifetime alias", () => {
 				...config,
 				oauth: { ...config.oauth, accessToken: { expiresIn: 900 } },
 			}),
-		).toHaveLength(1);
+		).toEqual([ALIAS_WARNING]);
+	});
+
+	it("writes the same line through consoleLogger when no logger is handed over", () => {
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		buildModules(loadShipped({ OAUTH_ACCESS_TOKEN_EXPIRES_IN: "900" }));
+		expect(warn.mock.calls).toEqual([ALIAS_WARNING.args]);
 	});
 });

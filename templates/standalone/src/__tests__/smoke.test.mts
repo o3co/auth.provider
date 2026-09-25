@@ -618,27 +618,46 @@ describe("standalone smoke test", () => {
 			expect(names).toContain("standalone:redis-clients");
 		});
 
-		it("buildModules honors legacy repositories.code.type='redis' with deprecation warn when oauth.code.adapter is absent", () => {
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-			try {
-				const legacyConfig = {
-					...config,
-					oauth: { ...config.oauth, code: undefined },
-					repositories: {
-						...config.repositories,
-						code: { type: "redis" as const, defaultExpiresIn: 600 },
+		it("buildModules honors legacy repositories.code.type='redis' with one object-first deprecation warn when oauth.code.adapter is absent", () => {
+			const warn = vi.fn();
+			const logger = {
+				trace: vi.fn(),
+				debug: vi.fn(),
+				info: vi.fn(),
+				warn,
+				error: vi.fn(),
+				fatal: vi.fn(),
+				child: () => logger,
+			};
+			const legacyConfig = {
+				...config,
+				oauth: { ...config.oauth, code: undefined },
+				repositories: {
+					...config.repositories,
+					code: { type: "redis" as const, defaultExpiresIn: 600 },
+				},
+			};
+			const modules = buildModules(legacyConfig, {
+				keyStoreModule: testKeyStoreModule,
+				repositoriesModule: testRepositoriesModule,
+				refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
+				logger,
+			});
+			const names = modules.map((m) => m.name);
+			expect(names).toContain("redis-code-repository");
+			expect(warn.mock.calls).toEqual([
+				[
+					{
+						key: "repositories.code.type",
+						env: "CLIENT_CODE_TYPE",
+						replacement: "oauth.code.adapter",
+						replacementEnv: "OAUTH_CODE_ADAPTER",
 					},
-				};
-				const modules = buildModules(legacyConfig, {
-					keyStoreModule: testKeyStoreModule,
-					repositoriesModule: testRepositoriesModule,
-					refreshTokenFamilyModules: [memoryRefreshTokenFamilyStoreModule],
-				});
-				const names = modules.map((m) => m.name);
-				expect(names).toContain("redis-code-repository");
-				expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("repositories.code.type"));
-			} finally {
-				warnSpy.mockRestore();
+					"config_key_deprecated",
+				],
+			]);
+			for (const level of ["trace", "debug", "info", "error", "fatal"] as const) {
+				expect(logger[level]).not.toHaveBeenCalled();
 			}
 		});
 

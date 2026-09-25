@@ -510,12 +510,22 @@ describe("#473: the Redis federation store's plaintext guard, booted from the sh
 		const config = resolveConfig({ ...PLAINTEXT_ENV, DEPLOYMENT_MODE: "single" });
 		handleRef = await boot(config, "development");
 		expect(handleRef.components.federationTokenStore?.kind).toBe("redis");
-		expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("allow-plaintext"));
+		expect(warnSpy).toHaveBeenCalledWith(
+			{ store: "federation-tokens", mode: "allow-plaintext" },
+			"federation_store_plaintext",
+		);
 	});
 
-	it("keeps the FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch under multi, at CRITICAL", async () => {
+	it("keeps the FEDERATION_TOKENS_ALLOW_INSECURE=1 escape hatch under multi, logged at error", async () => {
 		process.env.FEDERATION_TOKENS_ALLOW_INSECURE = "1";
 		handleRef = await boot(resolveConfig(PLAINTEXT_ENV), "development");
-		expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining("CRITICAL"));
+		expect(errorSpy).toHaveBeenCalledWith(
+			expect.objectContaining({
+				store: "federation-tokens",
+				deploymentMode: "multi",
+				override: "FEDERATION_TOKENS_ALLOW_INSECURE",
+			}),
+			"federation_store_plaintext_override",
+		);
 	});
 });

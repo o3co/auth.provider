@@ -58,6 +58,11 @@ const configSchema = z.object({
  *
  * Recurring issue class 2: `requires` includes `"config"` because
  * `deps.config` is read in `provides`.
+ *
+ * The optional `logger` slot is handed to the two stores that log — the
+ * user-session store and the RP registry, which report a stored record they
+ * cannot read (`user_session_corrupt_envelope`,
+ * `session_rp_registry_corrupt_envelope`); `consoleLogger` when it is empty.
  */
 export const redisSessionStoresModule = defineModule({
 	name: "redisSessionStores",
@@ -70,6 +75,7 @@ export const redisSessionStoresModule = defineModule({
 		"subjectRevocationClient",
 		"config",
 	] as const,
+	optional: ["logger"] as const,
 	configSchema,
 	provides: {
 		userSessionStore: (deps) => {
@@ -78,6 +84,7 @@ export const redisSessionStoresModule = defineModule({
 			return createRedisUserSessionStore({
 				client: deps.userSessionStoreClient,
 				keyPrefix: `${cfg.keyPrefix}us:`,
+				...(deps.logger !== undefined ? { logger: deps.logger } : {}),
 			});
 		},
 		sessionRPRegistry: (deps) => {
@@ -86,6 +93,7 @@ export const redisSessionStoresModule = defineModule({
 			return createRedisSessionRPRegistry({
 				client: deps.sessionRPRegistryClient,
 				keyPrefix: `${cfg.keyPrefix}rp:`,
+				...(deps.logger !== undefined ? { logger: deps.logger } : {}),
 			});
 		},
 		sessionFamilyIndex: (deps) => {

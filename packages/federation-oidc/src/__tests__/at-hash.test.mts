@@ -53,4 +53,20 @@ describe("at_hash (OIDC Core §3.3.2.11, #524)", () => {
 			/at_hash/,
 		);
 	});
+
+	it("refuses an alg that names no hash in its own words, wrapping no error of its own", () => {
+		// The alg is checked, not caught: the one error on this path is the
+		// refusal itself, so there is no library text to flatten or to carry.
+		let thrown: unknown;
+		try {
+			verifyAtHash("test", unsignedJwt({ alg: "HS9" }), "token", "x");
+		} catch (err) {
+			thrown = err;
+		}
+		expect(thrown).toBeInstanceOf(Error);
+		expect((thrown as Error).message).toBe(
+			'test: at_hash cannot be verified for a JWS alg of "HS9"',
+		);
+		expect((thrown as Error).cause).toBeUndefined();
+	});
 });

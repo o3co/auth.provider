@@ -154,9 +154,13 @@ describe("createRedisSidHash", () => {
 	it("setField surfaces a queued command's failure instead of reporting success", async () => {
 		const h = createRedisSidHash({ client, keyPrefix: prefix("wrongtype") });
 		await raw.set(`${prefix("wrongtype")}sid-1`, "not-a-hash");
-		await expect(h.setField("sid-1", "id-a", JSON.stringify({ x: 1 }), FUTURE())).rejects.toThrow(
-			/WRONGTYPE/,
-		);
+		// Redis's refusal on the cause, not in the message (see ioredis.mts).
+		await expect(
+			h.setField("sid-1", "id-a", JSON.stringify({ x: 1 }), FUTURE()),
+		).rejects.toMatchObject({
+			message: expect.not.stringContaining("WRONGTYPE"),
+			cause: expect.objectContaining({ message: expect.stringMatching(/^WRONGTYPE /) }),
+		});
 	});
 
 	// #291: `listValues` walks HSCAN cursors instead of issuing one HVALS.
