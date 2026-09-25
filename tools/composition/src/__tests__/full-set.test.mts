@@ -923,6 +923,49 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 		},
 	},
 	{
+		module: "device-grant",
+		slot: "subjectRevocation",
+		surface: "POST /oauth/device/verification (the sessions boundary)",
+		run: async (app, outage) => {
+			const started = await request(app)
+				.post("/oauth/device_authorization")
+				.type("form")
+				.send({ client_id: TV.id });
+			const { agent, header, token } = await signedIn(app);
+			outage.down = true;
+			return agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: started.body.user_code });
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "device_verification_session_liveness_unavailable",
+	},
+	{
+		module: "device-grant",
+		slot: "subjectRevocation",
+		surface: "the device's poll at /oauth/token (the sessions boundary)",
+		run: async (app, outage) => {
+			const started = await request(app)
+				.post("/oauth/device_authorization")
+				.type("form")
+				.send({ client_id: TV.id });
+			const { agent, header, token } = await signedIn(app);
+			await agent
+				.post("/oauth/device/verification")
+				.set(header, token)
+				.send({ action: "approve", user_code: started.body.user_code });
+			outage.down = true;
+			return request(app).post("/oauth/token").type("form").send({
+				grant_type: DEVICE_CODE_GRANT_TYPE,
+				client_id: TV.id,
+				device_code: started.body.device_code,
+			});
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "device_code_grant_revocation_unavailable",
+	},
+	{
 		module: "oauth-token-exchange",
 		slot: "userSessionStore",
 		surface: "the subject_token's session check",
