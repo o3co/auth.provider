@@ -637,16 +637,16 @@ export type BootStage =
 	| "assembleApp";
 
 // ---------------------------------------------------------------------------
-// BootErrorReason — 27 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375)
+// BootErrorReason — 26 literals, Per A2-β §6.1 (+ #271, #363, module-factory-not-called; #277's reason was folded into #363's by #375; the MFA ADR's D3 removed mfa-partial-wiring)
 // ---------------------------------------------------------------------------
 
 /**
  * All possible reasons a BootError can be thrown. Each literal corresponds to
  * one validation or runtime failure the boot planner can detect. There are
- * exactly 27 reasons.
+ * exactly 26 reasons.
  *
- * Per A2-β §6.1. Extended by issue #101 (mfa-partial-wiring,
- * federation-stores-incomplete), the OIDC discovery aggregator
+ * Per A2-β §6.1. Extended by issue #101 (federation-stores-incomplete), the
+ * OIDC discovery aggregator
  * (discovery-document-invalid), #363 (component-absence-undeclared —
  * which #375 also folded #277's retired access-token-revocation-unenforceable
  * reason into), and module-factory-not-called (a `modules` entry that is the
@@ -675,7 +675,6 @@ export type BootErrorReason =
 	| "route-order-target-missing"
 	| "federation-redirect-policy-unpaired"
 	| "grant-policy-without-issuer"
-	| "mfa-partial-wiring"
 	| "federation-stores-incomplete"
 	| "discovery-document-invalid"
 	| "replica-unsafe-adapter"
@@ -980,12 +979,6 @@ export interface GrantPolicyWithoutIssuerDetails {
 	readonly providedBy: string;
 }
 
-/** Per A2-β §6.1 amendment 2026-05 (issue #101). */
-export interface MfaPartialWiringDetails {
-	readonly reason: "mfa-partial-wiring";
-	readonly missing: readonly ("mfaProviderFactory" | "mfaTransactionStore")[];
-}
-
 /**
  * Per A2-β §6.1 amendment 2026-05 (issue #101 TODO-F-1); refreshTokenFamilyRevocation
  * added per #103 review (alignment with route-level gating in
@@ -1059,10 +1052,10 @@ export interface ComponentAbsenceUndeclaredDetails {
  *
  * Per A2-β §6.1, extended by A5 §8.2 and the Phase 9 boot-validator
  * restoration (A4 four-store + CP-20 issuer guard). Extended by issue #101
- * (mfa-partial-wiring, federation-stores-incomplete), the OIDC discovery
- * aggregator (discovery-document-invalid), #271 (replica-unsafe-adapter),
- * #363 (component-absence-undeclared) and module-factory-not-called — one
- * member per `BootErrorReason`, 27 in all.
+ * (federation-stores-incomplete), the OIDC discovery aggregator
+ * (discovery-document-invalid), #271 (replica-unsafe-adapter), #363
+ * (component-absence-undeclared) and module-factory-not-called — one member
+ * per `BootErrorReason`, 26 in all.
  */
 export type BootErrorDetails =
 	| ModuleFactoryNotCalledDetails
@@ -1087,7 +1080,6 @@ export type BootErrorDetails =
 	| RouteOrderTargetMissingDetails
 	| FederationRedirectPolicyUnpairedDetails
 	| GrantPolicyWithoutIssuerDetails
-	| MfaPartialWiringDetails
 	| FederationStoresIncompleteDetails
 	| DiscoveryDocumentInvalidDetails
 	| ReplicaUnsafeAdapterDetails

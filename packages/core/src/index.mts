@@ -477,26 +477,20 @@ export {
 	type LoggableError,
 	loggableError,
 } from "./logging/loggableError.mjs";
-export { createMfaProviderFactory } from "./mfa/factory.mjs";
-export type { MfaRouteDeps } from "./mfa/route.mjs";
-export { createMfaRouter } from "./mfa/route.mjs";
-// MFA
+// MFA — the second-factor contract (the manifest group below exports its
+// MfaFactor name)
 export type {
-	EnrollResult,
-	MfaChallenge,
-	MfaCoordinator,
-	MfaIssueContext,
-	MfaPendingTransaction,
-	MfaProvider,
-	MfaProviderFactory,
-	MfaResumeState,
-	MfaTransactionStore,
-	MfaVerifyFailureReason,
-	MfaVerifyResult,
-	SupportsEnrollment,
-	SupportsRevocation,
-} from "./mfa/types.mjs";
-export { supportsEnrollment, supportsRevocation } from "./mfa/types.mjs";
+	MfaCeremonyContext,
+	MfaChallengeContext,
+	MfaEnrolledFactor,
+	MfaEnrollmentCompletion,
+	MfaEnrollmentCompletionContext,
+	MfaEnrollmentContext,
+	MfaFactorData,
+	MfaFactorState,
+	MfaVerification,
+	MfaVerifyContext,
+} from "./mfa/factor.mjs";
 // Middleware — CORS for the browser-facing OAuth surface (#500)
 export {
 	browserFacingCorsRoutes,
@@ -552,6 +546,7 @@ export type {
 	// @o3co/auth-provider-core/modules/manifest directly.
 	MfaFactor,
 	MfaFactorFactory,
+	MfaFactorResolver,
 	Module,
 	ModuleSpec,
 	OidcDiscoveryContributionFactory,

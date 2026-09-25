@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 The OAuth 2.0 / OpenID Connect authorization-server endpoints of [auth.provider](../../README.md): the HTTP surface under `/oauth`, the built-in grant types, client authentication, and the logout cascade.
 
@@ -259,7 +259,7 @@ This is an OAuth 2.0 authorization server with the OIDC pieces a **first-party**
 
 A native app needs two things from the OP for a sensitive action: to **force a fresh authentication** (a payment, a credential change) and to **know how the user authenticated** (passkey, password, password plus a second factor), so it — or the resource server — can require a level. Both rest on what the session records at login.
 
-**What a session records.** `UserSession.authTime` and `UserSession.amr` — RFC 8176 values written by the login path: `["pwd"]` for `POST /session/login`; the upstream IdP's `amr` (when the provider surfaces it on the profile) plus the deployment-defined `fed` for a federation callback; the WebAuthn grant, which mints tokens without a session, stamps `amr: ["hwk"]` on its access token directly. RFC 8176 registers no value for "federated", and OIDC Core §2 leaves `amr` values to the deployment, so `fed` is documented here rather than borrowed. A composition that resumes a login after `POST /auth/mfa/verify` (the MFA route is not composed in this repository; its resume handlers are the deployment's) records `mfa` — and the factor's own value, `otp` say — in the session it creates; `CreateUserSessionInput.amr` is the seam.
+**What a session records.** `UserSession.authTime` and `UserSession.amr` — RFC 8176 values written by the login path: `["pwd"]` for `POST /session/login`; the upstream IdP's `amr` (when the provider surfaces it on the profile) plus the deployment-defined `fed` for a federation callback; the WebAuthn grant, which mints tokens without a session, stamps `amr: ["hwk"]` on its access token directly. RFC 8176 registers no value for "federated", and OIDC Core §2 leaves `amr` values to the deployment, so `fed` is documented here rather than borrowed.
 
 **What the tokens carry.** The id_token has `auth_time` always, `amr` when the session recorded one, and `acr` when `/authorize` satisfied an `acr_values` request. The access token mirrors `amr` and `acr` when present, so `auth.policy-verifier` or a resource server can gate on them without an id_token — and **keeps mirroring them across refreshes**: the `authorization_code` grant stamps both on the refresh token as well, and the `refresh_token` grant carries them from the presented token onto the access and refresh tokens it mints, since a refresh does not repeat the authentication (OIDC Core §12.2 treats `auth_time` the same way). The `session` grant mirrors the tracked session's `amr` (it has no `acr_values` negotiation, so no `acr`), and the passkey grant (`@o3co/auth-provider-webauthn`) stamps its `amr: ["hwk"]` on its refresh token as well as its access token. Every grant reads the claims in one shape — `amr` a non-empty array of non-empty strings, `acr` a non-empty string (core's `wellFormedAmr` / `wellFormedAcr`) — and omits anything else, so a session that recorded `amr: []` stamps no `amr` on any token rather than one that vanishes at the first refresh. A refresh token that carries neither yields tokens that carry neither.
 

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-core
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 ## Responsibility
 
@@ -406,10 +406,9 @@ Five optional extension points: a slot or contribution kind a composition root f
 
 #### MFA
 
-- `MfaProvider`, with the optional `SupportsEnrollment` / `SupportsRevocation` capabilities, the guards `supportsEnrollment()` / `supportsRevocation()`, and the `MfaCoordinator` / `MfaTransactionStore` types — [`src/mfa/types.mts`](src/mfa/types.mts); the factory `createMfaProviderFactory()` — [`src/mfa/factory.mts`](src/mfa/factory.mts).
-- `createMfaRouter(express, deps)` builds `POST /auth/mfa/verify { transaction_id, proof }`: it loads the pending transaction from the `MfaTransactionStore`, verifies the proof with the provider of the transaction's `providerKind`, and hands the resumed flow to the `onAuthorizeResume` / `onFederationResume` / `onLoginResume` callbacks you supply.
-- Core provides the port and the router and nothing that uses them. No route in this repository consults MFA: `/oauth/authorize`, the session login and the federation callback never call `MfaCoordinator.listEnrolled` or start a transaction, nothing mounts `createMfaRouter`, and no product code reads the `mfaFactors` contributions boot collects. A composition root that wants MFA starts the transaction in its own login flow, mounts the router and supplies the callbacks.
-- Boot refuses a composition that provides `mfaCoordinator` without both `mfaProviderFactory` and `mfaTransactionStore` (`mfa-partial-wiring`).
+The ports of multi-factor authentication, as [the MFA ADR](docs/adr/2026-09-25-multi-factor-authentication.md) designs them. Nothing in this repository consults them yet: `POST /session/login`, `/authorize` and the federation callback ask for no second factor.
+
+- `MfaFactor`, the contract a second factor implements, and what it is handed — [`src/mfa/factor.mts`](src/mfa/factor.mts). A factor never sees a key, a store or a transaction: it is handed its records' data opened, and the state it keeps between two requests of one ceremony. A package contributes one as `contributes.mfaFactors`, keyed by its kind (`MfaFactorFactory`); a factory answers `null` when its configuration switches the factor off. Boot projects the contributions through the synthetic key `mfaFactorResolver`, which leaves out a kind that answered `null`; that kind stays claimed, so a second contribution of it is a duplicate. Boot assembles a synthetic key after the `provides` factories have run, so a module reads the resolver from a contribution factory.
 - No factor is bundled; `@o3co/auth-provider-webauthn` ships passkeys as a grant (`contributes.grants`), not as an `mfaFactors` contribution.
 
 #### Audit

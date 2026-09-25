@@ -19,6 +19,7 @@ import type { AuditSink } from "../audit/types.mjs";
 import type { FederationProvider as ConcreteFederationProvider } from "../federations/types.mjs";
 import type { GrantHandler as ConcreteGrantHandler } from "../grants/types.mjs";
 import type { MfaFactor as ConcreteMfaFactor } from "../mfa/factor.mjs";
+import type { Contributed } from "../modules/manifest/contributed.mjs";
 import type {
 	AuditHook,
 	ExchangeTokenValidator,
@@ -28,7 +29,6 @@ import type {
 	MfaFactor,
 	MfaFactorFactory,
 } from "../modules/manifest/contributes-map.mjs";
-import type { Contributed } from "../modules/manifest/contributed.mjs";
 import { defineModule } from "../modules/manifest/define-module.mjs";
 import type { GrantPolicyHook } from "../policy/types.mjs";
 import type { ExchangeTokenValidator as ConcreteExchangeTokenValidator } from "../token-exchange/validator.mjs";
