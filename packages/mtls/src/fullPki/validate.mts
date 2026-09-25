@@ -110,7 +110,7 @@
  */
 
 import { X509Certificate } from "node:crypto";
-import { type LoggableError, loggableError } from "@o3co/auth-provider-core";
+import { loggableError } from "@o3co/auth-provider-core";
 import * as pkijs from "pkijs";
 import { checkClientLeafProfile } from "../pki.mjs";
 import { type AlgorithmPolicy, checkAlgorithmPolicy } from "./algorithms.mjs";
@@ -180,9 +180,10 @@ export interface FullPkiOptions {
 
 /**
  * The verdict. A refusal names its `step` and a `detail` in this module's own
- * words; `err` is the projection (core's `loggableError`) of a library error
- * behind it, when one threw — pkijs, WebCrypto, the platform fetch — never
- * its text. Whoever logs the refusal logs `err` beside `detail`.
+ * words; `cause` is the library error behind it, when one threw — pkijs,
+ * WebCrypto, the platform fetch — as it was thrown, and never its text in
+ * `detail`. Whoever logs the refusal logs core's `loggableError` projection of
+ * `cause` as `err`, and nothing else of it.
  */
 export type FullPkiResult =
 	| { readonly ok: true }
@@ -190,7 +191,7 @@ export type FullPkiResult =
 			readonly ok: false;
 			readonly step: string;
 			readonly detail: string;
-			readonly err?: LoggableError;
+			readonly cause?: unknown;
 	  };
 
 export interface FullPkiValidator {
@@ -224,13 +225,16 @@ type RevocationOutcome =
 			readonly kind: "unavailable";
 			readonly reason: string;
 			readonly detail: string;
-			/** The projection of the library error behind `reason`, when one threw. */
-			readonly err?: LoggableError;
+			/** The library error behind `reason`, when one threw. */
+			readonly cause?: unknown;
 	  };
 
-/** `{ err }` when there is one, for a spread into a result or a log line. */
-const withErr = (err: LoggableError | undefined): { err?: LoggableError } =>
-	err !== undefined ? { err } : {};
+/** `{ cause }` when there is one, for a spread into an outcome or a result. */
+const withCause = (cause: unknown): { cause?: unknown } => (cause !== undefined ? { cause } : {});
+
+/** `{ err }`, the projection of `cause`, when there is one — for a log line. */
+const errOf = (cause: unknown): { err?: ReturnType<typeof loggableError> } =>
+	cause !== undefined ? { err: loggableError(cause) } : {};
 
 const toPkijs = (certificate: X509Certificate): pkijs.Certificate =>
 	pkijs.Certificate.fromBER(certificate.raw);
@@ -273,31 +277,63 @@ const checkPathLength = (path: readonly pkijs.Certificate[]): FullPkiResult => {
 };
 
 /**
- * Map the engine's outcome onto a short step name the audit trail can carry.
- *
- * The engine is only ever run without revocation material, so its revocation
- * codes (11–13) cannot occur here; revocation outcomes are named by the
- * local pass below.
+ * This package's words for the result codes the engine can answer with here:
+ * pkijs's own checks (`resultCode` 3–10, 21, 41, 42, 98, 99). The engine runs
+ * without revocation material, so its revocation codes (11–13) cannot occur;
+ * revocation outcomes are named by the local pass below. The engine's
+ * `resultMessage` is never used — it is the library's text, and for an
+ * error it caught, that error's message.
  */
-const describeEngineFailure = (result: {
-	resultCode: number;
-	resultMessage: string;
-}): { step: string; detail: string } => {
-	// `buildPath` throws a plain `Error` when no path reaches an anchor, and
-	// the engine maps anything that is not its own `ChainValidationError` onto
-	// `ChainValidationCode.unknown`. The message is therefore the only way to
-	// tell "untrusted anchor" — the single most common misconfiguration — from
-	// a genuine internal failure, so it is matched alongside the codes.
-	if (/no (valid )?certificate path/i.test(result.resultMessage)) {
-		return { step: "no path to trust anchor", detail: result.resultMessage };
+const ENGINE_FAILURE_DETAIL: Readonly<Record<number, string>> = {
+	3: "a CA certificate on the path asserts keyCertSign without basicConstraints",
+	4: "a CA certificate on the path lacks the keyCertSign key usage",
+	5: "an intermediate certificate lacks the cRLSign key usage",
+	6: "a critical extension on the path could not be parsed",
+	7: "the chain holds more than one end-entity certificate",
+	8: "a certificate on the path is not yet valid or has expired",
+	9: "the path is too short",
+	10: "issuer and subject names on the path do not chain",
+	21: "a name form a name constraint requires is missing",
+	41: "a name on the path is outside the permitted subtrees of a name constraint",
+	42: "a name on the path is inside an excluded subtree of a name constraint",
+	98: "a certificate policy mapping is prohibited on the path",
+	99: "a certificate policy mapping maps anyPolicy",
+};
+
+/**
+ * Map the engine's outcome onto a short step name the audit trail can carry,
+ * a detail in this package's words, and the Error the engine caught, if any.
+ *
+ * "No path to a trust anchor" — the single most common misconfiguration —
+ * arrives two ways: as pkijs's own `ChainValidationError` (`noPath`,
+ * `noValidPath`), or as a plain `Error` its path builder throws when a
+ * certificate has no issuer among those it was given, which the engine maps
+ * onto `unknown`. The second is recognised by `noIssuer` — the issuer lookup
+ * came back empty, which the validator observes through the engine's
+ * `findIssuer` hook — not by the message, which is pkijs's text.
+ */
+const describeEngineFailure = (
+	result: { readonly resultCode: number; readonly error?: unknown },
+	noIssuer: boolean,
+): { step: string; detail: string; cause?: unknown } => {
+	const cause = result.error !== undefined ? { cause: result.error } : {};
+	if (
+		noIssuer ||
+		result.resultCode === pkijs.ChainValidationCode.noPath ||
+		result.resultCode === pkijs.ChainValidationCode.noValidPath
+	) {
+		return {
+			step: "no path to trust anchor",
+			detail: "no certificate path reaches a configured trust anchor",
+			...cause,
+		};
 	}
-	switch (result.resultCode) {
-		case 60:
-		case 97:
-			return { step: "no path to trust anchor", detail: result.resultMessage };
-		default:
-			return { step: "path validation failed", detail: result.resultMessage };
-	}
+	const detail =
+		ENGINE_FAILURE_DETAIL[result.resultCode] ??
+		(result.resultCode === pkijs.ChainValidationCode.unknown
+			? "the path validation engine failed"
+			: `the path validation engine refused the path (code ${result.resultCode})`);
+	return { step: "path validation failed", detail, ...cause };
 };
 
 export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidator => {
@@ -363,7 +399,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 											kind: "unavailable",
 											reason: last.reason,
 											detail: describeUnavailable(own.unavailable),
-											...withErr(last.err),
+											...withCause(last.cause),
 										};
 									}
 									return own;
@@ -386,7 +422,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				kind: "unavailable",
 				reason: lookup.reason,
 				detail: lookup.detail,
-				...withErr(lookup.err),
+				...withCause(lookup.cause),
 			};
 		}
 		// Every CRL here verified against `issuer`, whose subject is this
@@ -414,7 +450,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				kind: "unavailable",
 				reason: lookup.reason,
 				detail: lookup.detail,
-				...withErr(lookup.err),
+				...withCause(lookup.cause),
 			};
 		}
 		if (lookup.responderUnchecked && !uncheckedResponders.has(lookup.responder)) {
@@ -483,7 +519,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					subject: toNode(certificate).subject,
 					reason: ocsp.reason,
 					detail: ocsp.detail,
-					...withErr(ocsp.err),
+					...errOf(ocsp.cause),
 				},
 				"mtls_revocation_ocsp_fallback",
 			);
@@ -496,7 +532,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			kind: "unavailable",
 			reason: crl.reason,
 			detail: `ocsp: ${ocsp.reason} (${ocsp.detail}); crl: ${crl.reason} (${crl.detail})`,
-			...withErr(crl.err),
+			...withCause(crl.cause),
 		};
 	};
 
@@ -533,10 +569,24 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			// `passedWhenNotRevValues: true` here is not a policy choice — no CRLs
 			// are supplied, so the engine's revocation block does not run at all.
 			// The flag only keeps the engine from objecting to their absence.
+			let noIssuer = false;
 			const engine = new pkijs.CertificateChainValidationEngine({
 				trustedCerts,
 				certs,
 				checkDate: now,
+				// The default lookup, observed: an empty answer is the one case in
+				// which the path builder throws its plain, code-less Error, and it
+				// is how "no path to a trust anchor" is told apart from any other
+				// Error the engine catches (`describeEngineFailure`).
+				findIssuer: async (certificate, validationEngine, crypto) => {
+					const issuers = await validationEngine.defaultFindIssuer(
+						certificate,
+						validationEngine,
+						crypto,
+					);
+					if (issuers.length === 0) noIssuer = true;
+					return issuers;
+				},
 			});
 
 			let first: Awaited<ReturnType<pkijs.CertificateChainValidationEngine["verify"]>>;
@@ -548,13 +598,12 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 				return {
 					ok: false,
 					step: "path validation failed",
-					detail: "the path validation engine threw",
-					err: loggableError(err),
+					detail: "the path validation engine failed",
+					cause: err,
 				};
 			}
 			if (!first.result) {
-				const { step, detail } = describeEngineFailure(first);
-				return { ok: false, step, detail };
+				return { ok: false, ...describeEngineFailure(first, noIssuer) };
 			}
 
 			const path = first.certificatePath ?? [];
@@ -659,14 +708,14 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					const subject = toNode(certificate).subject;
 					if (revocation.onUnavailable === "reject") {
 						options.logger?.warn(
-							{ subject, reason: outcome.reason, detail: outcome.detail, ...withErr(outcome.err) },
+							{ subject, reason: outcome.reason, detail: outcome.detail, ...errOf(outcome.cause) },
 							"mtls_revocation_unavailable_rejected",
 						);
 						return {
 							ok: false,
 							step: "revocation status unavailable",
 							detail: `${subject}: ${outcome.reason} — ${outcome.detail}`,
-							...withErr(outcome.err),
+							...withCause(outcome.cause),
 						};
 					}
 					// Soft-fail. Logged at warn, never silently: an operator who chose
@@ -674,7 +723,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					// permanent soft-fail is an unrevocable PKI wearing a revocation
 					// configuration.
 					options.logger?.warn(
-						{ subject, reason: outcome.reason, detail: outcome.detail, ...withErr(outcome.err) },
+						{ subject, reason: outcome.reason, detail: outcome.detail, ...errOf(outcome.cause) },
 						"mtls_revocation_unavailable_allowed",
 					);
 					continue;
@@ -701,18 +750,18 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					const detail = describeUnavailable(outcome.unavailable);
 					if (revocation.onUnavailable === "reject") {
 						options.logger?.warn(
-							{ subject, reason: last.reason, detail, ...withErr(last.err) },
+							{ subject, reason: last.reason, detail, ...errOf(last.cause) },
 							"mtls_revocation_unavailable_rejected",
 						);
 						return {
 							ok: false,
 							step: "revocation status unavailable",
 							detail: `${subject}: ${last.reason} — ${detail}`,
-							...withErr(last.err),
+							...withCause(last.cause),
 						};
 					}
 					options.logger?.warn(
-						{ subject, reason: last.reason, detail, ...withErr(last.err) },
+						{ subject, reason: last.reason, detail, ...errOf(last.cause) },
 						"mtls_revocation_partially_unavailable_allowed",
 					);
 				}

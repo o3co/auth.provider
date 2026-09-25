@@ -167,7 +167,7 @@ describe("guarded fetch — destination", () => {
 			ok: false,
 			reason: "network_error",
 			detail: "fetch failed",
-			err: { name: "TypeError", cause: { name: "Error" } },
+			cause: expect.any(TypeError),
 		});
 	});
 

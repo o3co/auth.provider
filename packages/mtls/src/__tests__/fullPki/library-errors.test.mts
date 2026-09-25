@@ -220,7 +220,7 @@ describe("a CRL pkijs cannot use", () => {
 		);
 	});
 
-	it("the same under 'reject': the refusal carries the fixed detail and the projection", async () => {
+	it("the same under 'reject': the refusal carries the fixed detail, pkijs's error as its cause", async () => {
 		const { root, int, leaf } = await chain();
 		const logger = recordingLogger();
 		const result = await validator(
@@ -234,7 +234,7 @@ describe("a CRL pkijs cannot use", () => {
 			ok: false,
 			step: "revocation status unavailable",
 			detail: `CN=client: unparseable — ${INT_CRL_URL}: unparseable (not a DER CRL)`,
-			err: projectionOf("AsnError"),
+			cause: expect.objectContaining({ name: "AsnError" }),
 		});
 	});
 
@@ -387,13 +387,13 @@ const guarded = () =>
 	createGuardedFetch({ allowedHosts: ["127.0.0.1"], timeoutMs: 2_000, maxBytes: 1_024 });
 
 describe("the guarded fetch, against the platform fetch", () => {
-	it("a refused connection is 'network_error' named by its code, the fetch error as the projection", async () => {
+	it("a refused connection is 'network_error' named by its code, the fetch error as the cause", async () => {
 		const outcome = await guarded()(`http://127.0.0.1:${await closedPort()}/int.crl`);
 		expect(outcome).toEqual({
 			ok: false,
 			reason: "network_error",
 			detail: "ECONNREFUSED",
-			err: expect.objectContaining({
+			cause: expect.objectContaining({
 				name: "TypeError",
 				cause: expect.objectContaining({ code: "ECONNREFUSED" }),
 			}),

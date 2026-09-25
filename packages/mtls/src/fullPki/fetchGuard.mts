@@ -58,11 +58,11 @@
  *
  * A reason from a closed set (`FetchRejection`) and a `detail` in this
  * module's own words — a status, a size, a transport's error code. When the
- * platform fetch threw, its error rides beside them as `err`, core's
- * `loggableError` projection, for the log line that reports the refusal.
- * Nothing is read from an error's message, and none of it is copied into
- * `detail`: the message is the platform's reading of what a network path or
- * a responder did.
+ * platform fetch threw, its error rides beside them as `cause`, as it was
+ * thrown; the log line that reports the refusal carries core's
+ * `loggableError` projection of it. Nothing is read from an error's message,
+ * and none of it is copied into `detail`: the message is the platform's
+ * reading of what a network path or a responder did.
  *
  * ### GET and POST
  *
@@ -80,8 +80,6 @@
  * allowlist. Every one of those defaults is wrong here, and each is wrong in
  * a direction that fails open.
  */
-
-import { type LoggableError, loggableError } from "@o3co/auth-provider-core";
 
 /** Why a fetch did not produce bytes. Values are stable — audit logs read them. */
 export type FetchRejection =
@@ -102,8 +100,8 @@ export type FetchOutcome =
 			readonly ok: false;
 			readonly reason: FetchRejection;
 			readonly detail: string;
-			/** The platform fetch's error, projected, when it threw one. */
-			readonly err?: LoggableError;
+			/** The platform fetch's error, when it threw one. */
+			readonly cause?: unknown;
 	  };
 
 export interface GuardedFetchOptions {
@@ -376,7 +374,7 @@ export const createGuardedFetch = (options: GuardedFetchOptions): GuardedFetch =
 				ok: false,
 				reason: "network_error",
 				detail: transportCodeOf(err) ?? "fetch failed",
-				err: loggableError(err),
+				cause: err,
 			};
 		} finally {
 			clearTimeout(timer);

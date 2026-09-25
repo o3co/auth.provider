@@ -40,6 +40,7 @@ import { readFileSync } from "node:fs";
 import {
 	createTrustedProxyMatcher,
 	type Logger,
+	loggableError,
 	type TokenBindingMechanism,
 } from "@o3co/auth-provider-core";
 import type { Request } from "express";
@@ -501,7 +502,7 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 						{
 							step: result.step,
 							detail: result.detail,
-							...(result.err !== undefined ? { err: result.err } : {}),
+							...(result.cause !== undefined ? { err: loggableError(result.cause) } : {}),
 						},
 						"mtls_full_pki_validation_failed",
 					);
@@ -509,6 +510,7 @@ export const createMtlsMechanism = (options: MtlsMechanismOptions): TokenBinding
 						"chain_validation_failed",
 						`client certificate failed RFC 5280 path validation: ${result.step}`,
 						{ step: result.step, detail: result.detail },
+						result.cause !== undefined ? { cause: result.cause } : undefined,
 					);
 				}
 			} else if (mode === "pki") {
