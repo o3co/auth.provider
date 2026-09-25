@@ -2515,10 +2515,15 @@ describe("full-pki revocation — an outage or the certificate's shape, under 'r
 				[INT_CRL_URL]: 503,
 			});
 
-			expect(await judge(root, int, leaf, "both", impl)).toMatchObject({
-				ok: false,
-				outage: true,
-			});
+			const result = await judge(root, int, leaf, "both", impl);
+
+			expect(result).toMatchObject({ ok: false, outage: true });
+			// Nor is it a member of the outage: the one member is the CRL point
+			// that was asked, not a slot spent on "no_responder".
+			const cause = (result as { cause?: unknown }).cause as AggregateError;
+			expect(cause.errors.map((member: Error) => member.message)).toEqual([
+				expect.stringContaining(`crl ${INT_CRL_URL}: fetch_failed — `),
+			]);
 		});
 
 		it("an OCSP answer whose signature does not verify and the CRL down: a verdict (400)", async () => {
