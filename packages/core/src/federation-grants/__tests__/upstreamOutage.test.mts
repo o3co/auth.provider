@@ -22,8 +22,21 @@
  * `delegated-outage.test.mts` holds the real library to them).
  */
 
+import { runInNewContext } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { isFederationUpstreamOutage } from "#/federation-grants/upstreamOutage.mjs";
+
+/**
+ * A Response from another copy of the fetch implementation — npm `undici`'s,
+ * which a deployment's own `fetch` (a `ProxyAgent` setup) answers with, and
+ * which oauth4webapi accepts by its tag — not an instance of the global class.
+ */
+class ForeignResponse {
+	constructor(readonly status: number) {}
+	get [Symbol.toStringTag](): string {
+		return "Response";
+	}
+}
 
 const coded = (code: string) => Object.assign(new Error(`connect ${code}`), { code });
 const clientError = (code: string, cause: unknown) =>
@@ -58,6 +71,16 @@ describe("isFederationUpstreamOutage", () => {
 				status: 503,
 				error: "temporarily_unavailable",
 			}),
+		],
+		[
+			"a 503 from a deployment's own fetch (npm undici's Response), as openid-client raises it",
+			clientError("OAUTH_RESPONSE_IS_NOT_CONFORM", new ForeignResponse(503)),
+		],
+		[
+			"undici's fetch failure over a coded socket error, raised in another realm",
+			runInNewContext(
+				'Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("x"), { code: "ECONNRESET" }) })',
+			),
 		],
 	])("reads %s as an outage", (_label, error) => {
 		expect(isFederationUpstreamOutage(error)).toBe(true);
@@ -110,6 +133,10 @@ describe("isFederationUpstreamOutage", () => {
 		],
 		["a thrown plain object that looks like a timeout", { name: "TimeoutError" }],
 		["a thrown plain object that carries a 5xx status", { status: 503 }],
+		[
+			"a 404 from a deployment's own fetch",
+			clientError("OAUTH_RESPONSE_IS_NOT_CONFORM", new ForeignResponse(404)),
+		],
 	])("reads %s as no outage", (_label, error) => {
 		expect(isFederationUpstreamOutage(error)).toBe(false);
 	});
