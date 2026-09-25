@@ -48,6 +48,7 @@ import {
 	type FederationTransactionStore,
 	mintFederationTransactionId,
 } from "../federations/transaction.mjs";
+import { abandonCookieSession } from "../internal/cookieSession.mjs";
 import { readCookie } from "../internal/cookies.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
@@ -685,7 +686,7 @@ export const createRouter = (
 		if (!redirect.ok) {
 			// A policy's refusal, in its words, held to RFC 6749's characters, and
 			// a client error kept one (`refusalEnvelope`).
-			return res.status(redirect.status).json(refusalEnvelope(redirect, logger));
+			return res.status(redirect.status).json(refusalEnvelope(redirect, log));
 		}
 		return res.redirect(redirect.value);
 	};
@@ -744,7 +745,10 @@ export const createRouter = (
 		/**
 		 * Consume the transaction on a path that is refusing anyway: best
 		 * effort, so a delete that fails is one `federation_cleanup_failed`
-		 * warn and the refusal stands.
+		 * warn and the refusal stands. The transaction lives in the cookie
+		 * session's store, so after a failure the request's cookie session is
+		 * dropped too, and express-session does not write to that store again
+		 * as the response ends (`../internal/cookieSession.mts`).
 		 */
 		const discardTransaction = async (): Promise<void> => {
 			const discardErr = await consumeTransaction();
@@ -753,7 +757,24 @@ export const createRouter = (
 					{ store: "federation_transaction", step: "delete", err: loggableError(discardErr) },
 					"federation_cleanup_failed",
 				);
+				abandonCookieSession(req);
 			}
+		};
+
+		/**
+		 * The cookie session's store — the express session, or a `form_post`
+		 * transaction kept in the same store — could not answer: log the
+		 * outage, drop the request's cookie session so express-session does not
+		 * write to that store again as the response ends, and answer `503`.
+		 */
+		const refuseCookieStoreOutage = (
+			store: "cookie_session" | "federation_transaction",
+			step: FederationStoreStep,
+			cause: unknown,
+		): unknown => {
+			logStoreUnavailable(log, "federation_callback_store_unavailable", store, step, cause);
+			abandonCookieSession(req);
+			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		};
 
 		if (responseMode === "form_post") {
@@ -771,15 +792,8 @@ export const createRouter = (
 			try {
 				fed = (await transactions.get(transactionId)) ?? undefined;
 			} catch (err) {
-				logStoreUnavailable(
-					log,
-					"federation_callback_store_unavailable",
-					"federation_transaction",
-					"get",
-					err,
-				);
 				await discardTransaction();
-				return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+				return refuseCookieStoreOutage("federation_transaction", "get", err);
 			}
 		} else {
 			fed = req.session.federation;
@@ -903,14 +917,7 @@ export const createRouter = (
 		if (responseMode === "form_post") {
 			const consumeErr = await consumeTransaction();
 			if (consumeErr) {
-				logStoreUnavailable(
-					log,
-					"federation_callback_store_unavailable",
-					"federation_transaction",
-					"delete",
-					consumeErr,
-				);
-				return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+				return refuseCookieStoreOutage("federation_transaction", "delete", consumeErr);
 			}
 		} else {
 			delete req.session.federation;
@@ -918,14 +925,7 @@ export const createRouter = (
 				req.session.save((err) => resolve(err ?? null));
 			});
 			if (reusePrevSaveErr) {
-				logStoreUnavailable(
-					log,
-					"federation_callback_store_unavailable",
-					"cookie_session",
-					"save",
-					reusePrevSaveErr,
-				);
-				return res.status(503).json(SESSION_STORE_UNAVAILABLE);
+				return refuseCookieStoreOutage("cookie_session", "save", reusePrevSaveErr);
 			}
 		}
 
@@ -979,10 +979,13 @@ export const createRouter = (
 				callbackParams: adapterCallbackParams,
 			});
 		} catch (err) {
-			// The adapter's library puts the token response it refused on the
-			// error's cause chain — the access and refresh tokens included — so
-			// the log gets the projection, never the error.
-			log.warn({ err: loggableError(err) }, "federation token exchange failed");
+			// The upstream refused or could not answer: its verdict or its
+			// outage, not this server's, so a warn. The adapter's library puts
+			// the token response it refused on the error's cause chain — the
+			// access and refresh tokens included — so the log gets the
+			// projection, never the error. `provider` rides on `log`'s binding:
+			// the registered federation's name, not the path's text.
+			log.warn({ err: loggableError(err) }, "federation_callback_exchange_failed");
 			return res.status(502).json({
 				error: "exchange_failed",
 				error_description: "Token exchange with upstream IdP failed",
@@ -1160,6 +1163,9 @@ export const createRouter = (
 			await cleanUp(log, "user_session", "delete", () => userSessionStore.delete(sid));
 			// #296: the session is gone, so its subject-index entry must go too.
 			await rollbackSubjectIndex();
+			// express-session generated a fresh session for the failed
+			// regeneration; it must not be saved against the store that failed.
+			abandonCookieSession(req);
 			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}
 
@@ -1254,7 +1260,7 @@ export const createRouter = (
 		}
 		const redirectResult = callbackPolicy.resolveCallbackRedirect({ redirectTo });
 		if (!redirectResult.ok) {
-			return res.status(redirectResult.status).json(refusalEnvelope(redirectResult, logger));
+			return res.status(redirectResult.status).json(refusalEnvelope(redirectResult, log));
 		}
 
 		return res.redirect(redirectResult.value);
@@ -1375,7 +1381,9 @@ export const createRouter = (
 				}
 				const validation = policy.validateRedirect(redirect_to);
 				if (!validation.ok) {
-					return res.status(validation.status).json(refusalEnvelope(validation, logger));
+					return res
+						.status(validation.status)
+						.json(refusalEnvelope(validation, logger, { provider: provider.name }));
 				}
 				redirectTo = redirect_to;
 			}
@@ -1518,6 +1526,7 @@ export const createRouter = (
 						err,
 						{ provider: provider.name },
 					);
+					abandonCookieSession(req);
 					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 				}
 
@@ -1547,6 +1556,7 @@ export const createRouter = (
 						startSaveErr,
 						{ provider: provider.name },
 					);
+					abandonCookieSession(req);
 					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 				}
 			}

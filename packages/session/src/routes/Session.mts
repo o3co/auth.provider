@@ -40,6 +40,7 @@ import {
 	createCsrfProtectionFromConfig,
 	type SessionCsrfConfigSlice,
 } from "../csrf.mjs";
+import { abandonCookieSession } from "../internal/cookieSession.mjs";
 import { extractUserClaims } from "../internal/extractUserClaims.mjs";
 import { refusalEnvelope } from "../internal/refusalEnvelope.mjs";
 import { createRedirectAllowlistValidator } from "../redirect-allowlist.mjs";
@@ -354,7 +355,8 @@ export const createRouter = (
 
 	/**
 	 * A store `/session/login` cannot do without could not answer — the user
-	 * directory, the `UserSession` record, the cookie session's regeneration:
+	 * directory, the `UserSession` record, the cookie session's regeneration
+	 * or save:
 	 * the server's outage, never a verdict on the credentials. One line at
 	 * error level, `login_store_unavailable`, `store` naming which and `step`
 	 * the operation, with the error's projection — never the error, which can
@@ -363,7 +365,7 @@ export const createRouter = (
 	 */
 	const loginStoreUnavailable = (
 		store: "user_repository" | "user_session" | "cookie_session",
-		step: "authenticate" | "create" | "regenerate",
+		step: "authenticate" | "create" | "regenerate" | "save",
 		cause: unknown,
 		context: { readonly sid?: string; readonly sub?: string } = {},
 	): void => {
@@ -500,22 +502,20 @@ export const createRouter = (
 					}
 				}
 
-				// express-session regenerates by destroying the old record in its
-				// store, so a failure is that store's outage.
-				const regenerateErr = await new Promise<unknown>((resolve) => {
-					req.session.regenerate((err: unknown) => resolve(err ?? null));
-				});
-				if (regenerateErr) {
-					loginStoreUnavailable(
-						"cookie_session",
-						"regenerate",
-						regenerateErr,
-						sid === undefined ? {} : { sid },
-					);
-					// Best-effort rollback: the UserSession was created but the browser
-					// never got a session naming it. Delete the orphan so it doesn't
-					// leak, and (#296) its subject-index entry with it — otherwise
-					// `revokeAllForSubject` would enumerate a sid that no longer exists.
+				/**
+				 * The cookie session could not be regenerated or saved: its store's
+				 * outage. The UserSession was created but no browser session names
+				 * it, so the orphan is deleted best-effort, and (#296) its
+				 * subject-index entry with it — otherwise `revokeAllForSubject`
+				 * would enumerate a sid that no longer exists. The request's cookie
+				 * session is dropped so express-session neither writes it again nor
+				 * sets a cookie for it (`../internal/cookieSession.mts`).
+				 */
+				const refuseCookieSessionOutage = async (
+					step: "regenerate" | "save",
+					cause: unknown,
+				): Promise<Response> => {
+					loginStoreUnavailable("cookie_session", step, cause, sid === undefined ? {} : { sid });
 					if (sid !== undefined && userSessionStore) {
 						const orphan = sid;
 						await loginCleanup("user_session", "delete", { sid: orphan }, () =>
@@ -530,8 +530,16 @@ export const createRouter = (
 							);
 						}
 					}
+					abandonCookieSession(req);
 					return res.status(503).json(SESSION_STORE_UNAVAILABLE);
-				}
+				};
+
+				// express-session regenerates by destroying the old record in its
+				// store, so a failure is that store's outage.
+				const regenerateErr = await new Promise<unknown>((resolve) => {
+					req.session.regenerate((err: unknown) => resolve(err ?? null));
+				});
+				if (regenerateErr) return refuseCookieSessionOutage("regenerate", regenerateErr);
 				req.session.isAuthenticated = true;
 				req.session.user = user as Record<string, unknown> | undefined;
 				if (redirectTo) {
@@ -541,6 +549,14 @@ export const createRouter = (
 				if (sid) {
 					req.session.sid = sid;
 				}
+				// Saved before answering, as the federation callback does: left to
+				// express-session's save when the response ends, a store that failed
+				// there did so after the `200`, and the browser held a cookie for a
+				// session the next request would not find.
+				const saveErr = await new Promise<unknown>((resolve) => {
+					req.session.save((err: unknown) => resolve(err ?? null));
+				});
+				if (saveErr) return refuseCookieSessionOutage("save", saveErr);
 				// The caller is now on a regenerated session; hand it a fresh
 				// token in the same response so the follow-up `/session/logout`
 				// does not need another round trip to `/session/csrf`.

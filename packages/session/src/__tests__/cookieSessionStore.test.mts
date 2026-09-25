@@ -157,10 +157,15 @@ afterEach(async () => {
 	dispose = undefined;
 });
 
+/** Forget the commands the setup requests sent, so a test counts only its own. */
+const resetCalls = (): void => {
+	for (const command of Object.keys(fake.calls)) fake.calls[command] = 0;
+};
+
 beforeEach(() => {
 	fake.data.clear();
 	fake.failing.clear();
-	for (const command of Object.keys(fake.calls)) fake.calls[command] = 0;
+	resetCalls();
 });
 
 const alice = { id: "user-1", username: "alice" };
@@ -346,7 +351,7 @@ describe("a route that meets the cookie store failing answers once, and the sess
 		expect((await agent.get("/probe/write")).status).toBe(200);
 		const csrf = await csrfFor(agent);
 		clear(logger);
-		fake.calls.set = 0;
+		resetCalls();
 
 		fake.failing.add("del");
 		fake.failing.add("set");
@@ -371,7 +376,7 @@ describe("a route that meets the cookie store failing answers once, and the sess
 		const agent = request.agent(await boot(logger));
 		expect((await agent.get("/probe/write")).status).toBe(200);
 		clear(logger);
-		fake.calls.set = 0;
+		resetCalls();
 
 		fake.failing.add("set");
 		fake.failing.add("expire");
