@@ -688,12 +688,7 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 			return request(app).post(WEBAUTHN_OPTIONS).send({});
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
-		defects: {
-			answer:
-				"packages/webauthn `routes/authenticationOptions.mts`: a failure at `challengeStore.issue` is not caught; it reaches the terminal handler and is answered `500 server_error` (the runbook documents the same 500 for the ceremony's `contains` / `markSeen`)",
-			"store-field":
-				"packages/webauthn: the outage's one line is the terminal handler's `unhandled_request_error`, which carries `err` and `endpoint` but no `store` / `step` / `site` field",
-		},
+		event: "webauthn_ceremony_store_unavailable",
 	},
 	{
 		module: "webauthn",
@@ -705,12 +700,7 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 			return agent.post("/oauth/webauthn/registration/options").set(header, token).send({});
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
-		defects: {
-			answer:
-				"packages/webauthn `routes/registrationOptions.mts`: a failure at `credentialStore.listByUserId` is not caught; it reaches the terminal handler and is answered `500 server_error`",
-			"store-field":
-				"packages/webauthn: the outage's one line is the terminal handler's `unhandled_request_error`, which carries `err` and `endpoint` but no `store` / `step` / `site` field",
-		},
+		event: "webauthn_ceremony_store_unavailable",
 	},
 ];
 

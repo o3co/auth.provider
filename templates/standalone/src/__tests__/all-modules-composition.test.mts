@@ -965,9 +965,7 @@ const OUTAGES: readonly OutageCase[] = [
 			return (await login(app)).res;
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
-		defects: withoutTheLine(
-			"packages/session `routes/Session.mts`: the login route's `userSessionStore.create` failure answers 503 from a bare `catch {}` and logs nothing — a silent 503",
-		),
+		event: "login_store_unavailable",
 	},
 	{
 		module: "session",
@@ -978,13 +976,7 @@ const OUTAGES: readonly OutageCase[] = [
 			return (await login(app)).res;
 		},
 		answer: { status: 503, error: "temporarily_unavailable" },
-		defects: {
-			...withoutTheLine(
-				'packages/session `routes/Session.mts`: a user-repository failure at login is answered 503 "User directory temporarily unavailable" but logged only at warn, as "local login authenticate failed"',
-			),
-			"no-warn":
-				'packages/session `routes/Session.mts`: the outage\'s only line is the warn "local login authenticate failed"',
-		},
+		event: "login_store_unavailable",
 	},
 	{
 		module: "oauth (client authentication)",
@@ -1033,12 +1025,7 @@ const OUTAGES: readonly OutageCase[] = [
 		surface: "the OIDC federation callback",
 		run: oidcCallback,
 		answer: { status: 503, error: "temporarily_unavailable" },
-		defects: {
-			answer:
-				'packages/session `routes/Federation.mts`: a federation-token-store failure at the callback is caught by the post-create catch and answered `500 session_create_failed` "Internal error: session could not be persisted"',
-			"store-field":
-				'packages/session `routes/Federation.mts`: the post-create catch logs "session post-create failed" at error with `provider`, `sid` and `err`, but no `store` / `step` / `site` field',
-		},
+		event: "federation_callback_store_unavailable",
 	},
 	{
 		module: "session",
@@ -1046,13 +1033,7 @@ const OUTAGES: readonly OutageCase[] = [
 		surface: "the OIDC federation callback",
 		run: oidcCallback,
 		answer: { status: 503, error: "temporarily_unavailable" },
-		defects: {
-			...withoutTheLine(
-				'packages/session `routes/Federation.mts`: a session-federation-index failure at the callback is answered 503 but logged only at warn, as "sessionFederationIndex.addFederation failed"',
-			),
-			"no-warn":
-				'packages/session `routes/Federation.mts`: the outage\'s only line is the warn "sessionFederationIndex.addFederation failed"',
-		},
+		event: "federation_callback_store_unavailable",
 	},
 	{
 		module: "core (rate-limit guard)",
@@ -1109,7 +1090,7 @@ const OUTAGES: readonly OutageCase[] = [
 		event: "jwks_unavailable",
 		defects: {
 			"store-field":
-				"core's JWKS route (`packages/core/src/routes/Jwks.mts`): `jwks_unavailable` carries `algorithm` and `err` but no `store` / `step` / `site` field naming the key store",
+				"core's JWKS route (`packages/core/src/jwks/router.mts`): `jwks_unavailable` carries `algorithm` and `err` but no `store` / `step` / `site` field naming the key store",
 		},
 	},
 ];
