@@ -470,6 +470,12 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 			// either supplies an endpoint, or the request resolves to the
 			// deployment's own post-logout page, or it fails loudly rather than
 			// redirecting somewhere invented.
+			//
+			// "The deployment's own post-logout page" holds because of the
+			// caller's side of the contract (core's `EndSessionRequest`): the
+			// postLogoutRedirectUri handed here is one already matched against
+			// the client's registered postLogoutRedirectUris, or none — `oauth`'s
+			// logout routes check it first.
 			if (config.endSessionEndpoint) {
 				let url: URL;
 				try {
@@ -494,8 +500,10 @@ export function createAppleProvider(config: AppleProviderConfig): AppleProvider 
 			try {
 				url = new URL(req.postLogoutRedirectUri);
 			} catch {
+				// Named, not quoted: the message reaches a log line as the error's
+				// `detail`, and the value is not this adapter's text.
 				throw new Error(
-					`Apple federation "apple" received an invalid postLogoutRedirectUri: ${req.postLogoutRedirectUri}`,
+					'Apple federation "apple" received an invalid postLogoutRedirectUri: not a URL',
 				);
 			}
 			if (req.state) url.searchParams.set("state", req.state);

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-apple
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 Sign in with Apple federation provider for `auth.provider` — Apple's **web**
 flow, in a browser, back to this server.
@@ -313,7 +313,13 @@ What `exchangeCode` returns:
   back to. With `endSessionEndpoint` configured, that URL with `id_token_hint`,
   `post_logout_redirect_uri` and `state`; otherwise `postLogoutRedirectUri`
   with `state`; otherwise it throws rather than inventing a destination. Local
-  session destruction is unaffected.
+  session destruction is unaffected. An unparsable URL throws too; the message
+  names the field and quotes no value it was handed.
+  Redirecting straight to `postLogoutRedirectUri` is safe because the caller
+  hands only a URI it has matched against the client's registered
+  `postLogoutRedirectUris`, or none — core's `EndSessionRequest` states the
+  rule, and `oauth`'s logout routes keep it. A composition that calls
+  `endSession()` itself must do the same.
 
 ## Public API
 

@@ -1,6 +1,6 @@
 # @o3co/auth-provider-oauth
 
-最終更新: 2026-09-25
+最終更新: 2026-09-26
 
 [auth.provider](../../README.md) の OAuth 2.0 / OpenID Connect 認可サーバーのエンドポイント: `/oauth` 配下の HTTP 面、組み込みのグラントタイプ、クライアント認証、ログアウトカスケード。
 
@@ -504,14 +504,16 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 - `post_logout_redirect_uri`（任意） — `client.postLogoutRedirectUris` のいずれかと**バイト単位で完全一致**しなければならない。逆ドメインのカスタムスキームは正当なエントリーだが、それだからといって緩和はされない。
 - `state`（任意） — `post_logout_redirect_uri` へのリダイレクト時にそのまま返す
 
+`post_logout_redirect_uri` は、ヒントを検証しセッションを名指すと確かめた直後に 1 回だけ、ヒントの発行先クライアントのリストと照合し、以後は照合の結果だけを使う — 確認ページも、上流の end-session 呼び出しも、このエンドポイント自身のリダイレクトも。一致しないもの、あるいはこのデプロイメントが知らないクライアントのものは、送られなかったものとして扱う。特に、**フェデレーションの end-session 呼び出しには決して渡さない**。Google、GitHub、Apple は end-session エンドポイントを公開しておらず、設定されていなければそのアダプターは渡された URI へそのままリダイレクトするからである。クライアントは、ヒントの `azp` がその audience のひとつならそれ、そうでなければ唯一の audience（文字列、または要素 1 つのリスト）である。複数の audience を持ち `azp` の無いヒントはクライアントを名指さず、URI は捨てる。照合は完全一致で、末尾のスラッシュ、ホストやパスの大文字小文字の違い、クエリ・パス・フラグメントの追加、前方一致、別のスキームは別の URI である。一致したものは、起動時にすべての登録が満たすべき形（core の `checkRedirectUri`）も満たさなければならない。カスタムの `ClientRepository` は `ClientEntrySchema` を通らないので、URL でないエントリーや `javascript:` のような実行可能スキームのエントリーを持ち得る。そのような一致は未登録の URI と同じく捨ててログアウトを完了し、`site`、`clientId`、拒否の `reason`（エントリーそのものは載せない）付きの `logout_registered_redirect_uri_refused` として warn で 1 回ログに出す。`post_logout_redirect_uri` を指定しないリクエストはクライアントリポジトリに一切問い合わせない。答えられないクライアントリポジトリはログアウトを止めない: 登録済みかどうか分からないので URI は使わず、送られなかったものとしてログアウトを完了し、`site: "logout"` 付きの `client_repository_unavailable` として error レベルで 1 回ログに出す。
+
 `id_token_hint` の発行から 24 時間を超えた `GET` には、ログアウトする代わりに確認ページを返す。そのフォームはヒントと `state` をこのエンドポイントへ POST で送り返し、`post_logout_redirect_uri` はクライアントのアローリストにある場合だけ送り返す。
 
-検証できない `id_token_hint` は `400 invalid_token`、キーストアが答えず検証できなかったものは `GET` でも `POST` でも `503 temporarily_unavailable`。
+検証できない `id_token_hint` は `400 invalid_token`、キーストアが答えず検証できなかったものは `GET` でも `POST` でも `503 temporarily_unavailable`。セッションを名指さない（`sid` の無い）ものは、`GET` でも `POST` でも、確認ページより先に `400 invalid_request` になる。それでは何もログアウトできないからである。
 
-フロー: `id_token_hint` を検証 → セッションを読む → `backchannelLogoutUri` を持つすべての RP に OIDC Back-Channel Logout 1.0 の `logout_token` を送る（ベストエフォート。POST の失敗はログアウトを止めない） → ストアカスケードを実行 → 次のいずれかで応答:
+フロー: `id_token_hint` を検証 → `post_logout_redirect_uri` をクライアントのリストと照合 → セッションを読む → `backchannelLogoutUri` を持つすべての RP に OIDC Back-Channel Logout 1.0 の `logout_token` を送る（ベストエフォート。POST の失敗はログアウトを止めない） → ストアカスケードを実行 → 次のいずれかで応答:
 
-- `frontchannelLogoutUri` を持つ RP ごとの `<iframe>` を含む `text/html` ページ（q 値付きネゴシエーションで `Accept: text/html` が勝った場合）
-- 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添える。フェデレーショントークンのレコードが読めなければ添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
+- `frontchannelLogoutUri` を持つ RP ごとの `<iframe>` を含む `text/html` ページ（q 値付きネゴシエーションで `Accept: text/html` が勝った場合）。`post_logout_redirect_uri` が一致したときは、続いてブラウザーを `state` 付きでそこへ送るスクリプトを含む（下の `303` と同じ）
+- 最初のフェデレーションの IdP end-session URL への `303`（そのフェデレーションのプロバイダーが `SupportsLogout` を実装している場合）。保存済みのフェデレーション id_token を `id_token_hint` として添え、`post_logout_redirect_uri` はクライアントのリストに一致したときだけ添える。フェデレーショントークンのレコードが読めなければヒントを添えずにリダイレクトし、`logout_federation_token_read_failed`（warn）として 1 回ログに出す
 - `post_logout_redirect_uri` への `303`（クライアントのアローリストに一致する場合）
 - `200 {"logged_out": true}`（フォールバック）
 
@@ -530,7 +532,9 @@ OIDC RP-Initiated Logout 1.0 の `end_session_endpoint`。パラメーター（`
 
 プロバイダー単位のフェデレーション切断。Authorization に `typ: at+jwt` の `Bearer <access_token>`。ボディ（任意）: `post_logout_redirect_uri`、`state`。
 
-フロー: アクセストークンを検証 → そのファミリーが失効していないか確認 → セッションを読む → フェデレーションが紐付いていることを確認 → フェデレーショントークンを削除 → セッションからフェデレーションを削除 → プロバイダーが `SupportsLogout` を実装していれば IdP の end-session URL へリダイレクト。そうでなければ `200 {"disconnected": true}` を返す。
+フロー: アクセストークンを検証 → そのファミリーが失効していないか確認 → セッションを読む → フェデレーションが紐付いていることを確認 → `post_logout_redirect_uri` をクライアントのリストと照合 → フェデレーショントークンを削除 → セッションからフェデレーションを削除 → プロバイダーが `SupportsLogout` を実装していれば IdP の end-session URL へリダイレクト。そうでなければ `200 {"disconnected": true}` を返す。
+
+`post_logout_redirect_uri` を IdP の end-session 呼び出しに渡すのは、アクセストークンの発行先クライアント（その `azp`）の `postLogoutRedirectUris` のいずれかと完全一致したときだけである — このルートも呼び出し側が選んだ先へのリダイレクトで終わるので、`/oauth/logout` と同じ規則を適用する。一致しなければ捨て、アダプターは指定が無いときと同じように答える: Google と GitHub はブラウザーを自身のログアウトページへ送り、end-session エンドポイントが設定されていない Apple は拒否する。このルートはそれを失敗した end-session 呼び出しと同じく `200 {"disconnected": true}` で答える。`azp` の無いトークンには照合するリストが無く、一致したものは `/oauth/logout` と同じく `checkRedirectUri` を満たさなければならない。答えられないクライアントリポジトリは切断を止めない: URI を捨て、それが無いときと同じように答え、`site: "federation_logout"` 付きの `client_repository_unavailable` として error レベルで 1 回ログに出す。ボディの無い `POST` は URI を指定しない切断である。
 
 IdP の end-session 呼び出しが例外を投げた場合、ローカルの状態は既にクリア済みなので、応答は `200 {"disconnected": true}` で、オペレーター向けに監査イベント `federation.logout.idp_unreachable` を出す。
 
@@ -649,13 +653,13 @@ RFC 8693 §2.2.1）かのどちらかである。このエンドポイントは�
 | 403 | `forbidden` | クライアントが `allowedAzpForFederationToken` でオプトインしていない |
 | 404 | `federation_not_linked` | 指定のフェデレーションがこのセッションに紐付いていない |
 | 410 | `refresh_token_absent` | 保存済みトークンにリフレッシュトークンが無い（ログイン時に上流が返さなかった、またはロック後の再読み込みでそれの無いレコードが見つかった） |
-| 410 | `re_authentication_required` | IdP が `invalid_grant` / `invalid_token` を返した — セッションのフェデレーションはクリアされる。ユーザーは IdP で再認証が必要 |
-| 429 | `rate_limited` | 上流 IdP のレート制限超過（`status: 429` または `error: "too_many_requests"`）。後で再試行する |
-| 500 | `refresh_failed` | IdP リフレッシュ経路の分類できないエラー、またはこのルートが読めない応答。SIEM は監査の `details.reason` フィールドでグループ化すること |
+| 410 | `re_authentication_required` | IdP がリフレッシュトークンを拒否した: ライブラリが投げたものの `error` が `invalid_grant` / `invalid_token` で、ステータスが 429 でも 5xx でもない — セッションのフェデレーションはクリアされる。ユーザーは IdP で再認証が必要。429 や 5xx は本文が何を名乗ってもこれにならず、メッセージにコードを含むだけのエラーもならない。それらは保存済みトークンを残す（下の `429`、`503`、`500`） |
+| 429 | `rate_limited` | 上流 IdP のレート制限超過（本文がどのコードを名乗っていても `status: 429`、または `error: "too_many_requests"`）。保存済みトークンは残す。上流が秒数（1〜86400）で待ち時間を示したときは `Retry-After` にそれを載せ、示さなければ付けない |
+| 500 | `refresh_failed` | IdP リフレッシュ経路の分類できないエラー（`error` にコードが無く、メッセージが `invalid_grant` を名乗るだけのものを含む）、またはこのルートが読めない応答。保存済みトークンは残す。SIEM は監査の `details.reason` フィールドでグループ化すること |
 | 502 | `upstream_token_ineligible` | 上流のトークンがこのプロバイダーの渡せないもの。理由は `error_description` が名乗る — `token_type_unsupported` だけである。`Retry-After: 300` を付ける |
 | 503 | `refresh_not_supported` | プロバイダーが `SupportsRefresh` を実装していない。デプロイ側で直すべきものとして `federation_token_refresh_unsupported` を error レベルでログに出す |
 | 503 | `lock_timeout` | 待機ウィンドウ内に advisory lock を取得できなかった。続く競合が見えるよう、`federation`、`clientId`、`sid` 付きの `federation_token_lock_timeout` として warn でログに出す |
-| 503 | `temporarily_unavailable` | ストア障害（リフレッシュトークンファミリーの確認を含む）、アクセストークンの検証中に答えられないキーストアや失効ストア、IdP の 5xx、または上流のネットワーク障害（ECONNREFUSED / ENOTFOUND / ETIMEDOUT — fetch の TypeError の `error.cause.code` に包まれたコードを含む）。それぞれ error レベルで 1 回だけログに出す: ストアは `store` と `step` 付きの `federation_token_store_unavailable`、クライアントの検索は `client_repository_unavailable`（`site: "federation_token"`）、上流は `federation_token_upstream_unavailable`。503 でない上流の拒否は `federation_token_refresh_failed`（warn） |
+| 503 | `temporarily_unavailable` | ストア障害（リフレッシュトークンファミリーの確認を含む）、アクセストークンの検証中に答えられないキーストアや失効ストア、または上流の障害: 5xx を返した IdP（本文がどの OAuth コードを名乗っていても — ただし `too_many_requests` は上の `429` — 、ライブラリが本文を読んだか `Response` の上で投げたかにかかわらず）、時間内に答えなかった IdP、到達できなかった IdP（エラーやその cause に包まれた接続・トランスポートのコード）。判定は core の `isFederationUpstreamOutage` で、リフレッシュトークンを拒否するコードよりも先に行う。保存済みトークンは再試行のために残す。それぞれ error レベルで 1 回だけログに出す: ストアは `store` と `step` 付きの `federation_token_store_unavailable`、クライアントの検索は `client_repository_unavailable`（`site: "federation_token"`）、上流は `federation_token_upstream_unavailable`。503 でない上流の拒否は `federation_token_refresh_failed`（warn） |
 
 すべてのエラーレスポンスに `Cache-Control: no-store` と `Pragma: no-cache` を付ける。401 レスポンスには RFC 6750 に従い `WWW-Authenticate: Bearer error="invalid_token"` を含める。
 
@@ -684,7 +688,7 @@ clients:
 - `federation.token.forbidden` — 403 のとき（クライアントがオプトインしていない）
 - `federation.token.family_revoked` — ファミリー失効による 401 のとき
 - `federation.token.refresh_failed` — 500 `refresh_failed` のとき。ケースは 2 つ。`provider.refreshToken` がリフレッシュエラーの分類器で分類できないエラーを投げた場合: `details.reason` は `"unknown"`。または応答は返ったがこのルートが使えない場合: `"no_access_token"`・`"invalid_expiry"`・`"invalid_token_type"`。このイベントが持つ値はこの 4 つですべてで、SIEM のルールはこれでグループ化すること。分類器の残りの結果はこのイベントに**ならない**: `invalid_grant` は `federation.token.reauthentication_required`（410）、`rate_limited`（429）と `network`（503）は監査イベントを出さない。
-- `federation.token.reauthentication_required` — IdP から `invalid_grant` または `invalid_token` を受け取ったとき
+- `federation.token.reauthentication_required` — IdP の構造化された `invalid_grant` または `invalid_token` を受け取ったとき（上の 410）
 - `federation.token.upstream_ineligible` — 502 のとき。`details.reason` は `"token_type_unsupported"`、`details.tokenType` はレコードが保持していた値を読んだまま — トークン型として不正な値もそのまま。それこそ見る価値がある。`null` はレコードが文字列ですらないものを保持していたことを意味する。レスポンスには `Retry-After: 300` を付ける — `federationGrants.ineligibleRetryAfter` の既定値と同じで、この状態はオペレーターが上流の登録を変えるまで終わらないため。呼び出し元にはどの型だったかは伝えない — 再試行以外にできることが無いため
 
 ## jwt-bearer: 信頼する発行者 (#525)
