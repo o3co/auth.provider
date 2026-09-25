@@ -22,11 +22,10 @@
  * The OAuth and session routers parse their own bodies and have no error
  * handler: a body parser's refusal on `/oauth/token`, `/oauth/introspect` or
  * `/session/login`, and any error a route let through, went on to whatever
- * the host had after the router. Only `app.mts` had a handler there
- * (`terminalError.mts`), so any other host answered with Express's final
- * handler — an HTML page, with the stack outside production, where V8's JSON
- * error quotes the body it could not parse. The router core returns now
- * answers them itself.
+ * the host had after the router. Only `app.mts` had a handler there, so any
+ * other host answered with Express's final handler — an HTML page, with the
+ * stack outside production, where V8's JSON error quotes the body it could
+ * not parse. The router core returns now answers them itself.
  */
 
 import { defineModule } from "@o3co/auth-provider-core";

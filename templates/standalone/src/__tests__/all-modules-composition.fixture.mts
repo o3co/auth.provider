@@ -64,6 +64,7 @@ import {
 	type Logger,
 	type Module,
 	memoryRefreshTokenFamilyStoreModule,
+	terminalErrorHandler,
 } from "@o3co/auth-provider-core";
 import { createFakeIdp, type FakeIdp } from "@o3co/auth-provider-core/testing";
 import { parseFile } from "@o3co/ts.hocon";
@@ -75,7 +76,6 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { buildModules } from "#/buildModules.mjs";
 import { resolveConfigPaths, resolveLibraryReferenceConfPath } from "#/configPath.mjs";
 import { googleFederationConfigModule, oidcFederationConfigModule } from "#/modules.mjs";
-import { createTerminalErrorHandler } from "#/terminalError.mjs";
 
 export const ISSUER = "https://auth.test";
 const OIDC_ISSUER = "https://idp.test";
@@ -584,9 +584,10 @@ export interface ComposeOptions {
 	/** Keep the shipped Redis refresh-token family store (the `multi` boot). */
 	readonly shippedRefreshTokenFamilyStore?: boolean;
 	/**
-	 * Mount the template's terminal error handler after the composed router,
-	 * as `app.mts` does (the default). `false` mounts the router alone, as a
-	 * composition root that copies nothing of `app.mts` does.
+	 * Mount core's terminal error handler after the composed router again, as
+	 * `app.mts` does for its host routes (the default). `false` mounts the
+	 * router alone, as a composition root that copies nothing of `app.mts`
+	 * does.
 	 */
 	readonly terminalErrorHandler?: boolean;
 }
@@ -645,7 +646,7 @@ export async function compose(options: ComposeOptions = {}): Promise<Composition
 		}),
 	);
 	app.use(handle.router);
-	if (options.terminalErrorHandler !== false) app.use(createTerminalErrorHandler(logger));
+	if (options.terminalErrorHandler !== false) app.use(terminalErrorHandler(logger));
 	return { app, handle, config, modules, logger, upstreams: fakes };
 }
 
