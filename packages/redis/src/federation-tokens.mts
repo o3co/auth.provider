@@ -264,7 +264,12 @@ export function createRedisFederationTokenStore(
 	});
 	// Every setting this store is given and cannot use is refused as a
 	// RangeError: the key here, the TTL below, and the plaintext guard above.
-	if (opts.encryption.mode === "required" && opts.encryption.key.length !== 32) {
+	// A Buffer, not only 32 long: a JS caller's 32-character string has the
+	// length, and would be used as its UTF-8 bytes.
+	if (
+		opts.encryption.mode === "required" &&
+		(!Buffer.isBuffer(opts.encryption.key) || opts.encryption.key.length !== 32)
+	) {
 		throw new RangeError("FederationTokenStore redis: encryption key must be 32 bytes");
 	}
 	const prefix = opts.keyPrefix ?? "ft:";
