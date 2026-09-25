@@ -137,14 +137,6 @@ const OTHER_PROJECTIONS: ReadonlyArray<{
 	readonly projection: string;
 	readonly why: string;
 }> = [
-	{
-		file: "packages/federation-grants/src/routes.mts",
-		projection: "unexpectedErrorFields",
-		why:
-			"federation-grants' own allowlist (report.mts): a classification from a closed set of " +
-			"error names and a numeric status — nothing of the error's text, which is stricter than " +
-			"loggableError",
-	},
 	...[
 		"packages/core/src/middleware/tokenBinding.mts",
 		"packages/core/src/middleware/protectedResourceBinding.mts",
@@ -459,11 +451,6 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 		why: "jose's own fixed text about the token, as the verdict's message; jose's claims ride on the error, not in its message",
 	},
 	{
-		file: "packages/federation-grants/src/browserRoutes.mts",
-		sites: 2,
-		why: "an outage classifier reads the error's and its cause's text for network error codes; it is never logged (outside this PR; for review)",
-	},
-	{
 		file: "packages/federation-oidc/src/at-hash.mts",
 		sites: 1,
 		why: "the message of an error it throws, the original kept as `cause` (outside this change; for review)",
@@ -513,6 +500,7 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 const STRING_FIRST_EVERYWHERE: readonly string[] = [
 	"packages/core/src",
 	"packages/dpop/src",
+	"packages/federation-grants/src",
 	"packages/oauth/src",
 	"packages/oauth-token-exchange/src",
 	"packages/session/src",

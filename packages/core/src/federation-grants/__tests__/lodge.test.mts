@@ -882,3 +882,180 @@ describe("lodging without an id source of the caller's", () => {
 		expect(result.grantId).not.toBe(result.handle);
 	});
 });
+
+/**
+ * A `storage` refusal carries what failed (`failure`): which store, which
+ * operation, and what it threw or refused — so that the route answering it
+ * logs the outage once with its cause. Not enumerable: nothing that
+ * serialises the refusal can carry what a store put on its error.
+ */
+describe("what a storage refusal carries, for the route that answers it", () => {
+	const failureOf = (result: unknown) => (result as { failure?: Record<string, unknown> }).failure;
+
+	it("names the intent store and the error it threw", async () => {
+		const down = new Error("intent store down");
+		const result = await lodgeFederationGrantIntent(
+			deps({
+				intentStore: {
+					...intents,
+					putIntent: async () => {
+						throw down;
+					},
+				},
+			}),
+			initial(),
+		);
+		expect(result).toEqual({ ok: false, reason: "storage" });
+		expect(failureOf(result)).toEqual({
+			store: "federation_grant_intent",
+			step: "put_intent",
+			error: down,
+		});
+		expect(Object.keys(result)).not.toContain("failure");
+		expect(JSON.stringify(result)).not.toContain("intent store down");
+	});
+
+	it("names a refusal on this side that nothing threw", async () => {
+		const result = await lodgeFederationGrantIntent(
+			deps({
+				intentStore: {
+					...intents,
+					putIntent: async () => ({ outcome: "refused", reason: "collision" }),
+				},
+			}),
+			initial(),
+		);
+		expect(result).toEqual({ ok: false, reason: "storage" });
+		expect(failureOf(result)).toEqual({
+			store: "federation_grant_intent",
+			step: "put_intent",
+			refusal: "collision",
+		});
+	});
+
+	it("names a second write that failed, and an intent it could not close after it", async () => {
+		const down = new Error("grant store down");
+		const closing = new Error("close failed");
+		const result = await lodgeFederationGrantIntent(
+			deps({
+				grantStore: {
+					...grants,
+					createPending: async () => {
+						throw down;
+					},
+					isCurrentIntent: async () => false,
+				},
+				intentStore: {
+					...intents,
+					finishIntent: async () => {
+						throw closing;
+					},
+				},
+			}),
+			initial(),
+		);
+		expect(result).toEqual({ ok: false, reason: "storage" });
+		expect(failureOf(result)).toEqual({
+			store: "federation_grant",
+			step: "create_pending",
+			error: down,
+			cleanup: { store: "federation_grant_intent", step: "finish_intent", error: closing },
+		});
+	});
+
+	it("names a second write the store refused", async () => {
+		const result = await lodgeFederationGrantIntent(
+			deps({ grantStore: { ...grants, createPending: async () => ({ ok: false }) } }),
+			initial(),
+		);
+		expect(failureOf(result)).toEqual({
+			store: "federation_grant",
+			step: "create_pending",
+			refusal: "refused",
+		});
+	});
+
+	describe("a renewal", () => {
+		beforeEach(() => {
+			clock = at(2 * MIN);
+		});
+
+		it("names the grant store's read, the boundary's, and the backstop's write", async () => {
+			await establish();
+			const down = new Error("down");
+			const throwing = async () => {
+				throw down;
+			};
+			const unread = await lodgeFederationGrantReauthorization(
+				deps({ grantStore: { ...grants, inspect: throwing } }),
+				renewal(),
+			);
+			expect(failureOf(unread)).toEqual({
+				store: "federation_grant",
+				step: "inspect",
+				error: down,
+			});
+
+			const noBoundary = await lodgeFederationGrantReauthorization(
+				deps({ grantsRevokedBefore: throwing }),
+				renewal(),
+			);
+			expect(failureOf(noBoundary)).toEqual({
+				store: "revocation_boundary",
+				step: "read",
+				error: down,
+			});
+
+			const unrevoked = await lodgeFederationGrantReauthorization(
+				deps({
+					grantStore: { ...grants, revoke: throwing },
+					grantsRevokedBefore: async () => at(2 * MIN),
+				}),
+				renewal(),
+			);
+			expect(failureOf(unrevoked)).toEqual({
+				store: "federation_grant",
+				step: "revoke",
+				error: down,
+			});
+		});
+
+		it("names a boundary that answered something that is not one", async () => {
+			await establish();
+			const result = await lodgeFederationGrantReauthorization(
+				deps({ grantsRevokedBefore: async () => "yesterday" as never }),
+				renewal(),
+			);
+			expect(failureOf(result)).toMatchObject({
+				store: "revocation_boundary",
+				step: "read",
+				error: expect.any(TypeError),
+			});
+		});
+
+		it("names a pointer write it could not confirm", async () => {
+			await establish();
+			const reset = new Error("connection reset");
+			const result = await lodgeFederationGrantReauthorization(
+				deps({
+					grantStore: {
+						...grants,
+						nameIntent: async () => {
+							throw reset;
+						},
+						isCurrentIntent: async () => {
+							throw new Error("still down");
+						},
+					},
+				}),
+				renewal(),
+			);
+			expect(result).toEqual({ ok: false, reason: "storage" });
+			expect(failureOf(result)).toEqual({
+				store: "federation_grant",
+				step: "name_intent",
+				error: reset,
+			});
+		});
+	});
+});
