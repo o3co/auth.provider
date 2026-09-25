@@ -1,0 +1,114 @@
+name: umbrella-e2e
+
+# The umbrella's cross-component E2E suite (o3co/auth, `make test-e2e`) with
+# this change as auth.provider. The umbrella tests the provider at a revision
+# pinned in its Makefile and moves the pin at release time, so a change that
+# narrows what the provider accepts — a required config key, a stricter claim,
+# a new status — used to break the umbrella only when the pin was bumped. This
+# runs the suite at the umbrella's develop, with only PROVIDER_REV overridden:
+# auth.proxy and auth.policy-verifier stay at the umbrella's pins.
+#
+# Red means this change breaks the umbrella's contract: fix the umbrella's
+# tests/ first, or change this PR. AGENTS.md ("Umbrella E2E") says how. Not a
+# required check; AGENTS.md also says what making it one takes.
+
+on:
+  pull_request:
+    branches: [develop]
+    # No Markdown reaches the image the suite builds (it is built from
+    # packages/ and templates/standalone/), so a Markdown-only PR would only
+    # re-test develop, which the umbrella's nightly e2e-develop run does. A
+    # workflow filtered out here never reports: as a REQUIRED check it would
+    # leave such a PR pending forever — see AGENTS.md before requiring it.
+    paths-ignore:
+      - '**/*.md'
+      - 'docs/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: umbrella-e2e-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  umbrella-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out the umbrella (o3co/auth) at develop
+        uses: actions/checkout@v4
+        with:
+          repository: o3co/auth
+          ref: develop
+          path: umbrella
+          persist-credentials: false
+
+      # Where the umbrella's `make setup` clones auth.provider. Finding a clone
+      # there, it only runs `git fetch origin` and `git checkout --detach
+      # $(PROVIDER_REV)`, and the commit checked out here — for a pull request,
+      # its merge commit into develop — is already local, so the checkout finds
+      # it although no branch on origin points at it.
+      - name: Check out this change as the umbrella's auth.provider
+        uses: actions/checkout@v4
+        with:
+          path: umbrella/repos/auth.provider
+          persist-credentials: false
+
+      - name: Record the revisions under test
+        id: revs
+        run: |
+          provider="$(git -C umbrella/repos/auth.provider rev-parse HEAD)"
+          echo "provider=$provider" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = pull_request ]; then
+            what="this pull request merged into develop"
+          else
+            what="$GITHUB_REF_NAME"
+          fi
+          {
+            echo "## Revisions under test"
+            echo
+            echo "- auth.provider: \`$provider\` ($what)"
+            echo "- The suite: o3co/auth develop at \`$(git -C umbrella rev-parse HEAD)\`"
+            echo "- auth.proxy: \`$(sed -n 's/^PROXY_REV := //p' umbrella/Makefile)\` (the umbrella's pin)"
+            echo "- auth.policy-verifier: \`$(sed -n 's/^VERIFIER_REV := //p' umbrella/Makefile)\` (the umbrella's pin)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The rest mirrors the umbrella's own e2e workflow.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Enable pnpm via corepack
+        run: |
+          npm install -g corepack --force
+          corepack enable
+          corepack prepare pnpm@10.29.3 --activate
+
+      # The umbrella's `make setup` clones the other siblings with SSH URLs;
+      # runners have no SSH key, and all o3co repos are public.
+      - name: Clone sibling repos over HTTPS
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
+
+      # The umbrella's docker-compose.yml mounts ~/.npmrc as a build secret.
+      # Every @o3co package resolves from the public registry, so the file only
+      # has to exist.
+      - name: Provide npmrc secret file
+        run: touch ~/.npmrc
+
+      - name: Run the umbrella E2E suite with this change as auth.provider
+        working-directory: umbrella
+        env:
+          PROVIDER_SHA: ${{ steps.revs.outputs.provider }}
+        run: make test-e2e PROVIDER_REV="$PROVIDER_SHA"
+
+      - name: Dump container logs on failure
+        if: failure()
+        working-directory: umbrella
+        run: make logs || true
+
+      - name: Teardown
+        if: always()
+        working-directory: umbrella
+        run: make clean
