@@ -18,7 +18,13 @@
 // bytes, and nothing that has to be tidied up first.
 
 import { describe, expect, it } from "vitest";
-import { decodeSealingKey, SEALING_KEY_BYTES } from "#/sealing/keyRing.mjs";
+import {
+	checkSealingKeyRing,
+	decodeSealingKey,
+	isSealingKeyId,
+	SEALING_KEY_BYTES,
+	type SealingKeyRing,
+} from "#/sealing/keyRing.mjs";
 
 const KEY = Buffer.alloc(32, 0xa5).toString("base64");
 
@@ -68,5 +74,90 @@ describe("decodeSealingKey", () => {
 				String(bytes),
 			).toBeUndefined();
 		}
+	});
+});
+
+/** What `run` threw: its exact class and its message. */
+const refusal = (run: () => unknown): { class: unknown; message: string } => {
+	try {
+		run();
+	} catch (err) {
+		return { class: (err as Error).constructor, message: (err as Error).message };
+	}
+	throw new Error("expected a refusal");
+};
+
+describe("isSealingKeyId", () => {
+	it("is 1 to 64 characters of A-Za-z0-9_-, and a string", () => {
+		for (const id of ["k", "k-2026_09", "Z".repeat(64)]) expect(isSealingKeyId(id), id).toBe(true);
+		for (const id of ["", "k.2", "k 2", "k\n", "x".repeat(65), undefined, null, 12, ["k"]]) {
+			expect(isSealingKeyId(id), JSON.stringify(id)).toBe(false);
+		}
+	});
+});
+
+describe("checkSealingKeyRing", () => {
+	const material = Buffer.alloc(32, 1);
+
+	it("passes a ring of distinct, well-formed ids and 32-byte Buffers, and an empty one", () => {
+		// Whether a ring may be empty is its reader's to say.
+		expect(() =>
+			checkSealingKeyRing(
+				[
+					{ id: "k-new", key: material },
+					{ id: "k-old", key: Buffer.alloc(32, 2) },
+				],
+				"mfa.encryptionKeys",
+			),
+		).not.toThrow();
+		expect(() => checkSealingKeyRing([], "mfa.encryptionKeys")).not.toThrow();
+	});
+
+	it("refuses as a RangeError prefixed with the setting it was given, naming the entry", () => {
+		const cases: ReadonlyArray<readonly [string, SealingKeyRing, string]> = [
+			[
+				"an id outside the rule, named by its index",
+				[
+					{ id: "k-1", key: material },
+					{ id: "k.2", key: material },
+				],
+				"mfa.encryptionKeys has an encryption key id at index 1 that does not match ^[A-Za-z0-9_-]{1,64}$",
+			],
+			[
+				"a duplicate id, named",
+				[
+					{ id: "k-1", key: material },
+					{ id: "k-1", key: Buffer.alloc(32, 2) },
+				],
+				'mfa.encryptionKeys has a duplicate encryption key id "k-1"',
+			],
+			[
+				"a key that is not 32 bytes",
+				[{ id: "k-1", key: Buffer.alloc(16, 1) }],
+				'mfa.encryptionKeys has an encryption key "k-1" that is not a Buffer of 32 bytes',
+			],
+			[
+				"a key that is not a Buffer: a 32-character string would be used as its UTF-8 bytes",
+				[{ id: "k-1", key: "k".repeat(32) as unknown as Buffer }],
+				'mfa.encryptionKeys has an encryption key "k-1" that is not a Buffer of 32 bytes',
+			],
+		];
+		for (const [what, ring, message] of cases) {
+			expect(
+				refusal(() => checkSealingKeyRing(ring, "mfa.encryptionKeys")),
+				what,
+			).toStrictEqual({
+				class: RangeError,
+				message,
+			});
+		}
+	});
+
+	it("never echoes an id outside the rule: an operator who swapped id and key would see the key", () => {
+		const swapped = material.toString("base64");
+		const { message } = refusal(() =>
+			checkSealingKeyRing([{ id: swapped, key: material }], "mfa.encryptionKeys"),
+		);
+		expect(message).not.toContain(swapped);
 	});
 });

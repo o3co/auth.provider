@@ -186,18 +186,23 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 		}
 	});
 
-	it("refuses a ring whose key ids break the rule as a RangeError: a configured value it cannot use", () => {
-		// The ring is checked by core's sealing leaf when the store seals once at
-		// construction; its refusals are RangeErrors, as every refused setting is.
+	it("refuses a ring whose key ids break the rule as a RangeError naming the configuration key", () => {
+		// The resolver checks the ring it read with core's rule, under the key an
+		// operator wrote it at; its refusals are RangeErrors, as every refused
+		// setting is.
 		const ringOf = (ids: readonly string[]) => ({
 			encryptionMode: "required",
 			encryptionKeys: ids.map((id) => ({ id, key: KEY })),
 		});
 		expect(() => build(ringOf(["k-1", "k-1"]))).toThrow(
-			new RangeError("duplicate encryption key id"),
+			new RangeError(
+				'federation grant store: federationGrants.encryptionKeys has a duplicate encryption key id "k-1"',
+			),
 		);
-		expect(() => build(ringOf(["k.2"]))).toThrow(
-			new RangeError("encryption key id must match ^[A-Za-z0-9_-]{1,64}$"),
+		expect(() => build(ringOf(["k-1", "k.2"]))).toThrow(
+			new RangeError(
+				"federation grant store: federationGrants.encryptionKeys has an encryption key id at index 1 that does not match ^[A-Za-z0-9_-]{1,64}$",
+			),
 		);
 	});
 
@@ -212,12 +217,20 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 				{ id: "k-1", key: material },
 				{ id: "k-1", key: material },
 			]),
-		).toThrow(new RangeError("duplicate encryption key id"));
+		).toThrow(
+			new RangeError(
+				'federation grant store: encryption.keys has a duplicate encryption key id "k-1"',
+			),
+		);
 		expect(direct([{ id: "k 1", key: material }])).toThrow(
-			new RangeError("encryption key id must match ^[A-Za-z0-9_-]{1,64}$"),
+			new RangeError(
+				"federation grant store: encryption.keys has an encryption key id at index 0 that does not match ^[A-Za-z0-9_-]{1,64}$",
+			),
 		);
 		expect(direct([{ id: "k-1", key: Buffer.alloc(16, 7) }])).toThrow(
-			new RangeError("encryption key must be 32 bytes"),
+			new RangeError(
+				'federation grant store: encryption.keys has an encryption key "k-1" that is not a Buffer of 32 bytes',
+			),
 		);
 		// The store's own refusal of a ring with nothing to seal with, before the
 		// leaf is asked: the same setting, so the same class.
@@ -226,22 +239,48 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 		);
 	});
 
-	it("refuses a configured key it cannot read as a RangeError naming the key, before any store is built", () => {
+	it("refuses a configured key it cannot read as a RangeError naming the entry, before any store is built", () => {
 		// The key reader runs in the exported resolver, which a composition root
 		// that builds the store itself calls too; the factory takes key material.
 		const refusal = new RangeError(
-			'federation grant store: encryption key "k-1" must be canonical base64 of 32 bytes',
+			"federation grant store: federationGrants.encryptionKeys[1].key must be canonical base64 of 32 bytes",
 		);
 		for (const key of [`${KEY}\n`, Buffer.alloc(16, 7).toString("base64"), "not base64!!"]) {
 			expect(
 				() =>
 					resolveRedisFederationGrantStoreOptions(
-						config({ encryptionMode: "required", encryptionKeys: [{ id: "k-1", key }] }) as never,
+						config({
+							encryptionMode: "required",
+							encryptionKeys: [
+								{ id: "k-0", key: KEY },
+								{ id: "k-1", key },
+							],
+						}) as never,
 						{},
 					),
 				JSON.stringify(key),
 			).toThrow(refusal);
 		}
+	});
+
+	it("never puts key material in a refusal: an operator who swapped id and key sees neither", () => {
+		// The id is read before the key is known to be one, so a refusal that
+		// quoted it would put the base64 key into the BootError and the log.
+		let thrown: unknown;
+		try {
+			resolveRedisFederationGrantStoreOptions(
+				config({ encryptionMode: "required", encryptionKeys: [{ id: KEY, key: "k-1" }] }) as never,
+				{},
+			);
+		} catch (err) {
+			thrown = err;
+		}
+		expect(thrown).toStrictEqual(
+			new RangeError(
+				"federation grant store: federationGrants.encryptionKeys[0].key must be canonical base64 of 32 bytes",
+			),
+		);
+		expect((thrown as Error).message).not.toContain(KEY);
 	});
 
 	it.each([
@@ -251,12 +290,12 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 				{ id: "k-1", key: KEY },
 				{ id: "k-1", key: KEY },
 			],
-			"duplicate encryption key id",
+			'federation grant store: federationGrants.encryptionKeys has a duplicate encryption key id "k-1"',
 		],
 		[
 			"a key id outside the rule",
 			[{ id: "k.1", key: KEY }],
-			"encryption key id must match ^[A-Za-z0-9_-]{1,64}$",
+			"federation grant store: federationGrants.encryptionKeys has an encryption key id at index 0 that does not match ^[A-Za-z0-9_-]{1,64}$",
 		],
 		[
 			"no key at all",
@@ -266,12 +305,12 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 		[
 			"a key that is not canonical base64",
 			[{ id: "k-1", key: `${KEY}\n` }],
-			'federation grant store: encryption key "k-1" must be canonical base64 of 32 bytes',
+			"federation grant store: federationGrants.encryptionKeys[0].key must be canonical base64 of 32 bytes",
 		],
 		[
 			"a key that is not 32 bytes",
 			[{ id: "k-1", key: Buffer.alloc(16, 7).toString("base64") }],
-			'federation grant store: encryption key "k-1" must be canonical base64 of 32 bytes',
+			"federation grant store: federationGrants.encryptionKeys[0].key must be canonical base64 of 32 bytes",
 		],
 	])(
 		"fails boot on %s with a RangeError as the BootError's cause, naming the module",

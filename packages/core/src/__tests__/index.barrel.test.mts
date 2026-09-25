@@ -144,7 +144,13 @@ describe("core barrel — the sealing leaf", () => {
 	it("re-exports what a store needs to seal a value at rest under a key ring, and to read the ring's keys", () => {
 		// The federation grant store in `@o3co/auth-provider-redis` seals with
 		// these, and a second store must not grow its own envelope.
-		for (const name of ["sealWithKeyRing", "openWithKeyRing", "decodeSealingKey"] as const) {
+		for (const name of [
+			"sealWithKeyRing",
+			"openWithKeyRing",
+			"decodeSealingKey",
+			"checkSealingKeyRing",
+			"isSealingKeyId",
+		] as const) {
 			expect(typeof (core as Record<string, unknown>)[name], name).toBe("function");
 		}
 		expect(core.SEALING_KEY_BYTES).toBe(32);
