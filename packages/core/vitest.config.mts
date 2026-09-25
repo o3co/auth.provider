@@ -99,6 +99,9 @@ export default defineConfig({
 				// a required key. Paired with tsconfig.test.json.
 				"src/mfa/__tests__/**/*.test.mts",
 				"src/mail/__tests__/**/*.test.mts",
+				// The MFA enrollment witness on `User` and `UserRepository`. Paired
+				// with tsconfig.test.json.
+				"src/repositories/__tests__/mfaEnrollmentWitness.test.mts",
 			],
 			// vitest 5 collects a typecheck-included file's tests from the file
 			// itself, where 4 was content to let an imported helper register

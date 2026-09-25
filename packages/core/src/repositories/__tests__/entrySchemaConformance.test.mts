@@ -176,6 +176,8 @@ const FULLY_POPULATED_USER = {
 	name: "Alice Example",
 	picture: "https://example.com/alice.png",
 	groups: ["staff"],
+	// The MFA ADR's D12: the enrollment witness a Store answers on `authenticate`.
+	mfaEnrolled: true,
 } satisfies Required<User>;
 
 describe("UserEntrySchema conformance with User (#343)", () => {

@@ -60,7 +60,9 @@
 		"src/audit/__tests__/audit-details.types.test.mts",
 		// The MFA ports; paired with vitest.config.mts.
 		"src/mfa/**/*.mts",
-		"src/mail/**/*.mts"
+		"src/mail/**/*.mts",
+		// The MFA enrollment witness; paired with vitest.config.mts.
+		"src/repositories/__tests__/mfaEnrollmentWitness.test.mts"
 	],
 	"exclude": ["node_modules", "dist"]
 }
