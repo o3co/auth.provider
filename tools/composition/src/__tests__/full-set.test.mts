@@ -68,6 +68,7 @@ import {
 	TEMPLATE_DEPENDENCIES,
 	TOO_LARGE,
 	TRANSFERS,
+	WEB,
 	webTokens,
 } from "@o3co/auth-provider-standalone/src/__tests__/all-modules-composition.fixture.mts";
 import { WEBAUTHN_GRANT_TYPE } from "@o3co/auth-provider-webauthn";
@@ -642,6 +643,82 @@ describe.each([AS_LISTED, REVERSED] satisfies ModuleOrder[])("bodies, modules %s
 });
 
 // ---------------------------------------------------------------------------
+// Token exchange and the session behind the subject token
+// ---------------------------------------------------------------------------
+
+describe("token exchange: a token exchanged from a session-bound token ends with the session", () => {
+	// The session grant's token carries the browser session's `sid` and no
+	// family, so a logout reaches it only through the UserSession record that
+	// introspection reads. The exchange dropped the `sid`: the token it issued
+	// from that one stayed active after the logout, for the rest of its life.
+
+	/** Signed in, a session-grant token for the web client, and the gateway's exchange of it. */
+	const sessionAndExchange = async (app: Express) => {
+		const signed = await signedIn(app);
+		const minted = await signed.agent
+			.post("/oauth/token")
+			.set("Authorization", basic(WEB))
+			.type("form")
+			.send({ grant_type: "session", scope: "openid profile" });
+		expect(minted.status).toBe(200);
+		const original = minted.body.access_token as string;
+		const exchanged = await exchangeAsGateway(app, original);
+		expect(exchanged.status).toBe(200);
+		return { ...signed, original, exchanged: exchanged.body.access_token as string };
+	};
+
+	const exchangeAsGateway = (app: Express, subjectToken: string) =>
+		request(app).post("/oauth/token").set("Authorization", basic(GATEWAY)).type("form").send({
+			grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
+			subject_token: subjectToken,
+			subject_token_type: ACCESS_TOKEN_TYPE,
+		});
+
+	/** Introspected by the client its audience names. */
+	const active = async (
+		app: Express,
+		token: string,
+		client: { id: string; secret: string },
+	): Promise<unknown> => {
+		const res = await request(app)
+			.post("/oauth/introspect")
+			.set("Authorization", basic(client))
+			.type("form")
+			.send({ token });
+		expect(res.status).toBe(200);
+		return res.body.active;
+	};
+
+	it("after /session/logout, the session-grant token and the token exchanged from it both introspect inactive", async () => {
+		const { app } = await boot();
+		const { agent, header, token, original, exchanged } = await sessionAndExchange(app);
+		expect(await active(app, original, WEB)).toBe(true);
+		expect(await active(app, exchanged, GATEWAY)).toBe(true);
+
+		const logout = await agent.post("/session/logout").set(header, token);
+		expect(logout.status).toBe(200);
+
+		expect(await active(app, original, WEB)).toBe(false);
+		expect(await active(app, exchanged, GATEWAY)).toBe(false);
+		// Because the exchanged token names the same browser session.
+		expect(tokenPayload(exchanged).sid).toBe(tokenPayload(original).sid);
+	});
+
+	it("refuses to exchange a session-bound token after its session logged out", async () => {
+		const { app } = await boot();
+		const { agent, header, token, original } = await sessionAndExchange(app);
+		expect((await agent.post("/session/logout").set(header, token)).status).toBe(200);
+
+		const again = await exchangeAsGateway(app, original);
+		expect(again.status).toBe(400);
+		expect(again.body).toEqual({
+			error: "invalid_request",
+			error_description: "session_invalid",
+		});
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Outages
 // ---------------------------------------------------------------------------
 
@@ -732,6 +809,32 @@ const OUTAGES: readonly OutageCase<FullSet>[] = [
 			"no-warn":
 				"core's verifier (`verifyJwt`, `packages/core/src/jwt/verify.mts`) writes its own `jwt_verify_rejected` warn (`reason: \"revocation_unavailable\"`) beside the exchange's error line — the defect the template suite pins at introspection",
 		},
+	},
+	{
+		module: "oauth-token-exchange",
+		slot: "userSessionStore",
+		surface: "the subject_token's session check",
+		run: async (app, outage) => {
+			const { agent } = await signedIn(app);
+			const minted = await agent
+				.post("/oauth/token")
+				.set("Authorization", basic(WEB))
+				.type("form")
+				.send({ grant_type: "session", scope: "openid profile" });
+			outage.down = true;
+			return request(app)
+				.post("/oauth/token")
+				.set("Authorization", basic(GATEWAY))
+				.type("form")
+				.send({
+					grant_type: TOKEN_EXCHANGE_GRANT_TYPE,
+					subject_token: minted.body.access_token,
+					subject_token_type: ACCESS_TOKEN_TYPE,
+				});
+		},
+		answer: { status: 503, error: "temporarily_unavailable" },
+		event: "token_exchange_session_store_unavailable",
+		unrelatedWarns: ["jwt_verify_aud_skipped"],
 	},
 	{
 		module: "webauthn",

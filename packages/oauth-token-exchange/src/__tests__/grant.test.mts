@@ -17,6 +17,7 @@
 import {
 	type AppConfig,
 	type ClientRepository,
+	createInMemoryUserSessionStore,
 	type GrantContext,
 	type GrantPolicyContext,
 	type GrantPolicyHook,
@@ -24,6 +25,7 @@ import {
 	type Logger,
 	MAX_CLIENT_ID_LENGTH,
 	type PublicClient,
+	type UserSessionStore,
 } from "@o3co/auth-provider-core";
 import { decodeJwt } from "jose";
 import { describe, expect, it, vi } from "vitest";
@@ -71,6 +73,7 @@ function buildGrant(
 		config?: AppConfig;
 		grantPolicy?: GrantPolicyHook;
 		logger?: Logger;
+		userSessionStore?: UserSessionStore;
 	} = {},
 ) {
 	// null = explicitly absent; undefined = use default
@@ -91,6 +94,7 @@ function buildGrant(
 		clientRepository: overrides.clientRepository ?? mockClientRepository(),
 		...(overrides.grantPolicy ? { grantPolicy: overrides.grantPolicy } : {}),
 		...(overrides.logger ? { logger: overrides.logger } : {}),
+		...(overrides.userSessionStore ? { userSessionStore: overrides.userSessionStore } : {}),
 	});
 }
 
@@ -1798,5 +1802,133 @@ describe("createTokenExchangeGrant — D-6 ctx.authenticatedClient route-bound f
 		if (!("error" in result)) expect.fail("Expected error in result");
 		expect(result.error).toBe("invalid_client");
 		expect(result.errorDescription).toMatch(/does not support public clients/);
+	});
+});
+
+describe("createTokenExchangeGrant — the session behind a sid-carrying token", () => {
+	// A token minted from a browser session carries its `sid`, and a logout
+	// ends it: introspection, `/userinfo` and the refresh grant all read the
+	// UserSession it names. The exchange dropped the `sid`, so the token it
+	// issued stayed active after the logout that ended its subject token —
+	// and it accepted a subject token whose session was already gone.
+
+	/** A store holding `user-1`'s live session under `sid-live`, and `svc-a`'s under `sid-actor`. */
+	const liveSessions = async (): Promise<UserSessionStore> => {
+		const store = createInMemoryUserSessionStore();
+		for (const [sid, sub] of [
+			["sid-live", "user-1"],
+			["sid-actor", "svc-a"],
+		] as const) {
+			await store.create({
+				sid,
+				sub,
+				authTime: new Date(),
+				expiresAt: new Date(Date.now() + 3_600_000),
+				claims: {},
+				amr: ["pwd"],
+			});
+		}
+		return store;
+	};
+
+	const exchange = (g: ReturnType<typeof buildGrant>, body: Record<string, unknown>) =>
+		g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				...body,
+			}),
+		);
+
+	const issued = (result: Awaited<ReturnType<typeof exchange>>["result"]) => {
+		if (!("tokens" in result)) throw new Error(`expected tokens, got ${JSON.stringify(result)}`);
+		return decodeJwt(result.tokens.access_token);
+	};
+
+	it("carries the subject token's sid onto the issued token", async () => {
+		const g = buildGrant({ userSessionStore: await liveSessions() });
+		const { result } = await exchange(g, {
+			subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
+		});
+		expect(result.status).toBe(200);
+		expect(issued(result).sid).toBe("sid-live");
+	});
+
+	it("carries the sid without a store to check it against, as introspection reads it then", async () => {
+		// With no UserSession store wired nothing anywhere judges a `sid`, and
+		// the one the exchange would drop is the one a later wiring reads.
+		const g = buildGrant();
+		const { result } = await exchange(g, {
+			subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
+		});
+		expect(result.status).toBe(200);
+		expect(issued(result).sid).toBe("sid-live");
+	});
+
+	it("stamps no sid for a subject token without one, and reads no session", async () => {
+		const store = await liveSessions();
+		const get = vi.spyOn(store, "get");
+		const { result } = await exchange(buildGrant({ userSessionStore: store }), {
+			subject_token: await signSelfIssuedAccessToken({}),
+		});
+		expect(result.status).toBe(200);
+		expect(issued(result)).not.toHaveProperty("sid");
+		expect(get).not.toHaveBeenCalled();
+	});
+
+	it("refuses a subject token whose session has ended, with invalid_request session_invalid", async () => {
+		// RFC 8693 §2.2.2: a subject_token unacceptable for any reason is
+		// `invalid_request`. The refresh grant's words for the same finding.
+		const store = await liveSessions();
+		const g = buildGrant({ userSessionStore: store });
+		const subject = await signSelfIssuedAccessToken({ sid: "sid-live" });
+		await store.delete("sid-live");
+		const { result } = await exchange(g, { subject_token: subject });
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "session_invalid",
+		});
+	});
+
+	it("refuses an actor_token whose session has ended, naming the actor", async () => {
+		const store = await liveSessions();
+		const g = buildGrant({ userSessionStore: store });
+		const actor = await signSelfIssuedAccessToken({ sub: "svc-a", sid: "sid-actor" });
+		await store.delete("sid-actor");
+		const { result } = await exchange(g, {
+			subject_token: await signSelfIssuedAccessToken({
+				sid: "sid-live",
+				may_act: [{ sub: "svc-a", iss: ISSUER }],
+			}),
+			actor_token: actor,
+			actor_token_type: ACCESS_TOKEN_TYPE,
+		});
+		expect(result).toEqual({
+			status: 400,
+			error: "invalid_request",
+			errorDescription: "actor_token session_invalid",
+		});
+	});
+
+	it("answers a session store that cannot be read with 503, logged once at error, and issues nothing", async () => {
+		const store = await liveSessions();
+		vi.spyOn(store, "get").mockRejectedValue(storeReplyError());
+		const logger = spyLogger();
+		const { result } = await exchange(buildGrant({ userSessionStore: store, logger }), {
+			subject_token: await signSelfIssuedAccessToken({ sid: "sid-live" }),
+		});
+		expect(result).toEqual({
+			status: 503,
+			error: "temporarily_unavailable",
+			errorDescription: "session store unavailable",
+		});
+		expectOutageLine(logger, "token_exchange_session_store_unavailable", {
+			store: "user_session",
+			step: "get",
+			role: "subject",
+			err: expect.objectContaining({ name: "ReplyError" }),
+		});
 	});
 });

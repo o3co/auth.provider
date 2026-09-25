@@ -118,6 +118,22 @@ describe("createSelfIssuedAccessTokenValidator", () => {
 		).toThrow(/refreshTokenFamilyRevocation is not an option/);
 	});
 
+	it("projects the token's sid, so the grant can check its session and carry it", async () => {
+		const token = await signSelfIssuedAccessToken({ sid: "sid-1" });
+		const result = await validator().validate(token, { role: "subject" });
+		expect(result?.sid).toBe("sid-1");
+	});
+
+	it("leaves sid absent for a token without one, or with an empty one", async () => {
+		for (const claims of [{}, { sid: "" }, { sid: 42 }]) {
+			const result = await validator().validate(await signSelfIssuedAccessToken(claims), {
+				role: "subject",
+			});
+			expect(result, JSON.stringify(claims)).not.toBeNull();
+			expect(result?.sid, JSON.stringify(claims)).toBeUndefined();
+		}
+	});
+
 	it("accepts a token without a family_id claim, leaving familyId absent", async () => {
 		const token = await signSelfIssuedAccessToken({});
 		const result = await validator().validate(token, { role: "subject" });
