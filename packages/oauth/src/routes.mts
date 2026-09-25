@@ -43,6 +43,7 @@ import {
 	type Logger,
 	livenessSidOf,
 	loggableError,
+	ownedConfirmation,
 	type PendingConsentStore,
 	type RateLimiter,
 	type RefreshTokenFamilyRevocation,
@@ -667,6 +668,37 @@ export const createOAuthRouter = async (
 								errorEnvelope(
 									"unauthorized_client",
 									sanitizeErrorText(`client not allowed to use kind=${ctx.tokenBinding.kind}`),
+								),
+							);
+					}
+					// The kind is allowed, but the binding must also carry a member
+					// that kind owns: every grant stamps `ownedConfirmation` and
+					// nothing else, so a binding with none — a DPoP binding
+					// presenting an mTLS thumbprint, a contributed kind core has no
+					// confirmation for — would be minted an unbound Bearer token,
+					// and the required constraint downgraded without a word. A client
+					// that does not require a constraint gets that unbound token,
+					// advertised as Bearer; this one is refused.
+					if (ownedConfirmation(ctx.tokenBinding) === undefined) {
+						await emitAuditEvent(auditSink, {
+							timestamp: new Date(),
+							type: "token.issued.failure",
+							clientId: req.oauthClient?.clientId,
+							ip: req.ip,
+							userAgent: req.get("user-agent"),
+							details: {
+								reason: "sender_constraint_unowned_confirmation",
+								grant_type,
+								presented_kind: ctx.tokenBinding.kind,
+								required_methods: sc.methods,
+							},
+						});
+						return res
+							.status(400)
+							.json(
+								errorEnvelope(
+									"invalid_request",
+									"sender-constrained binding carries no confirmation its mechanism owns",
 								),
 							);
 					}

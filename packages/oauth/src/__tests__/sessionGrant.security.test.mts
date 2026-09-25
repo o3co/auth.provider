@@ -59,6 +59,8 @@ async function buildApp(
 	binding?: TokenBinding,
 	sid: string | undefined = SID,
 	browserUser: { id?: unknown } = { id: SUB },
+	/** Register the client `senderConstrained` for the binding's kind (the default). */
+	constrained = true,
 ) {
 	const client = {
 		clientId: "app",
@@ -66,7 +68,9 @@ async function buildApp(
 		allowedRedirectUris: [],
 		allowedScopes: ["read"],
 		allowedGrantTypes: ["session"],
-		...(binding ? { senderConstrained: { required: true, methods: [binding.kind] } } : {}),
+		...(binding && constrained
+			? { senderConstrained: { required: true, methods: [binding.kind] } }
+			: {}),
 	};
 	const clientRepository: ClientRepository = {
 		findById: async (id) => (id === "app" ? client : null),
@@ -242,12 +246,24 @@ describe("session grant authentication and token binding", () => {
 
 describe("session grant stamps only the confirmation the binding's mechanism owns", () => {
 	it.each(UNOWNED_BINDINGS)(
-		"mints an unbound access token, advertised as Bearer, for %s",
+		"mints an unbound access token, advertised as Bearer, for %s — to a client with no required constraint",
 		async (_label, binding) => {
-			const result = await mint(await buildApp(await liveStore(), binding));
+			const result = await mint(
+				await buildApp(await liveStore(), binding, SID, { id: SUB }, false),
+			);
 			expect(result.status).toBe(200);
 			expect(decodeJwt(result.body.access_token).cnf).toBeUndefined();
 			expect(result.body.token_type).toBe("Bearer");
+		},
+	);
+
+	it.each(UNOWNED_BINDINGS)(
+		"refuses %s at dispatch for a client that requires its kind, rather than downgrading it",
+		async (_label, binding) => {
+			const result = await mint(await buildApp(await liveStore(), binding));
+			expect(result.status).toBe(400);
+			expect(result.body.error).toBe("invalid_request");
+			expect(result.body.access_token).toBeUndefined();
 		},
 	);
 

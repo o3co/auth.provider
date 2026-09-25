@@ -297,7 +297,7 @@ A passkey is the primary login on a native app and the access token is short-liv
 
 **`token_type` says which kind was minted** — core's `generateTokenResponse` reads it off the access token's `cnf`. A DPoP-bound access token is announced as `DPoP` (RFC 9449 §5). An mTLS-bound one keeps `Bearer` — it travels as a bearer token and is checked against the TLS client certificate (RFC 8705 §3). An unbound request is answered exactly as before: `Bearer`, and no `cnf` on either token.
 
-**A client registered `senderConstrained` is refused before this grant runs.** The `/token` route's shared dispatch gate rejects a request that presents no binding with `401 invalid_client`, and one whose binding kind is not in the client's `methods` with `400 unauthorized_client` — for every `grant_type`, this one included. The grant handler holds no second copy of that rule; its part is the other half, above — a request that proves its key gets a token bound to it ([#489](https://github.com/o3co/auth.provider/issues/489)).
+**A client registered `senderConstrained` is refused before this grant runs.** The `/token` route's shared dispatch gate rejects a request that presents no binding with `401 invalid_client`, one whose binding kind is not in the client's `methods` with `400 unauthorized_client`, and one whose binding carries no confirmation its kind owns with `400 invalid_request` — for every `grant_type`, this one included. The grant handler holds no second copy of that rule; its part is the other half, above — a request that proves its key gets a token bound to it ([#489](https://github.com/o3co/auth.provider/issues/489)).
 
 ## SECURITY — token revocation limitations
 
