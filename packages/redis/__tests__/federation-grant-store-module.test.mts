@@ -423,6 +423,24 @@ describe("the Redis federation grant store module (#593, D16)", () => {
 		}
 	});
 
+	it("refuses an encryption mode it does not know, rather than reading it as plaintext", () => {
+		// The shared plaintext guard took anything but "required" for
+		// `allow-plaintext`. The module's schema refuses such a value first; a
+		// store built directly met the guard alone.
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			expect(() =>
+				createRedisFederationGrantStore({
+					client,
+					encryption: { mode: "requried" } as never,
+				}),
+			).toThrow(new RangeError('[federation-grants] mode must be "required" or "allow-plaintext"'));
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
 	it("holds the retention and the listing allowance to a year, as core's schema does", () => {
 		// A typo nothing bounded — `tombstoneRetention = 1e18` — became a
 		// deadline Redis refuses after the script has written, and a record

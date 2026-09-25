@@ -218,6 +218,9 @@ const bootRefusal = async (extra: Record<string, unknown>): Promise<unknown> => 
 	return ((await boot.catch((err: unknown) => err)) as Error).cause;
 };
 
+const MESSAGE_KEY =
+	"federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)";
+
 const PLAINTEXT_UNDER_MULTI =
 	'[federation-tokens] mode "allow-plaintext" is refused because deployment.mode is "multi" ' +
 	"(a multi-replica deployment is never a development box). " +
@@ -225,6 +228,8 @@ const PLAINTEXT_UNDER_MULTI =
 	"FEDERATION_TOKENS_ALLOW_INSECURE=1 to override (NOT recommended for production).";
 
 const KEY_OF_16 = Buffer.alloc(16, 7).toString("base64");
+/** 32 bytes of key material, as `openssl rand -base64 32` prints it (without the newline). */
+const KEY_OF_32 = Buffer.alloc(32, 0xfb).toString("base64");
 
 describe("every setting the token store is given and cannot use is refused as a RangeError", () => {
 	let insecure: string | undefined;
@@ -262,9 +267,63 @@ describe("every setting the token store is given and cannot use is refused as a 
 		).toThrow(RangeError);
 	});
 
+	it("through the builder: a configured key that is not canonical base64 of 32 bytes is refused, not tidied up", () => {
+		// `Buffer.from(…, "base64")` read a key with a trailing newline, in the
+		// URL alphabet, or without its padding as the same 32 bytes: a value an
+		// operator has to tidy up to read is not the value they checked. Core's
+		// `decodeSealingKey` is the one rule for a configured key.
+		for (const key of [
+			`${KEY_OF_32}\n`,
+			` ${KEY_OF_32}`,
+			Buffer.alloc(32, 0xfb).toString("base64url"),
+			KEY_OF_32.replace(/=+$/, ""),
+		]) {
+			expect(
+				() =>
+					redisFederationTokenStoreBuilder({
+						client: fakeClient(),
+						encryption: { mode: "required", key },
+					}),
+				JSON.stringify(key),
+			).toThrow(new RangeError(MESSAGE_KEY));
+		}
+		// The canonical spelling, and 32 bytes handed over as a Buffer, build.
+		for (const key of [KEY_OF_32, Buffer.alloc(32, 0xfb)]) {
+			const store = redisFederationTokenStoreBuilder({
+				client: fakeClient(),
+				encryption: { mode: "required", key },
+			}) as { kind: string };
+			expect(store.kind).toBe("redis");
+		}
+	});
+
+	it("refuses an encryption mode it does not know, rather than reading it as plaintext", () => {
+		// A typo such as "requried" was taken for `allow-plaintext`: stored in
+		// the clear with a warning outside production, and refused in production
+		// with a message about plaintext the operator never asked for.
+		const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+		try {
+			const message = '[federation-tokens] mode must be "required" or "allow-plaintext"';
+			expect(() =>
+				redisFederationTokenStoreBuilder({
+					client: fakeClient(),
+					encryption: { mode: "requried", key: KEY_OF_32 },
+				}),
+			).toThrow(new RangeError(message));
+			expect(() =>
+				createRedisFederationTokenStore({
+					client: fakeClient() as unknown as FederationTokenStoreClient,
+					encryption: { mode: "requried" } as never,
+				}),
+			).toThrow(new RangeError(message));
+			expect(warn).not.toHaveBeenCalled();
+		} finally {
+			warn.mockRestore();
+		}
+	});
+
 	it("through the builder: a configured key that does not decode to 32 bytes, or none", () => {
-		const message =
-			"federationTokenStore.redis: encryption.key must decode to 32 bytes (AES-256) when encryption.mode is 'required' (the default)";
+		const message = MESSAGE_KEY;
 		for (const key of [KEY_OF_16, Buffer.alloc(16, 7), undefined]) {
 			expect(
 				() =>
@@ -281,12 +340,17 @@ describe("every setting the token store is given and cannot use is refused as a 
 		[
 			"a key that does not decode to 32 bytes",
 			{ redisFederationTokenStore: { encryptionKey: KEY_OF_16 } },
-			"federationTokenStore.redis: encryption.key must decode to 32 bytes (AES-256) when encryption.mode is 'required' (the default)",
+			"federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)",
+		],
+		[
+			"a key that is not canonical base64",
+			{ redisFederationTokenStore: { encryptionKey: `${KEY_OF_32}\n` } },
+			"federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)",
 		],
 		[
 			"no key under the default mode",
 			{ redisFederationTokenStore: {} },
-			"federationTokenStore.redis: encryption.key must decode to 32 bytes (AES-256) when encryption.mode is 'required' (the default)",
+			"federationTokenStore.redis: encryption.key must be canonical base64 of 32 bytes (AES-256), or a Buffer of 32 bytes, when encryption.mode is 'required' (the default)",
 		],
 		[
 			'plaintext under deployment.mode = "multi"',
