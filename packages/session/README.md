@@ -194,6 +194,21 @@ What holds:
   (see [Install](#install)).
 - **Federation transactions share the store**, under the `fedtx:` key prefix —
   see [the transaction cookie](#the-transaction-cookie).
+- **A store that cannot answer is an outage, not a `500`.** When the store
+  cannot load a request's session (it is unreachable, or holds a record it
+  cannot read) the request is answered `503 temporarily_unavailable` before any
+  route runs; when it cannot save a session, or refresh its expiry, after the
+  route answered, that answer stands. Either way it is logged once at error
+  level as `session_middleware_store_unavailable` (`store: "cookie_session"`,
+  `step`: `load` or `save`, the error's projection) and goes no further —
+  express-session would have handed it to `next(err)`, the terminal handler's
+  `500` before the route, Express's final handler after it
+  ([`src/internal/cookieSession.mts`](src/internal/cookieSession.mts)). This
+  package's routes save the session themselves before they answer where it
+  matters — the login and the federation start and callback — so a failed save
+  there is their own `503`, and a route that answers a cookie-store outage drops
+  the request's session so express-session does not write to the failing store
+  again as the response ends.
 
 **Not `@o3co/auth-provider-redis`.** That package's `UserSessionStore` holds the
 `UserSession` record behind a `sid` — what introspection, `/userinfo` and
@@ -249,16 +264,18 @@ The manifest ([`src/module.mts`](src/module.mts)):
   `UserRepository.authenticate` answers `null`; `503 temporarily_unavailable`
   when a store the login needs cannot answer — the `UserRepository` throws,
   the `UserSession` write throws, or the express session cannot be
-  regenerated (its store failed to destroy the old record). Each is logged
-  once at error level as `login_store_unavailable`, with `store`
+  regenerated (its store failed to destroy the old record) or saved. Each is
+  logged once at error level as `login_store_unavailable`, with `store`
   (`user_repository`, `user_session`, `cookie_session`), `step`
-  (`authenticate`, `create`, `regenerate`) and the error's projection, never
-  the username. After a failed regeneration the `UserSession` and its
-  subject-index entry are rolled back best-effort; a rollback step that fails
-  is one `login_cleanup_failed` warn.
+  (`authenticate`, `create`, `regenerate`, `save`) and the error's projection,
+  never the username. After a failed regeneration or save the `UserSession`
+  and its subject-index entry are rolled back best-effort; a rollback step
+  that fails is one `login_cleanup_failed` warn.
 - On success it creates a `UserSession` (`amr: ["pwd"]`, lifetime
   `session.maxAge`), records it in `subjectSessionIndex` when that is wired,
-  regenerates the express session, and answers `200` with a fresh CSRF cookie.
+  regenerates the express session and saves it, and answers `200` with a fresh
+  CSRF cookie. The save comes before the answer: a store that cannot save it is
+  `503`, not a `200` for a session the next request would not find.
 - `redirect_to`, when sent, must be on `session.redirectAllowlist` (see
   [Redirect allowlists](#redirect-allowlists)) and is stored as
   `req.session.redirectTo`; nothing in this package redirects to it.
@@ -445,8 +462,9 @@ URL is exactly what the adapter returned.
 2. **`exchangeCode` throwing is `502 exchange_failed`.** Every refusal inside an
    adapter — a wrong `iss`, a bad id_token, a UserInfo mismatch — surfaces this
    way and never reaches the Store. A profile without `sub` is
-   `400 invalid_profile`. The `federation token exchange failed` warning
-   carries core's `loggableError(err)`, never the error itself: an OAuth
+   `400 invalid_profile`. The warning, `federation_callback_exchange_failed`
+   (the provider bound on the line), carries core's `loggableError(err)`,
+   never the error itself: an OAuth
    library puts the token response it refused, access and refresh token
    included, on the error's cause chain, and a logger that serialises the
    whole error would write them out. Every other failure these routes log —
@@ -824,7 +842,8 @@ The rule, shared by both lists
 the allowlist: the former is the bridge page a `redirect_to` is handed to, the
 latter the fallback for a callback whose start carried none. A callback that
 needs one of them and finds it unset is answered `500 misconfiguration` — after
-the session has been saved. So every federation needs `clientUrl` unless every
+the session has been saved — and logged once at error level as
+`redirect_policy_server_fault`, as every `5xx` a policy answers is. So every federation needs `clientUrl` unless every
 start carries a `redirect_to`, and a start that carries one needs
 `authCallbackUrl`.
 
@@ -842,7 +861,12 @@ a description character outside them goes out as `?`. A malformed code goes
 out as `invalid_request` under a 4xx — the refusal is still the client's, and
 `400 server_error` would contradict itself — logged as
 `redirect_policy_error_malformed`, and as `server_error` under any other
-status. `describeRedirectRejection`'s text is already inside them.
+status. `describeRedirectRejection`'s text is already inside them. A `5xx` is
+not a verdict on the client but the policy saying the server cannot answer, so
+it is also logged once at error level as `redirect_policy_server_fault`, with
+the status and the policy's code and description sanitised and capped (and the
+provider at the start leg); a `4xx` is not logged
+([`src/internal/refusalEnvelope.mts`](src/internal/refusalEnvelope.mts)).
 
 ### Writing an adapter
 
@@ -914,6 +938,7 @@ The bundled adapters are the worked examples — for instance
 | [`src/__tests__/module.test.mts`](src/__tests__/module.test.mts) | the manifest's slots and absence policies, the two routers at `/session`, and the `callbackURL` boot rule |
 | [`src/__tests__/sessionStoreModule.test.mts`](src/__tests__/sessionStoreModule.test.mts) | the middleware route at `/`, the cookie name, the `__Host-` rule, and the replica-safety declaration and refusal |
 | [`src/store/__tests__/factory.test.mts`](src/store/__tests__/factory.test.mts) | the two built-in stores, the `session-store` readiness probe, and the Redis client's error listener |
+| [`src/__tests__/cookieSessionStore.test.mts`](src/__tests__/cookieSessionStore.test.mts) | the cookie-session store failing under the real express-session and connect-redis: the middleware's `503` and its one line, and a route's outage answered once with the session not written again |
 | [`src/__tests__/csrf.test.mts`](src/__tests__/csrf.test.mts) | the signed token, the origin check and the guard's acceptance rule |
 | [`src/routes/__tests__/Session.test.mts`](src/routes/__tests__/Session.test.mts), [`loginRateLimit.test.mts`](src/routes/__tests__/loginRateLimit.test.mts) | login, what logout invalidates and that a store outage does not stop the `UserSession` delete, the outage answers and their one log line, and the login rate-limit guard |
 | [`src/routes/__tests__/Federation.test.mts`](src/routes/__tests__/Federation.test.mts) | the start and callback legs, account linking, the store writes and their rollback, the outage answers and their log lines, `amr` |
