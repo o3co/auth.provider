@@ -780,7 +780,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							subject: subjectValidated.sub,
 							clientId: client.clientId,
 							audienceForToken: requestAudience,
-							missingResources,
+							missingResources: loggedResources(missingResources),
 						},
 						"token_exchange_resource_not_in_audience",
 					);
@@ -970,7 +970,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							subject: subjectValidated.sub,
 							clientId: client.clientId,
 							audienceForToken,
-							missingResources,
+							missingResources: loggedResources(missingResources),
 						},
 						"token_exchange_resource_not_in_audience",
 					);
@@ -1257,6 +1257,18 @@ async function familyRefusal(
 	if (!revoked) return null;
 	return invalidRequest(forRole("family_revoked"));
 }
+
+/**
+ * The requested resources a refusal names, as its log line carries them: one
+ * string, space-delimited as the refusal's `error_description` spells them,
+ * sanitised and capped (core's `auditErrorText`). They are the caller's own
+ * `resource` values — before the policy runs, anything it wrote; after it,
+ * values the client and the subject token both carry, but as many as it
+ * chose to send — so neither what they hold nor how many there are may
+ * reach the line unbounded.
+ */
+const loggedResources = (resources: readonly string[]): string =>
+	auditErrorText(resources.join(" "));
 
 /**
  * The single audience an exchanged token is minted for (spec §8.1 rule 2):
