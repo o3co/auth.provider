@@ -79,6 +79,7 @@ import {
 	auditErrorText,
 	type ClientRepository,
 	checkRedirectUri,
+	describeRedirectUriRejection,
 	isLoopbackHostname,
 	isSpecialUseAddress,
 	type Logger,
@@ -300,7 +301,8 @@ function toClient(
 		throw new DocumentRejected(
 			method === "private_key_jwt"
 				? "private_key_jwt is not allowed for a Client ID Metadata Document: its keys would come from the same document that names them"
-				: `token_endpoint_auth_method ${JSON.stringify(method)} is not allowed for a Client ID Metadata Document`,
+				: // The document's author wrote it: quoted as the Content-Type is.
+					`token_endpoint_auth_method '${auditErrorText(typeof method === "string" ? method : JSON.stringify(method))}' is not allowed for a Client ID Metadata Document`,
 		);
 	}
 	const redirectUris = asStringArray(doc.redirect_uris, "redirect_uris");
@@ -309,7 +311,7 @@ function toClient(
 		const rejection = checkRedirectUri(uri);
 		if (rejection !== null) {
 			throw new DocumentRejected(
-				`redirect_uris entry ${JSON.stringify(uri)} is not acceptable: ${rejection}`,
+				`redirect_uris entry '${auditErrorText(uri)}' is not acceptable: ${describeRedirectUriRejection(rejection)}`,
 			);
 		}
 	}
