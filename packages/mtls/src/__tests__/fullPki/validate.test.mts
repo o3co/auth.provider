@@ -2591,3 +2591,48 @@ const buildCrlChain = () =>
 		leaf: [crlDistributionPoints([INT_CRL_URL])],
 		int: [crlDistributionPoints([ROOT_CRL_URL])],
 	});
+
+describe("full-pki log lines — a certificate's own text, one line and capped", () => {
+	// The subject is what the CA attested, but OpenSSL's rendering escapes
+	// only ASCII controls: a C1 control, U+2028 or a bidi override in a UTF-8
+	// name passes through, and nothing caps its length. A distribution point's
+	// URL is the certificate's too. Every string a line carries is filtered as
+	// core's `lineSafeText` does — a non-ASCII name stays legible — and capped.
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+	const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+
+	it("logs a soft-failed status with the subject and the distribution point bounded", async () => {
+		const root = await mintCa("Root", 1);
+		const int = await mintIntermediate("Intermediate", 2, root);
+		const hostileUrl = `http://crl.test/int.crl?x=\u0085\u2028\u202e${"u".repeat(10_000)}`;
+		const leaf = await mintLeaf(`clïent\u0085\u2028\u202eFORGED${"c".repeat(10_000)}`, 10, int, {
+			extensions: [
+				basicConstraints(false),
+				keyUsage(KEY_USAGE.digitalSignature),
+				clientAuthEku(),
+				crlDistributionPoints([hostileUrl]),
+			],
+		});
+		const { impl } = stubFetch({});
+		const logger = { warn: vi.fn(), debug: vi.fn() };
+
+		const result = await validator([root], {
+			revocation: crlPolicy("allow"),
+			fetchImpl: impl,
+			logger,
+		}).validate(leaf.x509, [int.x509], NOW);
+
+		expect(result).toEqual({ ok: true });
+		expect(logger.warn).toHaveBeenCalled();
+		const strings = logger.warn.mock.calls.flatMap(([line]) =>
+			Object.values(line as Record<string, unknown>).filter(
+				(value): value is string => typeof value === "string",
+			),
+		);
+		expect({
+			unsafe: strings.filter((value) => UNSAFE.test(value)).length,
+			over256: strings.filter((value) => value.length > 256).length,
+			leafNamed: strings.some((value) => value.startsWith("CN=clïent???FORGED")),
+		}).toEqual({ unsafe: 0, over256: 0, leafNamed: true });
+	});
+});

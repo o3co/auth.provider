@@ -1,6 +1,6 @@
 # @o3co/auth-provider-foundation
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 The HTTP client of "the Store" — the deployment's own user service — for
 auth.provider. `HttpUserRepository` implements core's `UserRepository` port over
@@ -282,10 +282,13 @@ deployment that then has a connection under `"required"` is refused at boot.
   This adapter offers no client certificate of its own: Node's `fetch` takes
   one only through an `undici` dispatcher, a dependency this package does not
   carry. A URL carrying `user:password@` is refused.
-- **No secret in the URL.** A query-string token would not stay secret: the
-  errors this adapter throws name the full URL, and the session routes log
-  them. The caller's credential belongs in `bearerToken`, which nothing this
-  adapter throws carries.
+- **No secret in the URL.** A query-string token would not stay secret: it
+  travels in every request line, to the Store's own access logs and to any
+  proxy in between. The errors this adapter throws — which the session routes
+  log — name an endpoint by its origin and path only, never its query or
+  fragment, so the query at least does not reach this deployment's log. The
+  caller's credential belongs in `bearerToken`, which nothing this adapter
+  throws carries.
 - **Answer without redirecting.** No request follows a redirect, so a
   password, a token, a link request or an identity goes only to the configured
   URL — the one the `https` rule below checks — and no answer from anywhere
@@ -309,9 +312,10 @@ deployment that then has a connection under `"required"` is refused at boot.
 | The federation-grants connect callback — the identity lookup ([`@o3co/auth-provider-federation-grants`](../federation-grants/README.md)) | redirect with `error=temporarily_unavailable` | `federation_grant_callback_unavailable` (error), `store: "user_directory"`, with `err` |
 
 Where `err` is logged, a `StoreCredentialRefusedError`'s message names the
-Store URL, the status and `CLIENT_USER_BEARER_TOKEN` — never the token; a
-`StoreTransportError`'s names the URL, what failed and at most a transport
-code.
+Store endpoint (its origin and path), the status and
+`CLIENT_USER_BEARER_TOKEN` — never the token; a `StoreTransportError`'s names
+the endpoint the same way, what failed and at most a transport code. No
+message this adapter throws quotes a URL's query string or fragment.
 
 ## Constructor validation
 
@@ -339,6 +343,8 @@ This is the same rule `oauth.jwt.issuer` applies in
 [`@o3co/auth-provider-core`](../core/README.md), with the carve-out widened from
 the single address `127.0.0.1` to the whole `127.0.0.0/8` block, and query
 strings allowed (an issuer may not carry one; a POST endpoint legitimately may).
+A query is sent, and never quoted: every error names the endpoint by origin
+and path.
 
 **`timeout` must be a positive integer** no greater than `2147483647`
 milliseconds. `0`, a negative number, and `NaN` all clamp to "fire immediately"

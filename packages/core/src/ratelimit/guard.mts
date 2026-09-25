@@ -18,7 +18,7 @@ import type { Request, RequestHandler, Response } from "express";
 import { auditedError } from "../audit/auditedError.mjs";
 import { emitAuditEvent } from "../audit/factory.mjs";
 import type { AuditSink } from "../audit/types.mjs";
-import { type ErrorEnvelope, errorEnvelope } from "../errors/envelope.mjs";
+import { auditErrorText, type ErrorEnvelope, errorEnvelope } from "../errors/envelope.mjs";
 import { consoleLogger } from "../logging/consoleLogger.mjs";
 import type { Logger } from "../logging/Logger.mjs";
 import { loggableError } from "../logging/loggableError.mjs";
@@ -147,8 +147,12 @@ export const checkWithFailMode = async (
 		const projected = loggableError(cause);
 		const reported = projected.detail ?? projected.name;
 		const ip = ctx.ip ?? "unknown";
+		// Behind `trust proxy`, `ip` is what the caller wrote in
+		// X-Forwarded-For: on the line, sanitised and capped, as claimed. The
+		// audit event is handed it raw — `emitAuditEvent` keeps it only if it
+		// is an address, so a sink never gets `"unknown"` or a spoofed name.
 		logger.error(
-			{ error: reported, mode: failMode, tag, ip },
+			{ error: reported, mode: failMode, tag, ip: auditErrorText(ip) },
 			failMode === "open" ? "rate_limiter_failed_open" : "rate_limiter_failed_closed",
 		);
 		emitAuditEvent(auditSink, {

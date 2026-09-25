@@ -92,7 +92,47 @@
  * sees only a literal: a message held in a variable or built by a call
  * (`logger.warn(message)`, `logger.warn(describe(x))`) is not flagged.
  *
- * A fourth rule reads the arguments of every error built in a file that
+ * A fourth rule reads the same logger calls, and every `emitAuditEvent(...)`,
+ * for the request itself: `req.body`, `req.query`, `req.params`, `req.path`,
+ * `req.originalUrl`, `req.url`, `req.baseUrl`, `req.headers`,
+ * `req.rawHeaders`, `req.cookies`, `req.signedCookies`, `req.hostname`,
+ * `req.host`, `req.subdomains`, `req.ip`, `req.ips`, `req.get(…)`,
+ * `req.header(…)` or any bracket access (`req["path"]`) — on `req` or a
+ * member path ending in it (`ctx.req`), behind `!` or `?.`, inside a
+ * template literal's `${…}` too —
+ * anywhere but inside the parentheses of `auditErrorText(...)` or
+ * `auditErrorList(...)`. What a
+ * caller sent is put on a line sanitised and capped: a log line and an audit
+ * event are read by systems that split on a line break, and neither may be
+ * made unbounded by a caller. `req.ip` is the caller's too: behind `trust
+ * proxy` it is what the caller wrote in `X-Forwarded-For`. The two
+ * exceptions are an audit event's own `ip` and `userAgent`, written as
+ * `ip: req.ip` and `userAgent: req.get("user-agent")` directly in the event
+ * `emitAuditEvent(...)` is handed (not nested in `details`): core's
+ * `recordAuditEvent`, which `emitAuditEvent` and every other built-in
+ * emitter hand their events to, bounds those two fields itself (`ip` an
+ * address or nothing, `userAgent` sanitised and capped),
+ * and the fifth rule pins that nothing else writes a sink. What it does not
+ * see, and each site's own tests pin instead: a request value read into a
+ * name first (`const name = req.params.name`, the rate-limit guard's `ip`),
+ * a receiver not named `req`, a value derived from one (a list of the
+ * caller's resources, a parsed body's field), and an audit event built
+ * anywhere but `emitAuditEvent` (federation-grants' bridge takes its events
+ * from core and from its routes, sanitises what it forwards itself, and
+ * hands them to `recordAuditEvent`).
+ *
+ * A fifth rule reads every source for a sink written directly —
+ * `sink.record(…)`, `auditSink.record(…)`, `options.sink?.record(…)`,
+ * `sink!.record(…)`, `(sink as AuditSink).record(…)`, `sink?.record?.(…)`,
+ * `sinks[i].record(…)` — and
+ * allows it only in core's `audit/factory.mts`, where `recordAuditEvent`
+ * bounds an event's `ip` and `userAgent` before the sink is handed it. Every
+ * built-in event reaches its sink through it: `emitAuditEvent` detached, or
+ * `recordAuditEvent` itself where the emitter waits on the sink. It sees a
+ * receiver named `sink` or `…Sink`; a sink held under another name is left
+ * to review.
+ *
+ * A sixth rule reads the arguments of every error built in a file that
  * binds a caught error (`new …Error(…)`, a BootError's `message:` among
  * them): the caught error's text flattened into them — `String(err)`,
  * `err.message`, the error in a template's `${…}` — is flagged, since the
@@ -175,10 +215,11 @@ const OTHER_PROJECTIONS: ReadonlyArray<{
  * `consoleLogger`, `opts.logger`, `this.auditLogger` — or a parenthesised
  * fallback between two (`(opts.logger ?? console)`, `(logger ??
  * consoleLogger)`); with a non-null assertion (`logger!.warn`), optional
- * chaining (`logger?.warn`) or an optional call (`warn?.(`).
+ * chaining (`logger?.warn`) or an optional call (`warn?.(`); and with the
+ * chain broken across lines, before or after any dot (`logger\n.warn(`).
  */
 const LOGGER_CALL =
-	/(?:\b(?:[\w$]+[!?]?\.)*(?:log|console|\w*[Ll]ogger)|\(\s*[\w$.!?]+\s*\?\?\s*[\w$.!?]+\s*\))!?\??\.(?:trace|debug|info|warn|error|fatal|child|log)(?:\?\.)?\(/g;
+	/(?:\b(?:[\w$]+[!?]?\s*\.\s*)*(?:log|console|\w*[Ll]ogger)|\(\s*[\w$.!?]+\s*\?\?\s*[\w$.!?]+\s*\))\s*!?\??\s*\.\s*(?:trace|debug|info|warn|error|fatal|child|log)\s*(?:\?\.\s*)?\(/g;
 
 const IDENTIFIER = "[A-Za-z_$][\\w$]*";
 
@@ -467,7 +508,7 @@ const FLATTENING_ALLOWED: ReadonlyArray<{
 	{
 		file: "packages/core/src/jwt/verify.mts",
 		sites: 1,
-		why: "jose's own fixed text about the token, as the verdict's message; jose's claims ride on the error, not in its message",
+		why: "jose's own text about the token, as the verdict's message, through lineSafeText — it quotes an unrecognised crit name the caller wrote; jose's claims ride on the error, not in its message",
 	},
 	{
 		file: "packages/redis/src/ioredis.mts",
@@ -958,6 +999,278 @@ describe("a logger call opens with an object, not a string (string-first rule)",
 		for (const { file, sites: allowed, why } of STRING_FIRST_ALLOWED) {
 			expect(sites.get(file)?.length ?? 0, `${file} — ${why}`).toBe(allowed);
 		}
+	});
+});
+
+/** `emitAuditEvent(`: the one function every route-side audit event goes through. */
+const AUDIT_CALL = /\bemitAuditEvent\(/g;
+
+/**
+ * A read of the request itself, on `req` or a member path ending in it
+ * (`ctx.req`): what the caller sent, or a header it chose — by name, behind
+ * `!` or `?.` (`req?.path`), or by any bracket (`req["path"]`, which literal
+ * blanking has already turned into `req[""]`).
+ */
+const REQUEST_READ =
+	/(?<![\w$])req\s*!?\s*(?:(?:\?\.|\.)\s*(?:(?:body|query|params|path|originalUrl|url|baseUrl|headers|rawHeaders|cookies|signedCookies|hostname|host|subdomains|ip|ips)(?![\w$])|(?:get|header)\s*(?:\?\.\s*)?\()|(?:\?\.)?\s*\[)/;
+
+/**
+ * An audit event's own `ip` or `userAgent`, written as the request field it
+ * exists to carry: `ip: req.ip`, `userAgent: req.get("user-agent")`. Exempt
+ * only at the event's top level — `recordAuditEvent` bounds those two fields,
+ * not a `details` entry that happens to share a name.
+ */
+const EVENT_REQUEST_FIELD =
+	/\b(?:ip\s*:\s*(?:[\w$]+\.)*req\.ip(?![\w$])|userAgent\s*:\s*(?:[\w$]+\.)*req\.get\(\s*(["'`])user-agent\1\s*\))/g;
+
+/** How many braces are open at the end of `code` (literals blanked first). */
+const braceDepth = (code: string): number => {
+	let depth = 0;
+	for (const c of literalsBlanked(code)) {
+		if (c === "{") depth++;
+		else if (c === "}") depth--;
+	}
+	return depth;
+};
+
+/** `args` of an `emitAuditEvent(...)` with the event's own request fields blanked. */
+const withEventRequestFieldsExempt = (args: string): string =>
+	args.replace(EVENT_REQUEST_FIELD, (field: string, _quote: string, offset: number) =>
+		braceDepth(args.slice(0, offset)) === 1
+			? `${field.startsWith("ip") ? "ip" : "userAgent"}: ""`
+			: field,
+	);
+
+/** `text` with every `name(...)` call replaced by `""`, parentheses balanced. */
+function withoutCallsOf(text: string, name: string): string {
+	const open = new RegExp(String.raw`\b${name}\(`, "g");
+	let out = "";
+	let from = 0;
+	for (let match = open.exec(text); match !== null; match = open.exec(text)) {
+		if (match.index < from) continue;
+		const start = match.index + match[0].length - 1;
+		let depth = 0;
+		let end = text.length;
+		for (let i = start; i < text.length; i++) {
+			if (text[i] === "(") depth++;
+			else if (text[i] === ")" && --depth === 0) {
+				end = i + 1;
+				break;
+			}
+		}
+		out += `${text.slice(from, match.index)}""`;
+		from = end;
+		open.lastIndex = end;
+	}
+	return out + text.slice(from);
+}
+
+/** Whether `args` reads the request anywhere but inside `auditErrorText(...)` or `auditErrorList(...)`. */
+function readsRequestRaw(args: string, { audit }: { readonly audit: boolean }): boolean {
+	const exempted = audit ? withEventRequestFieldsExempt(args) : args;
+	return [literalsBlanked(exempted), ...templateExpressions(exempted)].some((code) =>
+		REQUEST_READ.test(
+			withoutCallsOf(withoutCallsOf(literalsBlanked(code), "auditErrorText"), "auditErrorList"),
+		),
+	);
+}
+
+/** The line of every logger or `emitAuditEvent` call in `original` that hands on a raw request read. */
+function requestReadSitesIn(original: string): number[] {
+	const source = withoutComments(original);
+	const lines: number[] = [];
+	for (const { line, args } of loggerCalls(source)) {
+		if (readsRequestRaw(args, { audit: false })) lines.push(line);
+	}
+	for (const call of source.matchAll(AUDIT_CALL)) {
+		const args = argumentsFrom(source, (call.index ?? 0) + call[0].length - 1);
+		if (readsRequestRaw(args, { audit: true })) {
+			lines.push(source.slice(0, call.index).split("\n").length);
+		}
+	}
+	return lines.sort((a, b) => a - b);
+}
+
+function requestReadSites(): string[] {
+	const sites: string[] = [];
+	for (const root of SOURCE_ROOTS) {
+		for (const file of sourceFiles(join(repoRoot, root))) {
+			for (const line of requestReadSitesIn(readFileSync(file, "utf8"))) {
+				sites.push(`${relative(repoRoot, file)}:${line}`);
+			}
+		}
+	}
+	return sites;
+}
+
+describe("a request value reaches a logger or an audit event only through auditErrorText", () => {
+	it(`in ${SOURCE_ROOTS.join(", ")}`, () => {
+		expect(requestReadSites()).toEqual([]);
+	});
+
+	describe("the guard sees the shapes it exists for, and no others", () => {
+		const flags = (source: string): boolean => requestReadSitesIn(source).length > 0;
+
+		it.each([
+			["the path", `logger.warn({ path: req.path }, "rejected");`],
+			["the path, on ctx.req", `ctx.opts.logger.warn({ path: ctx.req.path }, "rejected");`],
+			["a path parameter", `log.warn({ grantId: req.params.grantId }, "refused");`],
+			["a query parameter", `logger.info({ scope: req.query.scope }, "asked");`],
+			["a body field", `logger.warn({ subject: req.body.sub }, "refused");`],
+			["the whole body", `logger.warn({ body: req.body }, "refused");`],
+			["a header, by property", `logger.warn({ origin: req.headers.origin }, "refused");`],
+			["a header, by getter", `logger.warn({ origin: req.get("origin") }, "refused");`],
+			["the original URL", `logger.error({ url: req.originalUrl }, "unhandled");`],
+			// biome-ignore lint/suspicious/noTemplateCurlyInString: the source text under test holds a template
+			["a template literal", 'logger.warn({ at: `${req.method} ${req.path}` }, "refused");'],
+			[
+				"an audit detail",
+				`emitAuditEvent(sink, { type: "x", details: { grantId: req.params.grantId } });`,
+			],
+			[
+				"a header other than user-agent as the audit's userAgent",
+				`emitAuditEvent(sink, { type: "x", userAgent: req.get("origin") });`,
+			],
+			[
+				"a user-agent anywhere but the audit's userAgent field",
+				`emitAuditEvent(sink, { type: "x", details: { agent: req.get("user-agent") } });`,
+			],
+			[
+				"a request read beside a sanitised one",
+				`logger.warn({ a: auditErrorText(req.path), b: req.path }, "refused");`,
+			],
+			[
+				"the ip, which is X-Forwarded-For's behind trust proxy",
+				`logger.warn({ ip: req.ip }, "x");`,
+			],
+			["the forwarded hops", `logger.warn({ hops: req.ips }, "x");`],
+			[
+				"an ip nested in an audit's details",
+				`emitAuditEvent(sink, { type: "x", details: { ip: req.ip } });`,
+			],
+			[
+				"a userAgent nested in an audit's details",
+				`emitAuditEvent(sink, { type: "x", details: { userAgent: req.get("user-agent") } });`,
+			],
+			[
+				"a header other than user-agent as the audit's ip",
+				`emitAuditEvent(sink, { type: "x", ip: req.get("x-forwarded-for") });`,
+			],
+			["the path, optionally chained", `logger.warn({ path: req?.path }, "x");`],
+			["the path, by bracket", `logger.warn({ path: req["path"] }, "x");`],
+			["a header, optionally chained", `logger.warn({ origin: req?.get("origin") }, "x");`],
+			["the hostname", `logger.warn({ host: req.hostname }, "x");`],
+			["the raw headers", `logger.warn({ headers: req.rawHeaders }, "x");`],
+			["the signed cookies", `logger.warn({ cookies: req.signedCookies }, "x");`],
+			["a logger chain broken across lines", `logger\n\t.warn({ path: req.path }, "x");`],
+			[
+				"a logger chain broken after the dot",
+				`ctx.opts.logger?.\n\twarn({ path: req.path }, "x");`,
+			],
+		])("flags %s", (_label, source) => {
+			expect(flags(source)).toBe(true);
+		});
+
+		it.each([
+			["the path, sanitised", `logger.warn({ path: auditErrorText(req.path) }, "rejected");`],
+			[
+				"a list, sanitised",
+				`logger.warn({ scopes: auditErrorList(req.body.scope.split(" ")) }, "rejected");`,
+			],
+			[
+				"a header, sanitised with a fallback",
+				`logger.warn({ site: auditErrorText(req.get("sec-fetch-site") ?? "") }, "rejected");`,
+			],
+			[
+				"the audit event's own ip and userAgent fields",
+				`emitAuditEvent(sink, { type: "x", ip: req.ip, userAgent: req.get("user-agent") });`,
+			],
+			[
+				"the audit event's own ip and userAgent fields, on ctx.req",
+				`emitAuditEvent(sink, { type: "x", ip: ctx.req.ip, userAgent: ctx.req.get("user-agent") });`,
+			],
+			["a string naming the path", `logger.warn({ note: "req.path" }, "rejected");`],
+			["a call that is not a logger's", `res.status(400).json({ path: req.path });`],
+			["a name that merely ends in req", `logger.warn({ path: myreq.path }, "rejected");`],
+		])("does not flag %s", (_label, source) => {
+			expect(flags(source)).toBe(false);
+		});
+
+		// A known gap, not a rule: improving the guard to follow a value into a
+		// name must not fail this file.
+		it.todo(
+			"flags a request value read into a name first: `const p = req.path; logger.warn({ p })`",
+		);
+	});
+});
+
+/**
+ * A sink written directly: `sink.record(`, `auditSink.record(`,
+ * `options.sink?.record(`, `sink!.record(`, `(sink as AuditSink).record(`,
+ * `sink?.record?.(`, `sinks[i].record(`, a chain broken across lines. A sink
+ * held under a name that does not end in `sink` / `Sink` is left to review.
+ */
+const SINK_WRITE =
+	/\b\w*[sS]inks?\s*(?:\[[^\]]*\]\s*)?(?:\s+as\s+[\w$.<>]+\s*\)\s*)?!?\s*(?:\?\.|\.)\s*record\s*(?:\?\.\s*)?\(/g;
+
+/** The one source that writes a sink, and how many times: core's `recordAuditEvent`. */
+const SINK_WRITERS: ReadonlyMap<string, number> = new Map([
+	["packages/core/src/audit/factory.mts", 1],
+]);
+
+const sinkWritesIn = (original: string): number[] => {
+	const source = withoutComments(original);
+	return [...source.matchAll(SINK_WRITE)].map(
+		(write) => source.slice(0, write.index).split("\n").length,
+	);
+};
+
+function sinkWrites(): Map<string, number[]> {
+	const sites = new Map<string, number[]>();
+	for (const root of SOURCE_ROOTS) {
+		for (const file of sourceFiles(join(repoRoot, root))) {
+			const lines = sinkWritesIn(readFileSync(file, "utf8"));
+			if (lines.length > 0) sites.set(relative(repoRoot, file), lines);
+		}
+	}
+	return sites;
+}
+
+describe("a built-in audit event reaches its sink only through core's recordAuditEvent", () => {
+	it(`in ${SOURCE_ROOTS.join(", ")}: only core's audit factory writes a sink`, () => {
+		const sites = sinkWrites();
+		const unexpected = [...sites]
+			.filter(([file, lines]) => lines.length !== SINK_WRITERS.get(file))
+			.map(([file, lines]) => `${file}:${lines.join(",")}`);
+		expect(unexpected).toEqual([]);
+		for (const [file, count] of SINK_WRITERS)
+			expect(sites.get(file)?.length ?? 0, file).toBe(count);
+	});
+
+	it.each([
+		["a sink", "await sink.record(mapped);"],
+		["an audit sink", "auditSink.record(event).catch(() => undefined);"],
+		["a sink behind optional chaining", "options.sink?.record(event);"],
+		["inside a callback", "void Promise.resolve().then(() => sink.record(mapped));"],
+		["a sink behind a non-null assertion", "sink!.record(event);"],
+		["a sink behind a cast", "(sink as AuditSink).record(event);"],
+		["an optional call", "sink?.record?.(event);"],
+		["one of several sinks", "sinks[i].record(event);"],
+		["a chain broken across lines", "sink\n\t.record(event);"],
+	])("flags %s written directly", (_label, source) => {
+		expect(sinkWritesIn(source)).toEqual([1]);
+	});
+
+	it.each([
+		["recordAuditEvent", "await recordAuditEvent(sink, mapped);"],
+		["emitAuditEvent", "emitAuditEvent(auditSink, event);"],
+		["a schema's record", "const map = z.record(z.string(), z.unknown());"],
+		[
+			"a sink's own method",
+			'const sink = { kind: "x", async record(event) { lines.push(event); } };',
+		],
+	])("does not flag %s", (_label, source) => {
+		expect(sinkWritesIn(source)).toEqual([]);
 	});
 });
 

@@ -100,6 +100,7 @@ export {
 export {
 	createAuditSinkFactory,
 	emitAuditEvent,
+	recordAuditEvent,
 	registerBuiltinAuditSinks,
 } from "./audit/factory.mjs";
 // Audit
@@ -194,6 +195,7 @@ export type { OidcDiscoveryContribution } from "./discovery/types.mjs";
 // custom routes outside the bundled session/oauth surfaces benefits from
 // the same helper so the entire auth product surface emits a single shape.
 export {
+	auditErrorList,
 	auditErrorText,
 	type ErrorEnvelope,
 	errorEnvelope,
@@ -482,6 +484,7 @@ export {
 	LOGGED_STACK_MAX_LENGTH,
 	LOGGED_STRING_MAX_LENGTH,
 	type LoggableError,
+	lineSafeText,
 	loggableError,
 } from "./logging/loggableError.mjs";
 export { createMfaProviderFactory } from "./mfa/factory.mjs";

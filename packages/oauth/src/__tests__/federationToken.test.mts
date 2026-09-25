@@ -3411,6 +3411,40 @@ describe("POST /oauth/federation/:name/token", () => {
 			);
 		});
 
+		describe("a type that is a line break, control characters and 10 000 characters", () => {
+			const HOSTILE = `DPoP\r\nFORGED federation.token.success\u001b[31m\u0000${"t".repeat(10_000)}`;
+			/** What the event carried, as an assertion needs it: a failure prints this, not the value. */
+			const auditedType = (auditSink: AuditSink) => {
+				const event = vi
+					.mocked(auditSink.record)
+					.mock.calls.map(([recorded]) => recorded)
+					.find((recorded) => recorded.type === "federation.token.upstream_ineligible");
+				const tokenType = event?.details?.tokenType;
+				return {
+					string: typeof tokenType === "string",
+					// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be audited.
+					control: /[\u0000-\u001f\u007f]/.test(String(tokenType)),
+					within200: String(tokenType).length <= 200,
+					head: String(tokenType).slice(0, 12),
+				};
+			};
+			const BOUNDED = { string: true, control: false, within200: true, head: "DPoP??FORGED" };
+
+			it("tells the audit sink the stored type sanitised and capped", async () => {
+				// The upstream wrote it, a store kept it: the audit sink is read by
+				// systems that split on a line break, and the value is still worth
+				// seeing — so it is kept, bounded, rather than dropped. (A refresh
+				// that answers such a type never gets here: `canonicalTokenType`
+				// refuses it as `invalid_token_type`.)
+				const { app, auditSink } = storedApp({ tokenType: HOSTILE });
+
+				const res = await postFedToken(app, "google", await mintAccessToken());
+
+				expect(res.status).toBe(502);
+				expect(auditedType(auditSink)).toEqual(BOUNDED);
+			});
+		});
+
 		it("judges the record a concurrent refresh wrote, on the post-lock re-read", async () => {
 			// The refresh that wrote this record is not this request, so its answer
 			// is no more trusted here than on the fast path.

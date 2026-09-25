@@ -1007,3 +1007,67 @@ describe("createDPoPMechanism — server-provided nonce (#530)", () => {
 		expect(result).not.toHaveProperty("responseHeaders");
 	});
 });
+
+describe("createDPoPMechanism — a crit header the caller wrote", () => {
+	// jose refuses an unrecognised `crit` entry before the signature, quoting
+	// the name: `Extension Header Parameter "<name>" is not recognized`. The
+	// name is the caller's (reachable before client authentication), and the
+	// line carries jose's message as the projected error's `detail`.
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+	const UNSAFE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029\u202a-\u202e\u2066-\u2069]/;
+
+	it("logs dpop_signature_invalid with jose's message one line and capped", async () => {
+		const warn = vi.fn();
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn,
+			error: vi.fn(),
+			fatal: vi.fn(),
+		};
+		const mechanism = createDPoPMechanism({
+			issuer: ISSUER,
+			replaySeenSet: createMemoryReplaySeenSet(),
+			logger: logger as never,
+		});
+		const name = `x\r\nFORGED dpop_ok\u0085\u2028\u202e\u2066${"n".repeat(10_000)}`;
+		const { publicKey, privateKey } = await generateKeyPair("ES256");
+		const proof = await new SignJWT({
+			htm: "POST",
+			htu: "https://as.example/token",
+			iat: Math.floor(Date.now() / 1000),
+			jti: crypto.randomUUID(),
+		})
+			.setProtectedHeader({
+				typ: "dpop+jwt",
+				alg: "ES256",
+				jwk: await exportJWK(publicKey),
+				crit: [name],
+				[name]: true,
+			})
+			.sign(privateKey, { crit: { [name]: true } });
+
+		await expect(mechanism.extract(makeReq(proof) as Request)).rejects.toMatchObject({
+			reason: "signature_invalid",
+		});
+		expect(warn).toHaveBeenCalledTimes(1);
+		const [line, event] = warn.mock.calls[0] as [
+			{ err: { name: string; detail?: string } },
+			string,
+		];
+		expect(event).toBe("dpop_signature_invalid");
+		const detail = line.err.detail ?? "";
+		expect({
+			name: line.err.name,
+			unsafe: UNSAFE.test(detail),
+			within256: detail.length <= 256,
+			head: detail.slice(0, 40),
+		}).toEqual({
+			name: "JOSENotSupported",
+			unsafe: false,
+			within256: true,
+			head: 'Extension Header Parameter "x??FORGED dp',
+		});
+	});
+});

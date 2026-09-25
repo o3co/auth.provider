@@ -136,7 +136,7 @@
  */
 
 import { X509Certificate } from "node:crypto";
-import { loggableError } from "@o3co/auth-provider-core";
+import { lineSafeText, loggableError } from "@o3co/auth-provider-core";
 import * as pkijs from "pkijs";
 import { MtlsRevocationSourceError, MtlsRevocationUnavailableError } from "../errors.mjs";
 import { checkClientLeafProfile } from "../pki.mjs";
@@ -613,7 +613,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 		if (lookup.responderUnchecked && !uncheckedResponders.has(lookup.responder)) {
 			uncheckedResponders.add(lookup.responder);
 			options.logger?.warn(
-				{ responder: lookup.responder, subject: subjectOf(certificate) },
+				{ responder: lineSafeText(lookup.responder), subject: subjectOf(certificate) },
 				"mtls_ocsp_responder_unchecked",
 			);
 		}
@@ -937,7 +937,12 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					}
 					if (revocation.onUnavailable === "reject") {
 						options.logger?.warn(
-							{ subject, reason: outcome.reason, detail: outcome.detail, ...errOf(outcome.cause) },
+							{
+								subject,
+								reason: outcome.reason,
+								detail: lineSafeText(outcome.detail),
+								...errOf(outcome.cause),
+							},
 							"mtls_revocation_unavailable_rejected",
 						);
 						return {
@@ -1007,7 +1012,7 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 					}
 					if (revocation.onUnavailable === "reject") {
 						options.logger?.warn(
-							{ subject, reason: last.reason, detail, ...errOf(last.cause) },
+							{ subject, reason: last.reason, detail: lineSafeText(detail), ...errOf(last.cause) },
 							"mtls_revocation_unavailable_rejected",
 						);
 						return {
@@ -1045,7 +1050,12 @@ export const createFullPkiValidator = (options: FullPkiOptions): FullPkiValidato
 			// resource's binding check — and these lines claim nothing about it.
 			for (const line of pending) {
 				options.logger?.warn(
-					{ subject: line.subject, reason: line.reason, detail: line.detail, ...errOf(line.cause) },
+					{
+						subject: line.subject,
+						reason: line.reason,
+						detail: lineSafeText(line.detail),
+						...errOf(line.cause),
+					},
 					line.event,
 				);
 			}

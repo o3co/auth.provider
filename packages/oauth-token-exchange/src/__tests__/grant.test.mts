@@ -768,6 +768,36 @@ describe("createTokenExchangeGrant — narrowing checks", () => {
 		});
 	});
 
+	it("names each widened audience once, on the line and in the refusal, however often it was sent", async () => {
+		// Every widened audience is one the client is registered for, so the
+		// values are bounded — but `audience` is not de-duplicated, and the
+		// caller chooses how many times it repeats one.
+		const logger = spyLogger();
+		const g = buildGrant({
+			logger: logger as unknown as Logger,
+			clientRepository: mockClientRepository(publicClient({ allowedAudiences: ["inventory"] })),
+		});
+		const token = await signSelfIssuedAccessToken({ aud: "billing", family_id: "fam-1" });
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				audience: Array.from({ length: 600 }, () => "inventory"),
+			}),
+		);
+		expect(result).toMatchObject({
+			status: 400,
+			error: "invalid_target",
+			errorDescription: "audience_widening_not_allowed: inventory",
+		});
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		const [line, event] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
+		expect(event).toBe("token_exchange_audience_widening_rejected");
+		expect(line.widenedAudiences).toEqual(["inventory"]);
+	});
+
 	it("mints a token when audience is empty array (treated as no audience requested)", async () => {
 		const g = buildGrant({
 			clientRepository: mockClientRepository(publicClient({ allowedAudiences: [] })),
@@ -1804,6 +1834,123 @@ describe("createTokenExchangeGrant — D-6 ctx.authenticatedClient route-bound f
 		if (!("error" in result)) expect.fail("Expected error in result");
 		expect(result.error).toBe("invalid_client");
 		expect(result.errorDescription).toMatch(/does not support public clients/);
+	});
+});
+
+describe("createTokenExchangeGrant — the resources a refusal logs are the caller's", () => {
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+	const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
+	/** What an assertion needs of a logged list: a failure prints this, not the list. */
+	const shapeOf = (value: unknown) => {
+		const entries = Array.isArray(value) ? (value as unknown[]) : [];
+		return {
+			array: Array.isArray(value),
+			entries: entries.length,
+			strings: entries.every((entry) => typeof entry === "string"),
+			control: entries.some((entry) => CONTROL.test(String(entry))),
+			within200: entries.every((entry) => String(entry).length <= 200),
+		};
+	};
+
+	/** The one warn line, `token_exchange_resource_not_in_audience`, and nothing at another level. */
+	const onlyRefusalLine = (logger: ReturnType<typeof spyLogger>) => {
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.error).not.toHaveBeenCalled();
+		const [line, event] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
+		expect(event).toBe("token_exchange_resource_not_in_audience");
+		return line;
+	};
+
+	it("logs a resource no audience could represent sanitised and capped", async () => {
+		// Refused before the policy runs: the resource is anything the caller
+		// wrote — a line break, a terminal escape, ten thousand characters.
+		const logger = spyLogger();
+		const g = buildGrant({ logger: logger as unknown as Logger });
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				resource: `https://x.example\r\nFORGED level=error\u001b[31m\u0000${"r".repeat(10_000)}`,
+			}),
+		);
+
+		expect(result).toMatchObject({ status: 400, error: "invalid_target" });
+		const line = onlyRefusalLine(logger);
+		expect(shapeOf(line.missingResources)).toEqual({
+			array: true,
+			entries: 1,
+			strings: true,
+			control: false,
+			within200: true,
+		});
+		expect(
+			String((line.missingResources as string[])[0]).startsWith("https://x.example??FORGED"),
+		).toBe(true);
+		expect(line).not.toHaveProperty("missingResourceCount");
+	});
+
+	it("logs the first ten resources the issued audience left out, and how many there were", async () => {
+		// Each resource is one the client and the subject token both carry, so
+		// the refusal is the later one — but the caller chooses how many it
+		// sends, and the line is not to grow with them.
+		const logger = spyLogger();
+		const policy: GrantPolicyHook = {
+			kind: "narrowing",
+			async evaluate() {
+				return { outcome: "allow", grantedAudience: ["https://b.example"] };
+			},
+		};
+		const g = buildGrant({
+			grantPolicy: policy,
+			logger: logger as unknown as Logger,
+			clientRepository: mockClientRepository(
+				publicClient({ allowedAudiences: ["https://a.example", "https://b.example"] }),
+			),
+		});
+		const token = await signSelfIssuedAccessToken({
+			aud: ["https://a.example", "https://b.example"],
+			family_id: "fam-1",
+		});
+
+		const { result } = await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				resource: Array.from({ length: 600 }, () => "https://a.example"),
+			}),
+		);
+
+		expect(result).toMatchObject({ status: 400, error: "invalid_target" });
+		const line = onlyRefusalLine(logger);
+		expect(line.audienceForToken).toBe("https://b.example");
+		expect(line.missingResources).toEqual(Array.from({ length: 10 }, () => "https://a.example"));
+		expect(line.missingResourceCount).toBe(600);
+	});
+
+	it("still logs an ordinary refusal's resources exactly as the caller sent them", async () => {
+		const logger = spyLogger();
+		const g = buildGrant({ logger: logger as unknown as Logger });
+		const token = await signSelfIssuedAccessToken({ family_id: "fam-1" });
+
+		await g.handle(
+			ctx({
+				client_id: "client-a",
+				client_secret: "any",
+				subject_token: token,
+				subject_token_type: ACCESS_TOKEN_TYPE,
+				resource: ["https://api.example.com", "https://other.example.com"],
+			}),
+		);
+
+		const line = onlyRefusalLine(logger);
+		expect(line.missingResources).toEqual(["https://api.example.com", "https://other.example.com"]);
+		expect(line).not.toHaveProperty("missingResourceCount");
 	});
 });
 

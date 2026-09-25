@@ -26,10 +26,10 @@
  * acceptance rule that composes them.
  */
 
-import { fullSectionsSchema } from "@o3co/auth-provider-core";
-import express, { type Request, type Response } from "express";
+import { fullSectionsSchema, type Logger } from "@o3co/auth-provider-core";
+import express, { type NextFunction, type Request, type Response } from "express";
 import request from "supertest";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { CsrfProtectionOptions } from "#/csrf.mjs";
 import {
 	checkRequestOrigin,
@@ -544,5 +544,121 @@ describe("csrf — issue endpoint", () => {
 			?.split(";")[0]
 			?.slice(csrf.cookieName.length + 1);
 		expect(decodeURIComponent(issued ?? "")).toBe(res.body.csrf_token);
+	});
+});
+
+describe("csrf — what a rejection logs of the caller's request", () => {
+	/** A line break, a terminal escape, a NUL and a bell, then 10 000 characters. */
+	const HOSTILE = `/act\r\nFORGED csrf_token_rejected\u001b[31m\u0000\u0007${"a".repeat(10_000)}`;
+	// biome-ignore lint/suspicious/noControlCharactersInRegex: a control character is what must not be logged.
+	const CONTROL = /[\u0000-\u001f\u007f]/;
+	/** What an assertion needs of a logged string: a failure prints this, not the string. */
+	const shapeOf = (text: unknown) => ({
+		string: typeof text === "string",
+		control: CONTROL.test(String(text)),
+		within200: String(text).length <= 200,
+	});
+	const BOUNDED = { string: true, control: false, within200: true };
+
+	const spyLogger = () => {
+		const logger = {
+			trace: vi.fn(),
+			debug: vi.fn(),
+			info: vi.fn(),
+			warn: vi.fn(),
+			error: vi.fn(),
+			fatal: vi.fn(),
+			child: () => logger,
+		};
+		return logger;
+	};
+
+	/**
+	 * The guard, called as Express calls it, on a request whose `path` is
+	 * what a lenient parser or another server in front could hand it — a real
+	 * HTTP client refuses to send a line break in a request target.
+	 */
+	const reject = (headers: Record<string, string>, path: string) => {
+		const logger = spyLogger();
+		const guard = createCsrfGuard({
+			csrf: makeCsrf({ cookie: { secure: false, sameSite: "lax" } }),
+			logger: logger as unknown as Logger,
+		});
+		const res = {
+			statusCode: 0,
+			status(code: number) {
+				this.statusCode = code;
+				return this;
+			},
+			json() {
+				return this;
+			},
+		};
+		const next = vi.fn();
+		guard(
+			Object.assign(fakeRequest({ headers }), { path }),
+			res as unknown as Response,
+			next as unknown as NextFunction,
+		);
+		expect(res.statusCode).toBe(403);
+		expect(next).not.toHaveBeenCalled();
+		return logger;
+	};
+
+	/** The one warn line, and nothing at another level. */
+	const onlyWarn = (logger: ReturnType<typeof spyLogger>, event: string) => {
+		expect(logger.warn).toHaveBeenCalledTimes(1);
+		expect(logger.error).not.toHaveBeenCalled();
+		expect(logger.info).not.toHaveBeenCalled();
+		const [line, name] = logger.warn.mock.calls[0] as [Record<string, unknown>, string];
+		expect(name).toBe(event);
+		return line;
+	};
+
+	it("logs a foreign origin's rejection with the path and the origin sanitised and capped", () => {
+		const line = onlyWarn(
+			reject({ origin: `https://evil.example\r\n\u001b[31m${"e".repeat(10_000)}` }, HOSTILE),
+			"csrf_origin_rejected",
+		);
+		expect(shapeOf(line.path)).toEqual(BOUNDED);
+		expect(shapeOf(line.origin)).toEqual(BOUNDED);
+		expect(String(line.path).startsWith("/act??FORGED")).toBe(true);
+	});
+
+	it("logs a token rejection with the path sanitised and capped", () => {
+		const line = onlyWarn(reject({}, HOSTILE), "csrf_token_rejected");
+		expect(line.verdict).toBe("absent");
+		expect(shapeOf(line.path)).toEqual(BOUNDED);
+	});
+
+	it("caps a 10 000-character path a real request carries", async () => {
+		const logger = spyLogger();
+		const app = express();
+		app.post(
+			/^\/act/,
+			createCsrfGuard({
+				csrf: makeCsrf({ cookie: { secure: false, sameSite: "lax" } }),
+				logger: logger as unknown as Logger,
+			}),
+			(_req, res) => {
+				res.status(200).json({ ok: true });
+			},
+		);
+
+		const res = await request(app)
+			.post(`/act/${"a".repeat(10_000)}`)
+			.send({});
+
+		expect(res.status).toBe(403);
+		const line = onlyWarn(logger, "csrf_token_rejected");
+		expect(shapeOf(line.path)).toEqual(BOUNDED);
+	});
+
+	it("still logs an ordinary path and origin exactly", () => {
+		const line = onlyWarn(
+			reject({ origin: "https://evil.example" }, "/session/login"),
+			"csrf_origin_rejected",
+		);
+		expect(line).toEqual({ origin: "https://evil.example", path: "/session/login" });
 	});
 });

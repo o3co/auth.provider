@@ -1,6 +1,6 @@
 # @o3co/auth-provider-federation-grants
 
-Last updated: 2026-09-25
+Last updated: 2026-09-26
 
 Federation grants for [`auth.provider`](https://github.com/o3co/auth.provider) — offline delegation of upstream access tokens (#593). A user consents once that a client may reach one upstream connection on their behalf; the client then obtains upstream access tokens over HTTP, later, with the user nowhere near a browser.
 
@@ -100,6 +100,13 @@ capability absent on purpose — the product-wide declaration, which opts the
 whole provider out of audit and which the standalone does not offer. A Store
 that drives a revocation through the library without passing `audit` records
 nothing of it, by the same choice.
+An event's grant id and subject are sanitised and capped at 200 characters
+(core's `auditErrorText`), as every string on this package's log lines is:
+both can be what the caller sent — the path's grant id is audited before
+client authentication, and `sub` is an assertion — and a sink is read by
+systems that split on a line break. `upstream.subject`, the IdP's `sub`, is
+bounded the same way by core when it builds the event's metadata. A
+well-formed id or subject is carried unchanged.
 
 ### What is logged
 

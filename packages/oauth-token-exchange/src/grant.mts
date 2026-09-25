@@ -28,6 +28,7 @@ import type {
 	ValidatedToken,
 } from "@o3co/auth-provider-core";
 import {
+	auditErrorList,
 	auditErrorText,
 	consoleLogger,
 	formatObject,
@@ -739,9 +740,12 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 				// unwilling or unable to issue a token for any target service
 				// indicated by the resource or audience parameters, the
 				// invalid_target error code SHOULD be used".
-				const widenedAudiences = requestedAudience.filter(
-					(audience) => !subjectAudienceSet.has(audience),
-				);
+				// Each named once: every one is an audience the client is
+				// registered for, so the set is bounded by its registration, but
+				// `audience` is not de-duplicated and a caller may repeat one.
+				const widenedAudiences = [
+					...new Set(requestedAudience.filter((audience) => !subjectAudienceSet.has(audience))),
+				];
 				if (widenedAudiences.length > 0) {
 					deps.logger?.warn(
 						{
@@ -795,7 +799,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							subject: subjectValidated.sub,
 							clientId: client.clientId,
 							audienceForToken: requestAudience,
-							missingResources,
+							...loggedResources(missingResources),
 						},
 						"token_exchange_resource_not_in_audience",
 					);
@@ -985,7 +989,7 @@ export function createTokenExchangeGrant(deps: TokenExchangeDependencies): Grant
 							subject: subjectValidated.sub,
 							clientId: client.clientId,
 							audienceForToken,
-							missingResources,
+							...loggedResources(missingResources),
 						},
 						"token_exchange_resource_not_in_audience",
 					);
@@ -1275,6 +1279,25 @@ async function familyRefusal(
 	if (!revoked) return null;
 	return invalidRequest(forRole("family_revoked"));
 }
+
+/**
+ * The requested resources a refusal names, as its log line carries them:
+ * `missingResources`, the first ten through core's `auditErrorList` (each
+ * sanitised and capped at 200 characters), and `missingResourceCount` when
+ * that had to cut. They are the caller's own `resource` values — before the
+ * policy runs, anything it wrote; after it, values the client and the subject
+ * token both carry, but as many as it chose to send — so neither what they
+ * hold nor how many there are may reach the line unbounded. A small,
+ * well-formed list reads as it always did.
+ */
+const loggedResources = (
+	resources: readonly string[],
+): { readonly missingResources: string[]; readonly missingResourceCount?: number } => {
+	const missingResources = auditErrorList(resources);
+	return missingResources.length < resources.length
+		? { missingResources, missingResourceCount: resources.length }
+		: { missingResources };
+};
 
 /**
  * The session rule for a token presented as `subject_token` or `actor_token`:

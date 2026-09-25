@@ -27,7 +27,7 @@
  * message now names the error by `loggableError`'s rules: its `name`, and
  * its message as the projection reads it (`uncappedDetail`: nothing of a
  * SyntaxError's or a YAMLException's text, a Redis reply's echoed arguments
- * cut); for a thrown
+ * cut, on one line); for a thrown
  * value that is not an Error, its kind alone. Not the projection's 256
  * character cap: a boot refusal's advice — the config key to set, the module
  * to wire — is often longer, and its end is what an operator acts on. The
