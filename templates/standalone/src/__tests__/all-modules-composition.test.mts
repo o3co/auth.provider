@@ -32,9 +32,9 @@
  * substituted, and `all-modules-composition.multi.test.mts` for the same
  * composition on Redis under `deployment.mode = "multi"`.
  *
- * `it.fails` marks a contract the composition breaks today; its comment names
- * the defect. When the defect is fixed the case starts failing, and the fix
- * turns it into a plain `it`.
+ * `knownDefect` marks a contract the composition breaks today; its comment
+ * names the defect. In the monorepo it is `it.fails`: the fix that mends the
+ * defect turns the case red, and turns it into a plain `it`.
  */
 
 import { readdirSync, readFileSync } from "node:fs";
@@ -136,6 +136,14 @@ const templateManifest = JSON.parse(
 const inMonorepo =
 	templateManifest.dependencies["@o3co/auth-provider-core"]?.startsWith("workspace:") === true;
 
+/**
+ * A contract the composition breaks today. `it.fails` in the monorepo, where
+ * the fix lands beside this file and flips it; skipped in a scaffold, which
+ * pins released packages and would otherwise turn red on the upgrade that
+ * carries the fix.
+ */
+const knownDefect = inMonorepo ? it.fails : it.skip;
+
 describe("what the all-modules composition covers", () => {
 	it("names every @o3co/auth-provider-* package the template depends on", () => {
 		const siblings = Object.keys(templateManifest.dependencies)
@@ -164,7 +172,9 @@ describe("what the all-modules composition covers", () => {
 			);
 		});
 
-		for (const [name, module] of Object.entries(NOT_IN_TEMPLATE)) {
+		// Listed only here: `runIf` skips a block's cases but still reports its
+		// todos, and a scaffold has none of these packages to boot.
+		for (const [name, module] of inMonorepo ? Object.entries(NOT_IN_TEMPLATE) : []) {
 			it.todo(
 				`boots ${module} (${name}) beside every other module — needs a composition that depends on ${name}`,
 			);
@@ -602,24 +612,27 @@ describe("every module's primary route answers in the one app", () => {
 	// commented out) and nothing at boot asks for it. Either shape of fix
 	// passes: boot refusing the federation by the missing key, or the login
 	// completing.
-	it.fails("a federation enabled from the documented variables alone either refuses to boot or completes a login", async () => {
-		const withoutLanding = (config: AppConfig): AppConfig => {
-			const federations = config.federations as Record<string, Record<string, unknown>>;
-			const { clientUrl: _dropped, ...oidc } = federations.oidc ?? {};
-			return { ...config, federations: { ...federations, oidc } } as unknown as AppConfig;
-		};
-		let composed: Composition;
-		try {
-			composed = await boot({ config: withoutLanding });
-		} catch (err) {
-			expect(String((err as { cause?: unknown }).cause ?? err)).toMatch(/clientUrl/);
-			return;
-		}
-		const callback = await (
-			await federatedCallback(composed.app, "oidc", composed.upstreams.oidc)
-		)();
-		expect(callback.status).toBeLessThan(500);
-	});
+	knownDefect(
+		"a federation enabled from the documented variables alone either refuses to boot or completes a login",
+		async () => {
+			const withoutLanding = (config: AppConfig): AppConfig => {
+				const federations = config.federations as Record<string, Record<string, unknown>>;
+				const { clientUrl: _dropped, ...oidc } = federations.oidc ?? {};
+				return { ...config, federations: { ...federations, oidc } } as unknown as AppConfig;
+			};
+			let composed: Composition;
+			try {
+				composed = await boot({ config: withoutLanding });
+			} catch (err) {
+				expect(String((err as { cause?: unknown }).cause ?? err)).toMatch(/clientUrl/);
+				return;
+			}
+			const callback = await (
+				await federatedCallback(composed.app, "oidc", composed.upstreams.oidc)
+			)();
+			expect(callback.status).toBeLessThan(500);
+		},
+	);
 
 	it("a federation grant is lodged, beside oauthModule under /oauth", async () => {
 		const { app } = await boot();
@@ -843,7 +856,7 @@ describe("a request body the OAuth endpoints do not parse", () => {
 	// leaves it undefined, the handler throws, and the terminal handler answers
 	// `500 server_error` and logs `unhandled_request_error` for the client's
 	// own mistake. `/oauth/revoke` checks, and answers 400.
-	it.fails.each([
+	knownDefect.each([
 		["/oauth/token", "text/plain"],
 		["/oauth/token", "application/xml"],
 		["/oauth/introspect", "text/plain"],
@@ -1097,9 +1110,9 @@ const fieldsOf = (line: { args: readonly unknown[] }): Record<string, unknown> =
 describe("a store outage answers 503 and is logged once, at error (#685)", () => {
 	for (const c of OUTAGES) {
 		const title = `${c.module}: ${c.slot} down at ${c.surface}`;
-		// A case with a `defect` fails today; `it.fails` keeps it visible and
+		// A case with a `defect` fails today; `knownDefect` keeps it visible and
 		// turns red the day the defect is fixed, so the entry is then removed.
-		(c.defect === undefined ? it : it.fails)(title, async () => {
+		(c.defect === undefined ? it : knownDefect)(title, async () => {
 			// Everything logged from the moment the store goes down is the outage's.
 			let composition: Composition | undefined;
 			let from = -1;
