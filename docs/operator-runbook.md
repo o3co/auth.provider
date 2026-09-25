@@ -690,10 +690,17 @@ sent to re-authenticate (`packages/redis/src/federation-tokens.mts` `get`).
 A watermark that is not a number throws rather than reading as "not revoked"
 (`packages/redis/src/subjectRevocation.mts`). A cookie-session record the
 store holds but cannot read — not JSON, or not a session record — is read as
-absent, so express-session starts a fresh session and that browser signs in
-again: `session_cookie_record_unreadable` (warn, `store: "cookie_session"`,
-never the record's text; `packages/session/src/store/factory.mts`). It is not
-the `503` a cookie store that cannot answer gives. Any of these at a steady rate
+absent, so express-session starts a fresh session for the request:
+`session_cookie_record_unreadable` (warn, `store: "cookie_session"`, never the
+record's text; `packages/session/src/store/factory.mts`). It is not the `503` a
+cookie store that cannot answer gives. The record is not deleted and the
+browser keeps its cookie, so each of its requests reads the record again and
+logs again, until the user signs in (a new cookie) or the record's TTL passes:
+a stream of these from one browser is one record. The same store's `form_post`
+federation transactions (`fedtx:`) and oauth re-authentication asks
+(`reauth:`) are read the same way and warn the same way — an unreadable
+transaction makes its callback `400 invalid_session` (the user starts the
+federation again), an unreadable ask is no ask (`/authorize` asks again). Any of these at a steady rate
 after a deploy means a key or an encoding changed under live data — see
 [§7](#7-upgrading-and-rollback).
 

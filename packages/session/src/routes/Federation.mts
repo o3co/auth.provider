@@ -1232,7 +1232,10 @@ export const createRouter = (
 			// The regenerated session was never saved — its save is what failed,
 			// or the attach before it — so there is no record to destroy. Drop it
 			// from the request instead, so express-session neither saves it as
-			// the response ends nor sets a cookie naming it.
+			// the response ends nor sets a cookie naming it. (A save whose reply
+			// was lost after Redis wrote it does leave a record. It is harmless:
+			// no cookie names it, its `sid` was rolled back above so `/authorize`
+			// refuses it, and it expires at its TTL.)
 			abandonCookieSession(req);
 			return res.status(503).json(SESSION_STORE_UNAVAILABLE);
 		}

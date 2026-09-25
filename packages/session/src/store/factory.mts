@@ -51,9 +51,22 @@ export function createSessionStoreFactory(ctx?: BuilderContext): SessionStoreFac
  * rebuilds the session's cookie from), would otherwise fail every request
  * that browser makes until the record expires, answered as a store outage
  * (`../internal/cookieSession.mts`). Read as absent, express-session starts a
- * fresh session and the user signs in again. Logged once per read as a warn,
+ * fresh session for the request. Logged once per read as a warn,
  * `session_cookie_record_unreadable` with `store: "cookie_session"` — never
  * the record's text, nor the parser's message, which quotes it.
+ *
+ * The record is not deleted, and the browser keeps its cookie: a fresh,
+ * unmodified session sets no new one (`saveUninitialized: false`). So every
+ * request from that browser reads the same record again and logs another
+ * warn, until the user signs in — which sets a new cookie — or the record's
+ * TTL passes. A stream of these from one browser is one record.
+ *
+ * Every record in the store is read through this, not only sessions: a
+ * `form_post` federation transaction (`fedtx:`) that cannot be read is absent,
+ * so its callback answers `400 invalid_session` and the user starts the
+ * federation again; an oauth re-authentication ask (`reauth:`) that cannot be
+ * read is no ask, so `/authorize` asks for the re-authentication again. Both
+ * warn the same way, as `store: "cookie_session"`.
  *
  * A store that cannot answer at all is not a record and never reaches here:
  * it is still the `503`.

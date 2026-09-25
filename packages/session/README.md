@@ -211,10 +211,17 @@ What holds:
 - **A record that cannot be read is absent, not an outage.** A record the Redis
   store answers with but that is not JSON, or not a session record (an object
   with a `cookie` object), is read as no session: express-session starts a
-  fresh one and the user signs in again. It is logged once per read as a warn,
+  fresh one for the request. It is logged once per read as a warn,
   `session_cookie_record_unreadable` (`store: "cookie_session"`), without the
-  record's text. Answered as an outage it would fail every request from that
-  browser until the record expired ([`src/store/factory.mts`](src/store/factory.mts)).
+  record's text. The record is not deleted and the browser keeps its cookie —
+  a fresh, unmodified session sets no new one — so every request from that
+  browser reads it again and logs again, until the user signs in (which sets a
+  new cookie) or the record's TTL passes: a stream of these warns from one
+  browser is one record. Answered as an outage it would instead have failed
+  every one of those requests. A `form_post` transaction (`fedtx:`) or an oauth
+  re-authentication ask (`reauth:`) in the same store is read the same way:
+  absent, so the callback answers `400 invalid_session` or `/authorize` asks
+  again ([`src/store/factory.mts`](src/store/factory.mts)).
 
 **Not `@o3co/auth-provider-redis`.** That package's `UserSessionStore` holds the
 `UserSession` record behind a `sid` — what introspection, `/userinfo` and
